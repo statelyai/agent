@@ -119,7 +119,7 @@ ${desire}
         invoke: {
           src: 'rateJoke',
           input: ({ context }) => ({
-            joke: context.jokes[context.jokes.length - 1],
+            joke: context.jokes[context.jokes.length - 1]!,
           }),
           onDone: {
             actions: assign({
