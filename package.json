@@ -15,6 +15,7 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
+    "@changesets/cli": "^2.27.1",
     "@types/node": "^20.10.6",
     "json-schema-to-ts": "^3.0.0",
     "tsup": "^8.0.1",
