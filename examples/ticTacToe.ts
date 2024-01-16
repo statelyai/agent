@@ -1,6 +1,6 @@
 import { assign, setup, assertEvent, createActor, raise } from 'xstate';
-import { fromChatCompletionStream, fromEventChoice } from '../src/openai';
 import OpenAI from 'openai';
+import { createAgent } from '../src/openai';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -8,64 +8,113 @@ const openai = new OpenAI({
 
 type Player = 'x' | 'o';
 
+const agent = createAgent(openai, {
+  model: 'gpt-3.5-turbo-1106',
+  context: {
+    board: {
+      type: 'array',
+      items: {
+        type: ['null', 'string'],
+        enum: [null, 'x', 'o'],
+      },
+      minItems: 9,
+      maxItems: 9,
+      description: 'The board of the tic-tac-toe game',
+    },
+    moves: {
+      type: 'number',
+      description: 'The number of moves that have been played',
+    },
+    player: {
+      type: 'string',
+      enum: ['x', 'o'],
+      description: 'The player whose turn it is',
+    },
+    winner: {
+      type: ['null', 'string'],
+      enum: [null, 'x', 'o'],
+      description: 'The player who won the game',
+    },
+    gameReport: {
+      type: 'string',
+      description: 'The game report',
+    },
+    events: {
+      type: 'array',
+      items: {
+        type: 'string',
+      },
+    },
+  } as const,
+  events: {
+    'x.play': {
+      properties: {
+        index: {
+          description: 'The index of the cell to play on',
+          type: 'number',
+
+          minimum: 0,
+          maximum: 8,
+        },
+      },
+    },
+    'o.play': {
+      properties: {
+        index: {
+          description: 'The index of the cell to play on',
+          type: 'number',
+          minimum: 0,
+          maximum: 8,
+        },
+      },
+    },
+    reset: {
+      properties: {},
+    },
+  },
+});
+
 const initialContext = {
   board: Array(9).fill(null) as Array<Player | null>,
   moves: 0,
   player: 'x' as Player,
-  winner: undefined as Player | undefined,
+  winner: null as Player | null,
   gameReport: '',
-};
+  events: [],
+} satisfies typeof agent.types.context;
 
-export const ticTacToeMachine = setup({
-  types: {} as {
-    context: typeof initialContext;
-    events:
-      | { type: 'x.play'; index: number }
-      | {
-          type: 'o.play';
-          index: number;
-        }
-      | { type: 'RESET' };
-  },
-  actors: {
-    bot: fromEventChoice(
-      openai,
-      ({ context }: { context: typeof initialContext }) => ({
-        model: 'gpt-4-1106-preview',
-        messages: [
-          {
-            role: 'system',
-            content: `You are playing a game of tic tac toe. This is the current game state. The 3x3 board is represented by a 9-element array. The first element is the top-left cell, the second element is the top-middle cell, the third element is the top-right cell, the fourth element is the middle-left cell, and so on. The value of each cell is either null, x, or o. The value of null means that the cell is empty. The value of x means that the cell is occupied by an x. The value of o means that the cell is occupied by an o.
+const bot = agent.fromEventChoice(
+  ({ context }: { context: typeof agent.types.context }) => `
+You are playing a game of tic tac toe. This is the current game state. The 3x3 board is represented by a 9-element array. The first element is the top-left cell, the second element is the top-middle cell, the third element is the top-right cell, the fourth element is the middle-left cell, and so on. The value of each cell is either null, x, or o. The value of null means that the cell is empty. The value of x means that the cell is occupied by an x. The value of o means that the cell is occupied by an o.
 
-${JSON.stringify(context, null, 2)}`,
-          },
-          {
-            role: 'user',
-            content:
-              'Execute the single best next move to try to win the game. Do not play on an existing cell.',
-          },
-        ],
-      })
-    ),
-    gameReporter: fromChatCompletionStream(
-      openai,
-      ({ context }: { context: typeof initialContext }) => ({
-        model: 'gpt-4-1106-preview',
-        messages: [
-          {
-            role: 'user',
-            content: `The tic-tac-toe game is over. The winner is ${
-              context.winner ?? 'nobody'
-            }. This was the ending board state:
-          
+${JSON.stringify(context, null, 2)}
+
+Execute the single best next move to try to win the game. Do not play on an existing cell.`
+);
+
+const gameReporter = agent.fromChatCompletionStream(
+  ({
+    context,
+  }: {
+    context: typeof agent.types.context;
+  }) => `The tic-tac-toe game is over. The winner is ${
+    context.winner ?? 'nobody'
+  }. This was the ending board state, represented as a 9-element array:
+
 ${JSON.stringify(context.board, null, 2)}
 
-Provide a game report analyzing the game.`,
-          },
-        ],
-        stream: true,
-      })
-    ),
+And here are the events that led to this game state:
+
+${context.events.join('\n')}
+
+Provide a very short game report analyzing the game.`
+);
+
+export const ticTacToeMachine = setup({
+  types: agent.types,
+  actors: {
+    bot,
+    gameReporter,
   },
   actions: {
     updateBoard: assign({
@@ -77,10 +126,18 @@ Provide a game report analyzing the game.`,
       },
       moves: ({ context }) => context.moves + 1,
       player: ({ context }) => (context.player === 'x' ? 'o' : 'x'),
+      events: ({ context, event }) => {
+        return [...context.events, JSON.stringify(event)];
+      },
     }),
     resetGame: assign(initialContext),
     setWinner: assign({
       winner: ({ context }) => (context.player === 'x' ? 'o' : 'x'),
+    }),
+    recordEvent: assign({
+      events: ({ context, event }) => {
+        return [...context.events, JSON.stringify(event)];
+      },
     }),
   },
   guards: {
@@ -157,18 +214,8 @@ Provide a game report analyzing the game.`,
                 target: 'o',
                 guard: 'isValidMove',
                 actions: 'updateBoard',
-                meta: {
-                  parameters: {
-                    index: {
-                      description: 'The index of the cell to play on',
-                      type: 'number',
-                      min: 0,
-                      max: 8,
-                    },
-                  },
-                },
               },
-              { reenter: true },
+              { target: 'x', reenter: true },
             ],
           },
         },
@@ -177,10 +224,8 @@ Provide a game report analyzing the game.`,
             src: 'bot',
             input: ({ context }) => ({ context }),
             onDone: {
-              // @ts-ignore
               actions: raise(({ event }) => {
-                console.log('output', event.output);
-                return event.output![0];
+                return event.output![0]!;
               }),
             },
           },
@@ -190,18 +235,8 @@ Provide a game report analyzing the game.`,
                 target: 'x',
                 guard: 'isValidMove',
                 actions: 'updateBoard',
-                meta: {
-                  parameters: {
-                    index: {
-                      description: 'The index of the cell to play on',
-                      type: 'number',
-                      min: 0,
-                      max: 8,
-                    },
-                  },
-                },
               },
-              { reenter: true },
+              { target: 'o', reenter: true },
             ],
           },
         },
@@ -233,7 +268,7 @@ Provide a game report analyzing the game.`,
         },
       },
       on: {
-        RESET: {
+        reset: {
           target: 'playing',
           actions: 'resetGame',
         },

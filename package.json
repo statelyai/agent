@@ -16,6 +16,7 @@
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^20.10.6",
+    "json-schema-to-ts": "^3.0.0",
     "tsup": "^8.0.1",
     "typescript": "^5.3.3"
   },

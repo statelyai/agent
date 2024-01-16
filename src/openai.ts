@@ -1,12 +1,29 @@
 import OpenAI from 'openai';
 import {
   AnyEventObject,
+  ObservableActorLogic,
   Observer,
+  PromiseActorLogic,
+  Values,
   fromObservable,
   fromPromise,
+  setup,
   toObserver,
 } from 'xstate';
 import { getAllTransitions } from './utils';
+import {
+  ContextSchema,
+  EventSchemas,
+  ConvertContextToJSONSchema,
+  ConvertToJSONSchemas,
+  createEventSchemas,
+} from './utils';
+import { FromSchema } from 'json-schema-to-ts';
+import { ChatCompletionCreateParamsNonStreaming } from 'openai/resources';
+import {
+  ChatCompletionCreateParamsBase,
+  ChatCompletionCreateParamsStreaming,
+} from 'openai/resources/chat/completions';
 
 /**
  * Creates [promise actor logic](https://stately.ai/docs/promise-actors) that uses the OpenAI API to generate a completion.
@@ -19,12 +36,24 @@ export function fromChatCompletion<TInput>(
   openai: OpenAI,
   inputFn: (
     input: TInput
-  ) => OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming
+  ) => string | OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming
 ) {
   return fromPromise<OpenAI.Chat.Completions.ChatCompletion, TInput>(
     async ({ input }) => {
       const openAiInput = inputFn(input);
-      const response = await openai.chat.completions.create(openAiInput);
+      const params: ChatCompletionCreateParamsNonStreaming =
+        typeof openAiInput === 'string'
+          ? {
+              model: 'gpt-3.5-turbo-1106',
+              messages: [
+                {
+                  role: 'user',
+                  content: openAiInput,
+                },
+              ],
+            }
+          : openAiInput;
+      const response = await openai.chat.completions.create(params);
 
       return response;
     }
@@ -41,7 +70,7 @@ export function fromChatCompletionStream<TInput>(
   openai: OpenAI,
   inputFn: (
     input: TInput
-  ) => OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming
+  ) => string | OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming
 ) {
   return fromObservable<OpenAI.Chat.Completions.ChatCompletionChunk, TInput>(
     ({ input }) => {
@@ -49,8 +78,20 @@ export function fromChatCompletionStream<TInput>(
 
       (async () => {
         const openAiInput = inputFn(input);
+        const resolvedParams: ChatCompletionCreateParamsBase =
+          typeof openAiInput === 'string'
+            ? {
+                model: 'gpt-3.5-turbo-1106',
+                messages: [
+                  {
+                    role: 'user',
+                    content: openAiInput,
+                  },
+                ],
+              }
+            : openAiInput;
         const stream = await openai.chat.completions.create({
-          ...openAiInput,
+          ...resolvedParams,
           stream: true,
         });
 
@@ -85,9 +126,10 @@ export function fromChatCompletionStream<TInput>(
  */
 export function fromEventChoice<TInput>(
   openai: OpenAI,
+  machineTypes: { schemas: { context: ContextSchema; events: EventSchemas } },
   inputFn: (
     input: TInput
-  ) => OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming
+  ) => string | OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming
 ) {
   return fromPromise<AnyEventObject[] | undefined, TInput>(
     async ({ input, self }) => {
@@ -104,17 +146,33 @@ export function fromEventChoice<TInput>(
             type: 'function',
             function: {
               name,
-              description: t.description,
+              description:
+                t.description ??
+                machineTypes.schemas.events[t.eventType]?.description,
               parameters: {
                 type: 'object',
-                properties: t.meta?.parameters ?? {},
+                properties:
+                  machineTypes.schemas.events[t.eventType]?.properties ?? {},
               },
             },
           } as const;
         });
+
       const openAiInput = inputFn(input);
+      const completionParams: ChatCompletionCreateParamsNonStreaming =
+        typeof openAiInput === 'string'
+          ? {
+              model: 'gpt-4-1106-preview',
+              messages: [
+                {
+                  role: 'user',
+                  content: openAiInput,
+                },
+              ],
+            }
+          : openAiInput;
       const completion = await openai.chat.completions.create({
-        ...openAiInput,
+        ...completionParams,
         tools,
       });
 
@@ -129,7 +187,64 @@ export function fromEventChoice<TInput>(
         });
       }
 
-      return toolCalls ?? undefined;
+      return undefined;
     }
   );
+}
+
+interface CreateAgentOutput<
+  T extends {
+    model: ChatCompletionCreateParamsBase['model'];
+    context: ContextSchema;
+    events: EventSchemas;
+  }
+> {
+  model: T['model'];
+  schemas: T;
+  types: {
+    context: FromSchema<ConvertContextToJSONSchema<T['context']>>;
+    events: FromSchema<Values<ConvertToJSONSchemas<T['events']>>>;
+  };
+  fromEventChoice: <TInput>(
+    inputFn: (input: TInput) => string | ChatCompletionCreateParamsNonStreaming
+  ) => PromiseActorLogic<
+    FromSchema<Values<ConvertToJSONSchemas<T['events']>>>[] | undefined,
+    TInput
+  >;
+  fromChatCompletion: <TInput>(
+    inputFn: (input: TInput) => string | ChatCompletionCreateParamsNonStreaming
+  ) => PromiseActorLogic<OpenAI.Chat.Completions.ChatCompletion, TInput>;
+  fromChatCompletionStream: <TInput>(
+    inputFn: (input: TInput) => string | ChatCompletionCreateParamsStreaming
+  ) => ObservableActorLogic<
+    OpenAI.Chat.Completions.ChatCompletionChunk,
+    TInput
+  >;
+}
+
+export function createAgent<
+  T extends {
+    model: ChatCompletionCreateParamsBase['model'];
+    context: ContextSchema;
+    events: EventSchemas;
+  }
+>(openai: OpenAI, settings: T): CreateAgentOutput<T> {
+  const obj: CreateAgentOutput<T> = {
+    model: settings.model,
+    schemas: {
+      context: {
+        type: 'object',
+        properties: settings.context,
+        additionalProperties: false,
+      },
+      events: createEventSchemas(settings.events),
+    } as any,
+    types: {} as any,
+    fromEventChoice: (input) => fromEventChoice(openai, obj, input) as any,
+    fromChatCompletion: (input) => fromChatCompletion(openai, input),
+    fromChatCompletionStream: (input) =>
+      fromChatCompletionStream(openai, input),
+  };
+
+  return obj as any;
 }
