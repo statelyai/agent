@@ -1,6 +1,11 @@
 import OpenAI from 'openai';
-import { assign, fromPromise, createActor, setup, log, raise } from 'xstate';
+import { assign, createActor, fromPromise, log, raise, setup } from 'xstate';
 import { createAgent } from '../src';
+import {
+  getRandomFunnyPhrase,
+  getRandomRatingPhrase,
+} from '../src/helpers/jokeHelper';
+import { loadingAnimation } from '../src/helpers/loader';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -32,7 +37,7 @@ const rateJoke = agent.fromChatCompletion(
 
 const getTopic = fromPromise(async () => {
   const topic = await new Promise<string>((res) => {
-    console.log('Give me a topic: \n\n');
+    console.log('Give me a joke topic:');
     const listener = (data: Buffer) => {
       const result = data.toString().trim();
       process.stdin.off('data', listener);
@@ -56,6 +61,7 @@ const jokeMachine = setup({
       jokes: string[];
       desire: string | null;
       lastRating: string | null;
+      loader: NodeJS.Timeout | null;
     },
     input: {} as { topic: string },
   },
@@ -71,6 +77,7 @@ const jokeMachine = setup({
     jokes: [],
     desire: null,
     lastRating: null,
+    loader: null,
   }),
   initial: 'waitingForTopic',
   states: {
@@ -86,11 +93,17 @@ const jokeMachine = setup({
       },
     },
     tellingJoke: {
+      entry: assign({ loader: () => loadingAnimation(getRandomFunnyPhrase()) }),
       invoke: {
         src: 'getJokeCompletion',
         input: ({ context }) => context.topic,
         onDone: {
           actions: [
+            ({ context }) => {
+              if (!context.loader) return;
+              clearInterval(context.loader);
+              console.log();
+            },
             assign({
               jokes: ({ context, event }) =>
                 context.jokes.concat(event.output.choices[0]!.message.content!),
@@ -102,11 +115,19 @@ const jokeMachine = setup({
       },
     },
     rateJoke: {
+      entry: assign({
+        loader: () => loadingAnimation(getRandomRatingPhrase()),
+      }),
       invoke: {
         src: 'rateJoke',
         input: ({ context }) => context.jokes[context.jokes.length - 1]!,
         onDone: {
           actions: [
+            ({ context }) => {
+              if (!context.loader) return;
+              clearInterval(context.loader);
+              console.log();
+            },
             assign({
               lastRating: ({ event }) =>
                 event.output.choices[0]!.message.content!,
@@ -147,5 +168,9 @@ const jokeMachine = setup({
 });
 
 const actor = createActor(jokeMachine);
-
 actor.start();
+actor.subscribe((state) => {
+  if (state.matches('end')) {
+    process.exit();
+  }
+});

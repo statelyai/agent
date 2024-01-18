@@ -9,6 +9,7 @@
     "build": "tsup src/index.ts --format cjs,esm --dts",
     "lint": "tsc",
     "test": "vitest run",
+    "example": "ts-node src/helpers/exampleRunner.ts",
     "prepublishOnly": "tsup src/index.ts --dts"
   },
   "keywords": [],
@@ -22,7 +23,9 @@
     "typescript": "^5.3.3"
   },
   "dependencies": {
+    "dotenv": "^16.3.1",
     "openai": "^4.24.1",
+    "ts-node": "^10.9.2",
     "xstate": "^5.3.1"
   },
   "publishConfig": {
