@@ -20,7 +20,7 @@ if (exampleParams.length === 0) {
 const exampleName = exampleParams[0];
 const filePath = `./examples/${exampleName}.ts`;
 if (existsSync(filePath)) {
-  require(filePath);
+  require(`../${exampleName}.ts`);
 } else {
   console.error(`Example ${exampleName} does not exist, you can choose from:`);
   showExamples();
