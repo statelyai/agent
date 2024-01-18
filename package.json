@@ -18,14 +18,14 @@
   "devDependencies": {
     "@changesets/cli": "^2.27.1",
     "@types/node": "^20.10.6",
+    "dotenv": "^16.3.1",
     "json-schema-to-ts": "^3.0.0",
     "tsup": "^8.0.1",
+    "ts-node": "^10.9.2",
     "typescript": "^5.3.3"
   },
   "dependencies": {
-    "dotenv": "^16.3.1",
     "openai": "^4.24.1",
-    "ts-node": "^10.9.2",
     "xstate": "^5.3.1"
   },
   "publishConfig": {

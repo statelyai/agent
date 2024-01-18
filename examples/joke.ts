@@ -1,10 +1,6 @@
 import OpenAI from 'openai';
 import { assign, createActor, fromPromise, log, raise, setup } from 'xstate';
 import { createAgent } from '../src';
-import {
-  getRandomFunnyPhrase,
-  getRandomRatingPhrase,
-} from '../src/helpers/jokeHelper';
 import { loadingAnimation } from '../src/helpers/loader';
 
 const openai = new OpenAI({
@@ -53,6 +49,38 @@ const decide = agent.fromEventChoice(
   (lastRating: string) =>
     `Choose what to do next, given the previous rating of the joke: ${lastRating}`
 );
+
+const funnyPhrases = [
+  'Concocting chuckles...',
+  'Brewing belly laughs...',
+  'Fabricating funnies...',
+  'Assembling amusement...',
+  'Molding merriment...',
+  'Whipping up wisecracks...',
+  'Generating guffaws...',
+  'Inventing hilarity...',
+  'Cultivating chortles...',
+  'Hatching howlers...',
+];
+export function getRandomFunnyPhrase() {
+  return funnyPhrases[Math.floor(Math.random() * funnyPhrases.length)];
+}
+
+const ratingPhrases = [
+  'Assessing amusement...',
+  'Evaluating hilarity...',
+  'Ranking chuckles...',
+  'Classifying cackles...',
+  'Scoring snickers...',
+  'Rating roars...',
+  'Judging jollity...',
+  'Measuring merriment...',
+  'Rating rib-ticklers...',
+  'Scaling sniggers...',
+];
+export function getRandomRatingPhrase() {
+  return ratingPhrases[Math.floor(Math.random() * ratingPhrases.length)];
+}
 
 const jokeMachine = setup({
   types: {
