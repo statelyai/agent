@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import { assign, createActor, fromPromise, log, raise, setup } from 'xstate';
 import { createAgent } from '../src';
-import { loadingAnimation } from '../src/helpers/loader';
+import { loadingAnimation } from './helpers/loader';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,

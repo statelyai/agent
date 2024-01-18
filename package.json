@@ -9,7 +9,7 @@
     "build": "tsup src/index.ts --format cjs,esm --dts",
     "lint": "tsc",
     "test": "vitest run",
-    "example": "ts-node src/helpers/exampleRunner.ts",
+    "example": "ts-node examples/helpers/runner.ts",
     "prepublishOnly": "tsup src/index.ts --dts"
   },
   "keywords": [],
