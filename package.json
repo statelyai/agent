@@ -9,6 +9,7 @@
     "build": "tsup src/index.ts --format cjs,esm --dts",
     "lint": "tsc",
     "test": "vitest run",
+    "example": "ts-node examples/helpers/runner.ts",
     "prepublishOnly": "tsup src/index.ts --dts"
   },
   "keywords": [],
@@ -17,15 +18,17 @@
   "devDependencies": {
     "@changesets/cli": "^2.27.1",
     "@types/node": "^20.10.6",
+    "dotenv": "^16.3.1",
     "json-schema-to-ts": "^3.0.0",
+    "openai": "^4.24.1",
+    "ts-node": "^10.9.2",
     "tsup": "^8.0.1",
     "typescript": "^5.3.3"
   },
-  "dependencies": {
-    "openai": "^4.24.1",
-    "xstate": "^5.3.1"
-  },
   "publishConfig": {
     "access": "public"
+  },
+  "dependencies": {
+    "xstate": "^5.5.1"
   }
 }
