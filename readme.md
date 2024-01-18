@@ -21,5 +21,5 @@ pnpm i
 ### Run an example
 
 ```bash
-pnpm example joke.ts
+pnpm example joke
 ```
