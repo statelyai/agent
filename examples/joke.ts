@@ -66,8 +66,8 @@ const jokeMachine = setup({
     decide,
   },
 }).createMachine({
-  context: ({ input }) => ({
-    topic: input.topic,
+  context: () => ({
+    topic: '',
     jokes: [],
     desire: null,
     lastRating: null,
