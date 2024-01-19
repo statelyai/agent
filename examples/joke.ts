@@ -114,6 +114,7 @@ const jokeMachine = setup({
     loader,
   },
 }).createMachine({
+  /** @xstate-layout N4IgpgJg5mDOIC5QCsD2BrMA6A7gQwEsAXAgOygDFUAnAFVQAcCBjAYglVOzIDcNs0mXIRLkqdRiwS9UzPCU4BtAAwBdFasSgGqWMQKctIAB6IArAEZlWABzKALADYbAdjMAaEAE9EAJgCcvlhmAL4hnoLYRGAANjFkUABS-Oyc3KR8QpFY0XEJyZjSGbLyBqQaGkY6egqkRqYI9i4uwQDM-sqOvh7eiC4WNsFhEfxY1PJgBWCpXFgyWaPj0VNFfHK1FWpVuvqGSCbmVsE2vsqtFt2ePggXyoOh4SDZEGDMBC+seLDo4vRMzJV9tVdnV9g1HMorohzhYho9nq93tMwKQIFNYIDtDtavVEPZOlgLI5Ai47q1yRSoTdnC0HiMhC83h8OLN5gJRoykasShs1JiQMCcWDEET-MF7PZfKSbBSKRYqUTWo44Y9SKgXvB9pFtjUyriEABaew2KkGlw2YZPUb4fRiGh-Fg6kH6iz+VpYXw2SxmLo9a4dS3ZXLxchTJ1C0ANez+ZUWfquP14sz2QOLCZhoHYvXChBmO5YVp3MxutxU-wS1MMxEvcPZyMit0er0WH2XXo3eytFPw0YoiC1vb13Pk2z+Mwy2WyhU2LphMJAA */
   id: 'joke',
   context: () => ({
     topic: '',
@@ -126,11 +127,9 @@ const jokeMachine = setup({
   states: {
     waitingForTopic: {
       invoke: {
-        src: 'getTopic',
+        src: "getTopic",
         onDone: {
-          actions: assign({
-            topic: ({ event }) => event.output,
-          }),
+          actions: "inline:joke.waitingForTopic#done.invoke.joke.waitingForTopic:invocation[0][-1]#transition[0]",
           target: 'tellingJoke',
         },
       },
@@ -138,23 +137,18 @@ const jokeMachine = setup({
     tellingJoke: {
       invoke: [
         {
-          src: 'getJokeCompletion',
+          src: "getJokeCompletion",
           input: ({ context }) => context.topic,
           onDone: {
             actions: [
-              assign({
-                jokes: ({ context, event }) =>
-                  context.jokes.concat(
-                    event.output.choices[0]!.message.content!
-                  ),
-              }),
-              log((x) => x.context.jokes.at(-1)),
+              "inline:joke.tellingJoke#done.invoke.joke.tellingJoke:invocation[0][-1]#transition[0]",
+              "inline:joke.tellingJoke#done.invoke.joke.tellingJoke:invocation[0][-1]#transition[1]",
             ],
             target: 'rateJoke',
           },
         },
         {
-          src: 'loader',
+          src: "loader",
           input: getRandomFunnyPhrase,
         },
       ],
@@ -162,33 +156,30 @@ const jokeMachine = setup({
     rateJoke: {
       invoke: [
         {
-          src: 'rateJoke',
+          src: "rateJoke",
           input: ({ context }) => context.jokes[context.jokes.length - 1]!,
           onDone: {
             actions: [
-              assign({
-                lastRating: ({ event }) =>
-                  event.output.choices[0]!.message.content!,
-              }),
-              log(({ context }) => context.lastRating),
+              "inline:joke.rateJoke#done.invoke.joke.rateJoke:invocation[0][-1]#transition[0]",
+              "inline:joke.rateJoke#done.invoke.joke.rateJoke:invocation[0][-1]#transition[1]",
             ],
             target: 'decide',
           },
         },
         {
-          src: 'loader',
+          src: "loader",
           input: getRandomRatingPhrase,
         },
       ],
     },
     decide: {
       invoke: {
-        src: 'decide',
+        src: "decide",
         input: ({ context }) => context.lastRating!,
         onDone: {
           actions: [
-            log(({ event }) => event),
-            raise(({ event }) => event.output![0]!),
+            "inline:joke.decide#done.invoke.joke.decide:invocation[0][-1]#transition[0]",
+            "inline:joke.decide#done.invoke.joke.decide:invocation[0][-1]#transition[1]",
           ],
         },
       },
