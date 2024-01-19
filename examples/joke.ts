@@ -114,6 +114,7 @@ const jokeMachine = setup({
     loader,
   },
 }).createMachine({
+  id: 'joke',
   context: () => ({
     topic: '',
     jokes: [],
