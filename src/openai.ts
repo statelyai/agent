@@ -34,6 +34,7 @@ import {
  */
 export function fromChatCompletion<TInput>(
   openai: OpenAI,
+  agentSettings: CreateAgentOutput<any>,
   inputFn: (
     input: TInput
   ) => string | OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming
@@ -44,7 +45,7 @@ export function fromChatCompletion<TInput>(
       const params: ChatCompletionCreateParamsNonStreaming =
         typeof openAiInput === 'string'
           ? {
-              model: 'gpt-3.5-turbo-1106',
+              model: agentSettings.model,
               messages: [
                 {
                   role: 'user',
@@ -68,6 +69,7 @@ export function fromChatCompletion<TInput>(
  */
 export function fromChatCompletionStream<TInput>(
   openai: OpenAI,
+  agentSettings: CreateAgentOutput<any>,
   inputFn: (
     input: TInput
   ) => string | OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming
@@ -81,7 +83,7 @@ export function fromChatCompletionStream<TInput>(
         const resolvedParams: ChatCompletionCreateParamsBase =
           typeof openAiInput === 'string'
             ? {
-                model: 'gpt-3.5-turbo-1106',
+                model: agentSettings.model,
                 messages: [
                   {
                     role: 'user',
@@ -126,7 +128,7 @@ export function fromChatCompletionStream<TInput>(
  */
 export function fromEventChoice<TInput>(
   openai: OpenAI,
-  machineTypes: { schemas: { context: ContextSchema; events: EventSchemas } },
+  agentSettings: CreateAgentOutput<any>,
   inputFn: (
     input: TInput
   ) => string | OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming
@@ -148,11 +150,11 @@ export function fromEventChoice<TInput>(
               name,
               description:
                 t.description ??
-                machineTypes.schemas.events[t.eventType]?.description,
+                agentSettings.schemas.events[t.eventType]?.description,
               parameters: {
                 type: 'object',
                 properties:
-                  machineTypes.schemas.events[t.eventType]?.properties ?? {},
+                  agentSettings.schemas.events[t.eventType]?.properties ?? {},
               },
             },
           } as const;
@@ -162,7 +164,7 @@ export function fromEventChoice<TInput>(
       const completionParams: ChatCompletionCreateParamsNonStreaming =
         typeof openAiInput === 'string'
           ? {
-              model: 'gpt-4-1106-preview',
+              model: agentSettings.model,
               messages: [
                 {
                   role: 'user',
@@ -229,7 +231,7 @@ export function createAgent<
     events: EventSchemas;
   }
 >(openai: OpenAI, settings: T): CreateAgentOutput<T> {
-  const obj: CreateAgentOutput<T> = {
+  const agentSettings: CreateAgentOutput<T> = {
     model: settings.model,
     schemas: {
       context: {
@@ -240,11 +242,13 @@ export function createAgent<
       events: createEventSchemas(settings.events),
     } as any,
     types: {} as any,
-    fromEventChoice: (input) => fromEventChoice(openai, obj, input) as any,
-    fromChatCompletion: (input) => fromChatCompletion(openai, input),
+    // @ts-ignore infinitely deep
+    fromEventChoice: (input) => fromEventChoice(openai, agentSettings, input),
+    fromChatCompletion: (input) =>
+      fromChatCompletion(openai, agentSettings, input),
     fromChatCompletionStream: (input) =>
-      fromChatCompletionStream(openai, input),
+      fromChatCompletionStream(openai, agentSettings, input),
   };
 
-  return obj as any;
+  return agentSettings as any;
 }
