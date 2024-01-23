@@ -5,7 +5,6 @@ import {
   fromCallback,
   fromPromise,
   log,
-  raise,
   setup,
 } from 'xstate';
 import { createAgent } from '../src';
@@ -53,7 +52,7 @@ const getTopic = fromPromise(async () => {
   return topic;
 });
 
-const decide = agent.fromEventChoice(
+const decide = agent.fromEvent(
   (lastRating: string) =>
     `Choose what to do next, given the previous rating of the joke: ${lastRating}`
 );
@@ -185,20 +184,19 @@ const jokeMachine = setup({
         src: 'decide',
         input: ({ context }) => context.lastRating!,
         onDone: {
-          actions: [
-            log(({ event }) => event),
-            raise(({ event }) => event.output![0]!),
-          ],
+          actions: log(({ event }) => event),
         },
       },
       on: {
         askForTopic: {
           target: 'waitingForTopic',
+          actions: log("That joke wasn't good enough. Let's try again."),
           description:
             'Ask for a new topic, because the last joke rated 6 or lower',
         },
         endJokes: {
           target: 'end',
+          actions: log('That joke was good enough. Goodbye!'),
           description: 'End the jokes, since the last joke rated 7 or higher',
         },
       },
