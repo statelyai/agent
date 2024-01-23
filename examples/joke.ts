@@ -205,12 +205,10 @@ const jokeMachine = setup({
       type: 'final',
     },
   },
+  exit: () => {
+    process.exit();
+  },
 });
 
 const actor = createActor(jokeMachine);
 actor.start();
-actor.subscribe((state) => {
-  if (state.matches('end')) {
-    process.exit();
-  }
-});
