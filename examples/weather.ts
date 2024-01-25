@@ -64,16 +64,23 @@ const agent = createAgent(openai, {
   },
 });
 
+const getWeather = fromPromise(async ({ input }: { input: string }) => {
+  const results = await searchTavily(
+    `Get the weather for this location: ${input}`,
+    {
+      maxResults: 5,
+      apiKey: process.env.TAVILY_API_KEY!,
+    }
+  );
+  return results;
+});
+
 const machine = setup({
-  types: agent.types,
+  types: {} as {
+    input: { location: string };
+  },
   actors: {
-    searchTavily: fromPromise(async ({ input }: { input: string }) => {
-      const results = await searchTavily(input, {
-        maxResults: 5,
-        apiKey: process.env.TAVILY_API_KEY!,
-      });
-      return results;
-    }),
+    getWeather,
     decide: agent.fromEvent(
       (input: string) =>
         `Decide what to do based on the given input, which may or may not be a location: ${input}`
@@ -121,9 +128,8 @@ const machine = setup({
     gettingWeather: {
       entry: log('Getting weather...'),
       invoke: {
-        src: 'searchTavily',
-        input: ({ context }) =>
-          `Get the weather for this location: ${context.location}`,
+        src: 'getWeather',
+        input: ({ context }) => context.location,
         onDone: {
           actions: [
             log(({ event }) => event.output),
