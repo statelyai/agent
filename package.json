@@ -10,12 +10,16 @@
     "lint": "tsc",
     "test": "vitest run",
     "example": "ts-node examples/helpers/runner.ts",
-    "prepublishOnly": "tsup src/index.ts --dts"
+    "prepublishOnly": "tsup src/index.ts --dts",
+    "changeset": "changeset",
+    "release": "changeset publish",
+    "version": "changeset version"
   },
   "keywords": [],
   "author": "",
   "license": "MIT",
   "devDependencies": {
+    "@changesets/changelog-github": "^0.5.0",
     "@changesets/cli": "^2.27.1",
     "@types/node": "^20.10.6",
     "dotenv": "^16.3.1",
@@ -30,5 +34,6 @@
   },
   "dependencies": {
     "xstate": "^5.5.1"
-  }
+  },
+  "packageManager": "pnpm@8.11.0"
 }
