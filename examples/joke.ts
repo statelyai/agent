@@ -30,11 +30,11 @@ const agent = createAgent(openai, {
   events: {},
 });
 
-const getJokeCompletion = agent.fromChatCompletion(
+const getJokeCompletion = agent.chatCompletion(
   (topic: string) => `Tell me a joke about ${topic}.`
 );
 
-const rateJoke = agent.fromChatCompletion(
+const rateJoke = agent.chatCompletion(
   (joke: string) => `Rate this joke on a scale of 1 to 10: ${joke}`
 );
 
@@ -52,7 +52,7 @@ const getTopic = fromPromise(async () => {
   return topic;
 });
 
-const decide = agent.fromEvent(
+const decide = agent.event(
   (lastRating: string) =>
     `Choose what to do next, given the previous rating of the joke: ${lastRating}`
 );

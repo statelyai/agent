@@ -81,7 +81,7 @@ const machine = setup({
   },
   actors: {
     getWeather,
-    decide: agent.fromEvent(
+    decide: agent.event(
       (input: string) =>
         `Decide what to do based on the given input, which may or may not be a location: ${input}`
     ),
