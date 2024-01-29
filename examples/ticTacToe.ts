@@ -248,13 +248,7 @@ export const ticTacToeMachine = setup({
   },
 });
 
-const actor = createActor(ticTacToeMachine, {
-  inspect: (e) => {
-    if (e.type === '@xstate.event') {
-      console.log(e.event);
-    }
-  },
-});
+const actor = createActor(ticTacToeMachine);
 actor.subscribe((s) => {
   console.log(s.value, s.context);
 });

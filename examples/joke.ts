@@ -23,11 +23,24 @@ const agent = createAgent(openai, {
       items: {
         type: 'string',
       },
-      desire: { type: ['string', 'null'] },
-      lastRating: { type: ['string', 'null'] },
+    },
+    desire: { type: ['string', 'null'] as const },
+    lastRating: { type: ['string', 'null'] as const },
+  },
+  events: {
+    askForTopic: {
+      type: 'object',
+      properties: {
+        topic: {
+          type: 'string',
+        },
+      },
+    },
+    endJokes: {
+      type: 'object',
+      properties: {},
     },
   },
-  events: {},
 });
 
 const getJokeCompletion = agent.chatCompletion(
@@ -96,15 +109,7 @@ const loader = fromCallback(({ input }: { input: string }) => {
 });
 
 const jokeMachine = setup({
-  types: {
-    context: {} as {
-      topic: string;
-      jokes: string[];
-      desire: string | null;
-      lastRating: string | null;
-    },
-    input: {} as { topic: string },
-  },
+  types: agent.types,
   actors: {
     getJokeCompletion,
     getTopic,
