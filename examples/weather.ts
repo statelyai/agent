@@ -1,7 +1,7 @@
-import OpenAI from 'openai';
-import { createAgent, fromEventChoice } from '../src';
+ import { createAgent, fromEventChoice } from '../src';
 import { assign, createActor, fromPromise, log, setup } from 'xstate';
 import { getFromTerminal } from './helpers/helpers';
+ import {ChatOpenAI, OpenAI} from "@langchain/openai";
 
 async function searchTavily(
   input: string,
@@ -35,9 +35,8 @@ async function searchTavily(
   return JSON.stringify(json.results);
 }
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+const openai = new ChatOpenAI({
+ });
 
 const agent = createAgent(openai, {
   model: 'gpt-4-1106-preview',

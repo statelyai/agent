@@ -1,10 +1,8 @@
 import { assign, setup, assertEvent, createActor } from 'xstate';
-import OpenAI from 'openai';
-import { createAgent } from '../src/openai';
+import {ChatOpenAI} from '@langchain/openai';
+import { createAgent } from '../src';
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+const openai = new ChatOpenAI( );
 
 type Player = 'x' | 'o';
 

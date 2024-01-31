@@ -1,4 +1,4 @@
-import OpenAI from 'openai';
+import {ChatOpenAI, OpenAI} from "@langchain/openai";
 import {
   assign,
   createActor,
@@ -10,9 +10,7 @@ import {
 import { createAgent } from '../src';
 import { loadingAnimation } from './helpers/loader';
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+const openai = new ChatOpenAI();
 
 const agent = createAgent(openai, {
   model: 'gpt-3.5-turbo-1106',
