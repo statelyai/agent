@@ -37,10 +37,8 @@
   "dependencies": {
     "@langchain/core": "^0.1.20",
     "@langchain/openai": "^0.0.13",
-    "json-schema-to-zod": "^2.0.14",
     "langchain": "^0.1.11",
-    "xstate": "^5.5.1",
-    "zod": "^3.22.4"
+    "xstate": "^5.5.1" 
   },
   "packageManager": "pnpm@8.11.0"
 }

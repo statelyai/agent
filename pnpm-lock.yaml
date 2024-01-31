@@ -11,18 +11,12 @@ dependencies:
   '@langchain/openai':
     specifier: ^0.0.13
     version: 0.0.13
-  json-schema-to-zod:
-    specifier: ^2.0.14
-    version: 2.0.14
   langchain:
     specifier: ^0.1.11
     version: 0.1.11
   xstate:
     specifier: ^5.5.1
     version: 5.5.1
-  zod:
-    specifier: ^3.22.4
-    version: 3.22.4
 
 devDependencies:
   '@changesets/changelog-github':
@@ -2202,11 +2196,6 @@ packages:
       '@types/json-schema': 7.0.15
       ts-algebra: 1.2.2
     dev: true
-
-  /json-schema-to-zod@2.0.14:
-    resolution: {integrity: sha512-Pp9wg1/AcMw5KA1RA7t6ybUTIes1yX0vp8PeE48cPnddHb+ZZWbAKPaFXVf4Pif4XSbo9u9i/hIzBcS1UHK/TA==}
-    hasBin: true
-    dev: false
 
   /jsonfile@4.0.0:
     resolution: {integrity: sha512-m6F1R3z8jjlf2imQHS2Qez5sjKWQzbuuhuJ/FKYFRZvPE3PuHcSMVZzfsLhGVOkfd20obL5SWEBew5ShlquNxg==}
