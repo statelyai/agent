@@ -6,7 +6,7 @@ import {jsonSchemaToZod} from "json-schema-to-zod";
 import {pull} from "langchain/hub";
 import type {ChatPromptTemplate} from "@langchain/core/prompts";
 import {BaseChatModel, BaseChatModelCallOptions} from "@langchain/core/dist/language_models/chat_models";
-import {CreateAgentOutput} from "./openai";
+import {CreateAgentOutput} from "./langchain";
 
 export async function getToolsAgent({transitions, functionNameMapping, execute, system, self, agentSettings, openai}:{transitions: Transitions<any, any>, functionNameMapping: Record<string, string>, execute?:boolean, system: ActorSystem<any>, self: AnyActorRef, agentSettings: CreateAgentOutput<any>, openai: BaseChatModel} ) {
     const tools: CreateOpenAIToolsAgentParams["tools"] = transitions

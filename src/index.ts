@@ -3,4 +3,4 @@ export {
   fromChatCompletionStream,
   fromEventChoice,
   createAgent,
-} from './openai';
+} from './langchain';
