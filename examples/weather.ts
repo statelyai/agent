@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
-import { createAgent, fromEventChoice } from '../src';
-import { assign, createActor, fromPromise, log, setup } from 'xstate';
+import { createAgent, createOpenAIAdapter, createSchemas } from '../src';
+import { assign, fromPromise, log, setup } from 'xstate';
 import { getFromTerminal } from './helpers/helpers';
 
 async function searchTavily(
@@ -23,6 +23,7 @@ async function searchTavily(
     },
     body: JSON.stringify(body),
   });
+
   const json = await response.json();
   if (!response.ok) {
     throw new Error(
@@ -39,8 +40,7 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-const agent = createAgent(openai, {
-  model: 'gpt-4-1106-preview',
+const schemas = createSchemas({
   context: {
     location: { type: 'string' },
     history: { type: 'array', items: { type: 'string' } },
@@ -64,6 +64,10 @@ const agent = createAgent(openai, {
   },
 });
 
+const adapter = createOpenAIAdapter(openai, {
+  model: 'gpt-4-1106-preview',
+});
+
 const getWeather = fromPromise(async ({ input }: { input: string }) => {
   const results = await searchTavily(
     `Get the weather for this location: ${input}`,
@@ -76,12 +80,11 @@ const getWeather = fromPromise(async ({ input }: { input: string }) => {
 });
 
 const machine = setup({
-  types: {} as {
-    input: { location: string };
-  },
+  schemas,
+  types: schemas.types,
   actors: {
     getWeather,
-    decide: agent.event(
+    decide: adapter.fromEventChoice(
       (input: string) =>
         `Decide what to do based on the given input, which may or may not be a location: ${input}`
     ),
@@ -150,4 +153,8 @@ const machine = setup({
   },
 });
 
-createActor(machine).start();
+createAgent(machine, {
+  input: {
+    location: 'New York',
+  },
+}).start();

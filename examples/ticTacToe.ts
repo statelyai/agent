@@ -1,6 +1,6 @@
-import { assign, setup, assertEvent, createActor } from 'xstate';
+import { assign, setup, assertEvent } from 'xstate';
 import OpenAI from 'openai';
-import { createAgent } from '../src/openai';
+import { createOpenAIAdapter, createSchemas, createAgent } from '../src';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -8,8 +8,7 @@ const openai = new OpenAI({
 
 type Player = 'x' | 'o';
 
-const agent = createAgent(openai, {
-  model: 'gpt-4-1106-preview',
+const schemas = createSchemas({
   context: {
     board: {
       type: 'array',
@@ -69,16 +68,20 @@ const agent = createAgent(openai, {
   },
 });
 
+const adapter = createOpenAIAdapter(openai, {
+  model: 'gpt-4-1106-preview',
+});
+
 const initialContext = {
   board: Array(9).fill(null) as Array<Player | null>,
   moves: 0,
   player: 'x' as Player,
   gameReport: '',
   events: [],
-} satisfies typeof agent.types.context;
+} satisfies typeof schemas.types.context;
 
-const bot = agent.event(
-  ({ context }: { context: typeof agent.types.context }) => `
+const bot = adapter.fromEventChoice(
+  ({ context }: { context: typeof schemas.types.context }) => `
 You are playing a game of tic tac toe. This is the current game state. The 3x3 board is represented by a 9-element array. The first element is the top-left cell, the second element is the top-middle cell, the third element is the top-right cell, the fourth element is the middle-left cell, and so on. The value of each cell is either null, x, or o. The value of null means that the cell is empty. The value of x means that the cell is occupied by an x. The value of o means that the cell is occupied by an o.
 
 ${JSON.stringify(context, null, 2)}
@@ -86,11 +89,11 @@ ${JSON.stringify(context, null, 2)}
 Execute the single best next move to try to win the game. Do not play on an existing cell.`
 );
 
-const gameReporter = agent.chatStream(
+const gameReporter = adapter.fromChatStream(
   ({
     context,
   }: {
-    context: typeof agent.types.context;
+    context: typeof schemas.types.context;
   }) => `Here is the game board:
 
 ${JSON.stringify(context.board, null, 2)}
@@ -124,7 +127,8 @@ function getWinner(board: typeof initialContext.board): Player | null {
 }
 
 export const ticTacToeMachine = setup({
-  types: agent.types,
+  schemas,
+  types: schemas.types,
   actors: {
     bot,
     gameReporter,
@@ -248,8 +252,8 @@ export const ticTacToeMachine = setup({
   },
 });
 
-const actor = createActor(ticTacToeMachine);
-actor.subscribe((s) => {
+const agent = createAgent(ticTacToeMachine);
+agent.subscribe((s) => {
   console.log(s.value, s.context);
 });
-actor.start();
+agent.start();
