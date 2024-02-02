@@ -1,17 +1,15 @@
 import type OpenAI from 'openai';
 import {
   AnyEventObject,
-  AnyMachineSnapshot,
   ObservableActorLogic,
   Observer,
   PromiseActorLogic,
   fromObservable,
   fromPromise,
   isMachineSnapshot,
-  setup,
   toObserver,
 } from 'xstate';
-import { getAllTransitions } from './utils';
+import { getAllTransitions } from '../utils';
 import { ChatCompletionCreateParamsNonStreaming } from 'openai/resources';
 import {
   ChatCompletionCreateParamsBase,
@@ -27,7 +25,7 @@ import {
  */
 export function fromChatCompletion<TInput>(
   openai: OpenAI,
-  agentSettings: CreateAgentOutput<any>,
+  agentSettings: OpenAIAdapterOutput<any>,
   inputFn: (
     input: TInput
   ) => string | OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming
@@ -62,7 +60,7 @@ export function fromChatCompletion<TInput>(
  */
 export function fromChatStream<TInput>(
   openai: OpenAI,
-  agentSettings: CreateAgentOutput<any>,
+  agentSettings: OpenAIAdapterOutput<any>,
   inputFn: (
     input: TInput
   ) => string | OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming
@@ -121,7 +119,7 @@ export function fromChatStream<TInput>(
  */
 export function fromEventChoice<TInput>(
   openai: OpenAI,
-  agentSettings: CreateAgentOutput<any>,
+  agentSettings: OpenAIAdapterOutput<any>,
   inputFn: (
     input: TInput
   ) => string | OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming,
@@ -208,12 +206,15 @@ export function fromEventChoice<TInput>(
   );
 }
 
-interface CreateAgentOutput<
+interface OpenAIAdapterOutput<
   T extends {
     model: ChatCompletionCreateParamsBase['model'];
   }
 > {
   model: T['model'];
+  /**
+   * Determines which event to send to the parent state machine actor based on the prompt.
+   */
   fromEventChoice: <TInput>(
     inputFn: (input: TInput) => string | ChatCompletionCreateParamsNonStreaming,
     options?: {
@@ -224,9 +225,15 @@ interface CreateAgentOutput<
       execute?: boolean;
     }
   ) => PromiseActorLogic<AnyEventObject[] | undefined, TInput>;
-  fromChatCompletion: <TInput>(
+  /**
+   * Creates promise actor logic that resolves with a chat completion.
+   */
+  fromChat: <TInput>(
     inputFn: (input: TInput) => string | ChatCompletionCreateParamsNonStreaming
   ) => PromiseActorLogic<OpenAI.Chat.Completions.ChatCompletion, TInput>;
+  /**
+   * Creates observable actor logic that emits a chat completion stream.
+   */
   fromChatStream: <TInput>(
     inputFn: (input: TInput) => string | ChatCompletionCreateParamsStreaming
   ) => ObservableActorLogic<
@@ -239,14 +246,13 @@ export function createOpenAIAdapter<
   T extends {
     model: ChatCompletionCreateParamsBase['model'];
   }
->(openai: OpenAI, settings: T): CreateAgentOutput<T> {
-  const agentSettings: CreateAgentOutput<T> = {
+>(openai: OpenAI, settings: T): OpenAIAdapterOutput<T> {
+  const agentSettings: OpenAIAdapterOutput<T> = {
     model: settings.model,
     fromEventChoice: (input) =>
       // @ts-ignore infinitely deep
       fromEventChoice(openai, agentSettings, input, { execute: true }) as any,
-    fromChatCompletion: (input) =>
-      fromChatCompletion(openai, agentSettings, input),
+    fromChat: (input) => fromChatCompletion(openai, agentSettings, input),
     fromChatStream: (input) => fromChatStream(openai, agentSettings, input),
   };
 

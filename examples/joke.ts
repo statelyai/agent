@@ -39,11 +39,11 @@ const adapter = createOpenAIAdapter(openai, {
   model: 'gpt-3.5-turbo-1106',
 });
 
-const getJokeCompletion = adapter.fromChatCompletion(
+const getJokeCompletion = adapter.fromChat(
   (topic: string) => `Tell me a joke about ${topic}.`
 );
 
-const rateJoke = adapter.fromChatCompletion(
+const rateJoke = adapter.fromChat(
   (joke: string) => `Rate this joke on a scale of 1 to 10: ${joke}`
 );
 
