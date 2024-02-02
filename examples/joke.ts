@@ -212,5 +212,5 @@ const jokeMachine = setup({
   },
 });
 
-const actor = createAgent(jokeMachine);
-actor.start();
+const agent = createAgent(jokeMachine);
+agent.start();
