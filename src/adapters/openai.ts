@@ -4,21 +4,12 @@ import {
   ObservableActorLogic,
   Observer,
   PromiseActorLogic,
-  Values,
   fromObservable,
   fromPromise,
-  setup,
+  isMachineSnapshot,
   toObserver,
 } from 'xstate';
-import { getAllTransitions } from './utils';
-import {
-  ContextSchema,
-  EventSchemas,
-  ConvertContextToJSONSchema,
-  ConvertToJSONSchemas,
-  createEventSchemas,
-} from './utils';
-import { FromSchema } from 'json-schema-to-ts';
+import { getAllTransitions } from '../utils';
 import { ChatCompletionCreateParamsNonStreaming } from 'openai/resources';
 import {
   ChatCompletionCreateParamsBase,
@@ -34,7 +25,7 @@ import {
  */
 export function fromChatCompletion<TInput>(
   openai: OpenAI,
-  agentSettings: CreateAgentOutput<any>,
+  agentSettings: OpenAIAdapterOutput<any>,
   inputFn: (
     input: TInput
   ) => string | OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming
@@ -67,9 +58,9 @@ export function fromChatCompletion<TInput>(
  * @param openai The OpenAI instance to use.
  * @param inputFn A function that maps arbitrary input to OpenAI chat completion input.
  */
-export function fromChatCompletionStream<TInput>(
+export function fromChatStream<TInput>(
   openai: OpenAI,
-  agentSettings: CreateAgentOutput<any>,
+  agentSettings: OpenAIAdapterOutput<any>,
   inputFn: (
     input: TInput
   ) => string | OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming
@@ -128,7 +119,7 @@ export function fromChatCompletionStream<TInput>(
  */
 export function fromEventChoice<TInput>(
   openai: OpenAI,
-  agentSettings: CreateAgentOutput<any>,
+  agentSettings: OpenAIAdapterOutput<any>,
   inputFn: (
     input: TInput
   ) => string | OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming,
@@ -142,6 +133,15 @@ export function fromEventChoice<TInput>(
 ) {
   return fromPromise<AnyEventObject[] | undefined, TInput>(
     async ({ input, self, system }) => {
+      const parentSnapshot = self._parent?.getSnapshot();
+
+      if (!parentSnapshot || !isMachineSnapshot(parentSnapshot)) {
+        return undefined;
+      }
+
+      const schemas = parentSnapshot.machine.schemas as any;
+      const eventSchemaMap = schemas.events ?? {};
+
       const transitions = getAllTransitions(self._parent!.getSnapshot());
       const functionNameMapping: Record<string, string> = {};
       const tools = transitions
@@ -156,12 +156,10 @@ export function fromEventChoice<TInput>(
             function: {
               name,
               description:
-                t.description ??
-                agentSettings.schemas.events[t.eventType]?.description,
+                t.description ?? eventSchemaMap[t.eventType]?.description,
               parameters: {
                 type: 'object',
-                properties:
-                  agentSettings.schemas.events[t.eventType]?.properties ?? {},
+                properties: eventSchemaMap[t.eventType]?.properties ?? {},
               },
             },
           } as const;
@@ -208,35 +206,35 @@ export function fromEventChoice<TInput>(
   );
 }
 
-interface CreateAgentOutput<
+interface OpenAIAdapterOutput<
   T extends {
     model: ChatCompletionCreateParamsBase['model'];
-    context: ContextSchema;
-    events: EventSchemas;
   }
 > {
   model: T['model'];
-  schemas: T;
-  types: {
-    context: FromSchema<ConvertContextToJSONSchema<T['context']>>;
-    events: FromSchema<Values<ConvertToJSONSchemas<T['events']>>>;
-  };
-  fromEvent: <TInput>(
-    inputFn: (input: TInput) => string | ChatCompletionCreateParamsNonStreaming
-  ) => PromiseActorLogic<
-    FromSchema<Values<ConvertToJSONSchemas<T['events']>>>[] | undefined,
-    TInput
-  >;
+  /**
+   * Determines which event to send to the parent state machine actor based on the prompt.
+   */
   fromEventChoice: <TInput>(
-    inputFn: (input: TInput) => string | ChatCompletionCreateParamsNonStreaming
-  ) => PromiseActorLogic<
-    FromSchema<Values<ConvertToJSONSchemas<T['events']>>>[] | undefined,
-    TInput
-  >;
-  fromChatCompletion: <TInput>(
+    inputFn: (input: TInput) => string | ChatCompletionCreateParamsNonStreaming,
+    options?: {
+      /**
+       * Immediately execute sending the event to the parent actor.
+       * @default true
+       */
+      execute?: boolean;
+    }
+  ) => PromiseActorLogic<AnyEventObject[] | undefined, TInput>;
+  /**
+   * Creates promise actor logic that resolves with a chat completion.
+   */
+  fromChat: <TInput>(
     inputFn: (input: TInput) => string | ChatCompletionCreateParamsNonStreaming
   ) => PromiseActorLogic<OpenAI.Chat.Completions.ChatCompletion, TInput>;
-  fromChatCompletionStream: <TInput>(
+  /**
+   * Creates observable actor logic that emits a chat completion stream.
+   */
+  fromChatStream: <TInput>(
     inputFn: (input: TInput) => string | ChatCompletionCreateParamsStreaming
   ) => ObservableActorLogic<
     OpenAI.Chat.Completions.ChatCompletionChunk,
@@ -244,34 +242,19 @@ interface CreateAgentOutput<
   >;
 }
 
-export function createAgent<
+export function createOpenAIAdapter<
   T extends {
     model: ChatCompletionCreateParamsBase['model'];
-    context: ContextSchema;
-    events: EventSchemas;
   }
->(openai: OpenAI, settings: T): CreateAgentOutput<T> {
-  const agentSettings: CreateAgentOutput<T> = {
+>(openai: OpenAI, settings: T): OpenAIAdapterOutput<T> {
+  const agentSettings: OpenAIAdapterOutput<T> = {
     model: settings.model,
-    schemas: {
-      context: {
-        type: 'object',
-        properties: settings.context,
-        additionalProperties: false,
-      },
-      events: createEventSchemas(settings.events),
-    } as any,
-    types: {} as any,
-    fromEvent: (input) =>
-      // @ts-ignore
-      fromEventChoice(openai, agentSettings, input, { execute: true }),
-    // @ts-ignore infinitely deep
-    fromEventChoice: (input) => fromEventChoice(openai, agentSettings, input),
-    fromChatCompletion: (input) =>
-      fromChatCompletion(openai, agentSettings, input),
-    fromChatCompletionStream: (input) =>
-      fromChatCompletionStream(openai, agentSettings, input),
+    fromEventChoice: (input) =>
+      // @ts-ignore infinitely deep
+      fromEventChoice(openai, agentSettings, input, { execute: true }) as any,
+    fromChat: (input) => fromChatCompletion(openai, agentSettings, input),
+    fromChatStream: (input) => fromChatStream(openai, agentSettings, input),
   };
 
-  return agentSettings as any;
+  return agentSettings;
 }
