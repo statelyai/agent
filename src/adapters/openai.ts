@@ -1,5 +1,6 @@
 import type OpenAI from 'openai';
 import {
+  AnyActorLogic,
   AnyEventObject,
   ObservableActorLogic,
   Observer,
@@ -15,6 +16,7 @@ import {
   ChatCompletionCreateParamsBase,
   ChatCompletionCreateParamsStreaming,
 } from 'openai/resources/chat/completions';
+import { StatelyAgentAdapter } from '../types';
 
 /**
  * Creates [promise actor logic](https://stately.ai/docs/promise-actors) that uses the OpenAI API to generate a completion.
@@ -206,6 +208,88 @@ export function fromEventChoice<TInput>(
   );
 }
 
+/**
+ * Creates [promise actor logic](https://stately.ai/docs/promise-actors) that passes the next possible transitions as functions to [OpenAI tool calls](https://platform.openai.com/docs/guides/function-calling) and returns an array of potential next events.
+ *
+ * @param openai The OpenAI instance to use.
+ * @param inputFn A function that maps arbitrary input to OpenAI chat completion input.
+ */
+export function fromToolChoice<TInput>(
+  openai: OpenAI,
+  agentSettings: StatelyAgentAdapter,
+  tools: {
+    [key: string]: {
+      description: string;
+      src: AnyActorLogic;
+      inputSchema: any;
+    };
+  },
+  inputFn: (
+    input: TInput
+  ) => string | OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming,
+  options?: {
+    /**
+     * Immediately execute sending the event to the parent actor.
+     * @default false
+     */
+    execute?: boolean;
+  }
+) {
+  return fromPromise<AnyEventObject[] | undefined, TInput>(
+    async ({ input, self, system }) => {
+      const functionNameMapping: Record<string, string> = {};
+      const resolvedTools = Object.entries(tools).map(([key, value]) => {
+        return {
+          type: 'function',
+          function: {
+            name: key,
+            description: value.description,
+            parameters: value.inputSchema,
+          },
+        } as const;
+      });
+
+      const openAiInput = inputFn(input);
+      const completionParams: ChatCompletionCreateParamsNonStreaming =
+        typeof openAiInput === 'string'
+          ? {
+              model: agentSettings.model,
+              messages: [
+                {
+                  role: 'user',
+                  content: openAiInput,
+                },
+              ],
+            }
+          : openAiInput;
+      const completion = await openai.chat.completions.create({
+        ...completionParams,
+        tools: resolvedTools,
+      });
+
+      const toolCalls = completion.choices[0]?.message.tool_calls;
+
+      if (toolCalls) {
+        const events = toolCalls.map((tc) => {
+          return {
+            type: functionNameMapping[tc.function.name],
+            ...JSON.parse(tc.function.arguments),
+          };
+        });
+
+        if (options?.execute) {
+          events.forEach((event) => {
+            // @ts-ignore
+            system._relay(self, self._parent, event);
+          });
+        }
+      }
+
+      return undefined;
+    }
+  );
+}
+
 interface OpenAIAdapterOutput<
   T extends {
     model: ChatCompletionCreateParamsBase['model'];
@@ -247,13 +331,15 @@ export function createOpenAIAdapter<
     model: ChatCompletionCreateParamsBase['model'];
   }
 >(openai: OpenAI, settings: T): OpenAIAdapterOutput<T> {
-  const agentSettings: OpenAIAdapterOutput<T> = {
+  const agentSettings: StatelyAgentAdapter = {
     model: settings.model,
     fromEventChoice: (input) =>
       // @ts-ignore infinitely deep
       fromEventChoice(openai, agentSettings, input, { execute: true }) as any,
     fromChat: (input) => fromChatCompletion(openai, agentSettings, input),
     fromChatStream: (input) => fromChatStream(openai, agentSettings, input),
+    fromToolChoice: (input, tools) =>
+      fromToolChoice(openai, agentSettings, tools, input),
   };
 
   return agentSettings;
