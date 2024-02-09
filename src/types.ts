@@ -5,6 +5,7 @@ import {
 } from 'openai/resources';
 import {
   AnyActorLogic,
+  AnyActorRef,
   AnyEventObject,
   ObservableActorLogic,
   PromiseActorLogic,
@@ -54,5 +55,13 @@ export interface StatelyAgentAdapter {
        */
       execute?: boolean;
     }
-  ) => PromiseActorLogic<AnyEventObject[] | undefined, TInput>;
+  ) => PromiseActorLogic<
+    | {
+        name: string;
+        arguments: any[];
+        actorRef: AnyActorRef;
+      }
+    | undefined,
+    TInput
+  >;
 }

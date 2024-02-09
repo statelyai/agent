@@ -5,6 +5,7 @@ import {
   ObservableActorLogic,
   Observer,
   PromiseActorLogic,
+  createActor,
   fromObservable,
   fromPromise,
   isMachineSnapshot,
@@ -235,59 +236,70 @@ export function fromToolChoice<TInput>(
     execute?: boolean;
   }
 ) {
-  return fromPromise<AnyEventObject[] | undefined, TInput>(
-    async ({ input, self, system }) => {
-      const functionNameMapping: Record<string, string> = {};
-      const resolvedTools = Object.entries(tools).map(([key, value]) => {
+  return fromPromise<any, TInput>(async ({ input, self, system }) => {
+    const functionNameMapping: Record<string, string> = {};
+    const resolvedTools = Object.entries(tools).map(([key, value]) => {
+      return {
+        type: 'function',
+        function: {
+          name: key,
+          description: value.description,
+          parameters: value.inputSchema,
+        },
+      } as const;
+    });
+
+    const openAiInput = inputFn(input);
+    const completionParams: ChatCompletionCreateParamsNonStreaming =
+      typeof openAiInput === 'string'
+        ? {
+            model: agentSettings.model,
+            messages: [
+              {
+                role: 'user',
+                content: openAiInput,
+              },
+            ],
+          }
+        : openAiInput;
+    const completion = await openai.chat.completions.create({
+      ...completionParams,
+      tools: resolvedTools,
+    });
+
+    const toolCalls = completion.choices[0]?.message.tool_calls;
+
+    if (toolCalls?.length) {
+      const logic = tools[toolCalls[0]!.function.name]?.src;
+
+      if (logic) {
+        const actor = createActor(logic);
+        actor.start();
         return {
-          type: 'function',
-          function: {
-            name: key,
-            description: value.description,
-            parameters: value.inputSchema,
-          },
-        } as const;
-      });
-
-      const openAiInput = inputFn(input);
-      const completionParams: ChatCompletionCreateParamsNonStreaming =
-        typeof openAiInput === 'string'
-          ? {
-              model: agentSettings.model,
-              messages: [
-                {
-                  role: 'user',
-                  content: openAiInput,
-                },
-              ],
-            }
-          : openAiInput;
-      const completion = await openai.chat.completions.create({
-        ...completionParams,
-        tools: resolvedTools,
-      });
-
-      const toolCalls = completion.choices[0]?.message.tool_calls;
-
-      if (toolCalls) {
-        const events = toolCalls.map((tc) => {
-          return {
-            type: functionNameMapping[tc.function.name],
-            ...JSON.parse(tc.function.arguments),
-          };
-        });
-
-        if (options?.execute) {
-          events.forEach((event) => {
-            // @ts-ignore
-            system._relay(self, self._parent, event);
-          });
-        }
+          ...toolCalls[0],
+          actorRef: actor,
+        };
       }
-
-      return undefined;
     }
-  );
+
+    if (toolCalls) {
+      const events = toolCalls.map((tc) => {
+        return {
+          type: functionNameMapping[tc.function.name],
+          ...JSON.parse(tc.function.arguments),
+        };
+      });
+
+      if (options?.execute) {
+        events.forEach((event) => {
+          // @ts-ignore
+          system._relay(self, self._parent, event);
+        });
+      }
+    }
+
+    return undefined;
+  });
 }
 
 interface OpenAIAdapterOutput<
@@ -330,7 +342,7 @@ export function createOpenAIAdapter<
   T extends {
     model: ChatCompletionCreateParamsBase['model'];
   }
->(openai: OpenAI, settings: T): OpenAIAdapterOutput<T> {
+>(openai: OpenAI, settings: T): StatelyAgentAdapter {
   const agentSettings: StatelyAgentAdapter = {
     model: settings.model,
     fromEventChoice: (input) =>
