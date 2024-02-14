@@ -13,7 +13,7 @@ import {
 
 export interface StatelyAgentAdapter {
   model: string;
-  fromEventChoice: <TInput>(
+  fromEvent: <TInput>(
     inputFn: (input: TInput) => string | ChatCompletionCreateParamsNonStreaming,
     options?: {
       /**
@@ -39,7 +39,7 @@ export interface StatelyAgentAdapter {
     TInput
   >;
 
-  fromToolChoice: <TInput>(
+  fromTool: <TInput>(
     inputFn: (input: TInput) => string | ChatCompletionCreateParamsNonStreaming,
     tools: {
       [key: string]: Tool<any, any>;

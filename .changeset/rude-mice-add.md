@@ -2,10 +2,10 @@
 '@statelyai/agent': patch
 ---
 
-Add `adapter.fromToolChoice(…)`, which creates an actor that chooses agent logic based on a input.
+Add `adapter.fromTool(…)`, which creates an actor that chooses agent logic based on a input.
 
 ```ts
-const actor = adapter.fromToolChoice(() => 'Draw me a picture of a donut', {
+const actor = adapter.fromTool(() => 'Draw me a picture of a donut', {
   // tools
   makeIllustration: {
     description: 'Makes an illustration',

@@ -61,7 +61,7 @@ const getTopic = fromPromise(async () => {
   return topic;
 });
 
-const decide = adapter.fromEventChoice(
+const decide = adapter.fromEvent(
   (lastRating: string) =>
     `Choose what to do next, given the previous rating of the joke: ${lastRating}`
 );

@@ -84,7 +84,7 @@ const machine = setup({
   types: schemas.types,
   actors: {
     getWeather,
-    decide: adapter.fromEventChoice(
+    decide: adapter.fromEvent(
       (input: string) =>
         `Decide what to do based on the given input, which may or may not be a location: ${input}`
     ),

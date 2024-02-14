@@ -118,7 +118,7 @@ export function fromChatStream<TInput>(
  * @param openai The OpenAI instance to use.
  * @param inputFn A function that maps arbitrary input to OpenAI chat completion input.
  */
-export function fromEventChoice<TInput>(
+export function fromEvent<TInput>(
   openai: OpenAI,
   agentSettings: OpenAIAdapterOutput<any>,
   inputFn: (
@@ -225,7 +225,7 @@ export function createTool<TInput, T>({
  * @param openai The OpenAI instance to use.
  * @param inputFn A function that maps arbitrary input to OpenAI chat completion input.
  */
-export function fromToolChoice<TInput>(
+export function fromTool<TInput>(
   openai: OpenAI,
   agentSettings: StatelyAgentAdapter,
   tools: {
@@ -305,7 +305,7 @@ interface OpenAIAdapterOutput<
   /**
    * Determines which event to send to the parent state machine actor based on the prompt.
    */
-  fromEventChoice: <TInput>(
+  fromEvent: <TInput>(
     inputFn: (input: TInput) => string | ChatCompletionCreateParamsNonStreaming,
     options?: {
       /**
@@ -339,13 +339,12 @@ export function createOpenAIAdapter<
 >(openai: OpenAI, settings: T): StatelyAgentAdapter {
   const agentSettings: StatelyAgentAdapter = {
     model: settings.model,
-    fromEventChoice: (input) =>
+    fromEvent: (input) =>
       // @ts-ignore infinitely deep
-      fromEventChoice(openai, agentSettings, input, { execute: true }) as any,
+      fromEvent(openai, agentSettings, input, { execute: true }) as any,
     fromChat: (input) => fromChatCompletion(openai, agentSettings, input),
     fromChatStream: (input) => fromChatStream(openai, agentSettings, input),
-    fromToolChoice: (input, tools) =>
-      fromToolChoice(openai, agentSettings, tools, input),
+    fromTool: (input, tools) => fromTool(openai, agentSettings, tools, input),
   };
 
   return agentSettings;

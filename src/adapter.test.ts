@@ -3,7 +3,7 @@ import { createOpenAIAdapter, createTool } from './adapters/openai';
 import OpenAI from 'openai';
 import { createActor, toPromise } from 'xstate';
 
-test('fromToolChoice - weather or illustration', async () => {
+test('fromTool - weather or illustration', async () => {
   const openAi = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
   });
@@ -12,49 +12,46 @@ test('fromToolChoice - weather or illustration', async () => {
     model: 'gpt-3.5-turbo',
   });
 
-  const toolChoice = adapter.fromToolChoice(
-    () => 'Create an image of a donut',
-    {
-      makeIllustration: {
-        description: 'Make an illustration',
-        run: async () => 'Illustration',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            name: {
-              type: 'string',
-              description: 'The name of the illustration',
-            },
+  const toolChoice = adapter.fromTool(() => 'Create an image of a donut', {
+    makeIllustration: {
+      description: 'Make an illustration',
+      run: async () => 'Illustration',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          name: {
+            type: 'string',
+            description: 'The name of the illustration',
           },
-          required: ['name'],
         },
+        required: ['name'],
       },
-      getWeather: {
-        description: 'Get the weather for a location',
-        run: async () => 'Weather',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            location: {
-              type: 'object',
-              properties: {
-                city: {
-                  type: 'string',
-                  description: 'The name of the city',
-                },
-                state: {
-                  type: 'string',
-                  description: 'The name of the state',
-                },
+    },
+    getWeather: {
+      description: 'Get the weather for a location',
+      run: async () => 'Weather',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          location: {
+            type: 'object',
+            properties: {
+              city: {
+                type: 'string',
+                description: 'The name of the city',
               },
-              required: ['city', 'state'],
+              state: {
+                type: 'string',
+                description: 'The name of the state',
+              },
             },
+            required: ['city', 'state'],
           },
-          required: ['location'],
         },
+        required: ['location'],
       },
-    }
-  );
+    },
+  });
 
   const actor = createActor(toolChoice);
 
@@ -65,7 +62,7 @@ test('fromToolChoice - weather or illustration', async () => {
   expect(res?.result).toBe('Illustration');
 });
 
-test('fromToolChoice - GitHub PR description inserter', async () => {
+test('fromTool - GitHub PR description inserter', async () => {
   const openAi = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
   });
@@ -74,7 +71,7 @@ test('fromToolChoice - GitHub PR description inserter', async () => {
     model: 'gpt-3.5-turbo-16k-0613',
   });
 
-  const toolChoice = adapter.fromToolChoice(
+  const toolChoice = adapter.fromTool(
     (input: string) =>
       `Create a GitHub PR description for the following: ${input}`,
     {
@@ -136,7 +133,7 @@ test('fromToolChoice - GitHub PR description inserter', async () => {
   expect(res?.result).toEqual('Description');
 });
 
-test('fromToolChoice - joke creator or rater', async () => {
+test('fromTool - joke creator or rater', async () => {
   const openAi = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
   });
@@ -178,7 +175,7 @@ test('fromToolChoice - joke creator or rater', async () => {
     },
   });
 
-  const toolChoice = adapter.fromToolChoice(
+  const toolChoice = adapter.fromTool(
     (input: string) => `
 The user provided this input:
 
