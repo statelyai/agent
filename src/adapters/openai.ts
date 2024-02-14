@@ -1,11 +1,9 @@
 import type OpenAI from 'openai';
 import {
-  AnyActorLogic,
   AnyEventObject,
   ObservableActorLogic,
   Observer,
   PromiseActorLogic,
-  createActor,
   fromObservable,
   fromPromise,
   isMachineSnapshot,
@@ -17,7 +15,7 @@ import {
   ChatCompletionCreateParamsBase,
   ChatCompletionCreateParamsStreaming,
 } from 'openai/resources/chat/completions';
-import { StatelyAgentAdapter } from '../types';
+import { StatelyAgentAdapter, Tool } from '../types';
 
 /**
  * Creates [promise actor logic](https://stately.ai/docs/promise-actors) that uses the OpenAI API to generate a completion.
@@ -209,6 +207,18 @@ export function fromEventChoice<TInput>(
   );
 }
 
+export function createTool<TInput, T>({
+  description,
+  inputSchema,
+  run,
+}: Tool<TInput, T>): Tool<TInput, T> {
+  return {
+    description,
+    inputSchema,
+    run,
+  };
+}
+
 /**
  * Creates [promise actor logic](https://stately.ai/docs/promise-actors) that passes the next possible transitions as functions to [OpenAI tool calls](https://platform.openai.com/docs/guides/function-calling) and returns an array of potential next events.
  *
@@ -219,24 +229,21 @@ export function fromToolChoice<TInput>(
   openai: OpenAI,
   agentSettings: StatelyAgentAdapter,
   tools: {
-    [key: string]: {
-      description: string;
-      src: AnyActorLogic;
-      inputSchema: any;
-    };
+    [key: string]: Tool<any, any>;
   },
   inputFn: (
     input: TInput
-  ) => string | OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming,
-  options?: {
-    /**
-     * Immediately execute sending the event to the parent actor.
-     * @default false
-     */
-    execute?: boolean;
-  }
+  ) => string | OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming
 ) {
-  return fromPromise<any, TInput>(async ({ input, self, system }) => {
+  return fromPromise<
+    | {
+        result: any;
+        tool: string;
+        toolCall: OpenAI.Chat.Completions.ChatCompletionMessageToolCall;
+      }
+    | undefined,
+    TInput
+  >(async ({ input, self, system }) => {
     const functionNameMapping: Record<string, string> = {};
     const resolvedTools = Object.entries(tools).map(([key, value]) => {
       return {
@@ -270,31 +277,18 @@ export function fromToolChoice<TInput>(
     const toolCalls = completion.choices[0]?.message.tool_calls;
 
     if (toolCalls?.length) {
-      const logic = tools[toolCalls[0]!.function.name]?.src;
+      const toolCall = toolCalls[0]!;
+      const tool = tools[toolCall.function.name];
+      const args = JSON.parse(toolCall.function.arguments);
 
-      if (logic) {
-        const actor = createActor(logic);
-        actor.start();
+      if (tool) {
+        const result = await tool.run(args);
+
         return {
-          ...toolCalls[0],
-          actorRef: actor,
+          toolCall,
+          tool: toolCall.function.name,
+          result,
         };
-      }
-    }
-
-    if (toolCalls) {
-      const events = toolCalls.map((tc) => {
-        return {
-          type: functionNameMapping[tc.function.name],
-          ...JSON.parse(tc.function.arguments),
-        };
-      });
-
-      if (options?.execute) {
-        events.forEach((event) => {
-          // @ts-ignore
-          system._relay(self, self._parent, event);
-        });
       }
     }
 

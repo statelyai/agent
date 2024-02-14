@@ -42,11 +42,7 @@ export interface StatelyAgentAdapter {
   fromToolChoice: <TInput>(
     inputFn: (input: TInput) => string | ChatCompletionCreateParamsNonStreaming,
     tools: {
-      [key: string]: {
-        description: string;
-        src: AnyActorLogic;
-        inputSchema: any;
-      };
+      [key: string]: Tool<any, any>;
     },
     options?: {
       /**
@@ -57,11 +53,17 @@ export interface StatelyAgentAdapter {
     }
   ) => PromiseActorLogic<
     | {
-        name: string;
-        arguments: any[];
-        actorRef: AnyActorRef;
+        result: any;
+        tool: string;
+        toolCall: OpenAI.Chat.Completions.ChatCompletionMessageToolCall;
       }
     | undefined,
     TInput
   >;
+}
+
+export interface Tool<TInput, TOutput> {
+  description: string;
+  inputSchema: any;
+  run: (input: TInput) => TOutput;
 }
