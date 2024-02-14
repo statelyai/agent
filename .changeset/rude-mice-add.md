@@ -9,14 +9,18 @@ const actor = adapter.fromToolChoice(() => 'Draw me a picture of a donut', {
   // tools
   makeIllustration: {
     description: 'Makes an illustration',
-    src: fromPromise(/* ... */),
+    run: async (input) => {
+      /* ... */
+    },
     inputSchema: {
       /* ... */
     },
   },
   getWeather: {
     description: 'Gets the weather',
-    src: fromPromise(/* ... */),
+    run: async (input) => {
+      /* ... */
+    },
     inputSchema: {
       /* ... */
     },
