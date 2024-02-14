@@ -15,7 +15,13 @@ export function createSchemas<
   context,
   events,
 }: {
+  /**
+   * An object mapping context properties to their JSON Schema.
+   */
   context: TContextSchema;
+  /**
+   * An object mapping event types to each event object's JSON Schema.
+   */
   events: TEventSchemas;
 }): {
   context: ConvertContextToJSONSchema<TContextSchema>;
