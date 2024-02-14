@@ -9,15 +9,19 @@ const openai = new OpenAI({
 
 const schemas = createSchemas({
   context: {
-    topic: { type: 'string' },
-    jokes: {
-      type: 'array',
-      items: {
-        type: 'string',
+    type: 'object',
+    properties: {
+      topic: { type: 'string' },
+      jokes: {
+        type: 'array',
+        items: {
+          type: 'string',
+        },
       },
+      desire: { type: ['string', 'null'] },
+      lastRating: { type: ['string', 'null'] },
     },
-    desire: { type: ['string', 'null'] as const },
-    lastRating: { type: ['string', 'null'] as const },
+    required: ['topic', 'jokes', 'desire', 'lastRating'],
   },
   events: {
     askForTopic: {
@@ -34,6 +38,8 @@ const schemas = createSchemas({
     },
   },
 });
+
+schemas.types.context.desire;
 
 const adapter = createOpenAIAdapter(openai, {
   model: 'gpt-3.5-turbo-1106',

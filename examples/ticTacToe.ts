@@ -10,36 +10,40 @@ type Player = 'x' | 'o';
 
 const schemas = createSchemas({
   context: {
-    board: {
-      type: 'array',
-      items: {
-        type: ['null', 'string'],
-        enum: [null, 'x', 'o'],
+    type: 'object',
+    properties: {
+      board: {
+        type: 'array',
+        items: {
+          type: ['null', 'string'],
+          enum: [null, 'x', 'o'],
+        },
+        minItems: 9,
+        maxItems: 9,
+        description: 'The board of the tic-tac-toe game',
       },
-      minItems: 9,
-      maxItems: 9,
-      description: 'The board of the tic-tac-toe game',
-    },
-    moves: {
-      type: 'number',
-      description: 'The number of moves that have been played',
-    },
-    player: {
-      type: 'string',
-      enum: ['x', 'o'],
-      description: 'The player whose turn it is',
-    },
-    gameReport: {
-      type: 'string',
-      description: 'The game report',
-    },
-    events: {
-      type: 'array',
-      items: {
+      moves: {
+        type: 'number',
+        description: 'The number of moves that have been played',
+      },
+      player: {
         type: 'string',
+        enum: ['x', 'o'],
+        description: 'The player whose turn it is',
+      },
+      gameReport: {
+        type: 'string',
+        description: 'The game report',
+      },
+      events: {
+        type: 'array',
+        items: {
+          type: 'string',
+        },
       },
     },
-  } as const,
+    required: ['board', 'moves', 'player', 'gameReport', 'events'],
+  },
   events: {
     'x.play': {
       properties: {

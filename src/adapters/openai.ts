@@ -229,8 +229,7 @@ export function fromTool<TInput>(
       }
     | undefined,
     TInput
-  >(async ({ input, self, system }) => {
-    const functionNameMapping: Record<string, string> = {};
+  >(async ({ input }) => {
     const resolvedTools = Object.entries(tools).map(([key, value]) => {
       return {
         type: 'function',
