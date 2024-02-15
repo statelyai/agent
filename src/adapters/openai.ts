@@ -26,7 +26,7 @@ import { StatelyAgentAdapter, Tool } from '../types';
  */
 export function fromChatCompletion<TInput>(
   openai: OpenAI,
-  agentSettings: OpenAIAdapterOutput<any>,
+  agentAdapter: OpenAIAdapterOutput<any>,
   inputFn: (
     input: TInput
   ) => string | OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming
@@ -37,7 +37,7 @@ export function fromChatCompletion<TInput>(
       const params: ChatCompletionCreateParamsNonStreaming =
         typeof openAiInput === 'string'
           ? {
-              model: agentSettings.model,
+              model: agentAdapter.model,
               messages: [
                 {
                   role: 'user',
@@ -61,7 +61,7 @@ export function fromChatCompletion<TInput>(
  */
 export function fromChatStream<TInput>(
   openai: OpenAI,
-  agentSettings: OpenAIAdapterOutput<any>,
+  agentAdapter: OpenAIAdapterOutput<any>,
   inputFn: (
     input: TInput
   ) => string | OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming
@@ -75,7 +75,7 @@ export function fromChatStream<TInput>(
         const resolvedParams: ChatCompletionCreateParamsBase =
           typeof openAiInput === 'string'
             ? {
-                model: agentSettings.model,
+                model: agentAdapter.model,
                 messages: [
                   {
                     role: 'user',
@@ -120,7 +120,7 @@ export function fromChatStream<TInput>(
  */
 export function fromEvent<TInput>(
   openai: OpenAI,
-  agentSettings: OpenAIAdapterOutput<any>,
+  agentAdapter: OpenAIAdapterOutput<any>,
   inputFn: (
     input: TInput
   ) => string | OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming,
@@ -170,7 +170,7 @@ export function fromEvent<TInput>(
       const completionParams: ChatCompletionCreateParamsNonStreaming =
         typeof openAiInput === 'string'
           ? {
-              model: agentSettings.model,
+              model: agentAdapter.model,
               messages: [
                 {
                   role: 'user',
@@ -227,7 +227,7 @@ export function createTool<TInput, T>({
  */
 export function fromTool<TInput>(
   openai: OpenAI,
-  agentSettings: StatelyAgentAdapter,
+  agentAdapter: StatelyAgentAdapter,
   tools: {
     [key: string]: Tool<any, any>;
   },
@@ -260,7 +260,7 @@ export function fromTool<TInput>(
     const completionParams: ChatCompletionCreateParamsNonStreaming =
       typeof openAiInput === 'string'
         ? {
-            model: agentSettings.model,
+            model: agentAdapter.model,
             messages: [
               {
                 role: 'user',
@@ -337,15 +337,15 @@ export function createOpenAIAdapter<
     model: ChatCompletionCreateParamsBase['model'];
   }
 >(openai: OpenAI, settings: T): StatelyAgentAdapter {
-  const agentSettings: StatelyAgentAdapter = {
+  const agentAdapter: StatelyAgentAdapter = {
     model: settings.model,
     fromEvent: (input) =>
       // @ts-ignore infinitely deep
-      fromEvent(openai, agentSettings, input, { execute: true }) as any,
-    fromChat: (input) => fromChatCompletion(openai, agentSettings, input),
-    fromChatStream: (input) => fromChatStream(openai, agentSettings, input),
-    fromTool: (input, tools) => fromTool(openai, agentSettings, tools, input),
+      fromEvent(openai, agentAdapter, input, { execute: true }) as any,
+    fromChat: (input) => fromChatCompletion(openai, agentAdapter, input),
+    fromChatStream: (input) => fromChatStream(openai, agentAdapter, input),
+    fromTool: (input, tools) => fromTool(openai, agentAdapter, tools, input),
   };
 
-  return agentSettings;
+  return agentAdapter;
 }
