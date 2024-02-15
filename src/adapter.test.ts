@@ -217,7 +217,7 @@ Determine what to do:
   expect(res2?.tool).toEqual('rateJoke');
 });
 
-test.only('fromEvent - ', async () => {
+test('fromEvent - ', async () => {
   const openAi = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
   });
