@@ -1,7 +1,7 @@
 import { test, expect } from 'vitest';
 import { createOpenAIAdapter, createTool } from './adapters/openai';
 import OpenAI from 'openai';
-import { assign, createActor, setup, toPromise } from 'xstate';
+import { ContextFrom, assign, createActor, setup, toPromise } from 'xstate';
 import { createSchemas } from './schemas';
 
 test('fromTool - weather or illustration', async () => {
@@ -217,7 +217,7 @@ Determine what to do:
   expect(res2?.tool).toEqual('rateJoke');
 });
 
-test('fromEvent - ', async () => {
+test.only('fromEvent - ', async () => {
   const openAi = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
   });
@@ -232,6 +232,10 @@ test('fromEvent - ', async () => {
         type: 'number',
         description: 'The stored number',
       },
+      label: {
+        type: 'string',
+        description: 'The label of the number',
+      },
     },
     events: {
       'number.evaluate': {
@@ -244,11 +248,11 @@ test('fromEvent - ', async () => {
           },
         },
       },
-      showEvenNumber: {
+      proclaimEvenNumber: {
         description: 'Show the even number',
         properties: {},
       },
-      showOddNumber: {
+      proclaimOddNumber: {
         description: 'Show the odd number',
         properties: {},
       },
@@ -262,6 +266,8 @@ test('fromEvent - ', async () => {
       storeNumber: assign({
         storedNumber: (_, params: { number: number }) => params.number,
       }),
+      labelNumberAsEven: assign({ label: 'Even' }),
+      labelNumberAsOdd: assign({ label: 'Odd' }),
     },
     actors: {
       evaluate: adapter.fromEvent(
@@ -274,6 +280,7 @@ test('fromEvent - ', async () => {
     initial: 'idle',
     context: {
       storedNumber: 0,
+      label: '',
     },
     states: {
       idle: {
@@ -302,35 +309,38 @@ test('fromEvent - ', async () => {
           },
         },
         on: {
-          showEvenNumber: {
-            target: 'even',
+          proclaimEvenNumber: {
+            target: 'done',
+            actions: ['labelNumberAsEven'],
           },
-          showOddNumber: {
-            target: 'odd',
+          proclaimOddNumber: {
+            target: 'done',
+            actions: ['labelNumberAsOdd'],
           },
         },
       },
-      even: {
-        type: 'final',
-      },
-      odd: {
+      done: {
         type: 'final',
       },
     },
-    output: ({ context }: { context: { storedNumber: number } }) => ({
+    output: ({
+      context,
+    }: {
+      context: { storedNumber: number; label: string };
+    }) => ({
       storedNumber: context.storedNumber,
+      label: context.label,
     }),
   });
 
   const actor = createActor(machine);
   actor.start();
-  const theNumber = 2;
   actor.send({
     type: 'number.evaluate',
-    number: theNumber,
+    number: 2,
   });
-  const res = (await toPromise(actor)) as { storedNumber: number };
+  const res = (await toPromise(actor)) as ContextFrom<typeof machine>;
 
-  expect(actor.getSnapshot().value).toBe('even');
-  expect(res.storedNumber).toBe(theNumber);
+  expect(res.storedNumber).toBe(2);
+  expect(res.label).toBe('Even');
 });
