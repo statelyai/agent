@@ -1,7 +1,8 @@
 import { test, expect } from 'vitest';
 import { createOpenAIAdapter, createTool } from './adapters/openai';
 import OpenAI from 'openai';
-import { createActor, toPromise } from 'xstate';
+import { assign, createActor, setup, toPromise } from 'xstate';
+import { createSchemas } from './schemas';
 
 test('fromTool - weather or illustration', async () => {
   const openAi = new OpenAI({
@@ -214,4 +215,122 @@ Determine what to do:
 
   const res2 = await toPromise(actor2);
   expect(res2?.tool).toEqual('rateJoke');
+});
+
+test.only('fromEvent - ', async () => {
+  const openAi = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+  });
+
+  const adapter = createOpenAIAdapter(openAi, {
+    model: 'gpt-3.5-turbo',
+  });
+
+  const schemas = createSchemas({
+    context: {
+      storedNumber: {
+        type: 'number',
+        description: 'The stored number',
+      },
+    },
+    events: {
+      'number.evaluate': {
+        description:
+          'Evaluate whether the number passed as input is even or odd.',
+        properties: {
+          number: {
+            type: 'number',
+            description: 'The input number to evaluate',
+          },
+        },
+      },
+      showEvenNumber: {
+        description: 'Show the even number',
+        properties: {},
+      },
+      showOddNumber: {
+        description: 'Show the odd number',
+        properties: {},
+      },
+    },
+  });
+
+  const machine = setup({
+    schemas,
+    types: schemas.types,
+    actions: {
+      storeNumber: assign({
+        storedNumber: (_, params: { number: number }) => params.number,
+      }),
+    },
+    actors: {
+      evaluate: adapter.fromEvent(
+        (input: number) =>
+          `Decide what to do based on the given input, which may be an even number or an odd number: ${input}`
+      ),
+    },
+  }).createMachine({
+    id: 'numberDisplayer',
+    initial: 'idle',
+    context: {
+      storedNumber: 0,
+    },
+    states: {
+      idle: {
+        on: {
+          'number.evaluate': {
+            target: 'evaluate',
+            actions: [
+              {
+                type: 'storeNumber',
+                params: ({ event }) => ({
+                  number: event.number,
+                }),
+              },
+            ],
+          },
+        },
+      },
+      evaluate: {
+        invoke: {
+          src: 'evaluate',
+          input: ({ event }) => {
+            if ('number' in event) {
+              return event.number;
+            }
+            throw new Error('Invalid input');
+          },
+        },
+        on: {
+          showEvenNumber: {
+            target: 'even',
+          },
+          showOddNumber: {
+            target: 'odd',
+          },
+        },
+      },
+      even: {
+        type: 'final',
+      },
+      odd: {
+        type: 'final',
+      },
+    },
+    output: ({ context }: { context: { storedNumber: number } }) => ({
+      storedNumber: context.storedNumber,
+    }),
+  });
+
+  const actor = createActor(machine);
+  actor.start();
+  const theNumber = 2;
+  actor.send({
+    type: 'number.evaluate',
+    number: theNumber,
+  });
+  const res = (await toPromise(actor)) as { storedNumber: number };
+
+  expect(actor.getSnapshot().value).toBe('even');
+  expect(res.storedNumber).toBe(theNumber);
 });
