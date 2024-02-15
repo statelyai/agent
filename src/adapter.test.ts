@@ -217,7 +217,7 @@ Determine what to do:
   expect(res2?.tool).toEqual('rateJoke');
 });
 
-test('fromEvent - ', async () => {
+test.only('fromEvent - ', async () => {
   const openAi = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
   });
@@ -228,8 +228,8 @@ test('fromEvent - ', async () => {
 
   const schemas = createSchemas({
     context: {
-      storedNumber: {
-        type: 'number',
+      storedNumberStr: {
+        type: 'string',
         description: 'The stored number',
       },
       label: {
@@ -242,9 +242,9 @@ test('fromEvent - ', async () => {
         description:
           'Evaluate whether the number passed as input is even or odd.',
         properties: {
-          number: {
-            type: 'number',
-            description: 'The input number to evaluate',
+          numberStr: {
+            type: 'string',
+            description: 'The input number string to evaluate',
           },
         },
       },
@@ -264,14 +264,14 @@ test('fromEvent - ', async () => {
     types: schemas.types,
     actions: {
       storeNumber: assign({
-        storedNumber: (_, params: { number: number }) => params.number,
+        storedNumberStr: (_, params: { numberStr: string }) => params.numberStr,
       }),
       labelNumberAsEven: assign({ label: 'Even' }),
       labelNumberAsOdd: assign({ label: 'Odd' }),
     },
     actors: {
       evaluate: adapter.fromEvent(
-        (input: number) =>
+        (input: string) =>
           `Decide what to do based on the given input, which may be an even number or an odd number: ${input}`
       ),
     },
@@ -279,7 +279,7 @@ test('fromEvent - ', async () => {
     id: 'numberDisplayer',
     initial: 'idle',
     context: {
-      storedNumber: 0,
+      storedNumberStr: '',
       label: '',
     },
     states: {
@@ -291,7 +291,7 @@ test('fromEvent - ', async () => {
               {
                 type: 'storeNumber',
                 params: ({ event }) => ({
-                  number: event.number,
+                  numberStr: event.numberStr,
                 }),
               },
             ],
@@ -302,8 +302,8 @@ test('fromEvent - ', async () => {
         invoke: {
           src: 'evaluate',
           input: ({ event }) => {
-            if ('number' in event) {
-              return event.number;
+            if ('numberStr' in event) {
+              return event.numberStr;
             }
             throw new Error('Invalid input');
           },
@@ -326,9 +326,9 @@ test('fromEvent - ', async () => {
     output: ({
       context,
     }: {
-      context: { storedNumber: number; label: string };
+      context: { storedNumberStr: string; label: string };
     }) => ({
-      storedNumber: context.storedNumber,
+      storedNumberStr: context.storedNumberStr,
       label: context.label,
     }),
   });
@@ -337,10 +337,10 @@ test('fromEvent - ', async () => {
   actor.start();
   actor.send({
     type: 'number.evaluate',
-    number: 2,
+    numberStr: 'two',
   });
   const res = (await toPromise(actor)) as ContextFrom<typeof machine>;
 
-  expect(res.storedNumber).toBe(2);
+  expect(res.storedNumberStr).toBe('two');
   expect(res.label).toBe('Even');
 });
