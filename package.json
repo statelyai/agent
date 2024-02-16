@@ -8,7 +8,7 @@
   "scripts": {
     "build": "tsup src/index.ts --format cjs,esm --dts",
     "lint": "tsc",
-    "test": "vitest run",
+    "test": "vitest",
     "example": "ts-node examples/helpers/runner.ts",
     "prepublishOnly": "tsup src/index.ts --dts",
     "changeset": "changeset",
