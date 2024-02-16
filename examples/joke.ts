@@ -39,8 +39,6 @@ const schemas = createSchemas({
   },
 });
 
-schemas.types.context.desire;
-
 const adapter = createOpenAIAdapter(openai, {
   model: 'gpt-3.5-turbo-1106',
 });

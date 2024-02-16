@@ -24,11 +24,11 @@ export type ContextSchema = JSONSchema7 & { type: 'object' };
 
 export type ConvertToJSONSchemas<T> = {
   [K in keyof T]: {
-    properties: { type: { const: K } };
+    properties: { type: { const: K } } & Prop<T[K], 'properties'>;
     type: 'object';
-    required: Array<keyof Prop<T[K], 'properties'> | 'type'>;
+    required: Array<(keyof Prop<T[K], 'properties'> & string) | 'type'>;
     additionalProperties: false;
-  } & T[K];
+  };
 } & {};
 
 export function createEventSchemas<T extends EventSchemas>(
