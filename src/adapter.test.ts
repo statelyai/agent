@@ -1,7 +1,8 @@
 import { test, expect } from 'vitest';
 import { createOpenAIAdapter, createTool } from './adapters/openai';
 import OpenAI from 'openai';
-import { createActor, toPromise } from 'xstate';
+import { ContextFrom, assign, createActor, setup, toPromise } from 'xstate';
+import { createSchemas } from './schemas';
 
 test('fromTool - weather or illustration', async () => {
   const openAi = new OpenAI({
@@ -214,4 +215,132 @@ Determine what to do:
 
   const res2 = await toPromise(actor2);
   expect(res2?.tool).toEqual('rateJoke');
+});
+
+test('fromEvent - ', async () => {
+  const openAi = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+  });
+
+  const adapter = createOpenAIAdapter(openAi, {
+    model: 'gpt-3.5-turbo',
+  });
+
+  const schemas = createSchemas({
+    context: {
+      storedNumberStr: {
+        type: 'string',
+        description: 'The stored number',
+      },
+      label: {
+        type: 'string',
+        description: 'The label of the number',
+      },
+    },
+    events: {
+      'number.evaluate': {
+        description:
+          'Evaluate whether the number passed as input is even or odd.',
+        properties: {
+          numberStr: {
+            type: 'string',
+            description: 'The input number string to evaluate',
+          },
+        },
+      },
+      proclaimEvenNumber: {
+        description: 'Show the even number',
+        properties: {},
+      },
+      proclaimOddNumber: {
+        description: 'Show the odd number',
+        properties: {},
+      },
+    },
+  });
+
+  const machine = setup({
+    schemas,
+    types: schemas.types,
+    actions: {
+      storeNumber: assign({
+        storedNumberStr: (_, params: { numberStr: string }) => params.numberStr,
+      }),
+      labelNumberAsEven: assign({ label: 'Even' }),
+      labelNumberAsOdd: assign({ label: 'Odd' }),
+    },
+    actors: {
+      evaluate: adapter.fromEvent(
+        (input: string) =>
+          `Decide what to do based on the given input, which may be an even number or an odd number: ${input}`
+      ),
+    },
+  }).createMachine({
+    id: 'numberDisplayer',
+    initial: 'idle',
+    context: {
+      storedNumberStr: '',
+      label: '',
+    },
+    states: {
+      idle: {
+        on: {
+          'number.evaluate': {
+            target: 'evaluate',
+            actions: [
+              {
+                type: 'storeNumber',
+                params: ({ event }) => ({
+                  numberStr: event.numberStr,
+                }),
+              },
+            ],
+          },
+        },
+      },
+      evaluate: {
+        invoke: {
+          src: 'evaluate',
+          input: ({ event }) => {
+            if ('numberStr' in event) {
+              return event.numberStr;
+            }
+            throw new Error('Invalid input');
+          },
+        },
+        on: {
+          proclaimEvenNumber: {
+            target: 'done',
+            actions: ['labelNumberAsEven'],
+          },
+          proclaimOddNumber: {
+            target: 'done',
+            actions: ['labelNumberAsOdd'],
+          },
+        },
+      },
+      done: {
+        type: 'final',
+      },
+    },
+    output: ({
+      context,
+    }: {
+      context: { storedNumberStr: string; label: string };
+    }) => ({
+      storedNumberStr: context.storedNumberStr,
+      label: context.label,
+    }),
+  });
+
+  const actor = createActor(machine);
+  actor.start();
+  actor.send({
+    type: 'number.evaluate',
+    numberStr: 'two',
+  });
+  const res = (await toPromise(actor)) as ContextFrom<typeof machine>;
+
+  expect(res.storedNumberStr).toBe('two');
+  expect(res.label).toBe('Even');
 });

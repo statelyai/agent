@@ -4,8 +4,6 @@ import {
   ChatCompletionCreateParamsStreaming,
 } from 'openai/resources';
 import {
-  AnyActorLogic,
-  AnyActorRef,
   AnyEventObject,
   ObservableActorLogic,
   PromiseActorLogic,
@@ -13,24 +11,22 @@ import {
 
 export interface StatelyAgentAdapter {
   model: string;
+  /**
+   * Creates actor logic that chooses an event from all of the
+   * possible next events of the parent state machine
+   * and sends it to the parent actor.
+   */
   fromEvent: <TInput>(
-    inputFn: (input: TInput) => string | ChatCompletionCreateParamsNonStreaming,
-    options?: {
-      /**
-       * Immediately execute sending the event to the parent actor.
-       * @default true
-       */
-      execute?: boolean;
-    }
+    inputFn: (input: TInput) => string | ChatCompletionCreateParamsNonStreaming
   ) => PromiseActorLogic<AnyEventObject[] | undefined, TInput>;
   /**
-   * Creates promise actor logic that resolves with a chat completion.
+   * Creates actor logic that resolves with a chat completion.
    */
   fromChat: <TInput>(
     inputFn: (input: TInput) => string | ChatCompletionCreateParamsNonStreaming
   ) => PromiseActorLogic<OpenAI.Chat.Completions.ChatCompletion, TInput>;
   /**
-   * Creates observable actor logic that emits a chat completion stream.
+   * Creates actor logic that emits a chat completion stream.
    */
   fromChatStream: <TInput>(
     inputFn: (input: TInput) => string | ChatCompletionCreateParamsStreaming
@@ -38,18 +34,14 @@ export interface StatelyAgentAdapter {
     OpenAI.Chat.Completions.ChatCompletionChunk,
     TInput
   >;
-
+  /**
+   * Creates actor logic that chooses a tool from the provided
+   * tools and runs that tool.
+   */
   fromTool: <TInput>(
     inputFn: (input: TInput) => string | ChatCompletionCreateParamsNonStreaming,
     tools: {
       [key: string]: Tool<any, any>;
-    },
-    options?: {
-      /**
-       * Immediately execute sending the event to the parent actor.
-       * @default true
-       */
-      execute?: boolean;
     }
   ) => PromiseActorLogic<
     | {
