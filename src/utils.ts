@@ -20,25 +20,16 @@ export type EventSchemas = {
   };
 };
 
-export interface ContextSchema {
-  [key: string]: JSONSchema7;
-}
+export type ContextSchema = JSONSchema7 & { type: 'object' };
 
 export type ConvertToJSONSchemas<T> = {
   [K in keyof T]: {
-    properties: { type: { const: K } };
+    properties: { type: { const: K } } & Prop<T[K], 'properties'>;
     type: 'object';
-    required: Array<keyof Prop<T[K], 'properties'> | 'type'>;
+    required: Array<(keyof Prop<T[K], 'properties'> & string) | 'type'>;
     additionalProperties: false;
-  } & T[K];
+  };
 } & {};
-
-export type ConvertContextToJSONSchema<T extends ContextSchema> = {
-  type: 'object';
-  properties: T;
-  readonly required: Array<keyof T & string>;
-  additionalProperties: false;
-};
 
 export function createEventSchemas<T extends EventSchemas>(
   eventSchemaMap: T
