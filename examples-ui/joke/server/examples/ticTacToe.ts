@@ -1,9 +1,9 @@
 import { assign, setup, assertEvent } from 'xstate';
 import OpenAI from 'openai';
 import {
+  createAgent,
   createOpenAIAdapter,
   createSchemas,
-  createAgent,
 } from '@statelyai/agent';
 
 const openai = new OpenAI({
