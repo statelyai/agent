@@ -1,10 +1,6 @@
 import { assign, setup, assertEvent } from 'xstate';
 import OpenAI from 'openai';
-import {
-  createOpenAIAdapter,
-  createSchemas,
-  createAgent,
-} from '../../../../src';
+import { createOpenAIAdapter, createSchemas, createAgent } from '../../../src';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,

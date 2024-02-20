@@ -1,7 +1,7 @@
 import * as dotenv from 'dotenv';
 import * as express from 'express';
 import * as cors from 'cors';
-import { createTicTacToeAgent } from './examples/ticTacToe';
+import { createTicTacToeAgent } from './ticTacToe';
 
 dotenv.config();
 

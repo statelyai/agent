@@ -2,7 +2,7 @@ import * as dotenv from 'dotenv';
 import * as express from 'express';
 import * as cors from 'cors';
 
-import { createJokeMachine } from './examples/joke';
+import { createJokeMachine } from './joke';
 
 dotenv.config();
 

@@ -12,7 +12,7 @@ import {
   createAgent,
   createOpenAIAdapter,
   createSchemas,
-} from '../../../../src';
+} from '../../../src/index.ts';
 import { loadingAnimation } from './helpers/loader.ts';
 
 dotenv.config();
