@@ -46,6 +46,14 @@ const schemas = createSchemas({
         },
       },
     },
+    setTopic: {
+      type: 'object',
+      properties: {
+        topic: {
+          type: 'string',
+        },
+      },
+    },
     endJokes: {
       type: 'object',
       properties: {},
