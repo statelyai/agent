@@ -2,11 +2,17 @@ import * as dotenv from 'dotenv';
 
 import OpenAI from 'openai';
 import { assign, fromCallback, setup } from 'xstate';
+// import {
+//   createAgent,
+//   createOpenAIAdapter,
+//   createSchemas,
+// } from '@statelyai/agent';
+
 import {
   createAgent,
   createOpenAIAdapter,
   createSchemas,
-} from '@statelyai/agent';
+} from '../../../../src';
 import { loadingAnimation } from './helpers/loader.ts';
 
 dotenv.config();
@@ -17,26 +23,22 @@ const openai = new OpenAI({
 
 const schemas = createSchemas({
   context: {
-    topic: { type: 'string' },
-    jokes: {
-      type: 'array',
-      items: {
-        type: 'string',
-      },
-    },
-    desire: { type: ['string', 'null'] as const },
-    lastRating: { type: ['string', 'null'] as const },
-  },
-  events: {
-    askForTopic: {
-      type: 'object',
-      properties: {
-        topic: {
+    type: 'object',
+    properties: {
+      topic: { type: 'string' },
+      jokes: {
+        type: 'array',
+        items: {
           type: 'string',
         },
       },
+      desire: { type: ['string', 'null'] },
+      lastRating: { type: ['string', 'null'] },
     },
-    setTopic: {
+    required: ['topic', 'jokes', 'desire', 'lastRating'],
+  },
+  events: {
+    askForTopic: {
       type: 'object',
       properties: {
         topic: {
@@ -50,7 +52,6 @@ const schemas = createSchemas({
     },
   },
 });
-
 const adapter = createOpenAIAdapter(openai, {
   model: 'gpt-3.5-turbo-1106',
 });
