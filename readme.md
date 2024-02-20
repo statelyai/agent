@@ -7,7 +7,7 @@
 Install `openai`, and `@statelyai/agent`:
 
 ```bash
-npm install openai @statelyai/agent
+pnpm install openai @statelyai/agent
 ```
 
 ## Usage
@@ -35,7 +35,7 @@ OPENAI_API_KEY="your-openai-api-key"
 Then, install the dependencies (`npm install`) and run the examples:
 
 ```bash
-npm run example joke
+pnpm run example joke
 # or:
-# npm run example ticTacToe
+# pnpm run example ticTacToe
 ```
