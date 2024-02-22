@@ -261,6 +261,5 @@ export function createTicTacToeAgent() {
     },
   });
 
-  const agent = createAgent(ticTacToeMachine);
-  return agent;
+  return createAgent(ticTacToeMachine);
 }

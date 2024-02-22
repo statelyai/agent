@@ -231,8 +231,5 @@ export function createJokeMachine({ log }: { log: (message: string) => void }) {
     },
   });
 
-  const agent = createAgent(jokeMachine);
-  agent.start();
-
-  return { agent };
+  return createAgent(jokeMachine);
 }

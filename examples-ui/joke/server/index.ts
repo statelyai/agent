@@ -36,12 +36,13 @@ app.get('/joke', (req, res) => {
   req.on('close', () => res.end());
 
   const sendToClient = (message: string) => sendEvent({ message });
-  const { agent } = createJokeMachine({ log: sendToClient });
+  const agent = createJokeMachine({ log: sendToClient });
   jokeAgent = agent;
 
-  agent.subscribe((state) => {
+  jokeAgent.subscribe((state) => {
     console.log('state.value', state.value);
   });
+  jokeAgent.start();
 });
 
 app.post('/joke-set-topic', (req, res) => {
