@@ -7,12 +7,9 @@ dotenv.config();
 
 const app = express();
 
-const SERVER_PORT = 3001;
-const CLIENT_PORT = 3000;
-
 app.use(
   cors({
-    origin: `http://localhost:${CLIENT_PORT}`,
+    origin: `http://localhost:${process.env.VITE_PORT}`,
   }),
 );
 app.use(express.json());
@@ -44,6 +41,8 @@ app.get('/tic-tac-toe', (req, res) => {
   ticTacToeAgent.start();
 });
 
-app.listen(SERVER_PORT, () => {
-  console.log(`Example app listening at http://localhost:${SERVER_PORT}`);
+app.listen(process.env.VITE_API_PORT, () => {
+  console.log(
+    `Example app listening at http://localhost:${process.env.VITE_API_PORT}`,
+  );
 });

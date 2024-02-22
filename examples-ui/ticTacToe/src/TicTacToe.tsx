@@ -6,7 +6,10 @@ export function TicTacToe() {
   const [gameSummary, setGameSummary] = useState<string | null>(null);
 
   useEffect(() => {
-    const eventSource = new EventSource('http://localhost:3001/tic-tac-toe');
+    const serverPort = import.meta.env.VITE_API_PORT;
+    const eventSource = new EventSource(
+      `http://localhost:${serverPort}/tic-tac-toe`,
+    );
 
     eventSource.onmessage = (event) => {
       try {

@@ -5,7 +5,8 @@ export function Joke() {
   const [formEnabled, setFormEnabled] = useState(true);
 
   useEffect(() => {
-    const eventSource = new EventSource('http://localhost:3001/joke');
+    const serverPort = import.meta.env.VITE_API_PORT;
+    const eventSource = new EventSource(`http://localhost:${serverPort}/joke`);
 
     eventSource.onmessage = (event) => {
       const eventList = document.getElementById('events');
