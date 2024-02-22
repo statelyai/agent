@@ -8,14 +8,15 @@ dotenv.config();
 
 const app = express();
 
+const SERVER_PORT = 3001;
+const CLIENT_PORT = 3000;
+
 app.use(
   cors({
-    origin: 'http://localhost:3000',
+    origin: `http://localhost:${CLIENT_PORT}`,
   }),
 );
 app.use(express.json());
-
-const port = 3001; // Use a different port from Vite's default (3000)
 
 let jokeAgent: ReturnType<typeof createJokeMachine>;
 
@@ -52,6 +53,6 @@ app.post('/joke-set-topic', (req, res) => {
   res.send(200);
 });
 
-app.listen(port, () => {
-  console.log(`Example app listening at http://localhost:${port}`);
+app.listen(SERVER_PORT, () => {
+  console.log(`Example app listening at http://localhost:${SERVER_PORT}`);
 });

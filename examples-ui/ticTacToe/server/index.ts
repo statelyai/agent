@@ -7,14 +7,15 @@ dotenv.config();
 
 const app = express();
 
+const SERVER_PORT = 3001;
+const CLIENT_PORT = 3000;
+
 app.use(
   cors({
-    origin: 'http://localhost:3000',
+    origin: `http://localhost:${CLIENT_PORT}`,
   }),
 );
 app.use(express.json());
-
-const port = 3001; // Use a different port from Vite's default (3000)
 
 app.get('/tic-tac-toe', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
@@ -43,6 +44,6 @@ app.get('/tic-tac-toe', (req, res) => {
   ticTacToeAgent.start();
 });
 
-app.listen(port, () => {
-  console.log(`Example app listening at http://localhost:${port}`);
+app.listen(SERVER_PORT, () => {
+  console.log(`Example app listening at http://localhost:${SERVER_PORT}`);
 });
