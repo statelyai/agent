@@ -3,8 +3,8 @@
     "module": "ESNext",
     "moduleResolution": "node",
     "noEmit": true,
-    "allowImportingTsExtensions": true
-    // other options as needed
+    "allowImportingTsExtensions": true,
+    "target": "ESNext"
   },
   "ts-node": {
     "compilerOptions": {
