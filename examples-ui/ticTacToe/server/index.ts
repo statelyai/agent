@@ -10,7 +10,7 @@ const app = express();
 app.use(
   cors({
     origin: 'http://localhost:3000',
-  })
+  }),
 );
 app.use(express.json());
 
@@ -22,7 +22,7 @@ app.get('/tic-tac-toe', (req, res) => {
   res.setHeader('Connection', 'keep-alive');
 
   // Function to send a message
-  const sendEvent = (data) => {
+  const sendEvent = (data: { message: unknown }) => {
     const message = `data: ${JSON.stringify(data)}\n\n`;
     res.write(message);
   };

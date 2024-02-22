@@ -11,13 +11,13 @@ const app = express();
 app.use(
   cors({
     origin: 'http://localhost:3000',
-  })
+  }),
 );
 app.use(express.json());
 
 const port = 3001; // Use a different port from Vite's default (3000)
 
-let jokeAgent;
+let jokeAgent: ReturnType<typeof createJokeMachine>;
 
 app.get('/joke', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
@@ -25,7 +25,7 @@ app.get('/joke', (req, res) => {
   res.setHeader('Connection', 'keep-alive');
 
   // Function to send a message
-  const sendEvent = (data) => {
+  const sendEvent = (data: { message: string }) => {
     const message = `data: ${JSON.stringify(data)}\n\n`;
     res.write(message);
   };

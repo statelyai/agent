@@ -1,7 +1,7 @@
 import * as dotenv from 'dotenv';
 
 import OpenAI from 'openai';
-import { assign, fromCallback, setup } from 'xstate';
+import { assign, enqueueActions, fromCallback, setup } from 'xstate';
 import {
   createAgent,
   createOpenAIAdapter,
@@ -170,7 +170,10 @@ export function createJokeMachine({ log }: { log: (message: string) => void }) {
                     ),
                 }),
                 ({ context }) => {
-                  log(context.jokes.at(-1));
+                  const jokeStr = context.jokes.at(-1);
+                  if (jokeStr) {
+                    log(jokeStr);
+                  }
                 },
               ],
               target: 'rateJoke',
@@ -189,11 +192,13 @@ export function createJokeMachine({ log }: { log: (message: string) => void }) {
             input: ({ context }) => context.jokes[context.jokes.length - 1]!,
             onDone: {
               actions: [
-                assign({
-                  lastRating: ({ event }) =>
-                    event.output.choices[0]!.message.content!,
+                enqueueActions(({ enqueue, event }) => {
+                  const lastRating = event.output.choices[0]!.message.content!;
+                  enqueue.assign({
+                    lastRating,
+                  });
+                  log(lastRating);
                 }),
-                ({ context }) => log(context.lastRating),
               ],
               target: 'decide',
             },
