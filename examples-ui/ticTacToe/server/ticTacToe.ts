@@ -131,7 +131,7 @@ function getWinner(board: typeof initialContext.board): Player | null {
 }
 
 export function createTicTacToeAgent() {
-  export const ticTacToeMachine = setup({
+  const ticTacToeMachine = setup({
     schemas,
     types: schemas.types,
     actors: {
