@@ -21,8 +21,8 @@ const schemas = createSchemas({
     board: {
       type: 'array',
       items: {
-        type: ['null', 'string'],
-        enum: [null, 'x', 'o'],
+        type: ['null', 'string'] as const,
+        enum: [null, 'x', 'o'] as const,
       },
       minItems: 9,
       maxItems: 9,
@@ -34,7 +34,7 @@ const schemas = createSchemas({
     },
     player: {
       type: 'string',
-      enum: ['x', 'o'],
+      enum: ['x', 'o'] as const,
       description: 'The player whose turn it is',
     },
     gameReport: {
@@ -116,7 +116,7 @@ const adapter = createOpenAIAdapter(openai, {
 });
 
 const initialContext = {
-  board: Array(9).fill(null) as Array<Player | null>,
+  board: Array<Player | null>(9).fill(null),
   moves: 0,
   player: 'x' as Player,
   gameReport: '',

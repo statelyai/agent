@@ -4,7 +4,8 @@
     "moduleResolution": "node",
     "noEmit": true,
     "allowImportingTsExtensions": true,
-    "target": "ESNext"
+    "target": "ESNext",
+    "strict": true
   },
   "ts-node": {
     "compilerOptions": {
