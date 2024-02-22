@@ -262,10 +262,5 @@ export function createTicTacToeAgent() {
   });
 
   const agent = createAgent(ticTacToeMachine);
-  agent.subscribe((s) => {
-    console.log(s.value, s.context);
-  });
-  agent.start();
-
   return agent;
 }
