@@ -1,13 +1,13 @@
-import * as dotenv from "dotenv";
+import * as dotenv from 'dotenv';
 
-import OpenAI from "openai";
-import { assign, fromCallback, setup } from "xstate";
+import OpenAI from 'openai';
+import { assign, fromCallback, setup } from 'xstate';
 import {
   createAgent,
   createOpenAIAdapter,
   createSchemas,
-} from "@statelyai/agent";
-import { loadingAnimation } from "./helpers/loader.ts";
+} from '@statelyai/agent';
+import { loadingAnimation } from './helpers/loader.ts';
 
 dotenv.config();
 
@@ -17,15 +17,15 @@ const openai = new OpenAI({
 
 const schemas = createSchemas({
   context: {
-    topic: { type: "string" },
+    topic: { type: 'string' },
     jokes: {
-      type: "array",
+      type: 'array',
       items: {
-        type: "string",
+        type: 'string',
       },
     },
-    desire: { type: ["string", "null"] },
-    lastRating: { type: ["string", "null"] },
+    desire: { type: ['string', 'null'] },
+    lastRating: { type: ['string', 'null'] },
     // TODO: replace with this when new `@statelyai/agent` gets released with the new context schame types
     //
     // type: 'object',
@@ -44,30 +44,30 @@ const schemas = createSchemas({
   },
   events: {
     askForTopic: {
-      type: "object",
+      type: 'object',
       properties: {
         topic: {
-          type: "string",
+          type: 'string',
         },
       },
     },
     setTopic: {
-      type: "object",
+      type: 'object',
       properties: {
         topic: {
-          type: "string",
+          type: 'string',
         },
       },
     },
     endJokes: {
-      type: "object",
+      type: 'object',
       properties: {},
     },
   },
   // TODO: after updating to the new `@statelyai/agent` version this assertion shouldn't be needed
 } as const);
 const adapter = createOpenAIAdapter(openai, {
-  model: "gpt-3.5-turbo-1106",
+  model: 'gpt-3.5-turbo-1106',
 });
 
 const getJokeCompletion = adapter.fromChat(
@@ -84,31 +84,31 @@ const decide = adapter.fromEvent(
 );
 export function getRandomFunnyPhrase() {
   const funnyPhrases = [
-    "Concocting chuckles...",
-    "Brewing belly laughs...",
-    "Fabricating funnies...",
-    "Assembling amusement...",
-    "Molding merriment...",
-    "Whipping up wisecracks...",
-    "Generating guffaws...",
-    "Inventing hilarity...",
-    "Cultivating chortles...",
-    "Hatching howlers...",
+    'Concocting chuckles...',
+    'Brewing belly laughs...',
+    'Fabricating funnies...',
+    'Assembling amusement...',
+    'Molding merriment...',
+    'Whipping up wisecracks...',
+    'Generating guffaws...',
+    'Inventing hilarity...',
+    'Cultivating chortles...',
+    'Hatching howlers...',
   ];
   return funnyPhrases[Math.floor(Math.random() * funnyPhrases.length)]!;
 }
 
 export function getRandomRatingPhrase() {
   const ratingPhrases = [
-    "Assessing amusement...",
-    "Evaluating hilarity...",
-    "Ranking chuckles...",
-    "Classifying cackles...",
-    "Scoring snickers...",
-    "Rating roars...",
-    "Judging jollity...",
-    "Measuring merriment...",
-    "Rating rib-ticklers...",
+    'Assessing amusement...',
+    'Evaluating hilarity...',
+    'Ranking chuckles...',
+    'Classifying cackles...',
+    'Scoring snickers...',
+    'Rating roars...',
+    'Judging jollity...',
+    'Measuring merriment...',
+    'Rating rib-ticklers...',
   ];
   return ratingPhrases[Math.floor(Math.random() * ratingPhrases.length)]!;
 }
@@ -134,13 +134,13 @@ export function createJokeMachine({ log }: { log: (message: string) => void }) {
     },
   }).createMachine({
     context: () => ({
-      topic: "",
+      topic: '',
       jokes: [],
       desire: null,
       lastRating: null,
       loader: null,
     }),
-    initial: "waitingForTopic",
+    initial: 'waitingForTopic',
     states: {
       waitingForTopic: {
         on: {
@@ -152,14 +152,14 @@ export function createJokeMachine({ log }: { log: (message: string) => void }) {
               ({ event }) => log(`--- Topic event set to: ${event.topic} ---`),
             ],
 
-            target: "tellingJoke",
+            target: 'tellingJoke',
           },
         },
       },
       tellingJoke: {
         invoke: [
           {
-            src: "getJokeCompletion",
+            src: 'getJokeCompletion',
             input: ({ context }) => context.topic,
             onDone: {
               actions: [
@@ -173,11 +173,11 @@ export function createJokeMachine({ log }: { log: (message: string) => void }) {
                   log(context.jokes.at(-1));
                 },
               ],
-              target: "rateJoke",
+              target: 'rateJoke',
             },
           },
           {
-            src: "loader",
+            src: 'loader',
             input: getRandomFunnyPhrase,
           },
         ],
@@ -185,7 +185,7 @@ export function createJokeMachine({ log }: { log: (message: string) => void }) {
       rateJoke: {
         invoke: [
           {
-            src: "rateJoke",
+            src: 'rateJoke',
             input: ({ context }) => context.jokes[context.jokes.length - 1]!,
             onDone: {
               actions: [
@@ -195,45 +195,45 @@ export function createJokeMachine({ log }: { log: (message: string) => void }) {
                 }),
                 ({ context }) => log(context.lastRating),
               ],
-              target: "decide",
+              target: 'decide',
             },
           },
           {
-            src: "loader",
+            src: 'loader',
             input: getRandomRatingPhrase,
           },
         ],
       },
       decide: {
         invoke: {
-          src: "decide",
+          src: 'decide',
           input: ({ context }) => context.lastRating!,
           onDone: {
-            actions: ({ event }) => console.log("unknown:", event), //log(event.message),
+            actions: ({ event }) => console.log('unknown:', event), //log(event.message),
           },
         },
         on: {
           askForTopic: {
-            target: "waitingForTopic",
+            target: 'waitingForTopic',
             actions: [
               () => log("That joke wasn't good enough. Let's try again."),
             ],
             description:
-              "Ask for a new topic, because the last joke rated 6 or lower",
+              'Ask for a new topic, because the last joke rated 6 or lower',
           },
           endJokes: {
-            target: "end",
-            actions: [() => log("That joke was good enough. Goodbye!")],
-            description: "End the jokes, since the last joke rated 7 or higher",
+            target: 'end',
+            actions: [() => log('That joke was good enough. Goodbye!')],
+            description: 'End the jokes, since the last joke rated 7 or higher',
           },
         },
       },
       end: {
-        type: "final",
+        type: 'final',
       },
     },
     exit: () => {
-      log("exit");
+      log('exit');
     },
   });
 
