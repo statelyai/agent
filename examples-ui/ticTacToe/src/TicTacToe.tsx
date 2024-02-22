@@ -51,13 +51,13 @@ export function TicTacToe() {
     <>
       <h2>Tic Tac Toe</h2>
       <p className="read-the-docs mb-10">So easy, an AI can play it!</p>
-      <div id="board">
+      <div id="board" className="w-96">
         <div className="grid grid-cols-3 gap-0">
           {board.map((cell, index) => {
             return (
               <div
                 key={index}
-                className="border-4 border-black border-solid w-auto h-40 pt-2 text-9xl text-center text-vertical-center"
+                className="border-4 border-black border-solid w-auto h-36 pt-1 text-9xl text-center text-vertical-center"
               >
                 {cell}
               </div>
