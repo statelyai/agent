@@ -57,7 +57,7 @@ export function TicTacToe() {
             return (
               <div
                 key={index}
-                className={`border-4 border-black border-solid w-auto h-36 pt-1 text-9xl text-center text-vertical-center ${getTextColor(cell)}`}
+                className={`border-4 border-black border-solid w-auto h-32 pt-3 text-8xl text-center text-vertical-center ${getTextColor(cell)}`}
               >
                 {cell}
               </div>
