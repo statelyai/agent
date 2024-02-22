@@ -2,17 +2,11 @@ import * as dotenv from 'dotenv';
 
 import OpenAI from 'openai';
 import { assign, fromCallback, setup } from 'xstate';
-// import {
-//   createAgent,
-//   createOpenAIAdapter,
-//   createSchemas,
-// } from '@statelyai/agent';
-
 import {
   createAgent,
   createOpenAIAdapter,
   createSchemas,
-} from '../../../src/index.ts';
+} from '@statelyai/agent';
 import { loadingAnimation } from './helpers/loader.ts';
 
 dotenv.config();
