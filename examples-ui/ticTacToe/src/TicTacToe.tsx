@@ -57,7 +57,7 @@ export function TicTacToe() {
             return (
               <div
                 key={index}
-                className="border-4 border-black border-solid w-auto h-36 pt-1 text-9xl text-center text-vertical-center"
+                className={`border-4 border-black border-solid w-auto h-36 pt-1 text-9xl text-center text-vertical-center ${getTextColor(cell)}`}
               >
                 {cell}
               </div>
@@ -66,8 +66,24 @@ export function TicTacToe() {
         </div>
       </div>
       {gameSummary && (
-        <div className="text-2xl font-bold text-center mt-8">{gameSummary}</div>
+        <div
+          className={`text-2xl font-bold text-center mt-8 ${getTextColor('')}`}
+        >
+          {gameSummary}
+        </div>
       )}
     </>
   );
+}
+
+function getTextColor(text: string) {
+  const lowerCaseText = text.toLowerCase();
+  switch (lowerCaseText) {
+    case 'o':
+      return 'text-blue-700';
+    case 'x':
+      return 'text-red-700';
+    default:
+      return 'text-gray-700';
+  }
 }
