@@ -2,7 +2,11 @@ import * as dotenv from 'dotenv';
 
 import { assign, setup, assertEvent } from 'xstate';
 import OpenAI from 'openai';
-import { createOpenAIAdapter, createSchemas, createAgent } from '../../../src';
+import {
+  createOpenAIAdapter,
+  createSchemas,
+  createAgent,
+} from '@statelyai/agent';
 
 dotenv.config();
 
