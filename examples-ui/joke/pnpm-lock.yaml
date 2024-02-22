@@ -26,6 +26,9 @@ dependencies:
   react-dom:
     specifier: ^18.2.0
     version: 18.2.0(react@18.2.0)
+  xstate:
+    specifier: ^5.8.0
+    version: 5.8.0
 
 devDependencies:
   '@tailwindcss/forms':
