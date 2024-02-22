@@ -14,39 +14,69 @@ type Player = 'x' | 'o';
 
 const schemas = createSchemas({
   context: {
-    type: 'object',
-    properties: {
-      board: {
-        type: 'array',
-        items: {
-          type: ['null', 'string'],
-          enum: [null, 'x', 'o'],
-        },
-        minItems: 9,
-        maxItems: 9,
-        description: 'The board of the tic-tac-toe game',
+    board: {
+      type: 'array',
+      items: {
+        type: ['null', 'string'],
+        enum: [null, 'x', 'o'],
       },
-      moves: {
-        type: 'number',
-        description: 'The number of moves that have been played',
-      },
-      player: {
+      minItems: 9,
+      maxItems: 9,
+      description: 'The board of the tic-tac-toe game',
+    },
+    moves: {
+      type: 'number',
+      description: 'The number of moves that have been played',
+    },
+    player: {
+      type: 'string',
+      enum: ['x', 'o'],
+      description: 'The player whose turn it is',
+    },
+    gameReport: {
+      type: 'string',
+      description: 'The game report',
+    },
+    events: {
+      type: 'array',
+      items: {
         type: 'string',
-        enum: ['x', 'o'],
-        description: 'The player whose turn it is',
-      },
-      gameReport: {
-        type: 'string',
-        description: 'The game report',
-      },
-      events: {
-        type: 'array',
-        items: {
-          type: 'string',
-        },
       },
     },
-    required: ['board', 'moves', 'player', 'gameReport', 'events'],
+    // TODO: replace with this when new `@statelyai/agent` gets released with the new context schame types
+    // type: 'object',
+    // properties: {
+    //   board: {
+    //     type: 'array',
+    //     items: {
+    //       type: ['null', 'string'],
+    //       enum: [null, 'x', 'o'],
+    //     },
+    //     minItems: 9,
+    //     maxItems: 9,
+    //     description: 'The board of the tic-tac-toe game',
+    //   },
+    //   moves: {
+    //     type: 'number',
+    //     description: 'The number of moves that have been played',
+    //   },
+    //   player: {
+    //     type: 'string',
+    //     enum: ['x', 'o'],
+    //     description: 'The player whose turn it is',
+    //   },
+    //   gameReport: {
+    //     type: 'string',
+    //     description: 'The game report',
+    //   },
+    //   events: {
+    //     type: 'array',
+    //     items: {
+    //       type: 'string',
+    //     },
+    //   },
+    // },
+    // required: ['board', 'moves', 'player', 'gameReport', 'events'],
   },
   events: {
     'x.play': {
@@ -73,7 +103,8 @@ const schemas = createSchemas({
     reset: {
       properties: {},
     },
-  },
+    // TODO: after updating to the new `@statelyai/agent` version this assertion shouldn't be needed
+  } as const,
 });
 
 const adapter = createOpenAIAdapter(openai, {
@@ -94,7 +125,7 @@ You are playing a game of tic tac toe. This is the current game state. The 3x3 b
 
 ${JSON.stringify(context, null, 2)}
 
-Execute the single best next move to try to win the game. Do not play on an existing cell.`
+Execute the single best next move to try to win the game. Do not play on an existing cell.`,
 );
 
 const gameReporter = adapter.fromChatStream(
@@ -112,7 +143,7 @@ ${context.events.join('\n')}
 
 The winner is ${getWinner(context.board)}.
 
-Provide a very short game report analyzing the game.`
+Provide a very short game report analyzing the game.`,
 );
 
 function getWinner(board: typeof initialContext.board): Player | null {
