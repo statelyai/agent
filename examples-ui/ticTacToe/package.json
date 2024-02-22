@@ -2,10 +2,9 @@
   "name": "agent-examples",
   "private": true,
   "version": "0.0.0",
-  "type": "module",
   "scripts": {
     "client": "vite",
-    "server": "npm run start --prefix ./server",
+    "server": "ts-node server/index.ts",
     "dev": "concurrently \"npm run client\" \"npm run server\"",
     "vite": "vite",
     "build": "tsc && vite build",
@@ -13,9 +12,14 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@statelyai/agent": "^0.0.5",
     "concurrently": "^8.2.2",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "openai": "^4.28.0",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "xstate": "^5.8.0"
   },
   "devDependencies": {
     "@tailwindcss/forms": "^0.5.7",
@@ -25,6 +29,7 @@
     "@typescript-eslint/parser": "^6.21.0",
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.17",
+    "dotenv": "^16.3.1",
     "eslint": "^8.56.0",
     "eslint-plugin-react-hooks": "^4.6.0",
     "eslint-plugin-react-refresh": "^0.4.5",
@@ -33,6 +38,7 @@
     "prettier": "^3.1.0",
     "prettier-plugin-organize-imports": "^3.2.4",
     "tailwindcss": "^3.4.1",
+    "ts-node": "^10.9.2",
     "typescript": "^5.3.3",
     "vite": "^5.1.0"
   }
