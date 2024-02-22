@@ -36,11 +36,6 @@ app.get('/tic-tac-toe', (req, res) => {
     ticTacToeAgent.stop();
     res.end();
   });
-
-  ticTacToeAgent.subscribe((state) => {
-    sendEvent({ message: state });
-  });
-  ticTacToeAgent.start();
 });
 
 app.listen(port, () => {
