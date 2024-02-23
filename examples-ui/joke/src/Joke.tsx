@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import './App.css';
+import StatelyLogo from './assets/stately-logo.svg';
 
 export function Joke() {
   const [formEnabled, setFormEnabled] = useState(true);
@@ -39,6 +40,9 @@ export function Joke() {
 
   return (
     <>
+      <div className="flex justify-center">
+        <img src={StatelyLogo} className="w-20" />
+      </div>
       <h2>Joke Generator</h2>
       <p className="read-the-docs mb-10">
         We'll keep you laughing all day long!

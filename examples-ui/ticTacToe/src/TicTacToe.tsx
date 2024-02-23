@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import './App.css';
+import StatelyLogo from './assets/stately-logo.svg';
 
 export function TicTacToe() {
   const [board, setBoard] = useState<string[]>(Array(9).fill(''));
@@ -52,6 +53,9 @@ export function TicTacToe() {
 
   return (
     <>
+      <div className="flex justify-center">
+        <img src={StatelyLogo} className="w-20" />
+      </div>
       <h2>Tic Tac Toe</h2>
       <p className="read-the-docs mb-10">So easy, AI can play it!</p>
       <div id="board" className="w-96">
