@@ -1,18 +1,20 @@
 # Getting started
 
-This repository has a root app for the client as well as a nested `server` directory for the server app.
+This directory in the `@stately/agent` repository has a self-contained app for a Joke Generator. It consists of a React/Vite client as well as a nested `server` directory for the express server app.
 
-Install dependencies for client and server:
+Install dependencies for client and server using [`pnpm`](https://pnpm.io/):
 
-`npm run install` or `npm run i`
+`pnpm run install` or `pnpm run i`
 
-Run the dev server for client and server (both run concurrently):
+Sure, here's a simple markdown table as requested:
 
-`npm run dev`
+| Name            | Script            | Description                             |
+| --------------- | ----------------- | --------------------------------------- |
+| Client only     | `pnpm run client` | Runs the client React app only          |
+| Server only     | `pnpm run server` | Runs the express server only            |
+| Client + Server | `pnpm run dev`    | Runs the client and server concurrently |
 
-got to `http://localhost:3000` to view the app for the Joke Generator.
-
-More examples coming soon.
+After running `pnpm run dev`, go to `http://localhost:3000` to view the app for the Joke Generator.
 
 # React + TypeScript + Vite
 
