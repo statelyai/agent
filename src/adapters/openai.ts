@@ -89,6 +89,9 @@ export function fromChatStream<TInput>(
             observer.next?.(part);
           });
         }
+        observers.forEach((observer) => {
+          observer.complete?.();
+        });
       })();
 
       return {
