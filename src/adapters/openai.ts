@@ -12,6 +12,14 @@ import { ChatCompletionCreateParamsNonStreaming } from 'openai/resources';
 import { ChatCompletionCreateParamsBase } from 'openai/resources/chat/completions';
 import { StatelyAgentAdapter, Tool } from '../types';
 
+export interface LLMProvider {
+  chat: {
+    completions: {
+      create: OpenAI['chat']['completions']['create'];
+    };
+  };
+}
+
 /**
  * Creates [promise actor logic](https://stately.ai/docs/promise-actors) that uses the OpenAI API to generate a completion.
  *
@@ -20,7 +28,7 @@ import { StatelyAgentAdapter, Tool } from '../types';
  *
  */
 export function fromChatCompletion<TInput>(
-  openai: OpenAI,
+  openai: LLMProvider,
   agentSettings: StatelyAgentAdapter,
   inputFn: (
     input: TInput
@@ -55,7 +63,7 @@ export function fromChatCompletion<TInput>(
  * @param inputFn A function that maps arbitrary input to OpenAI chat completion input.
  */
 export function fromChatStream<TInput>(
-  openai: OpenAI,
+  openai: LLMProvider,
   agentSettings: StatelyAgentAdapter,
   inputFn: (
     input: TInput
@@ -117,7 +125,7 @@ export function fromChatStream<TInput>(
  * @param inputFn A function that maps arbitrary input to OpenAI chat completion input.
  */
 export function fromEvent<TInput>(
-  openai: OpenAI,
+  openai: LLMProvider,
   agentSettings: StatelyAgentAdapter,
   inputFn: (
     input: TInput
@@ -208,6 +216,19 @@ export function createTool<TInput, T>({
   };
 }
 
+export interface FromToolResult {
+  result: any;
+  tool: string;
+  toolCall: ToolCall;
+}
+
+export interface ToolCall {
+  function: {
+    name: string;
+    arguments: string;
+  };
+}
+
 /**
  * Creates [promise actor logic](https://stately.ai/docs/promise-actors) that passes the next possible transitions as functions to [OpenAI tool calls](https://platform.openai.com/docs/guides/function-calling) and returns an array of potential next events.
  *
@@ -215,7 +236,7 @@ export function createTool<TInput, T>({
  * @param inputFn A function that maps arbitrary input to OpenAI chat completion input.
  */
 export function fromTool<TInput>(
-  openai: OpenAI,
+  openai: LLMProvider,
   agentSettings: StatelyAgentAdapter,
   tools: {
     [key: string]: Tool<any, any>;
@@ -224,15 +245,7 @@ export function fromTool<TInput>(
     input: TInput
   ) => string | OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming
 ) {
-  return fromPromise<
-    | {
-        result: any;
-        tool: string;
-        toolCall: OpenAI.Chat.Completions.ChatCompletionMessageToolCall;
-      }
-    | undefined,
-    TInput
-  >(async ({ input }) => {
+  return fromPromise<FromToolResult | undefined, TInput>(async ({ input }) => {
     const resolvedTools = Object.entries(tools).map(([key, value]) => {
       return {
         type: 'function',
@@ -265,7 +278,7 @@ export function fromTool<TInput>(
     const toolCalls = completion.choices[0]?.message.tool_calls;
 
     if (toolCalls?.length) {
-      const toolCall = toolCalls[0]!;
+      const toolCall = toolCalls[0]! as ToolCall;
       const tool = tools[toolCall.function.name];
       const args = JSON.parse(toolCall.function.arguments);
 
@@ -288,7 +301,7 @@ export function createOpenAIAdapter<
   T extends {
     model: ChatCompletionCreateParamsBase['model'];
   }
->(openai: OpenAI, settings: T): StatelyAgentAdapter {
+>(openai: LLMProvider, settings: T): StatelyAgentAdapter {
   const agentSettings: StatelyAgentAdapter = {
     model: settings.model,
     fromEvent: (input) => fromEvent(openai, agentSettings, input),

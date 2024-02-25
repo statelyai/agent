@@ -1,5 +1,5 @@
-import OpenAI from 'openai';
-import {
+import type OpenAI from 'openai';
+import type {
   ChatCompletionCreateParamsNonStreaming,
   ChatCompletionCreateParamsStreaming,
 } from 'openai/resources';
@@ -8,6 +8,7 @@ import {
   ObservableActorLogic,
   PromiseActorLogic,
 } from 'xstate';
+import { FromToolResult } from './adapters/openai';
 
 export interface StatelyAgentAdapter {
   model: string;
@@ -43,15 +44,7 @@ export interface StatelyAgentAdapter {
     tools: {
       [key: string]: Tool<any, any>;
     }
-  ) => PromiseActorLogic<
-    | {
-        result: any;
-        tool: string;
-        toolCall: OpenAI.Chat.Completions.ChatCompletionMessageToolCall;
-      }
-    | undefined,
-    TInput
-  >;
+  ) => PromiseActorLogic<FromToolResult | undefined, TInput>;
 }
 
 export interface Tool<TInput, TOutput> {

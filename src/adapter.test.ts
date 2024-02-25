@@ -1,12 +1,41 @@
 import { test, expect } from 'vitest';
-import { createOpenAIAdapter, createTool } from './adapters/openai';
+import {
+  FromToolResult,
+  createOpenAIAdapter,
+  createTool,
+} from './adapters/openai';
 import OpenAI from 'openai';
 import { createActor, toPromise } from 'xstate';
+import { createMockProvider } from './adapters/mock';
 
-test('fromTool - weather or illustration', async () => {
-  const openAi = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-  });
+test.only('fromTool - weather or illustration', async () => {
+  const openAi = createMockProvider(
+    // @ts-ignore
+    () => {
+      return {
+        choices: [
+          {
+            finish_reason: 'tool_calls',
+            index: 0,
+            logprobs: null,
+            message: {
+              tool_calls: [
+                {
+                  type: 'function',
+                  function: {
+                    name: 'makeIllustration',
+                    arguments: JSON.stringify({
+                      name: 'donut',
+                    }),
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      } as OpenAI.Chat.Completions.ChatCompletion;
+    }
+  );
 
   const adapter = createOpenAIAdapter(openAi, {
     model: 'gpt-3.5-turbo',
