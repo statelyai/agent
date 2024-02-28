@@ -6,8 +6,8 @@ settings:
 
 dependencies:
   xstate:
-    specifier: ^5.6.0
-    version: 5.6.0
+    specifier: ^5.8.0
+    version: 5.8.1
 
 devDependencies:
   '@changesets/changelog-github':
@@ -3396,8 +3396,8 @@ packages:
     resolution: {integrity: sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==}
     dev: true
 
-  /xstate@5.6.0:
-    resolution: {integrity: sha512-l62p4ZHM/fkGl68574s1dFzFmY8B3BeOff9EqBZbuonTSOXGx1fWTnh4SHSrS8Vhr5wyRT9afqWliMoO6Q+hUQ==}
+  /xstate@5.8.1:
+    resolution: {integrity: sha512-e5OLRjCfzvu/d6Bf3TQVHcEku64Uk/tQqibP9q0+90q7L0jR0H9OuFcNgOGmXc8hmapugKtXfEMfA1IwWW6m9g==}
     dev: false
 
   /y18n@4.0.3:
