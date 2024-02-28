@@ -1,6 +1,7 @@
 # Stately Agent (alpha)
 
-🚧 Documentation in progress! Please see [the examples directory](https://github.com/statelyai/agent/tree/main/examples) for working examples.
+- Read [the documentation](https://stately.ai/docs/agents)
+- See [the examples directory](https://github.com/statelyai/agent/tree/main/examples) for working examples.
 
 ## Installation
 
