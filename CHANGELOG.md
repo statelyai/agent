@@ -1,5 +1,11 @@
 # @statelyai/agent
 
+## 0.0.6
+
+### Patch Changes
+
+- [#16](https://github.com/statelyai/agent/pull/16) [`3ba5fb2`](https://github.com/statelyai/agent/commit/3ba5fb2392b51dee71f2585ed662b4ee9ecd6c41) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Update to XState 5.8.0
+
 ## 0.0.5
 
 ### Patch Changes
