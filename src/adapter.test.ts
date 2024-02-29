@@ -1,14 +1,10 @@
 import { test, expect } from 'vitest';
-import {
-  FromToolResult,
-  createOpenAIAdapter,
-  createTool,
-} from './adapters/openai';
-import OpenAI from 'openai';
+import { createOpenAIAdapter, createTool } from './adapters/openai';
+import type OpenAI from 'openai';
 import { createActor, toPromise } from 'xstate';
 import { createMockProvider } from './adapters/mock';
 
-test.only('fromTool - weather or illustration', async () => {
+test('fromTool - weather or illustration', async () => {
   const openAi = createMockProvider(
     // @ts-ignore
     () => {
@@ -92,8 +88,30 @@ test.only('fromTool - weather or illustration', async () => {
 });
 
 test('fromTool - GitHub PR description inserter', async () => {
-  const openAi = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
+  const openAi = createMockProvider(() => {
+    return {
+      choices: [
+        {
+          finish_reason: 'tool_calls',
+          index: 0,
+          logprobs: null,
+          message: {
+            tool_calls: [
+              {
+                type: 'function',
+                function: {
+                  name: 'createPullRequestDescription',
+                  arguments: JSON.stringify({
+                    title: 'New Feature',
+                    body: 'This PR adds support for X',
+                  }),
+                },
+              },
+            ],
+          },
+        },
+      ],
+    };
   });
 
   const adapter = createOpenAIAdapter(openAi, {
@@ -129,7 +147,9 @@ test('fromTool - GitHub PR description inserter', async () => {
       },
       createPullRequestDescription: {
         description: 'Create a GitHub PR description',
-        run: () => 'Description',
+        run: (result) => {
+          return result;
+        },
         inputSchema: {
           type: 'object',
           properties: {
@@ -159,12 +179,59 @@ test('fromTool - GitHub PR description inserter', async () => {
   const res = await toPromise(actor);
 
   expect(res?.tool).toEqual('createPullRequestDescription');
-  expect(res?.result).toEqual('Description');
+  expect(res?.result).toEqual({
+    title: 'New Feature',
+    body: 'This PR adds support for X',
+  });
 });
 
 test('fromTool - joke creator or rater', async () => {
-  const openAi = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
+  const openAi = createMockProvider((input) => {
+    if ((input.messages[0]?.content as string).includes('Tell me a joke')) {
+      return {
+        choices: [
+          {
+            finish_reason: 'tool_calls',
+            index: 0,
+            logprobs: null,
+            message: {
+              tool_calls: [
+                {
+                  type: 'function',
+                  function: {
+                    name: 'createJoke',
+                    arguments: JSON.stringify({}),
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      };
+    }
+
+    return {
+      choices: [
+        {
+          finish_reason: 'tool_calls',
+          index: 0,
+          logprobs: null,
+          message: {
+            tool_calls: [
+              {
+                type: 'function',
+                function: {
+                  name: 'rateJoke',
+                  arguments: JSON.stringify({
+                    joke: 'some joke',
+                  }),
+                },
+              },
+            ],
+          },
+        },
+      ],
+    };
   });
 
   const adapter = createOpenAIAdapter(openAi, {
