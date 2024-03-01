@@ -1,5 +1,11 @@
 # @statelyai/agent
 
+## 0.0.7
+
+### Patch Changes
+
+- [#18](https://github.com/statelyai/agent/pull/18) [`dcaabab`](https://github.com/statelyai/agent/commit/dcaababe69255b7eaff3347d0cf09469d3e6cc78) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `context` is now optional for `createSchemas(…)`
+
 ## 0.0.6
 
 ### Patch Changes
