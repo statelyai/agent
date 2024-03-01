@@ -19,13 +19,13 @@ export function createSchemas<
    *
    * Must be of `{ type: 'object' }`.
    */
-  context: TContextSchema;
+  context?: TContextSchema;
   /**
    * An object mapping event types to each event object's JSON Schema.
    */
   events: TEventSchemas;
 }): {
-  context: TContextSchema;
+  context: TContextSchema | undefined;
   events: ConvertToJSONSchemas<TEventSchemas>;
   types: {
     context: FromSchema<TContextSchema>;
