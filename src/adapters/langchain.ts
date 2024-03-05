@@ -282,5 +282,7 @@ export function createLangchainAdapter<
         fromEvent: fromEventChoiceStream.bind(null, settings),
         fromChat: fromCallbackChain.bind(null, settings),
         fromChatStream: fromObservableChain,
-    };
+        fromCallback: fromCallbackChain.bind(null, settings)
+
+    }
 }
