@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import { createAgent, createOpenAIAdapter, createSchemas } from '../src';
+import { createAgent, createOpenAIAdapter, defineEvents } from '../src';
 import { assign, setup } from 'xstate';
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -23,39 +23,17 @@ const guessLogic = adapter.fromEvent(
 `
 );
 
-const schemas = createSchemas({
-  context: {
-    type: 'object',
+const eventSchemas = defineEvents({
+  guess: {
     properties: {
-      lastGuess: {
-        type: ['number', 'null'],
-        description: 'The last guess',
-      },
-      previousGuesses: {
-        type: 'array',
-        items: {
-          type: 'number',
-        },
-        description: 'The previous guesses',
-      },
-      answer: {
+      number: {
+        // integer
         type: 'number',
-        description: 'The answer',
+        minimum: 1,
+        maximum: 10,
       },
     },
-  },
-  events: {
-    guess: {
-      properties: {
-        number: {
-          // integer
-          type: 'number',
-          minimum: 1,
-          maximum: 10,
-        },
-      },
-      required: ['number'],
-    },
+    required: ['number'],
   },
 });
 
@@ -66,9 +44,9 @@ const machine = setup({
       answer: number;
     },
     input: {} as { answer: number },
-    events: schemas.types.events,
+    events: eventSchemas.types,
   },
-  schemas,
+  schemas: eventSchemas,
   actors: {
     guessLogic,
   },

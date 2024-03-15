@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import { createAgent, createOpenAIAdapter, createSchemas } from '../src';
+import { createAgent, createOpenAIAdapter, defineEvents } from '../src';
 import { assign, fromPromise, log, setup } from 'xstate';
 import { getFromTerminal } from './helpers/helpers';
 
@@ -40,27 +40,20 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-const schemas = createSchemas({
-  context: {
-    location: { type: 'string' },
-    history: { type: 'array', items: { type: 'string' } },
-    count: { type: 'number' },
-  },
-  events: {
-    getWeather: {
-      description: 'Get the weather for a location',
-      properties: {
-        location: {
-          type: 'string',
-          description: 'The location to get the weather for',
-        },
+const eventSchemas = defineEvents({
+  getWeather: {
+    description: 'Get the weather for a location',
+    properties: {
+      location: {
+        type: 'string',
+        description: 'The location to get the weather for',
       },
     },
-    doSomethingElse: {
-      description:
-        'Do something else, because the user did not provide a location',
-      properties: {},
-    },
+  },
+  doSomethingElse: {
+    description:
+      'Do something else, because the user did not provide a location',
+    properties: {},
   },
 });
 
@@ -80,8 +73,15 @@ const getWeather = fromPromise(async ({ input }: { input: string }) => {
 });
 
 const machine = setup({
-  schemas,
-  types: schemas.types,
+  schemas: eventSchemas,
+  types: {
+    context: {} as {
+      location: string;
+      history: string[];
+      count: number;
+    },
+    events: eventSchemas.types,
+  },
   actors: {
     getWeather,
     decide: adapter.fromEvent(

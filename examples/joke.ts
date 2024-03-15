@@ -1,61 +1,44 @@
 import OpenAI from 'openai';
 import { assign, fromCallback, fromPromise, log, setup } from 'xstate';
-import { createAgent, createOpenAIAdapter, createSchemas } from '../src';
+import { createAgent, createOpenAIAdapter, defineEvents } from '../src';
 import { loadingAnimation } from './helpers/loader';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-const schemas = createSchemas({
-  context: {
+const eventSchemas = defineEvents({
+  askForTopic: {
     type: 'object',
     properties: {
-      topic: { type: 'string' },
-      jokes: {
-        type: 'array',
-        items: {
-          type: 'string',
-        },
+      topic: {
+        type: 'string',
       },
-      desire: { type: ['string', 'null'] },
-      lastRating: { type: ['number', 'null'] },
     },
-    required: ['topic', 'jokes', 'desire', 'lastRating'],
   },
-  events: {
-    askForTopic: {
-      type: 'object',
-      properties: {
-        topic: {
-          type: 'string',
-        },
+  tellJoke: {
+    type: 'object',
+    properties: {
+      joke: {
+        type: 'string',
       },
     },
-    tellJoke: {
-      type: 'object',
-      properties: {
-        joke: {
-          type: 'string',
-        },
+  },
+  endJokes: {
+    type: 'object',
+    properties: {},
+  },
+  rateJoke: {
+    type: 'object',
+    properties: {
+      rating: {
+        type: 'number',
+        minimum: 1,
+        maximum: 10,
       },
-    },
-    endJokes: {
-      type: 'object',
-      properties: {},
-    },
-    rateJoke: {
-      type: 'object',
-      properties: {
-        rating: {
-          type: 'number',
-          minimum: 1,
-          maximum: 10,
-        },
-        explanation: {
-          type: 'string',
-          description: 'An explanation for the rating',
-        },
+      explanation: {
+        type: 'string',
+        description: 'An explanation for the rating',
       },
     },
   },
@@ -131,8 +114,17 @@ const loader = fromCallback(({ input }: { input: string }) => {
 });
 
 const jokeMachine = setup({
-  schemas,
-  types: schemas.types,
+  schemas: eventSchemas,
+  types: {
+    context: {} as {
+      topic: string;
+      jokes: string[];
+      desire: string | null;
+      lastRating: number | null;
+      loader: string | null;
+    },
+    events: eventSchemas.types,
+  },
   actors: {
     getJokeCompletion,
     getTopic,

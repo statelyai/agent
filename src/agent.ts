@@ -1,4 +1,4 @@
-import { ActorOptions, AnyStateMachine, createActor } from 'xstate';
+import { AnyStateMachine, createActor } from 'xstate';
 
 export function createAgent<T extends AnyStateMachine>(
   ...args: Parameters<typeof createActor<T>>
