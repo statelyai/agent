@@ -1,5 +1,34 @@
 # @statelyai/agent
 
+## 0.0.8
+
+### Patch Changes
+
+- [#22](https://github.com/statelyai/agent/pull/22) [`8a2c34b`](https://github.com/statelyai/agent/commit/8a2c34b8a99161bf47c72df8eed3f5d3b6a19f5f) Thanks [@davidkpiano](https://github.com/davidkpiano)! - The `createSchemas(…)` function has been removed. The `defineEvents(…)` function should be used instead, as it is a simpler way of defining events and event schemas using Zod:
+
+  ```ts
+  import { defineEvents } from "@statelyai/agent";
+  import { z } from "zod";
+  import { setup } from "xstate";
+
+  const events = defineEvents({
+    inc: z.object({
+      by: z.number().describe("Increment amount"),
+    }),
+  });
+
+  const machine = setup({
+    types: {
+      events: events.types,
+    },
+    schema: {
+      events: events.schemas,
+    },
+  }).createMachine({
+    // ...
+  });
+  ```
+
 ## 0.0.7
 
 ### Patch Changes
