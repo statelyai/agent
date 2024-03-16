@@ -41,7 +41,7 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-const eventSchemas = defineEvents({
+const events = defineEvents({
   getWeather: z.object({
     location: z.string().describe('The location to get the weather for'),
   }),
@@ -66,14 +66,14 @@ const getWeather = fromPromise(async ({ input }: { input: string }) => {
 });
 
 const machine = setup({
-  schemas: eventSchemas,
+  schemas: events,
   types: {
     context: {} as {
       location: string;
       history: string[];
       count: number;
     },
-    events: eventSchemas.type,
+    events: events.type,
   },
   actors: {
     getWeather,
