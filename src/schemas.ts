@@ -1,19 +1,26 @@
 import { Values } from 'xstate';
-import {
-  EventSchemas,
-  ConvertToJSONSchemas,
-  createEventSchemas,
-} from './utils';
-import { FromSchema } from 'json-schema-to-ts';
+import { createZodEventSchemas } from './utils';
+import { SomeZodObject, TypeOf } from 'zod';
 
-export function defineEventSchemas<const TEventSchemas extends EventSchemas>(
+export type ZodEventTypes = {
+  // map event types to Zod types
+  [eventType: string]: SomeZodObject;
+};
+
+export function defineEvents<const TEventSchemas extends ZodEventTypes>(
   events: TEventSchemas
 ): {
-  events: ConvertToJSONSchemas<TEventSchemas>;
-  types: FromSchema<Values<ConvertToJSONSchemas<TEventSchemas>>>;
+  type: Values<{
+    [K in keyof TEventSchemas]: {
+      type: K;
+    } & TypeOf<TEventSchemas[K]>;
+  }>;
+  schemas: {
+    [K in keyof TEventSchemas]: unknown;
+  };
 } {
   return {
-    events: createEventSchemas(events),
-    types: {} as any,
+    type: {} as any,
+    schemas: createZodEventSchemas(events),
   };
 }

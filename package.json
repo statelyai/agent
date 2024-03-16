@@ -7,7 +7,7 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsup src/index.ts --format cjs,esm --dts",
-    "lint": "tsc",
+    "lint": "tsc --noEmit",
     "test": "vitest",
     "example": "ts-node examples/helpers/runner.ts",
     "prepublishOnly": "tsup src/index.ts --dts",

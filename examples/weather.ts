@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import { createAgent, createOpenAIAdapter, defineEvents } from '../src';
 import { assign, fromPromise, log, setup } from 'xstate';
 import { getFromTerminal } from './helpers/helpers';
+import { z } from 'zod';
 
 async function searchTavily(
   input: string,
@@ -41,20 +42,12 @@ const openai = new OpenAI({
 });
 
 const eventSchemas = defineEvents({
-  getWeather: {
-    description: 'Get the weather for a location',
-    properties: {
-      location: {
-        type: 'string',
-        description: 'The location to get the weather for',
-      },
-    },
-  },
-  doSomethingElse: {
-    description:
-      'Do something else, because the user did not provide a location',
-    properties: {},
-  },
+  getWeather: z.object({
+    location: z.string().describe('The location to get the weather for'),
+  }),
+  doSomethingElse: z
+    .object({})
+    .describe('Do something else, because the user did not provide a location'),
 });
 
 const adapter = createOpenAIAdapter(openai, {
@@ -80,7 +73,7 @@ const machine = setup({
       history: string[];
       count: number;
     },
-    events: eventSchemas.types,
+    events: eventSchemas.type,
   },
   actors: {
     getWeather,

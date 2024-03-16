@@ -2,46 +2,25 @@ import OpenAI from 'openai';
 import { assign, fromCallback, fromPromise, log, setup } from 'xstate';
 import { createAgent, createOpenAIAdapter, defineEvents } from '../src';
 import { loadingAnimation } from './helpers/loader';
+import { z } from 'zod';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
 const eventSchemas = defineEvents({
-  askForTopic: {
-    type: 'object',
-    properties: {
-      topic: {
-        type: 'string',
-      },
-    },
-  },
-  tellJoke: {
-    type: 'object',
-    properties: {
-      joke: {
-        type: 'string',
-      },
-    },
-  },
-  endJokes: {
-    type: 'object',
-    properties: {},
-  },
-  rateJoke: {
-    type: 'object',
-    properties: {
-      rating: {
-        type: 'number',
-        minimum: 1,
-        maximum: 10,
-      },
-      explanation: {
-        type: 'string',
-        description: 'An explanation for the rating',
-      },
-    },
-  },
+  askForTopic: z.object({
+    topic: z.string().describe('The topic for the joke'),
+  }),
+  tellJoke: z.object({
+    joke: z.string().describe('The joke text'),
+  }),
+  endJokes: z.object({}).describe('End the jokes'),
+
+  rateJoke: z.object({
+    rating: z.number().min(1).max(10),
+    explanation: z.string(),
+  }),
 });
 
 const adapter = createOpenAIAdapter(openai, {
@@ -123,7 +102,7 @@ const jokeMachine = setup({
       lastRating: number | null;
       loader: string | null;
     },
-    events: eventSchemas.types,
+    events: eventSchemas.type,
   },
   actors: {
     getJokeCompletion,

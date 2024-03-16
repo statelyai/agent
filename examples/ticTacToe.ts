@@ -1,5 +1,7 @@
 import { assign, setup, assertEvent } from 'xstate';
 import OpenAI from 'openai';
+import { z } from 'zod';
+import { zodToJsonSchema } from 'zod-to-json-schema';
 import { createOpenAIAdapter, defineEvents, createAgent } from '../src';
 
 const openai = new OpenAI({
@@ -9,31 +11,24 @@ const openai = new OpenAI({
 type Player = 'x' | 'o';
 
 const eventSchemas = defineEvents({
-  'x.play': {
-    properties: {
-      index: {
-        description: 'The index of the cell to play on',
-        type: 'number',
-
-        minimum: 0,
-        maximum: 8,
-      },
-    },
-  },
-  'o.play': {
-    properties: {
-      index: {
-        description: 'The index of the cell to play on',
-        type: 'number',
-        minimum: 0,
-        maximum: 8,
-      },
-    },
-  },
-  reset: {
-    properties: {},
-  },
+  'x.play': z.object({
+    index: z
+      .number()
+      .min(0)
+      .max(8)
+      .describe('The index of the cell to play on'),
+  }),
+  'o.play': z.object({
+    index: z
+      .number()
+      .min(0)
+      .max(8)
+      .describe('The index of the cell to play on'),
+  }),
+  reset: z.object({}).describe('Reset the game to the initial state'),
 });
+
+eventSchemas.type;
 
 interface GameContext {
   board: (Player | null)[];
@@ -101,7 +96,7 @@ export const ticTacToeMachine = setup({
   schemas: eventSchemas,
   types: {
     context: {} as GameContext,
-    events: eventSchemas.types,
+    events: eventSchemas.type,
   },
   actors: {
     bot,

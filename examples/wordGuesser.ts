@@ -2,6 +2,7 @@ import { assign, log, setup } from 'xstate';
 import { getFromTerminal } from './helpers/helpers';
 import { createAgent, createOpenAIAdapter, defineEvents } from '../src';
 import OpenAI from 'openai';
+import { z } from 'zod';
 
 const openAI = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -11,27 +12,14 @@ const adapter = createOpenAIAdapter(openAI, {
   model: 'gpt-4-1106-preview',
 });
 
-const eventSchemas = defineEvents({
-  guessLetter: {
-    description: 'Player guesses a letter',
-    properties: {
-      letter: {
-        type: 'string',
-        description: 'The letter guessed',
-        maxLength: 1,
-        minLength: 1,
-      },
-    },
-  },
-  guessWord: {
-    description: 'Player guesses the full word',
-    properties: {
-      word: {
-        type: 'string',
-        description: 'The word guessed',
-      },
-    },
-  },
+const events = defineEvents({
+  guessLetter: z.object({
+    letter: z.string().min(1).max(1).describe('The letter guessed'),
+  }),
+
+  guessWord: z.object({
+    word: z.string().describe('The word guessed'),
+  }),
 });
 
 const context = {
@@ -43,7 +31,7 @@ const context = {
 const wordGuesserMachine = setup({
   types: {
     context: {} as typeof context,
-    events: eventSchemas.types,
+    events: events.type,
   },
   actors: {
     getFromTerminal,
@@ -65,7 +53,9 @@ Please make your next guess - type a letter or the full word. You can only make 
     `
     ),
   },
-  schemas: eventSchemas,
+  schemas: {
+    events: events.schemas,
+  },
 }).createMachine({
   initial: 'providingWord',
   context,

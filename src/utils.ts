@@ -1,6 +1,9 @@
 import { AnyMachineSnapshot, AnyStateNode, Prop, Values } from 'xstate';
 import { FromSchema } from 'json-schema-to-ts';
 import { JSONSchema7 } from 'json-schema-to-ts/lib/types/definitions';
+import zodToJsonSchema, { JsonSchema7Type } from 'zod-to-json-schema';
+import { ZodEventTypes } from './schemas';
+import { z } from 'zod';
 
 export function getAllTransitions(state: AnyMachineSnapshot) {
   const nodes = state._nodes;
@@ -15,7 +18,7 @@ export type EventSchemas = {
   [key: string]: {
     description?: string;
     properties?: {
-      [key: string]: JSONSchema7;
+      [key: string]: JsonSchema7Type;
     };
   };
 };
@@ -50,6 +53,25 @@ export function createEventSchemas<T extends EventSchemas>(
       additionalProperties: false,
       ...schema,
     } as JSONSchema7;
+  }
+
+  return resolvedEventSchemaMap as ConvertToJSONSchemas<T>;
+}
+
+export function createZodEventSchemas<T extends ZodEventTypes>(
+  eventSchemaMap: T
+): {
+  [K in keyof T]: unknown;
+} {
+  const resolvedEventSchemaMap = {};
+
+  for (const [eventType, zodType] of Object.entries(eventSchemaMap)) {
+    // @ts-ignore
+    resolvedEventSchemaMap[eventType] = zodToJsonSchema(
+      zodType.extend({
+        type: z.literal(eventType),
+      })
+    );
   }
 
   return resolvedEventSchemaMap as ConvertToJSONSchemas<T>;
