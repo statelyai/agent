@@ -28,7 +28,7 @@ const eventSchemas = defineEvents({
   reset: z.object({}).describe('Reset the game to the initial state'),
 });
 
-eventSchemas.type;
+eventSchemas.types;
 
 interface GameContext {
   board: (Player | null)[];
@@ -96,7 +96,7 @@ export const ticTacToeMachine = setup({
   schemas: eventSchemas,
   types: {
     context: {} as GameContext,
-    events: eventSchemas.type,
+    events: eventSchemas.types,
   },
   actors: {
     bot,

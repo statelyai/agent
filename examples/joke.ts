@@ -102,7 +102,7 @@ const jokeMachine = setup({
       lastRating: number | null;
       loader: string | null;
     },
-    events: eventSchemas.type,
+    events: eventSchemas.types,
   },
   actors: {
     getJokeCompletion,

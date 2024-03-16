@@ -10,7 +10,7 @@ export type ZodEventTypes = {
 export function defineEvents<const TEventSchemas extends ZodEventTypes>(
   events: TEventSchemas
 ): {
-  type: Values<{
+  types: Values<{
     [K in keyof TEventSchemas]: {
       type: K;
     } & TypeOf<TEventSchemas[K]>;
@@ -20,7 +20,7 @@ export function defineEvents<const TEventSchemas extends ZodEventTypes>(
   };
 } {
   return {
-    type: {} as any,
+    types: {} as any,
     schemas: createZodEventSchemas(events),
   };
 }

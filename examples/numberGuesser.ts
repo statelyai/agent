@@ -37,7 +37,7 @@ const machine = setup({
       answer: number;
     },
     input: {} as { answer: number },
-    events: eventSchemas.type,
+    events: eventSchemas.types,
   },
   schemas: eventSchemas,
   actors: {

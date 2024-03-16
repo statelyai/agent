@@ -31,7 +31,7 @@ const context = {
 const wordGuesserMachine = setup({
   types: {
     context: {} as typeof context,
-    events: events.type,
+    events: events.types,
   },
   actors: {
     getFromTerminal,

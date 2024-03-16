@@ -73,7 +73,7 @@ const machine = setup({
       history: string[];
       count: number;
     },
-    events: events.type,
+    events: events.types,
   },
   actors: {
     getWeather,
