@@ -24,7 +24,7 @@ const guessLogic = adapter.fromEvent(
 `
 );
 
-const eventSchemas = defineEvents({
+const events = defineEvents({
   guess: z.object({
     number: z.number().min(1).max(10).describe('The number guessed'),
   }),
@@ -37,9 +37,11 @@ const machine = setup({
       answer: number;
     },
     input: {} as { answer: number },
-    events: eventSchemas.types,
+    events: events.types,
   },
-  schemas: eventSchemas,
+  schemas: {
+    events: events.schemas,
+  },
   actors: {
     guessLogic,
   },

@@ -10,7 +10,7 @@ const openai = new OpenAI({
 
 type Player = 'x' | 'o';
 
-const eventSchemas = defineEvents({
+const events = defineEvents({
   'x.play': z.object({
     index: z
       .number()
@@ -27,8 +27,6 @@ const eventSchemas = defineEvents({
   }),
   reset: z.object({}).describe('Reset the game to the initial state'),
 });
-
-eventSchemas.types;
 
 interface GameContext {
   board: (Player | null)[];
@@ -93,10 +91,12 @@ function getWinner(board: typeof initialContext.board): Player | null {
 }
 
 export const ticTacToeMachine = setup({
-  schemas: eventSchemas,
+  schemas: {
+    events: events.schemas,
+  },
   types: {
     context: {} as GameContext,
-    events: eventSchemas.types,
+    events: events.types,
   },
   actors: {
     bot,

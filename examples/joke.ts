@@ -8,7 +8,7 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-const eventSchemas = defineEvents({
+const events = defineEvents({
   askForTopic: z.object({
     topic: z.string().describe('The topic for the joke'),
   }),
@@ -93,7 +93,9 @@ const loader = fromCallback(({ input }: { input: string }) => {
 });
 
 const jokeMachine = setup({
-  schemas: eventSchemas,
+  schemas: {
+    events: events.schemas,
+  },
   types: {
     context: {} as {
       topic: string;
@@ -102,7 +104,7 @@ const jokeMachine = setup({
       lastRating: number | null;
       loader: string | null;
     },
-    events: eventSchemas.types,
+    events: events.types,
   },
   actors: {
     getJokeCompletion,
@@ -112,6 +114,7 @@ const jokeMachine = setup({
     loader,
   },
 }).createMachine({
+  id: 'joke',
   context: () => ({
     topic: '',
     jokes: [],
@@ -203,7 +206,7 @@ const jokeMachine = setup({
 const agent = createAgent(jokeMachine, {
   inspect: (ev) => {
     if (ev.type === '@xstate.event') {
-      console.log(ev.event);
+      console.log(`\n${ev.actorRef.id}`, ev.event);
     }
   },
 });

@@ -45,6 +45,14 @@ const events = defineEvents({
   getWeather: z.object({
     location: z.string().describe('The location to get the weather for'),
   }),
+  reportWeather: z.object({
+    location: z
+      .string()
+      .describe('The location the weather is being reported for'),
+    highF: z.number().describe('The high temperature today in Fahrenheit'),
+    lowF: z.number().describe('The low temperature today in Fahrenheit'),
+    summary: z.string().describe('A summary of the weather conditions'),
+  }),
   doSomethingElse: z
     .object({})
     .describe('Do something else, because the user did not provide a location'),
@@ -65,8 +73,12 @@ const getWeather = fromPromise(async ({ input }: { input: string }) => {
   return results;
 });
 
+const reportWeather = adapter.fromEvent(() => 'Report the weather');
+
 const machine = setup({
-  schemas: events,
+  schemas: {
+    events: events.schemas,
+  },
   types: {
     context: {} as {
       location: string;
@@ -77,6 +89,7 @@ const machine = setup({
   },
   actors: {
     getWeather,
+    reportWeather,
     decide: adapter.fromEvent(
       (input: string) =>
         `Decide what to do based on the given input, which may or may not be a location: ${input}`
@@ -133,6 +146,17 @@ const machine = setup({
               count: ({ context }) => context.count + 1,
             }),
           ],
+          target: 'reportWeather',
+        },
+      },
+    },
+    reportWeather: {
+      invoke: {
+        src: 'reportWeather',
+      },
+      on: {
+        reportWeather: {
+          actions: log(({ event }) => event),
           target: 'getLocation',
         },
       },
@@ -146,8 +170,12 @@ const machine = setup({
   },
 });
 
-createAgent(machine, {
+const actor = createAgent(machine, {
   input: {
     location: 'New York',
   },
-}).start();
+});
+actor.subscribe((s) => {
+  console.log(s.value);
+});
+actor.start();
