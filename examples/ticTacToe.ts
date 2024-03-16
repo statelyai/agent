@@ -1,6 +1,8 @@
 import { assign, setup, assertEvent } from 'xstate';
 import OpenAI from 'openai';
-import { createOpenAIAdapter, createSchemas, createAgent } from '../src';
+import { z } from 'zod';
+import { zodToJsonSchema } from 'zod-to-json-schema';
+import { createOpenAIAdapter, defineEvents, createAgent } from '../src';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -8,69 +10,31 @@ const openai = new OpenAI({
 
 type Player = 'x' | 'o';
 
-const schemas = createSchemas({
-  context: {
-    type: 'object',
-    properties: {
-      board: {
-        type: 'array',
-        items: {
-          type: ['null', 'string'],
-          enum: [null, 'x', 'o'],
-        },
-        minItems: 9,
-        maxItems: 9,
-        description: 'The board of the tic-tac-toe game',
-      },
-      moves: {
-        type: 'number',
-        description: 'The number of moves that have been played',
-      },
-      player: {
-        type: 'string',
-        enum: ['x', 'o'],
-        description: 'The player whose turn it is',
-      },
-      gameReport: {
-        type: 'string',
-        description: 'The game report',
-      },
-      events: {
-        type: 'array',
-        items: {
-          type: 'string',
-        },
-      },
-    },
-    required: ['board', 'moves', 'player', 'gameReport', 'events'],
-  },
-  events: {
-    'x.play': {
-      properties: {
-        index: {
-          description: 'The index of the cell to play on',
-          type: 'number',
-
-          minimum: 0,
-          maximum: 8,
-        },
-      },
-    },
-    'o.play': {
-      properties: {
-        index: {
-          description: 'The index of the cell to play on',
-          type: 'number',
-          minimum: 0,
-          maximum: 8,
-        },
-      },
-    },
-    reset: {
-      properties: {},
-    },
-  },
+const events = defineEvents({
+  'x.play': z.object({
+    index: z
+      .number()
+      .min(0)
+      .max(8)
+      .describe('The index of the cell to play on'),
+  }),
+  'o.play': z.object({
+    index: z
+      .number()
+      .min(0)
+      .max(8)
+      .describe('The index of the cell to play on'),
+  }),
+  reset: z.object({}).describe('Reset the game to the initial state'),
 });
+
+interface GameContext {
+  board: (Player | null)[];
+  moves: number;
+  player: Player;
+  gameReport: string;
+  events: string[];
+}
 
 const adapter = createOpenAIAdapter(openai, {
   model: 'gpt-4-1106-preview',
@@ -82,10 +46,10 @@ const initialContext = {
   player: 'x' as Player,
   gameReport: '',
   events: [],
-} satisfies typeof schemas.types.context;
+} satisfies GameContext;
 
 const bot = adapter.fromEvent(
-  ({ context }: { context: typeof schemas.types.context }) => `
+  ({ context }: { context: GameContext }) => `
 You are playing a game of tic tac toe. This is the current game state. The 3x3 board is represented by a 9-element array. The first element is the top-left cell, the second element is the top-middle cell, the third element is the top-right cell, the fourth element is the middle-left cell, and so on. The value of each cell is either null, x, or o. The value of null means that the cell is empty. The value of x means that the cell is occupied by an x. The value of o means that the cell is occupied by an o.
 
 ${JSON.stringify(context, null, 2)}
@@ -94,11 +58,7 @@ Execute the single best next move to try to win the game. Do not play on an exis
 );
 
 const gameReporter = adapter.fromChatStream(
-  ({
-    context,
-  }: {
-    context: typeof schemas.types.context;
-  }) => `Here is the game board:
+  ({ context }: { context: GameContext }) => `Here is the game board:
 
 ${JSON.stringify(context.board, null, 2)}
 
@@ -131,8 +91,13 @@ function getWinner(board: typeof initialContext.board): Player | null {
 }
 
 export const ticTacToeMachine = setup({
-  schemas,
-  types: schemas.types,
+  schemas: {
+    events: events.schemas,
+  },
+  types: {
+    context: {} as GameContext,
+    events: events.types,
+  },
   actors: {
     bot,
     gameReporter,

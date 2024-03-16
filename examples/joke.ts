@@ -1,53 +1,37 @@
 import OpenAI from 'openai';
 import { assign, fromCallback, fromPromise, log, setup } from 'xstate';
-import { createAgent, createOpenAIAdapter, createSchemas } from '../src';
+import { createAgent, createOpenAIAdapter, defineEvents } from '../src';
 import { loadingAnimation } from './helpers/loader';
+import { z } from 'zod';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-const schemas = createSchemas({
-  context: {
-    type: 'object',
-    properties: {
-      topic: { type: 'string' },
-      jokes: {
-        type: 'array',
-        items: {
-          type: 'string',
-        },
-      },
-      desire: { type: ['string', 'null'] },
-      lastRating: { type: ['string', 'null'] },
-    },
-    required: ['topic', 'jokes', 'desire', 'lastRating'],
-  },
-  events: {
-    askForTopic: {
-      type: 'object',
-      properties: {
-        topic: {
-          type: 'string',
-        },
-      },
-    },
-    endJokes: {
-      type: 'object',
-      properties: {},
-    },
-  },
+const events = defineEvents({
+  askForTopic: z.object({
+    topic: z.string().describe('The topic for the joke'),
+  }),
+  tellJoke: z.object({
+    joke: z.string().describe('The joke text'),
+  }),
+  endJokes: z.object({}).describe('End the jokes'),
+
+  rateJoke: z.object({
+    rating: z.number().min(1).max(10),
+    explanation: z.string(),
+  }),
 });
 
 const adapter = createOpenAIAdapter(openai, {
   model: 'gpt-3.5-turbo-1106',
 });
 
-const getJokeCompletion = adapter.fromChat(
+const getJokeCompletion = adapter.fromEvent(
   (topic: string) => `Tell me a joke about ${topic}.`
 );
 
-const rateJoke = adapter.fromChat(
+const rateJoke = adapter.fromEvent(
   (joke: string) => `Rate this joke on a scale of 1 to 10: ${joke}`
 );
 
@@ -66,7 +50,7 @@ const getTopic = fromPromise(async () => {
 });
 
 const decide = adapter.fromEvent(
-  (lastRating: string) =>
+  (lastRating: number) =>
     `Choose what to do next, given the previous rating of the joke: ${lastRating}`
 );
 export function getRandomFunnyPhrase() {
@@ -109,8 +93,19 @@ const loader = fromCallback(({ input }: { input: string }) => {
 });
 
 const jokeMachine = setup({
-  schemas,
-  types: schemas.types,
+  schemas: {
+    events: events.schemas,
+  },
+  types: {
+    context: {} as {
+      topic: string;
+      jokes: string[];
+      desire: string | null;
+      lastRating: number | null;
+      loader: string | null;
+    },
+    events: events.types,
+  },
   actors: {
     getJokeCompletion,
     getTopic,
@@ -119,6 +114,7 @@ const jokeMachine = setup({
     loader,
   },
 }).createMachine({
+  id: 'joke',
   context: () => ({
     topic: '',
     jokes: [],
@@ -144,54 +140,45 @@ const jokeMachine = setup({
         {
           src: 'getJokeCompletion',
           input: ({ context }) => context.topic,
-          onDone: {
-            actions: [
-              assign({
-                jokes: ({ context, event }) =>
-                  context.jokes.concat(
-                    event.output.choices[0]!.message.content!
-                  ),
-              }),
-              log((x) => `\n` + x.context.jokes.at(-1)),
-            ],
-            target: 'rateJoke',
-          },
         },
         {
           src: 'loader',
           input: getRandomFunnyPhrase,
         },
       ],
+      on: {
+        tellJoke: {
+          actions: assign({
+            jokes: ({ context, event }) => [...context.jokes, event.joke],
+          }),
+          target: 'rateJoke',
+        },
+      },
     },
     rateJoke: {
       invoke: [
         {
           src: 'rateJoke',
           input: ({ context }) => context.jokes[context.jokes.length - 1]!,
-          onDone: {
-            actions: [
-              assign({
-                lastRating: ({ event }) =>
-                  event.output.choices[0]!.message.content!,
-              }),
-              log(({ context }) => '\n' + context.lastRating),
-            ],
-            target: 'decide',
-          },
         },
         {
           src: 'loader',
           input: getRandomRatingPhrase,
         },
       ],
+      on: {
+        rateJoke: {
+          actions: assign({
+            lastRating: ({ event }) => event.rating,
+          }),
+          target: 'decide',
+        },
+      },
     },
     decide: {
       invoke: {
         src: 'decide',
         input: ({ context }) => context.lastRating!,
-        onDone: {
-          actions: log(({ event }) => event),
-        },
       },
       on: {
         askForTopic: {
@@ -216,5 +203,11 @@ const jokeMachine = setup({
   },
 });
 
-const agent = createAgent(jokeMachine);
+const agent = createAgent(jokeMachine, {
+  inspect: (ev) => {
+    if (ev.type === '@xstate.event') {
+      console.log(`\n${ev.actorRef.id}`, ev.event);
+    }
+  },
+});
 agent.start();

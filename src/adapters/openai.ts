@@ -140,15 +140,20 @@ export function fromEvent<TInput>(
         .map((t) => {
           const name = t.eventType.replace(/\./g, '_');
           functionNameMapping[name] = t.eventType;
+          const eventSchema = eventSchemaMap[t.eventType];
+          const {
+            description,
+            properties: { type, ...properties },
+          } = eventSchema ?? {};
+
           return {
             type: 'function',
             function: {
               name,
-              description:
-                t.description ?? eventSchemaMap[t.eventType]?.description,
+              description: t.description ?? description,
               parameters: {
                 type: 'object',
-                properties: eventSchemaMap[t.eventType]?.properties ?? {},
+                properties: properties ?? {},
               },
             },
           } as const;
