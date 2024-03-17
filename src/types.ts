@@ -1,4 +1,5 @@
 import OpenAI from 'openai';
+import { ChatRequest, ChatResponse, Ollama } from 'ollama';
 import {
   ChatCompletionCreateParamsNonStreaming,
   ChatCompletionCreateParamsStreaming,
@@ -16,42 +17,69 @@ export interface StatelyAgentAdapter {
    * possible next events of the parent state machine
    * and sends it to the parent actor.
    */
-  fromEvent: <TInput>(
-    inputFn: (input: TInput) => string | ChatCompletionCreateParamsNonStreaming
-  ) => PromiseActorLogic<AnyEventObject[] | undefined, TInput>;
+  fromEvent: {
+    <TInput>(inputFn: (input: TInput) => string | ChatRequest): PromiseActorLogic<AnyEventObject[] | undefined, TInput>;
+    <TInput>(inputFn: (input: TInput) => string | ChatCompletionCreateParamsNonStreaming): PromiseActorLogic<AnyEventObject[] | undefined, TInput>;
+  };
   /**
    * Creates actor logic that resolves with a chat completion.
    */
-  fromChat: <TInput>(
-    inputFn: (input: TInput) => string | ChatCompletionCreateParamsNonStreaming
-  ) => PromiseActorLogic<OpenAI.Chat.Completions.ChatCompletion, TInput>;
+  fromChat: {
+    <TInput>(
+      inputFn: (input: TInput) => string | ChatRequest
+    ): PromiseActorLogic<ChatResponse, TInput>;
+    <TInput>(
+      inputFn: (input: TInput) => string | ChatCompletionCreateParamsNonStreaming
+    ): PromiseActorLogic<OpenAI.Chat.Completions.ChatCompletion, TInput>;
+  };
   /**
    * Creates actor logic that emits a chat completion stream.
    */
-  fromChatStream: <TInput>(
-    inputFn: (input: TInput) => string | ChatCompletionCreateParamsStreaming
-  ) => ObservableActorLogic<
-    OpenAI.Chat.Completions.ChatCompletionChunk,
-    TInput
-  >;
+  fromChatStream: {
+    <TInput>(
+      inputFn: (input: TInput) => string | ChatCompletionCreateParamsStreaming
+    ): ObservableActorLogic<
+      OpenAI.Chat.Completions.ChatCompletionChunk,
+      TInput
+    >;
+    <TInput>(
+      inputFn: (input: TInput) => string | ChatRequest
+    ): ObservableActorLogic<ChatResponse, TInput>;
+  };
   /**
    * Creates actor logic that chooses a tool from the provided
    * tools and runs that tool.
    */
-  fromTool: <TInput>(
-    inputFn: (input: TInput) => string | ChatCompletionCreateParamsNonStreaming,
-    tools: {
-      [key: string]: Tool<any, any>;
-    }
-  ) => PromiseActorLogic<
-    | {
+  fromTool: {
+    <TInput>(
+      inputFn: (input: TInput) => string | ChatCompletionCreateParamsNonStreaming,
+      tools: {
+        [key: string]: Tool<any, any>;
+      }
+    ): PromiseActorLogic<
+      | {
         result: any;
         tool: string;
         toolCall: OpenAI.Chat.Completions.ChatCompletionMessageToolCall;
       }
-    | undefined,
-    TInput
-  >;
+      | undefined,
+      TInput
+    >;
+    <TInput>(
+      inputFn: (input: TInput) => string | ChatRequest,
+      tools: {
+        [key: string]: Tool<any, any>;
+      }
+    ): PromiseActorLogic<
+      | {
+        result: any;
+        tool: string;
+        toolCall: { function: { name: string, arguments: string } };
+      }
+      | undefined,
+      TInput
+    >;
+  }
 }
 
 export interface Tool<TInput, TOutput> {

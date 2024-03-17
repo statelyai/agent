@@ -36,6 +36,7 @@
     "access": "public"
   },
   "dependencies": {
+    "ollama": "^0.4.8",
     "xstate": "^5.8.0"
   },
   "packageManager": "pnpm@8.11.0"
