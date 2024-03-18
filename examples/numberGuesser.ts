@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
-import { createAgent, createOpenAIAdapter, createSchemas } from '../src';
+import { createAgent, createOpenAIAdapter, defineEvents } from '../src';
 import { assign, setup } from 'xstate';
+import { z } from 'zod';
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
@@ -23,40 +24,10 @@ const guessLogic = adapter.fromEvent(
 `
 );
 
-const schemas = createSchemas({
-  context: {
-    type: 'object',
-    properties: {
-      lastGuess: {
-        type: ['number', 'null'],
-        description: 'The last guess',
-      },
-      previousGuesses: {
-        type: 'array',
-        items: {
-          type: 'number',
-        },
-        description: 'The previous guesses',
-      },
-      answer: {
-        type: 'number',
-        description: 'The answer',
-      },
-    },
-  },
-  events: {
-    guess: {
-      properties: {
-        number: {
-          // integer
-          type: 'number',
-          minimum: 1,
-          maximum: 10,
-        },
-      },
-      required: ['number'],
-    },
-  },
+const events = defineEvents({
+  guess: z.object({
+    number: z.number().min(1).max(10).describe('The number guessed'),
+  }),
 });
 
 const machine = setup({
@@ -66,9 +37,11 @@ const machine = setup({
       answer: number;
     },
     input: {} as { answer: number },
-    events: schemas.types.events,
+    events: events.types,
   },
-  schemas,
+  schemas: {
+    events: events.schemas,
+  },
   actors: {
     guessLogic,
   },

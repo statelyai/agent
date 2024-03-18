@@ -1,5 +1,46 @@
 # @statelyai/agent
 
+## 0.0.8
+
+### Patch Changes
+
+- [#22](https://github.com/statelyai/agent/pull/22) [`8a2c34b`](https://github.com/statelyai/agent/commit/8a2c34b8a99161bf47c72df8eed3f5d3b6a19f5f) Thanks [@davidkpiano](https://github.com/davidkpiano)! - The `createSchemas(…)` function has been removed. The `defineEvents(…)` function should be used instead, as it is a simpler way of defining events and event schemas using Zod:
+
+  ```ts
+  import { defineEvents } from "@statelyai/agent";
+  import { z } from "zod";
+  import { setup } from "xstate";
+
+  const events = defineEvents({
+    inc: z.object({
+      by: z.number().describe("Increment amount"),
+    }),
+  });
+
+  const machine = setup({
+    types: {
+      events: events.types,
+    },
+    schema: {
+      events: events.schemas,
+    },
+  }).createMachine({
+    // ...
+  });
+  ```
+
+## 0.0.7
+
+### Patch Changes
+
+- [#18](https://github.com/statelyai/agent/pull/18) [`dcaabab`](https://github.com/statelyai/agent/commit/dcaababe69255b7eaff3347d0cf09469d3e6cc78) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `context` is now optional for `createSchemas(…)`
+
+## 0.0.6
+
+### Patch Changes
+
+- [#16](https://github.com/statelyai/agent/pull/16) [`3ba5fb2`](https://github.com/statelyai/agent/commit/3ba5fb2392b51dee71f2585ed662b4ee9ecd6c41) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Update to XState 5.8.0
+
 ## 0.0.5
 
 ### Patch Changes
