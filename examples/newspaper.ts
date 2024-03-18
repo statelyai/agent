@@ -1,3 +1,7 @@
+// Based on GPT Newspaper:
+// https://github.com/assafelovic/gpt-newspaper
+// https://gist.github.com/TheGreatBonnie/58dc21ebbeeb8cbb08df665db762738c
+
 import { TavilySearchAPIRetriever } from '@langchain/community/retrievers/tavily_search_api';
 import { ChatOpenAI } from '@langchain/openai';
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
