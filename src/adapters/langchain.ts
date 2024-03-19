@@ -1,6 +1,5 @@
 import {InputValues} from "@langchain/core/memory";
 import {ChatPromptTemplate} from "@langchain/core/prompts";
-import type {StatelyAgentAdapter} from '../types';
 import {
     AnyEventObject,
     AnyTransitionDefinition,
@@ -215,7 +214,7 @@ function toTools<TSentEvent extends AnyEventObject = AnyEventObject>(
         schema: JSONSchema7
     }): StructuredToolInterface {
 
-        //maybe worth defining a zod schema from the first place
+        //is it better to define a zod schema from the first place?
         const zodSchema = mapSchemaToZod(schema);
         return new DynamicStructuredTool({
             func(input: z.infer<typeof zodSchema>): Promise<string> {
