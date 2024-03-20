@@ -100,7 +100,7 @@ export function fromEventChoiceStream<
 export function fromCallbackChain<
     TEvents extends EventSchemas,
     TEvent extends AnyEventObject = AnyEventObject, //Partial<RunInput> & AnyEventObject= Partial<RunInput> & AnyEventObject// & TPrompt["partialVariables"],
-    TSentEvent extends EventObject = FromSchema<Values<ConvertToJSONSchemas<TEvents>>> & AnyEventObject,
+    TSentEvent extends EventObject =  AnyEventObject,
     TInput = NonReducibleUnknown,
     TPrompt extends ChatPromptTemplate<TEvent & TInput> = ChatPromptTemplate<TEvent & TInput>
 
@@ -272,6 +272,7 @@ function toTools<TSentEvent extends AnyEventObject = AnyEventObject>(
  
 export interface LangChainAgentSettings  {
     model: BaseChatModel;
+    
 }
 export function createLangchainAdapter<
     T extends LangChainAgentSettings
