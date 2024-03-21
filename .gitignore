@@ -130,3 +130,5 @@ dist
 .pnp.*
 
 .vscode/settings.json
+
+outputs
