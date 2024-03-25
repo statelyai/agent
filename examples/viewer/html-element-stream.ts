@@ -11,12 +11,12 @@ import {
     TransitionConfig
 } from "xstate";
 import {ChatPromptTemplate, HumanMessagePromptTemplate, SystemMessagePromptTemplate} from "@langchain/core/prompts";
-import { defineEvents} from "../src";
+import { defineEvents} from "../../src";
 import {ChatOpenAI} from "@langchain/openai";
-import {createLangchainAdapter, LangChainAgentSettings} from "../src/adapters/langchain";
+import * as fs from "fs";
+import {createLangchainAdapter, LangChainAgentSettings} from "../../src/adapters/langchain";
 import {z} from "zod";
-
- 
+import {env} from "process"; 
 const inputProperties = z.object(
     {
         name: z.string({
@@ -49,10 +49,23 @@ export type HtmlElement = Record<string, any> & {type: string};
 export type  HtmlElementMap = {
     [key: string]: HtmlElement[]
 }
- 
+console.log('env', env)
 const llmSettings = createLangchainAdapter({
     model: new ChatOpenAI({
-        modelName: 'gpt-4-32k',
+        azureOpenAIApiKey:"eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsImtpZCI6IlFUVkJNa0kxUXpKR1JFWkdRelV3TkRWRE5FRXdPRVF6TkRnMFF6RTJSRFpGTjBRMFJFSXpRUSJ9.eyJpc3MiOiJodHRwczovL2xvZ2luLmdpZ2VuLnpvbi5jeC9vaWRjL29wL3YxLjAvNF9hcUdCR2lyVlBnNXpPSVZoWmhuTnBRLyIsImV4cCI6MTczNTc0MTg0MCwiaWF0IjoxNzA0MjA1ODQwLCJhdWQiOiJCZ3h0OW51bFMxYTJVcWt4WEt6UDJGY1MiLCJhdXRoX3RpbWUiOjE3MDM3OTQzMjUsImF6cCI6IkJneHQ5bnVsUzFhMlVxa3hYS3pQMkZjUyIsInN1YiI6IjcwVUllYjl3Zm0zZ19ETEkzX2dHT3RBelltNzlaUGxTVWRQdWJEUUFOT0UiLCJhcHBzIjpbeyJoZWFkZXJzIjoiIHtcIkFJLVJlc291cmNlLUdyb3VwXCI6IFwiZGVmYXVsdFwifSIsInRva2VudXJsIjoiaHR0cHM6Ly9zYXAtY2RwLWRldi15OWs2bXE3eC5hdXRoZW50aWNhdGlvbi5ldTEwLmhhbmEub25kZW1hbmQuY29tL29hdXRoL3Rva2VuIiwiY2xpZW50aWQiOiJzYi04OThlZWFhYi1mNTNiLTQ5YjQtYjI1Mi1jMmViZGM4YTQzYWYhYjE2OTAzOXxhaWNvcmUhYjU0MCIsImNsaWVudHNlY3JldCI6ImNmZmFkNDI3LTdiOTgtNDc3Yi1iMzQ5LTBiNWYwYzc2NTkyZiQ1a1I0TEdKeGVUaXRLTUw3T1NVSjhDWHM0M1FDRktzRFBmcldLaDZUOVdrPSIsImlkIjoiYWktY2RwLWRldiIsInVybCI6Imh0dHBzOi8vYXBpLmFpLnByb2QuZXUtY2VudHJhbC0xLmF3cy5tbC5oYW5hLm9uZGVtYW5kLmNvbSJ9XSwiYXRfaGFzaCI6IlhEZTdVN2xGODRjWm5CT3JzdEphY1EifQ.BP9nsOBR-TD4xCBwlqWq72oQlMysboPIT-BCnuLUXW3MEyAodej9bNZXe-SAfgVpDE1A3f67fowUeg66ovfVccf1MJEpTwzLs2gFp1Zkwvc9A61Q3IQBa-2JmSB7a3DIBXr808f-yhvwfCSdTNggNXRGS1KtlcGW2w8zdDIjXgKkGXVRj07Z3Bxnwq8PuzH71XEJeLrfV6kBeksTSbVSPWIZN-q-LJ7-dYUeCaYUGgD0fv4WWvFpUVo7SjsduKrkmzckkIJuWIEE93mif3BS8PbaJ9uUG3SSt-fca64l3S2xGBkj9LIyBsqDNjRXcpmmemnazvYHjF1I69TGwu85sA",
+        azureOpenAIApiDeploymentName:"d76615bc07d01db5",
+        modelName:"gpt-4-32k",
+        azureOpenAIApiVersion:"2023-12-01-preview",
+        azureOpenAIBasePath:"https://ai-cdp-dev.deno.dev/v2/inference/deployments",
+        azureOpenAIApiEmbeddingsDeploymentName:"d006aa4aac5fd0f1"
+
+        // modelName: env.VITE_AZURE_OPENAI_API_MODEL_NAME,
+        // azureOpenAIApiKey: env.VITE_AZURE_OPENAI_API_KEY,
+        // azureOpenAIApiDeploymentName: env.VITE_AZURE_OPENAI_API_DEPLOYMENT_NAME,
+        // azureOpenAIApiVersion: env.VITE_AZURE_OPENAI_API_VERSION,
+        // azureOpenAIApiCompletionsDeploymentName: env.VITE_AZURE_OPENAI_API_DEPLOYMENT_NAME,
+        // azureOpenAIApiEmbeddingsDeploymentName: env.VITE_AZURE_OPENAI_API_EMBEDDINGS_DEPLOYMENT_NAME,
+        // azureOpenAIBasePath: env.VITE_AZURE_OPENAI_API_BASE_PATH
     })
 })
 
@@ -210,8 +223,6 @@ export const elementMachine = setup({
 
     
 /*
-import * as fs from "fs";
-
 const sample_actor: Actor<ElementMachine> = createActor(elementMachine, {
     input: {
         //ignore html input in ts
@@ -251,13 +262,6 @@ const sample_actor: Actor<ElementMachine> = createActor(elementMachine, {
         complete:( )=>fs.writeFileSync('html-elements.json', JSON.stringify(actor.getPersistedSnapshot(), null, 2))
     }
 });
-
-sample_actor.subscribe((s) => {
-    console.log(s.value, s.context);
-});
-export const actor= sample_actor;
-
-
 */
 export type ElementMachine=typeof elementMachine;
 export type ElementMachineEvents = EventFrom<ElementMachine>;
@@ -269,3 +273,9 @@ export type ElementMachineEventObject = ElementMachineEvents[keyof ElementMachin
 export type ElementMachineTransition =  TransitionConfig<HtmlElementContext,ElementMachineEvents, ElementMachineEvents, any, any, any, any>;
 
 
+// sample_actor.subscribe((s) => {
+//     console.log(s.value, s.context);
+// });
+// export const actor= sample_actor;
+
+export default elementMachine;
