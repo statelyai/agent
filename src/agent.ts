@@ -118,9 +118,9 @@ export interface Agent<TLogic extends AnyActorLogic>
 }
 
 export function createAgent<TLogic extends AnyActorLogic>(
-  goal: string,
   logic: TLogic,
-  input: InputFrom<TLogic>
+  input: InputFrom<TLogic>,
+  goal: string // TODO: () => string ?
 ): Agent<TLogic> {
   const experiences: Array<AgentExperience<any, any>> = [];
 
