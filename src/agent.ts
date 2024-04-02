@@ -1,44 +1,105 @@
-import { inspect } from 'util';
 import {
-  ActorOptions,
+  ActorRef,
+  ActorRefFrom,
   AnyActorLogic,
-  AnyActorRef,
   AnyEventObject,
-  AnyStateMachine,
+  AnyMachineSnapshot,
+  EventFromLogic,
   EventObject,
   InputFrom,
+  SnapshotFrom,
   createActor,
 } from 'xstate';
 
-export type AgentExperiences<T, R> = Record<
-  string,
-  Record<
-    string,
-    {
-      state: T;
-      reward: R;
-    }
-  >
->;
+// export type AgentExperiences<TState, TReward> = Record<
+//   string, // serialized state
+//   Record<
+//     string, // serialized event
+//     {
+//       state: TState;
+//       reward: TReward;
+//     }
+//   >
+// >;
+export interface AgentExperience<TState, TEvent extends AnyEventObject> {
+  prevState: TState | undefined;
+  event: TEvent;
+  nextState: TState;
+}
 
-export type AgentPlan<T> = Array<{
+export type AgentPlan<TLogic extends AnyActorLogic> = Array<{
   /**
    * The current state
    */
-  state: T;
+  state: SnapshotFrom<TLogic>;
   /**
    * The event to execute
    */
-  event: AnyEventObject;
+  event: EventFromLogic<TLogic>;
+  /**
+   * The expected next state
+   */
+  nextState: SnapshotFrom<TLogic>;
 }>;
 
-export interface AgentModel<T, R> {
-  experiences: AgentExperiences<T, any>;
-  getMachine: () => AnyStateMachine;
-  policy: (state: T, goal: T) => Promise<AgentPlan<T>>;
-  getNextEvents: (state: T) => Promise<AnyEventObject[]>;
-  getPlans: (state: T, goal: T) => Promise<Array<AgentPlan<T>>>;
-  getReward: (state: T, goal: T, action: EventObject) => Promise<R>;
+export interface AgentModel<
+  TLogic extends AnyActorLogic,
+  TReward,
+  TState extends SnapshotFrom<TLogic> = SnapshotFrom<TLogic>,
+  TEvent extends EventFromLogic<TLogic> = EventFromLogic<TLogic>
+> {
+  policy: ({
+    logic,
+    state,
+    goal,
+  }: {
+    logic: TLogic;
+    state: TState;
+    goal: string;
+  }) => Promise<AgentPlan<TState>>;
+  getExperiences: () => Promise<Array<AgentExperience<TState, TEvent>>>; // TODO: TLogic instead?
+  addExperience: (experience: AgentExperience<TState, TEvent>) => void;
+  getLogic: ({
+    experiences,
+  }: {
+    experiences: Array<AgentExperience<TState, TEvent>>; // TODO: TLogic instead?
+  }) => Promise<TLogic>;
+  getNextEvents: ({
+    logic,
+    state,
+  }: {
+    logic: TLogic;
+    state: TState;
+  }) => Promise<AnyEventObject[]>;
+  getPlans: ({
+    logic,
+    state,
+    goal,
+  }: {
+    logic: TLogic;
+    state: TState;
+    goal: string;
+  }) => Promise<Array<AgentPlan<TState>>>;
+  getNextPlan: ({
+    logic,
+    state,
+    goal,
+  }: {
+    logic: TLogic;
+    state: TState;
+    goal: string;
+  }) => AgentPlan<TState>;
+  getReward: ({
+    logic,
+    state,
+    goal,
+    action,
+  }: {
+    logic: TLogic;
+    state: TState;
+    goal: TState;
+    action: EventObject;
+  }) => Promise<TReward>;
 }
 
 export interface AgentLogic<T> {
@@ -50,38 +111,57 @@ export interface AgentLogic<T> {
   getPlan(state: T, goal: any): Promise<Array<[T, EventObject]>>;
 }
 
-export interface Agent<T extends AnyActorRef> {
-  experiences: Array<{
-    currentState: T;
-    event: AnyEventObject;
-    nextState: T;
-    // plan (event array)
-    // reason (string)
-  }>;
-  act(environment: T): Promise<any>;
+export interface Agent<TLogic extends AnyActorLogic>
+  extends ActorRef<SnapshotFrom<TLogic>, EventFromLogic<TLogic>> {
+  model: AgentModel<TLogic, any>;
+  goal: string;
 }
 
 export function createAgent<TLogic extends AnyActorLogic>(
   goal: string,
   logic: TLogic,
   input: InputFrom<TLogic>
-) {
-  const experiences: Agent<any>['experiences'] = [];
+): Agent<TLogic> {
+  const experiences: Array<AgentExperience<any, any>> = [];
+
+  const agentModel: AgentModel<TLogic, any> = {
+    // addExperience: (experience) =>  {
+    //   experiences.push(experience);
+    // },
+  } as unknown as AgentModel<TLogic, any>;
 
   const actor = createActor(logic, {
     input,
     inspect: (inspEv) => {
       if (inspEv.type === '@xstate.snapshot') {
-        experiences.push({
-          nextState: inspEv.state.value,
-          event: inspEv.event,
+        agentModel.addExperience({
+          prevState: experiences[experiences.length - 1]?.nextState,
+          nextState: (inspEv.snapshot as AnyMachineSnapshot).value,
+          event: inspEv.event as EventFromLogic<TLogic>,
         });
       }
     },
   });
 
+  // Act on environment
+  actor.subscribe(async (s) => {
+    const experiences = await agentModel.getExperiences();
+    const nextPlan = agentModel.getNextPlan({
+      logic: await agentModel.getLogic({ experiences }),
+      goal,
+      state: s,
+    });
+
+    // TODO: race conditions!
+    if (nextPlan?.[0]) {
+      const nextThing = nextPlan[0];
+      actor.send(nextThing.event);
+    }
+  });
+
   return {
-    experiences,
     ...actor,
-  };
+    goal,
+    model: agentModel,
+  } as unknown as Agent<TLogic>; // TODO: fix types
 }
