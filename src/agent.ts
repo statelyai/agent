@@ -10,6 +10,11 @@ import {
   SnapshotFrom,
   createActor,
 } from 'xstate';
+import { getAllTransitions } from './utils';
+import OpenAI from 'openai';
+import { StatelyAgentAdapter } from './types';
+import { getToolCalls } from './adapters/openai';
+import { ZodEventTypes } from './schemas';
 
 // export type AgentExperiences<TState, TReward> = Record<
 //   string, // serialized state
@@ -39,7 +44,7 @@ export type AgentPlan<TLogic extends AnyActorLogic> = Array<{
   /**
    * The expected next state
    */
-  nextState: SnapshotFrom<TLogic>;
+  nextState?: SnapshotFrom<TLogic>;
 }>;
 
 export interface AgentModel<
@@ -80,15 +85,6 @@ export interface AgentModel<
     state: TState;
     goal: string;
   }) => Promise<Array<AgentPlan<TState>>>;
-  getNextPlan: ({
-    logic,
-    state,
-    goal,
-  }: {
-    logic: TLogic;
-    state: TState;
-    goal: string;
-  }) => AgentPlan<TState>;
   getReward: ({
     logic,
     state,
@@ -118,17 +114,46 @@ export interface Agent<TLogic extends AnyActorLogic>
 }
 
 export function createAgent<TLogic extends AnyActorLogic>(
+  openai: OpenAI,
   logic: TLogic,
   input: InputFrom<TLogic>,
-  goal: string // TODO: () => string ?
+  goal: string, // TODO: () => string ?
+  schemas: ZodEventTypes
 ): Agent<TLogic> {
   const experiences: Array<AgentExperience<any, any>> = [];
 
-  const agentModel: AgentModel<TLogic, any> = {
-    // addExperience: (experience) =>  {
-    //   experiences.push(experience);
-    // },
-  } as unknown as AgentModel<TLogic, any>;
+  const agentModel = {
+    policy: async ({ logic, state, goal }) => {
+      const toolEvents = await getToolCalls(
+        openai,
+        goal,
+        state,
+        'gpt-3.5-turbo-16k-0613',
+        schemas
+      );
+
+      return toolEvents.map((te) => ({
+        state,
+        event: te as EventFromLogic<TLogic>,
+      }));
+    },
+    addExperience: (experience) => {
+      experiences.push(experience);
+    },
+    getExperiences: async () => experiences,
+    getLogic: async ({ experiences }) => {
+      return logic;
+    },
+    getNextEvents: async ({ logic, state }) => {
+      return [];
+    },
+    getReward: async ({ logic, state, goal, action }) => {
+      return 0;
+    },
+    getPlans: async ({ logic, state, goal }) => {
+      return [];
+    },
+  } satisfies AgentModel<TLogic, any>;
 
   const actor = createActor(logic, {
     input,

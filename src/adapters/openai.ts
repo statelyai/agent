@@ -1,6 +1,7 @@
 import type OpenAI from 'openai';
 import {
   AnyEventObject,
+  AnyMachineSnapshot,
   Observer,
   fromObservable,
   fromPromise,
@@ -11,6 +12,7 @@ import { getAllTransitions } from '../utils';
 import { ChatCompletionCreateParamsNonStreaming } from 'openai/resources';
 import { ChatCompletionCreateParamsBase } from 'openai/resources/chat/completions';
 import { StatelyAgentAdapter, Tool } from '../types';
+import { ZodEventTypes } from '../schemas';
 
 /**
  * Creates [promise actor logic](https://stately.ai/docs/promise-actors) that uses the OpenAI API to generate a completion.
@@ -105,6 +107,83 @@ export function fromChatStream<TInput>(
       };
     }
   );
+}
+
+export async function getToolCalls(
+  openai: OpenAI,
+  goal: string,
+  snapshot: AnyMachineSnapshot,
+  model: string,
+  eventSchemas: ZodEventTypes = {}
+): Promise<
+  Array<{
+    type: `agent.${string}`;
+    params: Record<string, any>;
+  }>
+> {
+  const eventSchemaMap = eventSchemas;
+  const transitions = getAllTransitions(snapshot);
+  const functionNameMapping: Record<string, string> = {};
+  const tools = transitions
+    .filter((t) => {
+      // return !t.eventType.startsWith('xstate.');
+      return t.eventType.startsWith('agent.');
+    })
+    .map((t) => {
+      const name = t.eventType.replace(/\./g, '_');
+      functionNameMapping[name] = t.eventType;
+      const eventSchema = eventSchemaMap[t.eventType];
+      const {
+        description,
+        properties: { type, ...properties },
+      } = (eventSchema as any) ?? {};
+
+      return {
+        type: 'function',
+        function: {
+          name,
+          description: t.description ?? description,
+          parameters: {
+            type: 'object',
+            properties: properties ?? {},
+          },
+        },
+      } as const;
+    });
+
+  if (!tools.length) {
+    return [];
+  }
+
+  const completionParams: ChatCompletionCreateParamsNonStreaming = {
+    model,
+    messages: [
+      {
+        role: 'user',
+        content: goal,
+      },
+    ],
+  };
+
+  const completion = await openai.chat.completions.create({
+    ...completionParams,
+    tools,
+  });
+
+  const toolCalls = completion.choices[0]?.message.tool_calls;
+
+  if (toolCalls?.length) {
+    const events = toolCalls.map((tc) => {
+      return {
+        type: functionNameMapping[tc.function.name],
+        ...JSON.parse(tc.function.arguments),
+      };
+    });
+
+    return events;
+  }
+
+  return [];
 }
 
 /**
