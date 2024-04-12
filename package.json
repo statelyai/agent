@@ -21,22 +21,22 @@
   "devDependencies": {
     "@changesets/changelog-github": "^0.5.0",
     "@changesets/cli": "^2.27.1",
-    "@types/node": "^20.10.6",
-    "dotenv": "^16.3.1",
-    "json-schema-to-ts": "^3.0.0",
-    "openai": "^4.24.1",
+    "@types/node": "^20.12.7",
+    "dotenv": "^16.4.5",
+    "json-schema-to-ts": "^3.0.1",
+    "openai": "^4.33.0",
     "ts-node": "^10.9.2",
-    "tsup": "^8.0.1",
-    "typescript": "^5.3.3",
-    "vitest": "^1.2.2",
+    "tsup": "^8.0.2",
+    "typescript": "^5.4.5",
+    "vitest": "^1.5.0",
     "zod": "^3.22.4",
-    "zod-to-json-schema": "^3.22.4"
+    "zod-to-json-schema": "^3.22.5"
   },
   "publishConfig": {
     "access": "public"
   },
   "dependencies": {
-    "xstate": "^5.8.0"
+    "xstate": "^5.10.0"
   },
   "packageManager": "pnpm@8.11.0"
 }

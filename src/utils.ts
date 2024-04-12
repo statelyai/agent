@@ -1,6 +1,6 @@
 import { AnyMachineSnapshot, AnyStateNode, Prop, Values } from 'xstate';
 import { FromSchema } from 'json-schema-to-ts';
-import { JSONSchema7 } from 'json-schema-to-ts/lib/types/definitions';
+import { JSONSchema } from 'json-schema-to-ts/lib/types/definitions';
 import zodToJsonSchema, { JsonSchema7Type } from 'zod-to-json-schema';
 import { ZodEventTypes } from './schemas';
 import { z } from 'zod';
@@ -23,7 +23,7 @@ export type EventSchemas = {
   };
 };
 
-export type ContextSchema = JSONSchema7 & { type: 'object' };
+export type ContextSchema = JSONSchema & { type: 'object' };
 
 export type ConvertToJSONSchemas<T> = {
   [K in keyof T]: {
@@ -52,7 +52,7 @@ export function createEventSchemas<T extends EventSchemas>(
       },
       additionalProperties: false,
       ...schema,
-    } as JSONSchema7;
+    } as JSONSchema;
   }
 
   return resolvedEventSchemaMap as ConvertToJSONSchemas<T>;
