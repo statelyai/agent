@@ -13,7 +13,7 @@ pnpm install openai @statelyai/agent
 
 ## Usage
 
-Work in progress. For now, see the examples:
+[Read the documentation](https://stately.ai/docs/agents)
 
 - [Joke generator](https://github.com/statelyai/agent/tree/main/examples/joke.ts)
   - Demonstrates `agent.fromChatCompletion(...)` to generate a joke and provide a joke rating
