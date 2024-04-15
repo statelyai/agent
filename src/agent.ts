@@ -2,15 +2,17 @@ import {
   ActorRef,
   ActorRefFrom,
   AnyActorLogic,
+  AnyActorRef,
   AnyEventObject,
   AnyMachineSnapshot,
+  EventFrom,
   EventFromLogic,
   EventObject,
   InputFrom,
   SnapshotFrom,
   createActor,
 } from 'xstate';
-import { getAllTransitions } from './utils';
+import { EventSchemas, getAllTransitions } from './utils';
 import OpenAI from 'openai';
 import { StatelyAgentAdapter } from './types';
 import { getToolCalls } from './adapters/openai';
@@ -32,68 +34,68 @@ export interface AgentExperience<TState, TEvent extends AnyEventObject> {
   nextState: TState;
 }
 
-export type AgentPlan<TLogic extends AnyActorLogic> = Array<{
+export type AgentPlan<TState, TEvent extends EventObject> = Array<{
   /**
    * The current state
    */
-  state: SnapshotFrom<TLogic>;
+  state: TState;
   /**
    * The event to execute
    */
-  event: EventFromLogic<TLogic>;
+  event: TEvent;
   /**
    * The expected next state
    */
-  nextState?: SnapshotFrom<TLogic>;
+  nextState?: TState;
 }>;
 
 export interface AgentModel<
-  TLogic extends AnyActorLogic,
+  // TLogic extends AnyActorLogic,
   TReward,
-  TState extends SnapshotFrom<TLogic> = SnapshotFrom<TLogic>,
-  TEvent extends EventFromLogic<TLogic> = EventFromLogic<TLogic>
+  TState,
+  TEvent extends EventObject
 > {
-  policy: ({
-    logic,
-    state,
-    goal,
-  }: {
-    logic: TLogic;
-    state: TState;
-    goal: string;
-  }) => Promise<AgentPlan<TState>>;
+  // policy: ({
+  //   logic,
+  //   state,
+  //   goal,
+  // }: {
+  //   logic: TLogic;
+  //   state: TState;
+  //   goal: string;
+  // }) => Promise<AgentPlan<TState>>;
   getExperiences: () => Promise<Array<AgentExperience<TState, TEvent>>>; // TODO: TLogic instead?
   addExperience: (experience: AgentExperience<TState, TEvent>) => void;
   getLogic: ({
     experiences,
   }: {
     experiences: Array<AgentExperience<TState, TEvent>>; // TODO: TLogic instead?
-  }) => Promise<TLogic>;
+  }) => Promise<AnyActorLogic>;
   getNextEvents: ({
     logic,
     state,
   }: {
-    logic: TLogic;
+    logic: AnyActorLogic;
     state: TState;
   }) => Promise<AnyEventObject[]>;
   getPlans: ({
     logic,
     state,
-    goal,
+    goals,
   }: {
-    logic: TLogic;
+    logic: AnyActorLogic;
     state: TState;
-    goal: string;
-  }) => Promise<Array<AgentPlan<TState>>>;
+    goals: string[];
+  }) => Promise<Array<AgentPlan<TState, TEvent>>>;
   getReward: ({
     logic,
     state,
-    goal,
+    goals,
     action,
   }: {
-    logic: TLogic;
+    logic: AnyActorLogic;
     state: TState;
-    goal: TState;
+    goals: string[];
     action: EventObject;
   }) => Promise<TReward>;
 }
@@ -107,86 +109,121 @@ export interface AgentLogic<T> {
   getPlan(state: T, goal: any): Promise<Array<[T, EventObject]>>;
 }
 
-export interface Agent<TLogic extends AnyActorLogic>
-  extends ActorRef<SnapshotFrom<TLogic>, EventFromLogic<TLogic>> {
-  model: AgentModel<TLogic, any>;
-  goal: string;
+export interface Agent<
+  TState extends AnyMachineSnapshot,
+  TEvent extends EventObject
+> {
+  act: (env: ActorRef<TState, TEvent>) => Promise<void>;
 }
 
-export function createAgent<TLogic extends AnyActorLogic>(
+export function createAgent<TEnvironment extends AnyActorRef>(
   openai: OpenAI,
-  logic: TLogic,
-  input: InputFrom<TLogic>,
-  goal: string, // TODO: () => string ?
+  // logic: AnyActorLogic,
+  // input: InputFrom<TLogic>,
+  getGoals: (state: SnapshotFrom<TEnvironment>) => string | string[],
   schemas: ZodEventTypes
-): Agent<TLogic> {
+): Agent<SnapshotFrom<TEnvironment>, EventFrom<TEnvironment>> {
   const experiences: Array<AgentExperience<any, any>> = [];
 
-  const agentModel = {
-    policy: async ({ logic, state, goal }) => {
-      const toolEvents = await getToolCalls(
-        openai,
-        goal,
-        state,
-        'gpt-3.5-turbo-16k-0613',
-        schemas
-      );
-
-      return toolEvents.map((te) => ({
-        state,
-        event: te as EventFromLogic<TLogic>,
-      }));
-    },
+  const agentModel: AgentModel<
+    any,
+    SnapshotFrom<TEnvironment>,
+    EventFrom<TEnvironment>
+  > = {
+    // policy: async ({ logic, state, goal }) => {
+    //   const toolEvents = await getToolCalls(
+    //     openai,
+    //     goal,
+    //     state,
+    //     'gpt-4-1106-preview',
+    //     (eventType) => eventType.startsWith('agent.'),
+    //     schemas
+    //   );
+    //   console.log(toolEvents);
+    //   return toolEvents.map((te) => ({
+    //     state,
+    //     event: te as EventFromLogic<TLogic>,
+    //   }));
+    // },
     addExperience: (experience) => {
       experiences.push(experience);
     },
     getExperiences: async () => experiences,
     getLogic: async ({ experiences }) => {
-      return logic;
+      return null as any; // TODO
     },
     getNextEvents: async ({ logic, state }) => {
       return [];
     },
-    getReward: async ({ logic, state, goal, action }) => {
+    getReward: async ({ logic, state, goals, action }) => {
       return 0;
     },
-    getPlans: async ({ logic, state, goal }) => {
-      return [];
-    },
-  } satisfies AgentModel<TLogic, any>;
-
-  const actor = createActor(logic, {
-    input,
-    inspect: (inspEv) => {
-      if (inspEv.type === '@xstate.snapshot') {
-        agentModel.addExperience({
-          prevState: experiences[experiences.length - 1]?.nextState,
-          nextState: (inspEv.snapshot as AnyMachineSnapshot).value,
-          event: inspEv.event as EventFromLogic<TLogic>,
-        });
+    getPlans: async ({ logic, state, goals }) => {
+      if (!goals[0]) {
+        return [];
       }
+
+      const toolEvents = await getToolCalls(
+        openai,
+        goals[0] + '\nOnly make a single tool call.',
+        state as any,
+        'gpt-3.5-turbo-16k-0613',
+        (eventType) => eventType.startsWith('agent.'),
+        schemas
+      );
+
+      console.log(toolEvents);
+
+      return [
+        toolEvents.map((toolEvent) => ({
+          state,
+          event: toolEvent as EventFrom<TEnvironment>,
+        })),
+      ];
     },
-  });
+  };
 
-  // Act on environment
-  actor.subscribe(async (s) => {
-    const experiences = await agentModel.getExperiences();
-    const nextPlan = agentModel.getNextPlan({
-      logic: await agentModel.getLogic({ experiences }),
-      goal,
-      state: s,
-    });
-
-    // TODO: race conditions!
-    if (nextPlan?.[0]) {
-      const nextThing = nextPlan[0];
-      actor.send(nextThing.event);
-    }
-  });
+  // const actor = createActor(logic, {
+  //   input,
+  //   inspect: (inspEv) => {
+  //     if (inspEv.type === '@xstate.snapshot') {
+  //       agentModel.addExperience({
+  //         prevState: experiences[experiences.length - 1]?.nextState,
+  //         nextState: (inspEv.snapshot as AnyMachineSnapshot).value,
+  //         event: inspEv.event as EventFromLogic<TLogic>,
+  //       });
+  //     }
+  //   },
+  // });
 
   return {
-    ...actor,
-    goal,
-    model: agentModel,
-  } as unknown as Agent<TLogic>; // TODO: fix types
+    act: async (actorRef) => {
+      const state = actorRef.getSnapshot();
+      // @ts-ignore
+      console.log(state.value, state.context);
+      const experiences = await agentModel.getExperiences();
+      const goals = toArray(getGoals(state));
+      console.log('Goal:', goals);
+
+      const nextPlans = await agentModel.getPlans({
+        logic: await agentModel.getLogic({ experiences }),
+        goals,
+        state,
+      });
+
+      const nextStep = nextPlans?.[0]?.[0];
+
+      // TODO: race conditions!
+      if (nextStep) {
+        console.log('nextStep', nextStep?.event);
+        actorRef.send(nextStep.event);
+      } else {
+        console.log('No next step');
+      }
+    },
+  } satisfies Agent<SnapshotFrom<TEnvironment>, EventFrom<TEnvironment>>; // TODO: fix types
+}
+
+function toArray<T>(value: T | T[]): T[] {
+  return Array.isArray(value) ? value : [value];
 }

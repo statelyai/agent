@@ -8,7 +8,7 @@ import {
   isMachineSnapshot,
   toObserver,
 } from 'xstate';
-import { getAllTransitions } from '../utils';
+import { EventSchemas, getAllTransitions } from '../utils';
 import { ChatCompletionCreateParamsNonStreaming } from 'openai/resources';
 import { ChatCompletionCreateParamsBase } from 'openai/resources/chat/completions';
 import { StatelyAgentAdapter, Tool } from '../types';
@@ -114,11 +114,12 @@ export async function getToolCalls(
   goal: string,
   snapshot: AnyMachineSnapshot,
   model: string,
-  eventSchemas: ZodEventTypes = {}
+  filter: (eventType: string) => boolean,
+  eventSchemas: EventSchemas = {}
 ): Promise<
   Array<{
+    [key: string]: unknown;
     type: `agent.${string}`;
-    params: Record<string, any>;
   }>
 > {
   const eventSchemaMap = eventSchemas;
@@ -126,8 +127,7 @@ export async function getToolCalls(
   const functionNameMapping: Record<string, string> = {};
   const tools = transitions
     .filter((t) => {
-      // return !t.eventType.startsWith('xstate.');
-      return t.eventType.startsWith('agent.');
+      return filter(t.eventType);
     })
     .map((t) => {
       const name = t.eventType.replace(/\./g, '_');

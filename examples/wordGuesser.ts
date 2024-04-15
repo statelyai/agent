@@ -1,4 +1,4 @@
-import { assign, log, setup } from 'xstate';
+import { assign, createActor, log, setup } from 'xstate';
 import { getFromTerminal } from './helpers/helpers';
 import { createAgent, createOpenAIAdapter, defineEvents } from '../src';
 import OpenAI from 'openai';
@@ -13,11 +13,11 @@ const adapter = createOpenAIAdapter(openAI, {
 });
 
 const events = defineEvents({
-  guessLetter: z.object({
+  'agent.guessLetter': z.object({
     letter: z.string().min(1).max(1).describe('The letter guessed'),
   }),
 
-  guessWord: z.object({
+  'agent.guessWord': z.object({
     word: z.string().describe('The word guessed'),
   }),
 });
@@ -35,23 +35,6 @@ const wordGuesserMachine = setup({
   },
   actors: {
     getFromTerminal,
-    guesser: adapter.fromEvent(
-      (input: typeof context) => `
-You are trying to guess the word. The word has ${
-        input.word!.length
-      } letters. You have guessed the following letters so far: ${input.letters.join(
-        ', '
-      )}. These letters matched: ${input
-        .word!.split('')
-        .map((letter) =>
-          input.letters.includes(letter.toUpperCase())
-            ? letter.toUpperCase()
-            : '_'
-        )
-        .join('')}
-Please make your next guess - type a letter or the full word. You can only make 10 total guesses.
-    `
-    ),
   },
   schemas: {
     events: events.schemas,
@@ -77,12 +60,12 @@ Please make your next guess - type a letter or the full word. You can only make 
         guard: ({ context }) => context.letters.length > 10,
         target: 'finalGuess',
       },
-      invoke: {
-        src: 'guesser',
-        input: ({ context }) => context,
-      },
+      // invoke: {
+      //   src: 'guesser',
+      //   input: ({ context }) => context,
+      // },
       on: {
-        guessLetter: {
+        'agent.guessLetter': {
           actions: assign({
             letters: ({ context, event }) => {
               return [...context.letters, event.letter.toUpperCase()];
@@ -91,7 +74,7 @@ Please make your next guess - type a letter or the full word. You can only make 
           target: 'guessing',
           reenter: true,
         },
-        guessWord: {
+        'agent.guessWord': {
           actions: assign({
             guessedWord: ({ event }) => event.word,
           }),
@@ -100,12 +83,12 @@ Please make your next guess - type a letter or the full word. You can only make 
       },
     },
     finalGuess: {
-      invoke: {
-        src: 'guesser',
-        input: ({ context }) => context,
-      },
+      // invoke: {
+      //   src: 'guesser',
+      //   input: ({ context }) => context,
+      // },
       on: {
-        guessWord: {
+        'agent.guessWord': {
           actions: assign({
             guessedWord: ({ event }) => event.word,
           }),
@@ -123,22 +106,57 @@ Please make your next guess - type a letter or the full word. You can only make 
           return 'You lost! The word was ' + context.word;
         }
       }),
+      after: {
+        1000: 'providingWord',
+      },
     },
   },
   exit: () => process.exit(),
 });
 
-const actor = createAgent(wordGuesserMachine, {
-  inspect: (ev) => {
-    if (ev.type === '@xstate.event') {
-      console.log(ev.event);
+const game = createActor(wordGuesserMachine);
+
+const agent = createAgent<typeof game>(
+  openAI,
+  (s) => {
+    if (s.matches('guessing')) {
+      return `
+      You are trying to guess the word. The word has ${
+        s.context.word!.length
+      } letters. You have guessed the following letters so far: ${s.context.letters.join(
+        ', '
+      )}. These letters matched: ${s.context
+        .word!.split('')
+        .map((letter) =>
+          s.context.letters.includes(letter.toUpperCase())
+            ? letter.toUpperCase()
+            : '_'
+        )
+        .join('')}
+      Please make your next guess - guess a letter or, if you think you know the word, guess the full word. You can only make 10 total guesses.
+          `;
     }
+
+    if (s.matches('finalGuess')) {
+      return `You have used all 10 guesses. You have guessed the following letters so far: ${s.context.letters.join(
+        ', '
+      )}. These letters matched: ${s.context
+        .word!.split('')
+        .map((letter) =>
+          s.context.letters.includes(letter.toUpperCase())
+            ? letter.toUpperCase()
+            : '_'
+        )
+        .join('')}. Guess the word.`;
+    }
+
+    return [];
   },
+  events.schemas as any
+);
+
+game.subscribe(() => {
+  agent.act(game);
 });
 
-actor.subscribe((s) => {
-  console.log(s.value);
-  console.log(s.context);
-});
-
-actor.start();
+game.start();

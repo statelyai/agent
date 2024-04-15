@@ -7,6 +7,10 @@ export type ZodEventTypes = {
   [eventType: string]: SomeZodObject;
 };
 
+export type EventSchemas<TEventType extends string> = {
+  [K in TEventType]: unknown;
+};
+
 export function defineEvents<const TEventSchemas extends ZodEventTypes>(
   events: TEventSchemas
 ): {
@@ -15,9 +19,7 @@ export function defineEvents<const TEventSchemas extends ZodEventTypes>(
       type: K;
     } & TypeOf<TEventSchemas[K]>;
   }>;
-  schemas: {
-    [K in keyof TEventSchemas]: unknown;
-  };
+  schemas: EventSchemas<keyof TEventSchemas & string>;
 } {
   return {
     types: {} as any,
