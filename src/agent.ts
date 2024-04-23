@@ -1,20 +1,14 @@
 import {
   ActorRef,
-  ActorRefFrom,
   AnyActorLogic,
   AnyActorRef,
   AnyEventObject,
   AnyMachineSnapshot,
   EventFrom,
-  EventFromLogic,
   EventObject,
-  InputFrom,
   SnapshotFrom,
-  createActor,
 } from 'xstate';
-import { EventSchemas, getAllTransitions } from './utils';
 import OpenAI from 'openai';
-import { StatelyAgentAdapter } from './types';
 import { getToolCalls } from './adapters/openai';
 import { ZodEventTypes } from './schemas';
 

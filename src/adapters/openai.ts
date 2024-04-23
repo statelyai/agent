@@ -12,7 +12,6 @@ import { EventSchemas, getAllTransitions } from '../utils';
 import { ChatCompletionCreateParamsNonStreaming } from 'openai/resources';
 import { ChatCompletionCreateParamsBase } from 'openai/resources/chat/completions';
 import { StatelyAgentAdapter, Tool } from '../types';
-import { ZodEventTypes } from '../schemas';
 
 /**
  * Creates [promise actor logic](https://stately.ai/docs/promise-actors) that uses the OpenAI API to generate a completion.
