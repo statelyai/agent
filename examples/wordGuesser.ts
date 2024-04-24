@@ -28,12 +28,17 @@ const context = {
   letters: [] as string[],
 };
 
+const agent = createAgent(openAI, {
+  model: 'gpt-3.5-turbo-16k-0613',
+});
+
 const wordGuesserMachine = setup({
   types: {
     context: {} as typeof context,
     events: events.types,
   },
   actors: {
+    agent,
     getFromTerminal,
   },
   schemas: {
@@ -60,10 +65,26 @@ const wordGuesserMachine = setup({
         guard: ({ context }) => context.letters.length > 10,
         target: 'finalGuess',
       },
-      // invoke: {
-      //   src: 'guesser',
-      //   input: ({ context }) => context,
-      // },
+      invoke: {
+        src: 'agent',
+        input: ({ context }) => ({
+          goal: `
+          You are trying to guess the word. The word has ${
+            context.word!.length
+          } letters. You have guessed the following letters so far: ${context.letters.join(
+            ', '
+          )}. These letters matched: ${context
+            .word!.split('')
+            .map((letter) =>
+              context.letters.includes(letter.toUpperCase())
+                ? letter.toUpperCase()
+                : '_'
+            )
+            .join('')}
+          Please make your next guess - guess a letter or, if you think you know the word, guess the full word. You can only make 10 total guesses.
+              `,
+        }),
+      },
       on: {
         'agent.guessLetter': {
           actions: assign({
@@ -83,10 +104,21 @@ const wordGuesserMachine = setup({
       },
     },
     finalGuess: {
-      // invoke: {
-      //   src: 'guesser',
-      //   input: ({ context }) => context,
-      // },
+      invoke: {
+        src: 'agent',
+        input: ({ context }) => ({
+          goal: `You have used all 10 guesses. You have guessed the following letters so far: ${context.letters.join(
+            ', '
+          )}. These letters matched: ${context
+            .word!.split('')
+            .map((letter) =>
+              context.letters.includes(letter.toUpperCase())
+                ? letter.toUpperCase()
+                : '_'
+            )
+            .join('')}. Guess the word.`,
+        }),
+      },
       on: {
         'agent.guessWord': {
           actions: assign({
@@ -115,48 +147,5 @@ const wordGuesserMachine = setup({
 });
 
 const game = createActor(wordGuesserMachine);
-
-const agent = createAgent<typeof game>(
-  openAI,
-  (s) => {
-    if (s.matches('guessing')) {
-      return `
-      You are trying to guess the word. The word has ${
-        s.context.word!.length
-      } letters. You have guessed the following letters so far: ${s.context.letters.join(
-        ', '
-      )}. These letters matched: ${s.context
-        .word!.split('')
-        .map((letter) =>
-          s.context.letters.includes(letter.toUpperCase())
-            ? letter.toUpperCase()
-            : '_'
-        )
-        .join('')}
-      Please make your next guess - guess a letter or, if you think you know the word, guess the full word. You can only make 10 total guesses.
-          `;
-    }
-
-    if (s.matches('finalGuess')) {
-      return `You have used all 10 guesses. You have guessed the following letters so far: ${s.context.letters.join(
-        ', '
-      )}. These letters matched: ${s.context
-        .word!.split('')
-        .map((letter) =>
-          s.context.letters.includes(letter.toUpperCase())
-            ? letter.toUpperCase()
-            : '_'
-        )
-        .join('')}. Guess the word.`;
-    }
-
-    return [];
-  },
-  events.schemas as any
-);
-
-game.subscribe(() => {
-  agent.act(game);
-});
 
 game.start();

@@ -6,11 +6,14 @@ import {
   AnyMachineSnapshot,
   EventFrom,
   EventObject,
+  fromPromise,
+  PromiseActorLogic,
   SnapshotFrom,
 } from 'xstate';
 import OpenAI from 'openai';
 import { getToolCalls } from './adapters/openai';
 import { ZodEventTypes } from './schemas';
+import { ChatCompletionCreateParamsBase } from 'openai/resources/chat/completions';
 
 // export type AgentExperiences<TState, TReward> = Record<
 //   string, // serialized state
@@ -110,7 +113,7 @@ export interface Agent<
   act: (env: ActorRef<TState, TEvent>) => Promise<void>;
 }
 
-export function createAgent<TEnvironment extends AnyActorRef>(
+export function createAgent2<TEnvironment extends AnyActorRef>(
   openai: OpenAI,
   // logic: AnyActorLogic,
   // input: InputFrom<TLogic>,
@@ -220,4 +223,49 @@ export function createAgent<TEnvironment extends AnyActorRef>(
 
 function toArray<T>(value: T | T[]): T[] {
   return Array.isArray(value) ? value : [value];
+}
+
+export function createAgent(
+  openai: OpenAI,
+  {
+    model,
+  }: {
+    model: ChatCompletionCreateParamsBase['model'];
+  }
+): PromiseActorLogic<
+  any,
+  {
+    goal: string;
+    model?: ChatCompletionCreateParamsBase['model'];
+  }
+> {
+  return fromPromise(async ({ input, self }) => {
+    const parentRef = self._parent;
+    if (!parentRef) {
+      return;
+    }
+    const state = parentRef.getSnapshot() as AnyMachineSnapshot;
+
+    console.log('SCHEMA', (state.machine.schemas as any)?.events);
+
+    const toolEvents = await getToolCalls(
+      openai,
+      input.goal + '\nOnly make a single tool call.',
+      state,
+      input.model ?? model,
+      (eventType) => eventType.startsWith('agent.'),
+      (state.machine.schemas as any)?.events
+    );
+
+    console.log(toolEvents);
+
+    if (toolEvents.length > 0) {
+      parentRef.send(toolEvents[0]);
+    }
+
+    // return toolEvents.map((toolEvent) => ({
+    //   state: input.state,
+    //   event: toolEvent as EventFrom<TEnvironment>,
+    // }))
+  });
 }
