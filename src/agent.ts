@@ -233,7 +233,7 @@ export function createAgent(
     model: ChatCompletionCreateParamsBase['model'];
   }
 ): PromiseActorLogic<
-  any,
+  void,
   {
     goal: string;
     model?: ChatCompletionCreateParamsBase['model'];
@@ -246,8 +246,6 @@ export function createAgent(
     }
     const state = parentRef.getSnapshot() as AnyMachineSnapshot;
 
-    console.log('SCHEMA', (state.machine.schemas as any)?.events);
-
     const toolEvents = await getToolCalls(
       openai,
       input.goal + '\nOnly make a single tool call.',
@@ -257,15 +255,10 @@ export function createAgent(
       (state.machine.schemas as any)?.events
     );
 
-    console.log(toolEvents);
-
     if (toolEvents.length > 0) {
       parentRef.send(toolEvents[0]);
     }
 
-    // return toolEvents.map((toolEvent) => ({
-    //   state: input.state,
-    //   event: toolEvent as EventFrom<TEnvironment>,
-    // }))
+    return;
   });
 }
