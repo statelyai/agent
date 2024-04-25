@@ -1,31 +1,17 @@
 import OpenAI from 'openai';
 import { createAgent, createOpenAIAdapter, defineEvents } from '../src';
-import { assign, setup } from 'xstate';
+import { assign, createActor, log, setup } from 'xstate';
 import { z } from 'zod';
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-const adapter = createOpenAIAdapter(openai, {
+const agent = createAgent(openai, {
   model: 'gpt-3.5-turbo-1106',
 });
 
-const guessLogic = adapter.fromEvent(
-  ({
-    previousGuesses,
-    lastResult,
-  }: {
-    previousGuesses: number[];
-    lastResult: string;
-  }) => `
-  Guess the number between 1 and 10. The previous guesses were ${
-    previousGuesses.length ? previousGuesses.join(', ') : 'not made yet'
-  } and the last result was ${lastResult}.
-`
-);
-
 const events = defineEvents({
-  guess: z.object({
+  'agent.guess': z.object({
     number: z.number().min(1).max(10).describe('The number guessed'),
   }),
 });
@@ -43,7 +29,7 @@ const machine = setup({
     events: events.schemas,
   },
   actors: {
-    guessLogic,
+    agent,
   },
 }).createMachine({
   context: ({ input }) => ({
@@ -59,19 +45,25 @@ const machine = setup({
         target: 'winner',
       },
       invoke: {
-        src: 'guessLogic',
+        src: 'agent',
         input: ({ context }) => ({
-          previousGuesses: context.previousGuesses,
-          lastResult:
+          goal: `
+          Guess the number between 1 and 10. The previous guesses were ${
+            context.previousGuesses.length
+              ? context.previousGuesses.join(', ')
+              : 'not made yet'
+          } and the last result was ${
             context.previousGuesses.length === 0
               ? 'not given yet'
               : context.previousGuesses.at(-1)! - context.answer > 0
               ? 'too high'
-              : 'too low',
+              : 'too low'
+          }.
+        `,
         }),
       },
       on: {
-        guess: {
+        'agent.guess': {
           actions: assign({
             previousGuesses: ({ context, event }) => [
               ...context.previousGuesses,
@@ -84,12 +76,13 @@ const machine = setup({
       },
     },
     winner: {
+      entry: log('You guessed the correct number!'),
       type: 'final',
     },
   },
 });
 
-const agent = createAgent(machine, {
+const actor = createActor(machine, {
   input: { answer: 4 },
   inspect: (ev) => {
     if (ev.type === '@xstate.event') {
@@ -98,4 +91,4 @@ const agent = createAgent(machine, {
   },
 });
 
-agent.start();
+actor.start();

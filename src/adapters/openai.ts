@@ -3,6 +3,7 @@ import {
   AnyEventObject,
   AnyMachineSnapshot,
   Observer,
+  PromiseActorLogic,
   fromObservable,
   fromPromise,
   isMachineSnapshot,
@@ -378,4 +379,42 @@ export function createOpenAIAdapter<
   };
 
   return agentSettings;
+}
+
+export function createAgent(
+  openai: OpenAI,
+  {
+    model,
+  }: {
+    model: ChatCompletionCreateParamsBase['model'];
+  }
+): PromiseActorLogic<
+  void,
+  {
+    goal: string;
+    model?: ChatCompletionCreateParamsBase['model'];
+  }
+> {
+  return fromPromise(async ({ input, self }) => {
+    const parentRef = self._parent;
+    if (!parentRef) {
+      return;
+    }
+    const state = parentRef.getSnapshot() as AnyMachineSnapshot;
+
+    const toolEvents = await getToolCalls(
+      openai,
+      input.goal + '\nOnly make a single tool call.',
+      state,
+      input.model ?? model,
+      (eventType) => eventType.startsWith('agent.'),
+      (state.machine.schemas as any)?.events
+    );
+
+    if (toolEvents.length > 0) {
+      parentRef.send(toolEvents[0]);
+    }
+
+    return;
+  });
 }
