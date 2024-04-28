@@ -10,39 +10,35 @@ const openai = new OpenAI({
 
 const agent = createAgent(openai, {
   model: 'gpt-3.5-turbo-16k-0613',
-});
-
-const events = defineEvents({
-  'agent.validateAnswer': z.object({
-    isValid: z.boolean(),
-    feedback: z.string(),
-  }),
-  'agent.answerQuestion': z.object({
-    answer: z.string().describe('The answer from the agent'),
-  }),
-  'agent.validateQuestion': z.object({
-    isValid: z
-      .boolean()
-      .describe(
-        'Whether the question is a valid question; that is, is it possible to even answer this question in a verifiably correct way?'
-      ),
-    explanation: z
-      .string()
-      .describe('An explanation for why the question is or is not valid'),
-  }),
+  events: {
+    'agent.validateAnswer': z.object({
+      isValid: z.boolean(),
+      feedback: z.string(),
+    }),
+    'agent.answerQuestion': z.object({
+      answer: z.string().describe('The answer from the agent'),
+    }),
+    'agent.validateQuestion': z.object({
+      isValid: z
+        .boolean()
+        .describe(
+          'Whether the question is a valid question; that is, is it possible to even answer this question in a verifiably correct way?'
+        ),
+      explanation: z
+        .string()
+        .describe('An explanation for why the question is or is not valid'),
+    }),
+  },
 });
 
 const machine = setup({
-  schemas: {
-    events: events.schemas,
-  },
   types: {
     context: {} as {
       question: string | null;
       answer: string | null;
       validation: string | null;
     },
-    events: events.types,
+    events: agent.eventTypes,
   },
   actors: {
     getFromTerminal,

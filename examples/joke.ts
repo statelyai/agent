@@ -7,31 +7,12 @@ import {
   log,
   setup,
 } from 'xstate';
-import { createAgent, createOpenAIAdapter, defineEvents } from '../src';
+import { createAgent } from '../src';
 import { loadingAnimation } from './helpers/loader';
 import { z } from 'zod';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
-});
-
-const events = defineEvents({
-  askForTopic: z.object({
-    topic: z.string().describe('The topic for the joke'),
-  }),
-  'agent.tellJoke': z.object({
-    joke: z.string().describe('The joke text'),
-  }),
-  'agent.endJokes': z.object({}).describe('End the jokes'),
-
-  'agent.rateJoke': z.object({
-    rating: z.number().min(1).max(10),
-    explanation: z.string(),
-  }),
-});
-
-const adapter = createOpenAIAdapter(openai, {
-  model: 'gpt-3.5-turbo-1106',
 });
 
 const getTopic = fromPromise(async () => {
@@ -89,12 +70,23 @@ const loader = fromCallback(({ input }: { input: string }) => {
 
 const agent = createAgent(openai, {
   model: 'gpt-3.5-turbo-1106',
+  events: {
+    askForTopic: z.object({
+      topic: z.string().describe('The topic for the joke'),
+    }),
+    'agent.tellJoke': z.object({
+      joke: z.string().describe('The joke text'),
+    }),
+    'agent.endJokes': z.object({}).describe('End the jokes'),
+
+    'agent.rateJoke': z.object({
+      rating: z.number().min(1).max(10),
+      explanation: z.string(),
+    }),
+  },
 });
 
 const jokeMachine = setup({
-  schemas: {
-    events: events.schemas,
-  },
   types: {
     context: {} as {
       topic: string;
@@ -103,7 +95,7 @@ const jokeMachine = setup({
       lastRating: number | null;
       loader: string | null;
     },
-    events: events.types,
+    events: agent.eventTypes,
   },
   actors: {
     getTopic,

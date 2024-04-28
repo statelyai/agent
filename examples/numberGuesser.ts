@@ -8,12 +8,11 @@ const openai = new OpenAI({
 
 const agent = createAgent(openai, {
   model: 'gpt-3.5-turbo-1106',
-});
-
-const events = defineEvents({
-  'agent.guess': z.object({
-    number: z.number().min(1).max(10).describe('The number guessed'),
-  }),
+  events: {
+    'agent.guess': z.object({
+      number: z.number().min(1).max(10).describe('The number guessed'),
+    }),
+  },
 });
 
 const machine = setup({
@@ -23,10 +22,7 @@ const machine = setup({
       answer: number;
     },
     input: {} as { answer: number },
-    events: events.types,
-  },
-  schemas: {
-    events: events.schemas,
+    events: agent.eventTypes,
   },
   actors: {
     agent,

@@ -8,20 +8,6 @@ const openAI = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-const adapter = createOpenAIAdapter(openAI, {
-  model: 'gpt-4-1106-preview',
-});
-
-const events = defineEvents({
-  'agent.guessLetter': z.object({
-    letter: z.string().min(1).max(1).describe('The letter guessed'),
-  }),
-
-  'agent.guessWord': z.object({
-    word: z.string().describe('The word guessed'),
-  }),
-});
-
 const context = {
   word: null as string | null,
   guessedWord: null as string | null,
@@ -30,19 +16,25 @@ const context = {
 
 const agent = createAgent(openAI, {
   model: 'gpt-3.5-turbo-16k-0613',
+  events: {
+    'agent.guessLetter': z.object({
+      letter: z.string().min(1).max(1).describe('The letter guessed'),
+    }),
+
+    'agent.guessWord': z.object({
+      word: z.string().describe('The word guessed'),
+    }),
+  },
 });
 
 const wordGuesserMachine = setup({
   types: {
     context: {} as typeof context,
-    events: events.types,
+    events: agent.eventTypes,
   },
   actors: {
     agent,
     getFromTerminal,
-  },
-  schemas: {
-    events: events.schemas,
   },
 }).createMachine({
   initial: 'providingWord',

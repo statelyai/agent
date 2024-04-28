@@ -9,25 +9,27 @@ const openai = new OpenAI({
 
 const agent = createAgent(openai, {
   model: 'gpt-4-0125-preview',
+  events: {
+    'agent.x.play': z.object({
+      index: z
+        .number()
+        .min(0)
+        .max(8)
+        .describe('The index of the cell to play on'),
+    }),
+    'agent.o.play': z.object({
+      index: z
+        .number()
+        .min(0)
+        .max(8)
+        .describe('The index of the cell to play on'),
+    }),
+  },
 });
 
 type Player = 'x' | 'o';
 
 const events = defineEvents({
-  'agent.x.play': z.object({
-    index: z
-      .number()
-      .min(0)
-      .max(8)
-      .describe('The index of the cell to play on'),
-  }),
-  'agent.o.play': z.object({
-    index: z
-      .number()
-      .min(0)
-      .max(8)
-      .describe('The index of the cell to play on'),
-  }),
   reset: z.object({}).describe('Reset the game to the initial state'),
 });
 
@@ -50,15 +52,6 @@ const initialContext = {
   gameReport: '',
   events: [],
 } satisfies GameContext;
-
-const bot = adapter.fromEvent(
-  ({ context }: { context: GameContext }) => `
-You are playing a game of tic tac toe. This is the current game state. The 3x3 board is represented by a 9-element array. The first element is the top-left cell, the second element is the top-middle cell, the third element is the top-right cell, the fourth element is the middle-left cell, and so on. The value of each cell is either null, x, or o. The value of null means that the cell is empty. The value of x means that the cell is occupied by an x. The value of o means that the cell is occupied by an o.
-
-${JSON.stringify(context, null, 2)}
-
-Execute the single best next move to try to win the game. Do not play on an existing cell.`
-);
 
 const gameReporter = adapter.fromChatStream(
   ({ context }: { context: GameContext }) => `Here is the game board:
@@ -108,7 +101,7 @@ export const ticTacToeMachine = setup({
   },
   types: {
     context: {} as GameContext,
-    events: events.types,
+    events: {} as typeof events.types | typeof agent.eventTypes,
   },
   actors: {
     agent,

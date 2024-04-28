@@ -1,6 +1,7 @@
 import { Values } from 'xstate';
 import { createZodEventSchemas } from './utils';
 import { SomeZodObject, TypeOf } from 'zod';
+import { JsonSchema7Type } from 'zod-to-json-schema';
 
 export type ZodEventTypes = {
   // map event types to Zod types
@@ -8,7 +9,7 @@ export type ZodEventTypes = {
 };
 
 export type EventSchemas<TEventType extends string> = {
-  [K in TEventType]: unknown;
+  [K in TEventType]: JsonSchema7Type;
 };
 
 export function defineEvents<const TEventSchemas extends ZodEventTypes>(

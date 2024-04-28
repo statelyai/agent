@@ -1,7 +1,10 @@
 import { AnyMachineSnapshot, AnyStateNode, Prop, Values } from 'xstate';
 import { FromSchema } from 'json-schema-to-ts';
 import { JSONSchema } from 'json-schema-to-ts/lib/types/definitions';
-import zodToJsonSchema, { JsonSchema7Type } from 'zod-to-json-schema';
+import zodToJsonSchema, {
+  JsonSchema7ObjectType,
+  JsonSchema7Type,
+} from 'zod-to-json-schema';
 import { ZodEventTypes } from './schemas';
 import { z } from 'zod';
 
@@ -32,7 +35,7 @@ export type ConvertToJSONSchemas<T> = {
     required: Array<(keyof Prop<T[K], 'properties'> & string) | 'type'>;
     additionalProperties: false;
   };
-} & {};
+} & JsonSchema7ObjectType;
 
 export function createEventSchemas<T extends EventSchemas>(
   eventSchemaMap: T
@@ -61,7 +64,7 @@ export function createEventSchemas<T extends EventSchemas>(
 export function createZodEventSchemas<T extends ZodEventTypes>(
   eventSchemaMap: T
 ): {
-  [K in keyof T]: unknown;
+  [K in keyof T]: JsonSchema7ObjectType;
 } {
   const resolvedEventSchemaMap = {};
 
@@ -74,7 +77,7 @@ export function createZodEventSchemas<T extends ZodEventTypes>(
     );
   }
 
-  return resolvedEventSchemaMap as ConvertToJSONSchemas<T>;
+  return resolvedEventSchemaMap as any;
 }
 
 export type InferEventsFromSchemas<T extends ConvertToJSONSchemas<any>> =

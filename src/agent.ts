@@ -1,14 +1,24 @@
-import { AnyMachineSnapshot, fromPromise, PromiseActorLogic } from 'xstate';
+import {
+  AnyMachineSnapshot,
+  fromPromise,
+  PromiseActorLogic,
+  Values,
+} from 'xstate';
 import OpenAI from 'openai';
 import { getToolCalls } from './adapters/openai';
 import { ChatCompletionCreateParamsBase } from 'openai/resources/chat/completions';
+import { ZodEventTypes, EventSchemas } from './schemas';
+import { createZodEventSchemas } from './utils';
+import { TypeOf } from 'zod';
 
-export function createAgent(
+export function createAgent<const TEventSchemas extends ZodEventTypes>(
   openai: OpenAI,
   {
     model,
+    events,
   }: {
     model: ChatCompletionCreateParamsBase['model'];
+    events?: TEventSchemas;
   }
 ): PromiseActorLogic<
   void,
@@ -16,8 +26,23 @@ export function createAgent(
     goal: string;
     model?: ChatCompletionCreateParamsBase['model'];
   }
-> {
-  return fromPromise(async ({ input, self }) => {
+> & {
+  eventTypes: Values<{
+    [K in keyof TEventSchemas]: {
+      type: K;
+    } & TypeOf<TEventSchemas[K]>;
+  }>;
+  eventSchemas: EventSchemas<keyof TEventSchemas & string>;
+} {
+  const eventSchemas = events ? createZodEventSchemas(events) : undefined;
+
+  const logic = fromPromise<
+    void,
+    {
+      goal: string;
+      model?: ChatCompletionCreateParamsBase['model'];
+    }
+  >(async ({ input, self }) => {
     const parentRef = self._parent;
     if (!parentRef) {
       return;
@@ -30,7 +55,7 @@ export function createAgent(
       state,
       input.model ?? model,
       (eventType) => eventType.startsWith('agent.'),
-      (state.machine.schemas as any)?.events
+      eventSchemas ?? (state.machine.schemas as any)?.events
     );
 
     if (toolEvents.length > 0) {
@@ -39,4 +64,8 @@ export function createAgent(
 
     return;
   });
+
+  (logic as any).eventSchemas = eventSchemas;
+
+  return logic as any;
 }
