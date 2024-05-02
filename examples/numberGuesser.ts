@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import { createAgent, createOpenAIAdapter, defineEvents } from '../src';
+import { createAgent } from '../src';
 import { assign, createActor, log, setup } from 'xstate';
 import { z } from 'zod';
 const openai = new OpenAI({

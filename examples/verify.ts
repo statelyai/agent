@@ -1,6 +1,6 @@
 import { assign, createActor, setup, log } from 'xstate';
 import { getFromTerminal } from './helpers/helpers';
-import { createAgent, defineEvents } from '../src';
+import { createAgent } from '../src';
 import OpenAI from 'openai';
 import { z } from 'zod';
 

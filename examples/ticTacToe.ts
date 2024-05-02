@@ -1,7 +1,7 @@
 import { assign, setup, assertEvent, createActor } from 'xstate';
 import OpenAI from 'openai';
 import { z } from 'zod';
-import { createOpenAIAdapter, defineEvents, createAgent } from '../src';
+import { createOpenAIAdapter, createAgent } from '../src';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -24,14 +24,11 @@ const agent = createAgent(openai, {
         .max(8)
         .describe('The index of the cell to play on'),
     }),
+    reset: z.object({}).describe('Reset the game to the initial state'),
   },
 });
 
 type Player = 'x' | 'o';
-
-const events = defineEvents({
-  reset: z.object({}).describe('Reset the game to the initial state'),
-});
 
 interface GameContext {
   board: (Player | null)[];
@@ -96,12 +93,9 @@ Execute the single best next move to try to win the game. Do not play on an exis
 });
 
 export const ticTacToeMachine = setup({
-  schemas: {
-    events: events.schemas,
-  },
   types: {
     context: {} as GameContext,
-    events: {} as typeof events.types | typeof agent.eventTypes,
+    events: agent.eventTypes,
   },
   actors: {
     agent,

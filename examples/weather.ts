@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import { createAgent, createOpenAIAdapter, defineEvents } from '../src';
+import { createAgent, createOpenAIAdapter } from '../src';
 import { assign, createActor, fromPromise, log, setup } from 'xstate';
 import { getFromTerminal } from './helpers/helpers';
 import { z } from 'zod';
@@ -41,23 +41,6 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-const events = defineEvents({
-  'agent.getWeather': z.object({
-    location: z.string().describe('The location to get the weather for'),
-  }),
-  'agent.reportWeather': z.object({
-    location: z
-      .string()
-      .describe('The location the weather is being reported for'),
-    highF: z.number().describe('The high temperature today in Fahrenheit'),
-    lowF: z.number().describe('The low temperature today in Fahrenheit'),
-    summary: z.string().describe('A summary of the weather conditions'),
-  }),
-  'agent.doSomethingElse': z
-    .object({})
-    .describe('Do something else, because the user did not provide a location'),
-});
-
 const adapter = createOpenAIAdapter(openai, {
   model: 'gpt-4-1106-preview',
 });
@@ -77,19 +60,34 @@ const reportWeather = adapter.fromEvent(() => 'Report the weather');
 
 const agent = createAgent(openai, {
   model: 'gpt-4-1106-preview',
+  events: {
+    'agent.getWeather': z.object({
+      location: z.string().describe('The location to get the weather for'),
+    }),
+    'agent.reportWeather': z.object({
+      location: z
+        .string()
+        .describe('The location the weather is being reported for'),
+      highF: z.number().describe('The high temperature today in Fahrenheit'),
+      lowF: z.number().describe('The low temperature today in Fahrenheit'),
+      summary: z.string().describe('A summary of the weather conditions'),
+    }),
+    'agent.doSomethingElse': z
+      .object({})
+      .describe(
+        'Do something else, because the user did not provide a location'
+      ),
+  },
 });
 
 const machine = setup({
-  schemas: {
-    events: events.schemas,
-  },
   types: {
     context: {} as {
       location: string;
       history: string[];
       count: number;
     },
-    events: events.types,
+    events: agent.eventTypes,
   },
   actors: {
     agent,
