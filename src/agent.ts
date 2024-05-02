@@ -25,6 +25,10 @@ export function createAgent<const TEventSchemas extends ZodEventTypes>(
   {
     goal: string;
     model?: ChatCompletionCreateParamsBase['model'];
+    /**
+     * Context to include
+     */
+    context?: any;
   }
 > & {
   eventTypes: Values<{
@@ -41,6 +45,7 @@ export function createAgent<const TEventSchemas extends ZodEventTypes>(
     {
       goal: string;
       model?: ChatCompletionCreateParamsBase['model'];
+      context?: any;
     }
   >(async ({ input, self }) => {
     const parentRef = self._parent;
@@ -48,10 +53,17 @@ export function createAgent<const TEventSchemas extends ZodEventTypes>(
       return;
     }
     const state = parentRef.getSnapshot() as AnyMachineSnapshot;
+    const contextToInclude = input.context
+      ? JSON.stringify(input.context, null, 2)
+      : 'No context provided';
 
     const toolEvents = await getToolCalls(
       openai,
-      input.goal + '\nOnly make a single tool call.',
+      [
+        `<context>\n${JSON.stringify(contextToInclude, null, 2)}\n</context>`,
+        input.goal,
+        'Only make a single tool call.',
+      ].join('\n\n'),
       state,
       input.model ?? model,
       (eventType) => eventType.startsWith('agent.'),

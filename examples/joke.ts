@@ -129,7 +129,10 @@ const jokeMachine = setup({
         {
           src: 'agent',
           input: ({ context }) => ({
-            goal: `Tell me a joke about ${context.topic}`,
+            context: {
+              topic: context.topic,
+            },
+            goal: `Tell me a joke about the topic.`,
           }),
         },
         {
@@ -154,9 +157,10 @@ const jokeMachine = setup({
         {
           src: 'agent',
           input: ({ context }) => ({
-            goal: `Rate this joke on a scale of 1 to 10: ${
-              context.jokes[context.jokes.length - 1]
-            }`,
+            context: {
+              jokes: context.jokes,
+            },
+            goal: `Rate the last joke on a scale of 1 to 10.`,
           }),
         },
         {
@@ -170,7 +174,7 @@ const jokeMachine = setup({
             assign({
               lastRating: ({ event }) => event.rating,
             }),
-            log(({ event }) => event.explanation),
+            log(({ event }) => event),
           ],
           target: 'decide',
         },
@@ -180,7 +184,10 @@ const jokeMachine = setup({
       invoke: {
         src: 'agent',
         input: ({ context }) => ({
-          goal: `Choose what to do next, given the previous rating of the joke: ${context.lastRating}`,
+          context: {
+            lastRating: context.lastRating,
+          },
+          goal: `Choose what to do next, given the previous rating of the joke.`,
         }),
       },
       on: {

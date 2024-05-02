@@ -1,6 +1,6 @@
 import { assign, createActor, log, setup } from 'xstate';
 import { getFromTerminal } from './helpers/helpers';
-import { createAgent, createOpenAIAdapter, defineEvents } from '../src';
+import { createAgent } from '../src';
 import OpenAI from 'openai';
 import { z } from 'zod';
 
@@ -11,11 +11,11 @@ const openAI = new OpenAI({
 const context = {
   word: null as string | null,
   guessedWord: null as string | null,
-  letters: [] as string[],
+  lettersGuessed: [] as string[],
 };
 
 const agent = createAgent(openAI, {
-  model: 'gpt-3.5-turbo-16k-0613',
+  model: 'gpt-4-1106-preview',
   events: {
     'agent.guessLetter': z.object({
       letter: z.string().min(1).max(1).describe('The letter guessed'),
@@ -54,34 +54,35 @@ const wordGuesserMachine = setup({
     },
     guessing: {
       always: {
-        guard: ({ context }) => context.letters.length > 10,
+        guard: ({ context }) => context.lettersGuessed.length > 10,
         target: 'finalGuess',
       },
       invoke: {
         src: 'agent',
         input: ({ context }) => ({
+          context: {
+            lettersGuessed: context.lettersGuessed,
+          },
           goal: `
           You are trying to guess the word. The word has ${
             context.word!.length
-          } letters. You have guessed the following letters so far: ${context.letters.join(
-            ', '
-          )}. These letters matched: ${context
+          } letters. These letters matched: ${context
             .word!.split('')
             .map((letter) =>
-              context.letters.includes(letter.toUpperCase())
+              context.lettersGuessed.includes(letter.toUpperCase())
                 ? letter.toUpperCase()
                 : '_'
             )
             .join('')}
-          Please make your next guess - guess a letter or, if you think you know the word, guess the full word. You can only make 10 total guesses.
+          Please make your next guess - guess a letter or, if you think you know the word, guess the full word. You can only make 10 total guesses. If you are confident you know the word, it is better to guess the word.
               `,
         }),
       },
       on: {
         'agent.guessLetter': {
           actions: assign({
-            letters: ({ context, event }) => {
-              return [...context.letters, event.letter.toUpperCase()];
+            lettersGuessed: ({ context, event }) => {
+              return [...context.lettersGuessed, event.letter.toUpperCase()];
             },
           }),
           target: 'guessing',
@@ -99,12 +100,13 @@ const wordGuesserMachine = setup({
       invoke: {
         src: 'agent',
         input: ({ context }) => ({
-          goal: `You have used all 10 guesses. You have guessed the following letters so far: ${context.letters.join(
-            ', '
-          )}. These letters matched: ${context
+          context: {
+            lettersGuessed: context.lettersGuessed,
+          },
+          goal: `You have used all 10 guesses. These letters matched: ${context
             .word!.split('')
             .map((letter) =>
-              context.letters.includes(letter.toUpperCase())
+              context.lettersGuessed.includes(letter.toUpperCase())
                 ? letter.toUpperCase()
                 : '_'
             )
