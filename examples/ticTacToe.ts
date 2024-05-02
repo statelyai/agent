@@ -1,32 +1,34 @@
-import { assign, setup, assertEvent } from 'xstate';
+import { assign, setup, assertEvent, createActor } from 'xstate';
 import OpenAI from 'openai';
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
-import { createOpenAIAdapter, defineEvents, createAgent } from '../src';
+import { createOpenAIAdapter, createAgent } from '../src';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-type Player = 'x' | 'o';
-
-const events = defineEvents({
-  'x.play': z.object({
-    index: z
-      .number()
-      .min(0)
-      .max(8)
-      .describe('The index of the cell to play on'),
-  }),
-  'o.play': z.object({
-    index: z
-      .number()
-      .min(0)
-      .max(8)
-      .describe('The index of the cell to play on'),
-  }),
-  reset: z.object({}).describe('Reset the game to the initial state'),
+const agent = createAgent(openai, {
+  model: 'gpt-4-0125-preview',
+  events: {
+    'agent.x.play': z.object({
+      index: z
+        .number()
+        .min(0)
+        .max(8)
+        .describe('The index of the cell to play on'),
+    }),
+    'agent.o.play': z.object({
+      index: z
+        .number()
+        .min(0)
+        .max(8)
+        .describe('The index of the cell to play on'),
+    }),
+    reset: z.object({}).describe('Reset the game to the initial state'),
+  },
 });
+
+type Player = 'x' | 'o';
 
 interface GameContext {
   board: (Player | null)[];
@@ -47,15 +49,6 @@ const initialContext = {
   gameReport: '',
   events: [],
 } satisfies GameContext;
-
-const bot = adapter.fromEvent(
-  ({ context }: { context: GameContext }) => `
-You are playing a game of tic tac toe. This is the current game state. The 3x3 board is represented by a 9-element array. The first element is the top-left cell, the second element is the top-middle cell, the third element is the top-right cell, the fourth element is the middle-left cell, and so on. The value of each cell is either null, x, or o. The value of null means that the cell is empty. The value of x means that the cell is occupied by an x. The value of o means that the cell is occupied by an o.
-
-${JSON.stringify(context, null, 2)}
-
-Execute the single best next move to try to win the game. Do not play on an existing cell.`
-);
 
 const gameReporter = adapter.fromChatStream(
   ({ context }: { context: GameContext }) => `Here is the game board:
@@ -90,22 +83,28 @@ function getWinner(board: typeof initialContext.board): Player | null {
   return null;
 }
 
+const playerInput = ({ context }: { context: GameContext }) => ({
+  goal: `
+You are playing a game of tic tac toe. This is the current game state. The 3x3 board is represented by a 9-element array. The first element is the top-left cell, the second element is the top-middle cell, the third element is the top-right cell, the fourth element is the middle-left cell, and so on. The value of each cell is either null, x, or o. The value of null means that the cell is empty. The value of x means that the cell is occupied by an x. The value of o means that the cell is occupied by an o.
+
+${JSON.stringify(context, null, 2)}
+
+Execute the single best next move to try to win the game. Do not play on an existing cell.`,
+});
+
 export const ticTacToeMachine = setup({
-  schemas: {
-    events: events.schemas,
-  },
   types: {
     context: {} as GameContext,
-    events: events.types,
+    events: agent.eventTypes,
   },
   actors: {
-    bot,
+    agent,
     gameReporter,
   },
   actions: {
     updateBoard: assign({
       board: ({ context, event }) => {
-        assertEvent(event, ['x.play', 'o.play']);
+        assertEvent(event, ['agent.x.play', 'agent.o.play']);
         const updatedBoard = [...context.board];
         updatedBoard[event.index] = context.player;
         return updatedBoard;
@@ -134,7 +133,7 @@ export const ticTacToeMachine = setup({
     },
     isValidMove: ({ context, event }) => {
       try {
-        assertEvent(event, ['o.play', 'x.play']);
+        assertEvent(event, ['agent.o.play', 'agent.x.play']);
       } catch {
         return false;
       }
@@ -155,11 +154,11 @@ export const ticTacToeMachine = setup({
       states: {
         x: {
           invoke: {
-            src: 'bot',
-            input: ({ context }) => ({ context }),
+            src: 'agent',
+            input: playerInput,
           },
           on: {
-            'x.play': [
+            'agent.x.play': [
               {
                 target: 'o',
                 guard: 'isValidMove',
@@ -171,11 +170,11 @@ export const ticTacToeMachine = setup({
         },
         o: {
           invoke: {
-            src: 'bot',
-            input: ({ context }) => ({ context }),
+            src: 'agent',
+            input: playerInput,
           },
           on: {
-            'o.play': [
+            'agent.o.play': [
               {
                 target: 'x',
                 guard: 'isValidMove',
@@ -221,8 +220,8 @@ export const ticTacToeMachine = setup({
   },
 });
 
-const agent = createAgent(ticTacToeMachine);
-agent.subscribe((s) => {
+const actor = createActor(ticTacToeMachine);
+actor.subscribe((s) => {
   console.log(s.value, s.context);
 });
-agent.start();
+actor.start();

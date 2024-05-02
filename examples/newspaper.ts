@@ -33,7 +33,7 @@ async function search({ topic }: Pick<AgentState, 'topic'>): Promise<string> {
   if (topic.length < 5) {
     topic = 'topic: ' + topic;
   }
-  const docs = await retriever.getRelevantDocuments(topic);
+  const docs = await retriever.invoke(topic);
   return JSON.stringify(docs);
 }
 

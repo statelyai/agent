@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
-import { createAgent, createOpenAIAdapter, defineEvents } from '../src';
-import { assign, fromPromise, log, setup } from 'xstate';
+import { createAgent, createOpenAIAdapter } from '../src';
+import { assign, createActor, fromPromise, log, setup } from 'xstate';
 import { getFromTerminal } from './helpers/helpers';
 import { z } from 'zod';
 
@@ -41,23 +41,6 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-const events = defineEvents({
-  getWeather: z.object({
-    location: z.string().describe('The location to get the weather for'),
-  }),
-  reportWeather: z.object({
-    location: z
-      .string()
-      .describe('The location the weather is being reported for'),
-    highF: z.number().describe('The high temperature today in Fahrenheit'),
-    lowF: z.number().describe('The low temperature today in Fahrenheit'),
-    summary: z.string().describe('A summary of the weather conditions'),
-  }),
-  doSomethingElse: z
-    .object({})
-    .describe('Do something else, because the user did not provide a location'),
-});
-
 const adapter = createOpenAIAdapter(openai, {
   model: 'gpt-4-1106-preview',
 });
@@ -75,19 +58,39 @@ const getWeather = fromPromise(async ({ input }: { input: string }) => {
 
 const reportWeather = adapter.fromEvent(() => 'Report the weather');
 
-const machine = setup({
-  schemas: {
-    events: events.schemas,
+const agent = createAgent(openai, {
+  model: 'gpt-4-1106-preview',
+  events: {
+    'agent.getWeather': z.object({
+      location: z.string().describe('The location to get the weather for'),
+    }),
+    'agent.reportWeather': z.object({
+      location: z
+        .string()
+        .describe('The location the weather is being reported for'),
+      highF: z.number().describe('The high temperature today in Fahrenheit'),
+      lowF: z.number().describe('The low temperature today in Fahrenheit'),
+      summary: z.string().describe('A summary of the weather conditions'),
+    }),
+    'agent.doSomethingElse': z
+      .object({})
+      .describe(
+        'Do something else, because the user did not provide a location'
+      ),
   },
+});
+
+const machine = setup({
   types: {
     context: {} as {
       location: string;
       history: string[];
       count: number;
     },
-    events: events.types,
+    events: agent.eventTypes,
   },
   actors: {
+    agent,
     getWeather,
     reportWeather,
     decide: adapter.fromEvent(
@@ -123,15 +126,17 @@ const machine = setup({
     decide: {
       entry: log('Deciding...'),
       invoke: {
-        src: 'decide',
-        input: ({ context }) => context.location,
+        src: 'agent',
+        input: ({ context }) => ({
+          goal: `Decide what to do based on the given input, which may or may not be a location: ${context.location}`,
+        }),
       },
       on: {
-        getWeather: {
+        'agent.getWeather': {
           actions: log(({ event }) => event),
           target: 'gettingWeather',
         },
-        doSomethingElse: 'getLocation',
+        'agent.doSomethingElse': 'getLocation',
       },
     },
     gettingWeather: {
@@ -152,10 +157,13 @@ const machine = setup({
     },
     reportWeather: {
       invoke: {
-        src: 'reportWeather',
+        src: 'agent',
+        input: ({ context }) => ({
+          goal: 'Report the weather', // TODO
+        }),
       },
       on: {
-        reportWeather: {
+        'agent.reportWeather': {
           actions: log(({ event }) => event),
           target: 'getLocation',
         },
@@ -170,7 +178,7 @@ const machine = setup({
   },
 });
 
-const actor = createAgent(machine, {
+const actor = createActor(machine, {
   input: {
     location: 'New York',
   },

@@ -1,8 +1,83 @@
-import { AnyStateMachine, createActor } from 'xstate';
+import {
+  AnyMachineSnapshot,
+  fromPromise,
+  PromiseActorLogic,
+  Values,
+} from 'xstate';
+import OpenAI from 'openai';
+import { getToolCalls } from './adapters/openai';
+import { ChatCompletionCreateParamsBase } from 'openai/resources/chat/completions';
+import { ZodEventTypes, EventSchemas } from './schemas';
+import { createZodEventSchemas } from './utils';
+import { TypeOf } from 'zod';
 
-export function createAgent<T extends AnyStateMachine>(
-  ...args: Parameters<typeof createActor<T>>
-) {
-  const [machine, options] = args;
-  return createActor(machine, options);
+type AgentLogic<TEventSchemas extends ZodEventTypes> = PromiseActorLogic<
+  void,
+  | {
+      goal: string;
+      model?: ChatCompletionCreateParamsBase['model'];
+      /**
+       * Context to include
+       */
+      context?: any;
+    }
+  | string
+> & {
+  eventTypes: Values<{
+    [K in keyof TEventSchemas]: {
+      type: K;
+    } & TypeOf<TEventSchemas[K]>;
+  }>;
+  eventSchemas: EventSchemas<keyof TEventSchemas & string>;
+};
+
+export function createAgent<const TEventSchemas extends ZodEventTypes>(
+  openai: OpenAI,
+  {
+    model,
+    events,
+  }: {
+    model: ChatCompletionCreateParamsBase['model'];
+    events?: TEventSchemas;
+  }
+): AgentLogic<TEventSchemas> {
+  const eventSchemas = events ? createZodEventSchemas(events) : undefined;
+
+  const logic: Omit<
+    AgentLogic<TEventSchemas>,
+    'eventTypes' | 'eventSchemas'
+  > = fromPromise(async ({ input, self }) => {
+    const parentRef = self._parent;
+    if (!parentRef) {
+      return;
+    }
+    const resolvedInput = typeof input === 'string' ? { goal: input } : input;
+    const state = parentRef.getSnapshot() as AnyMachineSnapshot;
+    const contextToInclude = resolvedInput.context
+      ? JSON.stringify(resolvedInput.context, null, 2)
+      : 'No context provided';
+
+    const toolEvents = await getToolCalls(
+      openai,
+      [
+        `<context>\n${JSON.stringify(contextToInclude, null, 2)}\n</context>`,
+        resolvedInput.goal,
+        'Only make a single tool call.',
+      ].join('\n\n'),
+      state,
+      resolvedInput.model ?? model,
+      (eventType) => eventType.startsWith('agent.'),
+      eventSchemas ?? (state.machine.schemas as any)?.events
+    );
+
+    if (toolEvents.length > 0) {
+      parentRef.send(toolEvents[0]);
+    }
+
+    return;
+  });
+
+  (logic as any).eventSchemas = eventSchemas;
+
+  return logic as AgentLogic<TEventSchemas>;
 }

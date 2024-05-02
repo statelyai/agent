@@ -21,6 +21,9 @@
   "devDependencies": {
     "@changesets/changelog-github": "^0.5.0",
     "@changesets/cli": "^2.27.1",
+    "@langchain/community": "^0.0.53",
+    "@langchain/core": "^0.1.61",
+    "@langchain/openai": "^0.0.28",
     "@types/node": "^20.12.7",
     "dotenv": "^16.4.5",
     "json-schema-to-ts": "^3.0.1",
@@ -36,7 +39,7 @@
     "access": "public"
   },
   "dependencies": {
-    "xstate": "^5.10.0"
+    "xstate": "^5.12.0"
   },
   "packageManager": "pnpm@8.11.0"
 }
