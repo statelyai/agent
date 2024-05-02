@@ -11,6 +11,26 @@ import { ZodEventTypes, EventSchemas } from './schemas';
 import { createZodEventSchemas } from './utils';
 import { TypeOf } from 'zod';
 
+type AgentLogic<TEventSchemas extends ZodEventTypes> = PromiseActorLogic<
+  void,
+  | {
+      goal: string;
+      model?: ChatCompletionCreateParamsBase['model'];
+      /**
+       * Context to include
+       */
+      context?: any;
+    }
+  | string
+> & {
+  eventTypes: Values<{
+    [K in keyof TEventSchemas]: {
+      type: K;
+    } & TypeOf<TEventSchemas[K]>;
+  }>;
+  eventSchemas: EventSchemas<keyof TEventSchemas & string>;
+};
+
 export function createAgent<const TEventSchemas extends ZodEventTypes>(
   openai: OpenAI,
   {
@@ -20,52 +40,32 @@ export function createAgent<const TEventSchemas extends ZodEventTypes>(
     model: ChatCompletionCreateParamsBase['model'];
     events?: TEventSchemas;
   }
-): PromiseActorLogic<
-  void,
-  {
-    goal: string;
-    model?: ChatCompletionCreateParamsBase['model'];
-    /**
-     * Context to include
-     */
-    context?: any;
-  }
-> & {
-  eventTypes: Values<{
-    [K in keyof TEventSchemas]: {
-      type: K;
-    } & TypeOf<TEventSchemas[K]>;
-  }>;
-  eventSchemas: EventSchemas<keyof TEventSchemas & string>;
-} {
+): AgentLogic<TEventSchemas> {
   const eventSchemas = events ? createZodEventSchemas(events) : undefined;
 
-  const logic = fromPromise<
-    void,
-    {
-      goal: string;
-      model?: ChatCompletionCreateParamsBase['model'];
-      context?: any;
-    }
-  >(async ({ input, self }) => {
+  const logic: Omit<
+    AgentLogic<TEventSchemas>,
+    'eventTypes' | 'eventSchemas'
+  > = fromPromise(async ({ input, self }) => {
     const parentRef = self._parent;
     if (!parentRef) {
       return;
     }
+    const resolvedInput = typeof input === 'string' ? { goal: input } : input;
     const state = parentRef.getSnapshot() as AnyMachineSnapshot;
-    const contextToInclude = input.context
-      ? JSON.stringify(input.context, null, 2)
+    const contextToInclude = resolvedInput.context
+      ? JSON.stringify(resolvedInput.context, null, 2)
       : 'No context provided';
 
     const toolEvents = await getToolCalls(
       openai,
       [
         `<context>\n${JSON.stringify(contextToInclude, null, 2)}\n</context>`,
-        input.goal,
+        resolvedInput.goal,
         'Only make a single tool call.',
       ].join('\n\n'),
       state,
-      input.model ?? model,
+      resolvedInput.model ?? model,
       (eventType) => eventType.startsWith('agent.'),
       eventSchemas ?? (state.machine.schemas as any)?.events
     );
@@ -79,5 +79,5 @@ export function createAgent<const TEventSchemas extends ZodEventTypes>(
 
   (logic as any).eventSchemas = eventSchemas;
 
-  return logic as any;
+  return logic as AgentLogic<TEventSchemas>;
 }

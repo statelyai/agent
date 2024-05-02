@@ -1,10 +1,3 @@
----
-'@statelyai/agent': minor
----
-
-The `createAgent(…)` function now returns **agent actor logic** instead of the state machine actor logic. That means its return value can now be used directly in `actors` for a state machine, and it will perform tool calls and choose the correct event to send back to the machine:
-
-```ts
 import { createAgent } from '../src';
 import { z } from 'zod';
 import { setup, createActor } from 'xstate';
@@ -47,6 +40,3 @@ const machine = setup({
 });
 
 const actor = createActor(machine).start();
-```
-
-See the examples directory for more detailed examples
