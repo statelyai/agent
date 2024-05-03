@@ -9,7 +9,8 @@ import { getToolCalls } from './adapters/openai';
 import { ChatCompletionCreateParamsBase } from 'openai/resources/chat/completions';
 import { ZodEventTypes, EventSchemas } from './schemas';
 import { createZodEventSchemas } from './utils';
-import { TypeOf } from 'zod';
+import { TypeOf, z } from 'zod';
+import { generateText, LanguageModel, tool } from 'ai';
 
 type AgentLogic<TEventSchemas extends ZodEventTypes> = PromiseActorLogic<
   void,
@@ -31,16 +32,13 @@ type AgentLogic<TEventSchemas extends ZodEventTypes> = PromiseActorLogic<
   eventSchemas: EventSchemas<keyof TEventSchemas & string>;
 };
 
-export function createAgent<const TEventSchemas extends ZodEventTypes>(
-  openai: OpenAI,
-  {
-    model,
-    events,
-  }: {
-    model: ChatCompletionCreateParamsBase['model'];
-    events?: TEventSchemas;
-  }
-): AgentLogic<TEventSchemas> {
+export function createAgent<const TEventSchemas extends ZodEventTypes>({
+  model,
+  events,
+}: {
+  model: LanguageModel;
+  events?: TEventSchemas;
+}): AgentLogic<TEventSchemas> {
   const eventSchemas = events ? createZodEventSchemas(events) : undefined;
 
   const logic: Omit<
@@ -57,24 +55,57 @@ export function createAgent<const TEventSchemas extends ZodEventTypes>(
       ? JSON.stringify(resolvedInput.context, null, 2)
       : 'No context provided';
 
-    const toolEvents = await getToolCalls(
-      openai,
-      [
-        `<context>\n${JSON.stringify(contextToInclude, null, 2)}\n</context>`,
-        resolvedInput.goal,
-        'Only make a single tool call.',
-      ].join('\n\n'),
+    const toolCalls = await getToolCalls(
       state,
-      resolvedInput.model ?? model,
       (eventType) => eventType.startsWith('agent.'),
       eventSchemas ?? (state.machine.schemas as any)?.events
     );
 
-    if (toolEvents.length > 0) {
-      parentRef.send(toolEvents[0]);
+    const toolMap: Record<string, any> = {};
+
+    for (const toolCall of toolCalls) {
+      toolMap[toolCall.function.name] = tool({
+        description: toolCall.function.description,
+        parameters: events?.[toolCall.eventType] ?? z.object({}),
+        execute: async (params) => {
+          parentRef.send({
+            type: toolCall.eventType,
+            ...params,
+          });
+        },
+      });
     }
 
+    await generateText({
+      model,
+      tools: toolMap,
+      prompt: [
+        `<context>\n${JSON.stringify(contextToInclude, null, 2)}\n</context>`,
+        resolvedInput.goal,
+        'Only make a single tool call.',
+      ].join('\n\n'),
+    });
+
     return;
+
+    // const toolEvents = await getToolCalls(
+    //   // model,
+    //   // [
+    //   //   `<context>\n${JSON.stringify(contextToInclude, null, 2)}\n</context>`,
+    //   //   resolvedInput.goal,
+    //   //   'Only make a single tool call.',
+    //   // ].join('\n\n'),
+    //   state,
+    //   // resolvedInput.model ?? model,
+    //   (eventType) => eventType.startsWith('agent.'),
+    //   eventSchemas ?? (state.machine.schemas as any)?.events
+    // );
+
+    // if (toolEvents.length > 0) {
+    //   parentRef.send(toolEvents[0]);
+    // }
+
+    // return;
   });
 
   (logic as any).eventSchemas = eventSchemas;

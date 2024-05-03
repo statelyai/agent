@@ -1,13 +1,10 @@
-import OpenAI from 'openai';
 import { createAgent } from '../src';
 import { assign, createActor, log, setup } from 'xstate';
 import { z } from 'zod';
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+import { openai } from '@ai-sdk/openai';
 
-const agent = createAgent(openai, {
-  model: 'gpt-3.5-turbo-1106',
+const agent = createAgent({
+  model: openai('gpt-3.5-turbo-1106'),
   events: {
     'agent.guess': z.object({
       number: z.number().min(1).max(10).describe('The number guessed'),

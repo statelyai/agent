@@ -1,4 +1,3 @@
-import OpenAI from 'openai';
 import {
   assign,
   createActor,
@@ -10,10 +9,11 @@ import {
 import { createAgent } from '../src';
 import { loadingAnimation } from './helpers/loader';
 import { z } from 'zod';
+import { openai } from '@ai-sdk/openai';
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// const openai = new OpenAI({
+//   apiKey: process.env.OPENAI_API_KEY,
+// });
 
 const getTopic = fromPromise(async () => {
   const topic = await new Promise<string>((res) => {
@@ -68,8 +68,8 @@ const loader = fromCallback(({ input }: { input: string }) => {
   };
 });
 
-const agent = createAgent(openai, {
-  model: 'gpt-3.5-turbo-1106',
+const agent = createAgent({
+  model: openai('gpt-3.5-turbo-1106'),
   events: {
     askForTopic: z.object({
       topic: z.string().describe('The topic for the joke'),

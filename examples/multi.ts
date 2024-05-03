@@ -1,15 +1,11 @@
-import OpenAI from 'openai';
 import { createAgent } from '../src';
 import { z } from 'zod';
 import { assign, createActor, log, setup } from 'xstate';
 import { getFromTerminal } from './helpers/helpers';
+import { openai } from '@ai-sdk/openai';
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-const agent = createAgent(openai, {
-  model: 'gpt-4-1106-preview',
+const agent = createAgent({
+  model: openai('gpt-4-1106-preview'),
   events: {
     'agent.respond': z.object({
       response: z.string().describe('The response from the agent'),

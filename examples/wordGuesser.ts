@@ -1,12 +1,8 @@
 import { assign, createActor, log, setup } from 'xstate';
 import { getFromTerminal } from './helpers/helpers';
 import { createAgent } from '../src';
-import OpenAI from 'openai';
 import { z } from 'zod';
-
-const openAI = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+import { openai } from '@ai-sdk/openai';
 
 const context = {
   word: null as string | null,
@@ -14,8 +10,8 @@ const context = {
   lettersGuessed: [] as string[],
 };
 
-const agent = createAgent(openAI, {
-  model: 'gpt-4-1106-preview',
+const agent = createAgent({
+  model: openai('gpt-4-1106-preview'),
   events: {
     'agent.guessLetter': z.object({
       letter: z.string().min(1).max(1).describe('The letter guessed'),
@@ -23,6 +19,14 @@ const agent = createAgent(openAI, {
 
     'agent.guessWord': z.object({
       word: z.string().describe('The word guessed'),
+    }),
+
+    'agent.respond': z.object({
+      response: z
+        .string()
+        .describe(
+          'The response from the agent, detailing why the guess was correct or incorrect based on the letters guessed.'
+        ),
     }),
   },
 });
@@ -41,6 +45,7 @@ const wordGuesserMachine = setup({
   context,
   states: {
     providingWord: {
+      entry: assign(context),
       invoke: {
         src: 'getFromTerminal',
         input: 'Enter a word',
@@ -80,18 +85,24 @@ const wordGuesserMachine = setup({
       },
       on: {
         'agent.guessLetter': {
-          actions: assign({
-            lettersGuessed: ({ context, event }) => {
-              return [...context.lettersGuessed, event.letter.toUpperCase()];
-            },
-          }),
+          actions: [
+            assign({
+              lettersGuessed: ({ context, event }) => {
+                return [...context.lettersGuessed, event.letter.toUpperCase()];
+              },
+            }),
+            log(({ event }) => event),
+          ],
           target: 'guessing',
           reenter: true,
         },
         'agent.guessWord': {
-          actions: assign({
-            guessedWord: ({ event }) => event.word,
-          }),
+          actions: [
+            assign({
+              guessedWord: ({ event }) => event.word,
+            }),
+            log(({ event }) => event),
+          ],
           target: 'gameOver',
         },
       },
@@ -115,14 +126,24 @@ const wordGuesserMachine = setup({
       },
       on: {
         'agent.guessWord': {
-          actions: assign({
-            guessedWord: ({ event }) => event.word,
-          }),
+          actions: [
+            assign({
+              guessedWord: ({ event }) => event.word,
+            }),
+            log(({ event }) => event),
+          ],
           target: 'gameOver',
         },
       },
     },
     gameOver: {
+      invoke: {
+        src: 'agent',
+        input: ({ context }) => ({
+          context,
+          goal: `Why do you think you won or lost?`,
+        }),
+      },
       entry: log(({ context }) => {
         if (
           context.guessedWord?.toUpperCase() === context.word?.toUpperCase()
@@ -132,8 +153,11 @@ const wordGuesserMachine = setup({
           return 'You lost! The word was ' + context.word;
         }
       }),
-      after: {
-        1000: 'providingWord',
+      on: {
+        'agent.respond': {
+          actions: log(({ event }) => event.response),
+          target: 'providingWord',
+        },
       },
     },
   },

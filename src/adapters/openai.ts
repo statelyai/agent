@@ -110,17 +110,22 @@ export function fromChatStream<TInput>(
 }
 
 export async function getToolCalls(
-  openai: OpenAI,
-  goal: string,
   snapshot: AnyMachineSnapshot,
-  model: string,
   filter: (eventType: string) => boolean,
   eventSchemas: EventSchemas = {}
 ): Promise<
-  Array<{
-    [key: string]: unknown;
-    type: `agent.${string}`;
-  }>
+  {
+    readonly type: 'function';
+    readonly eventType: string;
+    readonly function: {
+      readonly name: any;
+      readonly description: any;
+      readonly parameters: {
+        readonly type: 'object';
+        readonly properties: any;
+      };
+    };
+  }[]
 > {
   const eventSchemaMap = eventSchemas;
   const transitions = getAllTransitions(snapshot);
@@ -140,6 +145,7 @@ export async function getToolCalls(
 
       return {
         type: 'function',
+        eventType: t.eventType,
         function: {
           name,
           description: t.description ?? description,
@@ -155,35 +161,37 @@ export async function getToolCalls(
     return [];
   }
 
-  const completionParams: ChatCompletionCreateParamsNonStreaming = {
-    model,
-    messages: [
-      {
-        role: 'user',
-        content: goal,
-      },
-    ],
-  };
+  return tools;
 
-  const completion = await openai.chat.completions.create({
-    ...completionParams,
-    tools,
-  });
+  // const completionParams: ChatCompletionCreateParamsNonStreaming = {
+  //   model,
+  //   messages: [
+  //     {
+  //       role: 'user',
+  //       content: goal,
+  //     },
+  //   ],
+  // };
 
-  const toolCalls = completion.choices[0]?.message.tool_calls;
+  // const completion = await openai.chat.completions.create({
+  //   ...completionParams,
+  //   tools,
+  // });
 
-  if (toolCalls?.length) {
-    const events = toolCalls.map((tc) => {
-      return {
-        type: functionNameMapping[tc.function.name],
-        ...JSON.parse(tc.function.arguments),
-      };
-    });
+  // const toolCalls = completion.choices[0]?.message.tool_calls;
 
-    return events;
-  }
+  // if (toolCalls?.length) {
+  //   const events = toolCalls.map((tc) => {
+  //     return {
+  //       type: functionNameMapping[tc.function.name],
+  //       ...JSON.parse(tc.function.arguments),
+  //     };
+  //   });
 
-  return [];
+  //   return events;
+  // }
+
+  // return [];
 }
 
 /**
@@ -379,42 +387,4 @@ export function createOpenAIAdapter<
   };
 
   return agentSettings;
-}
-
-export function createAgent(
-  openai: OpenAI,
-  {
-    model,
-  }: {
-    model: ChatCompletionCreateParamsBase['model'];
-  }
-): PromiseActorLogic<
-  void,
-  {
-    goal: string;
-    model?: ChatCompletionCreateParamsBase['model'];
-  }
-> {
-  return fromPromise(async ({ input, self }) => {
-    const parentRef = self._parent;
-    if (!parentRef) {
-      return;
-    }
-    const state = parentRef.getSnapshot() as AnyMachineSnapshot;
-
-    const toolEvents = await getToolCalls(
-      openai,
-      input.goal + '\nOnly make a single tool call.',
-      state,
-      input.model ?? model,
-      (eventType) => eventType.startsWith('agent.'),
-      (state.machine.schemas as any)?.events
-    );
-
-    if (toolEvents.length > 0) {
-      parentRef.send(toolEvents[0]);
-    }
-
-    return;
-  });
 }

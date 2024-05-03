@@ -1,14 +1,10 @@
 import { assign, setup, assertEvent, createActor } from 'xstate';
-import OpenAI from 'openai';
 import { z } from 'zod';
 import { createOpenAIAdapter, createAgent } from '../src';
+import { openai } from '@ai-sdk/openai';
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-const agent = createAgent(openai, {
-  model: 'gpt-4-0125-preview',
+const agent = createAgent({
+  model: openai('gpt-4-0125-preview'),
   events: {
     'agent.x.play': z.object({
       index: z
