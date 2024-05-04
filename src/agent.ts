@@ -17,14 +17,14 @@ import { generateText, LanguageModel, streamText, tool } from 'ai';
 
 type AgentLogic<TEventSchemas extends ZodEventTypes> = PromiseActorLogic<
   void,
-  | {
+  | ({
       goal: string;
       model?: ChatCompletionCreateParamsBase['model'];
       /**
        * Context to include
        */
       context?: any;
-    }
+    } & Omit<Parameters<typeof generateText>[0], 'model' | 'tools' | 'prompt'>)
   | string
 > & {
   eventTypes: Values<{
@@ -69,9 +69,13 @@ export function createAgent<const TEventSchemas extends ZodEventTypes>({
     }
     const resolvedInput = typeof input === 'string' ? { goal: input } : input;
     const state = parentRef.getSnapshot() as AnyMachineSnapshot;
-    const contextToInclude = resolvedInput.context
-      ? JSON.stringify(resolvedInput.context, null, 2)
-      : 'No context provided';
+    const contextToInclude =
+      resolvedInput.context === true
+        ? // include entire context
+          parentRef.getSnapshot().context
+        : resolvedInput.context
+        ? JSON.stringify(resolvedInput.context, null, 2)
+        : 'No context provided';
 
     const toolCalls = await getToolCalls(
       state,
