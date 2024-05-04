@@ -11,10 +11,6 @@ import { loadingAnimation } from './helpers/loader';
 import { z } from 'zod';
 import { openai } from '@ai-sdk/openai';
 
-// const openai = new OpenAI({
-//   apiKey: process.env.OPENAI_API_KEY,
-// });
-
 const getTopic = fromPromise(async () => {
   const topic = await new Promise<string>((res) => {
     console.log('Give me a joke topic:');

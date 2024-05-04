@@ -34,10 +34,6 @@ interface GameContext {
   events: string[];
 }
 
-// const adapter = createOpenAIAdapter(openai, {
-//   model: 'gpt-4-1106-preview',
-// });
-
 const initialContext = {
   board: Array(9).fill(null) as Array<Player | null>,
   moves: 0,
@@ -82,7 +78,6 @@ export const ticTacToeMachine = setup({
   actors: {
     agent,
     gameReporter: agent.fromTextStream(),
-    // gameReporter,
   },
   actions: {
     updateBoard: assign({
