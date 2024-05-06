@@ -14,7 +14,11 @@ const agent = createAgent({
         .enum(['billing', 'technical', 'other'])
         .describe('The category of the customer issue'),
     }),
-    'agent.refund': z.object({}).describe('The agent wants to refund the user'),
+    'agent.refund': z
+      .object({
+        response: z.string().describe('The response from the agent'),
+      })
+      .describe('The agent wants to refund the user'),
     'agent.technical.solve': z.object({
       solution: z
         .string()
@@ -137,7 +141,7 @@ const machine = setup({
 });
 
 const actor = createActor(machine, {
-  input: `I really did not like this computer and I want my money back.`,
+  input: `I've changed my mind and I want a refund for order #182818!`,
 });
 
 actor.start();

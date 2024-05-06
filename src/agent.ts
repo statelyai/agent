@@ -79,7 +79,7 @@ export function createAgent<const TEventSchemas extends ZodEventTypes>({
 
     const toolCalls = await getToolCalls(
       state,
-      (eventType) => eventType.startsWith('agent.'),
+      (eventType) => Object.keys(events ?? {}).includes(eventType),
       eventSchemas ?? (state.machine.schemas as any)?.events
     );
 
