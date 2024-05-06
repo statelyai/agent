@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { createAgent } from '../src';
 import { openai } from '@ai-sdk/openai';
 import { assign, createActor, log, setup } from 'xstate';
+import { getFromTerminal } from './helpers/helpers';
 
 const agent = createAgent({
   model: openai('gpt-4-turbo'),
@@ -18,20 +19,31 @@ const agent = createAgent({
 const machine = setup({
   types: {
     context: {} as {
-      question: string;
+      question: string | null;
       goal: string | null;
     },
     events: agent.eventTypes,
-    input: {} as { question: string },
   },
-  actors: { agent },
+  actors: { agent, getFromTerminal },
 }).createMachine({
-  initial: 'makingGoal',
-  context: ({ input }) => ({
-    question: input.question,
+  initial: 'gettingQuestion',
+  context: {
+    question: null,
     goal: null,
-  }),
+  },
   states: {
+    gettingQuestion: {
+      invoke: {
+        src: 'getFromTerminal',
+        input: 'What would you like to ask?',
+        onDone: {
+          actions: assign({
+            question: ({ event }) => event.output,
+          }),
+          target: 'makingGoal',
+        },
+      },
+    },
     makingGoal: {
       invoke: {
         src: 'agent',
@@ -68,14 +80,12 @@ const machine = setup({
         },
       },
     },
-    responded: {},
+    responded: {
+      type: 'final',
+    },
   },
 });
 
-const actor = createActor(machine, {
-  input: {
-    question: 'What are the last 3 digits of pi?',
-  },
-});
+const actor = createActor(machine);
 
 actor.start();
