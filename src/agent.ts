@@ -13,9 +13,15 @@ import { ChatCompletionCreateParamsBase } from 'openai/resources/chat/completion
 import { ZodEventTypes, EventSchemas } from './schemas';
 import { createZodEventSchemas } from './utils';
 import { TypeOf, z } from 'zod';
-import { generateText, LanguageModel, streamText, tool } from 'ai';
+import {
+  generateText,
+  GenerateTextResult,
+  LanguageModel,
+  streamText,
+  tool,
+} from 'ai';
 
-type AgentLogic<TEventSchemas extends ZodEventTypes> = PromiseActorLogic<
+export type AgentLogic<TEventSchemas extends ZodEventTypes> = PromiseActorLogic<
   void,
   | ({
       goal: string;
@@ -33,6 +39,10 @@ type AgentLogic<TEventSchemas extends ZodEventTypes> = PromiseActorLogic<
     } & TypeOf<TEventSchemas[K]>;
   }>;
   eventSchemas: EventSchemas<keyof TEventSchemas & string>;
+  fromText: () => ObservableActorLogic<
+    GenerateTextResult<never>,
+    AgentTextStreamLogicInput
+  >;
   fromTextStream: () => ObservableActorLogic<
     { textDelta: string },
     AgentTextStreamLogicInput
@@ -61,7 +71,7 @@ export function createAgent<const TEventSchemas extends ZodEventTypes>({
 
   const logic: Omit<
     AgentLogic<TEventSchemas>,
-    'eventTypes' | 'eventSchemas' | 'fromTextStream'
+    'eventTypes' | 'eventSchemas' | 'fromText' | 'fromTextStream'
   > = fromPromise(async ({ input, self }) => {
     const parentRef = self._parent;
     if (!parentRef) {
@@ -114,6 +124,30 @@ export function createAgent<const TEventSchemas extends ZodEventTypes>({
 
   (logic as any).eventSchemas = eventSchemas;
 
+  function fromText() {
+    return fromPromise(
+      async ({ input }: { input: AgentTextStreamLogicInput }) => {
+        const observers = new Set<Observer<{ textDelta: string }>>();
+
+        const prompt = [
+          input.context &&
+            `<context>\n${JSON.stringify(input.context, null, 2)}\n</context>`,
+          input.prompt,
+        ]
+          .filter(Boolean)
+          .join('\n\n');
+
+        const result = await generateText({
+          model,
+          ...input,
+          prompt,
+        });
+
+        return result;
+      }
+    );
+  }
+
   function fromTextStream() {
     return fromObservable(({ input }: { input: AgentTextStreamLogicInput }) => {
       const observers = new Set<Observer<{ textDelta: string }>>();
@@ -157,6 +191,7 @@ export function createAgent<const TEventSchemas extends ZodEventTypes>({
     });
   }
 
+  (logic as any).fromText = fromText;
   (logic as any).fromTextStream = fromTextStream;
 
   return logic as AgentLogic<TEventSchemas>;

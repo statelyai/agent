@@ -74,7 +74,6 @@ const agent = createAgent({
       joke: z.string().describe('The joke text'),
     }),
     'agent.endJokes': z.object({}).describe('End the jokes'),
-
     'agent.rateJoke': z.object({
       rating: z.number().min(1).max(10),
       explanation: z.string(),
