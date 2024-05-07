@@ -1,14 +1,10 @@
 import { assign, setup, assertEvent, createActor } from 'xstate';
-import OpenAI from 'openai';
 import { z } from 'zod';
-import { createOpenAIAdapter, createAgent } from '../src';
+import { createAgent } from '../src';
+import { openai } from '@ai-sdk/openai';
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-const agent = createAgent(openai, {
-  model: 'gpt-4-0125-preview',
+const agent = createAgent({
+  model: openai('gpt-4-0125-preview'),
   events: {
     'agent.x.play': z.object({
       index: z
@@ -38,10 +34,6 @@ interface GameContext {
   events: string[];
 }
 
-const adapter = createOpenAIAdapter(openai, {
-  model: 'gpt-4-1106-preview',
-});
-
 const initialContext = {
   board: Array(9).fill(null) as Array<Player | null>,
   moves: 0,
@@ -49,20 +41,6 @@ const initialContext = {
   gameReport: '',
   events: [],
 } satisfies GameContext;
-
-const gameReporter = adapter.fromChatStream(
-  ({ context }: { context: GameContext }) => `Here is the game board:
-
-${JSON.stringify(context.board, null, 2)}
-
-And here are the events that led to this game state:
-
-${context.events.join('\n')}
-
-The winner is ${getWinner(context.board)}.
-
-Provide a very short game report analyzing the game.`
-);
 
 function getWinner(board: typeof initialContext.board): Player | null {
   const lines = [
@@ -99,7 +77,7 @@ export const ticTacToeMachine = setup({
   },
   actors: {
     agent,
-    gameReporter,
+    gameReporter: agent.fromTextStream(),
   },
   actions: {
     updateBoard: assign({
@@ -190,13 +168,21 @@ export const ticTacToeMachine = setup({
       initial: 'winner',
       invoke: {
         src: 'gameReporter',
-        input: ({ context }) => ({ context }),
+        input: ({ context }) => ({
+          context: {
+            events: context.events,
+            board: context.board,
+          },
+          prompt: `Provide a short game report analyzing the game.`,
+        }),
         onSnapshot: {
           actions: assign({
             gameReport: ({ context, event }) => {
+              console.log(
+                context.gameReport + event.snapshot.context?.textDelta ?? ''
+              );
               return (
-                context.gameReport +
-                (event.snapshot.context?.choices[0]?.delta.content ?? '')
+                context.gameReport + event.snapshot.context?.textDelta ?? ''
               );
             },
           }),

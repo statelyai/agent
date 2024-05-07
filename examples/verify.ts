@@ -1,15 +1,11 @@
 import { assign, createActor, setup, log } from 'xstate';
 import { getFromTerminal } from './helpers/helpers';
 import { createAgent } from '../src';
-import OpenAI from 'openai';
 import { z } from 'zod';
+import { openai } from '@ai-sdk/openai';
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-const agent = createAgent(openai, {
-  model: 'gpt-3.5-turbo-16k-0613',
+const agent = createAgent({
+  model: openai('gpt-3.5-turbo-16k-0613'),
   events: {
     'agent.validateAnswer': z.object({
       isValid: z.boolean(),

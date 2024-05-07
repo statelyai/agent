@@ -1,8 +1,8 @@
-import OpenAI from 'openai';
-import { createAgent, createOpenAIAdapter } from '../src';
+import { createAgent } from '../src';
 import { assign, createActor, fromPromise, log, setup } from 'xstate';
 import { getFromTerminal } from './helpers/helpers';
 import { z } from 'zod';
+import { openai } from '@ai-sdk/openai';
 
 async function searchTavily(
   input: string,
@@ -37,14 +37,6 @@ async function searchTavily(
   return JSON.stringify(json.results);
 }
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-const adapter = createOpenAIAdapter(openai, {
-  model: 'gpt-4-1106-preview',
-});
-
 const getWeather = fromPromise(async ({ input }: { input: string }) => {
   const results = await searchTavily(
     `Get the weather for this location: ${input}`,
@@ -56,10 +48,8 @@ const getWeather = fromPromise(async ({ input }: { input: string }) => {
   return results;
 });
 
-const reportWeather = adapter.fromEvent(() => 'Report the weather');
-
-const agent = createAgent(openai, {
-  model: 'gpt-4-1106-preview',
+const agent = createAgent({
+  model: openai('gpt-4-1106-preview'),
   events: {
     'agent.getWeather': z.object({
       location: z.string().describe('The location to get the weather for'),
@@ -92,11 +82,6 @@ const machine = setup({
   actors: {
     agent,
     getWeather,
-    reportWeather,
-    decide: adapter.fromEvent(
-      (input: string) =>
-        `Decide what to do based on the given input, which may or may not be a location: ${input}`
-    ),
     getFromTerminal,
   },
 }).createMachine({
@@ -128,7 +113,10 @@ const machine = setup({
       invoke: {
         src: 'agent',
         input: ({ context }) => ({
-          goal: `Decide what to do based on the given input, which may or may not be a location: ${context.location}`,
+          context: {
+            location: context.location,
+          },
+          goal: `Decide what to do based on the given location, which may or may not be a location`,
         }),
       },
       on: {

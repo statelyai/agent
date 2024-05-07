@@ -1,14 +1,10 @@
 import { createAgent } from '../src';
 import { z } from 'zod';
 import { setup, createActor } from 'xstate';
-import OpenAI from 'openai';
+import { openai } from '@ai-sdk/openai';
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-const agent = createAgent(openai, {
-  model: 'gpt-3.5-turbo-16k-0613',
+const agent = createAgent({
+  model: openai('gpt-3.5-turbo-16k-0613'),
   events: {
     'agent.thought': z.object({
       text: z.string().describe('The text of the thought'),
