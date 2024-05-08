@@ -83,24 +83,22 @@ export function createZodEventSchemas<T extends ZodEventTypes>(
 export type InferEventsFromSchemas<T extends ConvertToJSONSchemas<any>> =
   FromSchema<Values<T>>;
 
-export async function getToolCalls(
+export function getToolCalls(
   snapshot: AnyMachineSnapshot,
   filter: (eventType: string) => boolean,
   eventSchemas: EventSchemas = {}
-): Promise<
-  {
-    readonly type: 'function';
-    readonly eventType: string;
-    readonly function: {
-      readonly name: any;
-      readonly description: any;
-      readonly parameters: {
-        readonly type: 'object';
-        readonly properties: any;
-      };
+): {
+  readonly type: 'function';
+  readonly eventType: string;
+  readonly function: {
+    readonly name: any;
+    readonly description: any;
+    readonly parameters: {
+      readonly type: 'object';
+      readonly properties: any;
     };
-  }[]
-> {
+  };
+}[] {
   const eventSchemaMap = eventSchemas;
   const transitions = getAllTransitions(snapshot);
   const functionNameMapping: Record<string, string> = {};

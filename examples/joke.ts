@@ -208,6 +208,8 @@ const jokeMachine = setup({
   },
 });
 
-const actor = createActor(jokeMachine);
+const actor = createActor(jokeMachine, {
+  inspect: agent.observe,
+});
 
 actor.start();

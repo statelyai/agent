@@ -2,6 +2,7 @@ import {
   AnyMachineSnapshot,
   fromObservable,
   fromPromise,
+  InspectionEvent,
   ObservableActorLogic,
   Observer,
   PromiseActorLogic,
@@ -20,6 +21,7 @@ import {
   streamText,
   tool,
 } from 'ai';
+import { AgentHistory } from './history';
 
 export type AgentLogic<TEventSchemas extends ZodEventTypes> = PromiseActorLogic<
   void,
@@ -47,6 +49,7 @@ export type AgentLogic<TEventSchemas extends ZodEventTypes> = PromiseActorLogic<
     { textDelta: string },
     AgentTextStreamLogicInput
   >;
+  observe: (inspectionEvent: InspectionEvent) => Observer<any>;
 };
 
 export type AgentTextStreamLogicInput = Omit<
@@ -59,19 +62,23 @@ export type AgentTextStreamLogicInput = Omit<
 export function createAgent<const TEventSchemas extends ZodEventTypes>({
   model,
   events,
+  stringify = JSON.stringify,
+  history,
   ...generateTextOptions
 }: {
   model: LanguageModel;
   events?: TEventSchemas;
+  stringify?: typeof JSON.stringify;
+  history?: AgentHistory;
 } & Omit<
   Parameters<typeof generateText>[0],
   'model' | 'tools' | 'prompt'
 >): AgentLogic<TEventSchemas> {
   const eventSchemas = events ? createZodEventSchemas(events) : undefined;
 
-  const logic: Omit<
+  const agentLogic: Omit<
     AgentLogic<TEventSchemas>,
-    'eventTypes' | 'eventSchemas' | 'fromText' | 'fromTextStream'
+    'eventTypes' | 'eventSchemas' | 'fromText' | 'fromTextStream' | 'observe'
   > = fromPromise(async ({ input, self }) => {
     const parentRef = self._parent;
     if (!parentRef) {
@@ -84,7 +91,7 @@ export function createAgent<const TEventSchemas extends ZodEventTypes>({
         ? // include entire context
           parentRef.getSnapshot().context
         : resolvedInput.context
-        ? JSON.stringify(resolvedInput.context, null, 2)
+        ? stringify(resolvedInput.context, null, 2)
         : 'No context provided';
 
     const toolCalls = await getToolCalls(
@@ -100,10 +107,12 @@ export function createAgent<const TEventSchemas extends ZodEventTypes>({
         description: toolCall.function.description,
         parameters: events?.[toolCall.eventType] ?? z.object({}),
         execute: async (params) => {
-          parentRef.send({
+          const event = {
             type: toolCall.eventType,
             ...params,
-          });
+          };
+
+          parentRef.send(event);
         },
       });
     }
@@ -112,7 +121,7 @@ export function createAgent<const TEventSchemas extends ZodEventTypes>({
       model,
       tools: toolMap,
       prompt: [
-        `<context>\n${JSON.stringify(contextToInclude, null, 2)}\n</context>`,
+        `<context>\n${stringify(contextToInclude, null, 2)}\n</context>`,
         resolvedInput.goal,
         'Only make a single tool call.',
       ].join('\n\n'),
@@ -122,16 +131,14 @@ export function createAgent<const TEventSchemas extends ZodEventTypes>({
     return;
   });
 
-  (logic as any).eventSchemas = eventSchemas;
+  (agentLogic as any).eventSchemas = eventSchemas;
 
   function fromText() {
     return fromPromise(
       async ({ input }: { input: AgentTextStreamLogicInput }) => {
-        const observers = new Set<Observer<{ textDelta: string }>>();
-
         const prompt = [
           input.context &&
-            `<context>\n${JSON.stringify(input.context, null, 2)}\n</context>`,
+            `<context>\n${stringify(input.context, null, 2)}\n</context>`,
           input.prompt,
         ]
           .filter(Boolean)
@@ -154,7 +161,7 @@ export function createAgent<const TEventSchemas extends ZodEventTypes>({
 
       const prompt = [
         input.context &&
-          `<context>\n${JSON.stringify(input.context, null, 2)}\n</context>`,
+          `<context>\n${stringify(input.context, null, 2)}\n</context>`,
         input.prompt,
       ]
         .filter(Boolean)
@@ -191,8 +198,13 @@ export function createAgent<const TEventSchemas extends ZodEventTypes>({
     });
   }
 
-  (logic as any).fromText = fromText;
-  (logic as any).fromTextStream = fromTextStream;
+  (agentLogic as any).fromText = fromText;
+  (agentLogic as any).fromTextStream = fromTextStream;
+  (agentLogic as any).observe = (inspectionEvent: InspectionEvent) => {
+    if (inspectionEvent.type === '@xstate.snapshot') {
+      history?.add(inspectionEvent);
+    }
+  };
 
-  return logic as AgentLogic<TEventSchemas>;
+  return agentLogic as AgentLogic<TEventSchemas>;
 }
