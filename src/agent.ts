@@ -41,7 +41,7 @@ export type AgentLogic<TEventSchemas extends ZodEventTypes> = PromiseActorLogic<
     } & TypeOf<TEventSchemas[K]>;
   }>;
   eventSchemas: EventSchemas<keyof TEventSchemas & string>;
-  fromText: () => ObservableActorLogic<
+  fromText: () => PromiseActorLogic<
     GenerateTextResult<never>,
     AgentTextStreamLogicInput
   >;
@@ -117,14 +117,16 @@ export function createAgent<const TEventSchemas extends ZodEventTypes>({
       });
     }
 
+    const prompt = [
+      `<context>\n${stringify(contextToInclude, null, 2)}\n</context>`,
+      resolvedInput.goal,
+      'Only make a single tool call.',
+    ].join('\n\n');
+
     await generateText({
       model,
       tools: toolMap,
-      prompt: [
-        `<context>\n${stringify(contextToInclude, null, 2)}\n</context>`,
-        resolvedInput.goal,
-        'Only make a single tool call.',
-      ].join('\n\n'),
+      prompt,
       ...generateTextOptions,
     });
 

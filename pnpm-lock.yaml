@@ -8,8 +8,8 @@ dependencies:
     specifier: ^3.1.1
     version: registry.npmjs.org/ai@3.1.1(react@18.3.1)(solid-js@1.8.17)(svelte@4.2.15)(vue@3.4.26)(zod@3.22.4)
   xstate:
-    specifier: ^5.12.0
-    version: 5.12.0
+    specifier: ^5.13.0
+    version: registry.npmjs.org/xstate@5.13.0
 
 devDependencies:
   '@changesets/changelog-github':
@@ -63,10 +63,6 @@ packages:
   /graceful-fs@4.2.11:
     resolution: {integrity: sha512-RbJ5/jmFcNNCcDV5o9eTnBLJ/HszWV0P73bc+Ff4nS/rJj+YaS6IGyiOL0VoBYX+l1Wrl3k63h/KrH+nhJ0XvQ==, tarball: https://registry.npmjs.org/graceful-fs/-/graceful-fs-4.2.11.tgz}
     dev: true
-
-  /xstate@5.12.0:
-    resolution: {integrity: sha512-4W/Hj553mwVnTLQ1itc3rni/cGtM5OkjyavTjaxCelc0ZZKE/ks6tYllc98KbekIoUrEPm4CJH/wTB5p5pPGEw==, tarball: https://registry.npmjs.org/xstate/-/xstate-5.12.0.tgz}
-    dev: false
 
   registry.npmjs.org/@ai-sdk/openai@0.0.9(zod@3.22.4):
     resolution: {integrity: sha512-SSZGtX4KFDXWYmQ9JuhVumo1XOx1JAdHybYy08iwVXuCud9xdjZjjxgZkNPytQK9gRxFsYDOw1h0V/WXO7XgfQ==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@ai-sdk/openai/-/openai-0.0.9.tgz}
@@ -5876,6 +5872,12 @@ packages:
       string-width: registry.npmjs.org/string-width@5.1.2
       strip-ansi: registry.npmjs.org/strip-ansi@7.1.0
     dev: true
+
+  registry.npmjs.org/xstate@5.13.0:
+    resolution: {integrity: sha512-Z0om784N5u8sAzUvQJBa32jiTCIGGF/2ZsmKkerQEqeeUktAeOMK20FIHFUMywC4GcAkNksSvaeX7lwoRNXPEQ==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/xstate/-/xstate-5.13.0.tgz}
+    name: xstate
+    version: 5.13.0
+    dev: false
 
   registry.npmjs.org/y18n@4.0.3:
     resolution: {integrity: sha512-JKhqTOwSrqNA1NY5lSztJ1GrBiUodLMmIZuLiDaMRJ+itFd+ABVE8XBjOvIWL+rSqNDC74LCSFmlb/U4UZ4hJQ==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/y18n/-/y18n-4.0.3.tgz}
