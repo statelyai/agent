@@ -8,11 +8,18 @@ import zodToJsonSchema, {
 import { ZodEventTypes } from './schemas';
 import { z } from 'zod';
 
-export function getAllTransitions(state: AnyMachineSnapshot) {
+export function getAllTransitions(state: AnyMachineSnapshot): TransitionData[] {
   const nodes = state._nodes;
   const transitions = (nodes as AnyStateNode[])
     .map((node) => [...(node as AnyStateNode).transitions.values()])
-    .flat(2);
+    .flat(2)
+    .map((transition) => ({
+      ...transition,
+      guard:
+        typeof transition.guard === 'string'
+          ? { type: transition.guard }
+          : (transition.guard as any), // TODO: fix
+    }));
 
   return transitions;
 }
@@ -38,13 +45,13 @@ export type ConvertToJSONSchemas<T> = {
 } & JsonSchema7ObjectType;
 
 export function createEventSchemas<T extends EventSchemas>(
-  eventSchemaMap: T
+  eventSchemas: T
 ): ConvertToJSONSchemas<T> {
-  const resolvedEventSchemaMap = {};
+  const resolvedeventSchemas = {};
 
-  for (const [key, schema] of Object.entries(eventSchemaMap)) {
+  for (const [key, schema] of Object.entries(eventSchemas)) {
     // @ts-ignore
-    resolvedEventSchemaMap[key] = {
+    resolvedeventSchemas[key] = {
       type: 'object',
       required: ['type'],
       properties: {
@@ -58,30 +65,37 @@ export function createEventSchemas<T extends EventSchemas>(
     } as JSONSchema;
   }
 
-  return resolvedEventSchemaMap as ConvertToJSONSchemas<T>;
+  return resolvedeventSchemas as ConvertToJSONSchemas<T>;
 }
 
 export function createZodEventSchemas<T extends ZodEventTypes>(
-  eventSchemaMap: T
+  eventSchemas: T
 ): {
   [K in keyof T]: JsonSchema7ObjectType;
 } {
-  const resolvedEventSchemaMap = {};
+  const resolvedeventSchemas = {};
 
-  for (const [eventType, zodType] of Object.entries(eventSchemaMap)) {
+  for (const [eventType, zodType] of Object.entries(eventSchemas)) {
     // @ts-ignore
-    resolvedEventSchemaMap[eventType] = zodToJsonSchema(
+    resolvedeventSchemas[eventType] = zodToJsonSchema(
       zodType.extend({
         type: z.literal(eventType),
       })
     );
   }
 
-  return resolvedEventSchemaMap as any;
+  return resolvedeventSchemas as any;
 }
 
 export type InferEventsFromSchemas<T extends ConvertToJSONSchemas<any>> =
   FromSchema<Values<T>>;
+
+export interface TransitionData {
+  eventType: string;
+  description?: string;
+  guard?: { type: string };
+  target?: any;
+}
 
 export function getToolCalls(
   snapshot: AnyMachineSnapshot,
@@ -99,8 +113,7 @@ export function getToolCalls(
     };
   };
 }[] {
-  const eventSchemaMap = eventSchemas;
-  const transitions = getAllTransitions(snapshot);
+  const transitions = getAllTransitions(snapshot) as TransitionData[];
   const functionNameMapping: Record<string, string> = {};
   const tools = transitions
     .filter((t) => {
@@ -109,7 +122,7 @@ export function getToolCalls(
     .map((t) => {
       const name = t.eventType.replace(/\./g, '_');
       functionNameMapping[name] = t.eventType;
-      const eventSchema = eventSchemaMap[t.eventType];
+      const eventSchema = eventSchemas[t.eventType];
       const {
         description,
         properties: { type, ...properties },

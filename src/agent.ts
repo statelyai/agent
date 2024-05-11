@@ -1,5 +1,7 @@
 import {
+  AnyEventObject,
   AnyMachineSnapshot,
+  AnyStateMachine,
   fromObservable,
   fromPromise,
   InspectionEvent,
@@ -9,7 +11,7 @@ import {
   toObserver,
   Values,
 } from 'xstate';
-import { getToolCalls } from './utils';
+import { getAllTransitions, getToolCalls, TransitionData } from './utils';
 import { ChatCompletionCreateParamsBase } from 'openai/resources/chat/completions';
 import { ZodEventTypes, EventSchemas } from './schemas';
 import { createZodEventSchemas } from './utils';
@@ -123,12 +125,29 @@ export function createAgent<const TEventSchemas extends ZodEventTypes>({
       'Only make a single tool call.',
     ].join('\n\n');
 
-    await generateText({
+    console.log(
+      '>>',
+      await decide({
+        model,
+        goal: resolvedInput.goal,
+        events: events ?? {}, // TODO: events should be required
+        logic: parentRef.src as any,
+        state,
+      })
+    );
+
+    const event = await decide({
       model,
-      tools: toolMap,
-      prompt,
-      ...generateTextOptions,
+      goal: resolvedInput.goal,
+      events: events ?? {}, // TODO: events should be required
+      logic: parentRef.src as any,
+      state,
     });
+
+    if (event) {
+      // TODO: validate event
+      parentRef.send(event);
+    }
 
     return;
   });
@@ -209,4 +228,105 @@ export function createAgent<const TEventSchemas extends ZodEventTypes>({
   };
 
   return agentLogic as AgentLogic<TEventSchemas>;
+}
+
+export interface ObservedState {
+  value: string;
+  context: Record<string, unknown>;
+}
+
+export async function decide({
+  model,
+  goal,
+  events,
+  state,
+  logic,
+  getTransitions = (state, logic) => {
+    if (!logic) {
+      return [];
+    }
+
+    const resolvedState = logic.resolveState(state);
+    return getAllTransitions(resolvedState);
+  },
+}: {
+  model: LanguageModel;
+  goal: string;
+  state: ObservedState;
+  events: ZodEventTypes;
+  sessionId?: string;
+  history?: Array<{
+    snapshot: any;
+    event: AnyEventObject;
+    reward?: number;
+  }>;
+  logic?: AnyStateMachine;
+  getTransitions?: (
+    state: ObservedState,
+    logic?: AnyStateMachine
+  ) => TransitionData[];
+}): Promise<AnyEventObject> {
+  const transitions = getTransitions(state, logic);
+  const eventSchemas = createZodEventSchemas(events ?? {});
+  const filter = (eventType: string) =>
+    Object.keys(events ?? {}).includes(eventType);
+
+  const functionNameMapping: Record<string, string> = {};
+  const tools = transitions
+    .filter((t) => {
+      return filter(t.eventType);
+    })
+    .map((t) => {
+      const name = t.eventType.replace(/\./g, '_');
+      functionNameMapping[name] = t.eventType;
+      const eventSchema = eventSchemas?.[t.eventType];
+      const {
+        description,
+        properties: { type, ...properties },
+      } = eventSchema ?? ({} as any);
+
+      return {
+        type: 'function',
+        eventType: t.eventType,
+        function: {
+          name,
+          description: t.description ?? description,
+          parameters: {
+            type: 'object',
+            properties: properties ?? {},
+          },
+        },
+      } as const;
+    });
+
+  const toolMap: Record<string, any> = {};
+
+  for (const toolCall of tools) {
+    toolMap[toolCall.function.name] = tool({
+      description: toolCall.function.description,
+      parameters: events?.[toolCall.eventType] ?? z.object({}),
+      execute: async (params) => {
+        const event = {
+          type: toolCall.eventType,
+          ...params,
+        };
+
+        return event;
+      },
+    });
+  }
+
+  const prompt = [
+    `<context>\n${JSON.stringify(state.context, null, 2)}\n</context>`,
+    goal,
+    'Only make a single tool call.',
+  ].join('\n\n');
+
+  const result = await generateText({
+    model,
+    tools: toolMap,
+    prompt,
+  });
+
+  return result.toolResults[0]!.result;
 }
