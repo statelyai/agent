@@ -37,8 +37,9 @@ export type AgentPlan = {
   state: ObservedState;
   steps: Array<{
     event: EventObject;
-    nextState: ObservedState;
+    nextState?: ObservedState;
   }>;
+  nextEvent: EventObject | undefined;
 };
 
 export type PromptTemplate = (data: {

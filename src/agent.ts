@@ -24,6 +24,8 @@ import {
   streamText,
   tool,
 } from 'ai';
+import { AgentTemplate, GenerateTextOptions } from './types';
+import { createDefaultTemplate } from './templates/simple';
 
 export type AgentLogic<TEventSchemas extends ZodEventMapping> =
   PromiseActorLogic<
@@ -90,23 +92,6 @@ export type AgentTextStreamLogicInput = Omit<
   context?: any;
 };
 
-export const defaultPromptTemplate: PromptTemplate = (data) => {
-  return `
-<context>
-${JSON.stringify(data.context, null, 2)}
-</context>
-
-${data.goal}
-
-Only make a single tool call to achieve the goal.
-  `.trim();
-};
-
-type GenerateTextOptions = Omit<
-  Parameters<typeof generateText>[0],
-  'model' | 'tools' | 'prompt'
->;
-
 export interface AgentState {
   state: ObservedState;
 }
@@ -123,14 +108,16 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
   model,
   events,
   stringify = JSON.stringify,
-  promptTemplate = defaultPromptTemplate,
+  template,
   ...generateTextOptions
 }: {
   model: LanguageModel;
   events?: TEventSchemas;
   stringify?: typeof JSON.stringify;
-  promptTemplate?: PromptTemplate;
+  template?: AgentTemplate;
 } & GenerateTextOptions): AgentLogic<TEventSchemas> {
+  const resolvedTemplate =
+    template ?? createDefaultTemplate(generateTextOptions);
   const eventSchemas = events ? createZodEventSchemas(events) : undefined;
 
   const observe: AgentLogic<any>['observe'] = ({
@@ -164,7 +151,7 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
         events: events ?? {}, // TODO: events should be required
         state,
         logic: parentRef.src as any,
-        promptTemplate,
+        template: resolvedTemplate,
         ...generateTextOptions,
       });
 
@@ -254,7 +241,7 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
   agentLogic.observe = observe;
   agentLogic.decide = (stuff) =>
     decide({
-      promptTemplate,
+      template: resolvedTemplate,
       model,
       ...stuff,
     });
@@ -273,8 +260,7 @@ export async function decide({
   events,
   state,
   logic,
-  promptTemplate,
-  ...generateTextOptions
+  template = createDefaultTemplate(),
 }: {
   model: LanguageModel;
   goal: string;
@@ -287,8 +273,8 @@ export async function decide({
     reward?: number;
   }>;
   logic: AnyStateMachine;
-  promptTemplate: PromptTemplate;
-} & GenerateTextOptions): Promise<AnyEventObject | undefined> {
+  template: AgentTemplate | undefined;
+}): Promise<AnyEventObject | undefined> {
   const transitions = getTransitions(state, logic);
   const eventSchemas = createZodEventSchemas(events ?? {});
 
@@ -339,19 +325,17 @@ export async function decide({
       },
     });
   }
-  const prompt = promptTemplate({
-    goal,
-    context: state.context,
-    logic,
-    transitions,
-  });
-
-  const result = await generateText({
+  const plan = await template({
     model,
-    tools: toolMap,
-    prompt,
-    ...generateTextOptions,
+    state,
+    goal,
+    logic,
+    toolMap,
   });
 
-  return result.toolResults[0]?.result;
+  if (!plan?.nextEvent) {
+    return undefined;
+  }
+
+  return plan.nextEvent;
 }
