@@ -1,6 +1,23 @@
-import { generateText } from 'ai';
+import { generateText, tool } from 'ai';
 import { GenerateTextOptions, AgentTemplate } from '../types';
-import { PromptTemplate } from '../utils';
+import {
+  createZodEventSchemas,
+  getAllTransitions,
+  PromptTemplate,
+  TransitionData,
+} from '../utils';
+import { AnyStateMachine } from 'xstate';
+import { z } from 'zod';
+import { ObservedState } from '../agent';
+
+const getTransitions = (state: ObservedState, logic: AnyStateMachine) => {
+  if (!logic) {
+    return [];
+  }
+
+  const resolvedState = logic.resolveState(state);
+  return getAllTransitions(resolvedState);
+};
 
 export const defaultPromptTemplate: PromptTemplate = (data) => {
   return `
@@ -14,11 +31,64 @@ Only make a single tool call to achieve the goal.
   `.trim();
 };
 
-export function createDefaultTemplate(
-  options?: GenerateTextOptions
-): AgentTemplate {
+export function simple(options?: GenerateTextOptions): AgentTemplate {
   return {
     decide: async (x) => {
+      const transitions: TransitionData[] = x.logic
+        ? getTransitions(x.state, x.logic)
+        : Object.entries(x.events).map(([eventType, { description }]) => ({
+            eventType,
+            description,
+          }));
+      const eventSchemas = createZodEventSchemas(x.events);
+
+      const filter = (eventType: string) =>
+        Object.keys(x.events).includes(eventType);
+
+      const functionNameMapping: Record<string, string> = {};
+      const tools = transitions
+        .filter((t) => {
+          return filter(t.eventType);
+        })
+        .map((t) => {
+          const name = t.eventType.replace(/\./g, '_');
+          functionNameMapping[name] = t.eventType;
+          const eventSchema = eventSchemas?.[t.eventType];
+          const {
+            description,
+            properties: { type, ...properties },
+          } = eventSchema ?? ({} as any);
+
+          return {
+            type: 'function',
+            eventType: t.eventType,
+            function: {
+              name,
+              description: t.description ?? description,
+              parameters: {
+                type: 'object',
+                properties: properties ?? {},
+              },
+            },
+          } as const;
+        });
+
+      const toolMap: Record<string, any> = {};
+
+      for (const toolCall of tools) {
+        toolMap[toolCall.function.name] = tool({
+          description: toolCall.function.description,
+          parameters: x.events?.[toolCall.eventType] ?? z.object({}),
+          execute: async (params) => {
+            const event = {
+              type: toolCall.eventType,
+              ...params,
+            };
+
+            return event;
+          },
+        });
+      }
       const prompt = `
 <context>
 ${JSON.stringify(x.state.context, null, 2)}
@@ -32,7 +102,7 @@ Only make a single tool call to achieve the goal.
       const result = await generateText({
         model: x.model,
         prompt,
-        tools: x.toolMap as any,
+        tools: toolMap as any,
         ...options,
       });
 

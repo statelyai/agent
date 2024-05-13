@@ -1,4 +1,4 @@
-import { AnyStateMachine } from 'xstate';
+import { AnyStateMachine, IsNever } from 'xstate';
 import { ObservedState } from './agent';
 import { AgentPlan } from './utils';
 import {
@@ -9,26 +9,33 @@ import {
   streamText,
   StreamTextResult,
 } from 'ai';
+import { ZodEventMapping } from './schemas';
+
+export type AgentTemplateGenerateTextOptions = GenerateTextOptions;
+
+export type AgentTemplateStreamTextOptions = GenerateTextOptions;
+
+export type AgentTemplateDecideOptions = {
+  model: LanguageModel;
+  state: ObservedState;
+  goal: string;
+  events: ZodEventMapping;
+  logic?: AnyStateMachine;
+};
 
 export type AgentTemplate = {
   decide?: ({
     model,
     state,
     goal,
-    toolMap,
+    events,
     logic,
-  }: {
-    model: LanguageModel;
-    state: ObservedState;
-    goal: string;
-    toolMap: Record<string, CoreTool>;
-    logic?: AnyStateMachine;
-  }) => Promise<AgentPlan | undefined>;
+  }: AgentTemplateDecideOptions) => Promise<AgentPlan | undefined>;
   generateText?: (
-    stuff: GenerateTextOptions
+    options: AgentTemplateGenerateTextOptions
   ) => Promise<GenerateTextResult<Record<string, CoreTool<any, any>>>>;
   streamText?: (
-    stuff: StreamTextOptions
+    options: StreamTextOptions
   ) => Promise<StreamTextResult<Record<string, CoreTool<any, any>>>>;
 };
 

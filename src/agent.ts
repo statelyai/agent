@@ -11,7 +11,7 @@ import {
   toObserver,
   Values,
 } from 'xstate';
-import { getAllTransitions, PromptTemplate } from './utils';
+import { AgentPlan } from './utils';
 import { ChatCompletionCreateParamsBase } from 'openai/resources/chat/completions';
 import { ZodEventMapping, EventSchemas } from './schemas';
 import { createZodEventSchemas } from './utils';
@@ -25,7 +25,7 @@ import {
   tool,
 } from 'ai';
 import { AgentTemplate, GenerateTextOptions, StreamTextOptions } from './types';
-import { createDefaultTemplate } from './templates/simple';
+import { simple } from './templates/simple';
 
 export type AgentLogic<TEventSchemas extends ZodEventMapping> =
   PromiseActorLogic<
@@ -82,7 +82,7 @@ export type AgentLogic<TEventSchemas extends ZodEventMapping> =
       events: ZodEventMapping;
       logic: AnyStateMachine;
       template?: AgentTemplate;
-    }) => Promise<AnyEventObject | undefined>;
+    }) => Promise<AgentPlan | undefined>;
   };
 
 export type AgentTextStreamLogicInput = Omit<StreamTextOptions, 'model'> & {
@@ -93,14 +93,6 @@ export interface AgentState {
   state: ObservedState;
 }
 
-const getTransitions = (state: ObservedState, logic: AnyStateMachine) => {
-  if (!logic) {
-    return [];
-  }
-
-  const resolvedState = logic.resolveState(state);
-  return getAllTransitions(resolvedState);
-};
 export function createAgent<const TEventSchemas extends ZodEventMapping>({
   model,
   events,
@@ -114,7 +106,7 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
   template?: AgentTemplate;
 } & GenerateTextOptions): AgentLogic<TEventSchemas> {
   const resolvedTemplate =
-    template ?? createDefaultTemplate({ model, ...generateTextOptions });
+    template ?? simple({ model, ...generateTextOptions });
   const eventSchemas = events ? createZodEventSchemas(events) : undefined;
 
   const observe: AgentLogic<any>['observe'] = ({
@@ -236,12 +228,15 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
   agentLogic.fromTextStream = fromTextStream;
   agentLogic.inspect = (inspectionEvent) => {};
   agentLogic.observe = observe;
-  agentLogic.decide = (stuff) =>
-    decide({
+  agentLogic.decide = async (stuff) => {
+    const template = stuff.template ?? resolvedTemplate;
+
+    return await template.decide?.({
       template: resolvedTemplate,
       model,
       ...stuff,
     });
+  };
 
   return agentLogic as AgentLogic<TEventSchemas>;
 }
@@ -257,83 +252,26 @@ export async function decide({
   events,
   state,
   logic,
-  template = createDefaultTemplate(),
+  template = simple(),
 }: {
   model: LanguageModel;
   goal: string;
   state: ObservedState;
   events: ZodEventMapping;
   sessionId?: string;
-  history?: Array<{
-    snapshot: any;
-    event: AnyEventObject;
-    reward?: number;
-  }>;
   logic: AnyStateMachine;
   template: AgentTemplate | undefined;
 }): Promise<AnyEventObject | undefined> {
-  const transitions = getTransitions(state, logic);
-  const eventSchemas = createZodEventSchemas(events ?? {});
-
-  const filter = (eventType: string) =>
-    Object.keys(events ?? {}).includes(eventType);
-
-  const functionNameMapping: Record<string, string> = {};
-  const tools = transitions
-    .filter((t) => {
-      return filter(t.eventType);
-    })
-    .map((t) => {
-      const name = t.eventType.replace(/\./g, '_');
-      functionNameMapping[name] = t.eventType;
-      const eventSchema = eventSchemas?.[t.eventType];
-      const {
-        description,
-        properties: { type, ...properties },
-      } = eventSchema ?? ({} as any);
-
-      return {
-        type: 'function',
-        eventType: t.eventType,
-        function: {
-          name,
-          description: t.description ?? description,
-          parameters: {
-            type: 'object',
-            properties: properties ?? {},
-          },
-        },
-      } as const;
-    });
-
-  const toolMap: Record<string, any> = {};
-
-  for (const toolCall of tools) {
-    toolMap[toolCall.function.name] = tool({
-      description: toolCall.function.description,
-      parameters: events?.[toolCall.eventType] ?? z.object({}),
-      execute: async (params) => {
-        const event = {
-          type: toolCall.eventType,
-          ...params,
-        };
-
-        return event;
-      },
-    });
-  }
-  const decide = template.decide;
-
-  if (!decide) {
+  if (!template.decide) {
     throw new Error('No decide template found');
   }
 
-  const plan = await decide({
+  const plan = await template.decide({
     model,
     state,
     goal,
     logic,
-    toolMap,
+    events,
   });
 
   if (!plan?.nextEvent) {
