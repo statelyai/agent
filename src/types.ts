@@ -1,29 +1,37 @@
 import { AnyStateMachine } from 'xstate';
 import { ObservedState } from './agent';
 import { AgentPlan } from './utils';
-import { CoreTool, generateText, LanguageModel } from 'ai';
+import {
+  CoreTool,
+  generateText,
+  GenerateTextResult,
+  LanguageModel,
+  streamText,
+  StreamTextResult,
+} from 'ai';
 
-export type AgentTemplate = (stuff: {
-  model: LanguageModel;
-  state: ObservedState;
-  goal: string;
-  // eventTools: {
-  //   readonly type: 'function';
-  //   readonly eventType: string;
-  //   readonly function: {
-  //     readonly name: string;
-  //     readonly description: any;
-  //     readonly parameters: {
-  //       readonly type: 'object';
-  //       readonly properties: any;
-  //     };
-  //   };
-  // }[];
-  toolMap: Record<string, CoreTool>;
-  logic?: AnyStateMachine;
-}) => Promise<AgentPlan | undefined>;
+export type AgentTemplate = {
+  decide?: ({
+    model,
+    state,
+    goal,
+    toolMap,
+    logic,
+  }: {
+    model: LanguageModel;
+    state: ObservedState;
+    goal: string;
+    toolMap: Record<string, CoreTool>;
+    logic?: AnyStateMachine;
+  }) => Promise<AgentPlan | undefined>;
+  generateText?: (
+    stuff: GenerateTextOptions
+  ) => Promise<GenerateTextResult<Record<string, CoreTool<any, any>>>>;
+  streamText?: (
+    stuff: StreamTextOptions
+  ) => Promise<StreamTextResult<Record<string, CoreTool<any, any>>>>;
+};
 
-export type GenerateTextOptions = Omit<
-  Parameters<typeof generateText>[0],
-  'model' | 'tools' | 'prompt'
->;
+export type GenerateTextOptions = Parameters<typeof generateText>[0];
+
+export type StreamTextOptions = Parameters<typeof streamText>[0];

@@ -17,8 +17,9 @@ Only make a single tool call to achieve the goal.
 export function createDefaultTemplate(
   options?: GenerateTextOptions
 ): AgentTemplate {
-  return async (x) => {
-    const prompt = `
+  return {
+    decide: async (x) => {
+      const prompt = `
 <context>
 ${JSON.stringify(x.state.context, null, 2)}
 </context>
@@ -28,28 +29,29 @@ ${x.goal}
 Only make a single tool call to achieve the goal.
       `.trim();
 
-    const result = await generateText({
-      model: x.model,
-      prompt,
-      tools: x.toolMap as any,
-      ...options,
-    });
+      const result = await generateText({
+        model: x.model,
+        prompt,
+        tools: x.toolMap as any,
+        ...options,
+      });
 
-    const singleResult = result.toolResults[0];
+      const singleResult = result.toolResults[0];
 
-    if (!singleResult) {
-      return undefined;
-    }
+      if (!singleResult) {
+        return undefined;
+      }
 
-    return {
-      goal: x.goal,
-      state: x.state,
-      steps: [
-        {
-          event: singleResult.result,
-        },
-      ],
-      nextEvent: singleResult.result,
-    };
+      return {
+        goal: x.goal,
+        state: x.state,
+        steps: [
+          {
+            event: singleResult.result,
+          },
+        ],
+        nextEvent: singleResult.result,
+      };
+    },
   };
 }

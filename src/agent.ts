@@ -24,7 +24,7 @@ import {
   streamText,
   tool,
 } from 'ai';
-import { AgentTemplate, GenerateTextOptions } from './types';
+import { AgentTemplate, GenerateTextOptions, StreamTextOptions } from './types';
 import { createDefaultTemplate } from './templates/simple';
 
 export type AgentLogic<TEventSchemas extends ZodEventMapping> =
@@ -81,14 +81,11 @@ export type AgentLogic<TEventSchemas extends ZodEventMapping> =
       state: ObservedState;
       events: ZodEventMapping;
       logic: AnyStateMachine;
-      promptTemplate?: PromptTemplate;
+      template?: AgentTemplate;
     }) => Promise<AnyEventObject | undefined>;
   };
 
-export type AgentTextStreamLogicInput = Omit<
-  Parameters<typeof streamText>[0],
-  'model'
-> & {
+export type AgentTextStreamLogicInput = Omit<StreamTextOptions, 'model'> & {
   context?: any;
 };
 
@@ -117,7 +114,7 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
   template?: AgentTemplate;
 } & GenerateTextOptions): AgentLogic<TEventSchemas> {
   const resolvedTemplate =
-    template ?? createDefaultTemplate(generateTextOptions);
+    template ?? createDefaultTemplate({ model, ...generateTextOptions });
   const eventSchemas = events ? createZodEventSchemas(events) : undefined;
 
   const observe: AgentLogic<any>['observe'] = ({
@@ -325,7 +322,13 @@ export async function decide({
       },
     });
   }
-  const plan = await template({
+  const decide = template.decide;
+
+  if (!decide) {
+    throw new Error('No decide template found');
+  }
+
+  const plan = await decide({
     model,
     state,
     goal,

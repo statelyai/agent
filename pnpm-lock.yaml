@@ -51,6 +51,9 @@ devDependencies:
   vitest:
     specifier: ^1.5.0
     version: registry.npmjs.org/vitest@1.5.0(@types/node@20.12.7)
+  wikipedia:
+    specifier: ^2.1.2
+    version: registry.npmjs.org/wikipedia@2.1.2
   zod:
     specifier: ^3.22.4
     version: registry.npmjs.org/zod@3.22.4
@@ -2043,6 +2046,18 @@ packages:
       possible-typed-array-names: registry.npmjs.org/possible-typed-array-names@1.0.0
     dev: true
 
+  registry.npmjs.org/axios@1.6.8:
+    resolution: {integrity: sha512-v/ZHtJDU39mDpyBoFVkETcd/uNdxrWRrg3bKpOKzXFA6Bvqopts6ALSMU3y6ijYxbw2B+wPrIv46egTzJXCLGQ==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/axios/-/axios-1.6.8.tgz}
+    name: axios
+    version: 1.6.8
+    dependencies:
+      follow-redirects: registry.npmjs.org/follow-redirects@1.15.6
+      form-data: registry.npmjs.org/form-data@4.0.0
+      proxy-from-env: registry.npmjs.org/proxy-from-env@1.1.0
+    transitivePeerDependencies:
+      - debug
+    dev: true
+
   registry.npmjs.org/axobject-query@4.0.0:
     resolution: {integrity: sha512-+60uv1hiVFhHZeO+Lz0RYzsVHy5Wr1ayX0mwda9KPDVLNJgZ1T9Ny7VmFbLDzxsH0D87I86vgj3gFrjTJUYznw==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/axobject-query/-/axobject-query-4.0.0.tgz}
     name: axobject-query
@@ -2152,6 +2167,13 @@ packages:
       camelcase: registry.npmjs.org/camelcase@5.3.1
       map-obj: registry.npmjs.org/map-obj@4.3.0
       quick-lru: registry.npmjs.org/quick-lru@4.0.1
+    dev: true
+
+  registry.npmjs.org/camelcase@4.1.0:
+    resolution: {integrity: sha512-FxAv7HpHrXbh3aPo4o2qxHay2lkLY3x5Mw3KeE4KQE8ysVfziWeRZDwcjauvwBSGEC/nXUPzZy8zeh4HokqOnw==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/camelcase/-/camelcase-4.1.0.tgz}
+    name: camelcase
+    version: 4.1.0
+    engines: {node: '>=4'}
     dev: true
 
   registry.npmjs.org/camelcase@5.3.1:
@@ -2983,6 +3005,18 @@ packages:
     hasBin: true
     dev: true
 
+  registry.npmjs.org/follow-redirects@1.15.6:
+    resolution: {integrity: sha512-wWN62YITEaOpSK584EZXJafH1AGpO8RVgElfkuXbTOrPX4fIfOyEpW/CsiNd8JdYrAoOvafRTOEnvsO++qCqFA==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/follow-redirects/-/follow-redirects-1.15.6.tgz}
+    name: follow-redirects
+    version: 1.15.6
+    engines: {node: '>=4.0'}
+    peerDependencies:
+      debug: '*'
+    peerDependenciesMeta:
+      debug:
+        optional: true
+    dev: true
+
   registry.npmjs.org/for-each@0.3.3:
     resolution: {integrity: sha512-jqYfLp7mo9vIyQf8ykW2v7A+2N4QjeCeI5+Dz9XraiO1ign81wjiH7Fb9vSOWvQfNtmSa4H2RoQTrrXivdUZmw==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/for-each/-/for-each-0.3.3.tgz}
     name: for-each
@@ -3323,6 +3357,14 @@ packages:
     name: indent-string
     version: 4.0.0
     engines: {node: '>=8'}
+    dev: true
+
+  registry.npmjs.org/infobox-parser@3.6.4:
+    resolution: {integrity: sha512-d2lTlxKZX7WsYxk9/UPt51nkmZv5tbC75SSw4hfHqZ3LpRAn6ug0oru9xI2X+S78va3aUAze3xl/UqMuwLmJUw==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/infobox-parser/-/infobox-parser-3.6.4.tgz}
+    name: infobox-parser
+    version: 3.6.4
+    dependencies:
+      camelcase: registry.npmjs.org/camelcase@4.1.0
     dev: true
 
   registry.npmjs.org/internal-slot@1.0.7:
@@ -4513,6 +4555,12 @@ packages:
       '@jest/schemas': registry.npmjs.org/@jest/schemas@29.6.3
       ansi-styles: registry.npmjs.org/ansi-styles@5.2.0
       react-is: registry.npmjs.org/react-is@18.2.0
+    dev: true
+
+  registry.npmjs.org/proxy-from-env@1.1.0:
+    resolution: {integrity: sha512-D+zkORCbA9f1tdWRK0RaCR3GPv50cMxcrz4X8k5LTSUD1Dkw47mKJEZQNunItRTkWwgtaUSo1RVFRIG9ZXiFYg==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/proxy-from-env/-/proxy-from-env-1.1.0.tgz}
+    name: proxy-from-env
+    version: 1.1.0
     dev: true
 
   registry.npmjs.org/pseudomap@1.0.2:
@@ -5838,6 +5886,18 @@ packages:
     dependencies:
       siginfo: registry.npmjs.org/siginfo@2.0.0
       stackback: registry.npmjs.org/stackback@0.0.2
+    dev: true
+
+  registry.npmjs.org/wikipedia@2.1.2:
+    resolution: {integrity: sha512-RAYaMpXC9/E873RaSEtlEa8dXK4e0p5k98GKOd210MtkE5emm6fcnwD+N6ZA4cuffjDWagvhaQKtp/mGp2BOVQ==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/wikipedia/-/wikipedia-2.1.2.tgz}
+    name: wikipedia
+    version: 2.1.2
+    engines: {node: '>=10'}
+    dependencies:
+      axios: registry.npmjs.org/axios@1.6.8
+      infobox-parser: registry.npmjs.org/infobox-parser@3.6.4
+    transitivePeerDependencies:
+      - debug
     dev: true
 
   registry.npmjs.org/wrap-ansi@6.2.0:
