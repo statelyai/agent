@@ -11,19 +11,19 @@ import {
   toObserver,
   Values,
 } from 'xstate';
-import { getAllTransitions, getToolCalls, TransitionData } from './utils';
+import { AgentHistoryItem, getAllTransitions, PromptTemplate } from './utils';
 import { ChatCompletionCreateParamsBase } from 'openai/resources/chat/completions';
 import { ZodEventTypes, EventSchemas } from './schemas';
 import { createZodEventSchemas } from './utils';
 import { TypeOf, z } from 'zod';
 import {
+  CoreTool,
   generateText,
   GenerateTextResult,
   LanguageModel,
   streamText,
   tool,
 } from 'ai';
-import { AgentHistory } from './history';
 
 export type AgentLogic<TEventSchemas extends ZodEventTypes> = PromiseActorLogic<
   void,
@@ -44,14 +44,39 @@ export type AgentLogic<TEventSchemas extends ZodEventTypes> = PromiseActorLogic<
   }>;
   eventSchemas: EventSchemas<keyof TEventSchemas & string>;
   fromText: () => PromiseActorLogic<
-    GenerateTextResult<never>,
+    GenerateTextResult<Record<string, CoreTool<any, any>>>,
     AgentTextStreamLogicInput
   >;
   fromTextStream: () => ObservableActorLogic<
     { textDelta: string },
     AgentTextStreamLogicInput
   >;
-  observe: (inspectionEvent: InspectionEvent) => Observer<any>;
+  inspect: (inspectionEvent: InspectionEvent) => void;
+  observe: ({
+    state,
+    event,
+  }: {
+    state: ObservedState;
+    event: AnyEventObject;
+    timestamp: number;
+    eventOrigin: 'environment' | 'agent';
+  }) => void;
+  reward: ({
+    goal,
+    reward,
+    timestamp,
+  }: {
+    goal: string;
+    reward: number;
+    timestamp: number;
+  }) => void;
+  decide: ({}: {
+    model: LanguageModel;
+    goal: string;
+    state: ObservedState;
+    events: ZodEventTypes;
+    logic: AnyStateMachine;
+  }) => void;
 };
 
 export type AgentTextStreamLogicInput = Omit<
@@ -61,122 +86,136 @@ export type AgentTextStreamLogicInput = Omit<
   context?: any;
 };
 
+export const defaultPromptTemplate: PromptTemplate = (data) => {
+  return `
+<context>
+${JSON.stringify(data.context, null, 2)}
+</context>
+
+${data.goal}
+
+Only make a single tool call to achieve the goal.
+  `.trim();
+};
+
+type GenerateTextOptions = Omit<
+  Parameters<typeof generateText>[0],
+  'model' | 'tools' | 'prompt'
+>;
+
+export interface AgentState {
+  state: ObservedState;
+  history: Array<AgentHistoryItem>;
+}
+
+const getTransitions = (state: ObservedState, logic: AnyStateMachine) => {
+  if (!logic) {
+    return [];
+  }
+
+  const resolvedState = logic.resolveState(state);
+  return getAllTransitions(resolvedState);
+};
 export function createAgent<const TEventSchemas extends ZodEventTypes>({
   model,
   events,
   stringify = JSON.stringify,
-  history,
+  promptTemplate = defaultPromptTemplate,
   ...generateTextOptions
 }: {
   model: LanguageModel;
   events?: TEventSchemas;
   stringify?: typeof JSON.stringify;
-  history?: AgentHistory;
-} & Omit<
-  Parameters<typeof generateText>[0],
-  'model' | 'tools' | 'prompt'
->): AgentLogic<TEventSchemas> {
+  promptTemplate?: PromptTemplate;
+} & GenerateTextOptions): AgentLogic<TEventSchemas> {
   const eventSchemas = events ? createZodEventSchemas(events) : undefined;
+  let agentState: AgentState | undefined;
 
-  const agentLogic: Omit<
-    AgentLogic<TEventSchemas>,
-    'eventTypes' | 'eventSchemas' | 'fromText' | 'fromTextStream' | 'observe'
-  > = fromPromise(async ({ input, self }) => {
-    const parentRef = self._parent;
-    if (!parentRef) {
-      return;
-    }
-    const resolvedInput = typeof input === 'string' ? { goal: input } : input;
-    const state = parentRef.getSnapshot() as AnyMachineSnapshot;
-    const contextToInclude =
-      resolvedInput.context === true
-        ? // include entire context
-          parentRef.getSnapshot().context
-        : resolvedInput.context
-        ? stringify(resolvedInput.context, null, 2)
-        : 'No context provided';
-
-    const toolCalls = await getToolCalls(
+  const observe: AgentLogic<any>['observe'] = ({
+    state,
+    event,
+    timestamp,
+    eventOrigin: eventOrigin,
+  }) => {
+    agentState = agentState ?? {
       state,
-      (eventType) => Object.keys(events ?? {}).includes(eventType),
-      eventSchemas ?? (state.machine.schemas as any)?.events
-    );
+      history: [],
+    };
 
-    const toolMap: Record<string, any> = {};
+    agentState.history.push({
+      state: agentState.state,
+      event: event,
+      timestamp: timestamp,
+      eventOrigin: eventOrigin,
+    });
+  };
 
-    for (const toolCall of toolCalls) {
-      toolMap[toolCall.function.name] = tool({
-        description: toolCall.function.description,
-        parameters: events?.[toolCall.eventType] ?? z.object({}),
-        execute: async (params) => {
-          const event = {
-            type: toolCall.eventType,
-            ...params,
-          };
+  const agentLogic: AgentLogic<TEventSchemas> = fromPromise(
+    async ({ input, self }) => {
+      const parentRef = self._parent;
+      if (!parentRef) {
+        return;
+      }
+      const resolvedInput = typeof input === 'string' ? { goal: input } : input;
+      const snapshot = parentRef.getSnapshot() as AnyMachineSnapshot;
+      const contextToInclude =
+        resolvedInput.context === true
+          ? // include entire context
+            parentRef.getSnapshot().context
+          : resolvedInput.context;
+      const state = {
+        value: snapshot.value,
+        context: contextToInclude,
+      };
 
-          parentRef.send(event);
-        },
-      });
-    }
-
-    const prompt = [
-      `<context>\n${stringify(contextToInclude, null, 2)}\n</context>`,
-      resolvedInput.goal,
-      'Only make a single tool call.',
-    ].join('\n\n');
-
-    console.log(
-      '>>',
-      await decide({
+      const event = await decideFromMachine({
         model,
         goal: resolvedInput.goal,
         events: events ?? {}, // TODO: events should be required
-        logic: parentRef.src as any,
         state,
-      })
-    );
+        logic: parentRef.src as any,
+        promptTemplate,
+        ...generateTextOptions,
+      });
 
-    const event = await decide({
-      model,
-      goal: resolvedInput.goal,
-      events: events ?? {}, // TODO: events should be required
-      logic: parentRef.src as any,
-      state,
-    });
-
-    if (event) {
-      // TODO: validate event
-      parentRef.send(event);
-    }
-
-    return;
-  });
-
-  (agentLogic as any).eventSchemas = eventSchemas;
-
-  function fromText() {
-    return fromPromise(
-      async ({ input }: { input: AgentTextStreamLogicInput }) => {
-        const prompt = [
-          input.context &&
-            `<context>\n${stringify(input.context, null, 2)}\n</context>`,
-          input.prompt,
-        ]
-          .filter(Boolean)
-          .join('\n\n');
-
-        const result = await generateText({
-          model,
-          ...input,
-          prompt,
-        });
-
-        return result;
+      if (event) {
+        // TODO: validate event
+        parentRef.send(event);
       }
-    );
+
+      return;
+    }
+  ) as AgentLogic<TEventSchemas>;
+
+  agentLogic.eventSchemas = eventSchemas ?? ({} as any);
+
+  function fromText(): PromiseActorLogic<
+    GenerateTextResult<Record<string, CoreTool<any, any>>>,
+    AgentTextStreamLogicInput
+  > {
+    return fromPromise(async ({ input }) => {
+      const prompt = [
+        input.context &&
+          `<context>\n${stringify(input.context, null, 2)}\n</context>`,
+        input.prompt,
+      ]
+        .filter(Boolean)
+        .join('\n\n');
+
+      const result = await generateText({
+        model,
+        ...input,
+        prompt,
+      });
+
+      return result;
+    });
   }
 
-  function fromTextStream() {
+  function fromTextStream(): ObservableActorLogic<
+    { textDelta: string },
+    AgentTextStreamLogicInput
+  > {
     return fromObservable(({ input }: { input: AgentTextStreamLogicInput }) => {
       const observers = new Set<Observer<{ textDelta: string }>>();
 
@@ -205,8 +244,8 @@ export function createAgent<const TEventSchemas extends ZodEventTypes>({
       })();
 
       return {
-        subscribe: (...args) => {
-          const observer = toObserver(...(args as any));
+        subscribe: (...args: any[]) => {
+          const observer = toObserver(...args);
           observers.add(observer);
 
           return {
@@ -219,13 +258,10 @@ export function createAgent<const TEventSchemas extends ZodEventTypes>({
     });
   }
 
-  (agentLogic as any).fromText = fromText;
-  (agentLogic as any).fromTextStream = fromTextStream;
-  (agentLogic as any).observe = (inspectionEvent: InspectionEvent) => {
-    if (inspectionEvent.type === '@xstate.snapshot') {
-      history?.add(inspectionEvent);
-    }
-  };
+  agentLogic.fromText = fromText;
+  agentLogic.fromTextStream = fromTextStream;
+  agentLogic.inspect = (inspectionEvent) => {};
+  agentLogic.observe = observe;
 
   return agentLogic as AgentLogic<TEventSchemas>;
 }
@@ -235,20 +271,14 @@ export interface ObservedState {
   context: Record<string, unknown>;
 }
 
-export async function decide({
+export async function decideFromMachine({
   model,
   goal,
   events,
   state,
   logic,
-  getTransitions = (state, logic) => {
-    if (!logic) {
-      return [];
-    }
-
-    const resolvedState = logic.resolveState(state);
-    return getAllTransitions(resolvedState);
-  },
+  promptTemplate,
+  ...generateTextOptions
 }: {
   model: LanguageModel;
   goal: string;
@@ -260,14 +290,13 @@ export async function decide({
     event: AnyEventObject;
     reward?: number;
   }>;
-  logic?: AnyStateMachine;
-  getTransitions?: (
-    state: ObservedState,
-    logic?: AnyStateMachine
-  ) => TransitionData[];
-}): Promise<AnyEventObject> {
+  logic: AnyStateMachine;
+  // transitions: TransitionData[];
+  promptTemplate: PromptTemplate;
+} & GenerateTextOptions): Promise<AnyEventObject | undefined> {
   const transitions = getTransitions(state, logic);
   const eventSchemas = createZodEventSchemas(events ?? {});
+
   const filter = (eventType: string) =>
     Object.keys(events ?? {}).includes(eventType);
 
@@ -315,18 +344,20 @@ export async function decide({
       },
     });
   }
-
-  const prompt = [
-    `<context>\n${JSON.stringify(state.context, null, 2)}\n</context>`,
+  const prompt = promptTemplate({
     goal,
-    'Only make a single tool call.',
-  ].join('\n\n');
+    context: state.context,
+    logic,
+    transitions,
+    plan: undefined,
+  });
 
   const result = await generateText({
     model,
     tools: toolMap,
     prompt,
+    ...generateTextOptions,
   });
 
-  return result.toolResults[0]!.result;
+  return result.toolResults[0]?.result;
 }

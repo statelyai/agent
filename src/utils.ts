@@ -1,4 +1,10 @@
-import { AnyMachineSnapshot, AnyStateNode, Prop, Values } from 'xstate';
+import {
+  AnyMachineSnapshot,
+  AnyStateNode,
+  EventObject,
+  Prop,
+  Values,
+} from 'xstate';
 import { FromSchema } from 'json-schema-to-ts';
 import { JSONSchema } from 'json-schema-to-ts/lib/types/definitions';
 import zodToJsonSchema, {
@@ -7,6 +13,7 @@ import zodToJsonSchema, {
 } from 'zod-to-json-schema';
 import { ZodEventTypes } from './schemas';
 import { z } from 'zod';
+import { ObservedState } from './agent';
 
 export function getAllTransitions(state: AnyMachineSnapshot): TransitionData[] {
   const nodes = state._nodes;
@@ -32,6 +39,31 @@ export type EventSchemas = {
     };
   };
 };
+
+export type AgentPlan = {
+  goal: string;
+  state: ObservedState;
+  steps: Array<{
+    event: EventObject;
+    nextState: ObservedState;
+  }>;
+};
+
+export type AgentHistoryItem = {
+  eventOrigin: 'environment' | 'agent';
+  event: EventObject;
+  state: ObservedState;
+  timestamp: number;
+};
+
+export type PromptTemplate = (data: {
+  goal: string;
+  context: any;
+  logic?: unknown;
+  transitions?: TransitionData[];
+  plan?: AgentPlan;
+  history?: Array<AgentHistoryItem>;
+}) => string;
 
 export type ContextSchema = JSONSchema & { type: 'object' };
 
@@ -98,7 +130,8 @@ export interface TransitionData {
 }
 
 export function getToolCalls(
-  snapshot: AnyMachineSnapshot,
+  snapshot: ObservedState,
+  transitions: TransitionData[],
   filter: (eventType: string) => boolean,
   eventSchemas: EventSchemas = {}
 ): {
@@ -113,7 +146,6 @@ export function getToolCalls(
     };
   };
 }[] {
-  const transitions = getAllTransitions(snapshot) as TransitionData[];
   const functionNameMapping: Record<string, string> = {};
   const tools = transitions
     .filter((t) => {
