@@ -20,7 +20,7 @@ import {
   EventFrom,
 } from 'xstate';
 import { getToolCalls } from './adapters/openai';
-import { ZodEventTypes } from './schemas';
+import { ZodEventMapping } from './schemas';
 
 // >;
 export interface AgentExperience<TState, TEvent extends AnyEventObject> {
@@ -116,7 +116,7 @@ export function createAgent2<TEnvironment extends AnyActorRef>(
   // logic: AnyActorLogic,
   // input: InputFrom<TLogic>,
   getGoals: (state: SnapshotFrom<TEnvironment>) => string | string[],
-  schemas: ZodEventTypes
+  schemas: ZodEventMapping
 ): Agent<SnapshotFrom<TEnvironment>, EventFrom<TEnvironment>> {
   const experiences: Array<AgentExperience<any, any>> = [];
 
