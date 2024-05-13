@@ -33,7 +33,7 @@ Only make a single tool call to achieve the goal.
 
 export function simple(options?: GenerateTextOptions): AgentTemplate {
   return {
-    decide: async (x) => {
+    plan: async (x) => {
       const transitions: TransitionData[] = x.logic
         ? getTransitions(x.state, x.logic)
         : Object.entries(x.events).map(([eventType, { description }]) => ({

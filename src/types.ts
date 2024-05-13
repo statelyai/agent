@@ -15,7 +15,7 @@ export type AgentTemplateGenerateTextOptions = GenerateTextOptions;
 
 export type AgentTemplateStreamTextOptions = GenerateTextOptions;
 
-export type AgentTemplateDecideOptions = {
+export type AgentTemplatePlanOptions = {
   model: LanguageModel;
   state: ObservedState;
   goal: string;
@@ -24,13 +24,13 @@ export type AgentTemplateDecideOptions = {
 };
 
 export type AgentTemplate = {
-  decide?: ({
+  plan?: ({
     model,
     state,
     goal,
     events,
     logic,
-  }: AgentTemplateDecideOptions) => Promise<AgentPlan | undefined>;
+  }: AgentTemplatePlanOptions) => Promise<AgentPlan | undefined>;
   generateText?: (
     options: AgentTemplateGenerateTextOptions
   ) => Promise<GenerateTextResult<Record<string, CoreTool<any, any>>>>;

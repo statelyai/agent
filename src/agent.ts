@@ -22,7 +22,6 @@ import {
   GenerateTextResult,
   LanguageModel,
   streamText,
-  tool,
 } from 'ai';
 import { AgentTemplate, GenerateTextOptions, StreamTextOptions } from './types';
 import { simple } from './templates/simple';
@@ -76,7 +75,7 @@ export type AgentLogic<TEventSchemas extends ZodEventMapping> =
       reward: number;
       timestamp: number;
     }) => void;
-    decide: ({}: {
+    plan: (options: {
       goal: string;
       state: ObservedState;
       events: ZodEventMapping;
@@ -134,19 +133,23 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
         context: contextToInclude,
       };
 
-      const event = await decide({
+      if (!resolvedTemplate.plan) {
+        console.error('No plan template found');
+        return;
+      }
+
+      const plan = await resolvedTemplate.plan({
         model,
         goal: resolvedInput.goal,
         events: events ?? {}, // TODO: events should be required
         state,
         logic: parentRef.src as any,
-        template: resolvedTemplate,
         ...generateTextOptions,
       });
 
-      if (event) {
+      if (plan?.nextEvent) {
         // TODO: validate event
-        parentRef.send(event);
+        parentRef.send(plan.nextEvent);
       }
 
       return;
@@ -228,10 +231,10 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
   agentLogic.fromTextStream = fromTextStream;
   agentLogic.inspect = (inspectionEvent) => {};
   agentLogic.observe = observe;
-  agentLogic.decide = async (stuff) => {
+  agentLogic.plan = async (stuff) => {
     const template = stuff.template ?? resolvedTemplate;
 
-    return await template.decide?.({
+    return await template.plan?.({
       template: resolvedTemplate,
       model,
       ...stuff,
@@ -244,39 +247,4 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
 export interface ObservedState {
   value: string;
   context: Record<string, unknown>;
-}
-
-export async function decide({
-  model,
-  goal,
-  events,
-  state,
-  logic,
-  template = simple(),
-}: {
-  model: LanguageModel;
-  goal: string;
-  state: ObservedState;
-  events: ZodEventMapping;
-  sessionId?: string;
-  logic: AnyStateMachine;
-  template: AgentTemplate | undefined;
-}): Promise<AnyEventObject | undefined> {
-  if (!template.decide) {
-    throw new Error('No decide template found');
-  }
-
-  const plan = await template.decide({
-    model,
-    state,
-    goal,
-    logic,
-    events,
-  });
-
-  if (!plan?.nextEvent) {
-    return undefined;
-  }
-
-  return plan.nextEvent;
 }
