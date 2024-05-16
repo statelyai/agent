@@ -28,7 +28,7 @@ const machine = setup({
     },
     events: {} as typeof agent.eventTypes | { type: 'draw' },
   },
-  actors: { agent, getFromTerminal },
+  actors: { agent: agent.fromDecision(), getFromTerminal },
 }).createMachine({
   context: {
     lastInput: null,

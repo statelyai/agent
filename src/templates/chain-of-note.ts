@@ -15,7 +15,12 @@ export function chainOfNote() {
           return summary.extract;
         })
       );
-
+      x.agent?.addHistory({
+        content: x.prompt!,
+        id: Date.now() + '',
+        source: 'user',
+        timestamp: Date.now(),
+      });
       const result = await generateText({
         model: x.model,
         system: `Task Description:
@@ -32,6 +37,13 @@ export function chainOfNote() {
 
 Passages: \n${extracts.join('\n')}`,
         prompt: `${x.prompt!}`,
+      });
+
+      x.agent?.addHistory({
+        content: result.text,
+        id: Date.now() + '',
+        source: 'user',
+        timestamp: Date.now(),
       });
 
       return result;

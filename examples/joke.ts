@@ -80,7 +80,7 @@ const jokeMachine = setup({
     events: agent.eventTypes,
   },
   actors: {
-    agent,
+    agent: agent.fromDecision(),
     loader,
     getFromTerminal,
   },
@@ -148,7 +148,7 @@ const jokeMachine = setup({
       },
       on: {
         'agent.irrelevantJoke': {
-          actions: log((x) => x.event.explanation),
+          actions: log((x) => 'Irrelevant joke: ' + x.event.explanation),
           target: 'waitingForTopic',
           description: 'Continue',
         },

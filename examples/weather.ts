@@ -80,7 +80,8 @@ const machine = setup({
     events: agent.eventTypes,
   },
   actors: {
-    agent,
+    agent: agent.fromDecision(),
+    classifier: agent.fromObject(),
     getWeather,
     getFromTerminal,
   },
@@ -111,13 +112,17 @@ const machine = setup({
     decide: {
       entry: log('Deciding...'),
       invoke: {
-        src: 'agent',
+        src: 'classifier',
         input: ({ context }) => ({
           context: {
             location: context.location,
           },
-          goal: `Decide what to do based on the given location, which may or may not be a location`,
+          schema: z.object({}),
+          // goal: `Decide what to do based on the given location, which may or may not be a location`,
         }),
+        onDone: {
+          actions: (x) => x.event.output,
+        },
       },
       on: {
         'agent.getWeather': {
@@ -164,6 +169,13 @@ const machine = setup({
   exit: () => {
     process.exit();
   },
+});
+
+const res = agent.generateObject({
+  model: {} as any,
+  schema: z.object({
+    name: z.string(),
+  }),
 });
 
 const actor = createActor(machine, {

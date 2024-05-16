@@ -99,6 +99,14 @@ ${x.goal}
 Only make a single tool call to achieve the goal.
       `.trim();
 
+      const id = Date.now() + '';
+      x.agent?.addHistory({
+        content: prompt,
+        id,
+        source: 'user',
+        timestamp: Date.now(),
+      });
+
       const result = await generateText({
         model: x.model,
         prompt,
@@ -107,6 +115,14 @@ Only make a single tool call to achieve the goal.
       });
 
       const singleResult = result.toolResults[0];
+
+      x.agent?.addHistory({
+        content: singleResult,
+        id: Date.now() + '',
+        source: 'model',
+        timestamp: Date.now(),
+        responseId: id,
+      });
 
       if (!singleResult) {
         return undefined;

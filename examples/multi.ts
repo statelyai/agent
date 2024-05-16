@@ -22,7 +22,7 @@ const machine = setup({
   },
   actors: {
     getFromTerminal,
-    agent,
+    agent: agent.fromDecision(),
   },
 }).createMachine({
   initial: 'asking',
