@@ -22,7 +22,6 @@ import { createZodEventSchemas } from './utils';
 import { TypeOf } from 'zod';
 import {
   CoreTool,
-  generateObject,
   GenerateObjectResult,
   generateText,
   GenerateTextResult,
@@ -146,13 +145,13 @@ export type Agent<TEventSchemas extends ZodEventMapping> =
     >;
 
     // Object
-    generateObject: <T>(
-      options: AgentTemplateGenerateObjectOptions<T>
-    ) => Promise<GenerateObjectResult<T>>;
-    fromObject: <T>() => PromiseActorLogic<
-      GenerateObjectResult<Record<string, any>>,
-      AgentObjectLogicInput<T>
-    >;
+    // generateObject: <T>(
+    //   options: AgentTemplateGenerateObjectOptions<T>
+    // ) => Promise<GenerateObjectResult<T>>;
+    // fromObject: <T>() => PromiseActorLogic<
+    //   GenerateObjectResult<Record<string, any>>,
+    //   AgentObjectLogicInput<T>
+    // >;
 
     inspect: (inspectionEvent: InspectionEvent) => void;
     observe: ({
@@ -350,17 +349,6 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
     return result;
   }
 
-  agent.generateObject = generateObject;
-
-  agent.fromObject = <T>(): PromiseActorLogic<
-    GenerateObjectResult<T>,
-    AgentObjectLogicInput<T>
-  > => {
-    return fromPromise(async ({ input }) => {
-      return await agentGenerateObject(input);
-    });
-  };
-
   agent.generateText = agentGenerateText;
 
   agent.addHistory = async (history) => {
@@ -438,8 +426,6 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
       ...planOptions,
     });
   };
-
-  agent.generateObject;
 
   agent.start();
 

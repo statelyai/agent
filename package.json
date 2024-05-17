@@ -40,8 +40,8 @@
     "access": "public"
   },
   "dependencies": {
-    "@ai-sdk/openai": "^0.0.9",
-    "ai": "^3.1.1",
+    "@ai-sdk/openai": "^0.0.13",
+    "ai": "^3.1.12",
     "xstate": "^5.13.0"
   },
   "packageManager": "pnpm@8.11.0"
