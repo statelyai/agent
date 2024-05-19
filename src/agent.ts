@@ -186,10 +186,6 @@ export type AgentObjectLogicInput<T> = Omit<
   template?: AgentTemplate;
 };
 
-export interface AgentState {
-  state: ObservedState;
-}
-
 export function createAgent<const TEventSchemas extends ZodEventMapping>({
   model,
   events,
