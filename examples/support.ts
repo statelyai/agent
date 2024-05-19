@@ -40,9 +40,8 @@ const machine = setup({
       customerIssue: string;
     },
   },
-  actors: { agent },
+  actors: { agent: agent.fromDecision() },
 }).createMachine({
-  /** @xstate-layout N4IgpgJg5mDOIC5QAoC2BDAxgCwJYDswBKAOgDMAnAe3wBcAbAsAYnRjvOrscJM3vSxYuMgE8A2gAYAuolAAHKsNq4ackAA9EAJgCMADhL7d2gKwAaEKMTGSp7QGYALA4DspgL4fLaLHkKklDQMTKzstJzBPGB8AkIiErqySCCKyqr46loIeobGZpbWCAauJJKOLu5ePhg4TIFcIYRhYBxB3EyxgsJi4trJCkq4Kmop2blGJhZWiA4OkiRV3iC+dQEkAEa49DxQLRwUYGQArvgQUgOpQyOZY4iuzmUOU4U2unYVbp7Lq-7EJLQwDh8LhMOh6PsIoDgaDwSRYFR6AA3MAXdRpYYZLL3R6SZ4FGbFfSlcrOL5eZb4KgQODqX71dHXLF3BAAWgAbK82ezqitan8GlEmIz0qNQNknNoubpykYljU-PVNttdiLMWLNIhTOzSrl3FzbN8FWt-tDsCCwfQ1TdsQhtbqStMiiVefT1pgaCiKLB0DdwdbmeLEABOewkdmSXTaglFPSleV8xXrQ4nM4BjXZUPacOR6NOt52CkeIA */
   initial: 'frontline',
   context: ({ input }) => ({
     customerIssue: input,

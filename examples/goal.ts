@@ -16,6 +16,8 @@ const agent = createAgent({
   },
 });
 
+const decider = agent.fromDecision();
+
 const machine = setup({
   types: {
     context: {} as {
@@ -24,7 +26,7 @@ const machine = setup({
     },
     events: agent.eventTypes,
   },
-  actors: { agent, getFromTerminal },
+  actors: { decider, getFromTerminal },
 }).createMachine({
   initial: 'gettingQuestion',
   context: {
@@ -46,7 +48,7 @@ const machine = setup({
     },
     makingGoal: {
       invoke: {
-        src: 'agent',
+        src: 'decider',
         input: {
           context: true,
           goal: 'Determine what the user wants to accomplish. What is their ideal goal state?',
@@ -67,7 +69,7 @@ const machine = setup({
     },
     responding: {
       invoke: {
-        src: 'agent',
+        src: 'decider',
         input: {
           context: true,
           goal: 'Answer the question to achieve the stated goal, unless the goal is impossible to achieve.',

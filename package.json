@@ -32,6 +32,7 @@
     "tsup": "^8.0.2",
     "typescript": "^5.4.5",
     "vitest": "^1.5.0",
+    "wikipedia": "^2.1.2",
     "zod": "^3.22.4",
     "zod-to-json-schema": "^3.22.5"
   },
@@ -39,9 +40,9 @@
     "access": "public"
   },
   "dependencies": {
-    "@ai-sdk/openai": "^0.0.9",
-    "ai": "^3.1.1",
-    "xstate": "^5.12.0"
+    "@ai-sdk/openai": "^0.0.13",
+    "ai": "^3.1.12",
+    "xstate": "^5.13.0"
   },
   "packageManager": "pnpm@8.11.0"
 }

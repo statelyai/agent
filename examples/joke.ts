@@ -1,29 +1,9 @@
-import {
-  assign,
-  createActor,
-  fromCallback,
-  fromPromise,
-  log,
-  setup,
-} from 'xstate';
+import { assign, createActor, fromCallback, log, setup } from 'xstate';
 import { createAgent } from '../src';
 import { loadingAnimation } from './helpers/loader';
 import { z } from 'zod';
 import { openai } from '@ai-sdk/openai';
-
-const getTopic = fromPromise(async () => {
-  const topic = await new Promise<string>((res) => {
-    console.log('Give me a joke topic:');
-    const listener = (data: Buffer) => {
-      const result = data.toString().trim();
-      process.stdin.off('data', listener);
-      res(result);
-    };
-    process.stdin.on('data', listener);
-  });
-
-  return topic;
-});
+import { getFromTerminal } from './helpers/helpers';
 
 export function getRandomFunnyPhrase() {
   const funnyPhrases = [
@@ -65,7 +45,7 @@ const loader = fromCallback(({ input }: { input: string }) => {
 });
 
 const agent = createAgent({
-  model: openai('gpt-3.5-turbo-1106'),
+  model: openai('gpt-4-turbo'),
   events: {
     askForTopic: z.object({
       topic: z.string().describe('The topic for the joke'),
@@ -78,6 +58,13 @@ const agent = createAgent({
       rating: z.number().min(1).max(10),
       explanation: z.string(),
     }),
+    'agent.continue': z.object({}).describe('Continue'),
+    'agent.irrelevantJoke': z
+      .object({
+        explanation: z.string(),
+      })
+      .describe('Explains why the joke was irrelevant'),
+    'agent.relevantJoke': z.object({}).describe('The joke was relevant'),
   },
 });
 
@@ -93,9 +80,9 @@ const jokeMachine = setup({
     events: agent.eventTypes,
   },
   actors: {
-    getTopic,
-    agent,
+    agent: agent.fromDecision(),
     loader,
+    getFromTerminal,
   },
 }).createMachine({
   id: 'joke',
@@ -110,7 +97,8 @@ const jokeMachine = setup({
   states: {
     waitingForTopic: {
       invoke: {
-        src: 'getTopic',
+        src: 'getFromTerminal',
+        input: 'Give me a joke topic.',
         onDone: {
           actions: assign({
             topic: ({ event }) => event.output,
@@ -127,7 +115,7 @@ const jokeMachine = setup({
             context: {
               topic: context.topic,
             },
-            goal: `Tell me a joke about the topic.`,
+            goal: `Tell me a joke about the topic. Do not make any joke that is not relevant to the topic.`,
           }),
         },
         {
@@ -143,6 +131,29 @@ const jokeMachine = setup({
             }),
             log(({ event }) => event.joke),
           ],
+          target: 'relevance',
+        },
+      },
+    },
+    relevance: {
+      invoke: {
+        src: 'agent',
+        input: (x) => ({
+          context: {
+            topic: x.context.topic,
+            lastJoke: x.context.jokes[x.context.jokes.length - 1],
+          },
+          goal: 'An irrelevant joke has no reference to the topic. If the last joke is completely irrelevant to the topic, ask for a new joke topic. Otherwise, continue.',
+        }),
+      },
+      on: {
+        'agent.irrelevantJoke': {
+          actions: log((x) => 'Irrelevant joke: ' + x.event.explanation),
+          target: 'waitingForTopic',
+          description: 'Continue',
+        },
+        'agent.relevantJoke': {
+          actions: log('Joke was relevant'),
           target: 'rateJoke',
         },
       },
@@ -169,7 +180,9 @@ const jokeMachine = setup({
             assign({
               lastRating: ({ event }) => event.rating,
             }),
-            log(({ event }) => event),
+            log(
+              ({ event }) => `Rating: ${event.rating}\n\n${event.explanation}`
+            ),
           ],
           target: 'decide',
         },

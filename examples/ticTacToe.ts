@@ -76,7 +76,7 @@ export const ticTacToeMachine = setup({
     events: agent.eventTypes,
   },
   actors: {
-    agent,
+    agent: agent.fromDecision(),
     gameReporter: agent.fromTextStream(),
   },
   actions: {
@@ -99,6 +99,22 @@ export const ticTacToeMachine = setup({
         return [...context.events, JSON.stringify(event)];
       },
     }),
+    printBoard: ({ context }) => {
+      // Print the context.board in a 3 x 3 grid format
+      let boardString = '';
+      for (let i = 0; i < context.board.length; i++) {
+        if ([0, 3, 6].includes(i)) {
+          boardString += context.board[i] ?? ' ';
+        } else {
+          boardString += ' | ' + (context.board[i] ?? ' ');
+          if ([2, 5].includes(i)) {
+            boardString += '\n--+---+--\n';
+          }
+        }
+      }
+
+      console.log(boardString);
+    },
   },
   guards: {
     checkWin: ({ context }) => {
@@ -131,6 +147,7 @@ export const ticTacToeMachine = setup({
       initial: 'x',
       states: {
         x: {
+          entry: 'printBoard',
           invoke: {
             src: 'agent',
             input: playerInput,
@@ -147,6 +164,7 @@ export const ticTacToeMachine = setup({
           },
         },
         o: {
+          entry: 'printBoard',
           invoke: {
             src: 'agent',
             input: playerInput,
@@ -179,10 +197,10 @@ export const ticTacToeMachine = setup({
           actions: assign({
             gameReport: ({ context, event }) => {
               console.log(
-                context.gameReport + event.snapshot.context?.textDelta ?? ''
+                context.gameReport + (event.snapshot.context?.textDelta ?? '')
               );
               return (
-                context.gameReport + event.snapshot.context?.textDelta ?? ''
+                context.gameReport + (event.snapshot.context?.textDelta ?? '')
               );
             },
           }),
@@ -207,7 +225,4 @@ export const ticTacToeMachine = setup({
 });
 
 const actor = createActor(ticTacToeMachine);
-actor.subscribe((s) => {
-  console.log(s.value, s.context);
-});
 actor.start();

@@ -1,7 +1,7 @@
 import { SomeZodObject } from 'zod';
 import { JsonSchema7Type } from 'zod-to-json-schema';
 
-export type ZodEventTypes = {
+export type ZodEventMapping = {
   // map event types to Zod types
   [eventType: string]: SomeZodObject;
 };

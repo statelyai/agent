@@ -13,7 +13,7 @@ const agent = createAgent({
 });
 
 const machine = setup({
-  actors: { agent },
+  actors: { agent: agent.fromDecision() },
 }).createMachine({
   initial: 'thinking',
   states: {

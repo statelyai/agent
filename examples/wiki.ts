@@ -1,0 +1,42 @@
+import { z } from 'zod';
+import { createAgent } from '../src';
+import { openai } from '@ai-sdk/openai';
+import { chainOfNote } from '../src/templates/chain-of-note';
+
+const agent = createAgent({
+  model: openai('gpt-4-turbo'),
+  events: {
+    provideAnswer: z.object({
+      answer: z.string().describe('The answer'),
+    }),
+  },
+  template: chainOfNote(),
+});
+
+async function main() {
+  const res = await agent.generateText({
+    prompt: 'When was Deadpool 2 released?',
+  });
+
+  console.log(res.text);
+
+  await new Promise((res) => {
+    setTimeout(() => {
+      res({});
+    }, 2000);
+  });
+
+  console.log(agent.getSnapshot());
+
+  const res2 = await agent.generateText({
+    prompt: agent
+      .getSnapshot()
+      .context.history.map((h) => h.content)
+      .concat('What about the first one?')
+      .join('\n\n'),
+  });
+
+  console.log(res2.text);
+}
+
+main();

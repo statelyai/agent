@@ -37,7 +37,7 @@ const wordGuesserMachine = setup({
     events: agent.eventTypes,
   },
   actors: {
-    agent,
+    agent: agent.fromDecision(),
     getFromTerminal,
   },
 }).createMachine({

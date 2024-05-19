@@ -80,7 +80,7 @@ const machine = setup({
     events: agent.eventTypes,
   },
   actors: {
-    agent,
+    agent: agent.fromDecision(),
     getWeather,
     getFromTerminal,
   },

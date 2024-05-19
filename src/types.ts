@@ -1,61 +1,63 @@
-import OpenAI from 'openai';
+import { AnyStateMachine, IsNever } from 'xstate';
+import { Agent, ObservedState } from './agent';
+import { AgentPlan } from './utils';
 import {
-  ChatCompletionCreateParamsNonStreaming,
-  ChatCompletionCreateParamsStreaming,
-} from 'openai/resources';
-import {
-  AnyEventObject,
-  ObservableActorLogic,
-  PromiseActorLogic,
-} from 'xstate';
+  CoreTool,
+  generateObject,
+  GenerateObjectResult,
+  generateText,
+  GenerateTextResult,
+  LanguageModel,
+  streamText,
+  StreamTextResult,
+} from 'ai';
+import { ZodEventMapping } from './schemas';
+import { z } from 'zod';
 
-export interface StatelyAgentAdapter {
-  model: string;
-  /**
-   * Creates actor logic that chooses an event from all of the
-   * possible next events of the parent state machine
-   * and sends it to the parent actor.
-   */
-  fromEvent: <TInput>(
-    inputFn: (input: TInput) => string | ChatCompletionCreateParamsNonStreaming
-  ) => PromiseActorLogic<AnyEventObject[] | undefined, TInput>;
-  /**
-   * Creates actor logic that resolves with a chat completion.
-   */
-  fromChat: <TInput>(
-    inputFn: (input: TInput) => string | ChatCompletionCreateParamsNonStreaming
-  ) => PromiseActorLogic<OpenAI.Chat.Completions.ChatCompletion, TInput>;
-  /**
-   * Creates actor logic that emits a chat completion stream.
-   */
-  fromChatStream: <TInput>(
-    inputFn: (input: TInput) => string | ChatCompletionCreateParamsStreaming
-  ) => ObservableActorLogic<
-    OpenAI.Chat.Completions.ChatCompletionChunk,
-    TInput
-  >;
-  /**
-   * Creates actor logic that chooses a tool from the provided
-   * tools and runs that tool.
-   */
-  fromTool: <TInput>(
-    inputFn: (input: TInput) => string | ChatCompletionCreateParamsNonStreaming,
-    tools: {
-      [key: string]: Tool<any, any>;
-    }
-  ) => PromiseActorLogic<
-    | {
-        result: any;
-        tool: string;
-        toolCall: OpenAI.Chat.Completions.ChatCompletionMessageToolCall;
-      }
-    | undefined,
-    TInput
-  >;
-}
+export type GenerateTextOptions = Parameters<typeof generateText>[0];
 
-export interface Tool<TInput, TOutput> {
-  description: string;
-  inputSchema: any;
-  run: (input: TInput) => TOutput;
-}
+export type StreamTextOptions = Parameters<typeof streamText>[0];
+
+export type GenerateObjectOptions<T> = Parameters<typeof generateObject>[0] & {
+  schema: z.Schema<T>;
+};
+
+export type AgentTemplateGenerateTextOptions = GenerateTextOptions & {
+  agent?: Agent<any>;
+};
+
+export type AgentTemplateStreamTextOptions = GenerateTextOptions & {
+  agent?: Agent<any>;
+};
+
+export type AgentTemplateGenerateObjectOptions<T> = GenerateObjectOptions<T> & {
+  agent?: Agent<any>;
+};
+
+export type AgentTemplatePlanOptions = {
+  model: LanguageModel;
+  state: ObservedState;
+  goal: string;
+  events: ZodEventMapping;
+  logic?: AnyStateMachine;
+  agent?: Agent<any>;
+};
+
+export type AgentTemplate = {
+  plan?: ({
+    model,
+    state,
+    goal,
+    events,
+    logic,
+  }: AgentTemplatePlanOptions) => Promise<AgentPlan | undefined>;
+  generateText?: (
+    options: AgentTemplateGenerateTextOptions
+  ) => Promise<GenerateTextResult<Record<string, CoreTool<any, any>>>>;
+  generateObject?: <T>(
+    options: AgentTemplateGenerateObjectOptions<T>
+  ) => Promise<GenerateObjectResult<T>>;
+  streamText?: (
+    options: StreamTextOptions
+  ) => Promise<StreamTextResult<Record<string, CoreTool<any, any>>>>;
+};
