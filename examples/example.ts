@@ -19,7 +19,7 @@ const machine = setup({
   types: {
     events: agent.eventTypes,
   },
-  actors: { agent, summarizer: agent.fromText() },
+  actors: { agent: agent.fromDecision(), summarizer: agent.fromText() },
 }).createMachine({
   initial: 'summarizing',
   context: {

@@ -306,36 +306,7 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
 
     const resolvedTemplate = options.template ?? fallbackTemplate;
 
-    if (!resolvedTemplate.generateText) {
-      throw new Error('No generateText method found on template');
-    }
-
-    const result = resolvedTemplate.generateText({
-      model,
-      agent,
-      ...options,
-      prompt,
-    });
-
-    return result;
-  }
-
-  async function agentGenerateObject<T>(options: AgentObjectLogicInput<T>) {
-    const prompt = [
-      options.context &&
-        `<context>\n${stringify(options.context, null, 2)}\n</context>`,
-      options.prompt,
-    ]
-      .filter(Boolean)
-      .join('\n\n');
-
-    const resolvedTemplate = options.template ?? fallbackTemplate;
-
-    if (!resolvedTemplate.generateObject) {
-      throw new Error('No generateObject method found on template');
-    }
-
-    const result = resolvedTemplate.generateObject<T>({
+    const result = (resolvedTemplate?.generateText ?? generateText)({
       model,
       agent,
       ...options,
