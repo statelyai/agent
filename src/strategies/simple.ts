@@ -1,5 +1,5 @@
 import { generateText, tool } from 'ai';
-import { GenerateTextOptions, AgentTemplate } from '../types';
+import { GenerateTextOptions, AgentStrategy } from '../types';
 import {
   createZodEventSchemas,
   getAllTransitions,
@@ -31,9 +31,9 @@ Only make a single tool call to achieve the goal.
   `.trim();
 };
 
-export function simple(options?: GenerateTextOptions): AgentTemplate {
+export function simpleStrategy(options?: GenerateTextOptions): AgentStrategy {
   return {
-    plan: async (x) => {
+    generatePlan: async (x) => {
       const transitions: TransitionData[] = x.logic
         ? getTransitions(x.state, x.logic)
         : Object.entries(x.events).map(([eventType, { description }]) => ({
@@ -100,29 +100,30 @@ Only make a single tool call to achieve the goal.
       `.trim();
 
       const id = Date.now() + '';
-      // x.agent?.addHistory({
-      //   content: prompt,
-      //   id,
-      //   source: 'user',
-      //   timestamp: Date.now(),
-      // });
+      x.agent?.addHistory({
+        content: prompt,
+        id,
+        role: 'user',
+        timestamp: Date.now(),
+      });
 
       const result = await generateText({
         model: x.model,
         prompt,
         tools: toolMap as any,
+        messages: x.agent?.getSnapshot().context.history,
         ...options,
       });
 
       const singleResult = result.toolResults[0];
 
-      // x.agent?.addHistory({
-      //   content: singleResult,
-      //   id: Date.now() + '',
-      //   source: 'model',
-      //   timestamp: Date.now(),
-      //   responseId: id,
-      // });
+      x.agent?.addHistory({
+        content: singleResult,
+        id: Date.now() + '',
+        role: 'assistant',
+        timestamp: Date.now(),
+        responseId: id,
+      });
 
       if (!singleResult) {
         return undefined;

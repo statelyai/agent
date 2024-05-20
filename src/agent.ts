@@ -16,25 +16,18 @@ import {
   Values,
 } from 'xstate';
 import { AgentPlan } from './utils';
-import { ChatCompletionCreateParamsBase } from 'openai/resources/chat/completions';
 import { ZodEventMapping, EventSchemas } from './schemas';
 import { createZodEventSchemas } from './utils';
 import { TypeOf } from 'zod';
 import {
   CoreTool,
-  GenerateObjectResult,
   generateText,
   GenerateTextResult,
   LanguageModel,
   streamText,
 } from 'ai';
-import {
-  AgentTemplate,
-  AgentTemplateGenerateObjectOptions,
-  GenerateTextOptions,
-  StreamTextOptions,
-} from './types';
-import { simple } from './templates/simple';
+import { AgentStrategy, GenerateTextOptions, StreamTextOptions } from './types';
+import { simpleStrategy } from './strategies/simple';
 
 export interface AgentRewardItem {
   goal: string;
@@ -43,12 +36,13 @@ export interface AgentRewardItem {
 }
 
 export interface AgentChatHistory {
-  source: string;
+  role: 'user' | 'assistant';
   content: any;
   timestamp: number;
   id: string;
   // which chat message we're responding to
   responseId?: string;
+  conversationId?: string;
 }
 
 export interface AgentObservation {
@@ -69,17 +63,17 @@ export interface AgentPlanOptions {
   state: ObservedState;
   events: ZodEventMapping;
   logic: AnyStateMachine;
-  template?: AgentTemplate;
+  strategy?: AgentStrategy;
 }
 
 export type AgentDecisionLogicInput = {
   goal: string;
-  model?: ChatCompletionCreateParamsBase['model'];
+  model?: LanguageModel;
   /**
    * Context to include
    */
   context?: any;
-  template?: AgentTemplate;
+  strategy?: AgentStrategy;
 } & Omit<Parameters<typeof generateText>[0], 'model' | 'tools' | 'prompt'>;
 
 export type AgentDecisionLogic = PromiseActorLogic<
@@ -144,15 +138,6 @@ export type Agent<TEventSchemas extends ZodEventMapping> =
       AgentTextStreamLogicInput
     >;
 
-    // Object
-    // generateObject: <T>(
-    //   options: AgentTemplateGenerateObjectOptions<T>
-    // ) => Promise<GenerateObjectResult<T>>;
-    // fromObject: <T>() => PromiseActorLogic<
-    //   GenerateObjectResult<Record<string, any>>,
-    //   AgentObjectLogicInput<T>
-    // >;
-
     inspect: (inspectionEvent: InspectionEvent) => void;
     observe: ({
       state,
@@ -170,43 +155,35 @@ export type Agent<TEventSchemas extends ZodEventMapping> =
 
 export type AgentTextLogicInput = Omit<GenerateTextOptions, 'model'> & {
   context?: any;
-  template?: AgentTemplate;
+  strategy?: AgentStrategy;
 };
 
 export type AgentTextStreamLogicInput = Omit<StreamTextOptions, 'model'> & {
   context?: any;
-  template?: AgentTemplate;
-};
-
-export type AgentObjectLogicInput<T> = Omit<
-  AgentTemplateGenerateObjectOptions<T>,
-  'model'
-> & {
-  context?: any;
-  template?: AgentTemplate;
+  strategy?: AgentStrategy;
 };
 
 export function createAgent<const TEventSchemas extends ZodEventMapping>({
   model,
   events,
   stringify = JSON.stringify,
-  template,
+  strategy,
   ...generateTextOptions
 }: {
   model: LanguageModel;
   events?: TEventSchemas;
   stringify?: typeof JSON.stringify;
-  template?: AgentTemplate;
+  strategy?: AgentStrategy;
 } & GenerateTextOptions): Agent<TEventSchemas> {
-  const fallbackTemplate =
-    template ?? simple({ model, ...generateTextOptions });
+  const defaultStrategy =
+    strategy ?? simpleStrategy({ model, ...generateTextOptions });
   const eventSchemas = events ? createZodEventSchemas(events) : undefined;
 
   const observe: Agent<TEventSchemas>['observe'] = ({
     state,
     event,
     timestamp,
-    eventOrigin: eventOrigin,
+    // eventOrigin,
   }) => {
     agent.send({
       type: 'agent.observe',
@@ -258,7 +235,7 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
       }
 
       const resolvedInput = typeof input === 'string' ? { goal: input } : input;
-      const resolvedTemplate = resolvedInput.template ?? fallbackTemplate;
+      const resolvedStrategy = resolvedInput.strategy ?? defaultStrategy;
       const snapshot = parentRef.getSnapshot() as AnyMachineSnapshot;
       const contextToInclude =
         resolvedInput.context === true
@@ -270,12 +247,12 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
         context: contextToInclude,
       };
 
-      if (!resolvedTemplate.plan) {
-        console.error('No plan template found');
+      if (!resolvedStrategy.generatePlan) {
+        console.error('No plan strategy found');
         return;
       }
 
-      const plan = await resolvedTemplate.plan({
+      const plan = await resolvedStrategy.generatePlan({
         model,
         goal: resolvedInput.goal,
         events: events ?? {}, // TODO: events should be required
@@ -304,9 +281,9 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
       .filter(Boolean)
       .join('\n\n');
 
-    const resolvedTemplate = options.template ?? fallbackTemplate;
+    const resolvedStrategy = options.strategy ?? defaultStrategy;
 
-    const result = (resolvedTemplate?.generateText ?? generateText)({
+    const result = (resolvedStrategy?.generateText ?? generateText)({
       model,
       agent,
       ...options,
@@ -385,9 +362,9 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
   agent.inspect = (inspectionEvent) => {};
   agent.observe = observe;
   agent.plan = async (planOptions: AgentPlanOptions) => {
-    const resolvedTemplate = planOptions.template ?? fallbackTemplate;
+    const resolvedStrategy = planOptions.strategy ?? defaultStrategy;
 
-    return await resolvedTemplate.plan?.({
+    return await resolvedStrategy.generatePlan?.({
       model,
       agent,
       ...planOptions,

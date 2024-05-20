@@ -1,5 +1,5 @@
 import { generateText } from 'ai';
-import { AgentTemplate } from '../types';
+import { AgentStrategy } from '../types';
 import wiki from 'wikipedia';
 
 export function chainOfNote() {
@@ -18,7 +18,7 @@ export function chainOfNote() {
       x.agent?.addHistory({
         content: x.prompt!,
         id: Date.now() + '',
-        source: 'user',
+        role: 'user',
         timestamp: Date.now(),
       });
       const result = await generateText({
@@ -42,11 +42,11 @@ Passages: \n${extracts.join('\n')}`,
       x.agent?.addHistory({
         content: result.text,
         id: Date.now() + '',
-        source: 'user',
+        role: 'user',
         timestamp: Date.now(),
       });
 
       return result;
     },
-  } satisfies AgentTemplate;
+  } satisfies AgentStrategy;
 }
