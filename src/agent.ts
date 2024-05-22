@@ -100,7 +100,7 @@ type AgentLogic = TransitionActorLogic<
   any
 >;
 
-export type Agent<TEventSchemas extends ZodEventMapping> =
+export type Agent<TEventSchemas extends ZodEventMapping = {}> =
   ActorRefFrom<AgentLogic> & {
     eventTypes: Values<{
       [K in keyof TEventSchemas]: {
