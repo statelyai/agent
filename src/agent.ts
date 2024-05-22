@@ -26,8 +26,8 @@ import {
   LanguageModel,
   streamText,
 } from 'ai';
-import { AgentStrategy, GenerateTextOptions, StreamTextOptions } from './types';
-import { simpleStrategy } from './strategies/simple';
+import { GenerateTextOptions, StreamTextOptions } from './types';
+import { generatePlan } from './generatePlan';
 
 export interface AgentRewardItem {
   goal: string;
@@ -35,7 +35,7 @@ export interface AgentRewardItem {
   timestamp: number;
 }
 
-export interface AgentChatHistory {
+export interface AgentMessageHistory {
   role: 'user' | 'assistant';
   content: any;
   timestamp: number;
@@ -53,7 +53,7 @@ export interface AgentObservation {
 
 export interface AgentContext {
   observations: any[];
-  history: AgentChatHistory[];
+  history: AgentMessageHistory[];
   plans: AgentPlan[];
   rewards: AgentRewardItem[];
 }
@@ -63,7 +63,6 @@ export interface AgentPlanOptions {
   state: ObservedState;
   events: ZodEventMapping;
   logic: AnyStateMachine;
-  strategy?: AgentStrategy;
 }
 
 export type AgentDecisionLogicInput = {
@@ -73,7 +72,6 @@ export type AgentDecisionLogicInput = {
    * Context to include
    */
   context?: any;
-  strategy?: AgentStrategy;
 } & Omit<Parameters<typeof generateText>[0], 'model' | 'tools' | 'prompt'>;
 
 export type AgentDecisionLogic = PromiseActorLogic<
@@ -95,7 +93,7 @@ type AgentLogic = TransitionActorLogic<
     }
   | {
       type: 'agent.history';
-      history: AgentChatHistory;
+      history: AgentMessageHistory;
     },
   any
 >;
@@ -122,11 +120,12 @@ export type Agent<TEventSchemas extends ZodEventMapping = {}> =
 
     // Generate text
     generateText: (
-      options: AgentTextLogicInput
+      options: AgentGenerateTextOptions
     ) => Promise<GenerateTextResult<Record<string, any>>>;
+
     fromText: () => PromiseActorLogic<
       GenerateTextResult<Record<string, any>>,
-      AgentTextLogicInput
+      AgentGenerateTextOptions
     >;
 
     // Stream text
@@ -148,35 +147,33 @@ export type Agent<TEventSchemas extends ZodEventMapping = {}> =
       timestamp: number;
       eventOrigin: 'environment' | 'agent';
     }) => void;
-    addHistory: (history: AgentChatHistory) => Promise<void>;
+    addHistory: (history: AgentMessageHistory) => Promise<void>;
     reward: ({ goal, reward, timestamp }: AgentRewardItem) => void;
     plan: (options: AgentPlanOptions) => Promise<AgentPlan | undefined>;
+    onMessage: (callback: (message: AgentMessageHistory) => void) => void;
   };
 
-export type AgentTextLogicInput = Omit<GenerateTextOptions, 'model'> & {
+export type AgentGenerateTextOptions = Omit<GenerateTextOptions, 'model'> & {
+  model?: LanguageModel;
   context?: any;
-  strategy?: AgentStrategy;
 };
 
 export type AgentTextStreamLogicInput = Omit<StreamTextOptions, 'model'> & {
   context?: any;
-  strategy?: AgentStrategy;
 };
 
 export function createAgent<const TEventSchemas extends ZodEventMapping>({
   model,
   events,
   stringify = JSON.stringify,
-  strategy,
   ...generateTextOptions
 }: {
   model: LanguageModel;
   events?: TEventSchemas;
   stringify?: typeof JSON.stringify;
-  strategy?: AgentStrategy;
 } & GenerateTextOptions): Agent<TEventSchemas> {
-  const defaultStrategy =
-    strategy ?? simpleStrategy({ model, ...generateTextOptions });
+  const messageListeners: Observer<AgentMessageHistory>[] = [];
+
   const eventSchemas = events ? createZodEventSchemas(events) : undefined;
 
   const observe: Agent<TEventSchemas>['observe'] = ({
@@ -210,6 +207,9 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
         }
         case 'agent.history': {
           state.history.push(event.history);
+          messageListeners.forEach((listener) =>
+            listener.next?.(event.history)
+          );
           break;
         }
         default:
@@ -227,6 +227,10 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
 
   const agent = createActor(agentLogic) as unknown as Agent<TEventSchemas>;
 
+  agent.onMessage = (callback) => {
+    messageListeners.push(toObserver(callback));
+  };
+
   agent.fromDecision = () =>
     fromPromise(async ({ input, self }) => {
       const parentRef = self._parent;
@@ -235,7 +239,6 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
       }
 
       const resolvedInput = typeof input === 'string' ? { goal: input } : input;
-      const resolvedStrategy = resolvedInput.strategy ?? defaultStrategy;
       const snapshot = parentRef.getSnapshot() as AnyMachineSnapshot;
       const contextToInclude =
         resolvedInput.context === true
@@ -247,12 +250,7 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
         context: contextToInclude,
       };
 
-      if (!resolvedStrategy.generatePlan) {
-        console.error('No plan strategy found');
-        return;
-      }
-
-      const plan = await resolvedStrategy.generatePlan({
+      const plan = await generatePlan({
         model,
         goal: resolvedInput.goal,
         events: events ?? {}, // TODO: events should be required
@@ -272,7 +270,7 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
 
   agent.eventSchemas = eventSchemas ?? ({} as any);
 
-  async function agentGenerateText(options: AgentTextLogicInput) {
+  async function agentGenerateText(options: AgentGenerateTextOptions) {
     const prompt = [
       options.context &&
         `<context>\n${stringify(options.context, null, 2)}\n</context>`,
@@ -281,13 +279,35 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
       .filter(Boolean)
       .join('\n\n');
 
-    const resolvedStrategy = options.strategy ?? defaultStrategy;
+    const id = Date.now() + '';
 
-    const result = (resolvedStrategy?.generateText ?? generateText)({
+    agent.addHistory({
+      content: prompt,
+      id,
+      role: 'user',
+      timestamp: Date.now(),
+    });
+
+    const messages = options.messages ?? [];
+    const { prompt: _, ...optionsWithoutPrompt } = options;
+
+    messages.push({
+      content: prompt,
+      role: 'user',
+    });
+
+    const result = await generateText({
       model,
-      agent,
-      ...options,
-      prompt,
+      ...optionsWithoutPrompt,
+      messages,
+    });
+
+    agent.addHistory({
+      content: result.text,
+      id,
+      role: 'assistant',
+      timestamp: Date.now(),
+      responseId: id,
     });
 
     return result;
@@ -362,9 +382,7 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
   agent.inspect = (inspectionEvent) => {};
   agent.observe = observe;
   agent.plan = async (planOptions: AgentPlanOptions) => {
-    const resolvedStrategy = planOptions.strategy ?? defaultStrategy;
-
-    return await resolvedStrategy.generatePlan?.({
+    return await generatePlan({
       model,
       agent,
       ...planOptions,

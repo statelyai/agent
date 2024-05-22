@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { createAgent } from '../src';
 import { openai } from '@ai-sdk/openai';
-import { createActor, setup } from 'xstate';
+import { assign, createActor, setup } from 'xstate';
 import { getFromTerminal } from './helpers/helpers';
 
 const agent = createAgent({
@@ -16,30 +16,50 @@ const agent = createAgent({
 
 const machine = setup({
   types: {
+    context: {} as {
+      conversation: string[];
+    },
     events: agent.eventTypes,
   },
   actors: { agent: agent.fromDecision(), getFromTerminal },
 }).createMachine({
   initial: 'waiting',
+  context: {
+    conversation: [],
+  },
+  always: {
+    actions: (x) => console.log(x.context.conversation),
+  },
   states: {
     waiting: {
       invoke: {
         src: 'getFromTerminal',
         input: 'User:',
-        onDone: 'responding',
+        onDone: {
+          actions: assign({
+            conversation: (x) =>
+              x.context.conversation.concat('User: ' + x.event.output),
+          }),
+          target: 'responding',
+        },
       },
     },
     responding: {
       invoke: {
         src: 'agent',
-        input: () => ({
+        input: (x) => ({
+          context: {
+            conversation: x.context.conversation,
+          },
           goal: 'Respond to the user, unless they want to end the conversation.',
-          messages: agent.getSnapshot().context.history,
         }),
       },
       on: {
         'agent.respond': {
-          actions: (x) => console.log(x.event.response),
+          actions: assign({
+            conversation: (x) =>
+              x.context.conversation.concat('Assistant: ' + x.event.response),
+          }),
           target: 'waiting',
         },
         'agent.endConversation': 'finished',
@@ -55,4 +75,4 @@ const machine = setup({
   },
 });
 
-const actor = createActor(machine).start();
+createActor(machine).start();

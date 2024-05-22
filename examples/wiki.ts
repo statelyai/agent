@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { createAgent } from '../src';
 import { openai } from '@ai-sdk/openai';
 import { chainOfNote } from '../src/strategies/chain-of-note';
+import { createMachine } from 'xstate';
 
 const agent = createAgent({
   model: openai('gpt-4-turbo'),
@@ -10,7 +11,6 @@ const agent = createAgent({
       answer: z.string().describe('The answer'),
     }),
   },
-  strategy: chainOfNote(),
 });
 
 async function main() {
