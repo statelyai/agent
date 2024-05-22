@@ -5,6 +5,7 @@ import { assign, createActor, setup } from 'xstate';
 import { getFromTerminal } from './helpers/helpers';
 
 const agent = createAgent({
+  name: 'chatbot',
   model: openai('gpt-4-turbo'),
   events: {
     'agent.respond': z.object({

@@ -5,6 +5,7 @@ import { getFromTerminal } from './helpers/helpers';
 import { openai } from '@ai-sdk/openai';
 
 const agent = createAgent({
+  name: 'multi',
   model: openai('gpt-4-1106-preview'),
   events: {
     'agent.respond': z.object({

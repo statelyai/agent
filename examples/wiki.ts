@@ -1,10 +1,9 @@
 import { z } from 'zod';
 import { createAgent } from '../src';
 import { openai } from '@ai-sdk/openai';
-import { chainOfNote } from '../src/strategies/chain-of-note';
-import { createMachine } from 'xstate';
 
 const agent = createAgent({
+  name: 'wiki',
   model: openai('gpt-4-turbo'),
   events: {
     provideAnswer: z.object({

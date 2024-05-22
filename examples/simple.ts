@@ -4,6 +4,7 @@ import { setup, createActor } from 'xstate';
 import { openai } from '@ai-sdk/openai';
 
 const agent = createAgent({
+  name: 'simple',
   model: openai('gpt-3.5-turbo-16k-0613'),
   events: {
     'agent.thought': z.object({

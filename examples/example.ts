@@ -4,6 +4,7 @@ import { openai } from '@ai-sdk/openai';
 import { assign, createActor, setup } from 'xstate';
 
 const agent = createAgent({
+  name: 'example',
   model: openai('gpt-4-turbo'),
   events: {
     'agent.englishSummary': z.object({

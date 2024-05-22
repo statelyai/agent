@@ -1,5 +1,5 @@
 import { tool } from 'ai';
-import { AgentStrategyPlanOptions } from './types';
+import { AgentPlanOptions } from './types';
 import {
   AgentPlan,
   createZodEventSchemas,
@@ -33,18 +33,18 @@ Only make a single tool call to achieve the goal.
 };
 
 export async function generatePlan(
-  x: AgentStrategyPlanOptions
+  options: AgentPlanOptions
 ): Promise<AgentPlan | undefined> {
-  const transitions: TransitionData[] = x.logic
-    ? getTransitions(x.state, x.logic)
-    : Object.entries(x.events).map(([eventType, { description }]) => ({
+  const transitions: TransitionData[] = options.logic
+    ? getTransitions(options.state, options.logic)
+    : Object.entries(options.events).map(([eventType, { description }]) => ({
         eventType,
         description,
       }));
-  const eventSchemas = createZodEventSchemas(x.events);
+  const eventSchemas = createZodEventSchemas(options.events);
 
   const filter = (eventType: string) =>
-    Object.keys(x.events).includes(eventType);
+    Object.keys(options.events).includes(eventType);
 
   const functionNameMapping: Record<string, string> = {};
   const tools = transitions
@@ -79,7 +79,7 @@ export async function generatePlan(
   for (const toolCall of tools) {
     toolMap[toolCall.function.name] = tool({
       description: toolCall.function.description,
-      parameters: x.events?.[toolCall.eventType] ?? z.object({}),
+      parameters: options.events?.[toolCall.eventType] ?? z.object({}),
       execute: async (params) => {
         const event = {
           type: toolCall.eventType,
@@ -90,23 +90,23 @@ export async function generatePlan(
       },
     });
   }
-  const context = x.state.context
+  const context = options.state.context
     ? `
 <context>
-${JSON.stringify(x.state.context, null, 2)}
+${JSON.stringify(options.state.context, null, 2)}
 </context>`.trim()
     : '';
   const prompt = `
 ${context}
 
-${x.goal}
+${options.goal}
 
 Only make a single tool call to achieve the goal.
       `.trim();
 
-  const { model, ...otherOptions } = x;
+  const { model, ...otherOptions } = options;
 
-  const result = await x.agent!.generateText({
+  const result = await options.agent!.generateText({
     model,
     prompt,
     tools: toolMap as any,
@@ -120,8 +120,8 @@ Only make a single tool call to achieve the goal.
   }
 
   return {
-    goal: x.goal,
-    state: x.state,
+    goal: options.goal,
+    state: options.state,
     steps: [
       {
         event: singleResult.result,

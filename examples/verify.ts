@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { openai } from '@ai-sdk/openai';
 
 const agent = createAgent({
+  name: 'verifier',
   model: openai('gpt-3.5-turbo-16k-0613'),
   events: {
     'agent.validateAnswer': z.object({

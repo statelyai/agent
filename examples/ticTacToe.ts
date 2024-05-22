@@ -4,6 +4,7 @@ import { createAgent } from '../src';
 import { openai } from '@ai-sdk/openai';
 
 const agent = createAgent({
+  name: 'tic-tac-toe-bot',
   model: openai('gpt-4-0125-preview'),
   events: {
     'agent.x.play': z.object({

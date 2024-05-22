@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { createActor, log, setup } from 'xstate';
 
 const agent = createAgent({
+  name: 'support-agent',
   model: openai('gpt-4-1106-preview'),
   events: {
     'agent.respond': z.object({

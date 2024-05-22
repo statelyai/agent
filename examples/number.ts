@@ -5,6 +5,7 @@ import { openai } from '@ai-sdk/openai';
 import { getFromTerminal } from './helpers/helpers';
 
 const agent = createAgent({
+  name: 'number-guesser',
   model: openai('gpt-3.5-turbo-1106'),
   events: {
     'agent.guess': z.object({

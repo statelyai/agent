@@ -2,7 +2,6 @@ import {
   ActorRefFrom,
   AnyEventObject,
   AnyMachineSnapshot,
-  AnyStateMachine,
   createActor,
   fromObservable,
   fromPromise,
@@ -25,13 +24,20 @@ import {
   GenerateTextResult,
   LanguageModel,
   streamText,
+  StreamTextResult,
 } from 'ai';
-import { GenerateTextOptions, StreamTextOptions } from './types';
+import {
+  AgentPlanOptions,
+  GenerateTextOptions,
+  StreamTextOptions,
+} from './types';
 import { generatePlan } from './generatePlan';
+import { randomUUID } from 'crypto';
 
-export interface AgentRewardItem {
+export interface AgentFeedback {
   goal: string;
-  reward: number;
+  observation: AgentObservation;
+  attributes: Record<string, any>;
   timestamp: number;
 }
 
@@ -42,35 +48,28 @@ export interface AgentMessageHistory {
   id: string;
   // which chat message we're responding to
   responseId?: string;
-  conversationId?: string;
+  sessionId?: string;
 }
 
 export interface AgentObservation {
-  state: ObservedState;
+  id: string;
+  state: ObservedState | undefined;
+  event: AnyEventObject;
+  nextState: ObservedState;
   sessionId: string;
   timestamp: number;
 }
 
 export interface AgentContext {
-  observations: any[];
+  observations: AgentObservation[];
   history: AgentMessageHistory[];
   plans: AgentPlan[];
-  rewards: AgentRewardItem[];
-}
-
-export interface AgentPlanOptions {
-  goal: string;
-  state: ObservedState;
-  events: ZodEventMapping;
-  logic: AnyStateMachine;
+  feedback: AgentFeedback[];
 }
 
 export type AgentDecisionLogicInput = {
   goal: string;
   model?: LanguageModel;
-  /**
-   * Context to include
-   */
   context?: any;
 } & Omit<Parameters<typeof generateText>[0], 'model' | 'tools' | 'prompt'>;
 
@@ -83,23 +82,31 @@ type AgentLogic = TransitionActorLogic<
   AgentContext,
   | {
       type: 'agent.reward';
-      reward: AgentRewardItem;
+      reward: AgentFeedback;
     }
   | {
       type: 'agent.observe';
-      state: ObservedState;
+      state: ObservedState | undefined;
       event: AnyEventObject;
+      nextState: ObservedState;
       timestamp: number;
+      // Which actor sent the event
+      sessionId: string;
     }
   | {
       type: 'agent.history';
       history: AgentMessageHistory;
+    }
+  | {
+      type: 'agent.plan';
+      plan: AgentPlan;
     },
   any
 >;
 
 export type Agent<TEventSchemas extends ZodEventMapping = {}> =
   ActorRefFrom<AgentLogic> & {
+    name: string;
     eventTypes: Values<{
       [K in keyof TEventSchemas]: {
         type: K;
@@ -141,15 +148,17 @@ export type Agent<TEventSchemas extends ZodEventMapping = {}> =
     observe: ({
       state,
       event,
+      nextState,
     }: {
-      state: ObservedState;
+      state: ObservedState | undefined;
       event: AnyEventObject;
+      nextState: ObservedState;
       timestamp: number;
-      eventOrigin: 'environment' | 'agent';
+      sessionId: string;
     }) => void;
     addHistory: (history: AgentMessageHistory) => Promise<void>;
-    reward: ({ goal, reward, timestamp }: AgentRewardItem) => void;
-    plan: (options: AgentPlanOptions) => Promise<AgentPlan | undefined>;
+    addFeedback: (feedbackItem: AgentFeedback) => void;
+    generatePlan: (options: AgentPlanOptions) => Promise<AgentPlan | undefined>;
     onMessage: (callback: (message: AgentMessageHistory) => void) => void;
   };
 
@@ -163,11 +172,13 @@ export type AgentTextStreamLogicInput = Omit<StreamTextOptions, 'model'> & {
 };
 
 export function createAgent<const TEventSchemas extends ZodEventMapping>({
+  name,
   model,
   events,
   stringify = JSON.stringify,
   ...generateTextOptions
 }: {
+  name: string;
   model: LanguageModel;
   events?: TEventSchemas;
   stringify?: typeof JSON.stringify;
@@ -179,14 +190,18 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
   const observe: Agent<TEventSchemas>['observe'] = ({
     state,
     event,
+    nextState,
     timestamp,
+    sessionId,
     // eventOrigin,
   }) => {
     agent.send({
       type: 'agent.observe',
       state,
       event,
+      nextState,
       timestamp,
+      sessionId,
     });
   };
 
@@ -194,14 +209,17 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
     (state, event) => {
       switch (event.type) {
         case 'agent.reward': {
-          state.rewards.push(event.reward);
+          state.feedback.push(event.reward);
           break;
         }
         case 'agent.observe': {
           state.observations.push({
+            id: randomUUID(),
             state: event.state,
             event: event.event,
+            nextState: event.nextState,
             timestamp: event.timestamp,
+            sessionId: event.sessionId,
           });
           break;
         }
@@ -212,6 +230,10 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
           );
           break;
         }
+        case 'agent.plan': {
+          state.plans.push(event.plan);
+          break;
+        }
         default:
           break;
       }
@@ -220,12 +242,14 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
     {
       observations: [],
       plans: [],
-      rewards: [],
+      feedback: [],
       history: [],
     } as AgentContext
   );
 
   const agent = createActor(agentLogic) as unknown as Agent<TEventSchemas>;
+
+  agent.name = name;
 
   agent.onMessage = (callback) => {
     messageListeners.push(toObserver(callback));
@@ -269,6 +293,13 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
     }) as AgentDecisionLogic;
 
   agent.eventSchemas = eventSchemas ?? ({} as any);
+
+  agent.addHistory = async (history) => {
+    agent.send({
+      type: 'agent.history',
+      history,
+    });
+  };
 
   async function agentGenerateText(options: AgentGenerateTextOptions) {
     const prompt = [
@@ -315,13 +346,6 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
 
   agent.generateText = agentGenerateText;
 
-  agent.addHistory = async (history) => {
-    agent.send({
-      type: 'agent.history',
-      history,
-    });
-  };
-
   function fromText(): PromiseActorLogic<
     GenerateTextResult<Record<string, CoreTool<any, any>>>,
     AgentTextStreamLogicInput
@@ -329,6 +353,25 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
     return fromPromise(async ({ input }) => {
       return await agentGenerateText(input);
     });
+  }
+
+  async function agentStreamText(
+    input: AgentTextStreamLogicInput
+  ): Promise<StreamTextResult<any>> {
+    const id = randomUUID();
+    agent.addHistory({
+      content: input.prompt,
+      id,
+      role: 'user',
+      timestamp: Date.now(),
+    });
+    const result = await streamText({
+      model,
+      ...input,
+      prompt: input.prompt,
+    });
+
+    return result;
   }
 
   function fromTextStream(): ObservableActorLogic<
@@ -347,8 +390,7 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
         .join('\n\n');
 
       (async () => {
-        const result = await streamText({
-          model,
+        const result = await agentStreamText({
           ...input,
           prompt,
         });
@@ -379,14 +421,33 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
 
   agent.fromText = fromText;
   agent.fromTextStream = fromTextStream;
-  agent.inspect = (inspectionEvent) => {};
+  agent.inspect = (inspectionEvent) => {
+    if (inspectionEvent.type === '@xstate.snapshot') {
+      agent.send({
+        type: 'agent.observe',
+        event: inspectionEvent.event,
+        nextState: {
+          value: (inspectionEvent.snapshot as AnyMachineSnapshot).value,
+          context: (inspectionEvent.snapshot as AnyMachineSnapshot).context,
+        },
+        sessionId: agent.sessionId,
+        state: undefined,
+        timestamp: Date.now(),
+      });
+    }
+  };
   agent.observe = observe;
-  agent.plan = async (planOptions: AgentPlanOptions) => {
-    return await generatePlan({
-      model,
-      agent,
-      ...planOptions,
-    });
+  agent.generatePlan = async (planOptions: AgentPlanOptions) => {
+    const plan = await generatePlan(planOptions);
+
+    if (plan) {
+      agent.send({
+        type: 'agent.plan',
+        plan,
+      });
+    }
+
+    return plan;
   };
 
   agent.start();

@@ -7,7 +7,7 @@ export type GenerateTextOptions = Parameters<typeof generateText>[0];
 
 export type StreamTextOptions = Parameters<typeof streamText>[0];
 
-export type AgentStrategyPlanOptions = {
+export type AgentPlanOptions = {
   model: LanguageModel;
   state: ObservedState;
   goal: string;

@@ -5,6 +5,7 @@ import { assign, createActor, log, setup } from 'xstate';
 import { getFromTerminal } from './helpers/helpers';
 
 const agent = createAgent({
+  name: 'goal',
   model: openai('gpt-4-turbo'),
   events: {
     'agent.createGoal': z.object({
