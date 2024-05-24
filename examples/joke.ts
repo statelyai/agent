@@ -130,7 +130,7 @@ const jokeMachine = setup({
             assign({
               jokes: ({ context, event }) => [...context.jokes, event.joke],
             }),
-            log(({ event }) => event.joke),
+            log((x) => x.event.joke),
           ],
           target: 'relevance',
         },
@@ -223,5 +223,9 @@ const jokeMachine = setup({
 });
 
 const actor = createActor(jokeMachine);
+
+agent.onMessage((msg) => {
+  console.log(msg);
+});
 
 actor.start();

@@ -32,14 +32,14 @@ export type EventSchemas = {
   };
 };
 
-export type AgentPlan = {
+export type AgentPlan<TEvent extends EventObject> = {
   goal: string;
   state: ObservedState;
   steps: Array<{
-    event: EventObject;
+    event: TEvent;
     nextState?: ObservedState;
   }>;
-  nextEvent: EventObject | undefined;
+  nextEvent: TEvent | undefined;
 };
 
 export type PromptTemplate = (data: {

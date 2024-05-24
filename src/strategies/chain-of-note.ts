@@ -1,5 +1,4 @@
-import { generateText, GenerateTextResult, LanguageModel } from 'ai';
-import { AgentStrategy } from '../types';
+import { GenerateTextResult, LanguageModel } from 'ai';
 import wiki, { wikiSearchResult, wikiSummary } from 'wikipedia';
 import { Agent } from '../agent';
 import { assign, fromPromise, setup } from 'xstate';

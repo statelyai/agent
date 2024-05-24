@@ -11,6 +11,7 @@ const context = {
 };
 
 const agent = createAgent({
+  name: 'word',
   model: openai('gpt-4-1106-preview'),
   events: {
     'agent.guessLetter': z.object({

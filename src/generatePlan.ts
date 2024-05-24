@@ -34,7 +34,7 @@ Only make a single tool call to achieve the goal.
 
 export async function generatePlan(
   options: AgentPlanOptions
-): Promise<AgentPlan | undefined> {
+): Promise<AgentPlan<any> | undefined> {
   const transitions: TransitionData[] = options.logic
     ? getTransitions(options.state, options.logic)
     : Object.entries(options.events).map(([eventType, { description }]) => ({
