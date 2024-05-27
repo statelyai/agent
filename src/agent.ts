@@ -1,4 +1,5 @@
 import {
+  AnyEventObject,
   AnyMachineSnapshot,
   AnyStateMachine,
   createActor,
@@ -125,6 +126,20 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
     messageListeners.push(toObserver(callback));
   };
 
+  function getActions(onEvent: (event: AnyEventObject) => void) {
+    const actions: ZodActionMapping = {};
+
+    for (const [eventType, zodEventSchema] of Object.entries(events ?? {})) {
+      actions[eventType] = {
+        schema: zodEventSchema,
+        action: async (_state, event) => {
+          onEvent(event);
+        },
+      };
+    }
+    return actions;
+  }
+
   agent.fromDecision = () =>
     fromPromise(async ({ input, self }) => {
       const parentRef = self._parent;
@@ -145,16 +160,9 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
         context: contextToInclude,
       };
 
-      const actions: ZodActionMapping = {};
-
-      for (const [eventType, zodEventSchema] of Object.entries(events ?? {})) {
-        actions[eventType] = {
-          schema: zodEventSchema,
-          action: async (_state, event) => {
-            parentRef.send(event);
-          },
-        };
-      }
+      const actions = getActions((ev) => {
+        parentRef.send(ev);
+      });
 
       const plan = await agentDecide({
         goal: resolvedInput.goal,
@@ -163,21 +171,6 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
         state,
         ...generateTextOptions,
       });
-
-      // const plan = await generatePlan({
-      //   model,
-      //   goal: resolvedInput.goal,
-      //   events: events ?? {}, // TODO: events should be required
-      //   state,
-      //   logic: parentRef.src as any,
-      //   agent,
-      //   ...generateTextOptions,
-      // });
-
-      // if (plan?.nextEvent) {
-      //   // TODO: validate event
-      //   parentRef.send(plan.nextEvent);
-      // }
 
       return plan;
     }) as AgentDecisionLogic<any>;
@@ -373,21 +366,33 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
     return plan;
   };
 
-  agent.interact = (actorRef) => {
+  agent.interact = (actorRef, { goal, context: contextFn }) => {
     let currentState = actorRef.getSnapshot();
     let subscribed = true;
     actorRef.system.inspect({
-      next: (ev) => {
+      next: (inspectionEvent) => {
         if (!subscribed) {
           return;
         }
-        if (ev.actorRef === actorRef && ev.type === '@xstate.snapshot') {
+        if (
+          inspectionEvent.actorRef === actorRef &&
+          inspectionEvent.type === '@xstate.snapshot'
+        ) {
           agent.observe({
             state: currentState,
-            event: ev.event,
-            nextState: ev.snapshot as AnyMachineSnapshot,
+            event: inspectionEvent.event,
+            nextState: inspectionEvent.snapshot as AnyMachineSnapshot,
             sessionId: agent.sessionId,
             timestamp: Date.now(),
+          });
+          agent.decide({
+            state: currentState,
+            actions: getActions((ev) => {
+              inspectionEvent.actorRef.send(ev);
+            }),
+            goal,
+            logic: actorRef.src as any,
+            context: contextFn(currentState),
           });
         }
       },

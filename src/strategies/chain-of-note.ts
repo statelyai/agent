@@ -1,7 +1,7 @@
 import { GenerateTextResult, LanguageModel } from 'ai';
 import wiki, { wikiSearchResult, wikiSummary } from 'wikipedia';
-import { Agent } from '../agent';
 import { assign, fromPromise, setup } from 'xstate';
+import { Agent } from '../types';
 
 const searchWiki = fromPromise(
   async ({

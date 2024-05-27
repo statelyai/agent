@@ -206,7 +206,16 @@ export type Agent<TEventSchemas extends ZodEventMapping = {}> = ActorRefFrom<
     | undefined
   >;
   onMessage: (callback: (message: AgentMessageHistory) => void) => void;
-  interact: (actor: AnyActorRef) => Subscription;
+  interact: (
+    actor: AnyActorRef,
+    {
+      goal,
+      context,
+    }: {
+      goal: string;
+      context: (state: ObservedState) => any;
+    }
+  ) => Subscription;
 };
 
 export type AgentGenerateTextOptions = Omit<GenerateTextOptions, 'model'> & {

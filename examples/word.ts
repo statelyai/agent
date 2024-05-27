@@ -49,7 +49,7 @@ const wordGuesserMachine = setup({
       entry: assign(context),
       invoke: {
         src: 'getFromTerminal',
-        input: 'Enter a word',
+        input: 'Enter a word, and an agent will try to guess it.',
         onDone: {
           actions: assign({
             word: ({ event }) => event.output,
@@ -67,20 +67,19 @@ const wordGuesserMachine = setup({
         src: 'agent',
         input: ({ context }) => ({
           context: {
+            wordLength: context.word!.length,
             lettersGuessed: context.lettersGuessed,
+            lettersMatched: context
+              .word!.split('')
+              .map((letter) =>
+                context.lettersGuessed.includes(letter.toUpperCase())
+                  ? letter.toUpperCase()
+                  : '_'
+              )
+              .join(''),
           },
           goal: `
-          You are trying to guess the word. The word has ${
-            context.word!.length
-          } letters. These letters matched: ${context
-            .word!.split('')
-            .map((letter) =>
-              context.lettersGuessed.includes(letter.toUpperCase())
-                ? letter.toUpperCase()
-                : '_'
-            )
-            .join('')}
-          Please make your next guess - guess a letter or, if you think you know the word, guess the full word. You can only make 10 total guesses. If you are confident you know the word, it is better to guess the word.
+          You are trying to guess the word. Please make your next guess - guess a letter or, if you think you know the word, guess the full word. You can only make 10 total guesses. If you are confident you know the word, it is better to guess the word.
               `,
         }),
       },
@@ -149,9 +148,9 @@ const wordGuesserMachine = setup({
         if (
           context.guessedWord?.toUpperCase() === context.word?.toUpperCase()
         ) {
-          return 'You won!';
+          return 'The agent won!';
         } else {
-          return 'You lost! The word was ' + context.word;
+          return 'The agent lost! The word was ' + context.word;
         }
       }),
       on: {
