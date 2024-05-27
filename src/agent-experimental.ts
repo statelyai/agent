@@ -1,4 +1,4 @@
-// export type AgentExperiences<TState, TReward> = Record<
+//  type AgentExperiences<TState, TReward> = Record<
 //   string, // serialized state
 //   Record<
 //     string, // serialized event
@@ -23,13 +23,13 @@ import { getToolCalls } from './adapters/openai';
 import { ZodEventMapping } from './schemas';
 
 // >;
-export interface AgentExperience<TState, TEvent extends AnyEventObject> {
+interface AgentExperience<TState, TEvent extends AnyEventObject> {
   prevState: TState | undefined;
   event: TEvent;
   nextState: TState;
 }
 
-export type AgentPlan<TState, TEvent extends EventObject> = Array<{
+type AgentPlan<TState, TEvent extends EventObject> = Array<{
   /**
    * The current state
    */
@@ -44,7 +44,7 @@ export type AgentPlan<TState, TEvent extends EventObject> = Array<{
   nextState?: TState;
 }>;
 
-export interface AgentModel<
+interface AgentModel<
   // TLogic extends AnyActorLogic,
   TReward,
   TState,
@@ -95,7 +95,7 @@ export interface AgentModel<
   }) => Promise<TReward>;
 }
 
-export interface AgentLogic<T> {
+interface AgentLogic<T> {
   /**
    * The next possible actions (represented by events) that the agent can take
    * based on the current state of the environment
@@ -104,14 +104,11 @@ export interface AgentLogic<T> {
   getPlan(state: T, goal: any): Promise<Array<[T, EventObject]>>;
 }
 
-export interface Agent<
-  TState extends AnyMachineSnapshot,
-  TEvent extends EventObject
-> {
+interface Agent<TState extends AnyMachineSnapshot, TEvent extends EventObject> {
   act: (env: ActorRef<TState, TEvent>) => Promise<void>;
 }
 
-export function createAgent2<TEnvironment extends AnyActorRef>(
+function createAgent2<TEnvironment extends AnyActorRef>(
   openai: OpenAI,
   // logic: AnyActorLogic,
   // input: InputFrom<TLogic>,

@@ -28,9 +28,6 @@ const machine = setup({
   context: {
     conversation: [],
   },
-  always: {
-    actions: (x) => console.log(x.context.conversation),
-  },
   states: {
     waiting: {
       invoke: {

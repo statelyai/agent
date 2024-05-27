@@ -1,15 +1,14 @@
 import { tool } from 'ai';
-import { AgentPlanOptions } from './types';
 import {
   AgentPlan,
-  createZodEventSchemas,
-  getAllTransitions,
+  AgentPlanOptions,
+  ObservedState,
   PromptTemplate,
   TransitionData,
-} from './utils';
+} from '../types';
+import { createZodEventSchemas, getAllTransitions } from '../utils';
 import { AnyStateMachine } from 'xstate';
 import { z } from 'zod';
-import { ObservedState } from './agent';
 
 const getTransitions = (state: ObservedState, logic: AnyStateMachine) => {
   if (!logic) {
@@ -32,7 +31,7 @@ Only make a single tool call to achieve the goal.
   `.trim();
 };
 
-export async function generatePlan(
+export async function simplePlanner(
   options: AgentPlanOptions
 ): Promise<AgentPlan<any> | undefined> {
   const transitions: TransitionData[] = options.logic
@@ -106,7 +105,7 @@ Only make a single tool call to achieve the goal.
 
   const { model, ...otherOptions } = options;
 
-  const result = await options.agent!.generateText({
+  const result = await options.agent.generateText({
     model,
     prompt,
     tools: toolMap as any,
