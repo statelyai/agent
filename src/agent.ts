@@ -363,9 +363,41 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
 
   agent.interact = (actorRef, { goal, context: contextFn }) => {
     let currentState = actorRef.getSnapshot();
+    console.log(currentState.value);
     let subscribed = true;
+
+    async function observeAndPlan({
+      event,
+      snapshot,
+    }: {
+      event: AnyEventObject;
+      snapshot: AnyMachineSnapshot;
+    }) {
+      agent.observe({
+        state: currentState,
+        event: event,
+        nextState: snapshot as AnyMachineSnapshot,
+        sessionId: agent.sessionId,
+        timestamp: Date.now(),
+      });
+      currentState = snapshot;
+      const actions = getActions((ev) => {
+        console.log('sending event', ev);
+        actorRef.send(ev);
+      });
+      console.log(currentState.value);
+      const plan = await agent.decide({
+        state: currentState,
+        actions,
+        goal,
+        logic: actorRef.src as any,
+        context: contextFn(currentState),
+      });
+
+      console.log('next event', plan?.nextEvent);
+    }
     actorRef.system.inspect({
-      next: (inspectionEvent) => {
+      next: async (inspectionEvent) => {
         if (!subscribed) {
           return;
         }
@@ -373,31 +405,25 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
           inspectionEvent.actorRef === actorRef &&
           inspectionEvent.type === '@xstate.snapshot'
         ) {
-          agent.observe({
-            state: currentState,
+          await observeAndPlan({
             event: inspectionEvent.event,
-            nextState: inspectionEvent.snapshot as AnyMachineSnapshot,
-            sessionId: agent.sessionId,
-            timestamp: Date.now(),
-          });
-          agent.decide({
-            state: currentState,
-            actions: getActions((ev) => {
-              inspectionEvent.actorRef.send(ev);
-            }),
-            goal,
-            logic: actorRef.src as any,
-            context: contextFn(currentState),
+            snapshot: inspectionEvent.snapshot as AnyMachineSnapshot,
           });
         }
       },
     });
 
-    return {
-      unsubscribe: () => {
-        subscribed = false;
-      },
+    observeAndPlan({
+      event: { type: 'xstate.init' },
+      snapshot: currentState,
+    });
+
+    const promise = new Promise((res, rej) => {});
+    (promise as any).unsubscribe = () => {
+      subscribed = false;
     };
+
+    return promise as any;
   };
 
   agent.start();

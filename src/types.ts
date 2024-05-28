@@ -207,7 +207,7 @@ export type Agent<
       goal: string;
       context: (state: ObservedState) => any;
     }
-  ) => Subscription;
+  ) => Subscription & Promise<void>;
 };
 
 export type AgentGenerateTextOptions = Omit<GenerateTextOptions, 'model'> & {
