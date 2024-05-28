@@ -1,7 +1,7 @@
 import { SomeZodObject } from 'zod';
 import { JsonSchema7Type } from 'zod-to-json-schema';
-import { ObservedState } from './agent';
 import { AnyEventObject } from 'xstate';
+import { ObservedState } from './types';
 
 export type ZodEventMapping = {
   // map event types to Zod types

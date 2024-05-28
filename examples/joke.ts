@@ -60,12 +60,12 @@ const agent = createAgent({
       explanation: z.string(),
     }),
     'agent.continue': z.object({}).describe('Continue'),
-    'agent.irrelevantJoke': z
+    'agent.markAsIrrelevant': z
       .object({
         explanation: z.string(),
       })
       .describe('Explains why the joke was irrelevant'),
-    'agent.relevantJoke': z.object({}).describe('The joke was relevant'),
+    'agent.markAsRelevant': z.object({}).describe('The joke was relevant'),
   },
 });
 
@@ -148,12 +148,12 @@ const jokeMachine = setup({
         }),
       },
       on: {
-        'agent.irrelevantJoke': {
+        'agent.markAsIrrelevant': {
           actions: log((x) => 'Irrelevant joke: ' + x.event.explanation),
           target: 'waitingForTopic',
           description: 'Continue',
         },
-        'agent.relevantJoke': {
+        'agent.markAsRelevant': {
           actions: log('Joke was relevant'),
           target: 'rateJoke',
         },

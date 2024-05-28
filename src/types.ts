@@ -153,7 +153,6 @@ export type Agent<
 > = ActorRefFrom<AgentLogic<TEvents>> & {
   name: string;
   eventTypes: TEvents;
-  eventSchemas: EventSchemas<keyof TEventSchemas & string>;
 
   // Decision
   decide: (

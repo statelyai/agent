@@ -12,7 +12,6 @@ import {
   toObserver,
 } from 'xstate';
 import { ZodEventMapping, ZodActionMapping } from './schemas';
-import { createZodEventSchemas } from './utils';
 import {
   CoreTool,
   generateText,
@@ -54,8 +53,6 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
   stringify?: typeof JSON.stringify;
 } & GenerateTextOptions): Agent<TEventSchemas> {
   const messageListeners: Observer<AgentMessageHistory>[] = [];
-
-  const eventSchemas = events ? createZodEventSchemas(events) : undefined;
 
   const observe: Agent<TEventSchemas>['observe'] = ({
     state,
@@ -207,8 +204,6 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
   }
 
   agent.decide = agentDecide;
-
-  agent.eventSchemas = eventSchemas ?? ({} as any);
 
   agent.addHistory = async (history) => {
     agent.send({

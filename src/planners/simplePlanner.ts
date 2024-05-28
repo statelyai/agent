@@ -1,4 +1,4 @@
-import { tool } from 'ai';
+import { CoreTool, tool } from 'ai';
 import {
   AgentPlan,
   AgentPlanOptions,
@@ -6,7 +6,7 @@ import {
   PromptTemplate,
   TransitionData,
 } from '../types';
-import { createZodEventSchemas, getAllTransitions } from '../utils';
+import { getAllTransitions } from '../utils';
 import { AnyStateMachine } from 'xstate';
 import { z } from 'zod';
 
@@ -40,48 +40,38 @@ export async function simplePlanner(
         eventType,
         description,
       }));
-  const eventSchemas = createZodEventSchemas(options.events);
 
   const filter = (eventType: string) =>
     Object.keys(options.events).includes(eventType);
 
   const functionNameMapping: Record<string, string> = {};
-  const tools = transitions
+  const toolTransitions = transitions
     .filter((t) => {
       return filter(t.eventType);
     })
     .map((t) => {
       const name = t.eventType.replace(/\./g, '_');
       functionNameMapping[name] = t.eventType;
-      const eventSchema = eventSchemas?.[t.eventType];
-      const {
-        description,
-        properties: { type, ...properties },
-      } = eventSchema ?? ({} as any);
 
       return {
         type: 'function',
         eventType: t.eventType,
-        function: {
-          name,
-          description: t.description ?? description,
-          parameters: {
-            type: 'object',
-            properties: properties ?? {},
-          },
-        },
+        description: t.description,
+        name,
       } as const;
     });
 
-  const toolMap: Record<string, any> = {};
+  const toolMap: Record<string, CoreTool<any, any>> = {};
 
-  for (const toolCall of tools) {
-    toolMap[toolCall.function.name] = tool({
-      description: toolCall.function.description,
-      parameters: options.events?.[toolCall.eventType] ?? z.object({}),
+  for (const toolTransitionData of toolTransitions) {
+    const toolZodType = options.events?.[toolTransitionData.eventType];
+
+    toolMap[toolTransitionData.name] = tool({
+      description: toolZodType?.description ?? toolTransitionData.description,
+      parameters: toolZodType ?? z.object({}),
       execute: async (params) => {
         const event = {
-          type: toolCall.eventType,
+          type: toolTransitionData.eventType,
           ...params,
         };
 
@@ -108,7 +98,7 @@ Only make a single tool call to achieve the goal.
   const result = await options.agent.generateText({
     model,
     prompt,
-    tools: toolMap as any,
+    tools: toolMap,
     ...otherOptions,
   });
 
