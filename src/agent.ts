@@ -31,7 +31,7 @@ import {
   AgentMessageHistory,
   AgentPlanner,
   AgentPlanOptions,
-  AgentTextStreamLogicInput,
+  AgentStreamTextOptions,
   EventsFromZodEventMapping,
   GenerateTextOptions,
   ObservedState,
@@ -264,7 +264,7 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
 
   function fromText(): PromiseActorLogic<
     GenerateTextResult<Record<string, CoreTool<any, any>>>,
-    AgentTextStreamLogicInput
+    AgentStreamTextOptions
   > {
     return fromPromise(async ({ input }) => {
       return await agentGenerateText(input);
@@ -272,7 +272,7 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
   }
 
   async function agentStreamText(
-    input: AgentTextStreamLogicInput
+    input: AgentStreamTextOptions
   ): Promise<StreamTextResult<any>> {
     const id = randomUUID();
     agent.addHistory({
@@ -292,9 +292,9 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
 
   function fromTextStream(): ObservableActorLogic<
     { textDelta: string },
-    AgentTextStreamLogicInput
+    AgentStreamTextOptions
   > {
-    return fromObservable(({ input }: { input: AgentTextStreamLogicInput }) => {
+    return fromObservable(({ input }: { input: AgentStreamTextOptions }) => {
       const observers = new Set<Observer<{ textDelta: string }>>();
 
       const prompt = [

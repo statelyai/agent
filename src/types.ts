@@ -147,20 +147,20 @@ export type EventsFromZodEventMapping<TEventSchemas extends ZodEventMapping> =
     } & TypeOf<TEventSchemas[K]>;
   }>;
 
-export type Agent<TEventSchemas extends ZodEventMapping = {}> = ActorRefFrom<
-  AgentLogic<EventsFromZodEventMapping<TEventSchemas>>
-> & {
+export type Agent<
+  TEventSchemas extends ZodEventMapping = {},
+  TEvents extends EventObject = EventsFromZodEventMapping<TEventSchemas>
+> = ActorRefFrom<AgentLogic<TEvents>> & {
   name: string;
-  eventTypes: EventsFromZodEventMapping<TEventSchemas>;
+  eventTypes: TEvents;
   eventSchemas: EventSchemas<keyof TEventSchemas & string>;
 
   // Decision
   decide: (
     options: AgentDecideOptions
-  ) => Promise<AgentPlan<EventsFromZodEventMapping<TEventSchemas>> | undefined>;
-  fromDecision: () => AgentDecisionLogic<
-    EventsFromZodEventMapping<TEventSchemas>
-  >;
+  ) => Promise<AgentPlan<TEvents> | undefined>;
+
+  fromDecision: () => AgentDecisionLogic<TEvents>;
 
   // Generate text
   generateText: (
@@ -174,11 +174,11 @@ export type Agent<TEventSchemas extends ZodEventMapping = {}> = ActorRefFrom<
 
   // Stream text
   streamText: (
-    options: AgentTextStreamLogicInput
+    options: AgentStreamTextOptions
   ) => AsyncIterable<{ textDelta: string }>;
   fromTextStream: () => ObservableActorLogic<
     { textDelta: string },
-    AgentTextStreamLogicInput
+    AgentStreamTextOptions
   >;
 
   inspect: (inspectionEvent: InspectionEvent) => void;
@@ -194,17 +194,10 @@ export type Agent<TEventSchemas extends ZodEventMapping = {}> = ActorRefFrom<
     sessionId: string;
   }) => void;
   addHistory: (history: AgentMessageHistory) => Promise<void>;
-  addFeedback: (feedbackItem: AgentFeedback) => void;
-  generatePlan: (options: AgentPlanOptions) => Promise<
-    | AgentPlan<
-        Values<{
-          [K in keyof TEventSchemas & string]: {
-            type: K;
-          } & TypeOf<TEventSchemas[K]>;
-        }>
-      >
-    | undefined
-  >;
+  addFeedback: (feedbackItem: AgentFeedback) => Promise<void>;
+  generatePlan: (
+    options: AgentPlanOptions
+  ) => Promise<AgentPlan<TEvents> | undefined>;
   onMessage: (callback: (message: AgentMessageHistory) => void) => void;
   interact: (
     actor: AnyActorRef,
@@ -223,7 +216,8 @@ export type AgentGenerateTextOptions = Omit<GenerateTextOptions, 'model'> & {
   context?: any;
 };
 
-export type AgentTextStreamLogicInput = Omit<StreamTextOptions, 'model'> & {
+export type AgentStreamTextOptions = Omit<StreamTextOptions, 'model'> & {
+  model?: LanguageModel;
   context?: any;
 };
 
