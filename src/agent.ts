@@ -2,6 +2,7 @@ import {
   AnyEventObject,
   AnyMachineSnapshot,
   createActor,
+  EventObject,
   fromObservable,
   fromPromise,
   fromTransition,
@@ -39,7 +40,10 @@ import { simplePlanner } from './planners/simplePlanner';
 import { defaultPromptTemplate } from './templates/default';
 import { randomUUID } from 'crypto';
 
-export function createAgent<const TEventSchemas extends ZodEventMapping>({
+export function createAgent<
+  const TEventSchemas extends ZodEventMapping,
+  TEvents extends EventObject = EventsFromZodEventMapping<TEventSchemas>
+>({
   name,
   model,
   events,
@@ -51,13 +55,13 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
   name: string;
   model: LanguageModel;
   events?: TEventSchemas;
-  planner?: AgentPlanner<EventsFromZodEventMapping<TEventSchemas>>;
+  planner?: AgentPlanner<TEvents>;
   stringify?: typeof JSON.stringify;
   promptTemplate?: PromptTemplate;
-} & GenerateTextOptions): Agent<TEventSchemas> {
+} & GenerateTextOptions): Agent<TEvents> {
   const messageListeners: Observer<AgentMessageHistory>[] = [];
 
-  const observe: Agent<TEventSchemas>['observe'] = ({
+  const observe: Agent<TEvents>['observe'] = ({
     state,
     event,
     nextState,
@@ -75,50 +79,49 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
     });
   };
 
-  const agentLogic: AgentLogic<EventsFromZodEventMapping<TEventSchemas>> =
-    fromTransition(
-      (state, event) => {
-        switch (event.type) {
-          case 'agent.reward': {
-            state.feedback.push(event.reward);
-            break;
-          }
-          case 'agent.observe': {
-            state.observations.push({
-              id: randomUUID(),
-              state: event.state,
-              event: event.event,
-              nextState: event.nextState,
-              timestamp: event.timestamp,
-              sessionId: event.sessionId,
-            });
-            break;
-          }
-          case 'agent.history': {
-            state.history.push(event.history);
-            messageListeners.forEach((listener) =>
-              listener.next?.(event.history)
-            );
-            break;
-          }
-          case 'agent.plan': {
-            state.plans.push(event.plan);
-            break;
-          }
-          default:
-            break;
+  const agentLogic: AgentLogic<TEvents> = fromTransition(
+    (state, event) => {
+      switch (event.type) {
+        case 'agent.reward': {
+          state.feedback.push(event.reward);
+          break;
         }
-        return state;
-      },
-      {
-        observations: [],
-        plans: [],
-        feedback: [],
-        history: [],
-      } as AgentContext<EventsFromZodEventMapping<TEventSchemas>>
-    );
+        case 'agent.observe': {
+          state.observations.push({
+            id: randomUUID(),
+            state: event.state,
+            event: event.event,
+            nextState: event.nextState,
+            timestamp: event.timestamp,
+            sessionId: event.sessionId,
+          });
+          break;
+        }
+        case 'agent.history': {
+          state.history.push(event.history);
+          messageListeners.forEach((listener) =>
+            listener.next?.(event.history)
+          );
+          break;
+        }
+        case 'agent.plan': {
+          state.plans.push(event.plan);
+          break;
+        }
+        default:
+          break;
+      }
+      return state;
+    },
+    {
+      observations: [],
+      plans: [],
+      feedback: [],
+      history: [],
+    } as AgentContext<TEvents>
+  );
 
-  const agent = createActor(agentLogic) as unknown as Agent<TEventSchemas>;
+  const agent = createActor(agentLogic) as unknown as Agent<TEvents>;
 
   agent.name = name;
 

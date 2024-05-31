@@ -162,10 +162,9 @@ export type EventsFromZodEventMapping<TEventSchemas extends ZodEventMapping> =
     } & TypeOf<TEventSchemas[K]>;
   }>;
 
-export type Agent<
-  TEventSchemas extends ZodEventMapping = {},
-  TEvents extends EventObject = EventsFromZodEventMapping<TEventSchemas>
-> = ActorRefFrom<AgentLogic<TEvents>> & {
+export type Agent<TEvents extends EventObject> = ActorRefFrom<
+  AgentLogic<TEvents>
+> & {
   name: string;
   eventTypes: TEvents;
 

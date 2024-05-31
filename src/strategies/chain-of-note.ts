@@ -44,7 +44,7 @@ export const chainOfNote = setup({
   types: {
     input: {} as {
       model: LanguageModel;
-      agent: Agent;
+      agent: Agent<any>;
       prompt: string;
     },
     context: {} as {
@@ -56,7 +56,7 @@ export const chainOfNote = setup({
           }[]
         | null;
       model: LanguageModel;
-      agent: Agent;
+      agent: Agent<any>;
       prompt: string;
     },
     output: {} as GenerateTextResult<any>,
