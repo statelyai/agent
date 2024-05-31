@@ -33,8 +33,10 @@ import {
   AgentStreamTextOptions,
   EventsFromZodEventMapping,
   GenerateTextOptions,
+  PromptTemplate,
 } from './types';
 import { simplePlanner } from './planners/simplePlanner';
+import { defaultPromptTemplate } from './templates/default';
 import { randomUUID } from 'crypto';
 
 export function createAgent<const TEventSchemas extends ZodEventMapping>({
@@ -43,6 +45,7 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
   events,
   planner = simplePlanner,
   stringify = JSON.stringify,
+  promptTemplate = defaultPromptTemplate,
   ...generateTextOptions
 }: {
   name: string;
@@ -50,6 +53,7 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
   events?: TEventSchemas;
   planner?: AgentPlanner<EventsFromZodEventMapping<TEventSchemas>>;
   stringify?: typeof JSON.stringify;
+  promptTemplate?: PromptTemplate;
 } & GenerateTextOptions): Agent<TEventSchemas> {
   const messageListeners: Observer<AgentMessageHistory>[] = [];
 
@@ -183,13 +187,8 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
   };
 
   async function agentGenerateText(options: AgentGenerateTextOptions) {
-    const prompt = [
-      options.context &&
-        `<context>\n${stringify(options.context, null, 2)}\n</context>`,
-      options.prompt,
-    ]
-      .filter(Boolean)
-      .join('\n\n');
+    // TODO: check if messages was provided instead
+    const prompt = options.prompt!;
 
     const id = Date.now() + '';
 
@@ -262,13 +261,8 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
     return fromObservable(({ input }: { input: AgentStreamTextOptions }) => {
       const observers = new Set<Observer<{ textDelta: string }>>();
 
-      const prompt = [
-        input.context &&
-          `<context>\n${stringify(input.context, null, 2)}\n</context>`,
-        input.prompt,
-      ]
-        .filter(Boolean)
-        .join('\n\n');
+      // TODO: check if messages was provided instead
+      const prompt = input.prompt!;
 
       (async () => {
         const result = await agentStreamText({
@@ -333,7 +327,6 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
 
   agent.interact = (actorRef, { goal, context: contextFn }) => {
     let currentState = actorRef.getSnapshot();
-    console.log(currentState.value);
     let subscribed = true;
 
     async function observeAndPlan({
@@ -352,7 +345,6 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
       });
       currentState = snapshot;
 
-      console.log(currentState.value);
       const plan = await agent.decide({
         state: currentState,
         goal,
@@ -363,8 +355,6 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
           actorRef.send(event);
         },
       });
-
-      console.log('next event', plan?.nextEvent);
     }
     actorRef.system.inspect({
       next: async (inspectionEvent) => {

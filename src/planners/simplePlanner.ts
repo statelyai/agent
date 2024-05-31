@@ -3,12 +3,12 @@ import {
   AgentPlan,
   AgentPlanOptions,
   ObservedState,
-  PromptTemplate,
   TransitionData,
 } from '../types';
 import { getAllTransitions } from '../utils';
 import { AnyStateMachine } from 'xstate';
 import { z } from 'zod';
+import { defaultPromptTemplate } from '../templates/default';
 
 const getTransitions = (state: ObservedState, logic: AnyStateMachine) => {
   if (!logic) {
@@ -19,21 +19,10 @@ const getTransitions = (state: ObservedState, logic: AnyStateMachine) => {
   return getAllTransitions(resolvedState);
 };
 
-export const defaultPromptTemplate: PromptTemplate = (data) => {
-  return `
-<context>
-${JSON.stringify(data.context, null, 2)}
-</context>
-
-${data.goal}
-
-Only make a single tool call to achieve the goal.
-  `.trim();
-};
-
 export async function simplePlanner(
   options: AgentPlanOptions
 ): Promise<AgentPlan<any> | undefined> {
+  const template = options.template ?? defaultPromptTemplate;
   const transitions: TransitionData[] = options.logic
     ? getTransitions(options.state, options.logic)
     : Object.entries(options.events).map(([eventType, { description }]) => ({
@@ -79,19 +68,11 @@ export async function simplePlanner(
       },
     });
   }
-  const context = options.state.context
-    ? `
-<context>
-${JSON.stringify(options.state.context, null, 2)}
-</context>`.trim()
-    : '';
-  const prompt = `
-${context}
 
-${options.goal}
-
-Only make a single tool call to achieve the goal.
-      `.trim();
+  const prompt = template({
+    context: options.state.context,
+    goal: options.goal,
+  });
 
   const { model, ...otherOptions } = options;
 

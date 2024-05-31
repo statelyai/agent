@@ -7,6 +7,7 @@ import {
   InspectionEvent,
   ObservableActorLogic,
   PromiseActorLogic,
+  StateValue,
   Subscription,
   TransitionActorLogic,
   Values,
@@ -17,7 +18,7 @@ import {
   LanguageModel,
   streamText,
 } from 'ai';
-import { EventSchemas, ZodActionMapping, ZodEventMapping } from './schemas';
+import { ZodEventMapping } from './schemas';
 import { TypeOf } from 'zod';
 
 export type GenerateTextOptions = Parameters<typeof generateText>[0];
@@ -31,6 +32,7 @@ export type AgentPlanOptions = {
   events: ZodEventMapping;
   agent: Agent<any>;
   logic?: AnyStateMachine;
+  template?: PromptTemplate;
 };
 
 export type AgentPlan<TEvent extends EventObject> = {
@@ -52,9 +54,22 @@ export interface TransitionData {
 
 export type PromptTemplate = (data: {
   goal: string;
-  context: any;
+  /**
+   * The state value
+   */
+  value?: StateValue;
+  /**
+   * The provided context
+   */
+  context?: any;
   logic?: unknown;
-  transitions?: TransitionData[];
+  /**
+   * Past observations
+   */
+  observations?: AgentObservation[];
+  feedback?: AgentFeedback[];
+  messages?: AgentMessageHistory[];
+  plans?: AgentPlan<any>[];
 }) => string;
 
 export type AgentPlanner<TEvent extends EventObject> = (
