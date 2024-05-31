@@ -25,14 +25,14 @@ export type GenerateTextOptions = Parameters<typeof generateText>[0];
 
 export type StreamTextOptions = Parameters<typeof streamText>[0];
 
-export type AgentPlanOptions = {
+export type AgentPlanOptions<TEvent extends EventObject> = {
   model: LanguageModel;
   state: ObservedState;
   goal: string;
   events: ZodEventMapping;
   agent: Agent<any>;
   logic?: AnyStateMachine;
-  template?: PromptTemplate;
+  template?: PromptTemplate<TEvent>;
 };
 
 export type AgentPlan<TEvent extends EventObject> = {
@@ -52,7 +52,7 @@ export interface TransitionData {
   target?: any;
 }
 
-export type PromptTemplate = (data: {
+export type PromptTemplate<TEvents extends EventObject> = (data: {
   goal: string;
   /**
    * The state value
@@ -69,11 +69,11 @@ export type PromptTemplate = (data: {
   observations?: AgentObservation[];
   feedback?: AgentFeedback[];
   messages?: AgentMessageHistory[];
-  plans?: AgentPlan<any>[];
+  plans?: AgentPlan<TEvents>[];
 }) => string;
 
 export type AgentPlanner<TEvent extends EventObject> = (
-  options: AgentPlanOptions
+  options: AgentPlanOptions<TEvent>
 ) => Promise<AgentPlan<TEvent> | undefined>;
 
 export type AgentDecideOptions = {
@@ -83,7 +83,10 @@ export type AgentDecideOptions = {
   state: ObservedState;
   logic: AnyStateMachine;
   execute?: (event: AnyEventObject) => Promise<void>;
-} & Omit<Parameters<typeof generateText>[0], 'model' | 'tools' | 'prompt'>;
+} & Omit<
+  Parameters<typeof generateText>[0],
+  'model' | 'tools' | 'prompt' | 'messages'
+>;
 
 export interface AgentFeedback {
   goal: string;
@@ -209,7 +212,7 @@ export type Agent<TEvents extends EventObject> = ActorRefFrom<
   addHistory: (history: AgentMessageHistory) => Promise<void>;
   addFeedback: (feedbackItem: AgentFeedback) => Promise<void>;
   generatePlan: (
-    options: AgentPlanOptions
+    options: AgentPlanOptions<TEvents>
   ) => Promise<AgentPlan<TEvents> | undefined>;
   onMessage: (callback: (message: AgentMessageHistory) => void) => void;
   interact: (

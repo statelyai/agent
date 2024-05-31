@@ -1,6 +1,6 @@
 import { PromptTemplate } from '../types';
 
-export const defaultPromptTemplate: PromptTemplate = (data) => {
+export const defaultPromptTemplate: PromptTemplate<any> = (data) => {
   return `
 <context>
 ${JSON.stringify(data.context, null, 2)}

@@ -57,7 +57,7 @@ export function createAgent<
   events?: TEventSchemas;
   planner?: AgentPlanner<TEvents>;
   stringify?: typeof JSON.stringify;
-  promptTemplate?: PromptTemplate;
+  promptTemplate?: PromptTemplate<TEvents>;
 } & GenerateTextOptions): Agent<TEvents> {
   const messageListeners: Observer<AgentMessageHistory>[] = [];
 
@@ -315,7 +315,7 @@ export function createAgent<
     }
   };
   agent.observe = observe;
-  agent.generatePlan = async (planOptions: AgentPlanOptions) => {
+  agent.generatePlan = async (planOptions: AgentPlanOptions<TEvents>) => {
     const plan = await planner(planOptions);
 
     if (plan) {

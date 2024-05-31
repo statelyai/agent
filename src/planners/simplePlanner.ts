@@ -20,7 +20,7 @@ const getTransitions = (state: ObservedState, logic: AnyStateMachine) => {
 };
 
 export async function simplePlanner(
-  options: AgentPlanOptions
+  options: AgentPlanOptions<any>
 ): Promise<AgentPlan<any> | undefined> {
   const template = options.template ?? defaultPromptTemplate;
   const transitions: TransitionData[] = options.logic
