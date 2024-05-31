@@ -16,6 +16,7 @@ const agent = createAgent({
   events: {
     'agent.guessLetter': z.object({
       letter: z.string().min(1).max(1).describe('The letter guessed'),
+      reasoning: z.string().describe('The reasoning behind the guess'),
     }),
 
     'agent.guessWord': z.object({
@@ -78,9 +79,7 @@ const wordGuesserMachine = setup({
               )
               .join(''),
           },
-          goal: `
-          You are trying to guess the word. Please make your next guess - guess a letter or, if you think you know the word, guess the full word. You can only make 10 total guesses. If you are confident you know the word, it is better to guess the word.
-              `,
+          goal: `You are trying to guess the word. Please make your next guess - guess a letter or, if you think you know the word, guess the full word. You can only make 10 total guesses. If you are confident you know the word, it is better to guess the word.`,
         }),
       },
       on: {

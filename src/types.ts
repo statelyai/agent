@@ -65,9 +65,9 @@ export type AgentDecideOptions = {
   goal: string;
   model?: LanguageModel;
   context?: any;
-  actions: ZodActionMapping;
   state: ObservedState;
   logic: AnyStateMachine;
+  execute?: (event: AnyEventObject) => Promise<void>;
 } & Omit<Parameters<typeof generateText>[0], 'model' | 'tools' | 'prompt'>;
 
 export interface AgentFeedback {

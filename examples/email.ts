@@ -112,6 +112,6 @@ createActor(machine, {
   input: {
     email: 'That sounds great! When are you available?',
     instructions:
-      'Tell him when I am available. Address him by his full (first and last) name.',
+      'Tell them when I am available. Address them by his full (first and last) name.',
   },
 }).start();

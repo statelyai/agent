@@ -1,7 +1,6 @@
 import {
   AnyEventObject,
   AnyMachineSnapshot,
-  AnyStateMachine,
   createActor,
   fromObservable,
   fromPromise,
@@ -11,7 +10,7 @@ import {
   PromiseActorLogic,
   toObserver,
 } from 'xstate';
-import { ZodEventMapping, ZodActionMapping } from './schemas';
+import { ZodEventMapping } from './schemas';
 import {
   CoreTool,
   generateText,
@@ -23,6 +22,7 @@ import {
 import {
   Agent,
   AgentContext,
+  AgentDecideOptions,
   AgentDecisionLogic,
   AgentDecisionLogicInput,
   AgentGenerateTextOptions,
@@ -33,7 +33,6 @@ import {
   AgentStreamTextOptions,
   EventsFromZodEventMapping,
   GenerateTextOptions,
-  ObservedState,
 } from './types';
 import { simplePlanner } from './planners/simplePlanner';
 import { randomUUID } from 'crypto';
@@ -123,20 +122,6 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
     messageListeners.push(toObserver(callback));
   };
 
-  function getActions(onEvent: (event: AnyEventObject) => void) {
-    const actions: ZodActionMapping = {};
-
-    for (const [eventType, zodEventSchema] of Object.entries(events ?? {})) {
-      actions[eventType] = {
-        schema: zodEventSchema,
-        action: async (_state, event) => {
-          onEvent(event);
-        },
-      };
-    }
-    return actions;
-  }
-
   agent.fromDecision = () =>
     fromPromise(async ({ input, self }) => {
       const parentRef = self._parent;
@@ -157,36 +142,24 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
         context: contextToInclude,
       };
 
-      const actions = getActions((ev) => {
-        parentRef.send(ev);
-      });
-
       const plan = await agentDecide({
         goal: resolvedInput.goal,
-        actions,
         logic: parentRef.src as any,
         state,
+        execute: async (event) => {
+          parentRef.send(event);
+        },
         ...generateTextOptions,
       });
 
       return plan;
     }) as AgentDecisionLogic<any>;
 
-  async function agentDecide(opts: {
-    goal: string;
-    actions: ZodActionMapping;
-    state: ObservedState;
-    logic: AnyStateMachine;
-  }) {
-    const events: ZodEventMapping = {};
-    for (const [name, action] of Object.entries(opts.actions)) {
-      events[name] = action.schema;
-    }
-
+  async function agentDecide(opts: AgentDecideOptions) {
     const plan = await planner({
       model,
       goal: opts.goal,
-      events,
+      events: events ?? {},
       state: opts.state,
       logic: opts.logic,
       agent,
@@ -194,10 +167,7 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
     });
 
     if (plan?.nextEvent) {
-      await opts.actions[plan.nextEvent.type]?.action(
-        opts.state,
-        plan.nextEvent
-      );
+      await opts.execute?.(plan.nextEvent);
     }
 
     return plan;
@@ -381,17 +351,17 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
         timestamp: Date.now(),
       });
       currentState = snapshot;
-      const actions = getActions((ev) => {
-        console.log('sending event', ev);
-        actorRef.send(ev);
-      });
+
       console.log(currentState.value);
       const plan = await agent.decide({
         state: currentState,
-        actions,
         goal,
         logic: actorRef.src as any,
         context: contextFn(currentState),
+        execute: async (event) => {
+          console.log('executing event', event);
+          actorRef.send(event);
+        },
       });
 
       console.log('next event', plan?.nextEvent);

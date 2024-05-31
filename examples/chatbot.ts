@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { createAgent } from '../src';
 import { openai } from '@ai-sdk/openai';
-import { assign, createActor, setup } from 'xstate';
+import { assign, createActor, log, setup } from 'xstate';
 import { getFromTerminal } from './helpers/helpers';
 
 const agent = createAgent({
@@ -54,10 +54,13 @@ const machine = setup({
       },
       on: {
         'agent.respond': {
-          actions: assign({
-            conversation: (x) =>
-              x.context.conversation.concat('Assistant: ' + x.event.response),
-          }),
+          actions: [
+            assign({
+              conversation: (x) =>
+                x.context.conversation.concat('Assistant: ' + x.event.response),
+            }),
+            log((x) => `Agent: ${x.event.response}`),
+          ],
           target: 'waiting',
         },
         'agent.endConversation': 'finished',
