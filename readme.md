@@ -1,13 +1,13 @@
-An agent is like a language model that wraps:
+# Stately Agent
 
-- generateText()
-- streamText()
+> [!WARNING]  
+> Alpha software! Not ready for production yet.
 
-A plan is a sequence of events and predicted states to reach a goal.
+Stately Agent is a flexible framework for building AI agents using state machines. Stately agents go beyond normal LLM-based AI agents by:
 
-Agents also have internal state:
+- Using state machines to guide the agent's behavior, powered by [XState](https://stately.ai/docs/xstate)
+- Incorporating **observations**, **message history**, and **feedback** to the agent decision-making and text-generation processes, as needed
+- Enabling custom **planning** abilities for agents to achieve specific goals based on state machine logic, observations, and feedback
+- Wrapping the [Vercel AI SDK](https://sdk.vercel.ai/) to easily support multiple model providers, such as OpenAI, Anthropic, Google, Mistral, Groq, Perplexity, and more
 
-- observations: an array of observed states
-- history: an array of messages to/from the language model
-- plans: an array of plans
-- feedback: an array of feedback items, which is used to determine the reward
+_Documentation coming soon_
