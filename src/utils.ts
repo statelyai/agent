@@ -16,3 +16,7 @@ export function getAllTransitions(state: AnyMachineSnapshot): TransitionData[] {
 
   return transitions;
 }
+
+export function wrapInXml(tagName: string, content: string): string {
+  return `<${tagName}>${content}</${tagName}>`;
+}

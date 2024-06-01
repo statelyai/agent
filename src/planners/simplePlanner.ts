@@ -1,5 +1,6 @@
 import { CoreTool, tool } from 'ai';
 import {
+  Agent,
   AgentPlan,
   AgentPlanOptions,
   ObservedState,
@@ -8,7 +9,7 @@ import {
 import { getAllTransitions } from '../utils';
 import { AnyStateMachine } from 'xstate';
 import { z } from 'zod';
-import { defaultPromptTemplate } from '../templates/default';
+import { defaultToolCallTemplate } from '../templates/defaultToolCall';
 
 const getTransitions = (state: ObservedState, logic: AnyStateMachine) => {
   if (!logic) {
@@ -19,10 +20,11 @@ const getTransitions = (state: ObservedState, logic: AnyStateMachine) => {
   return getAllTransitions(resolvedState);
 };
 
-export async function simplePlanner(
+export async function simplePlanner<T extends Agent<any>>(
+  agent: T,
   options: AgentPlanOptions<any>
 ): Promise<AgentPlan<any> | undefined> {
-  const template = options.template ?? defaultPromptTemplate;
+  const template = options.template ?? defaultToolCallTemplate;
   const transitions: TransitionData[] = options.logic
     ? getTransitions(options.state, options.logic)
     : Object.entries(options.events).map(([eventType, { description }]) => ({
@@ -76,7 +78,7 @@ export async function simplePlanner(
 
   const { model, ...otherOptions } = options;
 
-  const result = await options.agent.generateText({
+  const result = await agent.generateText({
     model,
     prompt,
     tools: toolMap,

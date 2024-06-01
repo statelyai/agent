@@ -1,4 +1,4 @@
-import { createAgent } from '../src';
+import { createAgent, fromDecision } from '../src';
 import { z } from 'zod';
 import { setup, createActor } from 'xstate';
 import { openai } from '@ai-sdk/openai';
@@ -14,7 +14,7 @@ const agent = createAgent({
 });
 
 const machine = setup({
-  actors: { agent: agent.fromDecision() },
+  actors: { agent: fromDecision(agent) },
 }).createMachine({
   initial: 'thinking',
   states: {

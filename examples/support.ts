@@ -1,5 +1,5 @@
 import { openai } from '@ai-sdk/openai';
-import { createAgent } from '../src';
+import { createAgent, fromDecision } from '../src';
 import { z } from 'zod';
 import { createActor, log, setup } from 'xstate';
 
@@ -41,7 +41,7 @@ const machine = setup({
       customerIssue: string;
     },
   },
-  actors: { agent: agent.fromDecision() },
+  actors: { agent: fromDecision(agent) },
 }).createMachine({
   initial: 'frontline',
   context: ({ input }) => ({

@@ -1,4 +1,4 @@
-import { createAgent } from '../src';
+import { createAgent, fromDecision } from '../src';
 import { assign, createActor, log, setup } from 'xstate';
 import { z } from 'zod';
 import { openai } from '@ai-sdk/openai';
@@ -23,7 +23,7 @@ const machine = setup({
     events: agent.eventTypes,
   },
   actors: {
-    agent: agent.fromDecision(),
+    agent: fromDecision(agent),
     getFromTerminal,
   },
 }).createMachine({

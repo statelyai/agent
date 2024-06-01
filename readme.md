@@ -3,10 +3,6 @@ An agent is like a language model that wraps:
 - generateText()
 - streamText()
 
-And also has a few other methods:
-
-- generatePlan()
-
 A plan is a sequence of events and predicted states to reach a goal.
 
 Agents also have internal state:

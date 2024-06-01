@@ -1,14 +1,10 @@
 import {
   ActorRefFrom,
-  AnyActorRef,
   AnyEventObject,
   AnyStateMachine,
   EventObject,
-  InspectionEvent,
-  ObservableActorLogic,
   PromiseActorLogic,
   StateValue,
-  Subscription,
   TransitionActorLogic,
   Values,
 } from 'xstate';
@@ -30,7 +26,6 @@ export type AgentPlanOptions<TEvent extends EventObject> = {
   state: ObservedState;
   goal: string;
   events: ZodEventMapping;
-  agent: Agent<any>;
   logic?: AnyStateMachine;
   template?: PromptTemplate<TEvent>;
 };
@@ -62,6 +57,9 @@ export type PromptTemplate<TEvents extends EventObject> = (data: {
    * The provided context
    */
   context?: any;
+  /**
+   * The logical model of the observed environment
+   */
   logic?: unknown;
   /**
    * Past observations
@@ -72,9 +70,10 @@ export type PromptTemplate<TEvents extends EventObject> = (data: {
   plans?: AgentPlan<TEvents>[];
 }) => string;
 
-export type AgentPlanner<TEvent extends EventObject> = (
-  options: AgentPlanOptions<TEvent>
-) => Promise<AgentPlan<TEvent> | undefined>;
+export type AgentPlanner<T extends Agent<any>> = (
+  agent: T['eventTypes'],
+  options: AgentPlanOptions<T['eventTypes']>
+) => Promise<AgentPlan<T['eventTypes']> | undefined>;
 
 export type AgentDecideOptions = {
   goal: string;
@@ -83,6 +82,8 @@ export type AgentDecideOptions = {
   state: ObservedState;
   logic: AnyStateMachine;
   execute?: (event: AnyEventObject) => Promise<void>;
+  planner?: AgentPlanner<any>;
+  events?: ZodEventMapping;
 } & Omit<
   Parameters<typeof generateText>[0],
   'model' | 'tools' | 'prompt' | 'messages'
@@ -121,7 +122,7 @@ export interface AgentContext<TEvents extends EventObject> {
   feedback: AgentFeedback[];
 }
 
-export type AgentDecisionLogicInput = {
+export type AgentDecisionInput = {
   goal: string;
   model?: LanguageModel;
   context?: any;
@@ -129,7 +130,7 @@ export type AgentDecisionLogicInput = {
 
 export type AgentDecisionLogic<TEvents extends EventObject> = PromiseActorLogic<
   AgentPlan<TEvents> | undefined,
-  AgentDecisionLogicInput | string
+  AgentDecisionInput | string
 >;
 
 export type AgentLogic<TEvents extends EventObject> = TransitionActorLogic<
@@ -169,70 +170,43 @@ export type Agent<TEvents extends EventObject> = ActorRefFrom<
   AgentLogic<TEvents>
 > & {
   name: string;
+  events: ZodEventMapping;
   eventTypes: TEvents;
+  model: LanguageModel;
+  defaultOptions: GenerateTextOptions;
 
   // Decision
   decide: (
     options: AgentDecideOptions
   ) => Promise<AgentPlan<TEvents> | undefined>;
 
-  fromDecision: () => AgentDecisionLogic<TEvents>;
-
   // Generate text
   generateText: (
     options: AgentGenerateTextOptions
   ) => Promise<GenerateTextResult<Record<string, any>>>;
 
-  fromText: () => PromiseActorLogic<
-    GenerateTextResult<Record<string, any>>,
-    AgentGenerateTextOptions
-  >;
-
   // Stream text
   streamText: (
     options: AgentStreamTextOptions
   ) => AsyncIterable<{ textDelta: string }>;
-  fromTextStream: () => ObservableActorLogic<
-    { textDelta: string },
-    AgentStreamTextOptions
-  >;
 
-  inspect: (inspectionEvent: InspectionEvent) => void;
-  observe: ({
-    state,
-    event,
-    nextState,
-  }: {
-    state: ObservedState | undefined;
-    event: AnyEventObject;
-    nextState: ObservedState;
-    timestamp: number;
-    sessionId: string;
-  }) => void;
-  addHistory: (history: AgentMessageHistory) => Promise<void>;
-  addFeedback: (feedbackItem: AgentFeedback) => Promise<void>;
-  generatePlan: (
-    options: AgentPlanOptions<TEvents>
-  ) => Promise<AgentPlan<TEvents> | undefined>;
+  addObservation: (observation: AgentObservation) => void;
+  addHistory: (history: AgentMessageHistory) => void;
+  addFeedback: (feedbackItem: AgentFeedback) => void;
+  addPlan: (plan: AgentPlan<TEvents>) => void;
   onMessage: (callback: (message: AgentMessageHistory) => void) => void;
-  interact: (
-    actor: AnyActorRef,
-    {
-      goal,
-      context,
-    }: {
-      goal: string;
-      context: (state: ObservedState) => any;
-    }
-  ) => Subscription & Promise<void>;
 };
 
+export type AnyAgent = Agent<any>;
+
 export type AgentGenerateTextOptions = Omit<GenerateTextOptions, 'model'> & {
+  prompt: string;
   model?: LanguageModel;
   context?: any;
 };
 
 export type AgentStreamTextOptions = Omit<StreamTextOptions, 'model'> & {
+  prompt: string;
   model?: LanguageModel;
   context?: any;
 };

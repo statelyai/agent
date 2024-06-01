@@ -3,6 +3,7 @@ import { createAgent } from '../src';
 import { openai } from '@ai-sdk/openai';
 import { assign, createActor, log, setup } from 'xstate';
 import { getFromTerminal } from './helpers/helpers';
+import { fromDecision } from '../src';
 
 const agent = createAgent({
   name: 'chatbot',
@@ -22,7 +23,7 @@ const machine = setup({
     },
     events: agent.eventTypes,
   },
-  actors: { agent: agent.fromDecision(), getFromTerminal },
+  actors: { agent: fromDecision(agent), getFromTerminal },
 }).createMachine({
   initial: 'waiting',
   context: {

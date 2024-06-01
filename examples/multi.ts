@@ -1,4 +1,4 @@
-import { createAgent } from '../src';
+import { createAgent, fromDecision } from '../src';
 import { z } from 'zod';
 import { assign, createActor, log, setup } from 'xstate';
 import { getFromTerminal } from './helpers/helpers';
@@ -23,7 +23,7 @@ const machine = setup({
   },
   actors: {
     getFromTerminal,
-    agent: agent.fromDecision(),
+    agent: fromDecision(agent),
   },
 }).createMachine({
   initial: 'asking',

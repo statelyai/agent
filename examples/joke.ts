@@ -1,5 +1,5 @@
 import { assign, createActor, fromCallback, log, setup } from 'xstate';
-import { createAgent } from '../src';
+import { createAgent, fromDecision } from '../src';
 import { loadingAnimation } from './helpers/loader';
 import { z } from 'zod';
 import { openai } from '@ai-sdk/openai';
@@ -81,7 +81,7 @@ const jokeMachine = setup({
     events: agent.eventTypes,
   },
   actors: {
-    agent: agent.fromDecision(),
+    agent: fromDecision(agent),
     loader,
     getFromTerminal,
   },
