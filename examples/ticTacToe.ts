@@ -1,9 +1,11 @@
 import { assign, setup, assertEvent, createActor } from 'xstate';
 import { z } from 'zod';
-import { createAgent } from '../src';
+import { createAgent, fromDecision, fromTextStream } from '../src';
 import { openai } from '@ai-sdk/openai';
+import { defaultToolCallTemplate } from '../src/templates/defaultToolCall';
 
 const agent = createAgent({
+  name: 'tic-tac-toe-bot',
   model: openai('gpt-4-0125-preview'),
   events: {
     'agent.x.play': z.object({
@@ -76,8 +78,8 @@ export const ticTacToeMachine = setup({
     events: agent.eventTypes,
   },
   actors: {
-    agent: agent.fromDecision(),
-    gameReporter: agent.fromTextStream(),
+    agent: fromDecision(agent),
+    gameReporter: fromTextStream(agent),
   },
   actions: {
     updateBoard: assign({
@@ -191,7 +193,7 @@ export const ticTacToeMachine = setup({
             events: context.events,
             board: context.board,
           },
-          prompt: `Provide a short game report analyzing the game.`,
+          prompt: 'Provide a short game report analyzing the game.',
         }),
         onSnapshot: {
           actions: assign({

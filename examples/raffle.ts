@@ -1,10 +1,11 @@
 import { z } from 'zod';
-import { createAgent } from '../src';
+import { createAgent, fromDecision } from '../src';
 import { openai } from '@ai-sdk/openai';
 import { assign, createActor, log, setup } from 'xstate';
 import { getFromTerminal } from './helpers/helpers';
 
 const agent = createAgent({
+  name: 'raffle-chooser',
   model: openai('gpt-4-turbo'),
   events: {
     'agent.collectEntries': z.object({}).describe('Collect more entries'),
@@ -28,7 +29,7 @@ const machine = setup({
     },
     events: {} as typeof agent.eventTypes | { type: 'draw' },
   },
-  actors: { agent: agent.fromDecision(), getFromTerminal },
+  actors: { agent: fromDecision(agent), getFromTerminal },
 }).createMachine({
   context: {
     lastInput: null,

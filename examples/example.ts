@@ -1,9 +1,10 @@
 import { z } from 'zod';
-import { createAgent } from '../src';
+import { createAgent, fromDecision, fromText } from '../src';
 import { openai } from '@ai-sdk/openai';
 import { assign, createActor, setup } from 'xstate';
 
 const agent = createAgent({
+  name: 'example',
   model: openai('gpt-4-turbo'),
   events: {
     'agent.englishSummary': z.object({
@@ -19,7 +20,7 @@ const machine = setup({
   types: {
     events: agent.eventTypes,
   },
-  actors: { agent: agent.fromDecision(), summarizer: agent.fromText() },
+  actors: { agent: fromDecision(agent), summarizer: fromText(agent) },
 }).createMachine({
   initial: 'summarizing',
   context: {

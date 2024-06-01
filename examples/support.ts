@@ -1,9 +1,10 @@
 import { openai } from '@ai-sdk/openai';
-import { createAgent } from '../src';
+import { createAgent, fromDecision } from '../src';
 import { z } from 'zod';
 import { createActor, log, setup } from 'xstate';
 
 const agent = createAgent({
+  name: 'support-agent',
   model: openai('gpt-4-1106-preview'),
   events: {
     'agent.respond': z.object({
@@ -40,7 +41,7 @@ const machine = setup({
       customerIssue: string;
     },
   },
-  actors: { agent: agent.fromDecision() },
+  actors: { agent: fromDecision(agent) },
 }).createMachine({
   initial: 'frontline',
   context: ({ input }) => ({

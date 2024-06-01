@@ -1,10 +1,11 @@
-import { createAgent } from '../src';
+import { createAgent, fromDecision } from '../src';
 import { z } from 'zod';
 import { assign, createActor, log, setup } from 'xstate';
 import { getFromTerminal } from './helpers/helpers';
 import { openai } from '@ai-sdk/openai';
 
 const agent = createAgent({
+  name: 'multi',
   model: openai('gpt-4-1106-preview'),
   events: {
     'agent.respond': z.object({
@@ -22,7 +23,7 @@ const machine = setup({
   },
   actors: {
     getFromTerminal,
-    agent: agent.fromDecision(),
+    agent: fromDecision(agent),
   },
 }).createMachine({
   initial: 'asking',
@@ -68,7 +69,7 @@ const machine = setup({
       invoke: {
         src: 'agent',
         input: ({ context }) => ({
-          model: 'gpt-3.5-turbo-16k-0613',
+          model: openai('gpt-3.5-turbo-16k-0613'),
           context,
           goal: 'Debate the topic, and take the negative position. Respond directly to the last message of the discourse. Keep it short.',
         }),

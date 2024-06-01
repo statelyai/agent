@@ -1,238 +1,86 @@
 import {
-  ActorRefFrom,
-  AnyEventObject,
   AnyMachineSnapshot,
-  AnyStateMachine,
   createActor,
+  EventObject,
   fromObservable,
   fromPromise,
   fromTransition,
-  InspectionEvent,
   ObservableActorLogic,
   Observer,
   PromiseActorLogic,
   toObserver,
-  TransitionActorLogic,
-  Values,
 } from 'xstate';
-import { AgentPlan } from './utils';
-import { ChatCompletionCreateParamsBase } from 'openai/resources/chat/completions';
-import { ZodEventMapping, EventSchemas } from './schemas';
-import { createZodEventSchemas } from './utils';
-import { TypeOf } from 'zod';
+import { ZodEventMapping } from './schemas';
 import {
   CoreTool,
-  GenerateObjectResult,
   generateText,
   GenerateTextResult,
-  LanguageModel,
   streamText,
+  StreamTextResult,
 } from 'ai';
 import {
-  AgentTemplate,
-  AgentTemplateGenerateObjectOptions,
-  GenerateTextOptions,
-  StreamTextOptions,
-} from './types';
-import { simple } from './templates/simple';
-
-export interface AgentRewardItem {
-  goal: string;
-  reward: number;
-  timestamp: number;
-}
-
-export interface AgentChatHistory {
-  source: string;
-  content: any;
-  timestamp: number;
-  id: string;
-  // which chat message we're responding to
-  responseId?: string;
-}
-
-export interface AgentObservation {
-  state: ObservedState;
-  sessionId: string;
-  timestamp: number;
-}
-
-export interface AgentContext {
-  observations: any[];
-  history: AgentChatHistory[];
-  plans: AgentPlan[];
-  rewards: AgentRewardItem[];
-}
-
-export interface AgentPlanOptions {
-  goal: string;
-  state: ObservedState;
-  events: ZodEventMapping;
-  logic: AnyStateMachine;
-  template?: AgentTemplate;
-}
-
-export type AgentDecisionLogicInput = {
-  goal: string;
-  model?: ChatCompletionCreateParamsBase['model'];
-  /**
-   * Context to include
-   */
-  context?: any;
-  template?: AgentTemplate;
-} & Omit<Parameters<typeof generateText>[0], 'model' | 'tools' | 'prompt'>;
-
-export type AgentDecisionLogic = PromiseActorLogic<
-  void,
-  AgentDecisionLogicInput | string
->;
-
-type AgentLogic = TransitionActorLogic<
+  Agent,
   AgentContext,
-  | {
-      type: 'agent.reward';
-      reward: AgentRewardItem;
-    }
-  | {
-      type: 'agent.observe';
-      state: ObservedState;
-      event: AnyEventObject;
-      timestamp: number;
-    }
-  | {
-      type: 'agent.history';
-      history: AgentChatHistory;
-    },
-  any
->;
+  AgentDecideOptions,
+  AgentDecisionLogic,
+  AgentDecisionOptions,
+  AgentGenerateTextOptions,
+  AgentLogic,
+  AgentMessageHistory,
+  AgentPlanner,
+  AgentStreamTextOptions,
+  EventsFromZodEventMapping,
+  GenerateTextOptions,
+} from './types';
+import { simplePlanner } from './planners/simplePlanner';
+import { randomUUID } from 'crypto';
+import { defaultTextTemplate } from './templates/defaultText';
 
-export type Agent<TEventSchemas extends ZodEventMapping> =
-  ActorRefFrom<AgentLogic> & {
-    eventTypes: Values<{
-      [K in keyof TEventSchemas]: {
-        type: K;
-      } & TypeOf<TEventSchemas[K]>;
-    }>;
-    eventSchemas: EventSchemas<keyof TEventSchemas & string>;
-
-    // Decision
-    decide: (input: AgentDecisionLogicInput) => Promise<
-      | Values<{
-          [K in keyof TEventSchemas]: {
-            type: K;
-          } & TypeOf<TEventSchemas[K]>;
-        }>
-      | undefined
-    >;
-    fromDecision: () => AgentDecisionLogic;
-
-    // Generate text
-    generateText: (
-      options: AgentTextLogicInput
-    ) => Promise<GenerateTextResult<Record<string, any>>>;
-    fromText: () => PromiseActorLogic<
-      GenerateTextResult<Record<string, any>>,
-      AgentTextLogicInput
-    >;
-
-    // Stream text
-    streamText: (
-      options: AgentTextStreamLogicInput
-    ) => AsyncIterable<{ textDelta: string }>;
-    fromTextStream: () => ObservableActorLogic<
-      { textDelta: string },
-      AgentTextStreamLogicInput
-    >;
-
-    // Object
-    // generateObject: <T>(
-    //   options: AgentTemplateGenerateObjectOptions<T>
-    // ) => Promise<GenerateObjectResult<T>>;
-    // fromObject: <T>() => PromiseActorLogic<
-    //   GenerateObjectResult<Record<string, any>>,
-    //   AgentObjectLogicInput<T>
-    // >;
-
-    inspect: (inspectionEvent: InspectionEvent) => void;
-    observe: ({
-      state,
-      event,
-    }: {
-      state: ObservedState;
-      event: AnyEventObject;
-      timestamp: number;
-      eventOrigin: 'environment' | 'agent';
-    }) => void;
-    addHistory: (history: AgentChatHistory) => Promise<void>;
-    reward: ({ goal, reward, timestamp }: AgentRewardItem) => void;
-    plan: (options: AgentPlanOptions) => Promise<AgentPlan | undefined>;
-  };
-
-export type AgentTextLogicInput = Omit<GenerateTextOptions, 'model'> & {
-  context?: any;
-  template?: AgentTemplate;
-};
-
-export type AgentTextStreamLogicInput = Omit<StreamTextOptions, 'model'> & {
-  context?: any;
-  template?: AgentTemplate;
-};
-
-export type AgentObjectLogicInput<T> = Omit<
-  AgentTemplateGenerateObjectOptions<T>,
-  'model'
-> & {
-  context?: any;
-  template?: AgentTemplate;
-};
-
-export function createAgent<const TEventSchemas extends ZodEventMapping>({
+export function createAgent<
+  const TEventSchemas extends ZodEventMapping,
+  TEvents extends EventObject = EventsFromZodEventMapping<TEventSchemas>
+>({
+  name,
   model,
   events,
+  planner = simplePlanner as AgentPlanner<Agent<TEvents>>,
   stringify = JSON.stringify,
-  template,
   ...generateTextOptions
 }: {
-  model: LanguageModel;
-  events?: TEventSchemas;
+  name: string;
+  events: TEventSchemas;
+  planner?: AgentPlanner<Agent<TEvents>>;
   stringify?: typeof JSON.stringify;
-  template?: AgentTemplate;
-} & GenerateTextOptions): Agent<TEventSchemas> {
-  const fallbackTemplate =
-    template ?? simple({ model, ...generateTextOptions });
-  const eventSchemas = events ? createZodEventSchemas(events) : undefined;
+} & GenerateTextOptions): Agent<TEvents> {
+  const messageListeners: Observer<AgentMessageHistory>[] = [];
 
-  const observe: Agent<TEventSchemas>['observe'] = ({
-    state,
-    event,
-    timestamp,
-    eventOrigin: eventOrigin,
-  }) => {
-    agent.send({
-      type: 'agent.observe',
-      state,
-      event,
-      timestamp,
-    });
-  };
-
-  const agentLogic: AgentLogic = fromTransition(
+  const agentLogic: AgentLogic<TEvents> = fromTransition(
     (state, event) => {
       switch (event.type) {
         case 'agent.reward': {
-          state.rewards.push(event.reward);
+          state.feedback.push(event.reward);
           break;
         }
         case 'agent.observe': {
           state.observations.push({
+            id: randomUUID(),
             state: event.state,
             event: event.event,
+            nextState: event.nextState,
             timestamp: event.timestamp,
+            sessionId: event.sessionId,
           });
           break;
         }
         case 'agent.history': {
           state.history.push(event.history);
+          messageListeners.forEach((listener) =>
+            listener.next?.(event.history)
+          );
+          break;
+        }
+        case 'agent.plan': {
+          state.plans.push(event.plan);
           break;
         }
         default:
@@ -243,154 +91,56 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
     {
       observations: [],
       plans: [],
-      rewards: [],
+      feedback: [],
       history: [],
-    } as AgentContext
+    } as AgentContext<TEvents>
   );
 
-  const agent = createActor(agentLogic) as unknown as Agent<TEventSchemas>;
+  const agent = createActor(agentLogic) as unknown as Agent<TEvents>;
 
-  agent.fromDecision = () =>
-    fromPromise(async ({ input, self }) => {
-      const parentRef = self._parent;
-      if (!parentRef) {
-        return;
-      }
+  agent.events = events;
+  agent.model = model;
+  agent.name = name;
+  agent.defaultOptions = { ...generateTextOptions, model };
 
-      const resolvedInput = typeof input === 'string' ? { goal: input } : input;
-      const resolvedTemplate = resolvedInput.template ?? fallbackTemplate;
-      const snapshot = parentRef.getSnapshot() as AnyMachineSnapshot;
-      const contextToInclude =
-        resolvedInput.context === true
-          ? // include entire context
-            parentRef.getSnapshot().context
-          : resolvedInput.context;
-      const state = {
-        value: snapshot.value,
-        context: contextToInclude,
-      };
+  agent.onMessage = (callback) => {
+    messageListeners.push(toObserver(callback));
+  };
 
-      if (!resolvedTemplate.plan) {
-        console.error('No plan template found');
-        return;
-      }
+  agent.decide = (opts) => {
+    return agentDecide(agent, opts);
+  };
 
-      const plan = await resolvedTemplate.plan({
-        model,
-        goal: resolvedInput.goal,
-        events: events ?? {}, // TODO: events should be required
-        state,
-        logic: parentRef.src as any,
-        agent,
-        ...generateTextOptions,
-      });
-
-      if (plan?.nextEvent) {
-        // TODO: validate event
-        parentRef.send(plan.nextEvent);
-      }
-
-      return;
-    }) as AgentDecisionLogic;
-
-  agent.eventSchemas = eventSchemas ?? ({} as any);
-
-  async function agentGenerateText(options: AgentTextLogicInput) {
-    const prompt = [
-      options.context &&
-        `<context>\n${stringify(options.context, null, 2)}\n</context>`,
-      options.prompt,
-    ]
-      .filter(Boolean)
-      .join('\n\n');
-
-    const resolvedTemplate = options.template ?? fallbackTemplate;
-
-    const result = (resolvedTemplate?.generateText ?? generateText)({
-      model,
-      agent,
-      ...options,
-      prompt,
-    });
-
-    return result;
-  }
-
-  agent.generateText = agentGenerateText;
-
-  agent.addHistory = async (history) => {
+  agent.addHistory = (history) => {
     agent.send({
       type: 'agent.history',
       history,
     });
   };
 
-  function fromText(): PromiseActorLogic<
-    GenerateTextResult<Record<string, CoreTool<any, any>>>,
-    AgentTextStreamLogicInput
-  > {
-    return fromPromise(async ({ input }) => {
-      return await agentGenerateText(input);
+  agent.generateText = (opts) => agentGenerateText(agent, opts);
+
+  agent.addObservation = ({
+    state,
+    event,
+    nextState,
+    timestamp,
+    sessionId,
+  }) => {
+    agent.send({
+      type: 'agent.observe',
+      state,
+      event,
+      nextState,
+      timestamp,
+      sessionId,
     });
-  }
+  };
 
-  function fromTextStream(): ObservableActorLogic<
-    { textDelta: string },
-    AgentTextStreamLogicInput
-  > {
-    return fromObservable(({ input }: { input: AgentTextStreamLogicInput }) => {
-      const observers = new Set<Observer<{ textDelta: string }>>();
-
-      const prompt = [
-        input.context &&
-          `<context>\n${stringify(input.context, null, 2)}\n</context>`,
-        input.prompt,
-      ]
-        .filter(Boolean)
-        .join('\n\n');
-
-      (async () => {
-        const result = await streamText({
-          model,
-          ...input,
-          prompt,
-        });
-
-        for await (const part of result.fullStream) {
-          if (part.type === 'text-delta') {
-            observers.forEach((observer) => {
-              observer.next?.(part);
-            });
-          }
-        }
-      })();
-
-      return {
-        subscribe: (...args: any[]) => {
-          const observer = toObserver(...args);
-          observers.add(observer);
-
-          return {
-            unsubscribe: () => {
-              observers.delete(observer);
-            },
-          };
-        },
-      };
-    });
-  }
-
-  agent.fromText = fromText;
-  agent.fromTextStream = fromTextStream;
-  agent.inspect = (inspectionEvent) => {};
-  agent.observe = observe;
-  agent.plan = async (planOptions: AgentPlanOptions) => {
-    const resolvedTemplate = planOptions.template ?? fallbackTemplate;
-
-    return await resolvedTemplate.plan?.({
-      model,
-      agent,
-      ...planOptions,
+  agent.addPlan = (plan) => {
+    agent.send({
+      type: 'agent.plan',
+      plan,
     });
   };
 
@@ -399,7 +149,195 @@ export function createAgent<const TEventSchemas extends ZodEventMapping>({
   return agent;
 }
 
-export interface ObservedState {
-  value: string;
-  context: Record<string, unknown>;
+export function fromDecision(
+  agent: Agent<any>,
+  defaultOptions?: AgentDecisionOptions
+) {
+  return fromPromise(async ({ input, self }) => {
+    const parentRef = self._parent;
+    if (!parentRef) {
+      return;
+    }
+
+    const snapshot = parentRef.getSnapshot() as AnyMachineSnapshot;
+    const inputObject = typeof input === 'string' ? { goal: input } : input;
+    const resolvedInput = {
+      ...defaultOptions,
+      ...inputObject,
+    };
+    const contextToInclude =
+      resolvedInput.context === true
+        ? // include entire context
+          parentRef.getSnapshot().context
+        : resolvedInput.context;
+    const state = {
+      value: snapshot.value,
+      context: contextToInclude,
+    };
+
+    const plan = await agentDecide(agent, {
+      logic: parentRef.src as any,
+      state,
+      execute: async (event) => {
+        parentRef.send(event);
+      },
+      ...resolvedInput,
+    });
+
+    return plan;
+  }) as AgentDecisionLogic<any>;
+}
+
+async function agentGenerateText<T extends Agent<any>>(
+  agent: T,
+  options: AgentGenerateTextOptions
+) {
+  // TODO: check if messages was provided instead
+
+  const id = Date.now() + '';
+  const promptWithContext = defaultTextTemplate({
+    goal: options.prompt,
+    context: options.context,
+  });
+
+  const content = {
+    prompt: options.prompt,
+    context: options.context,
+  };
+
+  agent.addHistory({
+    content,
+    id,
+    role: 'user',
+    timestamp: Date.now(),
+  });
+
+  const result = await generateText({
+    model: options.model ?? agent.model,
+    ...options,
+    prompt: promptWithContext,
+  });
+
+  agent.addHistory({
+    content: result.toolResults ?? result.text,
+    id,
+    role: 'assistant',
+    timestamp: Date.now(),
+    responseId: id,
+  });
+
+  return result;
+}
+
+async function agentDecide<T extends Agent<any>>(
+  agent: T,
+  options: AgentDecideOptions
+) {
+  const {
+    planner = simplePlanner as AgentPlanner<any>,
+    goal,
+    events = agent.events,
+    state,
+    logic,
+    model = agent.model,
+    ...otherOptions
+  } = options;
+  // const planner = opts.planner ?? simplePlanner;
+  const plan = await planner(agent, {
+    model,
+    goal,
+    events,
+    state,
+    logic,
+    ...otherOptions,
+  });
+
+  if (plan?.nextEvent) {
+    await options.execute?.(plan.nextEvent);
+  }
+
+  return plan;
+}
+
+async function agentStreamText(
+  agent: Agent<any>,
+  options: AgentStreamTextOptions
+): Promise<StreamTextResult<any>> {
+  const id = randomUUID();
+  const promptWithContext = defaultTextTemplate({
+    goal: options.prompt,
+    context: options.context,
+  });
+  const content = {
+    prompt: options.prompt,
+    context: options.context,
+  };
+  agent.addHistory({
+    content,
+    id,
+    role: 'user',
+    timestamp: Date.now(),
+  });
+
+  const result = await streamText({
+    model: options.model ?? agent.model,
+    ...options,
+    prompt: promptWithContext,
+  });
+
+  return result;
+}
+
+export function fromTextStream<T extends Agent<any>>(
+  agent: T,
+  defaultOptions?: AgentStreamTextOptions
+): ObservableActorLogic<{ textDelta: string }, AgentStreamTextOptions> {
+  return fromObservable(({ input }: { input: AgentStreamTextOptions }) => {
+    const observers = new Set<Observer<{ textDelta: string }>>();
+
+    // TODO: check if messages was provided instead
+
+    (async () => {
+      const result = await agentStreamText(agent, {
+        ...defaultOptions,
+        ...input,
+      });
+
+      for await (const part of result.fullStream) {
+        if (part.type === 'text-delta') {
+          observers.forEach((observer) => {
+            observer.next?.(part);
+          });
+        }
+      }
+    })();
+
+    return {
+      subscribe: (...args: any[]) => {
+        const observer = toObserver(...args);
+        observers.add(observer);
+
+        return {
+          unsubscribe: () => {
+            observers.delete(observer);
+          },
+        };
+      },
+    };
+  });
+}
+
+export function fromText<T extends Agent<any>>(
+  agent: T,
+  defaultOptions?: AgentGenerateTextOptions
+): PromiseActorLogic<
+  GenerateTextResult<Record<string, CoreTool<any, any>>>,
+  AgentGenerateTextOptions
+> {
+  return fromPromise(async ({ input }) => {
+    return await agentGenerateText(agent, {
+      ...input,
+      ...defaultOptions,
+    });
+  });
 }

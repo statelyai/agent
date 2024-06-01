@@ -1,9 +1,10 @@
-import { createAgent } from '../src';
+import { createAgent, fromDecision } from '../src';
 import { z } from 'zod';
 import { setup, createActor } from 'xstate';
 import { openai } from '@ai-sdk/openai';
 
 const agent = createAgent({
+  name: 'simple',
   model: openai('gpt-3.5-turbo-16k-0613'),
   events: {
     'agent.thought': z.object({
@@ -13,7 +14,7 @@ const agent = createAgent({
 });
 
 const machine = setup({
-  actors: { agent: agent.fromDecision() },
+  actors: { agent: fromDecision(agent) },
 }).createMachine({
   initial: 'thinking',
   states: {

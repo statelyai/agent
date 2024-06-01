@@ -1,16 +1,15 @@
 import { z } from 'zod';
 import { createAgent } from '../src';
 import { openai } from '@ai-sdk/openai';
-import { chainOfNote } from '../src/templates/chain-of-note';
 
 const agent = createAgent({
+  name: 'wiki',
   model: openai('gpt-4-turbo'),
   events: {
     provideAnswer: z.object({
       answer: z.string().describe('The answer'),
     }),
   },
-  template: chainOfNote(),
 });
 
 async function main() {

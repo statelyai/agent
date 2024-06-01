@@ -1,10 +1,11 @@
 import { assign, createActor, setup, log } from 'xstate';
 import { getFromTerminal } from './helpers/helpers';
-import { createAgent } from '../src';
+import { createAgent, fromDecision } from '../src';
 import { z } from 'zod';
 import { openai } from '@ai-sdk/openai';
 
 const agent = createAgent({
+  name: 'verifier',
   model: openai('gpt-3.5-turbo-16k-0613'),
   events: {
     'agent.validateAnswer': z.object({
@@ -38,7 +39,7 @@ const machine = setup({
   },
   actors: {
     getFromTerminal,
-    agent: agent.fromDecision(),
+    agent: fromDecision(agent),
   },
 }).createMachine({
   initial: 'askQuestion',

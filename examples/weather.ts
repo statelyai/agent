@@ -1,4 +1,4 @@
-import { createAgent } from '../src';
+import { createAgent, fromDecision } from '../src';
 import { assign, createActor, fromPromise, log, setup } from 'xstate';
 import { getFromTerminal } from './helpers/helpers';
 import { z } from 'zod';
@@ -49,6 +49,7 @@ const getWeather = fromPromise(async ({ input }: { input: string }) => {
 });
 
 const agent = createAgent({
+  name: 'weather',
   model: openai('gpt-4-1106-preview'),
   events: {
     'agent.getWeather': z.object({
@@ -80,7 +81,7 @@ const machine = setup({
     events: agent.eventTypes,
   },
   actors: {
-    agent: agent.fromDecision(),
+    agent: fromDecision(agent),
     getWeather,
     getFromTerminal,
   },

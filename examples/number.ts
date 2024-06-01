@@ -1,10 +1,11 @@
-import { createAgent } from '../src';
+import { createAgent, fromDecision } from '../src';
 import { assign, createActor, log, setup } from 'xstate';
 import { z } from 'zod';
 import { openai } from '@ai-sdk/openai';
 import { getFromTerminal } from './helpers/helpers';
 
 const agent = createAgent({
+  name: 'number-guesser',
   model: openai('gpt-3.5-turbo-1106'),
   events: {
     'agent.guess': z.object({
@@ -22,7 +23,7 @@ const machine = setup({
     events: agent.eventTypes,
   },
   actors: {
-    agent: agent.fromDecision(),
+    agent: fromDecision(agent),
     getFromTerminal,
   },
 }).createMachine({

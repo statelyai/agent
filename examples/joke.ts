@@ -1,5 +1,5 @@
 import { assign, createActor, fromCallback, log, setup } from 'xstate';
-import { createAgent } from '../src';
+import { createAgent, fromDecision } from '../src';
 import { loadingAnimation } from './helpers/loader';
 import { z } from 'zod';
 import { openai } from '@ai-sdk/openai';
@@ -45,6 +45,7 @@ const loader = fromCallback(({ input }: { input: string }) => {
 });
 
 const agent = createAgent({
+  name: 'joke-teller',
   model: openai('gpt-4-turbo'),
   events: {
     askForTopic: z.object({
@@ -59,12 +60,12 @@ const agent = createAgent({
       explanation: z.string(),
     }),
     'agent.continue': z.object({}).describe('Continue'),
-    'agent.irrelevantJoke': z
+    'agent.markAsIrrelevant': z
       .object({
         explanation: z.string(),
       })
       .describe('Explains why the joke was irrelevant'),
-    'agent.relevantJoke': z.object({}).describe('The joke was relevant'),
+    'agent.markAsRelevant': z.object({}).describe('The joke was relevant'),
   },
 });
 
@@ -80,7 +81,7 @@ const jokeMachine = setup({
     events: agent.eventTypes,
   },
   actors: {
-    agent: agent.fromDecision(),
+    agent: fromDecision(agent),
     loader,
     getFromTerminal,
   },
@@ -129,7 +130,7 @@ const jokeMachine = setup({
             assign({
               jokes: ({ context, event }) => [...context.jokes, event.joke],
             }),
-            log(({ event }) => event.joke),
+            log((x) => x.event.joke),
           ],
           target: 'relevance',
         },
@@ -147,12 +148,12 @@ const jokeMachine = setup({
         }),
       },
       on: {
-        'agent.irrelevantJoke': {
+        'agent.markAsIrrelevant': {
           actions: log((x) => 'Irrelevant joke: ' + x.event.explanation),
           target: 'waitingForTopic',
           description: 'Continue',
         },
-        'agent.relevantJoke': {
+        'agent.markAsRelevant': {
           actions: log('Joke was relevant'),
           target: 'rateJoke',
         },
@@ -222,5 +223,9 @@ const jokeMachine = setup({
 });
 
 const actor = createActor(jokeMachine);
+
+agent.onMessage((msg) => {
+  console.log(msg);
+});
 
 actor.start();

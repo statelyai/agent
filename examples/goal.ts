@@ -1,10 +1,11 @@
 import { z } from 'zod';
-import { createAgent } from '../src';
+import { createAgent, fromDecision } from '../src';
 import { openai } from '@ai-sdk/openai';
 import { assign, createActor, log, setup } from 'xstate';
 import { getFromTerminal } from './helpers/helpers';
 
 const agent = createAgent({
+  name: 'goal',
   model: openai('gpt-4-turbo'),
   events: {
     'agent.createGoal': z.object({
@@ -16,7 +17,7 @@ const agent = createAgent({
   },
 });
 
-const decider = agent.fromDecision();
+const decider = fromDecision(agent);
 
 const machine = setup({
   types: {
