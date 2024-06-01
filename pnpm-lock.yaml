@@ -9,19 +9,19 @@ dependencies:
     specifier: ^0.0.13
     version: 0.0.13(zod@3.23.8)
   ai:
-    specifier: ^3.1.15
-    version: 3.1.15(react@18.3.1)(solid-js@1.8.17)(svelte@4.2.17)(vue@3.4.27)(zod@3.23.8)
+    specifier: ^3.1.22
+    version: 3.1.22(react@18.3.1)(solid-js@1.8.17)(svelte@4.2.17)(vue@3.4.27)(zod@3.23.8)
   xstate:
-    specifier: ^5.13.0
-    version: 5.13.0
+    specifier: ^5.13.1
+    version: 5.13.1
 
 devDependencies:
   '@changesets/changelog-github':
     specifier: ^0.5.0
     version: 0.5.0
   '@changesets/cli':
-    specifier: ^2.27.3
-    version: 2.27.3
+    specifier: ^2.27.5
+    version: 2.27.5
   '@langchain/community':
     specifier: ^0.0.53
     version: 0.0.53
@@ -32,8 +32,8 @@ devDependencies:
     specifier: ^0.0.28
     version: 0.0.28
   '@types/node':
-    specifier: ^20.12.12
-    version: 20.12.12
+    specifier: ^20.13.0
+    version: 20.13.0
   dotenv:
     specifier: ^16.4.5
     version: 16.4.5
@@ -42,7 +42,7 @@ devDependencies:
     version: 3.1.0
   ts-node:
     specifier: ^10.9.2
-    version: 10.9.2(@types/node@20.12.12)(typescript@5.4.5)
+    version: 10.9.2(@types/node@20.13.0)(typescript@5.4.5)
   tsup:
     specifier: ^8.0.2
     version: 8.0.2(ts-node@10.9.2)(typescript@5.4.5)
@@ -51,7 +51,7 @@ devDependencies:
     version: 5.4.5
   vitest:
     specifier: ^1.6.0
-    version: 1.6.0(@types/node@20.12.12)
+    version: 1.6.0(@types/node@20.13.0)
   wikipedia:
     specifier: ^2.1.2
     version: 2.1.2
@@ -75,8 +75,8 @@ packages:
       zod: 3.23.8
     dev: false
 
-  /@ai-sdk/provider-utils@0.0.10(zod@3.23.8):
-    resolution: {integrity: sha512-VAtWHXOKMXfo+Uz384wva5oqm6BTmtp3kVCZGcScubJYjIDApwAIER/a3WcTkeoq5ZXaN23bHT0KBfOhhBSgeg==, tarball: https://registry.npmjs.org/@ai-sdk/provider-utils/-/provider-utils-0.0.10.tgz}
+  /@ai-sdk/provider-utils@0.0.11(zod@3.23.8):
+    resolution: {integrity: sha512-JRDrqL2FGDmLh+a4R5qbS8UrWN9Lt7DpDIY1x6owgXjXkz3Umm1czs1X32VlL0M1dpoSxu4hGBFtXd56+kDzXA==, tarball: https://registry.npmjs.org/@ai-sdk/provider-utils/-/provider-utils-0.0.11.tgz}
     engines: {node: '>=18'}
     peerDependencies:
       zod: ^3.0.0
@@ -84,7 +84,7 @@ packages:
       zod:
         optional: true
     dependencies:
-      '@ai-sdk/provider': 0.0.7
+      '@ai-sdk/provider': 0.0.8
       eventsource-parser: 1.1.2
       nanoid: 3.3.6
       secure-json-parse: 2.7.0
@@ -114,8 +114,8 @@ packages:
       json-schema: 0.4.0
     dev: false
 
-  /@ai-sdk/provider@0.0.7:
-    resolution: {integrity: sha512-PZ3L2FNvw4GHI8UFKt0ZHN5R8LFyDMtP6nlQrqT8N7yAcwBJUMTPYmq6SiWCc/S6JRhUM5pU3aUoFaycoLzxlQ==, tarball: https://registry.npmjs.org/@ai-sdk/provider/-/provider-0.0.7.tgz}
+  /@ai-sdk/provider@0.0.8:
+    resolution: {integrity: sha512-+gcMvyPUDfDXV9caN3CG5Le0M5K4CjqTdMV1ODg/AosApQiJW9ByN5imJPdI043zVdt+HS9WG+s0j4am7ca4bg==, tarball: https://registry.npmjs.org/@ai-sdk/provider/-/provider-0.0.8.tgz}
     engines: {node: '>=18'}
     dependencies:
       json-schema: 0.4.0
@@ -180,13 +180,14 @@ packages:
       to-fast-properties: 2.0.0
     dev: false
 
-  /@changesets/apply-release-plan@7.0.1:
-    resolution: {integrity: sha512-aPdSq/R++HOyfEeBGjEe6LNG8gs0KMSyRETD/J2092OkNq8mOioAxyKjMbvVUdzgr/HTawzMOz7lfw339KnsCA==, tarball: https://registry.npmjs.org/@changesets/apply-release-plan/-/apply-release-plan-7.0.1.tgz}
+  /@changesets/apply-release-plan@7.0.3:
+    resolution: {integrity: sha512-klL6LCdmfbEe9oyfLxnidIf/stFXmrbFO/3gT5LU5pcyoZytzJe4gWpTBx3BPmyNPl16dZ1xrkcW7b98e3tYkA==, tarball: https://registry.npmjs.org/@changesets/apply-release-plan/-/apply-release-plan-7.0.3.tgz}
     dependencies:
       '@babel/runtime': 7.24.6
-      '@changesets/config': 3.0.0
+      '@changesets/config': 3.0.1
       '@changesets/get-version-range-type': 0.4.0
       '@changesets/git': 3.0.0
+      '@changesets/should-skip-package': 0.1.0
       '@changesets/types': 6.0.0
       '@manypkg/get-packages': 1.1.3
       detect-indent: 6.1.0
@@ -198,12 +199,13 @@ packages:
       semver: 7.6.2
     dev: true
 
-  /@changesets/assemble-release-plan@6.0.0:
-    resolution: {integrity: sha512-4QG7NuisAjisbW4hkLCmGW2lRYdPrKzro+fCtZaILX+3zdUELSvYjpL4GTv0E4aM9Mef3PuIQp89VmHJ4y2bfw==, tarball: https://registry.npmjs.org/@changesets/assemble-release-plan/-/assemble-release-plan-6.0.0.tgz}
+  /@changesets/assemble-release-plan@6.0.2:
+    resolution: {integrity: sha512-n9/Tdq+ze+iUtjmq0mZO3pEhJTKkku9hUxtUadW30jlN7kONqJG3O6ALeXrmc6gsi/nvoCuKjqEJ68Hk8RbMTQ==, tarball: https://registry.npmjs.org/@changesets/assemble-release-plan/-/assemble-release-plan-6.0.2.tgz}
     dependencies:
       '@babel/runtime': 7.24.6
       '@changesets/errors': 0.2.0
-      '@changesets/get-dependents-graph': 2.0.0
+      '@changesets/get-dependents-graph': 2.1.0
+      '@changesets/should-skip-package': 0.1.0
       '@changesets/types': 6.0.0
       '@manypkg/get-packages': 1.1.3
       semver: 7.6.2
@@ -225,22 +227,23 @@ packages:
       - encoding
     dev: true
 
-  /@changesets/cli@2.27.3:
-    resolution: {integrity: sha512-ve/VpWApILlSs8cr0okNx5C2LKRawI9XZgvfmf58S8sar2nhx5DPJREFXYZBahs0FeTfvH0rdVl+nGe8QF45Ig==, tarball: https://registry.npmjs.org/@changesets/cli/-/cli-2.27.3.tgz}
+  /@changesets/cli@2.27.5:
+    resolution: {integrity: sha512-UVppOvzCjjylBenFcwcZNG5IaZ8jsIaEVraV/pbXgukYNb0Oqa0d8UWb0LkYzA1Bf1HmUrOfccFcRLheRuA7pA==, tarball: https://registry.npmjs.org/@changesets/cli/-/cli-2.27.5.tgz}
     hasBin: true
     dependencies:
       '@babel/runtime': 7.24.6
-      '@changesets/apply-release-plan': 7.0.1
-      '@changesets/assemble-release-plan': 6.0.0
+      '@changesets/apply-release-plan': 7.0.3
+      '@changesets/assemble-release-plan': 6.0.2
       '@changesets/changelog-git': 0.2.0
-      '@changesets/config': 3.0.0
+      '@changesets/config': 3.0.1
       '@changesets/errors': 0.2.0
-      '@changesets/get-dependents-graph': 2.0.0
-      '@changesets/get-release-plan': 4.0.0
+      '@changesets/get-dependents-graph': 2.1.0
+      '@changesets/get-release-plan': 4.0.2
       '@changesets/git': 3.0.0
       '@changesets/logger': 0.1.0
       '@changesets/pre': 2.0.0
       '@changesets/read': 0.6.0
+      '@changesets/should-skip-package': 0.1.0
       '@changesets/types': 6.0.0
       '@changesets/write': 0.3.1
       '@manypkg/get-packages': 1.1.3
@@ -263,11 +266,11 @@ packages:
       tty-table: 4.2.3
     dev: true
 
-  /@changesets/config@3.0.0:
-    resolution: {integrity: sha512-o/rwLNnAo/+j9Yvw9mkBQOZySDYyOr/q+wptRLcAVGlU6djOeP9v1nlalbL9MFsobuBVQbZCTp+dIzdq+CLQUA==, tarball: https://registry.npmjs.org/@changesets/config/-/config-3.0.0.tgz}
+  /@changesets/config@3.0.1:
+    resolution: {integrity: sha512-nCr8pOemUjvGJ8aUu8TYVjqnUL+++bFOQHBVmtNbLvKzIDkN/uiP/Z4RKmr7NNaiujIURHySDEGFPftR4GbTUA==, tarball: https://registry.npmjs.org/@changesets/config/-/config-3.0.1.tgz}
     dependencies:
       '@changesets/errors': 0.2.0
-      '@changesets/get-dependents-graph': 2.0.0
+      '@changesets/get-dependents-graph': 2.1.0
       '@changesets/logger': 0.1.0
       '@changesets/types': 6.0.0
       '@manypkg/get-packages': 1.1.3
@@ -281,8 +284,8 @@ packages:
       extendable-error: 0.1.7
     dev: true
 
-  /@changesets/get-dependents-graph@2.0.0:
-    resolution: {integrity: sha512-cafUXponivK4vBgZ3yLu944mTvam06XEn2IZGjjKc0antpenkYANXiiE6GExV/yKdsCnE8dXVZ25yGqLYZmScA==, tarball: https://registry.npmjs.org/@changesets/get-dependents-graph/-/get-dependents-graph-2.0.0.tgz}
+  /@changesets/get-dependents-graph@2.1.0:
+    resolution: {integrity: sha512-QOt6pQq9RVXKGHPVvyKimJDYJumx7p4DO5MO9AhRJYgAPgv0emhNqAqqysSVKHBm4sxKlGN4S1zXOIb5yCFuhQ==, tarball: https://registry.npmjs.org/@changesets/get-dependents-graph/-/get-dependents-graph-2.1.0.tgz}
     dependencies:
       '@changesets/types': 6.0.0
       '@manypkg/get-packages': 1.1.3
@@ -300,12 +303,12 @@ packages:
       - encoding
     dev: true
 
-  /@changesets/get-release-plan@4.0.0:
-    resolution: {integrity: sha512-9L9xCUeD/Tb6L/oKmpm8nyzsOzhdNBBbt/ZNcjynbHC07WW4E1eX8NMGC5g5SbM5z/V+MOrYsJ4lRW41GCbg3w==, tarball: https://registry.npmjs.org/@changesets/get-release-plan/-/get-release-plan-4.0.0.tgz}
+  /@changesets/get-release-plan@4.0.2:
+    resolution: {integrity: sha512-rOalz7nMuMV2vyeP7KBeAhqEB7FM2GFPO5RQSoOoUKKH9L6wW3QyPA2K+/rG9kBrWl2HckPVES73/AuwPvbH3w==, tarball: https://registry.npmjs.org/@changesets/get-release-plan/-/get-release-plan-4.0.2.tgz}
     dependencies:
       '@babel/runtime': 7.24.6
-      '@changesets/assemble-release-plan': 6.0.0
-      '@changesets/config': 3.0.0
+      '@changesets/assemble-release-plan': 6.0.2
+      '@changesets/config': 3.0.1
       '@changesets/pre': 2.0.0
       '@changesets/read': 0.6.0
       '@changesets/types': 6.0.0
@@ -362,6 +365,14 @@ packages:
       chalk: 2.4.2
       fs-extra: 7.0.1
       p-filter: 2.1.0
+    dev: true
+
+  /@changesets/should-skip-package@0.1.0:
+    resolution: {integrity: sha512-FxG6Mhjw7yFStlSM7Z0Gmg3RiyQ98d/9VpQAZ3Fzr59dCOM9G6ZdYbjiSAt0XtFr9JR5U2tBaJWPjrkGGc618g==, tarball: https://registry.npmjs.org/@changesets/should-skip-package/-/should-skip-package-0.1.0.tgz}
+    dependencies:
+      '@babel/runtime': 7.24.6
+      '@changesets/types': 6.0.0
+      '@manypkg/get-packages': 1.1.3
     dev: true
 
   /@changesets/types@4.1.0:
@@ -1140,7 +1151,7 @@ packages:
       '@langchain/openai': 0.0.28
       expr-eval: 2.0.2
       flat: 5.0.2
-      langsmith: 0.1.28(@langchain/core@0.1.63)
+      langsmith: 0.1.30(@langchain/core@0.1.63)
       uuid: 9.0.1
       zod: 3.23.8
       zod-to-json-schema: 3.23.0(zod@3.23.8)
@@ -1158,7 +1169,7 @@ packages:
       camelcase: 6.3.0
       decamelize: 1.2.0
       js-tiktoken: 1.0.12
-      langsmith: 0.1.28(@langchain/core@0.1.63)
+      langsmith: 0.1.30(@langchain/core@0.1.63)
       ml-distance: 4.0.1
       mustache: 4.2.0
       p-queue: 6.6.2
@@ -1171,7 +1182,7 @@ packages:
       - openai
     dev: true
 
-  /@langchain/core@0.1.63(openai@4.47.1):
+  /@langchain/core@0.1.63(openai@4.47.3):
     resolution: {integrity: sha512-+fjyYi8wy6x1P+Ee1RWfIIEyxd9Ee9jksEwvrggPwwI/p45kIDTdYTblXsM13y4mNWTiACyLSdbwnPaxxdoz+w==, tarball: https://registry.npmjs.org/@langchain/core/-/core-0.1.63.tgz}
     engines: {node: '>=18'}
     dependencies:
@@ -1179,7 +1190,7 @@ packages:
       camelcase: 6.3.0
       decamelize: 1.2.0
       js-tiktoken: 1.0.12
-      langsmith: 0.1.28(@langchain/core@0.1.63)(openai@4.47.1)
+      langsmith: 0.1.30(@langchain/core@0.1.63)(openai@4.47.3)
       ml-distance: 4.0.1
       mustache: 4.2.0
       p-queue: 6.6.2
@@ -1196,9 +1207,9 @@ packages:
     resolution: {integrity: sha512-2s1RA3/eAnz4ahdzsMPBna9hfAqpFNlWdHiPxVGZ5yrhXsbLWWoPcF+22LCk9t0HJKtazi2GCIWc0HVXH9Abig==, tarball: https://registry.npmjs.org/@langchain/openai/-/openai-0.0.28.tgz}
     engines: {node: '>=18'}
     dependencies:
-      '@langchain/core': 0.1.63(openai@4.47.1)
+      '@langchain/core': 0.1.63(openai@4.47.3)
       js-tiktoken: 1.0.12
-      openai: 4.47.1
+      openai: 4.47.3
       zod: 3.23.8
       zod-to-json-schema: 3.23.0(zod@3.23.8)
     transitivePeerDependencies:
@@ -1416,7 +1427,7 @@ packages:
   /@types/node-fetch@2.6.11:
     resolution: {integrity: sha512-24xFj9R5+rfQJLRyM56qh+wnVSYhyXC2tkoBndtY0U+vubqNsYXGjufB2nn8Q6gt0LrARwL6UBtMCSVCwl4B1g==, tarball: https://registry.npmjs.org/@types/node-fetch/-/node-fetch-2.6.11.tgz}
     dependencies:
-      '@types/node': 20.12.12
+      '@types/node': 20.13.0
       form-data: 4.0.0
     dev: true
 
@@ -1430,8 +1441,8 @@ packages:
       undici-types: 5.26.5
     dev: true
 
-  /@types/node@20.12.12:
-    resolution: {integrity: sha512-eWLDGF/FOSPtAvEqeRAQ4C8LSA7M1I7i0ky1I8U7kD1J5ITyW3AsRhQrKVoWf5pFKZ2kILsEGJhsI9r93PYnOw==, tarball: https://registry.npmjs.org/@types/node/-/node-20.12.12.tgz}
+  /@types/node@20.13.0:
+    resolution: {integrity: sha512-FM6AOb3khNkNIXPnHFDYaHerSv8uN22C91z098AnGccVu+Pcdhi+pNUFDi0iLmPIsVE0JBD0KVS7mzUYt4nRzQ==, tarball: https://registry.npmjs.org/@types/node/-/node-20.13.0.tgz}
     dependencies:
       undici-types: 5.26.5
     dev: true
@@ -1588,8 +1599,8 @@ packages:
       humanize-ms: 1.2.1
     dev: true
 
-  /ai@3.1.15(react@18.3.1)(solid-js@1.8.17)(svelte@4.2.17)(vue@3.4.27)(zod@3.23.8):
-    resolution: {integrity: sha512-vrAiRaGjtjWkPO0g9mpYALM7L5lsHFFAv5ErEd9QQjiYUJPJGqBQhJ68bikupyX+Fkj/oTt27z9qbF0+peuEPw==, tarball: https://registry.npmjs.org/ai/-/ai-3.1.15.tgz}
+  /ai@3.1.22(react@18.3.1)(solid-js@1.8.17)(svelte@4.2.17)(vue@3.4.27)(zod@3.23.8):
+    resolution: {integrity: sha512-Vgy490Q6p6pZ39VrRzL9ovr2N1YPsR+KvWNs+n73VAQoGBZtU/vwiiWrFU9LHXGhB9X+EBfQD0vixnTDS2dJWA==, tarball: https://registry.npmjs.org/ai/-/ai-3.1.22.tgz}
     engines: {node: '>=18'}
     peerDependencies:
       openai: ^4.42.0
@@ -1612,8 +1623,8 @@ packages:
       zod:
         optional: true
     dependencies:
-      '@ai-sdk/provider': 0.0.7
-      '@ai-sdk/provider-utils': 0.0.10(zod@3.23.8)
+      '@ai-sdk/provider': 0.0.8
+      '@ai-sdk/provider-utils': 0.0.11(zod@3.23.8)
       eventsource-parser: 1.1.2
       json-schema: 0.4.0
       jsondiffpatch: 0.6.0
@@ -1815,8 +1826,8 @@ packages:
       wcwidth: 1.0.1
     dev: true
 
-  /bundle-require@4.1.0(esbuild@0.19.12):
-    resolution: {integrity: sha512-FeArRFM+ziGkRViKRnSTbHZc35dgmR9yNog05Kn0+ItI59pOAISGvnnIwW1WgFZQW59IxD9QpJnUPkdIPfZuXg==, tarball: https://registry.npmjs.org/bundle-require/-/bundle-require-4.1.0.tgz}
+  /bundle-require@4.2.1(esbuild@0.19.12):
+    resolution: {integrity: sha512-7Q/6vkyYAwOmQNRw75x+4yRtZCZJXUDmHHlFdkiV0wgv/reNjtJwpu1jPJ0w2kbEpIM0uoKI3S4/f39dU7AjSA==, tarball: https://registry.npmjs.org/bundle-require/-/bundle-require-4.2.1.tgz}
     engines: {node: ^12.20.0 || ^14.13.1 || >=16.0.0}
     peerDependencies:
       esbuild: '>=0.17'
@@ -2090,8 +2101,8 @@ packages:
     resolution: {integrity: sha512-68s5jYdlvasItOJnCuI2Q9s4q98g0pCyL3HrcKJu8KNugUl8ahgmZYg38ysLTgQjjXX3H8CJLkAvWrclWfcalw==, tarball: https://registry.npmjs.org/dataloader/-/dataloader-1.4.0.tgz}
     dev: true
 
-  /debug@4.3.4:
-    resolution: {integrity: sha512-PRWFHuSU3eDtQJPvnNY7Jcket1j0t5OuOsFzPPzsekD52Zl8qUfFIPEiswXqIvHWGVHOgX+7G/vCNNhehwxfkQ==, tarball: https://registry.npmjs.org/debug/-/debug-4.3.4.tgz}
+  /debug@4.3.5:
+    resolution: {integrity: sha512-pt0bNEmneDIvdL1Xsd9oDQ/wrQRkXDT4AUWlNZNPKvW5x/jyO9VFXkJUP07vQ2upmw5PlaITaPKc31jK13V+jg==, tarball: https://registry.npmjs.org/debug/-/debug-4.3.5.tgz}
     engines: {node: '>=6.0'}
     peerDependencies:
       supports-color: '*'
@@ -3060,8 +3071,8 @@ packages:
     engines: {node: '>=6'}
     dev: true
 
-  /langsmith@0.1.28(@langchain/core@0.1.63):
-    resolution: {integrity: sha512-IQUbo7I7rEE6QYBhrcgwqvlkcUsHlia0yTQpDwWdITw/VJx1f7gLPjNdbwWE+jvOZ4HcD7gCf2HR6zFXputu5A==, tarball: https://registry.npmjs.org/langsmith/-/langsmith-0.1.28.tgz}
+  /langsmith@0.1.30(@langchain/core@0.1.63):
+    resolution: {integrity: sha512-g8f10H1iiRjCweXJjgM3Y9xl6ApCa1OThDvc0BlSDLVrGVPy1on9wT39vAzYkeadC7oG48p7gfpGlYH3kLkJ9Q==, tarball: https://registry.npmjs.org/langsmith/-/langsmith-0.1.30.tgz}
     peerDependencies:
       '@langchain/core': '*'
       langchain: '*'
@@ -3082,8 +3093,8 @@ packages:
       uuid: 9.0.1
     dev: true
 
-  /langsmith@0.1.28(@langchain/core@0.1.63)(openai@4.47.1):
-    resolution: {integrity: sha512-IQUbo7I7rEE6QYBhrcgwqvlkcUsHlia0yTQpDwWdITw/VJx1f7gLPjNdbwWE+jvOZ4HcD7gCf2HR6zFXputu5A==, tarball: https://registry.npmjs.org/langsmith/-/langsmith-0.1.28.tgz}
+  /langsmith@0.1.30(@langchain/core@0.1.63)(openai@4.47.3):
+    resolution: {integrity: sha512-g8f10H1iiRjCweXJjgM3Y9xl6ApCa1OThDvc0BlSDLVrGVPy1on9wT39vAzYkeadC7oG48p7gfpGlYH3kLkJ9Q==, tarball: https://registry.npmjs.org/langsmith/-/langsmith-0.1.30.tgz}
     peerDependencies:
       '@langchain/core': '*'
       langchain: '*'
@@ -3096,10 +3107,10 @@ packages:
       openai:
         optional: true
     dependencies:
-      '@langchain/core': 0.1.63(openai@4.47.1)
+      '@langchain/core': 0.1.63(openai@4.47.3)
       '@types/uuid': 9.0.8
       commander: 10.0.1
-      openai: 4.47.1
+      openai: 4.47.3
       p-queue: 6.6.2
       p-retry: 4.6.2
       uuid: 9.0.1
@@ -3458,8 +3469,8 @@ packages:
       mimic-fn: 4.0.0
     dev: true
 
-  /openai@4.47.1:
-    resolution: {integrity: sha512-WWSxhC/69ZhYWxH/OBsLEirIjUcfpQ5+ihkXKp06hmeYXgBBIUCa9IptMzYx6NdkiOCsSGYCnTIsxaic3AjRCQ==, tarball: https://registry.npmjs.org/openai/-/openai-4.47.1.tgz}
+  /openai@4.47.3:
+    resolution: {integrity: sha512-470d4ibH5kizXflCzgur22GpM4nOjrg7WQ9jTOa3dNKEn248oBy4+pjOyfcFR4V4YUn/YlDNjp6h83PbviCCKQ==, tarball: https://registry.npmjs.org/openai/-/openai-4.47.3.tgz}
     hasBin: true
     dependencies:
       '@types/node': 18.19.33
@@ -3672,7 +3683,7 @@ packages:
         optional: true
     dependencies:
       lilconfig: 3.1.1
-      ts-node: 10.9.2(@types/node@20.12.12)(typescript@5.4.5)
+      ts-node: 10.9.2(@types/node@20.13.0)(typescript@5.4.5)
       yaml: 2.4.2
     dev: true
 
@@ -4341,7 +4352,7 @@ packages:
     resolution: {integrity: sha512-Y/arvbn+rrz3JCKl9C4kVNfTfSm2/mEp5FSz5EsZSANGPSlQrpRI5M4PKF+mJnE52jOO90PnPSc3Ur3bTQw0gA==, tarball: https://registry.npmjs.org/ts-interface-checker/-/ts-interface-checker-0.1.13.tgz}
     dev: true
 
-  /ts-node@10.9.2(@types/node@20.12.12)(typescript@5.4.5):
+  /ts-node@10.9.2(@types/node@20.13.0)(typescript@5.4.5):
     resolution: {integrity: sha512-f0FFpIdcHgn8zcPSbf1dRevwt047YMnaiJM3u2w2RewrB+fob/zePZcrOyQoLMMO7aBIddLcQIEK5dYjkLnGrQ==, tarball: https://registry.npmjs.org/ts-node/-/ts-node-10.9.2.tgz}
     hasBin: true
     peerDependencies:
@@ -4360,7 +4371,7 @@ packages:
       '@tsconfig/node12': 1.0.11
       '@tsconfig/node14': 1.0.3
       '@tsconfig/node16': 1.0.4
-      '@types/node': 20.12.12
+      '@types/node': 20.13.0
       acorn: 8.11.3
       acorn-walk: 8.3.2
       arg: 4.1.3
@@ -4391,10 +4402,10 @@ packages:
       typescript:
         optional: true
     dependencies:
-      bundle-require: 4.1.0(esbuild@0.19.12)
+      bundle-require: 4.2.1(esbuild@0.19.12)
       cac: 6.7.14
       chokidar: 3.6.0
-      debug: 4.3.4
+      debug: 4.3.5
       esbuild: 0.19.12
       execa: 5.1.1
       globby: 11.1.0
@@ -4540,16 +4551,16 @@ packages:
       spdx-expression-parse: 3.0.1
     dev: true
 
-  /vite-node@1.6.0(@types/node@20.12.12):
+  /vite-node@1.6.0(@types/node@20.13.0):
     resolution: {integrity: sha512-de6HJgzC+TFzOu0NTC4RAIsyf/DY/ibWDYQUcuEA84EMHhcefTUGkjFHKKEJhQN4A+6I0u++kr3l36ZF2d7XRw==, tarball: https://registry.npmjs.org/vite-node/-/vite-node-1.6.0.tgz}
     engines: {node: ^18.0.0 || >=20.0.0}
     hasBin: true
     dependencies:
       cac: 6.7.14
-      debug: 4.3.4
+      debug: 4.3.5
       pathe: 1.1.2
       picocolors: 1.0.1
-      vite: 5.2.11(@types/node@20.12.12)
+      vite: 5.2.12(@types/node@20.13.0)
     transitivePeerDependencies:
       - '@types/node'
       - less
@@ -4561,8 +4572,8 @@ packages:
       - terser
     dev: true
 
-  /vite@5.2.11(@types/node@20.12.12):
-    resolution: {integrity: sha512-HndV31LWW05i1BLPMUCE1B9E9GFbOu1MbenhS58FuK6owSO5qHm7GiCotrNY1YE5rMeQSFBGmT5ZaLEjFizgiQ==, tarball: https://registry.npmjs.org/vite/-/vite-5.2.11.tgz}
+  /vite@5.2.12(@types/node@20.13.0):
+    resolution: {integrity: sha512-/gC8GxzxMK5ntBwb48pR32GGhENnjtY30G4A0jemunsBkiEZFw60s8InGpN8gkhHEkjnRK1aSAxeQgwvFhUHAA==, tarball: https://registry.npmjs.org/vite/-/vite-5.2.12.tgz}
     engines: {node: ^18.0.0 || >=20.0.0}
     hasBin: true
     peerDependencies:
@@ -4589,7 +4600,7 @@ packages:
       terser:
         optional: true
     dependencies:
-      '@types/node': 20.12.12
+      '@types/node': 20.13.0
       esbuild: 0.20.2
       postcss: 8.4.38
       rollup: 4.18.0
@@ -4597,7 +4608,7 @@ packages:
       fsevents: 2.3.3
     dev: true
 
-  /vitest@1.6.0(@types/node@20.12.12):
+  /vitest@1.6.0(@types/node@20.13.0):
     resolution: {integrity: sha512-H5r/dN06swuFnzNFhq/dnz37bPXnq8xB2xB5JOVk8K09rUtoeNN+LHWkoQ0A/i3hvbUKKcCei9KpbxqHMLhLLA==, tarball: https://registry.npmjs.org/vitest/-/vitest-1.6.0.tgz}
     engines: {node: ^18.0.0 || >=20.0.0}
     hasBin: true
@@ -4622,7 +4633,7 @@ packages:
       jsdom:
         optional: true
     dependencies:
-      '@types/node': 20.12.12
+      '@types/node': 20.13.0
       '@vitest/expect': 1.6.0
       '@vitest/runner': 1.6.0
       '@vitest/snapshot': 1.6.0
@@ -4630,7 +4641,7 @@ packages:
       '@vitest/utils': 1.6.0
       acorn-walk: 8.3.2
       chai: 4.4.1
-      debug: 4.3.4
+      debug: 4.3.5
       execa: 8.0.1
       local-pkg: 0.5.0
       magic-string: 0.30.10
@@ -4640,8 +4651,8 @@ packages:
       strip-literal: 2.1.0
       tinybench: 2.8.0
       tinypool: 0.8.4
-      vite: 5.2.11(@types/node@20.12.12)
-      vite-node: 1.6.0(@types/node@20.12.12)
+      vite: 5.2.12(@types/node@20.13.0)
+      vite-node: 1.6.0(@types/node@20.13.0)
       why-is-node-running: 2.2.2
     transitivePeerDependencies:
       - less
@@ -4802,8 +4813,8 @@ packages:
       strip-ansi: 7.1.0
     dev: true
 
-  /xstate@5.13.0:
-    resolution: {integrity: sha512-Z0om784N5u8sAzUvQJBa32jiTCIGGF/2ZsmKkerQEqeeUktAeOMK20FIHFUMywC4GcAkNksSvaeX7lwoRNXPEQ==, tarball: https://registry.npmjs.org/xstate/-/xstate-5.13.0.tgz}
+  /xstate@5.13.1:
+    resolution: {integrity: sha512-saBUxsTb29Vq8bjq1TjLdGCYs2pneGMzQ7pqQyXh1nqZaSnKHkCkxf3EV+EDYbLnQioxK9HNMYPQrz4whj3RJQ==, tarball: https://registry.npmjs.org/xstate/-/xstate-5.13.1.tgz}
     dev: false
 
   /y18n@4.0.3:
