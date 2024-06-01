@@ -122,7 +122,7 @@ export interface AgentContext<TEvents extends EventObject> {
   feedback: AgentFeedback[];
 }
 
-export type AgentDecisionInput = {
+export type AgentDecisionOptions = {
   goal: string;
   model?: LanguageModel;
   context?: any;
@@ -130,7 +130,7 @@ export type AgentDecisionInput = {
 
 export type AgentDecisionLogic<TEvents extends EventObject> = PromiseActorLogic<
   AgentPlan<TEvents> | undefined,
-  AgentDecisionInput | string
+  AgentDecisionOptions | string
 >;
 
 export type AgentLogic<TEvents extends EventObject> = TransitionActorLogic<

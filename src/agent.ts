@@ -23,7 +23,7 @@ import {
   AgentContext,
   AgentDecideOptions,
   AgentDecisionLogic,
-  AgentDecisionInput as AgentDecisionOptions,
+  AgentDecisionOptions,
   AgentGenerateTextOptions,
   AgentLogic,
   AgentMessageHistory,
@@ -53,24 +53,6 @@ export function createAgent<
   stringify?: typeof JSON.stringify;
 } & GenerateTextOptions): Agent<TEvents> {
   const messageListeners: Observer<AgentMessageHistory>[] = [];
-
-  const observe: Agent<TEvents>['addObservation'] = ({
-    state,
-    event,
-    nextState,
-    timestamp,
-    sessionId,
-    // eventOrigin,
-  }) => {
-    agent.send({
-      type: 'agent.observe',
-      state,
-      event,
-      nextState,
-      timestamp,
-      sessionId,
-    });
-  };
 
   const agentLogic: AgentLogic<TEvents> = fromTransition(
     (state, event) => {
@@ -125,9 +107,11 @@ export function createAgent<
     messageListeners.push(toObserver(callback));
   };
 
-  agent.decide = (opts) => agentDecide(agent, opts);
+  agent.decide = (opts) => {
+    return agentDecide(agent, opts);
+  };
 
-  agent.addHistory = async (history) => {
+  agent.addHistory = (history) => {
     agent.send({
       type: 'agent.history',
       history,
@@ -136,7 +120,23 @@ export function createAgent<
 
   agent.generateText = (opts) => agentGenerateText(agent, opts);
 
-  agent.addObservation = observe;
+  agent.addObservation = ({
+    state,
+    event,
+    nextState,
+    timestamp,
+    sessionId,
+  }) => {
+    agent.send({
+      type: 'agent.observe',
+      state,
+      event,
+      nextState,
+      timestamp,
+      sessionId,
+    });
+  };
+
   agent.addPlan = (plan) => {
     agent.send({
       type: 'agent.plan',
