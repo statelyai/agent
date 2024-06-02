@@ -201,15 +201,10 @@ async function agentGenerateText<T extends Agent<any>>(
     context: options.context,
   });
 
-  const content = {
-    prompt: options.prompt,
-    context: options.context,
-  };
-
   agent.addHistory({
-    content,
     id,
     role: 'user',
+    content: promptWithContext,
     timestamp: Date.now(),
   });
 
@@ -225,6 +220,7 @@ async function agentGenerateText<T extends Agent<any>>(
     role: 'assistant',
     timestamp: Date.now(),
     responseId: id,
+    result,
   });
 
   return result;
@@ -271,14 +267,11 @@ async function agentStreamText(
     goal: options.prompt,
     context: options.context,
   });
-  const content = {
-    prompt: options.prompt,
-    context: options.context,
-  };
+
   agent.addHistory({
-    content,
-    id,
     role: 'user',
+    content: promptWithContext,
+    id,
     timestamp: Date.now(),
   });
 
@@ -286,6 +279,26 @@ async function agentStreamText(
     model: options.model ?? agent.model,
     ...options,
     prompt: promptWithContext,
+    onFinish: async (res) => {
+      agent.addHistory({
+        role: 'assistant',
+        result: {
+          text: res.text,
+          finishReason: res.finishReason,
+          logprobs: undefined,
+          responseMessages: [],
+          toolCalls: [],
+          toolResults: [],
+          usage: res.usage,
+          warnings: res.warnings,
+          rawResponse: res.rawResponse,
+        },
+        content: res.text,
+        id: randomUUID(),
+        timestamp: Date.now(),
+        responseId: id,
+      });
+    },
   });
 
   return result;

@@ -9,6 +9,7 @@ import {
   Values,
 } from 'xstate';
 import {
+  CoreMessage,
   generateText,
   GenerateTextResult,
   LanguageModel,
@@ -96,15 +97,16 @@ export interface AgentFeedback {
   timestamp: number;
 }
 
-export interface AgentMessageHistory {
-  role: 'user' | 'assistant';
-  content: any;
+export type AgentMessageHistory = CoreMessage & {
   timestamp: number;
   id: string;
-  // which chat message we're responding to
+  /**
+   * The response ID of the message, which references
+   * which message this message is responding to, if any.
+   */
   responseId?: string;
-  sessionId?: string;
-}
+  result?: GenerateTextResult<any>;
+};
 
 export interface AgentObservation {
   id: string;
