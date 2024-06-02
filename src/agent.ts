@@ -192,10 +192,11 @@ async function agentGenerateText<T extends Agent<any>>(
   agent: T,
   options: AgentGenerateTextOptions
 ) {
+  const template = options.template ?? defaultTextTemplate;
   // TODO: check if messages was provided instead
 
-  const id = Date.now() + '';
-  const promptWithContext = defaultTextTemplate({
+  const id = randomUUID();
+  const promptWithContext = template({
     goal: options.prompt,
     context: options.context,
   });
@@ -263,8 +264,10 @@ async function agentStreamText(
   agent: Agent<any>,
   options: AgentStreamTextOptions
 ): Promise<StreamTextResult<any>> {
+  const template = options.template ?? defaultTextTemplate;
+
   const id = randomUUID();
-  const promptWithContext = defaultTextTemplate({
+  const promptWithContext = template({
     goal: options.prompt,
     context: options.context,
   });

@@ -175,7 +175,14 @@ export type Agent<TEvents extends EventObject> = ActorRefFrom<
   model: LanguageModel;
   defaultOptions: GenerateTextOptions;
 
-  // Decision
+  /**
+   * Resolves with an `AgentPlan` based on the information provided in the `options`, including:
+   *
+   * - The `goal` for the agent to achieve
+   * - The observed current `state`
+   * - The `logic` (e.g. a state machine) that specifies what can happen next
+   * - Additional `context`
+   */
   decide: (
     options: AgentDecideOptions
   ) => Promise<AgentPlan<TEvents> | undefined>;
@@ -199,19 +206,27 @@ export type Agent<TEvents extends EventObject> = ActorRefFrom<
 
 export type AnyAgent = Agent<any>;
 
-export type AgentGenerateTextOptions = Omit<GenerateTextOptions, 'model'> & {
+export interface CommonTextOptions {
   prompt: string;
   model?: LanguageModel;
   context?: any;
-};
+  template?: PromptTemplate<any>;
+}
 
-export type AgentStreamTextOptions = Omit<StreamTextOptions, 'model'> & {
-  prompt: string;
-  model?: LanguageModel;
-  context?: any;
-};
+export type AgentGenerateTextOptions = Omit<GenerateTextOptions, 'model'> &
+  CommonTextOptions;
+
+export type AgentStreamTextOptions = Omit<StreamTextOptions, 'model'> &
+  CommonTextOptions;
 
 export interface ObservedState {
+  /**
+   * The current state value of the state machine, e.g.
+   * `"loading"` or `"processing"` or `"ready"`
+   */
   value: string;
+  /**
+   * Additional contextual data related to the current state
+   */
   context: Record<string, unknown>;
 }
