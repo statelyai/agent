@@ -224,8 +224,4 @@ const jokeMachine = setup({
 
 const actor = createActor(jokeMachine);
 
-agent.onMessage((msg) => {
-  console.log(msg);
-});
-
 actor.start();

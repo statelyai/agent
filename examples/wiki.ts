@@ -27,10 +27,11 @@ async function main() {
 
   console.log(agent.getSnapshot());
 
+  const history = await agent.getHistory();
+
   const res2 = await agent.generateText({
-    prompt: agent
-      .getSnapshot()
-      .context.history.map((h) => h.content)
+    prompt: history!
+      .map((h) => h.content)
       .concat('What about the first one?')
       .join('\n\n'),
   });

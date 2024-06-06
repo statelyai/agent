@@ -118,10 +118,7 @@ export interface AgentObservation {
 }
 
 export interface AgentContext<TEvents extends EventObject> {
-  observations: AgentObservation[];
-  history: AgentMessageHistory[];
-  plans: AgentPlan<TEvents>[];
-  feedback: AgentFeedback[];
+  storage: AgentStorage;
 }
 
 export type AgentDecisionOptions = {
@@ -138,21 +135,16 @@ export type AgentDecisionLogic<TEvents extends EventObject> = PromiseActorLogic<
 export type AgentLogic<TEvents extends EventObject> = TransitionActorLogic<
   AgentContext<TEvents>,
   | {
-      type: 'agent.reward';
-      reward: AgentFeedback;
+      type: 'agent.feedback';
+      feedback: AgentFeedback;
     }
   | {
       type: 'agent.observe';
-      state: ObservedState | undefined;
-      event: AnyEventObject;
-      nextState: ObservedState;
-      timestamp: number;
-      // Which actor sent the event
-      sessionId: string;
+      observation: Omit<AgentObservation, 'id'>;
     }
   | {
       type: 'agent.history';
-      history: AgentMessageHistory;
+      message: AgentMessageHistory;
     }
   | {
       type: 'agent.plan';
@@ -200,9 +192,13 @@ export type Agent<TEvents extends EventObject> = ActorRefFrom<
   ) => AsyncIterable<{ textDelta: string }>;
 
   addObservation: (observation: AgentObservation) => void;
+  getObservations: () => Promise<AgentObservation[] | undefined>;
   addHistory: (history: AgentMessageHistory) => void;
+  getHistory: () => Promise<AgentMessageHistory[] | undefined>;
   addFeedback: (feedbackItem: AgentFeedback) => void;
+  getFeedback: () => Promise<AgentFeedback[] | undefined>;
   addPlan: (plan: AgentPlan<TEvents>) => void;
+  getPlans: () => Promise<AgentPlan<TEvents>[] | undefined>;
   onMessage: (callback: (message: AgentMessageHistory) => void) => void;
 };
 
@@ -231,4 +227,25 @@ export interface ObservedState {
    * Additional contextual data related to the current state
    */
   context: Record<string, unknown>;
+}
+
+export type AgentStorageData = {
+  observations: AgentObservation[];
+  history: AgentMessageHistory[];
+  plans: AgentPlan<any>[];
+  feedback: AgentFeedback[];
+};
+
+export type AgentStorage = AppendOnlyStorage<AgentStorageData>;
+
+export interface AppendOnlyStorage<T extends Record<string, any[]>> {
+  append<K extends keyof T>(
+    sessionId: string,
+    key: K,
+    item: T[K][0]
+  ): Promise<void>;
+  getAll<K extends keyof T>(
+    sessionId: string,
+    key: K
+  ): Promise<T[K] | undefined>;
 }

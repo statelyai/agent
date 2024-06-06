@@ -28,6 +28,7 @@ import {
   AgentLogic,
   AgentMessageHistory,
   AgentPlanner,
+  AgentStorage,
   AgentStreamTextOptions,
   EventsFromZodEventMapping,
   GenerateTextOptions,
@@ -35,6 +36,7 @@ import {
 import { simplePlanner } from './planners/simplePlanner';
 import { randomUUID } from 'crypto';
 import { defaultTextTemplate } from './templates/defaultText';
+import { createMemoryStorage } from './storage';
 
 export function createAgent<
   const TEventSchemas extends ZodEventMapping,
@@ -45,42 +47,40 @@ export function createAgent<
   events,
   planner = simplePlanner as AgentPlanner<Agent<TEvents>>,
   stringify = JSON.stringify,
+  storage = createMemoryStorage(),
   ...generateTextOptions
 }: {
   name: string;
   events: TEventSchemas;
   planner?: AgentPlanner<Agent<TEvents>>;
   stringify?: typeof JSON.stringify;
+  storage?: AgentStorage;
 } & GenerateTextOptions): Agent<TEvents> {
-  const messageListeners: Observer<AgentMessageHistory>[] = [];
+  const messageHistoryListeners: Observer<AgentMessageHistory>[] = [];
 
   const agentLogic: AgentLogic<TEvents> = fromTransition(
-    (state, event) => {
+    (state, event, { sessionId }) => {
       switch (event.type) {
-        case 'agent.reward': {
-          state.feedback.push(event.reward);
+        case 'agent.feedback': {
+          state.storage.append(sessionId, 'feedback', event.feedback);
           break;
         }
         case 'agent.observe': {
-          state.observations.push({
+          state.storage.append(sessionId, 'observations', {
             id: randomUUID(),
-            state: event.state,
-            event: event.event,
-            nextState: event.nextState,
-            timestamp: event.timestamp,
-            sessionId: event.sessionId,
+            ...event.observation,
           });
           break;
         }
         case 'agent.history': {
-          state.history.push(event.history);
-          messageListeners.forEach((listener) =>
-            listener.next?.(event.history)
+          state.storage.append(sessionId, 'history', event.message);
+          messageHistoryListeners.forEach((listener) =>
+            listener.next?.(event.message)
           );
           break;
         }
         case 'agent.plan': {
-          state.plans.push(event.plan);
+          state.storage.append(sessionId, 'plans', event.plan);
           break;
         }
         default:
@@ -89,10 +89,7 @@ export function createAgent<
       return state;
     },
     {
-      observations: [],
-      plans: [],
-      feedback: [],
-      history: [],
+      storage,
     } as AgentContext<TEvents>
   );
 
@@ -104,7 +101,7 @@ export function createAgent<
   agent.defaultOptions = { ...generateTextOptions, model };
 
   agent.onMessage = (callback) => {
-    messageListeners.push(toObserver(callback));
+    messageHistoryListeners.push(toObserver(callback));
   };
 
   agent.decide = (opts) => {
@@ -114,27 +111,25 @@ export function createAgent<
   agent.addHistory = (history) => {
     agent.send({
       type: 'agent.history',
-      history,
+      message: history,
     });
+  };
+
+  agent.getHistory = async () => {
+    return await storage.getAll(agent.sessionId, 'history');
   };
 
   agent.generateText = (opts) => agentGenerateText(agent, opts);
 
-  agent.addObservation = ({
-    state,
-    event,
-    nextState,
-    timestamp,
-    sessionId,
-  }) => {
+  agent.addObservation = (observation) => {
     agent.send({
       type: 'agent.observe',
-      state,
-      event,
-      nextState,
-      timestamp,
-      sessionId,
+      observation,
     });
+  };
+
+  agent.getObservations = async () => {
+    return await storage.getAll(agent.sessionId, 'observations');
   };
 
   agent.addPlan = (plan) => {
@@ -142,6 +137,10 @@ export function createAgent<
       type: 'agent.plan',
       plan,
     });
+  };
+
+  agent.getPlans = async () => {
+    return await storage.getAll(agent.sessionId, 'plans');
   };
 
   agent.start();
