@@ -78,6 +78,10 @@ export function createAgent<
    * A description of the role of the agent
    */
   description?: string;
+  /**
+   * Events that the agent can cause (send) in an environment
+   * that the agent knows about.
+   */
   events: TEventSchemas;
   planner?: AgentPlanner<Agent<TEvents>>;
   stringify?: typeof JSON.stringify;

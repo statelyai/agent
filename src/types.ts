@@ -28,6 +28,10 @@ export type AgentPlanInput<TEvent extends EventObject> = {
   goal: string;
   events: ZodEventMapping;
   machine?: AnyStateMachine;
+  /**
+   * The previous plan
+   */
+  previousPlan?: AgentPlan<any>;
 };
 
 export type AgentPlan<TEvent extends EventObject> = {
@@ -204,13 +208,16 @@ export type Agent<TEvents extends EventObject> = ActorRefFrom<
   addPlan: (plan: AgentPlan<TEvents>) => void;
   getPlans: () => Promise<AgentPlan<TEvents>[] | undefined>;
   onMessage: (callback: (message: AgentMessageHistory) => void) => void;
+  /**
+   * Selects agent data from its context.
+   */
   select: <T>(selector: (context: AgentContext) => T) => T;
 };
 
 export type AnyAgent = Agent<any>;
 
 export interface CommonTextOptions {
-  prompt: string;
+  prompt: string | ((self: Agent<any>) => Promise<string>);
   model?: LanguageModel;
   context?: any;
   template?: PromptTemplate<any>;

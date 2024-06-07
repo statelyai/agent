@@ -32,6 +32,7 @@ export async function agentDecide<T extends Agent<any>>(
   });
 
   if (plan?.nextEvent) {
+    agent.addPlan(plan);
     await options.execute?.(plan.nextEvent);
   }
 
