@@ -8,6 +8,9 @@ dependencies:
   '@ai-sdk/openai':
     specifier: ^0.0.13
     version: 0.0.13(zod@3.23.8)
+  '@xstate/graph':
+    specifier: ^2.0.0
+    version: 2.0.0(xstate@5.13.1)
   ai:
     specifier: ^3.1.22
     version: 3.1.22(react@18.3.1)(solid-js@1.8.17)(svelte@4.2.17)(vue@3.4.27)(zod@3.23.8)
@@ -1573,6 +1576,14 @@ packages:
 
   /@vue/shared@3.4.27:
     resolution: {integrity: sha512-DL3NmY2OFlqmYYrzp39yi3LDkKxa5vZVwxWdQ3rG0ekuWscHraeIbnI8t+aZK7qhYqEqWKTUdijadunb9pnrgA==, tarball: https://registry.npmjs.org/@vue/shared/-/shared-3.4.27.tgz}
+    dev: false
+
+  /@xstate/graph@2.0.0(xstate@5.13.1):
+    resolution: {integrity: sha512-wmTdXnnmvE3EUyAwO1kYdp4drGymp+zNUhy/C0KFajzIw2EHfnEtYvognP0H08PzLgY1b1MvMD6yj1Ijyl7c+Q==, tarball: https://registry.npmjs.org/@xstate/graph/-/graph-2.0.0.tgz}
+    peerDependencies:
+      xstate: ^5.13.0
+    dependencies:
+      xstate: 5.13.1
     dev: false
 
   /abort-controller@3.0.0:

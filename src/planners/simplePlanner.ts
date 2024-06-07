@@ -2,40 +2,57 @@ import { CoreTool, tool } from 'ai';
 import {
   Agent,
   AgentPlan,
-  AgentPlanOptions,
+  AgentPlanInput,
   ObservedState,
+  PromptTemplate,
   TransitionData,
 } from '../types';
 import { getAllTransitions } from '../utils';
 import { AnyStateMachine } from 'xstate';
 import { z } from 'zod';
-import { defaultToolCallTemplate } from '../templates/defaultToolCall';
+import { defaultTextTemplate } from '../templates/defaultText';
 
-const getTransitions = (state: ObservedState, logic: AnyStateMachine) => {
-  if (!logic) {
+function getTransitions(
+  state: ObservedState,
+  machine: AnyStateMachine
+): TransitionData[] {
+  if (!machine) {
     return [];
   }
 
-  const resolvedState = logic.resolveState(state);
+  const resolvedState = machine.resolveState(state);
   return getAllTransitions(resolvedState);
+}
+
+const simplePlannerPromptTemplate: PromptTemplate<any> = (data) => {
+  return `
+${defaultTextTemplate(data)}
+
+Only make a single tool call to achieve the above goal.
+  `.trim();
 };
 
 export async function simplePlanner<T extends Agent<any>>(
   agent: T,
-  options: AgentPlanOptions<any>
+  input: AgentPlanInput<any>
 ): Promise<AgentPlan<any> | undefined> {
-  const template = options.template ?? defaultToolCallTemplate;
-  const transitions: TransitionData[] = options.logic
-    ? getTransitions(options.state, options.logic)
-    : Object.entries(options.events).map(([eventType, { description }]) => ({
+  // Get all of the possible next transitions
+  const transitions: TransitionData[] = input.machine
+    ? getTransitions(input.state, input.machine)
+    : Object.entries(input.events).map(([eventType, { description }]) => ({
         eventType,
         description,
       }));
 
+  // Only keep the transitions that match the event types that are in the event mapping
+  // TODO: allow for custom filters
   const filter = (eventType: string) =>
-    Object.keys(options.events).includes(eventType);
+    Object.keys(input.events).includes(eventType);
 
+  // Mapping of each event type (e.g. "mouse.click")
+  // to a valid function name (e.g. "mouse_click")
   const functionNameMapping: Record<string, string> = {};
+
   const toolTransitions = transitions
     .filter((t) => {
       return filter(t.eventType);
@@ -52,10 +69,11 @@ export async function simplePlanner<T extends Agent<any>>(
       } as const;
     });
 
+  // Convert the transition data to a tool map that the
+  // Vercel AI SDK can use
   const toolMap: Record<string, CoreTool<any, any>> = {};
-
   for (const toolTransitionData of toolTransitions) {
-    const toolZodType = options.events?.[toolTransitionData.eventType];
+    const toolZodType = input.events?.[toolTransitionData.eventType];
 
     toolMap[toolTransitionData.name] = tool({
       description: toolZodType?.description ?? toolTransitionData.description,
@@ -71,29 +89,30 @@ export async function simplePlanner<T extends Agent<any>>(
     });
   }
 
-  const prompt = template({
-    context: options.state.context,
-    goal: options.goal,
+  // Create a prompt with the given context and goal.
+  // The template is used to ensure that a single tool call is made.
+  const prompt = simplePlannerPromptTemplate({
+    state: input.state,
+    goal: input.goal,
   });
 
-  const { model, ...otherOptions } = options;
-
   const result = await agent.generateText({
-    model,
     prompt,
     tools: toolMap,
-    ...otherOptions,
+    ...input,
   });
 
   const singleResult = result.toolResults[0];
 
   if (!singleResult) {
+    // TODO: retries?
+    console.warn('No tool call results returned');
     return undefined;
   }
 
   return {
-    goal: options.goal,
-    state: options.state,
+    goal: input.goal,
+    state: input.state,
     steps: [
       {
         event: singleResult.result,

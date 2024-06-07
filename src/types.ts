@@ -22,19 +22,19 @@ export type GenerateTextOptions = Parameters<typeof generateText>[0];
 
 export type StreamTextOptions = Parameters<typeof streamText>[0];
 
-export type AgentPlanOptions<TEvent extends EventObject> = {
+export type AgentPlanInput<TEvent extends EventObject> = {
   model: LanguageModel;
   state: ObservedState;
   goal: string;
   events: ZodEventMapping;
-  logic?: AnyStateMachine;
-  template?: PromptTemplate<TEvent>;
+  machine?: AnyStateMachine;
 };
 
 export type AgentPlan<TEvent extends EventObject> = {
   goal: string;
   state: ObservedState;
-  steps: Array<{
+  content?: string;
+  steps?: Array<{
     event: TEvent;
     nextState?: ObservedState;
   }>;
@@ -51,17 +51,23 @@ export interface TransitionData {
 export type PromptTemplate<TEvents extends EventObject> = (data: {
   goal: string;
   /**
-   * The state value
+   * The observed state
    */
-  value?: StateValue;
+  state?: ObservedState;
   /**
-   * The provided context
+   * The context to provide.
+   * This overrides the observed state.context, if provided.
    */
   context?: any;
   /**
-   * The logical model of the observed environment
+   * The state machine model of the observed environment
    */
-  logic?: unknown;
+  machine?: unknown;
+  /**
+   * The potential next transitions that can be taken
+   * in the state machine
+   */
+  transitions?: TransitionData[];
   /**
    * Past observations
    */
@@ -73,7 +79,7 @@ export type PromptTemplate<TEvents extends EventObject> = (data: {
 
 export type AgentPlanner<T extends Agent<any>> = (
   agent: T['eventTypes'],
-  options: AgentPlanOptions<T['eventTypes']>
+  options: AgentPlanInput<T['eventTypes']>
 ) => Promise<AgentPlan<T['eventTypes']> | undefined>;
 
 export type AgentDecideOptions = {
@@ -81,7 +87,7 @@ export type AgentDecideOptions = {
   model?: LanguageModel;
   context?: any;
   state: ObservedState;
-  logic: AnyStateMachine;
+  machine: AnyStateMachine;
   execute?: (event: AnyEventObject) => Promise<void>;
   planner?: AgentPlanner<any>;
   events?: ZodEventMapping;
@@ -117,9 +123,7 @@ export interface AgentObservation {
   timestamp: number;
 }
 
-export interface AgentContext<TEvents extends EventObject> {
-  storage: AgentStorage;
-}
+export type AgentContext = AgentStorageData;
 
 export type AgentDecisionOptions = {
   goal: string;
@@ -133,7 +137,7 @@ export type AgentDecisionLogic<TEvents extends EventObject> = PromiseActorLogic<
 >;
 
 export type AgentLogic<TEvents extends EventObject> = TransitionActorLogic<
-  AgentContext<TEvents>,
+  AgentContext,
   | {
       type: 'agent.feedback';
       feedback: AgentFeedback;
@@ -222,7 +226,7 @@ export interface ObservedState {
    * The current state value of the state machine, e.g.
    * `"loading"` or `"processing"` or `"ready"`
    */
-  value: string;
+  value: StateValue;
   /**
    * Additional contextual data related to the current state
    */

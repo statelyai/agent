@@ -39,6 +39,7 @@
   },
   "dependencies": {
     "@ai-sdk/openai": "^0.0.13",
+    "@xstate/graph": "^2.0.0",
     "ai": "^3.1.22",
     "xstate": "^5.13.1"
   },

@@ -59,28 +59,28 @@ export function createAgent<
   const messageHistoryListeners: Observer<AgentMessageHistory>[] = [];
 
   const agentLogic: AgentLogic<TEvents> = fromTransition(
-    (state, event, { sessionId }) => {
+    (state, event) => {
       switch (event.type) {
         case 'agent.feedback': {
-          state.storage.append(sessionId, 'feedback', event.feedback);
+          state.feedback.push(event.feedback);
           break;
         }
         case 'agent.observe': {
-          state.storage.append(sessionId, 'observations', {
+          state.observations.push({
             id: randomUUID(),
             ...event.observation,
           });
           break;
         }
         case 'agent.history': {
-          state.storage.append(sessionId, 'history', event.message);
+          state.history.push(event.message);
           messageHistoryListeners.forEach((listener) =>
             listener.next?.(event.message)
           );
           break;
         }
         case 'agent.plan': {
-          state.storage.append(sessionId, 'plans', event.plan);
+          state.plans.push(event.plan);
           break;
         }
         default:
@@ -89,8 +89,11 @@ export function createAgent<
       return state;
     },
     {
-      storage,
-    } as AgentContext<TEvents>
+      feedback: [],
+      history: [],
+      observations: [],
+      plans: [],
+    } as AgentContext
   );
 
   const agent = createActor(agentLogic) as unknown as Agent<TEvents>;
@@ -175,7 +178,7 @@ export function fromDecision(
     };
 
     const plan = await agentDecide(agent, {
-      logic: parentRef.src as any,
+      machine: parentRef.src as any,
       state,
       execute: async (event) => {
         parentRef.send(event);
@@ -234,7 +237,7 @@ async function agentDecide<T extends Agent<any>>(
     goal,
     events = agent.events,
     state,
-    logic,
+    machine,
     model = agent.model,
     ...otherOptions
   } = options;
@@ -244,7 +247,7 @@ async function agentDecide<T extends Agent<any>>(
     goal,
     events,
     state,
-    logic,
+    machine,
     ...otherOptions,
   });
 
