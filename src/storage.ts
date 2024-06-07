@@ -1,6 +1,6 @@
-import { AgentStorage, AgentStorageData, AppendOnlyStorage } from './types';
+import { AgentMemory, AgentStorageData, AppendOnlyStorage } from './types';
 
-export function createMemoryStorage(): AgentStorage {
+export function createMemoryStorage(): AgentMemory {
   const storage = {
     sessions: {} as Record<string, AgentStorageData>,
   };

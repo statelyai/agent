@@ -125,7 +125,7 @@ export interface AgentObservation {
 
 export type AgentContext = AgentStorageData;
 
-export type AgentDecisionOptions = {
+export type AgentDecisionInput = {
   goal: string;
   model?: LanguageModel;
   context?: any;
@@ -133,7 +133,7 @@ export type AgentDecisionOptions = {
 
 export type AgentDecisionLogic<TEvents extends EventObject> = PromiseActorLogic<
   AgentPlan<TEvents> | undefined,
-  AgentDecisionOptions | string
+  AgentDecisionInput | string
 >;
 
 export type AgentLogic<TEvents extends EventObject> = TransitionActorLogic<
@@ -204,6 +204,7 @@ export type Agent<TEvents extends EventObject> = ActorRefFrom<
   addPlan: (plan: AgentPlan<TEvents>) => void;
   getPlans: () => Promise<AgentPlan<TEvents>[] | undefined>;
   onMessage: (callback: (message: AgentMessageHistory) => void) => void;
+  select: <T>(selector: (context: AgentContext) => T) => T;
 };
 
 export type AnyAgent = Agent<any>;
@@ -240,7 +241,7 @@ export type AgentStorageData = {
   feedback: AgentFeedback[];
 };
 
-export type AgentStorage = AppendOnlyStorage<AgentStorageData>;
+export type AgentMemory = AppendOnlyStorage<AgentStorageData>;
 
 export interface AppendOnlyStorage<T extends Record<string, any[]>> {
   append<K extends keyof T>(
