@@ -68,6 +68,7 @@ export function createAgent<
   planner = simplePlanner as AgentPlanner<Agent<TEvents>>,
   stringify = JSON.stringify,
   memory = createMemoryStorage(),
+  logic = agentLogic as AgentLogic<TEvents>,
   ...generateTextOptions
 }: {
   /**
@@ -89,10 +90,14 @@ export function createAgent<
    * Agent long-term memory
    */
   memory?: AgentMemory;
+  /**
+   * Agent logic
+   */
+  logic?: AgentLogic<TEvents>;
 } & GenerateTextOptions): Agent<TEvents> {
   const messageHistoryListeners: Observer<AgentMessageHistory>[] = [];
 
-  const agent = createActor(agentLogic) as unknown as Agent<TEvents>;
+  const agent = createActor(logic) as unknown as Agent<TEvents>;
   agent.events = events;
   agent.model = model;
   agent.name = name;
