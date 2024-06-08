@@ -127,7 +127,7 @@ export interface AgentObservation {
   timestamp: number;
 }
 
-export type AgentContext = AgentStorageData;
+export type AgentContext = AgentMemoryData;
 
 export type AgentDecisionInput = {
   goal: string;
@@ -171,11 +171,21 @@ export type EventsFromZodEventMapping<TEventSchemas extends ZodEventMapping> =
 export type Agent<TEvents extends EventObject> = ActorRefFrom<
   AgentLogic<TEvents>
 > & {
+  /**
+   * The general name of the agent. All agents with the same name are related and
+   * able to share experiences (observations, feedback) with each other.
+   */
   name: string;
+  /**
+   * The unique id of the agent. This is used to partition message history.
+   */
+  id?: string;
+  description?: string;
   events: ZodEventMapping;
   eventTypes: TEvents;
   model: LanguageModel;
   defaultOptions: GenerateTextOptions;
+  memory: AgentLongTermMemory | undefined;
 
   /**
    * Resolves with an `AgentPlan` based on the information provided in the `options`, including:
@@ -200,13 +210,9 @@ export type Agent<TEvents extends EventObject> = ActorRefFrom<
   ) => AsyncIterable<{ textDelta: string }>;
 
   addObservation: (observation: AgentObservation) => void;
-  getObservations: () => Promise<AgentObservation[] | undefined>;
   addHistory: (history: AgentMessageHistory) => void;
-  getHistory: () => Promise<AgentMessageHistory[] | undefined>;
   addFeedback: (feedbackItem: AgentFeedback) => void;
-  getFeedback: () => Promise<AgentFeedback[] | undefined>;
   addPlan: (plan: AgentPlan<TEvents>) => void;
-  getPlans: () => Promise<AgentPlan<TEvents>[] | undefined>;
   onMessage: (callback: (message: AgentMessageHistory) => void) => void;
   /**
    * Selects agent data from its context.
@@ -216,17 +222,26 @@ export type Agent<TEvents extends EventObject> = ActorRefFrom<
 
 export type AnyAgent = Agent<any>;
 
+export type FromAgent<T> = T | ((self: AnyAgent) => T | Promise<T>);
+
 export interface CommonTextOptions {
-  prompt: string | ((self: Agent<any>) => Promise<string>);
+  prompt: FromAgent<string>;
   model?: LanguageModel;
-  context?: any;
+  context?: Record<string, any>;
+  messages?: FromAgent<AgentMessageHistory[]> | true;
   template?: PromptTemplate<any>;
 }
 
-export type AgentGenerateTextOptions = Omit<GenerateTextOptions, 'model'> &
+export type AgentGenerateTextOptions = Omit<
+  GenerateTextOptions,
+  'model' | 'prompt' | 'messages'
+> &
   CommonTextOptions;
 
-export type AgentStreamTextOptions = Omit<StreamTextOptions, 'model'> &
+export type AgentStreamTextOptions = Omit<
+  StreamTextOptions,
+  'model' | 'prompt' | 'messages'
+> &
   CommonTextOptions;
 
 export interface ObservedState {
@@ -241,14 +256,14 @@ export interface ObservedState {
   context: Record<string, unknown>;
 }
 
-export type AgentStorageData = {
+export type AgentMemoryData = {
   observations: AgentObservation[];
   history: AgentMessageHistory[];
   plans: AgentPlan<any>[];
   feedback: AgentFeedback[];
 };
 
-export type AgentMemory = AppendOnlyStorage<AgentStorageData>;
+export type AgentMemory = AppendOnlyStorage<AgentMemoryData>;
 
 export interface AppendOnlyStorage<T extends Record<string, any[]>> {
   append<K extends keyof T>(
@@ -260,4 +275,16 @@ export interface AppendOnlyStorage<T extends Record<string, any[]>> {
     sessionId: string,
     key: K
   ): Promise<T[K] | undefined>;
+}
+
+export interface AgentLongTermMemory {
+  get<K extends keyof AgentMemoryData>(key: K): Promise<AgentMemoryData[K]>;
+  append<K extends keyof AgentMemoryData>(
+    key: K,
+    item: AgentMemoryData[K][0]
+  ): Promise<void>;
+  set<K extends keyof AgentMemoryData>(
+    key: K,
+    items: AgentMemoryData[K]
+  ): Promise<void>;
 }

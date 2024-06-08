@@ -3,8 +3,8 @@ import { wrapInXml } from '../utils';
 
 export const defaultTextTemplate: PromptTemplate<any> = (data) => {
   const preamble = [
-    data.state?.context
-      ? wrapInXml('context', JSON.stringify(data.state.context))
+    data.context
+      ? wrapInXml('context', JSON.stringify(data.context))
       : undefined,
   ]
     .filter(Boolean)

@@ -18,4 +18,5 @@ export async function simplePlanner<T extends Agent<any>>(
   void 0;
 
   // 4. Return shortest path as a plan
+  return null as any;
 }

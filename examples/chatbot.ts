@@ -25,12 +25,12 @@ const machine = setup({
   },
   actors: { agent: fromDecision(agent), getFromTerminal },
 }).createMachine({
-  initial: 'waiting',
+  initial: 'listening',
   context: {
     conversation: [],
   },
   states: {
-    waiting: {
+    listening: {
       invoke: {
         src: 'getFromTerminal',
         input: 'User:',
@@ -62,7 +62,7 @@ const machine = setup({
             }),
             log((x) => `Agent: ${x.event.response}`),
           ],
-          target: 'waiting',
+          target: 'listening',
         },
         'agent.endConversation': 'finished',
       },

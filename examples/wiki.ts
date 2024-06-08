@@ -25,15 +25,9 @@ async function main() {
     }, 2000);
   });
 
-  console.log(agent.getSnapshot());
-
-  const history = await agent.getHistory();
-
   const res2 = await agent.generateText({
-    prompt: history!
-      .map((h) => h.content)
-      .concat('What about the first one?')
-      .join('\n\n'),
+    messages: true,
+    prompt: 'What about the first one?',
   });
 
   console.log(res2.text);

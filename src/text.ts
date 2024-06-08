@@ -1,4 +1,5 @@
 import {
+  CoreMessage,
   CoreTool,
   GenerateTextResult,
   StreamTextResult,
@@ -21,6 +22,28 @@ import {
   toObserver,
 } from 'xstate';
 
+async function getMessages(
+  agent: Agent<any>,
+  prompt: string,
+  options: AgentStreamTextOptions
+): Promise<CoreMessage[]> {
+  let messages: CoreMessage[] = [];
+  if (options.messages === true) {
+    messages = agent.select((s) => s.history);
+  } else if (typeof options.messages === 'function') {
+    messages = await options.messages(agent);
+  } else if (options.messages) {
+    messages = options.messages;
+  }
+
+  messages = messages.concat({
+    role: 'user',
+    content: prompt,
+  });
+
+  return messages;
+}
+
 export async function agentGenerateText<T extends Agent<any>>(
   agent: T,
   options: AgentGenerateTextOptions
@@ -28,10 +51,17 @@ export async function agentGenerateText<T extends Agent<any>>(
   const template = options.template ?? defaultTextTemplate;
   // TODO: check if messages was provided instead
   const id = randomUUID();
+  const goal =
+    typeof options.prompt === 'string'
+      ? options.prompt
+      : await options.prompt(agent);
+
   const promptWithContext = template({
-    goal: options.prompt,
+    goal,
     context: options.context,
   });
+
+  const messages = await getMessages(agent, promptWithContext, options);
 
   agent.addHistory({
     id,
@@ -43,7 +73,8 @@ export async function agentGenerateText<T extends Agent<any>>(
   const result = await generateText({
     model: options.model ?? agent.model,
     ...options,
-    prompt: promptWithContext,
+    prompt: undefined,
+    messages,
   });
 
   agent.addHistory({
@@ -65,10 +96,17 @@ async function agentStreamText(
   const template = options.template ?? defaultTextTemplate;
 
   const id = randomUUID();
+  const goal =
+    typeof options.prompt === 'string'
+      ? options.prompt
+      : await options.prompt(agent);
+
   const promptWithContext = template({
-    goal: options.prompt,
+    goal,
     context: options.context,
   });
+
+  const messages = await getMessages(agent, promptWithContext, options);
 
   agent.addHistory({
     role: 'user',
@@ -80,7 +118,8 @@ async function agentStreamText(
   const result = await streamText({
     model: options.model ?? agent.model,
     ...options,
-    prompt: promptWithContext,
+    prompt: undefined,
+    messages,
     onFinish: async (res) => {
       agent.addHistory({
         role: 'assistant',

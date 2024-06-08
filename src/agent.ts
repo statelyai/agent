@@ -16,10 +16,10 @@ import {
   AgentMemory,
   EventsFromZodEventMapping,
   GenerateTextOptions,
+  AgentLongTermMemory,
 } from './types';
 import { simplePlanner } from './planners/simplePlanner';
 import { randomUUID } from 'crypto';
-import { createMemoryStorage } from './storage';
 import { agentGenerateText } from './text';
 import { agentDecide } from './decision';
 
@@ -63,11 +63,12 @@ export function createAgent<
   TEvents extends EventObject = EventsFromZodEventMapping<TEventSchemas>
 >({
   name,
+  description,
   model,
   events,
   planner = simplePlanner as AgentPlanner<Agent<TEvents>>,
   stringify = JSON.stringify,
-  memory = createMemoryStorage(),
+  getMemory,
   logic = agentLogic as AgentLogic<TEvents>,
   ...generateTextOptions
 }: {
@@ -87,9 +88,9 @@ export function createAgent<
   planner?: AgentPlanner<Agent<TEvents>>;
   stringify?: typeof JSON.stringify;
   /**
-   * Agent long-term memory
+   * A function that retrieves the agent's long term memory
    */
-  memory?: AgentMemory;
+  getMemory?: (agent: Agent<any>) => AgentLongTermMemory;
   /**
    * Agent logic
    */
@@ -101,10 +102,12 @@ export function createAgent<
   agent.events = events;
   agent.model = model;
   agent.name = name;
+  agent.description = description;
   agent.defaultOptions = { ...generateTextOptions, model };
   agent.select = (selector) => {
     return selector(agent.getSnapshot().context);
   };
+  agent.memory = getMemory ? getMemory(agent) : undefined;
 
   agent.onMessage = (callback) => {
     messageHistoryListeners.push(toObserver(callback));
@@ -121,10 +124,6 @@ export function createAgent<
     });
   };
 
-  agent.getHistory = async () => {
-    return await memory.getAll(agent.sessionId, 'history');
-  };
-
   agent.generateText = (opts) => agentGenerateText(agent, opts);
 
   agent.addObservation = (observation) => {
@@ -134,19 +133,11 @@ export function createAgent<
     });
   };
 
-  agent.getObservations = async () => {
-    return await memory.getAll(agent.sessionId, 'observations');
-  };
-
   agent.addPlan = (plan) => {
     agent.send({
       type: 'agent.plan',
       plan,
     });
-  };
-
-  agent.getPlans = async () => {
-    return await memory.getAll(agent.sessionId, 'plans');
   };
 
   agent.start();
