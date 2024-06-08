@@ -1,10 +1,8 @@
-import {
+import type {
   CoreMessage,
   CoreTool,
   GenerateTextResult,
   StreamTextResult,
-  generateText,
-  streamText,
 } from 'ai';
 import {
   Agent,
@@ -14,6 +12,7 @@ import {
 import { randomUUID } from 'crypto';
 import { defaultTextTemplate } from './templates/defaultText';
 import {
+  AnyMachineSnapshot,
   ObservableActorLogic,
   Observer,
   PromiseActorLogic,
@@ -21,7 +20,16 @@ import {
   fromPromise,
   toObserver,
 } from 'xstate';
+import { vercelAdapter } from './adapters/vercel';
 
+/**
+ * Gets an array of messages from the given prompt, based on the agent and options.
+ *
+ * @param agent
+ * @param prompt
+ * @param options
+ * @returns
+ */
 async function getMessages(
   agent: Agent<any>,
   prompt: string,
@@ -48,6 +56,7 @@ export async function agentGenerateText<T extends Agent<any>>(
   agent: T,
   options: AgentGenerateTextOptions
 ) {
+  const adapter = options.adapter ?? vercelAdapter;
   const template = options.template ?? defaultTextTemplate;
   // TODO: check if messages was provided instead
   const id = randomUUID();
@@ -70,7 +79,7 @@ export async function agentGenerateText<T extends Agent<any>>(
     timestamp: Date.now(),
   });
 
-  const result = await generateText({
+  const result = await adapter.generateText({
     model: options.model ?? agent.model,
     ...options,
     prompt: undefined,
@@ -93,6 +102,7 @@ async function agentStreamText(
   agent: Agent<any>,
   options: AgentStreamTextOptions
 ): Promise<StreamTextResult<any>> {
+  const adapter = options.adapter ?? vercelAdapter;
   const template = options.template ?? defaultTextTemplate;
 
   const id = randomUUID();
@@ -115,7 +125,7 @@ async function agentStreamText(
     timestamp: Date.now(),
   });
 
-  const result = await streamText({
+  const result = await adapter.streamText({
     model: options.model ?? agent.model,
     ...options,
     prompt: undefined,
@@ -148,8 +158,18 @@ async function agentStreamText(
 export function fromTextStream<T extends Agent<any>>(
   agent: T,
   defaultOptions?: AgentStreamTextOptions
-): ObservableActorLogic<{ textDelta: string }, AgentStreamTextOptions> {
-  return fromObservable(({ input }: { input: AgentStreamTextOptions }) => {
+): ObservableActorLogic<
+  { textDelta: string },
+  Omit<AgentStreamTextOptions, 'context'> & {
+    context?: AgentStreamTextOptions['context'] | boolean;
+  }
+> {
+  return fromObservable(({ input, self }) => {
+    const context =
+      input.context === true
+        ? (self._parent?.getSnapshot() as AnyMachineSnapshot).context
+        : input.context;
+
     const observers = new Set<Observer<{ textDelta: string }>>();
 
     // TODO: check if messages was provided instead
@@ -158,6 +178,7 @@ export function fromTextStream<T extends Agent<any>>(
       const result = await agentStreamText(agent, {
         ...defaultOptions,
         ...input,
+        context,
       });
 
       for await (const part of result.fullStream) {
@@ -189,12 +210,19 @@ export function fromText<T extends Agent<any>>(
   defaultOptions?: AgentGenerateTextOptions
 ): PromiseActorLogic<
   GenerateTextResult<Record<string, CoreTool<any, any>>>,
-  AgentGenerateTextOptions
+  Omit<AgentGenerateTextOptions, 'context'> & {
+    context?: AgentGenerateTextOptions['context'] | boolean;
+  }
 > {
-  return fromPromise(async ({ input }) => {
+  return fromPromise(async ({ input, self }) => {
+    const context =
+      input.context === true
+        ? (self._parent?.getSnapshot() as AnyMachineSnapshot).context
+        : input.context;
     return await agentGenerateText(agent, {
       ...input,
       ...defaultOptions,
+      context,
     });
   });
 }

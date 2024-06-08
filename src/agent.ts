@@ -13,15 +13,16 @@ import {
   AgentLogic,
   AgentMessageHistory,
   AgentPlanner,
-  AgentMemory,
   EventsFromZodEventMapping,
   GenerateTextOptions,
   AgentLongTermMemory,
+  AIAdapter,
 } from './types';
 import { simplePlanner } from './planners/simplePlanner';
 import { randomUUID } from 'crypto';
 import { agentGenerateText } from './text';
 import { agentDecide } from './decision';
+import { vercelAdapter } from './adapters/vercel';
 
 export const agentLogic: AgentLogic<AnyEventObject> = fromTransition(
   (state, event) => {
@@ -70,6 +71,7 @@ export function createAgent<
   stringify = JSON.stringify,
   getMemory,
   logic = agentLogic as AgentLogic<TEvents>,
+  adapter = vercelAdapter,
   ...generateTextOptions
 }: {
   /**
@@ -95,6 +97,7 @@ export function createAgent<
    * Agent logic
    */
   logic?: AgentLogic<TEvents>;
+  adapter?: AIAdapter;
 } & GenerateTextOptions): Agent<TEvents> {
   const messageHistoryListeners: Observer<AgentMessageHistory>[] = [];
 

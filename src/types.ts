@@ -230,6 +230,7 @@ export interface CommonTextOptions {
   context?: Record<string, any>;
   messages?: FromAgent<AgentMessageHistory[]> | true;
   template?: PromptTemplate<any>;
+  adapter?: AIAdapter;
 }
 
 export type AgentGenerateTextOptions = Omit<
@@ -287,4 +288,9 @@ export interface AgentLongTermMemory {
     key: K,
     items: AgentMemoryData[K]
   ): Promise<void>;
+}
+
+export interface AIAdapter {
+  generateText: typeof generateText;
+  streamText: typeof streamText;
 }
