@@ -10,10 +10,12 @@ import {
 } from 'xstate';
 import {
   CoreMessage,
+  CoreTool,
   generateText,
   GenerateTextResult,
   LanguageModel,
   streamText,
+  StreamTextResult,
 } from 'ai';
 import { ZodEventMapping } from './schemas';
 import { TypeOf } from 'zod';
@@ -207,7 +209,7 @@ export type Agent<TEvents extends EventObject> = ActorRefFrom<
   // Stream text
   streamText: (
     options: AgentStreamTextOptions
-  ) => AsyncIterable<{ textDelta: string }>;
+  ) => Promise<StreamTextResult<Record<string, CoreTool<any, any>>>>;
 
   addObservation: (observation: AgentObservation) => void;
   addHistory: (history: AgentMessageHistory) => void;
@@ -228,7 +230,7 @@ export interface CommonTextOptions {
   prompt: FromAgent<string>;
   model?: LanguageModel;
   context?: Record<string, any>;
-  messages?: FromAgent<AgentMessageHistory[]> | true;
+  messages?: FromAgent<CoreMessage[]> | true;
   template?: PromptTemplate<any>;
   adapter?: AIAdapter;
 }

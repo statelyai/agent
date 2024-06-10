@@ -52,7 +52,7 @@ const machine = setup({
         src: 'decider',
         input: {
           context: true,
-          goal: 'Determine what the user wants to accomplish. What is their ideal goal state?',
+          goal: 'Determine what the user wants to accomplish. What is their ideal goal state? ',
           maxRetries: 3,
         },
       },

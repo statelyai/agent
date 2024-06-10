@@ -56,21 +56,25 @@ export async function agentGenerateText<T extends Agent<any>>(
   agent: T,
   options: AgentGenerateTextOptions
 ) {
-  const adapter = options.adapter ?? vercelAdapter;
-  const template = options.template ?? defaultTextTemplate;
+  const resolvedOptions = {
+    ...agent.defaultOptions,
+    ...options,
+  };
+  const adapter = resolvedOptions.adapter ?? vercelAdapter;
+  const template = resolvedOptions.template ?? defaultTextTemplate;
   // TODO: check if messages was provided instead
   const id = randomUUID();
   const goal =
-    typeof options.prompt === 'string'
-      ? options.prompt
-      : await options.prompt(agent);
+    typeof resolvedOptions.prompt === 'string'
+      ? resolvedOptions.prompt
+      : await resolvedOptions.prompt(agent);
 
   const promptWithContext = template({
     goal,
-    context: options.context,
+    context: resolvedOptions.context,
   });
 
-  const messages = await getMessages(agent, promptWithContext, options);
+  const messages = await getMessages(agent, promptWithContext, resolvedOptions);
 
   agent.addHistory({
     id,
@@ -80,8 +84,7 @@ export async function agentGenerateText<T extends Agent<any>>(
   });
 
   const result = await adapter.generateText({
-    model: options.model ?? agent.model,
-    ...options,
+    ...resolvedOptions,
     prompt: undefined,
     messages,
   });
@@ -98,25 +101,29 @@ export async function agentGenerateText<T extends Agent<any>>(
   return result;
 }
 
-async function agentStreamText(
+export async function agentStreamText(
   agent: Agent<any>,
   options: AgentStreamTextOptions
 ): Promise<StreamTextResult<any>> {
-  const adapter = options.adapter ?? vercelAdapter;
-  const template = options.template ?? defaultTextTemplate;
+  const resolvedOptions = {
+    ...agent.defaultOptions,
+    ...options,
+  };
+  const adapter = resolvedOptions.adapter ?? vercelAdapter;
+  const template = resolvedOptions.template ?? defaultTextTemplate;
 
   const id = randomUUID();
   const goal =
-    typeof options.prompt === 'string'
-      ? options.prompt
-      : await options.prompt(agent);
+    typeof resolvedOptions.prompt === 'string'
+      ? resolvedOptions.prompt
+      : await resolvedOptions.prompt(agent);
 
   const promptWithContext = template({
     goal,
-    context: options.context,
+    context: resolvedOptions.context,
   });
 
-  const messages = await getMessages(agent, promptWithContext, options);
+  const messages = await getMessages(agent, promptWithContext, resolvedOptions);
 
   agent.addHistory({
     role: 'user',
@@ -126,8 +133,7 @@ async function agentStreamText(
   });
 
   const result = await adapter.streamText({
-    model: options.model ?? agent.model,
-    ...options,
+    ...resolvedOptions,
     prompt: undefined,
     messages,
     onFinish: async (res) => {

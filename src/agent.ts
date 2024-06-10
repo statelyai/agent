@@ -20,7 +20,7 @@ import {
 } from './types';
 import { simplePlanner } from './planners/simplePlanner';
 import { randomUUID } from 'crypto';
-import { agentGenerateText } from './text';
+import { agentGenerateText, agentStreamText } from './text';
 import { agentDecide } from './decision';
 import { vercelAdapter } from './adapters/vercel';
 
@@ -128,6 +128,15 @@ export function createAgent<
   };
 
   agent.generateText = (opts) => agentGenerateText(agent, opts);
+
+  agent.streamText = (opts) => agentStreamText(agent, opts);
+
+  agent.addFeedback = (feedback) => {
+    agent.send({
+      type: 'agent.feedback',
+      feedback,
+    });
+  };
 
   agent.addObservation = (observation) => {
     agent.send({

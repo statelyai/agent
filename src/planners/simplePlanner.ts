@@ -92,7 +92,7 @@ export async function simplePlanner<T extends Agent<any>>(
   // Create a prompt with the given context and goal.
   // The template is used to ensure that a single tool call is made.
   const prompt = simplePlannerPromptTemplate({
-    state: input.state,
+    context: input.state.context,
     goal: input.goal,
   });
 

@@ -12,6 +12,10 @@ export async function agentDecide<T extends Agent<any>>(
   agent: T,
   options: AgentDecideOptions
 ) {
+  const resolvedOptions = {
+    ...agent.defaultOptions,
+    ...options,
+  };
   const {
     planner = simplePlanner as AgentPlanner<any>,
     goal,
@@ -19,8 +23,8 @@ export async function agentDecide<T extends Agent<any>>(
     state,
     machine,
     model = agent.model,
-    ...otherOptions
-  } = options;
+    ...otherPlanInput
+  } = resolvedOptions;
   // const planner = opts.planner ?? simplePlanner;
   const plan = await planner(agent, {
     model,
@@ -28,12 +32,12 @@ export async function agentDecide<T extends Agent<any>>(
     events,
     state,
     machine,
-    ...otherOptions,
+    ...otherPlanInput,
   });
 
   if (plan?.nextEvent) {
     agent.addPlan(plan);
-    await options.execute?.(plan.nextEvent);
+    await resolvedOptions.execute?.(plan.nextEvent);
   }
 
   return plan;
