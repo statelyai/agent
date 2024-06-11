@@ -1,5 +1,6 @@
 import { test, expect } from 'vitest';
 import { createAgent } from './agent';
+import { createActor, createMachine } from 'xstate';
 
 test('an agent has the expected interface', () => {
   const agent = createAgent({
@@ -16,6 +17,8 @@ test('an agent has the expected interface', () => {
   expect(agent.addHistory).toBeDefined();
   expect(agent.addObservation).toBeDefined();
   expect(agent.addPlan).toBeDefined();
+
+  expect(agent.inspect).toBeDefined();
 });
 
 test('agent.addHistory() adds to history', () => {
@@ -98,6 +101,47 @@ test('agent.addObservation() adds to observations', () => {
       nextState: { value: 'lost', context: {} },
       sessionId: expect.any(String),
       timestamp: expect.any(Number),
+    })
+  );
+});
+
+test('agent.inspect() inspects machine actors', () => {
+  const machine = createMachine({
+    initial: 'a',
+    states: {
+      a: {
+        on: { NEXT: 'b' },
+      },
+      b: {},
+    },
+  });
+
+  const agent = createAgent({
+    name: 'test',
+    events: {},
+    model: {} as any,
+  });
+
+  const actor = createActor(machine, {
+    inspect: agent.inspect,
+  });
+
+  actor.start();
+
+  expect(agent.select((c) => c.observations)).toContainEqual(
+    expect.objectContaining({
+      state: undefined,
+      nextState: expect.objectContaining({ value: 'a' }),
+    })
+  );
+
+  actor.send({ type: 'NEXT' });
+
+  expect(agent.select((c) => c.observations)).toContainEqual(
+    expect.objectContaining({
+      state: expect.objectContaining({ value: 'a' }),
+      event: { type: 'NEXT' },
+      nextState: expect.objectContaining({ value: 'b' }),
     })
   );
 });

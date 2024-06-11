@@ -17,6 +17,7 @@ import {
   GenerateTextOptions,
   AgentLongTermMemory,
   AIAdapter,
+  ObservedState,
 } from './types';
 import { simplePlanner } from './planners/simplePlanner';
 import { randomUUID } from 'crypto';
@@ -163,6 +164,18 @@ export function createAgent<
       type: 'agent.plan',
       plan,
     });
+  };
+
+  let prevState: ObservedState | undefined = undefined;
+  agent.inspect = (inspEvent) => {
+    if (inspEvent.type === '@xstate.snapshot') {
+      agent.addObservation({
+        event: inspEvent.event,
+        state: prevState,
+        nextState: inspEvent.snapshot as any,
+      });
+      prevState = inspEvent.snapshot as any;
+    }
   };
 
   agent.start();

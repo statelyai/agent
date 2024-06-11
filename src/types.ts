@@ -1,10 +1,13 @@
 import {
   ActorRefFrom,
+  AnyActorRef,
   AnyEventObject,
   AnyStateMachine,
   EventObject,
+  InspectionEvent,
   PromiseActorLogic,
   StateValue,
+  Subscription,
   TransitionActorLogic,
   Values,
 } from 'xstate';
@@ -244,11 +247,19 @@ export type Agent<TEvents extends EventObject> = ActorRefFrom<
   addHistory: (history: AgentMessageHistoryInput) => void;
   addFeedback: (feedbackItem: AgentFeedbackInput) => void;
   addPlan: (plan: AgentPlan<TEvents>) => void;
+  /**
+   * Called whenever the agent (LLM assistant) receives or sends a message.
+   */
   onMessage: (callback: (message: AgentMessageHistory) => void) => void;
   /**
    * Selects agent data from its context.
    */
   select: <T>(selector: (context: AgentContext) => T) => T;
+  /**
+   * Inspects state machine actor transitions and automatically observes
+   * (state, event, nextState) tuples.
+   */
+  inspect: (e: InspectionEvent) => void;
 };
 
 export type AnyAgent = Agent<any>;
