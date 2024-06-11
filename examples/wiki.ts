@@ -13,24 +13,18 @@ const agent = createAgent({
 });
 
 async function main() {
-  const res = await agent.generateText({
+  const response1 = await agent.generateText({
     prompt: 'When was Deadpool 2 released?',
   });
 
-  console.log(res.text);
+  console.log(response1.text);
 
-  await new Promise((res) => {
-    setTimeout(() => {
-      res({});
-    }, 2000);
-  });
-
-  const res2 = await agent.generateText({
+  const response2 = await agent.generateText({
     messages: true,
     prompt: 'What about the first one?',
   });
 
-  console.log(res2.text);
+  console.log(response2.text);
 }
 
 main();
