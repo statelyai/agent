@@ -120,6 +120,7 @@ export function createAgent<
   agent.model = model;
   agent.name = name;
   agent.description = description;
+  agent.adapter = adapter;
   agent.defaultOptions = { ...generateTextOptions, model };
   agent.select = (selector) => {
     return selector(agent.getSnapshot().context);
@@ -166,15 +167,15 @@ export function createAgent<
     });
   };
 
-  agent.observe = (a) => {
+  agent.observe = (actorRef) => {
     let prevState: ObservedState | undefined = undefined;
     let subscribed = true;
     // Inspect system, but only observe specified actor
-    a.system.inspect({
+    actorRef.system.inspect({
       next: (inspEvent) => {
         if (
           !subscribed ||
-          inspEvent.actorRef !== a ||
+          inspEvent.actorRef !== actorRef ||
           inspEvent.type !== '@xstate.snapshot'
         ) {
           return;

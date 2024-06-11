@@ -60,7 +60,6 @@ export async function agentGenerateText<T extends Agent<any>>(
     ...agent.defaultOptions,
     ...options,
   };
-  const adapter = resolvedOptions.adapter ?? vercelAdapter;
   const template = resolvedOptions.template ?? defaultTextTemplate;
   // TODO: check if messages was provided instead
   const id = randomUUID();
@@ -83,7 +82,7 @@ export async function agentGenerateText<T extends Agent<any>>(
     timestamp: Date.now(),
   });
 
-  const result = await adapter.generateText({
+  const result = await agent.adapter.generateText({
     ...resolvedOptions,
     prompt: undefined,
     messages,
@@ -109,7 +108,6 @@ export async function agentStreamText(
     ...agent.defaultOptions,
     ...options,
   };
-  const adapter = resolvedOptions.adapter ?? vercelAdapter;
   const template = resolvedOptions.template ?? defaultTextTemplate;
 
   const id = randomUUID();
@@ -132,7 +130,7 @@ export async function agentStreamText(
     timestamp: Date.now(),
   });
 
-  const result = await adapter.streamText({
+  const result = await agent.adapter.streamText({
     ...resolvedOptions,
     prompt: undefined,
     messages,

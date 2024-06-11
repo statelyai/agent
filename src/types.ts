@@ -220,6 +220,13 @@ export type Agent<TEvents extends EventObject> = ActorRefFrom<
   model: LanguageModel;
   defaultOptions: GenerateTextOptions;
   memory: AgentLongTermMemory | undefined;
+  /**
+   * The adapter used to perform LLM actions such as
+   * `.generateText(…)` and `.streamText(…)`.
+   *
+   * Defaults to the Vercel AI SDK.
+   */
+  adapter: AIAdapter;
 
   /**
    * Resolves with an `AgentPlan` based on the information provided in the `options`, including:
@@ -273,7 +280,6 @@ export interface CommonTextOptions {
   context?: Record<string, any>;
   messages?: FromAgent<CoreMessage[]> | true;
   template?: PromptTemplate<any>;
-  adapter?: AIAdapter;
 }
 
 export type AgentGenerateTextOptions = Omit<

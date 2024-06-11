@@ -1,6 +1,7 @@
 import { test, expect } from 'vitest';
 import { createAgent } from './agent';
 import { createActor, createMachine } from 'xstate';
+import { AIAdapter } from './types';
 
 test('an agent has the expected interface', () => {
   const agent = createAgent({
@@ -144,4 +145,27 @@ test('agent.observe() observes machine actors', () => {
       nextState: expect.objectContaining({ value: 'b' }),
     })
   );
+});
+
+test('Agents can use a custom adapter', async () => {
+  const adapter = {
+    generateText: async () => {
+      return {
+        text: 'Response',
+      } as any;
+    },
+  } as unknown as AIAdapter;
+
+  const agent = createAgent({
+    name: 'test',
+    events: {},
+    adapter,
+    model: {} as any,
+  });
+
+  const res = await agent.generateText({
+    prompt: 'Question?',
+  });
+
+  expect(res.text).toEqual('Response');
 });

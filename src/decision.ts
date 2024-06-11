@@ -25,7 +25,7 @@ export async function agentDecide<T extends Agent<any>>(
     model = agent.model,
     ...otherPlanInput
   } = resolvedOptions;
-  // const planner = opts.planner ?? simplePlanner;
+
   const plan = await planner(agent, {
     model,
     goal,
