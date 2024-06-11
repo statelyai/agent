@@ -255,11 +255,12 @@ export type Agent<TEvents extends EventObject> = ActorRefFrom<
    * Selects agent data from its context.
    */
   select: <T>(selector: (context: AgentContext) => T) => T;
+
   /**
    * Inspects state machine actor transitions and automatically observes
    * (state, event, nextState) tuples.
    */
-  inspect: (e: InspectionEvent) => void;
+  observe: (a: AnyActorRef) => Subscription;
 };
 
 export type AnyAgent = Agent<any>;

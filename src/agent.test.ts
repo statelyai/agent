@@ -18,7 +18,7 @@ test('an agent has the expected interface', () => {
   expect(agent.addObservation).toBeDefined();
   expect(agent.addPlan).toBeDefined();
 
-  expect(agent.inspect).toBeDefined();
+  expect(agent.observe).toBeDefined();
 });
 
 test('agent.addHistory() adds to history', () => {
@@ -105,7 +105,7 @@ test('agent.addObservation() adds to observations', () => {
   );
 });
 
-test('agent.inspect() inspects machine actors', () => {
+test('agent.observe() observes machine actors', () => {
   const machine = createMachine({
     initial: 'a',
     states: {
@@ -122,9 +122,9 @@ test('agent.inspect() inspects machine actors', () => {
     model: {} as any,
   });
 
-  const actor = createActor(machine, {
-    inspect: agent.inspect,
-  });
+  const actor = createActor(machine);
+
+  agent.observe(actor);
 
   actor.start();
 

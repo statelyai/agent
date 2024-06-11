@@ -166,16 +166,33 @@ export function createAgent<
     });
   };
 
-  let prevState: ObservedState | undefined = undefined;
-  agent.inspect = (inspEvent) => {
-    if (inspEvent.type === '@xstate.snapshot') {
-      agent.addObservation({
-        event: inspEvent.event,
-        state: prevState,
-        nextState: inspEvent.snapshot as any,
-      });
-      prevState = inspEvent.snapshot as any;
-    }
+  agent.observe = (a) => {
+    let prevState: ObservedState | undefined = undefined;
+    let subscribed = true;
+    // Inspect system, but only observe specified actor
+    a.system.inspect({
+      next: (inspEvent) => {
+        if (
+          !subscribed ||
+          inspEvent.actorRef !== a ||
+          inspEvent.type !== '@xstate.snapshot'
+        ) {
+          return;
+        }
+        agent.addObservation({
+          event: inspEvent.event,
+          state: prevState,
+          nextState: inspEvent.snapshot as any,
+        });
+        prevState = inspEvent.snapshot as any;
+      },
+    });
+
+    return {
+      unsubscribe: () => {
+        subscribed = false;
+      }, // TODO: make this actually unsubscribe
+    };
   };
 
   agent.start();
