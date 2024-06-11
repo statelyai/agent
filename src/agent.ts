@@ -25,21 +25,34 @@ import { agentDecide } from './decision';
 import { vercelAdapter } from './adapters/vercel';
 
 export const agentLogic: AgentLogic<AnyEventObject> = fromTransition(
-  (state, event) => {
+  (state, event, { sessionId }) => {
     switch (event.type) {
       case 'agent.feedback': {
-        state.feedback.push(event.feedback);
+        const feedback = {
+          ...event.feedback,
+          timestamp: event.feedback.timestamp ?? Date.now(),
+          sessionId,
+        };
+        state.feedback.push(feedback);
         break;
       }
       case 'agent.observe': {
         state.observations.push({
-          id: randomUUID(),
           ...event.observation,
+          id: event.observation.id ?? randomUUID(),
+          sessionId,
+          timestamp: event.observation.timestamp ?? Date.now(),
         });
         break;
       }
       case 'agent.history': {
-        state.history.push(event.message);
+        const message = {
+          ...event.message,
+          id: event.message.id ?? randomUUID(),
+          timestamp: event.message.timestamp ?? Date.now(),
+          sessionId,
+        };
+        state.history.push(message);
         break;
       }
       case 'agent.plan': {

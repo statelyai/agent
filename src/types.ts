@@ -45,6 +45,8 @@ export type AgentPlan<TEvent extends EventObject> = {
     nextState?: ObservedState;
   }>;
   nextEvent: TEvent | undefined;
+  sessionId: string;
+  timestamp: number;
 };
 
 export interface TransitionData {
@@ -104,14 +106,33 @@ export type AgentDecideOptions = {
 
 export interface AgentFeedback {
   goal: string;
-  observation: AgentObservation;
+  observationId: string;
   attributes: Record<string, any>;
   timestamp: number;
+  sessionId: string;
+}
+
+export interface AgentFeedbackInput {
+  goal: string;
+  observationId: string; // Observation ID;
+  attributes: Record<string, any>;
+  timestamp?: number;
 }
 
 export type AgentMessageHistory = CoreMessage & {
   timestamp: number;
   id: string;
+  /**
+   * The response ID of the message, which references
+   * which message this message is responding to, if any.
+   */
+  responseId?: string;
+  result?: GenerateTextResult<any>;
+};
+
+export type AgentMessageHistoryInput = CoreMessage & {
+  timestamp?: number;
+  id?: string;
   /**
    * The response ID of the message, which references
    * which message this message is responding to, if any.
@@ -127,6 +148,14 @@ export interface AgentObservation {
   nextState: ObservedState;
   sessionId: string;
   timestamp: number;
+}
+
+export interface AgentObservationInput {
+  id?: string;
+  state: ObservedState | undefined;
+  event: AnyEventObject;
+  nextState: ObservedState;
+  timestamp?: number;
 }
 
 export type AgentContext = AgentMemoryData;
@@ -146,15 +175,15 @@ export type AgentLogic<TEvents extends EventObject> = TransitionActorLogic<
   AgentContext,
   | {
       type: 'agent.feedback';
-      feedback: AgentFeedback;
+      feedback: AgentFeedbackInput;
     }
   | {
       type: 'agent.observe';
-      observation: Omit<AgentObservation, 'id'>;
+      observation: AgentObservationInput;
     }
   | {
       type: 'agent.history';
-      message: AgentMessageHistory;
+      message: AgentMessageHistoryInput;
     }
   | {
       type: 'agent.plan';
@@ -211,9 +240,9 @@ export type Agent<TEvents extends EventObject> = ActorRefFrom<
     options: AgentStreamTextOptions
   ) => Promise<StreamTextResult<Record<string, CoreTool<any, any>>>>;
 
-  addObservation: (observation: AgentObservation) => void;
-  addHistory: (history: AgentMessageHistory) => void;
-  addFeedback: (feedbackItem: AgentFeedback) => void;
+  addObservation: (observation: AgentObservationInput) => void;
+  addHistory: (history: AgentMessageHistoryInput) => void;
+  addFeedback: (feedbackItem: AgentFeedbackInput) => void;
   addPlan: (plan: AgentPlan<TEvents>) => void;
   onMessage: (callback: (message: AgentMessageHistory) => void) => void;
   /**

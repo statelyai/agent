@@ -120,5 +120,7 @@ export async function simplePlanner<T extends Agent<any>>(
       },
     ],
     nextEvent: singleResult.result,
+    sessionId: agent.sessionId,
+    timestamp: Date.now(),
   };
 }
