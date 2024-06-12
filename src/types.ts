@@ -288,7 +288,7 @@ export type Agent<TEvents extends EventObject> = ActorRefFrom<
 
   /**
    * Inspects state machine actor transitions and automatically observes
-   * (state, event, nextState) tuples.
+   * (prevState, event, state) tuples.
    */
   interact: <TActor extends AnyActorRef>(
     actorRef: TActor,

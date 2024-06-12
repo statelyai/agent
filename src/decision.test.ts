@@ -7,8 +7,6 @@ import { GenerateTextResult } from 'ai';
 const mockToolDecision: AIAdapter['generateText'] = async (arg) => {
   const keys = Object.keys(arg.tools!);
 
-  console.log(keys);
-
   if (keys.length > 1) {
     throw new Error('Expected only 1 choice');
   }

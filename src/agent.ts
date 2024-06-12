@@ -205,8 +205,6 @@ export function createAgent<
 
       const input = getInput?.(observation);
 
-      console.log('input', input);
-
       if (input) {
         await agentDecide(agent, {
           machine: actorRef.src as AnyStateMachine,
