@@ -89,7 +89,7 @@ export async function agentGenerateText<T extends Agent<any>>(
   });
 
   agent.addMessage({
-    content: result.toolResults ?? result.text,
+    content: result.text,
     id,
     role: 'assistant',
     timestamp: Date.now(),
