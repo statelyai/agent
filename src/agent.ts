@@ -199,6 +199,7 @@ export function createAgent<
 
       prevState = observationInput.nextState;
     }
+
     // Inspect system, but only observe specified actor
     actorRef.system.inspect({
       next: async (inspEvent) => {
@@ -219,6 +220,15 @@ export function createAgent<
         await handleObservation(observationInput);
       },
     });
+
+    // If actor already started, interact with current state
+    if ((actorRef as any)._processingStatus === 1) {
+      handleObservation({
+        state: undefined,
+        event: { type: '' }, // TODO: unknown events?
+        nextState: actorRef.getSnapshot(),
+      });
+    }
 
     return {
       unsubscribe: () => {
