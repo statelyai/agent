@@ -1,7 +1,6 @@
 import { test, expect } from 'vitest';
-import { createAgent } from './agent';
+import { createAgent, type AIAdapter } from './';
 import { createActor, createMachine } from 'xstate';
-import { AIAdapter } from './types';
 
 test('an agent has the expected interface', () => {
   const agent = createAgent({
@@ -19,7 +18,7 @@ test('an agent has the expected interface', () => {
   expect(agent.addObservation).toBeDefined();
   expect(agent.addPlan).toBeDefined();
 
-  expect(agent.observe).toBeDefined();
+  expect(agent.interact).toBeDefined();
 });
 
 test('agent.addHistory() adds to history', () => {
@@ -106,7 +105,7 @@ test('agent.addObservation() adds to observations', () => {
   );
 });
 
-test('agent.observe() observes machine actors', () => {
+test('agent.interact() observes machine actors (no 2nd arg)', () => {
   const machine = createMachine({
     initial: 'a',
     states: {
@@ -125,7 +124,7 @@ test('agent.observe() observes machine actors', () => {
 
   const actor = createActor(machine);
 
-  agent.observe(actor);
+  agent.interact(actor);
 
   actor.start();
 

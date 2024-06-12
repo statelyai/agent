@@ -1,5 +1,6 @@
 import {
   AnyEventObject,
+  AnyStateMachine,
   createActor,
   EventObject,
   fromTransition,
@@ -18,6 +19,7 @@ import {
   AgentLongTermMemory,
   AIAdapter,
   ObservedState,
+  AgentObservationInput,
 } from './types';
 import { simplePlanner } from './planners/simplePlanner';
 import { randomUUID } from 'crypto';
@@ -38,12 +40,7 @@ export const agentLogic: AgentLogic<AnyEventObject> = fromTransition(
         break;
       }
       case 'agent.observe': {
-        state.observations.push({
-          ...event.observation,
-          id: event.observation.id ?? randomUUID(),
-          sessionId,
-          timestamp: event.observation.timestamp ?? Date.now(),
-        });
+        state.observations.push(event.observation);
         break;
       }
       case 'agent.history': {
@@ -153,11 +150,20 @@ export function createAgent<
     });
   };
 
-  agent.addObservation = (observation) => {
+  agent.addObservation = (observationInput) => {
+    const observation = {
+      ...observationInput,
+      id: observationInput.id ?? randomUUID(),
+      sessionId: agent.sessionId,
+      timestamp: observationInput.timestamp ?? Date.now(),
+    };
+
     agent.send({
       type: 'agent.observe',
       observation,
     });
+
+    return observation;
   };
 
   agent.addPlan = (plan) => {
@@ -167,12 +173,35 @@ export function createAgent<
     });
   };
 
-  agent.observe = (actorRef) => {
+  agent.interact = (actorRef, getInput) => {
     let prevState: ObservedState | undefined = undefined;
     let subscribed = true;
+
+    async function handleObservation(observationInput: AgentObservationInput) {
+      const observation = agent.addObservation(observationInput);
+
+      const input = getInput?.(observation);
+
+      console.log('input', input);
+
+      if (input) {
+        const plan = await agentDecide(agent, {
+          machine: actorRef.src as AnyStateMachine,
+          state: observation.nextState,
+          execute: async (event) => {
+            actorRef.send(event);
+          },
+          ...input,
+        });
+
+        // TODO: emit plan
+      }
+
+      prevState = observationInput.nextState;
+    }
     // Inspect system, but only observe specified actor
     actorRef.system.inspect({
-      next: (inspEvent) => {
+      next: async (inspEvent) => {
         if (
           !subscribed ||
           inspEvent.actorRef !== actorRef ||
@@ -180,12 +209,14 @@ export function createAgent<
         ) {
           return;
         }
-        agent.addObservation({
+
+        const observationInput = {
           event: inspEvent.event,
           state: prevState,
           nextState: inspEvent.snapshot as any,
-        });
-        prevState = inspEvent.snapshot as any;
+        };
+
+        await handleObservation(observationInput);
       },
     });
 

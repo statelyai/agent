@@ -182,7 +182,7 @@ export type AgentLogic<TEvents extends EventObject> = TransitionActorLogic<
     }
   | {
       type: 'agent.observe';
-      observation: AgentObservationInput;
+      observation: AgentObservation;
     }
   | {
       type: 'agent.history';
@@ -250,7 +250,7 @@ export type Agent<TEvents extends EventObject> = ActorRefFrom<
     options: AgentStreamTextOptions
   ) => Promise<StreamTextResult<Record<string, CoreTool<any, any>>>>;
 
-  addObservation: (observation: AgentObservationInput) => void;
+  addObservation: (observation: AgentObservationInput) => AgentObservation;
   addHistory: (history: AgentMessageHistoryInput) => void;
   addFeedback: (feedbackItem: AgentFeedbackInput) => void;
   addPlan: (plan: AgentPlan<TEvents>) => void;
@@ -267,7 +267,10 @@ export type Agent<TEvents extends EventObject> = ActorRefFrom<
    * Inspects state machine actor transitions and automatically observes
    * (state, event, nextState) tuples.
    */
-  observe: (a: AnyActorRef) => Subscription;
+  interact: (
+    actorRef: AnyActorRef,
+    getInput?: (observation: AgentObservation) => AgentDecisionInput
+  ) => Subscription;
 };
 
 export type AnyAgent = Agent<any>;
