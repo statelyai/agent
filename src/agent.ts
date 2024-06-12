@@ -10,7 +10,6 @@ import {
 import { ZodEventMapping } from './schemas';
 import {
   Agent,
-  AgentContext,
   AgentLogic,
   AgentMessageHistory,
   AgentPlanner,
@@ -20,6 +19,7 @@ import {
   AIAdapter,
   ObservedState,
   AgentObservationInput,
+  AgentMemoryContext,
 } from './types';
 import { simplePlanner } from './planners/simplePlanner';
 import { randomUUID } from 'crypto';
@@ -76,7 +76,7 @@ export const agentLogic: AgentLogic<AnyEventObject> = fromTransition(
     messages: [],
     observations: [],
     plans: [],
-  } as AgentContext
+  } as AgentMemoryContext
 );
 
 export function createAgent<
