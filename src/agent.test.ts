@@ -33,10 +33,12 @@ test('agent.addHistory() adds to history', () => {
     role: 'user',
   });
 
-  agent.addHistory({
+  const messageHistory = agent.addHistory({
     content: 'response 1',
     role: 'assistant',
   });
+
+  expect(messageHistory.sessionId).toEqual(agent.sessionId);
 
   expect(agent.select((c) => c.history)).toContainEqual(
     expect.objectContaining({
@@ -60,13 +62,15 @@ test('agent.addFeedback() adds to feedback', () => {
     model: {} as any,
   });
 
-  agent.addFeedback({
+  const feedback = agent.addFeedback({
     attributes: {
       score: -1,
     },
     goal: 'Win the game',
     observationId: 'obs-1',
   });
+
+  expect(feedback.sessionId).toEqual(agent.sessionId);
 
   expect(agent.select((c) => c.feedback)).toContainEqual(
     expect.objectContaining({
@@ -88,11 +92,13 @@ test('agent.addObservation() adds to observations', () => {
     model: {} as any,
   });
 
-  agent.addObservation({
+  const observation = agent.addObservation({
     state: { value: 'playing', context: {} },
     event: { type: 'play', position: 3 },
     nextState: { value: 'lost', context: {} },
   });
+
+  expect(observation.sessionId).toEqual(agent.sessionId);
 
   expect(agent.select((c) => c.observations)).toContainEqual(
     expect.objectContaining({

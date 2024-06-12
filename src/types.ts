@@ -131,6 +131,7 @@ export type AgentMessageHistory = CoreMessage & {
    */
   responseId?: string;
   result?: GenerateTextResult<any>;
+  sessionId: string;
 };
 
 export type AgentMessageHistoryInput = CoreMessage & {
@@ -178,7 +179,7 @@ export type AgentLogic<TEvents extends EventObject> = TransitionActorLogic<
   AgentContext,
   | {
       type: 'agent.feedback';
-      feedback: AgentFeedbackInput;
+      feedback: AgentFeedback;
     }
   | {
       type: 'agent.observe';
@@ -186,7 +187,7 @@ export type AgentLogic<TEvents extends EventObject> = TransitionActorLogic<
     }
   | {
       type: 'agent.history';
-      message: AgentMessageHistoryInput;
+      message: AgentMessageHistory;
     }
   | {
       type: 'agent.plan';
@@ -251,8 +252,8 @@ export type Agent<TEvents extends EventObject> = ActorRefFrom<
   ) => Promise<StreamTextResult<Record<string, CoreTool<any, any>>>>;
 
   addObservation: (observation: AgentObservationInput) => AgentObservation;
-  addHistory: (history: AgentMessageHistoryInput) => void;
-  addFeedback: (feedbackItem: AgentFeedbackInput) => void;
+  addHistory: (history: AgentMessageHistoryInput) => AgentMessageHistory;
+  addFeedback: (feedbackItem: AgentFeedbackInput) => AgentFeedback;
   addPlan: (plan: AgentPlan<TEvents>) => void;
   /**
    * Called whenever the agent (LLM assistant) receives or sends a message.

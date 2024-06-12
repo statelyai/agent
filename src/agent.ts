@@ -31,12 +31,7 @@ export const agentLogic: AgentLogic<AnyEventObject> = fromTransition(
   (state, event, { sessionId }) => {
     switch (event.type) {
       case 'agent.feedback': {
-        const feedback = {
-          ...event.feedback,
-          timestamp: event.feedback.timestamp ?? Date.now(),
-          sessionId,
-        };
-        state.feedback.push(feedback);
+        state.feedback.push(event.feedback);
         break;
       }
       case 'agent.observe': {
@@ -44,13 +39,7 @@ export const agentLogic: AgentLogic<AnyEventObject> = fromTransition(
         break;
       }
       case 'agent.history': {
-        const message = {
-          ...event.message,
-          id: event.message.id ?? randomUUID(),
-          timestamp: event.message.timestamp ?? Date.now(),
-          sessionId,
-        };
-        state.history.push(message);
+        state.history.push(event.message);
         break;
       }
       case 'agent.plan': {
@@ -132,22 +121,36 @@ export function createAgent<
     return agentDecide(agent, opts);
   };
 
-  agent.addHistory = (history) => {
+  agent.addHistory = (messageInput) => {
+    const message = {
+      ...messageInput,
+      id: messageInput.id ?? randomUUID(),
+      timestamp: messageInput.timestamp ?? Date.now(),
+      sessionId: agent.sessionId,
+    };
     agent.send({
       type: 'agent.history',
-      message: history,
+      message,
     });
+
+    return message;
   };
 
   agent.generateText = (opts) => agentGenerateText(agent, opts);
 
   agent.streamText = (opts) => agentStreamText(agent, opts);
 
-  agent.addFeedback = (feedback) => {
+  agent.addFeedback = (feedbackInput) => {
+    const feedback = {
+      ...feedbackInput,
+      timestamp: feedbackInput.timestamp ?? Date.now(),
+      sessionId: agent.sessionId,
+    };
     agent.send({
       type: 'agent.feedback',
       feedback,
     });
+    return feedback;
   };
 
   agent.addObservation = (observationInput) => {
