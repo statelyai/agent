@@ -1,8 +1,8 @@
-import { AgentMemory, AgentMemoryData } from './types';
+import { AgentMemory, AgentMemoryContext } from './types';
 
 export function createAgentMemory(): AgentMemory {
   const storage = {
-    sessions: {} as Record<string, AgentMemoryData>,
+    sessions: {} as Record<string, AgentMemoryContext>,
   };
 
   return {
@@ -14,7 +14,7 @@ export function createAgentMemory(): AgentMemory {
           messages: [],
           plans: [],
           feedback: [],
-        } satisfies AgentMemoryData);
+        } satisfies AgentMemoryContext);
 
       storage.sessions[sessionId]![key].push(item as any);
     },

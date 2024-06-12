@@ -164,8 +164,6 @@ export interface AgentObservationInput {
   timestamp?: number;
 }
 
-export type AgentContext = AgentMemoryData;
-
 export type AgentDecisionInput = {
   goal: string;
   model?: LanguageModel;
@@ -196,7 +194,7 @@ export type AgentEmitted<TEvents extends EventObject> =
     };
 
 export type AgentLogic<TEvents extends EventObject> = ActorLogic<
-  TransitionSnapshot<AgentContext>,
+  TransitionSnapshot<AgentMemoryContext>,
   | {
       type: 'agent.feedback';
       feedback: AgentFeedback;
@@ -274,7 +272,7 @@ export type Agent<TEvents extends EventObject> = ActorRefFrom<
   ) => Promise<StreamTextResult<Record<string, CoreTool<any, any>>>>;
 
   addObservation: (observation: AgentObservationInput) => AgentObservation<any>; // TODO
-  addHistory: (history: AgentMessageHistoryInput) => AgentMessageHistory;
+  addMessage: (history: AgentMessageHistoryInput) => AgentMessageHistory;
   addFeedback: (feedbackItem: AgentFeedbackInput) => AgentFeedback;
   addPlan: (plan: AgentPlan<TEvents>) => void;
   /**
@@ -284,7 +282,7 @@ export type Agent<TEvents extends EventObject> = ActorRefFrom<
   /**
    * Selects agent data from its context.
    */
-  select: <T>(selector: (context: AgentContext) => T) => T;
+  select: <T>(selector: (context: AgentMemoryContext) => T) => T;
 
   /**
    * Inspects state machine actor transitions and automatically observes
@@ -339,14 +337,14 @@ export type ObservedStateFrom<TActor extends AnyActorRef> = Pick<
   'value' | 'context'
 >;
 
-export type AgentMemoryData = {
+export type AgentMemoryContext = {
   observations: AgentObservation<any>[]; // TODO
   messages: AgentMessageHistory[];
   plans: AgentPlan<any>[];
   feedback: AgentFeedback[];
 };
 
-export type AgentMemory = AppendOnlyStorage<AgentMemoryData>;
+export type AgentMemory = AppendOnlyStorage<AgentMemoryContext>;
 
 export interface AppendOnlyStorage<T extends Record<string, any[]>> {
   append<K extends keyof T>(
@@ -361,14 +359,16 @@ export interface AppendOnlyStorage<T extends Record<string, any[]>> {
 }
 
 export interface AgentLongTermMemory {
-  get<K extends keyof AgentMemoryData>(key: K): Promise<AgentMemoryData[K]>;
-  append<K extends keyof AgentMemoryData>(
+  get<K extends keyof AgentMemoryContext>(
+    key: K
+  ): Promise<AgentMemoryContext[K]>;
+  append<K extends keyof AgentMemoryContext>(
     key: K,
-    item: AgentMemoryData[K][0]
+    item: AgentMemoryContext[K][0]
   ): Promise<void>;
-  set<K extends keyof AgentMemoryData>(
+  set<K extends keyof AgentMemoryContext>(
     key: K,
-    items: AgentMemoryData[K]
+    items: AgentMemoryContext[K]
   ): Promise<void>;
 }
 
