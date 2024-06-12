@@ -4,8 +4,10 @@ import {
   AnyActorRef,
   AnyEventObject,
   AnyStateMachine,
+  EventFrom,
   EventObject,
   PromiseActorLogic,
+  SnapshotFrom,
   StateValue,
   Subscription,
   TransitionSnapshot,
@@ -45,7 +47,7 @@ export type AgentPlan<TEvent extends EventObject> = {
   content?: string;
   steps?: Array<{
     event: TEvent;
-    nextState?: ObservedState;
+    state?: ObservedState;
   }>;
   nextEvent: TEvent | undefined;
   sessionId: string;
@@ -82,7 +84,7 @@ export type PromptTemplate<TEvents extends EventObject> = (data: {
   /**
    * Past observations
    */
-  observations?: AgentObservation[];
+  observations?: AgentObservation<any>[]; // TODO
   feedback?: AgentFeedback[];
   messages?: AgentMessageHistory[];
   plans?: AgentPlan<TEvents>[];
@@ -145,20 +147,20 @@ export type AgentMessageHistoryInput = CoreMessage & {
   result?: GenerateTextResult<any>;
 };
 
-export interface AgentObservation {
+export interface AgentObservation<TActor extends AnyActorRef> {
   id: string;
-  state: ObservedState | undefined;
-  event: AnyEventObject;
-  nextState: ObservedState;
+  prevState: SnapshotFrom<TActor> | undefined;
+  event: EventFrom<TActor>;
+  state: SnapshotFrom<TActor>;
   sessionId: string;
   timestamp: number;
 }
 
 export interface AgentObservationInput {
   id?: string;
-  state: ObservedState | undefined;
+  prevState: ObservedState | undefined;
   event: AnyEventObject;
-  nextState: ObservedState;
+  state: ObservedState;
   timestamp?: number;
 }
 
@@ -182,7 +184,7 @@ export type AgentEmitted<TEvents extends EventObject> =
     }
   | {
       type: 'observation';
-      observation: AgentObservation;
+      observation: AgentObservation<any>; // TODO
     }
   | {
       type: 'message';
@@ -201,7 +203,7 @@ export type AgentLogic<TEvents extends EventObject> = ActorLogic<
     }
   | {
       type: 'agent.observe';
-      observation: AgentObservation;
+      observation: AgentObservation<any>; // TODO
     }
   | {
       type: 'agent.message';
@@ -271,7 +273,7 @@ export type Agent<TEvents extends EventObject> = ActorRefFrom<
     options: AgentStreamTextOptions
   ) => Promise<StreamTextResult<Record<string, CoreTool<any, any>>>>;
 
-  addObservation: (observation: AgentObservationInput) => AgentObservation;
+  addObservation: (observation: AgentObservationInput) => AgentObservation<any>; // TODO
   addHistory: (history: AgentMessageHistoryInput) => AgentMessageHistory;
   addFeedback: (feedbackItem: AgentFeedbackInput) => AgentFeedback;
   addPlan: (plan: AgentPlan<TEvents>) => void;
@@ -288,9 +290,11 @@ export type Agent<TEvents extends EventObject> = ActorRefFrom<
    * Inspects state machine actor transitions and automatically observes
    * (state, event, nextState) tuples.
    */
-  interact: (
-    actorRef: AnyActorRef,
-    getInput?: (observation: AgentObservation) => AgentDecisionInput
+  interact: <TActor extends AnyActorRef>(
+    actorRef: TActor,
+    getInput?: (
+      observation: AgentObservation<TActor>
+    ) => AgentDecisionInput | undefined
   ) => Subscription;
 };
 
@@ -330,8 +334,13 @@ export interface ObservedState {
   context: Record<string, unknown>;
 }
 
+export type ObservedStateFrom<TActor extends AnyActorRef> = Pick<
+  SnapshotFrom<TActor>,
+  'value' | 'context'
+>;
+
 export type AgentMemoryData = {
-  observations: AgentObservation[];
+  observations: AgentObservation<any>[]; // TODO
   messages: AgentMessageHistory[];
   plans: AgentPlan<any>[];
   feedback: AgentFeedback[];

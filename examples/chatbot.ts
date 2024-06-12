@@ -1,9 +1,8 @@
 import { z } from 'zod';
-import { createAgent } from '../src';
+import { createAgent, fromDecision } from '../src';
 import { openai } from '@ai-sdk/openai';
 import { assign, createActor, log, setup } from 'xstate';
 import { getFromTerminal } from './helpers/helpers';
-import { fromDecision } from '../src';
 
 const agent = createAgent({
   name: 'chatbot',

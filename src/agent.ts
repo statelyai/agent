@@ -35,7 +35,7 @@ export const agentLogic: AgentLogic<AnyEventObject> = fromTransition(
         emit({
           type: 'feedback',
           // @ts-ignore TODO: fix types in XState
-          feedback,
+          feedback: event.feedback,
         });
         break;
       }
@@ -44,7 +44,7 @@ export const agentLogic: AgentLogic<AnyEventObject> = fromTransition(
         emit({
           type: 'observation',
           // @ts-ignore TODO: fix types in XState
-          observation,
+          observation: event.observation,
         });
         break;
       }
@@ -53,7 +53,7 @@ export const agentLogic: AgentLogic<AnyEventObject> = fromTransition(
         emit({
           type: 'message',
           // @ts-ignore TODO: fix types in XState
-          message,
+          message: event.message,
         });
         break;
       }
@@ -62,7 +62,7 @@ export const agentLogic: AgentLogic<AnyEventObject> = fromTransition(
         emit({
           type: 'plan',
           // @ts-ignore TODO: fix types in XState
-          plan,
+          plan: event.plan,
         });
         break;
       }
@@ -210,7 +210,7 @@ export function createAgent<
       if (input) {
         await agentDecide(agent, {
           machine: actorRef.src as AnyStateMachine,
-          state: observation.nextState,
+          state: observation.state,
           execute: async (event) => {
             actorRef.send(event);
           },
@@ -218,7 +218,7 @@ export function createAgent<
         });
       }
 
-      prevState = observationInput.nextState;
+      prevState = observationInput.state;
     }
 
     // Inspect system, but only observe specified actor
@@ -234,8 +234,8 @@ export function createAgent<
 
         const observationInput = {
           event: inspEvent.event,
-          state: prevState,
-          nextState: inspEvent.snapshot as any,
+          prevState,
+          state: inspEvent.snapshot as any,
         };
 
         await handleObservation(observationInput);
@@ -245,9 +245,9 @@ export function createAgent<
     // If actor already started, interact with current state
     if ((actorRef as any)._processingStatus === 1) {
       handleObservation({
-        state: undefined,
+        prevState: undefined,
         event: { type: '' }, // TODO: unknown events?
-        nextState: actorRef.getSnapshot(),
+        state: actorRef.getSnapshot(),
       });
     }
 

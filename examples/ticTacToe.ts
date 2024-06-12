@@ -63,15 +63,6 @@ function getWinner(board: typeof initialContext.board): Player | null {
   return null;
 }
 
-const playerInput = ({ context }: { context: GameContext }) => ({
-  goal: `
-You are playing a game of tic tac toe. This is the current game state. The 3x3 board is represented by a 9-element array. The first element is the top-left cell, the second element is the top-middle cell, the third element is the top-right cell, the fourth element is the middle-left cell, and so on. The value of each cell is either null, x, or o. The value of null means that the cell is empty. The value of x means that the cell is occupied by an x. The value of o means that the cell is occupied by an o.
-
-${JSON.stringify(context, null, 2)}
-
-Execute the single best next move to try to win the game. Do not play on an existing cell.`,
-});
-
 export const ticTacToeMachine = setup({
   types: {
     context: {} as GameContext,
@@ -150,10 +141,6 @@ export const ticTacToeMachine = setup({
       states: {
         x: {
           entry: 'printBoard',
-          invoke: {
-            src: 'agent',
-            input: playerInput,
-          },
           on: {
             'agent.x.play': [
               {
@@ -167,10 +154,6 @@ export const ticTacToeMachine = setup({
         },
         o: {
           entry: 'printBoard',
-          invoke: {
-            src: 'agent',
-            input: playerInput,
-          },
           on: {
             'agent.o.play': [
               {
@@ -227,4 +210,19 @@ export const ticTacToeMachine = setup({
 });
 
 const actor = createActor(ticTacToeMachine);
+
+agent.interact(actor, (observed) => {
+  if (observed.state.matches('playing')) {
+    return {
+      goal: `You are playing a game of tic tac toe. This is the current game state. The 3x3 board is represented by a 9-element array. The first element is the top-left cell, the second element is the top-middle cell, the third element is the top-right cell, the fourth element is the middle-left cell, and so on. The value of each cell is either null, x, or o. The value of null means that the cell is empty. The value of x means that the cell is occupied by an x. The value of o means that the cell is occupied by an o.
+
+${JSON.stringify(observed.state.context, null, 2)}
+
+Execute the single best next move to try to win the game. Do not play on an existing cell.`,
+    };
+  }
+
+  return;
+});
+
 actor.start();

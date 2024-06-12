@@ -93,18 +93,18 @@ test('agent.addObservation() adds to observations', () => {
   });
 
   const observation = agent.addObservation({
-    state: { value: 'playing', context: {} },
+    prevState: { value: 'playing', context: {} },
     event: { type: 'play', position: 3 },
-    nextState: { value: 'lost', context: {} },
+    state: { value: 'lost', context: {} },
   });
 
   expect(observation.sessionId).toEqual(agent.sessionId);
 
   expect(agent.select((c) => c.observations)).toContainEqual(
     expect.objectContaining({
-      state: { value: 'playing', context: {} },
+      prevState: { value: 'playing', context: {} },
       event: { type: 'play', position: 3 },
-      nextState: { value: 'lost', context: {} },
+      state: { value: 'lost', context: {} },
       sessionId: expect.any(String),
       timestamp: expect.any(Number),
     })
@@ -136,8 +136,8 @@ test('agent.interact() observes machine actors (no 2nd arg)', () => {
 
   expect(agent.select((c) => c.observations)).toContainEqual(
     expect.objectContaining({
-      state: undefined,
-      nextState: expect.objectContaining({ value: 'a' }),
+      prevState: undefined,
+      state: expect.objectContaining({ value: 'a' }),
     })
   );
 
@@ -145,9 +145,9 @@ test('agent.interact() observes machine actors (no 2nd arg)', () => {
 
   expect(agent.select((c) => c.observations)).toContainEqual(
     expect.objectContaining({
-      state: expect.objectContaining({ value: 'a' }),
+      prevState: expect.objectContaining({ value: 'a' }),
       event: { type: 'NEXT' },
-      nextState: expect.objectContaining({ value: 'b' }),
+      state: expect.objectContaining({ value: 'b' }),
     })
   );
 });
