@@ -11,7 +11,7 @@ export function createAgentMemory(): AgentMemory {
         storage.sessions[sessionId] ||
         ({
           observations: [],
-          history: [],
+          messages: [],
           plans: [],
           feedback: [],
         } satisfies AgentMemoryData);

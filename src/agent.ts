@@ -28,22 +28,42 @@ import { agentDecide } from './decision';
 import { vercelAdapter } from './adapters/vercel';
 
 export const agentLogic: AgentLogic<AnyEventObject> = fromTransition(
-  (state, event, { sessionId }) => {
+  (state, event, { emit }) => {
     switch (event.type) {
       case 'agent.feedback': {
         state.feedback.push(event.feedback);
+        emit({
+          type: 'feedback',
+          // @ts-ignore TODO: fix types in XState
+          feedback,
+        });
         break;
       }
       case 'agent.observe': {
         state.observations.push(event.observation);
+        emit({
+          type: 'observation',
+          // @ts-ignore TODO: fix types in XState
+          observation,
+        });
         break;
       }
-      case 'agent.history': {
-        state.history.push(event.message);
+      case 'agent.message': {
+        state.messages.push(event.message);
+        emit({
+          type: 'message',
+          // @ts-ignore TODO: fix types in XState
+          message,
+        });
         break;
       }
       case 'agent.plan': {
         state.plans.push(event.plan);
+        emit({
+          type: 'plan',
+          // @ts-ignore TODO: fix types in XState
+          plan,
+        });
         break;
       }
       default:
@@ -53,7 +73,7 @@ export const agentLogic: AgentLogic<AnyEventObject> = fromTransition(
   },
   {
     feedback: [],
-    history: [],
+    messages: [],
     observations: [],
     plans: [],
   } as AgentContext
@@ -129,7 +149,7 @@ export function createAgent<
       sessionId: agent.sessionId,
     };
     agent.send({
-      type: 'agent.history',
+      type: 'agent.message',
       message,
     });
 
@@ -188,7 +208,7 @@ export function createAgent<
       console.log('input', input);
 
       if (input) {
-        const plan = await agentDecide(agent, {
+        await agentDecide(agent, {
           machine: actorRef.src as AnyStateMachine,
           state: observation.nextState,
           execute: async (event) => {
@@ -196,8 +216,6 @@ export function createAgent<
           },
           ...input,
         });
-
-        // TODO: emit plan
       }
 
       prevState = observationInput.nextState;

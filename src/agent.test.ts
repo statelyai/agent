@@ -40,13 +40,13 @@ test('agent.addHistory() adds to history', () => {
 
   expect(messageHistory.sessionId).toEqual(agent.sessionId);
 
-  expect(agent.select((c) => c.history)).toContainEqual(
+  expect(agent.select((c) => c.messages)).toContainEqual(
     expect.objectContaining({
       content: 'msg 1',
     })
   );
 
-  expect(agent.select((c) => c.history)).toContainEqual(
+  expect(agent.select((c) => c.messages)).toContainEqual(
     expect.objectContaining({
       content: 'response 1',
       sessionId: expect.any(String),
@@ -173,4 +173,15 @@ test('Agents can use a custom adapter', async () => {
   });
 
   expect(res.text).toEqual('Response');
+});
+
+test.skip('You can listen for emitted agent events', () => {
+  const agent = createAgent({
+    name: 'test',
+    events: {},
+    adapter: {} as any,
+    model: {} as any,
+  });
+
+  agent.on('feedback', (x) => {});
 });

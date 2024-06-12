@@ -1,14 +1,14 @@
 import {
+  ActorLogic,
   ActorRefFrom,
   AnyActorRef,
   AnyEventObject,
   AnyStateMachine,
   EventObject,
-  InspectionEvent,
   PromiseActorLogic,
   StateValue,
   Subscription,
-  TransitionActorLogic,
+  TransitionSnapshot,
   Values,
 } from 'xstate';
 import {
@@ -36,7 +36,7 @@ export type AgentPlanInput<TEvent extends EventObject> = {
   /**
    * The previous plan
    */
-  previousPlan?: AgentPlan<any>;
+  previousPlan?: AgentPlan<TEvent>;
 };
 
 export type AgentPlan<TEvent extends EventObject> = {
@@ -175,8 +175,26 @@ export type AgentDecisionLogic<TEvents extends EventObject> = PromiseActorLogic<
   AgentDecisionInput | string
 >;
 
-export type AgentLogic<TEvents extends EventObject> = TransitionActorLogic<
-  AgentContext,
+export type AgentEmitted<TEvents extends EventObject> =
+  | {
+      type: 'feedback';
+      feedback: AgentFeedback;
+    }
+  | {
+      type: 'observation';
+      observation: AgentObservation;
+    }
+  | {
+      type: 'message';
+      message: AgentMessageHistory;
+    }
+  | {
+      type: 'plan';
+      plan: AgentPlan<TEvents>;
+    };
+
+export type AgentLogic<TEvents extends EventObject> = ActorLogic<
+  TransitionSnapshot<AgentContext>,
   | {
       type: 'agent.feedback';
       feedback: AgentFeedback;
@@ -186,14 +204,16 @@ export type AgentLogic<TEvents extends EventObject> = TransitionActorLogic<
       observation: AgentObservation;
     }
   | {
-      type: 'agent.history';
+      type: 'agent.message';
       message: AgentMessageHistory;
     }
   | {
       type: 'agent.plan';
       plan: AgentPlan<TEvents>;
     },
-  any
+  any, // TODO: input
+  any,
+  AgentEmitted<TEvents>
 >;
 
 export type EventsFromZodEventMapping<TEventSchemas extends ZodEventMapping> =
@@ -312,7 +332,7 @@ export interface ObservedState {
 
 export type AgentMemoryData = {
   observations: AgentObservation[];
-  history: AgentMessageHistory[];
+  messages: AgentMessageHistory[];
   plans: AgentPlan<any>[];
   feedback: AgentFeedback[];
 };

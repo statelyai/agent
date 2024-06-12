@@ -37,7 +37,7 @@ async function getMessages(
 ): Promise<CoreMessage[]> {
   let messages: CoreMessage[] = [];
   if (options.messages === true) {
-    messages = agent.select((s) => s.history);
+    messages = agent.select((s) => s.messages);
   } else if (typeof options.messages === 'function') {
     messages = await options.messages(agent);
   } else if (options.messages) {
