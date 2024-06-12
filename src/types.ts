@@ -1,18 +1,24 @@
 import {
+  ActorLogic,
   ActorRefFrom,
+  AnyActorRef,
   AnyEventObject,
   AnyStateMachine,
   EventObject,
   PromiseActorLogic,
   StateValue,
-  TransitionActorLogic,
+  Subscription,
+  TransitionSnapshot,
   Values,
 } from 'xstate';
 import {
+  CoreMessage,
+  CoreTool,
   generateText,
   GenerateTextResult,
   LanguageModel,
   streamText,
+  StreamTextResult,
 } from 'ai';
 import { ZodEventMapping } from './schemas';
 import { TypeOf } from 'zod';
@@ -21,23 +27,29 @@ export type GenerateTextOptions = Parameters<typeof generateText>[0];
 
 export type StreamTextOptions = Parameters<typeof streamText>[0];
 
-export type AgentPlanOptions<TEvent extends EventObject> = {
+export type AgentPlanInput<TEvent extends EventObject> = {
   model: LanguageModel;
   state: ObservedState;
   goal: string;
   events: ZodEventMapping;
-  logic?: AnyStateMachine;
-  template?: PromptTemplate<TEvent>;
+  machine?: AnyStateMachine;
+  /**
+   * The previous plan
+   */
+  previousPlan?: AgentPlan<TEvent>;
 };
 
 export type AgentPlan<TEvent extends EventObject> = {
   goal: string;
   state: ObservedState;
-  steps: Array<{
+  content?: string;
+  steps?: Array<{
     event: TEvent;
     nextState?: ObservedState;
   }>;
   nextEvent: TEvent | undefined;
+  sessionId: string;
+  timestamp: number;
 };
 
 export interface TransitionData {
@@ -50,17 +62,23 @@ export interface TransitionData {
 export type PromptTemplate<TEvents extends EventObject> = (data: {
   goal: string;
   /**
-   * The state value
+   * The observed state
    */
-  value?: StateValue;
+  state?: ObservedState;
   /**
-   * The provided context
+   * The context to provide.
+   * This overrides the observed state.context, if provided.
    */
   context?: any;
   /**
-   * The logical model of the observed environment
+   * The state machine model of the observed environment
    */
-  logic?: unknown;
+  machine?: unknown;
+  /**
+   * The potential next transitions that can be taken
+   * in the state machine
+   */
+  transitions?: TransitionData[];
   /**
    * Past observations
    */
@@ -72,7 +90,7 @@ export type PromptTemplate<TEvents extends EventObject> = (data: {
 
 export type AgentPlanner<T extends Agent<any>> = (
   agent: T['eventTypes'],
-  options: AgentPlanOptions<T['eventTypes']>
+  options: AgentPlanInput<T['eventTypes']>
 ) => Promise<AgentPlan<T['eventTypes']> | undefined>;
 
 export type AgentDecideOptions = {
@@ -80,7 +98,7 @@ export type AgentDecideOptions = {
   model?: LanguageModel;
   context?: any;
   state: ObservedState;
-  logic: AnyStateMachine;
+  machine: AnyStateMachine;
   execute?: (event: AnyEventObject) => Promise<void>;
   planner?: AgentPlanner<any>;
   events?: ZodEventMapping;
@@ -91,20 +109,41 @@ export type AgentDecideOptions = {
 
 export interface AgentFeedback {
   goal: string;
-  observation: AgentObservation;
+  observationId: string;
   attributes: Record<string, any>;
   timestamp: number;
+  sessionId: string;
 }
 
-export interface AgentMessageHistory {
-  role: 'user' | 'assistant';
-  content: any;
+export interface AgentFeedbackInput {
+  goal: string;
+  observationId: string; // Observation ID;
+  attributes: Record<string, any>;
+  timestamp?: number;
+}
+
+export type AgentMessageHistory = CoreMessage & {
   timestamp: number;
   id: string;
-  // which chat message we're responding to
+  /**
+   * The response ID of the message, which references
+   * which message this message is responding to, if any.
+   */
   responseId?: string;
-  sessionId?: string;
-}
+  result?: GenerateTextResult<any>;
+  sessionId: string;
+};
+
+export type AgentMessageHistoryInput = CoreMessage & {
+  timestamp?: number;
+  id?: string;
+  /**
+   * The response ID of the message, which references
+   * which message this message is responding to, if any.
+   */
+  responseId?: string;
+  result?: GenerateTextResult<any>;
+};
 
 export interface AgentObservation {
   id: string;
@@ -115,14 +154,17 @@ export interface AgentObservation {
   timestamp: number;
 }
 
-export interface AgentContext<TEvents extends EventObject> {
-  observations: AgentObservation[];
-  history: AgentMessageHistory[];
-  plans: AgentPlan<TEvents>[];
-  feedback: AgentFeedback[];
+export interface AgentObservationInput {
+  id?: string;
+  state: ObservedState | undefined;
+  event: AnyEventObject;
+  nextState: ObservedState;
+  timestamp?: number;
 }
 
-export type AgentDecisionOptions = {
+export type AgentContext = AgentMemoryData;
+
+export type AgentDecisionInput = {
   goal: string;
   model?: LanguageModel;
   context?: any;
@@ -130,33 +172,48 @@ export type AgentDecisionOptions = {
 
 export type AgentDecisionLogic<TEvents extends EventObject> = PromiseActorLogic<
   AgentPlan<TEvents> | undefined,
-  AgentDecisionOptions | string
+  AgentDecisionInput | string
 >;
 
-export type AgentLogic<TEvents extends EventObject> = TransitionActorLogic<
-  AgentContext<TEvents>,
+export type AgentEmitted<TEvents extends EventObject> =
   | {
-      type: 'agent.reward';
-      reward: AgentFeedback;
+      type: 'feedback';
+      feedback: AgentFeedback;
+    }
+  | {
+      type: 'observation';
+      observation: AgentObservation;
+    }
+  | {
+      type: 'message';
+      message: AgentMessageHistory;
+    }
+  | {
+      type: 'plan';
+      plan: AgentPlan<TEvents>;
+    };
+
+export type AgentLogic<TEvents extends EventObject> = ActorLogic<
+  TransitionSnapshot<AgentContext>,
+  | {
+      type: 'agent.feedback';
+      feedback: AgentFeedback;
     }
   | {
       type: 'agent.observe';
-      state: ObservedState | undefined;
-      event: AnyEventObject;
-      nextState: ObservedState;
-      timestamp: number;
-      // Which actor sent the event
-      sessionId: string;
+      observation: AgentObservation;
     }
   | {
-      type: 'agent.history';
-      history: AgentMessageHistory;
+      type: 'agent.message';
+      message: AgentMessageHistory;
     }
   | {
       type: 'agent.plan';
       plan: AgentPlan<TEvents>;
     },
-  any
+  any, // TODO: input
+  any,
+  AgentEmitted<TEvents>
 >;
 
 export type EventsFromZodEventMapping<TEventSchemas extends ZodEventMapping> =
@@ -169,13 +226,37 @@ export type EventsFromZodEventMapping<TEventSchemas extends ZodEventMapping> =
 export type Agent<TEvents extends EventObject> = ActorRefFrom<
   AgentLogic<TEvents>
 > & {
+  /**
+   * The general name of the agent. All agents with the same name are related and
+   * able to share experiences (observations, feedback) with each other.
+   */
   name: string;
+  /**
+   * The unique id of the agent. This is used to partition message history.
+   */
+  id?: string;
+  description?: string;
   events: ZodEventMapping;
   eventTypes: TEvents;
   model: LanguageModel;
   defaultOptions: GenerateTextOptions;
+  memory: AgentLongTermMemory | undefined;
+  /**
+   * The adapter used to perform LLM actions such as
+   * `.generateText(…)` and `.streamText(…)`.
+   *
+   * Defaults to the Vercel AI SDK.
+   */
+  adapter: AIAdapter;
 
-  // Decision
+  /**
+   * Resolves with an `AgentPlan` based on the information provided in the `options`, including:
+   *
+   * - The `goal` for the agent to achieve
+   * - The observed current `state`
+   * - The `logic` (e.g. a state machine) that specifies what can happen next
+   * - Additional `context`
+   */
   decide: (
     options: AgentDecideOptions
   ) => Promise<AgentPlan<TEvents> | undefined>;
@@ -188,30 +269,101 @@ export type Agent<TEvents extends EventObject> = ActorRefFrom<
   // Stream text
   streamText: (
     options: AgentStreamTextOptions
-  ) => AsyncIterable<{ textDelta: string }>;
+  ) => Promise<StreamTextResult<Record<string, CoreTool<any, any>>>>;
 
-  addObservation: (observation: AgentObservation) => void;
-  addHistory: (history: AgentMessageHistory) => void;
-  addFeedback: (feedbackItem: AgentFeedback) => void;
+  addObservation: (observation: AgentObservationInput) => AgentObservation;
+  addHistory: (history: AgentMessageHistoryInput) => AgentMessageHistory;
+  addFeedback: (feedbackItem: AgentFeedbackInput) => AgentFeedback;
   addPlan: (plan: AgentPlan<TEvents>) => void;
+  /**
+   * Called whenever the agent (LLM assistant) receives or sends a message.
+   */
   onMessage: (callback: (message: AgentMessageHistory) => void) => void;
+  /**
+   * Selects agent data from its context.
+   */
+  select: <T>(selector: (context: AgentContext) => T) => T;
+
+  /**
+   * Inspects state machine actor transitions and automatically observes
+   * (state, event, nextState) tuples.
+   */
+  interact: (
+    actorRef: AnyActorRef,
+    getInput?: (observation: AgentObservation) => AgentDecisionInput
+  ) => Subscription;
 };
 
 export type AnyAgent = Agent<any>;
 
-export type AgentGenerateTextOptions = Omit<GenerateTextOptions, 'model'> & {
-  prompt: string;
-  model?: LanguageModel;
-  context?: any;
-};
+export type FromAgent<T> = T | ((self: AnyAgent) => T | Promise<T>);
 
-export type AgentStreamTextOptions = Omit<StreamTextOptions, 'model'> & {
-  prompt: string;
+export interface CommonTextOptions {
+  prompt: FromAgent<string>;
   model?: LanguageModel;
-  context?: any;
-};
+  context?: Record<string, any>;
+  messages?: FromAgent<CoreMessage[]> | true;
+  template?: PromptTemplate<any>;
+}
+
+export type AgentGenerateTextOptions = Omit<
+  GenerateTextOptions,
+  'model' | 'prompt' | 'messages'
+> &
+  CommonTextOptions;
+
+export type AgentStreamTextOptions = Omit<
+  StreamTextOptions,
+  'model' | 'prompt' | 'messages'
+> &
+  CommonTextOptions;
 
 export interface ObservedState {
-  value: string;
+  /**
+   * The current state value of the state machine, e.g.
+   * `"loading"` or `"processing"` or `"ready"`
+   */
+  value: StateValue;
+  /**
+   * Additional contextual data related to the current state
+   */
   context: Record<string, unknown>;
+}
+
+export type AgentMemoryData = {
+  observations: AgentObservation[];
+  messages: AgentMessageHistory[];
+  plans: AgentPlan<any>[];
+  feedback: AgentFeedback[];
+};
+
+export type AgentMemory = AppendOnlyStorage<AgentMemoryData>;
+
+export interface AppendOnlyStorage<T extends Record<string, any[]>> {
+  append<K extends keyof T>(
+    sessionId: string,
+    key: K,
+    item: T[K][0]
+  ): Promise<void>;
+  getAll<K extends keyof T>(
+    sessionId: string,
+    key: K
+  ): Promise<T[K] | undefined>;
+}
+
+export interface AgentLongTermMemory {
+  get<K extends keyof AgentMemoryData>(key: K): Promise<AgentMemoryData[K]>;
+  append<K extends keyof AgentMemoryData>(
+    key: K,
+    item: AgentMemoryData[K][0]
+  ): Promise<void>;
+  set<K extends keyof AgentMemoryData>(
+    key: K,
+    items: AgentMemoryData[K]
+  ): Promise<void>;
+}
+
+export interface AIAdapter {
+  generateText: typeof generateText;
+  streamText: typeof streamText;
 }

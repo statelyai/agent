@@ -50,7 +50,7 @@ const machine = setup({
             instructions: x.context.instructions,
             clarifications: x.context.clarifications,
           },
-          goal: 'Your goal is to respond to the email given the instructions and the provided clarifications. If not enough information is provided, ask for clarification. Otherwise, create and submit a response email.',
+          goal: 'Your goal is to respond to the email given the instructions and the provided clarifications. If not enough information is provided, ask for clarification. Otherwise, if you are absolutely sure that there is no ambiguous or missing information, create and submit a response email.',
         }),
       },
       on: {
@@ -112,6 +112,6 @@ createActor(machine, {
   input: {
     email: 'That sounds great! When are you available?',
     instructions:
-      'Tell them when I am available. Address them by his full (first and last) name.',
+      'Tell them exactly when I am available. Address them by his full (first and last) name.',
   },
 }).start();
