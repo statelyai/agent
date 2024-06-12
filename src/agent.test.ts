@@ -14,26 +14,26 @@ test('an agent has the expected interface', () => {
   expect(agent.streamText).toBeDefined();
 
   expect(agent.addFeedback).toBeDefined();
-  expect(agent.addHistory).toBeDefined();
+  expect(agent.addMessage).toBeDefined();
   expect(agent.addObservation).toBeDefined();
   expect(agent.addPlan).toBeDefined();
 
   expect(agent.interact).toBeDefined();
 });
 
-test('agent.addHistory() adds to history', () => {
+test('agent.addMessage() adds to message history', () => {
   const agent = createAgent({
     name: 'test',
     events: {},
     model: {} as any,
   });
 
-  agent.addHistory({
+  agent.addMessage({
     content: 'msg 1',
     role: 'user',
   });
 
-  const messageHistory = agent.addHistory({
+  const messageHistory = agent.addMessage({
     content: 'response 1',
     role: 'assistant',
   });

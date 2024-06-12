@@ -141,7 +141,7 @@ export function createAgent<
     return agentDecide(agent, opts);
   };
 
-  agent.addHistory = (messageInput) => {
+  agent.addMessage = (messageInput) => {
     const message = {
       ...messageInput,
       id: messageInput.id ?? randomUUID(),

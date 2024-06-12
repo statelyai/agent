@@ -274,7 +274,7 @@ export type Agent<TEvents extends EventObject> = ActorRefFrom<
   ) => Promise<StreamTextResult<Record<string, CoreTool<any, any>>>>;
 
   addObservation: (observation: AgentObservationInput) => AgentObservation<any>; // TODO
-  addHistory: (history: AgentMessageHistoryInput) => AgentMessageHistory;
+  addMessage: (history: AgentMessageHistoryInput) => AgentMessageHistory;
   addFeedback: (feedbackItem: AgentFeedbackInput) => AgentFeedback;
   addPlan: (plan: AgentPlan<TEvents>) => void;
   /**

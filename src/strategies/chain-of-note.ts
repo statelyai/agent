@@ -118,7 +118,7 @@ export const chainOfNote = setup({
 //           return summary.extract;
 //         })
 //       );
-//       x.agent?.addHistory({
+//       x.agent?.addMessage({
 //         content: x.prompt!,
 //         id: Date.now() + '',
 //         role: 'user',
@@ -142,7 +142,7 @@ export const chainOfNote = setup({
 //         prompt: `${x.prompt!}`,
 //       });
 
-//       x.agent?.addHistory({
+//       x.agent?.addMessage({
 //         content: result.text,
 //         id: Date.now() + '',
 //         role: 'user',

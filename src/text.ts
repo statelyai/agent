@@ -75,7 +75,7 @@ export async function agentGenerateText<T extends Agent<any>>(
 
   const messages = await getMessages(agent, promptWithContext, resolvedOptions);
 
-  agent.addHistory({
+  agent.addMessage({
     id,
     role: 'user',
     content: promptWithContext,
@@ -88,7 +88,7 @@ export async function agentGenerateText<T extends Agent<any>>(
     messages,
   });
 
-  agent.addHistory({
+  agent.addMessage({
     content: result.toolResults ?? result.text,
     id,
     role: 'assistant',
@@ -123,7 +123,7 @@ export async function agentStreamText(
 
   const messages = await getMessages(agent, promptWithContext, resolvedOptions);
 
-  agent.addHistory({
+  agent.addMessage({
     role: 'user',
     content: promptWithContext,
     id,
@@ -135,7 +135,7 @@ export async function agentStreamText(
     prompt: undefined,
     messages,
     onFinish: async (res) => {
-      agent.addHistory({
+      agent.addMessage({
         role: 'assistant',
         result: {
           text: res.text,
