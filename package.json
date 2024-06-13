@@ -1,6 +1,6 @@
 {
   "name": "@statelyai/agent",
-  "version": "0.1.4",
+  "version": "1.0.0-beta.0",
   "description": "",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
