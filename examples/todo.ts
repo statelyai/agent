@@ -9,7 +9,8 @@ const agent = createAgent({
   model: openai('gpt-4o'),
   events: {
     addTodo: z.object({
-      message: z.string().min(1).max(100).describe('The message of the todo'),
+      title: z.string().min(1).max(100).describe('The title of the todo'),
+      content: z.string().min(1).max(100).describe('The content of the todo'),
     }),
     deleteTodo: z.object({
       index: z.number().describe('The index of the todo to delete'),
@@ -24,7 +25,8 @@ const agent = createAgent({
 });
 
 interface Todo {
-  message: string;
+  title: string;
+  content: string;
   done: boolean;
 }
 
@@ -48,7 +50,8 @@ const machine = setup({
         todos: ({ context, event }) => [
           ...context.todos,
           {
-            message: event.message,
+            title: event.title,
+            content: event.content,
             done: false,
           },
         ],
