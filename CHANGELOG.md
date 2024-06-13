@@ -1,5 +1,11 @@
 # @statelyai/agent
 
+## 0.1.5
+
+### Patch Changes
+
+- [`5f863bb`](https://github.com/statelyai/agent/commit/5f863bb0d89d90f30d0a9aa1f0dd2a35f0eeb45b) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Use nanoid
+
 ## 0.1.0
 
 ### Minor Changes
