@@ -109,7 +109,7 @@ export async function agentStreamText(
   };
   const template = resolvedOptions.template ?? defaultTextTemplate;
 
-  const id = randomUUID();
+  const id = nanoid();
   const goal =
     typeof resolvedOptions.prompt === 'string'
       ? resolvedOptions.prompt
@@ -148,7 +148,7 @@ export async function agentStreamText(
           rawResponse: res.rawResponse,
         },
         content: res.text,
-        id: randomUUID(),
+        id: nanoid(),
         timestamp: Date.now(),
         responseId: id,
       });
