@@ -22,10 +22,10 @@ import {
   AgentMemoryContext,
 } from './types';
 import { simplePlanner } from './planners/simplePlanner';
-import { randomUUID } from 'crypto';
 import { agentGenerateText, agentStreamText } from './text';
 import { agentDecide } from './decision';
 import { vercelAdapter } from './adapters/vercel';
+import { nanoid } from 'nanoid';
 
 export const agentLogic: AgentLogic<AnyEventObject> = fromTransition(
   (state, event, { emit }) => {
@@ -144,7 +144,7 @@ export function createAgent<
   agent.addMessage = (messageInput) => {
     const message = {
       ...messageInput,
-      id: messageInput.id ?? randomUUID(),
+      id: messageInput.id ?? nanoid(),
       timestamp: messageInput.timestamp ?? Date.now(),
       sessionId: agent.sessionId,
     };
@@ -176,7 +176,7 @@ export function createAgent<
   agent.addObservation = (observationInput) => {
     const observation = {
       ...observationInput,
-      id: observationInput.id ?? randomUUID(),
+      id: observationInput.id ?? nanoid(),
       sessionId: agent.sessionId,
       timestamp: observationInput.timestamp ?? Date.now(),
     };

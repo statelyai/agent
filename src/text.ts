@@ -9,7 +9,6 @@ import {
   AgentGenerateTextOptions,
   AgentStreamTextOptions,
 } from './types';
-import { randomUUID } from 'crypto';
 import { defaultTextTemplate } from './templates/defaultText';
 import {
   AnyMachineSnapshot,
@@ -20,7 +19,7 @@ import {
   fromPromise,
   toObserver,
 } from 'xstate';
-import { vercelAdapter } from './adapters/vercel';
+import { nanoid } from 'nanoid';
 
 /**
  * Gets an array of messages from the given prompt, based on the agent and options.
@@ -62,7 +61,7 @@ export async function agentGenerateText<T extends Agent<any>>(
   };
   const template = resolvedOptions.template ?? defaultTextTemplate;
   // TODO: check if messages was provided instead
-  const id = randomUUID();
+  const id = nanoid();
   const goal =
     typeof resolvedOptions.prompt === 'string'
       ? resolvedOptions.prompt
