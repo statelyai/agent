@@ -10,7 +10,7 @@
     "lint": "tsc --noEmit",
     "test": "vitest",
     "example": "ts-node examples/helpers/runner.ts",
-    "prepublishOnly": "tsup src/index.ts --dts",
+    "prepublishOnly": "tsup src/index.ts --format cjs,esm --dts",
     "changeset": "changeset",
     "release": "changeset publish",
     "version": "changeset version"

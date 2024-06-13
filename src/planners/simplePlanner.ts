@@ -9,7 +9,6 @@ import {
 } from '../types';
 import { getAllTransitions } from '../utils';
 import { AnyStateMachine } from 'xstate';
-import { z } from 'zod';
 import { defaultTextTemplate } from '../templates/defaultText';
 
 function getTransitions(
@@ -75,9 +74,13 @@ export async function simplePlanner<T extends Agent<any>>(
   for (const toolTransitionData of toolTransitions) {
     const toolZodType = input.events?.[toolTransitionData.eventType];
 
+    if (!toolZodType) {
+      continue;
+    }
+
     toolMap[toolTransitionData.name] = tool({
       description: toolZodType?.description ?? toolTransitionData.description,
-      parameters: toolZodType ?? z.object({}),
+      parameters: toolZodType,
       execute: async (params) => {
         const event = {
           type: toolTransitionData.eventType,

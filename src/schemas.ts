@@ -1,4 +1,4 @@
-import { SomeZodObject } from 'zod';
+import type { SomeZodObject } from 'zod';
 import { AnyEventObject } from 'xstate';
 import { ObservedState } from './types';
 
