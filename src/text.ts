@@ -19,7 +19,7 @@ import {
   fromPromise,
   toObserver,
 } from 'xstate';
-import { nanoid } from 'nanoid';
+import { randomId } from './utils';
 
 /**
  * Gets an array of messages from the given prompt, based on the agent and options.
@@ -61,7 +61,7 @@ export async function agentGenerateText<T extends Agent<any>>(
   };
   const template = resolvedOptions.template ?? defaultTextTemplate;
   // TODO: check if messages was provided instead
-  const id = nanoid();
+  const id = randomId();
   const goal =
     typeof resolvedOptions.prompt === 'string'
       ? resolvedOptions.prompt
@@ -109,7 +109,7 @@ export async function agentStreamText(
   };
   const template = resolvedOptions.template ?? defaultTextTemplate;
 
-  const id = nanoid();
+  const id = randomId();
   const goal =
     typeof resolvedOptions.prompt === 'string'
       ? resolvedOptions.prompt
@@ -148,7 +148,7 @@ export async function agentStreamText(
           rawResponse: res.rawResponse,
         },
         content: res.text,
-        id: nanoid(),
+        id: randomId(),
         timestamp: Date.now(),
         responseId: id,
       });
