@@ -12,7 +12,7 @@ const context = {
 
 const agent = createAgent({
   name: 'word',
-  model: openai('gpt-4-1106-preview'),
+  model: openai('gpt-4o'),
   events: {
     'agent.guessLetter': z.object({
       letter: z.string().min(1).max(1).describe('The letter guessed'),
@@ -42,12 +42,15 @@ const wordGuesserMachine = setup({
     agent: fromDecision(agent),
     getFromTerminal,
   },
+  actions: {
+    resetContext: assign(context),
+  },
 }).createMachine({
   initial: 'providingWord',
   context,
   states: {
     providingWord: {
-      entry: assign(context),
+      entry: 'resetContext',
       invoke: {
         src: 'getFromTerminal',
         input: 'Enter a word, and an agent will try to guess it.',
