@@ -100,10 +100,10 @@ export async function simplePlanner<T extends Agent<any>>(
   });
 
   const result = await agent.generateText({
+    ...input,
     prompt,
     tools: toolMap,
     toolChoice: 'required',
-    ...input,
   });
 
   const singleResult = result.toolResults[0];
