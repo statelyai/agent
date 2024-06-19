@@ -25,7 +25,7 @@ import { simplePlanner } from './planners/simplePlanner';
 import { agentGenerateText, agentStreamText } from './text';
 import { agentDecide } from './decision';
 import { vercelAdapter } from './adapters/vercel';
-import { nanoid } from 'nanoid';
+import { randomId } from './utils';
 
 export const agentLogic: AgentLogic<AnyEventObject> = fromTransition(
   (state, event, { emit }) => {
@@ -144,7 +144,7 @@ export function createAgent<
   agent.addMessage = (messageInput) => {
     const message = {
       ...messageInput,
-      id: messageInput.id ?? nanoid(),
+      id: messageInput.id ?? randomId(),
       timestamp: messageInput.timestamp ?? Date.now(),
       sessionId: agent.sessionId,
     };
@@ -176,7 +176,7 @@ export function createAgent<
   agent.addObservation = (observationInput) => {
     const observation = {
       ...observationInput,
-      id: observationInput.id ?? nanoid(),
+      id: observationInput.id ?? randomId(),
       sessionId: agent.sessionId,
       timestamp: observationInput.timestamp ?? Date.now(),
     };

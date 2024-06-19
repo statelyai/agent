@@ -2,7 +2,6 @@ import { assign, setup, assertEvent, createActor } from 'xstate';
 import { z } from 'zod';
 import { createAgent, fromDecision, fromTextStream } from '../src';
 import { openai } from '@ai-sdk/openai';
-import { defaultToolCallTemplate } from '../src/templates/defaultToolCall';
 
 const agent = createAgent({
   name: 'tic-tac-toe-bot',

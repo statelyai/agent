@@ -29,14 +29,31 @@ export type GenerateTextOptions = Parameters<typeof generateText>[0];
 
 export type StreamTextOptions = Parameters<typeof streamText>[0];
 
-export type AgentPlanInput<TEvent extends EventObject> = {
-  model: LanguageModel;
+export type AgentPlanInput<TEvent extends EventObject> = Omit<
+  GenerateTextOptions,
+  'prompt' | 'messages' | 'tools'
+> & {
+  /**
+   * The currently observed state.
+   */
   state: ObservedState;
+  /**
+   * The goal for the agent to accomplish.
+   * The agent will create a plan based on this goal.
+   */
   goal: string;
+  /**
+   * The events that the agent can trigger. This is a mapping of
+   * event types to Zod event schemas.
+   */
   events: ZodEventMapping;
+  /**
+   * The state machine that represents the environment the agent
+   * is interacting with.
+   */
   machine?: AnyStateMachine;
   /**
-   * The previous plan
+   * The previous plan.
    */
   previousPlan?: AgentPlan<TEvent>;
 };
