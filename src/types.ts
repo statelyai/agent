@@ -109,7 +109,7 @@ export type PromptTemplate<TEvents extends EventObject> = (data: {
 
 export type AgentPlanner<T extends Agent<any>> = (
   agent: T['eventTypes'],
-  options: AgentPlanInput<T['eventTypes']>
+  input: AgentPlanInput<T['eventTypes']>
 ) => Promise<AgentPlan<T['eventTypes']> | undefined>;
 
 export type AgentDecideOptions = {
@@ -271,7 +271,7 @@ export type Agent<TEvents extends EventObject> = ActorRefFrom<
    *
    * - The `goal` for the agent to achieve
    * - The observed current `state`
-   * - The `logic` (e.g. a state machine) that specifies what can happen next
+   * - The `machine` (e.g. a state machine) that specifies what can happen next
    * - Additional `context`
    */
   decide: (

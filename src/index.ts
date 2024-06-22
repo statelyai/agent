@@ -1,4 +1,4 @@
 export { createAgent } from './agent';
-export { fromText, fromTextStream, agentGenerateText } from './text';
-export { fromDecision, agentDecide } from './decision';
+export { fromText, fromTextStream } from './text';
+export { fromDecision } from './decision';
 export * from './types';

@@ -1,4 +1,4 @@
-import { test, expect } from 'vitest';
+import { test, expect, vi } from 'vitest';
 import { createAgent, type AIAdapter } from './';
 import { createActor, createMachine } from 'xstate';
 
@@ -175,7 +175,8 @@ test('Agents can use a custom adapter', async () => {
   expect(res.text).toEqual('Response');
 });
 
-test.skip('You can listen for emitted agent events', () => {
+test.skip('You can listen for emitted agent events', async () => {
+  const fn = vi.fn();
   const agent = createAgent({
     name: 'test',
     events: {},
@@ -183,5 +184,21 @@ test.skip('You can listen for emitted agent events', () => {
     model: {} as any,
   });
 
-  agent.on('feedback', (x) => {});
+  const p = new Promise((res) => {
+    agent.on('feedback', (f) => {
+      res(f);
+    });
+  });
+
+  agent.addFeedback({
+    attributes: {
+      score: -1,
+    },
+    goal: 'Win the game',
+    observationId: 'obs-1',
+  });
+
+  await p;
+
+  expect(fn).toHaveBeenCalled();
 });
