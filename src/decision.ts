@@ -5,13 +5,14 @@ import {
   AgentDecisionLogic,
   AgentDecisionInput,
   AgentPlanner,
+  AgentPlan,
 } from './types';
 import { simplePlanner } from './planners/simplePlanner';
 
 export async function agentDecide<T extends Agent<any>>(
   agent: T,
   options: AgentDecideOptions
-) {
+): Promise<AgentPlan<any> | undefined> {
   const resolvedOptions = {
     ...agent.defaultOptions,
     ...options,
@@ -46,7 +47,7 @@ export async function agentDecide<T extends Agent<any>>(
 export function fromDecision(
   agent: Agent<any>,
   defaultInput?: AgentDecisionInput
-) {
+): AgentDecisionLogic<any> {
   return fromPromise(async ({ input, self }) => {
     const parentRef = self._parent;
     if (!parentRef) {

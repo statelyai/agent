@@ -288,9 +288,11 @@ export type Agent<TEvents extends EventObject> = ActorRefFrom<
     options: AgentStreamTextOptions
   ) => Promise<StreamTextResult<Record<string, CoreTool<any, any>>>>;
 
-  addObservation: (observation: AgentObservationInput) => AgentObservation<any>; // TODO
-  addMessage: (history: AgentMessageHistoryInput) => AgentMessageHistory;
-  addFeedback: (feedbackItem: AgentFeedbackInput) => AgentFeedback;
+  addObservation: (
+    observationInput: AgentObservationInput
+  ) => AgentObservation<any>; // TODO
+  addMessage: (historyInput: AgentMessageHistoryInput) => AgentMessageHistory;
+  addFeedback: (feedbackInput: AgentFeedbackInput) => AgentFeedback;
   addPlan: (plan: AgentPlan<TEvents>) => void;
   /**
    * Called whenever the agent (LLM assistant) receives or sends a message.
