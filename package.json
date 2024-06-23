@@ -31,12 +31,12 @@
     "@langchain/community": "^0.0.53",
     "@langchain/core": "^0.1.63",
     "@langchain/openai": "^0.0.28",
-    "@types/node": "^20.14.6",
+    "@types/node": "^20.14.8",
     "dotenv": "^16.4.5",
     "json-schema-to-ts": "^3.1.0",
     "ts-node": "^10.9.2",
     "tsup": "^8.1.0",
-    "typescript": "^5.4.5",
+    "typescript": "^5.5.2",
     "vitest": "^1.6.0",
     "wikipedia": "^2.1.2",
     "zod": "^3.23.8"
@@ -47,8 +47,8 @@
   "dependencies": {
     "@ai-sdk/openai": "^0.0.31",
     "@xstate/graph": "^2.0.0",
-    "ai": "^3.2.1",
-    "xstate": "^5.13.2"
+    "ai": "^3.2.5",
+    "xstate": "^5.14.0"
   },
   "packageManager": "pnpm@8.11.0"
 }

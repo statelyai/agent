@@ -6,13 +6,13 @@ dependencies:
     version: registry.npmjs.org/@ai-sdk/openai@0.0.31(zod@3.23.8)
   '@xstate/graph':
     specifier: ^2.0.0
-    version: registry.npmjs.org/@xstate/graph@2.0.0(xstate@5.13.2)
+    version: registry.npmjs.org/@xstate/graph@2.0.0(xstate@5.14.0)
   ai:
-    specifier: ^3.2.1
-    version: registry.npmjs.org/ai@3.2.1(react@18.3.1)(solid-js@1.8.17)(svelte@4.2.18)(vue@3.4.29)(zod@3.23.8)
+    specifier: ^3.2.5
+    version: registry.npmjs.org/ai@3.2.5(react@18.3.1)(solid-js@1.8.17)(svelte@4.2.18)(vue@3.4.30)(zod@3.23.8)
   xstate:
-    specifier: ^5.13.2
-    version: registry.npmjs.org/xstate@5.13.2
+    specifier: ^5.14.0
+    version: registry.npmjs.org/xstate@5.14.0
 
 devDependencies:
   '@changesets/changelog-github':
@@ -31,8 +31,8 @@ devDependencies:
     specifier: ^0.0.28
     version: registry.npmjs.org/@langchain/openai@0.0.28
   '@types/node':
-    specifier: ^20.14.6
-    version: registry.npmjs.org/@types/node@20.14.6
+    specifier: ^20.14.8
+    version: registry.npmjs.org/@types/node@20.14.8
   dotenv:
     specifier: ^16.4.5
     version: registry.npmjs.org/dotenv@16.4.5
@@ -41,16 +41,16 @@ devDependencies:
     version: registry.npmjs.org/json-schema-to-ts@3.1.0
   ts-node:
     specifier: ^10.9.2
-    version: registry.npmjs.org/ts-node@10.9.2(@types/node@20.14.6)(typescript@5.4.5)
+    version: registry.npmjs.org/ts-node@10.9.2(@types/node@20.14.8)(typescript@5.5.2)
   tsup:
     specifier: ^8.1.0
-    version: registry.npmjs.org/tsup@8.1.0(ts-node@10.9.2)(typescript@5.4.5)
+    version: registry.npmjs.org/tsup@8.1.0(ts-node@10.9.2)(typescript@5.5.2)
   typescript:
-    specifier: ^5.4.5
-    version: registry.npmjs.org/typescript@5.4.5
+    specifier: ^5.5.2
+    version: registry.npmjs.org/typescript@5.5.2
   vitest:
     specifier: ^1.6.0
-    version: registry.npmjs.org/vitest@1.6.0(@types/node@20.14.6)
+    version: registry.npmjs.org/vitest@1.6.0(@types/node@20.14.8)
   wikipedia:
     specifier: ^2.1.2
     version: registry.npmjs.org/wikipedia@2.1.2
@@ -93,6 +93,25 @@ packages:
       zod: registry.npmjs.org/zod@3.23.8
     dev: false
 
+  registry.npmjs.org/@ai-sdk/provider-utils@0.0.16(zod@3.23.8):
+    resolution: {integrity: sha512-W2zUZ+C5uDr2P9/KZwtV4r4F0l2RlD0AvtJyug7ER5g3hGHAfKrPM0y2hSlRxNfph5BTCC6YQX0nFLyBph+6bQ==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@ai-sdk/provider-utils/-/provider-utils-0.0.16.tgz}
+    id: registry.npmjs.org/@ai-sdk/provider-utils/0.0.16
+    name: '@ai-sdk/provider-utils'
+    version: 0.0.16
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^3.0.0
+    peerDependenciesMeta:
+      zod:
+        optional: true
+    dependencies:
+      '@ai-sdk/provider': registry.npmjs.org/@ai-sdk/provider@0.0.10
+      eventsource-parser: registry.npmjs.org/eventsource-parser@1.1.2
+      nanoid: registry.npmjs.org/nanoid@3.3.6
+      secure-json-parse: registry.npmjs.org/secure-json-parse@2.7.0
+      zod: registry.npmjs.org/zod@3.23.8
+    dev: false
+
   registry.npmjs.org/@ai-sdk/provider@0.0.10:
     resolution: {integrity: sha512-NzkrtREQpHID1cTqY/C4CI30PVOaXWKYytDR2EcytmFgnP7Z6+CrGIA/YCnNhYAuUm6Nx+nGpRL/Hmyrv7NYzg==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@ai-sdk/provider/-/provider-0.0.10.tgz}
     name: '@ai-sdk/provider'
@@ -102,11 +121,11 @@ packages:
       json-schema: registry.npmjs.org/json-schema@0.4.0
     dev: false
 
-  registry.npmjs.org/@ai-sdk/react@0.0.4(react@18.3.1)(zod@3.23.8):
-    resolution: {integrity: sha512-YPvp81onTxNlnOWolyjvappS5y9pMkZwWKMxrqwMimaJI4NWquPrAeHCYqzaVAb/+RKaveEGSvyYs/SD8AO6ig==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@ai-sdk/react/-/react-0.0.4.tgz}
-    id: registry.npmjs.org/@ai-sdk/react/0.0.4
+  registry.npmjs.org/@ai-sdk/react@0.0.6(react@18.3.1)(zod@3.23.8):
+    resolution: {integrity: sha512-k0gpsiUxDTkDMYsdWl0WhujXVPMZvfPMCSbxZtzGvEao0YZNFQ/9ct+SZJvb5t9126oiNG0a344COO9CZ1OdLg==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@ai-sdk/react/-/react-0.0.6.tgz}
+    id: registry.npmjs.org/@ai-sdk/react/0.0.6
     name: '@ai-sdk/react'
-    version: 0.0.4
+    version: 0.0.6
     engines: {node: '>=18'}
     peerDependencies:
       react: ^18 || ^19
@@ -117,18 +136,18 @@ packages:
       zod:
         optional: true
     dependencies:
-      '@ai-sdk/provider-utils': registry.npmjs.org/@ai-sdk/provider-utils@0.0.15(zod@3.23.8)
-      '@ai-sdk/ui-utils': registry.npmjs.org/@ai-sdk/ui-utils@0.0.4(zod@3.23.8)
+      '@ai-sdk/provider-utils': registry.npmjs.org/@ai-sdk/provider-utils@0.0.16(zod@3.23.8)
+      '@ai-sdk/ui-utils': registry.npmjs.org/@ai-sdk/ui-utils@0.0.5(zod@3.23.8)
       react: registry.npmjs.org/react@18.3.1
       swr: registry.npmjs.org/swr@2.2.0(react@18.3.1)
       zod: registry.npmjs.org/zod@3.23.8
     dev: false
 
-  registry.npmjs.org/@ai-sdk/solid@0.0.4(solid-js@1.8.17)(zod@3.23.8):
-    resolution: {integrity: sha512-1X/vauXG+V0Hsb2P8kZFKaDrderTtB/7XdHZ/UkSMzTk8k0twx9OEXgztW8Rggh51t6sdI7mUoqAY5Khvjf01w==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@ai-sdk/solid/-/solid-0.0.4.tgz}
-    id: registry.npmjs.org/@ai-sdk/solid/0.0.4
+  registry.npmjs.org/@ai-sdk/solid@0.0.5(solid-js@1.8.17)(zod@3.23.8):
+    resolution: {integrity: sha512-h43y+Vt4if2/6ms2u5OtPCzrA64FqyrpLJCnM2wcCF1WNiu11GGJI+GMHKWZrNPDqokD+PYeh1GG9Xd9DCppKA==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@ai-sdk/solid/-/solid-0.0.5.tgz}
+    id: registry.npmjs.org/@ai-sdk/solid/0.0.5
     name: '@ai-sdk/solid'
-    version: 0.0.4
+    version: 0.0.5
     engines: {node: '>=18'}
     peerDependencies:
       solid-js: ^1.7.7
@@ -136,7 +155,7 @@ packages:
       solid-js:
         optional: true
     dependencies:
-      '@ai-sdk/ui-utils': registry.npmjs.org/@ai-sdk/ui-utils@0.0.4(zod@3.23.8)
+      '@ai-sdk/ui-utils': registry.npmjs.org/@ai-sdk/ui-utils@0.0.5(zod@3.23.8)
       solid-js: registry.npmjs.org/solid-js@1.8.17
       solid-swr-store: registry.npmjs.org/solid-swr-store@0.10.7(solid-js@1.8.17)(swr-store@0.10.6)
       swr-store: registry.npmjs.org/swr-store@0.10.6
@@ -144,11 +163,11 @@ packages:
       - zod
     dev: false
 
-  registry.npmjs.org/@ai-sdk/svelte@0.0.4(svelte@4.2.18)(zod@3.23.8):
-    resolution: {integrity: sha512-LVxg9/60ARX8AQIswyDx53HQlQQH91yUOThhUA0x9s2BcxgpDgDN37imynnoZbU7lvA5M9NvwlinkmUdJzUVTA==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@ai-sdk/svelte/-/svelte-0.0.4.tgz}
-    id: registry.npmjs.org/@ai-sdk/svelte/0.0.4
+  registry.npmjs.org/@ai-sdk/svelte@0.0.5(svelte@4.2.18)(zod@3.23.8):
+    resolution: {integrity: sha512-5Jqww5Jtuyyg5NGRxS4GjxnWaSG5bkLPd/lOQnCj+RhS1DqGfjw0Qz76OYNXnjR/5AeJoAU4FTU45P8z5Kmy2A==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@ai-sdk/svelte/-/svelte-0.0.5.tgz}
+    id: registry.npmjs.org/@ai-sdk/svelte/0.0.5
     name: '@ai-sdk/svelte'
-    version: 0.0.4
+    version: 0.0.5
     engines: {node: '>=18'}
     peerDependencies:
       svelte: ^3.0.0 || ^4.0.0
@@ -156,19 +175,19 @@ packages:
       svelte:
         optional: true
     dependencies:
-      '@ai-sdk/provider-utils': registry.npmjs.org/@ai-sdk/provider-utils@0.0.15(zod@3.23.8)
-      '@ai-sdk/ui-utils': registry.npmjs.org/@ai-sdk/ui-utils@0.0.4(zod@3.23.8)
+      '@ai-sdk/provider-utils': registry.npmjs.org/@ai-sdk/provider-utils@0.0.16(zod@3.23.8)
+      '@ai-sdk/ui-utils': registry.npmjs.org/@ai-sdk/ui-utils@0.0.5(zod@3.23.8)
       sswr: registry.npmjs.org/sswr@2.1.0(svelte@4.2.18)
       svelte: registry.npmjs.org/svelte@4.2.18
     transitivePeerDependencies:
       - zod
     dev: false
 
-  registry.npmjs.org/@ai-sdk/ui-utils@0.0.4(zod@3.23.8):
-    resolution: {integrity: sha512-vUfuqVOZV3MyFokAduQyJsnDP00qzyZut6mizFscXlCOmiiW3FAnu/XEnMEwCmf7yUG7O4v7Xa2zd4X1tsN5pg==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@ai-sdk/ui-utils/-/ui-utils-0.0.4.tgz}
-    id: registry.npmjs.org/@ai-sdk/ui-utils/0.0.4
+  registry.npmjs.org/@ai-sdk/ui-utils@0.0.5(zod@3.23.8):
+    resolution: {integrity: sha512-Ug2qsKVLLxzZtJMu8Omw7wA1p8RqX82M4OeAZ2/oCPlZSAVAte+VnuXl6q6lUsAUfprVCDpzDDm9GJOOOYZg2Q==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@ai-sdk/ui-utils/-/ui-utils-0.0.5.tgz}
+    id: registry.npmjs.org/@ai-sdk/ui-utils/0.0.5
     name: '@ai-sdk/ui-utils'
-    version: 0.0.4
+    version: 0.0.5
     engines: {node: '>=18'}
     peerDependencies:
       zod: ^3.0.0
@@ -176,16 +195,16 @@ packages:
       zod:
         optional: true
     dependencies:
-      '@ai-sdk/provider-utils': registry.npmjs.org/@ai-sdk/provider-utils@0.0.15(zod@3.23.8)
+      '@ai-sdk/provider-utils': registry.npmjs.org/@ai-sdk/provider-utils@0.0.16(zod@3.23.8)
       secure-json-parse: registry.npmjs.org/secure-json-parse@2.7.0
       zod: registry.npmjs.org/zod@3.23.8
     dev: false
 
-  registry.npmjs.org/@ai-sdk/vue@0.0.4(vue@3.4.29)(zod@3.23.8):
-    resolution: {integrity: sha512-gWyvenqPi1FC8tvczKhla4pCDTVMXvXHpiIJaBn7fRNq2vO7gDSAr9O//SCSPGY3l1aUCKLgKJbbeoXiTRSGBQ==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@ai-sdk/vue/-/vue-0.0.4.tgz}
-    id: registry.npmjs.org/@ai-sdk/vue/0.0.4
+  registry.npmjs.org/@ai-sdk/vue@0.0.5(vue@3.4.30)(zod@3.23.8):
+    resolution: {integrity: sha512-G4wdK2LKD7QevNvbnroatnkQ/V2X4H6iif4+wdFhlPo9am24+mgf4bXjvuIwNIgCVd0wwQ3hE+2kGuBDATu9gA==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@ai-sdk/vue/-/vue-0.0.5.tgz}
+    id: registry.npmjs.org/@ai-sdk/vue/0.0.5
     name: '@ai-sdk/vue'
-    version: 0.0.4
+    version: 0.0.5
     engines: {node: '>=18'}
     peerDependencies:
       vue: ^3.3.4
@@ -193,9 +212,9 @@ packages:
       vue:
         optional: true
     dependencies:
-      '@ai-sdk/ui-utils': registry.npmjs.org/@ai-sdk/ui-utils@0.0.4(zod@3.23.8)
-      swrv: registry.npmjs.org/swrv@1.0.4(vue@3.4.29)
-      vue: registry.npmjs.org/vue@3.4.29(typescript@5.4.5)
+      '@ai-sdk/ui-utils': registry.npmjs.org/@ai-sdk/ui-utils@0.0.5(zod@3.23.8)
+      swrv: registry.npmjs.org/swrv@1.0.4(vue@3.4.30)
+      vue: registry.npmjs.org/vue@3.4.30(typescript@5.5.2)
     transitivePeerDependencies:
       - zod
     dev: false
@@ -1467,7 +1486,7 @@ packages:
     name: '@types/node-fetch'
     version: 2.6.11
     dependencies:
-      '@types/node': registry.npmjs.org/@types/node@20.14.6
+      '@types/node': registry.npmjs.org/@types/node@20.14.8
       form-data: registry.npmjs.org/form-data@4.0.0
     dev: true
 
@@ -1477,18 +1496,18 @@ packages:
     version: 12.20.55
     dev: true
 
-  registry.npmjs.org/@types/node@18.19.37:
-    resolution: {integrity: sha512-Pi53fdVMk7Ig5IfAMltQQMgtY7xLzHaEous8IQasYsdQbYK3v90FkxI3XYQCe/Qme58pqp14lXJIsFmGP8VoZQ==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@types/node/-/node-18.19.37.tgz}
+  registry.npmjs.org/@types/node@18.19.39:
+    resolution: {integrity: sha512-nPwTRDKUctxw3di5b4TfT3I0sWDiWoPQCZjXhvdkINntwr8lcoVCKsTgnXeRubKIlfnV+eN/HYk6Jb40tbcEAQ==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@types/node/-/node-18.19.39.tgz}
     name: '@types/node'
-    version: 18.19.37
+    version: 18.19.39
     dependencies:
       undici-types: registry.npmjs.org/undici-types@5.26.5
     dev: true
 
-  registry.npmjs.org/@types/node@20.14.6:
-    resolution: {integrity: sha512-JbA0XIJPL1IiNnU7PFxDXyfAwcwVVrOoqyzzyQTyMeVhBzkJVMSkC1LlVsRQ2lpqiY4n6Bb9oCS6lzDKVQxbZw==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@types/node/-/node-20.14.6.tgz}
+  registry.npmjs.org/@types/node@20.14.8:
+    resolution: {integrity: sha512-DO+2/jZinXfROG7j7WKFn/3C6nFwxy2lLpgLjEXJz+0XKphZlTLJ14mo8Vfg8X5BWN6XjyESXq+LcYdT7tR3bA==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@types/node/-/node-20.14.8.tgz}
     name: '@types/node'
-    version: 20.14.6
+    version: 20.14.8
     dependencies:
       undici-types: registry.npmjs.org/undici-types@5.26.5
     dev: true
@@ -1566,100 +1585,100 @@ packages:
       pretty-format: registry.npmjs.org/pretty-format@29.7.0
     dev: true
 
-  registry.npmjs.org/@vue/compiler-core@3.4.29:
-    resolution: {integrity: sha512-TFKiRkKKsRCKvg/jTSSKK7mYLJEQdUiUfykbG49rubC9SfDyvT2JrzTReopWlz2MxqeLyxh9UZhvxEIBgAhtrg==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@vue/compiler-core/-/compiler-core-3.4.29.tgz}
+  registry.npmjs.org/@vue/compiler-core@3.4.30:
+    resolution: {integrity: sha512-ZL8y4Xxdh8O6PSwfdZ1IpQ24PjTAieOz3jXb/MDTfDtANcKBMxg1KLm6OX2jofsaQGYfIVzd3BAG22i56/cF1w==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@vue/compiler-core/-/compiler-core-3.4.30.tgz}
     name: '@vue/compiler-core'
-    version: 3.4.29
+    version: 3.4.30
     dependencies:
       '@babel/parser': registry.npmjs.org/@babel/parser@7.24.7
-      '@vue/shared': registry.npmjs.org/@vue/shared@3.4.29
+      '@vue/shared': registry.npmjs.org/@vue/shared@3.4.30
       entities: registry.npmjs.org/entities@4.5.0
       estree-walker: registry.npmjs.org/estree-walker@2.0.2
       source-map-js: registry.npmjs.org/source-map-js@1.2.0
     dev: false
 
-  registry.npmjs.org/@vue/compiler-dom@3.4.29:
-    resolution: {integrity: sha512-A6+iZ2fKIEGnfPJejdB7b1FlJzgiD+Y/sxxKwJWg1EbJu6ZPgzaPQQ51ESGNv0CP6jm6Z7/pO6Ia8Ze6IKrX7w==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@vue/compiler-dom/-/compiler-dom-3.4.29.tgz}
+  registry.npmjs.org/@vue/compiler-dom@3.4.30:
+    resolution: {integrity: sha512-+16Sd8lYr5j/owCbr9dowcNfrHd+pz+w2/b5Lt26Oz/kB90C9yNbxQ3bYOvt7rI2bxk0nqda39hVcwDFw85c2Q==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@vue/compiler-dom/-/compiler-dom-3.4.30.tgz}
     name: '@vue/compiler-dom'
-    version: 3.4.29
+    version: 3.4.30
     dependencies:
-      '@vue/compiler-core': registry.npmjs.org/@vue/compiler-core@3.4.29
-      '@vue/shared': registry.npmjs.org/@vue/shared@3.4.29
+      '@vue/compiler-core': registry.npmjs.org/@vue/compiler-core@3.4.30
+      '@vue/shared': registry.npmjs.org/@vue/shared@3.4.30
     dev: false
 
-  registry.npmjs.org/@vue/compiler-sfc@3.4.29:
-    resolution: {integrity: sha512-zygDcEtn8ZimDlrEQyLUovoWgKQic6aEQqRXce2WXBvSeHbEbcAsXyCk9oG33ZkyWH4sl9D3tkYc1idoOkdqZQ==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@vue/compiler-sfc/-/compiler-sfc-3.4.29.tgz}
+  registry.npmjs.org/@vue/compiler-sfc@3.4.30:
+    resolution: {integrity: sha512-8vElKklHn/UY8+FgUFlQrYAPbtiSB2zcgeRKW7HkpSRn/JjMRmZvuOtwDx036D1aqKNSTtXkWRfqx53Qb+HmMg==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@vue/compiler-sfc/-/compiler-sfc-3.4.30.tgz}
     name: '@vue/compiler-sfc'
-    version: 3.4.29
+    version: 3.4.30
     dependencies:
       '@babel/parser': registry.npmjs.org/@babel/parser@7.24.7
-      '@vue/compiler-core': registry.npmjs.org/@vue/compiler-core@3.4.29
-      '@vue/compiler-dom': registry.npmjs.org/@vue/compiler-dom@3.4.29
-      '@vue/compiler-ssr': registry.npmjs.org/@vue/compiler-ssr@3.4.29
-      '@vue/shared': registry.npmjs.org/@vue/shared@3.4.29
+      '@vue/compiler-core': registry.npmjs.org/@vue/compiler-core@3.4.30
+      '@vue/compiler-dom': registry.npmjs.org/@vue/compiler-dom@3.4.30
+      '@vue/compiler-ssr': registry.npmjs.org/@vue/compiler-ssr@3.4.30
+      '@vue/shared': registry.npmjs.org/@vue/shared@3.4.30
       estree-walker: registry.npmjs.org/estree-walker@2.0.2
       magic-string: registry.npmjs.org/magic-string@0.30.10
       postcss: registry.npmjs.org/postcss@8.4.38
       source-map-js: registry.npmjs.org/source-map-js@1.2.0
     dev: false
 
-  registry.npmjs.org/@vue/compiler-ssr@3.4.29:
-    resolution: {integrity: sha512-rFbwCmxJ16tDp3N8XCx5xSQzjhidYjXllvEcqX/lopkoznlNPz3jyy0WGJCyhAaVQK677WWFt3YO/WUEkMMUFQ==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@vue/compiler-ssr/-/compiler-ssr-3.4.29.tgz}
+  registry.npmjs.org/@vue/compiler-ssr@3.4.30:
+    resolution: {integrity: sha512-ZJ56YZGXJDd6jky4mmM0rNaNP6kIbQu9LTKZDhcpddGe/3QIalB1WHHmZ6iZfFNyj5mSypTa4+qDJa5VIuxMSg==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@vue/compiler-ssr/-/compiler-ssr-3.4.30.tgz}
     name: '@vue/compiler-ssr'
-    version: 3.4.29
+    version: 3.4.30
     dependencies:
-      '@vue/compiler-dom': registry.npmjs.org/@vue/compiler-dom@3.4.29
-      '@vue/shared': registry.npmjs.org/@vue/shared@3.4.29
+      '@vue/compiler-dom': registry.npmjs.org/@vue/compiler-dom@3.4.30
+      '@vue/shared': registry.npmjs.org/@vue/shared@3.4.30
     dev: false
 
-  registry.npmjs.org/@vue/reactivity@3.4.29:
-    resolution: {integrity: sha512-w8+KV+mb1a8ornnGQitnMdLfE0kXmteaxLdccm2XwdFxXst4q/Z7SEboCV5SqJNpZbKFeaRBBJBhW24aJyGINg==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@vue/reactivity/-/reactivity-3.4.29.tgz}
+  registry.npmjs.org/@vue/reactivity@3.4.30:
+    resolution: {integrity: sha512-bVJurnCe3LS0JII8PPoAA63Zd2MBzcKrEzwdQl92eHCcxtIbxD2fhNwJpa+KkM3Y/A4T5FUnmdhgKwOf6BfbcA==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@vue/reactivity/-/reactivity-3.4.30.tgz}
     name: '@vue/reactivity'
-    version: 3.4.29
+    version: 3.4.30
     dependencies:
-      '@vue/shared': registry.npmjs.org/@vue/shared@3.4.29
+      '@vue/shared': registry.npmjs.org/@vue/shared@3.4.30
     dev: false
 
-  registry.npmjs.org/@vue/runtime-core@3.4.29:
-    resolution: {integrity: sha512-s8fmX3YVR/Rk5ig0ic0NuzTNjK2M7iLuVSZyMmCzN/+Mjuqqif1JasCtEtmtoJWF32pAtUjyuT2ljNKNLeOmnQ==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@vue/runtime-core/-/runtime-core-3.4.29.tgz}
+  registry.npmjs.org/@vue/runtime-core@3.4.30:
+    resolution: {integrity: sha512-qaFEbnNpGz+tlnkaualomogzN8vBLkgzK55uuWjYXbYn039eOBZrWxyXWq/7qh9Bz2FPifZqGjVDl/FXiq9L2g==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@vue/runtime-core/-/runtime-core-3.4.30.tgz}
     name: '@vue/runtime-core'
-    version: 3.4.29
+    version: 3.4.30
     dependencies:
-      '@vue/reactivity': registry.npmjs.org/@vue/reactivity@3.4.29
-      '@vue/shared': registry.npmjs.org/@vue/shared@3.4.29
+      '@vue/reactivity': registry.npmjs.org/@vue/reactivity@3.4.30
+      '@vue/shared': registry.npmjs.org/@vue/shared@3.4.30
     dev: false
 
-  registry.npmjs.org/@vue/runtime-dom@3.4.29:
-    resolution: {integrity: sha512-gI10atCrtOLf/2MPPMM+dpz3NGulo9ZZR9d1dWo4fYvm+xkfvRrw1ZmJ7mkWtiJVXSsdmPbcK1p5dZzOCKDN0g==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@vue/runtime-dom/-/runtime-dom-3.4.29.tgz}
+  registry.npmjs.org/@vue/runtime-dom@3.4.30:
+    resolution: {integrity: sha512-tV6B4YiZRj5QsaJgw2THCy5C1H+2UeywO9tqgWEc21tn85qHEERndHN/CxlyXvSBFrpmlexCIdnqPuR9RM9thw==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@vue/runtime-dom/-/runtime-dom-3.4.30.tgz}
     name: '@vue/runtime-dom'
-    version: 3.4.29
+    version: 3.4.30
     dependencies:
-      '@vue/reactivity': registry.npmjs.org/@vue/reactivity@3.4.29
-      '@vue/runtime-core': registry.npmjs.org/@vue/runtime-core@3.4.29
-      '@vue/shared': registry.npmjs.org/@vue/shared@3.4.29
+      '@vue/reactivity': registry.npmjs.org/@vue/reactivity@3.4.30
+      '@vue/runtime-core': registry.npmjs.org/@vue/runtime-core@3.4.30
+      '@vue/shared': registry.npmjs.org/@vue/shared@3.4.30
       csstype: registry.npmjs.org/csstype@3.1.3
     dev: false
 
-  registry.npmjs.org/@vue/server-renderer@3.4.29(vue@3.4.29):
-    resolution: {integrity: sha512-HMLCmPI2j/k8PVkSBysrA2RxcxC5DgBiCdj7n7H2QtR8bQQPqKAe8qoaxLcInzouBmzwJ+J0x20ygN/B5mYBng==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@vue/server-renderer/-/server-renderer-3.4.29.tgz}
-    id: registry.npmjs.org/@vue/server-renderer/3.4.29
+  registry.npmjs.org/@vue/server-renderer@3.4.30(vue@3.4.30):
+    resolution: {integrity: sha512-TBD3eqR1DeDc0cMrXS/vEs/PWzq1uXxnvjoqQuDGFIEHFIwuDTX/KWAQKIBjyMWLFHEeTDGYVsYci85z2UbTDg==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@vue/server-renderer/-/server-renderer-3.4.30.tgz}
+    id: registry.npmjs.org/@vue/server-renderer/3.4.30
     name: '@vue/server-renderer'
-    version: 3.4.29
+    version: 3.4.30
     peerDependencies:
-      vue: 3.4.29
+      vue: 3.4.30
     dependencies:
-      '@vue/compiler-ssr': registry.npmjs.org/@vue/compiler-ssr@3.4.29
-      '@vue/shared': registry.npmjs.org/@vue/shared@3.4.29
-      vue: registry.npmjs.org/vue@3.4.29(typescript@5.4.5)
+      '@vue/compiler-ssr': registry.npmjs.org/@vue/compiler-ssr@3.4.30
+      '@vue/shared': registry.npmjs.org/@vue/shared@3.4.30
+      vue: registry.npmjs.org/vue@3.4.30(typescript@5.5.2)
     dev: false
 
-  registry.npmjs.org/@vue/shared@3.4.29:
-    resolution: {integrity: sha512-hQ2gAQcBO/CDpC82DCrinJNgOHI2v+FA7BDW4lMSPeBpQ7sRe2OLHWe5cph1s7D8DUQAwRt18dBDfJJ220APEA==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@vue/shared/-/shared-3.4.29.tgz}
+  registry.npmjs.org/@vue/shared@3.4.30:
+    resolution: {integrity: sha512-CLg+f8RQCHQnKvuHY9adMsMaQOcqclh6Z5V9TaoMgy0ut0tz848joZ7/CYFFyF/yZ5i2yaw7Fn498C+CNZVHIg==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@vue/shared/-/shared-3.4.30.tgz}
     name: '@vue/shared'
-    version: 3.4.29
+    version: 3.4.30
     dev: false
 
-  registry.npmjs.org/@xstate/graph@2.0.0(xstate@5.13.2):
+  registry.npmjs.org/@xstate/graph@2.0.0(xstate@5.14.0):
     resolution: {integrity: sha512-wmTdXnnmvE3EUyAwO1kYdp4drGymp+zNUhy/C0KFajzIw2EHfnEtYvognP0H08PzLgY1b1MvMD6yj1Ijyl7c+Q==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@xstate/graph/-/graph-2.0.0.tgz}
     id: registry.npmjs.org/@xstate/graph/2.0.0
     name: '@xstate/graph'
@@ -1667,7 +1686,7 @@ packages:
     peerDependencies:
       xstate: ^5.13.0
     dependencies:
-      xstate: registry.npmjs.org/xstate@5.13.2
+      xstate: registry.npmjs.org/xstate@5.14.0
     dev: false
 
   registry.npmjs.org/abort-controller@3.0.0:
@@ -1704,11 +1723,11 @@ packages:
       humanize-ms: registry.npmjs.org/humanize-ms@1.2.1
     dev: true
 
-  registry.npmjs.org/ai@3.2.1(react@18.3.1)(solid-js@1.8.17)(svelte@4.2.18)(vue@3.4.29)(zod@3.23.8):
-    resolution: {integrity: sha512-6C2rGQLeZmhbjPBOZy2IU8aGg2c9btL8QKWS+dT2Pyxik2ue28FbEsOWQ2O1DOG/5NLX6VM6yNXMlBem3N59Cg==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/ai/-/ai-3.2.1.tgz}
-    id: registry.npmjs.org/ai/3.2.1
+  registry.npmjs.org/ai@3.2.5(react@18.3.1)(solid-js@1.8.17)(svelte@4.2.18)(vue@3.4.30)(zod@3.23.8):
+    resolution: {integrity: sha512-Af4prTiDL+PKGLuAkNmaCSc3JJWTefjYTuzoLqghj/jsHz61ldyV91JT0Lra3wa9Yt/uDBc8wf4wHd7vCOXbfg==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/ai/-/ai-3.2.5.tgz}
+    id: registry.npmjs.org/ai/3.2.5
     name: ai
-    version: 3.2.1
+    version: 3.2.5
     engines: {node: '>=18'}
     peerDependencies:
       openai: ^4.42.0
@@ -1726,12 +1745,12 @@ packages:
         optional: true
     dependencies:
       '@ai-sdk/provider': registry.npmjs.org/@ai-sdk/provider@0.0.10
-      '@ai-sdk/provider-utils': registry.npmjs.org/@ai-sdk/provider-utils@0.0.15(zod@3.23.8)
-      '@ai-sdk/react': registry.npmjs.org/@ai-sdk/react@0.0.4(react@18.3.1)(zod@3.23.8)
-      '@ai-sdk/solid': registry.npmjs.org/@ai-sdk/solid@0.0.4(solid-js@1.8.17)(zod@3.23.8)
-      '@ai-sdk/svelte': registry.npmjs.org/@ai-sdk/svelte@0.0.4(svelte@4.2.18)(zod@3.23.8)
-      '@ai-sdk/ui-utils': registry.npmjs.org/@ai-sdk/ui-utils@0.0.4(zod@3.23.8)
-      '@ai-sdk/vue': registry.npmjs.org/@ai-sdk/vue@0.0.4(vue@3.4.29)(zod@3.23.8)
+      '@ai-sdk/provider-utils': registry.npmjs.org/@ai-sdk/provider-utils@0.0.16(zod@3.23.8)
+      '@ai-sdk/react': registry.npmjs.org/@ai-sdk/react@0.0.6(react@18.3.1)(zod@3.23.8)
+      '@ai-sdk/solid': registry.npmjs.org/@ai-sdk/solid@0.0.5(solid-js@1.8.17)(zod@3.23.8)
+      '@ai-sdk/svelte': registry.npmjs.org/@ai-sdk/svelte@0.0.5(svelte@4.2.18)(zod@3.23.8)
+      '@ai-sdk/ui-utils': registry.npmjs.org/@ai-sdk/ui-utils@0.0.5(zod@3.23.8)
+      '@ai-sdk/vue': registry.npmjs.org/@ai-sdk/vue@0.0.5(vue@3.4.30)(zod@3.23.8)
       eventsource-parser: registry.npmjs.org/eventsource-parser@1.1.2
       json-schema: registry.npmjs.org/json-schema@0.4.0
       jsondiffpatch: registry.npmjs.org/jsondiffpatch@0.6.0
@@ -2560,7 +2579,7 @@ packages:
       is-string: registry.npmjs.org/is-string@1.0.7
       is-typed-array: registry.npmjs.org/is-typed-array@1.1.13
       is-weakref: registry.npmjs.org/is-weakref@1.0.2
-      object-inspect: registry.npmjs.org/object-inspect@1.13.1
+      object-inspect: registry.npmjs.org/object-inspect@1.13.2
       object-keys: registry.npmjs.org/object-keys@1.1.1
       object.assign: registry.npmjs.org/object.assign@4.1.5
       regexp.prototype.flags: registry.npmjs.org/regexp.prototype.flags@1.5.2
@@ -3274,10 +3293,11 @@ packages:
     engines: {node: '>= 0.4'}
     dev: true
 
-  registry.npmjs.org/is-core-module@2.13.1:
-    resolution: {integrity: sha512-hHrIjvZsftOsvKSn2TRYl63zvxsgE0K+0mYMoH6gD4omR5IWB2KynivBQczo3+wF1cCkjzvptnI9Q0sPU66ilw==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/is-core-module/-/is-core-module-2.13.1.tgz}
+  registry.npmjs.org/is-core-module@2.14.0:
+    resolution: {integrity: sha512-a5dFJih5ZLYlRtDc0dZWP7RiKr6xIKzmn/oAYCDvdLThadVgyJwlaoQPmRtMSpz+rk0OGAgIu+TcM9HUF0fk1A==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/is-core-module/-/is-core-module-2.14.0.tgz}
     name: is-core-module
-    version: 2.13.1
+    version: 2.14.0
+    engines: {node: '>= 0.4'}
     dependencies:
       hasown: registry.npmjs.org/hasown@2.0.2
     dev: true
@@ -4010,10 +4030,11 @@ packages:
     engines: {node: '>=0.10.0'}
     dev: true
 
-  registry.npmjs.org/object-inspect@1.13.1:
-    resolution: {integrity: sha512-5qoj1RUiKOMsCCNLV1CBiPYE10sziTsnmNxkAI/rZhiD63CF7IqdFGC/XzjWjpSgLf0LxXX3bDFIh0E18f6UhQ==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/object-inspect/-/object-inspect-1.13.1.tgz}
+  registry.npmjs.org/object-inspect@1.13.2:
+    resolution: {integrity: sha512-IRZSRuzJiynemAXPYtPe5BoI/RESNYR7TYm50MC5Mqbd3Jmw5y790sErYw3V6SryFJD64b74qQQs9wn5Bg/k3g==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/object-inspect/-/object-inspect-1.13.2.tgz}
     name: object-inspect
-    version: 1.13.1
+    version: 1.13.2
+    engines: {node: '>= 0.4'}
     dev: true
 
   registry.npmjs.org/object-keys@1.1.1:
@@ -4059,7 +4080,7 @@ packages:
     version: 4.52.0
     hasBin: true
     dependencies:
-      '@types/node': registry.npmjs.org/@types/node@18.19.37
+      '@types/node': registry.npmjs.org/@types/node@18.19.39
       '@types/node-fetch': registry.npmjs.org/@types/node-fetch@2.6.11
       abort-controller: registry.npmjs.org/abort-controller@3.0.0
       agentkeepalive: registry.npmjs.org/agentkeepalive@4.5.0
@@ -4340,7 +4361,7 @@ packages:
         optional: true
     dependencies:
       lilconfig: registry.npmjs.org/lilconfig@3.1.2
-      ts-node: registry.npmjs.org/ts-node@10.9.2(@types/node@20.14.6)(typescript@5.4.5)
+      ts-node: registry.npmjs.org/ts-node@10.9.2(@types/node@20.14.8)(typescript@5.5.2)
       yaml: registry.npmjs.org/yaml@2.4.5
     dev: true
 
@@ -4530,7 +4551,7 @@ packages:
     version: 1.22.8
     hasBin: true
     dependencies:
-      is-core-module: registry.npmjs.org/is-core-module@2.13.1
+      is-core-module: registry.npmjs.org/is-core-module@2.14.0
       path-parse: registry.npmjs.org/path-parse@1.0.7
       supports-preserve-symlinks-flag: registry.npmjs.org/supports-preserve-symlinks-flag@1.0.0
     dev: true
@@ -4727,7 +4748,7 @@ packages:
       call-bind: registry.npmjs.org/call-bind@1.0.7
       es-errors: registry.npmjs.org/es-errors@1.3.0
       get-intrinsic: registry.npmjs.org/get-intrinsic@1.2.4
-      object-inspect: registry.npmjs.org/object-inspect@1.13.1
+      object-inspect: registry.npmjs.org/object-inspect@1.13.2
     dev: true
 
   registry.npmjs.org/siginfo@2.0.0:
@@ -5088,7 +5109,7 @@ packages:
     version: 4.0.0
     dev: false
 
-  registry.npmjs.org/swrv@1.0.4(vue@3.4.29):
+  registry.npmjs.org/swrv@1.0.4(vue@3.4.30):
     resolution: {integrity: sha512-zjEkcP8Ywmj+xOJW3lIT65ciY/4AL4e/Or7Gj0MzU3zBJNMdJiT8geVZhINavnlHRMMCcJLHhraLTAiDOTmQ9g==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/swrv/-/swrv-1.0.4.tgz}
     id: registry.npmjs.org/swrv/1.0.4
     name: swrv
@@ -5096,7 +5117,7 @@ packages:
     peerDependencies:
       vue: '>=3.2.26 < 4'
     dependencies:
-      vue: registry.npmjs.org/vue@3.4.29(typescript@5.4.5)
+      vue: registry.npmjs.org/vue@3.4.30(typescript@5.5.2)
     dev: false
 
   registry.npmjs.org/term-size@2.2.1:
@@ -5208,7 +5229,7 @@ packages:
     version: 0.1.13
     dev: true
 
-  registry.npmjs.org/ts-node@10.9.2(@types/node@20.14.6)(typescript@5.4.5):
+  registry.npmjs.org/ts-node@10.9.2(@types/node@20.14.8)(typescript@5.5.2):
     resolution: {integrity: sha512-f0FFpIdcHgn8zcPSbf1dRevwt047YMnaiJM3u2w2RewrB+fob/zePZcrOyQoLMMO7aBIddLcQIEK5dYjkLnGrQ==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/ts-node/-/ts-node-10.9.2.tgz}
     id: registry.npmjs.org/ts-node/10.9.2
     name: ts-node
@@ -5230,19 +5251,19 @@ packages:
       '@tsconfig/node12': registry.npmjs.org/@tsconfig/node12@1.0.11
       '@tsconfig/node14': registry.npmjs.org/@tsconfig/node14@1.0.3
       '@tsconfig/node16': registry.npmjs.org/@tsconfig/node16@1.0.4
-      '@types/node': registry.npmjs.org/@types/node@20.14.6
+      '@types/node': registry.npmjs.org/@types/node@20.14.8
       acorn: registry.npmjs.org/acorn@8.12.0
       acorn-walk: registry.npmjs.org/acorn-walk@8.3.3
       arg: registry.npmjs.org/arg@4.1.3
       create-require: registry.npmjs.org/create-require@1.1.1
       diff: registry.npmjs.org/diff@4.0.2
       make-error: registry.npmjs.org/make-error@1.3.6
-      typescript: registry.npmjs.org/typescript@5.4.5
+      typescript: registry.npmjs.org/typescript@5.5.2
       v8-compile-cache-lib: registry.npmjs.org/v8-compile-cache-lib@3.0.1
       yn: registry.npmjs.org/yn@3.1.1
     dev: true
 
-  registry.npmjs.org/tsup@8.1.0(ts-node@10.9.2)(typescript@5.4.5):
+  registry.npmjs.org/tsup@8.1.0(ts-node@10.9.2)(typescript@5.5.2):
     resolution: {integrity: sha512-UFdfCAXukax+U6KzeTNO2kAARHcWxmKsnvSPXUcfA1D+kU05XDccCrkffCQpFaWDsZfV0jMyTsxU39VfCp6EOg==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/tsup/-/tsup-8.1.0.tgz}
     id: registry.npmjs.org/tsup/8.1.0
     name: tsup
@@ -5278,7 +5299,7 @@ packages:
       source-map: registry.npmjs.org/source-map@0.8.0-beta.0
       sucrase: registry.npmjs.org/sucrase@3.35.0
       tree-kill: registry.npmjs.org/tree-kill@1.2.2
-      typescript: registry.npmjs.org/typescript@5.4.5
+      typescript: registry.npmjs.org/typescript@5.5.2
     transitivePeerDependencies:
       - supports-color
       - ts-node
@@ -5380,10 +5401,10 @@ packages:
       possible-typed-array-names: registry.npmjs.org/possible-typed-array-names@1.0.0
     dev: true
 
-  registry.npmjs.org/typescript@5.4.5:
-    resolution: {integrity: sha512-vcI4UpRgg81oIRUFwR0WSIHKt11nJ7SAVlYNIu+QpqeyXP+gpQJy/Z4+F0aGxSE4MqwjyXvW/TzgkLAx2AGHwQ==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/typescript/-/typescript-5.4.5.tgz}
+  registry.npmjs.org/typescript@5.5.2:
+    resolution: {integrity: sha512-NcRtPEOsPFFWjobJEtfihkLCZCXZt/os3zf8nTxjVH3RvTSxjrCamJpbExGvYOF+tFHc3pA65qpdwPbzjohhew==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/typescript/-/typescript-5.5.2.tgz}
     name: typescript
-    version: 5.4.5
+    version: 5.5.2
     engines: {node: '>=14.17'}
     hasBin: true
 
@@ -5450,7 +5471,7 @@ packages:
       spdx-expression-parse: registry.npmjs.org/spdx-expression-parse@3.0.1
     dev: true
 
-  registry.npmjs.org/vite-node@1.6.0(@types/node@20.14.6):
+  registry.npmjs.org/vite-node@1.6.0(@types/node@20.14.8):
     resolution: {integrity: sha512-de6HJgzC+TFzOu0NTC4RAIsyf/DY/ibWDYQUcuEA84EMHhcefTUGkjFHKKEJhQN4A+6I0u++kr3l36ZF2d7XRw==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/vite-node/-/vite-node-1.6.0.tgz}
     id: registry.npmjs.org/vite-node/1.6.0
     name: vite-node
@@ -5462,7 +5483,7 @@ packages:
       debug: registry.npmjs.org/debug@4.3.5
       pathe: registry.npmjs.org/pathe@1.1.2
       picocolors: registry.npmjs.org/picocolors@1.0.1
-      vite: registry.npmjs.org/vite@5.3.1(@types/node@20.14.6)
+      vite: registry.npmjs.org/vite@5.3.1(@types/node@20.14.8)
     transitivePeerDependencies:
       - '@types/node'
       - less
@@ -5474,7 +5495,7 @@ packages:
       - terser
     dev: true
 
-  registry.npmjs.org/vite@5.3.1(@types/node@20.14.6):
+  registry.npmjs.org/vite@5.3.1(@types/node@20.14.8):
     resolution: {integrity: sha512-XBmSKRLXLxiaPYamLv3/hnP/KXDai1NDexN0FpkTaZXTfycHvkRHoenpgl/fvuK/kPbB6xAgoyiryAhQNxYmAQ==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/vite/-/vite-5.3.1.tgz}
     id: registry.npmjs.org/vite/5.3.1
     name: vite
@@ -5505,7 +5526,7 @@ packages:
       terser:
         optional: true
     dependencies:
-      '@types/node': registry.npmjs.org/@types/node@20.14.6
+      '@types/node': registry.npmjs.org/@types/node@20.14.8
       esbuild: registry.npmjs.org/esbuild@0.21.5
       postcss: registry.npmjs.org/postcss@8.4.38
       rollup: registry.npmjs.org/rollup@4.18.0
@@ -5513,7 +5534,7 @@ packages:
       fsevents: registry.npmjs.org/fsevents@2.3.3
     dev: true
 
-  registry.npmjs.org/vitest@1.6.0(@types/node@20.14.6):
+  registry.npmjs.org/vitest@1.6.0(@types/node@20.14.8):
     resolution: {integrity: sha512-H5r/dN06swuFnzNFhq/dnz37bPXnq8xB2xB5JOVk8K09rUtoeNN+LHWkoQ0A/i3hvbUKKcCei9KpbxqHMLhLLA==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/vitest/-/vitest-1.6.0.tgz}
     id: registry.npmjs.org/vitest/1.6.0
     name: vitest
@@ -5541,7 +5562,7 @@ packages:
       jsdom:
         optional: true
     dependencies:
-      '@types/node': registry.npmjs.org/@types/node@20.14.6
+      '@types/node': registry.npmjs.org/@types/node@20.14.8
       '@vitest/expect': registry.npmjs.org/@vitest/expect@1.6.0
       '@vitest/runner': registry.npmjs.org/@vitest/runner@1.6.0
       '@vitest/snapshot': registry.npmjs.org/@vitest/snapshot@1.6.0
@@ -5559,8 +5580,8 @@ packages:
       strip-literal: registry.npmjs.org/strip-literal@2.1.0
       tinybench: registry.npmjs.org/tinybench@2.8.0
       tinypool: registry.npmjs.org/tinypool@0.8.4
-      vite: registry.npmjs.org/vite@5.3.1(@types/node@20.14.6)
-      vite-node: registry.npmjs.org/vite-node@1.6.0(@types/node@20.14.6)
+      vite: registry.npmjs.org/vite@5.3.1(@types/node@20.14.8)
+      vite-node: registry.npmjs.org/vite-node@1.6.0(@types/node@20.14.8)
       why-is-node-running: registry.npmjs.org/why-is-node-running@2.2.2
     transitivePeerDependencies:
       - less
@@ -5572,23 +5593,23 @@ packages:
       - terser
     dev: true
 
-  registry.npmjs.org/vue@3.4.29(typescript@5.4.5):
-    resolution: {integrity: sha512-8QUYfRcYzNlYuzKPfge1UWC6nF9ym0lx7mpGVPJYNhddxEf3DD0+kU07NTL0sXuiT2HuJuKr/iEO8WvXvT0RSQ==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/vue/-/vue-3.4.29.tgz}
-    id: registry.npmjs.org/vue/3.4.29
+  registry.npmjs.org/vue@3.4.30(typescript@5.5.2):
+    resolution: {integrity: sha512-NcxtKCwkdf1zPsr7Y8+QlDBCGqxvjLXF2EX+yi76rV5rrz90Y6gK1cq0olIhdWGgrlhs9ElHuhi9t3+W5sG5Xw==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/vue/-/vue-3.4.30.tgz}
+    id: registry.npmjs.org/vue/3.4.30
     name: vue
-    version: 3.4.29
+    version: 3.4.30
     peerDependencies:
       typescript: '*'
     peerDependenciesMeta:
       typescript:
         optional: true
     dependencies:
-      '@vue/compiler-dom': registry.npmjs.org/@vue/compiler-dom@3.4.29
-      '@vue/compiler-sfc': registry.npmjs.org/@vue/compiler-sfc@3.4.29
-      '@vue/runtime-dom': registry.npmjs.org/@vue/runtime-dom@3.4.29
-      '@vue/server-renderer': registry.npmjs.org/@vue/server-renderer@3.4.29(vue@3.4.29)
-      '@vue/shared': registry.npmjs.org/@vue/shared@3.4.29
-      typescript: registry.npmjs.org/typescript@5.4.5
+      '@vue/compiler-dom': registry.npmjs.org/@vue/compiler-dom@3.4.30
+      '@vue/compiler-sfc': registry.npmjs.org/@vue/compiler-sfc@3.4.30
+      '@vue/runtime-dom': registry.npmjs.org/@vue/runtime-dom@3.4.30
+      '@vue/server-renderer': registry.npmjs.org/@vue/server-renderer@3.4.30(vue@3.4.30)
+      '@vue/shared': registry.npmjs.org/@vue/shared@3.4.30
+      typescript: registry.npmjs.org/typescript@5.5.2
     dev: false
 
   registry.npmjs.org/wcwidth@1.0.1:
@@ -5760,10 +5781,10 @@ packages:
       strip-ansi: registry.npmjs.org/strip-ansi@7.1.0
     dev: true
 
-  registry.npmjs.org/xstate@5.13.2:
-    resolution: {integrity: sha512-cFbFJUuK7n8NGe9rsT9G8QjK/8KQO5WaxCkpl1GxnvSDb9oXM/+cbZbEtLT/YaAjDfaGA2nzOKyw5oev2LuNRw==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/xstate/-/xstate-5.13.2.tgz}
+  registry.npmjs.org/xstate@5.14.0:
+    resolution: {integrity: sha512-3c1H8dzebSODUSY1vM86zIE3Eg+VFzElvhklaF/ZTN5K2i6HsLc4j38qn9+TF2mHPTUFXrOn4M0Cxw9m63upLA==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/xstate/-/xstate-5.14.0.tgz}
     name: xstate
-    version: 5.13.2
+    version: 5.14.0
     dev: false
 
   registry.npmjs.org/y18n@4.0.3:
