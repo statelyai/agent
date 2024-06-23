@@ -92,6 +92,11 @@ export async function simplePlanner<T extends Agent<any>>(
     });
   }
 
+  if (!Object.keys(toolMap).length) {
+    // No valid transitions for the specified tools
+    return undefined;
+  }
+
   // Create a prompt with the given context and goal.
   // The template is used to ensure that a single tool call is made.
   const prompt = simplePlannerPromptTemplate({
@@ -109,6 +114,7 @@ export async function simplePlanner<T extends Agent<any>>(
   const singleResult = result.toolResults[0];
 
   if (!singleResult) {
+    console.log(toolMap);
     // TODO: retries?
     console.warn('No tool call results returned');
     return undefined;
