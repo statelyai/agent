@@ -1,6 +1,8 @@
 import { test, expect, vi } from 'vitest';
 import { createAgent, type AIAdapter } from './';
 import { createActor, createMachine } from 'xstate';
+import { GenerateTextResult } from 'ai';
+import { z } from 'zod';
 
 test('an agent has the expected interface', () => {
   const agent = createAgent({
@@ -175,7 +177,7 @@ test('Agents can use a custom adapter', async () => {
   expect(res.text).toEqual('Response');
 });
 
-test.skip('You can listen for emitted agent events', async () => {
+test('You can listen for feedback events', () => {
   const fn = vi.fn();
   const agent = createAgent({
     name: 'test',
@@ -184,11 +186,7 @@ test.skip('You can listen for emitted agent events', async () => {
     model: {} as any,
   });
 
-  const p = new Promise((res) => {
-    agent.on('feedback', (f) => {
-      res(f);
-    });
-  });
+  agent.on('feedback', fn);
 
   agent.addFeedback({
     attributes: {
@@ -198,7 +196,69 @@ test.skip('You can listen for emitted agent events', async () => {
     observationId: 'obs-1',
   });
 
-  await p;
-
   expect(fn).toHaveBeenCalled();
+});
+
+test('You can listen for plan events', async () => {
+  const fn = vi.fn();
+  const agent = createAgent({
+    name: 'test',
+    model: {} as any,
+    events: {
+      WIN: z.object({}),
+    },
+    adapter: {
+      generateText: async (arg) => {
+        const keys = Object.keys(arg.tools!);
+
+        if (keys.length !== 1) {
+          throw new Error('Expected only 1 choice');
+        }
+
+        return {
+          toolResults: [
+            {
+              result: {
+                type: keys[0],
+              },
+            },
+          ],
+        } as any as GenerateTextResult<any>;
+      },
+      streamText: {} as any,
+    },
+  });
+
+  agent.on('plan', fn);
+
+  await agent.decide({
+    goal: 'Win the game',
+    state: {
+      value: 'playing',
+      context: {},
+    },
+    machine: createMachine({
+      initial: 'playing',
+      states: {
+        playing: {
+          on: {
+            WIN: {
+              target: 'won',
+            },
+          },
+        },
+        won: {},
+      },
+    }),
+  });
+
+  expect(fn).toHaveBeenCalledWith(
+    expect.objectContaining({
+      plan: expect.objectContaining({
+        nextEvent: {
+          type: 'WIN',
+        },
+      }),
+    })
+  );
 });
