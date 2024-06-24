@@ -95,9 +95,24 @@ export function createAgent<
   ...generateTextOptions
 }: {
   /**
+   * The unique identifier for the agent.
+   *
+   * This should be the same across all sessions of a specific agent, as it can be
+   * used to retrieve memory for this agent.
+   *
+   * @example
+   * ```ts
+   * const agent = createAgent({
+   *  id: 'recipe-assistant',
+   *  // ...
+   * });
+   * ```
+   */
+  id?: string;
+  /**
    * The name of the agent
    */
-  name: string;
+  name?: string;
   /**
    * A description of the role of the agent
    */

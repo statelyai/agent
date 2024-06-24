@@ -244,12 +244,12 @@ export type Agent<TEvents extends EventObject> = ActorRefFrom<
   AgentLogic<TEvents>
 > & {
   /**
-   * The general name of the agent. All agents with the same name are related and
+   * The name of the agent. All agents with the same name are related and
    * able to share experiences (observations, feedback) with each other.
    */
-  name: string;
+  name?: string;
   /**
-   * The unique id of the agent. This is used to partition message history.
+   * The unique identifier for the agent.
    */
   id?: string;
   description?: string;
