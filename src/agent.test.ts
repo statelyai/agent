@@ -113,6 +113,46 @@ test('agent.addObservation() adds to observations', () => {
   );
 });
 
+test('agent.addObservation() adds to observations with machine hash', () => {
+  const agent = createAgent({
+    name: 'test',
+    events: {},
+    model: {} as any,
+  });
+
+  const machine = createMachine({
+    initial: 'playing',
+    states: {
+      playing: {
+        on: {
+          play: 'lost',
+        },
+      },
+      lost: {},
+    },
+  });
+
+  const observation = agent.addObservation({
+    prevState: { value: 'playing', context: {} },
+    event: { type: 'play', position: 3 },
+    state: { value: 'lost', context: {} },
+    machine,
+  });
+
+  expect(observation.sessionId).toEqual(agent.sessionId);
+
+  expect(agent.select((c) => c.observations)).toContainEqual(
+    expect.objectContaining({
+      prevState: { value: 'playing', context: {} },
+      event: { type: 'play', position: 3 },
+      state: { value: 'lost', context: {} },
+      machineHash: expect.any(String),
+      sessionId: expect.any(String),
+      timestamp: expect.any(Number),
+    })
+  );
+});
+
 test('agent.interact() observes machine actors (no 2nd arg)', () => {
   const machine = createMachine({
     initial: 'a',

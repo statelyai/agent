@@ -169,6 +169,7 @@ export interface AgentObservation<TActor extends AnyActorRef> {
   prevState: SnapshotFrom<TActor> | undefined;
   event: EventFrom<TActor>;
   state: SnapshotFrom<TActor>;
+  machineHash: string | undefined;
   sessionId: string;
   timestamp: number;
 }
@@ -178,6 +179,7 @@ export interface AgentObservationInput {
   prevState: ObservedState | undefined;
   event: AnyEventObject;
   state: ObservedState;
+  machine?: AnyStateMachine;
   timestamp?: number;
 }
 

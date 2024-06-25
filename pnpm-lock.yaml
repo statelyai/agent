@@ -4,12 +4,18 @@ dependencies:
   '@ai-sdk/openai':
     specifier: ^0.0.31
     version: registry.npmjs.org/@ai-sdk/openai@0.0.31(zod@3.23.8)
+  '@types/object-hash':
+    specifier: ^3.0.6
+    version: registry.npmjs.org/@types/object-hash@3.0.6
   '@xstate/graph':
     specifier: ^2.0.0
     version: registry.npmjs.org/@xstate/graph@2.0.0(xstate@5.14.0)
   ai:
     specifier: ^3.2.5
     version: registry.npmjs.org/ai@3.2.5(react@18.3.1)(solid-js@1.8.17)(svelte@4.2.18)(vue@3.4.30)(zod@3.23.8)
+  object-hash:
+    specifier: ^3.0.0
+    version: registry.npmjs.org/object-hash@3.0.0
   xstate:
     specifier: ^5.14.0
     version: registry.npmjs.org/xstate@5.14.0
@@ -1517,6 +1523,12 @@ packages:
     name: '@types/normalize-package-data'
     version: 2.4.4
     dev: true
+
+  registry.npmjs.org/@types/object-hash@3.0.6:
+    resolution: {integrity: sha512-fOBV8C1FIu2ELinoILQ+ApxcUKz4ngq+IWUYrxSGjXzzjUALijilampwkMgEtJ+h2njAW3pi853QpzNVCHB73w==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@types/object-hash/-/object-hash-3.0.6.tgz}
+    name: '@types/object-hash'
+    version: 3.0.6
+    dev: false
 
   registry.npmjs.org/@types/retry@0.12.0:
     resolution: {integrity: sha512-wWKOClTTiizcZhXnPY4wikVAwmdYHp8q6DmC+EJUzAMsycb7HB32Kh9RN4+0gExjmPmZSAQjgURXIGATPegAvA==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/@types/retry/-/retry-0.12.0.tgz}
@@ -4029,6 +4041,13 @@ packages:
     version: 4.1.1
     engines: {node: '>=0.10.0'}
     dev: true
+
+  registry.npmjs.org/object-hash@3.0.0:
+    resolution: {integrity: sha512-RSn9F68PjH9HqtltsSnqYC1XXoWe9Bju5+213R98cNGttag9q9yAOTzdbsqvIa7aNm5WffBZFpWYr2aWrklWAw==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/object-hash/-/object-hash-3.0.0.tgz}
+    name: object-hash
+    version: 3.0.0
+    engines: {node: '>= 6'}
+    dev: false
 
   registry.npmjs.org/object-inspect@1.13.2:
     resolution: {integrity: sha512-IRZSRuzJiynemAXPYtPe5BoI/RESNYR7TYm50MC5Mqbd3Jmw5y790sErYw3V6SryFJD64b74qQQs9wn5Bg/k3g==, registry: https://registry.npmjs.com/, tarball: https://registry.npmjs.org/object-inspect/-/object-inspect-1.13.2.tgz}

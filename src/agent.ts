@@ -20,12 +20,13 @@ import {
   ObservedState,
   AgentObservationInput,
   AgentMemoryContext,
+  AgentObservation,
 } from './types';
 import { simplePlanner } from './planners/simplePlanner';
 import { agentGenerateText, agentStreamText } from './text';
 import { agentDecide } from './decision';
 import { vercelAdapter } from './adapters/vercel';
-import { randomId } from './utils';
+import { getMachineHash, randomId } from './utils';
 
 export const agentLogic: AgentLogic<AnyEventObject> = fromTransition(
   (state, event, { emit }) => {
@@ -189,12 +190,18 @@ export function createAgent<
   };
 
   agent.addObservation = (observationInput) => {
+    const { prevState, event, state } = observationInput;
     const observation = {
-      ...observationInput,
+      prevState,
+      event,
+      state,
       id: observationInput.id ?? randomId(),
       sessionId: agent.sessionId,
       timestamp: observationInput.timestamp ?? Date.now(),
-    };
+      machineHash: observationInput.machine
+        ? getMachineHash(observationInput.machine)
+        : undefined,
+    } satisfies AgentObservation<any>;
 
     agent.send({
       type: 'agent.observe',
@@ -249,7 +256,8 @@ export function createAgent<
           event: inspEvent.event,
           prevState,
           state: inspEvent.snapshot as any,
-        };
+          machine: (actorRef as any).src,
+        } satisfies AgentObservationInput;
 
         await handleObservation(observationInput);
       },
@@ -261,6 +269,7 @@ export function createAgent<
         prevState: undefined,
         event: { type: '' }, // TODO: unknown events?
         state: actorRef.getSnapshot(),
+        machine: (actorRef as any).src,
       });
     }
 
