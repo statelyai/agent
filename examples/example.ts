@@ -32,11 +32,11 @@ const machine = setup({
       invoke: [
         {
           src: 'summarizer',
-          input: {
-            context: true,
+          input: (x) => ({
+            context: x.context,
             prompt:
               'Summarize the patient visit in a single sentence. The summary should be in English.',
-          },
+          }),
           onDone: {
             actions: assign({
               englishSummary: ({ event }) => event.output.text,
@@ -45,11 +45,11 @@ const machine = setup({
         },
         {
           src: 'summarizer',
-          input: {
-            context: true,
+          input: (x) => ({
+            context: x.context,
             prompt:
               'Summarize the patient visit in a single sentence. The summary should be in Spanish.',
-          },
+          }),
           onDone: {
             actions: assign({
               spanishSummary: ({ event }) => event.output.text,

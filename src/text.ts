@@ -35,9 +35,7 @@ async function getMessages(
   options: AgentStreamTextOptions
 ): Promise<CoreMessage[]> {
   let messages: CoreMessage[] = [];
-  if (options.messages === true) {
-    messages = agent.select((s) => s.messages);
-  } else if (typeof options.messages === 'function') {
+  if (typeof options.messages === 'function') {
     messages = await options.messages(agent);
   } else if (options.messages) {
     messages = options.messages;
@@ -164,15 +162,10 @@ export function fromTextStream<T extends Agent<any>>(
 ): ObservableActorLogic<
   { textDelta: string },
   Omit<AgentStreamTextOptions, 'context'> & {
-    context?: AgentStreamTextOptions['context'] | boolean;
+    context?: AgentStreamTextOptions['context'];
   }
 > {
-  return fromObservable(({ input, self }) => {
-    const context =
-      input.context === true
-        ? (self._parent?.getSnapshot() as AnyMachineSnapshot).context
-        : input.context;
-
+  return fromObservable(({ input }) => {
     const observers = new Set<Observer<{ textDelta: string }>>();
 
     // TODO: check if messages was provided instead
@@ -181,7 +174,7 @@ export function fromTextStream<T extends Agent<any>>(
       const result = await agentStreamText(agent, {
         ...defaultOptions,
         ...input,
-        context,
+        context: input.context,
       });
 
       for await (const part of result.fullStream) {
@@ -214,18 +207,14 @@ export function fromText<T extends Agent<any>>(
 ): PromiseActorLogic<
   GenerateTextResult<Record<string, CoreTool<any, any>>>,
   Omit<AgentGenerateTextOptions, 'context'> & {
-    context?: AgentGenerateTextOptions['context'] | boolean;
+    context?: AgentGenerateTextOptions['context'];
   }
 > {
-  return fromPromise(async ({ input, self }) => {
-    const context =
-      input.context === true
-        ? (self._parent?.getSnapshot() as AnyMachineSnapshot).context
-        : input.context;
+  return fromPromise(async ({ input }) => {
     return await agentGenerateText(agent, {
       ...input,
       ...defaultOptions,
-      context,
+      context: input.context,
     });
   });
 }

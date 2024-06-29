@@ -20,7 +20,7 @@ async function main() {
   console.log(response1.text);
 
   const response2 = await agent.generateText({
-    messages: true,
+    messages: (x) => x.select((ctx) => ctx.messages),
     prompt: 'What about the first one?',
   });
 

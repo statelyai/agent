@@ -325,7 +325,7 @@ export interface CommonTextOptions {
   prompt: FromAgent<string>;
   model?: LanguageModel;
   context?: Record<string, any>;
-  messages?: FromAgent<CoreMessage[]> | true;
+  messages?: FromAgent<CoreMessage[]>;
   template?: PromptTemplate<any>;
 }
 
