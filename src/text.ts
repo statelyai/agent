@@ -11,7 +11,6 @@ import {
 } from './types';
 import { defaultTextTemplate } from './templates/defaultText';
 import {
-  AnyMachineSnapshot,
   ObservableActorLogic,
   Observer,
   PromiseActorLogic,
@@ -29,10 +28,10 @@ import { randomId } from './utils';
  * @param options
  * @returns
  */
-async function getMessages(
+export async function getMessages(
   agent: Agent<any>,
   prompt: string,
-  options: AgentStreamTextOptions
+  options: Omit<AgentGenerateTextOptions, 'prompt'>
 ): Promise<CoreMessage[]> {
   let messages: CoreMessage[] = [];
   if (typeof options.messages === 'function') {
