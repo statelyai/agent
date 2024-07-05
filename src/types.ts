@@ -62,10 +62,11 @@ export type AgentPlan<TEvent extends EventObject> = {
   goal: string;
   state: ObservedState;
   content?: string;
-  steps?: Array<{
-    event: TEvent;
-    state?: ObservedState;
-  }>;
+  /**
+   * Executes the plan based on the given `state` and resolves with
+   * a potential next `event` to trigger to achieve the `goal`.
+   */
+  execute: (state: ObservedState) => Promise<TEvent | undefined>;
   nextEvent: TEvent | undefined;
   sessionId: string;
   timestamp: number;

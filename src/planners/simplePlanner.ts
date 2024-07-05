@@ -123,11 +123,12 @@ export async function simplePlanner<T extends Agent<any>>(
   return {
     goal: input.goal,
     state: input.state,
-    steps: [
-      {
-        event: singleResult.result,
-      },
-    ],
+    execute: async (state) => {
+      if (JSON.stringify(state) === JSON.stringify(input.state)) {
+        return singleResult.result;
+      }
+      return undefined;
+    },
     nextEvent: singleResult.result,
     sessionId: agent.sessionId,
     timestamp: Date.now(),
