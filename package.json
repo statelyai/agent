@@ -27,17 +27,17 @@
   "license": "MIT",
   "devDependencies": {
     "@changesets/changelog-github": "^0.5.0",
-    "@changesets/cli": "^2.27.5",
+    "@changesets/cli": "^2.27.7",
     "@langchain/community": "^0.0.53",
     "@langchain/core": "^0.1.63",
     "@langchain/openai": "^0.0.28",
-    "@types/node": "^20.14.8",
+    "@types/node": "^20.14.10",
     "@types/object-hash": "^3.0.6",
     "dotenv": "^16.4.5",
     "json-schema-to-ts": "^3.1.0",
     "ts-node": "^10.9.2",
     "tsup": "^8.1.0",
-    "typescript": "^5.5.2",
+    "typescript": "^5.5.3",
     "vitest": "^1.6.0",
     "wikipedia": "^2.1.2",
     "zod": "^3.23.8"
@@ -48,7 +48,7 @@
   "dependencies": {
     "@ai-sdk/openai": "^0.0.31",
     "@xstate/graph": "^2.0.0",
-    "ai": "^3.2.5",
+    "ai": "^3.2.16",
     "object-hash": "^3.0.0",
     "xstate": "^5.14.0"
   },
