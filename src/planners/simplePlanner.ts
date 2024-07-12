@@ -27,7 +27,7 @@ const simplePlannerPromptTemplate: PromptTemplate<any> = (data) => {
   return `
 ${defaultTextTemplate(data)}
 
-Only make a single tool call to achieve the above goal.
+Make at most one tool call to achieve the above goal. If the goal cannot be achieved with any tool calls, do not make any tool call.
   `.trim();
 };
 
@@ -98,17 +98,17 @@ export async function simplePlanner<T extends Agent<any>>(
   }
 
   // Create a prompt with the given context and goal.
-  // The template is used to ensure that a single tool call is made.
+  // The template is used to ensure that a single tool call at most is made.
   const prompt = simplePlannerPromptTemplate({
     context: input.state.context,
     goal: input.goal,
   });
 
   const result = await agent.generateText({
+    toolChoice: 'auto',
     ...input,
     prompt,
     tools: toolMap,
-    toolChoice: 'required',
   });
 
   const singleResult = result.toolResults[0];
