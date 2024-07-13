@@ -48,9 +48,9 @@
   "dependencies": {
     "@ai-sdk/openai": "^0.0.31",
     "@xstate/graph": "^2.0.0",
-    "ai": "^3.2.16",
+    "ai": "^3.2.22",
     "object-hash": "^3.0.0",
-    "xstate": "^5.14.0"
+    "xstate": "^5.15.0"
   },
   "packageManager": "pnpm@8.11.0"
 }
