@@ -1,11 +1,11 @@
 import { CoreTool, tool } from 'ai';
 import {
-  Agent,
   AgentPlan,
   AgentPlanInput,
   ObservedState,
   PromptTemplate,
   TransitionData,
+  AnyAgent,
 } from '../types';
 import { getAllTransitions } from '../utils';
 import { AnyStateMachine } from 'xstate';
@@ -31,7 +31,7 @@ Make at most one tool call to achieve the above goal. If the goal cannot be achi
   `.trim();
 };
 
-export async function simplePlanner<T extends Agent<any>>(
+export async function simplePlanner<T extends AnyAgent>(
   agent: T,
   input: AgentPlanInput<any>
 ): Promise<AgentPlan<any> | undefined> {

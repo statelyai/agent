@@ -1,6 +1,6 @@
 import { AnyMachineSnapshot, fromPromise } from 'xstate';
 import {
-  Agent,
+  AnyAgent,
   AgentDecideOptions,
   AgentDecisionLogic,
   AgentDecisionInput,
@@ -9,7 +9,7 @@ import {
 } from './types';
 import { simplePlanner } from './planners/simplePlanner';
 
-export async function agentDecide<T extends Agent<any>>(
+export async function agentDecide<T extends AnyAgent>(
   agent: T,
   options: AgentDecideOptions
 ): Promise<AgentPlan<any> | undefined> {
@@ -45,7 +45,7 @@ export async function agentDecide<T extends Agent<any>>(
 }
 
 export function fromDecision(
-  agent: Agent<any>,
+  agent: AnyAgent,
   defaultInput?: AgentDecisionInput
 ): AgentDecisionLogic<any> {
   return fromPromise(async ({ input, self }) => {
