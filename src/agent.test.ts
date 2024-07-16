@@ -52,8 +52,20 @@ test('agent.addMessage() adds to message history', () => {
       content: 'msg 1',
     })
   );
+  expect(agent.getMessages()).toContainEqual(
+    expect.objectContaining({
+      content: 'msg 1',
+    })
+  );
 
   expect(agent.select((c) => c.messages)).toContainEqual(
+    expect.objectContaining({
+      content: 'response 1',
+      sessionId: expect.any(String),
+      timestamp: expect.any(Number),
+    })
+  );
+  expect(agent.getMessages()).toContainEqual(
     expect.objectContaining({
       content: 'response 1',
       sessionId: expect.any(String),
@@ -80,6 +92,17 @@ test('agent.addFeedback() adds to feedback', () => {
   expect(feedback.sessionId).toEqual(agent.sessionId);
 
   expect(agent.select((c) => c.feedback)).toContainEqual(
+    expect.objectContaining({
+      attributes: {
+        score: -1,
+      },
+      goal: 'Win the game',
+      observationId: 'obs-1',
+      sessionId: expect.any(String),
+      timestamp: expect.any(Number),
+    })
+  );
+  expect(agent.getFeedback()).toContainEqual(
     expect.objectContaining({
       attributes: {
         score: -1,
@@ -182,6 +205,12 @@ test('agent.interact() observes machine actors (no 2nd arg)', () => {
   actor.start();
 
   expect(agent.select((c) => c.observations)).toContainEqual(
+    expect.objectContaining({
+      prevState: undefined,
+      state: expect.objectContaining({ value: 'a' }),
+    })
+  );
+  expect(agent.getObservations()).toContainEqual(
     expect.objectContaining({
       prevState: undefined,
       state: expect.objectContaining({ value: 'a' }),
