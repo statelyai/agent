@@ -342,8 +342,15 @@ export type Agent<TContext, TEvents extends EventObject> = ActorRefFrom<
   getPlans: () => AgentPlan<TEvents>[];
 
   /**
-   * Inspects state machine actor transitions and automatically observes
-   * (prevState, event, state) tuples.
+   * Interacts with this state machine actor by:
+   * 1. Inspecting state transitions and storing them as observations
+   * 2. Deciding what to do next (which event to send the actor) based on
+   * the agent input returned from `getInput(observation)`.
+   *
+   * Observations contain the `prevState`, `event`, and current `state` of this
+   * actor, as well as other properties that are useful when recalled.
+   * These observations are stored in the `agent`'s short-term (local) memory
+   * and can be retrieved via `agent.getObservations()`.
    */
   interact: <TActor extends AnyActorRef>(
     actorRef: TActor,

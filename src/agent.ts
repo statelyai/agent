@@ -28,7 +28,6 @@ import { agentGenerateText, agentStreamText } from './text';
 import { agentDecide } from './decision';
 import { vercelAdapter } from './adapters/vercel';
 import { getMachineHash, randomId } from './utils';
-import { SomeZodObject, TypeOf } from 'zod';
 
 export const agentLogic: AgentLogic<AnyEventObject> = fromTransition(
   (state, event, { emit }) => {
