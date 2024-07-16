@@ -286,6 +286,8 @@ export function createAgent<
     };
   };
 
+  agent.types = {} as any;
+
   agent.start();
 
   return agent;

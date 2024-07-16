@@ -35,7 +35,7 @@ const agent = createAgent({
 
 const machine = setup({
   types: {
-    events: agent.eventTypes,
+    events: agent.types.events,
     input: {} as string,
     context: {} as {
       customerIssue: string;

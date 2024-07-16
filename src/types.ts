@@ -109,9 +109,9 @@ export type PromptTemplate<TEvents extends EventObject> = (data: {
 }) => string;
 
 export type AgentPlanner<T extends AnyAgent> = (
-  agent: T['eventTypes'],
-  input: AgentPlanInput<T['eventTypes']>
-) => Promise<AgentPlan<T['eventTypes']> | undefined>;
+  agent: T,
+  input: AgentPlanInput<T['types']['events']>
+) => Promise<AgentPlan<T['types']['events']> | undefined>;
 
 export type AgentDecideOptions = {
   goal: string;
@@ -263,8 +263,10 @@ export type Agent<TContext, TEvents extends EventObject> = ActorRefFrom<
   id?: string;
   description?: string;
   events: ZodEventMapping;
-  eventTypes: TEvents;
-  contextType: Compute<TContext>;
+  types: {
+    events: TEvents;
+    context: Compute<TContext>;
+  };
   model: LanguageModel;
   defaultOptions: GenerateTextOptions;
   memory: AgentLongTermMemory | undefined;

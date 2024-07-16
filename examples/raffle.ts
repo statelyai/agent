@@ -27,7 +27,7 @@ const machine = setup({
       lastInput: string | null;
       entries: string[];
     },
-    events: {} as typeof agent.eventTypes | { type: 'draw' },
+    events: {} as typeof agent.types.events | { type: 'draw' },
   },
   actors: { agent: fromDecision(agent), getFromTerminal },
 }).createMachine({

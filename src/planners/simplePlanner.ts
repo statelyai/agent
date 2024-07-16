@@ -105,7 +105,7 @@ export async function simplePlanner<T extends AnyAgent>(
   });
 
   const result = await agent.generateText({
-    toolChoice: 'auto',
+    toolChoice: 'required',
     ...input,
     prompt,
     tools: toolMap,

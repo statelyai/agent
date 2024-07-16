@@ -18,7 +18,7 @@ const agent = createAgent({
 
 const machine = setup({
   types: {
-    events: agent.eventTypes,
+    events: agent.types.events,
   },
   actors: { agent: fromDecision(agent), summarizer: fromText(agent) },
 }).createMachine({

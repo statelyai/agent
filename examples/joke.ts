@@ -67,19 +67,17 @@ const agent = createAgent({
       .describe('Explains why the joke was irrelevant'),
     'agent.markAsRelevant': z.object({}).describe('The joke was relevant'),
   },
+  context: {
+    topic: z.string().describe('The topic for the joke'),
+    jokes: z.array(z.string()).describe('The jokes told so far'),
+    desire: z.string().nullable().describe('The user desire'),
+    lastRating: z.number().nullable().describe('The last joke rating'),
+    loader: z.string().nullable().describe('The loader text'),
+  },
 });
 
 const jokeMachine = setup({
-  types: {
-    context: {} as {
-      topic: string;
-      jokes: string[];
-      desire: string | null;
-      lastRating: number | null;
-      loader: string | null;
-    },
-    events: agent.eventTypes,
-  },
+  types: agent.types,
   actors: {
     agent: fromDecision(agent),
     loader,
