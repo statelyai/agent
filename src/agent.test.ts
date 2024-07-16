@@ -302,3 +302,24 @@ test('You can listen for plan events', async () => {
     })
   );
 });
+
+test('agent.types provides context and event types', () => {
+  const agent = createAgent({
+    model: {} as any,
+    events: {
+      setScore: z.object({
+        score: z.number(),
+      }),
+    },
+    context: {
+      score: z.number(),
+    },
+  });
+
+  agent.types satisfies { context: any; events: any };
+
+  agent.types.context satisfies { score: number };
+
+  // @ts-expect-error
+  agent.types.context satisfies { score: string };
+});
