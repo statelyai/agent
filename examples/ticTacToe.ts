@@ -36,26 +36,16 @@ const agent = createAgent({
       .union([z.literal('x'), z.literal('o')])
       .describe('The current player (x or o)'),
     gameReport: z.string(),
-    events: z.array(z.string()),
   },
 });
 
 type Player = 'x' | 'o';
-
-interface GameContext {
-  board: (Player | null)[];
-  moves: number;
-  player: Player;
-  gameReport: string;
-  events: string[];
-}
 
 const initialContext = {
   board: Array(9).fill(null) as Array<Player | null>,
   moves: 0,
   player: 'x' as Player,
   gameReport: '',
-  events: [],
 } satisfies typeof agent.types.context;
 
 function getWinner(board: typeof initialContext.board): Player | null {
@@ -96,16 +86,8 @@ export const ticTacToeMachine = setup({
       },
       moves: ({ context }) => context.moves + 1,
       player: ({ context }) => (context.player === 'x' ? 'o' : 'x'),
-      events: ({ context, event }) => {
-        return [...context.events, JSON.stringify(event)];
-      },
     }),
     resetGame: assign(initialContext),
-    recordEvent: assign({
-      events: ({ context, event }) => {
-        return [...context.events, JSON.stringify(event)];
-      },
-    }),
     printBoard: ({ context }) => {
       // Print the context.board in a 3 x 3 grid format
       let boardString = '';
@@ -187,7 +169,7 @@ export const ticTacToeMachine = setup({
         src: 'gameReporter',
         input: ({ context }) => ({
           context: {
-            events: context.events,
+            events: agent.getObservations().map((o) => o.event),
             board: context.board,
           },
           prompt: 'Provide a short game report analyzing the game.',

@@ -46,7 +46,7 @@ const machine = setup({
           context: {
             userMessage: 'User says: ' + x.context.userMessage,
           },
-          messages: agent.select((mem) => mem.messages),
+          messages: agent.getMessages(),
           goal: 'Respond to the user, unless they want to end the conversation.',
         }),
       },

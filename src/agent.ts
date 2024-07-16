@@ -11,7 +11,7 @@ import { ZodContextMapping, ZodEventMapping } from './schemas';
 import {
   Agent,
   AgentLogic,
-  AgentMessageHistory,
+  AgentMessage,
   AgentPlanner,
   EventsFromZodEventMapping,
   GenerateTextOptions,
@@ -28,7 +28,6 @@ import { agentGenerateText, agentStreamText } from './text';
 import { agentDecide } from './decision';
 import { vercelAdapter } from './adapters/vercel';
 import { getMachineHash, randomId } from './utils';
-import { SomeZodObject, TypeOf } from 'zod';
 
 export const agentLogic: AgentLogic<AnyEventObject> = fromTransition(
   (state, event, { emit }) => {
@@ -141,7 +140,7 @@ export function createAgent<
   logic?: AgentLogic<TEvents>;
   adapter?: AIAdapter;
 } & GenerateTextOptions): Agent<TContext, TEvents> {
-  const messageHistoryListeners: Observer<AgentMessageHistory>[] = [];
+  const messageHistoryListeners: Observer<AgentMessage>[] = [];
 
   const agent = createActor(logic) as unknown as Agent<TContext, TEvents>;
   agent.events = events;
@@ -177,6 +176,7 @@ export function createAgent<
 
     return message;
   };
+  agent.getMessages = () => agent.getSnapshot().context.messages;
 
   agent.generateText = (opts) => agentGenerateText(agent, opts);
 
@@ -194,6 +194,7 @@ export function createAgent<
     });
     return feedback;
   };
+  agent.getFeedback = () => agent.getSnapshot().context.feedback;
 
   agent.addObservation = (observationInput) => {
     const { prevState, event, state } = observationInput;
@@ -216,6 +217,7 @@ export function createAgent<
 
     return observation;
   };
+  agent.getObservations = () => agent.getSnapshot().context.observations;
 
   agent.addPlan = (plan) => {
     agent.send({
@@ -223,8 +225,9 @@ export function createAgent<
       plan,
     });
   };
+  agent.getPlans = () => agent.getSnapshot().context.plans;
 
-  agent.interact = (actorRef, getInput) => {
+  agent.interact = ((actorRef, getInput) => {
     let prevState: ObservedState | undefined = undefined;
     let subscribed = true;
 
@@ -284,7 +287,7 @@ export function createAgent<
         subscribed = false;
       }, // TODO: make this actually unsubscribe
     };
-  };
+  }) as typeof agent.interact;
 
   agent.types = {} as any;
 

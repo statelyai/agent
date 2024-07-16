@@ -50,7 +50,7 @@ const machine = setup({
             instructions: x.context.instructions,
             clarifications: x.context.clarifications,
           },
-          messages: agent.select((ctx) => ctx.messages),
+          messages: agent.getMessages(),
           goal: 'Respond to the email given the instructions and the provided clarifications. If not enough information is provided, ask for clarification. Otherwise, if you are absolutely sure that there is no ambiguous or missing information, create and submit a response email.',
         }),
       },
