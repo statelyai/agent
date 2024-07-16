@@ -227,7 +227,7 @@ export function createAgent<
   };
   agent.getPlans = () => agent.getSnapshot().context.plans;
 
-  agent.interact = (actorRef, getInput) => {
+  agent.interact = ((actorRef, getInput) => {
     let prevState: ObservedState | undefined = undefined;
     let subscribed = true;
 
@@ -287,7 +287,7 @@ export function createAgent<
         subscribed = false;
       }, // TODO: make this actually unsubscribe
     };
-  };
+  }) as typeof agent.interact;
 
   agent.types = {} as any;
 

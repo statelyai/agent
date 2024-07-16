@@ -342,22 +342,55 @@ export type Agent<TContext, TEvents extends EventObject> = ActorRefFrom<
   getPlans: () => AgentPlan<TEvents>[];
 
   /**
-   * Interacts with this state machine actor by:
-   * 1. Inspecting state transitions and storing them as observations
-   * 2. Deciding what to do next (which event to send the actor) based on
-   * the agent input returned from `getInput(observation)`.
+   * Interacts with this state machine actor by inspecting state transitions and storing them as observations.
    *
    * Observations contain the `prevState`, `event`, and current `state` of this
    * actor, as well as other properties that are useful when recalled.
    * These observations are stored in the `agent`'s short-term (local) memory
    * and can be retrieved via `agent.getObservations()`.
+   *
+   * @example
+   * ```ts
+   * // Only observes the actor's state transitions
+   * agent.interact(actor);
+   *
+   * actor.start();
+   * ```
    */
-  interact: <TActor extends AnyActorRef>(
+  interact<TActor extends AnyActorRef>(actorRef: TActor): Subscription;
+  /**
+   * Interacts with this state machine actor by:
+   * 1. Inspecting state transitions and storing them as observations
+   * 2. Deciding what to do next (which event to send the actor) based on
+   * the agent input returned from `getInput(observation)`, if `getInput(…)` is provided as the 2nd argument.
+   *
+   * Observations contain the `prevState`, `event`, and current `state` of this
+   * actor, as well as other properties that are useful when recalled.
+   * These observations are stored in the `agent`'s short-term (local) memory
+   * and can be retrieved via `agent.getObservations()`.
+   *
+   * @example
+   * ```ts
+   * // Observes the actor's state transitions and
+   * // makes a decision if on the "summarize" state
+   * agent.interact(actor, observed => {
+   *   if (observed.state.matches('summarize')) {
+   *     return {
+   *       context: observed.state.context,
+   *       goal: 'Summarize the message'
+   *     }
+   *   }
+   * });
+   *
+   * actor.start();
+   * ```
+   */
+  interact<TActor extends AnyActorRef>(
     actorRef: TActor,
-    getInput?: (
+    getInput: (
       observation: AgentObservation<TActor>
     ) => AgentDecisionInput | undefined
-  ) => Subscription;
+  ): Subscription;
 };
 
 export type AnyAgent = Agent<any, any>;
