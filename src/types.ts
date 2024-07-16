@@ -104,7 +104,7 @@ export type PromptTemplate<TEvents extends EventObject> = (data: {
    */
   observations?: AgentObservation<any>[]; // TODO
   feedback?: AgentFeedback[];
-  messages?: AgentMessageHistory[];
+  messages?: AgentMessage[];
   plans?: AgentPlan<TEvents>[];
 }) => string;
 
@@ -142,7 +142,7 @@ export interface AgentFeedbackInput {
   timestamp?: number;
 }
 
-export type AgentMessageHistory = CoreMessage & {
+export type AgentMessage = CoreMessage & {
   timestamp: number;
   id: string;
   /**
@@ -154,7 +154,7 @@ export type AgentMessageHistory = CoreMessage & {
   sessionId: string;
 };
 
-export type AgentMessageHistoryInput = CoreMessage & {
+export type AgentMessageInput = CoreMessage & {
   timestamp?: number;
   id?: string;
   /**
@@ -206,7 +206,7 @@ export type AgentEmitted<TEvents extends EventObject> =
     }
   | {
       type: 'message';
-      message: AgentMessageHistory;
+      message: AgentMessage;
     }
   | {
       type: 'plan';
@@ -225,7 +225,7 @@ export type AgentLogic<TEvents extends EventObject> = ActorLogic<
     }
   | {
       type: 'agent.message';
-      message: AgentMessageHistory;
+      message: AgentMessage;
     }
   | {
       type: 'agent.plan';
@@ -303,17 +303,37 @@ export type Agent<TContext, TEvents extends EventObject> = ActorRefFrom<
   addObservation: (
     observationInput: AgentObservationInput
   ) => AgentObservation<any>; // TODO
-  addMessage: (historyInput: AgentMessageHistoryInput) => AgentMessageHistory;
+  addMessage: (messageInput: AgentMessageInput) => AgentMessage;
   addFeedback: (feedbackInput: AgentFeedbackInput) => AgentFeedback;
   addPlan: (plan: AgentPlan<TEvents>) => void;
   /**
    * Called whenever the agent (LLM assistant) receives or sends a message.
    */
-  onMessage: (callback: (message: AgentMessageHistory) => void) => void;
+  onMessage: (callback: (message: AgentMessage) => void) => void;
   /**
    * Selects agent data from its context.
    */
   select: <T>(selector: (context: AgentMemoryContext) => T) => T;
+
+  /**
+   * Retrieves messages from the agent's short-term (local) memory.
+   */
+  getMessages: () => AgentMessage[];
+
+  /**
+   * Retrieves observations from the agent's short-term (local) memory.
+   */
+  getObservations: () => AgentObservation<Agent<TContext, TEvents>>[];
+
+  /**
+   * Retrieves feedback from the agent's short-term (local) memory.
+   */
+  getFeedback: () => AgentFeedback[];
+
+  /**
+   * Retrieves strategies from the agent's short-term (local) memory.
+   */
+  getPlans: () => AgentPlan<TEvents>[];
 
   /**
    * Inspects state machine actor transitions and automatically observes
@@ -370,7 +390,7 @@ export type ObservedStateFrom<TActor extends AnyActorRef> = Pick<
 
 export type AgentMemoryContext = {
   observations: AgentObservation<any>[]; // TODO
-  messages: AgentMessageHistory[];
+  messages: AgentMessage[];
   plans: AgentPlan<any>[];
   feedback: AgentFeedback[];
 };

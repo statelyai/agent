@@ -11,7 +11,7 @@ import { ZodContextMapping, ZodEventMapping } from './schemas';
 import {
   Agent,
   AgentLogic,
-  AgentMessageHistory,
+  AgentMessage,
   AgentPlanner,
   EventsFromZodEventMapping,
   GenerateTextOptions,
@@ -141,7 +141,7 @@ export function createAgent<
   logic?: AgentLogic<TEvents>;
   adapter?: AIAdapter;
 } & GenerateTextOptions): Agent<TContext, TEvents> {
-  const messageHistoryListeners: Observer<AgentMessageHistory>[] = [];
+  const messageHistoryListeners: Observer<AgentMessage>[] = [];
 
   const agent = createActor(logic) as unknown as Agent<TContext, TEvents>;
   agent.events = events;
@@ -177,6 +177,7 @@ export function createAgent<
 
     return message;
   };
+  agent.getMessages = () => agent.getSnapshot().context.messages;
 
   agent.generateText = (opts) => agentGenerateText(agent, opts);
 
@@ -194,6 +195,7 @@ export function createAgent<
     });
     return feedback;
   };
+  agent.getFeedback = () => agent.getSnapshot().context.feedback;
 
   agent.addObservation = (observationInput) => {
     const { prevState, event, state } = observationInput;
@@ -216,6 +218,7 @@ export function createAgent<
 
     return observation;
   };
+  agent.getObservations = () => agent.getSnapshot().context.observations;
 
   agent.addPlan = (plan) => {
     agent.send({
@@ -223,6 +226,7 @@ export function createAgent<
       plan,
     });
   };
+  agent.getPlans = () => agent.getSnapshot().context.plans;
 
   agent.interact = (actorRef, getInput) => {
     let prevState: ObservedState | undefined = undefined;

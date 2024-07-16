@@ -15,10 +15,15 @@ test('an agent has the expected interface', () => {
   expect(agent.generateText).toBeDefined();
   expect(agent.streamText).toBeDefined();
 
-  expect(agent.addFeedback).toBeDefined();
   expect(agent.addMessage).toBeDefined();
   expect(agent.addObservation).toBeDefined();
+  expect(agent.addFeedback).toBeDefined();
   expect(agent.addPlan).toBeDefined();
+
+  expect(agent.getMessages).toBeDefined();
+  expect(agent.getObservations).toBeDefined();
+  expect(agent.getFeedback).toBeDefined();
+  expect(agent.getPlans).toBeDefined();
 
   expect(agent.interact).toBeDefined();
 });
