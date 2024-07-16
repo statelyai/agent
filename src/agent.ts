@@ -7,11 +7,11 @@ import {
   Observer,
   toObserver,
 } from 'xstate';
-import { ZodEventMapping } from './schemas';
+import { ZodContextMapping, ZodEventMapping } from './schemas';
 import {
   Agent,
   AgentLogic,
-  AgentMessageHistory,
+  AgentMessage,
   AgentPlanner,
   EventsFromZodEventMapping,
   GenerateTextOptions,
@@ -21,6 +21,7 @@ import {
   AgentObservationInput,
   AgentMemoryContext,
   AgentObservation,
+  ContextFromZodContextMapping,
 } from './types';
 import { simplePlanner } from './planners/simplePlanner';
 import { agentGenerateText, agentStreamText } from './text';
@@ -81,14 +82,17 @@ export const agentLogic: AgentLogic<AnyEventObject> = fromTransition(
 );
 
 export function createAgent<
+  const TContextSchema extends ZodContextMapping,
   const TEventSchemas extends ZodEventMapping,
-  TEvents extends EventObject = EventsFromZodEventMapping<TEventSchemas>
+  TEvents extends EventObject = EventsFromZodEventMapping<TEventSchemas>,
+  TContext = ContextFromZodContextMapping<TContextSchema>
 >({
   name,
   description,
   model,
   events,
-  planner = simplePlanner as AgentPlanner<Agent<TEvents>>,
+  context,
+  planner = simplePlanner as AgentPlanner<Agent<TContext, TEvents>>,
   stringify = JSON.stringify,
   getMemory,
   logic = agentLogic as AgentLogic<TEvents>,
@@ -123,21 +127,22 @@ export function createAgent<
    * that the agent knows about.
    */
   events: TEventSchemas;
-  planner?: AgentPlanner<Agent<TEvents>>;
+  context?: TContextSchema;
+  planner?: AgentPlanner<Agent<TContext, TEvents>>;
   stringify?: typeof JSON.stringify;
   /**
    * A function that retrieves the agent's long term memory
    */
-  getMemory?: (agent: Agent<any>) => AgentLongTermMemory;
+  getMemory?: (agent: Agent<TContext, TEvents>) => AgentLongTermMemory;
   /**
    * Agent logic
    */
   logic?: AgentLogic<TEvents>;
   adapter?: AIAdapter;
-} & GenerateTextOptions): Agent<TEvents> {
-  const messageHistoryListeners: Observer<AgentMessageHistory>[] = [];
+} & GenerateTextOptions): Agent<TContext, TEvents> {
+  const messageHistoryListeners: Observer<AgentMessage>[] = [];
 
-  const agent = createActor(logic) as unknown as Agent<TEvents>;
+  const agent = createActor(logic) as unknown as Agent<TContext, TEvents>;
   agent.events = events;
   agent.model = model;
   agent.name = name;
@@ -171,6 +176,7 @@ export function createAgent<
 
     return message;
   };
+  agent.getMessages = () => agent.getSnapshot().context.messages;
 
   agent.generateText = (opts) => agentGenerateText(agent, opts);
 
@@ -188,6 +194,7 @@ export function createAgent<
     });
     return feedback;
   };
+  agent.getFeedback = () => agent.getSnapshot().context.feedback;
 
   agent.addObservation = (observationInput) => {
     const { prevState, event, state } = observationInput;
@@ -210,6 +217,7 @@ export function createAgent<
 
     return observation;
   };
+  agent.getObservations = () => agent.getSnapshot().context.observations;
 
   agent.addPlan = (plan) => {
     agent.send({
@@ -217,8 +225,9 @@ export function createAgent<
       plan,
     });
   };
+  agent.getPlans = () => agent.getSnapshot().context.plans;
 
-  agent.interact = (actorRef, getInput) => {
+  agent.interact = ((actorRef, getInput) => {
     let prevState: ObservedState | undefined = undefined;
     let subscribed = true;
 
@@ -278,7 +287,9 @@ export function createAgent<
         subscribed = false;
       }, // TODO: make this actually unsubscribe
     };
-  };
+  }) as typeof agent.interact;
+
+  agent.types = {} as any;
 
   agent.start();
 

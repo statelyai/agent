@@ -1,15 +1,11 @@
-import type { SomeZodObject } from 'zod';
-import { AnyEventObject } from 'xstate';
-import { ObservedState } from './types';
+import { ZodType, type SomeZodObject } from 'zod';
 
 export type ZodEventMapping = {
   // map event types to Zod types
   [eventType: string]: SomeZodObject;
 };
 
-export type ZodActionMapping = {
-  [eventType: string]: {
-    schema: SomeZodObject;
-    action: (state: ObservedState, event: AnyEventObject) => Promise<void>;
-  };
+export type ZodContextMapping = {
+  // map context keys to Zod types
+  [contextKey: string]: ZodType;
 };

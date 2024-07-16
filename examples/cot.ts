@@ -17,16 +17,14 @@ const agent = createAgent({
       answer: z.string().describe('The answer to the question'),
     }),
   },
+  context: {
+    question: z.string().nullable(),
+    thought: z.string().nullable(),
+  },
 });
 
 const machine = setup({
-  types: {
-    context: {} as {
-      question: string | null;
-      thought: string | null;
-    },
-    events: agent.eventTypes,
-  },
+  types: agent.types,
   actors: { agent: fromDecision(agent), getFromTerminal },
 }).createMachine({
   initial: 'asking',

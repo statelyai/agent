@@ -1,11 +1,11 @@
 import { CoreTool, tool } from 'ai';
 import {
-  Agent,
   AgentPlan,
   AgentPlanInput,
   ObservedState,
   PromptTemplate,
   TransitionData,
+  AnyAgent,
 } from '../types';
 import { getAllTransitions } from '../utils';
 import { AnyStateMachine } from 'xstate';
@@ -28,11 +28,11 @@ const simplePlannerPromptTemplate: PromptTemplate<any> = (data) => {
   return `
 ${defaultTextTemplate(data)}
 
-Only make a single tool call to achieve the above goal.
+Make at most one tool call to achieve the above goal. If the goal cannot be achieved with any tool calls, do not make any tool call.
   `.trim();
 };
 
-export async function simplePlanner<T extends Agent<any>>(
+export async function simplePlanner<T extends AnyAgent>(
   agent: T,
   input: AgentPlanInput<any>
 ): Promise<AgentPlan<any> | undefined> {
@@ -99,7 +99,7 @@ export async function simplePlanner<T extends Agent<any>>(
   }
 
   // Create a prompt with the given context and goal.
-  // The template is used to ensure that a single tool call is made.
+  // The template is used to ensure that a single tool call at most is made.
   const prompt = simplePlannerPromptTemplate({
     context: input.state.context,
     goal: input.goal,
@@ -108,11 +108,11 @@ export async function simplePlanner<T extends Agent<any>>(
   const messages = await getMessages(agent, prompt, input);
 
   const result = await agent.generateText({
+    toolChoice: 'required',
     ...input,
     prompt,
     messages,
     tools: toolMap,
-    toolChoice: 'required',
   });
 
   const singleResult = result.toolResults[0];
@@ -127,11 +127,12 @@ export async function simplePlanner<T extends Agent<any>>(
   return {
     goal: input.goal,
     state: input.state,
-    steps: [
-      {
-        event: singleResult.result,
-      },
-    ],
+    execute: async (state) => {
+      if (JSON.stringify(state) === JSON.stringify(input.state)) {
+        return singleResult.result;
+      }
+      return undefined;
+    },
     nextEvent: singleResult.result,
     sessionId: agent.sessionId,
     timestamp: Date.now(),

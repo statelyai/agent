@@ -15,10 +15,15 @@ test('an agent has the expected interface', () => {
   expect(agent.generateText).toBeDefined();
   expect(agent.streamText).toBeDefined();
 
-  expect(agent.addFeedback).toBeDefined();
   expect(agent.addMessage).toBeDefined();
   expect(agent.addObservation).toBeDefined();
+  expect(agent.addFeedback).toBeDefined();
   expect(agent.addPlan).toBeDefined();
+
+  expect(agent.getMessages).toBeDefined();
+  expect(agent.getObservations).toBeDefined();
+  expect(agent.getFeedback).toBeDefined();
+  expect(agent.getPlans).toBeDefined();
 
   expect(agent.interact).toBeDefined();
 });
@@ -47,8 +52,20 @@ test('agent.addMessage() adds to message history', () => {
       content: 'msg 1',
     })
   );
+  expect(agent.getMessages()).toContainEqual(
+    expect.objectContaining({
+      content: 'msg 1',
+    })
+  );
 
   expect(agent.select((c) => c.messages)).toContainEqual(
+    expect.objectContaining({
+      content: 'response 1',
+      sessionId: expect.any(String),
+      timestamp: expect.any(Number),
+    })
+  );
+  expect(agent.getMessages()).toContainEqual(
     expect.objectContaining({
       content: 'response 1',
       sessionId: expect.any(String),
@@ -75,6 +92,17 @@ test('agent.addFeedback() adds to feedback', () => {
   expect(feedback.sessionId).toEqual(agent.sessionId);
 
   expect(agent.select((c) => c.feedback)).toContainEqual(
+    expect.objectContaining({
+      attributes: {
+        score: -1,
+      },
+      goal: 'Win the game',
+      observationId: 'obs-1',
+      sessionId: expect.any(String),
+      timestamp: expect.any(Number),
+    })
+  );
+  expect(agent.getFeedback()).toContainEqual(
     expect.objectContaining({
       attributes: {
         score: -1,
@@ -177,6 +205,12 @@ test('agent.interact() observes machine actors (no 2nd arg)', () => {
   actor.start();
 
   expect(agent.select((c) => c.observations)).toContainEqual(
+    expect.objectContaining({
+      prevState: undefined,
+      state: expect.objectContaining({ value: 'a' }),
+    })
+  );
+  expect(agent.getObservations()).toContainEqual(
     expect.objectContaining({
       prevState: undefined,
       state: expect.objectContaining({ value: 'a' }),
@@ -301,4 +335,25 @@ test('You can listen for plan events', async () => {
       }),
     })
   );
+});
+
+test('agent.types provides context and event types', () => {
+  const agent = createAgent({
+    model: {} as any,
+    events: {
+      setScore: z.object({
+        score: z.number(),
+      }),
+    },
+    context: {
+      score: z.number(),
+    },
+  });
+
+  agent.types satisfies { context: any; events: any };
+
+  agent.types.context satisfies { score: number };
+
+  // @ts-expect-error
+  agent.types.context satisfies { score: string };
 });

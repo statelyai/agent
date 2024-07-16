@@ -36,7 +36,9 @@ const machine = setup({
       todos: Todo[];
       command: string | null;
     },
-    events: {} as typeof agent.eventTypes | { type: 'assist'; command: string },
+    events: {} as
+      | typeof agent.types.events
+      | { type: 'assist'; command: string },
   },
   actors: { agent: fromDecision(agent), getFromTerminal },
 }).createMachine({
