@@ -1,7 +1,7 @@
 import { GenerateTextResult, LanguageModel } from 'ai';
 import wiki, { wikiSearchResult, wikiSummary } from 'wikipedia';
 import { assign, fromPromise, setup } from 'xstate';
-import { Agent } from '../types';
+import { AnyAgent } from '../types';
 
 const searchWiki = fromPromise(
   async ({
@@ -44,7 +44,7 @@ export const chainOfNote = setup({
   types: {
     input: {} as {
       model: LanguageModel;
-      agent: Agent<any>;
+      agent: AnyAgent;
       prompt: string;
     },
     context: {} as {
@@ -56,7 +56,7 @@ export const chainOfNote = setup({
           }[]
         | null;
       model: LanguageModel;
-      agent: Agent<any>;
+      agent: AnyAgent;
       prompt: string;
     },
     output: {} as GenerateTextResult<any>,

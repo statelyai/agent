@@ -1,7 +1,7 @@
-import { Agent, AgentPlan, AgentPlanInput } from '../types';
+import { Agent, AgentPlan, AgentPlanInput, AnyAgent } from '../types';
 import { getShortestPaths } from '@xstate/graph';
 
-export async function simplePlanner<T extends Agent<any>>(
+export async function simplePlanner<T extends AnyAgent>(
   agent: T,
   input: AgentPlanInput<any>
 ): Promise<AgentPlan<any> | undefined> {

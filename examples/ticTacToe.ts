@@ -23,6 +23,21 @@ const agent = createAgent({
     }),
     reset: z.object({}).describe('Reset the game to the initial state'),
   },
+  context: {
+    board: z
+      .array(z.union([z.literal(null), z.literal('x'), z.literal('o')]))
+      .describe('The 3x3 board represented as a 9-element array.'),
+    moves: z
+      .number()
+      .min(0)
+      .max(9)
+      .describe('The number of moves made in the game.'),
+    player: z
+      .union([z.literal('x'), z.literal('o')])
+      .describe('The current player (x or o)'),
+    gameReport: z.string(),
+    events: z.array(z.string()),
+  },
 });
 
 type Player = 'x' | 'o';
@@ -41,7 +56,7 @@ const initialContext = {
   player: 'x' as Player,
   gameReport: '',
   events: [],
-} satisfies GameContext;
+} satisfies typeof agent.types.context;
 
 function getWinner(board: typeof initialContext.board): Player | null {
   const lines = [
@@ -64,8 +79,8 @@ function getWinner(board: typeof initialContext.board): Player | null {
 
 export const ticTacToeMachine = setup({
   types: {
-    context: {} as GameContext,
-    events: agent.eventTypes,
+    context: agent.types.context,
+    events: agent.types.events,
   },
   actors: {
     agent: fromDecision(agent),

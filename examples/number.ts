@@ -20,7 +20,7 @@ const machine = setup({
       previousGuesses: number[];
       answer: number | null;
     },
-    events: agent.eventTypes,
+    events: agent.types.events,
   },
   actors: {
     agent: fromDecision(agent),

@@ -25,7 +25,7 @@ const machine = setup({
       question: string | null;
       goal: string | null;
     },
-    events: agent.eventTypes,
+    events: agent.types.events,
   },
   actors: { decider, getFromTerminal },
 }).createMachine({

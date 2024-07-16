@@ -35,7 +35,7 @@ const machine = setup({
       answer: string | null;
       validation: string | null;
     },
-    events: agent.eventTypes,
+    events: agent.types.events,
   },
   actors: {
     getFromTerminal,

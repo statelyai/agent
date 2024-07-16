@@ -36,7 +36,7 @@ const agent = createAgent({
 const wordGuesserMachine = setup({
   types: {
     context: {} as typeof context,
-    events: agent.eventTypes,
+    events: agent.types.events,
   },
   actors: {
     agent: fromDecision(agent),

@@ -5,13 +5,12 @@ import type {
   StreamTextResult,
 } from 'ai';
 import {
-  Agent,
   AgentGenerateTextOptions,
   AgentStreamTextOptions,
+  AnyAgent,
 } from './types';
 import { defaultTextTemplate } from './templates/defaultText';
 import {
-  AnyMachineSnapshot,
   ObservableActorLogic,
   Observer,
   PromiseActorLogic,
@@ -30,7 +29,7 @@ import { randomId } from './utils';
  * @returns
  */
 async function getMessages(
-  agent: Agent<any>,
+  agent: AnyAgent,
   prompt: string,
   options: AgentStreamTextOptions
 ): Promise<CoreMessage[]> {
@@ -49,7 +48,7 @@ async function getMessages(
   return messages;
 }
 
-export async function agentGenerateText<T extends Agent<any>>(
+export async function agentGenerateText<T extends AnyAgent>(
   agent: T,
   options: AgentGenerateTextOptions
 ) {
@@ -98,7 +97,7 @@ export async function agentGenerateText<T extends Agent<any>>(
 }
 
 export async function agentStreamText(
-  agent: Agent<any>,
+  agent: AnyAgent,
   options: AgentStreamTextOptions
 ): Promise<StreamTextResult<any>> {
   const resolvedOptions = {
@@ -156,7 +155,7 @@ export async function agentStreamText(
   return result;
 }
 
-export function fromTextStream<T extends Agent<any>>(
+export function fromTextStream<T extends AnyAgent>(
   agent: T,
   defaultOptions?: AgentStreamTextOptions
 ): ObservableActorLogic<
@@ -201,7 +200,7 @@ export function fromTextStream<T extends Agent<any>>(
   });
 }
 
-export function fromText<T extends Agent<any>>(
+export function fromText<T extends AnyAgent>(
   agent: T,
   defaultOptions?: AgentGenerateTextOptions
 ): PromiseActorLogic<

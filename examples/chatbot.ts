@@ -13,20 +13,18 @@ const agent = createAgent({
     }),
     'agent.endConversation': z.object({}).describe('Stop the conversation'),
   },
+  context: {
+    userMessage: z.string(),
+  },
 });
 
 const machine = setup({
-  types: {
-    context: {} as {
-      conversation: string[];
-    },
-    events: agent.eventTypes,
-  },
+  types: agent.types,
   actors: { agent: fromDecision(agent), getFromTerminal },
 }).createMachine({
   initial: 'listening',
   context: {
-    conversation: [],
+    userMessage: '',
   },
   states: {
     listening: {
@@ -35,8 +33,7 @@ const machine = setup({
         input: 'User:',
         onDone: {
           actions: assign({
-            conversation: (x) =>
-              x.context.conversation.concat('User: ' + x.event.output),
+            userMessage: (x) => x.event.output,
           }),
           target: 'responding',
         },
@@ -47,20 +44,15 @@ const machine = setup({
         src: 'agent',
         input: (x) => ({
           context: {
-            conversation: x.context.conversation,
+            userMessage: 'User says: ' + x.context.userMessage,
           },
+          messages: agent.select((mem) => mem.messages),
           goal: 'Respond to the user, unless they want to end the conversation.',
         }),
       },
       on: {
         'agent.respond': {
-          actions: [
-            assign({
-              conversation: (x) =>
-                x.context.conversation.concat('Assistant: ' + x.event.response),
-            }),
-            log((x) => `Agent: ${x.event.response}`),
-          ],
+          actions: [log((x) => `Agent: ${x.event.response}`)],
           target: 'listening',
         },
         'agent.endConversation': 'finished',

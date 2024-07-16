@@ -78,7 +78,7 @@ const machine = setup({
       history: string[];
       count: number;
     },
-    events: agent.eventTypes,
+    events: agent.types.events,
   },
   actors: {
     agent: fromDecision(agent),

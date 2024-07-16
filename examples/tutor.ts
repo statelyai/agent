@@ -28,7 +28,7 @@ const machine = setup({
     context: {} as {
       conversation: string[];
     },
-    events: agent.eventTypes,
+    events: agent.types.events,
   },
   actors: { agent: fromDecision(agent), getFromTerminal },
 }).createMachine({

@@ -22,7 +22,7 @@ import {
   streamText,
   StreamTextResult,
 } from 'ai';
-import { ZodEventMapping } from './schemas';
+import { ZodContextMapping, ZodEventMapping } from './schemas';
 import { TypeOf } from 'zod';
 
 export type GenerateTextOptions = Parameters<typeof generateText>[0];
@@ -108,10 +108,10 @@ export type PromptTemplate<TEvents extends EventObject> = (data: {
   plans?: AgentPlan<TEvents>[];
 }) => string;
 
-export type AgentPlanner<T extends Agent<any>> = (
-  agent: T['eventTypes'],
-  input: AgentPlanInput<T['eventTypes']>
-) => Promise<AgentPlan<T['eventTypes']> | undefined>;
+export type AgentPlanner<T extends AnyAgent> = (
+  agent: T,
+  input: AgentPlanInput<T['types']['events']>
+) => Promise<AgentPlan<T['types']['events']> | undefined>;
 
 export type AgentDecideOptions = {
   goal: string;
@@ -243,7 +243,13 @@ export type EventsFromZodEventMapping<TEventSchemas extends ZodEventMapping> =
     } & TypeOf<TEventSchemas[K]>;
   }>;
 
-export type Agent<TEvents extends EventObject> = ActorRefFrom<
+export type ContextFromZodContextMapping<
+  TContextSchema extends ZodContextMapping
+> = {
+  [K in keyof TContextSchema & string]: TypeOf<TContextSchema[K]>;
+};
+
+export type Agent<TContext, TEvents extends EventObject> = ActorRefFrom<
   AgentLogic<TEvents>
 > & {
   /**
@@ -257,7 +263,10 @@ export type Agent<TEvents extends EventObject> = ActorRefFrom<
   id?: string;
   description?: string;
   events: ZodEventMapping;
-  eventTypes: TEvents;
+  types: {
+    events: TEvents;
+    context: Compute<TContext>;
+  };
   model: LanguageModel;
   defaultOptions: GenerateTextOptions;
   memory: AgentLongTermMemory | undefined;
@@ -318,7 +327,7 @@ export type Agent<TEvents extends EventObject> = ActorRefFrom<
   ) => Subscription;
 };
 
-export type AnyAgent = Agent<any>;
+export type AnyAgent = Agent<any, any>;
 
 export type FromAgent<T> = T | ((self: AnyAgent) => T | Promise<T>);
 
@@ -398,3 +407,5 @@ export interface AIAdapter {
   generateText: typeof generateText;
   streamText: typeof streamText;
 }
+
+export type Compute<A extends any> = { [K in keyof A]: A[K] } & unknown;
