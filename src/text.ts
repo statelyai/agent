@@ -28,10 +28,10 @@ import { randomId } from './utils';
  * @param options
  * @returns
  */
-async function getMessages(
+export async function getMessages(
   agent: AnyAgent,
   prompt: string,
-  options: AgentStreamTextOptions
+  options: Omit<AgentGenerateTextOptions, 'prompt'>
 ): Promise<CoreMessage[]> {
   let messages: CoreMessage[] = [];
   if (typeof options.messages === 'function') {

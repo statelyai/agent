@@ -10,6 +10,7 @@ import {
 import { getAllTransitions } from '../utils';
 import { AnyStateMachine } from 'xstate';
 import { defaultTextTemplate } from '../templates/defaultText';
+import { getMessages } from '../text';
 
 function getTransitions(
   state: ObservedState,
@@ -81,7 +82,7 @@ export async function simplePlanner<T extends AnyAgent>(
     toolMap[toolTransitionData.name] = tool({
       description: toolZodType?.description ?? toolTransitionData.description,
       parameters: toolZodType,
-      execute: async (params) => {
+      execute: async (params: Record<string, any>) => {
         const event = {
           type: toolTransitionData.eventType,
           ...params,
@@ -104,10 +105,13 @@ export async function simplePlanner<T extends AnyAgent>(
     goal: input.goal,
   });
 
+  const messages = await getMessages(agent, prompt, input);
+
   const result = await agent.generateText({
     toolChoice: 'required',
     ...input,
     prompt,
+    messages,
     tools: toolMap,
   });
 
