@@ -1,6 +1,6 @@
 {
   "name": "@statelyai/agent",
-  "version": "1.0.0-beta.1",
+  "version": "1.0.0",
   "description": "Stateful agents that make decisions based on finite-state machine models",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
