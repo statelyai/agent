@@ -1,4 +1,4 @@
-import { CoreTool, tool } from 'ai';
+import { type CoreTool, tool } from 'ai';
 import {
   AgentPlan,
   AgentPlanInput,

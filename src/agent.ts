@@ -155,7 +155,7 @@ export function createAgent<
   agent.memory = getMemory ? getMemory(agent) : undefined;
 
   agent.onMessage = (callback) => {
-    messageHistoryListeners.push(toObserver(callback));
+    agent.on('message', (ev) => callback(ev.message));
   };
 
   agent.decide = (opts) => {

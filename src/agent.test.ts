@@ -1,5 +1,5 @@
 import { test, expect, vi } from 'vitest';
-import { createAgent, type AIAdapter } from './';
+import { AgentMessage, createAgent, type AIAdapter } from './';
 import { createActor, createMachine } from 'xstate';
 import { GenerateTextResult } from 'ai';
 import { z } from 'zod';
@@ -356,4 +356,48 @@ test('agent.types provides context and event types', () => {
 
   // @ts-expect-error
   agent.types.context satisfies { score: string };
+});
+
+test('can provide a correlation ID', async () => {
+  const agent = createAgent({
+    model: {} as any,
+    events: {
+      setScore: z.object({
+        score: z.number(),
+      }),
+    },
+    context: {
+      score: z.number(),
+    },
+    adapter: {
+      generateText: async () => {
+        console.log('gen');
+        const res = {
+          text: 'response',
+        };
+
+        return res as GenerateTextResult<any>;
+      },
+      streamText: {} as any,
+    },
+  });
+
+  const promise = new Promise<AgentMessage>((res) => {
+    console.log('listening');
+    agent.onMessage((msg) => {
+      console.log(msg);
+      if (msg.role === 'assistant') {
+        res(msg);
+      }
+    });
+  });
+
+  await agent.generateText({
+    prompt: 'hi',
+    correlationId: 'c-1',
+  });
+
+  const msg = await promise;
+
+  expect(msg.correlationId).toBe('c-1');
 });

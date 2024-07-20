@@ -130,6 +130,10 @@ export type AgentDecideOptions = {
 export interface AgentFeedback {
   goal: string;
   observationId: string;
+  /**
+   * The message correlation that the feedback is relevant for
+   */
+  correlationId?: string;
   attributes: Record<string, any>;
   timestamp: number;
   sessionId: string;
@@ -152,6 +156,8 @@ export type AgentMessage = CoreMessage & {
   responseId?: string;
   result?: GenerateTextResult<any>;
   sessionId: string;
+  correlationId?: string;
+  parentCorrelationId?: string;
 };
 
 export type AgentMessageInput = CoreMessage & {
@@ -162,6 +168,8 @@ export type AgentMessageInput = CoreMessage & {
    * which message this message is responding to, if any.
    */
   responseId?: string;
+  correlationId?: string;
+  parentCorrelationId?: string;
   result?: GenerateTextResult<any>;
 };
 
@@ -395,7 +403,7 @@ export type Agent<TContext, TEvents extends EventObject> = ActorRefFrom<
 
 export type AnyAgent = Agent<any, any>;
 
-export type FromAgent<T> = T | ((self: AnyAgent) => T | Promise<T>);
+export type FromAgent<T> = T | ((agent: AnyAgent) => T | Promise<T>);
 
 export interface CommonTextOptions {
   prompt: FromAgent<string>;
@@ -403,6 +411,8 @@ export interface CommonTextOptions {
   context?: Record<string, any>;
   messages?: FromAgent<CoreMessage[]>;
   template?: PromptTemplate<any>;
+  correlationId?: string;
+  parentCorrelationId?: string;
 }
 
 export type AgentGenerateTextOptions = Omit<
