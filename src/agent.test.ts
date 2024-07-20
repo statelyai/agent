@@ -1,5 +1,10 @@
 import { test, expect, vi } from 'vitest';
-import { AgentMessage, createAgent, type AIAdapter } from './';
+import {
+  AgentGenerateTextResult,
+  AgentMessage,
+  createAgent,
+  type AIAdapter,
+} from './';
 import { createActor, createMachine } from 'xstate';
 import { GenerateTextResult } from 'ai';
 import { z } from 'zod';
@@ -297,7 +302,7 @@ test('You can listen for plan events', async () => {
               },
             },
           ],
-        } as any as GenerateTextResult<any>;
+        } as any as AgentGenerateTextResult;
       },
       streamText: {} as any,
     },
@@ -368,7 +373,7 @@ test('can provide a correlation ID', async () => {
           text: 'response',
         };
 
-        return res as GenerateTextResult<any>;
+        return res as AgentGenerateTextResult;
       },
       streamText: {} as any,
     },
@@ -393,6 +398,36 @@ test('can provide a correlation ID', async () => {
   expect(msg.parentCorrelationId).toBe(undefined);
 });
 
+test('correlation IDs are automatically generated if not provided', async () => {
+  const agent = createAgent({
+    model: {} as any,
+    events: {},
+    adapter: {
+      generateText: async () => {
+        const res = {
+          text: 'response',
+        };
+
+        return res as AgentGenerateTextResult;
+      },
+      streamText: {} as any,
+    },
+  });
+
+  await agent.generateText({
+    prompt: 'hi',
+  });
+
+  const messages = agent.getMessages();
+
+  expect(messages[0]?.correlationId).toEqual(expect.stringMatching(/.+/));
+  expect(messages[0]?.role).toBe('user');
+  expect(messages[1]?.correlationId).toEqual(expect.stringMatching(/.+/));
+  expect(messages[1]?.role).toBe('assistant');
+
+  expect(messages[0]!.correlationId).toEqual(messages[1]!.correlationId);
+});
+
 test('can provide a parent correlation ID', async () => {
   const agent = createAgent({
     model: {} as any,
@@ -403,18 +438,10 @@ test('can provide a parent correlation ID', async () => {
           text: 'response',
         };
 
-        return res as GenerateTextResult<any>;
+        return res as AgentGenerateTextResult;
       },
       streamText: {} as any,
     },
-  });
-
-  const promise = new Promise<AgentMessage>((res) => {
-    agent.onMessage((msg) => {
-      if (msg.role === 'assistant') {
-        res(msg);
-      }
-    });
   });
 
   await agent.generateText({
@@ -423,7 +450,7 @@ test('can provide a parent correlation ID', async () => {
     parentCorrelationId: 'c-0',
   });
 
-  const msg = await promise;
+  const msg = agent.getMessages().find((msg) => msg.role === 'assistant')!;
 
   expect(msg.correlationId).toBe('c-1');
   expect(msg.parentCorrelationId).toBe('c-0');

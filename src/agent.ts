@@ -22,6 +22,7 @@ import {
   AgentMemoryContext,
   AgentObservation,
   ContextFromZodContextMapping,
+  AgentFeedback,
 } from './types';
 import { simplePlanner } from './planners/simplePlanner';
 import { agentGenerateText, agentStreamText } from './text';
@@ -168,7 +169,8 @@ export function createAgent<
       id: messageInput.id ?? randomId(),
       timestamp: messageInput.timestamp ?? Date.now(),
       sessionId: agent.sessionId,
-    };
+      correlationId: messageInput.correlationId ?? randomId(),
+    } satisfies AgentMessage;
     agent.send({
       type: 'agent.message',
       message,
@@ -185,9 +187,11 @@ export function createAgent<
   agent.addFeedback = (feedbackInput) => {
     const feedback = {
       ...feedbackInput,
+      attributes: { ...feedbackInput.attributes },
+      reward: feedbackInput.reward ?? 0,
       timestamp: feedbackInput.timestamp ?? Date.now(),
       sessionId: agent.sessionId,
-    };
+    } satisfies AgentFeedback;
     agent.send({
       type: 'agent.feedback',
       feedback,

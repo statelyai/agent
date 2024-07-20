@@ -56,6 +56,8 @@ export async function agentGenerateText<T extends AnyAgent>(
     ...agent.defaultOptions,
     ...options,
   };
+  // Generate a correlation ID if one is not provided
+  const correlationId = resolvedOptions.correlationId ?? randomId();
   const template = resolvedOptions.template ?? defaultTextTemplate;
   // TODO: check if messages was provided instead
   const id = randomId();
@@ -76,7 +78,7 @@ export async function agentGenerateText<T extends AnyAgent>(
     role: 'user',
     content: promptWithContext,
     timestamp: Date.now(),
-    correlationId: options.correlationId,
+    correlationId,
     parentCorrelationId: options.parentCorrelationId,
   });
 
@@ -93,7 +95,7 @@ export async function agentGenerateText<T extends AnyAgent>(
     timestamp: Date.now(),
     responseId: id,
     result,
-    correlationId: options.correlationId,
+    correlationId,
     parentCorrelationId: options.parentCorrelationId,
   });
 
