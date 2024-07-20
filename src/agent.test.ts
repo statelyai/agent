@@ -371,7 +371,6 @@ test('can provide a correlation ID', async () => {
     },
     adapter: {
       generateText: async () => {
-        console.log('gen');
         const res = {
           text: 'response',
         };
@@ -383,9 +382,7 @@ test('can provide a correlation ID', async () => {
   });
 
   const promise = new Promise<AgentMessage>((res) => {
-    console.log('listening');
     agent.onMessage((msg) => {
-      console.log(msg);
       if (msg.role === 'assistant') {
         res(msg);
       }
