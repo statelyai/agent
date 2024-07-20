@@ -405,15 +405,18 @@ export type AnyAgent = Agent<any, any>;
 
 export type FromAgent<T> = T | ((agent: AnyAgent) => T | Promise<T>);
 
-export interface CommonTextOptions {
+export type CommonTextOptions = {
   prompt: FromAgent<string>;
   model?: LanguageModel;
   context?: Record<string, any>;
   messages?: FromAgent<CoreMessage[]>;
   template?: PromptTemplate<any>;
+} & PromptMeta;
+
+export type PromptMeta = {
   correlationId?: string;
   parentCorrelationId?: string;
-}
+};
 
 export type AgentGenerateTextOptions = Omit<
   GenerateTextOptions,

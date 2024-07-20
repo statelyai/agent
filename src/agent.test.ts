@@ -361,14 +361,7 @@ test('agent.types provides context and event types', () => {
 test('can provide a correlation ID', async () => {
   const agent = createAgent({
     model: {} as any,
-    events: {
-      setScore: z.object({
-        score: z.number(),
-      }),
-    },
-    context: {
-      score: z.number(),
-    },
+    events: {},
     adapter: {
       generateText: async () => {
         const res = {
@@ -397,4 +390,41 @@ test('can provide a correlation ID', async () => {
   const msg = await promise;
 
   expect(msg.correlationId).toBe('c-1');
+  expect(msg.parentCorrelationId).toBe(undefined);
+});
+
+test('can provide a parent correlation ID', async () => {
+  const agent = createAgent({
+    model: {} as any,
+    events: {},
+    adapter: {
+      generateText: async (o) => {
+        const res = {
+          text: 'response',
+        };
+
+        return res as GenerateTextResult<any>;
+      },
+      streamText: {} as any,
+    },
+  });
+
+  const promise = new Promise<AgentMessage>((res) => {
+    agent.onMessage((msg) => {
+      if (msg.role === 'assistant') {
+        res(msg);
+      }
+    });
+  });
+
+  await agent.generateText({
+    prompt: 'hi',
+    correlationId: 'c-1',
+    parentCorrelationId: 'c-0',
+  });
+
+  const msg = await promise;
+
+  expect(msg.correlationId).toBe('c-1');
+  expect(msg.parentCorrelationId).toBe('c-0');
 });
