@@ -143,6 +143,7 @@ export async function agentStreamText(
           usage: res.usage,
           warnings: res.warnings,
           rawResponse: res.rawResponse,
+          roundtrips: [], // TODO: how do we get this information?
         },
         content: res.text,
         id: randomId(),
