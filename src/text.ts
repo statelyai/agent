@@ -6,7 +6,9 @@ import type {
 } from 'ai';
 import {
   AgentGenerateTextOptions,
+  AgentGenerateTextResult,
   AgentStreamTextOptions,
+  AgentStreamTextResult,
   AnyAgent,
 } from './types';
 import { defaultTextTemplate } from './templates/defaultText';
@@ -51,13 +53,13 @@ export async function getMessages(
 export async function agentGenerateText<T extends AnyAgent>(
   agent: T,
   options: AgentGenerateTextOptions
-) {
+): Promise<AgentGenerateTextResult> {
   const resolvedOptions = {
     ...agent.defaultOptions,
     ...options,
+    correlationId: options.correlationId ?? randomId(),
   };
   // Generate a correlation ID if one is not provided
-  const correlationId = resolvedOptions.correlationId ?? randomId();
   const template = resolvedOptions.template ?? defaultTextTemplate;
   // TODO: check if messages was provided instead
   const id = randomId();
@@ -78,8 +80,8 @@ export async function agentGenerateText<T extends AnyAgent>(
     role: 'user',
     content: promptWithContext,
     timestamp: Date.now(),
-    correlationId,
-    parentCorrelationId: options.parentCorrelationId,
+    correlationId: resolvedOptions.correlationId,
+    parentCorrelationId: resolvedOptions.parentCorrelationId,
   });
 
   const result = await agent.adapter.generateText({
@@ -95,20 +97,25 @@ export async function agentGenerateText<T extends AnyAgent>(
     timestamp: Date.now(),
     responseId: id,
     result,
-    correlationId,
-    parentCorrelationId: options.parentCorrelationId,
+    correlationId: resolvedOptions.correlationId,
+    parentCorrelationId: resolvedOptions.parentCorrelationId,
   });
 
-  return result;
+  return {
+    ...result,
+    parentCorrelationId: resolvedOptions.parentCorrelationId,
+    correlationId: resolvedOptions.correlationId,
+  };
 }
 
 export async function agentStreamText(
   agent: AnyAgent,
   options: AgentStreamTextOptions
-): Promise<StreamTextResult<any>> {
+): Promise<AgentStreamTextResult> {
   const resolvedOptions = {
     ...agent.defaultOptions,
     ...options,
+    correlationId: options.correlationId ?? randomId(),
   };
   const template = resolvedOptions.template ?? defaultTextTemplate;
 
@@ -159,7 +166,11 @@ export async function agentStreamText(
     },
   });
 
-  return result;
+  return {
+    ...result,
+    parentCorrelationId: resolvedOptions.parentCorrelationId,
+    correlationId: resolvedOptions.correlationId,
+  } as unknown as AgentStreamTextResult; // TODO: fix
 }
 
 export function fromTextStream<T extends AnyAgent>(

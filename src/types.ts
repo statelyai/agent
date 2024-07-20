@@ -414,10 +414,12 @@ export type CommonTextOptions = {
   context?: Record<string, any>;
   messages?: FromAgent<CoreMessage[]>;
   template?: PromptTemplate<any>;
-} & TextResultMeta;
+  correlationId?: string;
+  parentCorrelationId?: string;
+};
 
 export type TextResultMeta = {
-  correlationId?: string;
+  correlationId: string;
   parentCorrelationId?: string;
 };
 

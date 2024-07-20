@@ -455,3 +455,36 @@ test('can provide a parent correlation ID', async () => {
   expect(msg.correlationId).toBe('c-1');
   expect(msg.parentCorrelationId).toBe('c-0');
 });
+
+test('can add feedback to a correlation', async () => {
+  const agent = createAgent({
+    name: 'test',
+    model: {} as any,
+    events: {},
+    adapter: {
+      generateText: async () => {
+        const res = {
+          text: 'response',
+        };
+
+        return res as AgentGenerateTextResult;
+      },
+      streamText: {} as any,
+    },
+  });
+
+  const res = await agent.generateText({
+    prompt: 'test',
+  });
+
+  agent.addFeedback({
+    correlationId: res.correlationId,
+    reward: -1,
+  });
+
+  const message = agent.getMessages()[0]!;
+  const feedback = agent.getFeedback()[0]!;
+
+  expect(message.correlationId).toBeDefined();
+  expect(feedback.correlationId).toEqual(message.correlationId);
+});
