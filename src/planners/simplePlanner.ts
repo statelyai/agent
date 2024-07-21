@@ -1,4 +1,4 @@
-import { CoreTool, tool } from 'ai';
+import { type CoreTool, tool } from 'ai';
 import {
   AgentPlan,
   AgentPlanInput,
@@ -118,7 +118,6 @@ export async function simplePlanner<T extends AnyAgent>(
   const singleResult = result.toolResults[0];
 
   if (!singleResult) {
-    console.log(toolMap);
     // TODO: retries?
     console.warn('No tool call results returned');
     return undefined;

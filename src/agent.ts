@@ -22,6 +22,7 @@ import {
   AgentMemoryContext,
   AgentObservation,
   ContextFromZodContextMapping,
+  AgentFeedback,
 } from './types';
 import { simplePlanner } from './planners/simplePlanner';
 import { agentGenerateText, agentStreamText } from './text';
@@ -73,12 +74,13 @@ export const agentLogic: AgentLogic<AnyEventObject> = fromTransition(
     }
     return state;
   },
-  {
-    feedback: [],
-    messages: [],
-    observations: [],
-    plans: [],
-  } as AgentMemoryContext
+  () =>
+    ({
+      feedback: [],
+      messages: [],
+      observations: [],
+      plans: [],
+    } as AgentMemoryContext)
 );
 
 export function createAgent<
@@ -140,8 +142,6 @@ export function createAgent<
   logic?: AgentLogic<TEvents>;
   adapter?: AIAdapter;
 } & GenerateTextOptions): Agent<TContext, TEvents> {
-  const messageHistoryListeners: Observer<AgentMessage>[] = [];
-
   const agent = createActor(logic) as unknown as Agent<TContext, TEvents>;
   agent.events = events;
   agent.model = model;
@@ -155,7 +155,7 @@ export function createAgent<
   agent.memory = getMemory ? getMemory(agent) : undefined;
 
   agent.onMessage = (callback) => {
-    messageHistoryListeners.push(toObserver(callback));
+    agent.on('message', (ev) => callback(ev.message));
   };
 
   agent.decide = (opts) => {
@@ -168,7 +168,8 @@ export function createAgent<
       id: messageInput.id ?? randomId(),
       timestamp: messageInput.timestamp ?? Date.now(),
       sessionId: agent.sessionId,
-    };
+      correlationId: messageInput.correlationId ?? randomId(),
+    } satisfies AgentMessage;
     agent.send({
       type: 'agent.message',
       message,
@@ -185,9 +186,11 @@ export function createAgent<
   agent.addFeedback = (feedbackInput) => {
     const feedback = {
       ...feedbackInput,
+      attributes: { ...feedbackInput.attributes },
+      reward: feedbackInput.reward ?? 0,
       timestamp: feedbackInput.timestamp ?? Date.now(),
       sessionId: agent.sessionId,
-    };
+    } satisfies AgentFeedback;
     agent.send({
       type: 'agent.feedback',
       feedback,

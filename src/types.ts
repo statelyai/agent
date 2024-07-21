@@ -128,18 +128,25 @@ export type AgentDecideOptions = {
 >;
 
 export interface AgentFeedback {
-  goal: string;
-  observationId: string;
+  goal?: string;
+  observationId?: string;
+  /**
+   * The message correlation that the feedback is relevant for
+   */
+  correlationId?: string;
   attributes: Record<string, any>;
+  reward: number;
   timestamp: number;
   sessionId: string;
 }
 
 export interface AgentFeedbackInput {
-  goal: string;
-  observationId: string; // Observation ID;
-  attributes: Record<string, any>;
+  goal?: string;
+  observationId?: string;
+  correlationId?: string;
+  attributes?: Record<string, any>;
   timestamp?: number;
+  reward?: number;
 }
 
 export type AgentMessage = CoreMessage & {
@@ -152,6 +159,8 @@ export type AgentMessage = CoreMessage & {
   responseId?: string;
   result?: GenerateTextResult<any>;
   sessionId: string;
+  correlationId: string;
+  parentCorrelationId?: string;
 };
 
 export type AgentMessageInput = CoreMessage & {
@@ -162,6 +171,8 @@ export type AgentMessageInput = CoreMessage & {
    * which message this message is responding to, if any.
    */
   responseId?: string;
+  correlationId?: string;
+  parentCorrelationId?: string;
   result?: GenerateTextResult<any>;
 };
 
@@ -293,12 +304,12 @@ export type Agent<TContext, TEvents extends EventObject> = ActorRefFrom<
   // Generate text
   generateText: (
     options: AgentGenerateTextOptions
-  ) => Promise<GenerateTextResult<Record<string, any>>>;
+  ) => Promise<AgentGenerateTextResult>;
 
   // Stream text
   streamText: (
     options: AgentStreamTextOptions
-  ) => Promise<StreamTextResult<Record<string, CoreTool<any, any>>>>;
+  ) => Promise<AgentStreamTextResult>;
 
   addObservation: (
     observationInput: AgentObservationInput
@@ -395,15 +406,22 @@ export type Agent<TContext, TEvents extends EventObject> = ActorRefFrom<
 
 export type AnyAgent = Agent<any, any>;
 
-export type FromAgent<T> = T | ((self: AnyAgent) => T | Promise<T>);
+export type FromAgent<T> = T | ((agent: AnyAgent) => T | Promise<T>);
 
-export interface CommonTextOptions {
+export type CommonTextOptions = {
   prompt: FromAgent<string>;
   model?: LanguageModel;
   context?: Record<string, any>;
   messages?: FromAgent<CoreMessage[]>;
   template?: PromptTemplate<any>;
-}
+  correlationId?: string;
+  parentCorrelationId?: string;
+};
+
+export type TextResultMeta = {
+  correlationId: string;
+  parentCorrelationId?: string;
+};
 
 export type AgentGenerateTextOptions = Omit<
   GenerateTextOptions,
@@ -411,11 +429,15 @@ export type AgentGenerateTextOptions = Omit<
 > &
   CommonTextOptions;
 
+export type AgentGenerateTextResult = GenerateTextResult<any> & TextResultMeta;
+
 export type AgentStreamTextOptions = Omit<
   StreamTextOptions,
   'model' | 'prompt' | 'messages'
 > &
   CommonTextOptions;
+
+export type AgentStreamTextResult = StreamTextResult<any> & TextResultMeta;
 
 export interface ObservedState {
   /**
