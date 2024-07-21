@@ -1,9 +1,4 @@
-import type {
-  CoreMessage,
-  CoreTool,
-  GenerateTextResult,
-  StreamTextResult,
-} from 'ai';
+import type { CoreMessage, CoreTool, GenerateTextResult } from 'ai';
 import {
   AgentGenerateTextOptions,
   AgentGenerateTextResult,
@@ -137,6 +132,8 @@ export async function agentStreamText(
     content: promptWithContext,
     id,
     timestamp: Date.now(),
+    correlationId: resolvedOptions.correlationId,
+    parentCorrelationId: resolvedOptions.parentCorrelationId,
   });
 
   const result = await agent.adapter.streamText({
@@ -162,6 +159,8 @@ export async function agentStreamText(
         id: randomId(),
         timestamp: Date.now(),
         responseId: id,
+        correlationId: resolvedOptions.correlationId,
+        parentCorrelationId: resolvedOptions.parentCorrelationId,
       });
     },
   });

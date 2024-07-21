@@ -74,12 +74,13 @@ export const agentLogic: AgentLogic<AnyEventObject> = fromTransition(
     }
     return state;
   },
-  {
-    feedback: [],
-    messages: [],
-    observations: [],
-    plans: [],
-  } as AgentMemoryContext
+  () =>
+    ({
+      feedback: [],
+      messages: [],
+      observations: [],
+      plans: [],
+    } as AgentMemoryContext)
 );
 
 export function createAgent<
@@ -141,8 +142,6 @@ export function createAgent<
   logic?: AgentLogic<TEvents>;
   adapter?: AIAdapter;
 } & GenerateTextOptions): Agent<TContext, TEvents> {
-  const messageHistoryListeners: Observer<AgentMessage>[] = [];
-
   const agent = createActor(logic) as unknown as Agent<TContext, TEvents>;
   agent.events = events;
   agent.model = model;

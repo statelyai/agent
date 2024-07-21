@@ -363,128 +363,144 @@ test('agent.types provides context and event types', () => {
   agent.types.context satisfies { score: string };
 });
 
-test('can provide a correlation ID', async () => {
-  const agent = createAgent({
-    model: {} as any,
-    events: {},
-    adapter: {
-      generateText: async () => {
-        const res = {
-          text: 'response',
-        };
+test.each(['generateText', 'streamText'] as const)(
+  'can provide a correlation ID (%s)',
+  async (method) => {
+    const agent = createAgent({
+      model: {} as any,
+      events: {},
+      adapter: {
+        [method]: async (opts) => {
+          const res = {
+            text: 'response',
+          };
 
-        return res as AgentGenerateTextResult;
-      },
-      streamText: {} as any,
-    },
-  });
+          opts.onFinish?.(res);
 
-  const promise = new Promise<AgentMessage>((res) => {
-    agent.onMessage((msg) => {
-      if (msg.role === 'assistant') {
-        res(msg);
-      }
+          return res as AgentGenerateTextResult;
+        },
+      } as any as AIAdapter,
     });
-  });
 
-  await agent.generateText({
-    prompt: 'hi',
-    correlationId: 'c-1',
-  });
+    const promise = new Promise<AgentMessage>((res) => {
+      agent.onMessage((msg) => {
+        if (msg.role === 'assistant') {
+          res(msg);
+        }
+      });
+    });
 
-  const msg = await promise;
+    await agent[method]({
+      prompt: 'hi',
+      correlationId: 'c-1',
+    });
 
-  expect(msg.correlationId).toBe('c-1');
-  expect(msg.parentCorrelationId).toBe(undefined);
-});
+    const msg = await promise;
 
-test('correlation IDs are automatically generated if not provided', async () => {
-  const agent = createAgent({
-    model: {} as any,
-    events: {},
-    adapter: {
-      generateText: async () => {
-        const res = {
-          text: 'response',
-        };
+    expect(msg.correlationId).toBe('c-1');
+    expect(msg.parentCorrelationId).toBe(undefined);
+  }
+);
 
-        return res as AgentGenerateTextResult;
-      },
-      streamText: {} as any,
-    },
-  });
+test.each(['generateText', 'streamText'] as const)(
+  'correlation IDs are automatically generated if not provided (%s)',
+  async (method) => {
+    const agent = createAgent({
+      model: {} as any,
+      events: {},
+      adapter: {
+        [method]: async (opts) => {
+          const res = {
+            text: 'response',
+          };
 
-  await agent.generateText({
-    prompt: 'hi',
-  });
+          opts.onFinish?.(res);
 
-  const messages = agent.getMessages();
+          return res as AgentGenerateTextResult;
+        },
+      } as any as AIAdapter,
+    });
 
-  expect(messages[0]?.correlationId).toEqual(expect.stringMatching(/.+/));
-  expect(messages[0]?.role).toBe('user');
-  expect(messages[1]?.correlationId).toEqual(expect.stringMatching(/.+/));
-  expect(messages[1]?.role).toBe('assistant');
+    await agent[method]({
+      prompt: 'hi',
+    });
 
-  expect(messages[0]!.correlationId).toEqual(messages[1]!.correlationId);
-});
+    const messages = agent.getMessages();
 
-test('can provide a parent correlation ID', async () => {
-  const agent = createAgent({
-    model: {} as any,
-    events: {},
-    adapter: {
-      generateText: async (o) => {
-        const res = {
-          text: 'response',
-        };
+    expect(messages[0]?.correlationId).toEqual(expect.stringMatching(/.+/));
+    expect(messages[0]?.role).toBe('user');
+    expect(messages[1]?.correlationId).toEqual(expect.stringMatching(/.+/));
+    expect(messages[1]?.role).toBe('assistant');
 
-        return res as AgentGenerateTextResult;
-      },
-      streamText: {} as any,
-    },
-  });
+    expect(messages[0]!.correlationId).toEqual(messages[1]!.correlationId);
+  }
+);
 
-  await agent.generateText({
-    prompt: 'hi',
-    correlationId: 'c-1',
-    parentCorrelationId: 'c-0',
-  });
+test.each(['generateText', 'streamText'] as const)(
+  'can provide a parent correlation ID (%s)',
+  async (method) => {
+    const agent = createAgent({
+      model: {} as any,
+      events: {},
+      adapter: {
+        [method]: async (opts) => {
+          const res = {
+            text: 'response',
+          };
 
-  const msg = agent.getMessages().find((msg) => msg.role === 'assistant')!;
+          opts.onFinish?.(res);
 
-  expect(msg.correlationId).toBe('c-1');
-  expect(msg.parentCorrelationId).toBe('c-0');
-});
+          return res as AgentGenerateTextResult;
+        },
+      } as any as AIAdapter,
+    });
 
-test('can add feedback to a correlation', async () => {
-  const agent = createAgent({
-    name: 'test',
-    model: {} as any,
-    events: {},
-    adapter: {
-      generateText: async () => {
-        const res = {
-          text: 'response',
-        };
+    await agent[method]({
+      prompt: 'hi',
+      correlationId: 'c-1',
+      parentCorrelationId: 'c-0',
+    });
 
-        return res as AgentGenerateTextResult;
-      },
-      streamText: {} as any,
-    },
-  });
+    const msg = agent.getMessages().find((msg) => msg.role === 'assistant')!;
 
-  const res = await agent.generateText({
-    prompt: 'test',
-  });
+    expect(msg.correlationId).toBe('c-1');
+    expect(msg.parentCorrelationId).toBe('c-0');
+  }
+);
 
-  agent.addFeedback({
-    correlationId: res.correlationId,
-    reward: -1,
-  });
+test.each(['generateText', 'streamText'] as const)(
+  'can add feedback to a correlation (%s)',
+  async (method) => {
+    const agent = createAgent({
+      name: 'test',
+      model: {} as any,
+      events: {},
+      adapter: {
+        [method]: async (opts) => {
+          const res = {
+            text: 'response',
+          };
 
-  const message = agent.getMessages()[0]!;
-  const feedback = agent.getFeedback()[0]!;
+          opts.onFinish?.(res);
 
-  expect(message.correlationId).toBeDefined();
-  expect(feedback.correlationId).toEqual(message.correlationId);
-});
+          return res as AgentGenerateTextResult;
+        },
+      } as any as AIAdapter,
+    });
+
+    const res = await agent[method]({
+      prompt: 'test',
+    });
+
+    agent.addFeedback({
+      correlationId: res.correlationId,
+      reward: -1,
+    });
+
+    const message = agent.getMessages()[0]!;
+    const feedback = agent.getFeedback()[0]!;
+
+    expect(message.correlationId).toBeDefined();
+    expect(feedback.correlationId).toEqual(message.correlationId);
+  }
+);
