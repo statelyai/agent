@@ -1,5 +1,78 @@
 # @statelyai/agent
 
+## 1.1.0
+
+### Minor Changes
+
+- [#39](https://github.com/statelyai/agent/pull/39) [`3cce30f`](https://github.com/statelyai/agent/commit/3cce30fc77d36dbed0abad805248de9f64bf8086) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Added four new methods for easily retrieving agent messages, observations, feedback, and plans:
+
+  - `agent.getMessages()`
+  - `agent.getObservations()`
+  - `agent.getFeedback()`
+  - `agent.getPlans()`
+
+  The `agent.select(…)` method is deprecated in favor of these methods.
+
+- [#40](https://github.com/statelyai/agent/pull/40) [`8b7c374`](https://github.com/statelyai/agent/commit/8b7c37482d5c35b2b3addc2f88e198526f203da7) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Correlation IDs are now provided as part of the result from `agent.generateText(…)` and `agent.streamText(…)`:
+
+  ```ts
+  const result = await agent.generateText({
+    prompt: "Write me a song",
+    correlationId: "my-correlation-id",
+    // ...
+  });
+
+  result.correlationId; // 'my-correlation-id'
+  ```
+
+  These correlation IDs can be passed to feedback:
+
+  ```ts
+  // ...
+
+  agent.addFeedback({
+    reward: -1,
+    correlationId: result.correlationId,
+  });
+  ```
+
+- [#40](https://github.com/statelyai/agent/pull/40) [`8b7c374`](https://github.com/statelyai/agent/commit/8b7c37482d5c35b2b3addc2f88e198526f203da7) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Changes to agent feedback (the `AgentFeedback` interface):
+
+  - `goal` is now optional
+  - `observationId` is now optional
+  - `correlationId` has been added (optional)
+  - `reward` has been added (optional)
+  - `attributes` are now optional
+
+- [#38](https://github.com/statelyai/agent/pull/38) [`21fb17c`](https://github.com/statelyai/agent/commit/21fb17c65fac1cbb4a8b08a04a58480a6930a0a9) Thanks [@davidkpiano](https://github.com/davidkpiano)! - You can now add `context` Zod schema to your agent. For now, this is meant to be passed directly to the state machine, but in the future, the schema can be shared with the LLM agent to better understand the state machine and its context for decision making.
+
+  Breaking: The `context` and `events` types are now in `agent.types` instead of ~~`agent.eventTypes`.
+
+  ```ts
+  const agent = createAgent({
+    // ...
+    context: {
+      score: z.number().describe("The score of the game"),
+      // ...
+    },
+  });
+
+  const machine = setup({
+    types: agent.types,
+  }).createMachine({
+    context: {
+      score: 0,
+    },
+    // ...
+  });
+  ```
+
+### Patch Changes
+
+- [`5f863bb`](https://github.com/statelyai/agent/commit/5f863bb0d89d90f30d0a9aa1f0dd2a35f0eeb45b) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Use nanoid
+
+- [#37](https://github.com/statelyai/agent/pull/37) [`dafa815`](https://github.com/statelyai/agent/commit/dafa8157cc1b5adbfb222c146dbc84ab2eed8894) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Messages are now properly included in `agent.decide(…)`, when specified.
+
 ## 0.1.0
 
 ### Minor Changes
