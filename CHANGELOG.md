@@ -1,5 +1,11 @@
 # @statelyai/agent
 
+## 1.1.1
+
+### Patch Changes
+
+- [#41](https://github.com/statelyai/agent/pull/41) [`b2f2b73`](https://github.com/statelyai/agent/commit/b2f2b7307e96d7722968769aae9db2572ede8ce7) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Update dependencies
+
 ## 1.1.0
 
 ### Minor Changes
