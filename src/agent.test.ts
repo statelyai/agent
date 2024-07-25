@@ -370,7 +370,7 @@ test.each(['generateText', 'streamText'] as const)(
       model: {} as any,
       events: {},
       adapter: {
-        [method]: async (opts) => {
+        [method]: async (opts: any) => {
           const res = {
             text: 'response',
           };
@@ -409,7 +409,7 @@ test.each(['generateText', 'streamText'] as const)(
       model: {} as any,
       events: {},
       adapter: {
-        [method]: async (opts) => {
+        [method]: async (opts: any) => {
           const res = {
             text: 'response',
           };
@@ -443,7 +443,7 @@ test.each(['generateText', 'streamText'] as const)(
       model: {} as any,
       events: {},
       adapter: {
-        [method]: async (opts) => {
+        [method]: async (opts: any) => {
           const res = {
             text: 'response',
           };
@@ -476,7 +476,7 @@ test.each(['generateText', 'streamText'] as const)(
       model: {} as any,
       events: {},
       adapter: {
-        [method]: async (opts) => {
+        [method]: async (opts: any) => {
           const res = {
             text: 'response',
           };
