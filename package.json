@@ -31,7 +31,7 @@
     "@langchain/community": "^0.0.53",
     "@langchain/core": "^0.1.63",
     "@langchain/openai": "^0.0.28",
-    "@types/node": "^20.14.12",
+    "@types/node": "^20.14.13",
     "@types/object-hash": "^3.0.6",
     "dotenv": "^16.4.5",
     "json-schema-to-ts": "^3.1.0",
@@ -48,9 +48,9 @@
   "dependencies": {
     "@ai-sdk/openai": "^0.0.40",
     "@xstate/graph": "^2.0.0",
-    "ai": "^3.2.36",
+    "ai": "^3.2.40",
     "object-hash": "^3.0.0",
-    "xstate": "^5.15.0"
+    "xstate": "^5.16.0"
   },
   "packageManager": "pnpm@8.11.0"
 }
