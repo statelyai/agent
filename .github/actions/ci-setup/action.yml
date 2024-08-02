@@ -7,18 +7,18 @@ runs:
     - uses: actions/setup-node@v4
       with:
         node-version: 20.x
-
-    - name: Get pnpm store directory
+        
+    - name: install pnpm
+      run: npm i pnpm@latest -g
       shell: bash
-      id: pnpm-cache
-      run: |
-        echo "pnpm_cache_dir=$(pnpm store path | tr -d '\n')" >> $GITHUB_OUTPUT
-    - uses: actions/cache@v4
-      name: Setup pnpm cache
-      with:
-        path: ${{ steps.pnpm-cache.outputs.pnpm_cache_dir }}
-        key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-        restore-keys: |
-          ${{ runner.os }}-pnpm-store-
+
+    - name: Setup npmrc
+      run: echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > .npmrc
+      shell: bash
+
+    - name: setup pnpm config
+      run: pnpm config set store-dir $PNPM_CACHE_FOLDER
+      shell: bash
+
     - run: pnpm install
       shell: bash
