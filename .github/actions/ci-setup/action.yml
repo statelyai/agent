@@ -12,7 +12,7 @@ runs:
       shell: bash
       id: pnpm-cache
       run: |
-        echo "pnpm_cache_dir=$(pnpm store path)" >> $GITHUB_OUTPUT
+        echo "pnpm_cache_dir=$(pnpm store path | tr -d '\n')" >> $GITHUB_OUTPUT
     - uses: actions/cache@v4
       name: Setup pnpm cache
       with:
