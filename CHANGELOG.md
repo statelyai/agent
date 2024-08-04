@@ -1,5 +1,11 @@
 # @statelyai/agent
 
+## 1.1.3
+
+### Patch Changes
+
+- [#45](https://github.com/statelyai/agent/pull/45) [`3c271f3`](https://github.com/statelyai/agent/commit/3c271f306c4ed9553c155e66cec8aa4284e9c813) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Fix reading the actor logic
+
 ## 1.1.2
 
 ### Patch Changes
