@@ -1,4 +1,4 @@
-import { AnyMachineSnapshot, fromPromise } from 'xstate';
+import { AnyActor, AnyMachineSnapshot, fromPromise } from 'xstate';
 import {
   AnyAgent,
   AgentDecideOptions,
@@ -71,7 +71,7 @@ export function fromDecision(
     };
 
     const plan = await agentDecide(agent, {
-      machine: parentRef.src as any,
+      machine: (parentRef as AnyActor).logic,
       state,
       execute: async (event) => {
         parentRef.send(event);
