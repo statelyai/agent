@@ -1,5 +1,11 @@
 # @statelyai/agent
 
+## 1.1.4
+
+### Patch Changes
+
+- [#47](https://github.com/statelyai/agent/pull/47) [`185c149`](https://github.com/statelyai/agent/commit/185c1498f63aef15a3194032df3dcdcb2b33d752) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Update `ai` and `xstate` packages
+
 ## 1.1.3
 
 ### Patch Changes
