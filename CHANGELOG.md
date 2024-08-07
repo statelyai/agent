@@ -1,5 +1,11 @@
 # @statelyai/agent
 
+## 1.1.5
+
+### Patch Changes
+
+- [#49](https://github.com/statelyai/agent/pull/49) [`ae505d5`](https://github.com/statelyai/agent/commit/ae505d56b432a92875699507fb694628ef4d773d) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Update `ai` package
+
 ## 1.1.4
 
 ### Patch Changes
