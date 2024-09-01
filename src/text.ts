@@ -144,15 +144,12 @@ export async function agentStreamText(
       agent.addMessage({
         role: 'assistant',
         result: {
-          text: res.text,
-          finishReason: res.finishReason,
+          ...res,
           logprobs: undefined,
           responseMessages: [],
           toolCalls: [],
           toolResults: [],
-          usage: res.usage,
           warnings: res.warnings,
-          rawResponse: res.rawResponse,
           roundtrips: [], // TODO: how do we get this information?
         },
         content: res.text,
