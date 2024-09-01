@@ -25,7 +25,11 @@ import {
   AgentFeedback,
 } from './types';
 import { simplePlanner } from './planners/simplePlanner';
-import { agentGenerateText, agentStreamText } from './text';
+import {
+  agentGenerateObject,
+  agentGenerateText,
+  agentStreamText,
+} from './text';
 import { agentDecide } from './decision';
 import { vercelAdapter } from './adapters/vercel';
 import { getMachineHash, randomId } from './utils';
@@ -169,7 +173,7 @@ export function createAgent<
       timestamp: messageInput.timestamp ?? Date.now(),
       sessionId: agent.sessionId,
       correlationId: messageInput.correlationId ?? randomId(),
-    } satisfies AgentMessage;
+    } as AgentMessage; // TODO: check satisfies
     agent.send({
       type: 'agent.message',
       message,
@@ -180,6 +184,8 @@ export function createAgent<
   agent.getMessages = () => agent.getSnapshot().context.messages;
 
   agent.generateText = (opts) => agentGenerateText(agent, opts);
+
+  agent.generateObject = (opts) => agentGenerateObject(agent, opts);
 
   agent.streamText = (opts) => agentStreamText(agent, opts);
 

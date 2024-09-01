@@ -16,6 +16,8 @@ import {
 import {
   CoreMessage,
   CoreTool,
+  generateObject,
+  GenerateObjectResult,
   generateText,
   GenerateTextResult,
   LanguageModel,
@@ -26,6 +28,8 @@ import { ZodContextMapping, ZodEventMapping } from './schemas';
 import { TypeOf } from 'zod';
 
 export type GenerateTextOptions = Parameters<typeof generateText>[0];
+
+export type GenerateObjectOptions = Parameters<typeof generateObject>[0];
 
 export type StreamTextOptions = Parameters<typeof streamText>[0];
 
@@ -161,7 +165,11 @@ export type AgentMessage = CoreMessage & {
   sessionId: string;
   correlationId: string;
   parentCorrelationId?: string;
-};
+} & (
+    | { type: 'text'; result: GenerateTextResult<any> }
+    | { type: 'object'; result: GenerateObjectResult<any> }
+    | { role: 'user' }
+  );
 
 export type AgentMessageInput = CoreMessage & {
   timestamp?: number;
@@ -173,7 +181,7 @@ export type AgentMessageInput = CoreMessage & {
   responseId?: string;
   correlationId?: string;
   parentCorrelationId?: string;
-  result?: GenerateTextResult<any>;
+  result?: GenerateObjectResult<any> | GenerateTextResult<any>;
 };
 
 export interface AgentObservation<TActor extends AnyActorRef> {
@@ -306,6 +314,11 @@ export type Agent<TContext, TEvents extends EventObject> = ActorRefFrom<
     options: AgentGenerateTextOptions
   ) => Promise<AgentGenerateTextResult>;
 
+  // Generate object
+  generateObject: (
+    options: AgentGenerateObjectOptions
+  ) => Promise<AgentGenerateObjectResult>;
+
   // Stream text
   streamText: (
     options: AgentStreamTextOptions
@@ -431,6 +444,15 @@ export type AgentGenerateTextOptions = Omit<
 
 export type AgentGenerateTextResult = GenerateTextResult<any> & TextResultMeta;
 
+export type AgentGenerateObjectOptions = Omit<
+  GenerateObjectOptions,
+  'model' | 'prompt' | 'messages'
+> &
+  CommonTextOptions;
+
+export type AgentGenerateObjectResult = GenerateObjectResult<any> &
+  TextResultMeta;
+
 export type AgentStreamTextOptions = Omit<
   StreamTextOptions,
   'model' | 'prompt' | 'messages'
@@ -493,6 +515,7 @@ export interface AgentLongTermMemory {
 
 export interface AIAdapter {
   generateText: typeof generateText;
+  generateObject: typeof generateObject;
   streamText: typeof streamText;
 }
 

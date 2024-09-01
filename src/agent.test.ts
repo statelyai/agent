@@ -6,7 +6,6 @@ import {
   type AIAdapter,
 } from './';
 import { createActor, createMachine } from 'xstate';
-import { GenerateTextResult } from 'ai';
 import { z } from 'zod';
 
 test('an agent has the expected interface', () => {
@@ -305,6 +304,7 @@ test('You can listen for plan events', async () => {
         } as any as AgentGenerateTextResult;
       },
       streamText: {} as any,
+      generateObject: {} as any,
     },
   });
 
@@ -467,6 +467,36 @@ test.each(['generateText', 'streamText'] as const)(
     expect(msg.parentCorrelationId).toBe('c-0');
   }
 );
+
+test('can provide a parent correlation ID (%s)', async (method) => {
+  const agent = createAgent({
+    model: {} as any,
+    events: {},
+    adapter: {
+      generateObject: async (opts: any) => {
+        const res = {
+          text: 'response',
+        };
+
+        opts.onFinish?.(res);
+
+        return res as AgentGenerateTextResult;
+      },
+    } as any as AIAdapter,
+  });
+
+  await agent.generateObject({
+    prompt: 'hi',
+    correlationId: 'c-1',
+    parentCorrelationId: 'c-0',
+    schema: z.object({}),
+  });
+
+  const msg = agent.getMessages().find((msg) => msg.role === 'assistant')!;
+
+  expect(msg.correlationId).toBe('c-1');
+  expect(msg.parentCorrelationId).toBe('c-0');
+});
 
 test.each(['generateText', 'streamText'] as const)(
   'can add feedback to a correlation (%s)',

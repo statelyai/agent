@@ -1,5 +1,7 @@
 import type { CoreMessage, CoreTool, GenerateTextResult } from 'ai';
 import {
+  AgentGenerateObjectOptions,
+  AgentGenerateObjectResult,
   AgentGenerateTextOptions,
   AgentGenerateTextResult,
   AgentStreamTextOptions,
@@ -98,6 +100,65 @@ export async function agentGenerateText<T extends AnyAgent>(
 
   return {
     ...result,
+    parentCorrelationId: resolvedOptions.parentCorrelationId,
+    correlationId: resolvedOptions.correlationId,
+  };
+}
+
+export async function agentGenerateObject<T extends AnyAgent>(
+  agent: T,
+  options: AgentGenerateObjectOptions
+): Promise<AgentGenerateObjectResult> {
+  const resolvedOptions = {
+    ...agent.defaultOptions,
+    ...options,
+    correlationId: options.correlationId ?? randomId(),
+  };
+  // Generate a correlation ID if one is not provided
+  const template = resolvedOptions.template ?? defaultTextTemplate;
+  // TODO: check if messages was provided instead
+  const id = randomId();
+  const goal =
+    typeof resolvedOptions.prompt === 'string'
+      ? resolvedOptions.prompt
+      : await resolvedOptions.prompt(agent);
+
+  const promptWithContext = template({
+    goal,
+    context: resolvedOptions.context,
+  });
+
+  const messages = await getMessages(agent, promptWithContext, resolvedOptions);
+
+  agent.addMessage({
+    id,
+    role: 'user',
+    content: promptWithContext,
+    timestamp: Date.now(),
+    correlationId: resolvedOptions.correlationId,
+    parentCorrelationId: resolvedOptions.parentCorrelationId,
+  });
+
+  const result = await agent.adapter.generateObject({
+    ...resolvedOptions,
+    prompt: undefined,
+    messages,
+  });
+
+  agent.addMessage({
+    content: JSON.stringify(result.object), // TODO
+    id,
+    role: 'assistant',
+    timestamp: Date.now(),
+    responseId: id,
+    result,
+    correlationId: resolvedOptions.correlationId,
+    parentCorrelationId: resolvedOptions.parentCorrelationId,
+  });
+
+  return {
+    ...result,
+    toJsonResponse: result.toJsonResponse,
     parentCorrelationId: resolvedOptions.parentCorrelationId,
     correlationId: resolvedOptions.correlationId,
   };
