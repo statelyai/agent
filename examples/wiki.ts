@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { createAgent } from '../src';
 import { openai } from '@ai-sdk/openai';
+import { CoreMessage, generateText, streamText, tool } from 'ai';
 
 const agent = createAgent({
   name: 'wiki',
@@ -12,19 +13,30 @@ const agent = createAgent({
   },
 });
 
+agent.onMessage((msg) => {
+  console.log(msg);
+});
+
 async function main() {
-  const response1 = await agent.generateText({
+  await generateText({
+    model: agent.model,
     prompt: 'When was Deadpool 2 released?',
   });
 
-  console.log(response1.text);
-
-  const response2 = await agent.generateText({
-    messages: (x) => x.select((ctx) => ctx.messages),
-    prompt: 'What about the first one?',
+  const response2 = await streamText({
+    model: agent.model,
+    messages: (agent.getMessages() as CoreMessage[]).concat({
+      role: 'user',
+      content: 'What about the first one?',
+    }),
   });
 
-  console.log(response2.text);
+  let text = '';
+
+  for await (const t of response2.textStream) {
+    text += t;
+    console.log(text);
+  }
 }
 
 main();

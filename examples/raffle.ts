@@ -31,7 +31,6 @@ const machine = setup({
   },
   actors: { agent: fromDecision(agent), getFromTerminal },
 }).createMachine({
-  /** @xstate-layout N4IgpgJg5mDOIC5QAoC2BDAxgCwJYDswBKAOjHwBcwAnAqAYggHtCSCA3JgazBLSzyFS5KrXxQEHJpnQVcLANoAGALrKViUAAcmsXHJaaQAD0QAmAOwBmEmYCsADgCMZgJxmALE4ceHSuwA0IACe5gBsZiR29q5KPnaOrmEOAL4pQfw4BMQkEGCiqAR09OgwlCSYTAA2VWCYFACilLRw6kY6egb4RqYIZg52JB52Ya5jSq5+To4eQaEILhYkA0qjVlYeSlsOYWFpGRhZQrn5NIX4xaUiudToAO5tSCAd+vLdT727SiRKHsl2FjCwxcrlmIUQTl2ticHk26ycMPsqXSIEyghyEFud0uZQoJGoYB01AoAHUCIRqI9tLpXoYPohXBYnCQnP4HK4nFYLF5vK45hCPDYmVtdk5uYzuWkUfgmHl4E80dkiO0aV0eogALRhfkIDWDMZjJn9MxhKwjSb7VGHdHCSg0OgqzpvdUIDxmHWc5l2caeKxhVYDFyWxXHPIFIriR2096gXoeVw2VmgiIOBzWJRiqwe2FRdzcpRWE0JPPB61Km73B1PF5q+kIPweEhWMWjCz+BJKJketwkQEWCyuOywv0WaJ2UsCcvY-AUqO12MQls-Ue+Px2KzspweoHLXxsjO-eNmMxSlJAA */
   context: {
     lastInput: null,
     entries: [],
