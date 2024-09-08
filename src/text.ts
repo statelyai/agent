@@ -1,4 +1,10 @@
-import type { CoreMessage, CoreTool, GenerateTextResult } from 'ai';
+import {
+  generateText,
+  streamText,
+  type CoreMessage,
+  type CoreTool,
+  type GenerateTextResult,
+} from 'ai';
 import {
   AgentGenerateTextOptions,
   AgentGenerateTextResult,
@@ -77,7 +83,7 @@ export async function agentGenerateText<T extends AnyAgent>(
     timestamp: Date.now(),
     correlationId: resolvedOptions.correlationId,
     parentCorrelationId: resolvedOptions.parentCorrelationId,
-  });
+  } as any);
 
   const result = await agent.adapter.generateText({
     ...resolvedOptions,
@@ -94,7 +100,7 @@ export async function agentGenerateText<T extends AnyAgent>(
     result,
     correlationId: resolvedOptions.correlationId,
     parentCorrelationId: resolvedOptions.parentCorrelationId,
-  });
+  } as any);
 
   return {
     ...result,
@@ -134,7 +140,7 @@ export async function agentStreamText(
     timestamp: Date.now(),
     correlationId: resolvedOptions.correlationId,
     parentCorrelationId: resolvedOptions.parentCorrelationId,
-  });
+  } as any);
 
   const result = await agent.adapter.streamText({
     ...resolvedOptions,
@@ -161,7 +167,7 @@ export async function agentStreamText(
         responseId: id,
         correlationId: resolvedOptions.correlationId,
         parentCorrelationId: resolvedOptions.parentCorrelationId,
-      });
+      } as any);
     },
   });
 
@@ -174,23 +180,36 @@ export async function agentStreamText(
 
 export function fromTextStream<T extends AnyAgent>(
   agent: T,
-  defaultOptions?: AgentStreamTextOptions
+  options?: AgentStreamTextOptions
 ): ObservableActorLogic<
   { textDelta: string },
   Omit<AgentStreamTextOptions, 'context'> & {
     context?: AgentStreamTextOptions['context'];
   }
 > {
+  const template = options?.template ?? defaultTextTemplate;
   return fromObservable(({ input }) => {
     const observers = new Set<Observer<{ textDelta: string }>>();
 
     // TODO: check if messages was provided instead
 
     (async () => {
-      const result = await agentStreamText(agent, {
-        ...defaultOptions,
-        ...input,
+      const model = input.model ? agent.wrap(input.model) : agent.model;
+      const goal =
+        typeof input.prompt === 'string'
+          ? input.prompt
+          : await input.prompt(agent);
+      const promptWithContext = template({
+        goal,
         context: input.context,
+      });
+      const messages = await getMessages(agent, promptWithContext, input);
+      const result = await streamText({
+        ...options,
+        ...input,
+        prompt: undefined, // overwritten by messages
+        model,
+        messages,
       });
 
       for await (const part of result.fullStream) {
@@ -219,18 +238,42 @@ export function fromTextStream<T extends AnyAgent>(
 
 export function fromText<T extends AnyAgent>(
   agent: T,
-  defaultOptions?: AgentGenerateTextOptions
+  options?: AgentGenerateTextOptions
 ): PromiseActorLogic<
   GenerateTextResult<Record<string, CoreTool<any, any>>>,
   Omit<AgentGenerateTextOptions, 'context'> & {
     context?: AgentGenerateTextOptions['context'];
   }
 > {
+  const resolvedOptions = {
+    ...agent.defaultOptions,
+    ...options,
+    correlationId: options?.correlationId ?? randomId(),
+  };
+
+  const template = resolvedOptions.template ?? defaultTextTemplate;
+
   return fromPromise(async ({ input }) => {
-    return await agentGenerateText(agent, {
-      ...input,
-      ...defaultOptions,
+    const goal =
+      typeof input.prompt === 'string'
+        ? input.prompt
+        : await input.prompt(agent);
+
+    const promptWithContext = template({
+      goal,
       context: input.context,
+    });
+
+    const messages = await getMessages(agent, promptWithContext, input);
+
+    const model = input.model ? agent.wrap(input.model) : agent.model;
+
+    return await generateText({
+      ...input,
+      ...options,
+      prompt: undefined,
+      messages,
+      model,
     });
   });
 }

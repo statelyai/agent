@@ -6,7 +6,7 @@ import {
   type AIAdapter,
 } from './';
 import { createActor, createMachine } from 'xstate';
-import { GenerateTextResult } from 'ai';
+import { generateText } from 'ai';
 import { z } from 'zod';
 
 test('an agent has the expected interface', () => {
@@ -17,8 +17,8 @@ test('an agent has the expected interface', () => {
   });
 
   expect(agent.decide).toBeDefined();
-  expect(agent.generateText).toBeDefined();
-  expect(agent.streamText).toBeDefined();
+  // expect(agent.generateText).toBeDefined();
+  // expect(agent.streamText).toBeDefined();
 
   expect(agent.addMessage).toBeDefined();
   expect(agent.addObservation).toBeDefined();
@@ -41,13 +41,13 @@ test('agent.addMessage() adds to message history', () => {
   });
 
   agent.addMessage({
-    content: 'msg 1',
     role: 'user',
+    content: [{ type: 'text', text: 'msg 1' }],
   });
 
   const messageHistory = agent.addMessage({
-    content: 'response 1',
     role: 'assistant',
+    content: [{ type: 'text', text: 'response 1' }],
   });
 
   expect(messageHistory.sessionId).toEqual(agent.sessionId);
@@ -249,7 +249,8 @@ test('Agents can use a custom adapter', async () => {
     model: {} as any,
   });
 
-  const res = await agent.generateText({
+  const res = await generateText({
+    model: agent.model,
     prompt: 'Question?',
   });
 

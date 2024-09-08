@@ -1,4 +1,4 @@
-import { type CoreTool, tool } from 'ai';
+import { type CoreTool, generateText, tool } from 'ai';
 import {
   AgentPlan,
   AgentPlanInput,
@@ -107,12 +107,25 @@ export async function simplePlanner<T extends AnyAgent>(
 
   const messages = await getMessages(agent, prompt, input);
 
-  const result = await agent.generateText({
-    toolChoice: 'required',
-    ...input,
-    prompt,
+  const model = input.model ? agent.wrap(input.model) : agent.model;
+
+  const {
+    state,
+    machine,
+    previousPlan,
+    events,
+    goal,
+    model: _,
+    ...rest
+  } = input;
+
+  const result = await generateText({
+    // ...input,
+    ...rest,
+    model,
     messages,
-    tools: toolMap,
+    tools: toolMap as any,
+    toolChoice: input.toolChoice ?? 'required',
   });
 
   const singleResult = result.toolResults[0];

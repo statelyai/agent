@@ -29,6 +29,8 @@ import { agentGenerateText, agentStreamText } from './text';
 import { agentDecide } from './decision';
 import { vercelAdapter } from './adapters/vercel';
 import { getMachineHash, randomId } from './utils';
+import { experimental_wrapLanguageModel } from 'ai';
+import { createAgentMiddleware } from './middleware';
 
 export const agentLogic: AgentLogic<AnyEventObject> = fromTransition(
   (state, event, { emit }) => {
@@ -293,6 +295,17 @@ export function createAgent<
   }) as typeof agent.interact;
 
   agent.types = {} as any;
+
+  agent.wrap = (modelToWrap) =>
+    experimental_wrapLanguageModel({
+      model: modelToWrap,
+      middleware: createAgentMiddleware(agent),
+    });
+
+  agent.model = experimental_wrapLanguageModel({
+    model,
+    middleware: createAgentMiddleware(agent),
+  });
 
   agent.start();
 

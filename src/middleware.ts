@@ -1,8 +1,15 @@
 import {
   Experimental_LanguageModelV1Middleware as LanguageModelV1Middleware,
+  LanguageModelV1StreamPart,
   experimental_wrapLanguageModel as wrapLanguageModel,
 } from 'ai';
-import { AnyAgent } from './types';
+import {
+  AgentMessageInput,
+  AnyAgent,
+  LanguageModelV1TextPart,
+  LanguageModelV1ToolCallPart,
+} from './types';
+import { randomId } from './utils';
 
 export function createAgentMiddleware(agent: AnyAgent) {
   const middleware: LanguageModelV1Middleware = {
@@ -10,21 +17,78 @@ export function createAgentMiddleware(agent: AnyAgent) {
       return params;
     },
     wrapGenerate: async ({ doGenerate, params }) => {
-      params.headers;
-      console.log('doGenerate called');
-      console.log(`params: ${JSON.stringify(params, null, 2)}`);
+      const id = randomId();
+
+      params.prompt.forEach((p) => {
+        agent.addMessage({
+          id,
+          ...p,
+          timestamp: Date.now(),
+          correlationId: params.providerMetadata
+            ?.correlationId as unknown as string,
+          parentCorrelationId: params.providerMetadata
+            ?.parentCorrelationId as unknown as string,
+        });
+      });
 
       const result = await doGenerate();
 
-      console.log('doGenerate finished');
-      console.log(`generated text: ${result.text}`);
+      const content: (LanguageModelV1TextPart | LanguageModelV1ToolCallPart)[] =
+        [];
+
+      if (result.text) {
+        content.push({
+          type: 'text',
+          text: result.text,
+        });
+      }
+
+      const msgsToAppend: AgentMessageInput[] = [];
+
+      if (result.toolCalls) {
+        // Omit tool calls for now
+        // result.toolCalls.forEach((toolCall, i) => {
+        //   content.push({
+        //     type: 'tool-call',
+        //     ...toolCall,
+        //   });
+        // });
+      }
+
+      agent.addMessage({
+        id: randomId(),
+        timestamp: Date.now(),
+        role: 'assistant',
+        content: content,
+        responseId: id,
+        correlationId: params.providerMetadata
+          ?.correlationId as unknown as string,
+        parentCorrelationId: params.providerMetadata
+          ?.parentCorrelationId as unknown as string,
+      });
+
+      msgsToAppend.forEach((m) => {
+        agent.addMessage(m);
+      });
 
       return result;
     },
 
     wrapStream: async ({ doStream, params }) => {
-      console.log('doStream called');
-      console.log(`params: ${JSON.stringify(params, null, 2)}`);
+      const id = randomId();
+
+      params.prompt.forEach((message) => {
+        message.content;
+        agent.addMessage({
+          id,
+          ...message,
+          timestamp: Date.now(),
+          correlationId: params.providerMetadata
+            ?.correlationId as unknown as string,
+          parentCorrelationId: params.providerMetadata
+            ?.parentCorrelationId as unknown as string,
+        });
+      });
 
       const { stream, ...rest } = await doStream();
 
@@ -43,8 +107,29 @@ export function createAgentMiddleware(agent: AnyAgent) {
         },
 
         flush() {
-          console.log('doStream finished');
-          console.log(`generated text: ${generatedText}`);
+          const content: (
+            | LanguageModelV1TextPart
+            | LanguageModelV1ToolCallPart
+          )[] = [];
+
+          if (generatedText) {
+            content.push({
+              type: 'text',
+              text: generatedText,
+            });
+          }
+
+          agent.addMessage({
+            id: randomId(),
+            timestamp: Date.now(),
+            role: 'assistant',
+            content,
+            responseId: id,
+            correlationId: params.providerMetadata
+              ?.correlationId as unknown as string,
+            parentCorrelationId: params.providerMetadata
+              ?.parentCorrelationId as unknown as string,
+          });
         },
       });
 
@@ -56,8 +141,3 @@ export function createAgentMiddleware(agent: AnyAgent) {
   };
   return middleware;
 }
-
-const wrappedLanguageModel = wrapLanguageModel({
-  model: {} as any,
-  middleware: createAgentMiddleware({} as any),
-});
