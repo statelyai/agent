@@ -6,8 +6,9 @@ import {
   type AIAdapter,
 } from './';
 import { createActor, createMachine } from 'xstate';
-import { generateText } from 'ai';
+import { LanguageModelV1CallOptions } from 'ai';
 import { z } from 'zod';
+import { dummyResponseValues, MockLanguageModelV1 } from './mockModel';
 
 test('an agent has the expected interface', () => {
   const agent = createAgent({
@@ -34,10 +35,12 @@ test('an agent has the expected interface', () => {
 });
 
 test('agent.addMessage() adds to message history', () => {
+  const model = new MockLanguageModelV1({});
+
   const agent = createAgent({
     name: 'test',
     events: {},
-    model: {} as any,
+    model,
   });
 
   agent.addMessage({
@@ -52,27 +55,15 @@ test('agent.addMessage() adds to message history', () => {
 
   expect(messageHistory.sessionId).toEqual(agent.sessionId);
 
-  expect(agent.select((c) => c.messages)).toContainEqual(
-    expect.objectContaining({
-      content: 'msg 1',
-    })
-  );
   expect(agent.getMessages()).toContainEqual(
     expect.objectContaining({
-      content: 'msg 1',
+      content: [expect.objectContaining({ text: 'msg 1' })],
     })
   );
 
-  expect(agent.select((c) => c.messages)).toContainEqual(
-    expect.objectContaining({
-      content: 'response 1',
-      sessionId: expect.any(String),
-      timestamp: expect.any(Number),
-    })
-  );
   expect(agent.getMessages()).toContainEqual(
     expect.objectContaining({
-      content: 'response 1',
+      content: [expect.objectContaining({ text: 'response 1' })],
       sessionId: expect.any(String),
       timestamp: expect.any(Number),
     })
@@ -233,30 +224,6 @@ test('agent.interact() observes machine actors (no 2nd arg)', () => {
   );
 });
 
-test('Agents can use a custom adapter', async () => {
-  const adapter = {
-    generateText: async () => {
-      return {
-        text: 'Response',
-      } as any;
-    },
-  } as unknown as AIAdapter;
-
-  const agent = createAgent({
-    name: 'test',
-    events: {},
-    adapter,
-    model: {} as any,
-  });
-
-  const res = await generateText({
-    model: agent.model,
-    prompt: 'Question?',
-  });
-
-  expect(res.text).toEqual('Response');
-});
-
 test('You can listen for feedback events', () => {
   const fn = vi.fn();
   const agent = createAgent({
@@ -281,31 +248,33 @@ test('You can listen for feedback events', () => {
 
 test('You can listen for plan events', async () => {
   const fn = vi.fn();
+  const model = new MockLanguageModelV1({
+    doGenerate: async (params: LanguageModelV1CallOptions) => {
+      const keys =
+        params.mode.type === 'regular'
+          ? params.mode.tools?.map((t) => t.name)
+          : [];
+
+      return {
+        ...dummyResponseValues,
+        finishReason: 'tool-calls',
+        toolCalls: [
+          {
+            toolCallType: 'function',
+            toolCallId: 'call-1',
+            toolName: keys![0],
+            args: `{ "type": "${keys?.[0]}" }`,
+          },
+        ],
+      } as any;
+    },
+  });
+
   const agent = createAgent({
     name: 'test',
-    model: {} as any,
+    model,
     events: {
       WIN: z.object({}),
-    },
-    adapter: {
-      generateText: async (arg) => {
-        const keys = Object.keys(arg.tools!);
-
-        if (keys.length !== 1) {
-          throw new Error('Expected only 1 choice');
-        }
-
-        return {
-          toolResults: [
-            {
-              result: {
-                type: keys[0],
-              },
-            },
-          ],
-        } as any as AgentGenerateTextResult;
-      },
-      streamText: {} as any,
     },
   });
 

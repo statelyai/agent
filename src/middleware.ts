@@ -13,7 +13,7 @@ import { randomId } from './utils';
 
 export function createAgentMiddleware(agent: AnyAgent) {
   const middleware: LanguageModelV1Middleware = {
-    transformParams: async ({ params, type }) => {
+    transformParams: async ({ params }) => {
       return params;
     },
     wrapGenerate: async ({ doGenerate, params }) => {
@@ -32,44 +32,6 @@ export function createAgentMiddleware(agent: AnyAgent) {
       });
 
       const result = await doGenerate();
-
-      const content: (LanguageModelV1TextPart | LanguageModelV1ToolCallPart)[] =
-        [];
-
-      if (result.text) {
-        content.push({
-          type: 'text',
-          text: result.text,
-        });
-      }
-
-      const msgsToAppend: AgentMessageInput[] = [];
-
-      if (result.toolCalls) {
-        // Omit tool calls for now
-        // result.toolCalls.forEach((toolCall, i) => {
-        //   content.push({
-        //     type: 'tool-call',
-        //     ...toolCall,
-        //   });
-        // });
-      }
-
-      agent.addMessage({
-        id: randomId(),
-        timestamp: Date.now(),
-        role: 'assistant',
-        content: content,
-        responseId: id,
-        correlationId: params.providerMetadata
-          ?.correlationId as unknown as string,
-        parentCorrelationId: params.providerMetadata
-          ?.parentCorrelationId as unknown as string,
-      });
-
-      msgsToAppend.forEach((m) => {
-        agent.addMessage(m);
-      });
 
       return result;
     },

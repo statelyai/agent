@@ -278,7 +278,7 @@ type LanguageModelV1Message = (
   providerMetadata?: LanguageModelV1ProviderMetadata;
 };
 
-export type AgentMessageInput = LanguageModelV1Message & {
+export type AgentMessageInput = CoreMessage & {
   timestamp?: number;
   id?: string;
   /**

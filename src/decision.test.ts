@@ -1,8 +1,9 @@
 import { test, expect } from 'vitest';
-import { createAgent, fromDecision, type AIAdapter } from './';
+import { createAgent, fromDecision, type AIAdapter } from '.';
 import { createActor, createMachine, waitFor } from 'xstate';
 import { z } from 'zod';
-import { GenerateTextResult } from 'ai';
+import { GenerateTextResult, LanguageModelV1CallOptions } from 'ai';
+import { dummyResponseValues, MockLanguageModelV1 } from './mockModel';
 
 const mockToolDecision: AIAdapter['generateText'] = async (arg) => {
   const keys = Object.keys(arg.tools!);
@@ -28,10 +29,31 @@ const mockToolDecision: AIAdapter['generateText'] = async (arg) => {
   } as any as GenerateTextResult<any>;
 };
 
+const doGenerate = async (params: LanguageModelV1CallOptions) => {
+  const keys =
+    params.mode.type === 'regular' ? params.mode.tools?.map((t) => t.name) : [];
+
+  return {
+    ...dummyResponseValues,
+    finishReason: 'tool-calls',
+    toolCalls: [
+      {
+        toolCallType: 'function',
+        toolCallId: 'call-1',
+        toolName: keys![0],
+        args: `{ "type": "${keys?.[0]}" }`,
+      },
+    ],
+  } as any;
+};
+
 test('fromDecision() makes a decision', async () => {
+  const model = new MockLanguageModelV1({
+    doGenerate,
+  });
   const agent = createAgent({
     name: 'test',
-    model: {} as any,
+    model,
     events: {
       doFirst: z.object({}),
       doSecond: z.object({}),
@@ -91,16 +113,15 @@ test('fromDecision() makes a decision', async () => {
 });
 
 test('interacts with an actor', async () => {
+  const model = new MockLanguageModelV1({
+    doGenerate,
+  });
   const agent = createAgent({
     name: 'test',
-    model: {} as any,
+    model,
     events: {
       doFirst: z.object({}),
       doSecond: z.object({}),
-    },
-    adapter: {
-      generateText: mockToolDecision,
-      streamText: {} as any,
     },
   });
 
@@ -135,9 +156,12 @@ test('interacts with an actor', async () => {
 });
 
 test('interacts with an actor (late interaction)', async () => {
+  const model = new MockLanguageModelV1({
+    doGenerate,
+  });
   const agent = createAgent({
     name: 'test',
-    model: {} as any,
+    model,
     events: {
       doFirst: z.object({}),
       doSecond: z.object({}),
