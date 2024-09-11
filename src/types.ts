@@ -31,7 +31,7 @@ export type StreamTextOptions = Parameters<typeof streamText>[0];
 
 export type AgentPlanInput<TEvent extends EventObject> = Omit<
   GenerateTextOptions,
-  'prompt' | 'messages' | 'tools'
+  'prompt' | 'tools'
 > & {
   /**
    * The currently observed state.
@@ -118,14 +118,11 @@ export type AgentDecideOptions = {
   model?: LanguageModel;
   context?: any;
   state: ObservedState;
-  machine: AnyStateMachine;
+  machine?: AnyStateMachine;
   execute?: (event: AnyEventObject) => Promise<void>;
   planner?: AgentPlanner<any>;
   events?: ZodEventMapping;
-} & Omit<
-  Parameters<typeof generateText>[0],
-  'model' | 'tools' | 'prompt' | 'messages'
->;
+} & Omit<Parameters<typeof generateText>[0], 'model' | 'tools' | 'prompt'>;
 
 export interface AgentFeedback {
   goal?: string;

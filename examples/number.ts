@@ -2,7 +2,7 @@ import { createAgent, fromDecision } from '../src';
 import { assign, createActor, log, setup } from 'xstate';
 import { z } from 'zod';
 import { openai } from '@ai-sdk/openai';
-import { getFromTerminal } from './helpers/helpers';
+import { fromTerminal } from './helpers/helpers';
 
 const agent = createAgent({
   name: 'number-guesser',
@@ -24,7 +24,7 @@ const machine = setup({
   },
   actors: {
     agent: fromDecision(agent),
-    getFromTerminal,
+    getFromTerminal: fromTerminal,
   },
 }).createMachine({
   context: {

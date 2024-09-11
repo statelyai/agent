@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { createAgent, fromDecision } from '../src';
 import { openai } from '@ai-sdk/openai';
 import { assign, createActor, log, setup } from 'xstate';
-import { getFromTerminal } from './helpers/helpers';
+import { fromTerminal } from './helpers/helpers';
 
 const agent = createAgent({
   name: 'chain-of-thought',
@@ -25,7 +25,7 @@ const agent = createAgent({
 
 const machine = setup({
   types: agent.types,
-  actors: { agent: fromDecision(agent), getFromTerminal },
+  actors: { agent: fromDecision(agent), getFromTerminal: fromTerminal },
 }).createMachine({
   initial: 'asking',
   context: {

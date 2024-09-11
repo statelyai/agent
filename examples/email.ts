@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { createAgent, fromDecision } from '../src';
 import { openai } from '@ai-sdk/openai';
 import { assign, createActor, setup } from 'xstate';
-import { getFromTerminal } from './helpers/helpers';
+import { fromTerminal } from './helpers/helpers';
 
 const agent = createAgent({
   name: 'email',
@@ -31,7 +31,7 @@ const machine = setup({
       replyEmail: string | null;
     },
   },
-  actors: { agent: fromDecision(agent), getFromTerminal },
+  actors: { agent: fromDecision(agent), getFromTerminal: fromTerminal },
 }).createMachine({
   initial: 'checking',
   context: (x) => ({

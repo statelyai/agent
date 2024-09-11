@@ -1,5 +1,5 @@
 import { assign, createActor, log, setup } from 'xstate';
-import { getFromTerminal } from './helpers/helpers';
+import { fromTerminal } from './helpers/helpers';
 import { createAgent, fromDecision } from '../src';
 import { z } from 'zod';
 import { openai } from '@ai-sdk/openai';
@@ -30,7 +30,7 @@ const machine = setup({
     },
     events: agent.types.events,
   },
-  actors: { agent: fromDecision(agent), getFromTerminal },
+  actors: { agent: fromDecision(agent), getFromTerminal: fromTerminal },
 }).createMachine({
   initial: 'human',
   context: {

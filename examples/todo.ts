@@ -2,7 +2,7 @@ import { assign, setup, assertEvent, createActor, createMachine } from 'xstate';
 import { z } from 'zod';
 import { createAgent, fromDecision } from '../src';
 import { openai } from '@ai-sdk/openai';
-import { getFromTerminal } from './helpers/helpers';
+import { fromTerminal } from './helpers/helpers';
 
 const agent = createAgent({
   name: 'todo',
@@ -40,7 +40,7 @@ const machine = setup({
       | typeof agent.types.events
       | { type: 'assist'; command: string },
   },
-  actors: { agent: fromDecision(agent), getFromTerminal },
+  actors: { agent: fromDecision(agent), getFromTerminal: fromTerminal },
 }).createMachine({
   context: {
     command: null,

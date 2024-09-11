@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { createAgent, fromDecision } from '../src';
 import { openai } from '@ai-sdk/openai';
 import { assign, createActor, log, setup } from 'xstate';
-import { getFromTerminal } from './helpers/helpers';
+import { fromTerminal } from './helpers/helpers';
 
 const agent = createAgent({
   name: 'goal',
@@ -27,7 +27,7 @@ const machine = setup({
     },
     events: agent.types.events,
   },
-  actors: { decider, getFromTerminal },
+  actors: { decider, getFromTerminal: fromTerminal },
 }).createMachine({
   initial: 'gettingQuestion',
   context: {

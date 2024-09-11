@@ -3,7 +3,7 @@ import { createAgent, fromDecision } from '../src';
 import { loadingAnimation } from './helpers/loader';
 import { z } from 'zod';
 import { openai } from '@ai-sdk/openai';
-import { getFromTerminal } from './helpers/helpers';
+import { fromTerminal } from './helpers/helpers';
 
 export function getRandomFunnyPhrase() {
   const funnyPhrases = [
@@ -81,7 +81,7 @@ const jokeMachine = setup({
   actors: {
     agent: fromDecision(agent),
     loader,
-    getFromTerminal,
+    getFromTerminal: fromTerminal,
   },
 }).createMachine({
   id: 'joke',

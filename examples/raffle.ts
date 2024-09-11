@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { createAgent, fromDecision } from '../src';
 import { openai } from '@ai-sdk/openai';
 import { assign, createActor, log, setup } from 'xstate';
-import { getFromTerminal } from './helpers/helpers';
+import { fromTerminal } from './helpers/helpers';
 
 const agent = createAgent({
   name: 'raffle-chooser',
@@ -29,7 +29,7 @@ const machine = setup({
     },
     events: {} as typeof agent.types.events | { type: 'draw' },
   },
-  actors: { agent: fromDecision(agent), getFromTerminal },
+  actors: { agent: fromDecision(agent), getFromTerminal: fromTerminal },
 }).createMachine({
   context: {
     lastInput: null,
