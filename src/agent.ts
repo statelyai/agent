@@ -4,8 +4,6 @@ import {
   createActor,
   EventObject,
   fromTransition,
-  Observer,
-  toObserver,
 } from 'xstate';
 import { ZodContextMapping, ZodEventMapping } from './schemas';
 import {
@@ -16,7 +14,6 @@ import {
   EventsFromZodEventMapping,
   GenerateTextOptions,
   AgentLongTermMemory,
-  AIAdapter,
   ObservedState,
   AgentObservationInput,
   AgentMemoryContext,
@@ -25,9 +22,7 @@ import {
   AgentFeedback,
 } from './types';
 import { simplePlanner } from './planners/simplePlanner';
-import { agentGenerateText, agentStreamText } from './text';
 import { agentDecide } from './decision';
-import { vercelAdapter } from './adapters/vercel';
 import { getMachineHash, randomId } from './utils';
 import { experimental_wrapLanguageModel } from 'ai';
 import { createAgentMiddleware } from './middleware';
@@ -100,7 +95,6 @@ export function createAgent<
   stringify = JSON.stringify,
   getMemory,
   logic = agentLogic as AgentLogic<TEvents>,
-  adapter = vercelAdapter,
   ...generateTextOptions
 }: {
   /**
@@ -142,14 +136,12 @@ export function createAgent<
    * Agent logic
    */
   logic?: AgentLogic<TEvents>;
-  adapter?: AIAdapter;
 } & GenerateTextOptions): Agent<TContext, TEvents> {
   const agent = createActor(logic) as unknown as Agent<TContext, TEvents>;
   agent.events = events;
   agent.model = model;
   agent.name = name;
   agent.description = description;
-  agent.adapter = adapter;
   agent.defaultOptions = { ...generateTextOptions, model };
   agent.select = (selector) => {
     return selector(agent.getSnapshot().context);
@@ -170,7 +162,6 @@ export function createAgent<
       id: messageInput.id ?? randomId(),
       timestamp: messageInput.timestamp ?? Date.now(),
       sessionId: agent.sessionId,
-      correlationId: messageInput.correlationId ?? randomId(),
     } satisfies AgentMessage;
     agent.send({
       type: 'agent.message',
@@ -180,10 +171,6 @@ export function createAgent<
     return message;
   };
   agent.getMessages = () => agent.getSnapshot().context.messages;
-
-  agent.generateText = (opts) => agentGenerateText(agent, opts);
-
-  agent.streamText = (opts) => agentStreamText(agent, opts);
 
   agent.addFeedback = (feedbackInput) => {
     const feedback = {

@@ -159,8 +159,6 @@ export type AgentMessage = CoreMessage & {
   responseId?: string;
   result?: GenerateTextResult<any>;
   sessionId: string;
-  correlationId: string;
-  parentCorrelationId?: string;
 };
 
 type JSONObject = {
@@ -396,13 +394,6 @@ export type Agent<TContext, TEvents extends EventObject> = ActorRefFrom<
   model: LanguageModel;
   defaultOptions: GenerateTextOptions;
   memory: AgentLongTermMemory | undefined;
-  /**
-   * The adapter used to perform LLM actions such as
-   * `.generateText(…)` and `.streamText(…)`.
-   *
-   * Defaults to the Vercel AI SDK.
-   */
-  adapter: AIAdapter;
 
   /**
    * Resolves with an `AgentPlan` based on the information provided in the `options`, including:
@@ -415,24 +406,6 @@ export type Agent<TContext, TEvents extends EventObject> = ActorRefFrom<
   decide: (
     options: AgentDecideOptions
   ) => Promise<AgentPlan<TEvents> | undefined>;
-
-  // Generate text
-  /**
-   *
-   * @deprecated
-   */
-  generateText: (
-    options: AgentGenerateTextOptions
-  ) => Promise<AgentGenerateTextResult>;
-
-  // Stream text
-  /**
-   *
-   * @deprecated
-   */
-  streamText: (
-    options: AgentStreamTextOptions
-  ) => Promise<AgentStreamTextResult>;
 
   addObservation: (
     observationInput: AgentObservationInput
@@ -539,13 +512,6 @@ export type CommonTextOptions = {
   context?: Record<string, any>;
   messages?: FromAgent<CoreMessage[]>;
   template?: PromptTemplate<any>;
-  correlationId?: string;
-  parentCorrelationId?: string;
-};
-
-export type TextResultMeta = {
-  correlationId: string;
-  parentCorrelationId?: string;
 };
 
 export type AgentGenerateTextOptions = Omit<
@@ -554,15 +520,11 @@ export type AgentGenerateTextOptions = Omit<
 > &
   CommonTextOptions;
 
-export type AgentGenerateTextResult = GenerateTextResult<any> & TextResultMeta;
-
 export type AgentStreamTextOptions = Omit<
   StreamTextOptions,
   'model' | 'prompt' | 'messages'
 > &
   CommonTextOptions;
-
-export type AgentStreamTextResult = StreamTextResult<any> & TextResultMeta;
 
 export interface ObservedState {
   /**
@@ -614,11 +576,6 @@ export interface AgentLongTermMemory {
     key: K,
     items: AgentMemoryContext[K]
   ): Promise<void>;
-}
-
-export interface AIAdapter {
-  generateText: typeof generateText;
-  streamText: typeof streamText;
 }
 
 export type Compute<A extends any> = { [K in keyof A]: A[K] } & unknown;

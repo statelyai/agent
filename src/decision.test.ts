@@ -1,33 +1,9 @@
 import { test, expect } from 'vitest';
-import { createAgent, fromDecision, type AIAdapter } from '.';
+import { createAgent, fromDecision } from '.';
 import { createActor, createMachine, waitFor } from 'xstate';
 import { z } from 'zod';
-import { GenerateTextResult, LanguageModelV1CallOptions } from 'ai';
+import { LanguageModelV1CallOptions } from 'ai';
 import { dummyResponseValues, MockLanguageModelV1 } from './mockModel';
-
-const mockToolDecision: AIAdapter['generateText'] = async (arg) => {
-  const keys = Object.keys(arg.tools!);
-
-  if (keys.length > 1) {
-    throw new Error('Expected only 1 choice');
-  }
-
-  if (keys.length === 0) {
-    return {
-      toolResults: [],
-    } as any as GenerateTextResult<any>;
-  }
-
-  return {
-    toolResults: [
-      {
-        result: {
-          type: keys[0],
-        },
-      },
-    ],
-  } as any as GenerateTextResult<any>;
-};
 
 const doGenerate = async (params: LanguageModelV1CallOptions) => {
   const keys =
@@ -57,26 +33,6 @@ test('fromDecision() makes a decision', async () => {
     events: {
       doFirst: z.object({}),
       doSecond: z.object({}),
-    },
-    adapter: {
-      generateText: async (arg) => {
-        const keys = Object.keys(arg.tools!);
-
-        if (keys.length !== 1) {
-          throw new Error('Expected only 1 choice');
-        }
-
-        return {
-          toolResults: [
-            {
-              result: {
-                type: keys[0],
-              },
-            },
-          ],
-        } as any as GenerateTextResult<any>;
-      },
-      streamText: {} as any,
     },
   });
 
@@ -165,10 +121,6 @@ test('interacts with an actor (late interaction)', async () => {
     events: {
       doFirst: z.object({}),
       doSecond: z.object({}),
-    },
-    adapter: {
-      generateText: mockToolDecision,
-      streamText: {} as any,
     },
   });
 

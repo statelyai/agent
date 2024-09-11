@@ -1,10 +1,8 @@
 import {
   Experimental_LanguageModelV1Middleware as LanguageModelV1Middleware,
   LanguageModelV1StreamPart,
-  experimental_wrapLanguageModel as wrapLanguageModel,
 } from 'ai';
 import {
-  AgentMessageInput,
   AnyAgent,
   LanguageModelV1TextPart,
   LanguageModelV1ToolCallPart,
