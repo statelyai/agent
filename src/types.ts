@@ -417,16 +417,6 @@ export type Agent<TContext, TEvents extends EventObject> = ActorRefFrom<
    * Called whenever the agent (LLM assistant) receives or sends a message.
    */
   onMessage: (callback: (message: AgentMessage) => void) => void;
-  /**
-   * Selects agent data from its context.
-   *
-   * @deprecated Select from `agent.getSnapshot().context` directly or:
-   * - `agent.getMessages()`
-   * - `agent.getObservations()`
-   * - `agent.getFeedback()`
-   * - `agent.getPlans()`
-   */
-  select: <T>(selector: (context: AgentMemoryContext) => T) => T;
 
   /**
    * Retrieves messages from the agent's short-term (local) memory.

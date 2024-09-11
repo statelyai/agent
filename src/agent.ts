@@ -143,9 +143,6 @@ export function createAgent<
   agent.name = name;
   agent.description = description;
   agent.defaultOptions = { ...generateTextOptions, model };
-  agent.select = (selector) => {
-    return selector(agent.getSnapshot().context);
-  };
   agent.memory = getMemory ? getMemory(agent) : undefined;
 
   agent.onMessage = (callback) => {

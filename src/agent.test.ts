@@ -9,7 +9,7 @@ test('an agent has the expected interface', () => {
   const agent = createAgent({
     name: 'test',
     events: {},
-    model: {} as any,
+    model: new MockLanguageModelV1(),
   });
 
   expect(agent.decide).toBeDefined();
@@ -28,7 +28,7 @@ test('an agent has the expected interface', () => {
 });
 
 test('agent.addMessage() adds to message history', () => {
-  const model = new MockLanguageModelV1({});
+  const model = new MockLanguageModelV1();
 
   const agent = createAgent({
     name: 'test',
@@ -80,7 +80,7 @@ test('agent.addFeedback() adds to feedback', () => {
 
   expect(feedback.sessionId).toEqual(agent.sessionId);
 
-  expect(agent.select((c) => c.feedback)).toContainEqual(
+  expect(agent.getFeedback()).toContainEqual(
     expect.objectContaining({
       attributes: {
         score: -1,
@@ -119,7 +119,7 @@ test('agent.addObservation() adds to observations', () => {
 
   expect(observation.sessionId).toEqual(agent.sessionId);
 
-  expect(agent.select((c) => c.observations)).toContainEqual(
+  expect(agent.getObservations()).toContainEqual(
     expect.objectContaining({
       prevState: { value: 'playing', context: {} },
       event: { type: 'play', position: 3 },
@@ -158,7 +158,7 @@ test('agent.addObservation() adds to observations with machine hash', () => {
 
   expect(observation.sessionId).toEqual(agent.sessionId);
 
-  expect(agent.select((c) => c.observations)).toContainEqual(
+  expect(agent.getObservations()).toContainEqual(
     expect.objectContaining({
       prevState: { value: 'playing', context: {} },
       event: { type: 'play', position: 3 },
@@ -193,7 +193,7 @@ test('agent.interact() observes machine actors (no 2nd arg)', () => {
 
   actor.start();
 
-  expect(agent.select((c) => c.observations)).toContainEqual(
+  expect(agent.getObservations()).toContainEqual(
     expect.objectContaining({
       prevState: undefined,
       state: expect.objectContaining({ value: 'a' }),
@@ -208,7 +208,7 @@ test('agent.interact() observes machine actors (no 2nd arg)', () => {
 
   actor.send({ type: 'NEXT' });
 
-  expect(agent.select((c) => c.observations)).toContainEqual(
+  expect(agent.getObservations()).toContainEqual(
     expect.objectContaining({
       prevState: expect.objectContaining({ value: 'a' }),
       event: { type: 'NEXT' },
