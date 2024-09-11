@@ -116,7 +116,6 @@ export type AgentPlanner<T extends AnyAgent> = (
 export type AgentDecideOptions = {
   goal: string;
   model?: LanguageModel;
-  context?: any;
   state: ObservedState;
   machine?: AnyStateMachine;
   execute?: (event: AnyEventObject) => Promise<void>;
@@ -485,6 +484,8 @@ export type Agent<TContext, TEvents extends EventObject> = ActorRefFrom<
       observation: AgentObservation<TActor>
     ) => AgentDecisionInput | undefined
   ): Subscription;
+
+  observe<TActor extends AnyActorRef>(actorRef: TActor): Subscription;
 
   wrap: (model: LanguageModelV1) => LanguageModelV1;
 };

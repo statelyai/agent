@@ -187,10 +187,17 @@ export function createAgent<
 
   agent.addObservation = (observationInput) => {
     const { prevState, event, state } = observationInput;
+    const observedState = { context: state.context, value: state.value };
+    const observedPrevState = prevState
+      ? {
+          context: prevState.context,
+          value: prevState.value,
+        }
+      : undefined;
     const observation = {
-      prevState,
+      prevState: observedPrevState,
       event,
-      state,
+      state: observedState,
       id: observationInput.id ?? randomId(),
       sessionId: agent.sessionId,
       timestamp: observationInput.timestamp ?? Date.now(),
@@ -240,7 +247,7 @@ export function createAgent<
     }
 
     // Inspect system, but only observe specified actor
-    actorRef.system.inspect({
+    const sub = actorRef.system.inspect({
       next: async (inspEvent) => {
         if (
           !subscribed ||
@@ -273,10 +280,39 @@ export function createAgent<
 
     return {
       unsubscribe: () => {
+        sub.unsubscribe();
         subscribed = false;
-      }, // TODO: make this actually unsubscribe
+      },
     };
   }) as typeof agent.interact;
+
+  agent.observe = (actorRef) => {
+    let prevState: ObservedState = actorRef.getSnapshot();
+
+    const sub = actorRef.system.inspect({
+      next: async (inspEvent) => {
+        if (
+          inspEvent.actorRef !== actorRef ||
+          inspEvent.type !== '@xstate.snapshot'
+        ) {
+          return;
+        }
+
+        const observationInput = {
+          event: inspEvent.event,
+          prevState,
+          state: inspEvent.snapshot as any,
+          machine: (actorRef as any).src,
+        } satisfies AgentObservationInput;
+
+        prevState = observationInput.state;
+
+        agent.addObservation(observationInput);
+      },
+    });
+
+    return sub;
+  };
 
   agent.types = {} as any;
 
