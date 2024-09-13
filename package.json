@@ -26,6 +26,7 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
+    "@ai-sdk/openai": "^0.0.40",
     "@changesets/changelog-github": "^0.5.0",
     "@changesets/cli": "^2.27.7",
     "@langchain/community": "^0.0.53",
@@ -46,9 +47,8 @@
     "access": "public"
   },
   "dependencies": {
-    "@ai-sdk/openai": "^0.0.40",
     "@xstate/graph": "^2.0.0",
-    "ai": "^3.3.28",
+    "ai": "^3.3.35",
     "object-hash": "^3.0.0",
     "xstate": "^5.17.1"
   },
