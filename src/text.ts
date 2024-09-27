@@ -153,7 +153,10 @@ export async function agentStreamText(
           usage: res.usage,
           warnings: res.warnings,
           rawResponse: res.rawResponse,
-          roundtrips: [], // TODO: how do we get this information?
+          roundtrips: [], // TODO: how do we get this information?,
+          steps: res.steps,
+          response: res.response,
+          experimental_providerMetadata: res.experimental_providerMetadata,
         },
         content: res.text,
         id: randomId(),
@@ -167,6 +170,8 @@ export async function agentStreamText(
 
   return {
     ...result,
+    textStream: result.textStream,
+    fullStream: result.fullStream,
     parentCorrelationId: resolvedOptions.parentCorrelationId,
     correlationId: resolvedOptions.correlationId,
   } as unknown as AgentStreamTextResult; // TODO: fix
