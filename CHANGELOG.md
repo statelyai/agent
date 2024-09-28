@@ -1,5 +1,12 @@
 # @statelyai/agent
 
+## 1.1.6
+
+### Patch Changes
+
+- [#54](https://github.com/statelyai/agent/pull/54) [`140fdce`](https://github.com/statelyai/agent/commit/140fdceb879dea5a32f243e89a8d87a9c524e454) Thanks [@XavierDK](https://github.com/XavierDK)! - - Addressing an issue where the fullStream property was not properly copied when using the spread operator (...). The problem occurred because fullStream is an iterator, and as such, it was not included in the shallow copy of the result object.
+  - Update all packages
+
 ## 1.1.5
 
 ### Patch Changes
