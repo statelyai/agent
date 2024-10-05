@@ -28,7 +28,7 @@
   "devDependencies": {
     "@ai-sdk/openai": "^0.0.40",
     "@changesets/changelog-github": "^0.5.0",
-    "@changesets/cli": "^2.27.8",
+    "@changesets/cli": "^2.27.9",
     "@langchain/community": "^0.0.53",
     "@langchain/core": "^0.1.63",
     "@langchain/openai": "^0.0.28",
@@ -39,7 +39,7 @@
     "ts-node": "^10.9.2",
     "tsup": "^8.3.0",
     "typescript": "^5.6.2",
-    "vitest": "^2.1.1",
+    "vitest": "^2.1.2",
     "wikipedia": "^2.1.2",
     "zod": "^3.23.8"
   },
@@ -48,7 +48,7 @@
   },
   "dependencies": {
     "@xstate/graph": "^2.0.1",
-    "ai": "^3.4.7",
+    "ai": "^3.4.9",
     "object-hash": "^3.0.0",
     "xstate": "^5.18.2"
   },
