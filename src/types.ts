@@ -18,12 +18,11 @@ import {
   generateText,
   GenerateTextResult,
   LanguageModel,
-  LanguageModelV1,
   streamText,
-  StreamTextResult,
 } from 'ai';
 import { ZodContextMapping, ZodEventMapping } from './schemas';
 import { TypeOf } from 'zod';
+import { Agent } from './agent';
 
 export type GenerateTextOptions = Parameters<typeof generateText>[0];
 
@@ -367,127 +366,6 @@ export type ContextFromZodContextMapping<
   TContextSchema extends ZodContextMapping
 > = {
   [K in keyof TContextSchema & string]: TypeOf<TContextSchema[K]>;
-};
-
-export type Agent<TContext, TEvents extends EventObject> = ActorRefFrom<
-  AgentLogic<TEvents>
-> & {
-  /**
-   * The name of the agent. All agents with the same name are related and
-   * able to share experiences (observations, feedback) with each other.
-   */
-  name?: string;
-  /**
-   * The unique identifier for the agent.
-   */
-  id?: string;
-  description?: string;
-  events: ZodEventMapping;
-  types: {
-    events: TEvents;
-    context: Compute<TContext>;
-  };
-  model: LanguageModel;
-  defaultOptions: GenerateTextOptions;
-  memory: AgentLongTermMemory | undefined;
-
-  /**
-   * Resolves with an `AgentPlan` based on the information provided in the `options`, including:
-   *
-   * - The `goal` for the agent to achieve
-   * - The observed current `state`
-   * - The `machine` (e.g. a state machine) that specifies what can happen next
-   * - Additional `context`
-   */
-  decide: (
-    options: AgentDecideOptions
-  ) => Promise<AgentPlan<TEvents> | undefined>;
-
-  addObservation: (
-    observationInput: AgentObservationInput
-  ) => AgentObservation<any>; // TODO
-  addMessage: (messageInput: AgentMessageInput) => AgentMessage;
-  addFeedback: (feedbackInput: AgentFeedbackInput) => AgentFeedback;
-  addPlan: (plan: AgentPlan<TEvents>) => void;
-  /**
-   * Called whenever the agent (LLM assistant) receives or sends a message.
-   */
-  onMessage: (callback: (message: AgentMessage) => void) => void;
-
-  /**
-   * Retrieves messages from the agent's short-term (local) memory.
-   */
-  getMessages: () => AgentMessage[];
-
-  /**
-   * Retrieves observations from the agent's short-term (local) memory.
-   */
-  getObservations: () => AgentObservation<Agent<TContext, TEvents>>[];
-
-  /**
-   * Retrieves feedback from the agent's short-term (local) memory.
-   */
-  getFeedback: () => AgentFeedback[];
-
-  /**
-   * Retrieves strategies from the agent's short-term (local) memory.
-   */
-  getPlans: () => AgentPlan<TEvents>[];
-
-  /**
-   * Interacts with this state machine actor by inspecting state transitions and storing them as observations.
-   *
-   * Observations contain the `prevState`, `event`, and current `state` of this
-   * actor, as well as other properties that are useful when recalled.
-   * These observations are stored in the `agent`'s short-term (local) memory
-   * and can be retrieved via `agent.getObservations()`.
-   *
-   * @example
-   * ```ts
-   * // Only observes the actor's state transitions
-   * agent.interact(actor);
-   *
-   * actor.start();
-   * ```
-   */
-  interact<TActor extends AnyActorRef>(actorRef: TActor): Subscription;
-  /**
-   * Interacts with this state machine actor by:
-   * 1. Inspecting state transitions and storing them as observations
-   * 2. Deciding what to do next (which event to send the actor) based on
-   * the agent input returned from `getInput(observation)`, if `getInput(…)` is provided as the 2nd argument.
-   *
-   * Observations contain the `prevState`, `event`, and current `state` of this
-   * actor, as well as other properties that are useful when recalled.
-   * These observations are stored in the `agent`'s short-term (local) memory
-   * and can be retrieved via `agent.getObservations()`.
-   *
-   * @example
-   * ```ts
-   * // Observes the actor's state transitions and
-   * // makes a decision if on the "summarize" state
-   * agent.interact(actor, observed => {
-   *   if (observed.state.matches('summarize')) {
-   *     return {
-   *       context: observed.state.context,
-   *       goal: 'Summarize the message'
-   *     }
-   *   }
-   * });
-   *
-   * actor.start();
-   * ```
-   */
-  interact<TActor extends AnyActorRef>(
-    actorRef: TActor,
-    getInput: (
-      observation: AgentObservation<TActor>
-    ) => AgentDecisionInput | undefined
-  ): Subscription;
-
-  observe<TActor extends AnyActorRef>(actorRef: TActor): Subscription;
-
-  wrap: (model: LanguageModelV1) => LanguageModelV1;
 };
 
 export type AnyAgent = Agent<any, any>;
