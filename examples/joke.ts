@@ -60,12 +60,12 @@ const agent = createAgent({
       explanation: z.string(),
     }),
     'agent.continue': z.object({}).describe('Continue'),
-    'agent.markAsIrrelevant': z
-      .object({
-        explanation: z.string(),
-      })
-      .describe('Explains why the joke was irrelevant'),
-    'agent.markAsRelevant': z.object({}).describe('The joke was relevant'),
+    'agent.markRelevancy': z.object({
+      relevant: z.boolean().describe('Whether the joke was relevant'),
+      explanation: z
+        .string()
+        .describe('The explanation for why the joke was relevant or not'),
+    }),
   },
   context: {
     topic: z.string().describe('The topic for the joke'),
@@ -140,21 +140,23 @@ const jokeMachine = setup({
         input: ({ context }) => ({
           context: {
             topic: context.topic,
-            lastJoke: context.jokes[context.jokes.length - 1],
+            lastJoke: context.jokes.at(-1),
           },
           goal: 'An irrelevant joke has no reference to the topic. If the last joke is completely irrelevant to the topic, ask for a new joke topic. Otherwise, continue.',
         }),
       },
       on: {
-        'agent.markAsIrrelevant': {
-          actions: log(({ event }) => 'Irrelevant joke: ' + event.explanation),
-          target: 'waitingForTopic',
-          description: 'Continue',
-        },
-        'agent.markAsRelevant': {
-          actions: log('Joke was relevant'),
-          target: 'rateJoke',
-        },
+        'agent.markRelevancy': [
+          {
+            guard: ({ event }) => !event.relevant,
+            actions: log(
+              ({ event }) => 'Irrelevant joke: ' + event.explanation
+            ),
+            target: 'waitingForTopic',
+            description: 'Continue',
+          },
+          { target: 'rateJoke' },
+        ],
       },
     },
     rateJoke: {

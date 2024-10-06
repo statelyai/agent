@@ -52,8 +52,13 @@ const machine = createMachine({
       },
     },
     other: {
-      entry: () => console.log('Nothing to do!'),
-      type: 'final',
+      entry: () =>
+        console.log(
+          'You want me to do something else. I can only tell the time.'
+        ),
+      after: {
+        1000: 'start',
+      },
     },
   },
 });

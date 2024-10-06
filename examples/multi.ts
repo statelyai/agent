@@ -6,7 +6,7 @@ import { openai } from '@ai-sdk/openai';
 
 const agent = createAgent({
   name: 'multi',
-  model: openai('gpt-4-1106-preview'),
+  model: openai('gpt-4o-mini'),
   events: {
     'agent.respond': z.object({
       response: z.string().describe('The response from the agent'),

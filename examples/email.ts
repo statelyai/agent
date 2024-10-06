@@ -70,8 +70,8 @@ const machine = setup({
         input: `Please provide answers to the questions above`,
         onDone: {
           actions: assign({
-            clarifications: ({ context }) =>
-              context.clarifications.concat(x.event.output),
+            clarifications: ({ context, event }) =>
+              context.clarifications.concat(event.output),
           }),
           target: 'checking',
         },
