@@ -51,6 +51,7 @@ async function main() {
   }
 
   console.log('End of conversation.');
+  process.exit();
 }
 
 main().catch(console.error);

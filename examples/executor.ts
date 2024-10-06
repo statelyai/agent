@@ -24,7 +24,7 @@ const machine = createMachine({
         input: 'What do you want to do?',
         onDone: {
           actions: assign({
-            question: (x) => x.event.output,
+            question: ({ event }) => event.output,
           }),
           target: 'deciding',
         },

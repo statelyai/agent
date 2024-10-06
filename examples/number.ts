@@ -39,7 +39,7 @@ const machine = setup({
         input: 'Enter a number between 1 and 10',
         onDone: {
           actions: assign({
-            answer: (x) => +x.event.output,
+            answer: ({ event }) => +event.output,
           }),
           target: 'guessing',
         },
@@ -78,7 +78,7 @@ const machine = setup({
                 event.number,
               ],
             }),
-            log((x) => x.event.number),
+            log(({ event }) => event.number),
           ],
           target: 'guessing',
           reenter: true,

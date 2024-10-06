@@ -43,8 +43,8 @@ const machine = setup({
         input: 'Say something in Spanish:',
         onDone: {
           actions: assign({
-            conversation: (x) =>
-              x.context.conversation.concat(`User: ` + x.event.output),
+            conversation: ({ context }) =>
+              context.conversation.concat(`User: ` + x.event.output),
           }),
           target: 'ai',
         },
@@ -56,7 +56,7 @@ const machine = setup({
         teaching: {
           invoke: {
             src: 'agent',
-            input: (x) => ({
+            input: () => ({
               context: true,
               goal: 'Give brief feedback to the human based on the most recent response of the conversation',
               maxTokens: 100,
@@ -64,7 +64,7 @@ const machine = setup({
           },
           on: {
             teach: {
-              actions: (x) => console.log(x.event.instruction),
+              actions: ({ event }) => console.log(event.instruction),
               target: 'responding',
             },
           },
@@ -72,7 +72,7 @@ const machine = setup({
         responding: {
           invoke: {
             src: 'agent',
-            input: (x) => ({
+            input: () => ({
               context: true,
               goal: 'Respond to the last message of the conversation in Spanish',
             }),
@@ -81,10 +81,10 @@ const machine = setup({
             respond: {
               actions: [
                 assign({
-                  conversation: (x) =>
-                    x.context.conversation.concat(`Agent: ` + x.event.response),
+                  conversation: ({ context }) =>
+                    context.conversation.concat(`Agent: ` + x.event.response),
                 }),
-                log((x) => x.event.response),
+                log(({ event }) => event.response),
               ],
               target: 'done',
             },

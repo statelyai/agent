@@ -123,7 +123,7 @@ const machine = setup({
       },
       on: {
         'agent.endConversation': {
-          actions: log((x) => x.event),
+          actions: log(({ event }) => event),
           target: 'end',
         },
       },

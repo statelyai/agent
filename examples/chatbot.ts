@@ -33,7 +33,7 @@ const machine = setup({
         input: 'User:',
         onDone: {
           actions: assign({
-            userMessage: (x) => x.event.output,
+            userMessage: ({ event }) => event.output,
           }),
           target: 'responding',
         },
@@ -42,9 +42,9 @@ const machine = setup({
     responding: {
       invoke: {
         src: 'agent',
-        input: (x) => ({
+        input: ({ context }) => ({
           context: {
-            userMessage: 'User says: ' + x.context.userMessage,
+            userMessage: 'User says: ' + context.userMessage,
           },
           messages: agent.getMessages(),
           goal: 'Respond to the user, unless they want to end the conversation.',
@@ -52,7 +52,7 @@ const machine = setup({
       },
       on: {
         'agent.respond': {
-          actions: [log((x) => `Agent: ${x.event.response}`)],
+          actions: log(({ event }) => `Agent: ${event.response}`),
           target: 'listening',
         },
         'agent.endConversation': 'finished',

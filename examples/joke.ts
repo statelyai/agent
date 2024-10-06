@@ -128,7 +128,7 @@ const jokeMachine = setup({
             assign({
               jokes: ({ context, event }) => [...context.jokes, event.joke],
             }),
-            log((x) => x.event.joke),
+            log(({ event }) => event.joke),
           ],
           target: 'relevance',
         },
@@ -137,17 +137,17 @@ const jokeMachine = setup({
     relevance: {
       invoke: {
         src: 'agent',
-        input: (x) => ({
+        input: ({ context }) => ({
           context: {
-            topic: x.context.topic,
-            lastJoke: x.context.jokes[x.context.jokes.length - 1],
+            topic: context.topic,
+            lastJoke: context.jokes[context.jokes.length - 1],
           },
           goal: 'An irrelevant joke has no reference to the topic. If the last joke is completely irrelevant to the topic, ask for a new joke topic. Otherwise, continue.',
         }),
       },
       on: {
         'agent.markAsIrrelevant': {
-          actions: log((x) => 'Irrelevant joke: ' + x.event.explanation),
+          actions: log(({ event }) => 'Irrelevant joke: ' + event.explanation),
           target: 'waitingForTopic',
           description: 'Continue',
         },

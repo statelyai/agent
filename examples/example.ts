@@ -32,8 +32,8 @@ const machine = setup({
       invoke: [
         {
           src: 'summarizer',
-          input: (x) => ({
-            context: x.context,
+          input: ({ context }) => ({
+            context,
             prompt:
               'Summarize the patient visit in a single sentence. The summary should be in English.',
           }),
@@ -45,8 +45,8 @@ const machine = setup({
         },
         {
           src: 'summarizer',
-          input: (x) => ({
-            context: x.context,
+          input: ({ context }) => ({
+            context,
             prompt:
               'Summarize the patient visit in a single sentence. The summary should be in Spanish.',
           }),

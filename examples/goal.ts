@@ -62,7 +62,7 @@ const machine = setup({
             assign({
               goal: ({ event }) => event.goal,
             }),
-            log((x) => x.event),
+            log(({ event }) => event),
           ],
           target: 'responding',
         },

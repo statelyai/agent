@@ -34,9 +34,9 @@ const machine = setup({
   actors: { agent: fromDecision(agent), getFromTerminal: fromTerminal },
 }).createMachine({
   initial: 'checking',
-  context: (x) => ({
-    email: x.input.email,
-    instructions: x.input.instructions,
+  context: ({ input }) => ({
+    email: input.email,
+    instructions: input.instructions,
     clarifications: [],
     replyEmail: null,
   }),
@@ -44,11 +44,11 @@ const machine = setup({
     checking: {
       invoke: {
         src: 'agent',
-        input: (x) => ({
+        input: ({ context }) => ({
           context: {
-            email: x.context.email,
-            instructions: x.context.instructions,
-            clarifications: x.context.clarifications,
+            email: context.email,
+            instructions: context.instructions,
+            clarifications: context.clarifications,
           },
           messages: agent.getMessages(),
           goal: 'Respond to the email given the instructions and the provided clarifications. If not enough information is provided, ask for clarification. Otherwise, if you are absolutely sure that there is no ambiguous or missing information, create and submit a response email.',
@@ -56,7 +56,7 @@ const machine = setup({
       },
       on: {
         askForClarification: {
-          actions: (x) => console.log(x.event.questions.join('\n')),
+          actions: ({ event }) => console.log(event.questions.join('\n')),
           target: 'clarifying',
         },
         submitEmail: {
@@ -70,8 +70,8 @@ const machine = setup({
         input: `Please provide answers to the questions above`,
         onDone: {
           actions: assign({
-            clarifications: (x) =>
-              x.context.clarifications.concat(x.event.output),
+            clarifications: ({ context }) =>
+              context.clarifications.concat(x.event.output),
           }),
           target: 'checking',
         },
@@ -100,7 +100,7 @@ const machine = setup({
     },
     done: {
       type: 'final',
-      entry: (x) => console.log(x.context.replyEmail),
+      entry: ({ context }) => console.log(context.replyEmail),
     },
   },
   exit: () => {
