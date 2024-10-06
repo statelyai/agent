@@ -1,12 +1,12 @@
 import { createAgent, fromDecision } from '../src';
 import { z } from 'zod';
 import { assign, createActor, log, setup } from 'xstate';
-import { getFromTerminal } from './helpers/helpers';
+import { fromTerminal } from './helpers/helpers';
 import { openai } from '@ai-sdk/openai';
 
 const agent = createAgent({
   name: 'multi',
-  model: openai('gpt-4-1106-preview'),
+  model: openai('gpt-4o-mini'),
   events: {
     'agent.respond': z.object({
       response: z.string().describe('The response from the agent'),
@@ -22,7 +22,7 @@ const machine = setup({
     },
   },
   actors: {
-    getFromTerminal,
+    getFromTerminal: fromTerminal,
     agent: fromDecision(agent),
   },
 }).createMachine({

@@ -2,7 +2,7 @@ import { createAgent, fromDecision } from '../src';
 import { assign, createActor, log, setup } from 'xstate';
 import { z } from 'zod';
 import { openai } from '@ai-sdk/openai';
-import { getFromTerminal } from './helpers/helpers';
+import { fromTerminal } from './helpers/helpers';
 
 const agent = createAgent({
   name: 'number-guesser',
@@ -24,7 +24,7 @@ const machine = setup({
   },
   actors: {
     agent: fromDecision(agent),
-    getFromTerminal,
+    getFromTerminal: fromTerminal,
   },
 }).createMachine({
   context: {
@@ -39,7 +39,7 @@ const machine = setup({
         input: 'Enter a number between 1 and 10',
         onDone: {
           actions: assign({
-            answer: (x) => +x.event.output,
+            answer: ({ event }) => +event.output,
           }),
           target: 'guessing',
         },
@@ -78,7 +78,7 @@ const machine = setup({
                 event.number,
               ],
             }),
-            log((x) => x.event.number),
+            log(({ event }) => event.number),
           ],
           target: 'guessing',
           reenter: true,

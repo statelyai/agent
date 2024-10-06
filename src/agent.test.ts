@@ -1,24 +1,18 @@
 import { test, expect, vi } from 'vitest';
-import {
-  AgentGenerateTextResult,
-  AgentMessage,
-  createAgent,
-  type AIAdapter,
-} from './';
+import { createAgent } from './';
 import { createActor, createMachine } from 'xstate';
-import { GenerateTextResult } from 'ai';
+import { LanguageModelV1CallOptions } from 'ai';
 import { z } from 'zod';
+import { dummyResponseValues, MockLanguageModelV1 } from './mockModel';
 
 test('an agent has the expected interface', () => {
   const agent = createAgent({
     name: 'test',
     events: {},
-    model: {} as any,
+    model: new MockLanguageModelV1(),
   });
 
   expect(agent.decide).toBeDefined();
-  expect(agent.generateText).toBeDefined();
-  expect(agent.streamText).toBeDefined();
 
   expect(agent.addMessage).toBeDefined();
   expect(agent.addObservation).toBeDefined();
@@ -34,45 +28,35 @@ test('an agent has the expected interface', () => {
 });
 
 test('agent.addMessage() adds to message history', () => {
+  const model = new MockLanguageModelV1();
+
   const agent = createAgent({
     name: 'test',
     events: {},
-    model: {} as any,
+    model,
   });
 
   agent.addMessage({
-    content: 'msg 1',
     role: 'user',
+    content: [{ type: 'text', text: 'msg 1' }],
   });
 
   const messageHistory = agent.addMessage({
-    content: 'response 1',
     role: 'assistant',
+    content: [{ type: 'text', text: 'response 1' }],
   });
 
   expect(messageHistory.sessionId).toEqual(agent.sessionId);
 
-  expect(agent.select((c) => c.messages)).toContainEqual(
-    expect.objectContaining({
-      content: 'msg 1',
-    })
-  );
   expect(agent.getMessages()).toContainEqual(
     expect.objectContaining({
-      content: 'msg 1',
+      content: [expect.objectContaining({ text: 'msg 1' })],
     })
   );
 
-  expect(agent.select((c) => c.messages)).toContainEqual(
-    expect.objectContaining({
-      content: 'response 1',
-      sessionId: expect.any(String),
-      timestamp: expect.any(Number),
-    })
-  );
   expect(agent.getMessages()).toContainEqual(
     expect.objectContaining({
-      content: 'response 1',
+      content: [expect.objectContaining({ text: 'response 1' })],
       sessionId: expect.any(String),
       timestamp: expect.any(Number),
     })
@@ -96,7 +80,7 @@ test('agent.addFeedback() adds to feedback', () => {
 
   expect(feedback.sessionId).toEqual(agent.sessionId);
 
-  expect(agent.select((c) => c.feedback)).toContainEqual(
+  expect(agent.getFeedback()).toContainEqual(
     expect.objectContaining({
       attributes: {
         score: -1,
@@ -135,7 +119,7 @@ test('agent.addObservation() adds to observations', () => {
 
   expect(observation.sessionId).toEqual(agent.sessionId);
 
-  expect(agent.select((c) => c.observations)).toContainEqual(
+  expect(agent.getObservations()).toContainEqual(
     expect.objectContaining({
       prevState: { value: 'playing', context: {} },
       event: { type: 'play', position: 3 },
@@ -174,7 +158,7 @@ test('agent.addObservation() adds to observations with machine hash', () => {
 
   expect(observation.sessionId).toEqual(agent.sessionId);
 
-  expect(agent.select((c) => c.observations)).toContainEqual(
+  expect(agent.getObservations()).toContainEqual(
     expect.objectContaining({
       prevState: { value: 'playing', context: {} },
       event: { type: 'play', position: 3 },
@@ -209,7 +193,7 @@ test('agent.interact() observes machine actors (no 2nd arg)', () => {
 
   actor.start();
 
-  expect(agent.select((c) => c.observations)).toContainEqual(
+  expect(agent.getObservations()).toContainEqual(
     expect.objectContaining({
       prevState: undefined,
       state: expect.objectContaining({ value: 'a' }),
@@ -224,7 +208,7 @@ test('agent.interact() observes machine actors (no 2nd arg)', () => {
 
   actor.send({ type: 'NEXT' });
 
-  expect(agent.select((c) => c.observations)).toContainEqual(
+  expect(agent.getObservations()).toContainEqual(
     expect.objectContaining({
       prevState: expect.objectContaining({ value: 'a' }),
       event: { type: 'NEXT' },
@@ -233,35 +217,11 @@ test('agent.interact() observes machine actors (no 2nd arg)', () => {
   );
 });
 
-test('Agents can use a custom adapter', async () => {
-  const adapter = {
-    generateText: async () => {
-      return {
-        text: 'Response',
-      } as any;
-    },
-  } as unknown as AIAdapter;
-
-  const agent = createAgent({
-    name: 'test',
-    events: {},
-    adapter,
-    model: {} as any,
-  });
-
-  const res = await agent.generateText({
-    prompt: 'Question?',
-  });
-
-  expect(res.text).toEqual('Response');
-});
-
 test('You can listen for feedback events', () => {
   const fn = vi.fn();
   const agent = createAgent({
     name: 'test',
     events: {},
-    adapter: {} as any,
     model: {} as any,
   });
 
@@ -280,31 +240,33 @@ test('You can listen for feedback events', () => {
 
 test('You can listen for plan events', async () => {
   const fn = vi.fn();
+  const model = new MockLanguageModelV1({
+    doGenerate: async (params: LanguageModelV1CallOptions) => {
+      const keys =
+        params.mode.type === 'regular'
+          ? params.mode.tools?.map((t) => t.name)
+          : [];
+
+      return {
+        ...dummyResponseValues,
+        finishReason: 'tool-calls',
+        toolCalls: [
+          {
+            toolCallType: 'function',
+            toolCallId: 'call-1',
+            toolName: keys![0],
+            args: `{ "type": "${keys?.[0]}" }`,
+          },
+        ],
+      } as any;
+    },
+  });
+
   const agent = createAgent({
     name: 'test',
-    model: {} as any,
+    model,
     events: {
       WIN: z.object({}),
-    },
-    adapter: {
-      generateText: async (arg) => {
-        const keys = Object.keys(arg.tools!);
-
-        if (keys.length !== 1) {
-          throw new Error('Expected only 1 choice');
-        }
-
-        return {
-          toolResults: [
-            {
-              result: {
-                type: keys[0],
-              },
-            },
-          ],
-        } as any as AgentGenerateTextResult;
-      },
-      streamText: {} as any,
     },
   });
 
@@ -362,145 +324,3 @@ test('agent.types provides context and event types', () => {
   // @ts-expect-error
   agent.types.context satisfies { score: string };
 });
-
-test.each(['generateText', 'streamText'] as const)(
-  'can provide a correlation ID (%s)',
-  async (method) => {
-    const agent = createAgent({
-      model: {} as any,
-      events: {},
-      adapter: {
-        [method]: async (opts: any) => {
-          const res = {
-            text: 'response',
-          };
-
-          opts.onFinish?.(res);
-
-          return res as AgentGenerateTextResult;
-        },
-      } as any as AIAdapter,
-    });
-
-    const promise = new Promise<AgentMessage>((res) => {
-      agent.onMessage((msg) => {
-        if (msg.role === 'assistant') {
-          res(msg);
-        }
-      });
-    });
-
-    await agent[method]({
-      prompt: 'hi',
-      correlationId: 'c-1',
-    });
-
-    const msg = await promise;
-
-    expect(msg.correlationId).toBe('c-1');
-    expect(msg.parentCorrelationId).toBe(undefined);
-  }
-);
-
-test.each(['generateText', 'streamText'] as const)(
-  'correlation IDs are automatically generated if not provided (%s)',
-  async (method) => {
-    const agent = createAgent({
-      model: {} as any,
-      events: {},
-      adapter: {
-        [method]: async (opts: any) => {
-          const res = {
-            text: 'response',
-          };
-
-          opts.onFinish?.(res);
-
-          return res as AgentGenerateTextResult;
-        },
-      } as any as AIAdapter,
-    });
-
-    await agent[method]({
-      prompt: 'hi',
-    });
-
-    const messages = agent.getMessages();
-
-    expect(messages[0]?.correlationId).toEqual(expect.stringMatching(/.+/));
-    expect(messages[0]?.role).toBe('user');
-    expect(messages[1]?.correlationId).toEqual(expect.stringMatching(/.+/));
-    expect(messages[1]?.role).toBe('assistant');
-
-    expect(messages[0]!.correlationId).toEqual(messages[1]!.correlationId);
-  }
-);
-
-test.each(['generateText', 'streamText'] as const)(
-  'can provide a parent correlation ID (%s)',
-  async (method) => {
-    const agent = createAgent({
-      model: {} as any,
-      events: {},
-      adapter: {
-        [method]: async (opts: any) => {
-          const res = {
-            text: 'response',
-          };
-
-          opts.onFinish?.(res);
-
-          return res as AgentGenerateTextResult;
-        },
-      } as any as AIAdapter,
-    });
-
-    await agent[method]({
-      prompt: 'hi',
-      correlationId: 'c-1',
-      parentCorrelationId: 'c-0',
-    });
-
-    const msg = agent.getMessages().find((msg) => msg.role === 'assistant')!;
-
-    expect(msg.correlationId).toBe('c-1');
-    expect(msg.parentCorrelationId).toBe('c-0');
-  }
-);
-
-test.each(['generateText', 'streamText'] as const)(
-  'can add feedback to a correlation (%s)',
-  async (method) => {
-    const agent = createAgent({
-      name: 'test',
-      model: {} as any,
-      events: {},
-      adapter: {
-        [method]: async (opts: any) => {
-          const res = {
-            text: 'response',
-          };
-
-          opts.onFinish?.(res);
-
-          return res as AgentGenerateTextResult;
-        },
-      } as any as AIAdapter,
-    });
-
-    const res = await agent[method]({
-      prompt: 'test',
-    });
-
-    agent.addFeedback({
-      correlationId: res.correlationId,
-      reward: -1,
-    });
-
-    const message = agent.getMessages()[0]!;
-    const feedback = agent.getFeedback()[0]!;
-
-    expect(message.correlationId).toBeDefined();
-    expect(feedback.correlationId).toEqual(message.correlationId);
-  }
-);

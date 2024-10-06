@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { createAgent, fromDecision } from '../src';
 import { openai } from '@ai-sdk/openai';
 import { assign, createActor, log, setup } from 'xstate';
-import { getFromTerminal } from './helpers/helpers';
+import { fromTerminal } from './helpers/helpers';
 
 const agent = createAgent({
   name: 'chain-of-thought',
@@ -25,7 +25,7 @@ const agent = createAgent({
 
 const machine = setup({
   types: agent.types,
-  actors: { agent: fromDecision(agent), getFromTerminal },
+  actors: { agent: fromDecision(agent), getFromTerminal: fromTerminal },
 }).createMachine({
   initial: 'asking',
   context: {
@@ -39,7 +39,7 @@ const machine = setup({
         input: 'What would you like to ask?',
         onDone: {
           actions: assign({
-            question: (x) => x.event.output,
+            question: ({ event }) => event.output,
           }),
           target: 'thinking',
         },
@@ -48,17 +48,17 @@ const machine = setup({
     thinking: {
       invoke: {
         src: 'agent',
-        input: (x) => ({
-          context: x.context,
+        input: ({ context }) => ({
+          context,
           goal: 'Answer the question. Think step-by-step.',
         }),
       },
       on: {
         'agent.think': {
           actions: [
-            log((x) => x.event.thought),
+            log(({ event }) => event.thought),
             assign({
-              thought: (x) => x.event.thought,
+              thought: ({ event }) => event.thought,
             }),
           ],
           target: 'answering',
@@ -68,14 +68,14 @@ const machine = setup({
     answering: {
       invoke: {
         src: 'agent',
-        input: (x) => ({
-          context: x.context,
+        input: ({ context }) => ({
+          context,
           goal: 'Answer the question',
         }),
       },
       on: {
         'agent.answer': {
-          actions: [log((x) => x.event.answer)],
+          actions: [log(({ event }) => event.answer)],
           target: 'answered',
         },
       },

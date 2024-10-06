@@ -20,8 +20,14 @@
       "program": "${file}",
       "cwd": "${workspaceFolder}",
       "runtimeExecutable": "${workspaceFolder}/node_modules/.bin/ts-node",
+      "runtimeArgs": ["--transpile-only"],
       "outFiles": ["${workspaceFolder}/dist/**/*.js"],
       "sourceMaps": true,
+      "smartStep": true,
+      "resolveSourceMapLocations": [
+        "${workspaceFolder}/**",
+        "!**/node_modules/**"
+      ],
       "console": "integratedTerminal"
     }
   ]

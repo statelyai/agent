@@ -3,7 +3,7 @@ import { createAgent, fromDecision } from '../src';
 import { loadingAnimation } from './helpers/loader';
 import { z } from 'zod';
 import { openai } from '@ai-sdk/openai';
-import { getFromTerminal } from './helpers/helpers';
+import { fromTerminal } from './helpers/helpers';
 
 export function getRandomFunnyPhrase() {
   const funnyPhrases = [
@@ -60,12 +60,12 @@ const agent = createAgent({
       explanation: z.string(),
     }),
     'agent.continue': z.object({}).describe('Continue'),
-    'agent.markAsIrrelevant': z
-      .object({
-        explanation: z.string(),
-      })
-      .describe('Explains why the joke was irrelevant'),
-    'agent.markAsRelevant': z.object({}).describe('The joke was relevant'),
+    'agent.markRelevancy': z.object({
+      relevant: z.boolean().describe('Whether the joke was relevant'),
+      explanation: z
+        .string()
+        .describe('The explanation for why the joke was relevant or not'),
+    }),
   },
   context: {
     topic: z.string().describe('The topic for the joke'),
@@ -81,7 +81,7 @@ const jokeMachine = setup({
   actors: {
     agent: fromDecision(agent),
     loader,
-    getFromTerminal,
+    getFromTerminal: fromTerminal,
   },
 }).createMachine({
   id: 'joke',
@@ -128,7 +128,7 @@ const jokeMachine = setup({
             assign({
               jokes: ({ context, event }) => [...context.jokes, event.joke],
             }),
-            log((x) => x.event.joke),
+            log(({ event }) => event.joke),
           ],
           target: 'relevance',
         },
@@ -137,24 +137,26 @@ const jokeMachine = setup({
     relevance: {
       invoke: {
         src: 'agent',
-        input: (x) => ({
+        input: ({ context }) => ({
           context: {
-            topic: x.context.topic,
-            lastJoke: x.context.jokes[x.context.jokes.length - 1],
+            topic: context.topic,
+            lastJoke: context.jokes.at(-1),
           },
           goal: 'An irrelevant joke has no reference to the topic. If the last joke is completely irrelevant to the topic, ask for a new joke topic. Otherwise, continue.',
         }),
       },
       on: {
-        'agent.markAsIrrelevant': {
-          actions: log((x) => 'Irrelevant joke: ' + x.event.explanation),
-          target: 'waitingForTopic',
-          description: 'Continue',
-        },
-        'agent.markAsRelevant': {
-          actions: log('Joke was relevant'),
-          target: 'rateJoke',
-        },
+        'agent.markRelevancy': [
+          {
+            guard: ({ event }) => !event.relevant,
+            actions: log(
+              ({ event }) => 'Irrelevant joke: ' + event.explanation
+            ),
+            target: 'waitingForTopic',
+            description: 'Continue',
+          },
+          { target: 'rateJoke' },
+        ],
       },
     },
     rateJoke: {

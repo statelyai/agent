@@ -1,4 +1,4 @@
-import { type CoreTool, tool } from 'ai';
+import { CoreMessage, type CoreTool, generateText, tool } from 'ai';
 import {
   AgentPlan,
   AgentPlanInput,
@@ -7,7 +7,7 @@ import {
   TransitionData,
   AnyAgent,
 } from '../types';
-import { getAllTransitions } from '../utils';
+import { getAllTransitions, randomId } from '../utils';
 import { AnyStateMachine } from 'xstate';
 import { defaultTextTemplate } from '../templates/defaultText';
 import { getMessages } from '../text';
@@ -107,12 +107,35 @@ export async function simplePlanner<T extends AnyAgent>(
 
   const messages = await getMessages(agent, prompt, input);
 
-  const result = await agent.generateText({
-    toolChoice: 'required',
-    ...input,
-    prompt,
+  const model = input.model ? agent.wrap(input.model) : agent.model;
+
+  const {
+    state,
+    machine,
+    previousPlan,
+    events,
+    goal,
+    model: _,
+    ...rest
+  } = input;
+
+  const result = await generateText({
+    // ...input,
+    ...rest,
+    model,
     messages,
-    tools: toolMap,
+    tools: toolMap as any,
+    toolChoice: input.toolChoice ?? 'required',
+  });
+
+  result.responseMessages.forEach((m) => {
+    const message: CoreMessage = m;
+
+    agent.addMessage({
+      ...message,
+      id: randomId(),
+      timestamp: Date.now(),
+    });
   });
 
   const singleResult = result.toolResults[0];

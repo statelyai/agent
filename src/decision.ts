@@ -6,13 +6,14 @@ import {
   AgentDecisionInput,
   AgentPlanner,
   AgentPlan,
+  EventsFromZodEventMapping,
 } from './types';
 import { simplePlanner } from './planners/simplePlanner';
 
 export async function agentDecide<T extends AnyAgent>(
   agent: T,
   options: AgentDecideOptions
-): Promise<AgentPlan<any> | undefined> {
+): Promise<AgentPlan<EventsFromZodEventMapping<T['events']>> | undefined> {
   const resolvedOptions = {
     ...agent.defaultOptions,
     ...options,

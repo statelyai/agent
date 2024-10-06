@@ -15,15 +15,14 @@ import {
 } from 'xstate';
 import {
   CoreMessage,
-  CoreTool,
   generateText,
   GenerateTextResult,
   LanguageModel,
   streamText,
-  StreamTextResult,
 } from 'ai';
 import { ZodContextMapping, ZodEventMapping } from './schemas';
 import { TypeOf } from 'zod';
+import { Agent } from './agent';
 
 export type GenerateTextOptions = Parameters<typeof generateText>[0];
 
@@ -31,7 +30,7 @@ export type StreamTextOptions = Parameters<typeof streamText>[0];
 
 export type AgentPlanInput<TEvent extends EventObject> = Omit<
   GenerateTextOptions,
-  'prompt' | 'messages' | 'tools'
+  'prompt' | 'tools'
 > & {
   /**
    * The currently observed state.
@@ -116,16 +115,12 @@ export type AgentPlanner<T extends AnyAgent> = (
 export type AgentDecideOptions = {
   goal: string;
   model?: LanguageModel;
-  context?: any;
   state: ObservedState;
-  machine: AnyStateMachine;
+  machine?: AnyStateMachine;
   execute?: (event: AnyEventObject) => Promise<void>;
   planner?: AgentPlanner<any>;
   events?: ZodEventMapping;
-} & Omit<
-  Parameters<typeof generateText>[0],
-  'model' | 'tools' | 'prompt' | 'messages'
->;
+} & Omit<Parameters<typeof generateText>[0], 'model' | 'tools' | 'prompt'>;
 
 export interface AgentFeedback {
   goal?: string;
@@ -159,8 +154,121 @@ export type AgentMessage = CoreMessage & {
   responseId?: string;
   result?: GenerateTextResult<any>;
   sessionId: string;
-  correlationId: string;
-  parentCorrelationId?: string;
+};
+
+type JSONObject = {
+  [key: string]: JSONValue;
+};
+type JSONArray = JSONValue[];
+type JSONValue = null | string | number | boolean | JSONObject | JSONArray;
+
+type LanguageModelV1ProviderMetadata = Record<
+  string,
+  Record<string, JSONValue>
+>;
+
+interface LanguageModelV1ImagePart {
+  type: 'image';
+  /**
+Image data as a Uint8Array (e.g. from a Blob or Buffer) or a URL.
+   */
+  image: Uint8Array | URL;
+  /**
+Optional mime type of the image.
+   */
+  mimeType?: string;
+  /**
+   * Additional provider-specific metadata. They are passed through
+   * to the provider from the AI SDK and enable provider-specific
+   * functionality that can be fully encapsulated in the provider.
+   */
+  providerMetadata?: LanguageModelV1ProviderMetadata;
+}
+
+export interface LanguageModelV1TextPart {
+  type: 'text';
+  /**
+The text content.
+   */
+  text: string;
+  /**
+   * Additional provider-specific metadata. They are passed through
+   * to the provider from the AI SDK and enable provider-specific
+   * functionality that can be fully encapsulated in the provider.
+   */
+  providerMetadata?: LanguageModelV1ProviderMetadata;
+}
+
+export interface LanguageModelV1ToolCallPart {
+  type: 'tool-call';
+  /**
+ID of the tool call. This ID is used to match the tool call with the tool result.
+ */
+  toolCallId: string;
+  /**
+Name of the tool that is being called.
+ */
+  toolName: string;
+  /**
+Arguments of the tool call. This is a JSON-serializable object that matches the tool's input schema.
+   */
+  args: unknown;
+  /**
+   * Additional provider-specific metadata. They are passed through
+   * to the provider from the AI SDK and enable provider-specific
+   * functionality that can be fully encapsulated in the provider.
+   */
+  providerMetadata?: LanguageModelV1ProviderMetadata;
+}
+interface LanguageModelV1ToolResultPart {
+  type: 'tool-result';
+  /**
+ID of the tool call that this result is associated with.
+ */
+  toolCallId: string;
+  /**
+Name of the tool that generated this result.
+  */
+  toolName: string;
+  /**
+Result of the tool call. This is a JSON-serializable object.
+   */
+  result: unknown;
+  /**
+Optional flag if the result is an error or an error message.
+   */
+  isError?: boolean;
+  /**
+   * Additional provider-specific metadata. They are passed through
+   * to the provider from the AI SDK and enable provider-specific
+   * functionality that can be fully encapsulated in the provider.
+   */
+  providerMetadata?: LanguageModelV1ProviderMetadata;
+}
+type LanguageModelV1Message = (
+  | {
+      role: 'system';
+      content: string;
+    }
+  | {
+      role: 'user';
+      content: Array<LanguageModelV1TextPart | LanguageModelV1ImagePart>;
+    }
+  | {
+      role: 'assistant';
+      content: Array<LanguageModelV1TextPart | LanguageModelV1ToolCallPart>;
+    }
+  | {
+      role: 'tool';
+      content: Array<LanguageModelV1ToolResultPart>;
+    }
+) & {
+  /**
+   * Additional provider-specific metadata. They are passed through
+   * to the provider from the AI SDK and enable provider-specific
+   * functionality that can be fully encapsulated in the provider.
+   */
+  providerMetadata?: LanguageModelV1ProviderMetadata;
 };
 
 export type AgentMessageInput = CoreMessage & {
@@ -260,150 +368,6 @@ export type ContextFromZodContextMapping<
   [K in keyof TContextSchema & string]: TypeOf<TContextSchema[K]>;
 };
 
-export type Agent<TContext, TEvents extends EventObject> = ActorRefFrom<
-  AgentLogic<TEvents>
-> & {
-  /**
-   * The name of the agent. All agents with the same name are related and
-   * able to share experiences (observations, feedback) with each other.
-   */
-  name?: string;
-  /**
-   * The unique identifier for the agent.
-   */
-  id?: string;
-  description?: string;
-  events: ZodEventMapping;
-  types: {
-    events: TEvents;
-    context: Compute<TContext>;
-  };
-  model: LanguageModel;
-  defaultOptions: GenerateTextOptions;
-  memory: AgentLongTermMemory | undefined;
-  /**
-   * The adapter used to perform LLM actions such as
-   * `.generateText(…)` and `.streamText(…)`.
-   *
-   * Defaults to the Vercel AI SDK.
-   */
-  adapter: AIAdapter;
-
-  /**
-   * Resolves with an `AgentPlan` based on the information provided in the `options`, including:
-   *
-   * - The `goal` for the agent to achieve
-   * - The observed current `state`
-   * - The `machine` (e.g. a state machine) that specifies what can happen next
-   * - Additional `context`
-   */
-  decide: (
-    options: AgentDecideOptions
-  ) => Promise<AgentPlan<TEvents> | undefined>;
-
-  // Generate text
-  generateText: (
-    options: AgentGenerateTextOptions
-  ) => Promise<AgentGenerateTextResult>;
-
-  // Stream text
-  streamText: (
-    options: AgentStreamTextOptions
-  ) => Promise<AgentStreamTextResult>;
-
-  addObservation: (
-    observationInput: AgentObservationInput
-  ) => AgentObservation<any>; // TODO
-  addMessage: (messageInput: AgentMessageInput) => AgentMessage;
-  addFeedback: (feedbackInput: AgentFeedbackInput) => AgentFeedback;
-  addPlan: (plan: AgentPlan<TEvents>) => void;
-  /**
-   * Called whenever the agent (LLM assistant) receives or sends a message.
-   */
-  onMessage: (callback: (message: AgentMessage) => void) => void;
-  /**
-   * Selects agent data from its context.
-   *
-   * @deprecated Select from `agent.getSnapshot().context` directly or:
-   * - `agent.getMessages()`
-   * - `agent.getObservations()`
-   * - `agent.getFeedback()`
-   * - `agent.getPlans()`
-   */
-  select: <T>(selector: (context: AgentMemoryContext) => T) => T;
-
-  /**
-   * Retrieves messages from the agent's short-term (local) memory.
-   */
-  getMessages: () => AgentMessage[];
-
-  /**
-   * Retrieves observations from the agent's short-term (local) memory.
-   */
-  getObservations: () => AgentObservation<Agent<TContext, TEvents>>[];
-
-  /**
-   * Retrieves feedback from the agent's short-term (local) memory.
-   */
-  getFeedback: () => AgentFeedback[];
-
-  /**
-   * Retrieves strategies from the agent's short-term (local) memory.
-   */
-  getPlans: () => AgentPlan<TEvents>[];
-
-  /**
-   * Interacts with this state machine actor by inspecting state transitions and storing them as observations.
-   *
-   * Observations contain the `prevState`, `event`, and current `state` of this
-   * actor, as well as other properties that are useful when recalled.
-   * These observations are stored in the `agent`'s short-term (local) memory
-   * and can be retrieved via `agent.getObservations()`.
-   *
-   * @example
-   * ```ts
-   * // Only observes the actor's state transitions
-   * agent.interact(actor);
-   *
-   * actor.start();
-   * ```
-   */
-  interact<TActor extends AnyActorRef>(actorRef: TActor): Subscription;
-  /**
-   * Interacts with this state machine actor by:
-   * 1. Inspecting state transitions and storing them as observations
-   * 2. Deciding what to do next (which event to send the actor) based on
-   * the agent input returned from `getInput(observation)`, if `getInput(…)` is provided as the 2nd argument.
-   *
-   * Observations contain the `prevState`, `event`, and current `state` of this
-   * actor, as well as other properties that are useful when recalled.
-   * These observations are stored in the `agent`'s short-term (local) memory
-   * and can be retrieved via `agent.getObservations()`.
-   *
-   * @example
-   * ```ts
-   * // Observes the actor's state transitions and
-   * // makes a decision if on the "summarize" state
-   * agent.interact(actor, observed => {
-   *   if (observed.state.matches('summarize')) {
-   *     return {
-   *       context: observed.state.context,
-   *       goal: 'Summarize the message'
-   *     }
-   *   }
-   * });
-   *
-   * actor.start();
-   * ```
-   */
-  interact<TActor extends AnyActorRef>(
-    actorRef: TActor,
-    getInput: (
-      observation: AgentObservation<TActor>
-    ) => AgentDecisionInput | undefined
-  ): Subscription;
-};
-
 export type AnyAgent = Agent<any, any>;
 
 export type FromAgent<T> = T | ((agent: AnyAgent) => T | Promise<T>);
@@ -414,13 +378,6 @@ export type CommonTextOptions = {
   context?: Record<string, any>;
   messages?: FromAgent<CoreMessage[]>;
   template?: PromptTemplate<any>;
-  correlationId?: string;
-  parentCorrelationId?: string;
-};
-
-export type TextResultMeta = {
-  correlationId: string;
-  parentCorrelationId?: string;
 };
 
 export type AgentGenerateTextOptions = Omit<
@@ -429,15 +386,11 @@ export type AgentGenerateTextOptions = Omit<
 > &
   CommonTextOptions;
 
-export type AgentGenerateTextResult = GenerateTextResult<any> & TextResultMeta;
-
 export type AgentStreamTextOptions = Omit<
   StreamTextOptions,
   'model' | 'prompt' | 'messages'
 > &
   CommonTextOptions;
-
-export type AgentStreamTextResult = StreamTextResult<any> & TextResultMeta;
 
 export interface ObservedState {
   /**
@@ -489,11 +442,6 @@ export interface AgentLongTermMemory {
     key: K,
     items: AgentMemoryContext[K]
   ): Promise<void>;
-}
-
-export interface AIAdapter {
-  generateText: typeof generateText;
-  streamText: typeof streamText;
 }
 
 export type Compute<A extends any> = { [K in keyof A]: A[K] } & unknown;

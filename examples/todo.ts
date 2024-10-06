@@ -2,7 +2,7 @@ import { assign, setup, assertEvent, createActor, createMachine } from 'xstate';
 import { z } from 'zod';
 import { createAgent, fromDecision } from '../src';
 import { openai } from '@ai-sdk/openai';
-import { getFromTerminal } from './helpers/helpers';
+import { fromTerminal } from './helpers/helpers';
 
 const agent = createAgent({
   name: 'todo',
@@ -40,7 +40,7 @@ const machine = setup({
       | typeof agent.types.events
       | { type: 'assist'; command: string },
   },
-  actors: { agent: fromDecision(agent), getFromTerminal },
+  actors: { agent: fromDecision(agent), getFromTerminal: fromTerminal },
 }).createMachine({
   context: {
     command: null,
@@ -118,10 +118,10 @@ const machine = setup({
     assisting: {
       invoke: {
         src: 'agent',
-        input: (x) => ({
+        input: ({ context }) => ({
           context: {
-            command: x.context.command,
-            todos: x.context.todos,
+            command: context.command,
+            todos: context.todos,
           },
           goal: 'Interpret the command as an action for this todo list; for example, "I need donuts" would add a todo item with the message "Get donuts".',
         }),
