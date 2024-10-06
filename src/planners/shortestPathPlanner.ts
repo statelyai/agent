@@ -1,4 +1,4 @@
-import { Agent, AgentPlan, AgentPlanInput, AnyAgent } from '../types';
+import { AgentPlan, AgentPlanInput, AnyAgent } from '../types';
 import { getShortestPaths } from '@xstate/graph';
 
 export async function simplePlanner<T extends AnyAgent>(

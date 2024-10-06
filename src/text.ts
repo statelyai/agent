@@ -19,7 +19,6 @@ import {
   fromPromise,
   toObserver,
 } from 'xstate';
-import { randomId } from './utils';
 
 /**
  * Gets an array of messages from the given prompt, based on the agent and options.

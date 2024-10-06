@@ -564,11 +564,15 @@ export class Agent<
    */
   public interact<TActor extends AnyActorRef>(
     actorRef: TActor,
-    getInput: (observation: AgentObservation<TActor>) => AgentDecisionInput
+    getInput: (
+      observation: AgentObservation<TActor>
+    ) => AgentDecisionInput | undefined
   ): Subscription;
   public interact<TActor extends AnyActorRef>(
     actorRef: TActor,
-    getInput?: (observation: AgentObservation<TActor>) => AgentDecisionInput
+    getInput?: (
+      observation: AgentObservation<TActor>
+    ) => AgentDecisionInput | undefined
   ): Subscription {
     let prevState: ObservedState | undefined = undefined;
     let subscribed = true;
