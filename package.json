@@ -23,7 +23,7 @@
     "rl",
     "reinforcement learning"
   ],
-  "author": "",
+  "author": "David Khourshid",
   "license": "MIT",
   "devDependencies": {
     "@ai-sdk/openai": "^0.0.40",
