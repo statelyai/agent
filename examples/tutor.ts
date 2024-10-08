@@ -43,8 +43,8 @@ const machine = setup({
         input: 'Say something in Spanish:',
         onDone: {
           actions: assign({
-            conversation: ({ context }) =>
-              context.conversation.concat(`User: ` + x.event.output),
+            conversation: ({ context, event }) =>
+              context.conversation.concat(`User: ` + event.output),
           }),
           target: 'ai',
         },
@@ -81,8 +81,8 @@ const machine = setup({
             respond: {
               actions: [
                 assign({
-                  conversation: ({ context }) =>
-                    context.conversation.concat(`Agent: ` + x.event.response),
+                  conversation: ({ context, event }) =>
+                    context.conversation.concat(`Agent: ` + event.response),
                 }),
                 log(({ event }) => event.response),
               ],
