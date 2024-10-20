@@ -5,7 +5,7 @@ import { openai } from '@ai-sdk/openai';
 
 const agent = createAgent({
   name: 'simple',
-  model: openai('gpt-3.5-turbo-16k-0613'),
+  model: openai('gpt-4o-mini'),
   events: {
     'agent.thought': z.object({
       text: z.string().describe('The text of the thought'),
@@ -21,7 +21,9 @@ const machine = setup({
     thinking: {
       invoke: {
         src: 'agent',
-        input: 'Think about a random topic, and then share that thought.',
+        input: {
+          goal: 'Think about a random topic, and then share that thought.',
+        },
       },
       on: {
         'agent.thought': {

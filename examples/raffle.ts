@@ -6,7 +6,7 @@ import { fromTerminal } from './helpers/helpers';
 
 const agent = createAgent({
   name: 'raffle-chooser',
-  model: openai('gpt-4-turbo'),
+  model: openai('gpt-4o-mini'),
   events: {
     'agent.collectEntries': z.object({}).describe('Collect more entries'),
     'agent.draw': z.object({}).describe('Draw a winner'),
@@ -27,7 +27,7 @@ const machine = setup({
       lastInput: string | null;
       entries: string[];
     },
-    events: {} as typeof agent.types.events | { type: 'draw' },
+    events: agent.types.events,
   },
   actors: { agent: fromDecision(agent), getFromTerminal: fromTerminal },
 }).createMachine({

@@ -6,7 +6,7 @@ import { openai } from '@ai-sdk/openai';
 
 const agent = createAgent({
   name: 'tutor',
-  model: openai('gpt-4-1106-preview'),
+  model: openai('gpt-4o-mini'),
   events: {
     teach: z.object({
       instruction: z

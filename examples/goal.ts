@@ -6,7 +6,7 @@ import { fromTerminal } from './helpers/helpers';
 
 const agent = createAgent({
   name: 'goal',
-  model: openai('gpt-4-turbo'),
+  model: openai('gpt-4o-mini'),
   events: {
     'agent.createGoal': z.object({
       goal: z.string().describe('The goal for the conversation'),
@@ -62,7 +62,7 @@ const machine = setup({
             assign({
               goal: ({ event }) => event.goal,
             }),
-            log(({ event }) => event),
+            log(({ event }) => `Goal: ${event.goal}`),
           ],
           target: 'responding',
         },
@@ -79,7 +79,7 @@ const machine = setup({
       },
       on: {
         'agent.respond': {
-          actions: log(({ event }) => event),
+          actions: log(({ event }) => `Response: ${event.response}`),
         },
       },
     },

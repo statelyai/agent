@@ -5,18 +5,20 @@ import { openai } from '@ai-sdk/openai';
 
 const events = {
   'agent.x.play': z.object({
+    reasoning: z.string().describe('The reasoning for the move'),
     index: z
       .number()
       .min(0)
       .max(8)
-      .describe('The index of the cell to play on'),
+      .describe('The index of the cell for xto play on'),
   }),
   'agent.o.play': z.object({
+    reasoning: z.string().describe('The reasoning for the move'),
     index: z
       .number()
       .min(0)
       .max(8)
-      .describe('The index of the cell to play on'),
+      .describe('The index of the cell for o to play on'),
   }),
   reset: z.object({}).describe('Reset the game to the initial state'),
 };
@@ -34,6 +36,7 @@ const context = {
     .union([z.literal('x'), z.literal('o')])
     .describe('The current player (x or o)'),
   gameReport: z.string(),
+  lastReason: z.string(),
 };
 
 const xAgent = createAgent({
@@ -57,6 +60,7 @@ const initialContext = {
   moves: 0,
   player: 'x' as Player,
   gameReport: '',
+  lastReason: '',
 } satisfies typeof xAgent.types.context;
 
 function getWinner(board: typeof initialContext.board): Player | null {
@@ -101,14 +105,14 @@ export const ticTacToeMachine = setup({
     resetGame: assign(initialContext),
     printBoard: ({ context }) => {
       // Print the context.board in a 3 x 3 grid format
-      let boardString = '';
+      let boardString = `${context.lastReason}\n`;
       for (let i = 0; i < context.board.length; i++) {
         if ([0, 3, 6].includes(i)) {
           boardString += context.board[i] ?? ' ';
         } else {
           boardString += ' | ' + (context.board[i] ?? ' ');
           if ([2, 5].includes(i)) {
-            boardString += '\n--+---+--\n';
+            boardString += `\n--+---+--\n`;
           }
         }
       }
@@ -153,7 +157,12 @@ export const ticTacToeMachine = setup({
               {
                 target: 'o',
                 guard: 'isValidMove',
-                actions: 'updateBoard',
+                actions: [
+                  assign({
+                    lastReason: ({ event }) => event.reasoning,
+                  }),
+                  'updateBoard',
+                ],
               },
               { target: 'x', reenter: true },
             ],
@@ -166,7 +175,12 @@ export const ticTacToeMachine = setup({
               {
                 target: 'x',
                 guard: 'isValidMove',
-                actions: 'updateBoard',
+                actions: [
+                  assign({
+                    lastReason: ({ event }) => event.reasoning,
+                  }),
+                  'updateBoard',
+                ],
               },
               { target: 'o', reenter: true },
             ],
@@ -221,7 +235,7 @@ const actor = createActor(ticTacToeMachine);
 xAgent.interact(actor, (observed) => {
   if (observed.state.matches({ playing: 'x' })) {
     return {
-      goal: `You are playing a game of tic tac toe. This is the current game state. The 3x3 board is represented by a 9-element array. The first element is the top-left cell, the second element is the top-middle cell, the third element is the top-right cell, the fourth element is the middle-left cell, and so on. The value of each cell is either null, x, or o. The value of null means that the cell is empty. The value of x means that the cell is occupied by an x. The value of o means that the cell is occupied by an o.
+      goal: `You are playing a game of tic tac toe. This is the current game state. The 3x3 board is represented by a 9-element array. The first element is the top-left cell, the second element is the top-middle cell, the third element is the top-right cell, the fourth element is the middle-left cell, and so on. The value of each cell is either null, x, or o. The value of null means that the cell is empty. 
 
 ${JSON.stringify(observed.state.context, null, 2)}
 
@@ -235,7 +249,7 @@ Execute the single best next move to try to win the game. Do not play on an exis
 oAgent.interact(actor, (observed) => {
   if (observed.state.matches({ playing: 'o' })) {
     return {
-      goal: `You are playing a game of tic tac toe. This is the current game state. The 3x3 board is represented by a 9-element array. The first element is the top-left cell, the second element is the top-middle cell, the third element is the top-right cell, the fourth element is the middle-left cell, and so on. The value of each cell is either null, x, or o. The value of null means that the cell is empty. The value of x means that the cell is occupied by an x. The value of o means that the cell is occupied by an o.
+      goal: `You are playing a game of tic tac toe. This is the current game state. The 3x3 board is represented by a 9-element array. The first element is the top-left cell, the second element is the top-middle cell, the third element is the top-right cell, the fourth element is the middle-left cell, and so on. The value of each cell is either null, x, or o. The value of null means that the cell is empty. 
 
 ${JSON.stringify(observed.state.context, null, 2)}
 

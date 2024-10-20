@@ -9,6 +9,7 @@ const agent = createAgent({
   model: openai('gpt-3.5-turbo-1106'),
   events: {
     'agent.guess': z.object({
+      reasoning: z.string().describe('The reasoning for the guess'),
       number: z.number().min(1).max(10).describe('The number guessed'),
     }),
   },
@@ -78,7 +79,7 @@ const machine = setup({
                 event.number,
               ],
             }),
-            log(({ event }) => event.number),
+            log(({ event }) => `${event.number} (${event.reasoning})`),
           ],
           target: 'guessing',
           reenter: true,

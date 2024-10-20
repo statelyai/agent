@@ -5,7 +5,7 @@ import { getFromTerminal } from './helpers/helpers';
 
 const agent = createAgent({
   name: 'chatbot',
-  model: openai('gpt-4-turbo'),
+  model: openai('gpt-4o-mini'),
   events: {
     'agent.respond': z.object({
       response: z.string().describe('The response from the agent'),

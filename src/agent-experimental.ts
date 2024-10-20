@@ -127,7 +127,7 @@
 //     //     openai,
 //     //     goal,
 //     //     state,
-//     //     'gpt-4-1106-preview',
+//     //     'gpt-4o-mini',
 //     //     (eventType) => eventType.startsWith('agent.'),
 //     //     schemas
 //     //   );

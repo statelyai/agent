@@ -5,7 +5,7 @@ import { assign, createActor, setup } from 'xstate';
 
 const agent = createAgent({
   name: 'example',
-  model: openai('gpt-4-turbo'),
+  model: openai('gpt-4o-mini'),
   events: {
     'agent.englishSummary': z.object({
       text: z.string().describe('The summary in English'),

@@ -69,7 +69,7 @@ const machine = setup({
       invoke: {
         src: 'agent',
         input: ({ context }) => ({
-          model: openai('gpt-3.5-turbo-16k-0613'),
+          model: openai('gpt-4-turbo'),
           context,
           goal: 'Debate the topic, and take the negative position. Respond directly to the last message of the discourse. Keep it short.',
         }),

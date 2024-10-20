@@ -39,6 +39,9 @@ importers:
       '@langchain/openai':
         specifier: ^0.0.28
         version: 0.0.28
+      '@tavily/core':
+        specifier: ^0.0.2
+        version: 0.0.2
       '@types/node':
         specifier: ^20.16.13
         version: 20.16.13
@@ -944,6 +947,9 @@ packages:
     resolution: {integrity: sha512-fbMkAF7fufku0N2dE5TBXcNlg0pt0cJue4xBRE2Qc5Vqikxr4VCgKj/ht6SMdFcOacVA9rqF70APJ8RN/4vMJw==, tarball: https://registry.npmjs.org/@rollup/rollup-win32-x64-msvc/-/rollup-win32-x64-msvc-4.24.0.tgz}
     cpu: [x64]
     os: [win32]
+
+  '@tavily/core@0.0.2':
+    resolution: {integrity: sha512-UabYbp57bdjEloA4efW9zTSzv+FZp13JVDHcfutUNR5XUZ+aDGupe2wpfABECnD+b7Ojp9v9zguZcm1o+h0//w==, tarball: https://registry.npmjs.org/@tavily/core/-/core-0.0.2.tgz}
 
   '@tsconfig/node10@1.0.11':
     resolution: {integrity: sha512-DcRjDCujK/kCk/cUe8Xz8ZSpm8mS3mNNpta+jGCA6USEDfktlNvm1+IuZ9eTcDbNk41BHwpHHeW+N1lKCz4zOw==, tarball: https://registry.npmjs.org/@tsconfig/node10/-/node10-1.0.11.tgz}
@@ -2810,6 +2816,13 @@ snapshots:
 
   '@rollup/rollup-win32-x64-msvc@4.24.0':
     optional: true
+
+  '@tavily/core@0.0.2':
+    dependencies:
+      axios: 1.7.7
+      js-tiktoken: 1.0.15
+    transitivePeerDependencies:
+      - debug
 
   '@tsconfig/node10@1.0.11': {}
 

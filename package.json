@@ -32,6 +32,7 @@
     "@langchain/community": "^0.0.53",
     "@langchain/core": "^0.1.63",
     "@langchain/openai": "^0.0.28",
+    "@tavily/core": "^0.0.2",
     "@types/node": "^20.16.13",
     "@types/object-hash": "^3.0.6",
     "dotenv": "^16.4.5",
