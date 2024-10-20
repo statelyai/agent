@@ -6,7 +6,7 @@ import { fromTerminal } from './helpers/helpers';
 
 const agent = createAgent({
   name: 'todo',
-  model: openai('gpt-4o'),
+  model: openai('gpt-4o-mini'),
   events: {
     addTodo: z.object({
       title: z.string().min(1).max(100).describe('The title of the todo'),

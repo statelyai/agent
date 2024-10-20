@@ -471,17 +471,10 @@ export class Agent<
     observationInput: AgentObservationInput
   ): AgentObservation<any> {
     const { prevState, event, state } = observationInput;
-    const observedState = { context: state.context, value: state.value };
-    const observedPrevState = prevState
-      ? {
-          context: prevState.context,
-          value: prevState.value,
-        }
-      : undefined;
     const observation = {
-      prevState: observedPrevState,
+      prevState,
       event,
-      state: observedState,
+      state,
       id: observationInput.id ?? randomId(),
       sessionId: this.sessionId,
       timestamp: observationInput.timestamp ?? Date.now(),

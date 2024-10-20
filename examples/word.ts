@@ -4,15 +4,14 @@ import { createAgent, fromDecision } from '../src';
 import { z } from 'zod';
 import { openai } from '@ai-sdk/openai';
 
-const context = {
-  word: null as string | null,
-  guessedWord: null as string | null,
-  lettersGuessed: [] as string[],
-};
-
 const agent = createAgent({
   name: 'word',
-  model: openai('gpt-4o'),
+  model: openai('gpt-4o-mini'),
+  context: {
+    word: z.string().nullable().describe('The word to guess'),
+    guessedWord: z.string().nullable().describe('The guessed word'),
+    lettersGuessed: z.array(z.string()).describe('The letters guessed'),
+  },
   events: {
     'agent.guessLetter': z.object({
       letter: z.string().min(1).max(1).describe('The letter guessed'),
@@ -33,9 +32,15 @@ const agent = createAgent({
   },
 });
 
+const context = {
+  word: null,
+  guessedWord: null,
+  lettersGuessed: [],
+} satisfies typeof agent.types.context;
+
 const wordGuesserMachine = setup({
   types: {
-    context: {} as typeof context,
+    context: agent.types.context,
     events: agent.types.events,
   },
   actors: {

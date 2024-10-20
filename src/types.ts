@@ -66,6 +66,9 @@ export type AgentPlan<TEvent extends EventObject> = {
    * a potential next `event` to trigger to achieve the `goal`.
    */
   execute: (state: ObservedState) => Promise<TEvent | undefined>;
+  /**
+   * The next event that the agent decided needs to occur to achieve the `goal`.
+   */
   nextEvent: TEvent | undefined;
   sessionId: string;
   timestamp: number;

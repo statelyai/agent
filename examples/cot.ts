@@ -6,7 +6,7 @@ import { fromTerminal } from './helpers/helpers';
 
 const agent = createAgent({
   name: 'chain-of-thought',
-  model: openai('gpt-4o'),
+  model: openai('gpt-4o-mini'),
   events: {
     'agent.think': z.object({
       thought: z

@@ -3,40 +3,51 @@ import { z } from 'zod';
 import { createAgent, fromDecision, fromTextStream } from '../src';
 import { openai } from '@ai-sdk/openai';
 
-const agent = createAgent({
-  name: 'tic-tac-toe-bot',
-  model: openai('gpt-4-0125-preview'),
-  events: {
-    'agent.x.play': z.object({
-      index: z
-        .number()
-        .min(0)
-        .max(8)
-        .describe('The index of the cell to play on'),
-    }),
-    'agent.o.play': z.object({
-      index: z
-        .number()
-        .min(0)
-        .max(8)
-        .describe('The index of the cell to play on'),
-    }),
-    reset: z.object({}).describe('Reset the game to the initial state'),
-  },
-  context: {
-    board: z
-      .array(z.union([z.literal(null), z.literal('x'), z.literal('o')]))
-      .describe('The 3x3 board represented as a 9-element array.'),
-    moves: z
+const events = {
+  'agent.x.play': z.object({
+    index: z
       .number()
       .min(0)
-      .max(9)
-      .describe('The number of moves made in the game.'),
-    player: z
-      .union([z.literal('x'), z.literal('o')])
-      .describe('The current player (x or o)'),
-    gameReport: z.string(),
-  },
+      .max(8)
+      .describe('The index of the cell to play on'),
+  }),
+  'agent.o.play': z.object({
+    index: z
+      .number()
+      .min(0)
+      .max(8)
+      .describe('The index of the cell to play on'),
+  }),
+  reset: z.object({}).describe('Reset the game to the initial state'),
+};
+
+const context = {
+  board: z
+    .array(z.union([z.literal(null), z.literal('x'), z.literal('o')]))
+    .describe('The 3x3 board represented as a 9-element array.'),
+  moves: z
+    .number()
+    .min(0)
+    .max(9)
+    .describe('The number of moves made in the game.'),
+  player: z
+    .union([z.literal('x'), z.literal('o')])
+    .describe('The current player (x or o)'),
+  gameReport: z.string(),
+};
+
+const xAgent = createAgent({
+  name: 'tic-tac-toe-learner',
+  model: openai('gpt-4o-mini'),
+  events,
+  context,
+});
+
+const oAgent = createAgent({
+  name: 'tic-tac-toe-noob',
+  model: openai('gpt-4o-mini'),
+  events,
+  context,
 });
 
 type Player = 'x' | 'o';
@@ -46,7 +57,7 @@ const initialContext = {
   moves: 0,
   player: 'x' as Player,
   gameReport: '',
-} satisfies typeof agent.types.context;
+} satisfies typeof xAgent.types.context;
 
 function getWinner(board: typeof initialContext.board): Player | null {
   const lines = [
@@ -69,12 +80,12 @@ function getWinner(board: typeof initialContext.board): Player | null {
 
 export const ticTacToeMachine = setup({
   types: {
-    context: agent.types.context,
-    events: agent.types.events,
+    context: xAgent.types.context,
+    events: xAgent.types.events,
   },
   actors: {
-    agent: fromDecision(agent),
-    gameReporter: fromTextStream(agent),
+    agent: fromDecision(xAgent),
+    gameReporter: fromTextStream(xAgent),
   },
   actions: {
     updateBoard: assign({
@@ -169,7 +180,7 @@ export const ticTacToeMachine = setup({
         src: 'gameReporter',
         input: ({ context }) => ({
           context: {
-            events: agent.getObservations().map((o) => o.event),
+            events: xAgent.getObservations().map((o) => o.event),
             board: context.board,
           },
           prompt: 'Provide a short game report analyzing the game.',
@@ -207,8 +218,22 @@ export const ticTacToeMachine = setup({
 
 const actor = createActor(ticTacToeMachine);
 
-agent.interact(actor, (observed) => {
-  if (observed.state.matches('playing')) {
+xAgent.interact(actor, (observed) => {
+  if (observed.state.matches({ playing: 'x' })) {
+    return {
+      goal: `You are playing a game of tic tac toe. This is the current game state. The 3x3 board is represented by a 9-element array. The first element is the top-left cell, the second element is the top-middle cell, the third element is the top-right cell, the fourth element is the middle-left cell, and so on. The value of each cell is either null, x, or o. The value of null means that the cell is empty. The value of x means that the cell is occupied by an x. The value of o means that the cell is occupied by an o.
+
+${JSON.stringify(observed.state.context, null, 2)}
+
+Execute the single best next move to try to win the game. Do not play on an existing cell.`,
+    };
+  }
+
+  return;
+});
+
+oAgent.interact(actor, (observed) => {
+  if (observed.state.matches({ playing: 'o' })) {
     return {
       goal: `You are playing a game of tic tac toe. This is the current game state. The 3x3 board is represented by a 9-element array. The first element is the top-left cell, the second element is the top-middle cell, the third element is the top-right cell, the fourth element is the middle-left cell, and so on. The value of each cell is either null, x, or o. The value of null means that the cell is empty. The value of x means that the cell is occupied by an x. The value of o means that the cell is occupied by an o.
 
