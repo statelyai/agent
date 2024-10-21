@@ -156,7 +156,7 @@ export async function simplePlanner<T extends AnyAgent>(
       return undefined;
     },
     nextEvent: singleResult.result,
-    sessionId: agent.sessionId,
+    episodeId: agent.episodeId,
     timestamp: Date.now(),
   };
 }

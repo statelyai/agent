@@ -371,7 +371,7 @@ export class Agent<
   /**
    * The unique identifier for the agent.
    */
-  public id: string;
+  public episodeId: string;
   public description?: string;
   public events: TEventSchemas;
   public context?: TContextSchema;
@@ -405,7 +405,7 @@ export class Agent<
   }) {
     super(logic);
     this.model = model;
-    this.id = id ?? '';
+    this.episodeId = id ?? '';
     this.name = name;
     this.description = description;
     this.events = events;
@@ -431,7 +431,7 @@ export class Agent<
       ...messageInput,
       id: messageInput.id ?? randomId(),
       timestamp: messageInput.timestamp ?? Date.now(),
-      sessionId: this.sessionId,
+      episodeId: this.episodeId,
     } satisfies AgentMessage;
     this.send({
       type: 'agent.message',
@@ -451,7 +451,7 @@ export class Agent<
       attributes: { ...feedbackInput.attributes },
       reward: feedbackInput.reward ?? 0,
       timestamp: feedbackInput.timestamp ?? Date.now(),
-      sessionId: this.sessionId,
+      episodeId: this.episodeId,
     } satisfies AgentFeedback;
     this.send({
       type: 'agent.feedback',
@@ -476,7 +476,7 @@ export class Agent<
       event,
       state,
       id: observationInput.id ?? randomId(),
-      sessionId: this.sessionId,
+      episodeId: this.episodeId,
       timestamp: observationInput.timestamp ?? Date.now(),
       machineHash: observationInput.machine
         ? getMachineHash(observationInput.machine)

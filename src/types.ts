@@ -70,7 +70,7 @@ export type AgentPlan<TEvent extends EventObject> = {
    * The next event that the agent decided needs to occur to achieve the `goal`.
    */
   nextEvent: TEvent | undefined;
-  sessionId: string;
+  episodeId: string;
   timestamp: number;
 };
 
@@ -135,7 +135,7 @@ export interface AgentFeedback {
   attributes: Record<string, any>;
   reward: number;
   timestamp: number;
-  sessionId: string;
+  episodeId: string;
 }
 
 export interface AgentFeedbackInput {
@@ -156,7 +156,7 @@ export type AgentMessage = CoreMessage & {
    */
   responseId?: string;
   result?: GenerateTextResult<any>;
-  sessionId: string;
+  episodeId: string;
 };
 
 type JSONObject = {
@@ -293,7 +293,7 @@ export interface AgentObservation<TActor extends AnyActorRef> {
   event: EventFrom<TActor>;
   state: SnapshotFrom<TActor>;
   machineHash: string | undefined;
-  sessionId: string;
+  episodeId: string;
   timestamp: number;
 }
 
@@ -418,20 +418,6 @@ export type AgentMemoryContext = {
   plans: AgentPlan<any>[];
   feedback: AgentFeedback[];
 };
-
-export type AgentMemory = AppendOnlyStorage<AgentMemoryContext>;
-
-export interface AppendOnlyStorage<T extends Record<string, any[]>> {
-  append<K extends keyof T>(
-    sessionId: string,
-    key: K,
-    item: T[K][0]
-  ): Promise<void>;
-  getAll<K extends keyof T>(
-    sessionId: string,
-    key: K
-  ): Promise<T[K] | undefined>;
-}
 
 export interface AgentLongTermMemory {
   get<K extends keyof AgentMemoryContext>(

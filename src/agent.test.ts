@@ -46,7 +46,7 @@ test('agent.addMessage() adds to message history', () => {
     content: [{ type: 'text', text: 'response 1' }],
   });
 
-  expect(messageHistory.sessionId).toEqual(agent.sessionId);
+  expect(messageHistory.episodeId).toEqual(agent.episodeId);
 
   expect(agent.getMessages()).toContainEqual(
     expect.objectContaining({
@@ -57,7 +57,7 @@ test('agent.addMessage() adds to message history', () => {
   expect(agent.getMessages()).toContainEqual(
     expect.objectContaining({
       content: [expect.objectContaining({ text: 'response 1' })],
-      sessionId: expect.any(String),
+      episodeId: expect.any(String),
       timestamp: expect.any(Number),
     })
   );
@@ -78,7 +78,7 @@ test('agent.addFeedback() adds to feedback', () => {
     observationId: 'obs-1',
   });
 
-  expect(feedback.sessionId).toEqual(agent.sessionId);
+  expect(feedback.episodeId).toEqual(agent.episodeId);
 
   expect(agent.getFeedback()).toContainEqual(
     expect.objectContaining({
@@ -87,7 +87,7 @@ test('agent.addFeedback() adds to feedback', () => {
       },
       goal: 'Win the game',
       observationId: 'obs-1',
-      sessionId: expect.any(String),
+      episodeId: expect.any(String),
       timestamp: expect.any(Number),
     })
   );
@@ -98,7 +98,7 @@ test('agent.addFeedback() adds to feedback', () => {
       },
       goal: 'Win the game',
       observationId: 'obs-1',
-      sessionId: expect.any(String),
+      episodeId: expect.any(String),
       timestamp: expect.any(Number),
     })
   );
@@ -117,14 +117,14 @@ test('agent.addObservation() adds to observations', () => {
     state: { value: 'lost', context: {} },
   });
 
-  expect(observation.sessionId).toEqual(agent.sessionId);
+  expect(observation.episodeId).toEqual(agent.episodeId);
 
   expect(agent.getObservations()).toContainEqual(
     expect.objectContaining({
       prevState: { value: 'playing', context: {} },
       event: { type: 'play', position: 3 },
       state: { value: 'lost', context: {} },
-      sessionId: expect.any(String),
+      episodeId: expect.any(String),
       timestamp: expect.any(Number),
     })
   );
@@ -156,7 +156,7 @@ test('agent.addObservation() adds to observations with machine hash', () => {
     machine,
   });
 
-  expect(observation.sessionId).toEqual(agent.sessionId);
+  expect(observation.episodeId).toEqual(agent.episodeId);
 
   expect(agent.getObservations()).toContainEqual(
     expect.objectContaining({
@@ -164,7 +164,7 @@ test('agent.addObservation() adds to observations with machine hash', () => {
       event: { type: 'play', position: 3 },
       state: { value: 'lost', context: {} },
       machineHash: expect.any(String),
-      sessionId: expect.any(String),
+      episodeId: expect.any(String),
       timestamp: expect.any(Number),
     })
   );
