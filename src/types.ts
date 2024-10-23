@@ -288,7 +288,7 @@ export type AgentMessageInput = CoreMessage & {
 export interface AgentObservation<TActor extends ActorRefLike> {
   id: string;
   prevState: SnapshotFrom<TActor> | undefined;
-  event: EventFrom<TActor>;
+  event: EventFrom<TActor> | undefined;
   state: SnapshotFrom<TActor>;
   machineHash: string | undefined;
   episodeId: string;
@@ -297,8 +297,8 @@ export interface AgentObservation<TActor extends ActorRefLike> {
 
 export interface AgentObservationInput {
   id?: string;
-  prevState: ObservedState | undefined;
-  event: AnyEventObject;
+  prevState?: ObservedState;
+  event?: AnyEventObject;
   state: ObservedState;
   machine?: AnyStateMachine;
   timestamp?: number;
@@ -402,7 +402,7 @@ export interface ObservedState {
   /**
    * Additional contextual data related to the current state
    */
-  context: Record<string, unknown>;
+  context?: Record<string, unknown>;
 }
 
 export type ObservedStateFrom<TActor extends ActorRefLike> = Pick<

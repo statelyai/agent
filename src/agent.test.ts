@@ -130,6 +130,28 @@ test('agent.addObservation() adds to observations', () => {
   );
 });
 
+test('agent.addObservation() adds to observations (initial state)', () => {
+  const agent = createAgent({
+    name: 'test',
+    events: {},
+    model: {} as any,
+  });
+
+  const observation = agent.addObservation({
+    state: { value: 'lost' },
+  });
+
+  expect(observation.episodeId).toEqual(agent.episodeId);
+
+  expect(agent.getObservations()).toContainEqual(
+    expect.objectContaining({
+      state: { value: 'lost', context: undefined },
+      episodeId: expect.any(String),
+      timestamp: expect.any(Number),
+    })
+  );
+});
+
 test('agent.addObservation() adds to observations with machine hash', () => {
   const agent = createAgent({
     name: 'test',
@@ -164,6 +186,53 @@ test('agent.addObservation() adds to observations with machine hash', () => {
       event: { type: 'play', position: 3 },
       state: { value: 'lost', context: {} },
       machineHash: expect.any(String),
+      episodeId: expect.any(String),
+      timestamp: expect.any(Number),
+    })
+  );
+});
+
+test('agent.addFeedback() adds to feedback (with observation)', () => {
+  const agent = createAgent({
+    name: 'test',
+    events: {},
+    model: {} as any,
+  });
+
+  const observation = agent.addObservation({
+    state: {
+      value: 'playing',
+    },
+  });
+
+  const feedback = agent.addFeedback({
+    attributes: {
+      score: -1,
+    },
+    goal: 'Win the game',
+    observationId: observation.id,
+  });
+
+  expect(feedback.episodeId).toEqual(agent.episodeId);
+
+  expect(agent.getFeedback()).toContainEqual(
+    expect.objectContaining({
+      attributes: {
+        score: -1,
+      },
+      goal: 'Win the game',
+      observationId: observation.id,
+      episodeId: expect.any(String),
+      timestamp: expect.any(Number),
+    })
+  );
+  expect(agent.getFeedback()).toContainEqual(
+    expect.objectContaining({
+      attributes: {
+        score: -1,
+      },
+      goal: 'Win the game',
+      observationId: observation.id,
       episodeId: expect.any(String),
       timestamp: expect.any(Number),
     })
@@ -244,7 +313,7 @@ test('You can listen for plan events', async () => {
     doGenerate: async (params: LanguageModelV1CallOptions) => {
       const keys =
         params.mode.type === 'regular'
-          ? params.mode.tools?.map((t) => t.name)
+          ? params.mode.tools?.map((tool) => tool.name)
           : [];
 
       return {

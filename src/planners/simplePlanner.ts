@@ -20,7 +20,11 @@ function getTransitions(
     return [];
   }
 
-  const resolvedState = machine.resolveState(state);
+  const resolvedState = machine.resolveState({
+    ...state,
+    // Need this property defined to make TS happy
+    context: state.context,
+  });
   return getAllTransitions(resolvedState);
 }
 
