@@ -20,7 +20,7 @@
       "program": "${file}",
       "cwd": "${workspaceFolder}",
       "runtimeExecutable": "${workspaceFolder}/node_modules/.bin/ts-node",
-      "runtimeArgs": ["--transpile-only"],
+      "runtimeArgs": ["--transpile-only", "-r", "dotenv/config"],
       "outFiles": ["${workspaceFolder}/dist/**/*.js"],
       "sourceMaps": true,
       "smartStep": true,
