@@ -1,6 +1,6 @@
 import {
   Actor,
-  AnyActorRef,
+  ActorRefLike,
   AnyEventObject,
   AnyStateMachine,
   EventObject,
@@ -31,7 +31,7 @@ import {
 } from './types';
 import { simplePlanner } from './planners/simplePlanner';
 import { agentDecide } from './decision';
-import { getMachineHash, randomId } from './utils';
+import { getMachineHash, isActorRef, randomId } from './utils';
 import {
   experimental_wrapLanguageModel,
   LanguageModel,
@@ -527,7 +527,7 @@ export class Agent<
    * actor.start();
    * ```
    */
-  public interact<TActor extends AnyActorRef>(actorRef: TActor): Subscription;
+  public interact<TActor extends ActorRefLike>(actorRef: TActor): Subscription;
   /**
    * Interacts with this state machine actor by:
    * 1. Inspecting state transitions and storing them as observations
@@ -555,18 +555,20 @@ export class Agent<
    * actor.start();
    * ```
    */
-  public interact<TActor extends AnyActorRef>(
+  public interact<TActor extends ActorRefLike>(
     actorRef: TActor,
     getInput: (
       observation: AgentObservation<TActor>
     ) => AgentDecisionInput | undefined
   ): Subscription;
-  public interact<TActor extends AnyActorRef>(
+  public interact<TActor extends ActorRefLike>(
     actorRef: TActor,
     getInput?: (
       observation: AgentObservation<TActor>
     ) => AgentDecisionInput | undefined
   ): Subscription {
+    const actorRefCheck = isActorRef(actorRef);
+
     let prevState: ObservedState | undefined = undefined;
     let subscribed = true;
 
@@ -579,7 +581,9 @@ export class Agent<
 
       if (input) {
         await agentDecide(agent, {
-          machine: actorRef.src as AnyStateMachine,
+          machine: actorRefCheck
+            ? (actorRef.src as AnyStateMachine)
+            : undefined,
           state: observation.state,
           execute: async (event) => {
             actorRef.send(event);
@@ -592,26 +596,28 @@ export class Agent<
     }
 
     // Inspect system, but only observe specified actor
-    const sub = actorRef.system.inspect({
-      next: async (inspEvent) => {
-        if (
-          !subscribed ||
-          inspEvent.actorRef !== actorRef ||
-          inspEvent.type !== '@xstate.snapshot'
-        ) {
-          return;
-        }
+    const sub = actorRefCheck
+      ? actorRef.system.inspect({
+          next: async (inspEvent) => {
+            if (
+              !subscribed ||
+              inspEvent.actorRef !== actorRef ||
+              inspEvent.type !== '@xstate.snapshot'
+            ) {
+              return;
+            }
 
-        const observationInput = {
-          event: inspEvent.event,
-          prevState,
-          state: inspEvent.snapshot as any,
-          machine: (actorRef as any).src,
-        } satisfies AgentObservationInput;
+            const observationInput = {
+              event: inspEvent.event,
+              prevState,
+              state: inspEvent.snapshot as any,
+              machine: (actorRef as any).src,
+            } satisfies AgentObservationInput;
 
-        await handleObservation(observationInput);
-      },
-    });
+            await handleObservation(observationInput);
+          },
+        })
+      : undefined;
 
     // If actor already started, interact with current state
     if ((actorRef as any)._processingStatus === 1) {
@@ -625,38 +631,41 @@ export class Agent<
 
     return {
       unsubscribe: () => {
-        sub.unsubscribe();
+        sub?.unsubscribe();
         subscribed = false;
       },
     };
   }
 
-  public observe<TActor extends AnyActorRef>(actorRef: TActor) {
+  public observe<TActor extends ActorRefLike>(actorRef: TActor): Subscription {
     let prevState: ObservedState = actorRef.getSnapshot();
+    const actorRefCheck = isActorRef(actorRef);
 
-    const sub = actorRef.system.inspect({
-      next: async (inspEvent) => {
-        if (
-          inspEvent.actorRef !== actorRef ||
-          inspEvent.type !== '@xstate.snapshot'
-        ) {
-          return;
-        }
+    const sub = actorRefCheck
+      ? actorRef.system.inspect({
+          next: async (inspEvent) => {
+            if (
+              inspEvent.actorRef !== actorRef ||
+              inspEvent.type !== '@xstate.snapshot'
+            ) {
+              return;
+            }
 
-        const observationInput = {
-          event: inspEvent.event,
-          prevState,
-          state: inspEvent.snapshot as any,
-          machine: (actorRef as any).src,
-        } satisfies AgentObservationInput;
+            const observationInput = {
+              event: inspEvent.event,
+              prevState,
+              state: inspEvent.snapshot as any,
+              machine: (actorRef as any).src,
+            } satisfies AgentObservationInput;
 
-        prevState = observationInput.state;
+            prevState = observationInput.state;
 
-        this.addObservation(observationInput);
-      },
-    });
+            this.addObservation(observationInput);
+          },
+        })
+      : undefined;
 
-    return sub;
+    return sub ?? { unsubscribe: () => {} };
   }
 
   public wrap(modelToWrap: LanguageModelV1) {

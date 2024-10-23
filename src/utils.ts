@@ -1,4 +1,10 @@
-import { AnyMachineSnapshot, AnyStateMachine, AnyStateNode } from 'xstate';
+import {
+  ActorRefLike,
+  AnyActorRef,
+  AnyMachineSnapshot,
+  AnyStateMachine,
+  AnyStateNode,
+} from 'xstate';
 import hash from 'object-hash';
 import { TransitionData } from './types';
 
@@ -69,4 +75,14 @@ export function getMachineHash(machine: AnyStateMachine): string {
   const machineHash = hash(transitions);
   machineHashes.set(machine, machineHash);
   return machineHash;
+}
+
+export function isActorRef(
+  actorRefLike: ActorRefLike
+): actorRefLike is AnyActorRef {
+  return (
+    'src' in actorRefLike &&
+    'system' in actorRefLike &&
+    'sessionId' in actorRefLike
+  );
 }

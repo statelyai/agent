@@ -33,7 +33,7 @@
     "@langchain/core": "^0.1.63",
     "@langchain/openai": "^0.0.28",
     "@tavily/core": "^0.0.2",
-    "@types/node": "^20.16.13",
+    "@types/node": "^20.16.14",
     "@types/object-hash": "^3.0.6",
     "dotenv": "^16.4.5",
     "json-schema-to-ts": "^3.1.1",
@@ -49,7 +49,7 @@
   },
   "dependencies": {
     "@xstate/graph": "^2.0.1",
-    "ai": "^3.4.16",
+    "ai": "^3.4.17",
     "object-hash": "^3.0.0",
     "xstate": "^5.18.2"
   },

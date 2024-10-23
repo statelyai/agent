@@ -1,7 +1,6 @@
 import {
   ActorLogic,
-  ActorRefFrom,
-  AnyActorRef,
+  ActorRefLike,
   AnyEventObject,
   AnyStateMachine,
   EventFrom,
@@ -9,7 +8,6 @@ import {
   PromiseActorLogic,
   SnapshotFrom,
   StateValue,
-  Subscription,
   TransitionSnapshot,
   Values,
 } from 'xstate';
@@ -287,7 +285,7 @@ export type AgentMessageInput = CoreMessage & {
   result?: GenerateTextResult<any>;
 };
 
-export interface AgentObservation<TActor extends AnyActorRef> {
+export interface AgentObservation<TActor extends ActorRefLike> {
   id: string;
   prevState: SnapshotFrom<TActor> | undefined;
   event: EventFrom<TActor>;
@@ -407,7 +405,7 @@ export interface ObservedState {
   context: Record<string, unknown>;
 }
 
-export type ObservedStateFrom<TActor extends AnyActorRef> = Pick<
+export type ObservedStateFrom<TActor extends ActorRefLike> = Pick<
   SnapshotFrom<TActor>,
   'value' | 'context'
 >;
