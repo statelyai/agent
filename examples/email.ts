@@ -91,13 +91,13 @@ const flow = expert.createFlow({
   },
 });
 
-flow
-  .input({
-    email: 'That sounds great! When are you available?',
-    instructions:
-      'Tell them exactly when I am available. Address them by his full (first and last) name.',
-  })
-  .start();
+let [state, actions] = flow.initialTransition({
+  email: 'That sounds great! When are you available?',
+  instructions:
+    'Tell them exactly when I am available. Address them by his full (first and last) name.',
+});
+
+console.log({ state, actions });
 
 // const machine = setup({
 //   types: {

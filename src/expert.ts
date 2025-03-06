@@ -1,17 +1,16 @@
 import {
   Actor,
   ActorRefLike,
-  createActor,
   createMachine,
   enqueueActions,
   EventObject,
   fromPromise,
   fromTransition,
-  InputFrom,
+  initialTransition,
   MachineConfig,
-  raise,
   SnapshotFrom,
   Subscription,
+  transition,
 } from 'xstate';
 import { ZodContextMapping, ZodEventMapping } from './schemas';
 import {
@@ -36,6 +35,7 @@ import {
   ExpertDecisionInput,
   ContextFromZodContextMapping,
   EventsFromZodEventMapping,
+  ExpertFlow,
 } from './types';
 import { toolPolicy } from './policies/toolPolicy';
 import { isActorRef, isMachineActor, randomId } from './utils';
@@ -688,7 +688,7 @@ export class Expert<
       ContextFromZodContextMapping<TContextSchema>,
       EventsFromZodEventMapping<TEventSchemas>
     >;
-  }) {
+  }): ExpertFlow<this> {
     const machineConfig: MachineConfig<any, any, any, any, any> = {
       initial: flowConfig.initial,
       context: flowConfig.context,
@@ -749,24 +749,27 @@ export class Expert<
     const machine = createMachine(machineConfig);
 
     return {
-      input: (input: any) => ({
-        start: () => {
-          const actor = createActor(machine, { input });
+      initialTransition: (input) => {
+        return initialTransition(machine, input);
+      },
+      transition: (state, event) => {
+        return transition(
+          machine,
+          machine.resolveState({ context: {}, ...state }),
+          event
+        );
+      },
+      decide: (s) => {
+        const state = machine.resolveState(s);
+        const goals = Object.values(state.getMeta()).map((m) => m?.goal);
+        console.log({ goals });
 
-          this.interact(actor, (state) => {
-            const goals = Object.values(state.state.getMeta()).map(
-              (m) => m?.goal
-            );
-            console.log({ goals });
-
-            if (goals[0]) {
-              return { goal: goals[0] };
-            }
-          });
-
-          return actor.start();
-        },
-      }),
+        return this.decide({
+          state,
+          goal: goals[0],
+          machine,
+        });
+      },
     };
   }
 }

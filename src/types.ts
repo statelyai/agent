@@ -4,6 +4,7 @@ import {
   AnyEventObject,
   AnyStateMachine,
   EventFrom,
+  EventObject,
   SnapshotFrom,
   StateValue,
   TransitionSnapshot,
@@ -496,3 +497,16 @@ export interface ExpertInsight extends BaseProperties {
   observationId: string;
   attributes: Record<string, any>;
 }
+
+export type ExpertFlow<TExpert extends AnyExpert> = {
+  transition: (
+    state: ObservedState<TExpert>,
+    event: EventFromExpert<TExpert>
+  ) => [state: ObservedState<TExpert>, actions: any[]];
+  initialTransition: (
+    input: any
+  ) => [state: ObservedState<TExpert>, actions: any[]];
+  decide: (
+    state: ObservedState<TExpert>
+  ) => Promise<ExpertDecision<TExpert> | undefined>;
+};
