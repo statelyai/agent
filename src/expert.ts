@@ -1,7 +1,15 @@
 import {
   Actor,
   ActorRefLike,
+  createActor,
+  createMachine,
+  enqueueActions,
+  EventObject,
+  fromPromise,
   fromTransition,
+  InputFrom,
+  MachineConfig,
+  raise,
   SnapshotFrom,
   Subscription,
 } from 'xstate';
@@ -26,6 +34,8 @@ import {
   ExpertInsightInput,
   ExpertInsight,
   ExpertDecisionInput,
+  ContextFromZodContextMapping,
+  EventsFromZodEventMapping,
 } from './types';
 import { toolPolicy } from './policies/toolPolicy';
 import { isActorRef, isMachineActor, randomId } from './utils';
@@ -625,5 +635,178 @@ export class Expert<
     }
 
     return decision;
+  }
+
+  public createFlow<T extends Record<string, any>>(flowConfig: {
+    initial: string;
+    context: (input: any) => ContextFromZodContextMapping<TContextSchema>;
+    states: {
+      [K in keyof T]: {
+        type?: 'final';
+        goal?: string;
+        on?: {
+          [K in keyof TEventSchemas]?: TransitionOutput<
+            ContextFromZodContextMapping<TContextSchema>,
+            EventsFromZodEventMapping<TEventSchemas> & { type: K }
+          >;
+        };
+        invoke?: {
+          src: (input: {
+            context: ContextFromZodContextMapping<TContextSchema>;
+            event: EventsFromZodEventMapping<TEventSchemas>;
+          }) => Promise<T[K]>;
+          onDone?: TransitionOutput<
+            ContextFromZodContextMapping<TContextSchema>,
+            { type: 'done'; output: T[K] }
+          >;
+        };
+        entry?: FlowAction<
+          ContextFromZodContextMapping<TContextSchema>,
+          EventsFromZodEventMapping<TEventSchemas>
+        >;
+        exit?: FlowAction<
+          ContextFromZodContextMapping<TContextSchema>,
+          EventsFromZodEventMapping<TEventSchemas>
+        >;
+      };
+    };
+    on?: {
+      [K in keyof TEventSchemas]?: TransitionOutput<
+        ContextFromZodContextMapping<TContextSchema>,
+        EventsFromZodEventMapping<TEventSchemas> & { type: K }
+      >;
+    };
+    invoke?: {
+      src: () => Promise<any>;
+      onDone?: FlowAction<ContextFromZodContextMapping<TContextSchema>, any>;
+    };
+    entry?: FlowAction<
+      ContextFromZodContextMapping<TContextSchema>,
+      EventsFromZodEventMapping<TEventSchemas>
+    >;
+    exit?: FlowAction<
+      ContextFromZodContextMapping<TContextSchema>,
+      EventsFromZodEventMapping<TEventSchemas>
+    >;
+  }) {
+    const machineConfig: MachineConfig<any, any, any, any, any> = {
+      initial: flowConfig.initial,
+      context: flowConfig.context,
+      states: {},
+      entry: flowConfig.entry,
+      exit: flowConfig.exit,
+      on: {},
+    };
+
+    for (const event of Object.keys(flowConfig.on ?? {})) {
+      const transition = flowConfig.on![event]!;
+      machineConfig.on![event] = transitionOutputToObject(transition);
+    }
+
+    for (const state of Object.keys(flowConfig.states)) {
+      const stateConfig = flowConfig.states[state]!;
+      machineConfig.states![state] = {
+        type: stateConfig.type,
+        entry: stateConfig.entry,
+        exit: stateConfig.exit,
+        on: {},
+      };
+
+      machineConfig.on![`_nav.${state}`] = {
+        target: `.${state}`,
+      };
+
+      for (const event of Object.keys(flowConfig.states[state]!.on ?? {})) {
+        const transition = flowConfig.states[state]!.on![event]!;
+        machineConfig.states![state]!.on![event] =
+          transitionOutputToObject(transition);
+      }
+
+      const invoked: any[] = [];
+
+      if (stateConfig.invoke) {
+        invoked.push({
+          src: fromPromise(({ input }) => stateConfig.invoke!.src(input)),
+          input: ({ context, event }) => ({ context, event }),
+          onDone: stateConfig.invoke.onDone
+            ? transitionOutputToObject(stateConfig.invoke.onDone)
+            : undefined,
+        });
+      }
+
+      if (stateConfig.goal) {
+        machineConfig.states![state]!.meta = {
+          goal: stateConfig.goal,
+        };
+      }
+
+      machineConfig.states![state]!.invoke = invoked;
+
+      machineConfig.states![state]!.entry = stateConfig.entry;
+      machineConfig.states![state]!.exit = stateConfig.exit;
+    }
+
+    const machine = createMachine(machineConfig);
+
+    return {
+      input: (input: any) => ({
+        start: () => {
+          const actor = createActor(machine, { input });
+
+          this.interact(actor, (state) => {
+            const goals = Object.values(state.state.getMeta()).map(
+              (m) => m?.goal
+            );
+            console.log({ goals });
+
+            if (goals[0]) {
+              return { goal: goals[0] };
+            }
+          });
+
+          return actor.start();
+        },
+      }),
+    };
+  }
+}
+
+type FlowAction<TContext, TEvent extends EventObject> = ({
+  context,
+  event,
+}: {
+  context: TContext;
+  event: TEvent;
+}) => void;
+
+type TransitionOutput<TContext, TEvent extends EventObject> =
+  | (({ context, event }: { context: TContext; event: TEvent }) => {
+      target?: string;
+      context?: TContext;
+    })
+  | {
+      target?: string;
+      context?: TContext;
+    };
+
+function transitionOutputToObject(transition: TransitionOutput<any, any>) {
+  if (typeof transition === 'function') {
+    return {
+      actions: enqueueActions(({ context, event, enqueue }) => {
+        const res = transition({ context, event } as any);
+
+        if (res.context) {
+          enqueue.assign(res.context);
+        }
+
+        if (res.target) {
+          enqueue.raise({
+            type: `_nav.${res.target}`,
+          });
+        }
+      }),
+    };
+  } else {
+    return transition;
   }
 }
