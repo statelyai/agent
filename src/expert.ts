@@ -726,8 +726,10 @@ export class Expert<
 
       if (stateConfig.invoke) {
         invoked.push({
-          src: fromPromise(({ input }) => stateConfig.invoke!.src(input)),
-          input: ({ context, event }) => ({ context, event }),
+          src: fromPromise(({ input }) =>
+            stateConfig.invoke!.src(input as any)
+          ),
+          input: ({ context, event }: any) => ({ context, event }),
           onDone: stateConfig.invoke.onDone
             ? transitionOutputToObject(stateConfig.invoke.onDone)
             : undefined,
@@ -760,7 +762,7 @@ export class Expert<
         );
       },
       decide: (s) => {
-        const state = machine.resolveState(s);
+        const state = machine.resolveState(s as any);
         const goals = Object.values(state.getMeta()).map((m) => m?.goal);
         console.log({ goals });
 
