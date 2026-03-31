@@ -1,447 +1,230 @@
-import {
-  ActorLogic,
-  ActorRefFrom,
-  AnyActorRef,
-  AnyEventObject,
-  AnyStateMachine,
-  EventFrom,
-  EventObject,
-  PromiseActorLogic,
-  SnapshotFrom,
-  StateValue,
-  Subscription,
-  TransitionSnapshot,
-  Values,
-} from 'xstate';
-import {
-  CoreMessage,
-  generateText,
-  GenerateTextResult,
-  LanguageModel,
-  streamText,
-} from 'ai';
-import { ZodContextMapping, ZodEventMapping } from './schemas';
-import { TypeOf } from 'zod';
-import { Agent } from './agent';
+// ─── Standard Schema compatibility ───
+// Minimal Standard Schema V1 interface so any compliant library (zod, valibot, arktype) works.
 
-export type GenerateTextOptions = Parameters<typeof generateText>[0];
-
-export type StreamTextOptions = Parameters<typeof streamText>[0];
-
-export type AgentPlanInput<TEvent extends EventObject> = Omit<
-  GenerateTextOptions,
-  'prompt' | 'tools'
-> & {
-  /**
-   * The currently observed state.
-   */
-  state: ObservedState;
-  /**
-   * The goal for the agent to accomplish.
-   * The agent will create a plan based on this goal.
-   */
-  goal: string;
-  /**
-   * The events that the agent can trigger. This is a mapping of
-   * event types to Zod event schemas.
-   */
-  events: ZodEventMapping;
-  /**
-   * The state machine that represents the environment the agent
-   * is interacting with.
-   */
-  machine?: AnyStateMachine;
-  /**
-   * The previous plan.
-   */
-  previousPlan?: AgentPlan<TEvent>;
-};
-
-export type AgentPlan<TEvent extends EventObject> = {
-  goal: string;
-  state: ObservedState;
-  content?: string;
-  /**
-   * Executes the plan based on the given `state` and resolves with
-   * a potential next `event` to trigger to achieve the `goal`.
-   */
-  execute: (state: ObservedState) => Promise<TEvent | undefined>;
-  nextEvent: TEvent | undefined;
-  sessionId: string;
-  timestamp: number;
-};
-
-export interface TransitionData {
-  eventType: string;
-  description?: string;
-  guard?: { type: string };
-  target?: any;
+export interface StandardSchemaV1<Output = unknown> {
+  readonly '~standard': {
+    readonly version: 1;
+    readonly vendor: string;
+    readonly validate: (value: unknown) => any;
+    readonly types?: { readonly input?: unknown; readonly output?: Output };
+  };
 }
 
-export type PromptTemplate<TEvents extends EventObject> = (data: {
-  goal: string;
-  /**
-   * The observed state
-   */
-  state?: ObservedState;
-  /**
-   * The context to provide.
-   * This overrides the observed state.context, if provided.
-   */
-  context?: any;
-  /**
-   * The state machine model of the observed environment
-   */
-  machine?: unknown;
-  /**
-   * The potential next transitions that can be taken
-   * in the state machine
-   */
-  transitions?: TransitionData[];
-  /**
-   * Past observations
-   */
-  observations?: AgentObservation<any>[]; // TODO
-  feedback?: AgentFeedback[];
-  messages?: AgentMessage[];
-  plans?: AgentPlan<TEvents>[];
-}) => string;
+export type StandardSchemaResult<T> =
+  | { value: T; issues?: undefined }
+  | { value?: undefined; issues: ReadonlyArray<{ message: string }> };
 
-export type AgentPlanner<T extends AnyAgent> = (
-  agent: T,
-  input: AgentPlanInput<T['types']['events']>
-) => Promise<AgentPlan<T['types']['events']> | undefined>;
+export type InferOutput<T> = T extends StandardSchemaV1<infer O> ? O : never;
 
-export type AgentDecideOptions = {
-  goal: string;
-  model?: LanguageModel;
-  state: ObservedState;
-  machine?: AnyStateMachine;
-  execute?: (event: AnyEventObject) => Promise<void>;
-  planner?: AgentPlanner<any>;
-  events?: ZodEventMapping;
-} & Omit<Parameters<typeof generateText>[0], 'model' | 'tools' | 'prompt'>;
+// ─── Adapter ───
 
-export interface AgentFeedback {
-  goal?: string;
-  observationId?: string;
-  /**
-   * The message correlation that the feedback is relevant for
-   */
-  correlationId?: string;
-  attributes: Record<string, any>;
-  reward: number;
-  timestamp: number;
-  sessionId: string;
+export interface AgentAdapter {
+  decide: (options: {
+    model: string;
+    prompt: string;
+    options: Record<string, { description: string; schema?: StandardSchemaV1 }>;
+    reasoning?: boolean;
+  }) => Promise<{
+    choice: string;
+    data: Record<string, unknown>;
+    reasoning?: string;
+  }>;
 }
 
-export interface AgentFeedbackInput {
-  goal?: string;
-  observationId?: string;
-  correlationId?: string;
-  attributes?: Record<string, any>;
-  timestamp?: number;
-  reward?: number;
+// ─── Events ───
+
+export interface AgentEvent {
+  type: string;
+  [key: string]: unknown;
 }
 
-export type AgentMessage = CoreMessage & {
-  timestamp: number;
+// ─── Transition ───
+
+export interface TransitionResult {
+  target?: string;
+  context?: Record<string, unknown>;
+  params?: Record<string, unknown>;
+}
+
+export interface TransitionArgs<
+  TContext = Record<string, unknown>,
+  TEvent extends AgentEvent = AgentEvent,
+> {
+  context: TContext;
+  event: TEvent;
+}
+
+export interface OnDoneArgs<
+  TContext = Record<string, unknown>,
+  TResult = unknown,
+> {
+  result: TResult;
+  context: TContext;
+}
+
+export interface RunArgs<TContext = Record<string, unknown>> {
+  context: TContext;
+  parentParams: Record<string, unknown>;
+  signal?: AbortSignal;
+}
+
+export interface OutputArgs<TContext = Record<string, unknown>> {
+  context: TContext;
+}
+
+// ─── Decide / Classify ───
+
+export interface DecideResult {
+  choice: string;
+  data: Record<string, unknown>;
+  reasoning?: string;
+}
+
+export interface ClassifyResult {
+  category: string;
+}
+
+export interface DecideConfig {
+  model: string;
+  adapter?: AgentAdapter;
+  prompt:
+    | string
+    | ((args: {
+        context: Record<string, unknown>;
+        parentParams: Record<string, unknown>;
+      }) => string);
+  options: Record<
+    string,
+    { description: string; schema?: StandardSchemaV1 }
+  >;
+  reasoning?: boolean;
+  onDone: (args: OnDoneArgs<Record<string, unknown>, DecideResult>) => TransitionResult;
+  on?: Record<
+    string,
+    (args: TransitionArgs) => TransitionResult
+  >;
+}
+
+export interface ClassifyConfig {
+  model: string;
+  adapter?: AgentAdapter;
+  prompt:
+    | string
+    | ((args: {
+        context: Record<string, unknown>;
+        parentParams: Record<string, unknown>;
+      }) => string);
+  into: Record<string, { description: string }>;
+  examples?: Array<{ input: string; category: string }>;
+  onDone: (
+    args: OnDoneArgs<Record<string, unknown>, ClassifyResult>
+  ) => TransitionResult;
+  on?: Record<
+    string,
+    (args: TransitionArgs) => TransitionResult
+  >;
+}
+
+// ─── State config ───
+
+export interface StateConfig {
+  type?: 'final';
+  outputSchema?: StandardSchemaV1;
+  paramsSchema?: StandardSchemaV1;
+  run?: (args: RunArgs) => Promise<unknown>;
+  onDone?: (args: OnDoneArgs) => TransitionResult;
+  on?: Record<
+    string,
+    (args: TransitionArgs) => TransitionResult
+  >;
+  events?: Record<string, StandardSchemaV1>;
+  output?: (args: OutputArgs) => unknown;
+  // Compound state
+  initial?:
+    | string
+    | ((args: {
+        context: Record<string, unknown>;
+        parentParams: Record<string, unknown>;
+      }) => TransitionResult);
+  states?: Record<string, StateConfig>;
+
+  // Internal — set by decide/classify helpers
+  /** @internal */
+  __type?: 'decide' | 'classify';
+  /** @internal */
+  __decideConfig?: DecideConfig;
+  /** @internal */
+  __classifyConfig?: ClassifyConfig;
+}
+
+// ─── Machine config ───
+
+export interface MachineConfig {
   id: string;
-  /**
-   * The response ID of the message, which references
-   * which message this message is responding to, if any.
-   */
-  responseId?: string;
-  result?: GenerateTextResult<any>;
-  sessionId: string;
-};
-
-type JSONObject = {
-  [key: string]: JSONValue;
-};
-type JSONArray = JSONValue[];
-type JSONValue = null | string | number | boolean | JSONObject | JSONArray;
-
-type LanguageModelV1ProviderMetadata = Record<
-  string,
-  Record<string, JSONValue>
->;
-
-interface LanguageModelV1ImagePart {
-  type: 'image';
-  /**
-Image data as a Uint8Array (e.g. from a Blob or Buffer) or a URL.
-   */
-  image: Uint8Array | URL;
-  /**
-Optional mime type of the image.
-   */
-  mimeType?: string;
-  /**
-   * Additional provider-specific metadata. They are passed through
-   * to the provider from the AI SDK and enable provider-specific
-   * functionality that can be fully encapsulated in the provider.
-   */
-  providerMetadata?: LanguageModelV1ProviderMetadata;
+  inputSchema?: StandardSchemaV1;
+  context: (input: any) => Record<string, unknown>;
+  contextSchema?: StandardSchemaV1;
+  events?: Record<string, StandardSchemaV1>;
+  adapter?: AgentAdapter;
+  initial:
+    | string
+    | ((args: { context: Record<string, unknown> }) => TransitionResult);
+  states: Record<string, StateConfig>;
 }
 
-export interface LanguageModelV1TextPart {
-  type: 'text';
-  /**
-The text content.
-   */
-  text: string;
-  /**
-   * Additional provider-specific metadata. They are passed through
-   * to the provider from the AI SDK and enable provider-specific
-   * functionality that can be fully encapsulated in the provider.
-   */
-  providerMetadata?: LanguageModelV1ProviderMetadata;
+// ─── Agent Machine (returned by createAgentMachine) ───
+
+export interface AgentMachine extends MachineConfig {}
+
+// ─── Agent State (serializable) ───
+
+export interface AgentState {
+  value: string;
+  params: Record<string, Record<string, unknown>>;
+  context: Record<string, unknown>;
+  status: 'running' | 'waiting' | 'done' | 'error';
+  output?: unknown;
+  error?: unknown;
 }
 
-export interface LanguageModelV1ToolCallPart {
-  type: 'tool-call';
-  /**
-ID of the tool call. This ID is used to match the tool call with the tool result.
- */
-  toolCallId: string;
-  /**
-Name of the tool that is being called.
- */
-  toolName: string;
-  /**
-Arguments of the tool call. This is a JSON-serializable object that matches the tool's input schema.
-   */
-  args: unknown;
-  /**
-   * Additional provider-specific metadata. They are passed through
-   * to the provider from the AI SDK and enable provider-specific
-   * functionality that can be fully encapsulated in the provider.
-   */
-  providerMetadata?: LanguageModelV1ProviderMetadata;
-}
-interface LanguageModelV1ToolResultPart {
-  type: 'tool-result';
-  /**
-ID of the tool call that this result is associated with.
- */
-  toolCallId: string;
-  /**
-Name of the tool that generated this result.
-  */
-  toolName: string;
-  /**
-Result of the tool call. This is a JSON-serializable object.
-   */
-  result: unknown;
-  /**
-Optional flag if the result is an error or an error message.
-   */
-  isError?: boolean;
-  /**
-   * Additional provider-specific metadata. They are passed through
-   * to the provider from the AI SDK and enable provider-specific
-   * functionality that can be fully encapsulated in the provider.
-   */
-  providerMetadata?: LanguageModelV1ProviderMetadata;
-}
-type LanguageModelV1Message = (
-  | {
-      role: 'system';
-      content: string;
-    }
-  | {
-      role: 'user';
-      content: Array<LanguageModelV1TextPart | LanguageModelV1ImagePart>;
-    }
-  | {
-      role: 'assistant';
-      content: Array<LanguageModelV1TextPart | LanguageModelV1ToolCallPart>;
-    }
-  | {
-      role: 'tool';
-      content: Array<LanguageModelV1ToolResultPart>;
-    }
-) & {
-  /**
-   * Additional provider-specific metadata. They are passed through
-   * to the provider from the AI SDK and enable provider-specific
-   * functionality that can be fully encapsulated in the provider.
-   */
-  providerMetadata?: LanguageModelV1ProviderMetadata;
-};
+// ─── Run result (discriminated union) ───
 
-export type AgentMessageInput = CoreMessage & {
-  timestamp?: number;
-  id?: string;
-  /**
-   * The response ID of the message, which references
-   * which message this message is responding to, if any.
-   */
-  responseId?: string;
-  correlationId?: string;
-  parentCorrelationId?: string;
-  result?: GenerateTextResult<any>;
-};
-
-export interface AgentObservation<TActor extends AnyActorRef> {
-  id: string;
-  prevState: SnapshotFrom<TActor> | undefined;
-  event: EventFrom<TActor>;
-  state: SnapshotFrom<TActor>;
-  machineHash: string | undefined;
-  sessionId: string;
-  timestamp: number;
-}
-
-export interface AgentObservationInput {
-  id?: string;
-  prevState: ObservedState | undefined;
-  event: AnyEventObject;
-  state: ObservedState;
-  machine?: AnyStateMachine;
-  timestamp?: number;
-}
-
-export type AgentDecisionInput = {
-  goal: string;
-  model?: LanguageModel;
-  context?: any;
-} & Omit<Parameters<typeof generateText>[0], 'model' | 'tools' | 'prompt'>;
-
-export type AgentDecisionLogic<TEvents extends EventObject> = PromiseActorLogic<
-  AgentPlan<TEvents> | undefined,
-  AgentDecisionInput | string
->;
-
-export type AgentEmitted<TEvents extends EventObject> =
+export type AgentRunResult =
   | {
-      type: 'feedback';
-      feedback: AgentFeedback;
+      status: 'done';
+      state: AgentState;
+      output: unknown;
+      context: Record<string, unknown>;
     }
   | {
-      type: 'observation';
-      observation: AgentObservation<any>; // TODO
+      status: 'waiting';
+      state: AgentState;
+      value: string;
+      events: Record<string, StandardSchemaV1>;
+      context: Record<string, unknown>;
     }
   | {
-      type: 'message';
-      message: AgentMessage;
-    }
-  | {
-      type: 'plan';
-      plan: AgentPlan<TEvents>;
+      status: 'error';
+      state: AgentState;
+      error: unknown;
     };
 
-export type AgentLogic<TEvents extends EventObject> = ActorLogic<
-  TransitionSnapshot<AgentMemoryContext>,
-  | {
-      type: 'agent.feedback';
-      feedback: AgentFeedback;
-    }
-  | {
-      type: 'agent.observe';
-      observation: AgentObservation<any>; // TODO
-    }
-  | {
-      type: 'agent.message';
-      message: AgentMessage;
-    }
-  | {
-      type: 'agent.plan';
-      plan: AgentPlan<TEvents>;
-    },
-  any, // TODO: input
-  any,
-  AgentEmitted<TEvents>
->;
+// ─── Snapshot (for streaming) ───
 
-export type EventsFromZodEventMapping<TEventSchemas extends ZodEventMapping> =
-  Values<{
-    [K in keyof TEventSchemas & string]: {
-      type: K;
-    } & TypeOf<TEventSchemas[K]>;
-  }>;
-
-export type ContextFromZodContextMapping<
-  TContextSchema extends ZodContextMapping
-> = {
-  [K in keyof TContextSchema & string]: TypeOf<TContextSchema[K]>;
-};
-
-export type AnyAgent = Agent<any, any>;
-
-export type FromAgent<T> = T | ((agent: AnyAgent) => T | Promise<T>);
-
-export type CommonTextOptions = {
-  prompt: FromAgent<string>;
-  model?: LanguageModel;
-  context?: Record<string, any>;
-  messages?: FromAgent<CoreMessage[]>;
-  template?: PromptTemplate<any>;
-};
-
-export type AgentGenerateTextOptions = Omit<
-  GenerateTextOptions,
-  'model' | 'prompt' | 'messages'
-> &
-  CommonTextOptions;
-
-export type AgentStreamTextOptions = Omit<
-  StreamTextOptions,
-  'model' | 'prompt' | 'messages'
-> &
-  CommonTextOptions;
-
-export interface ObservedState {
-  /**
-   * The current state value of the state machine, e.g.
-   * `"loading"` or `"processing"` or `"ready"`
-   */
-  value: StateValue;
-  /**
-   * Additional contextual data related to the current state
-   */
+export interface AgentSnapshot {
+  value: string;
   context: Record<string, unknown>;
+  status: AgentState['status'];
+  params: Record<string, Record<string, unknown>>;
 }
 
-export type ObservedStateFrom<TActor extends AnyActorRef> = Pick<
-  SnapshotFrom<TActor>,
-  'value' | 'context'
->;
+// ─── Trace ───
 
-export type AgentMemoryContext = {
-  observations: AgentObservation<any>[]; // TODO
-  messages: AgentMessage[];
-  plans: AgentPlan<any>[];
-  feedback: AgentFeedback[];
-};
-
-export type AgentMemory = AppendOnlyStorage<AgentMemoryContext>;
-
-export interface AppendOnlyStorage<T extends Record<string, any[]>> {
-  append<K extends keyof T>(
-    sessionId: string,
-    key: K,
-    item: T[K][0]
-  ): Promise<void>;
-  getAll<K extends keyof T>(
-    sessionId: string,
-    key: K
-  ): Promise<T[K] | undefined>;
+export interface Trace {
+  state: string;
+  event: {
+    type: string;
+    timestamp: number;
+    [key: string]: unknown;
+  };
 }
-
-export interface AgentLongTermMemory {
-  get<K extends keyof AgentMemoryContext>(
-    key: K
-  ): Promise<AgentMemoryContext[K]>;
-  append<K extends keyof AgentMemoryContext>(
-    key: K,
-    item: AgentMemoryContext[K][0]
-  ): Promise<void>;
-  set<K extends keyof AgentMemoryContext>(
-    key: K,
-    items: AgentMemoryContext[K]
-  ): Promise<void>;
-}
-
-export type Compute<A extends any> = { [K in keyof A]: A[K] } & unknown;

@@ -1,17 +1,62 @@
 {
   "name": "@statelyai/agent",
-  "version": "1.1.6",
-  "description": "Stateful agents that make decisions based on finite-state machine models",
-  "main": "dist/index.js",
+  "version": "2.0.0",
+  "description": "Lightweight, stateless, framework-agnostic state-machine-driven AI agents",
+  "type": "module",
+  "main": "dist/index.cjs",
   "module": "dist/index.mjs",
-  "types": "dist/index.d.ts",
+  "types": "dist/index.d.mts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./ai-sdk": {
+      "import": {
+        "types": "./dist/ai-sdk.d.mts",
+        "default": "./dist/ai-sdk.mjs"
+      },
+      "require": {
+        "types": "./dist/ai-sdk.d.cts",
+        "default": "./dist/ai-sdk.cjs"
+      }
+    },
+    "./graph": {
+      "import": {
+        "types": "./dist/graph.d.mts",
+        "default": "./dist/graph.mjs"
+      },
+      "require": {
+        "types": "./dist/graph.d.cts",
+        "default": "./dist/graph.cjs"
+      }
+    },
+    "./xstate": {
+      "import": {
+        "types": "./dist/xstate.d.mts",
+        "default": "./dist/xstate.mjs"
+      },
+      "require": {
+        "types": "./dist/xstate.d.cts",
+        "default": "./dist/xstate.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "build": "tsup src/index.ts --format cjs,esm --dts",
+    "build": "tsdown",
     "lint": "tsc --noEmit",
     "test": "vitest",
     "test:ci": "vitest --run",
-    "example": "ts-node examples/helpers/runner.ts",
-    "prepublishOnly": "tsup src/index.ts --format cjs,esm --dts",
+    "prepublishOnly": "tsdown",
     "changeset": "changeset",
     "release": "changeset publish",
     "version": "changeset version"
@@ -20,37 +65,37 @@
     "ai",
     "state machine",
     "agent",
-    "rl",
-    "reinforcement learning"
+    "statechart",
+    "classify",
+    "decide"
   ],
   "author": "David Khourshid <david@stately.ai>",
   "license": "MIT",
   "devDependencies": {
-    "@ai-sdk/openai": "^0.0.40",
+    "@ai-sdk/openai": "^3.0.25",
     "@changesets/changelog-github": "^0.5.0",
     "@changesets/cli": "^2.27.9",
-    "@langchain/community": "^0.0.53",
-    "@langchain/core": "^0.1.63",
-    "@langchain/openai": "^0.0.28",
     "@types/node": "^20.16.10",
-    "@types/object-hash": "^3.0.6",
     "dotenv": "^16.4.5",
-    "json-schema-to-ts": "^3.1.1",
-    "ts-node": "^10.9.2",
-    "tsup": "^8.3.0",
+    "tsdown": "^0.21.7",
     "typescript": "^5.6.2",
     "vitest": "^2.1.2",
-    "wikipedia": "^2.1.2",
-    "zod": "^3.23.8"
+    "zod": "^4.3.6"
+  },
+  "peerDependencies": {
+    "zod": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "zod": {
+      "optional": true
+    }
   },
   "publishConfig": {
     "access": "public"
   },
   "dependencies": {
-    "@xstate/graph": "^2.0.1",
-    "ai": "^3.4.9",
-    "object-hash": "^3.0.0",
-    "xstate": "^5.18.2"
+    "ai": "^6.0.67",
+    "xstate": "^5.26.0"
   },
-  "packageManager": "pnpm@8.11.0"
+  "packageManager": "pnpm@10.28.2"
 }
