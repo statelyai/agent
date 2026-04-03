@@ -1,10 +1,5 @@
 // Core
 export { createAgentMachine } from './machine.js';
-export { createInitialState } from './state.js';
-export { step } from './step.js';
-export { run } from './run.js';
-export { stream } from './stream.js';
-export { sendEvent } from './event.js';
 
 // AI primitives
 export { decide } from './decide.js';
@@ -16,22 +11,21 @@ export { createAdapter } from './adapter.js';
 // Types
 export type {
   AgentAdapter,
-  AgentEvent,
   AgentMachine,
-  AgentRunResult,
   AgentSnapshot,
   AgentState,
   ClassifyConfig,
-  ClassifyResult,
   DecideConfig,
-  DecideResult,
+  DecideResultFor,
+  EventUnion,
+  ExecuteResult,
+  InferOutput,
   MachineConfig,
-  OnDoneArgs,
-  OutputArgs,
-  RunArgs,
   StandardSchemaV1,
   StateConfig,
+  StateValue,
+  StateValueOf,
   Trace,
-  TransitionArgs,
+  TransitionEvent,
   TransitionResult,
 } from './types.js';

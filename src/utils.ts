@@ -1,90 +1,137 @@
 import type {
-  AgentMachine,
-  AgentState,
+  MachineConfig,
   StandardSchemaResult,
   StandardSchemaV1,
   StateConfig,
+  StateValue,
   TransitionResult,
 } from './types.js';
 
+/** Internal state representation with dot-path string value */
+export interface InternalState {
+  value: string;
+  context: Record<string, unknown>;
+  status: 'active' | 'pending' | 'done' | 'error';
+  params: Record<string, Record<string, unknown>>;
+  output?: unknown;
+  error?: unknown;
+}
+
+// ─── StateValue ↔ dot-path conversion ───
+
+/** Convert xstate-style value `{ handling: 'check' }` to dot-path `'handling.check'` */
+export function valueToPath(value: StateValue): string {
+  if (typeof value === 'string') return value;
+  const key = Object.keys(value)[0]!;
+  const child = (value as Record<string, StateValue>)[key]!;
+  return typeof child === 'string'
+    ? `${key}.${child}`
+    : `${key}.${valueToPath(child)}`;
+}
+
+/** Convert dot-path `'handling.check'` to xstate-style value `{ handling: 'check' }` */
+export function pathToValue(path: string): StateValue {
+  const parts = path.split('.');
+  if (parts.length === 1) return parts[0]!;
+  let result: StateValue = parts[parts.length - 1]!;
+  for (let i = parts.length - 2; i >= 0; i--) {
+    result = { [parts[i]!]: result };
+  }
+  return result;
+}
+
 /**
- * Validate a value against a Standard Schema V1 schema.
+ * Validate a value against a Standard Schema synchronously.
+ * Throws if validation returns a Promise (async schemas not supported here).
  */
-export async function validateSchema<T>(
+export function validateSchemaSync<T>(
   schema: StandardSchemaV1<T>,
   value: unknown
-): Promise<T> {
-  const result = await schema['~standard'].validate(value) as StandardSchemaResult<T>;
-  if (result.issues) {
-    const messages = result.issues.map((i: { message: string }) => i.message).join(', ');
+): T {
+  const result = schema['~standard'].validate(value);
+  if (result instanceof Promise) {
+    throw new Error(
+      'Async schema validation is not supported in sync context. Validate input before calling getInitialState.'
+    );
+  }
+  const syncResult = result as StandardSchemaResult<T>;
+  if (syncResult.issues) {
+    const messages = syncResult.issues
+      .map((i: { message: string }) => i.message)
+      .join(', ');
     throw new Error(`Validation failed: ${messages}`);
   }
-  return result.value as T;
+  return syncResult.value as T;
 }
 
 /**
  * Resolve a StateConfig from a dot-separated state path.
  */
 export function resolveStateConfig(
-  machine: AgentMachine,
+  config: MachineConfig<any, any, any, any>,
   value: string
-): StateConfig {
+): any {
   const parts = value.split('.');
-  let current: Record<string, StateConfig> = machine.states;
-  let config: StateConfig | undefined;
+  let current: Record<string, any> = config.states;
+  let stateConfig: any;
 
   for (const part of parts) {
-    config = current[part];
-    if (!config) {
+    stateConfig = current[part];
+    if (!stateConfig) {
       throw new Error(`State '${part}' not found in path '${value}'`);
     }
-    if (config.states) {
-      current = config.states;
+    if (stateConfig.states) {
+      current = stateConfig.states;
     }
   }
 
-  return config!;
+  return stateConfig!;
 }
 
 /**
- * Get the parent state config for a nested state, or null for root states.
+ * Get the parent state config, or null for root states.
  */
 export function getParentConfig(
-  machine: AgentMachine,
+  config: MachineConfig<any, any, any, any>,
   value: string
-): StateConfig | null {
+): any {
   const parts = value.split('.');
   if (parts.length <= 1) return null;
   const parentPath = parts.slice(0, -1).join('.');
-  return resolveStateConfig(machine, parentPath);
+  return resolveStateConfig(config, parentPath);
 }
 
 /**
- * Get the parent's params for the current state.
+ * Get the params for the current state.
+ * Params are stored at `state.params[statePath]` when transitioning.
+ * For nested states, also checks the parent path.
  */
-export function getParentParams(
-  state: AgentState
+export function getParams(
+  valuePath: string,
+  params: Record<string, Record<string, unknown>>
 ): Record<string, unknown> {
-  const parts = state.value.split('.');
+  // Check own params first (set when transitioning TO this state)
+  if (params[valuePath]) return params[valuePath]!;
+  // Fall back to parent params (for compound state children)
+  const parts = valuePath.split('.');
   if (parts.length <= 1) return {};
   const parentPath = parts.slice(0, -1).join('.');
-  return state.params[parentPath] ?? {};
+  return params[parentPath] ?? {};
 }
 
 /**
- * Resolve an initial transition value.
- * Accepts string shorthand, object shorthand, or function.
+ * Resolve an initial transition (string shorthand or function).
  */
 export function resolveInitial(
   initial:
     | string
     | ((args: {
         context: Record<string, unknown>;
-        parentParams: Record<string, unknown>;
+        params: Record<string, unknown>;
       }) => TransitionResult),
   args: {
     context: Record<string, unknown>;
-    parentParams: Record<string, unknown>;
+    params: Record<string, unknown>;
   }
 ): TransitionResult {
   if (typeof initial === 'string') {
@@ -94,46 +141,38 @@ export function resolveInitial(
 }
 
 /**
- * Resolve a target state path. Targets are siblings of the handler's state.
- * `handlerStatePath` is the dot-path of the state where the handler is defined.
+ * Resolve a target relative to the handler's state path.
+ * Targets are siblings of the state where the handler is defined.
  */
 export function resolveTarget(
   handlerStatePath: string,
   target: string
 ): string {
   const parts = handlerStatePath.split('.');
-  if (parts.length <= 1) {
-    // Handler on a root-level state → target is root-level
-    return target;
-  }
-  // Handler on a nested state → target is a sibling (under same parent)
+  if (parts.length <= 1) return target;
   const parentParts = parts.slice(0, -1);
   return [...parentParts, target].join('.');
 }
 
 /**
  * Apply a transition result to produce a new state.
- * Handles context merging, target resolution, and compound state entry.
  */
 export function applyTransition(
-  machine: AgentMachine,
-  state: AgentState,
+  config: MachineConfig<any, any, any, any>,
+  state: InternalState,
   transition: TransitionResult,
   handlerStatePath: string
-): AgentState {
+): InternalState {
   let newState = { ...state };
 
-  // Merge context
   if (transition.context) {
     newState.context = { ...state.context, ...transition.context };
   }
 
   if (transition.target) {
-    // Resolve target relative to handler's scope
     newState.value = resolveTarget(handlerStatePath, transition.target);
-    newState.status = 'running';
+    newState.status = 'active';
 
-    // Store params if provided
     if (transition.params) {
       newState.params = {
         ...state.params,
@@ -141,8 +180,7 @@ export function applyTransition(
       };
     }
 
-    // Enter compound states recursively
-    newState = enterCompoundStates(machine, newState);
+    newState = enterCompoundStates(config, newState);
   }
 
   return newState;
@@ -150,22 +188,21 @@ export function applyTransition(
 
 /**
  * If the current state is a compound state, resolve its initial and descend.
- * Repeats for nested compounds.
  */
 export function enterCompoundStates(
-  machine: AgentMachine,
-  state: AgentState
-): AgentState {
+  config: MachineConfig<any, any, any, any>,
+  state: InternalState
+): InternalState {
   let current = state;
 
   for (;;) {
-    const config = resolveStateConfig(machine, current.value);
-    if (!config.states || !config.initial) break;
+    const stateConfig = resolveStateConfig(config, current.value);
+    if (!stateConfig.states || !stateConfig.initial) break;
 
-    const parentParams = current.params[current.value] ?? {};
-    const init = resolveInitial(config.initial, {
+    const params = current.params[current.value] ?? {};
+    const init = resolveInitial(stateConfig.initial, {
       context: current.context,
-      parentParams,
+      params,
     });
 
     if (!init.target) break;
@@ -188,35 +225,32 @@ export function enterCompoundStates(
 }
 
 /**
- * Collect available events for a given state path.
- * Walks from the current state up to root, merging event schemas.
+ * Collect available events for a state path.
  * State-level events override root-level events.
+ * Only includes events that have handlers.
  */
 export function getAvailableEvents(
-  machine: AgentMachine,
+  config: MachineConfig<any, any, any, any>,
   value: string
 ): Record<string, StandardSchemaV1> {
   const events: Record<string, StandardSchemaV1> = {};
 
-  // Root-level events
-  if (machine.events) {
-    Object.assign(events, machine.events);
+  if (config.schemas?.events) {
+    Object.assign(events, config.schemas.events);
   }
 
-  // Walk up from current state, collecting event schemas
   const parts = value.split('.');
   for (let i = 0; i < parts.length; i++) {
     const path = parts.slice(0, i + 1).join('.');
-    const config = resolveStateConfig(machine, path);
-    if (config.events) {
-      Object.assign(events, config.events);
+    const stateConfig = resolveStateConfig(config, path);
+    if (stateConfig.events) {
+      Object.assign(events, stateConfig.events);
     }
   }
 
-  // Filter to only events that have handlers on the current state or ancestors
-  const handledEvents = getHandledEventTypes(machine, value);
+  const handledTypes = getHandledEventTypes(config, value);
   const result: Record<string, StandardSchemaV1> = {};
-  for (const eventType of handledEvents) {
+  for (const eventType of handledTypes) {
     if (events[eventType]) {
       result[eventType] = events[eventType];
     }
@@ -225,11 +259,8 @@ export function getAvailableEvents(
   return result;
 }
 
-/**
- * Get all event types that have handlers on the current state or any ancestor.
- */
 function getHandledEventTypes(
-  machine: AgentMachine,
+  config: MachineConfig<any, any, any, any>,
   value: string
 ): Set<string> {
   const handled = new Set<string>();
@@ -237,13 +268,33 @@ function getHandledEventTypes(
 
   for (let i = parts.length; i >= 1; i--) {
     const path = parts.slice(0, i).join('.');
-    const config = resolveStateConfig(machine, path);
-    if (config.on) {
-      for (const eventType of Object.keys(config.on)) {
+    const stateConfig = resolveStateConfig(config, path);
+    if (stateConfig.on) {
+      for (const eventType of Object.keys(stateConfig.on)) {
         handled.add(eventType);
       }
     }
   }
 
   return handled;
+}
+
+/**
+ * Find the event schema for a given event type.
+ * State-level schemas override root-level.
+ */
+export function findEventSchema(
+  config: MachineConfig<any, any, any, any>,
+  value: string,
+  eventType: string
+): StandardSchemaV1 | undefined {
+  const parts = value.split('.');
+  for (let i = parts.length; i >= 1; i--) {
+    const path = parts.slice(0, i).join('.');
+    const stateConfig = resolveStateConfig(config, path);
+    if (stateConfig.events?.[eventType]) {
+      return stateConfig.events[eventType];
+    }
+  }
+  return config.schemas?.events?.[eventType];
 }

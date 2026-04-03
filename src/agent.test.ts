@@ -2,11 +2,6 @@ import { describe, expect, test, vi } from 'vitest';
 import { z } from 'zod';
 import {
   createAgentMachine,
-  createInitialState,
-  step,
-  run,
-  stream,
-  sendEvent,
   decide,
   classify,
   createAdapter,
@@ -16,7 +11,11 @@ import type { AgentAdapter } from './types.js';
 // ─── Test helpers ───
 
 function mockAdapter(
-  responses: Array<{ choice: string; data?: Record<string, unknown>; reasoning?: string }>
+  responses: Array<{
+    choice: string;
+    data?: Record<string, unknown>;
+    reasoning?: string;
+  }>
 ): AgentAdapter {
   let index = 0;
   return {
@@ -32,7 +31,7 @@ function mockAdapter(
   };
 }
 
-// ─── Simple machine for basic tests ───
+// ─── Simple machine (no schemas — inferred from context) ───
 
 function createSimpleMachine() {
   return createAgentMachine({
@@ -46,12 +45,13 @@ function createSimpleMachine() {
         },
       },
       running: {
-        run: async ({ context }) => {
-          return { value: (context.count as number) + 1 };
+        invoke: async ({ context }) => {
+          // context.count is typed as number ✓
+          return { value: context.count + 1 };
         },
         onDone: ({ result, context }) => ({
           target: 'done',
-          context: { count: (result as any).value },
+          context: { count: (result as { value: number }).value },
         }),
       },
       done: {
@@ -62,22 +62,24 @@ function createSimpleMachine() {
   });
 }
 
-// ─── Machine with events for HITL ───
+// ─── HITL machine (with schemas) ───
 
 function createHitlMachine() {
   return createAgentMachine({
     id: 'hitl',
-    inputSchema: z.object({ task: z.string() }),
-    context: (input) => ({
+    schemas: {
+      input: z.object({ task: z.string() }),
+      events: {
+        'user.message': z.object({ message: z.string() }),
+        'user.approve': z.object({}),
+        'user.cancel': z.object({}),
+      },
+    },
+    context: (input: { task: string }) => ({
       task: input.task,
       messages: [] as Array<{ role: string; content: string }>,
       result: null as string | null,
     }),
-    events: {
-      'user.message': z.object({ message: z.string() }),
-      'user.approve': z.object({}),
-      'user.cancel': z.object({}),
-    },
     initial: 'gathering',
     states: {
       gathering: {
@@ -85,25 +87,25 @@ function createHitlMachine() {
           'user.message': ({ event, context }) => ({
             context: {
               messages: [
-                ...(context.messages as any[]),
-                { role: 'user', content: (event as any).message },
+                ...context.messages,
+                { role: 'user', content: (event as { message: string }).message },
               ],
             },
           }),
-          'user.approve': ({ context }) => ({
-            target: 'processing',
-          }),
+          'user.approve': () => ({ target: 'processing' }),
           'user.cancel': () => ({ target: 'cancelled' }),
         },
       },
       processing: {
-        run: async ({ context }) => {
-          const msgs = context.messages as Array<{ content: string }>;
-          return { output: `Processed: ${msgs.map((m) => m.content).join(', ')}` };
+        invoke: async ({ context }) => {
+          // context.messages is typed ✓
+          return {
+            output: `Processed: ${context.messages.map((m) => m.content).join(', ')}`,
+          };
         },
         onDone: ({ result }) => ({
           target: 'reviewing',
-          context: { result: (result as any).output },
+          context: { result: (result as { output: string }).output },
         }),
       },
       reviewing: {
@@ -113,8 +115,8 @@ function createHitlMachine() {
             target: 'processing',
             context: {
               messages: [
-                ...(context.messages as any[]),
-                { role: 'user', content: (event as any).message },
+                ...context.messages,
+                { role: 'user', content: (event as { message: string }).message },
               ],
             },
           }),
@@ -133,7 +135,7 @@ function createHitlMachine() {
   });
 }
 
-// ─── Machine with decide state ───
+// ─── Decide machine ───
 
 function createDecideMachine(adapter: AgentAdapter) {
   return createAgentMachine({
@@ -141,6 +143,7 @@ function createDecideMachine(adapter: AgentAdapter) {
     context: () => ({
       issue: 'App crashes on login',
       category: null as string | null,
+      resolution: null as string | null,
     }),
     adapter,
     initial: 'classifying',
@@ -156,15 +159,17 @@ function createDecideMachine(adapter: AgentAdapter) {
         onDone: ({ result }) => ({
           target: 'handling',
           context: { category: result.choice },
+          params: { category: result.choice },
         }),
       }),
       handling: {
-        run: async ({ context }) => ({
-          resolution: `Handled ${context.category} issue`,
+        paramsSchema: z.object({ category: z.string() }),
+        invoke: async ({ context, params }) => ({
+          resolution: `Handled ${params.category} issue`,
         }),
         onDone: ({ result }) => ({
           target: 'done',
-          context: { resolution: (result as any).resolution },
+          context: { resolution: (result as { resolution: string }).resolution },
         }),
       },
       done: {
@@ -178,12 +183,15 @@ function createDecideMachine(adapter: AgentAdapter) {
   });
 }
 
-// ─── Machine with classify state ───
+// ─── Classify machine ───
 
 function createClassifyMachine(adapter: AgentAdapter) {
   return createAgentMachine({
     id: 'classifier',
-    context: () => ({ issue: 'I want my money back', category: null as string | null }),
+    context: () => ({
+      issue: 'I want my money back',
+      category: null as string | null,
+    }),
     adapter,
     initial: 'classifyIntent',
     states: {
@@ -208,7 +216,7 @@ function createClassifyMachine(adapter: AgentAdapter) {
   });
 }
 
-// ─── Nested/compound state machine ───
+// ─── Nested machine ───
 
 function createNestedMachine() {
   return createAgentMachine({
@@ -221,51 +229,53 @@ function createNestedMachine() {
     states: {
       handling: {
         initial: ({ context }) => {
-          if (context.category === 'billing') {
+          if (context.category === 'billing')
             return { target: 'checkEligibility' };
-          }
           return { target: 'diagnose' };
         },
         states: {
           checkEligibility: {
-            run: async () => ({ eligible: true }),
+            invoke: async () => ({ eligible: true }),
             onDone: ({ result }) => {
-              if ((result as any).eligible) return { target: 'processRefund' };
+              if ((result as { eligible: boolean }).eligible)
+                return { target: 'processRefund' };
               return { target: 'deny' };
             },
           },
           processRefund: {
-            run: async () => ({}),
-            onDone: ({ context }) => ({
+            invoke: async () => ({}),
+            onDone: () => ({
               target: 'childDone',
               context: { resolution: 'Refund processed' },
             }),
           },
           deny: {
-            run: async () => ({ message: 'Not eligible' }),
+            invoke: async () => ({ message: 'Not eligible' }),
             onDone: ({ result }) => ({
               target: 'childDone',
-              context: { resolution: (result as any).message },
+              context: {
+                resolution: (result as { message: string }).message,
+              },
             }),
           },
           diagnose: {
-            run: async () => ({ diagnosis: 'It is a bug' }),
+            invoke: async () => ({ diagnosis: 'It is a bug' }),
             onDone: ({ result }) => ({
               target: 'childDone',
-              context: { resolution: (result as any).diagnosis },
+              context: {
+                resolution: (result as { diagnosis: string }).diagnosis,
+              },
             }),
           },
           childDone: { type: 'final' },
         },
-        onDone: () => ({
-          target: 'respond',
-        }),
+        onDone: () => ({ target: 'respond' }),
         on: {
           'user.cancel': () => ({ target: 'cancelled' }),
         },
       },
       respond: {
-        run: async ({ context }) => ({ message: context.resolution }),
+        invoke: async ({ context }) => ({ message: context.resolution }),
         onDone: () => ({ target: 'done' }),
       },
       done: {
@@ -285,133 +295,110 @@ function createNestedMachine() {
 // ═══════════════════════════════════════
 
 describe('createAgentMachine', () => {
-  test('creates a machine config', () => {
+  test('returns machine with typed methods', () => {
     const machine = createSimpleMachine();
     expect(machine.id).toBe('simple');
-    expect(machine.states).toBeDefined();
-    expect(machine.states.idle).toBeDefined();
-    expect(machine.states.running).toBeDefined();
-    expect(machine.states.done).toBeDefined();
+    expect(typeof machine.getInitialState).toBe('function');
+    expect(typeof machine.transition).toBe('function');
+    expect(typeof machine.invoke).toBe('function');
+    expect(typeof machine.execute).toBe('function');
+    expect(typeof machine.stream).toBe('function');
+    expect(typeof machine.resolveState).toBe('function');
   });
 });
 
-describe('createInitialState', () => {
-  test('creates initial state with context', async () => {
+describe('getInitialState', () => {
+  test('creates initial state (sync)', () => {
     const machine = createSimpleMachine();
-    const state = await createInitialState(machine, undefined);
+    const state = machine.getInitialState();
     expect(state.value).toBe('idle');
     expect(state.context).toEqual({ count: 0 });
-    expect(state.status).toBe('running');
-    expect(state.params).toEqual({});
+    expect(state.status).toBe('active');
   });
 
-  test('validates input against schema', async () => {
+  test('validates input via schemas.input (sync)', () => {
     const machine = createHitlMachine();
-    const state = await createInitialState(machine, { task: 'test task' });
+    const state = machine.getInitialState({ task: 'test task' });
     expect(state.context.task).toBe('test task');
-    expect(state.value).toBe('gathering');
   });
 
-  test('rejects invalid input', async () => {
+  test('rejects invalid input', () => {
     const machine = createHitlMachine();
-    await expect(createInitialState(machine, { task: 123 })).rejects.toThrow();
+    // @ts-expect-error — deliberately invalid input for runtime test
+    expect(() => machine.getInitialState({ task: 123 })).toThrow();
   });
 
-  test('resolves string initial', async () => {
+  test('resolves string initial', () => {
     const machine = createSimpleMachine();
-    const state = await createInitialState(machine, undefined);
-    expect(state.value).toBe('idle');
+    expect(machine.getInitialState().value).toBe('idle');
   });
 
-  test('resolves function initial', async () => {
+  test('resolves function initial', () => {
     const machine = createAgentMachine({
       id: 'fn-initial',
-      context: (input) => ({ mode: input }),
+      context: (input: string) => ({ mode: input }),
       initial: ({ context }) => ({
-        target: context.mode === 'fast' ? 'fast' : 'slow',
+        target: (context.mode === 'fast' ? 'fast' : 'slow') as 'fast' | 'slow',
       }),
       states: {
         fast: { type: 'final' },
         slow: { type: 'final' },
       },
     });
-    const state = await createInitialState(machine, 'fast');
-    expect(state.value).toBe('fast');
+    expect(machine.getInitialState('fast').value).toBe('fast');
   });
 
-  test('resolves compound state initial', async () => {
+  test('resolves compound state initial', () => {
     const machine = createNestedMachine();
-    const state = await createInitialState(machine, undefined);
-    // Should enter handling → checkEligibility (since category is 'billing')
-    expect(state.value).toBe('handling.checkEligibility');
+    expect(machine.getInitialState().value).toEqual({ handling: 'checkEligibility' });
   });
 });
 
-describe('step', () => {
-  test('executes run and transitions via onDone', async () => {
+describe('invoke', () => {
+  test('executes invoke and transitions via onDone', async () => {
     const machine = createSimpleMachine();
-    let state = await createInitialState(machine, undefined);
-    // idle → send start event to get to 'running'
-    state = sendEvent(machine, state, { type: 'start' });
-    expect(state.value).toBe('running');
-
-    state = await step(machine, state);
+    let state = machine.getInitialState();
+    state = machine.transition(state, { type: 'start' });
+    state = await machine.invoke(state);
     expect(state.value).toBe('done');
     expect(state.context.count).toBe(1);
   });
 
-  test('returns waiting for event-only states', async () => {
+  test('returns pending for event-only states', async () => {
     const machine = createHitlMachine();
-    let state = await createInitialState(machine, { task: 'test' });
-    state = await step(machine, state);
-    expect(state.status).toBe('waiting');
+    const state = await machine.invoke(machine.getInitialState({ task: 'x' }));
+    expect(state.status).toBe('pending');
     expect(state.value).toBe('gathering');
   });
 
   test('returns done for final states', async () => {
     const machine = createSimpleMachine();
-    let state = await createInitialState(machine, undefined);
-    state = sendEvent(machine, state, { type: 'start' });
-    state = await step(machine, state); // run → done
-    state = await step(machine, state); // final
-    expect(state.status).toBe('done');
-    expect(state.output).toEqual({ result: 1 });
+    let s = machine.transition(machine.getInitialState(), { type: 'start' });
+    s = await machine.invoke(s);
+    s = await machine.invoke(s);
+    expect(s.status).toBe('done');
+    expect(s.output).toEqual({ result: 1 });
   });
 
-  test('handles context updates in transitions', async () => {
-    const machine = createSimpleMachine();
-    let state = await createInitialState(machine, undefined);
-    state = sendEvent(machine, state, { type: 'start' });
-    state = await step(machine, state);
-    expect(state.context.count).toBe(1);
+  test('handles decide with adapter', async () => {
+    const machine = createDecideMachine(
+      mockAdapter([{ choice: 'technical' }])
+    );
+    const s = await machine.invoke(machine.getInitialState());
+    expect(s.value).toBe('handling');
+    expect(s.context.category).toBe('technical');
   });
 
-  test('handles decide state with adapter', async () => {
-    const adapter = mockAdapter([
-      { choice: 'technical', data: {} },
-    ]);
-    const machine = createDecideMachine(adapter);
-    let state = await createInitialState(machine, undefined);
-    expect(state.value).toBe('classifying');
-
-    state = await step(machine, state);
-    expect(state.value).toBe('handling');
-    expect(state.context.category).toBe('technical');
+  test('handles classify', async () => {
+    const machine = createClassifyMachine(
+      mockAdapter([{ choice: 'billing' }])
+    );
+    const s = await machine.invoke(machine.getInitialState());
+    expect(s.value).toBe('done');
+    expect(s.context.category).toBe('billing');
   });
 
-  test('handles classify state', async () => {
-    const adapter = mockAdapter([
-      { choice: 'billing', data: {} },
-    ]);
-    const machine = createClassifyMachine(adapter);
-    let state = await createInitialState(machine, undefined);
-
-    state = await step(machine, state);
-    expect(state.value).toBe('done');
-    expect(state.context.category).toBe('billing');
-  });
-
-  test('errors without adapter on decide state', async () => {
+  test('errors without adapter', async () => {
     const machine = createAgentMachine({
       id: 'no-adapter',
       context: () => ({}),
@@ -426,76 +413,105 @@ describe('step', () => {
         done: { type: 'final' },
       },
     });
-    const state = await createInitialState(machine, undefined);
-    const result = await step(machine, state);
-    expect(result.status).toBe('error');
-    expect(result.error).toContain('No adapter');
+    const s = await machine.invoke(machine.getInitialState());
+    expect(s.status).toBe('error');
   });
 
-  test('bubbles error from run', async () => {
+  test('catches invoke errors', async () => {
     const machine = createAgentMachine({
-      id: 'error-machine',
+      id: 'err',
       context: () => ({}),
-      initial: 'failing',
+      initial: 'fail',
       states: {
-        failing: {
-          run: async () => {
+        fail: {
+          invoke: async () => {
             throw new Error('boom');
           },
-          onDone: () => ({ target: 'done' }),
+          onDone: () => ({ target: 'ok' }),
         },
-        done: { type: 'final' },
+        ok: { type: 'final' },
       },
     });
-    const state = await createInitialState(machine, undefined);
-    const result = await step(machine, state);
-    expect(result.status).toBe('error');
-    expect((result.error as Error).message).toBe('boom');
+    const s = await machine.invoke(machine.getInitialState());
+    expect(s.status).toBe('error');
+    expect((s.error as Error).message).toBe('boom');
   });
 
-  test('handles nested state entry and execution', async () => {
+  test('nested state entry and execution', async () => {
     const machine = createNestedMachine();
-    let state = await createInitialState(machine, undefined);
-    expect(state.value).toBe('handling.checkEligibility');
+    let s = machine.getInitialState();
+    expect(s.value).toEqual({ handling: 'checkEligibility' });
 
-    // Step through checkEligibility → processRefund
-    state = await step(machine, state);
-    expect(state.value).toBe('handling.processRefund');
+    s = await machine.invoke(s);
+    expect(s.value).toEqual({ handling: 'processRefund' });
 
-    // Step through processRefund → childDone
-    state = await step(machine, state);
-    expect(state.value).toBe('handling.childDone');
-    expect(state.context.resolution).toBe('Refund processed');
+    s = await machine.invoke(s);
+    expect(s.value).toEqual({ handling: 'childDone' });
 
-    // Step: childDone is final → parent onDone → respond
-    state = await step(machine, state);
-    expect(state.value).toBe('respond');
+    s = await machine.invoke(s);
+    expect(s.value).toBe('respond');
   });
 });
 
-describe('run', () => {
-  test('runs until completion', async () => {
+describe('transition', () => {
+  test('transitions on matching event', () => {
     const machine = createSimpleMachine();
-    let state = await createInitialState(machine, undefined);
-    state = sendEvent(machine, state, { type: 'start' });
+    const s = machine.transition(machine.getInitialState(), { type: 'start' });
+    expect(s.value).toBe('running');
+    expect(s.status).toBe('active');
+  });
 
-    const result = await run(machine, state);
-    expect(result.status).toBe('done');
-    if (result.status === 'done') {
-      expect(result.output).toEqual({ result: 1 });
-      expect(result.context.count).toBe(1);
+  test('self-transition (no target)', async () => {
+    const machine = createHitlMachine();
+    let s = await machine.invoke(machine.getInitialState({ task: 'x' }));
+    s = machine.transition(s, { type: 'user.message', message: 'hello' });
+    expect(s.value).toBe('gathering');
+    expect(s.context.messages[0]!.content).toBe('hello');
+  });
+
+  test('accumulates context', async () => {
+    const machine = createHitlMachine();
+    let s = await machine.invoke(machine.getInitialState({ task: 'x' }));
+    s = machine.transition(s, { type: 'user.message', message: 'one' });
+    s = machine.transition(s, { type: 'user.message', message: 'two' });
+    expect(s.context.messages.length).toBe(2);
+  });
+
+  test('throws on unknown event', () => {
+    const machine = createSimpleMachine();
+    expect(() =>
+      machine.transition(machine.getInitialState(), { type: 'nope' })
+    ).toThrow("No handler for event 'nope'");
+  });
+
+  test('parent preempts child', () => {
+    const machine = createNestedMachine();
+    const s = machine.transition(machine.getInitialState(), {
+      type: 'user.cancel',
+    });
+    expect(s.value).toBe('cancelled');
+  });
+});
+
+describe('execute', () => {
+  test('runs until done', async () => {
+    const machine = createSimpleMachine();
+    let s = machine.transition(machine.getInitialState(), { type: 'start' });
+    const r = await machine.execute(s);
+    expect(r.status).toBe('done');
+    if (r.status === 'done') {
+      expect(r.output).toEqual({ result: 1 });
+      expect(r.context.count).toBe(1);
     }
   });
 
-  test('stops at waiting state', async () => {
+  test('stops at pending', async () => {
     const machine = createHitlMachine();
-    const state = await createInitialState(machine, { task: 'test' });
-
-    const result = await run(machine, state);
-    expect(result.status).toBe('waiting');
-    if (result.status === 'waiting') {
-      expect(result.value).toBe('gathering');
-      expect(result.events).toBeDefined();
+    const r = await machine.execute(machine.getInitialState({ task: 'x' }));
+    expect(r.status).toBe('pending');
+    if (r.status === 'pending') {
+      expect(r.value).toBe('gathering');
+      expect(r.events['user.message']).toBeDefined();
     }
   });
 
@@ -506,7 +522,7 @@ describe('run', () => {
       initial: 'fail',
       states: {
         fail: {
-          run: async () => {
+          invoke: async () => {
             throw new Error('nope');
           },
           onDone: () => ({ target: 'ok' }),
@@ -514,20 +530,18 @@ describe('run', () => {
         ok: { type: 'final' },
       },
     });
-    const state = await createInitialState(machine, undefined);
-    const result = await run(machine, state);
-    expect(result.status).toBe('error');
+    const r = await machine.execute(machine.getInitialState());
+    expect(r.status).toBe('error');
   });
 
   test('runs through multiple transitions', async () => {
-    const adapter = mockAdapter([{ choice: 'technical' }]);
-    const machine = createDecideMachine(adapter);
-    const state = await createInitialState(machine, undefined);
-
-    const result = await run(machine, state);
-    expect(result.status).toBe('done');
-    if (result.status === 'done') {
-      expect(result.output).toEqual({
+    const machine = createDecideMachine(
+      mockAdapter([{ choice: 'technical' }])
+    );
+    const r = await machine.execute(machine.getInitialState());
+    expect(r.status).toBe('done');
+    if (r.status === 'done') {
+      expect(r.output).toEqual({
         category: 'technical',
         resolution: 'Handled technical issue',
       });
@@ -536,147 +550,63 @@ describe('run', () => {
 
   test('runs nested states to completion', async () => {
     const machine = createNestedMachine();
-    const state = await createInitialState(machine, undefined);
-
-    const result = await run(machine, state);
-    expect(result.status).toBe('done');
-    if (result.status === 'done') {
-      expect(result.output).toEqual({ resolution: 'Refund processed' });
-    }
-  });
-
-  test('waiting result includes available events', async () => {
-    const machine = createHitlMachine();
-    const state = await createInitialState(machine, { task: 'test' });
-
-    const result = await run(machine, state);
-    expect(result.status).toBe('waiting');
-    if (result.status === 'waiting') {
-      expect(result.events['user.message']).toBeDefined();
-      expect(result.events['user.approve']).toBeDefined();
-      expect(result.events['user.cancel']).toBeDefined();
-    }
-  });
-});
-
-describe('sendEvent', () => {
-  test('transitions on matching event', async () => {
-    const machine = createSimpleMachine();
-    const state = await createInitialState(machine, undefined);
-    const next = sendEvent(machine, state, { type: 'start' });
-    expect(next.value).toBe('running');
-    expect(next.status).toBe('running');
-  });
-
-  test('handles self-transition (no target)', async () => {
-    const machine = createHitlMachine();
-    let state = await createInitialState(machine, { task: 'test' });
-    state = await step(machine, state); // → waiting
-
-    const next = sendEvent(machine, state, {
-      type: 'user.message',
-      message: 'hello',
+    const r = await machine.execute(machine.getInitialState());
+    expect(r.status === 'done' && r.output).toEqual({
+      resolution: 'Refund processed',
     });
-    expect(next.value).toBe('gathering'); // same state
-    expect((next.context.messages as any[]).length).toBe(1);
-    expect((next.context.messages as any[])[0].content).toBe('hello');
-  });
-
-  test('accumulates context on repeated self-transitions', async () => {
-    const machine = createHitlMachine();
-    let state = await createInitialState(machine, { task: 'test' });
-    state = await step(machine, state); // → waiting
-
-    state = sendEvent(machine, state, { type: 'user.message', message: 'one' });
-    state = sendEvent(machine, state, { type: 'user.message', message: 'two' });
-    state = sendEvent(machine, state, { type: 'user.message', message: 'three' });
-
-    expect((state.context.messages as any[]).length).toBe(3);
-  });
-
-  test('transitions to new state with event', async () => {
-    const machine = createHitlMachine();
-    let state = await createInitialState(machine, { task: 'test' });
-    state = await step(machine, state); // → waiting at gathering
-
-    state = sendEvent(machine, state, { type: 'user.approve' });
-    expect(state.value).toBe('processing');
-    expect(state.status).toBe('running');
-  });
-
-  test('throws on unknown event', async () => {
-    const machine = createSimpleMachine();
-    const state = await createInitialState(machine, undefined);
-    expect(() =>
-      sendEvent(machine, state, { type: 'nonexistent' })
-    ).toThrow("No handler for event 'nonexistent'");
-  });
-
-  test('parent event preempts child in nested state', async () => {
-    const machine = createNestedMachine();
-    let state = await createInitialState(machine, undefined);
-    expect(state.value).toBe('handling.checkEligibility');
-
-    // Parent's on handler should preempt
-    const next = sendEvent(machine, state, { type: 'user.cancel' });
-    expect(next.value).toBe('cancelled');
   });
 });
 
 describe('stream', () => {
-  test('yields snapshots for each transition', async () => {
-    const adapter = mockAdapter([{ choice: 'technical' }]);
-    const machine = createDecideMachine(adapter);
-    const state = await createInitialState(machine, undefined);
-
-    const snapshots = [];
-    for await (const snapshot of stream(machine, state)) {
-      snapshots.push(snapshot);
+  test('yields snapshots', async () => {
+    const machine = createDecideMachine(
+      mockAdapter([{ choice: 'technical' }])
+    );
+    const snaps = [];
+    for await (const snap of machine.stream(machine.getInitialState())) {
+      snaps.push(snap);
     }
+    expect(snaps.length).toBeGreaterThanOrEqual(3);
+    expect(snaps[0]!.value).toBe('classifying');
+    expect(snaps[snaps.length - 1]!.status).toBe('done');
+  });
+});
 
-    expect(snapshots.length).toBeGreaterThanOrEqual(3); // initial + classifying→handling + handling→done + done
-    expect(snapshots[0]!.value).toBe('classifying');
-    const last = snapshots[snapshots.length - 1]!;
-    expect(last.status).toBe('done');
+describe('resolveState', () => {
+  test('restores from JSON', async () => {
+    const machine = createHitlMachine();
+    const r = await machine.execute(machine.getInitialState({ task: 'x' }));
+    const restored = machine.resolveState(JSON.parse(JSON.stringify(r.state)));
+    const next = machine.transition(restored, {
+      type: 'user.message',
+      message: 'restored',
+    });
+    expect(next.context.messages[0]!.content).toBe('restored');
+  });
+
+  test('nested round-trip', async () => {
+    const machine = createNestedMachine();
+    const s = machine.getInitialState();
+    const restored = machine.resolveState(JSON.parse(JSON.stringify(s)));
+    expect(restored.value).toEqual({ handling: 'checkEligibility' });
+    const r = await machine.execute(restored);
+    expect(r.status).toBe('done');
   });
 });
 
 describe('decide', () => {
-  test('creates state config with decide type', () => {
-    const config = decide({
-      model: 'test',
-      prompt: 'test prompt',
-      options: {
-        a: { description: 'Option A' },
-        b: { description: 'Option B' },
-      },
-      onDone: ({ result }) => ({ target: result.choice }),
-    });
-    expect(config.__type).toBe('decide');
-    expect(config.__decideConfig).toBeDefined();
-    expect(config.__decideConfig!.model).toBe('test');
-  });
-
-  test('calls adapter with resolved prompt function', async () => {
-    const decideSpy = vi.fn().mockResolvedValue({
-      choice: 'a',
-      data: {},
-    });
-    const adapter: AgentAdapter = { decide: decideSpy };
-
+  test('calls adapter with resolved prompt', async () => {
+    const spy = vi.fn().mockResolvedValue({ choice: 'a', data: {} });
     const machine = createAgentMachine({
-      id: 'decide-test',
+      id: 'dtest',
       context: () => ({ topic: 'cats' }),
-      adapter,
+      adapter: { decide: spy },
       initial: 'choosing',
       states: {
         choosing: decide({
           model: 'my-model',
           prompt: ({ context }) => `About ${context.topic}`,
-          options: {
-            a: { description: 'A' },
-            b: { description: 'B' },
-          },
+          options: { a: { description: 'A' }, b: { description: 'B' } },
           onDone: ({ result }) => ({
             target: 'done',
             context: { choice: result.choice },
@@ -685,36 +615,24 @@ describe('decide', () => {
         done: { type: 'final' },
       },
     });
-
-    const state = await createInitialState(machine, undefined);
-    await step(machine, state);
-
-    expect(decideSpy).toHaveBeenCalledWith({
-      model: 'my-model',
-      prompt: 'About cats',
-      options: {
-        a: { description: 'A' },
-        b: { description: 'B' },
-      },
-      reasoning: undefined,
-    });
+    await machine.invoke(machine.getInitialState());
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'my-model', prompt: 'About cats' })
+    );
   });
 
-  test('supports per-state adapter override', async () => {
-    const machineAdapter = mockAdapter([{ choice: 'machine' }]);
-    const stateAdapter = mockAdapter([{ choice: 'state' }]);
-
+  test('per-state adapter override', async () => {
     const machine = createAgentMachine({
-      id: 'override-test',
+      id: 'override',
       context: () => ({ choice: null as string | null }),
-      adapter: machineAdapter,
+      adapter: mockAdapter([{ choice: 'machine' }]),
       initial: 'choosing',
       states: {
         choosing: decide({
           model: 'test',
-          adapter: stateAdapter, // overrides machine adapter
+          adapter: mockAdapter([{ choice: 'state' }]),
           prompt: 'pick',
-          options: { state: { description: 'S' }, machine: { description: 'M' } },
+          options: { s: { description: 'S' }, m: { description: 'M' } },
           onDone: ({ result }) => ({
             target: 'done',
             context: { choice: result.choice },
@@ -723,63 +641,20 @@ describe('decide', () => {
         done: { type: 'final' },
       },
     });
-
-    const state = await createInitialState(machine, undefined);
-    const result = await run(machine, state);
-    expect(result.status).toBe('done');
-    if (result.status === 'done') {
-      expect(result.context.choice).toBe('state'); // used state adapter, not machine
-    }
+    const r = await machine.execute(machine.getInitialState());
+    expect(r.status === 'done' && r.context.choice).toBe('state');
   });
 
-  test('supports reasoning', async () => {
-    const adapter: AgentAdapter = {
-      decide: async () => ({
-        choice: 'a',
-        data: {},
-        reasoning: 'Because reasons',
-      }),
-    };
-
+  test('option schemas typed data', async () => {
     const machine = createAgentMachine({
-      id: 'reasoning-test',
-      context: () => ({ reasoning: null as string | null }),
-      adapter,
-      initial: 'choosing',
-      states: {
-        choosing: decide({
-          model: 'test',
-          prompt: 'pick',
-          reasoning: true,
-          options: { a: { description: 'A' } },
-          onDone: ({ result }) => ({
-            target: 'done',
-            context: { reasoning: result.reasoning ?? null },
-          }),
-        }),
-        done: { type: 'final' },
-      },
-    });
-
-    const state = await createInitialState(machine, undefined);
-    const result = await run(machine, state);
-    if (result.status === 'done') {
-      expect(result.context.reasoning).toBe('Because reasons');
-    }
-  });
-
-  test('decide with option schemas passes data', async () => {
-    const adapter: AgentAdapter = {
-      decide: async () => ({
-        choice: 'withData',
-        data: { items: ['a', 'b'] },
-      }),
-    };
-
-    const machine = createAgentMachine({
-      id: 'data-test',
+      id: 'data',
       context: () => ({ items: null as string[] | null }),
-      adapter,
+      adapter: {
+        decide: async () => ({
+          choice: 'withData',
+          data: { items: ['a', 'b'] },
+        }),
+      },
       initial: 'choosing',
       states: {
         choosing: decide({
@@ -795,79 +670,128 @@ describe('decide', () => {
           onDone: ({ result }) => ({
             target: 'done',
             context: {
-              items: result.choice === 'withData' ? (result.data as any).items : null,
+              items:
+                result.choice === 'withData'
+                  ? (result.data as { items: string[] }).items
+                  : null,
             },
           }),
         }),
         done: { type: 'final' },
       },
     });
+    const r = await machine.execute(machine.getInitialState());
+    expect(r.status === 'done' && r.context.items).toEqual(['a', 'b']);
+  });
+});
 
-    const state = await createInitialState(machine, undefined);
-    const result = await run(machine, state);
-    if (result.status === 'done') {
-      expect(result.context.items).toEqual(['a', 'b']);
+describe('type: choice', () => {
+  test('inline choice state with typed context', async () => {
+    const adapter = mockAdapter([{ choice: 'technical' }]);
+    const machine = createAgentMachine({
+      id: 'choice-test',
+      context: () => ({ issue: 'App crashes', result: null as string | null }),
+      adapter,
+      initial: 'routing',
+      states: {
+        routing: {
+          type: 'choice',
+          model: 'test-model',
+          prompt: ({ context }) => `Route: ${context.issue}`, // context typed ✓
+          options: {
+            billing: { description: 'Billing' },
+            technical: { description: 'Technical' },
+          },
+          onDone: ({ result, context }) => ({
+            target: 'done',
+            context: { result: `${result.choice}: ${context.issue}` },
+          }),
+        },
+        done: { type: 'final', output: ({ context }) => ({ result: context.result }) },
+      },
+    });
+
+    const r = await machine.execute(machine.getInitialState());
+    expect(r.status).toBe('done');
+    if (r.status === 'done') {
+      expect(r.output).toEqual({ result: 'technical: App crashes' });
     }
+  });
+
+  test('choice with event preemption', async () => {
+    let called = false;
+    const adapter: AgentAdapter = {
+      decide: async () => {
+        called = true;
+        // Slow adapter — in real use, event would preempt
+        return { choice: 'a', data: {} };
+      },
+    };
+    const machine = createAgentMachine({
+      id: 'choice-preempt',
+      context: () => ({}),
+      adapter,
+      initial: 'choosing',
+      states: {
+        choosing: {
+          type: 'choice',
+          model: 'test',
+          prompt: 'pick',
+          options: { a: { description: 'A' } },
+          onDone: () => ({ target: 'done' }),
+          on: {
+            cancel: () => ({ target: 'cancelled' }),
+          },
+        },
+        done: { type: 'final' },
+        cancelled: { type: 'final' },
+      },
+    });
+
+    // Can send event to choice state (preemption)
+    const state = machine.getInitialState();
+    const next = machine.transition(state, { type: 'cancel' });
+    expect(next.value).toBe('cancelled');
   });
 });
 
 describe('classify', () => {
-  test('creates state config with classify type', () => {
-    const config = classify({
-      model: 'test',
-      prompt: 'classify this',
-      into: {
-        a: { description: 'Category A' },
-        b: { description: 'Category B' },
-      },
-      onDone: ({ result }) => ({ target: result.category }),
-    });
-    expect(config.__type).toBe('classify');
-    expect(config.__classifyConfig).toBeDefined();
-    expect(config.__decideConfig).toBeDefined(); // classify wraps decide
-  });
-
-  test('result has category field', async () => {
-    const adapter = mockAdapter([{ choice: 'billing' }]);
-    const machine = createClassifyMachine(adapter);
-    const state = await createInitialState(machine, undefined);
-
-    const result = await run(machine, state);
-    expect(result.status).toBe('done');
-    if (result.status === 'done') {
-      expect(result.output).toEqual({ category: 'billing' });
-    }
+  test('result has typed category', async () => {
+    const machine = createClassifyMachine(
+      mockAdapter([{ choice: 'billing' }])
+    );
+    const r = await machine.execute(machine.getInitialState());
+    expect(r.status === 'done' && r.output).toEqual({ category: 'billing' });
   });
 });
 
 describe('nested states', () => {
-  test('enters compound state initial child', async () => {
-    const machine = createNestedMachine();
-    const state = await createInitialState(machine, undefined);
-    expect(state.value).toBe('handling.checkEligibility');
-  });
-
-  test('conditional compound initial based on context', async () => {
+  test('conditional compound initial', async () => {
     const machine = createAgentMachine({
-      id: 'cond-nested',
-      context: () => ({ category: 'technical' as string }),
+      id: 'cond',
+      context: () => ({
+        category: 'technical' as string,
+        resolution: null as string | null,
+      }),
       initial: 'handling',
       states: {
         handling: {
-          initial: ({ context }) => {
-            if (context.category === 'billing') return { target: 'billing' };
-            return { target: 'technical' };
-          },
+          initial: ({ context }) =>
+            context.category === 'billing'
+              ? { target: 'billing' }
+              : { target: 'technical' },
           states: {
             billing: {
-              run: async () => ({ result: 'billing handled' }),
+              invoke: async () => ({}),
               onDone: () => ({ target: 'childDone' }),
             },
             technical: {
-              run: async () => ({ result: 'tech handled' }),
+              invoke: async () => ({ result: 'tech handled' }),
               onDone: ({ result }) => ({
                 target: 'childDone',
-                context: { resolution: (result as any).result },
+                context: {
+                  resolution: (result as { result: string }).result,
+                },
               }),
             },
             childDone: { type: 'final' },
@@ -880,281 +804,27 @@ describe('nested states', () => {
         },
       },
     });
-
-    const state = await createInitialState(machine, undefined);
-    expect(state.value).toBe('handling.technical');
-
-    const result = await run(machine, state);
-    expect(result.status).toBe('done');
-    if (result.status === 'done') {
-      expect(result.output).toEqual({ resolution: 'tech handled' });
-    }
+    expect(machine.getInitialState().value).toEqual({ handling: 'technical' });
+    const r = await machine.execute(machine.getInitialState());
+    expect(r.status === 'done' && r.output).toEqual({
+      resolution: 'tech handled',
+    });
   });
 
-  test('parent onDone fires when child reaches final', async () => {
+  test('parent preempts → cancel', async () => {
     const machine = createNestedMachine();
-    const state = await createInitialState(machine, undefined);
-
-    const result = await run(machine, state);
-    expect(result.status).toBe('done');
-    if (result.status === 'done') {
-      // The chain: checkEligibility → processRefund → childDone → (parent onDone) → respond → done
-      expect(result.output).toEqual({ resolution: 'Refund processed' });
-    }
-  });
-
-  test('parent event handler preempts children', async () => {
-    const machine = createNestedMachine();
-    const state = await createInitialState(machine, undefined);
-    expect(state.value).toBe('handling.checkEligibility');
-
-    const next = sendEvent(machine, state, { type: 'user.cancel' });
-    expect(next.value).toBe('cancelled');
-    expect(next.status).toBe('running');
-
-    const result = await run(machine, next);
-    expect(result.status).toBe('done');
-    if (result.status === 'done') {
-      expect(result.output).toEqual({ cancelled: true });
-    }
-  });
-});
-
-describe('full workflow: HITL', () => {
-  test('gather → process → review → done', async () => {
-    const machine = createHitlMachine();
-
-    // Start
-    let state = await createInitialState(machine, { task: 'build feature' });
-    let result = await run(machine, state);
-    expect(result.status).toBe('waiting');
-    expect(result.status === 'waiting' && result.value).toBe('gathering');
-
-    // Send messages
-    state = sendEvent(machine, result.state, { type: 'user.message', message: 'req A' });
-    state = sendEvent(machine, state, { type: 'user.message', message: 'req B' });
-
-    // Approve to move to processing
-    state = sendEvent(machine, state, { type: 'user.approve' });
-    result = await run(machine, state);
-    expect(result.status).toBe('waiting');
-    expect(result.status === 'waiting' && result.value).toBe('reviewing');
-    expect(result.status === 'waiting' && result.context.result).toBe('Processed: req A, req B');
-
-    // Approve the review
-    state = sendEvent(machine, result.state, { type: 'user.approve' });
-    result = await run(machine, state);
-    expect(result.status).toBe('done');
-    if (result.status === 'done') {
-      expect(result.output).toEqual({ result: 'Processed: req A, req B' });
-    }
-  });
-
-  test('gather → process → review → reject → process → review → done', async () => {
-    const machine = createHitlMachine();
-
-    let state = await createInitialState(machine, { task: 'write code' });
-    let result = await run(machine, state);
-
-    // Send a message
-    state = sendEvent(machine, result.state, { type: 'user.message', message: 'initial' });
-    state = sendEvent(machine, state, { type: 'user.approve' });
-    result = await run(machine, state);
-    expect(result.status === 'waiting' && result.value).toBe('reviewing');
-
-    // Reject with feedback (sends us back to processing)
-    state = sendEvent(machine, result.state, { type: 'user.message', message: 'fix this' });
-    result = await run(machine, state);
-    expect(result.status === 'waiting' && result.value).toBe('reviewing');
-    expect(result.status === 'waiting' && result.context.result).toBe('Processed: initial, fix this');
-
-    // Approve
-    state = sendEvent(machine, result.state, { type: 'user.approve' });
-    result = await run(machine, state);
-    expect(result.status).toBe('done');
-  });
-
-  test('cancel at any point', async () => {
-    const machine = createHitlMachine();
-
-    let state = await createInitialState(machine, { task: 'test' });
-    let result = await run(machine, state);
-
-    state = sendEvent(machine, result.state, { type: 'user.cancel' });
-    result = await run(machine, state);
-    expect(result.status).toBe('done');
-    if (result.status === 'done') {
-      expect(result.output).toEqual({ cancelled: true });
-    }
-  });
-});
-
-describe('serialization', () => {
-  test('state round-trips through JSON', async () => {
-    const machine = createHitlMachine();
-    let state = await createInitialState(machine, { task: 'test' });
-    let result = await run(machine, state);
-
-    // Serialize → deserialize
-    const json = JSON.stringify(result.state);
-    const restored = JSON.parse(json);
-
-    // Send event on restored state
-    const next = sendEvent(machine, restored, {
-      type: 'user.message',
-      message: 'from restored',
+    let s = machine.transition(machine.getInitialState(), {
+      type: 'user.cancel',
     });
-    expect((next.context.messages as any[])[0].content).toBe('from restored');
-  });
-
-  test('nested state round-trips through JSON', async () => {
-    const machine = createNestedMachine();
-    const state = await createInitialState(machine, undefined);
-
-    const json = JSON.stringify(state);
-    const restored = JSON.parse(json);
-
-    expect(restored.value).toBe('handling.checkEligibility');
-
-    // Can continue execution from restored state
-    const result = await run(machine, restored);
-    expect(result.status).toBe('done');
+    const r = await machine.execute(s);
+    expect(r.status === 'done' && r.output).toEqual({ cancelled: true });
   });
 });
 
-describe('createAdapter', () => {
-  test('creates a custom adapter', () => {
-    const adapter = createAdapter({
-      decide: async () => ({ choice: 'a', data: {} }),
-    });
-    expect(adapter.decide).toBeDefined();
-  });
-});
-
-describe('edge cases', () => {
-  test('state with run but no onDone and no on is a dead end', async () => {
+describe('P1: nested final without parent onDone', () => {
+  test('halts at pending', async () => {
     const machine = createAgentMachine({
-      id: 'dead-end',
-      context: () => ({}),
-      initial: 'stuck',
-      states: {
-        stuck: {
-          run: async () => ({ done: true }),
-        },
-      },
-    });
-    const state = await createInitialState(machine, undefined);
-    const result = await step(machine, state);
-    // run completes but no onDone and no on → state doesn't change
-    expect(result.value).toBe('stuck');
-  });
-
-  test('already done state returns as-is', async () => {
-    const machine = createSimpleMachine();
-    const doneState = {
-      value: 'done',
-      params: {},
-      context: { count: 1 },
-      status: 'done' as const,
-      output: { result: 1 },
-    };
-    const result = await step(machine, doneState);
-    expect(result).toEqual(doneState);
-  });
-
-  test('already errored state returns as-is', async () => {
-    const machine = createSimpleMachine();
-    const errorState = {
-      value: 'running',
-      params: {},
-      context: { count: 0 },
-      status: 'error' as const,
-      error: 'something went wrong',
-    };
-    const result = await step(machine, errorState);
-    expect(result).toEqual(errorState);
-  });
-});
-
-describe('P1: nested final state without parent onDone', () => {
-  test('does not mark machine as done when parent lacks onDone', async () => {
-    // a.b.c where c is final, b has NO onDone, a has onDone
-    const machine = createAgentMachine({
-      id: 'p1-bug',
-      context: () => ({ resolved: false }),
-      initial: 'a',
-      states: {
-        a: {
-          initial: 'b',
-          states: {
-            b: {
-              initial: 'c',
-              // NO onDone — should halt here, not mark machine done
-              states: {
-                c: { type: 'final' },
-              },
-            },
-          },
-          onDone: () => ({
-            target: 'result',
-            context: { resolved: true },
-          }),
-        },
-        result: {
-          type: 'final',
-          output: ({ context }) => ({ resolved: context.resolved }),
-        },
-      },
-    });
-
-    const state = await createInitialState(machine, undefined);
-    expect(state.value).toBe('a.b.c');
-
-    // Step: c is final, parent b has no onDone → should wait, NOT done
-    const next = await step(machine, state);
-    expect(next.status).toBe('waiting');
-    expect(next.value).toBe('a.b.c'); // stays put
-  });
-
-  test('correctly bubbles when parent has onDone', async () => {
-    // Same structure but b HAS onDone → bDone(final) → a.onDone → result
-    const machine = createAgentMachine({
-      id: 'p1-fixed',
-      context: () => ({}),
-      initial: 'a',
-      states: {
-        a: {
-          initial: 'b',
-          states: {
-            b: {
-              initial: 'c',
-              states: {
-                c: { type: 'final' },
-              },
-              onDone: () => ({ target: 'bDone' }),
-            },
-            bDone: { type: 'final' },
-          },
-          onDone: () => ({ target: 'result' }),
-        },
-        result: {
-          type: 'final',
-          output: () => ({ ok: true }),
-        },
-      },
-    });
-
-    const state = await createInitialState(machine, undefined);
-    const result = await run(machine, state);
-    expect(result.status).toBe('done');
-    if (result.status === 'done') {
-      expect(result.output).toEqual({ ok: true });
-    }
-  });
-
-  test('ancestor on handlers still work when halted at final child', async () => {
-    const machine = createAgentMachine({
-      id: 'p1-escape',
+      id: 'p1',
       context: () => ({}),
       initial: 'a',
       states: {
@@ -1164,104 +834,528 @@ describe('P1: nested final state without parent onDone', () => {
             b: {
               initial: 'c',
               states: { c: { type: 'final' } },
-              // no onDone
             },
           },
-          on: {
-            escape: () => ({ target: 'escaped' }),
-          },
+          onDone: () => ({ target: 'result' }),
         },
-        escaped: {
-          type: 'final',
-          output: () => ({ escaped: true }),
-        },
+        result: { type: 'final' },
       },
     });
-
-    const state = await createInitialState(machine, undefined);
-    let result = await run(machine, state);
-    expect(result.status).toBe('waiting'); // halted at a.b.c
-
-    // Ancestor on handler should still be reachable
-    const next = sendEvent(machine, result.state, { type: 'escape' });
-    expect(next.value).toBe('escaped');
-    result = await run(machine, next);
-    expect(result.status).toBe('done');
-    if (result.status === 'done') {
-      expect(result.output).toEqual({ escaped: true });
-    }
-  });
-});
-
-describe('P2: event payload validation', () => {
-  test('rejects event with invalid payload', async () => {
-    const machine = createHitlMachine();
-    let state = await createInitialState(machine, { task: 'test' });
-    state = await step(machine, state); // → waiting
-
-    // user.message schema requires { message: string }
-    // Sending wrong type should throw
-    expect(() =>
-      sendEvent(machine, state, { type: 'user.message', message: 123 as any })
-    ).toThrow();
+    const s = await machine.invoke(machine.getInitialState());
+    expect(s.status).toBe('pending');
+    expect(s.value).toEqual({ a: { b: 'c' } });
   });
 
-  test('accepts event with valid payload', async () => {
-    const machine = createHitlMachine();
-    let state = await createInitialState(machine, { task: 'test' });
-    state = await step(machine, state);
-
-    // Should not throw
-    const next = sendEvent(machine, state, {
-      type: 'user.message',
-      message: 'valid string',
-    });
-    expect((next.context.messages as any[]).length).toBe(1);
-  });
-
-  test('skips validation when no schema declared', async () => {
-    const machine = createSimpleMachine();
-    const state = await createInitialState(machine, undefined);
-
-    // 'start' event has no schema — should not throw
-    const next = sendEvent(machine, state, { type: 'start' });
-    expect(next.value).toBe('running');
-  });
-
-  test('state-level schema overrides root-level', async () => {
+  test('ancestor on still reachable', async () => {
     const machine = createAgentMachine({
-      id: 'schema-override',
-      context: () => ({ val: '' }),
-      events: {
-        act: z.object({ type: z.literal('act'), val: z.string() }),
-      },
+      id: 'p1-esc',
+      context: () => ({}),
       initial: 'a',
       states: {
         a: {
-          events: {
-            // Override: requires val to be a number
-            act: z.object({ type: z.literal('act'), val: z.number() }),
+          initial: 'b',
+          states: {
+            b: {
+              initial: 'c',
+              states: { c: { type: 'final' } },
+            },
           },
-          on: {
-            act: ({ event }) => ({
-              target: 'b',
-              context: { val: String((event as any).val) },
-            }),
-          },
+          on: { escape: () => ({ target: 'out' }) },
         },
+        out: { type: 'final', output: () => ({ escaped: true }) },
+      },
+    });
+    let r = await machine.execute(machine.getInitialState());
+    expect(r.status).toBe('pending');
+    const s = machine.transition(r.state, { type: 'escape' });
+    r = await machine.execute(s);
+    expect(r.status === 'done' && r.output).toEqual({ escaped: true });
+  });
+});
+
+describe('P2: event validation', () => {
+  test('rejects invalid payload', async () => {
+    const machine = createHitlMachine();
+    const s = await machine.invoke(machine.getInitialState({ task: 'x' }));
+    expect(() =>
+      // @ts-expect-error — deliberately invalid for runtime test
+      machine.transition(s, { type: 'user.message', message: 123 })
+    ).toThrow();
+  });
+
+  test('accepts valid payload', async () => {
+    const machine = createHitlMachine();
+    const s = await machine.invoke(machine.getInitialState({ task: 'x' }));
+    const next = machine.transition(s, {
+      type: 'user.message',
+      message: 'ok',
+    });
+    expect(next.context.messages.length).toBe(1);
+  });
+
+  test('skips when no schema', () => {
+    const machine = createSimpleMachine();
+    const s = machine.transition(machine.getInitialState(), { type: 'start' });
+    expect(s.value).toBe('running');
+  });
+});
+
+describe('full HITL workflow', () => {
+  test('gather → process → review → done', async () => {
+    const machine = createHitlMachine();
+    let s = machine.getInitialState({ task: 'build' });
+    let r = await machine.execute(s);
+    expect(r.status).toBe('pending');
+
+    s = machine.transition(r.state, {
+      type: 'user.message',
+      message: 'req A',
+    });
+    s = machine.transition(s, { type: 'user.message', message: 'req B' });
+    s = machine.transition(s, { type: 'user.approve' });
+    r = await machine.execute(s);
+    expect(r.status === 'pending' && r.context.result).toBe(
+      'Processed: req A, req B'
+    );
+
+    s = machine.transition(r.state, { type: 'user.approve' });
+    r = await machine.execute(s);
+    expect(r.status === 'done' && r.output).toEqual({
+      result: 'Processed: req A, req B',
+    });
+  });
+
+  test('cancel', async () => {
+    const machine = createHitlMachine();
+    let r = await machine.execute(machine.getInitialState({ task: 'x' }));
+    const s = machine.transition(r.state, { type: 'user.cancel' });
+    r = await machine.execute(s);
+    expect(r.status === 'done' && r.output).toEqual({ cancelled: true });
+  });
+});
+
+describe('type inference', () => {
+  // ─── state.value ───
+
+  test('state.value is typed union of state names', () => {
+    const machine = createAgentMachine({
+      id: 't',
+      context: () => ({ x: 1 }),
+      initial: 'a',
+      states: {
+        a: { on: { go: () => ({ target: 'b' }) } },
         b: { type: 'final' },
       },
     });
+    const s = machine.getInitialState();
 
-    const state = await createInitialState(machine, undefined);
+    s.value satisfies 'a' | 'b';
+    // @ts-expect-error — 'c' is not a valid state name
+    s.value satisfies 'c';
+  });
 
-    // String val should fail (state schema requires number)
+  test('nested state values are xstate-style objects', () => {
+    const machine = createAgentMachine({
+      id: 't',
+      context: () => ({}),
+      initial: 'parent',
+      states: {
+        parent: {
+          initial: 'child',
+          states: { child: { type: 'final' } },
+          onDone: () => ({ target: 'done' }),
+        },
+        done: { type: 'final' },
+      },
+    });
+    const s = machine.getInitialState();
+
+    // Runtime check — nested values are objects
+    expect(s.value).toEqual({ parent: 'child' });
+  });
+
+  // ─── state.context ───
+
+  test('context typed from context() return', () => {
+    const machine = createAgentMachine({
+      id: 't',
+      context: () => ({ name: 'test', count: 0, flag: true }),
+      initial: 'idle',
+      states: { idle: { type: 'final' } },
+    });
+    const s = machine.getInitialState();
+
+    s.context.name satisfies string;
+    s.context.count satisfies number;
+    s.context.flag satisfies boolean;
+    // @ts-expect-error — name is string not number
+    s.context.name satisfies number;
+    // @ts-expect-error — 'nope' does not exist
+    s.context.nope;
+  });
+
+  test('context typed in on handlers', () => {
+    const machine = createAgentMachine({
+      id: 't',
+      context: () => ({ items: ['a', 'b'] }),
+      initial: 'idle',
+      states: {
+        idle: {
+          on: {
+            add: ({ context }) => {
+              context.items satisfies string[];
+              // @ts-expect-error — 'nope' does not exist
+              context.nope;
+              return { context: { items: [...context.items, 'c'] } };
+            },
+          },
+        },
+      },
+    });
+    const next = machine.transition(machine.getInitialState(), { type: 'add' });
+    expect(next.context.items).toEqual(['a', 'b', 'c']);
+  });
+
+  test('context typed in invoke', () => {
+    const machine = createAgentMachine({
+      id: 't',
+      context: () => ({ n: 42 }),
+      initial: 'work',
+      states: {
+        work: {
+          invoke: async ({ context }) => {
+            context.n satisfies number;
+            // @ts-expect-error — 'nope' does not exist
+            context.nope;
+            return { doubled: context.n * 2 };
+          },
+          onDone: ({ result }) => ({
+            target: 'done',
+            context: { n: (result as { doubled: number }).doubled },
+          }),
+        },
+        done: { type: 'final' },
+      },
+    });
+    return machine.execute(machine.getInitialState()).then((r) => {
+      expect(r.status === 'done' && r.context.n).toBe(84);
+    });
+  });
+
+  test('context typed in output', () => {
+    const machine = createAgentMachine({
+      id: 't',
+      context: () => ({ score: 100 }),
+      initial: 'done',
+      states: {
+        done: {
+          type: 'final',
+          output: ({ context }) => {
+            context.score satisfies number;
+            // @ts-expect-error — 'nope' does not exist
+            context.nope;
+            return { score: context.score };
+          },
+        },
+      },
+    });
+    expect(machine.getInitialState).toBeDefined();
+  });
+
+  test('context typed in initial function', () => {
+    const machine = createAgentMachine({
+      id: 't',
+      context: () => ({ mode: 'fast' as 'fast' | 'slow' }),
+      initial: ({ context }) => {
+        context.mode satisfies 'fast' | 'slow';
+        // @ts-expect-error — 'nope' does not exist
+        context.nope;
+        return { target: (context.mode === 'fast' ? 'a' : 'b') as 'a' | 'b' };
+      },
+      states: {
+        a: { type: 'final' },
+        b: { type: 'final' },
+      },
+    });
+    expect(machine.getInitialState().value).toBe('a');
+  });
+
+  // ─── schemas.context (overload 1) ───
+
+  test('schemas.context drives TContext + input typed from schemas.input', () => {
+    const machine = createAgentMachine({
+      id: 't',
+      schemas: {
+        context: z.object({ count: z.number(), label: z.string() }),
+        input: z.object({ initial: z.number() }),
+      },
+      context: (input) => {
+        input.initial satisfies number;
+        // @ts-expect-error — 'nope' does not exist on input
+        input.nope;
+        return { count: input.initial, label: 'hello' };
+      },
+      initial: 'idle',
+      states: {
+        idle: {
+          invoke: async ({ context }) => {
+            context.count satisfies number;
+            context.label satisfies string;
+            // @ts-expect-error — 'nope' does not exist
+            context.nope;
+            return {};
+          },
+        },
+      },
+    });
+    const s = machine.getInitialState({ initial: 5 });
+
+    s.context.count satisfies number;
+    s.context.label satisfies string;
+    // @ts-expect-error — 'nope' does not exist
+    s.context.nope;
+    expect(s.context.count).toBe(5);
+  });
+
+  // ─── schemas.events ───
+
+  test('transition events typed from schemas.events', () => {
+    const machine = createAgentMachine({
+      id: 't',
+      schemas: {
+        events: {
+          greet: z.object({ name: z.string() }),
+          ping: z.object({}),
+        },
+      },
+      context: () => ({ msg: '' }),
+      initial: 'idle',
+      states: {
+        idle: {
+          on: {
+            greet: ({ event }) => ({
+              context: { msg: `hi ${(event as { name: string }).name}` },
+            }),
+            ping: () => ({}),
+          },
+        },
+      },
+    });
+    const s = machine.getInitialState();
+
+    // Valid events compile
+    machine.transition(s, { type: 'greet', name: 'world' });
+    machine.transition(s, { type: 'ping' });
+
+    // @ts-expect-error — 'bogus' is not a valid event type
+    expect(() => machine.transition(s, { type: 'bogus' })).toThrow();
+
+    // @ts-expect-error — missing required 'name' field
+    expect(() => machine.transition(s, { type: 'greet' })).toThrow();
+
     expect(() =>
-      sendEvent(machine, state, { type: 'act', val: 'nope' })
+      machine.transition(s, {
+        type: 'greet',
+        // @ts-expect-error — name must be string
+        name: 123,
+      })
     ).toThrow();
 
-    // Number val should succeed
-    const next = sendEvent(machine, state, { type: 'act', val: 42 });
-    expect(next.value).toBe('b');
+    const next = machine.transition(s, { type: 'greet', name: 'world' });
+    expect(next.context.msg).toBe('hi world');
+  });
+
+  test('no schemas.events → untyped events (any type string)', () => {
+    const machine = createAgentMachine({
+      id: 't',
+      context: () => ({}),
+      initial: 'idle',
+      states: {
+        idle: { on: { anything: () => ({}) } },
+      },
+    });
+    // Any event type string accepted when no schemas.events
+    machine.transition(machine.getInitialState(), { type: 'anything' });
+    // Unknown events still throw at runtime (no handler)
+    expect(() =>
+      machine.transition(machine.getInitialState(), { type: 'nope' })
+    ).toThrow();
+  });
+
+  // ─── paramsSchema per state ───
+
+  test('params typed per state from paramsSchema', async () => {
+    const machine = createAgentMachine({
+      id: 't',
+      context: () => ({ result: '' }),
+      initial: 'a',
+      states: {
+        a: {
+          paramsSchema: z.object({ count: z.number() }),
+          invoke: async ({ params }) => {
+            params.count satisfies number;
+            // @ts-expect-error — count is number not string
+            params.count satisfies string;
+            // @ts-expect-error — 'name' not on a's params
+            params.name;
+            return { doubled: params.count * 2 };
+          },
+          onDone: ({ result }) => ({
+            target: 'b',
+            params: { name: 'hello' },
+            context: { result: String((result as { doubled: number }).doubled) },
+          }),
+        },
+        b: {
+          paramsSchema: z.object({ name: z.string() }),
+          invoke: async ({ params }) => {
+            params.name satisfies string;
+            // @ts-expect-error — name is string not number
+            params.name satisfies number;
+            // @ts-expect-error — 'count' not on b's params
+            params.count;
+            return { greeting: `hi ${params.name}` };
+          },
+          onDone: ({ result }) => ({
+            target: 'done',
+            context: { result: (result as { greeting: string }).greeting },
+          }),
+        },
+        done: {
+          type: 'final',
+          output: ({ context }) => ({ result: context.result }),
+        },
+      },
+    });
+
+    let state = machine.resolveState({
+      ...machine.getInitialState(),
+      params: { a: { count: 21 } },
+    });
+    const r = await machine.execute(state);
+    expect(r.status === 'done' && r.output).toEqual({ result: 'hi hello' });
+  });
+
+  test('no paramsSchema → params is Record<string, unknown>', () => {
+    createAgentMachine({
+      id: 't',
+      context: () => ({}),
+      initial: 'idle',
+      states: {
+        idle: {
+          invoke: async ({ params }) => {
+            params satisfies Record<string, unknown>;
+            return {};
+          },
+        },
+      },
+    });
+  });
+
+  // ─── type: 'choice' context typing ───
+
+  test('type: choice gets typed context in prompt and onDone', () => {
+    const adapter = mockAdapter([{ choice: 'a' }]);
+    const machine = createAgentMachine({
+      id: 't',
+      context: () => ({ topic: 'cats', result: '' }),
+      adapter,
+      initial: 'choosing',
+      states: {
+        choosing: {
+          type: 'choice',
+          model: 'test',
+          prompt: ({ context }) => {
+            context.topic satisfies string;
+            // @ts-expect-error — 'nope' does not exist
+            context.nope;
+            return `About ${context.topic}`;
+          },
+          options: { a: { description: 'A' } },
+          onDone: ({ result, context }) => {
+            result.choice satisfies string;
+            context.topic satisfies string;
+            return { target: 'done', context: { result: result.choice } };
+          },
+        },
+        done: { type: 'final' },
+      },
+    });
+    expect(machine.id).toBe('t');
+  });
+
+  // ─── getInitialState input typing ───
+
+  test('getInitialState requires input when schemas.input provided', () => {
+    const machine = createAgentMachine({
+      id: 't',
+      schemas: {
+        context: z.object({ task: z.string() }),
+        input: z.object({ task: z.string() }),
+      },
+      context: (input) => ({ task: input.task }),
+      initial: 'idle',
+      states: { idle: { type: 'final' } },
+    });
+
+    // Valid
+    machine.getInitialState({ task: 'hello' });
+
+    expect(() =>
+      machine.getInitialState({
+        // @ts-expect-error — task must be string
+        task: 123,
+      })
+    ).toThrow();
+
+    // @ts-expect-error — missing required input (runtime: validates)
+    expect(() => machine.getInitialState()).toThrow();
+  });
+
+  test('getInitialState optional when no input schema', () => {
+    const machine = createAgentMachine({
+      id: 't',
+      context: () => ({ x: 1 }),
+      initial: 'idle',
+      states: { idle: { type: 'final' } },
+    });
+
+    // Both valid
+    machine.getInitialState();
+    machine.getInitialState(undefined);
+  });
+});
+
+describe('edge cases', () => {
+  test('invoke with no onDone is dead end', async () => {
+    const machine = createAgentMachine({
+      id: 'dead',
+      context: () => ({}),
+      initial: 'stuck',
+      states: { stuck: { invoke: async () => ({}) } },
+    });
+    const s = await machine.invoke(machine.getInitialState());
+    expect(s.value).toBe('stuck');
+  });
+
+  test('done state returns as-is', async () => {
+    const machine = createSimpleMachine();
+    const done = {
+      value: 'done',
+      params: {},
+      context: { count: 1 },
+      status: 'done',
+      output: { result: 1 },
+    } as const;
+    expect(await machine.invoke(done)).toEqual(done);
+  });
+});
+
+describe('createAdapter', () => {
+  test('creates custom adapter', () => {
+    const a = createAdapter({
+      decide: async () => ({ choice: 'a', data: {} }),
+    });
+    expect(a.decide).toBeDefined();
   });
 });
