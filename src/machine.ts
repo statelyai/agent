@@ -2,7 +2,9 @@ import type {
   AgentMachine,
   AgentSnapshot,
   AgentState,
+  EventPayload,
   ExecuteResult,
+  InferOutput,
   MachineConfig,
   StandardSchemaV1,
   StateConfig,
@@ -34,17 +36,48 @@ function toExternal(state: InternalState): AgentState {
   return { ...state, value: pathToValue(state.value) };
 }
 
-// Per-state node config with typed params via TParamsMap[K]
-type StateNodeDef<TContext extends Record<string, unknown>, TParams> = {
+// Falls back to `any` when TResult was not inferred (unknown)
+type FallbackAny<T> = unknown extends T ? any : T;
+
+// Handler for a specific known event type
+type TypedOnHandler<E extends string, TEvents, TContext extends Record<string, unknown>> =
+  | string
+  | TransitionResult
+  | ((args: {
+      event: { type: E } & EventPayload<InferOutput<TEvents[E & keyof TEvents]>>;
+      context: TContext;
+    }) => TransitionResult);
+
+// Handler for an unknown event type
+type UntypedOnHandler<TContext extends Record<string, unknown>> =
+  | string
+  | TransitionResult
+  | ((args: { event: any; context: TContext }) => TransitionResult);
+
+// When TEvents has keys, known events get typed handlers; others get untyped.
+// When TEvents is empty (no schemas.events), all handlers are untyped.
+type OnHandlers<TEvents, TContext extends Record<string, unknown>> =
+  [keyof TEvents] extends [never]
+    ? Record<string, UntypedOnHandler<TContext>>
+    : { [E in keyof TEvents & string]?: TypedOnHandler<E, TEvents, TContext> };
+
+// Per-state node config with typed params via TParamsMap[K] and typed result via TResultMap[K]
+type StateNodeDef<
+  TContext extends Record<string, unknown>,
+  TParams,
+  TResult,
+  TEvents,
+> = {
   type?: 'final' | 'choice';
   paramsSchema?: StandardSchemaV1<TParams>;
+  resultSchema?: StandardSchemaV1<TResult>;
   invoke?: (args: {
     context: TContext;
     params: NoInfer<TParams>;
     signal?: AbortSignal;
-  }) => Promise<unknown>;
-  onDone?: (args: { result: any; context: TContext }) => TransitionResult;
-  on?: Record<string, (args: { event: any; context: TContext }) => TransitionResult>;
+  }) => Promise<NoInfer<TResult>>;
+  onDone?: (args: { result: FallbackAny<NoInfer<TResult>>; context: TContext }) => TransitionResult;
+  on?: Record<string, string | TransitionResult | ((args: { event: any; context: TContext }) => TransitionResult)>;
   events?: Record<string, StandardSchemaV1>;
   output?: (args: { context: TContext }) => unknown;
   initial?: string | ((args: { context: TContext; params: Record<string, unknown> }) => TransitionResult);
@@ -61,12 +94,14 @@ type StateNodeDef<TContext extends Record<string, unknown>, TParams> = {
   __classifyConfig?: any;
 };
 
-// Mapped states type: each key K gets its own params from TParamsMap[K]
-type StatesWithParams<
+// Mapped states type: each key K gets its own params and result types
+type StatesMap<
   TContext extends Record<string, unknown>,
   TParamsMap extends Record<string, any>,
+  TResultMap extends Record<string, any>,
+  TEvents,
 > = {
-  [K in keyof TParamsMap]: StateNodeDef<TContext, TParamsMap[K]>;
+  [K in keyof TParamsMap & keyof TResultMap]: StateNodeDef<TContext, TParamsMap[K], TResultMap[K], TEvents>;
 };
 
 // ─── Overload 1: schemas.context drives TContext ───
@@ -75,6 +110,7 @@ export function createAgentMachine<
   TContext extends Record<string, unknown>,
   const TEvents extends Record<string, StandardSchemaV1>,
   const TParamsMap extends Record<string, any>,
+  TResultMap extends Record<string, any>,
 >(config: {
   id: string;
   schemas: {
@@ -85,37 +121,63 @@ export function createAgentMachine<
   context: (input: NoInfer<TInput>) => NoInfer<TContext>;
   adapter?: import('./types.js').AgentAdapter;
   initial:
-    | (keyof TParamsMap & string)
+    | (keyof TParamsMap & keyof TResultMap & string)
     | ((args: { context: NoInfer<TContext> }) => {
-        target: keyof TParamsMap & string;
+        target: keyof TParamsMap & keyof TResultMap & string;
         params?: Record<string, unknown>;
       });
-  states: StatesWithParams<NoInfer<TContext>, TParamsMap>;
-}): AgentMachine<TInput, TContext, TEvents, StatesWithParams<TContext, TParamsMap>>;
+  states: StatesMap<NoInfer<TContext>, TParamsMap, TResultMap, TEvents>;
+}): AgentMachine<TInput, TContext, TEvents, StatesMap<TContext, TParamsMap, TResultMap, TEvents>>;
 
-// ─── Overload 2: context() return drives TContext ───
+// ─── Overload 2: schemas.input present, context() return drives TContext ───
 export function createAgentMachine<
   TInput,
   TContext extends Record<string, unknown>,
   const TEvents extends Record<string, StandardSchemaV1>,
   const TParamsMap extends Record<string, any>,
+  TResultMap extends Record<string, any>,
+>(config: {
+  id: string;
+  schemas: {
+    input: StandardSchemaV1<TInput>;
+    context?: never;
+    events?: TEvents;
+  };
+  context: (input: NoInfer<TInput>) => TContext;
+  adapter?: import('./types.js').AgentAdapter;
+  initial:
+    | (keyof TParamsMap & keyof TResultMap & string)
+    | ((args: { context: TContext }) => {
+        target: keyof TParamsMap & keyof TResultMap & string;
+        params?: Record<string, unknown>;
+      });
+  states: StatesMap<TContext, TParamsMap, TResultMap, TEvents>;
+}): AgentMachine<TInput, TContext, TEvents, StatesMap<TContext, TParamsMap, TResultMap, TEvents>>;
+
+// ─── Overload 3: no schemas.input/context — all from context() ───
+export function createAgentMachine<
+  TInput,
+  TContext extends Record<string, unknown>,
+  const TEvents extends Record<string, StandardSchemaV1>,
+  const TParamsMap extends Record<string, any>,
+  TResultMap extends Record<string, any>,
 >(config: {
   id: string;
   schemas?: {
-    input?: StandardSchemaV1;
+    input?: never;
     context?: never;
     events?: TEvents;
   };
   context: (input: TInput) => TContext;
   adapter?: import('./types.js').AgentAdapter;
   initial:
-    | (keyof TParamsMap & string)
+    | (keyof TParamsMap & keyof TResultMap & string)
     | ((args: { context: TContext }) => {
-        target: keyof TParamsMap & string;
+        target: keyof TParamsMap & keyof TResultMap & string;
         params?: Record<string, unknown>;
       });
-  states: StatesWithParams<TContext, TParamsMap>;
-}): AgentMachine<TInput, TContext, TEvents, StatesWithParams<TContext, TParamsMap>>;
+  states: StatesMap<TContext, TParamsMap, TResultMap, TEvents>;
+}): AgentMachine<TInput, TContext, TEvents, StatesMap<TContext, TParamsMap, TResultMap, TEvents>>;
 
 // ─── Implementation ───
 
@@ -186,9 +248,16 @@ export function createAgentMachine(
       const path = parts.slice(0, i).join('.');
       const stateConfig = resolveStateConfig(cfg, path);
 
-      if (stateConfig.on?.[event.type]) {
+      if (stateConfig.on?.[event.type] !== undefined) {
         const handler = stateConfig.on[event.type]!;
-        const result = handler({ context: internal.context, event });
+        let result: TransitionResult;
+        if (typeof handler === 'string') {
+          result = { target: handler };
+        } else if (typeof handler === 'function') {
+          result = handler({ context: internal.context, event });
+        } else {
+          result = handler;
+        }
 
         if (result.target) {
           return toExternal(

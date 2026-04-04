@@ -17,6 +17,7 @@ export type {
   ClassifyConfig,
   DecideConfig,
   DecideResultFor,
+  EventPayload,
   EventUnion,
   ExecuteResult,
   InferOutput,

@@ -45,17 +45,19 @@ function createSimpleMachine() {
         },
       },
       running: {
+        resultSchema: z.object({ value: z.number() }),
         invoke: async ({ context }) => {
           // context.count is typed as number ✓
           return { value: context.count + 1 };
         },
-        onDone: ({ result, context }) => ({
+        onDone: ({ result }) => ({
           target: 'done',
-          context: { count: (result as { value: number }).value },
+          context: { count: result.value },
         }),
       },
       done: {
         type: 'final',
+        // is the machine output inferred? should we have top-level outputSchema?
         output: ({ context }) => ({ result: context.count }),
       },
     },
@@ -75,7 +77,7 @@ function createHitlMachine() {
         'user.cancel': z.object({}),
       },
     },
-    context: (input: { task: string }) => ({
+    context: (input) => ({
       task: input.task,
       messages: [] as Array<{ role: string; content: string }>,
       result: null as string | null,
@@ -84,19 +86,22 @@ function createHitlMachine() {
     states: {
       gathering: {
         on: {
+          // events are now typed from schemas.events
           'user.message': ({ event, context }) => ({
             context: {
               messages: [
                 ...context.messages,
-                { role: 'user', content: (event as { message: string }).message },
+                { role: 'user', content: event.message },
               ],
             },
           }),
-          'user.approve': () => ({ target: 'processing' }),
-          'user.cancel': () => ({ target: 'cancelled' }),
+          // static shorthand — string target
+          'user.approve': 'processing',
+          'user.cancel': 'cancelled',
         },
       },
       processing: {
+        resultSchema: z.object({ output: z.string() }),
         invoke: async ({ context }) => {
           // context.messages is typed ✓
           return {
@@ -105,22 +110,23 @@ function createHitlMachine() {
         },
         onDone: ({ result }) => ({
           target: 'reviewing',
-          context: { result: (result as { output: string }).output },
+          context: { result: result.output },
         }),
       },
       reviewing: {
         on: {
-          'user.approve': () => ({ target: 'done' }),
+          // static shorthand — object target
+          'user.approve': { target: 'done' },
           'user.message': ({ event, context }) => ({
             target: 'processing',
             context: {
               messages: [
                 ...context.messages,
-                { role: 'user', content: (event as { message: string }).message },
+                { role: 'user', content: event.message },
               ],
             },
           }),
-          'user.cancel': () => ({ target: 'cancelled' }),
+          'user.cancel': 'cancelled',
         },
       },
       done: {
@@ -150,6 +156,7 @@ function createDecideMachine(adapter: AgentAdapter) {
     states: {
       classifying: decide({
         model: 'test-model',
+        // context is Record<string, unknown> here, not typed from context!!
         prompt: ({ context }) => `Classify: ${context.issue}`,
         options: {
           billing: { description: 'Billing issues' },
@@ -164,12 +171,13 @@ function createDecideMachine(adapter: AgentAdapter) {
       }),
       handling: {
         paramsSchema: z.object({ category: z.string() }),
+        resultSchema: z.object({ resolution: z.string() }),
         invoke: async ({ context, params }) => ({
           resolution: `Handled ${params.category} issue`,
         }),
         onDone: ({ result }) => ({
           target: 'done',
-          context: { resolution: (result as { resolution: string }).resolution },
+          context: { resolution: result.resolution },
         }),
       },
       done: {
@@ -1023,6 +1031,7 @@ describe('type inference', () => {
       initial: 'work',
       states: {
         work: {
+          resultSchema: z.object({ doubled: z.number() }),
           invoke: async ({ context }) => {
             context.n satisfies number;
             // @ts-expect-error — 'nope' does not exist
@@ -1031,7 +1040,7 @@ describe('type inference', () => {
           },
           onDone: ({ result }) => ({
             target: 'done',
-            context: { n: (result as { doubled: number }).doubled },
+            context: { n: result.doubled },
           }),
         },
         done: { type: 'final' },
@@ -1134,7 +1143,7 @@ describe('type inference', () => {
         idle: {
           on: {
             greet: ({ event }) => ({
-              context: { msg: `hi ${(event as { name: string }).name}` },
+              context: { msg: `hi ${event.name}` },
             }),
             ping: () => ({}),
           },
@@ -1192,6 +1201,7 @@ describe('type inference', () => {
       states: {
         a: {
           paramsSchema: z.object({ count: z.number() }),
+          resultSchema: z.object({ doubled: z.number() }),
           invoke: async ({ params }) => {
             params.count satisfies number;
             // @ts-expect-error — count is number not string
@@ -1203,11 +1213,12 @@ describe('type inference', () => {
           onDone: ({ result }) => ({
             target: 'b',
             params: { name: 'hello' },
-            context: { result: String((result as { doubled: number }).doubled) },
+            context: { result: String(result.doubled) },
           }),
         },
         b: {
           paramsSchema: z.object({ name: z.string() }),
+          resultSchema: z.object({ greeting: z.string() }),
           invoke: async ({ params }) => {
             params.name satisfies string;
             // @ts-expect-error — name is string not number
@@ -1218,7 +1229,7 @@ describe('type inference', () => {
           },
           onDone: ({ result }) => ({
             target: 'done',
-            context: { result: (result as { greeting: string }).greeting },
+            context: { result: result.greeting },
           }),
         },
         done: {
@@ -1323,6 +1334,118 @@ describe('type inference', () => {
     // Both valid
     machine.getInitialState();
     machine.getInitialState(undefined);
+  });
+
+  // ─── resultSchema ───
+
+  test('resultSchema types invoke return and onDone result', () => {
+    createAgentMachine({
+      id: 't',
+      context: () => ({ total: 0 }),
+      initial: 'work',
+      states: {
+        work: {
+          resultSchema: z.object({ value: z.number() }),
+          invoke: async () => {
+            // return type must match resultSchema
+            return { value: 42 };
+          },
+          onDone: ({ result }) => {
+            // result is typed from resultSchema
+            result.value satisfies number;
+            // @ts-expect-error — 'nope' does not exist on result
+            result.nope;
+            return { target: 'done', context: { total: result.value } };
+          },
+        },
+        done: { type: 'final' },
+      },
+    });
+  });
+
+  test('no resultSchema → onDone result is any', () => {
+    createAgentMachine({
+      id: 't',
+      context: () => ({}),
+      initial: 'work',
+      states: {
+        work: {
+          invoke: async () => ({ anything: true }),
+          onDone: ({ result }) => {
+            // result is any when no resultSchema — no errors
+            result.whatever;
+            return { target: 'done' };
+          },
+        },
+        done: { type: 'final' },
+      },
+    });
+  });
+
+  // ─── events typed in on handlers ───
+
+  test('on handler event typed from schemas.events', () => {
+    createAgentMachine({
+      id: 't',
+      schemas: {
+        events: {
+          'msg': z.object({ text: z.string() }),
+        },
+      },
+      context: () => ({ last: '' }),
+      initial: 'idle',
+      states: {
+        idle: {
+          on: {
+            msg: ({ event }) => {
+              // event.text is typed from schemas.events
+              event.text satisfies string;
+              event.type satisfies 'msg';
+              return { context: { last: event.text } };
+            },
+          },
+        },
+      },
+    });
+  });
+
+  // ─── static transition shorthand ───
+
+  test('on handler accepts string shorthand', () => {
+    const machine = createAgentMachine({
+      id: 't',
+      context: () => ({}),
+      initial: 'a',
+      states: {
+        a: {
+          on: {
+            go: 'b',
+          },
+        },
+        b: { type: 'final' },
+      },
+    });
+    const s = machine.transition(machine.getInitialState(), { type: 'go' });
+    expect(s.value).toBe('b');
+  });
+
+  test('on handler accepts static TransitionResult object', () => {
+    const machine = createAgentMachine({
+      id: 't',
+      context: () => ({ x: 0 }),
+      initial: 'a',
+      states: {
+        a: {
+          on: {
+            go: { target: 'b', context: { x: 1 } },
+          },
+        },
+        b: { type: 'final' },
+      },
+    });
+    const s = machine.transition(machine.getInitialState(), { type: 'go' });
+    expect(s.value).toBe('b');
+    expect(s.context.x).toBe(1);
   });
 });
 

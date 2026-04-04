@@ -34,7 +34,7 @@ type _SV3<T> = T extends Record<string, any>
 
 // ─── Event Helpers ───
 
-type EventPayload<T> = T extends Record<string, never> ? unknown : T;
+export type EventPayload<T> = T extends Record<string, never> ? unknown : T;
 
 export type EventUnion<T extends Record<string, StandardSchemaV1>> = {
   [K in keyof T & string]: { type: K } & EventPayload<InferOutput<T[K]>>;
@@ -82,7 +82,7 @@ export interface StateConfig<
     signal?: AbortSignal;
   }) => Promise<unknown>;
   onDone?: (args: { result: any; context: TContext }) => TransitionResult;
-  on?: Record<string, (args: { event: any; context: TContext }) => TransitionResult>;
+  on?: Record<string, string | TransitionResult | ((args: { event: any; context: TContext }) => TransitionResult)>;
   events?: Record<string, StandardSchemaV1>;
   output?: (args: { context: TContext }) => unknown;
   initial?:
