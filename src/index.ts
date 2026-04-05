@@ -24,8 +24,6 @@ export type {
   MachineConfig,
   StandardSchemaV1,
   StateConfig,
-  StateValue,
-  StateValueOf,
   Trace,
   TransitionEvent,
   TransitionResult,

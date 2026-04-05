@@ -96,8 +96,8 @@ function createHitlMachine() {
             },
           }),
           // static shorthand — string target
-          'user.approve': 'processing',
-          'user.cancel': 'cancelled',
+          'user.approve': { target: 'processing' },
+          'user.cancel': { target: 'cancelled' },
         },
       },
       processing: {
@@ -126,7 +126,7 @@ function createHitlMachine() {
               ],
             },
           }),
-          'user.cancel': 'cancelled',
+          'user.cancel': { target: 'cancelled' },
         },
       },
       done: {
@@ -224,79 +224,6 @@ function createClassifyMachine(adapter: AgentAdapter) {
   });
 }
 
-// ─── Nested machine ───
-
-function createNestedMachine() {
-  return createAgentMachine({
-    id: 'nested',
-    context: () => ({
-      resolution: null as string | null,
-      category: 'billing' as string,
-    }),
-    initial: 'handling',
-    states: {
-      handling: {
-        initial: ({ context }) => {
-          if (context.category === 'billing')
-            return { target: 'checkEligibility' };
-          return { target: 'diagnose' };
-        },
-        states: {
-          checkEligibility: {
-            invoke: async () => ({ eligible: true }),
-            onDone: ({ result }) => {
-              if ((result as { eligible: boolean }).eligible)
-                return { target: 'processRefund' };
-              return { target: 'deny' };
-            },
-          },
-          processRefund: {
-            invoke: async () => ({}),
-            onDone: () => ({
-              target: 'childDone',
-              context: { resolution: 'Refund processed' },
-            }),
-          },
-          deny: {
-            invoke: async () => ({ message: 'Not eligible' }),
-            onDone: ({ result }) => ({
-              target: 'childDone',
-              context: {
-                resolution: (result as { message: string }).message,
-              },
-            }),
-          },
-          diagnose: {
-            invoke: async () => ({ diagnosis: 'It is a bug' }),
-            onDone: ({ result }) => ({
-              target: 'childDone',
-              context: {
-                resolution: (result as { diagnosis: string }).diagnosis,
-              },
-            }),
-          },
-          childDone: { type: 'final' },
-        },
-        onDone: () => ({ target: 'respond' }),
-        on: {
-          'user.cancel': () => ({ target: 'cancelled' }),
-        },
-      },
-      respond: {
-        invoke: async ({ context }) => ({ message: context.resolution }),
-        onDone: () => ({ target: 'done' }),
-      },
-      done: {
-        type: 'final',
-        output: ({ context }) => ({ resolution: context.resolution }),
-      },
-      cancelled: {
-        type: 'final',
-        output: () => ({ cancelled: true }),
-      },
-    },
-  });
-}
 
 // ═══════════════════════════════════════
 // Tests
@@ -332,7 +259,7 @@ describe('getInitialState', () => {
 
   test('rejects invalid input', () => {
     const machine = createHitlMachine();
-    // @ts-expect-error — deliberately invalid input for runtime test
+    // Runtime validation catches invalid input (schemas.input validates)
     expect(() => machine.getInitialState({ task: 123 })).toThrow();
   });
 
@@ -356,10 +283,6 @@ describe('getInitialState', () => {
     expect(machine.getInitialState('fast').value).toBe('fast');
   });
 
-  test('resolves compound state initial', () => {
-    const machine = createNestedMachine();
-    expect(machine.getInitialState().value).toEqual({ handling: 'checkEligibility' });
-  });
 });
 
 describe('invoke', () => {
@@ -445,20 +368,6 @@ describe('invoke', () => {
     expect((s.error as Error).message).toBe('boom');
   });
 
-  test('nested state entry and execution', async () => {
-    const machine = createNestedMachine();
-    let s = machine.getInitialState();
-    expect(s.value).toEqual({ handling: 'checkEligibility' });
-
-    s = await machine.invoke(s);
-    expect(s.value).toEqual({ handling: 'processRefund' });
-
-    s = await machine.invoke(s);
-    expect(s.value).toEqual({ handling: 'childDone' });
-
-    s = await machine.invoke(s);
-    expect(s.value).toBe('respond');
-  });
 });
 
 describe('transition', () => {
@@ -492,13 +401,6 @@ describe('transition', () => {
     ).toThrow("No handler for event 'nope'");
   });
 
-  test('parent preempts child', () => {
-    const machine = createNestedMachine();
-    const s = machine.transition(machine.getInitialState(), {
-      type: 'user.cancel',
-    });
-    expect(s.value).toBe('cancelled');
-  });
 });
 
 describe('execute', () => {
@@ -556,13 +458,6 @@ describe('execute', () => {
     }
   });
 
-  test('runs nested states to completion', async () => {
-    const machine = createNestedMachine();
-    const r = await machine.execute(machine.getInitialState());
-    expect(r.status === 'done' && r.output).toEqual({
-      resolution: 'Refund processed',
-    });
-  });
 });
 
 describe('stream', () => {
@@ -592,14 +487,6 @@ describe('resolveState', () => {
     expect(next.context.messages[0]!.content).toBe('restored');
   });
 
-  test('nested round-trip', async () => {
-    const machine = createNestedMachine();
-    const s = machine.getInitialState();
-    const restored = machine.resolveState(JSON.parse(JSON.stringify(s)));
-    expect(restored.value).toEqual({ handling: 'checkEligibility' });
-    const r = await machine.execute(restored);
-    expect(r.status).toBe('done');
-  });
 });
 
 describe('decide', () => {
@@ -680,7 +567,7 @@ describe('decide', () => {
             context: {
               items:
                 result.choice === 'withData'
-                  ? (result.data as { items: string[] }).items
+                  ? result.data.items
                   : null,
             },
           }),
@@ -773,114 +660,6 @@ describe('classify', () => {
   });
 });
 
-describe('nested states', () => {
-  test('conditional compound initial', async () => {
-    const machine = createAgentMachine({
-      id: 'cond',
-      context: () => ({
-        category: 'technical' as string,
-        resolution: null as string | null,
-      }),
-      initial: 'handling',
-      states: {
-        handling: {
-          initial: ({ context }) =>
-            context.category === 'billing'
-              ? { target: 'billing' }
-              : { target: 'technical' },
-          states: {
-            billing: {
-              invoke: async () => ({}),
-              onDone: () => ({ target: 'childDone' }),
-            },
-            technical: {
-              invoke: async () => ({ result: 'tech handled' }),
-              onDone: ({ result }) => ({
-                target: 'childDone',
-                context: {
-                  resolution: (result as { result: string }).result,
-                },
-              }),
-            },
-            childDone: { type: 'final' },
-          },
-          onDone: () => ({ target: 'done' }),
-        },
-        done: {
-          type: 'final',
-          output: ({ context }) => ({ resolution: context.resolution }),
-        },
-      },
-    });
-    expect(machine.getInitialState().value).toEqual({ handling: 'technical' });
-    const r = await machine.execute(machine.getInitialState());
-    expect(r.status === 'done' && r.output).toEqual({
-      resolution: 'tech handled',
-    });
-  });
-
-  test('parent preempts → cancel', async () => {
-    const machine = createNestedMachine();
-    let s = machine.transition(machine.getInitialState(), {
-      type: 'user.cancel',
-    });
-    const r = await machine.execute(s);
-    expect(r.status === 'done' && r.output).toEqual({ cancelled: true });
-  });
-});
-
-describe('P1: nested final without parent onDone', () => {
-  test('halts at pending', async () => {
-    const machine = createAgentMachine({
-      id: 'p1',
-      context: () => ({}),
-      initial: 'a',
-      states: {
-        a: {
-          initial: 'b',
-          states: {
-            b: {
-              initial: 'c',
-              states: { c: { type: 'final' } },
-            },
-          },
-          onDone: () => ({ target: 'result' }),
-        },
-        result: { type: 'final' },
-      },
-    });
-    const s = await machine.invoke(machine.getInitialState());
-    expect(s.status).toBe('pending');
-    expect(s.value).toEqual({ a: { b: 'c' } });
-  });
-
-  test('ancestor on still reachable', async () => {
-    const machine = createAgentMachine({
-      id: 'p1-esc',
-      context: () => ({}),
-      initial: 'a',
-      states: {
-        a: {
-          initial: 'b',
-          states: {
-            b: {
-              initial: 'c',
-              states: { c: { type: 'final' } },
-            },
-          },
-          on: { escape: () => ({ target: 'out' }) },
-        },
-        out: { type: 'final', output: () => ({ escaped: true }) },
-      },
-    });
-    let r = await machine.execute(machine.getInitialState());
-    expect(r.status).toBe('pending');
-    const s = machine.transition(r.state, { type: 'escape' });
-    r = await machine.execute(s);
-    expect(r.status === 'done' && r.output).toEqual({ escaped: true });
-  });
-});
-
 describe('P2: event validation', () => {
   test('rejects invalid payload', async () => {
     const machine = createHitlMachine();
@@ -962,26 +741,6 @@ describe('type inference', () => {
     s.value satisfies 'c';
   });
 
-  test('nested state values are xstate-style objects', () => {
-    const machine = createAgentMachine({
-      id: 't',
-      context: () => ({}),
-      initial: 'parent',
-      states: {
-        parent: {
-          initial: 'child',
-          states: { child: { type: 'final' } },
-          onDone: () => ({ target: 'done' }),
-        },
-        done: { type: 'final' },
-      },
-    });
-    const s = machine.getInitialState();
-
-    // Runtime check — nested values are objects
-    expect(s.value).toEqual({ parent: 'child' });
-  });
-
   // ─── state.context ───
 
   test('context typed from context() return', () => {
@@ -1002,9 +761,48 @@ describe('type inference', () => {
     s.context.nope;
   });
 
+  test('transition context is Partial<TContext> — rejects unknown keys', () => {
+    createAgentMachine({
+      id: 't',
+      schemas: { events: { go: z.object({}) } },
+      context: () => ({ count: 0, name: 'hello' }),
+      initial: 'idle',
+      states: {
+        idle: {
+          on: {
+            go: ({ context }) => ({
+              target: 'idle',
+              // valid: known key
+              context: { count: context.count + 1 },
+            }),
+          },
+        },
+      },
+    });
+
+    // @ts-expect-error — 'foo' not a valid context key
+    createAgentMachine({
+      id: 't2',
+      schemas: { events: { go: z.object({}) } },
+      context: () => ({ count: 0 }),
+      initial: 'idle',
+      states: {
+        idle: {
+          on: {
+            go: () => ({
+              target: 'idle',
+              context: { foo: 'bar' },
+            }),
+          },
+        },
+      },
+    });
+  });
+
   test('context typed in on handlers', () => {
     const machine = createAgentMachine({
       id: 't',
+      schemas: { events: { add: z.object({}) } },
       context: () => ({ items: ['a', 'b'] }),
       initial: 'idle',
       states: {
@@ -1285,6 +1083,8 @@ describe('type inference', () => {
           options: { a: { description: 'A' } },
           onDone: ({ result, context }) => {
             result.choice satisfies string;
+            // @ts-expect-error
+            result.nope;
             context.topic satisfies string;
             return { target: 'done', context: { result: result.choice } };
           },
@@ -1372,7 +1172,9 @@ describe('type inference', () => {
         work: {
           invoke: async () => ({ anything: true }),
           onDone: ({ result }) => {
-            // result is any when no resultSchema — no errors
+            // Without resultSchema, result is ChoiceResult (default)
+            result.choice satisfies string;
+            // @ts-expect-error — 'whatever' not on ChoiceResult
             result.whatever;
             return { target: 'done' };
           },
@@ -1419,7 +1221,7 @@ describe('type inference', () => {
       states: {
         a: {
           on: {
-            go: 'b',
+            go: { target: 'b' },
           },
         },
         b: { type: 'final' },

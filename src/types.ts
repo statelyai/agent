@@ -15,23 +15,6 @@ export type StandardSchemaResult<T> =
 
 export type InferOutput<T> = T extends StandardSchemaV1<infer O> ? O : never;
 
-// ─── State Value (xstate-style) ───
-
-/** `'idle'` or `{ handling: 'check' }` or `{ a: { b: 'deep' } }` */
-export type StateValue = string | { [key: string]: StateValue };
-
-/** Derive the state value union from a states config (depth-limited to 4) */
-export type StateValueOf<T> = _SV1<T>;
-type _SV1<T> = T extends Record<string, any>
-  ? { [K in keyof T & string]: T[K] extends { states: infer S extends Record<string, any> } ? { [P in K]: _SV2<S> } : K }[keyof T & string]
-  : never;
-type _SV2<T> = T extends Record<string, any>
-  ? { [K in keyof T & string]: T[K] extends { states: infer S extends Record<string, any> } ? { [P in K]: _SV3<S> } : K }[keyof T & string]
-  : never;
-type _SV3<T> = T extends Record<string, any>
-  ? { [K in keyof T & string]: K }[keyof T & string]
-  : never;
-
 // ─── Event Helpers ───
 
 export type EventPayload<T> = T extends Record<string, never> ? unknown : T;
@@ -63,9 +46,11 @@ export interface AgentAdapter {
 
 // ─── Transition ───
 
-export interface TransitionResult {
+export interface TransitionResult<
+  TContext extends Record<string, unknown> = Record<string, unknown>,
+> {
   target?: string;
-  context?: Record<string, unknown>;
+  context?: Partial<TContext>;
   params?: Record<string, unknown>;
 }
 
@@ -81,14 +66,10 @@ export interface StateConfig<
     params: Record<string, unknown>;
     signal?: AbortSignal;
   }) => Promise<unknown>;
-  onDone?: (args: { result: any; context: TContext }) => TransitionResult;
-  on?: Record<string, string | TransitionResult | ((args: { event: any; context: TContext }) => TransitionResult)>;
+  onDone?: (args: { result: any; context: TContext }) => TransitionResult<TContext>;
+  on?: Record<string, TransitionResult<TContext> | ((args: { event: any; context: TContext }) => TransitionResult<TContext>)>;
   events?: Record<string, StandardSchemaV1>;
   output?: (args: { context: TContext }) => unknown;
-  initial?:
-    | string
-    | ((args: { context: TContext; params: Record<string, unknown> }) => TransitionResult);
-  states?: Record<string, StateConfig<TContext>>;
   // choice-specific
   model?: string;
   adapter?: AgentAdapter;
@@ -104,7 +85,7 @@ export interface StateConfig<
 
 export interface AgentState<
   TContext extends Record<string, unknown> = Record<string, unknown>,
-  TValue extends StateValue = StateValue,
+  TValue extends string = string,
 > {
   value: TValue;
   context: TContext;
@@ -118,7 +99,7 @@ export interface AgentState<
 
 export type ExecuteResult<
   TContext extends Record<string, unknown> = Record<string, unknown>,
-  TValue extends StateValue = StateValue,
+  TValue extends string = string,
   TEvents extends Record<string, StandardSchemaV1> = {},
 > =
   | { status: 'done'; state: AgentState<TContext, TValue>; output: unknown; context: TContext }
@@ -129,7 +110,7 @@ export type ExecuteResult<
 
 export interface AgentSnapshot<
   TContext extends Record<string, unknown> = Record<string, unknown>,
-  TValue extends StateValue = StateValue,
+  TValue extends string = string,
 > {
   value: TValue;
   context: TContext;
@@ -149,33 +130,33 @@ export interface AgentMachine<
 
   getInitialState(
     ...args: unknown extends TInput ? [input?: TInput] : [input: TInput]
-  ): AgentState<TContext, StateValueOf<TStates>>;
+  ): AgentState<TContext, keyof TStates & string>;
 
   resolveState(raw: {
-    value: StateValue;
+    value: string;
     context: TContext;
     params?: Record<string, Record<string, unknown>>;
     status?: AgentState['status'];
     output?: unknown;
     error?: unknown;
-  }): AgentState<TContext, StateValueOf<TStates>>;
+  }): AgentState<TContext, keyof TStates & string>;
 
   transition(
-    state: AgentState<TContext, StateValueOf<TStates>>,
+    state: AgentState<TContext, keyof TStates & string>,
     event: TransitionEvent<TEvents>
-  ): AgentState<TContext, StateValueOf<TStates>>;
+  ): AgentState<TContext, keyof TStates & string>;
 
   invoke(
-    state: AgentState<TContext, StateValueOf<TStates>>
-  ): Promise<AgentState<TContext, StateValueOf<TStates>>>;
+    state: AgentState<TContext, keyof TStates & string>
+  ): Promise<AgentState<TContext, keyof TStates & string>>;
 
   execute(
-    state: AgentState<TContext, StateValueOf<TStates>>
-  ): Promise<ExecuteResult<TContext, StateValueOf<TStates>, TEvents>>;
+    state: AgentState<TContext, keyof TStates & string>
+  ): Promise<ExecuteResult<TContext, keyof TStates & string, TEvents>>;
 
   stream(
-    state: AgentState<TContext, StateValueOf<TStates>>
-  ): AsyncGenerator<AgentSnapshot<TContext, StateValueOf<TStates>>>;
+    state: AgentState<TContext, keyof TStates & string>
+  ): AsyncGenerator<AgentSnapshot<TContext, keyof TStates & string>>;
 }
 
 // ─── Machine Config (internal) ───
@@ -200,7 +181,7 @@ export interface MachineConfig<
   states: TStates;
 }
 
-// ─── Decide (wrapper fn — typed result, untyped context) ───
+// ─── Decide ───
 
 export type DecideResultFor<
   TOptions extends Record<string, { description: string; schema?: StandardSchemaV1 }>,
@@ -224,7 +205,7 @@ export interface DecideConfig<
   on?: Record<string, (args: { event: any; context: Record<string, unknown> }) => TransitionResult>;
 }
 
-// ─── Classify (wrapper fn — typed category, untyped context) ───
+// ─── Classify ───
 
 export interface ClassifyConfig<
   TCategories extends Record<string, { description: string }> = Record<string, { description: string }>,
