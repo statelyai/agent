@@ -21,10 +21,10 @@ export function createMemoryRunStore<
   const snapshots = new Map<string, PersistedSnapshot<TSnapshot>[]>();
 
   return {
-    async append(sessionId, event) {
-      const current = journals.get(sessionId) ?? [];
+    async append(event) {
+      const current = journals.get(event.sessionId) ?? [];
       current.push(event);
-      journals.set(sessionId, current);
+      journals.set(event.sessionId, current);
     },
 
     async loadEvents(sessionId) {

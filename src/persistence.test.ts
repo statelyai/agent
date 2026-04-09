@@ -4,14 +4,14 @@ import { createMemoryRunStore } from './index.js';
 test('appends and loads journal events in sequence order', async () => {
   const store = createMemoryRunStore();
 
-  await store.append('session-1', {
+  await store.append({
     sessionId: 'session-1',
     sequence: 2,
     type: 'xstate.done.invoke.worker',
     at: 20,
   });
 
-  await store.append('session-1', {
+  await store.append({
     sessionId: 'session-1',
     sequence: 1,
     type: 'xstate.init',
