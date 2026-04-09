@@ -371,7 +371,10 @@ export function createAgentMachine(
       value: s.value,
       context: s.context,
       status: s.status,
-      params: s.params,
+      sessionId: cfg.id,
+      createdAt: Date.now(),
+      output: s.output,
+      error: s.error,
     };
   }
 
