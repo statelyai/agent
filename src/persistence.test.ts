@@ -42,53 +42,53 @@ test('loads the latest saved snapshot', async () => {
   await store.saveSnapshot({
     sessionId: 'session-1',
     sequence: 1,
+    afterSequence: 1,
     snapshot: {
       value: 'idle',
       context: { count: 1 },
       status: 'active',
       createdAt: 100,
       sessionId: 'session-1',
+      params: {
+        idle: { count: 1 },
+      },
     },
-    params: {
-      idle: { count: 1 },
-    },
-    lastJournalIndex: 1,
     createdAt: 100,
   });
 
   await store.saveSnapshot({
     sessionId: 'session-1',
     sequence: 3,
+    afterSequence: 3,
     snapshot: {
       value: 'done',
       context: { count: 2 },
       status: 'done',
       createdAt: 300,
       sessionId: 'session-1',
+      params: {
+        done: { count: 2 },
+      },
       output: { count: 2 },
     },
-    params: {
-      done: { count: 2 },
-    },
-    lastJournalIndex: 3,
     createdAt: 300,
   });
 
   expect(await store.loadLatestSnapshot('session-1')).toEqual({
     sessionId: 'session-1',
     sequence: 3,
+    afterSequence: 3,
     snapshot: {
       value: 'done',
       context: { count: 2 },
       status: 'done',
       createdAt: 300,
       sessionId: 'session-1',
+      params: {
+        done: { count: 2 },
+      },
       output: { count: 2 },
     },
-    params: {
-      done: { count: 2 },
-    },
-    lastJournalIndex: 3,
     createdAt: 300,
   });
 });

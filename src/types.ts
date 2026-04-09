@@ -96,6 +96,8 @@ export interface AgentState<
   context: TContext;
   status: 'active' | 'pending' | 'done' | 'error';
   params: Record<string, Record<string, unknown>>;
+  sessionId?: string;
+  createdAt?: number;
   output?: unknown;
   error?: unknown;
 }
@@ -122,6 +124,7 @@ export interface AgentSnapshot<
   status: AgentState['status'];
   createdAt: number;
   sessionId: string;
+  params: Record<string, Record<string, unknown>>;
   output?: unknown;
   error?: unknown;
 }
@@ -144,6 +147,8 @@ export interface AgentMachine<
     value: string;
     context: TContext;
     params?: Record<string, Record<string, unknown>>;
+    sessionId?: string;
+    createdAt?: number;
     status?: AgentState['status'];
     output?: unknown;
     error?: unknown;

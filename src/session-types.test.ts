@@ -8,6 +8,7 @@ test('AgentSnapshot includes durable session fields', () => {
     status: 'active',
     createdAt: 123,
     sessionId: 'session-1',
+    params: {},
   };
 
   expect(snapshot.sessionId).toBe('session-1');

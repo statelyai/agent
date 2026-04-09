@@ -155,9 +155,15 @@ export function createAgentMachine(
   machineConfig: MachineConfig<any, any, any, any>
 ): AgentMachine {
   const cfg = machineConfig as MachineConfig;
-  let snapshotRunIndex = 0;
 
-  function createSnapshotRuntime() {
+  function createSnapshotRuntime(state: AgentState) {
+    if (state.sessionId && state.createdAt !== undefined) {
+      return {
+        sessionId: state.sessionId,
+        createdAt: state.createdAt,
+      };
+    }
+
     const sessionId =
       typeof globalThis.crypto !== 'undefined' &&
       typeof globalThis.crypto.randomUUID === 'function'
@@ -166,7 +172,7 @@ export function createAgentMachine(
 
     return {
       sessionId,
-      createdAt: Date.now() + snapshotRunIndex++,
+      createdAt: Date.now(),
     };
   }
 
@@ -197,6 +203,8 @@ export function createAgentMachine(
     value: string;
     context: Record<string, unknown>;
     params?: Record<string, Record<string, unknown>>;
+    sessionId?: string;
+    createdAt?: number;
     status?: AgentState['status'];
     output?: unknown;
     error?: unknown;
@@ -206,6 +214,8 @@ export function createAgentMachine(
       context: raw.context,
       status: raw.status ?? 'active',
       params: raw.params ?? {},
+      sessionId: raw.sessionId,
+      createdAt: raw.createdAt,
       output: raw.output,
       error: raw.error,
     };
@@ -398,7 +408,7 @@ export function createAgentMachine(
     state: AgentState
   ): AsyncGenerator<AgentSnapshot> {
     let current = state;
-    const runtime = createSnapshotRuntime();
+    const runtime = createSnapshotRuntime(current);
     yield toSnap(current, runtime);
     while (current.status === 'active') {
       current = await invoke(current);
@@ -416,6 +426,7 @@ export function createAgentMachine(
       status: s.status,
       sessionId: runtime.sessionId,
       createdAt: runtime.createdAt,
+      params: s.params,
       output: s.output,
       error: s.error,
     };

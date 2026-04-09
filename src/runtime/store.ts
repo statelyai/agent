@@ -11,8 +11,7 @@ export interface PersistedSnapshot<
   sessionId: string;
   sequence: number;
   snapshot: TSnapshot;
-  params: Record<string, Record<string, unknown>>;
-  lastJournalIndex: number;
+  afterSequence: number;
   createdAt: number;
 }
 
