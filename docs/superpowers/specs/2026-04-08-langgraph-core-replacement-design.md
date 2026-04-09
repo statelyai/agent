@@ -62,7 +62,7 @@ A machine definition remains declarative and mostly pure:
 
 A run becomes the primary runtime object:
 
-- backed by an append-only event log
+- backed by an append-only replay journal
 - accelerated by persisted snapshots
 - observable through a first-class event stream
 - resumable from persisted state
@@ -72,7 +72,7 @@ This yields a model where the semantics are simple:
 
 - transitions are deterministic
 - invokes are explicit effect boundaries
-- external events drive progress
+- external and internal machine events drive progress
 - streaming is run-level, not bolted on
 - persistence is a core contract
 
@@ -100,15 +100,19 @@ The machine should continue to express workflows such as:
 
 ### Run Model
 
-Introduce a durable run as the central execution concept.
+Introduce a durable session as the central execution concept.
+
+`sessionId` should be the canonical persisted identifier.
+
+`run` can still be a useful public term for the live handle returned by the runtime, but the durable identity should align with actor/session terminology.
 
 Each run has:
 
-- `runId`
+- `sessionId`
 - `machineId`
 - input payload
 - current snapshot
-- append-only event history
+- append-only replay journal
 - status
 - subscribers
 
@@ -116,9 +120,9 @@ Suggested shape:
 
 ```ts
 interface AgentRun {
-  id: string;
+  sessionId: string;
   status: "active" | "pending" | "done" | "error";
-  getSnapshot(): AgentState;
+  getSnapshot(): AgentSnapshot;
   send(event: { type: string; [key: string]: unknown }): Promise<void>;
   on(type: string, handler: (event: unknown) => void): () => void;
   [Symbol.asyncIterator](): AsyncIterator<RunEmitterEvent>;
@@ -129,17 +133,12 @@ interface AgentRun {
 
 Phase 1 durability should exist at machine boundaries, not inside arbitrary user async code.
 
-Persist:
+Persist the replayable machine events:
 
-- run start
-- external event receipt
-- state entry
-- invoke start
-- invoke success
-- invoke failure
-- transition application
-- run completion
-- run failure
+- external events sent to the actor
+- internal machine events emitted by the runtime
+- invoke completion events
+- invoke failure events
 
 Do not claim sub-invoke durability for plain `Promise.all(...)` or arbitrary nested promises.
 
@@ -206,57 +205,106 @@ In practice, current `agent` APIs already combine these concerns inside state co
 That means:
 
 - transition logic should remain replayable without rerunning effects
-- effect lifecycle should be represented in runtime events
+- effect lifecycle should be represented through emitted machine events
 - invoke results should be fed back as events, not hidden mutations
+
+This should follow the same philosophy as XState invoke completion:
+
+- invoke completion becomes an internal done event
+- invoke failure becomes an internal error event
+- the machine progresses by consuming events, not by direct mutation from effect code
 
 This is the main improvement opportunity over LangGraph's more graph-runtime-centric model.
 
 ## Persistence Model
 
-The canonical persisted representation is an append-only event log.
+The canonical persisted representation is an append-only replay journal.
 
 Snapshots are derived state used to accelerate replay and resume.
 
-### Event Log
+### Replay Journal
 
-Suggested minimal durable event family:
+The replay journal is the source of truth. It contains the actual events consumed by the actor, including synthetic internal events produced by the runtime.
+
+Suggested minimal replayable event family:
 
 ```ts
-type PersistedRunEvent =
-  | { type: "run.started"; input: unknown; at: number }
-  | { type: "event.received"; event: { type: string; [k: string]: unknown }; at: number }
-  | { type: "state.entered"; value: string; params?: Record<string, unknown>; at: number }
-  | { type: "invoke.started"; state: string; at: number }
-  | { type: "invoke.succeeded"; state: string; result: unknown; at: number }
-  | { type: "invoke.failed"; state: string; error: SerializedError; at: number }
-  | { type: "transition.applied"; from: string; to: string; at: number }
-  | { type: "run.completed"; output: unknown; at: number }
-  | { type: "run.failed"; error: SerializedError; at: number };
+type JournalEvent =
+  | { type: "xstate.init"; input?: unknown; at: number }
+  | { type: "user.message"; [key: string]: unknown; at: number }
+  | { type: "approve"; at: number }
+  | { type: "xstate.done.invoke.research"; output: unknown; at: number }
+  | {
+      type: "xstate.error.invoke.research";
+      error: SerializedError;
+      at: number;
+    };
 ```
+
+The exact event naming can be refined, but the important property is that invoke done/error are actor events, not metadata records.
+
+### Runtime and Audit Events
+
+Derived runtime records can still exist for observability and subscriptions, but they are not the canonical replay source.
+
+Examples:
+
+- state entered
+- transition applied
+- snapshot persisted
+- session completed
+- session failed
+
+These belong in the runtime event stream and diagnostics layer.
 
 ### Snapshots
 
 Suggested snapshot shape:
 
 ```ts
+type AgentSnapshot = {
+  value: string;
+  context: Record<string, unknown>;
+  status: "active" | "done" | "error" | "pending";
+  createdAt: number;
+  sessionId: string;
+  output?: unknown;
+  error?: SerializedError;
+};
+
 type PersistedSnapshot = {
-  runId: string;
-  version: number;
-  state: AgentState;
-  lastEventIndex: number;
+  sessionId: string;
+  sequence: number;
+  snapshot: AgentSnapshot;
+  lastJournalIndex: number;
   createdAt: number;
 };
 ```
+
+This aligns the live snapshot shape closely with XState snapshots:
+
+- `value`
+- `context`
+- `status`
+
+with additional metadata such as:
+
+- `createdAt`
+- `sessionId`
+- optional `output`
+- optional `error`
+
+The `sequence` field exists so storage can identify which snapshot is the latest persisted derivation and so replay can resume from a known journal offset. It should track journal position rather than inventing a separate semantic version.
 
 ### Replay Model
 
 Restore a run by:
 
 1. loading the latest snapshot
-2. replaying all events after that snapshot
+2. replaying all journal events after that snapshot
 3. reconstructing the current live run state
 
-If no snapshot exists, replay from `run.started`.
+If no snapshot exists, replay from `xstate.init`.
 
 ### Storage Interface
 
@@ -264,9 +312,9 @@ Persistence must be abstracted behind a portable interface:
 
 ```ts
 interface RunStore {
-  append(runId: string, event: PersistedRunEvent): Promise<void>;
-  loadEvents(runId: string, afterVersion?: number): Promise<PersistedRunEvent[]>;
-  loadLatestSnapshot(runId: string): Promise<PersistedSnapshot | null>;
+  append(sessionId: string, event: JournalEvent): Promise<void>;
+  loadEvents(sessionId: string, afterSequence?: number): Promise<JournalEvent[]>;
+  loadLatestSnapshot(sessionId: string): Promise<PersistedSnapshot | null>;
   saveSnapshot(snapshot: PersistedSnapshot): Promise<void>;
 }
 ```
@@ -304,11 +352,25 @@ Suggested public stream model:
 
 ```ts
 type RunEmitterEvent =
-  | { type: "state"; snapshot: AgentState }
-  | { type: "machine.event"; event: PersistedRunEvent }
+  | { type: "state"; snapshot: AgentSnapshot }
+  | { type: "machine.event"; event: JournalEvent }
+  | { type: "runtime"; event: RuntimeEvent }
   | { type: "part"; part: StreamPart }
   | { type: "done"; output: unknown }
   | { type: "error"; error: unknown };
+```
+
+Where `machine.event` refers to replayable actor events and `runtime` refers to derived lifecycle records useful for debugging and orchestration.
+
+Suggested runtime event family:
+
+```ts
+type RuntimeEvent =
+  | { type: "state.entered"; value: string; at: number }
+  | { type: "transition.applied"; from: string; to: string; at: number }
+  | { type: "snapshot.saved"; sessionId: string; sequence: number; at: number }
+  | { type: "session.completed"; sessionId: string; at: number }
+  | { type: "session.failed"; sessionId: string; error: SerializedError; at: number };
 ```
 
 ### Stream Parts
@@ -339,13 +401,13 @@ run.on("toolResult", ({ toolCallId, output }) => {});
 
 ### Emission Model
 
-Invoke code should be able to emit live parts:
+Invoke code should be able to emit live parts using a separate enqueue/emission argument:
 
 ```ts
 drafting: {
-  invoke: async ({ emit }) => {
+  invoke: async ({ context }, enq) => {
     for await (const chunk of streamText(...)) {
-      emit({ type: "text-delta", id: "draft", delta: chunk });
+      enq.emit({ type: "text-delta", id: "draft", delta: chunk });
     }
     return { draft: finalText };
   },
@@ -353,6 +415,39 @@ drafting: {
 ```
 
 Durable runtime events are persisted. Stream parts are ephemeral by default in phase 1.
+
+Using a second argument is important because it preserves a useful authoring distinction:
+
+- one-argument functions are easier to lint as pure/no-emission
+- two-argument functions explicitly opt into streaming side effects
+
+### Emitted Schemas
+
+Machine definitions should support emitted event schemas alongside input and external event schemas.
+
+Suggested direction:
+
+```ts
+schemas: {
+  input: ...,
+  events: {
+    approve: ...,
+    reject: ...,
+  },
+  emitted: {
+    textPart: ...,
+    toolCall: ...,
+    toolResult: ...,
+  },
+}
+```
+
+This gives:
+
+- typed live emissions
+- runtime validation of emitted parts
+- stronger UI integration
+- symmetry with event schemas
 
 ## Runner-Agnostic Architecture
 
@@ -379,7 +474,7 @@ This makes it possible to showcase:
 
 Durable Objects are especially relevant because they demonstrate the design clearly:
 
-- event log and snapshot persistence can live in DO state
+- replay journal and snapshot persistence can live in DO state
 - run coordination can be serialized naturally
 - stream subscriptions can be implemented via the object lifecycle
 
@@ -393,8 +488,8 @@ The important point is that Durable Objects should be an example adapter, not th
 - shared state update workflows -> `invoke` + `onDone` context updates
 - human-in-the-loop -> pending states + external events
 - subgraphs/subflows -> nested machine execution
-- streaming -> run-level event emitter + stream parts
-- persistence/resume -> event log + snapshots
+- streaming -> run-level event emitter + stream parts + emitted schemas
+- persistence/resume -> event journal + snapshots
 - prebuilt agent patterns -> curated machine factories
 
 ### Needs Reinterpretation
@@ -489,7 +584,7 @@ Define:
 Build:
 
 - run object
-- event logging
+- journal append/load
 - snapshotting
 - restoration
 - run subscriptions
@@ -535,6 +630,31 @@ Port and maintain semantic-equivalence tests grouped by capability family.
 
 5. Allowing runner assumptions to leak into core.
    This would compromise portability across Vercel, Cloudflare, and other environments.
+
+## Advantages Over LangGraph
+
+This design improves on LangGraph core in several important ways:
+
+1. Clearer semantic center.
+   LangGraph is graph-runtime-first. This design is actor/state-machine-first, so the progression model stays grounded in event consumption and snapshot derivation.
+
+2. Better purity boundary.
+   Transition logic remains conceptually pure, while effect execution is explicit and first-class rather than interwoven with graph runtime semantics.
+
+3. Simpler human-in-the-loop model.
+   Pending states plus external events are easier to reason about than a dedicated interrupt abstraction for most workflows.
+
+4. More honest durability.
+   The replay source is the actor event journal, not a mixed bag of runtime metadata. This makes replay and debugging cleaner.
+
+5. Better portability.
+   The runtime is explicitly designed to be runner-agnostic and storage-agnostic, making it a stronger fit for Vercel, Cloudflare Workers, Durable Objects, and other environments.
+
+6. Easier mental model for composition.
+   Nested machine execution is ordinary execution, not a special graph/subgraph system.
+
+7. Better streaming ergonomics.
+   Run-level subscriptions plus emitted schemas provide a clearer UI/runtime boundary than LangGraph's graph-oriented stream modes.
 
 ## Recommendation
 
