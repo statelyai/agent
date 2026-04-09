@@ -16,8 +16,6 @@ test('AgentSnapshot includes durable session fields', () => {
 
 test('JournalEvent supports invoke completion events', () => {
   const event: JournalEvent = {
-    sessionId: 'session-1',
-    sequence: 2,
     type: 'xstate.done.invoke.worker',
     at: 456,
   };

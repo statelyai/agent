@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
 import { createAgentMachine } from './index.js';
 
-test('stream emits durable snapshots with session metadata', async () => {
+async function collectSnapshots() {
   const machine = createAgentMachine({
     id: 'snapshot-machine',
     context: () => ({}),
@@ -19,10 +19,18 @@ test('stream emits durable snapshots with session metadata', async () => {
     snaps.push(snap);
   }
 
+  return snaps;
+}
+
+test('stream emits durable snapshots with stable session metadata', async () => {
+  const snaps = await collectSnapshots();
+
   expect(snaps.length).toBeGreaterThanOrEqual(2);
+  expect(new Set(snaps.map((snap) => snap.sessionId)).size).toBe(1);
+  expect(new Set(snaps.map((snap) => snap.createdAt)).size).toBe(1);
   expect(snaps[0]).toEqual(
     expect.objectContaining({
-      sessionId: 'snapshot-machine',
+      sessionId: expect.any(String),
       createdAt: expect.any(Number),
       value: 'done',
       context: {},
@@ -32,12 +40,19 @@ test('stream emits durable snapshots with session metadata', async () => {
   expect(snaps[0]).not.toHaveProperty('params');
   expect(snaps[snaps.length - 1]).toEqual(
     expect.objectContaining({
-      sessionId: 'snapshot-machine',
-      createdAt: expect.any(Number),
+      sessionId: snaps[0]!.sessionId,
+      createdAt: snaps[0]!.createdAt,
       value: 'done',
       context: {},
       status: 'done',
       output: { ok: true },
     })
   );
+});
+
+test('separate machine executions get distinct session ids', async () => {
+  const firstRun = await collectSnapshots();
+  const secondRun = await collectSnapshots();
+
+  expect(firstRun[0]!.sessionId).not.toBe(secondRun[0]!.sessionId);
 });

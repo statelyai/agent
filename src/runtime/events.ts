@@ -1,7 +1,7 @@
 export interface JournalEvent {
-  sessionId: string;
-  sequence: number;
   type: 'xstate.init' | (string & {});
   at: number;
+  sessionId?: string;
+  sequence?: number;
   [key: string]: unknown;
 }
