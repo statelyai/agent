@@ -2,6 +2,7 @@ import type {
   AgentMachine,
   AgentSnapshot,
   AgentState,
+  EmittedPart,
   EventPayload,
   ExecuteResult,
   InferOutput,
@@ -9,13 +10,19 @@ import type {
   StandardSchemaV1,
   TransitionResult,
 } from './types.js';
+import type { JournalEvent } from './runtime/events.js';
 import {
   applyTransition,
+  findEmittedSchema,
   findEventSchema,
+  formatSchemaIssues,
   getAvailableEvents,
   getParams,
+  isDoneInvokeEventType,
+  isErrorInvokeEventType,
   resolveInitial,
   resolveStateConfig,
+  serializeError,
   validateSchemaSync,
 } from './utils.js';
 import type { StateConfigAny } from './utils.js';
@@ -47,7 +54,7 @@ type StateNodeDef<
     context: TContext;
     params: NoInfer<TParams>;
     signal?: AbortSignal;
-  }) => Promise<NoInfer<TResult>>;
+  }, enq: { emit(part: EmittedPart): void }) => Promise<NoInfer<TResult>>;
   onDone?: (args: { result: OnDoneResult<TResult>; context: TContext }) => TransitionResult<TContext>;
   on?: { [E in keyof TEvents & string]?: TransitionResult<TContext> | ((args: {
       event: EventFor<TEvents, E>;
@@ -88,6 +95,7 @@ export function createAgentMachine<
     context: StandardSchemaV1<TContext>;
     input?: StandardSchemaV1<TInput>;
     events?: TEvents;
+    emitted?: Record<string, StandardSchemaV1>;
   };
   context: (input: NoInfer<TInput>) => NoInfer<TContext>;
   adapter?: import('./types.js').AgentAdapter;
@@ -113,6 +121,7 @@ export function createAgentMachine<
     input: StandardSchemaV1<TInput>;
     context?: never;
     events?: TEvents;
+    emitted?: Record<string, StandardSchemaV1>;
   };
   context: (input: NoInfer<TInput>) => TContext;
   adapter?: import('./types.js').AgentAdapter;
@@ -137,6 +146,7 @@ export function createAgentMachine<
     input?: never;
     context?: never;
     events?: TEvents;
+    emitted?: Record<string, StandardSchemaV1>;
   };
   context: (...args: any[]) => TContext;
   adapter?: import('./types.js').AgentAdapter;
@@ -156,6 +166,8 @@ export function createAgentMachine(
 ): AgentMachine {
   const cfg = machineConfig as MachineConfig;
 
+  type SnapshotRuntime = { sessionId: string; createdAt: number };
+
   function createSnapshotRuntime(state: AgentState) {
     if (state.sessionId && state.createdAt !== undefined) {
       return {
@@ -173,6 +185,17 @@ export function createAgentMachine(
     return {
       sessionId,
       createdAt: Date.now(),
+    };
+  }
+
+  function withRuntimeMetadata(
+    state: AgentState,
+    runtime: SnapshotRuntime
+  ): AgentState {
+    return {
+      ...state,
+      sessionId: runtime.sessionId,
+      createdAt: runtime.createdAt,
     };
   }
 
@@ -225,9 +248,87 @@ export function createAgentMachine(
     state: AgentState,
     event: { type: string; [k: string]: unknown }
   ): AgentState {
+    const sc = resolveStateConfig(cfg, state.value);
+    const effectiveConfig = sc.__decideConfig
+      ? { ...sc, ...(sc.__decideConfig as Record<string, unknown>) }
+      : sc;
+    if (isDoneInvokeEventType(state.value, event.type)) {
+      const result = 'output' in event ? event.output : undefined;
+      const validatedResult = effectiveConfig.resultSchema
+        ? validateSchemaSync(effectiveConfig.resultSchema, result)
+        : result;
+
+      if (effectiveConfig.onDone) {
+        const trans = effectiveConfig.onDone({
+          result: validatedResult,
+          context: state.context,
+        });
+
+        if (trans.target) {
+          return applyTransition(state, trans);
+        }
+
+        return {
+          ...state,
+          status: 'pending',
+          context: trans.context
+            ? { ...state.context, ...trans.context }
+            : state.context,
+        };
+      }
+
+      const internalHandler = sc.on?.[event.type];
+      if (internalHandler !== undefined) {
+        const result: TransitionResult =
+          typeof internalHandler === 'function'
+            ? internalHandler({ context: state.context, event })
+            : internalHandler;
+
+        if (result.target) {
+          return applyTransition(state, result);
+        }
+
+        return {
+          ...state,
+          status: 'pending',
+          context: result.context
+            ? { ...state.context, ...result.context }
+            : state.context,
+        };
+      }
+
+      return { ...state, status: 'pending' };
+    }
+
+    if (isErrorInvokeEventType(state.value, event.type)) {
+      const internalHandler = sc.on?.[event.type];
+      if (internalHandler !== undefined) {
+        const result: TransitionResult =
+          typeof internalHandler === 'function'
+            ? internalHandler({ context: state.context, event })
+            : internalHandler;
+
+        if (result.target) {
+          return applyTransition(state, result);
+        }
+
+        return {
+          ...state,
+          context: result.context
+            ? { ...state.context, ...result.context }
+            : state.context,
+        };
+      }
+
+      return {
+        ...state,
+        status: 'error',
+        error: 'error' in event ? event.error : undefined,
+      };
+    }
+
     validateEventPayload(state.value, event);
 
-    const sc = resolveStateConfig(cfg, state.value);
     if (sc.on?.[event.type] !== undefined) {
       const handler = sc.on[event.type]!;
       const result: TransitionResult =
@@ -266,60 +367,52 @@ export function createAgentMachine(
       'issues' in result &&
       result.issues
     ) {
-      const messages = (result.issues as Array<{ message: string }>)
-        .map((i) => i.message)
-        .join(', ');
+      const messages = formatSchemaIssues(
+        result.issues as Array<{ message: string }>
+      );
       throw new Error(`Invalid event '${event.type}': ${messages}`);
     }
   }
 
-  async function invoke(state: AgentState): Promise<AgentState> {
-    if (state.status === 'done' || state.status === 'error') {
-      return state;
+  function validateEmittedPart(part: EmittedPart): void {
+    const schema = findEmittedSchema(cfg, part.type);
+    if (!schema) {
+      return;
     }
 
-    const sc = resolveStateConfig(cfg, state.value);
-
-    if (sc.type === 'final') {
-      const output = sc.output
-        ? sc.output({ context: state.context })
-        : undefined;
-      return { ...state, status: 'done', output };
+    const result = schema['~standard'].validate(part);
+    if (result instanceof Promise) {
+      throw new Error(
+        'Async schema validation is not supported in sync context.'
+      );
     }
 
-    if (sc.type === 'choice' || sc.__decideConfig) {
-      return handleChoice(state, sc);
+    if (result.issues) {
+      const messages = formatSchemaIssues(result.issues);
+      throw new Error(`Invalid emitted part '${part.type}': ${messages}`);
     }
+  }
 
-    if (sc.invoke) {
-      return handleInvoke(state, sc);
-    }
-
-    if (sc.on) {
-      return { ...state, status: 'pending' };
-    }
-
+  function createEnqueue(onEmit?: (part: EmittedPart) => void) {
     return {
-      ...state,
-      status: 'error',
-      error: `State '${state.value}' has no invoke, events, or final type`,
+      emit(part: EmittedPart) {
+        validateEmittedPart(part);
+        onEmit?.(part);
+      },
     };
   }
 
-  async function handleChoice(
-    state: AgentState,
-    sc: StateConfigAny
-  ): Promise<AgentState> {
-    // Merge __decideConfig props onto sc for decide() wrapper compat
+  async function createChoiceEvent(state: AgentState): Promise<JournalEvent> {
+    const sc = resolveStateConfig(cfg, state.value);
     const dc = sc.__decideConfig
       ? { ...sc, ...(sc.__decideConfig as Record<string, unknown>) }
       : sc;
     const adapter = (dc as StateConfigAny).adapter ?? cfg.adapter;
     if (!adapter) {
       return {
-        ...state,
-        status: 'error',
-        error: `No adapter for '${state.value}'`,
+        type: `xstate.error.invoke.${state.value}`,
+        error: { message: `No adapter for '${state.value}'` },
+        at: Date.now(),
       };
     }
 
@@ -336,35 +429,97 @@ export function createAgentMachine(
         options: (dc as StateConfigAny).options!,
         reasoning: (dc as StateConfigAny).reasoning,
       });
-      const onDone = (dc as StateConfigAny).onDone;
-      if (!onDone) return { ...state, status: 'error', error: 'choice state missing onDone' };
-      const trans = onDone({ result, context: state.context });
-      return applyTransition(state, trans);
+
+      return {
+        type: `xstate.done.invoke.${state.value}`,
+        output: result,
+        at: Date.now(),
+      };
     } catch (error) {
-      return { ...state, status: 'error', error };
+      return {
+        type: `xstate.error.invoke.${state.value}`,
+        error: serializeError(error),
+        at: Date.now(),
+      };
     }
   }
 
-  async function handleInvoke(
+  async function createInvokeEvent(
     state: AgentState,
-    sc: StateConfigAny
-  ): Promise<AgentState> {
+    sc: StateConfigAny,
+    onEmit?: (part: EmittedPart) => void
+  ): Promise<JournalEvent> {
     try {
-      const result = await sc.invoke!({
-        context: state.context,
-        params: getParams(state.value, state.params),
-      });
-      if (sc.onDone) {
-        const trans = sc.onDone({ result, context: state.context });
-        return applyTransition(state, trans);
-      }
-      if (sc.on) {
-        return { ...state, status: 'pending' };
-      }
-      return state;
+      const result = await sc.invoke!(
+        {
+          context: state.context,
+          params: getParams(state.value, state.params),
+        },
+        createEnqueue(onEmit)
+      );
+
+      return {
+        type: `xstate.done.invoke.${state.value}`,
+        output: result,
+        at: Date.now(),
+      };
     } catch (error) {
-      return { ...state, status: 'error', error };
+      return {
+        type: `xstate.error.invoke.${state.value}`,
+        error: serializeError(error),
+        at: Date.now(),
+      };
     }
+  }
+
+  async function getEffectEvent(
+    state: AgentState,
+    onEmit?: (part: EmittedPart) => void
+  ): Promise<JournalEvent | null> {
+    if (state.status === 'done' || state.status === 'error') {
+      return null;
+    }
+
+    const sc = resolveStateConfig(cfg, state.value);
+    if (sc.type === 'choice' || sc.__decideConfig) {
+      return createChoiceEvent(state);
+    }
+
+    if (sc.invoke) {
+      return createInvokeEvent(state, sc, onEmit);
+    }
+
+    return null;
+  }
+
+  async function invoke(state: AgentState): Promise<AgentState> {
+    if (state.status === 'done' || state.status === 'error') {
+      return state;
+    }
+
+    const sc = resolveStateConfig(cfg, state.value);
+
+    if (sc.type === 'final') {
+      const output = sc.output
+        ? sc.output({ context: state.context })
+        : undefined;
+      return { ...state, status: 'done', output };
+    }
+
+    const effectEvent = await getEffectEvent(state);
+    if (effectEvent) {
+      return transition(state, effectEvent);
+    }
+
+    if (sc.on) {
+      return { ...state, status: 'pending' };
+    }
+
+    return {
+      ...state,
+      status: 'error',
+      error: `State '${state.value}' has no invoke, events, or final type`,
+    };
   }
 
   async function execute(state: AgentState): Promise<ExecuteResult> {
@@ -409,9 +564,11 @@ export function createAgentMachine(
   ): AsyncGenerator<AgentSnapshot> {
     let current = state;
     const runtime = createSnapshotRuntime(current);
+    current = withRuntimeMetadata(current, runtime);
     yield toSnap(current, runtime);
     while (current.status === 'active') {
       current = await invoke(current);
+      current = withRuntimeMetadata(current, runtime);
       yield toSnap(current, runtime);
     }
   }
@@ -440,5 +597,10 @@ export function createAgentMachine(
     invoke,
     execute,
     stream,
+    __runtime: {
+      toSnapshot: toSnap,
+      withRuntimeMetadata,
+      getEffectEvent,
+    },
   } as AgentMachine;
 }

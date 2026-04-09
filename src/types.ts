@@ -23,11 +23,19 @@ export type EventUnion<T extends Record<string, StandardSchemaV1>> = {
   [K in keyof T & string]: { type: K } & EventPayload<InferOutput<T[K]>>;
 }[keyof T & string];
 
+export type EmittedUnion<T extends Record<string, StandardSchemaV1>> = EventUnion<T>;
+
 export type TransitionEvent<
   TEvents extends Record<string, StandardSchemaV1>,
 > = [keyof TEvents & string] extends [never]
   ? { type: string; [key: string]: unknown }
   : EventUnion<TEvents>;
+
+export type EmittedPart = { type: string; [key: string]: unknown };
+
+export interface InvokeEnqueue {
+  emit(part: EmittedPart): void;
+}
 
 // ─── Durable Session Vocabulary ───
 
@@ -66,11 +74,12 @@ export interface StateConfig<
 > {
   type?: 'final' | 'choice';
   paramsSchema?: StandardSchemaV1;
+  resultSchema?: StandardSchemaV1;
   invoke?: (args: {
     context: TContext;
     params: Record<string, unknown>;
     signal?: AbortSignal;
-  }) => Promise<unknown>;
+  }, enq: InvokeEnqueue) => Promise<unknown>;
   onDone?: (args: { result: any; context: TContext }) => TransitionResult<TContext>;
   on?: Record<string, TransitionResult<TContext> | ((args: { event: any; context: TContext }) => TransitionResult<TContext>)>;
   events?: Record<string, StandardSchemaV1>;
@@ -176,6 +185,34 @@ export interface AgentMachine<
   ): AsyncGenerator<AgentSnapshot<TContext, keyof TStates & string>>;
 }
 
+export interface AgentRun<
+  TContext extends Record<string, unknown> = Record<string, unknown>,
+  TValue extends string = string,
+  TEvents extends Record<string, StandardSchemaV1> = {},
+> {
+  readonly sessionId: string;
+  readonly status: AgentSnapshot<TContext, TValue>['status'];
+  getSnapshot(): AgentSnapshot<TContext, TValue>;
+  send(event: TransitionEvent<TEvents>): Promise<void>;
+  on(type: string, handler: (event: unknown) => void): () => void;
+}
+
+export interface SessionOptions<
+  TInput = unknown,
+  TSnapshot extends AgentSnapshot = AgentSnapshot,
+> {
+  input?: TInput;
+  sessionId?: string;
+  store: import('./runtime/store.js').RunStore<TSnapshot>;
+}
+
+export interface RestoreSessionOptions<
+  TSnapshot extends AgentSnapshot = AgentSnapshot,
+> {
+  sessionId: string;
+  store: import('./runtime/store.js').RunStore<TSnapshot>;
+}
+
 // ─── Machine Config (internal) ───
 
 export interface MachineConfig<
@@ -189,6 +226,7 @@ export interface MachineConfig<
     input?: StandardSchemaV1;
     context?: StandardSchemaV1;
     events?: TEvents;
+    emitted?: Record<string, StandardSchemaV1>;
   };
   context: (input: TInput) => TContext;
   adapter?: AgentAdapter;

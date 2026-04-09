@@ -46,10 +46,17 @@ export function resolveStateConfig(
 /** Loose state config for internal runtime use */
 export type StateConfigAny = {
   type?: 'final' | 'choice';
-  invoke?: (args: { context: Record<string, unknown>; params: Record<string, unknown> }) => Promise<unknown>;
+  invoke?: (
+    args: {
+      context: Record<string, unknown>;
+      params: Record<string, unknown>;
+    },
+    enq: { emit(part: { type: string; [key: string]: unknown }): void }
+  ) => Promise<unknown>;
   onDone?: (args: { result: unknown; context: Record<string, unknown> }) => TransitionResult;
   on?: Record<string, TransitionResult | ((args: { event: Record<string, unknown>; context: Record<string, unknown> }) => TransitionResult)>;
   output?: (args: { context: Record<string, unknown> }) => unknown;
+  resultSchema?: StandardSchemaV1;
   model?: string;
   adapter?: { decide: (...args: unknown[]) => Promise<unknown> };
   prompt?: string | ((args: { context: Record<string, unknown>; params: Record<string, unknown> }) => string);
@@ -165,4 +172,47 @@ export function findEventSchema(
   }
   const events = config.schemas?.events as Record<string, StandardSchemaV1> | undefined;
   return events?.[eventType];
+}
+
+export function findEmittedSchema(
+  config: MachineConfig,
+  eventType: string
+): StandardSchemaV1 | undefined {
+  const emitted = config.schemas?.emitted as
+    | Record<string, StandardSchemaV1>
+    | undefined;
+
+  return emitted?.[eventType];
+}
+
+export function formatSchemaIssues(
+  issues: ReadonlyArray<{ message: string }>
+): string {
+  return issues.map((issue) => issue.message).join(', ');
+}
+
+export function isDoneInvokeEventType(
+  stateValue: string,
+  eventType: string
+): boolean {
+  return eventType === `xstate.done.invoke.${stateValue}`;
+}
+
+export function isErrorInvokeEventType(
+  stateValue: string,
+  eventType: string
+): boolean {
+  return eventType === `xstate.error.invoke.${stateValue}`;
+}
+
+export function serializeError(error: unknown): unknown {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+    };
+  }
+
+  return error;
 }
