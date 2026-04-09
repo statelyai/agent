@@ -10,7 +10,7 @@ function compareSnapshots(
   a: PersistedSnapshot<AgentSnapshot>,
   b: PersistedSnapshot<AgentSnapshot>
 ): number {
-  return a.sequence - b.sequence || a.createdAt - b.createdAt;
+  return a.afterSequence - b.afterSequence || a.createdAt - b.createdAt;
 }
 
 export function createMemoryRunStore<
@@ -26,11 +26,14 @@ export function createMemoryRunStore<
       const sequence = current.length === 0 ? 1 : current[current.length - 1]!.sequence + 1;
       current.push({ ...event, sequence });
       journals.set(sessionId, current);
+      return { sequence };
     },
 
     async loadEvents(sessionId, afterSequence = 0) {
       const events = journals.get(sessionId) ?? [];
-      return events.filter((entry) => entry.sequence > afterSequence);
+      return [...events]
+        .filter((entry) => entry.sequence > afterSequence)
+        .sort((a, b) => a.sequence - b.sequence);
     },
 
     async loadLatestSnapshot(sessionId) {

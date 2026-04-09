@@ -143,16 +143,20 @@ export interface AgentMachine<
     ...args: unknown extends TInput ? [input?: TInput] : [input: TInput]
   ): AgentState<TContext, keyof TStates & string>;
 
-  resolveState(raw: {
-    value: string;
-    context: TContext;
-    params?: Record<string, Record<string, unknown>>;
-    sessionId?: string;
-    createdAt?: number;
-    status?: AgentState['status'];
-    output?: unknown;
-    error?: unknown;
-  }): AgentState<TContext, keyof TStates & string>;
+  resolveState(
+    raw:
+      | AgentSnapshot<TContext, keyof TStates & string>
+      | {
+          value: string;
+          context: TContext;
+          params?: Record<string, Record<string, unknown>>;
+          sessionId?: string;
+          createdAt?: number;
+          status?: AgentState['status'];
+          output?: unknown;
+          error?: unknown;
+        }
+  ): AgentState<TContext, keyof TStates & string>;
 
   transition(
     state: AgentState<TContext, keyof TStates & string>,

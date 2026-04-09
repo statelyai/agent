@@ -9,7 +9,6 @@ export interface PersistedSnapshot<
   TSnapshot extends AgentSnapshot = AgentSnapshot,
 > {
   sessionId: string;
-  sequence: number;
   snapshot: TSnapshot;
   afterSequence: number;
   createdAt: number;
@@ -19,7 +18,7 @@ export interface RunStore<
   TSnapshot extends AgentSnapshot = AgentSnapshot,
   TEvent extends JournalEvent = JournalEvent,
 > {
-  append(sessionId: string, event: TEvent): Promise<void>;
+  append(sessionId: string, event: TEvent): Promise<{ sequence: number }>;
   loadEvents(
     sessionId: string,
     afterSequence?: number
