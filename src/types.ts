@@ -119,11 +119,10 @@ export interface AgentSnapshot<
   value: TValue;
   context: TContext;
   status: AgentState['status'];
-  createdAt?: number;
-  sessionId?: string;
+  createdAt: number;
+  sessionId: string;
   output?: unknown;
   error?: unknown;
-  params?: Record<string, Record<string, unknown>>;
 }
 
 export type { PersistedSnapshot, RunStore } from './runtime/store.js';
