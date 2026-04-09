@@ -1,21 +1,21 @@
 import { expect, test } from 'vitest';
 import { createAgentMachine } from './index.js';
 
-async function collectSnapshots() {
-  const machine = createAgentMachine({
-    id: 'snapshot-machine',
-    context: () => ({}),
-    initial: 'done',
-    states: {
-      done: {
-        type: 'final',
-        output: () => ({ ok: true }),
-      },
+const machine = createAgentMachine({
+  id: 'snapshot-machine',
+  context: () => ({}),
+  initial: 'done',
+  states: {
+    done: {
+      type: 'final',
+      output: () => ({ ok: true }),
     },
-  });
+  },
+});
 
+async function collectSnapshots(state = machine.getInitialState()) {
   const snaps = [];
-  for await (const snap of machine.stream(machine.getInitialState())) {
+  for await (const snap of machine.stream(state)) {
     snaps.push(snap);
   }
 
@@ -51,8 +51,10 @@ test('stream emits durable snapshots with stable session metadata', async () => 
 });
 
 test('separate machine executions get distinct session ids', async () => {
-  const firstRun = await collectSnapshots();
-  const secondRun = await collectSnapshots();
+  const state = machine.getInitialState();
+  const firstRun = await collectSnapshots(state);
+  const secondRun = await collectSnapshots(state);
 
   expect(firstRun[0]!.sessionId).not.toBe(secondRun[0]!.sessionId);
+  expect(firstRun[0]!.createdAt).not.toBe(secondRun[0]!.createdAt);
 });

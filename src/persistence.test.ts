@@ -16,17 +16,20 @@ test('appends and loads journal events in sequence order', async () => {
 
   expect(await store.loadEvents('session-1')).toEqual([
     {
-      at: 20,
+      sequence: 1,
       type: 'xstate.done.invoke.worker',
+      at: 20,
     },
     {
-      at: 10,
+      sequence: 2,
       type: 'xstate.init',
+      at: 10,
     },
   ]);
 
   expect(await store.loadEvents('session-1', 1)).toEqual([
     {
+      sequence: 2,
       at: 10,
       type: 'xstate.init',
     },
@@ -46,6 +49,9 @@ test('loads the latest saved snapshot', async () => {
       createdAt: 100,
       sessionId: 'session-1',
     },
+    params: {
+      idle: { count: 1 },
+    },
     lastJournalIndex: 1,
     createdAt: 100,
   });
@@ -61,6 +67,9 @@ test('loads the latest saved snapshot', async () => {
       sessionId: 'session-1',
       output: { count: 2 },
     },
+    params: {
+      done: { count: 2 },
+    },
     lastJournalIndex: 3,
     createdAt: 300,
   });
@@ -75,6 +84,9 @@ test('loads the latest saved snapshot', async () => {
       createdAt: 300,
       sessionId: 'session-1',
       output: { count: 2 },
+    },
+    params: {
+      done: { count: 2 },
     },
     lastJournalIndex: 3,
     createdAt: 300,

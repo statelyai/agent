@@ -32,6 +32,7 @@ export type TransitionEvent<
 // ─── Durable Session Vocabulary ───
 
 export type { JournalEvent } from './runtime/events.js';
+export type { JournalEventRecord, PersistedSnapshot, RunStore } from './runtime/store.js';
 
 // ─── Adapter ───
 
@@ -124,8 +125,6 @@ export interface AgentSnapshot<
   output?: unknown;
   error?: unknown;
 }
-
-export type { PersistedSnapshot, RunStore } from './runtime/store.js';
 
 // ─── Agent Machine ───
 

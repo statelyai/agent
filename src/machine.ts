@@ -155,32 +155,19 @@ export function createAgentMachine(
   machineConfig: MachineConfig<any, any, any, any>
 ): AgentMachine {
   const cfg = machineConfig as MachineConfig;
-  const snapshotRuntimeByState = new WeakMap<AgentState, { sessionId: string; createdAt: number }>();
+  let snapshotRunIndex = 0;
 
   function createSnapshotRuntime() {
     const sessionId =
-      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-        ? crypto.randomUUID()
+      typeof globalThis.crypto !== 'undefined' &&
+      typeof globalThis.crypto.randomUUID === 'function'
+        ? globalThis.crypto.randomUUID()
         : `session-${Math.random().toString(36).slice(2)}`;
 
     return {
       sessionId,
-      createdAt: Date.now(),
+      createdAt: Date.now() + snapshotRunIndex++,
     };
-  }
-
-  function getSnapshotRuntime(state: AgentState) {
-    let runtime = snapshotRuntimeByState.get(state);
-    if (!runtime) {
-      runtime = createSnapshotRuntime();
-      snapshotRuntimeByState.set(state, runtime);
-    }
-    return runtime;
-  }
-
-  function bindSnapshotRuntime(state: AgentState, runtime: { sessionId: string; createdAt: number }) {
-    snapshotRuntimeByState.set(state, runtime);
-    return state;
   }
 
   function getInitialState(...args: [input?: unknown]): AgentState {
@@ -411,18 +398,17 @@ export function createAgentMachine(
     state: AgentState
   ): AsyncGenerator<AgentSnapshot> {
     let current = state;
-    const runtime = getSnapshotRuntime(current);
+    const runtime = createSnapshotRuntime();
     yield toSnap(current, runtime);
     while (current.status === 'active') {
       current = await invoke(current);
-      bindSnapshotRuntime(current, runtime);
       yield toSnap(current, runtime);
     }
   }
 
   function toSnap(
     s: AgentState,
-    runtime = getSnapshotRuntime(s)
+    runtime: { sessionId: string; createdAt: number }
   ): AgentSnapshot {
     return {
       value: s.value,

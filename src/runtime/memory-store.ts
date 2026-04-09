@@ -1,11 +1,10 @@
 import type { AgentSnapshot } from '../types.js';
 import type { JournalEvent } from './events.js';
-import type { PersistedSnapshot, RunStore } from './store.js';
-
-type StoredJournalEvent<TEvent extends JournalEvent> = {
-  sequence: number;
-  event: TEvent;
-};
+import type {
+  JournalEventRecord,
+  PersistedSnapshot,
+  RunStore,
+} from './store.js';
 
 function compareSnapshots(
   a: PersistedSnapshot<AgentSnapshot>,
@@ -18,22 +17,20 @@ export function createMemoryRunStore<
   TSnapshot extends AgentSnapshot = AgentSnapshot,
   TEvent extends JournalEvent = JournalEvent,
 >(): RunStore<TSnapshot, TEvent> {
-  const journals = new Map<string, Array<StoredJournalEvent<TEvent>>>();
+  const journals = new Map<string, Array<JournalEventRecord<TEvent>>>();
   const snapshots = new Map<string, PersistedSnapshot<TSnapshot>[]>();
 
   return {
     async append(sessionId, event) {
       const current = journals.get(sessionId) ?? [];
       const sequence = current.length === 0 ? 1 : current[current.length - 1]!.sequence + 1;
-      current.push({ sequence, event });
+      current.push({ ...event, sequence });
       journals.set(sessionId, current);
     },
 
     async loadEvents(sessionId, afterSequence = 0) {
       const events = journals.get(sessionId) ?? [];
-      return events
-        .filter((entry) => entry.sequence > afterSequence)
-        .map((entry) => entry.event);
+      return events.filter((entry) => entry.sequence > afterSequence);
     },
 
     async loadLatestSnapshot(sessionId) {

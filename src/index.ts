@@ -23,6 +23,7 @@ export type {
   ExecuteResult,
   InferOutput,
   JournalEvent,
+  JournalEventRecord,
   MachineConfig,
   PersistedSnapshot,
   RunStore,
