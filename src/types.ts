@@ -29,6 +29,10 @@ export type TransitionEvent<
   ? { type: string; [key: string]: unknown }
   : EventUnion<TEvents>;
 
+// ─── Durable Session Vocabulary ───
+
+export type { JournalEvent } from './runtime/events.js';
+
 // ─── Adapter ───
 
 export interface AgentAdapter {
@@ -115,8 +119,14 @@ export interface AgentSnapshot<
   value: TValue;
   context: TContext;
   status: AgentState['status'];
-  params: Record<string, Record<string, unknown>>;
+  createdAt?: number;
+  sessionId?: string;
+  output?: unknown;
+  error?: unknown;
+  params?: Record<string, Record<string, unknown>>;
 }
+
+export type { PersistedSnapshot, RunStore } from './runtime/store.js';
 
 // ─── Agent Machine ───
 
@@ -194,29 +204,33 @@ export type DecideResultFor<
 }[keyof TOptions & string];
 
 export interface DecideConfig<
+  TContext extends Record<string, unknown> = Record<string, unknown>,
+  TParams extends Record<string, unknown> = Record<string, unknown>,
   TOptions extends Record<string, { description: string; schema?: StandardSchemaV1 }> = Record<string, { description: string; schema?: StandardSchemaV1 }>,
 > {
   model: string;
   adapter?: AgentAdapter;
-  prompt: string | ((args: { context: Record<string, unknown>; params: Record<string, unknown> }) => string);
+  prompt: string | ((args: { context: TContext; params: TParams }) => string);
   options: TOptions;
   reasoning?: boolean;
-  onDone: (args: { result: DecideResultFor<TOptions>; context: Record<string, unknown> }) => TransitionResult;
-  on?: Record<string, (args: { event: any; context: Record<string, unknown> }) => TransitionResult>;
+  onDone: (args: { result: DecideResultFor<TOptions>; context: TContext }) => TransitionResult<TContext>;
+  on?: Record<string, (args: { event: any; context: TContext }) => TransitionResult<TContext>>;
 }
 
 // ─── Classify ───
 
 export interface ClassifyConfig<
+  TContext extends Record<string, unknown> = Record<string, unknown>,
+  TParams extends Record<string, unknown> = Record<string, unknown>,
   TCategories extends Record<string, { description: string }> = Record<string, { description: string }>,
 > {
   model: string;
   adapter?: AgentAdapter;
-  prompt: string | ((args: { context: Record<string, unknown>; params: Record<string, unknown> }) => string);
+  prompt: string | ((args: { context: TContext; params: TParams }) => string);
   into: TCategories;
   examples?: Array<{ input: string; category: keyof TCategories & string }>;
-  onDone: (args: { result: { category: keyof TCategories & string }; context: Record<string, unknown> }) => TransitionResult;
-  on?: Record<string, (args: { event: any; context: Record<string, unknown> }) => TransitionResult>;
+  onDone: (args: { result: { category: keyof TCategories & string }; context: TContext }) => TransitionResult<TContext>;
+  on?: Record<string, (args: { event: any; context: TContext }) => TransitionResult<TContext>>;
 }
 
 // ─── Trace ───

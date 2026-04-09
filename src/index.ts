@@ -7,6 +7,7 @@ export { classify } from './classify.js';
 
 // Adapter
 export { createAdapter } from './adapter.js';
+export { createMemoryRunStore } from './runtime/memory-store.js';
 
 // Types
 export type {
@@ -21,7 +22,10 @@ export type {
   EventUnion,
   ExecuteResult,
   InferOutput,
+  JournalEvent,
   MachineConfig,
+  PersistedSnapshot,
+  RunStore,
   StandardSchemaV1,
   StateConfig,
   Trace,
