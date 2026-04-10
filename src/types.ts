@@ -37,6 +37,10 @@ export interface InvokeEnqueue {
   emit(part: EmittedPart): void;
 }
 
+type IsExactlyUnknown<T> = unknown extends T
+  ? ([T] extends [unknown] ? true : false)
+  : false;
+
 // ─── Durable Session Vocabulary ───
 
 export type { JournalEvent } from './runtime/events.js';
@@ -59,10 +63,32 @@ export interface AgentAdapter {
 
 // ─── Transition ───
 
-export interface TransitionResult<
+export type TransitionResult<
   TContext extends Record<string, unknown> = Record<string, unknown>,
+  TTarget extends string = string,
+  TParamsByTarget extends Record<string, any> = {},
+> =
+  | {
+      target?: undefined;
+      context?: Partial<TContext>;
+      params?: never;
+    }
+  | {
+      [K in TTarget]: {
+        target: K;
+        context?: Partial<TContext>;
+      } & (K extends keyof TParamsByTarget
+        ? IsExactlyUnknown<TParamsByTarget[K]> extends true
+          ? { params?: never }
+          : { params: TParamsByTarget[K] }
+        : { params?: never })
+    }[TTarget];
+
+export interface InitialTransitionResult<
+  TContext extends Record<string, unknown> = Record<string, unknown>,
+  TTarget extends string = string,
 > {
-  target?: string;
+  target: TTarget;
   context?: Partial<TContext>;
   params?: Record<string, unknown>;
 }
@@ -71,6 +97,8 @@ export interface TransitionResult<
 
 export interface StateConfig<
   TContext extends Record<string, unknown> = Record<string, unknown>,
+  TTarget extends string = string,
+  TParamsByTarget extends Record<string, any> = {},
 > {
   type?: 'final' | 'choice';
   paramsSchema?: StandardSchemaV1;
@@ -80,8 +108,8 @@ export interface StateConfig<
     params: Record<string, unknown>;
     signal?: AbortSignal;
   }, enq: InvokeEnqueue) => Promise<unknown>;
-  onDone?: (args: { result: any; context: TContext }) => TransitionResult<TContext>;
-  on?: Record<string, TransitionResult<TContext> | ((args: { event: any; context: TContext }) => TransitionResult<TContext>)>;
+  onDone?: (args: { result: any; context: TContext }) => TransitionResult<TContext, TTarget, TParamsByTarget>;
+  on?: Record<string, TransitionResult<TContext, TTarget, TParamsByTarget> | ((args: { event: any; context: TContext }, enq: InvokeEnqueue) => TransitionResult<TContext, TTarget, TParamsByTarget>)>;
   events?: Record<string, StandardSchemaV1>;
   output?: (args: { context: TContext }) => unknown;
   // choice-specific
@@ -252,14 +280,16 @@ export interface DecideConfig<
   TContext extends Record<string, unknown> = Record<string, unknown>,
   TParams extends Record<string, unknown> = Record<string, unknown>,
   TOptions extends Record<string, { description: string; schema?: StandardSchemaV1 }> = Record<string, { description: string; schema?: StandardSchemaV1 }>,
+  TTarget extends string = string,
+  TParamsByTarget extends Record<string, any> = {},
 > {
   model: string;
   adapter?: AgentAdapter;
   prompt: string | ((args: { context: TContext; params: TParams }) => string);
   options: TOptions;
   reasoning?: boolean;
-  onDone: (args: { result: DecideResultFor<TOptions>; context: TContext }) => TransitionResult<TContext>;
-  on?: Record<string, (args: { event: any; context: TContext }) => TransitionResult<TContext>>;
+  onDone: (args: { result: DecideResultFor<TOptions>; context: TContext }) => TransitionResult<TContext, TTarget, TParamsByTarget>;
+  on?: Record<string, (args: { event: any; context: TContext }, enq: InvokeEnqueue) => TransitionResult<TContext, TTarget, TParamsByTarget>>;
 }
 
 // ─── Classify ───
@@ -268,14 +298,16 @@ export interface ClassifyConfig<
   TContext extends Record<string, unknown> = Record<string, unknown>,
   TParams extends Record<string, unknown> = Record<string, unknown>,
   TCategories extends Record<string, { description: string }> = Record<string, { description: string }>,
+  TTarget extends string = string,
+  TParamsByTarget extends Record<string, any> = {},
 > {
   model: string;
   adapter?: AgentAdapter;
   prompt: string | ((args: { context: TContext; params: TParams }) => string);
   into: TCategories;
   examples?: Array<{ input: string; category: keyof TCategories & string }>;
-  onDone: (args: { result: { category: keyof TCategories & string }; context: TContext }) => TransitionResult<TContext>;
-  on?: Record<string, (args: { event: any; context: TContext }) => TransitionResult<TContext>>;
+  onDone: (args: { result: { category: keyof TCategories & string }; context: TContext }) => TransitionResult<TContext, TTarget, TParamsByTarget>;
+  on?: Record<string, (args: { event: any; context: TContext }, enq: InvokeEnqueue) => TransitionResult<TContext, TTarget, TParamsByTarget>>;
 }
 
 // ─── Trace ───

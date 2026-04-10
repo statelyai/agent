@@ -1,4 +1,34 @@
-import type { ClassifyConfig } from './types.js';
+import type {
+  AgentAdapter,
+  InvokeEnqueue,
+  StateConfig,
+  TransitionResult,
+} from './types.js';
+
+type TransitionTargetOf<T> = T extends { target?: infer TTarget }
+  ? Extract<TTarget, string>
+  : never;
+
+type HandlerTargetOf<T> = T extends (...args: any[]) => infer TResult
+  ? TransitionTargetOf<TResult>
+  : TransitionTargetOf<T>;
+
+type OnTargets<TOn> = TOn extends Record<string, infer THandler>
+  ? HandlerTargetOf<THandler>
+  : never;
+
+type ClassifyStateConfig<
+  TContext extends Record<string, unknown>,
+  TTarget extends string,
+  TParamsByTarget extends Record<string, any>,
+> = Pick<
+  StateConfig<TContext, TTarget, TParamsByTarget>,
+  'on'
+> & {
+  __type: 'classify';
+  __classifyConfig: Record<string, unknown>;
+  __decideConfig: Record<string, unknown>;
+};
 
 /**
  * Create a classification state. Sugar over `decide` for simple routing —
@@ -6,12 +36,37 @@ import type { ClassifyConfig } from './types.js';
  *
  * `result.category` is typed as a union of the `into` keys.
  *
- * Note: context in prompt callback is untyped. For typed context, use
- * inline `type: 'choice'` instead.
  */
 export function classify<
+  TContext extends Record<string, unknown>,
   const TCategories extends Record<string, { description: string }>,
->(config: ClassifyConfig<TCategories>): any {
+  TParams extends Record<string, unknown> = Record<string, unknown>,
+  TTarget extends string = string,
+  TParamsByTarget extends Record<string, any> = {},
+>(
+  config: {
+    model: string;
+    adapter?: AgentAdapter;
+    prompt: string | ((args: { context: TContext; params: TParams }) => string);
+    into: TCategories;
+    examples?: Array<{ input: string; category: keyof TCategories & string }>;
+    onDone: (args: {
+      result: { category: keyof TCategories & string };
+      context: TContext;
+    }) => TransitionResult<TContext, TTarget, TParamsByTarget>;
+    on?: Record<
+      string,
+      (
+        args: { event: any; context: TContext },
+        enq: InvokeEnqueue
+      ) => TransitionResult<TContext, TTarget, TParamsByTarget>
+    >;
+  }
+): ClassifyStateConfig<
+  TContext,
+  TTarget,
+  TParamsByTarget
+> {
   const decideOptions: Record<string, { description: string }> = {};
   for (const [key, val] of Object.entries(config.into)) {
     decideOptions[key] = { description: val.description };
@@ -19,7 +74,7 @@ export function classify<
 
   return {
     __type: 'classify',
-    __classifyConfig: config,
+    __classifyConfig: config as unknown as Record<string, unknown>,
     __decideConfig: {
       model: config.model,
       adapter: config.adapter,
@@ -32,6 +87,10 @@ export function classify<
         });
       },
     },
-    on: config.on,
+    on: config.on as StateConfig<
+      TContext,
+      TTarget,
+      TParamsByTarget
+    >['on'],
   };
 }

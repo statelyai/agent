@@ -9,6 +9,7 @@ import type {
   RestoreSessionOptions,
   SessionOptions,
 } from '../types.js';
+import { isReservedInternalEventType } from '../utils.js';
 
 type SnapshotRuntime = {
   sessionId: string;
@@ -23,6 +24,16 @@ type RuntimeMachine = AgentMachine & {
       state: AgentState,
       onEmit?: (part: EmittedPart) => void
     ): Promise<JournalEvent | null>;
+    resolveEffectTransition(
+      state: AgentState,
+      effectEvent: JournalEvent,
+      onEmit?: (part: EmittedPart) => void
+    ): { event: JournalEvent; next: AgentState };
+    transitionWithEffects(
+      state: AgentState,
+      event: { type: string; [key: string]: unknown },
+      onEmit?: (part: EmittedPart) => void
+    ): { next: AgentState; emitted: EmittedPart[] };
   };
 };
 
@@ -35,8 +46,8 @@ type RunState = {
 
 function createSessionId(): string {
   if (
-    typeof globalThis.crypto !== 'undefined' &&
-    typeof globalThis.crypto.randomUUID === 'function'
+    typeof globalThis.crypto !== 'undefined'
+    && typeof globalThis.crypto.randomUUID === 'function'
   ) {
     return globalThis.crypto.randomUUID();
   }
@@ -69,6 +80,62 @@ function createRun(
   runState: RunState,
   emitter = createRunEmitter()
 ): AgentRun {
+  let releaseStart!: () => void;
+  let operation = new Promise<void>((resolve) => {
+    releaseStart = resolve;
+  });
+  let startScheduled = false;
+  let terminalEmitted = false;
+
+  function emitPart(part: EmittedPart) {
+    emitter.emit('part', part);
+    emitter.emit(part.type, part);
+  }
+
+  function enqueue<T>(op: () => Promise<T>): Promise<T> {
+    const result = operation.then(op);
+    operation = result.then(
+      () => undefined,
+      () => undefined
+    );
+
+    return result;
+  }
+
+  function emitTerminalIfNeeded() {
+    if (terminalEmitted) {
+      return;
+    }
+
+    if (runState.snapshot.status === 'done') {
+      terminalEmitted = true;
+      emitter.emit('runtime', {
+        type: 'session.completed',
+        sessionId: runState.runtime.sessionId,
+        at: Date.now(),
+      });
+      emitter.emit('done', {
+        output: runState.snapshot.output,
+        snapshot: runState.snapshot,
+      });
+      return;
+    }
+
+    if (runState.snapshot.status === 'error') {
+      terminalEmitted = true;
+      emitter.emit('runtime', {
+        type: 'session.failed',
+        sessionId: runState.runtime.sessionId,
+        error: runState.snapshot.error,
+        at: Date.now(),
+      });
+      emitter.emit('error', {
+        error: runState.snapshot.error,
+        snapshot: runState.snapshot,
+      });
+    }
+  }
+
   async function persistSnapshot() {
     runState.snapshot = runtimeMachine.__runtime.toSnapshot(
       runState.current,
@@ -86,8 +153,10 @@ function createRun(
       type: 'snapshot.persisted',
       sessionId: runState.runtime.sessionId,
       afterSequence: runState.lastSequence,
+      at: Date.now(),
     });
     emitter.emit('state', runState.snapshot);
+    emitTerminalIfNeeded();
   }
 
   async function appendMachineEvent(event: JournalEvent) {
@@ -103,15 +172,19 @@ function createRun(
     while (runState.current.status === 'active') {
       const effectEvent = await runtimeMachine.__runtime.getEffectEvent(
         runState.current,
-        (part) => {
-          emitter.emit(part.type, part);
-        }
+        emitPart
       );
 
       if (effectEvent) {
-        await appendMachineEvent(effectEvent);
+        const resolved = runtimeMachine.__runtime.resolveEffectTransition(
+          runState.current,
+          effectEvent,
+          emitPart
+        );
+
+        await appendMachineEvent(resolved.event);
         runState.current = runtimeMachine.__runtime.withRuntimeMetadata(
-          machine.transition(runState.current, effectEvent),
+          resolved.next,
           runState.runtime
         );
         await persistSnapshot();
@@ -124,6 +197,20 @@ function createRun(
       );
       await persistSnapshot();
     }
+  }
+
+  function scheduleStart() {
+    if (startScheduled) {
+      return;
+    }
+
+    startScheduled = true;
+    void enqueue(async () => {
+      await settle();
+    });
+    queueMicrotask(() => {
+      releaseStart();
+    });
   }
 
   return {
@@ -140,16 +227,28 @@ function createRun(
     },
 
     async send(event) {
-      const journalEvent = toJournalEvent(event);
-      const next = machine.transition(runState.current, journalEvent);
+      if (isReservedInternalEventType(event.type)) {
+        throw new Error(
+          `Cannot send reserved internal event '${event.type}' to a session`
+        );
+      }
 
-      await appendMachineEvent(journalEvent);
-      runState.current = runtimeMachine.__runtime.withRuntimeMetadata(
-        next,
-        runState.runtime
-      );
-      await persistSnapshot();
-      await settle();
+      return enqueue(async () => {
+        const journalEvent = toJournalEvent(event);
+        const next = runtimeMachine.__runtime.transitionWithEffects(
+          runState.current,
+          journalEvent,
+          emitPart
+        ).next;
+
+        await appendMachineEvent(journalEvent);
+        runState.current = runtimeMachine.__runtime.withRuntimeMetadata(
+          next,
+          runState.runtime
+        );
+        await persistSnapshot();
+        await settle();
+      });
     },
 
     on(type, handler) {
@@ -163,12 +262,14 @@ function createRun(
 
     /** @internal */
     async __settle() {
-      await settle();
+      await enqueue(async () => {
+        await settle();
+      });
     },
 
     /** @internal */
-    __emit(type: string, event: unknown) {
-      emitter.emit(type, event);
+    __scheduleStart() {
+      scheduleStart();
     },
   } as AgentRun;
 }
@@ -198,7 +299,7 @@ export async function startSession(
   ) as AgentRun & {
     __persistCurrent(): Promise<void>;
     __settle(): Promise<void>;
-    __emit(type: string, event: unknown): void;
+    __scheduleStart(): void;
   };
 
   const initEvent = {
@@ -208,14 +309,9 @@ export async function startSession(
   } satisfies JournalEvent;
   const record = await options.store.append(runtime.sessionId, initEvent);
   runState.lastSequence = record.sequence;
-  run.__emit('machine.event', { ...initEvent, sequence: record.sequence });
-  run.__emit('runtime', {
-    type: 'session.started',
-    sessionId: runtime.sessionId,
-  });
 
   await run.__persistCurrent();
-  await run.__settle();
+  run.__scheduleStart();
 
   return run;
 }
@@ -258,21 +354,14 @@ export async function restoreSession(
   ) as AgentRun & {
     __persistCurrent(): Promise<void>;
     __settle(): Promise<void>;
-    __emit(type: string, event: unknown): void;
+    __scheduleStart(): void;
   };
-
-  if (initEvent && !persisted) {
-    run.__emit('machine.event', initEvent);
-  }
 
   const replayTail = await options.store.loadEvents(
     options.sessionId,
     runState.lastSequence
   );
-
-  if (!persisted) {
-    run.__emit('state', runState.snapshot);
-  }
+  let replayed = false;
 
   for (const event of replayTail) {
     runState.current = runtimeMachine.__runtime.withRuntimeMetadata(
@@ -284,22 +373,13 @@ export async function restoreSession(
       runState.current,
       runState.runtime
     );
-    run.__emit('machine.event', event);
-    run.__emit('state', runState.snapshot);
+    replayed = true;
   }
 
-  if (persisted) {
-    run.__emit('state', runState.snapshot);
+  if (!persisted || replayed) {
+    await run.__persistCurrent();
   }
-
-  run.__emit('runtime', {
-    type: 'session.restored',
-    sessionId: runState.runtime.sessionId,
-    afterSequence: runState.lastSequence,
-  });
-
-  await run.__persistCurrent();
-  await run.__settle();
+  run.__scheduleStart();
 
   return run;
 }

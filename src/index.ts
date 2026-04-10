@@ -4,6 +4,12 @@ export { createAgentMachine } from './machine.js';
 // AI primitives
 export { decide } from './decide.js';
 export { classify } from './classify.js';
+export { createReactAgent } from './prebuilt/react.js';
+export type {
+  ReactAgentMessage,
+  ReactAgentModelResult,
+  ReactTool,
+} from './prebuilt/react.js';
 
 // Adapter
 export { createAdapter } from './adapter.js';

@@ -6,6 +6,18 @@ import {
   startSession,
 } from './index.js';
 
+function once<T = unknown>(
+  run: { on(type: string, handler: (event: unknown) => void): () => void },
+  type: string
+) {
+  return new Promise<T>((resolve) => {
+    const off = run.on(type, (event) => {
+      off();
+      resolve(event as T);
+    });
+  });
+}
+
 test('invoke success is journaled as an internal machine event', async () => {
   const machine = createAgentMachine({
     id: 'invoke-success',
@@ -29,6 +41,7 @@ test('invoke success is journaled as an internal machine event', async () => {
 
   const store = createMemoryRunStore();
   const run = await startSession(machine, { store });
+  await once(run, 'done');
   const journal = await store.loadEvents(run.sessionId);
 
   expect(run.getSnapshot()).toEqual(
@@ -65,6 +78,7 @@ test('invoke failure is journaled as an internal machine event', async () => {
 
   const store = createMemoryRunStore();
   const run = await startSession(machine, { store });
+  await once(run, 'error');
   const journal = await store.loadEvents(run.sessionId);
 
   expect(run.getSnapshot()).toEqual(
@@ -83,4 +97,41 @@ test('invoke failure is journaled as an internal machine event', async () => {
       error: expect.objectContaining({ message: 'boom' }),
     }),
   ]);
+});
+
+test('invalid invoke results fail without journaling a done event', async () => {
+  const machine = createAgentMachine({
+    id: 'invoke-invalid-result',
+    context: () => ({ count: 0 }),
+    initial: 'processing',
+    states: {
+      processing: {
+        resultSchema: z.object({ value: z.string() }),
+        invoke: async () => ({ value: 42 } as unknown as { value: string }),
+      },
+    },
+  });
+
+  const store = createMemoryRunStore();
+  const run = await startSession(machine, { store });
+  await once(run, 'error');
+  const journal = await store.loadEvents(run.sessionId);
+
+  expect(journal.map((event) => event.type)).toEqual([
+    'xstate.init',
+    'xstate.error.invoke.processing',
+  ]);
+  expect(journal).not.toContainEqual(
+    expect.objectContaining({
+      type: 'xstate.done.invoke.processing',
+    })
+  );
+  expect(run.getSnapshot()).toEqual(
+    expect.objectContaining({
+      status: 'error',
+      error: expect.objectContaining({
+        message: expect.stringContaining('Validation failed'),
+      }),
+    })
+  );
 });

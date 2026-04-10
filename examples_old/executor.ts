@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { fromTerminal } from './helpers/helpers';
 
 const agent = createAgent({
-  model: openai('gpt-4o-mini'),
+  model: openai('gpt-5.4-nano'),
   events: {
     getTime: z.object({}).describe('Get the current time'),
     other: z.object({}).describe('Do something else'),

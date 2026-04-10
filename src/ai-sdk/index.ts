@@ -1,4 +1,4 @@
-import { generateObject } from 'ai';
+import { generateText, Output } from 'ai';
 import { z } from 'zod';
 import type { AgentAdapter, StandardSchemaV1 } from '../types.js';
 
@@ -10,57 +10,69 @@ import type { AgentAdapter, StandardSchemaV1 } from '../types.js';
 export function createAiSdkAdapter(): AgentAdapter {
   return {
     async decide({ model, prompt, options, reasoning }) {
-      // Build the discriminated union schema for options
       const optionKeys = Object.keys(options);
+      const allSchemaLess = Object.values(options).every((option) => !option.schema);
 
-      // Build per-option schemas
-      const optionSchemas: Record<string, z.ZodType> = {};
-      for (const [key, opt] of Object.entries(options)) {
-        if (opt.schema) {
-          // Use the provided schema as the data shape
-          optionSchemas[key] = z.object({
-            choice: z.literal(key),
-            data: toZodSchema(opt.schema),
-            ...(reasoning ? { reasoning: z.string().describe('Chain-of-thought reasoning for this decision') } : {}),
-          });
-        } else {
-          optionSchemas[key] = z.object({
-            choice: z.literal(key),
-            data: z.object({}),
-            ...(reasoning ? { reasoning: z.string().describe('Chain-of-thought reasoning for this decision') } : {}),
-          });
-        }
+      if (allSchemaLess && !reasoning) {
+        const optionDescriptions = Object.entries(options)
+          .map(([key, opt]) => `- ${key}: ${opt.description}`)
+          .join('\n');
+
+        const result = await generateText({
+          model: resolveModel(model),
+          system: `You must choose exactly one of the following options:\n${optionDescriptions}`,
+          prompt,
+          output: Output.choice({
+            options: optionKeys,
+          }),
+        });
+
+        return {
+          choice: result.output,
+          data: {},
+        };
       }
 
-      // Build the union schema
-      const schemas = optionKeys.map((k) => optionSchemas[k]!);
+      const optionSchemas: z.ZodTypeAny[] = [];
+      for (const [key, opt] of Object.entries(options)) {
+        optionSchemas.push(
+          z.object({
+            decision: z.literal(key),
+            data: opt.schema ? toZodSchema(opt.schema) : z.object({}),
+            ...(reasoning ? { reasoning: z.string() } : {}),
+          })
+        );
+      }
+
+      const schemas = optionSchemas;
       const schema =
         schemas.length === 1
           ? schemas[0]!
           : z.union(schemas as [z.ZodType, z.ZodType, ...z.ZodType[]]);
 
-      // Build the system prompt with option descriptions
       const optionDescriptions = Object.entries(options)
         .map(([key, opt]) => `- ${key}: ${opt.description}`)
         .join('\n');
 
-      const systemPrompt = `You must choose exactly one of the following options:\n${optionDescriptions}\n\nRespond with your choice and any required data.`;
+      const systemPrompt = `You must choose exactly one of the following options:\n${optionDescriptions}\n\nRespond with structured output containing the chosen decision and any required data.`;
 
-      const result = await generateObject({
+      const result = await generateText({
         model: resolveModel(model),
         system: systemPrompt,
         prompt,
-        schema,
+        output: Output.object({
+          schema,
+        }),
       });
 
-      const obj = result.object as {
-        choice: string;
+      const obj = result.output as {
+        decision: string;
         data: Record<string, unknown>;
         reasoning?: string;
       };
 
       return {
-        choice: obj.choice,
+        choice: obj.decision,
         data: obj.data ?? {},
         reasoning: obj.reasoning,
       };
@@ -86,7 +98,7 @@ function toZodSchema(schema: StandardSchemaV1): z.ZodType {
  * Resolve a model string to an AI SDK model.
  * Supports the `provider/model` format via the AI SDK registry.
  */
-function resolveModel(model: string): Parameters<typeof generateObject>[0]['model'] {
+function resolveModel(model: string): Parameters<typeof generateText>[0]['model'] {
   // The AI SDK accepts model strings when using a provider registry.
   // For now, return as-is — users configure their provider registry externally.
   return model as any;

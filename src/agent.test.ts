@@ -41,7 +41,7 @@ function createSimpleMachine() {
     states: {
       idle: {
         on: {
-          start: () => ({ target: 'running' }),
+          start: ({ target: 'running' }),
         },
       },
       running: {
@@ -156,7 +156,6 @@ function createDecideMachine(adapter: AgentAdapter) {
     states: {
       classifying: decide({
         model: 'test-model',
-        // context is Record<string, unknown> here, not typed from context!!
         prompt: ({ context }) => `Classify: ${context.issue}`,
         options: {
           billing: { description: 'Billing issues' },
@@ -166,14 +165,12 @@ function createDecideMachine(adapter: AgentAdapter) {
         onDone: ({ result }) => ({
           target: 'handling',
           context: { category: result.choice },
-          params: { category: result.choice },
         }),
       }),
       handling: {
-        paramsSchema: z.object({ category: z.string() }),
         resultSchema: z.object({ resolution: z.string() }),
-        invoke: async ({ context, params }) => ({
-          resolution: `Handled ${params.category} issue`,
+        invoke: async ({ context }) => ({
+          resolution: `Handled ${context.category} issue`,
         }),
         onDone: ({ result }) => ({
           target: 'done',
@@ -260,7 +257,8 @@ describe('getInitialState', () => {
   test('rejects invalid input', () => {
     const machine = createHitlMachine();
     // Runtime validation catches invalid input (schemas.input validates)
-    expect(() => machine.getInitialState({ task: 123 })).toThrow();
+    const invalidInput = { task: 123 } as unknown as { task: string };
+    expect(() => machine.getInitialState(invalidInput)).toThrow();
   });
 
   test('resolves string initial', () => {
@@ -780,13 +778,13 @@ describe('type inference', () => {
       },
     });
 
-    // @ts-expect-error — 'foo' not a valid context key
     createAgentMachine({
       id: 't2',
       schemas: { events: { go: z.object({}) } },
       context: () => ({ count: 0 }),
       initial: 'idle',
       states: {
+        // @ts-expect-error — 'foo' not a valid context key
         idle: {
           on: {
             go: () => ({
@@ -922,6 +920,33 @@ describe('type inference', () => {
     // @ts-expect-error — 'nope' does not exist
     s.context.nope;
     expect(s.context.count).toBe(5);
+  });
+
+  test('schemas.input alone drives context input typing', () => {
+    const machine = createAgentMachine({
+      id: 't-input-only',
+      schemas: {
+        input: z.object({ message: z.string() }),
+      },
+      context: (input) => {
+        input.message satisfies string;
+        // @ts-expect-error — 'nope' does not exist on input
+        input.nope;
+        return { message: input.message, count: 0 };
+      },
+      initial: 'idle',
+      states: {
+        idle: {
+          type: 'final',
+        },
+      },
+    });
+
+    machine.getInitialState({ message: 'hello' });
+    if (false) {
+      // @ts-expect-error — message must be string
+      machine.getInitialState({ message: 123 });
+    }
   });
 
   // ─── schemas.events ───

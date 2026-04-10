@@ -5,30 +5,33 @@ import {
   createMemoryRunStore,
   restoreSession,
   startSession,
-} from './index.js';
+} from '../index.js';
 
-test('restoreSession reconstructs from the latest snapshot plus replay tail', async () => {
+test('persists and restores a long-running approval workflow', async () => {
   const machine = createAgentMachine({
-    id: 'restore-session',
-    context: () => ({ approved: false, result: null as string | null }),
+    id: 'langgraph-equivalent-persistence',
+    context: () => ({
+      approved: false,
+      summary: null as string | null,
+    }),
     initial: 'review',
     states: {
       review: {
         on: {
           approve: {
-            target: 'processing',
+            target: 'summarize',
             context: { approved: true },
           },
         },
       },
-      processing: {
-        resultSchema: z.object({ value: z.string() }),
+      summarize: {
+        resultSchema: z.object({ summary: z.string() }),
         invoke: async ({ context }) => ({
-          value: context.approved ? 'approved' : 'rejected',
+          summary: context.approved ? 'approved summary' : 'rejected summary',
         }),
         onDone: ({ result }) => ({
           target: 'done',
-          context: { result: result.value },
+          context: { summary: result.summary },
         }),
       },
       done: {
@@ -59,19 +62,27 @@ test('restoreSession reconstructs from the latest snapshot plus replay tail', as
   const liveRun = await startSession(machine, { store });
   await liveRun.send({ type: 'approve' });
 
-  expect(await store.loadLatestSnapshot(liveRun.sessionId)).toEqual(
-    expect.objectContaining({
-      afterSequence: 1,
-    })
-  );
-
   const restoredRun = await restoreSession(machine, {
     sessionId: liveRun.sessionId,
     store,
   });
+
   await vi.waitFor(() => {
     expect(restoredRun.getSnapshot()).toEqual(liveRun.getSnapshot());
   });
 
-  expect(restoredRun.getSnapshot()).toEqual(liveRun.getSnapshot());
+  expect(restoredRun.getSnapshot()).toEqual(
+    expect.objectContaining({
+      value: 'done',
+      status: 'done',
+      context: {
+        approved: true,
+        summary: 'approved summary',
+      },
+      output: {
+        approved: true,
+        summary: 'approved summary',
+      },
+    })
+  );
 });

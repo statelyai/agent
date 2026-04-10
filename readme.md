@@ -7,4 +7,20 @@ Stately Agent is a flexible framework for building AI agents using state machine
 - Enabling custom **planning** abilities for agents to achieve specific goals based on state machine logic, observations, and feedback
 - First-class integration with the [Vercel AI SDK](https://sdk.vercel.ai/) to easily support multiple model providers, such as OpenAI, Anthropic, Google, Mistral, Groq, Perplexity, and more
 
+## Examples
+
+The examples in [`examples/`](/Users/davidkpiano/Code/agent/examples) are intentionally small, run in the CLI, and use real OpenAI calls when `OPENAI_API_KEY` is set.
+
+Run them with `node --import tsx examples/<name>.ts`.
+
+Each example demonstrates one concept:
+
+- [`examples/simple.ts`](/Users/davidkpiano/Code/agent/examples/simple.ts): the smallest `createAgentMachine(...)` flow with an `invoke` state that makes a real LLM call
+- [`examples/hitl.ts`](/Users/davidkpiano/Code/agent/examples/hitl.ts): a human-in-the-loop machine that pauses in a pending state, accepts typed events, and drafts with an LLM after approval
+- [`examples/decide.ts`](/Users/davidkpiano/Code/agent/examples/decide.ts): choosing the next branch with structured branch-specific payloads
+- [`examples/classify.ts`](/Users/davidkpiano/Code/agent/examples/classify.ts): routing into a fixed category set when you only need a label
+- [`examples/adapter.ts`](/Users/davidkpiano/Code/agent/examples/adapter.ts): plugging in a custom adapter that still uses a real OpenAI model under the hood
+
+Use `classify(...)` when the result is just "what kind of thing is this?" Use `decide(...)` when the result is "what should happen next?" and the chosen branch may need structured data.
+
 **Read the documentation: [stately.ai/docs/agents](https://stately.ai/docs/agents)**

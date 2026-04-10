@@ -1,11 +1,21 @@
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
+import { z } from 'zod';
 import {
   createAgentMachine,
   createMemoryRunStore,
   startSession,
 } from './index.js';
 
-test('startSession creates a session and persists xstate.init', async () => {
+function deferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve;
+  });
+
+  return { promise, resolve };
+}
+
+test('startSession creates a session, persists xstate.init, and returns before start effects run', async () => {
   const machine = createAgentMachine({
     id: 'session-runtime',
     context: () => ({ count: 0 }),
@@ -33,16 +43,23 @@ test('startSession creates a session and persists xstate.init', async () => {
   const persisted = await store.loadLatestSnapshot(run.sessionId);
 
   expect(run.sessionId).toBe(snapshot.sessionId);
-  expect(run.status).toBe('pending');
   expect(snapshot).toEqual(
     expect.objectContaining({
       sessionId: run.sessionId,
       value: 'idle',
-      status: 'pending',
+      status: 'active',
       context: { count: 0 },
       params: {},
     })
   );
+  await vi.waitFor(() => {
+    expect(run.getSnapshot()).toEqual(
+      expect.objectContaining({
+        value: 'idle',
+        status: 'pending',
+      })
+    );
+  });
   expect(journal).toEqual([
     expect.objectContaining({
       sequence: 1,
@@ -57,4 +74,111 @@ test('startSession creates a session and persists xstate.init', async () => {
       snapshot,
     })
   );
+});
+
+test('serializes concurrent sends so each event applies from the latest snapshot', async () => {
+  const gates = [deferred(), deferred()];
+  let invocations = 0;
+  const machine = createAgentMachine({
+    id: 'serialized-send',
+    schemas: {
+      events: {
+        increment: z.object({ amount: z.number() }),
+      },
+    },
+    context: () => ({ count: 0 }),
+    initial: 'ready',
+    states: {
+      ready: {
+        on: {
+          increment: ({ event, context }) => ({
+            target: 'working',
+            context: { count: context.count + event.amount },
+          }),
+        },
+      },
+      working: {
+        resultSchema: z.object({ count: z.number() }),
+        invoke: async ({ context }) => {
+          const gate = gates[invocations++]!;
+          await gate.promise;
+          return { count: context.count };
+        },
+        onDone: ({ result }) => ({
+          target: 'ready',
+          context: { count: result.count },
+        }),
+      },
+    },
+  });
+
+  const run = await startSession(machine, { store: createMemoryRunStore() });
+  await vi.waitFor(() => {
+    expect(run.getSnapshot()).toEqual(
+      expect.objectContaining({
+        value: 'ready',
+        status: 'pending',
+      })
+    );
+  });
+
+  const first = run.send({ type: 'increment', amount: 1 });
+  const second = run.send({ type: 'increment', amount: 10 });
+
+  await vi.waitFor(() => {
+    expect(invocations).toBe(1);
+  });
+
+  gates[0]!.resolve();
+  await first;
+  await vi.waitFor(() => {
+    expect(invocations).toBe(2);
+  });
+
+  gates[1]!.resolve();
+  await second;
+
+  expect(run.getSnapshot()).toEqual(
+    expect.objectContaining({
+      value: 'ready',
+      status: 'pending',
+      context: { count: 11 },
+    })
+  );
+});
+
+test('rejects reserved internal events from run.send', async () => {
+  const machine = createAgentMachine({
+    id: 'reserved-events',
+    context: () => ({ count: 0 }),
+    initial: 'ready',
+    states: {
+      ready: {
+        on: {
+          go: { target: 'done' },
+        },
+      },
+      done: { type: 'final' },
+    },
+  });
+
+  const run = await startSession(machine, { store: createMemoryRunStore() });
+  await vi.waitFor(() => {
+    expect(run.getSnapshot()).toEqual(
+      expect.objectContaining({
+        value: 'ready',
+        status: 'pending',
+      })
+    );
+  });
+
+  await expect(run.send({ type: 'xstate.init' })).rejects.toThrow(
+    /reserved internal event/i
+  );
+  await expect(
+    run.send({ type: 'xstate.done.invoke.worker' })
+  ).rejects.toThrow(/reserved internal event/i);
+  await expect(
+    run.send({ type: 'xstate.error.invoke.worker' })
+  ).rejects.toThrow(/reserved internal event/i);
 });

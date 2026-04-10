@@ -1,5 +1,6 @@
 import type {
   AgentState,
+  InitialTransitionResult,
   MachineConfig,
   StandardSchemaResult,
   StandardSchemaV1,
@@ -54,7 +55,7 @@ export type StateConfigAny = {
     enq: { emit(part: { type: string; [key: string]: unknown }): void }
   ) => Promise<unknown>;
   onDone?: (args: { result: unknown; context: Record<string, unknown> }) => TransitionResult;
-  on?: Record<string, TransitionResult | ((args: { event: Record<string, unknown>; context: Record<string, unknown> }) => TransitionResult)>;
+  on?: Record<string, TransitionResult | ((args: { event: Record<string, unknown>; context: Record<string, unknown> }, enq: { emit(part: { type: string; [key: string]: unknown }): void }) => TransitionResult)>;
   output?: (args: { context: Record<string, unknown> }) => unknown;
   resultSchema?: StandardSchemaV1;
   model?: string;
@@ -86,12 +87,12 @@ export function resolveInitial(
     | ((args: {
         context: Record<string, unknown>;
         params: Record<string, unknown>;
-      }) => TransitionResult),
+      }) => InitialTransitionResult),
   args: {
     context: Record<string, unknown>;
     params: Record<string, unknown>;
   }
-): TransitionResult {
+): InitialTransitionResult {
   if (typeof initial === 'string') {
     return { target: initial };
   }
@@ -203,6 +204,14 @@ export function isErrorInvokeEventType(
   eventType: string
 ): boolean {
   return eventType === `xstate.error.invoke.${stateValue}`;
+}
+
+export function isReservedInternalEventType(eventType: string): boolean {
+  return (
+    eventType === 'xstate.init'
+    || eventType.startsWith('xstate.done.invoke.')
+    || eventType.startsWith('xstate.error.invoke.')
+  );
 }
 
 export function serializeError(error: unknown): unknown {

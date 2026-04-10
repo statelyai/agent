@@ -46,7 +46,10 @@ type StateNodeDef<
   TParams,
   TResult,
   TEvents,
-> = {
+  TTarget extends string,
+  TParamsMap extends Record<string, any>,
+> =
+  | {
   type?: 'final' | 'choice';
   paramsSchema?: StandardSchemaV1<TParams>;
   resultSchema?: StandardSchemaV1<TResult>;
@@ -55,11 +58,11 @@ type StateNodeDef<
     params: NoInfer<TParams>;
     signal?: AbortSignal;
   }, enq: { emit(part: EmittedPart): void }) => Promise<NoInfer<TResult>>;
-  onDone?: (args: { result: OnDoneResult<TResult>; context: TContext }) => TransitionResult<TContext>;
-  on?: { [E in keyof TEvents & string]?: TransitionResult<TContext> | ((args: {
+  onDone?: (args: { result: OnDoneResult<TResult>; context: TContext }) => TransitionResult<TContext, TTarget, TParamsMap>;
+  on?: { [E in keyof TEvents & string]?: TransitionResult<TContext, TTarget, TParamsMap> | ((args: {
       event: EventFor<TEvents, E>;
       context: TContext;
-    }) => TransitionResult<TContext>) };
+    }, enq: { emit(part: EmittedPart): void }) => TransitionResult<TContext, TTarget, TParamsMap>) };
   events?: Record<string, StandardSchemaV1>;
   output?: (args: { context: TContext }) => unknown;
   // choice-specific
@@ -71,7 +74,13 @@ type StateNodeDef<
   // internal
   __type?: 'decide' | 'classify';
   __decideConfig?: Record<string, unknown>;
-};
+}
+  | {
+    on?: StateConfigAny['on'];
+    __type: 'decide' | 'classify';
+    __decideConfig: Record<string, unknown>;
+    __classifyConfig?: Record<string, unknown>;
+  };
 
 type StatesMap<
   TContext extends Record<string, unknown>,
@@ -79,7 +88,14 @@ type StatesMap<
   TResultMap extends Record<string, any>,
   TEvents,
 > = {
-  [K in keyof TParamsMap & keyof TResultMap]: StateNodeDef<TContext, TParamsMap[K], TResultMap[K], TEvents>;
+  [K in keyof TParamsMap & keyof TResultMap]: StateNodeDef<
+    TContext,
+    TParamsMap[K],
+    TResultMap[K],
+    TEvents,
+    keyof TParamsMap & keyof TResultMap & string,
+    TParamsMap
+  >;
 };
 
 // ─── Overload A: schemas.context present ───
@@ -248,10 +264,59 @@ export function createAgentMachine(
     state: AgentState,
     event: { type: string; [k: string]: unknown }
   ): AgentState {
+    return transitionWithEffects(state, event).next;
+  }
+
+  function transitionWithEffects(
+    state: AgentState,
+    event: { type: string; [k: string]: unknown },
+    onEmit?: (part: EmittedPart) => void
+  ): { next: AgentState; emitted: EmittedPart[] } {
+    const emitted: EmittedPart[] = [];
+    const enqueue = createEnqueue((part) => {
+      emitted.push(part);
+      onEmit?.(part);
+    });
     const sc = resolveStateConfig(cfg, state.value);
-    const effectiveConfig = sc.__decideConfig
-      ? { ...sc, ...(sc.__decideConfig as Record<string, unknown>) }
-      : sc;
+    const effectiveConfig = getEffectiveStateConfig(state.value);
+
+    function applyResult(
+      result: TransitionResult,
+      status = state.status
+    ): AgentState {
+      if (result.target) {
+        return applyTransition(state, result);
+      }
+
+      return {
+        ...state,
+        status,
+        context: result.context
+          ? { ...state.context, ...result.context }
+          : state.context,
+      };
+    }
+
+    function resolveHandlerResult(
+      handler:
+        | TransitionResult
+        | ((args: {
+            event: { type: string; [k: string]: unknown };
+            context: Record<string, unknown>;
+          }, enq: { emit(part: EmittedPart): void }) => TransitionResult),
+      status = state.status
+    ): { next: AgentState; emitted: EmittedPart[] } {
+      const result: TransitionResult =
+        typeof handler === 'function'
+          ? handler({ context: state.context, event }, enqueue)
+          : handler;
+
+      return {
+        next: applyResult(result, status),
+        emitted,
+      };
+    }
+
     if (isDoneInvokeEventType(state.value, event.type)) {
       const result = 'output' in event ? event.output : undefined;
       const validatedResult = effectiveConfig.resultSchema
@@ -264,66 +329,33 @@ export function createAgentMachine(
           context: state.context,
         });
 
-        if (trans.target) {
-          return applyTransition(state, trans);
-        }
-
         return {
-          ...state,
-          status: 'pending',
-          context: trans.context
-            ? { ...state.context, ...trans.context }
-            : state.context,
+          next: applyResult(trans, 'pending'),
+          emitted,
         };
       }
 
       const internalHandler = sc.on?.[event.type];
       if (internalHandler !== undefined) {
-        const result: TransitionResult =
-          typeof internalHandler === 'function'
-            ? internalHandler({ context: state.context, event })
-            : internalHandler;
-
-        if (result.target) {
-          return applyTransition(state, result);
-        }
-
-        return {
-          ...state,
-          status: 'pending',
-          context: result.context
-            ? { ...state.context, ...result.context }
-            : state.context,
-        };
+        return resolveHandlerResult(internalHandler, 'pending');
       }
 
-      return { ...state, status: 'pending' };
+      return { next: { ...state, status: 'pending' }, emitted };
     }
 
     if (isErrorInvokeEventType(state.value, event.type)) {
       const internalHandler = sc.on?.[event.type];
       if (internalHandler !== undefined) {
-        const result: TransitionResult =
-          typeof internalHandler === 'function'
-            ? internalHandler({ context: state.context, event })
-            : internalHandler;
-
-        if (result.target) {
-          return applyTransition(state, result);
-        }
-
-        return {
-          ...state,
-          context: result.context
-            ? { ...state.context, ...result.context }
-            : state.context,
-        };
+        return resolveHandlerResult(internalHandler);
       }
 
       return {
-        ...state,
-        status: 'error',
-        error: 'error' in event ? event.error : undefined,
+        next: {
+          ...state,
+          status: 'error',
+          error: 'error' in event ? event.error : undefined,
+        },
+        emitted,
       };
     }
 
@@ -331,26 +363,31 @@ export function createAgentMachine(
 
     if (sc.on?.[event.type] !== undefined) {
       const handler = sc.on[event.type]!;
-      const result: TransitionResult =
-        typeof handler === 'function'
-          ? handler({ context: state.context, event })
-          : handler;
-
-      if (result.target) {
-        return applyTransition(state, result);
-      }
-
-      return {
-        ...state,
-        context: result.context
-          ? { ...state.context, ...result.context }
-          : state.context,
-      };
+      return resolveHandlerResult(handler);
     }
 
     throw new Error(
       `No handler for event '${event.type}' in state '${state.value}'`
     );
+  }
+
+  function getEffectiveStateConfig(value: string): StateConfigAny {
+    const sc = resolveStateConfig(cfg, value);
+    return sc.__decideConfig
+      ? { ...sc, ...(sc.__decideConfig as Record<string, unknown>) }
+      : sc;
+  }
+
+  function validateReplayableResult(
+    value: string,
+    result: unknown
+  ): unknown {
+    const effectiveConfig = getEffectiveStateConfig(value);
+    if (!effectiveConfig.resultSchema) {
+      return result;
+    }
+
+    return validateSchemaSync(effectiveConfig.resultSchema, result);
   }
 
   function validateEventPayload(
@@ -372,6 +409,17 @@ export function createAgentMachine(
       );
       throw new Error(`Invalid event '${event.type}': ${messages}`);
     }
+  }
+
+  function toInvokeErrorEvent(
+    state: AgentState,
+    error: unknown
+  ): JournalEvent {
+    return {
+      type: `xstate.error.invoke.${state.value}`,
+      error: serializeError(error),
+      at: Date.now(),
+    };
   }
 
   function validateEmittedPart(part: EmittedPart): void {
@@ -403,10 +451,7 @@ export function createAgentMachine(
   }
 
   async function createChoiceEvent(state: AgentState): Promise<JournalEvent> {
-    const sc = resolveStateConfig(cfg, state.value);
-    const dc = sc.__decideConfig
-      ? { ...sc, ...(sc.__decideConfig as Record<string, unknown>) }
-      : sc;
+    const dc = getEffectiveStateConfig(state.value);
     const adapter = (dc as StateConfigAny).adapter ?? cfg.adapter;
     if (!adapter) {
       return {
@@ -429,10 +474,11 @@ export function createAgentMachine(
         options: (dc as StateConfigAny).options!,
         reasoning: (dc as StateConfigAny).reasoning,
       });
+      const validatedResult = validateReplayableResult(state.value, result);
 
       return {
         type: `xstate.done.invoke.${state.value}`,
-        output: result,
+        output: validatedResult,
         at: Date.now(),
       };
     } catch (error) {
@@ -457,10 +503,11 @@ export function createAgentMachine(
         },
         createEnqueue(onEmit)
       );
+      const validatedResult = validateReplayableResult(state.value, result);
 
       return {
         type: `xstate.done.invoke.${state.value}`,
-        output: result,
+        output: validatedResult,
         at: Date.now(),
       };
     } catch (error) {
@@ -492,6 +539,30 @@ export function createAgentMachine(
     return null;
   }
 
+  function resolveEffectTransition(
+    state: AgentState,
+    effectEvent: JournalEvent,
+    onEmit?: (part: EmittedPart) => void
+  ): { event: JournalEvent; next: AgentState } {
+    try {
+      return {
+        event: effectEvent,
+        next: transitionWithEffects(state, effectEvent, onEmit).next,
+      };
+    } catch (error) {
+      if (isDoneInvokeEventType(state.value, effectEvent.type)) {
+        const errorEvent = toInvokeErrorEvent(state, error);
+
+        return {
+          event: errorEvent,
+          next: transitionWithEffects(state, errorEvent, onEmit).next,
+        };
+      }
+
+      throw error;
+    }
+  }
+
   async function invoke(state: AgentState): Promise<AgentState> {
     if (state.status === 'done' || state.status === 'error') {
       return state;
@@ -508,7 +579,7 @@ export function createAgentMachine(
 
     const effectEvent = await getEffectEvent(state);
     if (effectEvent) {
-      return transition(state, effectEvent);
+      return resolveEffectTransition(state, effectEvent).next;
     }
 
     if (sc.on) {
@@ -601,6 +672,8 @@ export function createAgentMachine(
       toSnapshot: toSnap,
       withRuntimeMetadata,
       getEffectEvent,
+      resolveEffectTransition,
+      transitionWithEffects,
     },
   } as AgentMachine;
 }
