@@ -32,6 +32,13 @@ export function createRaffleExample(
   return createAgentMachine({
     id: 'raffle-example',
     schemas: {
+      output: z.object({
+        entries: z.array(z.string()),
+        winner: z.string().nullable(),
+        firstRunnerUp: z.string().nullable(),
+        secondRunnerUp: z.string().nullable(),
+        explanation: z.string().nullable(),
+      }),
       events: {
         'user.entry': z.object({ entry: z.string() }),
         'user.draw': z.object({}),

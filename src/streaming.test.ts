@@ -7,14 +7,13 @@ import {
 } from './index.js';
 
 function once<T = unknown>(
-  run: { on(type: string, handler: (event: unknown) => void): () => void },
-  type: string
+  subscribe: (handler: (event: T) => void) => () => void
 ) {
   return new Promise<T>((resolve) => {
     let off = () => {};
-    off = run.on(type, (event) => {
+    off = subscribe((event) => {
       off();
-      resolve(event as T);
+      resolve(event);
     });
   });
 }
@@ -56,19 +55,19 @@ test('returns a live run before initial invoke output and emits ephemeral parts'
   const allParts: Array<{ type: string; delta: string }> = [];
   const states: string[] = [];
   const events: string[] = [];
-  const done = once<{ output: { text: string } }>(run, 'done');
+  const done = once(run.onDone.bind(run));
 
   const offPart = run.on('textPart', (part) => {
     parts.push(part as { type: string; delta: string });
   });
-  const offAnyPart = run.on('part', (part) => {
-    allParts.push(part as { type: string; delta: string });
+  const offAnyPart = run.onEmitted((part) => {
+    allParts.push(part);
   });
-  const offState = run.on('state', (snapshot) => {
-    states.push((snapshot as { value: string }).value);
+  const offState = run.onSnapshot((snapshot) => {
+    states.push(snapshot.value);
   });
-  const offEvent = run.on('machine.event', (event) => {
-    events.push((event as { type: string }).type);
+  const offEvent = run.onMachineEvent((event) => {
+    events.push(event.type);
   });
 
   expect(run.getSnapshot()).toEqual(
@@ -132,22 +131,22 @@ test('does not replay prior events to late subscribers', async () => {
   const run = await startSession(machine, {
     store: createMemoryRunStore(),
   });
-  await once(run, 'done');
+  await once(run.onDone.bind(run));
 
   const lateParts: Array<{ type: string; delta: string }> = [];
   const replayedStates: string[] = [];
   const replayedEvents: string[] = [];
 
   run.on('textPart', (part) => {
-    lateParts.push(part as { type: string; delta: string });
+    lateParts.push(part);
   });
-  run.on('state', (snapshot) => {
-    replayedStates.push((snapshot as { value: string }).value);
+  run.onSnapshot((snapshot) => {
+    replayedStates.push(snapshot.value);
   });
-  run.on('machine.event', (event) => {
-    replayedEvents.push((event as { type: string }).type);
+  run.onMachineEvent((event) => {
+    replayedEvents.push(event.type);
   });
-  run.on('done', () => {
+  run.onDone(() => {
     replayedEvents.push('done');
   });
 
@@ -179,7 +178,7 @@ test('invalid emitted parts are rejected', async () => {
   const run = await startSession(machine, {
     store: createMemoryRunStore(),
   });
-  await once(run, 'error');
+  await once(run.onError.bind(run));
 
   expect(run.getSnapshot()).toEqual(
     expect.objectContaining({
@@ -230,7 +229,7 @@ test('transition handlers can emit live effects without journaling them', async 
   const parts: string[] = [];
 
   run.on('textPart', (part) => {
-    parts.push((part as { delta: string }).delta);
+    parts.push(part.delta);
   });
 
   await run.send({ type: 'send' });

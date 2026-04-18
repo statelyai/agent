@@ -71,6 +71,11 @@ export function createCustomerServiceSimExample(
     id: 'customer-service-sim-example',
     schemas: {
       input: z.object({ issue: z.string() }),
+      output: z.object({
+        transcript: z.array(z.string()),
+        turnCount: z.number(),
+        outcome: z.string().nullable(),
+      }),
     },
     context: (input) => ({
       issue: input.issue,

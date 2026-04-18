@@ -29,6 +29,7 @@ export function createSubflowExample(
     id: 'subflow-child',
     schemas: {
       input: z.object({ topic: z.string() }),
+      output: z.object({ bullets: z.array(z.string()) }),
     },
     context: (input) => ({
       topic: input.topic,
@@ -62,6 +63,10 @@ export function createSubflowExample(
     id: 'subflow-example',
     schemas: {
       input: z.object({ topic: z.string() }),
+      output: z.object({
+        bullets: z.array(z.string()),
+        draft: z.string().nullable(),
+      }),
     },
     context: (input) => ({
       topic: input.topic,
@@ -82,7 +87,7 @@ export function createSubflowExample(
           }
 
           return {
-            bullets: (result.output as { bullets: string[] }).bullets,
+            bullets: result.output.bullets,
           };
         },
         onDone: ({ result }) => ({

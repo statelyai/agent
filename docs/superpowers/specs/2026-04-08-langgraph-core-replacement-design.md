@@ -125,9 +125,12 @@ interface AgentRun {
   getSnapshot(): AgentSnapshot;
   send(event: { type: string; [key: string]: unknown }): Promise<void>;
   on(type: string, handler: (event: unknown) => void): () => void;
-  [Symbol.asyncIterator](): AsyncIterator<RunEmitterEvent>;
 }
 ```
+
+An async-iterator surface is still useful, but it is additive. The emitter-style `on(...)` API is the required phase-1 contract.
+
+`on(...)` is a live listener only. It should not be treated as a history or replay API. Historical actor events belong to the journal/store layer.
 
 ### Durable Execution Boundaries
 
@@ -268,15 +271,15 @@ type AgentSnapshot = {
   status: "active" | "done" | "error" | "pending";
   createdAt: number;
   sessionId: string;
+  params: Record<string, Record<string, unknown>>;
   output?: unknown;
   error?: SerializedError;
 };
 
 type PersistedSnapshot = {
   sessionId: string;
-  sequence: number;
   snapshot: AgentSnapshot;
-  lastJournalIndex: number;
+  afterSequence: number;
   createdAt: number;
 };
 ```
@@ -294,7 +297,7 @@ with additional metadata such as:
 - optional `output`
 - optional `error`
 
-The `sequence` field exists so storage can identify which snapshot is the latest persisted derivation and so replay can resume from a known journal offset. It should track journal position rather than inventing a separate semantic version.
+The `afterSequence` field identifies the last replayable journal event already reflected in the snapshot, so replay can resume from a known journal offset without inventing a separate semantic version.
 
 ### Replay Model
 
@@ -362,16 +365,20 @@ type RunEmitterEvent =
 
 Where `machine.event` refers to replayable actor events and `runtime` refers to derived lifecycle records useful for debugging and orchestration.
 
+These event shapes describe what a live run may emit. They do not imply that late subscribers receive replayed history through `on(...)`.
+
 Suggested runtime event family:
 
 ```ts
 type RuntimeEvent =
-  | { type: "state.entered"; value: string; at: number }
-  | { type: "transition.applied"; from: string; to: string; at: number }
-  | { type: "snapshot.saved"; sessionId: string; sequence: number; at: number }
+  | { type: "session.started"; sessionId: string; at: number }
+  | { type: "session.restored"; sessionId: string; afterSequence: number; at: number }
+  | { type: "snapshot.persisted"; sessionId: string; afterSequence: number; at: number }
   | { type: "session.completed"; sessionId: string; at: number }
   | { type: "session.failed"; sessionId: string; error: SerializedError; at: number };
 ```
+
+Derived events such as `state.entered` and `transition.applied` are still useful for richer inspection, but they are not required for this phase.
 
 ### Stream Parts
 

@@ -6,14 +6,13 @@ import {
 } from '../index.js';
 
 function once<T = unknown>(
-  run: { on(type: string, handler: (event: unknown) => void): () => void },
-  type: string
+  subscribe: (handler: (event: T) => void) => () => void
 ) {
   return new Promise<T>((resolve) => {
     let off = () => {};
-    off = run.on(type, (event) => {
+    off = subscribe((event) => {
       off();
-      resolve(event as T);
+      resolve(event);
     });
   });
 }
@@ -60,13 +59,13 @@ test('prebuilt react agent loops through a tool call and returns a final answer'
   const toolEvents: string[] = [];
 
   run.on('toolCall', (event) => {
-    toolEvents.push(`call:${(event as { toolName: string }).toolName}`);
+    toolEvents.push(`call:${event.toolName}`);
   });
   run.on('toolResult', (event) => {
-    toolEvents.push(`result:${(event as { toolName: string }).toolName}`);
+    toolEvents.push(`result:${event.toolName}`);
   });
 
-  await once(run, 'done');
+  await once(run.onDone.bind(run));
 
   expect(toolEvents).toEqual(['call:search', 'result:search']);
   expect(run.getSnapshot()).toEqual(

@@ -43,6 +43,11 @@ export function createTutorExample(
     id: 'tutor-example',
     schemas: {
       input: z.object({ message: z.string() }),
+      output: z.object({
+        conversation: z.array(z.string()),
+        feedback: z.string().nullable(),
+        response: z.string().nullable(),
+      }),
     },
     context: (input) => ({
       conversation: [`User: ${input.message}`],

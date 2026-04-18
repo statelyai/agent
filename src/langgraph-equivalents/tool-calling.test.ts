@@ -7,14 +7,13 @@ import {
 } from '../index.js';
 
 function once<T = unknown>(
-  run: { on(type: string, handler: (event: unknown) => void): () => void },
-  type: string
+  subscribe: (handler: (event: T) => void) => () => void
 ) {
   return new Promise<T>((resolve) => {
     let off = () => {};
-    off = run.on(type, (event) => {
+    off = subscribe((event) => {
       off();
-      resolve(event as T);
+      resolve(event);
     });
   });
 }
@@ -78,13 +77,13 @@ test('supports tool-call style invokes with live tool events and final output', 
   const events: string[] = [];
 
   run.on('toolCall', (event) => {
-    events.push(`call:${(event as { toolName: string }).toolName}`);
+    events.push(`call:${event.toolName}`);
   });
   run.on('toolResult', (event) => {
-    events.push(`result:${(event as { toolName: string }).toolName}`);
+    events.push(`result:${event.toolName}`);
   });
 
-  await once(run, 'done');
+  await once(run.onDone.bind(run));
 
   expect(events).toEqual(['call:getWeather', 'result:getWeather']);
   expect(run.getSnapshot()).toEqual(

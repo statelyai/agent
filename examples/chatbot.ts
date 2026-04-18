@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { createAgentMachine, decide, type AgentAdapter } from '../src/index.js';
+import { createAgentMachine, decide, decideResultSchema, type AgentAdapter } from '../src/index.js';
 import {
   closePrompt,
   createOpenAiDecisionAdapter,
@@ -19,6 +19,11 @@ export function createChatbotExample(
     reply?: (transcript: string[]) => Promise<z.infer<typeof replySchema>>;
   } = {}
 ) {
+  const decisionOptions = {
+    respond: { description: 'Reply to the user and continue chatting.' },
+    end: { description: 'End the conversation now.' },
+  } as const;
+
   const adapter =
     options.adapter ??
     (process.env.OPENAI_API_KEY ? createOpenAiDecisionAdapter() : undefined);
@@ -39,6 +44,11 @@ export function createChatbotExample(
   return createAgentMachine({
     id: 'chatbot-example',
     schemas: {
+      output: z.object({
+        transcript: z.array(z.string()),
+        ended: z.boolean(),
+        lastAssistantMessage: z.string().nullable(),
+      }),
       events: {
         'user.message': z.object({ message: z.string() }),
         'user.exit': z.object({}),
@@ -50,7 +60,6 @@ export function createChatbotExample(
       lastAssistantMessage: null as string | null,
       ended: false,
     }),
-    adapter,
     initial: 'listening',
     states: {
       listening: {
@@ -68,24 +77,25 @@ export function createChatbotExample(
           },
         },
       },
-      deciding: decide({
-        model: 'openai/gpt-5.4-nano',
-        prompt: ({ context }) =>
-          [
-            'Decide whether the assistant should answer or end the conversation.',
-            'End only when the user is clearly saying goodbye or asking to stop.',
-            '',
-            (context as { transcript: string[] }).transcript.join('\n'),
-          ].join('\n'),
-        options: {
-          respond: { description: 'Reply to the user and continue chatting.' },
-          end: { description: 'End the conversation now.' },
-        },
+      deciding: {
+        resultSchema: decideResultSchema(decisionOptions),
+        invoke: async ({ context }) =>
+          decide({
+            adapter,
+            model: 'openai/gpt-5.4-nano',
+            prompt: [
+              'Decide whether the assistant should answer or end the conversation.',
+              'End only when the user is clearly saying goodbye or asking to stop.',
+              '',
+              context.transcript.join('\n'),
+            ].join('\n'),
+            options: decisionOptions,
+          }),
         onDone: ({ result }) => ({
           target: result.choice === 'end' ? 'done' : 'replying',
           context: result.choice === 'end' ? { ended: true } : {},
         }),
-      }),
+      },
       replying: {
         resultSchema: replySchema,
         invoke: async ({ context }) => reply(context.transcript),

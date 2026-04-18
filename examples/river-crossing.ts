@@ -93,6 +93,14 @@ function moveItem(
 export function createRiverCrossingExample() {
   return createAgentMachine({
     id: 'river-crossing-example',
+    schemas: {
+      output: z.object({
+        leftBank: z.array(bankItem),
+        rightBank: z.array(bankItem),
+        steps: z.array(z.string()),
+        reasoning: z.array(z.string()),
+      }),
+    },
     context: () => ({
       leftBank: ['wolf', 'goat', 'cabbage'] as Array<'wolf' | 'goat' | 'cabbage'>,
       rightBank: [] as Array<'wolf' | 'goat' | 'cabbage'>,
@@ -122,22 +130,22 @@ export function createRiverCrossingExample() {
 
           return {
             target: 'moving' as const,
-            params: { move: result.move },
+            input: { move: result.move },
             context: { reasoning: nextReasoning },
           };
         },
       },
       moving: {
-        paramsSchema: z.object({
+        inputSchema: z.object({
           move: crossingMoveSchema.shape.move.exclude(['done']),
         }),
         resultSchema: crossingStateSchema,
-        invoke: async ({ context, params }) =>
+        invoke: async ({ context, input }) =>
           moveItem(
             [...context.leftBank],
             [...context.rightBank],
             context.farmerPosition,
-            params.move as 'takeGoat' | 'takeWolf' | 'takeCabbage' | 'returnEmpty'
+            input.move as 'takeGoat' | 'takeWolf' | 'takeCabbage' | 'returnEmpty'
           ),
         onDone: ({ result, context }) => ({
           target: 'choosing',

@@ -26,6 +26,7 @@ export function createSimpleExample(
     id: 'simple-example',
     schemas: {
       input: z.object({ text: z.string() }),
+      output: z.object({ summary: z.string().nullable() }),
     },
     context: (input) => ({
       text: input.text,

@@ -50,7 +50,7 @@ export type StateConfigAny = {
   invoke?: (
     args: {
       context: Record<string, unknown>;
-      params: Record<string, unknown>;
+      input: Record<string, unknown>;
     },
     enq: { emit(part: { type: string; [key: string]: unknown }): void }
   ) => Promise<unknown>;
@@ -60,22 +60,20 @@ export type StateConfigAny = {
   resultSchema?: StandardSchemaV1;
   model?: string;
   adapter?: { decide: (...args: unknown[]) => Promise<unknown> };
-  prompt?: string | ((args: { context: Record<string, unknown>; params: Record<string, unknown> }) => string);
+  prompt?: string | ((args: { context: Record<string, unknown>; input: Record<string, unknown> }) => string);
   options?: Record<string, { description: string; schema?: StandardSchemaV1 }>;
   reasoning?: boolean;
   events?: Record<string, StandardSchemaV1>;
-  __type?: string;
-  __decideConfig?: Record<string, unknown>;
 };
 
 /**
- * Get the params for the current state.
+ * Get the input for the current state.
  */
-export function getParams(
+export function getInput(
   value: string,
-  params: Record<string, Record<string, unknown>>
+  input: Record<string, Record<string, unknown>>
 ): Record<string, unknown> {
-  return params[value] ?? {};
+  return input[value] ?? {};
 }
 
 /**
@@ -86,11 +84,11 @@ export function resolveInitial(
     | string
     | ((args: {
         context: Record<string, unknown>;
-        params: Record<string, unknown>;
+        input: Record<string, unknown>;
       }) => InitialTransitionResult),
   args: {
     context: Record<string, unknown>;
-    params: Record<string, unknown>;
+    input: Record<string, unknown>;
   }
 ): InitialTransitionResult {
   if (typeof initial === 'string') {
@@ -116,10 +114,10 @@ export function applyTransition(
     newState.value = transition.target;
     newState.status = 'active';
 
-    if (transition.params) {
-      newState.params = {
-        ...state.params,
-        [transition.target]: transition.params,
+    if (transition.input) {
+      newState.input = {
+        ...state.input,
+        [transition.target]: transition.input,
       };
     }
   }

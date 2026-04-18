@@ -49,7 +49,7 @@ test('startSession creates a session, persists xstate.init, and returns before s
       value: 'idle',
       status: 'active',
       context: { count: 0 },
-      params: {},
+      input: {},
     })
   );
   await vi.waitFor(() => {

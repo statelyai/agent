@@ -29,6 +29,7 @@ export function createToolCallingExample(
     id: 'tool-calling-example',
     schemas: {
       input: z.object({ city: z.string() }),
+      output: z.object({ forecast: z.string().nullable() }),
       emitted: {
         toolCall: z.object({
           toolName: z.string(),
@@ -88,25 +89,20 @@ async function main() {
     });
 
     run.on('toolCall', (event) => {
-      const tool = event as { toolName: string; input: { city: string } };
-      console.log(`Calling ${tool.toolName}(${tool.input.city})`);
+      console.log(`Calling ${event.toolName}(${event.input.city})`);
     });
 
     run.on('toolResult', (event) => {
-      const result = event as {
-        toolName: string;
-        output: { forecast: string };
-      };
-      console.log(`${result.toolName} -> ${result.output.forecast}`);
+      console.log(`${event.toolName} -> ${event.output.forecast}`);
     });
 
     await new Promise<void>((resolve, reject) => {
-      run.on('done', (event) => {
-        console.log((event as { output: unknown }).output);
+      run.onDone((event) => {
+        console.log(event.output);
         resolve();
       });
-      run.on('error', (event) => {
-        reject((event as { error: unknown }).error);
+      run.onError((event) => {
+        reject(event.error);
       });
     });
   } finally {

@@ -93,6 +93,12 @@ export function createNewspaperExample(
     id: 'newspaper-example',
     schemas: {
       input: z.object({ topic: z.string() }),
+      output: z.object({
+        topic: z.string(),
+        article: z.string().nullable(),
+        revisionCount: z.number(),
+        searchResults: z.array(z.string()),
+      }),
     },
     context: (input) => ({
       topic: input.topic,

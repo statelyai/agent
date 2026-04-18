@@ -51,7 +51,7 @@ test('loads the most replay-advanced saved snapshot', async () => {
       status: 'active',
       createdAt: 100,
       sessionId: 'session-1',
-      params: {
+      input: {
         idle: { count: 1 },
       },
     },
@@ -67,7 +67,7 @@ test('loads the most replay-advanced saved snapshot', async () => {
       status: 'done',
       createdAt: 300,
       sessionId: 'session-1',
-      params: {
+      input: {
         done: { count: 2 },
       },
       output: { count: 2 },
@@ -84,7 +84,7 @@ test('loads the most replay-advanced saved snapshot', async () => {
       status: 'done',
       createdAt: 300,
       sessionId: 'session-1',
-      params: {
+      input: {
         done: { count: 2 },
       },
       output: { count: 2 },
@@ -105,7 +105,7 @@ test('loads the most replay-advanced snapshot even if saved earlier', async () =
       status: 'done',
       createdAt: 500,
       sessionId: 'session-1',
-      params: { done: { count: 5 } },
+      input: { done: { count: 5 } },
     },
     createdAt: 500,
   });
@@ -119,7 +119,7 @@ test('loads the most replay-advanced snapshot even if saved earlier', async () =
       status: 'active',
       createdAt: 200,
       sessionId: 'session-1',
-      params: { review: { count: 2 } },
+      input: { review: { count: 2 } },
     },
     createdAt: 200,
   });
@@ -133,7 +133,7 @@ test('loads the most replay-advanced snapshot even if saved earlier', async () =
       status: 'done',
       createdAt: 500,
       sessionId: 'session-1',
-      params: { done: { count: 5 } },
+      input: { done: { count: 5 } },
     },
     createdAt: 500,
   });

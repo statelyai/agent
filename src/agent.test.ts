@@ -1,10 +1,12 @@
 import { describe, expect, test, vi } from 'vitest';
 import { z } from 'zod';
 import {
-  createAgentMachine,
-  decide,
   classify,
+  classifyResultSchema,
+  createAgentMachine,
   createAdapter,
+  decide,
+  decideResultSchema,
 } from './index.js';
 import type { AgentAdapter } from './types.js';
 
@@ -30,6 +32,12 @@ function mockAdapter(
     },
   };
 }
+
+const choiceResultSchema = z.object({
+  choice: z.string(),
+  data: z.record(z.string(), z.unknown()),
+  reasoning: z.string().optional(),
+});
 
 // ─── Simple machine (no schemas — inferred from context) ───
 
@@ -144,6 +152,12 @@ function createHitlMachine() {
 // ─── Decide machine ───
 
 function createDecideMachine(adapter: AgentAdapter) {
+  const options = {
+    billing: { description: 'Billing issues' },
+    technical: { description: 'Technical issues' },
+    general: { description: 'General inquiries' },
+  } as const;
+
   return createAgentMachine({
     id: 'decider',
     context: () => ({
@@ -151,22 +165,22 @@ function createDecideMachine(adapter: AgentAdapter) {
       category: null as string | null,
       resolution: null as string | null,
     }),
-    adapter,
     initial: 'classifying',
     states: {
-      classifying: decide({
-        model: 'test-model',
-        prompt: ({ context }) => `Classify: ${context.issue}`,
-        options: {
-          billing: { description: 'Billing issues' },
-          technical: { description: 'Technical issues' },
-          general: { description: 'General inquiries' },
-        },
+      classifying: {
+        resultSchema: decideResultSchema(options),
+        invoke: async ({ context }) =>
+          decide({
+            adapter,
+            model: 'test-model',
+            prompt: `Classify: ${context.issue}`,
+            options,
+          }),
         onDone: ({ result }) => ({
           target: 'handling',
           context: { category: result.choice },
         }),
-      }),
+      },
       handling: {
         resultSchema: z.object({ resolution: z.string() }),
         invoke: async ({ context }) => ({
@@ -191,28 +205,34 @@ function createDecideMachine(adapter: AgentAdapter) {
 // ─── Classify machine ───
 
 function createClassifyMachine(adapter: AgentAdapter) {
+  const categories = {
+    billing: { description: 'Billing, payments, refunds' },
+    technical: { description: 'Technical issues, bugs' },
+    general: { description: 'General inquiries' },
+  } as const;
+
   return createAgentMachine({
     id: 'classifier',
     context: () => ({
       issue: 'I want my money back',
       category: null as string | null,
     }),
-    adapter,
     initial: 'classifyIntent',
     states: {
-      classifyIntent: classify({
-        model: 'test-model',
-        prompt: ({ context }) => `Classify: "${context.issue}"`,
-        into: {
-          billing: { description: 'Billing, payments, refunds' },
-          technical: { description: 'Technical issues, bugs' },
-          general: { description: 'General inquiries' },
-        },
+      classifyIntent: {
+        resultSchema: classifyResultSchema(categories),
+        invoke: async ({ context }) =>
+          classify({
+            adapter,
+            model: 'test-model',
+            prompt: `Classify: "${context.issue}"`,
+            into: categories,
+          }),
         onDone: ({ result }) => ({
           target: 'done',
           context: { category: result.category },
         }),
-      }),
+      },
       done: {
         type: 'final',
         output: ({ context }) => ({ category: context.category }),
@@ -333,12 +353,15 @@ describe('invoke', () => {
       context: () => ({}),
       initial: 'deciding',
       states: {
-        deciding: decide({
-          model: 'test',
-          prompt: 'test',
-          options: { a: { description: 'A' } },
+        deciding: {
+          invoke: async () =>
+            decide({
+              model: 'test',
+              prompt: 'test',
+              options: { a: { description: 'A' } },
+            }),
           onDone: () => ({ target: 'done' }),
-        }),
+        },
         done: { type: 'final' },
       },
     });
@@ -492,19 +515,26 @@ describe('decide', () => {
     const spy = vi.fn().mockResolvedValue({ choice: 'a', data: {} });
     const machine = createAgentMachine({
       id: 'dtest',
-      context: () => ({ topic: 'cats' }),
-      adapter: { decide: spy },
+      context: () => ({ topic: 'cats', choice: null as string | null }),
       initial: 'choosing',
       states: {
-        choosing: decide({
-          model: 'my-model',
-          prompt: ({ context }) => `About ${context.topic}`,
-          options: { a: { description: 'A' }, b: { description: 'B' } },
+        choosing: {
+          resultSchema: decideResultSchema({
+            a: { description: 'A' },
+            b: { description: 'B' },
+          }),
+          invoke: async ({ context }) =>
+            decide({
+              adapter: { decide: spy },
+              model: 'my-model',
+              prompt: `About ${context.topic}`,
+              options: { a: { description: 'A' }, b: { description: 'B' } },
+            }),
           onDone: ({ result }) => ({
             target: 'done',
             context: { choice: result.choice },
           }),
-        }),
+        },
         done: { type: 'final' },
       },
     });
@@ -518,19 +548,28 @@ describe('decide', () => {
     const machine = createAgentMachine({
       id: 'override',
       context: () => ({ choice: null as string | null }),
-      adapter: mockAdapter([{ choice: 'machine' }]),
       initial: 'choosing',
       states: {
-        choosing: decide({
-          model: 'test',
-          adapter: mockAdapter([{ choice: 'state' }]),
-          prompt: 'pick',
-          options: { s: { description: 'S' }, m: { description: 'M' } },
+        choosing: {
+          resultSchema: decideResultSchema({
+            state: { description: 'State' },
+            machine: { description: 'Machine' },
+          }),
+          invoke: async () =>
+            decide({
+              adapter: mockAdapter([{ choice: 'state' }]),
+              model: 'test',
+              prompt: 'pick',
+              options: {
+                state: { description: 'State' },
+                machine: { description: 'Machine' },
+              },
+            }),
           onDone: ({ result }) => ({
             target: 'done',
             context: { choice: result.choice },
           }),
-        }),
+        },
         done: { type: 'final' },
       },
     });
@@ -542,34 +581,46 @@ describe('decide', () => {
     const machine = createAgentMachine({
       id: 'data',
       context: () => ({ items: null as string[] | null }),
-      adapter: {
-        decide: async () => ({
-          choice: 'withData',
-          data: { items: ['a', 'b'] },
-        }),
-      },
       initial: 'choosing',
       states: {
-        choosing: decide({
-          model: 'test',
-          prompt: 'pick',
-          options: {
+        choosing: {
+          resultSchema: decideResultSchema({
             withData: {
               description: 'Has data',
               schema: z.object({ items: z.array(z.string()) }),
             },
             withoutData: { description: 'No data' },
-          },
-          onDone: ({ result }) => ({
-            target: 'done',
-            context: {
-              items:
-                result.choice === 'withData'
-                  ? result.data.items
-                  : null,
-            },
           }),
-        }),
+          invoke: async () =>
+            decide({
+              adapter: {
+                decide: async () => ({
+                  choice: 'withData',
+                  data: { items: ['a', 'b'] },
+                }),
+              },
+              model: 'test',
+              prompt: 'pick',
+              options: {
+                withData: {
+                  description: 'Has data',
+                  schema: z.object({ items: z.array(z.string()) }),
+                },
+                withoutData: { description: 'No data' },
+              },
+            }),
+          onDone: ({ result }) => {
+            return {
+              target: 'done',
+              context: {
+                items:
+                  result.choice === 'withData'
+                    ? (result.data.items ?? null)
+                    : null,
+              },
+            };
+          },
+        },
         done: { type: 'final' },
       },
     });
@@ -589,6 +640,7 @@ describe('type: choice', () => {
       states: {
         routing: {
           type: 'choice',
+          resultSchema: choiceResultSchema,
           model: 'test-model',
           prompt: ({ context }) => `Route: ${context.issue}`, // context typed ✓
           options: {
@@ -628,6 +680,7 @@ describe('type: choice', () => {
       states: {
         choosing: {
           type: 'choice',
+          resultSchema: choiceResultSchema,
           model: 'test',
           prompt: 'pick',
           options: { a: { description: 'A' } },
@@ -784,9 +837,9 @@ describe('type inference', () => {
       context: () => ({ count: 0 }),
       initial: 'idle',
       states: {
-        // @ts-expect-error — 'foo' not a valid context key
         idle: {
           on: {
+            // @ts-expect-error — 'foo' not a valid context key
             go: () => ({
               target: 'idle',
               context: { foo: 'bar' },
@@ -850,6 +903,11 @@ describe('type inference', () => {
   test('context typed in output', () => {
     const machine = createAgentMachine({
       id: 't',
+      schemas: {
+        output: z.object({
+          score: z.number(),
+        }),
+      },
       context: () => ({ score: 100 }),
       initial: 'done',
       states: {
@@ -1014,41 +1072,41 @@ describe('type inference', () => {
     ).toThrow();
   });
 
-  // ─── paramsSchema per state ───
+  // ─── inputSchema per state ───
 
-  test('params typed per state from paramsSchema', async () => {
+  test('input typed per state from inputSchema', async () => {
     const machine = createAgentMachine({
       id: 't',
       context: () => ({ result: '' }),
       initial: 'a',
       states: {
         a: {
-          paramsSchema: z.object({ count: z.number() }),
+          inputSchema: z.object({ count: z.number() }),
           resultSchema: z.object({ doubled: z.number() }),
-          invoke: async ({ params }) => {
-            params.count satisfies number;
+          invoke: async ({ input }) => {
+            input.count satisfies number;
             // @ts-expect-error — count is number not string
-            params.count satisfies string;
-            // @ts-expect-error — 'name' not on a's params
-            params.name;
-            return { doubled: params.count * 2 };
+            input.count satisfies string;
+            // @ts-expect-error — 'name' not on a's input
+            input.name;
+            return { doubled: input.count * 2 };
           },
           onDone: ({ result }) => ({
             target: 'b',
-            params: { name: 'hello' },
+            input: { name: 'hello' },
             context: { result: String(result.doubled) },
           }),
         },
         b: {
-          paramsSchema: z.object({ name: z.string() }),
+          inputSchema: z.object({ name: z.string() }),
           resultSchema: z.object({ greeting: z.string() }),
-          invoke: async ({ params }) => {
-            params.name satisfies string;
+          invoke: async ({ input }) => {
+            input.name satisfies string;
             // @ts-expect-error — name is string not number
-            params.name satisfies number;
-            // @ts-expect-error — 'count' not on b's params
-            params.count;
-            return { greeting: `hi ${params.name}` };
+            input.name satisfies number;
+            // @ts-expect-error — 'count' not on b's input
+            input.count;
+            return { greeting: `hi ${input.name}` };
           },
           onDone: ({ result }) => ({
             target: 'done',
@@ -1064,21 +1122,21 @@ describe('type inference', () => {
 
     let state = machine.resolveState({
       ...machine.getInitialState(),
-      params: { a: { count: 21 } },
+      input: { a: { count: 21 } },
     });
     const r = await machine.execute(state);
     expect(r.status === 'done' && r.output).toEqual({ result: 'hi hello' });
   });
 
-  test('no paramsSchema → params is Record<string, unknown>', () => {
+  test('no inputSchema → input is Record<string, unknown>', () => {
     createAgentMachine({
       id: 't',
       context: () => ({}),
       initial: 'idle',
       states: {
         idle: {
-          invoke: async ({ params }) => {
-            params satisfies Record<string, unknown>;
+          invoke: async ({ input }) => {
+            input satisfies Record<string, unknown>;
             return {};
           },
         },
@@ -1098,6 +1156,7 @@ describe('type inference', () => {
       states: {
         choosing: {
           type: 'choice',
+          resultSchema: choiceResultSchema,
           model: 'test',
           prompt: ({ context }) => {
             context.topic satisfies string;
@@ -1188,7 +1247,7 @@ describe('type inference', () => {
     });
   });
 
-  test('no resultSchema → onDone result is any', () => {
+  test('no resultSchema → onDone result is inferred from invoke', () => {
     createAgentMachine({
       id: 't',
       context: () => ({}),
@@ -1197,16 +1256,54 @@ describe('type inference', () => {
         work: {
           invoke: async () => ({ anything: true }),
           onDone: ({ result }) => {
-            // Without resultSchema, result is ChoiceResult (default)
-            result.choice satisfies string;
-            // @ts-expect-error — 'whatever' not on ChoiceResult
-            result.whatever;
+            result.anything satisfies boolean;
+            // @ts-expect-error — 'choice' does not exist on invoke result
+            result.choice;
             return { target: 'done' };
           },
         },
         done: { type: 'final' },
       },
     });
+  });
+
+  test('final output is inferred through execute and snapshots', async () => {
+    const machine = createAgentMachine({
+      id: 'typed-output',
+      schemas: {
+        output: z.object({
+          count: z.number(),
+          label: z.string(),
+        }),
+      },
+      context: () => ({ count: 2 }),
+      initial: 'done',
+      states: {
+        done: {
+          type: 'final',
+          output: ({ context }) => ({
+            count: context.count,
+            label: `count:${context.count}`,
+          }),
+        },
+      },
+    });
+
+    const runResult = await machine.execute(machine.getInitialState());
+    if (runResult.status === 'done') {
+      runResult.output.count satisfies number;
+      runResult.output.label satisfies string;
+      // @ts-expect-error output property should be typed
+      runResult.output.missing;
+    }
+
+    const snapshot = machine.resolveState(machine.getInitialState());
+    snapshot.output satisfies
+      | {
+          count: number;
+          label: string;
+        }
+      | undefined;
   });
 
   // ─── events typed in on handlers ───
@@ -1292,7 +1389,7 @@ describe('edge cases', () => {
     const machine = createSimpleMachine();
     const done = {
       value: 'done',
-      params: {},
+      input: {},
       context: { count: 1 },
       status: 'done',
       output: { result: 1 },

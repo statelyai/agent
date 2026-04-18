@@ -52,6 +52,13 @@ export function createJokeExample(
     id: 'joke-example',
     schemas: {
       input: z.object({ topic: z.string() }),
+      output: z.object({
+        topic: z.string(),
+        joke: z.string().nullable(),
+        rating: z.number().nullable(),
+        explanation: z.string().nullable(),
+        accepted: z.boolean(),
+      }),
     },
     context: (input) => ({
       topic: input.topic,

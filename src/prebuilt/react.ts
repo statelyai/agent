@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { createAgentMachine } from '../machine.js';
-import type { AgentMachine, StandardSchemaV1 } from '../types.js';
+import type { StandardSchemaV1 } from '../types.js';
 
 const messageSchema = z.object({
   role: z.enum(['system', 'user', 'assistant', 'tool']),
@@ -48,16 +48,7 @@ export function createReactAgent(options: {
       schema?: StandardSchemaV1;
     }>;
   }) => Promise<ReactAgentModelResult>;
-}): AgentMachine<
-  { messages?: ReactAgentMessage[] },
-  {
-    messages: ReactAgentMessage[];
-    stepCount: number;
-    pendingToolCall:
-      | { toolName: string; input: Record<string, unknown> }
-      | null;
-  }
-> {
+}) {
   const tools = options.tools ?? [];
   const maxSteps = options.maxSteps ?? 8;
   const toolDefinitions = tools.map(({ name, description, schema }) => ({
@@ -131,7 +122,10 @@ export function createReactAgent(options: {
                 stepCount: context.stepCount + 1,
                 messages: [
                   ...context.messages,
-                  { role: 'assistant', content: result.message },
+                  {
+                    role: 'assistant',
+                    content: result.message,
+                  } satisfies ReactAgentMessage,
                 ],
               },
             };
@@ -152,10 +146,10 @@ export function createReactAgent(options: {
                   content:
                     result.message
                     ?? `Calling tool ${result.toolName} with ${JSON.stringify(result.input)}`,
-                },
+                } satisfies ReactAgentMessage,
               ],
             },
-            params: {
+            input: {
               toolName: result.toolName,
               input: result.input,
             },
@@ -163,7 +157,7 @@ export function createReactAgent(options: {
         },
       },
       tool: {
-        paramsSchema: z.object({
+        inputSchema: z.object({
           toolName: z.string(),
           input: z.record(z.string(), z.unknown()),
         }),
@@ -171,29 +165,29 @@ export function createReactAgent(options: {
           toolName: z.string(),
           output: z.unknown(),
         }),
-        invoke: async ({ params }, enq) => {
-          const tool = toolsByName.get(params.toolName);
+        invoke: async ({ input }, enq) => {
+          const tool = toolsByName.get(input.toolName);
 
           if (!tool) {
-            throw new Error(`Tool '${params.toolName}' not found`);
+            throw new Error(`Tool '${input.toolName}' not found`);
           }
 
           enq.emit({
             type: 'toolCall',
-            toolName: params.toolName,
-            input: params.input,
+            toolName: input.toolName,
+            input: input.input,
           });
 
-          const output = await tool.execute(params.input);
+          const output = await tool.execute(input.input);
 
           enq.emit({
             type: 'toolResult',
-            toolName: params.toolName,
+            toolName: input.toolName,
             output,
           });
 
           return {
-            toolName: params.toolName,
+            toolName: input.toolName,
             output,
           };
         },
@@ -207,7 +201,7 @@ export function createReactAgent(options: {
                 role: 'tool',
                 name: result.toolName,
                 content: serializeToolOutput(result.output),
-              },
+              } satisfies ReactAgentMessage,
             ],
           },
         }),

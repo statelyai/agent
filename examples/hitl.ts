@@ -32,6 +32,10 @@ export function createHitlExample(
     id: 'hitl-example',
     schemas: {
       input: z.object({ task: z.string() }),
+      output: z.object({
+        draft: z.string().nullable().optional(),
+        cancelled: z.literal(true).optional(),
+      }),
       events: {
         'user.message': z.object({ message: z.string() }),
         'user.approve': z.object({}),
@@ -70,11 +74,11 @@ export function createHitlExample(
       },
       done: {
         type: 'final',
-        output: ({ context }) => ({ draft: context.draft }),
+        output: ({ context }) => ({ draft: context.draft ?? null }),
       },
       cancelled: {
         type: 'final',
-        output: () => ({ cancelled: true }),
+        output: () => ({ cancelled: true as const }),
       },
     },
   });

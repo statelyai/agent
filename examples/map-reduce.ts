@@ -32,6 +32,11 @@ export function createMapReduceExample(
     id: 'map-reduce-example',
     schemas: {
       input: z.object({ topic: z.string() }),
+      output: z.object({
+        subjects: z.array(z.string()),
+        jokes: z.array(z.string()),
+        bestJoke: z.string().nullable(),
+      }),
     },
     context: (input) => ({
       topic: input.topic,

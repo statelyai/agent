@@ -2,7 +2,7 @@ import type { AgentMachine } from '../types.js';
 
 export interface GraphNode {
   id: string;
-  type: 'state' | 'decide' | 'classify' | 'final';
+  type: 'state' | 'choice' | 'final';
 }
 
 export interface GraphEdge {

@@ -11,6 +11,15 @@ import type {
 } from '../types.js';
 import { isReservedInternalEventType } from '../utils.js';
 
+const RESERVED_PUBLIC_ON_TYPES = new Set([
+  'part',
+  'done',
+  'error',
+  'state',
+  'machine.event',
+  'runtime',
+]);
+
 type SnapshotRuntime = {
   sessionId: string;
   createdAt: number;
@@ -74,12 +83,12 @@ function toJournalEvent(
 }
 
 function createRun(
-  machine: AgentMachine,
+  machine: AgentMachine<any, any, any, any, any, any>,
   store: SessionOptions['store'],
   runtimeMachine: RuntimeMachine,
   runState: RunState,
   emitter = createRunEmitter()
-): AgentRun {
+): AgentRun<any, any, any, any, any> {
   let releaseStart!: () => void;
   let operation = new Promise<void>((resolve) => {
     releaseStart = resolve;
@@ -252,7 +261,33 @@ function createRun(
     },
 
     on(type, handler) {
-      return emitter.on(type, handler);
+      if (RESERVED_PUBLIC_ON_TYPES.has(type)) {
+        throw new Error(
+          `'${type}' is not an emitted event subscription. Use a dedicated run method instead.`
+        );
+      }
+
+      return emitter.on(type, handler as (event: unknown) => void);
+    },
+
+    onEmitted(handler) {
+      return emitter.on('part', handler as (event: unknown) => void);
+    },
+
+    onDone(handler) {
+      return emitter.on('done', handler as (event: unknown) => void);
+    },
+
+    onError(handler) {
+      return emitter.on('error', handler as (event: unknown) => void);
+    },
+
+    onSnapshot(handler) {
+      return emitter.on('state', handler as (event: unknown) => void);
+    },
+
+    onMachineEvent(handler) {
+      return emitter.on('machine.event', handler as (event: unknown) => void);
     },
 
     /** @internal */
@@ -271,15 +306,24 @@ function createRun(
     __scheduleStart() {
       scheduleStart();
     },
-  } as AgentRun;
+  } as AgentRun<any, any, any, any, any>;
 }
 
-export async function startSession(
-  machine: AgentMachine,
-  options: SessionOptions
-): Promise<AgentRun> {
+export async function startSession<
+  TInput,
+  TContext extends Record<string, unknown>,
+  TEvents extends Record<string, import('../types.js').StandardSchemaV1>,
+  TStates extends Record<string, any>,
+  TOutput,
+  TEmitted extends Record<string, import('../types.js').StandardSchemaV1>,
+>(
+  machine: AgentMachine<TInput, TContext, TEvents, TStates, TOutput, TEmitted>,
+  options: SessionOptions<TInput>
+): Promise<AgentRun<TContext, keyof TStates & string, TEvents, TOutput, TEmitted>> {
   const runtimeMachine = asRuntimeMachine(machine);
-  const initialState = machine.getInitialState(options.input);
+  const initialState = (machine as AgentMachine).getInitialState(
+    options.input as TInput
+  ) as AgentState<TContext, keyof TStates & string, TOutput>;
   const runtime = {
     sessionId: options.sessionId ?? createSessionId(),
     createdAt: Date.now(),
@@ -296,7 +340,7 @@ export async function startSession(
     options.store,
     runtimeMachine,
     runState
-  ) as AgentRun & {
+  ) as AgentRun<TContext, keyof TStates & string, TEvents, TOutput, TEmitted> & {
     __persistCurrent(): Promise<void>;
     __settle(): Promise<void>;
     __scheduleStart(): void;
@@ -316,10 +360,17 @@ export async function startSession(
   return run;
 }
 
-export async function restoreSession(
-  machine: AgentMachine,
+export async function restoreSession<
+  TInput,
+  TContext extends Record<string, unknown>,
+  TEvents extends Record<string, import('../types.js').StandardSchemaV1>,
+  TStates extends Record<string, any>,
+  TOutput,
+  TEmitted extends Record<string, import('../types.js').StandardSchemaV1>,
+>(
+  machine: AgentMachine<TInput, TContext, TEvents, TStates, TOutput, TEmitted>,
   options: RestoreSessionOptions
-): Promise<AgentRun> {
+): Promise<AgentRun<TContext, keyof TStates & string, TEvents, TOutput, TEmitted>> {
   const runtimeMachine = asRuntimeMachine(machine);
   const persisted = await options.store.loadLatestSnapshot(options.sessionId);
   const allEvents = await options.store.loadEvents(options.sessionId);
@@ -336,8 +387,14 @@ export async function restoreSession(
     createdAt: persisted?.snapshot.createdAt ?? initEvent?.at ?? Date.now(),
   };
   const initialState = persisted
-    ? machine.resolveState(persisted.snapshot)
-    : machine.getInitialState(initEvent?.input);
+    ? (machine.resolveState(
+        persisted.snapshot as AgentSnapshot<TContext, keyof TStates & string, TOutput>
+      ) as AgentState<TContext, keyof TStates & string, TOutput>)
+    : ((machine as AgentMachine).getInitialState(initEvent?.input) as AgentState<
+        TContext,
+        keyof TStates & string,
+        TOutput
+      >);
   const runState: RunState = {
     current: runtimeMachine.__runtime.withRuntimeMetadata(initialState, runtime),
     snapshot:
@@ -351,7 +408,7 @@ export async function restoreSession(
     options.store,
     runtimeMachine,
     runState
-  ) as AgentRun & {
+  ) as AgentRun<TContext, keyof TStates & string, TEvents, TOutput, TEmitted> & {
     __persistCurrent(): Promise<void>;
     __settle(): Promise<void>;
     __scheduleStart(): void;
@@ -365,7 +422,10 @@ export async function restoreSession(
 
   for (const event of replayTail) {
     runState.current = runtimeMachine.__runtime.withRuntimeMetadata(
-      machine.transition(runState.current, event),
+      machine.transition(
+        runState.current as AgentState<TContext, keyof TStates & string, TOutput>,
+        event as unknown as import('../types.js').TransitionEvent<TEvents>
+      ) as AgentState<TContext, keyof TStates & string, TOutput>,
       runState.runtime
     );
     runState.lastSequence = event.sequence;

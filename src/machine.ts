@@ -17,7 +17,7 @@ import {
   findEventSchema,
   formatSchemaIssues,
   getAvailableEvents,
-  getParams,
+  getInput,
   isDoneInvokeEventType,
   isErrorInvokeEventType,
   resolveInitial,
@@ -28,73 +28,61 @@ import {
 import type { StateConfigAny } from './utils.js';
 
 // ─── Type helpers ───
-
-type FallbackAny<T> = unknown extends T ? any : T;
-
-/** Choice result shape — always the same for type: 'choice' */
-type ChoiceResult = { choice: string; data: Record<string, unknown>; reasoning?: string };
-
-/** Result type for onDone: typed from resultSchema when present */
-type OnDoneResult<TResult> = unknown extends TResult ? ChoiceResult : NoInfer<TResult>;
+/** Result type for onDone: typed from invoke return or resultSchema when present */
+type OnDoneResult<TResult> = NoInfer<TResult>;
 
 type EventFor<TEvents, E> = E extends keyof TEvents & string
   ? { type: E } & EventPayload<InferOutput<TEvents[E & keyof TEvents]>>
   : { type: E & string; [k: string]: unknown };
 
 type StateNodeDef<
+  TState,
   TContext extends Record<string, unknown>,
-  TParams,
+  TInput,
   TResult,
   TEvents,
   TTarget extends string,
-  TParamsMap extends Record<string, any>,
-> =
-  | {
+  TInputMap extends Record<string, any>,
+  TOutput,
+> = {
   type?: 'final' | 'choice';
-  paramsSchema?: StandardSchemaV1<TParams>;
+  inputSchema?: StandardSchemaV1<TInput>;
   resultSchema?: StandardSchemaV1<TResult>;
   invoke?: (args: {
     context: TContext;
-    params: NoInfer<TParams>;
+    input: NoInfer<TInput>;
     signal?: AbortSignal;
-  }, enq: { emit(part: EmittedPart): void }) => Promise<NoInfer<TResult>>;
-  onDone?: (args: { result: OnDoneResult<TResult>; context: TContext }) => TransitionResult<TContext, TTarget, TParamsMap>;
-  on?: { [E in keyof TEvents & string]?: TransitionResult<TContext, TTarget, TParamsMap> | ((args: {
+  }, enq: { emit(part: EmittedPart): void }) => Promise<TResult>;
+  onDone?: (args: { result: OnDoneResult<TResult>; context: TContext }) => TransitionResult<TContext, TTarget, TInputMap>;
+  on?: { [E in keyof TEvents & string]?: TransitionResult<TContext, TTarget, TInputMap> | ((args: {
       event: EventFor<TEvents, E>;
       context: TContext;
-    }, enq: { emit(part: EmittedPart): void }) => TransitionResult<TContext, TTarget, TParamsMap>) };
+    }, enq: { emit(part: EmittedPart): void }) => TransitionResult<TContext, TTarget, TInputMap>) };
   events?: Record<string, StandardSchemaV1>;
-  output?: (args: { context: TContext }) => unknown;
-  // choice-specific
+  output?: (args: { context: TContext }) => NoInfer<TOutput>;
   model?: string;
   adapter?: import('./types.js').AgentAdapter;
-  prompt?: string | ((args: { context: TContext; params: NoInfer<TParams> }) => string);
+  prompt?: string | ((args: { context: TContext; input: NoInfer<TInput> }) => string);
   options?: Record<string, { description: string; schema?: StandardSchemaV1 }>;
   reasoning?: boolean;
-  // internal
-  __type?: 'decide' | 'classify';
-  __decideConfig?: Record<string, unknown>;
-}
-  | {
-    on?: StateConfigAny['on'];
-    __type: 'decide' | 'classify';
-    __decideConfig: Record<string, unknown>;
-    __classifyConfig?: Record<string, unknown>;
-  };
+};
 
 type StatesMap<
   TContext extends Record<string, unknown>,
-  TParamsMap extends Record<string, any>,
+  TInputMap extends Record<string, any>,
   TResultMap extends Record<string, any>,
+  TOutput,
   TEvents,
 > = {
-  [K in keyof TParamsMap & keyof TResultMap]: StateNodeDef<
+  [K in keyof TInputMap & keyof TResultMap]: StateNodeDef<
+    unknown,
     TContext,
-    TParamsMap[K],
+    TInputMap[K],
     TResultMap[K],
     TEvents,
-    keyof TParamsMap & keyof TResultMap & string,
-    TParamsMap
+    keyof TInputMap & keyof TResultMap & string,
+    TInputMap,
+    TOutput
   >;
 };
 
@@ -103,82 +91,91 @@ export function createAgentMachine<
   TInput,
   TContext extends Record<string, unknown>,
   const TEvents extends Record<string, StandardSchemaV1>,
-  const TParamsMap extends Record<string, any>,
+  const TInputMap extends Record<string, any>,
   TResultMap extends Record<string, any>,
+  const TEmitted extends Record<string, StandardSchemaV1>,
+  TOutput = unknown,
 >(config: {
   id: string;
   schemas: {
     context: StandardSchemaV1<TContext>;
     input?: StandardSchemaV1<TInput>;
     events?: TEvents;
-    emitted?: Record<string, StandardSchemaV1>;
+    emitted?: TEmitted;
+    output?: StandardSchemaV1<TOutput>;
   };
   context: (input: NoInfer<TInput>) => NoInfer<TContext>;
   adapter?: import('./types.js').AgentAdapter;
   initial:
-    | (keyof TParamsMap & keyof TResultMap & string)
+    | (keyof TInputMap & keyof TResultMap & string)
     | ((args: { context: NoInfer<TContext> }) => {
-        target: keyof TParamsMap & keyof TResultMap & string;
-        params?: Record<string, unknown>;
+        target: keyof TInputMap & keyof TResultMap & string;
+        input?: Record<string, unknown>;
       });
-  states: StatesMap<NoInfer<TContext>, TParamsMap, TResultMap, TEvents>;
-}): AgentMachine<TInput, TContext, TEvents, StatesMap<TContext, TParamsMap, TResultMap, TEvents>>;
+  states: StatesMap<NoInfer<TContext>, TInputMap, TResultMap, TOutput, TEvents>;
+}): AgentMachine<TInput, TContext, TEvents, StatesMap<TContext, TInputMap, TResultMap, TOutput, TEvents>, TOutput, TEmitted>;
 
 // ─── Overload B: no schemas.context ───
 export function createAgentMachine<
   TInput,
   TContext extends Record<string, unknown>,
   const TEvents extends Record<string, StandardSchemaV1>,
-  const TParamsMap extends Record<string, any>,
+  const TInputMap extends Record<string, any>,
   TResultMap extends Record<string, any>,
+  const TEmitted extends Record<string, StandardSchemaV1>,
+  TOutput = unknown,
 >(config: {
   id: string;
   schemas: {
     input: StandardSchemaV1<TInput>;
     context?: never;
     events?: TEvents;
-    emitted?: Record<string, StandardSchemaV1>;
+    emitted?: TEmitted;
+    output?: StandardSchemaV1<TOutput>;
   };
   context: (input: NoInfer<TInput>) => TContext;
   adapter?: import('./types.js').AgentAdapter;
   initial:
-    | (keyof TParamsMap & keyof TResultMap & string)
+    | (keyof TInputMap & keyof TResultMap & string)
     | ((args: { context: TContext }) => {
-        target: keyof TParamsMap & keyof TResultMap & string;
-        params?: Record<string, unknown>;
+        target: keyof TInputMap & keyof TResultMap & string;
+        input?: Record<string, unknown>;
       });
-  states: StatesMap<TContext, TParamsMap, TResultMap, TEvents>;
-}): AgentMachine<TInput, TContext, TEvents, StatesMap<TContext, TParamsMap, TResultMap, TEvents>>;
+  states: StatesMap<TContext, TInputMap, TResultMap, TOutput, TEvents>;
+}): AgentMachine<TInput, TContext, TEvents, StatesMap<TContext, TInputMap, TResultMap, TOutput, TEvents>, TOutput, TEmitted>;
 
 // ─── Overload C: no schemas.input or schemas.context ───
 export function createAgentMachine<
   TContext extends Record<string, unknown>,
   const TEvents extends Record<string, StandardSchemaV1>,
-  const TParamsMap extends Record<string, any>,
+  const TInputMap extends Record<string, any>,
   TResultMap extends Record<string, any>,
+  const TEmitted extends Record<string, StandardSchemaV1>,
+  TOutput = unknown,
 >(config: {
   id: string;
   schemas?: {
     input?: never;
     context?: never;
     events?: TEvents;
-    emitted?: Record<string, StandardSchemaV1>;
+    emitted?: TEmitted;
+    output?: StandardSchemaV1<TOutput>;
   };
   context: (...args: any[]) => TContext;
   adapter?: import('./types.js').AgentAdapter;
   initial:
-    | (keyof TParamsMap & keyof TResultMap & string)
+    | (keyof TInputMap & keyof TResultMap & string)
     | ((args: { context: TContext }) => {
-        target: keyof TParamsMap & keyof TResultMap & string;
-        params?: Record<string, unknown>;
+        target: keyof TInputMap & keyof TResultMap & string;
+        input?: Record<string, unknown>;
       });
-  states: StatesMap<TContext, TParamsMap, TResultMap, TEvents>;
-}): AgentMachine<unknown, TContext, TEvents, StatesMap<TContext, TParamsMap, TResultMap, TEvents>>;
+  states: StatesMap<TContext, TInputMap, TResultMap, TOutput, TEvents>;
+}): AgentMachine<unknown, TContext, TEvents, StatesMap<TContext, TInputMap, TResultMap, TOutput, TEvents>, TOutput, TEmitted>;
 
 // ─── Implementation ───
 
 export function createAgentMachine(
-  machineConfig: MachineConfig<any, any, any, any>
+  machineConfig: MachineConfig<any, any, any, any, any>
 ): AgentMachine {
   const cfg = machineConfig as MachineConfig;
 
@@ -224,7 +221,7 @@ export function createAgentMachine(
     }
 
     const context = cfg.context(validatedInput);
-    const init = resolveInitial(cfg.initial, { context, params: {} });
+    const init = resolveInitial(cfg.initial, { context, input: {} });
 
     if (!init.target) {
       throw new Error('Initial transition must specify a target state');
@@ -234,14 +231,14 @@ export function createAgentMachine(
       value: init.target,
       context: init.context ? { ...context, ...init.context } : context,
       status: 'active',
-      params: init.params ? { [init.target]: init.params } : {},
+      input: init.input ? { [init.target]: init.input } : {},
     };
   }
 
   function resolveState(raw: {
     value: string;
     context: Record<string, unknown>;
-    params?: Record<string, Record<string, unknown>>;
+    input?: Record<string, Record<string, unknown>>;
     sessionId?: string;
     createdAt?: number;
     status?: AgentState['status'];
@@ -252,7 +249,7 @@ export function createAgentMachine(
       value: raw.value,
       context: raw.context,
       status: raw.status ?? 'active',
-      params: raw.params ?? {},
+      input: raw.input ?? {},
       sessionId: raw.sessionId,
       createdAt: raw.createdAt,
       output: raw.output,
@@ -278,8 +275,6 @@ export function createAgentMachine(
       onEmit?.(part);
     });
     const sc = resolveStateConfig(cfg, state.value);
-    const effectiveConfig = getEffectiveStateConfig(state.value);
-
     function applyResult(
       result: TransitionResult,
       status = state.status
@@ -319,12 +314,12 @@ export function createAgentMachine(
 
     if (isDoneInvokeEventType(state.value, event.type)) {
       const result = 'output' in event ? event.output : undefined;
-      const validatedResult = effectiveConfig.resultSchema
-        ? validateSchemaSync(effectiveConfig.resultSchema, result)
+      const validatedResult = sc.resultSchema
+        ? validateSchemaSync(sc.resultSchema, result)
         : result;
 
-      if (effectiveConfig.onDone) {
-        const trans = effectiveConfig.onDone({
+      if (sc.onDone) {
+        const trans = sc.onDone({
           result: validatedResult,
           context: state.context,
         });
@@ -371,23 +366,16 @@ export function createAgentMachine(
     );
   }
 
-  function getEffectiveStateConfig(value: string): StateConfigAny {
-    const sc = resolveStateConfig(cfg, value);
-    return sc.__decideConfig
-      ? { ...sc, ...(sc.__decideConfig as Record<string, unknown>) }
-      : sc;
-  }
-
   function validateReplayableResult(
     value: string,
     result: unknown
   ): unknown {
-    const effectiveConfig = getEffectiveStateConfig(value);
-    if (!effectiveConfig.resultSchema) {
+    const sc = resolveStateConfig(cfg, value);
+    if (!sc.resultSchema) {
       return result;
     }
 
-    return validateSchemaSync(effectiveConfig.resultSchema, result);
+    return validateSchemaSync(sc.resultSchema, result);
   }
 
   function validateEventPayload(
@@ -451,8 +439,8 @@ export function createAgentMachine(
   }
 
   async function createChoiceEvent(state: AgentState): Promise<JournalEvent> {
-    const dc = getEffectiveStateConfig(state.value);
-    const adapter = (dc as StateConfigAny).adapter ?? cfg.adapter;
+    const sc = resolveStateConfig(cfg, state.value);
+    const adapter = sc.adapter ?? cfg.adapter;
     if (!adapter) {
       return {
         type: `xstate.error.invoke.${state.value}`,
@@ -461,18 +449,18 @@ export function createAgentMachine(
       };
     }
 
-    const params = getParams(state.value, state.params);
+    const input = getInput(state.value, state.input);
     const prompt =
-      typeof dc.prompt === 'function'
-        ? dc.prompt({ context: state.context, params })
-        : dc.prompt;
+      typeof sc.prompt === 'function'
+        ? sc.prompt({ context: state.context, input })
+        : sc.prompt;
 
     try {
       const result = await adapter.decide({
-        model: (dc as StateConfigAny).model!,
+        model: sc.model!,
         prompt: prompt as string,
-        options: (dc as StateConfigAny).options!,
-        reasoning: (dc as StateConfigAny).reasoning,
+        options: sc.options!,
+        reasoning: sc.reasoning,
       });
       const validatedResult = validateReplayableResult(state.value, result);
 
@@ -499,7 +487,7 @@ export function createAgentMachine(
       const result = await sc.invoke!(
         {
           context: state.context,
-          params: getParams(state.value, state.params),
+          input: getInput(state.value, state.input),
         },
         createEnqueue(onEmit)
       );
@@ -528,7 +516,7 @@ export function createAgentMachine(
     }
 
     const sc = resolveStateConfig(cfg, state.value);
-    if (sc.type === 'choice' || sc.__decideConfig) {
+    if (sc.type === 'choice') {
       return createChoiceEvent(state);
     }
 
@@ -571,9 +559,12 @@ export function createAgentMachine(
     const sc = resolveStateConfig(cfg, state.value);
 
     if (sc.type === 'final') {
-      const output = sc.output
+      const rawOutput = sc.output
         ? sc.output({ context: state.context })
         : undefined;
+      const output = cfg.schemas?.output
+        ? validateSchemaSync(cfg.schemas.output, rawOutput)
+        : rawOutput;
       return { ...state, status: 'done', output };
     }
 
@@ -654,7 +645,7 @@ export function createAgentMachine(
       status: s.status,
       sessionId: runtime.sessionId,
       createdAt: runtime.createdAt,
-      params: s.params,
+      input: s.input,
       output: s.output,
       error: s.error,
     };

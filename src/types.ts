@@ -66,22 +66,22 @@ export interface AgentAdapter {
 export type TransitionResult<
   TContext extends Record<string, unknown> = Record<string, unknown>,
   TTarget extends string = string,
-  TParamsByTarget extends Record<string, any> = {},
+  TInputByTarget extends Record<string, any> = {},
 > =
   | {
       target?: undefined;
       context?: Partial<TContext>;
-      params?: never;
+      input?: never;
     }
   | {
       [K in TTarget]: {
         target: K;
         context?: Partial<TContext>;
-      } & (K extends keyof TParamsByTarget
-        ? IsExactlyUnknown<TParamsByTarget[K]> extends true
-          ? { params?: never }
-          : { params: TParamsByTarget[K] }
-        : { params?: never })
+      } & (K extends keyof TInputByTarget
+        ? IsExactlyUnknown<TInputByTarget[K]> extends true
+          ? { input?: never }
+          : { input: TInputByTarget[K] }
+        : { input?: never })
     }[TTarget];
 
 export interface InitialTransitionResult<
@@ -90,7 +90,7 @@ export interface InitialTransitionResult<
 > {
   target: TTarget;
   context?: Partial<TContext>;
-  params?: Record<string, unknown>;
+  input?: Record<string, unknown>;
 }
 
 // ─── State Config ───
@@ -98,44 +98,53 @@ export interface InitialTransitionResult<
 export interface StateConfig<
   TContext extends Record<string, unknown> = Record<string, unknown>,
   TTarget extends string = string,
-  TParamsByTarget extends Record<string, any> = {},
+  TInputByTarget extends Record<string, any> = {},
 > {
   type?: 'final' | 'choice';
-  paramsSchema?: StandardSchemaV1;
+  inputSchema?: StandardSchemaV1;
   resultSchema?: StandardSchemaV1;
   invoke?: (args: {
     context: TContext;
-    params: Record<string, unknown>;
+    input: Record<string, unknown>;
     signal?: AbortSignal;
   }, enq: InvokeEnqueue) => Promise<unknown>;
-  onDone?: (args: { result: any; context: TContext }) => TransitionResult<TContext, TTarget, TParamsByTarget>;
-  on?: Record<string, TransitionResult<TContext, TTarget, TParamsByTarget> | ((args: { event: any; context: TContext }, enq: InvokeEnqueue) => TransitionResult<TContext, TTarget, TParamsByTarget>)>;
+  onDone?: (args: { result: any; context: TContext }) => TransitionResult<TContext, TTarget, TInputByTarget>;
+  on?: Record<string, TransitionResult<TContext, TTarget, TInputByTarget> | ((args: { event: any; context: TContext }, enq: InvokeEnqueue) => TransitionResult<TContext, TTarget, TInputByTarget>)>;
   events?: Record<string, StandardSchemaV1>;
   output?: (args: { context: TContext }) => unknown;
   // choice-specific
   model?: string;
   adapter?: AgentAdapter;
-  prompt?: string | ((args: { context: TContext; params: Record<string, unknown> }) => string);
+  prompt?: string | ((args: { context: TContext; input: Record<string, unknown> }) => string);
   options?: Record<string, { description: string; schema?: StandardSchemaV1 }>;
   reasoning?: boolean;
-  /** @internal */ __type?: 'decide' | 'classify';
-  /** @internal */ __decideConfig?: any;
-  /** @internal */ __classifyConfig?: any;
 }
+
+type OutputForState<TState> = TState extends {
+  output: (...args: any[]) => infer TOutput;
+}
+  ? TOutput
+  : never;
+
+export type OutputForStates<TStates extends Record<string, unknown>> =
+  [OutputForState<TStates[keyof TStates]>] extends [never]
+    ? unknown
+    : OutputForState<TStates[keyof TStates]>;
 
 // ─── Agent State (POJO) ───
 
 export interface AgentState<
   TContext extends Record<string, unknown> = Record<string, unknown>,
   TValue extends string = string,
+  TOutput = unknown,
 > {
   value: TValue;
   context: TContext;
   status: 'active' | 'pending' | 'done' | 'error';
-  params: Record<string, Record<string, unknown>>;
+  input: Record<string, Record<string, unknown>>;
   sessionId?: string;
   createdAt?: number;
-  output?: unknown;
+  output?: TOutput;
   error?: unknown;
 }
 
@@ -145,24 +154,26 @@ export type ExecuteResult<
   TContext extends Record<string, unknown> = Record<string, unknown>,
   TValue extends string = string,
   TEvents extends Record<string, StandardSchemaV1> = {},
+  TOutput = unknown,
 > =
-  | { status: 'done'; state: AgentState<TContext, TValue>; output: unknown; context: TContext }
-  | { status: 'pending'; state: AgentState<TContext, TValue>; value: TValue; events: Record<string, StandardSchemaV1>; context: TContext }
-  | { status: 'error'; state: AgentState<TContext, TValue>; error: unknown };
+  | { status: 'done'; state: AgentState<TContext, TValue, TOutput>; output: TOutput; context: TContext }
+  | { status: 'pending'; state: AgentState<TContext, TValue, TOutput>; value: TValue; events: Record<string, StandardSchemaV1>; context: TContext }
+  | { status: 'error'; state: AgentState<TContext, TValue, TOutput>; error: unknown };
 
 // ─── Snapshot ───
 
 export interface AgentSnapshot<
   TContext extends Record<string, unknown> = Record<string, unknown>,
   TValue extends string = string,
+  TOutput = unknown,
 > {
   value: TValue;
   context: TContext;
   status: AgentState['status'];
   createdAt: number;
   sessionId: string;
-  params: Record<string, Record<string, unknown>>;
-  output?: unknown;
+  input: Record<string, Record<string, unknown>>;
+  output?: TOutput;
   error?: unknown;
 }
 
@@ -173,56 +184,88 @@ export interface AgentMachine<
   TContext extends Record<string, unknown> = Record<string, unknown>,
   TEvents extends Record<string, StandardSchemaV1> = {},
   TStates extends Record<string, any> = Record<string, StateConfig<TContext>>,
+  TOutput = OutputForStates<TStates>,
+  TEmitted extends Record<string, StandardSchemaV1> = {},
 > {
   readonly id: string;
 
   getInitialState(
     ...args: unknown extends TInput ? [input?: TInput] : [input: TInput]
-  ): AgentState<TContext, keyof TStates & string>;
+  ): AgentState<TContext, keyof TStates & string, TOutput>;
 
   resolveState(
     raw:
-      | AgentSnapshot<TContext, keyof TStates & string>
+      | AgentSnapshot<TContext, keyof TStates & string, TOutput>
       | {
           value: string;
           context: TContext;
-          params?: Record<string, Record<string, unknown>>;
+          input?: Record<string, Record<string, unknown>>;
           sessionId?: string;
           createdAt?: number;
           status?: AgentState['status'];
-          output?: unknown;
+          output?: TOutput;
           error?: unknown;
         }
-  ): AgentState<TContext, keyof TStates & string>;
+  ): AgentState<TContext, keyof TStates & string, TOutput>;
 
   transition(
-    state: AgentState<TContext, keyof TStates & string>,
+    state: AgentState<TContext, keyof TStates & string, TOutput>,
     event: TransitionEvent<TEvents>
-  ): AgentState<TContext, keyof TStates & string>;
+  ): AgentState<TContext, keyof TStates & string, TOutput>;
 
   invoke(
-    state: AgentState<TContext, keyof TStates & string>
-  ): Promise<AgentState<TContext, keyof TStates & string>>;
+    state: AgentState<TContext, keyof TStates & string, TOutput>
+  ): Promise<AgentState<TContext, keyof TStates & string, TOutput>>;
 
   execute(
-    state: AgentState<TContext, keyof TStates & string>
-  ): Promise<ExecuteResult<TContext, keyof TStates & string, TEvents>>;
+    state: AgentState<TContext, keyof TStates & string, TOutput>
+  ): Promise<ExecuteResult<TContext, keyof TStates & string, TEvents, TOutput>>;
 
   stream(
-    state: AgentState<TContext, keyof TStates & string>
-  ): AsyncGenerator<AgentSnapshot<TContext, keyof TStates & string>>;
+    state: AgentState<TContext, keyof TStates & string, TOutput>
+  ): AsyncGenerator<AgentSnapshot<TContext, keyof TStates & string, TOutput>>;
 }
 
 export interface AgentRun<
   TContext extends Record<string, unknown> = Record<string, unknown>,
   TValue extends string = string,
   TEvents extends Record<string, StandardSchemaV1> = {},
+  TOutput = unknown,
+  TEmitted extends Record<string, StandardSchemaV1> = {},
 > {
   readonly sessionId: string;
-  readonly status: AgentSnapshot<TContext, TValue>['status'];
-  getSnapshot(): AgentSnapshot<TContext, TValue>;
+  readonly status: AgentSnapshot<TContext, TValue, TOutput>['status'];
+  getSnapshot(): AgentSnapshot<TContext, TValue, TOutput>;
   send(event: TransitionEvent<TEvents>): Promise<void>;
-  on(type: string, handler: (event: unknown) => void): () => void;
+  on<TKey extends keyof TEmitted & string>(
+    type: TKey,
+    handler: (event: { type: TKey } & EventPayload<InferOutput<TEmitted[TKey]>>) => void
+  ): () => void;
+  onEmitted(
+    handler: (event: EmittedUnion<TEmitted>) => void
+  ): () => void;
+  onDone(
+    handler: (event: {
+      output: TOutput;
+      snapshot: AgentSnapshot<TContext, TValue, TOutput>;
+    }) => void
+  ): () => void;
+  onError(
+    handler: (event: {
+      error: unknown;
+      snapshot: AgentSnapshot<TContext, TValue, TOutput>;
+    }) => void
+  ): () => void;
+  onSnapshot(
+    handler: (snapshot: AgentSnapshot<TContext, TValue, TOutput>) => void
+  ): () => void;
+  onMachineEvent(
+    handler: (
+      event: import('./runtime/store.js').JournalEventRecord<
+        import('./runtime/events.js').JournalEvent
+      >
+    ) => void
+  ): () => void;
 }
 
 export interface SessionOptions<
@@ -247,24 +290,24 @@ export interface MachineConfig<
   TInput = unknown,
   TContext extends Record<string, unknown> = Record<string, unknown>,
   TEvents extends Record<string, StandardSchemaV1> = {},
-  TStates extends Record<string, StateConfig<TContext>> = Record<string, StateConfig<TContext>>,
+  TStates extends Record<string, any> = Record<string, StateConfig<TContext>>,
+  TEmitted extends Record<string, StandardSchemaV1> = {},
 > {
   id: string;
   schemas?: {
     input?: StandardSchemaV1;
     context?: StandardSchemaV1;
     events?: TEvents;
-    emitted?: Record<string, StandardSchemaV1>;
+    emitted?: TEmitted;
+    output?: StandardSchemaV1;
   };
   context: (input: TInput) => TContext;
   adapter?: AgentAdapter;
   initial:
     | (keyof TStates & string)
-    | ((args: { context: TContext }) => { target: keyof TStates & string; params?: Record<string, unknown> });
+    | ((args: { context: TContext }) => { target: keyof TStates & string; input?: Record<string, unknown> });
   states: TStates;
 }
-
-// ─── Decide ───
 
 export type DecideResultFor<
   TOptions extends Record<string, { description: string; schema?: StandardSchemaV1 }>,
@@ -276,38 +319,31 @@ export type DecideResultFor<
   };
 }[keyof TOptions & string];
 
-export interface DecideConfig<
-  TContext extends Record<string, unknown> = Record<string, unknown>,
-  TParams extends Record<string, unknown> = Record<string, unknown>,
+export interface DecideOptions<
   TOptions extends Record<string, { description: string; schema?: StandardSchemaV1 }> = Record<string, { description: string; schema?: StandardSchemaV1 }>,
-  TTarget extends string = string,
-  TParamsByTarget extends Record<string, any> = {},
 > {
-  model: string;
   adapter?: AgentAdapter;
-  prompt: string | ((args: { context: TContext; params: TParams }) => string);
+  model: string;
+  prompt: string;
   options: TOptions;
   reasoning?: boolean;
-  onDone: (args: { result: DecideResultFor<TOptions>; context: TContext }) => TransitionResult<TContext, TTarget, TParamsByTarget>;
-  on?: Record<string, (args: { event: any; context: TContext }, enq: InvokeEnqueue) => TransitionResult<TContext, TTarget, TParamsByTarget>>;
 }
 
-// ─── Classify ───
-
-export interface ClassifyConfig<
-  TContext extends Record<string, unknown> = Record<string, unknown>,
-  TParams extends Record<string, unknown> = Record<string, unknown>,
+export interface ClassifyResultFor<
   TCategories extends Record<string, { description: string }> = Record<string, { description: string }>,
-  TTarget extends string = string,
-  TParamsByTarget extends Record<string, any> = {},
 > {
-  model: string;
+  category: keyof TCategories & string;
+}
+
+export interface ClassifyOptions<
+  TCategories extends Record<string, { description: string }> = Record<string, { description: string }>,
+> {
   adapter?: AgentAdapter;
-  prompt: string | ((args: { context: TContext; params: TParams }) => string);
+  model: string;
+  prompt: string;
   into: TCategories;
   examples?: Array<{ input: string; category: keyof TCategories & string }>;
-  onDone: (args: { result: { category: keyof TCategories & string }; context: TContext }) => TransitionResult<TContext, TTarget, TParamsByTarget>;
-  on?: Record<string, (args: { event: any; context: TContext }, enq: InvokeEnqueue) => TransitionResult<TContext, TTarget, TParamsByTarget>>;
+  reasoning?: boolean;
 }
 
 // ─── Trace ───

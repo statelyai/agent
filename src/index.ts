@@ -1,9 +1,9 @@
 // Core
 export { createAgentMachine } from './machine.js';
+export { decide, decideResultSchema, requireAdapter } from './decide.js';
+export { classify, classifyResultSchema } from './classify.js';
 
 // AI primitives
-export { decide } from './decide.js';
-export { classify } from './classify.js';
 export { createReactAgent } from './prebuilt/react.js';
 export type {
   ReactAgentMessage,
@@ -23,8 +23,9 @@ export type {
   AgentRun,
   AgentSnapshot,
   AgentState,
-  ClassifyConfig,
-  DecideConfig,
+  ClassifyOptions,
+  ClassifyResultFor,
+  DecideOptions,
   DecideResultFor,
   EmittedPart,
   EmittedUnion,

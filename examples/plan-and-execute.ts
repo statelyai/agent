@@ -82,6 +82,12 @@ export function createPlanAndExecuteExample(
     id: 'plan-and-execute-example',
     schemas: {
       input: z.object({ goal: z.string() }),
+      output: z.object({
+        goal: z.string(),
+        plan: z.array(z.string()),
+        stepResults: z.array(z.string()),
+        answer: z.string().nullable(),
+      }),
     },
     context: (input) => ({
       goal: input.goal,
@@ -97,18 +103,18 @@ export function createPlanAndExecuteExample(
         onDone: ({ result }) => ({
           target: 'executing',
           context: { plan: result.plan },
-          params: { index: 0 } 
+          input: { index: 0 } 
         }),
       },
       executing: {
-        paramsSchema: z.object({
+        inputSchema: z.object({
           index: z.number().int().min(0),
         }),
         resultSchema: stepResultSchema,
-        invoke: async ({ context, params }) =>
+        invoke: async ({ context, input }) =>
           executeStep({
             goal: context.goal,
-            step: context.plan[params.index] ?? '',
+            step: context.plan[input.index] ?? '',
             priorResults: context.stepResults,
           }),
         onDone: ({ result, context }) => {
@@ -119,7 +125,7 @@ export function createPlanAndExecuteExample(
             return {
               target: 'executing' as const,
               context: { stepResults: nextStepResults },
-              params: { index: nextIndex },
+              input: { index: nextIndex },
             };
           }
 

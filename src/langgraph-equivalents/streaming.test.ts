@@ -7,14 +7,13 @@ import {
 } from '../index.js';
 
 function once<T = unknown>(
-  run: { on(type: string, handler: (event: unknown) => void): () => void },
-  type: string
+  subscribe: (handler: (event: T) => void) => () => void
 ) {
   return new Promise<T>((resolve) => {
     let off = () => {};
-    off = run.on(type, (event) => {
+    off = subscribe((event) => {
       off();
-      resolve(event as T);
+      resolve(event);
     });
   });
 }
@@ -55,10 +54,10 @@ test('streams live invoke output while preserving durable state history', async 
   const liveParts: string[] = [];
 
   run.on('textPart', (part) => {
-    liveParts.push((part as { delta: string }).delta);
+    liveParts.push(part.delta);
   });
 
-  await once(run, 'done');
+  await once(run.onDone.bind(run));
 
   expect(liveParts).toEqual(['hello', ' world']);
   expect(run.getSnapshot()).toEqual(

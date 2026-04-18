@@ -29,7 +29,7 @@ const machine = createAgentMachine({
 machine.transition(machine.getInitialState(), { type: 'advance' });
 
 createAgentMachine({
-  id: 'typed-target-params',
+  id: 'typed-target-input',
   context: () => ({ count: 0 }),
   initial: 'idle',
   states: {
@@ -37,14 +37,14 @@ createAgentMachine({
       on: {
         advance: () => ({
           target: 'working',
-          params: {
+          input: {
             index: 0,
           },
         }),
       },
     },
     working: {
-      paramsSchema: z.object({
+      inputSchema: z.object({
         index: z.number(),
       }),
     },
@@ -58,21 +58,96 @@ createAgentMachine({
   },
 });
 
+const typedMachine = createAgentMachine({
+  id: 'typed-surface',
+  schemas: {
+    input: z.object({
+      task: z.string(),
+    }),
+    events: {
+      submit: z.object({
+        value: z.number(),
+      }),
+    },
+    output: z.object({
+      task: z.string(),
+      total: z.number(),
+    }),
+  },
+  context: (input) => ({
+    task: input.task,
+    total: 0,
+  }),
+  initial: 'idle',
+  states: {
+    idle: {
+      on: {
+        submit: ({ event }) => {
+          event.value satisfies number;
+          // @ts-expect-error invalid event payload property
+          event.missing;
+          return {
+            target: 'done',
+            context: { total: event.value },
+          };
+        },
+      },
+    },
+    done: {
+      type: 'final',
+      output: ({ context }) => ({
+        task: context.task,
+        total: context.total,
+      }),
+    },
+  },
+});
+
+typedMachine.getInitialState({ task: 'ship it' });
+// @ts-expect-error missing required input
+typedMachine.getInitialState();
+// @ts-expect-error wrong input type
+typedMachine.getInitialState({ task: 42 });
+
+const typedState = typedMachine.getInitialState({ task: 'infer state values' });
+typedState.value satisfies 'idle' | 'done';
+// @ts-expect-error invalid state literal
+typedState.value satisfies 'missing';
+
+typedMachine.transition(typedState, { type: 'submit', value: 1 });
+// @ts-expect-error invalid event type
+typedMachine.transition(typedState, { type: 'missing' });
+// @ts-expect-error invalid event payload
+typedMachine.transition(typedState, { type: 'submit', value: 'nope' });
+
+void (async () => {
+  const result = await typedMachine.execute(
+    typedMachine.transition(typedState, { type: 'submit', value: 2 })
+  );
+
+  if (result.status === 'done') {
+    result.output.total satisfies number;
+    result.output.task satisfies string;
+    // @ts-expect-error no missing output property
+    result.output.missing;
+  }
+})();
+
 createAgentMachine({
-  id: 'missing-required-target-params',
+  id: 'missing-required-target-input',
   context: () => ({ count: 0 }),
   initial: 'idle',
   states: {
-    // @ts-expect-error params should be required when the target has paramsSchema
     idle: {
       on: {
+        // @ts-expect-error input should be required when the target has inputSchema
         advance: () => ({
           target: 'working',
         }),
       },
     },
     working: {
-      paramsSchema: z.object({
+      inputSchema: z.object({
         index: z.number(),
       }),
     },
@@ -91,9 +166,9 @@ createAgentMachine({
   context: () => ({ count: 0 }),
   initial: 'idle',
   states: {
-    // @ts-expect-error invalid targets should be rejected at author time
     idle: {
       on: {
+        // @ts-expect-error invalid targets should be rejected at author time
         advance: () => ({
           target: 'missing',
         }),
@@ -113,16 +188,16 @@ createAgentMachine({
 });
 
 createAgentMachine({
-  id: 'unexpected-target-params',
+  id: 'unexpected-target-input',
   context: () => ({ count: 0 }),
   initial: 'idle',
   states: {
     idle: {
       on: {
-        // @ts-expect-error params should be rejected when the target has no paramsSchema
+        // @ts-expect-error input should be rejected when the target has no inputSchema
         advance: () => ({
           target: 'done',
-          params: {
+          input: {
             anything: true,
           },
         }),
@@ -142,23 +217,23 @@ createAgentMachine({
 });
 
 createAgentMachine({
-  id: 'invalid-target-params',
+  id: 'invalid-target-input',
   context: () => ({ count: 0 }),
   initial: 'idle',
   states: {
     idle: {
       on: {
-        // @ts-expect-error target params should match the target state's params schema
+        // @ts-expect-error target input should match the target state's input schema
         advance: () => ({
           target: 'working',
-          params: {
+          input: {
             wrong: true,
           },
         }),
       },
     },
     working: {
-      paramsSchema: z.object({
+      inputSchema: z.object({
         index: z.number(),
       }),
     },
@@ -179,17 +254,17 @@ createAgentMachine({
   states: {
     idle: {
       on: {
-        // @ts-expect-error target params should match the target param field types
+        // @ts-expect-error target input should match the target input field types
         advance: () => ({
           target: 'working',
-          params: {
+          input: {
             index: 'hello',
           },
         }),
       },
     },
     working: {
-      paramsSchema: z.object({
+      inputSchema: z.object({
         index: z.number(),
       }),
     },

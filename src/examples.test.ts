@@ -15,14 +15,17 @@ import {
   createJokeExample,
   createJugsExample,
   createMapReduceExample,
+  createMultiAgentNetworkExample,
   createNewspaperExample,
   createPlanAndExecuteExample,
   createRaffleExample,
   createReactAgentExample,
+  createRewooExample,
   createReflectionExample,
   createRiverCrossingExample,
   createSimpleExample,
   createSubflowExample,
+  createSupervisorExample,
   createToolCallingExample,
   createTutorExample,
 } from '../examples/index.js';
@@ -42,13 +45,16 @@ describe('curated examples', () => {
     expect(existsSync(resolve(examplesDir, 'joke.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'jugs.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'map-reduce.ts'))).toBe(true);
+    expect(existsSync(resolve(examplesDir, 'multi-agent-network.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'newspaper.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'plan-and-execute.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'raffle.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'react-agent.ts'))).toBe(true);
+    expect(existsSync(resolve(examplesDir, 'rewoo.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'reflection.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'river-crossing.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'subflow.ts'))).toBe(true);
+    expect(existsSync(resolve(examplesDir, 'supervisor.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'tool-calling.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'tutor.ts'))).toBe(true);
   });
@@ -475,6 +481,64 @@ describe('curated examples', () => {
     }
   });
 
+  test('multi-agent network example coordinates specialist handoffs through a supervisor state', async () => {
+    let step = 0;
+
+    const machine = createMultiAgentNetworkExample({
+      adapter: {
+        decide: async () => {
+          step += 1;
+
+          if (step === 1) {
+            return {
+              choice: 'research',
+              data: { focus: 'collect technical notes' },
+            };
+          }
+
+          if (step === 2) {
+            return {
+              choice: 'write',
+              data: { angle: 'produce a short memo' },
+            };
+          }
+
+          return {
+            choice: 'finalize',
+            data: {},
+          };
+        },
+      },
+      research: async ({ topic, focus }) => ({
+        notes: [`${topic}:${focus}:a`, `${topic}:${focus}:b`],
+      }),
+      write: async ({ topic, notes, angle }) => ({
+        draft: `${topic} | ${angle} | ${notes.join(' / ')}`,
+      }),
+    });
+
+    const result = await machine.execute(
+      machine.getInitialState({ topic: 'durable agents' })
+    );
+
+    expect(result.status).toBe('done');
+    if (result.status === 'done') {
+      expect(result.output).toEqual({
+        topic: 'durable agents',
+        notes: [
+          'durable agents:collect technical notes:a',
+          'durable agents:collect technical notes:b',
+        ],
+        draft:
+          'durable agents | produce a short memo | durable agents:collect technical notes:a / durable agents:collect technical notes:b',
+        handoffs: [
+          'researcher:collect technical notes',
+          'writer:produce a short memo',
+        ],
+      });
+    }
+  });
+
   test('tool-calling example emits live tool activity and completes with output', async () => {
     const machine = createToolCallingExample(async (city) => ({
       forecast: `Rainy in ${city}`,
@@ -488,15 +552,15 @@ describe('curated examples', () => {
     const events: string[] = [];
 
     run.on('toolCall', (event) => {
-      events.push(`call:${(event as { toolName: string }).toolName}`);
+      events.push(`call:${event.toolName}`);
     });
     run.on('toolResult', (event) => {
-      events.push(`result:${(event as { toolName: string }).toolName}`);
+      events.push(`result:${event.toolName}`);
     });
 
     await new Promise<void>((resolve, reject) => {
-      run.on('done', () => resolve());
-      run.on('error', (event) => reject((event as { error: unknown }).error));
+      run.onDone(() => resolve());
+      run.onError((event) => reject(event.error));
     });
 
     expect(events).toEqual(['call:getWeather', 'result:getWeather']);
@@ -545,15 +609,15 @@ describe('curated examples', () => {
     const events: string[] = [];
 
     run.on('toolCall', (event) => {
-      events.push(`call:${(event as { toolName: string }).toolName}`);
+      events.push(`call:${event.toolName}`);
     });
     run.on('toolResult', (event) => {
-      events.push(`result:${(event as { toolName: string }).toolName}`);
+      events.push(`result:${event.toolName}`);
     });
 
     await new Promise<void>((resolve, reject) => {
-      run.on('done', () => resolve());
-      run.on('error', (event) => reject((event as { error: unknown }).error));
+      run.onDone(() => resolve());
+      run.onError((event) => reject(event.error));
     });
 
     expect(events).toEqual(['call:search', 'result:search']);
@@ -564,6 +628,111 @@ describe('curated examples', () => {
         }),
       })
     );
+  });
+
+  test('rewoo example plans named steps, executes them with references, and solves the objective', async () => {
+    const machine = createRewooExample({
+      plan: async () => ({
+        steps: [
+          {
+            id: 'E1',
+            instruction: 'Collect a fact',
+            input: 'LangGraphJS',
+          },
+          {
+            id: 'E2',
+            instruction: 'Summarize the fact',
+            input: 'Use #E1 in one concise sentence',
+          },
+        ],
+      }),
+      executeStep: async ({ step, resolvedInput }) => ({
+        result: `${step.id}:${resolvedInput}`,
+      }),
+      solve: async ({ resultsById }) => ({
+        answer: `${resultsById.E1} | ${resultsById.E2}`,
+      }),
+    });
+
+    const result = await machine.execute(
+      machine.getInitialState({ objective: 'understand the repo' })
+    );
+
+    expect(result.status).toBe('done');
+    if (result.status === 'done') {
+      expect(result.output).toEqual({
+        objective: 'understand the repo',
+        steps: [
+          {
+            id: 'E1',
+            instruction: 'Collect a fact',
+            input: 'LangGraphJS',
+          },
+          {
+            id: 'E2',
+            instruction: 'Summarize the fact',
+            input: 'Use #E1 in one concise sentence',
+          },
+        ],
+        resultsById: {
+          E1: 'E1:LangGraphJS',
+          E2: 'E2:Use E1:LangGraphJS in one concise sentence',
+        },
+        answer: 'E1:LangGraphJS | E2:Use E1:LangGraphJS in one concise sentence',
+      });
+    }
+  });
+
+  test('supervisor example retries a blocked worker and can still resolve the request', async () => {
+    let decisions = 0;
+
+    const machine = createSupervisorExample({
+      adapter: {
+        decide: async () => {
+          decisions += 1;
+
+          return {
+            choice: decisions === 1 ? 'retry' : 'escalate',
+            data:
+              decisions === 1
+                ? { instruction: 'Retry using the customer email on file.' }
+                : { reason: 'Escalate to billing.' },
+          };
+        },
+      },
+      handle: async ({ attempt, instruction }) =>
+        attempt === 1
+          ? {
+              status: 'blocked' as const,
+              issue: 'Missing account identifier.',
+            }
+          : {
+              status: 'resolved' as const,
+              response: `Resolved after retry: ${instruction}`,
+            },
+    });
+
+    const result = await machine.execute(
+      machine.getInitialState({
+        request: 'Fix the duplicate subscription charge.',
+      })
+    );
+
+    expect(result.status).toBe('done');
+    if (result.status === 'done') {
+      expect(result.output).toEqual({
+        request: 'Fix the duplicate subscription charge.',
+        status: 'resolved',
+        resolution: 'Resolved after retry: Retry using the customer email on file.',
+        escalationReason: null,
+        attemptCount: 2,
+        history: [
+          'worker:1:blocked:Missing account identifier.',
+          'supervisor:retry:Retry using the customer email on file.',
+          'worker:2:resolved:Resolved after retry: Retry using the customer email on file.',
+        ],
+      });
+    }
   });
 
   test('newspaper example loops through critique and revision', async () => {

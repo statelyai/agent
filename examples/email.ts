@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { createAgentMachine, decide, type AgentAdapter } from '../src/index.js';
+import { createAgentMachine, decide, decideResultSchema, type AgentAdapter } from '../src/index.js';
 import {
   closePrompt,
   createOpenAiDecisionAdapter,
@@ -36,6 +36,18 @@ export function createEmailExample(
     ) => Promise<z.infer<typeof draftSchema>>;
   } = {}
 ) {
+  const checkingOptions = {
+    askForClarification: {
+      description: 'Ask one or more clarifying questions before drafting.',
+      schema: z.object({
+        questions: z.array(z.string()).min(1),
+      }),
+    },
+    draft: {
+      description: 'Draft the email reply now.',
+    },
+  } as const;
+
   const adapter =
     options.adapter ??
     (process.env.OPENAI_API_KEY ? createOpenAiDecisionAdapter() : undefined);
@@ -109,6 +121,10 @@ export function createEmailExample(
         email: z.string(),
         instructions: z.string(),
       }),
+      output: z.object({
+        replyEmail: z.string().nullable(),
+        clarifications: z.array(z.string()),
+      }),
       events: {
         'user.answer': z.object({ answer: z.string() }),
       },
@@ -120,55 +136,41 @@ export function createEmailExample(
       questions: [] as string[],
       replyEmail: null as string | null,
     }),
-    adapter,
     initial: 'checking',
     states: {
-      checking: decide({
-        model: 'openai/gpt-5.4-nano',
-        prompt: ({ context }) => { // why is this Record<string, unknown> instead of a specific type?
-          const emailContext = context as {
-            email: string;
-            instructions: string;
-            clarifications: string[];
-          };
-
-          return [
-            'Decide whether there is enough information to draft the reply email.',
-            'Choose askForClarification only if key scheduling or identity details are missing.',
-            '',
-            `Email: ${emailContext.email}`,
-            `Instructions: ${emailContext.instructions}`,
-            `Clarifications: ${emailContext.clarifications.join(' | ') || 'none'}`,
-          ].join('\n');
-        },
-        options: {
-          askForClarification: {
-            description: 'Ask one or more clarifying questions before drafting.',
-            schema: z.object({
-              questions: z.array(z.string()).min(1),
-            }),
-          },
-          draft: {
-            description: 'Draft the email reply now.',
-          },
-        },
+      checking: {
+        resultSchema: decideResultSchema(checkingOptions),
+        invoke: async ({ context }) =>
+          decide({
+            adapter,
+            model: 'openai/gpt-5.4-nano',
+            prompt: [
+              'Decide whether there is enough information to draft the reply email.',
+              'Choose askForClarification only if key scheduling or identity details are missing.',
+              '',
+              `Email: ${context.email}`,
+              `Instructions: ${context.instructions}`,
+              `Clarifications: ${context.clarifications.join(' | ') || 'none'}`,
+            ].join('\n'),
+            options: checkingOptions,
+          }),
         onDone: ({ result, context }) => {
-          const emailContext = context as { clarifications: string[] };
+          if (
+            result.choice === 'askForClarification'
+            && context.clarifications.length === 0
+          ) {
+            return {
+              target: 'clarifying',
+              context: { questions: result.data.questions },
+            };
+          }
 
-          return ({
-          target:
-            result.choice === 'askForClarification' &&
-            emailContext.clarifications.length === 0
-              ? 'clarifying'
-              : 'drafting',
-          context:
-            result.choice === 'askForClarification' &&
-            emailContext.clarifications.length === 0
-              ? { questions: result.data.questions }
-              : { questions: [] },
-          });
+          return {
+            target: 'drafting',
+            context: { questions: [] },
+          };
         },
-      }),
+      },
       clarifying: {
         on: {
           'user.answer': ({ event, context }) => ({

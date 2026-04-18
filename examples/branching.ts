@@ -35,6 +35,12 @@ export function createBranchingExample(
     id: 'branching-example',
     schemas: {
       input: z.object({ topic: z.string() }),
+      output: z.object({
+        docs: z.string().nullable(),
+        issues: z.string().nullable(),
+        code: z.string().nullable(),
+        summary: z.string().nullable(),
+      }),
     },
     context: (input) => ({
       topic: input.topic,

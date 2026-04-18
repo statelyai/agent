@@ -77,6 +77,12 @@ export function createReflectionExample(
     id: 'reflection-example',
     schemas: {
       input: z.object({ task: z.string() }),
+      output: z.object({
+        task: z.string(),
+        draft: z.string().nullable(),
+        feedback: z.string().nullable(),
+        revisionCount: z.number(),
+      }),
     },
     context: (input) => ({
       task: input.task,

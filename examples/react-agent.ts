@@ -81,24 +81,19 @@ async function main() {
     });
 
     run.on('toolCall', (event) => {
-      const call = event as { toolName: string; input: { query: string } };
-      console.log(`Calling ${call.toolName}(${call.input.query})`);
+      console.log(`Calling ${event.toolName}(${event.input.query})`);
     });
     run.on('toolResult', (event) => {
-      const result = event as {
-        toolName: string;
-        output: unknown;
-      };
-      console.log(`${result.toolName} -> ${String(result.output)}`);
+      console.log(`${event.toolName} -> ${String(event.output)}`);
     });
 
     await new Promise<void>((resolve, reject) => {
-      run.on('done', (event) => {
-        console.log((event as { output: unknown }).output);
+      run.onDone((event) => {
+        console.log(event.output);
         resolve();
       });
-      run.on('error', (event) => {
-        reject((event as { error: unknown }).error);
+      run.onError((event) => {
+        reject(event.error);
       });
     });
   } finally {

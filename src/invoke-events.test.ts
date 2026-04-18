@@ -7,13 +7,12 @@ import {
 } from './index.js';
 
 function once<T = unknown>(
-  run: { on(type: string, handler: (event: unknown) => void): () => void },
-  type: string
+  subscribe: (handler: (event: T) => void) => () => void
 ) {
   return new Promise<T>((resolve) => {
-    const off = run.on(type, (event) => {
+    const off = subscribe((event) => {
       off();
-      resolve(event as T);
+      resolve(event);
     });
   });
 }
@@ -41,7 +40,7 @@ test('invoke success is journaled as an internal machine event', async () => {
 
   const store = createMemoryRunStore();
   const run = await startSession(machine, { store });
-  await once(run, 'done');
+  await once(run.onDone.bind(run));
   const journal = await store.loadEvents(run.sessionId);
 
   expect(run.getSnapshot()).toEqual(
@@ -78,7 +77,7 @@ test('invoke failure is journaled as an internal machine event', async () => {
 
   const store = createMemoryRunStore();
   const run = await startSession(machine, { store });
-  await once(run, 'error');
+  await once(run.onError.bind(run));
   const journal = await store.loadEvents(run.sessionId);
 
   expect(run.getSnapshot()).toEqual(
@@ -114,7 +113,7 @@ test('invalid invoke results fail without journaling a done event', async () => 
 
   const store = createMemoryRunStore();
   const run = await startSession(machine, { store });
-  await once(run, 'error');
+  await once(run.onError.bind(run));
   const journal = await store.loadEvents(run.sessionId);
 
   expect(journal.map((event) => event.type)).toEqual([

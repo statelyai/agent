@@ -56,6 +56,14 @@ function applyWaterJugMove(
 export function createJugsExample() {
   return createAgentMachine({
     id: 'jugs-example',
+    schemas: {
+      output: z.object({
+        jug3: z.number(),
+        jug5: z.number(),
+        steps: z.array(z.string()),
+        reasoning: z.array(z.string()),
+      }),
+    },
     context: () => ({
       jug3: 0,
       jug5: 0,
@@ -79,21 +87,21 @@ export function createJugsExample() {
 
           return {
             target: 'applying' as const,
-            params: { move: result.move },
+            input: { move: result.move },
             context: { reasoning: nextReasoning },
           };
         },
       },
       applying: {
-        paramsSchema: z.object({
+        inputSchema: z.object({
           move: moveSchema.shape.move.exclude(['done']),
         }),
         resultSchema: applySchema,
-        invoke: async ({ context, params }) =>
+        invoke: async ({ context, input }) =>
           applyWaterJugMove(
             context.jug3,
             context.jug5,
-            params.move as 'fill5' | 'pour5to3' | 'empty3'
+            input.move as 'fill5' | 'pour5to3' | 'empty3'
           ),
         onDone: ({ result, context }) => ({
           target: 'choosing',

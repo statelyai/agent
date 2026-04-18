@@ -6,7 +6,7 @@ const machine = createAgentMachine({
   context: () => ({}),
   initial: () => ({
     target: 'done',
-    params: { step: 1 },
+    input: { step: 1 },
   }),
   states: {
     done: {
@@ -31,7 +31,7 @@ test('stream emits durable snapshots with stable session metadata', async () => 
   expect(snaps.length).toBeGreaterThanOrEqual(2);
   expect(new Set(snaps.map((snap) => snap.sessionId)).size).toBe(1);
   expect(new Set(snaps.map((snap) => snap.createdAt)).size).toBe(1);
-  expect(snaps[0]!.params).toEqual({ done: { step: 1 } });
+  expect(snaps[0]!.input).toEqual({ done: { step: 1 } });
   expect(snaps[0]).toEqual(
     expect.objectContaining({
       sessionId: expect.any(String),
@@ -39,7 +39,7 @@ test('stream emits durable snapshots with stable session metadata', async () => 
       value: 'done',
       context: {},
       status: 'active',
-      params: { done: { step: 1 } },
+      input: { done: { step: 1 } },
     })
   );
   expect(snaps[snaps.length - 1]).toEqual(
@@ -49,7 +49,7 @@ test('stream emits durable snapshots with stable session metadata', async () => 
       value: 'done',
       context: {},
       status: 'done',
-      params: { done: { step: 1 } },
+      input: { done: { step: 1 } },
       output: { ok: true },
     })
   );
@@ -62,10 +62,10 @@ test('snapshot roundtrips through resolveState without losing identity', async (
 
   expect(restored.sessionId).toBe(emitted[0]!.sessionId);
   expect(restored.createdAt).toBe(emitted[0]!.createdAt);
-  expect(restored.params).toEqual(emitted[0]!.params);
+  expect(restored.input).toEqual(emitted[0]!.input);
   expect(rerun[0]!.sessionId).toBe(emitted[0]!.sessionId);
   expect(rerun[0]!.createdAt).toBe(emitted[0]!.createdAt);
-  expect(rerun[0]!.params).toEqual(emitted[0]!.params);
+  expect(rerun[0]!.input).toEqual(emitted[0]!.input);
 });
 
 test('fresh machine executions on the same raw state get distinct session ids', async () => {
