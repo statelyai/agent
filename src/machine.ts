@@ -653,6 +653,7 @@ export function createAgentMachine(
 
   return {
     id: cfg.id,
+    __config: cfg,
     getInitialState,
     resolveState,
     transition,

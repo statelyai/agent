@@ -1,6 +1,5 @@
 import { z } from 'zod';
-import { createAgentMachine } from '../machine.js';
-import type { StandardSchemaV1 } from '../types.js';
+import { createAgentMachine, type StandardSchemaV1 } from '../src/index.js';
 
 const messageSchema = z.object({
   role: z.enum(['system', 'user', 'assistant', 'tool']),
@@ -25,6 +24,12 @@ const modelResultSchema = z.discriminatedUnion('kind', [
   finalAnswerSchema,
 ]);
 
+const reactOutputSchema = z.object({
+  messages: z.array(messageSchema),
+  finalMessage: z.string().nullable(),
+  steps: z.number().int().min(0),
+});
+
 export type ReactAgentMessage = z.infer<typeof messageSchema>;
 
 export type ReactTool = {
@@ -36,7 +41,7 @@ export type ReactTool = {
 
 export type ReactAgentModelResult = z.infer<typeof modelResultSchema>;
 
-export function createReactAgent(options: {
+export function createReactAgentFromScratch(options: {
   prompt?: string;
   maxSteps?: number;
   tools?: ReactTool[];
@@ -63,11 +68,12 @@ export function createReactAgent(options: {
   }
 
   return createAgentMachine({
-    id: 'prebuilt-react-agent',
+    id: 'react-agent-from-scratch',
     schemas: {
       input: z.object({
         messages: z.array(messageSchema).optional(),
       }),
+      output: reactOutputSchema,
       emitted: {
         textPart: z.object({ delta: z.string() }),
         toolCall: z.object({

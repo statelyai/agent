@@ -1,9 +1,9 @@
 import { z } from 'zod';
 import {
   createMemoryRunStore,
-  createReactAgent,
   startSession,
 } from '../src/index.js';
+import { createReactAgentFromScratch } from './react-agent-from-scratch.js';
 import {
   closePrompt,
   generateExampleObject,
@@ -37,7 +37,7 @@ export function createReactAgentExample(options: {
     }>;
   }) => Promise<z.infer<typeof reactModelResultSchema>>;
 } = {}) {
-  return createReactAgent({
+  return createReactAgentFromScratch({
     prompt: 'You are a helpful assistant.',
     tools: [
       {

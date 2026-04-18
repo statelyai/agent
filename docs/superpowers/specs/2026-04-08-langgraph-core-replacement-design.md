@@ -271,7 +271,7 @@ type AgentSnapshot = {
   status: "active" | "done" | "error" | "pending";
   createdAt: number;
   sessionId: string;
-  params: Record<string, Record<string, unknown>>;
+  input: Record<string, Record<string, unknown>>;
   output?: unknown;
   error?: SerializedError;
 };

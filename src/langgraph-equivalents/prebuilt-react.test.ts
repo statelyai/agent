@@ -1,9 +1,9 @@
 import { expect, test } from 'vitest';
 import {
   createMemoryRunStore,
-  createReactAgent,
   startSession,
 } from '../index.js';
+import { createReactAgentFromScratch } from '../../examples/react-agent-from-scratch.js';
 
 function once<T = unknown>(
   subscribe: (handler: (event: T) => void) => () => void
@@ -17,8 +17,8 @@ function once<T = unknown>(
   });
 }
 
-test('prebuilt react agent loops through a tool call and returns a final answer', async () => {
-  const agent = createReactAgent({
+test('react agent from scratch loops through a tool call and returns a final answer', async () => {
+  const agent = createReactAgentFromScratch({
     prompt: 'You are helpful.',
     tools: [
       {

@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 
 import {
   createChatbotExample,
+  createDurableObjectRunStore,
   createAdapterExample,
   createBranchingExample,
   createClassifyExample,
@@ -17,6 +18,7 @@ import {
   createMapReduceExample,
   createMultiAgentNetworkExample,
   createNewspaperExample,
+  runPersistenceExample,
   createPlanAndExecuteExample,
   createRaffleExample,
   createReactAgentExample,
@@ -24,6 +26,7 @@ import {
   createReflectionExample,
   createRiverCrossingExample,
   createSimpleExample,
+  createSqlAgentExample,
   createSubflowExample,
   createSupervisorExample,
   createToolCallingExample,
@@ -34,12 +37,14 @@ describe('curated examples', () => {
   test('ships the canonical examples directory', () => {
     const examplesDir = resolve(process.cwd(), 'examples');
     expect(existsSync(resolve(examplesDir, 'simple.ts'))).toBe(true);
+    expect(existsSync(resolve(examplesDir, 'sql-agent.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'hitl.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'decide.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'classify.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'adapter.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'branching.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'chatbot.ts'))).toBe(true);
+    expect(existsSync(resolve(examplesDir, 'cloudflare-durable-object.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'customer-service-sim.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'email.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'joke.ts'))).toBe(true);
@@ -47,9 +52,11 @@ describe('curated examples', () => {
     expect(existsSync(resolve(examplesDir, 'map-reduce.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'multi-agent-network.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'newspaper.ts'))).toBe(true);
+    expect(existsSync(resolve(examplesDir, 'persistence.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'plan-and-execute.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'raffle.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'react-agent.ts'))).toBe(true);
+    expect(existsSync(resolve(examplesDir, 'react-agent-from-scratch.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'rewoo.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'reflection.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'river-crossing.ts'))).toBe(true);
@@ -71,6 +78,75 @@ describe('curated examples', () => {
     if (result.status === 'done') {
       expect(result.output).toEqual({ summary: 'A short summary.' });
     }
+  });
+
+  test('persistence example restores a durable session to the same final snapshot', async () => {
+    const result = await runPersistenceExample(
+      { request: 'Approve the annual budget summary.' },
+      {
+        summarize: async ({ request, approved }) => ({
+          summary: `${request} :: approved=${String(approved)}`,
+        }),
+      }
+    );
+
+    expect(result.liveSnapshot).toEqual(result.restoredSnapshot);
+    expect(result.liveSnapshot).toEqual(
+      expect.objectContaining({
+        value: 'done',
+        status: 'done',
+        output: {
+          request: 'Approve the annual budget summary.',
+          approved: true,
+          summary: 'Approve the annual budget summary. :: approved=true',
+        },
+      })
+    );
+  });
+
+  test('cloudflare durable object example store persists journal and snapshots', async () => {
+    const storage = new Map<string, unknown>();
+    const store = createDurableObjectRunStore({
+      async get(key) {
+        return storage.get(key) as never;
+      },
+      async put(key, value) {
+        storage.set(key, value);
+      },
+    });
+
+    await store.append('session-1', {
+      type: 'xstate.init',
+      at: 1,
+    });
+    await store.append('session-1', {
+      type: 'approve',
+      at: 2,
+    });
+    await store.saveSnapshot({
+      sessionId: 'session-1',
+      afterSequence: 2,
+      snapshot: {
+        value: 'done',
+        context: {},
+        status: 'done',
+        createdAt: 2,
+        sessionId: 'session-1',
+        input: {},
+      },
+      createdAt: 2,
+    });
+
+    await expect(store.loadEvents('session-1')).resolves.toEqual([
+      expect.objectContaining({ sequence: 1, type: 'xstate.init' }),
+      expect.objectContaining({ sequence: 2, type: 'approve' }),
+    ]);
+    await expect(store.loadLatestSnapshot('session-1')).resolves.toEqual(
+      expect.objectContaining({
+        sessionId: 'session-1',
+        afterSequence: 2,
+      })
+    );
   });
 
   test('hitl example exposes typed pending events', async () => {
@@ -569,6 +645,78 @@ describe('curated examples', () => {
         output: { forecast: 'Rainy in New York' },
       })
     );
+  });
+
+  test('sql-agent example retries after a bad query and then answers from rows', async () => {
+    let decisions = 0;
+
+    const machine = createSqlAgentExample({
+      adapter: {
+        decide: async () => {
+          decisions += 1;
+
+          if (decisions === 1) {
+            return {
+              choice: 'query',
+              data: {
+                query: 'SELECT total FROM invoices WHERE customer = "Acme"',
+              },
+            };
+          }
+
+          if (decisions === 2) {
+            return {
+              choice: 'query',
+              data: {
+                query: "SELECT customer, total FROM invoices WHERE customer = 'Acme'",
+              },
+            };
+          }
+
+          return {
+            choice: 'answer',
+            data: {
+              answer: 'Acme has one invoice total of 42.',
+            },
+          };
+        },
+      },
+      executeQuery: async ({ query }) => {
+        if (query.includes('"Acme"')) {
+          return {
+            status: 'error' as const,
+            error: 'SQL syntax error near double quotes.',
+          };
+        }
+
+        return {
+          status: 'success' as const,
+          rows: [{ customer: 'Acme', total: 42 }],
+        };
+      },
+    });
+
+    const result = await machine.execute(
+      machine.getInitialState({
+        question: 'What is Acme owed?',
+        schema: 'invoices(customer text, total integer)',
+      })
+    );
+
+    expect(result.status).toBe('done');
+    if (result.status === 'done') {
+      expect(result.output).toEqual({
+        question: 'What is Acme owed?',
+        schema: 'invoices(customer text, total integer)',
+        answer: 'Acme has one invoice total of 42.',
+        latestRows: [{ customer: 'Acme', total: 42 }],
+        latestError: null,
+        queryHistory: [
+          'SELECT total FROM invoices WHERE customer = "Acme"',
+          "SELECT customer, total FROM invoices WHERE customer = 'Acme'",
+        ],
+      });
+    }
   });
 
   test('react agent example loops through a tool and returns a final answer', async () => {

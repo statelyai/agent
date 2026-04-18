@@ -188,6 +188,8 @@ export interface AgentMachine<
   TEmitted extends Record<string, StandardSchemaV1> = {},
 > {
   readonly id: string;
+  /** @internal */
+  readonly __config?: unknown;
 
   getInitialState(
     ...args: unknown extends TInput ? [input?: TInput] : [input: TInput]

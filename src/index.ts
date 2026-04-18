@@ -3,14 +3,6 @@ export { createAgentMachine } from './machine.js';
 export { decide, decideResultSchema, requireAdapter } from './decide.js';
 export { classify, classifyResultSchema } from './classify.js';
 
-// AI primitives
-export { createReactAgent } from './prebuilt/react.js';
-export type {
-  ReactAgentMessage,
-  ReactAgentModelResult,
-  ReactTool,
-} from './prebuilt/react.js';
-
 // Adapter
 export { createAdapter } from './adapter.js';
 export { createMemoryRunStore } from './runtime/memory-store.js';
