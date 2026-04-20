@@ -52,6 +52,7 @@
     "dist"
   ],
   "scripts": {
+    "agent:convert": "tsx scripts/agent-convert.ts",
     "build": "tsdown",
     "lint": "tsc --noEmit",
     "test": "vitest",

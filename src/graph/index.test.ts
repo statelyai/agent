@@ -122,7 +122,10 @@ test('exports a mermaid state diagram from the Stately graph data', () => {
     },
   });
 
-  expect(toMermaid(machine)).toContain('idle --> done: finish');
+  expect(toMermaid(machine)).toBe(`stateDiagram-v2
+    [*] --> idle
+    idle --> done : finish
+    done --> [*]`);
 });
 
 test('infers guards from conditional-expression transition branches', () => {

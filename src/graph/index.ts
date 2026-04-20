@@ -6,6 +6,13 @@ import {
   type GraphNode as StatelyGraphNode,
   type NodeConfig,
 } from '@statelyai/graph';
+import {
+  toMermaidState,
+  type MermaidStateGraph,
+  type StateEdgeData,
+  type StateGraphData,
+  type StateNodeData,
+} from '@statelyai/graph/mermaid';
 import ts from 'typescript';
 import type {
   AgentMachine,
@@ -110,28 +117,7 @@ export function toGraph(machine: AgentMachine): AgentGraph {
 }
 
 export function toMermaid(machine: AgentMachine): string {
-  const graph = toGraph(machine);
-  const lines = ['stateDiagram-v2'];
-
-  if (graph.initialNodeId) {
-    lines.push(`  [*] --> ${graph.initialNodeId}`);
-  }
-
-  for (const node of graph.nodes) {
-    if (node.data.type === 'final') {
-      lines.push(`  ${node.id} --> [*]`);
-    }
-  }
-
-  for (const edge of graph.edges) {
-    lines.push(
-      `  ${edge.sourceId} --> ${edge.targetId}${
-        edge.label ? `: ${edge.label}` : ''
-      }`
-    );
-  }
-
-  return lines.join('\n');
+  return toMermaidState(toMermaidStateGraph(toGraph(machine)));
 }
 
 function getNodeType(state: StateConfig): AgentGraphNodeData['type'] {
@@ -144,6 +130,67 @@ function getNodeType(state: StateConfig): AgentGraphNodeData['type'] {
   }
 
   return 'state';
+}
+
+function toMermaidStateGraph(graph: AgentGraph): MermaidStateGraph {
+  const nodes: Array<NodeConfig<StateNodeData>> = graph.nodes.map((node) => ({
+    id: node.id,
+    label: node.label,
+    data: {
+      ...(node.data.type === 'choice' ? { stateType: 'choice' as const } : {}),
+    },
+  }));
+
+  const edges: Array<EdgeConfig<StateEdgeData>> = graph.edges.map((edge) => ({
+    id: edge.id,
+    sourceId: edge.sourceId,
+    targetId: edge.targetId,
+    label: edge.label ?? undefined,
+    data: {},
+  }));
+
+  if (graph.initialNodeId) {
+    const startId = `${graph.id}.__start`;
+    nodes.push({
+      id: startId,
+      data: { isStart: true },
+    });
+    edges.unshift({
+      id: `${startId}:initial`,
+      sourceId: startId,
+      targetId: graph.initialNodeId,
+      data: {},
+    });
+  }
+
+  for (const node of graph.nodes) {
+    if (node.data.type !== 'final') {
+      continue;
+    }
+
+    const endId = `${node.id}.__end`;
+    nodes.push({
+      id: endId,
+      data: { isEnd: true },
+    });
+    edges.push({
+      id: `${node.id}:final`,
+      sourceId: node.id,
+      targetId: endId,
+      data: {},
+    });
+  }
+
+  return createGraph<StateNodeData, StateEdgeData, StateGraphData>({
+    id: graph.id,
+    type: graph.type,
+    initialNodeId: graph.initialNodeId ?? undefined,
+    data: {
+      diagramType: 'stateDiagram',
+    },
+    nodes,
+    edges,
+  });
 }
 
 function getTransitionEdges(args: {

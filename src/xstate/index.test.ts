@@ -1,0 +1,109 @@
+import { expect, test } from 'vitest';
+import { z } from 'zod';
+import { createAgentMachine } from '../index.js';
+import { toXStateMachine } from './index.js';
+
+test('exports a serializable XState config for visualization', () => {
+  const machine = createAgentMachine({
+    id: 'xstate-export',
+    schemas: {
+      events: {
+        submit: z.object({
+          type: z.literal('submit'),
+          count: z.number(),
+        }),
+      },
+    },
+    context: () => ({ total: 0 }),
+    initial: 'idle',
+    states: {
+      idle: {
+        on: {
+          submit: ({ event }) => {
+            if (event.count > 0) {
+              return {
+                target: 'working',
+                context: { total: event.count },
+                input: { index: event.count },
+              };
+            }
+
+            return { target: 'done' };
+          },
+        },
+      },
+      working: {
+        inputSchema: z.object({
+          index: z.number(),
+        }),
+        resultSchema: z.object({
+          ok: z.boolean(),
+        }),
+        invoke: async () => ({ ok: true }),
+        onDone: () => ({
+          target: 'done',
+        }),
+      },
+      done: {
+        type: 'final',
+      },
+    },
+  });
+
+  expect(toXStateMachine(machine)).toEqual({
+    id: 'xstate-export',
+    initial: 'idle',
+    states: {
+      idle: {
+        on: {
+          submit: [
+            {
+              target: 'working',
+              guard: { type: 'event.count > 0' },
+              actions: ['assignContext', 'assignInput'],
+              meta: {
+                agent: {
+                  event: 'submit',
+                  updates: {
+                    context: true,
+                    input: true,
+                  },
+                },
+              },
+            },
+            {
+              target: 'done',
+              meta: {
+                agent: {
+                  event: 'submit',
+                },
+              },
+            },
+          ],
+        },
+      },
+      working: {
+        invoke: {
+          id: 'invoke.working',
+          src: 'invoke.working',
+          onDone: {
+            target: 'done',
+            meta: {
+              agent: {
+                event: 'done',
+              },
+            },
+          },
+        },
+        meta: {
+          agent: {
+            invoke: true,
+          },
+        },
+      },
+      done: {
+        type: 'final',
+      },
+    },
+  });
+});
