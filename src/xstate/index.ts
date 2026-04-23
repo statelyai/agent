@@ -4,6 +4,13 @@ import type { AgentMachine, MachineConfig, StateConfig } from '../types.js';
 export interface XStateMachineConfig {
   id: string;
   initial?: string;
+  meta: {
+    agent: {
+      format: '@statelyai/agent/xstate-visualization';
+      runnable: false;
+      note: string;
+    };
+  };
   states: Record<string, XStateStateConfig>;
 }
 
@@ -46,10 +53,11 @@ type InternalMachine = AgentMachine & {
 };
 
 /**
- * Convert an agent machine to a serializable XState machine config for
- * visualization. Runtime behavior is still driven by the agent machine.
+ * Convert an agent machine to a serializable XState-like machine config for
+ * visualization. Guards, actions, and invokes are symbolic metadata, so this
+ * object is not a runnable replacement for the agent machine.
  */
-export function toXStateMachine(machine: AgentMachine): XStateMachineConfig {
+export function toXStateVisualization(machine: AgentMachine): XStateMachineConfig {
   const config = (machine as InternalMachine).__config;
   if (!config) {
     throw new Error('Machine config metadata is unavailable for XState export');
@@ -122,9 +130,22 @@ export function toXStateMachine(machine: AgentMachine): XStateMachineConfig {
     ...(typeof graph.initialNodeId === 'string'
       ? { initial: graph.initialNodeId }
       : {}),
+    meta: {
+      agent: {
+        format: '@statelyai/agent/xstate-visualization',
+        runnable: false,
+        note: 'Generated for visualization. Runtime semantics remain in the agent machine.',
+      },
+    },
     states,
   };
 }
+
+/**
+ * @deprecated Use `toXStateVisualization(...)` to make the visualization-only
+ * contract explicit.
+ */
+export const toXStateMachine = toXStateVisualization;
 
 function groupEdgesByEvent(
   edges: AgentGraph['edges']

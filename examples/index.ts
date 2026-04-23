@@ -5,6 +5,7 @@ export { createDecideExample } from './decide.js';
 export { createClassifyExample } from './classify.js';
 export { createAdapterExample } from './adapter.js';
 export { createChatbotExample } from './chatbot.js';
+export { createConditionalSubflowExample } from './conditional-subflow.js';
 export {
   AgentSessionDurableObject,
   createDurableObjectRunStore,

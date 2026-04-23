@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { toGraph, toMermaid, type AgentGraphWarning } from '../src/graph/index.js';
 import type { AgentMachine } from '../src/index.js';
-import { toXStateMachine } from '../src/xstate/index.js';
+import { toXStateVisualization } from '../src/xstate/index.js';
 
 type Format = 'mermaid' | 'xstate';
 
@@ -31,7 +31,7 @@ async function main() {
   const output =
     options.format === 'mermaid'
       ? toMermaid(machine)
-      : `${JSON.stringify(toXStateMachine(machine), null, 2)}\n`;
+      : `${JSON.stringify(toXStateVisualization(machine), null, 2)}\n`;
 
   if (options.outFile) {
     await writeFile(resolve(options.outFile), output);

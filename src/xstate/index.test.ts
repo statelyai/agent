@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
 import { z } from 'zod';
 import { createAgentMachine } from '../index.js';
-import { toXStateMachine } from './index.js';
+import { toXStateMachine, toXStateVisualization } from './index.js';
 
 test('exports a serializable XState config for visualization', () => {
   const machine = createAgentMachine({
@@ -50,9 +50,16 @@ test('exports a serializable XState config for visualization', () => {
     },
   });
 
-  expect(toXStateMachine(machine)).toEqual({
+  expect(toXStateVisualization(machine)).toEqual({
     id: 'xstate-export',
     initial: 'idle',
+    meta: {
+      agent: {
+        format: '@statelyai/agent/xstate-visualization',
+        runnable: false,
+        note: 'Generated for visualization. Runtime semantics remain in the agent machine.',
+      },
+    },
     states: {
       idle: {
         on: {
@@ -107,4 +114,5 @@ test('exports a serializable XState config for visualization', () => {
       },
     },
   });
+  expect(toXStateMachine(machine)).toEqual(toXStateVisualization(machine));
 });

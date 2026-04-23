@@ -37,6 +37,14 @@ test('agent:convert writes Mermaid and XState output from machine files', async 
   };
   expect(namedXState.id).toBe('named-converter-machine');
   expect(namedXState.initial).toBe('idle');
+  expect(namedXState).toMatchObject({
+    meta: {
+      agent: {
+        format: '@statelyai/agent/xstate-visualization',
+        runnable: false,
+      },
+    },
+  });
   expect(Object.keys(namedXState.states)).toEqual(['idle', 'rejected', 'done']);
 
   const factoryXStateFile = join(tmp, 'factory.json');

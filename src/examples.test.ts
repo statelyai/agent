@@ -9,6 +9,7 @@ import {
   createAdapterExample,
   createBranchingExample,
   createClassifyExample,
+  createConditionalSubflowExample,
   createCustomerServiceSimExample,
   createDecideExample,
   createEmailExample,
@@ -46,6 +47,7 @@ describe('curated examples', () => {
     expect(existsSync(resolve(examplesDir, 'branching.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'chatbot.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'cloudflare-durable-object.ts'))).toBe(true);
+    expect(existsSync(resolve(examplesDir, 'conditional-subflow.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'customer-service-sim.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'email.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'error-retry.ts'))).toBe(true);
@@ -245,6 +247,31 @@ describe('curated examples', () => {
         answer: 'Recovered answer.',
         attempts: 2,
         errors: ['temporary outage'],
+      });
+    }
+  });
+
+  test('conditional subflow example routes directly into the requested child flow', async () => {
+    const machine = createConditionalSubflowExample({
+      draft: async ({ topic, bullets }) => ({
+        draft: `${topic}: ${bullets.join(', ')}`,
+      }),
+    });
+
+    const result = await machine.execute(
+      machine.getInitialState({
+        topic: 'state machines',
+        mode: 'draft',
+        bullets: ['deterministic', 'resumable'],
+      })
+    );
+
+    expect(result.status).toBe('done');
+    if (result.status === 'done') {
+      expect(result.output).toEqual({
+        mode: 'draft',
+        bullets: ['deterministic', 'resumable'],
+        draft: 'state machines: deterministic, resumable',
       });
     }
   });
