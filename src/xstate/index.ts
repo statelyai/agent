@@ -81,7 +81,7 @@ export function toXStateMachine(machine: AgentMachine): XStateMachineConfig {
 
     const regularEdges = graph.edges.filter((edge) =>
       edge.sourceId === stateId
-      && edge.data.event !== 'done'
+      && edge.data.source !== 'invoke.done'
     );
 
     for (const [event, edges] of groupEdgesByEvent(regularEdges)) {
@@ -97,7 +97,7 @@ export function toXStateMachine(machine: AgentMachine): XStateMachineConfig {
     if (stateConfig.onDone) {
       const doneEdges = graph.edges.filter((edge) =>
         edge.sourceId === stateId
-        && edge.data.event === 'done'
+        && edge.data.source === 'invoke.done'
       );
 
       const formattedDone = formatTransitions(doneEdges);

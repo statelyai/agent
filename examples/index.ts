@@ -13,6 +13,7 @@ export {
 } from './cloudflare-durable-object.js';
 export { createCustomerServiceSimExample } from './customer-service-sim.js';
 export { createEmailExample } from './email.js';
+export { createErrorRetryExample } from './error-retry.js';
 export { createJokeExample } from './joke.js';
 export { createJugsExample } from './jugs.js';
 export { createMapReduceExample } from './map-reduce.js';

@@ -73,6 +73,7 @@ test('exports a serializable XState config for visualization', () => {
             },
             {
               target: 'done',
+              guard: { type: '!(event.count > 0)' },
               meta: {
                 agent: {
                   event: 'submit',
@@ -90,7 +91,7 @@ test('exports a serializable XState config for visualization', () => {
             target: 'done',
             meta: {
               agent: {
-                event: 'done',
+                event: 'done.invoke.working',
               },
             },
           },

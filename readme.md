@@ -9,14 +9,19 @@ Stately Agent is a flexible framework for building AI agents using state machine
 
 ## Examples
 
+<!-- curated examples and CLI commands from examples/index.ts and package.json#scripts -->
+
 The examples in [`examples/`](/Users/davidkpiano/Code/agent/examples) are intentionally small, run in the CLI, and use real OpenAI calls when `OPENAI_API_KEY` is set.
 
 Run them with `node --import tsx examples/<name>.ts`.
+
+Convert a machine file to diagram output with `pnpm agent:convert <file> --format mermaid` or `pnpm agent:convert <file> --format xstate`.
 
 Each example demonstrates one concept:
 
 - [`examples/simple.ts`](/Users/davidkpiano/Code/agent/examples/simple.ts): the smallest `createAgentMachine(...)` flow with an `invoke` state that makes a real LLM call
 - [`examples/hitl.ts`](/Users/davidkpiano/Code/agent/examples/hitl.ts): a human-in-the-loop machine that pauses in a pending state, accepts typed events, and drafts with an LLM after approval
+- [`examples/error-retry.ts`](/Users/davidkpiano/Code/agent/examples/error-retry.ts): retrying transient invoke failures through explicit internal error events
 - [`examples/decide.ts`](/Users/davidkpiano/Code/agent/examples/decide.ts): choosing the next branch with structured branch-specific payloads
 - [`examples/classify.ts`](/Users/davidkpiano/Code/agent/examples/classify.ts): routing into a fixed category set when you only need a label
 - [`examples/adapter.ts`](/Users/davidkpiano/Code/agent/examples/adapter.ts): plugging in a custom adapter that still uses a real OpenAI model under the hood

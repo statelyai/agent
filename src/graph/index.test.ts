@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { createAgentMachine } from '../index.js';
 import { toGraph, toMermaid } from './index.js';
 
+declare function unknownTransition(): { target: 'done' };
+
 test('exports finite states and transition edges as Stately graph JSON', () => {
   const machine = createAgentMachine({
     id: 'graph-export',
@@ -74,6 +76,7 @@ test('exports finite states and transition edges as Stately graph JSON', () => {
         label: 'submit [event.count > 0]',
         data: {
           event: 'submit',
+          source: 'event',
           guard: { type: 'event.count > 0' },
           actions: {
             context: true,
@@ -86,23 +89,130 @@ test('exports finite states and transition edges as Stately graph JSON', () => {
         id: 'idle:submit:1',
         sourceId: 'idle',
         targetId: 'done',
-        label: 'submit',
+        label: 'submit [!(event.count > 0)]',
         data: {
           event: 'submit',
+          source: 'event',
+          guard: { type: '!(event.count > 0)' },
         },
       },
       {
         type: 'edge',
-        id: 'working:done:2',
+        id: 'working:done.invoke.working:2',
         sourceId: 'working',
         targetId: 'done',
-        label: 'done',
+        label: 'done.invoke.working',
         data: {
-          event: 'done',
+          event: 'done.invoke.working',
+          source: 'invoke.done',
         },
       },
     ],
   });
+});
+
+test('infers switch, early-return, and helper-call transition branches', () => {
+  const machine = createAgentMachine({
+    id: 'ast-rich-export',
+    schemas: {
+      events: {
+        route: z.object({
+          type: z.literal('route'),
+          kind: z.enum(['a', 'b', 'c']),
+          urgent: z.boolean(),
+        }),
+      },
+    },
+    context: () => ({}),
+    initial: 'idle',
+    states: {
+      idle: {
+        on: {
+          route: ({ event }) => {
+            const toA = () => ({ target: 'a' as const });
+
+            if (event.urgent) {
+              return toA();
+            }
+
+            switch (event.kind) {
+              case 'b':
+                return { target: 'b' as const };
+              case 'c':
+                return { target: 'c' as const };
+              default:
+                return { target: 'fallback' as const };
+            }
+          },
+        },
+      },
+      a: { type: 'final' },
+      b: { type: 'final' },
+      c: { type: 'final' },
+      fallback: { type: 'final' },
+    },
+  });
+
+  expect(toGraph(machine).edges).toEqual([
+    expect.objectContaining({
+      targetId: 'a',
+      data: expect.objectContaining({
+        guard: { type: 'event.urgent' },
+      }),
+    }),
+    expect.objectContaining({
+      targetId: 'b',
+      data: expect.objectContaining({
+        guard: { type: '(!(event.urgent)) && (event.kind === "b")' },
+      }),
+    }),
+    expect.objectContaining({
+      targetId: 'c',
+      data: expect.objectContaining({
+        guard: { type: '(!(event.urgent)) && (event.kind === "c")' },
+      }),
+    }),
+    expect.objectContaining({
+      targetId: 'fallback',
+      data: expect.objectContaining({
+        guard: {
+          type: '(!(event.urgent)) && (!(event.kind === "b") && !(event.kind === "c"))',
+        },
+      }),
+    }),
+  ]);
+});
+
+test('reports graph warnings for unsupported transition analysis', () => {
+  const machine = createAgentMachine({
+    id: 'ast-warning-export',
+    schemas: {
+      events: {
+        go: z.object({ type: z.literal('go') }),
+      },
+    },
+    context: () => ({}),
+    initial: 'idle',
+    states: {
+      idle: {
+        on: {
+          go: () => {
+            return unknownTransition();
+          },
+        },
+      },
+      done: { type: 'final' },
+    },
+  });
+
+  expect(toGraph(machine).data?.warnings).toEqual([
+    {
+      state: 'idle',
+      event: 'go',
+      message:
+        'Unsupported helper call: unknownTransition() is not statically resolvable.',
+    },
+  ]);
 });
 
 test('exports a mermaid state diagram from the Stately graph data', () => {

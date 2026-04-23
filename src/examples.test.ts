@@ -12,6 +12,7 @@ import {
   createCustomerServiceSimExample,
   createDecideExample,
   createEmailExample,
+  createErrorRetryExample,
   createHitlExample,
   createJokeExample,
   createJugsExample,
@@ -47,6 +48,7 @@ describe('curated examples', () => {
     expect(existsSync(resolve(examplesDir, 'cloudflare-durable-object.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'customer-service-sim.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'email.ts'))).toBe(true);
+    expect(existsSync(resolve(examplesDir, 'error-retry.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'joke.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'jugs.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'map-reduce.ts'))).toBe(true);
@@ -220,6 +222,29 @@ describe('curated examples', () => {
       expect(result.output).toEqual({
         route: 'billing',
         confidence: 0.9,
+      });
+    }
+  });
+
+  test('error retry example recovers from transient invoke failures', async () => {
+    const machine = createErrorRetryExample(async ({ attempt }) => {
+      if (attempt === 1) {
+        throw new Error('temporary outage');
+      }
+
+      return { answer: 'Recovered answer.' };
+    });
+
+    const result = await machine.execute(
+      machine.getInitialState({ question: 'Can this retry?' })
+    );
+
+    expect(result.status).toBe('done');
+    if (result.status === 'done') {
+      expect(result.output).toEqual({
+        answer: 'Recovered answer.',
+        attempts: 2,
+        errors: ['temporary outage'],
       });
     }
   });
