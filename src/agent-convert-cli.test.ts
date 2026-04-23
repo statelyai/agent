@@ -53,10 +53,24 @@ test('agent:convert writes Mermaid and XState output from machine files', async 
     id: string;
   };
   expect(factoryXState.id).toBe('factory-converter-machine');
+
+  const warningFile = join(tmp, 'warning.mmd');
+  const warningResult = await runConvert([
+    fixture,
+    '--export',
+    'warningMachine',
+    '--format',
+    'mermaid',
+    '--out',
+    warningFile,
+  ]);
+  expect(warningResult.stderr).toContain(
+    '[agent:convert] idle on go: Unsupported helper call: unknownTransition() is not statically resolvable.'
+  );
 });
 
 async function runConvert(args: string[]) {
-  await execFileAsync('pnpm', ['agent:convert', ...args], {
+  return execFileAsync('pnpm', ['agent:convert', ...args], {
     cwd: resolve('.'),
   });
 }

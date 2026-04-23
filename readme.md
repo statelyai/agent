@@ -15,7 +15,7 @@ The examples in [`examples/`](/Users/davidkpiano/Code/agent/examples) are intent
 
 Run them with `node --import tsx examples/<name>.ts`.
 
-Convert a machine file to diagram output with `pnpm agent:convert <file> --format mermaid` or `pnpm agent:convert <file> --format xstate`.
+Convert a machine file to diagram output with `pnpm agent:convert <file> --format mermaid` or `pnpm agent:convert <file> --format xstate`. Static analysis warnings are printed to stderr.
 
 Each example demonstrates one concept:
 

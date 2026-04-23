@@ -1,5 +1,6 @@
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 import { createErrorRetryExample } from '../../examples/index.js';
+import { createMemoryRunStore, restoreSession } from '../index.js';
 
 test('retries failed invoke work through explicit internal error events', async () => {
   let attempts = 0;
@@ -47,4 +48,70 @@ test('fails after the configured retry budget is exhausted', async () => {
       errors: ['still down 1', 'still down 2'],
     });
   }
+});
+
+test('restores a durable retry snapshot and continues from the next attempt', async () => {
+  const sessionId = 'durable-retry-session';
+  const machine = createErrorRetryExample(async ({ attempt }) => ({
+    answer: `restored attempt ${attempt}`,
+  }));
+  const store = createMemoryRunStore();
+  const input = { question: 'Can retry survive restore?' };
+  const initial = machine.getInitialState(input);
+  const retryState = machine.transition(initial, {
+    type: 'xstate.error.invoke.answering',
+    error: { message: 'network reset' },
+    at: 2,
+  });
+
+  await store.append(sessionId, {
+    type: 'xstate.init',
+    input,
+    at: 1,
+  });
+  await store.append(sessionId, {
+    type: 'xstate.error.invoke.answering',
+    error: { message: 'network reset' },
+    at: 2,
+  });
+  await store.saveSnapshot({
+    sessionId,
+    afterSequence: 2,
+    snapshot: {
+      value: retryState.value,
+      context: retryState.context,
+      status: retryState.status,
+      input: retryState.input,
+      createdAt: 1,
+      sessionId,
+    },
+    createdAt: 2,
+  });
+
+  const restored = await restoreSession(machine, {
+    sessionId,
+    store,
+  });
+
+  await vi.waitFor(() => {
+    expect(restored.getSnapshot().status).toBe('done');
+  });
+
+  expect(restored.getSnapshot()).toEqual(
+    expect.objectContaining({
+      value: 'done',
+      status: 'done',
+      context: {
+        question: 'Can retry survive restore?',
+        answer: 'restored attempt 2',
+        attempt: 2,
+        errors: ['network reset'],
+      },
+      output: {
+        answer: 'restored attempt 2',
+        attempts: 2,
+        errors: ['network reset'],
+      },
+    })
+  );
 });

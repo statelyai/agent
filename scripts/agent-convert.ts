@@ -1,7 +1,7 @@
 import { writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { toMermaid } from '../src/graph/index.js';
+import { toGraph, toMermaid, type AgentGraphWarning } from '../src/graph/index.js';
 import type { AgentMachine } from '../src/index.js';
 import { toXStateMachine } from '../src/xstate/index.js';
 
@@ -25,6 +25,9 @@ async function main() {
   }
 
   const machine = await loadMachine(options);
+  const graph = toGraph(machine);
+  writeWarnings(graph.data?.warnings ?? []);
+
   const output =
     options.format === 'mermaid'
       ? toMermaid(machine)
@@ -36,6 +39,18 @@ async function main() {
   }
 
   process.stdout.write(output.endsWith('\n') ? output : `${output}\n`);
+}
+
+function writeWarnings(warnings: AgentGraphWarning[]) {
+  for (const warning of warnings) {
+    process.stderr.write(
+      [
+        '[agent:convert]',
+        `${warning.state} on ${warning.event}:`,
+        warning.message,
+      ].join(' ') + '\n'
+    );
+  }
 }
 
 function parseArgs(args: string[]): CliOptions {
