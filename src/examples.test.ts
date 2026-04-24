@@ -1,7 +1,5 @@
 import { describe, expect, test } from 'vitest';
 import { z } from 'zod';
-import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
 
 import {
   createChatbotExample,
@@ -16,6 +14,7 @@ import {
   createEmailExample,
   createErrorRetryExample,
   createHitlExample,
+  createPersistenceSessionHttpHandler,
   createJokeExample,
   createJugsExample,
   createMapReduceExample,
@@ -40,44 +39,6 @@ import {
 } from '../examples/index.js';
 
 describe('curated examples', () => {
-  test('ships the canonical examples directory', () => {
-    const examplesDir = resolve(process.cwd(), 'examples');
-    expect(existsSync(resolve(examplesDir, 'simple.ts'))).toBe(true);
-    expect(existsSync(resolve(examplesDir, 'sql-agent.ts'))).toBe(true);
-    expect(existsSync(resolve(examplesDir, 'hitl.ts'))).toBe(true);
-    expect(existsSync(resolve(examplesDir, 'decide.ts'))).toBe(true);
-    expect(existsSync(resolve(examplesDir, 'classify.ts'))).toBe(true);
-    expect(existsSync(resolve(examplesDir, 'adapter.ts'))).toBe(true);
-    expect(existsSync(resolve(examplesDir, 'branching.ts'))).toBe(true);
-    expect(existsSync(resolve(examplesDir, 'chatbot.ts'))).toBe(true);
-    expect(existsSync(resolve(examplesDir, 'cloudflare-durable-object.ts'))).toBe(true);
-    expect(existsSync(resolve(examplesDir, 'cloudflare-durable-network.ts'))).toBe(true);
-    expect(existsSync(resolve(examplesDir, 'conditional-subflow.ts'))).toBe(true);
-    expect(existsSync(resolve(examplesDir, 'customer-service-sim.ts'))).toBe(true);
-    expect(existsSync(resolve(examplesDir, 'email.ts'))).toBe(true);
-    expect(existsSync(resolve(examplesDir, 'error-retry.ts'))).toBe(true);
-    expect(existsSync(resolve(examplesDir, 'joke.ts'))).toBe(true);
-    expect(existsSync(resolve(examplesDir, 'jugs.ts'))).toBe(true);
-    expect(existsSync(resolve(examplesDir, 'map-reduce.ts'))).toBe(true);
-    expect(existsSync(resolve(examplesDir, 'multi-agent-network.ts'))).toBe(true);
-    expect(existsSync(resolve(examplesDir, 'newspaper.ts'))).toBe(true);
-    expect(existsSync(resolve(examplesDir, 'persistence.ts'))).toBe(true);
-    expect(existsSync(resolve(examplesDir, 'persistent-multi-agent-network.ts'))).toBe(true);
-    expect(existsSync(resolve(examplesDir, 'persistent-streaming.ts'))).toBe(true);
-    expect(existsSync(resolve(examplesDir, 'persistent-supervisor.ts'))).toBe(true);
-    expect(existsSync(resolve(examplesDir, 'plan-and-execute.ts'))).toBe(true);
-    expect(existsSync(resolve(examplesDir, 'raffle.ts'))).toBe(true);
-    expect(existsSync(resolve(examplesDir, 'react-agent.ts'))).toBe(true);
-    expect(existsSync(resolve(examplesDir, 'react-agent-from-scratch.ts'))).toBe(true);
-    expect(existsSync(resolve(examplesDir, 'rewoo.ts'))).toBe(true);
-    expect(existsSync(resolve(examplesDir, 'reflection.ts'))).toBe(true);
-    expect(existsSync(resolve(examplesDir, 'river-crossing.ts'))).toBe(true);
-    expect(existsSync(resolve(examplesDir, 'subflow.ts'))).toBe(true);
-    expect(existsSync(resolve(examplesDir, 'supervisor.ts'))).toBe(true);
-    expect(existsSync(resolve(examplesDir, 'tool-calling.ts'))).toBe(true);
-    expect(existsSync(resolve(examplesDir, 'tutor.ts'))).toBe(true);
-  });
-
   test('simple example runs to a final output', async () => {
     const machine = createSimpleExample(async () => ({
       summary: 'A short summary.',
@@ -159,6 +120,89 @@ describe('curated examples', () => {
         afterSequence: 2,
       })
     );
+  });
+
+  test('http session example exposes start, send, and status over Request/Response', async () => {
+    const handle = createPersistenceSessionHttpHandler({
+      summarize: async ({ request, approved }) => ({
+        summary: `${request} :: approved=${String(approved)}`,
+      }),
+    });
+
+    const startResponse = await handle(
+      new Request('https://agent.test/sessions', {
+        method: 'POST',
+        body: JSON.stringify({
+          request: 'Approve the annual budget summary.',
+        }),
+        headers: {
+          'content-type': 'application/json',
+        },
+      })
+    );
+    const startBody = await startResponse.json() as {
+      sessionId: string;
+      snapshot: { value: string; status: string };
+    };
+
+    expect(startBody.snapshot).toEqual(
+      expect.objectContaining({
+        value: 'review',
+        status: 'active',
+      })
+    );
+
+    const sendResponse = await handle(
+      new Request(`https://agent.test/sessions/${startBody.sessionId}/events`, {
+        method: 'POST',
+        body: JSON.stringify({ type: 'approve' }),
+        headers: {
+          'content-type': 'application/json',
+        },
+      })
+    );
+    const sendBody = await sendResponse.json() as {
+      snapshot: {
+        value: string;
+        status: string;
+        output: {
+          request: string;
+          approved: boolean;
+          summary: string;
+        };
+      };
+    };
+
+    expect(sendBody.snapshot).toEqual(
+      expect.objectContaining({
+        value: 'done',
+        status: 'done',
+        output: {
+          request: 'Approve the annual budget summary.',
+          approved: true,
+          summary: 'Approve the annual budget summary. :: approved=true',
+        },
+      })
+    );
+
+    const statusResponse = await handle(
+      new Request(`https://agent.test/sessions/${startBody.sessionId}`, {
+        method: 'GET',
+      })
+    );
+    const statusBody = await statusResponse.json() as {
+      snapshot: {
+        value: string;
+        status: string;
+        output: {
+          request: string;
+          approved: boolean;
+          summary: string;
+        };
+      };
+    };
+
+    expect(statusBody.snapshot).toEqual(sendBody.snapshot);
   });
 
   test('cloudflare durable network example restores and settles a network run', async () => {

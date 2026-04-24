@@ -272,6 +272,66 @@ test('resolves simple helper calls with arguments in guards and targets', () => 
   ]);
 });
 
+test('resolves one-level helper forwarding with substituted arguments', () => {
+  const machine = createAgentMachine({
+    id: 'helper-forwarding-export',
+    schemas: {
+      events: {
+        choose: z.object({
+          type: z.literal('choose'),
+          kind: z.enum(['approved', 'rejected']),
+        }),
+      },
+    },
+    context: () => ({}),
+    initial: 'idle',
+    states: {
+      idle: {
+        on: {
+          choose: ({ event }) => {
+            function goTo(
+              target: 'approved' | 'rejected',
+              reason: string
+            ) {
+              return {
+                target,
+                context: { reason },
+              };
+            }
+
+            function route(kind: 'approved' | 'rejected') {
+              return goTo(kind, `routed:${kind}`);
+            }
+
+            return event.kind === 'approved'
+              ? route('approved')
+              : route('rejected');
+          },
+        },
+      },
+      approved: { type: 'final' },
+      rejected: { type: 'final' },
+    },
+  });
+
+  expect(toGraph(machine).edges).toEqual([
+    expect.objectContaining({
+      targetId: 'approved',
+      data: expect.objectContaining({
+        guard: { type: 'event.kind === "approved"' },
+        actions: { context: true },
+      }),
+    }),
+    expect.objectContaining({
+      targetId: 'rejected',
+      data: expect.objectContaining({
+        guard: { type: '!(event.kind === "approved")' },
+        actions: { context: true },
+      }),
+    }),
+  ]);
+});
+
 test('exports a mermaid state diagram from the Stately graph data', () => {
   const machine = createAgentMachine({
     id: 'mermaid-export',

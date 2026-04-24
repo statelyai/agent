@@ -1,6 +1,7 @@
 export { createSimpleExample } from './simple.js';
 export { createSqlAgentExample } from './sql-agent.js';
 export { createHitlExample } from './hitl.js';
+export { createPersistenceSessionHttpHandler } from './http-session.js';
 export { createDecideExample } from './decide.js';
 export { createClassifyExample } from './classify.js';
 export { createAdapterExample } from './adapter.js';
