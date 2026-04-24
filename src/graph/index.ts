@@ -38,13 +38,17 @@ export interface AgentGraphEdgeData {
 }
 
 export interface AgentGraphData {
-  warnings?: AgentGraphWarning[];
 }
 
 export interface AgentGraphWarning {
   state: string;
   event: string;
   message: string;
+}
+
+export interface AgentGraphAnalysis {
+  graph: AgentGraph;
+  warnings: AgentGraphWarning[];
 }
 
 export interface AgentGraph
@@ -80,6 +84,8 @@ type AnalyzableFunction =
   | ts.FunctionDeclaration;
 
 type HelperMap = Map<string, AnalyzableFunction | ts.Expression>;
+type BindingMap = Map<string, ts.Expression>;
+const printer = ts.createPrinter({ removeComments: true });
 
 /**
  * Convert an agent machine to a Stately graph-compatible plain JSON object.
@@ -88,6 +94,10 @@ type HelperMap = Map<string, AnalyzableFunction | ts.Expression>;
  * inferred from static transition objects and transition handler ASTs.
  */
 export function toGraph(machine: AgentMachine): AgentGraph {
+  return analyzeGraph(machine).graph;
+}
+
+export function analyzeGraph(machine: AgentMachine): AgentGraphAnalysis {
   const config = (machine as InternalMachine).__config;
   if (!config) {
     throw new Error('Machine config metadata is unavailable for graph export');
@@ -138,14 +148,18 @@ export function toGraph(machine: AgentMachine): AgentGraph {
     }
   }
 
-  return createGraph<AgentGraphNodeData, AgentGraphEdgeData, AgentGraphData>({
+  const graph = createGraph<AgentGraphNodeData, AgentGraphEdgeData, AgentGraphData>({
     id: machine.id,
     initialNodeId:
       typeof config.initial === 'string' ? config.initial : undefined,
-    ...(warnings.length > 0 ? { data: { warnings } } : {}),
     nodes,
     edges,
   });
+
+  return {
+    graph,
+    warnings,
+  };
 }
 
 export function toMermaid(machine: AgentMachine): string {
@@ -296,7 +310,9 @@ function analyzeTransitionObject(transition: unknown): AnalysisResult {
 }
 
 function analyzeTransitionFunction(fn: Function): AnalysisResult {
-  const source = fn.toString();
+  const source = fn
+    .toString()
+    .replace(/__name\([^)]*\);?/g, '');
   const file = ts.createSourceFile(
     'transition.ts',
     `const __transition = ${source};`,
@@ -320,7 +336,8 @@ function analyzeTransitionFunction(fn: Function): AnalysisResult {
       transitionFunction.body,
       [],
       file,
-      helpers
+      helpers,
+      new Map()
     );
   }
 
@@ -329,7 +346,8 @@ function analyzeTransitionFunction(fn: Function): AnalysisResult {
       transitionFunction.body.statements,
       [],
       file,
-      helpers
+      helpers,
+      new Map()
     );
   }
 
@@ -377,35 +395,38 @@ function collectHelpers(fn: AnalyzableFunction): HelperMap {
     return helpers;
   }
 
-  for (const statement of fn.body.statements) {
+  function visit(node: ts.Node) {
     if (
-      ts.isFunctionDeclaration(statement)
-      && statement.name
-      && statement.body
+      node !== fn.body
+      && isAnalyzableFunction(node)
     ) {
-      helpers.set(statement.name.text, statement);
-      continue;
+      return;
     }
 
-    if (!ts.isVariableStatement(statement)) {
-      continue;
+    if (ts.isFunctionDeclaration(node) && node.name && node.body) {
+      helpers.set(node.name.text, node);
+      return;
     }
 
-    for (const declaration of statement.declarationList.declarations) {
-      if (!ts.isIdentifier(declaration.name) || !declaration.initializer) {
-        continue;
+    if (ts.isVariableDeclaration(node)) {
+      if (!ts.isIdentifier(node.name) || !node.initializer) {
+        return;
       }
 
-      const initializer = unwrapParenthesized(declaration.initializer);
+      const initializer = unwrapParenthesized(node.initializer);
       if (
         isAnalyzableFunction(initializer)
         || ts.isObjectLiteralExpression(initializer)
         || ts.isConditionalExpression(initializer)
       ) {
-        helpers.set(declaration.name.text, initializer);
+        helpers.set(node.name.text, initializer);
       }
     }
+
+    ts.forEachChild(node, visit);
   }
+
+  visit(fn.body);
 
   return helpers;
 }
@@ -414,14 +435,21 @@ function analyzeStatements(
   statements: ts.NodeArray<ts.Statement>,
   guards: string[],
   file: ts.SourceFile,
-  helpers: HelperMap
+  helpers: HelperMap,
+  bindings: BindingMap
 ): BlockAnalysis {
   const candidates: EdgeCandidate[] = [];
   const warnings: string[] = [];
   const fallthroughGuards = [...guards];
 
   for (const statement of statements) {
-    const result = analyzeStatement(statement, fallthroughGuards, file, helpers);
+    const result = analyzeStatement(
+      statement,
+      fallthroughGuards,
+      file,
+      helpers,
+      bindings
+    );
     candidates.push(...result.candidates);
     warnings.push(...result.warnings);
 
@@ -434,7 +462,9 @@ function analyzeStatements(
       && isReturnOnlyBranch(statement.thenStatement)
       && !statement.elseStatement
     ) {
-      fallthroughGuards.push(`!(${statement.expression.getText(file)})`);
+      fallthroughGuards.push(
+        `!(${renderExpressionText(statement.expression, file, bindings)})`
+      );
     }
   }
 
@@ -445,7 +475,8 @@ function analyzeStatement(
   statement: ts.Statement,
   guards: string[],
   file: ts.SourceFile,
-  helpers: HelperMap
+  helpers: HelperMap,
+  bindings: BindingMap
 ): BlockAnalysis {
   if (ts.isReturnStatement(statement)) {
     if (!statement.expression) {
@@ -460,7 +491,8 @@ function analyzeStatement(
       statement.expression,
       guards,
       file,
-      helpers
+      helpers,
+      bindings
     );
 
     return {
@@ -476,11 +508,11 @@ function analyzeStatement(
   }
 
   if (ts.isIfStatement(statement)) {
-    return analyzeIfStatement(statement, guards, file, helpers);
+    return analyzeIfStatement(statement, guards, file, helpers, bindings);
   }
 
   if (ts.isSwitchStatement(statement)) {
-    return analyzeSwitchStatement(statement, guards, file, helpers);
+    return analyzeSwitchStatement(statement, guards, file, helpers, bindings);
   }
 
   if (
@@ -502,21 +534,24 @@ function analyzeIfStatement(
   statement: ts.IfStatement,
   guards: string[],
   file: ts.SourceFile,
-  helpers: HelperMap
+  helpers: HelperMap,
+  bindings: BindingMap
 ): BlockAnalysis {
-  const condition = statement.expression.getText(file);
+  const condition = renderExpressionText(statement.expression, file, bindings);
   const thenResult = analyzeBranch(
     statement.thenStatement,
     [...guards, condition],
     file,
-    helpers
+    helpers,
+    bindings
   );
   const elseResult = statement.elseStatement
     ? analyzeBranch(
         statement.elseStatement,
         [...guards, `!(${condition})`],
         file,
-        helpers
+        helpers,
+        bindings
       )
     : emptyBlockAnalysis();
 
@@ -531,11 +566,12 @@ function analyzeSwitchStatement(
   statement: ts.SwitchStatement,
   guards: string[],
   file: ts.SourceFile,
-  helpers: HelperMap
+  helpers: HelperMap,
+  bindings: BindingMap
 ): BlockAnalysis {
   const candidates: EdgeCandidate[] = [];
   const warnings: string[] = [];
-  const expression = statement.expression.getText(file);
+  const expression = renderExpressionText(statement.expression, file, bindings);
   const caseGuards: string[] = [];
   let allClausesExit = statement.caseBlock.clauses.length > 0;
 
@@ -554,7 +590,8 @@ function analyzeSwitchStatement(
       clause.statements,
       clauseGuard ? [...guards, clauseGuard] : guards,
       file,
-      helpers
+      helpers,
+      bindings
     );
     candidates.push(...result.candidates);
     warnings.push(...result.warnings);
@@ -572,13 +609,14 @@ function analyzeBranch(
   statement: ts.Statement,
   guards: string[],
   file: ts.SourceFile,
-  helpers: HelperMap
+  helpers: HelperMap,
+  bindings: BindingMap
 ): BlockAnalysis {
   if (ts.isBlock(statement)) {
-    return analyzeStatements(statement.statements, guards, file, helpers);
+    return analyzeStatements(statement.statements, guards, file, helpers, bindings);
   }
 
-  return analyzeStatement(statement, guards, file, helpers);
+  return analyzeStatement(statement, guards, file, helpers, bindings);
 }
 
 function emptyBlockAnalysis(): BlockAnalysis {
@@ -606,25 +644,28 @@ function analyzeTransitionExpression(
   expression: ts.Expression,
   guards: string[],
   file: ts.SourceFile,
-  helpers: HelperMap
+  helpers: HelperMap,
+  bindings: BindingMap
 ): AnalysisResult {
   const current = unwrapParenthesized(expression);
 
   if (ts.isConditionalExpression(current)) {
-    const condition = current.condition.getText(file);
+    const condition = renderExpressionText(current.condition, file, bindings);
 
     return mergeAnalysis([
       analyzeTransitionExpression(
         current.whenTrue,
         [...guards, condition],
         file,
-        helpers
+        helpers,
+        bindings
       ),
       analyzeTransitionExpression(
         current.whenFalse,
         [...guards, `!(${condition})`],
         file,
-        helpers
+        helpers,
+        bindings
       ),
     ]);
   }
@@ -632,23 +673,34 @@ function analyzeTransitionExpression(
   if (
     ts.isCallExpression(current)
     && ts.isIdentifier(current.expression)
-    && current.arguments.length === 0
   ) {
-    const helper = helpers.get(current.expression.text);
+    const fallbackHelper = findHelperByName(file, current.expression.text);
+    const helper =
+      helpers.get(current.expression.text)
+      ?? fallbackHelper;
     if (!helper) {
       return {
         candidates: [],
         warnings: [
-          `Unsupported helper call: ${current.expression.text}() is not statically resolvable.`,
+          `Unsupported helper call: ${current.expression.text}(${current.arguments.map((arg) => renderExpressionText(arg, file, bindings)).join(', ')}) is not statically resolvable.`,
         ],
       };
     }
 
-    return analyzeHelper(helper, guards, file, helpers);
+    return analyzeHelper(
+      helper,
+      current.arguments,
+      guards,
+      file,
+      helpers,
+      bindings
+    );
   }
 
   const object = unwrapParenthesizedObject(current);
-  const target = object ? getStringProperty(object, 'target') : undefined;
+  const target = object
+    ? getStringProperty(object, 'target', file, bindings)
+    : undefined;
   if (!target) {
     return { candidates: [], warnings: [] };
   }
@@ -666,17 +718,41 @@ function analyzeTransitionExpression(
 
 function analyzeHelper(
   helper: AnalyzableFunction | ts.Expression,
+  args: ts.NodeArray<ts.Expression>,
   guards: string[],
   file: ts.SourceFile,
-  helpers: HelperMap
+  helpers: HelperMap,
+  bindings: BindingMap
 ): AnalysisResult {
   if (isAnalyzableFunction(helper)) {
+    const helperBindings = createBindings(helper, args, bindings);
+    if (!helperBindings) {
+      return {
+        candidates: [],
+        warnings: [
+          `Unsupported helper call: argument count for ${getHelperName(helper)}(...) could not be matched.`,
+        ],
+      };
+    }
+
     if (ts.isArrowFunction(helper) && !ts.isBlock(helper.body)) {
-      return analyzeTransitionExpression(helper.body, guards, file, helpers);
+      return analyzeTransitionExpression(
+        helper.body,
+        guards,
+        file,
+        helpers,
+        helperBindings
+      );
     }
 
     if (helper.body && ts.isBlock(helper.body)) {
-      const result = analyzeStatements(helper.body.statements, guards, file, helpers);
+      const result = analyzeStatements(
+        helper.body.statements,
+        guards,
+        file,
+        helpers,
+        helperBindings
+      );
       return {
         candidates: result.candidates,
         warnings: result.warnings,
@@ -685,7 +761,14 @@ function analyzeHelper(
   }
 
   if (ts.isExpression(helper)) {
-    return analyzeTransitionExpression(helper, guards, file, helpers);
+    if (args.length > 0) {
+      return {
+        candidates: [],
+        warnings: ['Unsupported helper call: non-function helper cannot accept arguments.'],
+      };
+    }
+
+    return analyzeTransitionExpression(helper, guards, file, helpers, bindings);
   }
 
   return {
@@ -711,6 +794,50 @@ function unwrapParenthesized<T extends ts.Expression>(expression: T): ts.Express
   return current;
 }
 
+function findHelperByName(
+  file: ts.SourceFile,
+  name: string
+): AnalyzableFunction | ts.Expression | undefined {
+  let helper: AnalyzableFunction | ts.Expression | undefined;
+
+  function visit(node: ts.Node) {
+    if (helper) {
+      return;
+    }
+
+    if (
+      ts.isFunctionDeclaration(node)
+      && node.name?.text === name
+      && node.body
+    ) {
+      helper = node;
+      return;
+    }
+
+    if (ts.isVariableDeclaration(node)) {
+      if (!ts.isIdentifier(node.name) || node.name.text !== name || !node.initializer) {
+        ts.forEachChild(node, visit);
+        return;
+      }
+
+      const initializer = unwrapParenthesized(node.initializer);
+      if (
+        isAnalyzableFunction(initializer)
+        || ts.isObjectLiteralExpression(initializer)
+        || ts.isConditionalExpression(initializer)
+      ) {
+        helper = initializer;
+        return;
+      }
+    }
+
+    ts.forEachChild(node, visit);
+  }
+
+  visit(file);
+  return helper;
+}
+
 function unwrapParenthesizedObject(
   expression: ts.Expression
 ): ts.ObjectLiteralExpression | undefined {
@@ -725,28 +852,44 @@ function unwrapParenthesizedObject(
 
 function getStringProperty(
   object: ts.ObjectLiteralExpression,
-  name: string
+  name: string,
+  file: ts.SourceFile,
+  bindings: BindingMap
 ): string | undefined {
   const property = object.properties.find((candidate) => {
     return (
-      ts.isPropertyAssignment(candidate)
+      (ts.isPropertyAssignment(candidate)
+        || ts.isShorthandPropertyAssignment(candidate))
       && ts.isIdentifier(candidate.name)
       && candidate.name.text === name
     );
   });
 
-  if (!property || !ts.isPropertyAssignment(property)) {
+  if (!property) {
     return undefined;
   }
 
-  const initializer = property.initializer;
-  return ts.isStringLiteralLike(initializer) ? initializer.text : undefined;
+  if (ts.isPropertyAssignment(property)) {
+    return resolveStringExpression(property.initializer, file, bindings);
+  }
+
+  if (ts.isShorthandPropertyAssignment(property)) {
+    const binding = bindings.get(property.name.text);
+    if (!binding) {
+      return property.name.text;
+    }
+
+    return resolveStringExpression(binding, file, bindings);
+  }
+
+  return undefined;
 }
 
 function hasProperty(object: ts.ObjectLiteralExpression, name: string): boolean {
   return object.properties.some((candidate) => {
     return (
-      ts.isPropertyAssignment(candidate)
+      (ts.isPropertyAssignment(candidate)
+        || ts.isShorthandPropertyAssignment(candidate))
       && ts.isIdentifier(candidate.name)
       && candidate.name.text === name
     );
@@ -759,6 +902,99 @@ function getEdgeLabel(event: string, guard: string | undefined): string {
   }
 
   return `${event} [${guard}]`;
+}
+
+function createBindings(
+  helper: AnalyzableFunction,
+  args: ts.NodeArray<ts.Expression>,
+  parentBindings: BindingMap
+): BindingMap | null {
+  if (args.length > helper.parameters.length) {
+    return null;
+  }
+
+  const bindings = new Map(parentBindings);
+  helper.parameters.forEach((parameter, index) => {
+    if (!ts.isIdentifier(parameter.name)) {
+      return;
+    }
+
+    const arg = args[index];
+    if (arg) {
+      bindings.set(parameter.name.text, substituteExpression(arg, parentBindings));
+    }
+  });
+
+  return bindings;
+}
+
+function getHelperName(helper: AnalyzableFunction): string {
+  if (helper.name) {
+    return helper.name.text;
+  }
+
+  return 'helper';
+}
+
+function resolveStringExpression(
+  expression: ts.Expression,
+  file: ts.SourceFile,
+  bindings: BindingMap
+): string | undefined {
+  const current = substituteExpression(unwrapParenthesized(expression), bindings);
+
+  if (ts.isStringLiteralLike(current)) {
+    return current.text;
+  }
+
+  if (ts.isNoSubstitutionTemplateLiteral(current)) {
+    return current.text;
+  }
+
+  if (ts.isIdentifier(current)) {
+    return current.text;
+  }
+
+  const rendered = renderExpressionText(current, file, bindings);
+  return /^["'`](.*)["'`]$/s.test(rendered)
+    ? rendered.slice(1, -1)
+    : undefined;
+}
+
+function renderExpressionText(
+  expression: ts.Expression,
+  file: ts.SourceFile,
+  bindings: BindingMap
+): string {
+  const substituted = substituteExpression(unwrapParenthesized(expression), bindings);
+  return printer.printNode(ts.EmitHint.Unspecified, substituted, file);
+}
+
+function substituteExpression(
+  expression: ts.Expression,
+  bindings: BindingMap
+): ts.Expression {
+  if (bindings.size === 0) {
+    return expression;
+  }
+
+  const transformed = ts.transform(expression, [
+    (context) => {
+      const visit: ts.Visitor = (node) => {
+        if (ts.isIdentifier(node) && bindings.has(node.text)) {
+          return substituteExpression(bindings.get(node.text)!, bindings);
+        }
+
+        return ts.visitEachChild(node, visit, context);
+      };
+
+      return (node) => ts.visitNode(node, visit) as ts.Expression;
+    },
+  ]);
+
+  const substituted = transformed.transformed[0] as ts.Expression;
+  transformed.dispose();
+  return substituted;
 }
 
 function combineGuardList(guards: string[]): string | undefined {

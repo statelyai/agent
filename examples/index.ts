@@ -12,6 +12,7 @@ export {
   type DurableObjectStateLike,
   type DurableObjectStorageLike,
 } from './cloudflare-durable-object.js';
+export { AgentNetworkDurableObject } from './cloudflare-durable-network.js';
 export { createCustomerServiceSimExample } from './customer-service-sim.js';
 export { createEmailExample } from './email.js';
 export { createErrorRetryExample } from './error-retry.js';
@@ -22,6 +23,10 @@ export { createMultiAgentNetworkExample } from './multi-agent-network.js';
 export { createNewspaperExample } from './newspaper.js';
 export { createPlanAndExecuteExample } from './plan-and-execute.js';
 export { createPersistenceExample, runPersistenceExample } from './persistence.js';
+export {
+  createPersistentMultiAgentNetworkExample,
+  runPersistentMultiAgentNetworkExample,
+} from './persistent-multi-agent-network.js';
 export { createRaffleExample } from './raffle.js';
 export { createReactAgentExample } from './react-agent.js';
 export {

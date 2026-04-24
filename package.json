@@ -72,6 +72,9 @@
   ],
   "author": "David Khourshid <david@stately.ai>",
   "license": "MIT",
+  "engines": {
+    "node": ">=22.18.0"
+  },
   "devDependencies": {
     "@ai-sdk/openai": "^3.0.25",
     "@changesets/changelog-github": "^0.5.0",

@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
 import { z } from 'zod';
 import { createAgentMachine } from '../index.js';
-import { toGraph, toMermaid } from './index.js';
+import { analyzeGraph, toGraph, toMermaid } from './index.js';
 
 declare function unknownTransition(): { target: 'done' };
 
@@ -205,13 +205,70 @@ test('reports graph warnings for unsupported transition analysis', () => {
     },
   });
 
-  expect(toGraph(machine).data?.warnings).toEqual([
+  expect(analyzeGraph(machine).warnings).toEqual([
     {
       state: 'idle',
       event: 'go',
       message:
         'Unsupported helper call: unknownTransition() is not statically resolvable.',
     },
+  ]);
+  expect(toGraph(machine).data).toBeUndefined();
+});
+
+test('resolves simple helper calls with arguments in guards and targets', () => {
+  const machine = createAgentMachine({
+    id: 'helper-args-export',
+    schemas: {
+      events: {
+        choose: z.object({
+          type: z.literal('choose'),
+          kind: z.enum(['approved', 'rejected']),
+        }),
+      },
+    },
+    context: () => ({}),
+    initial: 'idle',
+    states: {
+      idle: {
+        on: {
+          choose: ({ event }) => {
+            function goTo(
+              target: 'approved' | 'rejected',
+              reason: string
+            ) {
+              return {
+                target,
+                context: { reason },
+              };
+            }
+
+            return event.kind === 'approved'
+              ? goTo('approved', 'explicit approval path')
+              : goTo('rejected', 'explicit rejection path');
+          },
+        },
+      },
+      approved: { type: 'final' },
+      rejected: { type: 'final' },
+    },
+  });
+
+  expect(toGraph(machine).edges).toEqual([
+    expect.objectContaining({
+      targetId: 'approved',
+      data: expect.objectContaining({
+        guard: { type: 'event.kind === "approved"' },
+        actions: { context: true },
+      }),
+    }),
+    expect.objectContaining({
+      targetId: 'rejected',
+      data: expect.objectContaining({
+        guard: { type: '!(event.kind === "approved")' },
+        actions: { context: true },
+      }),
+    }),
   ]);
 });
 

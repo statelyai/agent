@@ -27,6 +27,11 @@ test('supports tool-call style invokes with live tool events and final output', 
           toolName: z.string(),
           input: z.object({ city: z.string() }),
         }),
+        toolProgress: z.object({
+          toolName: z.string(),
+          message: z.string(),
+          step: z.number().int().min(1),
+        }),
         toolResult: z.object({
           toolName: z.string(),
           output: z.object({ forecast: z.string() }),
@@ -47,6 +52,20 @@ test('supports tool-call style invokes with live tool events and final output', 
             type: 'toolCall',
             toolName: 'getWeather',
             input: { city: context.city },
+          });
+
+          enq.emit({
+            type: 'toolProgress',
+            toolName: 'getWeather',
+            message: `Fetching weather for ${context.city}`,
+            step: 1,
+          });
+
+          enq.emit({
+            type: 'toolProgress',
+            toolName: 'getWeather',
+            message: `Formatting response for ${context.city}`,
+            step: 2,
           });
 
           const output = { forecast: `Sunny in ${context.city}` };
@@ -79,13 +98,21 @@ test('supports tool-call style invokes with live tool events and final output', 
   run.on('toolCall', (event) => {
     events.push(`call:${event.toolName}`);
   });
+  run.on('toolProgress', (event) => {
+    events.push(`progress:${event.toolName}:${event.step}`);
+  });
   run.on('toolResult', (event) => {
     events.push(`result:${event.toolName}`);
   });
 
   await once(run.onDone.bind(run));
 
-  expect(events).toEqual(['call:getWeather', 'result:getWeather']);
+  expect(events).toEqual([
+    'call:getWeather',
+    'progress:getWeather:1',
+    'progress:getWeather:2',
+    'result:getWeather',
+  ]);
   expect(run.getSnapshot()).toEqual(
     expect.objectContaining({
       value: 'done',

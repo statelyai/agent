@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 
 import {
   createChatbotExample,
+  AgentNetworkDurableObject,
   createDurableObjectRunStore,
   createAdapterExample,
   createBranchingExample,
@@ -21,6 +22,7 @@ import {
   createMultiAgentNetworkExample,
   createNewspaperExample,
   runPersistenceExample,
+  runPersistentMultiAgentNetworkExample,
   createPlanAndExecuteExample,
   createRaffleExample,
   createReactAgentExample,
@@ -47,6 +49,7 @@ describe('curated examples', () => {
     expect(existsSync(resolve(examplesDir, 'branching.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'chatbot.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'cloudflare-durable-object.ts'))).toBe(true);
+    expect(existsSync(resolve(examplesDir, 'cloudflare-durable-network.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'conditional-subflow.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'customer-service-sim.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'email.ts'))).toBe(true);
@@ -57,6 +60,7 @@ describe('curated examples', () => {
     expect(existsSync(resolve(examplesDir, 'multi-agent-network.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'newspaper.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'persistence.ts'))).toBe(true);
+    expect(existsSync(resolve(examplesDir, 'persistent-multi-agent-network.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'plan-and-execute.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'raffle.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'react-agent.ts'))).toBe(true);
@@ -149,6 +153,70 @@ describe('curated examples', () => {
       expect.objectContaining({
         sessionId: 'session-1',
         afterSequence: 2,
+      })
+    );
+  });
+
+  test('cloudflare durable network example restores and settles a network run', async () => {
+    const storage = new Map<string, unknown>();
+    const firstInstance = new AgentNetworkDurableObject({
+      storage: {
+        async get(key) {
+          return storage.get(key) as never;
+        },
+        async put(key, value) {
+          storage.set(key, value);
+        },
+      },
+    });
+
+    const startResponse = await firstInstance.fetch(
+      new Request('https://example.com/start', {
+        method: 'POST',
+        body: JSON.stringify({ topic: 'durable networks' }),
+      })
+    );
+    const started = await startResponse.json() as {
+      sessionId: string;
+      snapshot: { status: string };
+    };
+
+    const resumedInstance = new AgentNetworkDurableObject({
+      storage: {
+        async get(key) {
+          return storage.get(key) as never;
+        },
+        async put(key, value) {
+          storage.set(key, value);
+        },
+      },
+    });
+    const resumeResponse = await resumedInstance.fetch(
+      new Request(
+        `https://example.com/resume?sessionId=${started.sessionId}`,
+        { method: 'POST' }
+      )
+    );
+    const resumed = await resumeResponse.json() as {
+      sessionId: string;
+      snapshot: {
+        status: string;
+        output: {
+          topic: string;
+          handoffs: string[];
+        };
+      };
+    };
+
+    expect(started.sessionId).toBe(resumed.sessionId);
+    expect(resumed.snapshot.status).toBe('done');
+    expect(resumed.snapshot.output).toEqual(
+      expect.objectContaining({
+        topic: 'durable networks',
+        handoffs: [
+          'researcher:collect the strongest supporting facts',
+          'writer:turn the current notes into a concise summary',
+        ],
       })
     );
   });
@@ -274,6 +342,65 @@ describe('curated examples', () => {
         draft: 'state machines: deterministic, resumable',
       });
     }
+  });
+
+  test('persistent multi-agent network example restores from a mid-handoff snapshot', async () => {
+    let step = 0;
+    const result = await runPersistentMultiAgentNetworkExample(
+      { topic: 'resumable coordination' },
+      {
+        adapter: {
+          decide: async () => {
+            step += 1;
+
+            if (step === 1) {
+              return {
+                choice: 'research',
+                data: { focus: 'collect durable coordination notes' },
+              };
+            }
+
+            if (step === 2) {
+              return {
+                choice: 'write',
+                data: { angle: 'produce the final coordination memo' },
+              };
+            }
+
+            return {
+              choice: 'finalize',
+              data: {},
+            };
+          },
+        },
+        research: async ({ topic, focus }) => ({
+          notes: [`${topic}:${focus}:a`, `${topic}:${focus}:b`],
+        }),
+        write: async ({ topic, notes, angle }) => ({
+          draft: `${topic} | ${angle} | ${notes.join(' / ')}`,
+        }),
+      }
+    );
+
+    expect(result.restoredSnapshot).toEqual(result.liveSnapshot);
+    expect(result.liveSnapshot).toEqual(
+      expect.objectContaining({
+        value: 'done',
+        output: {
+          topic: 'resumable coordination',
+          notes: [
+            'resumable coordination:collect durable coordination notes:a',
+            'resumable coordination:collect durable coordination notes:b',
+          ],
+          draft:
+            'resumable coordination | produce the final coordination memo | resumable coordination:collect durable coordination notes:a / resumable coordination:collect durable coordination notes:b',
+          handoffs: [
+            'researcher:collect durable coordination notes',
+            'writer:produce the final coordination memo',
+          ],
+        },
+      })
+    );
   });
 
   test('branching example fans out plain async work and summarizes it', async () => {
@@ -668,9 +795,22 @@ describe('curated examples', () => {
   });
 
   test('tool-calling example emits live tool activity and completes with output', async () => {
-    const machine = createToolCallingExample(async (city) => ({
-      forecast: `Rainy in ${city}`,
-    }));
+    const machine = createToolCallingExample(async (city, emitProgress) => {
+      emitProgress({
+        toolName: 'getWeather',
+        message: `Checking radar for ${city}`,
+        step: 1,
+      });
+      emitProgress({
+        toolName: 'getWeather',
+        message: `Preparing forecast for ${city}`,
+        step: 2,
+      });
+
+      return {
+        forecast: `Rainy in ${city}`,
+      };
+    });
 
     const { createMemoryRunStore, startSession } = await import('./index.js');
     const run = await startSession(machine, {
@@ -682,6 +822,9 @@ describe('curated examples', () => {
     run.on('toolCall', (event) => {
       events.push(`call:${event.toolName}`);
     });
+    run.on('toolProgress', (event) => {
+      events.push(`progress:${event.toolName}:${event.step}`);
+    });
     run.on('toolResult', (event) => {
       events.push(`result:${event.toolName}`);
     });
@@ -691,7 +834,12 @@ describe('curated examples', () => {
       run.onError((event) => reject(event.error));
     });
 
-    expect(events).toEqual(['call:getWeather', 'result:getWeather']);
+    expect(events).toEqual([
+      'call:getWeather',
+      'progress:getWeather:1',
+      'progress:getWeather:2',
+      'result:getWeather',
+    ]);
     expect(run.getSnapshot()).toEqual(
       expect.objectContaining({
         output: { forecast: 'Rainy in New York' },

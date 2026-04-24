@@ -1,7 +1,7 @@
 import { writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { toGraph, toMermaid, type AgentGraphWarning } from '../src/graph/index.js';
+import { analyzeGraph, toMermaid, type AgentGraphWarning } from '../src/graph/index.js';
 import type { AgentMachine } from '../src/index.js';
 import { toXStateVisualization } from '../src/xstate/index.js';
 
@@ -25,8 +25,8 @@ async function main() {
   }
 
   const machine = await loadMachine(options);
-  const graph = toGraph(machine);
-  writeWarnings(graph.data?.warnings ?? []);
+  const analysis = analyzeGraph(machine);
+  writeWarnings(analysis.warnings);
 
   const output =
     options.format === 'mermaid'

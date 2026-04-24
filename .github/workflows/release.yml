@@ -29,7 +29,7 @@ jobs:
       - name: setup node.js
         uses: actions/setup-node@v3
         with:
-          node-version: 20
+          node-version: 22.18.0
       - name: install pnpm
         run: npm i pnpm@latest -g
       - name: setup pnpm config
