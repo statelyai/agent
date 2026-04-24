@@ -26,6 +26,8 @@ Each example demonstrates one concept:
 - [`examples/tool-calling.ts`](/Users/davidkpiano/Code/agent/examples/tool-calling.ts): tool invocation with emitted `toolCall`, incremental `toolProgress`, and final `toolResult` events
 - [`examples/persistence.ts`](/Users/davidkpiano/Code/agent/examples/persistence.ts): persisting snapshots and restoring a session in plain runtime code
 - [`examples/persistent-multi-agent-network.ts`](/Users/davidkpiano/Code/agent/examples/persistent-multi-agent-network.ts): durable multi-agent handoffs that restore from a persisted mid-network snapshot
+- [`examples/persistent-streaming.ts`](/Users/davidkpiano/Code/agent/examples/persistent-streaming.ts): restore a crashed streaming invoke and continue with only new live emitted parts
+- [`examples/persistent-supervisor.ts`](/Users/davidkpiano/Code/agent/examples/persistent-supervisor.ts): durable supervisor routing that restores after a persisted retry handoff
 - [`examples/cloudflare-durable-network.ts`](/Users/davidkpiano/Code/agent/examples/cloudflare-durable-network.ts): a Cloudflare Durable Object runner that starts and resumes a persisted multi-agent network
 - [`examples/decide.ts`](/Users/davidkpiano/Code/agent/examples/decide.ts): choosing the next branch with structured branch-specific payloads
 - [`examples/classify.ts`](/Users/davidkpiano/Code/agent/examples/classify.ts): routing into a fixed category set when you only need a label

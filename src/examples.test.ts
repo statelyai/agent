@@ -23,6 +23,8 @@ import {
   createNewspaperExample,
   runPersistenceExample,
   runPersistentMultiAgentNetworkExample,
+  runPersistentStreamingExample,
+  runPersistentSupervisorExample,
   createPlanAndExecuteExample,
   createRaffleExample,
   createReactAgentExample,
@@ -61,6 +63,8 @@ describe('curated examples', () => {
     expect(existsSync(resolve(examplesDir, 'newspaper.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'persistence.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'persistent-multi-agent-network.ts'))).toBe(true);
+    expect(existsSync(resolve(examplesDir, 'persistent-streaming.ts'))).toBe(true);
+    expect(existsSync(resolve(examplesDir, 'persistent-supervisor.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'plan-and-execute.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'raffle.ts'))).toBe(true);
     expect(existsSync(resolve(examplesDir, 'react-agent.ts'))).toBe(true);
@@ -401,6 +405,91 @@ describe('curated examples', () => {
         },
       })
     );
+  });
+
+  test('persistent supervisor example restores from a persisted retry handoff', async () => {
+    let decisions = 0;
+
+    const result = await runPersistentSupervisorExample(
+      { request: 'Reverse the duplicate subscription charge.' },
+      {
+        adapter: {
+          decide: async () => {
+            decisions += 1;
+
+            if (decisions === 1) {
+              return {
+                choice: 'retry',
+                data: {
+                  instruction: 'Retry using the verified billing email on file.',
+                },
+              };
+            }
+
+            return {
+              choice: 'escalate',
+              data: {
+                reason: 'Escalate to billing because the account is still ambiguous.',
+              },
+            };
+          },
+        },
+        handle: async ({ attempt, instruction }) => ({
+          status: 'blocked' as const,
+          issue:
+            attempt === 1
+              ? 'Missing account identifier.'
+              : `Still blocked after retry: ${instruction}`,
+        }),
+        maxAttempts: 2,
+      }
+    );
+
+    expect(result.liveSnapshot).toEqual(result.restoredSnapshot);
+    expect(result.liveSnapshot).toEqual(
+      expect.objectContaining({
+        value: 'done',
+        status: 'done',
+        output: {
+          request: 'Reverse the duplicate subscription charge.',
+          status: 'escalated',
+          resolution: null,
+          escalationReason:
+            'Escalate to billing because the account is still ambiguous.',
+          attemptCount: 2,
+          history: [
+            'worker:1:blocked:Missing account identifier.',
+            'supervisor:retry:Retry using the verified billing email on file.',
+            'worker:2:blocked:Still blocked after retry: Retry using the verified billing email on file.',
+            'supervisor:escalate:Escalate to billing because the account is still ambiguous.',
+          ],
+        },
+      })
+    );
+  });
+
+  test('persistent streaming example resumes with only new live parts after restore', async () => {
+    const result = await runPersistentStreamingExample();
+
+    expect(result.initialParts).toEqual(['hel']);
+    expect(result.restoredParts).toEqual(['lo']);
+    expect(result.initialSnapshot).toEqual(
+      expect.objectContaining({
+        value: 'writing',
+        status: 'active',
+      })
+    );
+    expect(result.restoredSnapshot).toEqual(
+      expect.objectContaining({
+        value: 'done',
+        status: 'done',
+        output: { text: 'hello' },
+      })
+    );
+    expect(result.journal.map((event) => event.type)).toEqual([
+      'xstate.init',
+      'xstate.done.invoke.writing',
+    ]);
   });
 
   test('branching example fans out plain async work and summarizes it', async () => {

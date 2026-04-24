@@ -27,6 +27,14 @@ export {
   createPersistentMultiAgentNetworkExample,
   runPersistentMultiAgentNetworkExample,
 } from './persistent-multi-agent-network.js';
+export {
+  createPersistentStreamingExample,
+  runPersistentStreamingExample,
+} from './persistent-streaming.js';
+export {
+  createPersistentSupervisorExample,
+  runPersistentSupervisorExample,
+} from './persistent-supervisor.js';
 export { createRaffleExample } from './raffle.js';
 export { createReactAgentExample } from './react-agent.js';
 export {
