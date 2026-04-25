@@ -15,6 +15,7 @@ import {
   createErrorRetryExample,
   createHitlExample,
   createPersistenceSessionHttpHandler,
+  createStreamingSessionHttpController,
   createJokeExample,
   createJugsExample,
   createMapReduceExample,
@@ -37,6 +38,38 @@ import {
   createToolCallingExample,
   createTutorExample,
 } from '../examples/index.js';
+
+function createSseReader(response: Response) {
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  return {
+    async next(): Promise<{ event: string; data: unknown }> {
+      while (true) {
+        const match = buffer.match(/^event: ([^\n]+)\ndata: ([^\n]+)\n\n/);
+        if (match) {
+          buffer = buffer.slice(match[0].length);
+          return {
+            event: match[1]!,
+            data: JSON.parse(match[2]!),
+          };
+        }
+
+        const chunk = await reader.read();
+        if (chunk.done) {
+          throw new Error('SSE stream closed before the next event was available.');
+        }
+
+        buffer += decoder.decode(chunk.value, { stream: true });
+      }
+    },
+
+    async cancel() {
+      await reader.cancel();
+    },
+  };
+}
 
 describe('curated examples', () => {
   test('simple example runs to a final output', async () => {
@@ -203,6 +236,84 @@ describe('curated examples', () => {
     };
 
     expect(statusBody.snapshot).toEqual(sendBody.snapshot);
+  });
+
+  test('http streaming session example reconnects with only new SSE parts after restore', async () => {
+    const controller = createStreamingSessionHttpController();
+
+    const startResponse = await controller.handle(
+      new Request('https://agent.test/sessions', {
+        method: 'POST',
+        body: JSON.stringify({
+          streamId: 'stream-1',
+          text: 'hello',
+        }),
+        headers: {
+          'content-type': 'application/json',
+        },
+      })
+    );
+    const startBody = await startResponse.json() as {
+      sessionId: string;
+    };
+
+    const firstStreamResponse = await controller.handle(
+      new Request(`https://agent.test/sessions/${startBody.sessionId}/stream`)
+    );
+    const firstReader = createSseReader(firstStreamResponse);
+
+    controller.advance('stream-1');
+
+    await expect(firstReader.next()).resolves.toEqual({
+      event: 'textPart',
+      data: {
+        type: 'textPart',
+        delta: 'hel',
+      },
+    });
+
+    await firstReader.cancel();
+    controller.dropActiveSession(startBody.sessionId);
+
+    const secondStreamResponse = await controller.handle(
+      new Request(`https://agent.test/sessions/${startBody.sessionId}/stream`)
+    );
+    const secondReader = createSseReader(secondStreamResponse);
+
+    controller.advance('stream-1');
+
+    await expect(secondReader.next()).resolves.toEqual({
+      event: 'textPart',
+      data: {
+        type: 'textPart',
+        delta: 'lo',
+      },
+    });
+    await expect(secondReader.next()).resolves.toEqual({
+      event: 'done',
+      data: {
+        text: 'hello',
+      },
+    });
+
+    const statusResponse = await controller.handle(
+      new Request(`https://agent.test/sessions/${startBody.sessionId}`)
+    );
+    const statusBody = await statusResponse.json() as {
+      snapshot: {
+        value: string;
+        status: string;
+        output: { text: string };
+      };
+    };
+
+    expect(statusBody.snapshot).toEqual(
+      expect.objectContaining({
+        value: 'done',
+        status: 'done',
+        output: { text: 'hello' },
+      })
+    );
   });
 
   test('cloudflare durable network example restores and settles a network run', async () => {
