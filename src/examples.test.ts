@@ -11,6 +11,7 @@ import {
   createConditionalSubflowExample,
   createCustomerServiceSimExample,
   createDecideExample,
+  createChatbotMessagesExample,
   createEmailExample,
   createErrorRetryExample,
   createHitlExample,
@@ -27,6 +28,7 @@ import {
   runPersistentSupervisorExample,
   createPlanAndExecuteExample,
   createRaffleExample,
+  createRagExample,
   createReactAgentExample,
   createRewooExample,
   createReflectionExample,
@@ -83,6 +85,67 @@ describe('curated examples', () => {
     expect(result.status).toBe('done');
     if (result.status === 'done') {
       expect(result.output).toEqual({ summary: 'A short summary.' });
+    }
+  });
+
+  test('chatbot messages example accumulates structured conversation turns', async () => {
+    const machine = createChatbotMessagesExample(async (messages) => ({
+      message: {
+        role: 'assistant',
+        content: `Replying to: ${messages.at(-1)?.content ?? ''}`,
+      },
+    }));
+
+    const afterUserMessage = machine.transition(machine.getInitialState(), {
+      type: 'messages.user',
+      message: {
+        role: 'user',
+        content: 'Hello there',
+      },
+    });
+    const result = await machine.execute(afterUserMessage);
+
+    expect(result.status).toBe('pending');
+    if (result.status === 'pending') {
+      expect(result.context.messages).toEqual([
+        { role: 'user', content: 'Hello there' },
+        { role: 'assistant', content: 'Replying to: Hello there' },
+      ]);
+      expect(result.context.finalMessage).toEqual({
+        role: 'assistant',
+        content: 'Replying to: Hello there',
+      });
+    }
+  });
+
+  test('rag example retrieves context and produces a grounded answer', async () => {
+    const machine = createRagExample({
+      retrieve: async (question) => ({
+        documents: [
+          { id: 'doc-1', content: `${question} :: first fact` },
+          { id: 'doc-2', content: `${question} :: second fact` },
+        ],
+      }),
+      answer: async ({ question, documents }) => ({
+        answer: `${question} => ${documents.map((document) => document.content).join(' | ')}`,
+      }),
+    });
+
+    const result = await machine.execute(
+      machine.getInitialState({ question: 'What is LangGraph?' })
+    );
+
+    expect(result.status).toBe('done');
+    if (result.status === 'done') {
+      expect(result.output).toEqual({
+        question: 'What is LangGraph?',
+        documents: [
+          { id: 'doc-1', content: 'What is LangGraph? :: first fact' },
+          { id: 'doc-2', content: 'What is LangGraph? :: second fact' },
+        ],
+        answer:
+          'What is LangGraph? => What is LangGraph? :: first fact | What is LangGraph? :: second fact',
+      });
     }
   });
 

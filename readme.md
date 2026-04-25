@@ -22,7 +22,9 @@ Each example demonstrates one concept:
 - [`examples/simple.ts`](/Users/davidkpiano/Code/agent/examples/simple.ts): the smallest `createAgentMachine(...)` flow with an `invoke` state that makes a real LLM call
 - [`examples/hitl.ts`](/Users/davidkpiano/Code/agent/examples/hitl.ts): a human-in-the-loop machine that pauses in a pending state, accepts typed events, and drafts with an LLM after approval
 - [`examples/error-retry.ts`](/Users/davidkpiano/Code/agent/examples/error-retry.ts): retrying transient invoke failures through explicit internal error events
+- [`examples/chatbot-messages.ts`](/Users/davidkpiano/Code/agent/examples/chatbot-messages.ts): message-centric chat state with structured `{ role, content }` accumulation across turns
 - [`examples/conditional-subflow.ts`](/Users/davidkpiano/Code/agent/examples/conditional-subflow.ts): routing directly into one of multiple child subflows from parent input
+- [`examples/rag.ts`](/Users/davidkpiano/Code/agent/examples/rag.ts): retrieval-augmented generation with explicit retrieve and answer states
 - [`examples/tool-calling.ts`](/Users/davidkpiano/Code/agent/examples/tool-calling.ts): tool invocation with emitted `toolCall`, incremental `toolProgress`, and final `toolResult` events
 - [`examples/persistence.ts`](/Users/davidkpiano/Code/agent/examples/persistence.ts): persisting snapshots and restoring a session in plain runtime code
 - [`examples/http-session.ts`](/Users/davidkpiano/Code/agent/examples/http-session.ts): runner-agnostic HTTP transport for starting sessions, sending events, and reading snapshots over `Request`/`Response`

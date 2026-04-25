@@ -7,6 +7,7 @@ export { createDecideExample } from './decide.js';
 export { createClassifyExample } from './classify.js';
 export { createAdapterExample } from './adapter.js';
 export { createChatbotExample } from './chatbot.js';
+export { createChatbotMessagesExample } from './chatbot-messages.js';
 export { createConditionalSubflowExample } from './conditional-subflow.js';
 export {
   AgentSessionDurableObject,
@@ -38,6 +39,7 @@ export {
   runPersistentSupervisorExample,
 } from './persistent-supervisor.js';
 export { createRaffleExample } from './raffle.js';
+export { createRagExample } from './rag.js';
 export { createReactAgentExample } from './react-agent.js';
 export {
   createReactAgentFromScratch,
