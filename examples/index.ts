@@ -6,9 +6,15 @@ export { createStreamingSessionHttpController } from './http-streaming-session.j
 export { createDecideExample } from './decide.js';
 export { createClassifyExample } from './classify.js';
 export { createAdapterExample } from './adapter.js';
+export { createAiSdkExample } from './ai-sdk.js';
 export { createChatbotExample } from './chatbot.js';
 export { createChatbotMessagesExample } from './chatbot-messages.js';
 export { createConditionalSubflowExample } from './conditional-subflow.js';
+export {
+  createCloudflareAgentRunStore,
+  createCloudflareAgentsExample,
+  type CloudflareAgentRunStoreState,
+} from './cloudflare-agents.js';
 export {
   AgentSessionDurableObject,
   createDurableObjectRunStore,

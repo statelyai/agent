@@ -2,12 +2,24 @@ import { generateText, Output } from 'ai';
 import { z } from 'zod';
 import type { AgentAdapter, StandardSchemaV1 } from '../types.js';
 
+type AiSdkGenerateText = typeof generateText;
+type AiSdkModel = Parameters<typeof generateText>[0]['model'];
+
+export interface CreateAiSdkAdapterOptions {
+  resolveModel?: (model: string) => AiSdkModel;
+  generateText?: AiSdkGenerateText;
+}
+
 /**
  * Create an adapter that uses the Vercel AI SDK for decide/classify.
- * Model strings like 'anthropic/claude-sonnet-4.5' are resolved via the
- * AI SDK's model registry.
+ * By default, model strings are passed straight through to the AI SDK.
+ * For provider helpers such as `openai(...)`, pass `resolveModel`.
  */
-export function createAiSdkAdapter(): AgentAdapter {
+export function createAiSdkAdapter(
+  config: CreateAiSdkAdapterOptions = {}
+): AgentAdapter {
+  const generate = config.generateText ?? generateText;
+
   return {
     async decide({ model, prompt, options, reasoning }) {
       const optionKeys = Object.keys(options);
@@ -18,8 +30,8 @@ export function createAiSdkAdapter(): AgentAdapter {
           .map(([key, opt]) => `- ${key}: ${opt.description}`)
           .join('\n');
 
-        const result = await generateText({
-          model: resolveModel(model),
+        const result = await generate({
+          model: resolveModel(model, config.resolveModel),
           system: `You must choose exactly one of the following options:\n${optionDescriptions}`,
           prompt,
           output: Output.choice({
@@ -56,8 +68,8 @@ export function createAiSdkAdapter(): AgentAdapter {
 
       const systemPrompt = `You must choose exactly one of the following options:\n${optionDescriptions}\n\nRespond with structured output containing the chosen decision and any required data.`;
 
-      const result = await generateText({
-        model: resolveModel(model),
+      const result = await generate({
+        model: resolveModel(model, config.resolveModel),
         system: systemPrompt,
         prompt,
         output: Output.object({
@@ -96,10 +108,16 @@ function toZodSchema(schema: StandardSchemaV1): z.ZodType {
 
 /**
  * Resolve a model string to an AI SDK model.
- * Supports the `provider/model` format via the AI SDK registry.
+ * Supports custom resolution when users prefer provider helpers such as
+ * `openai('gpt-5.4-nano')`.
  */
-function resolveModel(model: string): Parameters<typeof generateText>[0]['model'] {
-  // The AI SDK accepts model strings when using a provider registry.
-  // For now, return as-is — users configure their provider registry externally.
+function resolveModel(
+  model: string,
+  resolver?: (model: string) => AiSdkModel
+): AiSdkModel {
+  if (resolver) {
+    return resolver(model);
+  }
+
   return model as any;
 }

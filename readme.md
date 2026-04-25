@@ -11,7 +11,7 @@ Stately Agent is a flexible framework for building AI agents using state machine
 
 <!-- curated examples and CLI commands from examples/index.ts and package.json#scripts -->
 
-The examples in [`examples/`](/Users/davidkpiano/Code/agent/examples) are intentionally small, run in the CLI, and use real OpenAI calls when `OPENAI_API_KEY` is set.
+The examples in [`examples/`](/Users/davidkpiano/Code/agent/examples) are intentionally small. Most run in the CLI and use real OpenAI calls when `OPENAI_API_KEY` is set. Runtime-specific examples call out extra environment requirements inline.
 
 Run them with `node --import tsx examples/<name>.ts`.
 
@@ -26,9 +26,11 @@ Each example demonstrates one concept:
 - [`examples/conditional-subflow.ts`](/Users/davidkpiano/Code/agent/examples/conditional-subflow.ts): routing directly into one of multiple child subflows from parent input
 - [`examples/rag.ts`](/Users/davidkpiano/Code/agent/examples/rag.ts): retrieval-augmented generation with explicit retrieve and answer states
 - [`examples/tool-calling.ts`](/Users/davidkpiano/Code/agent/examples/tool-calling.ts): tool invocation with emitted `toolCall`, incremental `toolProgress`, and final `toolResult` events
+- [`examples/ai-sdk.ts`](/Users/davidkpiano/Code/agent/examples/ai-sdk.ts): AI SDK v6 integration using `createAiSdkAdapter(...)` for routing and `generateText(..., { output: Output.object(...) })` for structured drafting
 - [`examples/persistence.ts`](/Users/davidkpiano/Code/agent/examples/persistence.ts): persisting snapshots and restoring a session in plain runtime code
 - [`examples/http-session.ts`](/Users/davidkpiano/Code/agent/examples/http-session.ts): runner-agnostic HTTP transport for starting sessions, sending events, and reading snapshots over `Request`/`Response`
 - [`examples/http-streaming-session.ts`](/Users/davidkpiano/Code/agent/examples/http-streaming-session.ts): durable SSE transport that reconnects to a restored run and emits only new streaming parts
+- [`examples/cloudflare-agents.ts`](/Users/davidkpiano/Code/agent/examples/cloudflare-agents.ts): integrating a persisted agent-machine session store into Cloudflare Agents `onRequest()` routing; requires the Cloudflare Workers runtime
 - [`examples/persistent-multi-agent-network.ts`](/Users/davidkpiano/Code/agent/examples/persistent-multi-agent-network.ts): durable multi-agent handoffs that restore from a persisted mid-network snapshot
 - [`examples/persistent-streaming.ts`](/Users/davidkpiano/Code/agent/examples/persistent-streaming.ts): restore a crashed streaming invoke and continue with only new live emitted parts
 - [`examples/persistent-supervisor.ts`](/Users/davidkpiano/Code/agent/examples/persistent-supervisor.ts): durable supervisor routing that restores after a persisted retry handoff

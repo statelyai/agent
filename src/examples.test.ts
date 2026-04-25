@@ -1,9 +1,12 @@
 import { describe, expect, test } from 'vitest';
 import { z } from 'zod';
+import { restoreSession, startSession } from './index.js';
 
 import {
+  createAiSdkExample,
   createChatbotExample,
   AgentNetworkDurableObject,
+  createCloudflareAgentRunStore,
   createDurableObjectRunStore,
   createAdapterExample,
   createBranchingExample,
@@ -15,6 +18,7 @@ import {
   createEmailExample,
   createErrorRetryExample,
   createHitlExample,
+  createPersistenceExample,
   createPersistenceSessionHttpHandler,
   createStreamingSessionHttpController,
   createJokeExample,
@@ -85,6 +89,35 @@ describe('curated examples', () => {
     expect(result.status).toBe('done');
     if (result.status === 'done') {
       expect(result.output).toEqual({ summary: 'A short summary.' });
+    }
+  });
+
+  test('ai sdk example routes and drafts a structured reply', async () => {
+    const machine = createAiSdkExample({
+      adapter: {
+        decide: async () => ({
+          choice: 'billing',
+          data: { confidence: 0.93 },
+        }),
+      },
+      draftReply: async ({ route, confidence, message }) => ({
+        subject: `${route.toUpperCase()} reply`,
+        body: `${message} :: ${confidence.toFixed(2)}`,
+      }),
+    });
+
+    const result = await machine.execute(
+      machine.getInitialState({ message: 'Please refund invoice 123.' })
+    );
+
+    expect(result.status).toBe('done');
+    if (result.status === 'done') {
+      expect(result.output).toEqual({
+        route: 'billing',
+        confidence: 0.93,
+        subject: 'BILLING reply',
+        body: 'Please refund invoice 123. :: 0.93',
+      });
     }
   });
 
@@ -216,6 +249,48 @@ describe('curated examples', () => {
         afterSequence: 2,
       })
     );
+  });
+
+  test('cloudflare agents example store persists durable sessions in synced state', async () => {
+    let state = {
+      sessions: {},
+    };
+    const store = createCloudflareAgentRunStore({
+      getState: () => state,
+      setState: async (nextState) => {
+        state = nextState;
+      },
+    });
+    const machine = createPersistenceExample(async ({ request, approved }) => ({
+      summary: `${request} :: approved=${String(approved)}`,
+    }));
+
+    const run = await startSession(machine, {
+      store,
+      input: {
+        request: 'Approve the Cloudflare rollout.',
+      },
+    });
+
+    await run.send({ type: 'approve' });
+
+    const restored = await restoreSession(machine, {
+      sessionId: run.sessionId,
+      store,
+    });
+
+    expect(restored.getSnapshot()).toEqual(
+      expect.objectContaining({
+        value: 'done',
+        status: 'done',
+        output: {
+          request: 'Approve the Cloudflare rollout.',
+          approved: true,
+          summary: 'Approve the Cloudflare rollout. :: approved=true',
+        },
+      })
+    );
+    expect(Object.keys(state.sessions)).toEqual([run.sessionId]);
   });
 
   test('http session example exposes start, send, and status over Request/Response', async () => {
