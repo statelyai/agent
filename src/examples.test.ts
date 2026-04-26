@@ -26,6 +26,8 @@ import {
   createMapReduceExample,
   createMultiAgentNetworkExample,
   createNewspaperExample,
+  createNextReviewRouteHandlers,
+  createNextStreamingRouteHandlers,
   runPersistenceExample,
   runPersistentMultiAgentNetworkExample,
   runPersistentStreamingExample,
@@ -452,6 +454,142 @@ describe('curated examples', () => {
         output: { text: 'hello' },
       })
     );
+  });
+
+  test('next app router review example adapts Request/Response handlers to dynamic route params', async () => {
+    const routes = createNextReviewRouteHandlers({
+      summarize: async ({ request, approved }) => ({
+        summary: `${request} :: approved=${String(approved)}`,
+      }),
+    });
+
+    const startResponse = await routes.sessions.POST(
+      new Request('https://agent.test/api/agent', {
+        method: 'POST',
+        body: JSON.stringify({
+          request: 'Approve the quarterly report.',
+        }),
+        headers: {
+          'content-type': 'application/json',
+        },
+      })
+    );
+    const startBody = await startResponse.json() as {
+      sessionId: string;
+      snapshot: { value: string; status: string };
+    };
+
+    expect(startBody.snapshot).toEqual(
+      expect.objectContaining({
+        value: 'review',
+        status: 'active',
+      })
+    );
+
+    const sendResponse = await routes.events.POST(
+      new Request(`https://agent.test/api/agent/${startBody.sessionId}/events`, {
+        method: 'POST',
+        body: JSON.stringify({ type: 'approve' }),
+        headers: {
+          'content-type': 'application/json',
+        },
+      }),
+      {
+        params: Promise.resolve({
+          sessionId: startBody.sessionId,
+        }),
+      }
+    );
+    const sendBody = await sendResponse.json() as {
+      snapshot: {
+        value: string;
+        status: string;
+        output: {
+          request: string;
+          approved: boolean;
+          summary: string;
+        };
+      };
+    };
+
+    expect(sendBody.snapshot).toEqual(
+      expect.objectContaining({
+        value: 'done',
+        status: 'done',
+        output: {
+          request: 'Approve the quarterly report.',
+          approved: true,
+          summary: 'Approve the quarterly report. :: approved=true',
+        },
+      })
+    );
+  });
+
+  test('next app router streaming example reconnects with only new streamed parts', async () => {
+    const routes = createNextStreamingRouteHandlers();
+
+    const startResponse = await routes.sessions.POST(
+      new Request('https://agent.test/api/agent', {
+        method: 'POST',
+        body: JSON.stringify({
+          streamId: 'next-stream-1',
+          text: 'hello',
+        }),
+        headers: {
+          'content-type': 'application/json',
+        },
+      })
+    );
+    const startBody = await startResponse.json() as { sessionId: string };
+
+    const firstStreamResponse = await routes.stream.GET(
+      new Request(`https://agent.test/api/agent/${startBody.sessionId}/stream`),
+      {
+        params: Promise.resolve({
+          sessionId: startBody.sessionId,
+        }),
+      }
+    );
+    const firstReader = createSseReader(firstStreamResponse);
+
+    routes.advance('next-stream-1');
+
+    await expect(firstReader.next()).resolves.toEqual({
+      event: 'textPart',
+      data: {
+        type: 'textPart',
+        delta: 'hel',
+      },
+    });
+
+    await firstReader.cancel();
+    routes.dropActiveSession(startBody.sessionId);
+
+    const secondStreamResponse = await routes.stream.GET(
+      new Request(`https://agent.test/api/agent/${startBody.sessionId}/stream`),
+      {
+        params: Promise.resolve({
+          sessionId: startBody.sessionId,
+        }),
+      }
+    );
+    const secondReader = createSseReader(secondStreamResponse);
+
+    routes.advance('next-stream-1');
+
+    await expect(secondReader.next()).resolves.toEqual({
+      event: 'textPart',
+      data: {
+        type: 'textPart',
+        delta: 'lo',
+      },
+    });
+    await expect(secondReader.next()).resolves.toEqual({
+      event: 'done',
+      data: {
+        text: 'hello',
+      },
+    });
   });
 
   test('cloudflare durable network example restores and settles a network run', async () => {

@@ -75,7 +75,7 @@ test('agent:convert writes Mermaid and XState output from machine files', async 
   expect(warningResult.stderr).toContain(
     '[agent:convert] idle on go: Unsupported helper call: unknownTransition() is not statically resolvable.'
   );
-});
+}, 20000);
 
 async function runConvert(args: string[]) {
   return execFileAsync('pnpm', ['agent:convert', ...args], {

@@ -30,6 +30,7 @@ Each example demonstrates one concept:
 - [`examples/persistence.ts`](/Users/davidkpiano/Code/agent/examples/persistence.ts): persisting snapshots and restoring a session in plain runtime code
 - [`examples/http-session.ts`](/Users/davidkpiano/Code/agent/examples/http-session.ts): runner-agnostic HTTP transport for starting sessions, sending events, and reading snapshots over `Request`/`Response`
 - [`examples/http-streaming-session.ts`](/Users/davidkpiano/Code/agent/examples/http-streaming-session.ts): durable SSE transport that reconnects to a restored run and emits only new streaming parts
+- [`examples/next-app-router.ts`](/Users/davidkpiano/Code/agent/examples/next-app-router.ts): Next.js App Router wrappers around the generic HTTP and SSE session transports, including `runtime`, `dynamic`, and `maxDuration` route config values
 - [`examples/cloudflare-agents.ts`](/Users/davidkpiano/Code/agent/examples/cloudflare-agents.ts): integrating a persisted agent-machine session store into Cloudflare Agents `onRequest()` routing; requires the Cloudflare Workers runtime
 - [`examples/persistent-multi-agent-network.ts`](/Users/davidkpiano/Code/agent/examples/persistent-multi-agent-network.ts): durable multi-agent handoffs that restore from a persisted mid-network snapshot
 - [`examples/persistent-streaming.ts`](/Users/davidkpiano/Code/agent/examples/persistent-streaming.ts): restore a crashed streaming invoke and continue with only new live emitted parts
@@ -40,5 +41,23 @@ Each example demonstrates one concept:
 - [`examples/adapter.ts`](/Users/davidkpiano/Code/agent/examples/adapter.ts): plugging in a custom adapter that still uses a real OpenAI model under the hood
 
 Use `classify(...)` when the result is just "what kind of thing is this?" Use `decide(...)` when the result is "what should happen next?" and the chosen branch may need structured data.
+
+## Persistence Adapters
+
+<!-- RunStore contract from src/runtime/store.ts and storage examples from examples/cloudflare-*.ts, examples/http-session.ts, and examples/persistence.ts -->
+
+Storage adapters are intentionally bring-your-own. Implement the `RunStore` contract with four methods:
+
+- `append(sessionId, event)`
+- `loadEvents(sessionId, afterSequence?)`
+- `loadLatestSnapshot(sessionId)`
+- `saveSnapshot(snapshot)`
+
+Use these examples as templates for your storage layer:
+
+- [`examples/persistence.ts`](/Users/davidkpiano/Code/agent/examples/persistence.ts): the smallest durable session flow with an in-memory store
+- [`examples/http-session.ts`](/Users/davidkpiano/Code/agent/examples/http-session.ts): the Request/Response transport shape around a `RunStore`
+- [`examples/cloudflare-durable-object.ts`](/Users/davidkpiano/Code/agent/examples/cloudflare-durable-object.ts): Durable Object-backed event and snapshot persistence
+- [`examples/cloudflare-agents.ts`](/Users/davidkpiano/Code/agent/examples/cloudflare-agents.ts): syncing a `RunStore` into Cloudflare Agents state
 
 **Read the documentation: [stately.ai/docs/agents](https://stately.ai/docs/agents)**

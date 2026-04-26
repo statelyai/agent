@@ -30,6 +30,14 @@ export { createJugsExample } from './jugs.js';
 export { createMapReduceExample } from './map-reduce.js';
 export { createMultiAgentNetworkExample } from './multi-agent-network.js';
 export { createNewspaperExample } from './newspaper.js';
+export {
+  createNextReviewRouteHandlers,
+  createNextStreamingRouteHandlers,
+  dynamic as nextAppRouterDynamic,
+  maxDuration as nextAppRouterMaxDuration,
+  runtime as nextAppRouterRuntime,
+  type NextRouteContext,
+} from './next-app-router.js';
 export { createPlanAndExecuteExample } from './plan-and-execute.js';
 export { createPersistenceExample, runPersistenceExample } from './persistence.js';
 export {
