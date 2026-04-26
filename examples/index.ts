@@ -31,6 +31,10 @@ export { createMapReduceExample } from './map-reduce.js';
 export { createMultiAgentNetworkExample } from './multi-agent-network.js';
 export { createNewspaperExample } from './newspaper.js';
 export {
+  createNextAiSdkUiRoute,
+  type AgentUiMessage,
+} from './next-ai-sdk-ui.js';
+export {
   createNextReviewRouteHandlers,
   createNextStreamingRouteHandlers,
   dynamic as nextAppRouterDynamic,

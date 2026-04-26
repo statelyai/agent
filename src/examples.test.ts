@@ -26,6 +26,7 @@ import {
   createMapReduceExample,
   createMultiAgentNetworkExample,
   createNewspaperExample,
+  createNextAiSdkUiRoute,
   createNextReviewRouteHandlers,
   createNextStreamingRouteHandlers,
   runPersistenceExample,
@@ -590,6 +591,53 @@ describe('curated examples', () => {
         text: 'hello',
       },
     });
+  });
+
+  test('next ai sdk ui route streams UI message parts from machine emissions', async () => {
+    const route = createNextAiSdkUiRoute({
+      streamReply: async ({ messages, onDelta }) => {
+        expect(messages.at(-1)).toMatchObject({
+          role: 'user',
+        });
+        onDelta('Hel');
+        onDelta('lo');
+        return { text: 'Hello' };
+      },
+    });
+
+    const response = await route.POST(
+      new Request('https://agent.test/api/chat', {
+        method: 'POST',
+        body: JSON.stringify({
+          messages: [
+            {
+              id: 'user-1',
+              role: 'user',
+              parts: [
+                {
+                  type: 'text',
+                  text: 'Say hello.',
+                },
+              ],
+            },
+          ],
+        }),
+        headers: {
+          'content-type': 'application/json',
+        },
+      })
+    );
+    const body = await response.text();
+
+    expect(response.headers.get('x-vercel-ai-ui-message-stream')).toBe('v1');
+    expect(body).toContain('"type":"data-notification"');
+    expect(body).toContain('"message":"Drafting reply..."');
+    expect(body).toContain('"type":"source"');
+    expect(body).toContain('"title":"Stately Agent documentation"');
+    expect(body).toContain('"type":"text-start"');
+    expect(body).toContain('"delta":"Hel"');
+    expect(body).toContain('"delta":"lo"');
+    expect(body).toContain('"type":"text-end"');
   });
 
   test('cloudflare durable network example restores and settles a network run', async () => {
