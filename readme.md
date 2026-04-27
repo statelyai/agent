@@ -13,35 +13,23 @@ Stately Agent is a flexible framework for building AI agents using state machine
 
 The examples in [`examples/`](/Users/davidkpiano/Code/agent/examples) are intentionally small. Most run in the CLI and use real OpenAI calls when `OPENAI_API_KEY` is set. Runtime-specific examples call out extra environment requirements inline.
 
+If you want examples grouped by intent instead of a flat list, start with [`examples/README.md`](/Users/davidkpiano/Code/agent/examples/README.md). It separates app-shaped examples, workflow examples, runtime integrations, and lower-level reference examples.
+
 Run them with `node --import tsx examples/<name>.ts`.
 
 Convert a machine file to diagram output with `pnpm agent:convert <file> --format mermaid` or `pnpm agent:convert <file> --format xstate`. Static analysis warnings are printed to stderr. For programmatic access, use `analyzeGraph(...)` from `@statelyai/agent/graph`; warnings are returned explicitly instead of being hidden in graph metadata.
 
-Each example demonstrates one concept:
+Start here:
 
-- [`examples/simple.ts`](/Users/davidkpiano/Code/agent/examples/simple.ts): the smallest `createAgentMachine(...)` flow with an `invoke` state that makes a real LLM call
-- [`examples/hitl.ts`](/Users/davidkpiano/Code/agent/examples/hitl.ts): a human-in-the-loop machine that pauses in a pending state, accepts typed events, and drafts with an LLM after approval
-- [`examples/error-retry.ts`](/Users/davidkpiano/Code/agent/examples/error-retry.ts): retrying transient invoke failures through explicit internal error events
-- [`examples/chatbot-messages.ts`](/Users/davidkpiano/Code/agent/examples/chatbot-messages.ts): message-centric chat state with structured `{ role, content }` accumulation across turns
-- [`examples/conditional-subflow.ts`](/Users/davidkpiano/Code/agent/examples/conditional-subflow.ts): routing directly into one of multiple child subflows from parent input
-- [`examples/rag.ts`](/Users/davidkpiano/Code/agent/examples/rag.ts): retrieval-augmented generation with explicit retrieve and answer states
-- [`examples/tool-calling.ts`](/Users/davidkpiano/Code/agent/examples/tool-calling.ts): tool invocation with emitted `toolCall`, incremental `toolProgress`, and final `toolResult` events
-- [`examples/ai-sdk.ts`](/Users/davidkpiano/Code/agent/examples/ai-sdk.ts): AI SDK v6 integration using `createAiSdkAdapter(...)` for routing and `generateText(..., { output: Output.object(...) })` for structured drafting
-- [`examples/persistence.ts`](/Users/davidkpiano/Code/agent/examples/persistence.ts): persisting snapshots and restoring a session in plain runtime code
-- [`examples/http-session.ts`](/Users/davidkpiano/Code/agent/examples/http-session.ts): runner-agnostic HTTP transport for starting sessions, sending events, and reading snapshots over `Request`/`Response`
-- [`examples/http-streaming-session.ts`](/Users/davidkpiano/Code/agent/examples/http-streaming-session.ts): durable SSE transport that reconnects to a restored run and emits only new streaming parts
-- [`examples/next-app-router.ts`](/Users/davidkpiano/Code/agent/examples/next-app-router.ts): Next.js App Router wrappers around the generic HTTP and SSE session transports, including `runtime`, `dynamic`, and `maxDuration` route config values
-- [`examples/next-ai-sdk-ui.ts`](/Users/davidkpiano/Code/agent/examples/next-ai-sdk-ui.ts): a Next.js App Router chat route that accepts `UIMessage[]` and streams AI SDK UI message parts from machine-emitted notifications, sources, and text deltas
-- [`examples/cloudflare-agents.ts`](/Users/davidkpiano/Code/agent/examples/cloudflare-agents.ts): integrating a persisted agent-machine session store into Cloudflare Agents `onRequest()` routing; requires the Cloudflare Workers runtime
-- [`examples/persistent-multi-agent-network.ts`](/Users/davidkpiano/Code/agent/examples/persistent-multi-agent-network.ts): durable multi-agent handoffs that restore from a persisted mid-network snapshot
-- [`examples/persistent-streaming.ts`](/Users/davidkpiano/Code/agent/examples/persistent-streaming.ts): restore a crashed streaming invoke and continue with only new live emitted parts
-- [`examples/persistent-supervisor.ts`](/Users/davidkpiano/Code/agent/examples/persistent-supervisor.ts): durable supervisor routing that restores after a persisted retry handoff
-- [`examples/cloudflare-durable-network.ts`](/Users/davidkpiano/Code/agent/examples/cloudflare-durable-network.ts): a Cloudflare Durable Object runner that starts and resumes a persisted multi-agent network
-- [`examples/decide.ts`](/Users/davidkpiano/Code/agent/examples/decide.ts): choosing the next branch with structured branch-specific payloads
-- [`examples/classify.ts`](/Users/davidkpiano/Code/agent/examples/classify.ts): routing into a fixed category set when you only need a label
-- [`examples/adapter.ts`](/Users/davidkpiano/Code/agent/examples/adapter.ts): plugging in a custom adapter that still uses a real OpenAI model under the hood
+- App-shaped integrations: [`examples/apps/next/`](/Users/davidkpiano/Code/agent/examples/apps/next), [`examples/apps/cloudflare-agents/`](/Users/davidkpiano/Code/agent/examples/apps/cloudflare-agents), [`examples/next-ai-sdk-ui.ts`](/Users/davidkpiano/Code/agent/examples/next-ai-sdk-ui.ts), [`examples/cloudflare-agents.ts`](/Users/davidkpiano/Code/agent/examples/cloudflare-agents.ts)
+- Durable sessions and transports: [`examples/persistence.ts`](/Users/davidkpiano/Code/agent/examples/persistence.ts), [`examples/http-session.ts`](/Users/davidkpiano/Code/agent/examples/http-session.ts), [`examples/http-streaming-session.ts`](/Users/davidkpiano/Code/agent/examples/http-streaming-session.ts)
+- Core workflow patterns: [`examples/rag.ts`](/Users/davidkpiano/Code/agent/examples/rag.ts), [`examples/tool-calling.ts`](/Users/davidkpiano/Code/agent/examples/tool-calling.ts), [`examples/error-retry.ts`](/Users/davidkpiano/Code/agent/examples/error-retry.ts), [`examples/persistent-supervisor.ts`](/Users/davidkpiano/Code/agent/examples/persistent-supervisor.ts)
+- CrewAI-style equivalents: [`examples/content-creator-flow.ts`](/Users/davidkpiano/Code/agent/examples/content-creator-flow.ts), [`examples/email-auto-responder-flow.ts`](/Users/davidkpiano/Code/agent/examples/email-auto-responder-flow.ts), [`examples/lead-score-flow.ts`](/Users/davidkpiano/Code/agent/examples/lead-score-flow.ts), [`examples/meeting-assistant-flow.ts`](/Users/davidkpiano/Code/agent/examples/meeting-assistant-flow.ts), [`examples/self-evaluation-loop-flow.ts`](/Users/davidkpiano/Code/agent/examples/self-evaluation-loop-flow.ts), [`examples/write-a-book-flow.ts`](/Users/davidkpiano/Code/agent/examples/write-a-book-flow.ts)
+- Reference examples: [`examples/simple.ts`](/Users/davidkpiano/Code/agent/examples/simple.ts), [`examples/decide.ts`](/Users/davidkpiano/Code/agent/examples/decide.ts), [`examples/classify.ts`](/Users/davidkpiano/Code/agent/examples/classify.ts), [`examples/adapter.ts`](/Users/davidkpiano/Code/agent/examples/adapter.ts)
 
 Use `classify(...)` when the result is just "what kind of thing is this?" Use `decide(...)` when the result is "what should happen next?" and the chosen branch may need structured data.
+
+CrewAI Flow parity is tracked in [`docs/crewai-parity.md`](/Users/davidkpiano/Code/agent/docs/crewai-parity.md), the same way LangGraph parity is tracked separately.
 
 ## Persistence Adapters
 

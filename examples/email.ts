@@ -1,13 +1,20 @@
 import { z } from 'zod';
-import { createAgentMachine, decide, decideResultSchema, type AgentAdapter } from '../src/index.js';
+import {
+  createAgentMachine,
+  createMemoryRunStore,
+  decide,
+  decideResultSchema,
+  startSession,
+  type AgentAdapter,
+} from '../src/index.js';
 import {
   closePrompt,
   createOpenAiDecisionAdapter,
-  formatResult,
   generateExampleObject,
   generateExampleText,
   isMain,
   prompt,
+  waitForRunSnapshot,
 } from './_run.js';
 
 const draftSchema = z.object({
@@ -219,28 +226,35 @@ async function main() {
     const email = await prompt('Incoming email');
     const instructions = await prompt('Instructions');
     const machine = createEmailExample();
-    let state = machine.getInitialState({ email, instructions });
+    const run = await startSession(machine, {
+      store: createMemoryRunStore(),
+      input: { email, instructions },
+    });
 
     while (true) {
-      const result = await machine.execute(state);
+      const snapshot = await waitForRunSnapshot(
+        run,
+        (nextSnapshot) => nextSnapshot.status !== 'active'
+      );
 
-      if (result.status === 'done') {
-        console.log(formatResult(result));
+      if (snapshot.status === 'done') {
+        console.log({
+          status: snapshot.status,
+          value: snapshot.value,
+          context: snapshot.context,
+          output: snapshot.output,
+        });
         break;
       }
 
-      if (result.status !== 'pending') {
-        throw new Error('Email example entered an unexpected error state.');
-      }
-
-      if (result.value === 'clarifying') {
-        console.log(result.context.questions.join('\n'));
+      if (snapshot.value === 'clarifying') {
+        console.log(snapshot.context.questions.join('\n'));
         const answer = await prompt('Clarification');
-        state = machine.transition(result.state, { type: 'user.answer', answer });
+        await run.send({ type: 'user.answer', answer });
         continue;
       }
 
-      state = result.state;
+      throw new Error('Email example entered an unexpected pending state.');
     }
   } finally {
     closePrompt();

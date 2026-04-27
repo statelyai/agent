@@ -9,6 +9,7 @@ import {
   generateExampleObject,
   isMain,
   prompt,
+  waitForRunDone,
 } from './_run.js';
 
 const forecastSchema = z.object({
@@ -128,15 +129,8 @@ async function main() {
       console.log(`${event.toolName} -> ${event.output.forecast}`);
     });
 
-    await new Promise<void>((resolve, reject) => {
-      run.onDone((event) => {
-        console.log(event.output);
-        resolve();
-      });
-      run.onError((event) => {
-        reject(event.error);
-      });
-    });
+    const done = await waitForRunDone(run);
+    console.log(done.output);
   } finally {
     closePrompt();
   }

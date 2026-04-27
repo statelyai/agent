@@ -13,6 +13,7 @@ import {
   generateExampleObject,
   isMain,
   prompt,
+  waitForRunDone,
 } from './_run.js';
 
 const sqlValueSchema = z.union([z.string(), z.number(), z.null()]);
@@ -260,15 +261,8 @@ async function main() {
       console.log(`${event.toolName} -> ${JSON.stringify(event.output)}`);
     });
 
-    await new Promise<void>((resolve, reject) => {
-      run.onDone((event) => {
-        console.log(event.output);
-        resolve();
-      });
-      run.onError((event) => {
-        reject(event.error);
-      });
-    });
+    const done = await waitForRunDone(run);
+    console.log(done.output);
   } finally {
     closePrompt();
   }

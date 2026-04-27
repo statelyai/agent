@@ -6,7 +6,13 @@ import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
-import type { AgentAdapter, ExecuteResult, StandardSchemaV1 } from '../src/index.js';
+import type {
+  AgentAdapter,
+  AgentRun,
+  AgentSnapshot,
+  ExecuteResult,
+  StandardSchemaV1,
+} from '../src/index.js';
 
 export function isMain(moduleUrl: string): boolean {
   const entry = process.argv[1];
@@ -89,6 +95,81 @@ export function formatResult(result: ExecuteResult<any, any, any>) {
     value: result.state.value,
     error: result.error,
   };
+}
+
+export function waitForRunDone<
+  TContext extends Record<string, unknown>,
+  TValue extends string,
+  TEvents extends Record<string, StandardSchemaV1>,
+  TOutput,
+  TEmitted extends Record<string, StandardSchemaV1>,
+>(
+  run: AgentRun<TContext, TValue, TEvents, TOutput, TEmitted>
+): Promise<{
+  output: TOutput;
+  snapshot: AgentSnapshot<TContext, TValue, TOutput>;
+}> {
+  return new Promise((resolve, reject) => {
+    const offDone = run.onDone((event) => {
+      offDone();
+      offError();
+      resolve(event);
+    });
+    const offError = run.onError((event) => {
+      offDone();
+      offError();
+      reject(event.error);
+    });
+  });
+}
+
+export function waitForRunSnapshot<
+  TContext extends Record<string, unknown>,
+  TValue extends string,
+  TEvents extends Record<string, StandardSchemaV1>,
+  TOutput,
+  TEmitted extends Record<string, StandardSchemaV1>,
+>(
+  run: AgentRun<TContext, TValue, TEvents, TOutput, TEmitted>,
+  predicate: (
+    snapshot: AgentSnapshot<TContext, TValue, TOutput>
+  ) => boolean,
+  timeoutMs = 1000
+): Promise<AgentSnapshot<TContext, TValue, TOutput>> {
+  const current = run.getSnapshot();
+  if (predicate(current)) {
+    return Promise.resolve(current);
+  }
+
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error('Run snapshot did not reach the expected state in time.'));
+    }, timeoutMs);
+
+    const cleanup = () => {
+      clearTimeout(timeout);
+      offSnapshot();
+      offDone();
+      offError();
+    };
+
+    const check = (snapshot: AgentSnapshot<TContext, TValue, TOutput>) => {
+      if (predicate(snapshot)) {
+        cleanup();
+        resolve(snapshot);
+      }
+    };
+
+    const offSnapshot = run.onSnapshot(check);
+    const offDone = run.onDone((event) => {
+      check(event.snapshot);
+    });
+    const offError = run.onError((event) => {
+      cleanup();
+      reject(event.error);
+    });
+  });
 }
 
 export function createOpenAiDecisionAdapter(): AgentAdapter {

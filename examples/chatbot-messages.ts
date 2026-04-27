@@ -1,10 +1,15 @@
 import { z } from 'zod';
-import { createAgentMachine } from '../src/index.js';
+import {
+  createAgentMachine,
+  createMemoryRunStore,
+  startSession,
+} from '../src/index.js';
 import {
   closePrompt,
   generateExampleObject,
   isMain,
   prompt,
+  waitForRunSnapshot,
 } from './_run.js';
 
 const messageSchema = z.object({
@@ -90,31 +95,37 @@ export function createChatbotMessagesExample(
 async function main() {
   try {
     const machine = createChatbotMessagesExample();
-    let state = machine.getInitialState();
+    const run = await startSession(machine, {
+      store: createMemoryRunStore(),
+    });
     let lastPrintedAssistantMessage: string | null = null;
 
     while (true) {
-      const result = await machine.execute(state);
+      const snapshot = await waitForRunSnapshot(
+        run,
+        (nextSnapshot) => nextSnapshot.status !== 'active'
+      );
 
-      if (result.status === 'done') {
+      if (snapshot.status === 'done') {
+        console.log({
+          status: snapshot.status,
+          value: snapshot.value,
+          context: snapshot.context,
+          output: snapshot.output,
+        });
         break;
       }
 
-      if (result.status !== 'pending') {
-        throw new Error('Chatbot messages example entered an unexpected error state.');
-      }
-
       if (
-        result.context.finalMessage?.role === 'assistant'
-        && result.context.finalMessage.content !== lastPrintedAssistantMessage
+        snapshot.context.finalMessage?.role === 'assistant'
+        && snapshot.context.finalMessage.content !== lastPrintedAssistantMessage
       ) {
-        console.log(`Assistant: ${result.context.finalMessage.content}`);
-        lastPrintedAssistantMessage = result.context.finalMessage.content;
+        console.log(`Assistant: ${snapshot.context.finalMessage.content}`);
+        lastPrintedAssistantMessage = snapshot.context.finalMessage.content;
       }
 
       const content = await prompt('User (blank to exit)');
-      state = machine.transition(
-        result.state,
+      await run.send(
         content
           ? {
               type: 'messages.user',

@@ -1,12 +1,19 @@
 import { z } from 'zod';
-import { createAgentMachine, decide, decideResultSchema, type AgentAdapter } from '../src/index.js';
+import {
+  createAgentMachine,
+  createMemoryRunStore,
+  decide,
+  decideResultSchema,
+  startSession,
+  type AgentAdapter,
+} from '../src/index.js';
 import {
   closePrompt,
   createOpenAiDecisionAdapter,
-  formatResult,
   generateExampleObject,
   isMain,
   prompt,
+  waitForRunSnapshot,
 } from './_run.js';
 
 const replySchema = z.object({
@@ -122,41 +129,46 @@ export function createChatbotExample(
 async function main() {
   try {
     const machine = createChatbotExample();
-    let state = machine.getInitialState();
+    const run = await startSession(machine, {
+      store: createMemoryRunStore(),
+    });
     let lastPrintedAssistantMessage: string | null = null;
 
     while (true) {
-      const result = await machine.execute(state);
+      const snapshot = await waitForRunSnapshot(
+        run,
+        (nextSnapshot) => nextSnapshot.status !== 'active'
+      );
 
-      if (result.status === 'done') {
+      if (snapshot.status === 'done') {
         if (
-          result.output &&
-          typeof result.output === 'object' &&
-          'lastAssistantMessage' in result.output &&
-          result.output.lastAssistantMessage &&
-          result.output.lastAssistantMessage !== lastPrintedAssistantMessage
+          snapshot.output &&
+          typeof snapshot.output === 'object' &&
+          'lastAssistantMessage' in snapshot.output &&
+          snapshot.output.lastAssistantMessage &&
+          snapshot.output.lastAssistantMessage !== lastPrintedAssistantMessage
         ) {
-          console.log(`Assistant: ${result.output.lastAssistantMessage}`);
+          console.log(`Assistant: ${snapshot.output.lastAssistantMessage}`);
         }
-        console.log(formatResult(result));
+        console.log({
+          status: snapshot.status,
+          value: snapshot.value,
+          context: snapshot.context,
+          output: snapshot.output,
+        });
         break;
       }
 
-      if (result.status !== 'pending') {
-        throw new Error('Chatbot example entered an unexpected error state.');
-      }
-
-       if (
-        result.context.lastAssistantMessage &&
-        result.context.lastAssistantMessage !== lastPrintedAssistantMessage
+      if (
+        snapshot.context.lastAssistantMessage &&
+        snapshot.context.lastAssistantMessage !== lastPrintedAssistantMessage
       ) {
-        console.log(`Assistant: ${result.context.lastAssistantMessage}`);
-        lastPrintedAssistantMessage = result.context.lastAssistantMessage;
+        console.log(`Assistant: ${snapshot.context.lastAssistantMessage}`);
+        lastPrintedAssistantMessage = snapshot.context.lastAssistantMessage;
       }
 
       const message = await prompt('User (blank to exit)');
-      state = machine.transition(
-        result.state,
+      await run.send(
         message
           ? { type: 'user.message', message }
           : { type: 'user.exit' }

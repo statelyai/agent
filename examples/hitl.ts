@@ -1,11 +1,15 @@
 import { z } from 'zod';
-import { createAgentMachine } from '../src/index.js';
+import {
+  createAgentMachine,
+  createMemoryRunStore,
+  startSession,
+} from '../src/index.js';
 import {
   closePrompt,
-  formatResult,
   generateExampleObject,
   isMain,
   prompt,
+  waitForRunSnapshot,
 } from './_run.js';
 
 const draftSchema = z.object({
@@ -88,33 +92,49 @@ async function main() {
   try {
     const task = await prompt('Task');
     const machine = createHitlExample();
-    let state = await machine.invoke(machine.getInitialState({ task }));
+    const run = await startSession(machine, {
+      store: createMemoryRunStore(),
+      input: { task },
+    });
 
-    while (state.status === 'pending') {
+    while (true) {
+      const snapshot = await waitForRunSnapshot(
+        run,
+        (nextSnapshot) => nextSnapshot.status !== 'active'
+      );
+
+      if (snapshot.status === 'done') {
+        console.log({
+          status: snapshot.status,
+          value: snapshot.value,
+          context: snapshot.context,
+          output: snapshot.output,
+        });
+        break;
+      }
+
       const message = await prompt('Add note, or type /approve or /cancel');
 
       if (message === '/approve') {
-        state = machine.transition(state, { type: 'user.approve' });
-        break;
+        await run.send({ type: 'user.approve' });
+        continue;
       }
 
       if (message === '/cancel') {
-        state = machine.transition(state, { type: 'user.cancel' });
-        break;
+        await run.send({ type: 'user.cancel' });
+        continue;
       }
 
-      state = machine.transition(state, {
+      await run.send({
         type: 'user.message',
         message,
       });
       console.log({
-        status: state.status,
-        value: state.value,
-        context: state.context,
+        status: run.getSnapshot().status,
+        value: run.getSnapshot().value,
+        context: run.getSnapshot().context,
       });
     }
-
-    console.log(formatResult(await machine.execute(state)));
   } finally {
     closePrompt();
   }

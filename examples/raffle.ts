@@ -1,11 +1,15 @@
 import { z } from 'zod';
-import { createAgentMachine } from '../src/index.js';
+import {
+  createAgentMachine,
+  createMemoryRunStore,
+  startSession,
+} from '../src/index.js';
 import {
   closePrompt,
-  formatResult,
   generateExampleObject,
   isMain,
   prompt,
+  waitForRunSnapshot,
 } from './_run.js';
 
 const winnerSchema = z.object({
@@ -93,23 +97,28 @@ export function createRaffleExample(
 async function main() {
   try {
     const machine = createRaffleExample();
-    let state = machine.getInitialState();
+    const run = await startSession(machine, {
+      store: createMemoryRunStore(),
+    });
 
     while (true) {
-      const result = await machine.execute(state);
+      const snapshot = await waitForRunSnapshot(
+        run,
+        (nextSnapshot) => nextSnapshot.status !== 'active'
+      );
 
-      if (result.status === 'done') {
-        console.log(formatResult(result));
+      if (snapshot.status === 'done') {
+        console.log({
+          status: snapshot.status,
+          value: snapshot.value,
+          context: snapshot.context,
+          output: snapshot.output,
+        });
         break;
       }
 
-      if (result.status !== 'pending') {
-        throw new Error('Raffle example entered an unexpected error state.');
-      }
-
       const entry = await prompt('Entry (blank to draw)');
-      state = machine.transition(
-        result.state,
+      await run.send(
         entry ? { type: 'user.entry', entry } : { type: 'user.draw' }
       );
     }

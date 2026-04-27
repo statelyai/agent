@@ -593,6 +593,64 @@ describe('curated examples', () => {
     });
   });
 
+  test('next app-shaped route files import cleanly', async () => {
+    const [
+      routesModule,
+      chatRouteModule,
+      reviewSessionsRouteModule,
+      reviewSessionRouteModule,
+      reviewEventsRouteModule,
+      streamingSessionsRouteModule,
+      streamingSessionRouteModule,
+      streamingStreamRouteModule,
+    ] = await Promise.all([
+      import(new URL('../examples/apps/next/lib/routes.ts', import.meta.url).href),
+      import(new URL('../examples/apps/next/app/api/chat/route.ts', import.meta.url).href),
+      import(
+        new URL('../examples/apps/next/app/api/review-sessions/route.ts', import.meta.url).href
+      ),
+      import(
+        new URL(
+          '../examples/apps/next/app/api/review-sessions/[sessionId]/route.ts',
+          import.meta.url
+        ).href
+      ),
+      import(
+        new URL(
+          '../examples/apps/next/app/api/review-sessions/[sessionId]/events/route.ts',
+          import.meta.url
+        ).href
+      ),
+      import(
+        new URL('../examples/apps/next/app/api/stream-sessions/route.ts', import.meta.url).href
+      ),
+      import(
+        new URL(
+          '../examples/apps/next/app/api/stream-sessions/[sessionId]/route.ts',
+          import.meta.url
+        ).href
+      ),
+      import(
+        new URL(
+          '../examples/apps/next/app/api/stream-sessions/[sessionId]/stream/route.ts',
+          import.meta.url
+        ).href
+      ),
+    ]);
+
+    expect(routesModule.runtime).toBe('nodejs');
+    expect(typeof routesModule.chatRoute.POST).toBe('function');
+    expect(typeof routesModule.reviewRoutes.sessions.POST).toBe('function');
+    expect(typeof routesModule.streamingRoutes.stream.GET).toBe('function');
+    expect(typeof chatRouteModule.POST).toBe('function');
+    expect(typeof reviewSessionsRouteModule.POST).toBe('function');
+    expect(typeof reviewSessionRouteModule.GET).toBe('function');
+    expect(typeof reviewEventsRouteModule.POST).toBe('function');
+    expect(typeof streamingSessionsRouteModule.POST).toBe('function');
+    expect(typeof streamingSessionRouteModule.GET).toBe('function');
+    expect(typeof streamingStreamRouteModule.GET).toBe('function');
+  });
+
   test('next ai sdk ui route streams UI message parts from machine emissions', async () => {
     const route = createNextAiSdkUiRoute({
       streamReply: async ({ messages, onDelta }) => {

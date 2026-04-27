@@ -10,6 +10,7 @@ import {
   generateExampleText,
   isMain,
   prompt,
+  waitForRunDone,
 } from './_run.js';
 
 const reactModelResultSchema = z.discriminatedUnion('kind', [
@@ -87,15 +88,8 @@ async function main() {
       console.log(`${event.toolName} -> ${String(event.output)}`);
     });
 
-    await new Promise<void>((resolve, reject) => {
-      run.onDone((event) => {
-        console.log(event.output);
-        resolve();
-      });
-      run.onError((event) => {
-        reject(event.error);
-      });
-    });
+    const done = await waitForRunDone(run);
+    console.log(done.output);
   } finally {
     closePrompt();
   }
