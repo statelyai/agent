@@ -1,19 +1,17 @@
 import {
   restoreSession,
   startSession,
-  type JournalEventRecord,
-  type PersistedSnapshot,
   type RunStore,
 } from '../src/index.js';
+import {
+  createCloudflareAgentRunStore,
+  type CloudflareAgentRunStoreState,
+} from '../src/cloudflare/index.js';
 import { createPersistenceExample } from './persistence.js';
 
-type SessionEntry = {
-  events: JournalEventRecord[];
-  snapshot: PersistedSnapshot | null;
-};
-
-export type CloudflareAgentRunStoreState = {
-  sessions: Record<string, SessionEntry>;
+export {
+  createCloudflareAgentRunStore,
+  type CloudflareAgentRunStoreState,
 };
 
 export interface CloudflareAgentsExampleArtifacts {
@@ -22,69 +20,6 @@ export interface CloudflareAgentsExampleArtifacts {
   };
   worker: {
     fetch(request: Request, env: Record<string, unknown>): Promise<Response>;
-  };
-}
-
-export function createCloudflareAgentRunStore(options: {
-  getState: () => CloudflareAgentRunStoreState;
-  setState: (
-    nextState: CloudflareAgentRunStoreState
-  ) => void | Promise<void>;
-}): RunStore {
-  return {
-    async append(sessionId, event) {
-      const currentState = options.getState();
-      const currentSession = currentState.sessions[sessionId] ?? {
-        events: [],
-        snapshot: null,
-      };
-      const sequence = currentSession.events.length + 1;
-      const nextSession: SessionEntry = {
-        ...currentSession,
-        events: [...currentSession.events, { ...event, sequence }],
-      };
-
-      await options.setState({
-        ...currentState,
-        sessions: {
-          ...currentState.sessions,
-          [sessionId]: nextSession,
-        },
-      });
-
-      return { sequence };
-    },
-
-    async loadEvents(sessionId, afterSequence = 0) {
-      return (
-        options.getState().sessions[sessionId]?.events.filter(
-          (event) => event.sequence > afterSequence
-        ) ?? []
-      );
-    },
-
-    async loadLatestSnapshot(sessionId) {
-      return options.getState().sessions[sessionId]?.snapshot ?? null;
-    },
-
-    async saveSnapshot(snapshot) {
-      const currentState = options.getState();
-      const currentSession = currentState.sessions[snapshot.sessionId] ?? {
-        events: [],
-        snapshot: null,
-      };
-
-      await options.setState({
-        ...currentState,
-        sessions: {
-          ...currentState.sessions,
-          [snapshot.sessionId]: {
-            ...currentSession,
-            snapshot,
-          },
-        },
-      });
-    },
   };
 }
 

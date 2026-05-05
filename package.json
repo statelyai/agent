@@ -27,6 +27,16 @@
         "default": "./dist/ai-sdk.cjs"
       }
     },
+    "./cloudflare": {
+      "import": {
+        "types": "./dist/cloudflare.d.mts",
+        "default": "./dist/cloudflare.mjs"
+      },
+      "require": {
+        "types": "./dist/cloudflare.d.cts",
+        "default": "./dist/cloudflare.cjs"
+      }
+    },
     "./graph": {
       "import": {
         "types": "./dist/graph.d.mts",
@@ -35,6 +45,36 @@
       "require": {
         "types": "./dist/graph.d.cts",
         "default": "./dist/graph.cjs"
+      }
+    },
+    "./http": {
+      "import": {
+        "types": "./dist/http.d.mts",
+        "default": "./dist/http.mjs"
+      },
+      "require": {
+        "types": "./dist/http.d.cts",
+        "default": "./dist/http.cjs"
+      }
+    },
+    "./next": {
+      "import": {
+        "types": "./dist/next.d.mts",
+        "default": "./dist/next.mjs"
+      },
+      "require": {
+        "types": "./dist/next.d.cts",
+        "default": "./dist/next.cjs"
+      }
+    },
+    "./runtime": {
+      "import": {
+        "types": "./dist/runtime.d.mts",
+        "default": "./dist/runtime.mjs"
+      },
+      "require": {
+        "types": "./dist/runtime.d.cts",
+        "default": "./dist/runtime.cjs"
       }
     },
     "./xstate": {

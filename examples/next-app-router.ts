@@ -1,4 +1,11 @@
 import { type RunStore } from '../src/index.js';
+import type { NextRouteContext } from '../src/next/index.js';
+export {
+  dynamic,
+  maxDuration,
+  runtime,
+} from '../src/next/index.js';
+export type { NextRouteContext } from '../src/next/index.js';
 import {
   createPersistenceSessionHttpHandler,
   type SessionHttpHandlerOptions,
@@ -7,18 +14,6 @@ import {
   createStreamingSessionHttpController,
   type StreamingSessionHttpController,
 } from './http-streaming-session.js';
-
-/**
- * Suggested route-segment config for Next.js App Router route handlers that
- * host long-lived agent sessions and streaming responses.
- */
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
-export const maxDuration = 30;
-
-export interface NextRouteContext<TParams extends Record<string, string>> {
-  params: Promise<TParams> | TParams;
-}
 
 export interface NextReviewRouteHandlers {
   sessions: {

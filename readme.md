@@ -31,6 +31,21 @@ Use `classify(...)` when the result is just "what kind of thing is this?" Use `d
 
 CrewAI Flow parity is tracked in [`docs/crewai-parity.md`](/Users/davidkpiano/Code/agent/docs/crewai-parity.md), the same way LangGraph parity is tracked separately.
 
+## Runtime Adapters
+
+<!-- public runtime adapter subpaths from package.json#exports and src/{runtime,http,next,cloudflare}/index.ts -->
+
+The core package exports session helpers from `@statelyai/agent` and `@statelyai/agent/runtime`:
+
+- `waitForRunDone(run)`: await terminal success or reject on session error
+- `waitForRunSnapshot(run, predicate)`: await the next snapshot that matches a predicate
+
+Use the framework adapters when a machine needs to run inside an app runtime:
+
+- `@statelyai/agent/http`: `createSessionHttpController(...)`, `createSessionHttpHandler(...)`, and `createRunSseResponse(...)`
+- `@statelyai/agent/next`: `createNextSessionRouteHandlers(...)` plus App Router config exports
+- `@statelyai/agent/cloudflare`: `createDurableObjectRunStore(...)` and `createCloudflareAgentRunStore(...)`
+
 ## Persistence Adapters
 
 <!-- RunStore contract from src/runtime/store.ts and storage examples from examples/cloudflare-*.ts, examples/http-session.ts, and examples/persistence.ts -->
@@ -45,8 +60,8 @@ Storage adapters are intentionally bring-your-own. Implement the `RunStore` cont
 Use these examples as templates for your storage layer:
 
 - [`examples/persistence.ts`](/Users/davidkpiano/Code/agent/examples/persistence.ts): the smallest durable session flow with an in-memory store
-- [`examples/http-session.ts`](/Users/davidkpiano/Code/agent/examples/http-session.ts): the Request/Response transport shape around a `RunStore`
-- [`examples/cloudflare-durable-object.ts`](/Users/davidkpiano/Code/agent/examples/cloudflare-durable-object.ts): Durable Object-backed event and snapshot persistence
-- [`examples/cloudflare-agents.ts`](/Users/davidkpiano/Code/agent/examples/cloudflare-agents.ts): syncing a `RunStore` into Cloudflare Agents state
+- [`examples/http-session.ts`](/Users/davidkpiano/Code/agent/examples/http-session.ts): the Request/Response transport shape around `@statelyai/agent/http`
+- [`examples/cloudflare-durable-object.ts`](/Users/davidkpiano/Code/agent/examples/cloudflare-durable-object.ts): Durable Object-backed event and snapshot persistence with `@statelyai/agent/cloudflare`
+- [`examples/cloudflare-agents.ts`](/Users/davidkpiano/Code/agent/examples/cloudflare-agents.ts): syncing a `RunStore` into Cloudflare Agents state with `@statelyai/agent/cloudflare`
 
 **Read the documentation: [stately.ai/docs/agents](https://stately.ai/docs/agents)**

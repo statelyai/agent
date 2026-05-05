@@ -3,7 +3,7 @@ import { restoreSession, startSession, type RunStore } from '../../../../src/ind
 import {
   createCloudflareAgentRunStore,
   type CloudflareAgentRunStoreState,
-} from '../../../cloudflare-agents.js';
+} from '../../../../src/cloudflare/index.js';
 import { createPersistenceExample } from '../../../persistence.js';
 
 export class ReviewWorkflowAgent extends Agent<

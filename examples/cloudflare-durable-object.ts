@@ -1,75 +1,20 @@
 import {
-  createPersistenceExample,
-} from './persistence.js';
-import {
   restoreSession,
   startSession,
-  type AgentSnapshot,
-  type JournalEvent,
-  type JournalEventRecord,
-  type PersistedSnapshot,
   type RunStore,
 } from '../src/index.js';
+import {
+  createDurableObjectRunStore,
+  type DurableObjectStateLike,
+  type DurableObjectStorageLike,
+} from '../src/cloudflare/index.js';
+import { createPersistenceExample } from './persistence.js';
 
-export interface DurableObjectStorageLike {
-  get<T = unknown>(key: string): Promise<T | undefined>;
-  put<T = unknown>(key: string, value: T): Promise<void>;
-}
-
-export interface DurableObjectStateLike {
-  storage: DurableObjectStorageLike;
-}
-
-export function createDurableObjectRunStore(
-  storage: DurableObjectStorageLike
-): RunStore {
-  return {
-    async append(sessionId, event) {
-      const key = journalKey(sessionId);
-      const current = (await storage.get<JournalEventRecord[]>(key)) ?? [];
-      const sequence =
-        current.length === 0
-          ? 1
-          : current[current.length - 1]!.sequence + 1;
-
-      await storage.put(key, [...current, { ...event, sequence }]);
-      return { sequence };
-    },
-
-    async loadEvents(sessionId, afterSequence = 0) {
-      const current =
-        (await storage.get<JournalEventRecord<JournalEvent>[]>(
-          journalKey(sessionId)
-        )) ?? [];
-
-      return current
-        .filter((event) => event.sequence > afterSequence)
-        .sort((a, b) => a.sequence - b.sequence);
-    },
-
-    async loadLatestSnapshot(sessionId) {
-      const snapshots =
-        (await storage.get<PersistedSnapshot<AgentSnapshot>[]>(
-          snapshotsKey(sessionId)
-        )) ?? [];
-
-      return (
-        [...snapshots].sort(
-          (a, b) =>
-            a.afterSequence - b.afterSequence || a.createdAt - b.createdAt
-        ).at(-1) ?? null
-      );
-    },
-
-    async saveSnapshot(snapshot) {
-      const key = snapshotsKey(snapshot.sessionId);
-      const current =
-        (await storage.get<PersistedSnapshot<AgentSnapshot>[]>(key)) ?? [];
-
-      await storage.put(key, [...current, snapshot]);
-    },
-  };
-}
+export {
+  createDurableObjectRunStore,
+  type DurableObjectStateLike,
+  type DurableObjectStorageLike,
+};
 
 export class AgentSessionDurableObject {
   private readonly store: RunStore;
@@ -136,12 +81,4 @@ function requiredSessionId(url: URL): string {
   }
 
   return sessionId;
-}
-
-function journalKey(sessionId: string): string {
-  return `sessions/${sessionId}/journal`;
-}
-
-function snapshotsKey(sessionId: string): string {
-  return `sessions/${sessionId}/snapshots`;
 }

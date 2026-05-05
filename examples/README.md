@@ -18,8 +18,8 @@ These are the best starting points when you want code that already looks like a 
 - [`apps/next/`](/Users/davidkpiano/Code/agent/examples/apps/next): copy-paste Next.js App Router routes
 - [`apps/cloudflare-agents/`](/Users/davidkpiano/Code/agent/examples/apps/cloudflare-agents): copy-paste Cloudflare Agents Worker layout
 - [`next-ai-sdk-ui.ts`](/Users/davidkpiano/Code/agent/examples/next-ai-sdk-ui.ts): AI SDK UI route helper
-- [`next-app-router.ts`](/Users/davidkpiano/Code/agent/examples/next-app-router.ts): App Router session route helpers
-- [`cloudflare-agents.ts`](/Users/davidkpiano/Code/agent/examples/cloudflare-agents.ts): Node-safe Cloudflare Agents helper version
+- [`next-app-router.ts`](/Users/davidkpiano/Code/agent/examples/next-app-router.ts): App Router session routes backed by `@statelyai/agent/next` and `@statelyai/agent/http`
+- [`cloudflare-agents.ts`](/Users/davidkpiano/Code/agent/examples/cloudflare-agents.ts): Node-safe Cloudflare Agents example backed by `@statelyai/agent/cloudflare`
 
 ## Workflow Examples
 
@@ -51,6 +51,8 @@ These focus on real orchestration patterns:
 - [`http-streaming-session.ts`](/Users/davidkpiano/Code/agent/examples/http-streaming-session.ts)
 - [`cloudflare-durable-object.ts`](/Users/davidkpiano/Code/agent/examples/cloudflare-durable-object.ts)
 - [`cloudflare-durable-network.ts`](/Users/davidkpiano/Code/agent/examples/cloudflare-durable-network.ts)
+
+The reusable pieces behind these examples are exported from `@statelyai/agent/http`, `@statelyai/agent/next`, and `@statelyai/agent/cloudflare`.
 
 ## Reference / Concept Examples
 

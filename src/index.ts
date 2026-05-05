@@ -7,6 +7,7 @@ export { classify, classifyResultSchema } from './classify.js';
 export { createAdapter } from './adapter.js';
 export { createMemoryRunStore } from './runtime/memory-store.js';
 export { restoreSession, startSession } from './runtime/session.js';
+export { waitForRunDone, waitForRunSnapshot } from './runtime/index.js';
 
 // Types
 export type {
