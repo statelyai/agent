@@ -27,13 +27,14 @@ export interface AgentGraphNodeData {
 
 export interface AgentGraphEdgeData {
   event?: string;
-  source?: 'event' | 'invoke.done';
+  source?: 'event' | 'invoke.done' | 'always';
   guard?: {
     type: string;
   };
   actions?: {
     context?: boolean;
     input?: boolean;
+    messages?: boolean;
   };
 }
 
@@ -67,6 +68,7 @@ type EdgeCandidate = {
   guard?: string;
   hasContext?: boolean;
   hasInput?: boolean;
+  hasMessages?: boolean;
 };
 
 type AnalysisResult = {
@@ -129,6 +131,19 @@ export function analyzeGraph(machine: AgentMachine): AgentGraphAnalysis {
       });
       edges.push(...result.edges);
       warnings.push(...formatWarnings(sourceId, event, result.warnings));
+    }
+
+    if (stateConfig.always) {
+      const event = '';
+      const result = getTransitionEdges({
+        sourceId,
+        event,
+        source: 'always',
+        transition: stateConfig.always,
+        ordinalOffset: edges.length,
+      });
+      edges.push(...result.edges);
+      warnings.push(...formatWarnings(sourceId, 'always', result.warnings));
     }
 
     if (!stateConfig.on) {
@@ -270,11 +285,12 @@ function getTransitionEdges(args: {
               },
             }
           : {}),
-        ...((candidate.hasContext || candidate.hasInput)
+        ...((candidate.hasContext || candidate.hasInput || candidate.hasMessages)
           ? {
               actions: {
                 ...(candidate.hasContext ? { context: true } : {}),
                 ...(candidate.hasInput ? { input: true } : {}),
+                ...(candidate.hasMessages ? { messages: true } : {}),
               },
             }
           : {}),
@@ -301,6 +317,7 @@ function analyzeTransitionObject(transition: unknown): AnalysisResult {
         target,
         hasContext: 'context' in transition,
         hasInput: 'input' in transition,
+        hasMessages: 'messages' in transition,
       }],
       warnings: [],
     };
@@ -711,6 +728,7 @@ function analyzeTransitionExpression(
       guard: combineGuardList(guards),
       hasContext: object ? hasProperty(object, 'context') : false,
       hasInput: object ? hasProperty(object, 'input') : false,
+      hasMessages: object ? hasProperty(object, 'messages') : false,
     }],
     warnings: [],
   };
@@ -897,11 +915,12 @@ function hasProperty(object: ts.ObjectLiteralExpression, name: string): boolean 
 }
 
 function getEdgeLabel(event: string, guard: string | undefined): string {
+  const label = event || 'always';
   if (!guard) {
-    return event;
+    return label;
   }
 
-  return `${event} [${guard}]`;
+  return `${label} [${guard}]`;
 }
 
 function createBindings(

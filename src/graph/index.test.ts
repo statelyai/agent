@@ -111,6 +111,42 @@ test('exports finite states and transition edges as Stately graph JSON', () => {
   });
 });
 
+test('exports always transitions and message updates', () => {
+  const machine = createAgentMachine({
+    id: 'always-graph',
+    context: () => ({}),
+    initial: 'checking',
+    states: {
+      checking: {
+        always: ({ messages }) => ({
+          target: 'done',
+          messages: messages.concat({ role: 'assistant', content: 'ok' }),
+        }),
+      },
+      done: {
+        type: 'final',
+      },
+    },
+  });
+
+  expect(toGraph(machine).edges).toEqual([
+    {
+      type: 'edge',
+      id: 'checking::0',
+      sourceId: 'checking',
+      targetId: 'done',
+      label: 'always',
+      data: {
+        event: '',
+        source: 'always',
+        actions: {
+          messages: true,
+        },
+      },
+    },
+  ]);
+});
+
 test('infers switch, early-return, and helper-call transition branches', () => {
   const machine = createAgentMachine({
     id: 'ast-rich-export',

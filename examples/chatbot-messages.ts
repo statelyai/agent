@@ -3,6 +3,7 @@ import {
   createAgentMachine,
   createMemoryRunStore,
   startSession,
+  type AgentMessage,
 } from '../src/index.js';
 import {
   closePrompt,
@@ -13,7 +14,7 @@ import {
 } from './_run.js';
 
 const messageSchema = z.object({
-  role: z.enum(['user', 'assistant']),
+  role: z.string(),
   content: z.string(),
 });
 
@@ -22,7 +23,7 @@ const replySchema = z.object({
 });
 
 export function createChatbotMessagesExample(
-  reply: (messages: Array<z.infer<typeof messageSchema>>) => Promise<z.infer<typeof replySchema>> = (messages) =>
+  reply: (messages: AgentMessage[]) => Promise<z.infer<typeof replySchema>> = (messages) =>
     generateExampleObject({
       schema: replySchema,
       system: 'You are a concise assistant in a terminal chat.',
@@ -50,19 +51,17 @@ export function createChatbotMessagesExample(
       },
     },
     context: () => ({
-      messages: [] as Array<z.infer<typeof messageSchema>>,
       finalMessage: null as z.infer<typeof messageSchema> | null,
       ended: false,
     }),
+    messages: [],
     initial: 'waitingForUser',
     states: {
       waitingForUser: {
         on: {
-          'messages.user': ({ event, context }) => ({
+          'messages.user': ({ event, messages }) => ({
             target: 'replying',
-            context: {
-              messages: [...context.messages, event.message],
-            },
+            messages: messages.concat(event.message),
           }),
           'messages.end': {
             target: 'done',
@@ -72,19 +71,19 @@ export function createChatbotMessagesExample(
       },
       replying: {
         resultSchema: replySchema,
-        invoke: async ({ context }) => reply(context.messages),
-        onDone: ({ result, context }) => ({
+        invoke: async ({ messages }) => reply(messages),
+        onDone: ({ result, messages }) => ({
           target: 'waitingForUser',
+          messages: messages.concat(result.message),
           context: {
-            messages: [...context.messages, result.message],
             finalMessage: result.message,
           },
         }),
       },
       done: {
         type: 'final',
-        output: ({ context }) => ({
-          messages: context.messages,
+        output: ({ context, messages }) => ({
+          messages,
           finalMessage: context.finalMessage,
         }),
       },
@@ -111,17 +110,22 @@ async function main() {
           status: snapshot.status,
           value: snapshot.value,
           context: snapshot.context,
+          messages: snapshot.messages,
           output: snapshot.output,
         });
         break;
       }
 
+      const finalMessage = snapshot.context.finalMessage as
+        | z.infer<typeof messageSchema>
+        | null;
+
       if (
-        snapshot.context.finalMessage?.role === 'assistant'
-        && snapshot.context.finalMessage.content !== lastPrintedAssistantMessage
+        finalMessage?.role === 'assistant'
+        && finalMessage.content !== lastPrintedAssistantMessage
       ) {
-        console.log(`Assistant: ${snapshot.context.finalMessage.content}`);
-        lastPrintedAssistantMessage = snapshot.context.finalMessage.content;
+        console.log(`Assistant: ${finalMessage.content}`);
+        lastPrintedAssistantMessage = finalMessage.content;
       }
 
       const content = await prompt('User (blank to exit)');

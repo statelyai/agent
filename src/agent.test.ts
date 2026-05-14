@@ -701,6 +701,83 @@ describe('type: choice', () => {
   });
 });
 
+describe('messages and always', () => {
+  test('messages are passed through invoke, onDone, always, and output', async () => {
+    const machine = createAgentMachine({
+      id: 'messages-always',
+      schemas: {
+        input: z.object({ prompt: z.string() }),
+        output: z.object({
+          messages: z.array(z.object({ role: z.string(), content: z.string() })),
+          attempts: z.number(),
+        }),
+      },
+      context: () => ({
+        attempts: 0,
+        accepted: false,
+      }),
+      messages: (input) => [{ role: 'user', content: input.prompt }],
+      initial: 'generating',
+      states: {
+        generating: {
+          resultSchema: z.object({ text: z.string() }),
+          invoke: async ({ messages }) => ({
+            text: `reply to ${messages.at(-1)?.content}`,
+          }),
+          onDone: ({ result, context, messages }) => ({
+            target: 'checking',
+            context: { attempts: context.attempts + 1 },
+            messages: messages.concat({
+              role: 'assistant',
+              content: result.text,
+            }),
+          }),
+        },
+        checking: {
+          always: ({ context, messages }) =>
+            context.attempts >= 2
+              ? {
+                  target: 'done',
+                  context: { accepted: true },
+                  messages: messages.concat({
+                    role: 'system',
+                    content: 'accepted',
+                  }),
+                }
+              : {
+                  target: 'generating',
+                  messages: messages.concat({
+                    role: 'user',
+                    content: 'repair',
+                  }),
+                },
+        },
+        done: {
+          type: 'final',
+          output: ({ context, messages }) => ({
+            messages,
+            attempts: context.attempts,
+          }),
+        },
+      },
+    });
+
+    const result = await machine.execute(machine.getInitialState({ prompt: 'draft' }));
+
+    expect(result.status).toBe('done');
+    if (result.status === 'done') {
+      expect(result.messages.map((message) => message.content)).toEqual([
+        'draft',
+        'reply to draft',
+        'repair',
+        'reply to repair',
+        'accepted',
+      ]);
+      expect(result.output.attempts).toBe(2);
+    }
+  });
+});
+
 describe('classify', () => {
   test('result has typed category', async () => {
     const machine = createClassifyMachine(
@@ -1388,12 +1465,13 @@ describe('edge cases', () => {
   test('done state returns as-is', async () => {
     const machine = createSimpleMachine();
     const done = {
-      value: 'done',
+      value: 'done' as const,
       input: {},
       context: { count: 1 },
-      status: 'done',
+      messages: [],
+      status: 'done' as const,
       output: { result: 1 },
-    } as const;
+    };
     expect(await machine.invoke(done)).toEqual(done);
   });
 });

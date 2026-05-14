@@ -5,6 +5,7 @@ test('AgentSnapshot includes durable session fields', () => {
   const snapshot: AgentSnapshot<{ count: number }, 'idle'> = {
     value: 'idle',
     context: { count: 1 },
+    messages: [],
     status: 'active',
     createdAt: 123,
     sessionId: 'session-1',

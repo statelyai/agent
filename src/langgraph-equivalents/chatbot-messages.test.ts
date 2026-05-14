@@ -20,7 +20,7 @@ test('message-centric chatbot workflow accumulates structured messages across tu
 
   expect(firstResult.status).toBe('pending');
   if (firstResult.status === 'pending') {
-    expect(firstResult.context.messages).toEqual([
+    expect(firstResult.messages).toEqual([
       { role: 'user', content: 'Hello there' },
       { role: 'assistant', content: 'Replying to: Hello there' },
     ]);
@@ -36,7 +36,7 @@ test('message-centric chatbot workflow accumulates structured messages across tu
 
     expect(secondResult.status).toBe('pending');
     if (secondResult.status === 'pending') {
-      expect(secondResult.context.messages).toEqual([
+      expect(secondResult.messages).toEqual([
         { role: 'user', content: 'Hello there' },
         { role: 'assistant', content: 'Replying to: Hello there' },
         { role: 'user', content: 'Can you expand on that?' },

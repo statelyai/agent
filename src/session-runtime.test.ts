@@ -147,6 +147,49 @@ test('serializes concurrent sends so each event applies from the latest snapshot
   );
 });
 
+test('journals always transitions and persists messages', async () => {
+  const machine = createAgentMachine({
+    id: 'always-session',
+    context: () => ({ ready: false }),
+    messages: () => [{ role: 'user', content: 'start' }],
+    initial: 'checking',
+    states: {
+      checking: {
+        always: ({ messages }) => ({
+          target: 'done',
+          context: { ready: true },
+          messages: messages.concat({ role: 'assistant', content: 'done' }),
+        }),
+      },
+      done: {
+        type: 'final',
+        output: ({ context, messages }) => ({ ...context, messages }),
+      },
+    },
+  });
+  const store = createMemoryRunStore();
+  const run = await startSession(machine, { store });
+
+  await vi.waitFor(() => {
+    expect(run.getSnapshot()).toEqual(
+      expect.objectContaining({
+        value: 'done',
+        status: 'done',
+        context: { ready: true },
+        messages: [
+          { role: 'user', content: 'start' },
+          { role: 'assistant', content: 'done' },
+        ],
+      })
+    );
+  });
+
+  await expect(store.loadEvents(run.sessionId)).resolves.toEqual([
+    expect.objectContaining({ sequence: 1, type: 'xstate.init' }),
+    expect.objectContaining({ sequence: 2, type: 'xstate.always.checking' }),
+  ]);
+});
+
 test('rejects reserved internal events from run.send', async () => {
   const machine = createAgentMachine({
     id: 'reserved-events',
@@ -180,5 +223,8 @@ test('rejects reserved internal events from run.send', async () => {
   ).rejects.toThrow(/reserved internal event/i);
   await expect(
     run.send({ type: 'xstate.error.invoke.worker' })
+  ).rejects.toThrow(/reserved internal event/i);
+  await expect(
+    run.send({ type: 'xstate.always.ready' })
   ).rejects.toThrow(/reserved internal event/i);
 });

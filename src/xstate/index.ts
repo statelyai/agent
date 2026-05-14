@@ -17,6 +17,7 @@ export interface XStateMachineConfig {
 export interface XStateStateConfig {
   type?: 'final';
   on?: Record<string, XStateTransitionConfig | XStateTransitionConfig[]>;
+  always?: XStateTransitionConfig | XStateTransitionConfig[];
   invoke?: {
     id: string;
     src: string;
@@ -43,6 +44,7 @@ export interface XStateTransitionConfig {
       updates?: {
         context?: boolean;
         input?: boolean;
+        messages?: boolean;
       };
     };
   };
@@ -90,6 +92,7 @@ export function toXStateVisualization(machine: AgentMachine): XStateMachineConfi
     const regularEdges = graph.edges.filter((edge) =>
       edge.sourceId === stateId
       && edge.data.source !== 'invoke.done'
+      && edge.data.source !== 'always'
     );
 
     for (const [event, edges] of groupEdgesByEvent(regularEdges)) {
@@ -100,6 +103,18 @@ export function toXStateVisualization(machine: AgentMachine): XStateMachineConfi
 
       xstateState.on ??= {};
       xstateState.on[event] = formatted;
+    }
+
+    if (stateConfig.always) {
+      const alwaysEdges = graph.edges.filter((edge) =>
+        edge.sourceId === stateId
+        && edge.data.source === 'always'
+      );
+
+      const formattedAlways = formatTransitions(alwaysEdges);
+      if (formattedAlways) {
+        xstateState.always = formattedAlways;
+      }
     }
 
     if (stateConfig.onDone) {
@@ -180,6 +195,7 @@ function formatTransition(edge: AgentGraphEdge): XStateTransitionConfig {
   const actions = [
     ...(edge.data.actions?.context ? ['assignContext'] : []),
     ...(edge.data.actions?.input ? ['assignInput'] : []),
+    ...(edge.data.actions?.messages ? ['assignMessages'] : []),
   ];
 
   return {
@@ -194,6 +210,7 @@ function formatTransition(edge: AgentGraphEdge): XStateTransitionConfig {
               updates: {
                 ...(edge.data.actions.context ? { context: true } : {}),
                 ...(edge.data.actions.input ? { input: true } : {}),
+                ...(edge.data.actions.messages ? { messages: true } : {}),
               },
             }
           : {}),

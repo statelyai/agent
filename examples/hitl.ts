@@ -3,6 +3,7 @@ import {
   createAgentMachine,
   createMemoryRunStore,
   startSession,
+  type AgentMessage,
 } from '../src/index.js';
 import {
   closePrompt,
@@ -19,15 +20,15 @@ const draftSchema = z.object({
 export function createHitlExample(
   draftReply: (args: {
     task: string;
-    notes: string[];
-  }) => Promise<z.infer<typeof draftSchema>> = async ({ task, notes }) => {
+    messages: AgentMessage[];
+  }) => Promise<z.infer<typeof draftSchema>> = async ({ task, messages }) => {
     return generateExampleObject({
       schema: draftSchema,
       prompt: [
         `Task: ${task}`,
         '',
         'Use the notes below to draft a concise response:',
-        ...notes.map((note, index) => `${index + 1}. ${note}`),
+        ...messages.map((message, index) => `${index + 1}. ${message.content}`),
       ].join('\n'),
     });
   }
@@ -48,17 +49,15 @@ export function createHitlExample(
     },
     context: (input) => ({
       task: input.task,
-      notes: [] as string[],
       draft: null as string | null,
     }),
+    messages: [],
     initial: 'gathering',
     states: {
       gathering: {
         on: {
-          'user.message': ({ context, event }) => ({
-            context: {
-              notes: context.notes.concat(event.message),
-            },
+          'user.message': ({ messages, event }) => ({
+            messages: messages.concat({ role: 'user', content: event.message }),
           }),
           'user.approve': { target: 'drafting' },
           'user.cancel': { target: 'cancelled' },
@@ -66,13 +65,14 @@ export function createHitlExample(
       },
       drafting: {
         resultSchema: draftSchema,
-        invoke: async ({ context }) =>
+        invoke: async ({ context, messages }) =>
           draftReply({
             task: context.task,
-            notes: context.notes,
+            messages,
           }),
-        onDone: ({ result }) => ({
+        onDone: ({ result, messages }) => ({
           target: 'done',
+          messages: messages.concat({ role: 'assistant', content: result.draft }),
           context: { draft: result.draft },
         }),
       },
@@ -108,6 +108,7 @@ async function main() {
           status: snapshot.status,
           value: snapshot.value,
           context: snapshot.context,
+          messages: snapshot.messages,
           output: snapshot.output,
         });
         break;

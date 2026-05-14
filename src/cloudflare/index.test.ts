@@ -28,6 +28,7 @@ describe('cloudflare adapter', () => {
         value: 'done',
         status: 'done',
         context: {},
+        messages: [],
         input: {},
       },
     });
@@ -68,6 +69,7 @@ describe('cloudflare adapter', () => {
         value: 'done',
         status: 'done',
         context: {},
+        messages: [],
         input: {},
       },
     });

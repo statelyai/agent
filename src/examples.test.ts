@@ -143,7 +143,7 @@ describe('curated examples', () => {
 
     expect(result.status).toBe('pending');
     if (result.status === 'pending') {
-      expect(result.context.messages).toEqual([
+      expect(result.messages).toEqual([
         { role: 'user', content: 'Hello there' },
         { role: 'assistant', content: 'Replying to: Hello there' },
       ]);
@@ -234,6 +234,7 @@ describe('curated examples', () => {
       snapshot: {
         value: 'done',
         context: {},
+        messages: [],
         status: 'done',
         createdAt: 2,
         sessionId: 'session-1',

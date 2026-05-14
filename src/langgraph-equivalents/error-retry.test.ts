@@ -80,6 +80,7 @@ test('restores a durable retry snapshot and continues from the next attempt', as
     snapshot: {
       value: retryState.value,
       context: retryState.context,
+      messages: retryState.messages,
       status: retryState.status,
       input: retryState.input,
       createdAt: 1,

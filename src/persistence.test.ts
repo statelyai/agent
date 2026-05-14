@@ -48,6 +48,7 @@ test('loads the most replay-advanced saved snapshot', async () => {
     snapshot: {
       value: 'idle',
       context: { count: 1 },
+      messages: [],
       status: 'active',
       createdAt: 100,
       sessionId: 'session-1',
@@ -64,6 +65,7 @@ test('loads the most replay-advanced saved snapshot', async () => {
     snapshot: {
       value: 'done',
       context: { count: 2 },
+      messages: [],
       status: 'done',
       createdAt: 300,
       sessionId: 'session-1',
@@ -81,6 +83,7 @@ test('loads the most replay-advanced saved snapshot', async () => {
     snapshot: {
       value: 'done',
       context: { count: 2 },
+      messages: [],
       status: 'done',
       createdAt: 300,
       sessionId: 'session-1',
@@ -102,6 +105,7 @@ test('loads the most replay-advanced snapshot even if saved earlier', async () =
     snapshot: {
       value: 'done',
       context: { count: 5 },
+      messages: [],
       status: 'done',
       createdAt: 500,
       sessionId: 'session-1',
@@ -116,6 +120,7 @@ test('loads the most replay-advanced snapshot even if saved earlier', async () =
     snapshot: {
       value: 'review',
       context: { count: 2 },
+      messages: [],
       status: 'active',
       createdAt: 200,
       sessionId: 'session-1',
@@ -130,6 +135,7 @@ test('loads the most replay-advanced snapshot even if saved earlier', async () =
     snapshot: {
       value: 'done',
       context: { count: 5 },
+      messages: [],
       status: 'done',
       createdAt: 500,
       sessionId: 'session-1',

@@ -38,6 +38,7 @@ These focus on real orchestration patterns:
 - [`lead-score-flow.ts`](/Users/davidkpiano/Code/agent/examples/lead-score-flow.ts)
 - [`meeting-assistant-flow.ts`](/Users/davidkpiano/Code/agent/examples/meeting-assistant-flow.ts)
 - [`self-evaluation-loop-flow.ts`](/Users/davidkpiano/Code/agent/examples/self-evaluation-loop-flow.ts)
+- [`spec-agent-loop.ts`](/Users/davidkpiano/Code/agent/examples/spec-agent-loop.ts)
 - [`write-a-book-flow.ts`](/Users/davidkpiano/Code/agent/examples/write-a-book-flow.ts)
 - [`plan-and-execute.ts`](/Users/davidkpiano/Code/agent/examples/plan-and-execute.ts)
 - [`reflection.ts`](/Users/davidkpiano/Code/agent/examples/reflection.ts)

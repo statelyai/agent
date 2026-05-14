@@ -1,5 +1,6 @@
 import type {
   AgentMachine,
+  AgentMessage,
   AgentSnapshot,
   AgentState,
   EmittedPart,
@@ -18,6 +19,7 @@ import {
   formatSchemaIssues,
   getAvailableEvents,
   getInput,
+  isAlwaysEventType,
   isDoneInvokeEventType,
   isErrorInvokeEventType,
   resolveInitial,
@@ -50,19 +52,26 @@ type StateNodeDef<
   resultSchema?: StandardSchemaV1<TResult>;
   invoke?: (args: {
     context: TContext;
+    messages: AgentMessage[];
     input: NoInfer<TInput>;
     signal?: AbortSignal;
   }, enq: { emit(part: EmittedPart): void }) => Promise<TResult>;
-  onDone?: (args: { result: OnDoneResult<TResult>; context: TContext }) => TransitionResult<TContext, TTarget, TInputMap>;
+  onDone?: (args: { result: OnDoneResult<TResult>; context: TContext; messages: AgentMessage[] }) => TransitionResult<TContext, TTarget, TInputMap>;
+  always?: TransitionResult<TContext, TTarget, TInputMap> | ((args: {
+    context: TContext;
+    messages: AgentMessage[];
+    input: NoInfer<TInput>;
+  }, enq: { emit(part: EmittedPart): void }) => TransitionResult<TContext, TTarget, TInputMap>);
   on?: { [E in keyof TEvents & string]?: TransitionResult<TContext, TTarget, TInputMap> | ((args: {
       event: EventFor<TEvents, E>;
       context: TContext;
+      messages: AgentMessage[];
     }, enq: { emit(part: EmittedPart): void }) => TransitionResult<TContext, TTarget, TInputMap>) };
   events?: Record<string, StandardSchemaV1>;
-  output?: (args: { context: TContext }) => NoInfer<TOutput>;
+  output?: (args: { context: TContext; messages: AgentMessage[] }) => NoInfer<TOutput>;
   model?: string;
   adapter?: import('./types.js').AgentAdapter;
-  prompt?: string | ((args: { context: TContext; input: NoInfer<TInput> }) => string);
+  prompt?: string | ((args: { context: TContext; messages: AgentMessage[]; input: NoInfer<TInput> }) => string);
   options?: Record<string, { description: string; schema?: StandardSchemaV1 }>;
   reasoning?: boolean;
 };
@@ -105,6 +114,7 @@ export function createAgentMachine<
     output?: StandardSchemaV1<TOutput>;
   };
   context: (input: NoInfer<TInput>) => NoInfer<TContext>;
+  messages?: AgentMessage[] | ((input: NoInfer<TInput>) => AgentMessage[]);
   adapter?: import('./types.js').AgentAdapter;
   initial:
     | (keyof TInputMap & keyof TResultMap & string)
@@ -134,6 +144,7 @@ export function createAgentMachine<
     output?: StandardSchemaV1<TOutput>;
   };
   context: (input: NoInfer<TInput>) => TContext;
+  messages?: AgentMessage[] | ((input: NoInfer<TInput>) => AgentMessage[]);
   adapter?: import('./types.js').AgentAdapter;
   initial:
     | (keyof TInputMap & keyof TResultMap & string)
@@ -162,6 +173,7 @@ export function createAgentMachine<
     output?: StandardSchemaV1<TOutput>;
   };
   context: (...args: any[]) => TContext;
+  messages?: AgentMessage[] | ((input: unknown) => AgentMessage[]);
   adapter?: import('./types.js').AgentAdapter;
   initial:
     | (keyof TInputMap & keyof TResultMap & string)
@@ -221,6 +233,10 @@ export function createAgentMachine(
     }
 
     const context = cfg.context(validatedInput);
+    const messages =
+      typeof cfg.messages === 'function'
+        ? cfg.messages(validatedInput)
+        : cfg.messages ?? [];
     const init = resolveInitial(cfg.initial, { context, input: {} });
 
     if (!init.target) {
@@ -230,6 +246,7 @@ export function createAgentMachine(
     return {
       value: init.target,
       context: init.context ? { ...context, ...init.context } : context,
+      messages: init.messages ?? messages,
       status: 'active',
       input: init.input ? { [init.target]: init.input } : {},
     };
@@ -238,6 +255,7 @@ export function createAgentMachine(
   function resolveState(raw: {
     value: string;
     context: Record<string, unknown>;
+    messages?: AgentMessage[];
     input?: Record<string, Record<string, unknown>>;
     sessionId?: string;
     createdAt?: number;
@@ -248,6 +266,7 @@ export function createAgentMachine(
     return {
       value: raw.value,
       context: raw.context,
+      messages: raw.messages ?? [],
       status: raw.status ?? 'active',
       input: raw.input ?? {},
       sessionId: raw.sessionId,
@@ -289,6 +308,7 @@ export function createAgentMachine(
         context: result.context
           ? { ...state.context, ...result.context }
           : state.context,
+        messages: result.messages ?? state.messages,
       };
     }
 
@@ -296,14 +316,21 @@ export function createAgentMachine(
       handler:
         | TransitionResult
         | ((args: {
-            event: { type: string; [k: string]: unknown };
-            context: Record<string, unknown>;
-          }, enq: { emit(part: EmittedPart): void }) => TransitionResult),
+          event: { type: string; [k: string]: unknown };
+          context: Record<string, unknown>;
+          messages: AgentMessage[];
+          input: Record<string, unknown>;
+        }, enq: { emit(part: EmittedPart): void }) => TransitionResult),
       status = state.status
     ): { next: AgentState; emitted: EmittedPart[] } {
       const result: TransitionResult =
         typeof handler === 'function'
-          ? handler({ context: state.context, event }, enqueue)
+          ? handler({
+              context: state.context,
+              messages: state.messages,
+              input: getInput(state.value, state.input),
+              event,
+            }, enqueue)
           : handler;
 
       return {
@@ -322,6 +349,7 @@ export function createAgentMachine(
         const trans = sc.onDone({
           result: validatedResult,
           context: state.context,
+          messages: state.messages,
         });
 
         return {
@@ -336,6 +364,17 @@ export function createAgentMachine(
       }
 
       return { next: { ...state, status: 'pending' }, emitted };
+    }
+
+    if (isAlwaysEventType(state.value, event.type)) {
+      if (!sc.always) {
+        throw new Error(`No always transition in state '${state.value}'`);
+      }
+
+      return resolveHandlerResult(
+        sc.always,
+        state.status
+      );
     }
 
     if (isErrorInvokeEventType(state.value, event.type)) {
@@ -452,7 +491,7 @@ export function createAgentMachine(
     const input = getInput(state.value, state.input);
     const prompt =
       typeof sc.prompt === 'function'
-        ? sc.prompt({ context: state.context, input })
+        ? sc.prompt({ context: state.context, messages: state.messages, input })
         : sc.prompt;
 
     try {
@@ -487,6 +526,7 @@ export function createAgentMachine(
       const result = await sc.invoke!(
         {
           context: state.context,
+          messages: state.messages,
           input: getInput(state.value, state.input),
         },
         createEnqueue(onEmit)
@@ -516,6 +556,13 @@ export function createAgentMachine(
     }
 
     const sc = resolveStateConfig(cfg, state.value);
+    if (sc.always) {
+      return {
+        type: `xstate.always.${state.value}`,
+        at: Date.now(),
+      };
+    }
+
     if (sc.type === 'choice') {
       return createChoiceEvent(state);
     }
@@ -560,7 +607,7 @@ export function createAgentMachine(
 
     if (sc.type === 'final') {
       const rawOutput = sc.output
-        ? sc.output({ context: state.context })
+        ? sc.output({ context: state.context, messages: state.messages })
         : undefined;
       const output = cfg.schemas?.output
         ? validateSchemaSync(cfg.schemas.output, rawOutput)
@@ -597,6 +644,7 @@ export function createAgentMachine(
           state: current,
           output: current.output,
           context: current.context,
+          messages: current.messages,
         };
       case 'pending':
         return {
@@ -605,6 +653,7 @@ export function createAgentMachine(
           value: current.value,
           events: getAvailableEvents(cfg, current.value),
           context: current.context,
+          messages: current.messages,
         };
       case 'error':
         return {
@@ -642,6 +691,7 @@ export function createAgentMachine(
     return {
       value: s.value,
       context: s.context,
+      messages: s.messages,
       status: s.status,
       sessionId: runtime.sessionId,
       createdAt: runtime.createdAt,

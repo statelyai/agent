@@ -76,6 +76,7 @@ export function formatResult(result: ExecuteResult<any, any, any>) {
       status: result.status,
       value: result.state.value,
       context: result.context,
+      messages: result.messages,
       output: result.output,
     };
   }
@@ -85,6 +86,7 @@ export function formatResult(result: ExecuteResult<any, any, any>) {
       status: result.status,
       value: result.value,
       context: result.context,
+      messages: result.messages,
       events: Object.keys(result.events),
     };
   }

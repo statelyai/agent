@@ -33,6 +33,12 @@ export type TransitionEvent<
 
 export type EmittedPart = { type: string; [key: string]: unknown };
 
+export type AgentMessage = {
+  role: string;
+  content: string;
+  [key: string]: unknown;
+};
+
 export interface InvokeEnqueue {
   emit(part: EmittedPart): void;
 }
@@ -71,12 +77,14 @@ export type TransitionResult<
   | {
       target?: undefined;
       context?: Partial<TContext>;
+      messages?: AgentMessage[];
       input?: never;
     }
   | {
       [K in TTarget]: {
         target: K;
         context?: Partial<TContext>;
+        messages?: AgentMessage[];
       } & (K extends keyof TInputByTarget
         ? IsExactlyUnknown<TInputByTarget[K]> extends true
           ? { input?: never }
@@ -90,6 +98,7 @@ export interface InitialTransitionResult<
 > {
   target: TTarget;
   context?: Partial<TContext>;
+  messages?: AgentMessage[];
   input?: Record<string, unknown>;
 }
 
@@ -105,17 +114,19 @@ export interface StateConfig<
   resultSchema?: StandardSchemaV1;
   invoke?: (args: {
     context: TContext;
+    messages: AgentMessage[];
     input: Record<string, unknown>;
     signal?: AbortSignal;
   }, enq: InvokeEnqueue) => Promise<unknown>;
-  onDone?: (args: { result: any; context: TContext }) => TransitionResult<TContext, TTarget, TInputByTarget>;
-  on?: Record<string, TransitionResult<TContext, TTarget, TInputByTarget> | ((args: { event: any; context: TContext }, enq: InvokeEnqueue) => TransitionResult<TContext, TTarget, TInputByTarget>)>;
+  onDone?: (args: { result: any; context: TContext; messages: AgentMessage[] }) => TransitionResult<TContext, TTarget, TInputByTarget>;
+  always?: TransitionResult<TContext, TTarget, TInputByTarget> | ((args: { context: TContext; messages: AgentMessage[]; input: Record<string, unknown> }, enq: InvokeEnqueue) => TransitionResult<TContext, TTarget, TInputByTarget>);
+  on?: Record<string, TransitionResult<TContext, TTarget, TInputByTarget> | ((args: { event: any; context: TContext; messages: AgentMessage[] }, enq: InvokeEnqueue) => TransitionResult<TContext, TTarget, TInputByTarget>)>;
   events?: Record<string, StandardSchemaV1>;
-  output?: (args: { context: TContext }) => unknown;
+  output?: (args: { context: TContext; messages: AgentMessage[] }) => unknown;
   // choice-specific
   model?: string;
   adapter?: AgentAdapter;
-  prompt?: string | ((args: { context: TContext; input: Record<string, unknown> }) => string);
+  prompt?: string | ((args: { context: TContext; messages: AgentMessage[]; input: Record<string, unknown> }) => string);
   options?: Record<string, { description: string; schema?: StandardSchemaV1 }>;
   reasoning?: boolean;
 }
@@ -140,6 +151,7 @@ export interface AgentState<
 > {
   value: TValue;
   context: TContext;
+  messages: AgentMessage[];
   status: 'active' | 'pending' | 'done' | 'error';
   input: Record<string, Record<string, unknown>>;
   sessionId?: string;
@@ -156,8 +168,8 @@ export type ExecuteResult<
   TEvents extends Record<string, StandardSchemaV1> = {},
   TOutput = unknown,
 > =
-  | { status: 'done'; state: AgentState<TContext, TValue, TOutput>; output: TOutput; context: TContext }
-  | { status: 'pending'; state: AgentState<TContext, TValue, TOutput>; value: TValue; events: Record<string, StandardSchemaV1>; context: TContext }
+  | { status: 'done'; state: AgentState<TContext, TValue, TOutput>; output: TOutput; context: TContext; messages: AgentMessage[] }
+  | { status: 'pending'; state: AgentState<TContext, TValue, TOutput>; value: TValue; events: Record<string, StandardSchemaV1>; context: TContext; messages: AgentMessage[] }
   | { status: 'error'; state: AgentState<TContext, TValue, TOutput>; error: unknown };
 
 // ─── Snapshot ───
@@ -169,6 +181,7 @@ export interface AgentSnapshot<
 > {
   value: TValue;
   context: TContext;
+  messages: AgentMessage[];
   status: AgentState['status'];
   createdAt: number;
   sessionId: string;
@@ -201,6 +214,7 @@ export interface AgentMachine<
       | {
           value: string;
           context: TContext;
+          messages?: AgentMessage[];
           input?: Record<string, Record<string, unknown>>;
           sessionId?: string;
           createdAt?: number;
@@ -304,6 +318,7 @@ export interface MachineConfig<
     output?: StandardSchemaV1;
   };
   context: (input: TInput) => TContext;
+  messages?: AgentMessage[] | ((input: TInput) => AgentMessage[]);
   adapter?: AgentAdapter;
   initial:
     | (keyof TStates & string)

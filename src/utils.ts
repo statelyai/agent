@@ -1,4 +1,5 @@
 import type {
+  AgentMessage,
   AgentState,
   InitialTransitionResult,
   MachineConfig,
@@ -50,17 +51,19 @@ export type StateConfigAny = {
   invoke?: (
     args: {
       context: Record<string, unknown>;
+      messages: AgentMessage[];
       input: Record<string, unknown>;
     },
     enq: { emit(part: { type: string; [key: string]: unknown }): void }
   ) => Promise<unknown>;
-  onDone?: (args: { result: unknown; context: Record<string, unknown> }) => TransitionResult;
-  on?: Record<string, TransitionResult | ((args: { event: Record<string, unknown>; context: Record<string, unknown> }, enq: { emit(part: { type: string; [key: string]: unknown }): void }) => TransitionResult)>;
-  output?: (args: { context: Record<string, unknown> }) => unknown;
+  onDone?: (args: { result: unknown; context: Record<string, unknown>; messages: AgentMessage[] }) => TransitionResult;
+  always?: TransitionResult | ((args: { context: Record<string, unknown>; messages: AgentMessage[]; input: Record<string, unknown> }, enq: { emit(part: { type: string; [key: string]: unknown }): void }) => TransitionResult);
+  on?: Record<string, TransitionResult | ((args: { event: Record<string, unknown>; context: Record<string, unknown>; messages: AgentMessage[] }, enq: { emit(part: { type: string; [key: string]: unknown }): void }) => TransitionResult)>;
+  output?: (args: { context: Record<string, unknown>; messages: AgentMessage[] }) => unknown;
   resultSchema?: StandardSchemaV1;
   model?: string;
   adapter?: { decide: (...args: unknown[]) => Promise<unknown> };
-  prompt?: string | ((args: { context: Record<string, unknown>; input: Record<string, unknown> }) => string);
+  prompt?: string | ((args: { context: Record<string, unknown>; messages: AgentMessage[]; input: Record<string, unknown> }) => string);
   options?: Record<string, { description: string; schema?: StandardSchemaV1 }>;
   reasoning?: boolean;
   events?: Record<string, StandardSchemaV1>;
@@ -108,6 +111,10 @@ export function applyTransition(
 
   if (transition.context) {
     newState.context = { ...state.context, ...transition.context };
+  }
+
+  if (transition.messages) {
+    newState.messages = transition.messages;
   }
 
   if (transition.target) {
@@ -204,11 +211,19 @@ export function isErrorInvokeEventType(
   return eventType === `xstate.error.invoke.${stateValue}`;
 }
 
+export function isAlwaysEventType(
+  stateValue: string,
+  eventType: string
+): boolean {
+  return eventType === `xstate.always.${stateValue}`;
+}
+
 export function isReservedInternalEventType(eventType: string): boolean {
   return (
     eventType === 'xstate.init'
     || eventType.startsWith('xstate.done.invoke.')
     || eventType.startsWith('xstate.error.invoke.')
+    || eventType.startsWith('xstate.always.')
   );
 }
 
@@ -222,4 +237,23 @@ export function serializeError(error: unknown): unknown {
   }
 
   return error;
+}
+
+export function appendMessages(
+  messages: readonly AgentMessage[],
+  ...nextMessages: AgentMessage[]
+): AgentMessage[] {
+  return messages.concat(nextMessages);
+}
+
+export function userMessage(content: string, extras: Record<string, unknown> = {}): AgentMessage {
+  return { role: 'user', content, ...extras };
+}
+
+export function assistantMessage(content: string, extras: Record<string, unknown> = {}): AgentMessage {
+  return { role: 'assistant', content, ...extras };
+}
+
+export function systemMessage(content: string, extras: Record<string, unknown> = {}): AgentMessage {
+  return { role: 'system', content, ...extras };
 }

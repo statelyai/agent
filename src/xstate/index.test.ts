@@ -116,3 +116,37 @@ test('exports a serializable XState config for visualization', () => {
   });
   expect(toXStateMachine(machine)).toEqual(toXStateVisualization(machine));
 });
+
+test('exports always transitions for visualization', () => {
+  const machine = createAgentMachine({
+    id: 'xstate-always',
+    context: () => ({}),
+    initial: 'checking',
+    states: {
+      checking: {
+        always: ({ messages }) => ({
+          target: 'done',
+          messages: messages.concat({ role: 'assistant', content: 'ok' }),
+        }),
+      },
+      done: {
+        type: 'final',
+      },
+    },
+  });
+
+  expect(toXStateVisualization(machine).states.checking).toEqual({
+    always: {
+      target: 'done',
+      actions: ['assignMessages'],
+      meta: {
+        agent: {
+          event: '',
+          updates: {
+            messages: true,
+          },
+        },
+      },
+    },
+  });
+});

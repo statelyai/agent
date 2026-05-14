@@ -63,6 +63,7 @@ export {
 export { createRewooExample } from './rewoo.js';
 export { createReflectionExample } from './reflection.js';
 export { createSelfEvaluationLoopFlowExample } from './self-evaluation-loop-flow.js';
+export { createSpecAgentLoopExample } from './spec-agent-loop.js';
 export { createSupervisorExample } from './supervisor.js';
 export { createWriteABookFlowExample } from './write-a-book-flow.js';
 export { createSqlAgentExample } from './sql-agent.js';
