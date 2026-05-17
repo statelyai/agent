@@ -97,17 +97,17 @@ export function createLeadScoreFlowExample(options: {
     initial: 'scoring',
     states: {
       scoring: {
-        resultSchema: scoringSchema,
+        schemas: { output: scoringSchema },
         invoke: async ({ context }) =>
           scoreLeads({
             leads: context.leads,
             reviewNote: context.reviewNote,
           }),
-        onDone: ({ result, context }) => ({
+        onDone: ({ output, context }) => ({
           target: 'reviewing',
           context: {
-            scoredLeads: result.scoredLeads,
-            topLeads: result.scoredLeads.slice(0, 3),
+            scoredLeads: output.scoredLeads,
+            topLeads: output.scoredLeads.slice(0, 3),
             reviewNote: null,
             reviewCount: context.reviewCount + 1,
           },
@@ -127,12 +127,12 @@ export function createLeadScoreFlowExample(options: {
         },
       },
       writing: {
-        resultSchema: emailBatchSchema,
+        schemas: { output: emailBatchSchema },
         invoke: async ({ context }) => writeEmails(context.scoredLeads),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
           context: {
-            emailDrafts: result.drafts,
+            emailDrafts: output.drafts,
           },
         }),
       },

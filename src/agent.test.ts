@@ -8,7 +8,7 @@ import {
   decide,
   decideResultSchema,
 } from './index.js';
-import type { AgentAdapter } from './types.js';
+import type { DecideAdapter } from './types.js';
 
 // ─── Test helpers ───
 
@@ -18,7 +18,7 @@ function mockAdapter(
     data?: Record<string, unknown>;
     reasoning?: string;
   }>
-): AgentAdapter {
+): DecideAdapter {
   let index = 0;
   return {
     decide: async () => {
@@ -53,14 +53,14 @@ function createSimpleMachine() {
         },
       },
       running: {
-        resultSchema: z.object({ value: z.number() }),
+        schemas: { output: z.object({ value: z.number() }) },
         invoke: async ({ context }) => {
           // context.count is typed as number ✓
           return { value: context.count + 1 };
         },
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
-          context: { count: result.value },
+          context: { count: output.value },
         }),
       },
       done: {
@@ -109,16 +109,16 @@ function createHitlMachine() {
         },
       },
       processing: {
-        resultSchema: z.object({ output: z.string() }),
+        schemas: { output: z.object({ output: z.string() }) },
         invoke: async ({ context }) => {
           // context.messages is typed ✓
           return {
             output: `Processed: ${context.messages.map((m) => m.content).join(', ')}`,
           };
         },
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'reviewing',
-          context: { result: result.output },
+          context: { result: output.output },
         }),
       },
       reviewing: {
@@ -151,7 +151,7 @@ function createHitlMachine() {
 
 // ─── Decide machine ───
 
-function createDecideMachine(adapter: AgentAdapter) {
+function createDecideMachine(adapter: DecideAdapter) {
   const options = {
     billing: { description: 'Billing issues' },
     technical: { description: 'Technical issues' },
@@ -168,7 +168,7 @@ function createDecideMachine(adapter: AgentAdapter) {
     initial: 'classifying',
     states: {
       classifying: {
-        resultSchema: decideResultSchema(options),
+        schemas: { output: decideResultSchema(options) },
         invoke: async ({ context }) =>
           decide({
             adapter,
@@ -176,19 +176,19 @@ function createDecideMachine(adapter: AgentAdapter) {
             prompt: `Classify: ${context.issue}`,
             options,
           }),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'handling',
-          context: { category: result.choice },
+          context: { category: output.choice },
         }),
       },
       handling: {
-        resultSchema: z.object({ resolution: z.string() }),
+        schemas: { output: z.object({ resolution: z.string() }) },
         invoke: async ({ context }) => ({
           resolution: `Handled ${context.category} issue`,
         }),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
-          context: { resolution: result.resolution },
+          context: { resolution: output.resolution },
         }),
       },
       done: {
@@ -204,7 +204,7 @@ function createDecideMachine(adapter: AgentAdapter) {
 
 // ─── Classify machine ───
 
-function createClassifyMachine(adapter: AgentAdapter) {
+function createClassifyMachine(adapter: DecideAdapter) {
   const categories = {
     billing: { description: 'Billing, payments, refunds' },
     technical: { description: 'Technical issues, bugs' },
@@ -220,7 +220,7 @@ function createClassifyMachine(adapter: AgentAdapter) {
     initial: 'classifyIntent',
     states: {
       classifyIntent: {
-        resultSchema: classifyResultSchema(categories),
+        schemas: { output: classifyResultSchema(categories) },
         invoke: async ({ context }) =>
           classify({
             adapter,
@@ -228,9 +228,9 @@ function createClassifyMachine(adapter: AgentAdapter) {
             prompt: `Classify: "${context.issue}"`,
             into: categories,
           }),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
-          context: { category: result.category },
+          context: { category: output.category },
         }),
       },
       done: {
@@ -519,10 +519,10 @@ describe('decide', () => {
       initial: 'choosing',
       states: {
         choosing: {
-          resultSchema: decideResultSchema({
+          schemas: { output: decideResultSchema({
             a: { description: 'A' },
             b: { description: 'B' },
-          }),
+          }) },
           invoke: async ({ context }) =>
             decide({
               adapter: { decide: spy },
@@ -530,9 +530,9 @@ describe('decide', () => {
               prompt: `About ${context.topic}`,
               options: { a: { description: 'A' }, b: { description: 'B' } },
             }),
-          onDone: ({ result }) => ({
+          onDone: ({ output }) => ({
             target: 'done',
-            context: { choice: result.choice },
+            context: { choice: output.choice },
           }),
         },
         done: { type: 'final' },
@@ -551,10 +551,10 @@ describe('decide', () => {
       initial: 'choosing',
       states: {
         choosing: {
-          resultSchema: decideResultSchema({
+          schemas: { output: decideResultSchema({
             state: { description: 'State' },
             machine: { description: 'Machine' },
-          }),
+          }) },
           invoke: async () =>
             decide({
               adapter: mockAdapter([{ choice: 'state' }]),
@@ -565,9 +565,9 @@ describe('decide', () => {
                 machine: { description: 'Machine' },
               },
             }),
-          onDone: ({ result }) => ({
+          onDone: ({ output }) => ({
             target: 'done',
-            context: { choice: result.choice },
+            context: { choice: output.choice },
           }),
         },
         done: { type: 'final' },
@@ -584,13 +584,13 @@ describe('decide', () => {
       initial: 'choosing',
       states: {
         choosing: {
-          resultSchema: decideResultSchema({
+          schemas: { output: decideResultSchema({
             withData: {
               description: 'Has data',
               schema: z.object({ items: z.array(z.string()) }),
             },
             withoutData: { description: 'No data' },
-          }),
+          }) },
           invoke: async () =>
             decide({
               adapter: {
@@ -609,13 +609,13 @@ describe('decide', () => {
                 withoutData: { description: 'No data' },
               },
             }),
-          onDone: ({ result }) => {
+          onDone: ({ output }) => {
             return {
               target: 'done',
               context: {
                 items:
-                  result.choice === 'withData'
-                    ? (result.data.items ?? null)
+                  output.choice === 'withData'
+                    ? (output.data.items ?? null)
                     : null,
               },
             };
@@ -629,27 +629,29 @@ describe('decide', () => {
   });
 });
 
-describe('type: choice', () => {
-  test('inline choice state with typed context', async () => {
+describe('decide helper', () => {
+  test('explicit decide invoke with typed context', async () => {
     const adapter = mockAdapter([{ choice: 'technical' }]);
     const machine = createAgentMachine({
-      id: 'choice-test',
+      id: 'decide-helper-test',
       context: () => ({ issue: 'App crashes', result: null as string | null }),
-      adapter,
       initial: 'routing',
       states: {
         routing: {
-          type: 'choice',
-          resultSchema: choiceResultSchema,
-          model: 'test-model',
-          prompt: ({ context }) => `Route: ${context.issue}`, // context typed ✓
-          options: {
-            billing: { description: 'Billing' },
-            technical: { description: 'Technical' },
-          },
-          onDone: ({ result, context }) => ({
+          schemas: { output: choiceResultSchema },
+          invoke: async ({ context }) =>
+            decide({
+              adapter,
+              model: 'test-model',
+              prompt: `Route: ${context.issue}`,
+              options: {
+                billing: { description: 'Billing' },
+                technical: { description: 'Technical' },
+              },
+            }),
+          onDone: ({ output, context }) => ({
             target: 'done',
-            context: { result: `${result.choice}: ${context.issue}` },
+            context: { result: `${output.choice}: ${context.issue}` },
           }),
         },
         done: { type: 'final', output: ({ context }) => ({ result: context.result }) },
@@ -663,27 +665,28 @@ describe('type: choice', () => {
     }
   });
 
-  test('choice with event preemption', async () => {
+  test('invoke state with event transition', () => {
     let called = false;
-    const adapter: AgentAdapter = {
+    const adapter: DecideAdapter = {
       decide: async () => {
         called = true;
-        // Slow adapter — in real use, event would preempt
         return { choice: 'a', data: {} };
       },
     };
     const machine = createAgentMachine({
-      id: 'choice-preempt',
+      id: 'invoke-event-transition',
       context: () => ({}),
-      adapter,
       initial: 'choosing',
       states: {
         choosing: {
-          type: 'choice',
-          resultSchema: choiceResultSchema,
-          model: 'test',
-          prompt: 'pick',
-          options: { a: { description: 'A' } },
+          schemas: { output: choiceResultSchema },
+          invoke: async () =>
+            decide({
+              adapter,
+              model: 'test',
+              prompt: 'pick',
+              options: { a: { description: 'A' } },
+            }),
           onDone: () => ({ target: 'done' }),
           on: {
             cancel: () => ({ target: 'cancelled' }),
@@ -694,14 +697,340 @@ describe('type: choice', () => {
       },
     });
 
-    // Can send event to choice state (preemption)
     const state = machine.getInitialState();
     const next = machine.transition(state, { type: 'cancel' });
     expect(next.value).toBe('cancelled');
+    expect(called).toBe(false);
   });
 });
 
 describe('messages and always', () => {
+  test('states expose resolved generation fields', () => {
+    const search = async () => 'result';
+    const machine = createAgentMachine({
+      id: 'generation-fields',
+      schemas: {
+        input: z.object({ task: z.string() }),
+      },
+      context: (input) => ({ task: input.task, phase: 'read' }),
+      messages: (input) => [{ role: 'user', content: input.task }],
+      initial: 'planning',
+      states: {
+        planning: {
+          model: 'test-model',
+          system: 'Plan carefully.',
+          prompt: ({ context }) => `Plan: ${context.task}`,
+          tools: { search },
+          toolChoice: 'auto',
+          on: {
+            ready: {
+              target: 'implementing',
+              context: { phase: 'write' },
+              messages: [
+                {
+                  role: 'system',
+                  content: 'Writing is allowed now.',
+                },
+              ],
+            },
+          },
+        },
+        implementing: {
+          prompt: ({ context }) => `Implement: ${context.task}`,
+          tools: {
+            writeFile: async () => 'ok',
+          },
+          on: {
+            done: { target: 'done' },
+          },
+        },
+        done: { type: 'final' },
+      },
+    });
+
+    const planning = machine.getInitialState({ task: 'Fix bug' });
+    expect(planning.prompt).toBe('Plan: Fix bug');
+    expect(planning.model).toBe('test-model');
+    expect(planning.system).toBe('Plan carefully.');
+    expect(Object.keys(planning.tools ?? {})).toEqual(['search', 'event.ready']);
+    expect(planning.toolChoice).toBe('auto');
+
+    const implementing = machine.transition(planning, { type: 'ready' });
+    expect(implementing.prompt).toBe('Implement: Fix bug');
+    expect(implementing.model).toBeUndefined();
+    expect(Object.keys(implementing.tools ?? {})).toEqual([
+      'writeFile',
+      'event.done',
+    ]);
+    expect(implementing.messages.at(-1)).toEqual({
+      role: 'system',
+      content: 'Writing is allowed now.',
+    });
+  });
+
+  test('generation fields resolve from the unresolved snapshot', () => {
+    const read = async () => 'read';
+    const write = async () => 'write';
+    const seenSnapshots: Array<{
+      value: string;
+      hasPrompt: boolean;
+      hasTools: boolean;
+    }> = [];
+    const machine = createAgentMachine({
+      id: 'snapshot-resolvers',
+      schemas: {
+        input: z.object({ task: z.string(), mode: z.enum(['read', 'write']) }),
+      },
+      context: (input) => ({ task: input.task, mode: input.mode }),
+      messages: (input) => [{ role: 'user', content: `Task: ${input.task}` }],
+      initial: 'working',
+      states: {
+        working: {
+          model: ({ snapshot }) =>
+            snapshot.context.mode === 'write' ? 'write-model' : 'read-model',
+          system: ({ snapshot }) => `State: ${snapshot.value}`,
+          prompt: ({ snapshot }) => {
+            seenSnapshots.push({
+              value: snapshot.value,
+              hasPrompt: 'prompt' in snapshot,
+              hasTools: 'tools' in snapshot,
+            });
+
+            return [
+              `Mode: ${snapshot.context.mode}`,
+              `Messages: ${snapshot.messages.length}`,
+              `Task: ${snapshot.context.task}`,
+            ].join('\n');
+          },
+          tools: ({ snapshot }) =>
+            snapshot.context.mode === 'write' ? { read, write } : { read },
+          toolChoice: ({ snapshot }) =>
+            snapshot.context.mode === 'write' ? 'required' : 'auto',
+          on: {
+            done: { target: 'done' },
+          },
+        },
+        done: { type: 'final' },
+      },
+    });
+
+    const state = machine.getInitialState({ task: 'Fix bug', mode: 'write' });
+
+    expect(state.model).toBe('write-model');
+    expect(state.system).toBe('State: working');
+    expect(state.prompt).toBe('Mode: write\nMessages: 1\nTask: Fix bug');
+    expect(Object.keys(state.tools ?? {})).toEqual(['read', 'write', 'event.done']);
+    expect(state.toolChoice).toBe('required');
+    expect(seenSnapshots).toEqual([
+      {
+        value: 'working',
+        hasPrompt: false,
+        hasTools: false,
+      },
+    ]);
+  });
+
+  test('event tools are namespaced and use event schemas', async () => {
+    const userTool = async () => 'user tool';
+    const machine = createAgentMachine({
+      id: 'event-tools',
+      schemas: {
+        events: {
+          PLAN_READY: z.object({
+            type: z.literal('PLAN_READY'),
+            rationale: z.string(),
+          }),
+        },
+      },
+      context: () => ({}),
+      initial: 'planning',
+      states: {
+        planning: {
+          tools: { PLAN_READY: userTool },
+          on: {
+            PLAN_READY: { target: 'done' },
+          },
+        },
+        done: { type: 'final' },
+      },
+    });
+
+    const state = machine.getInitialState();
+    expect(state.tools?.PLAN_READY).toBe(userTool);
+    expect(state.tools?.['event.PLAN_READY']).toMatchObject({
+      description: "Transition with event 'PLAN_READY'.",
+      schemas: { input: expect.any(Object) },
+    });
+
+    const eventTool = state.tools?.['event.PLAN_READY'] as {
+      execute(input: Record<string, unknown>): Promise<Record<string, unknown>>;
+    };
+    await expect(
+      eventTool.execute({ rationale: 'plan is ready' })
+    ).resolves.toEqual({
+      type: 'PLAN_READY',
+      rationale: 'plan is ready',
+    });
+  });
+
+  test('prompt states with no user tools still expose event tools', () => {
+    const machine = createAgentMachine({
+      id: 'event-only-tools',
+      context: () => ({}),
+      initial: 'waiting',
+      states: {
+        waiting: {
+          prompt: 'Wait for completion.',
+          on: {
+            done: { target: 'done' },
+          },
+        },
+        done: { type: 'final' },
+      },
+    });
+
+    expect(Object.keys(machine.getInitialState().tools ?? {})).toEqual([
+      'event.done',
+    ]);
+  });
+
+  test('on events become prefixed event tools in prompt states by default', () => {
+    const machine = createAgentMachine({
+      id: 'prefixed-event-tools',
+      context: () => ({}),
+      initial: 'planning',
+      states: {
+        planning: {
+          prompt: 'Plan and choose a transition.',
+          on: {
+            PLAN_READY: { target: 'done' },
+            FAIL: { target: 'failed' },
+          },
+        },
+        done: { type: 'final' },
+        failed: { type: 'final' },
+      },
+    });
+
+    expect(Object.keys(machine.getInitialState().tools ?? {})).toEqual([
+      'event.PLAN_READY',
+      'event.FAIL',
+    ]);
+  });
+
+  test('non-generative states do not expose on events as tools', () => {
+    const machine = createAgentMachine({
+      id: 'non-generative-events',
+      context: () => ({}),
+      initial: 'waiting',
+      states: {
+        waiting: {
+          on: {
+            APPROVED: { target: 'done' },
+          },
+        },
+        done: { type: 'final' },
+      },
+    });
+
+    const waiting = machine.getInitialState();
+    expect(waiting.tools).toBeUndefined();
+
+    const done = machine.transition(waiting, { type: 'APPROVED' });
+    expect(done.value).toBe('done');
+  });
+
+  test('external events are valid transitions but excluded from event tools', () => {
+    const machine = createAgentMachine({
+      id: 'external-events',
+      externalEvents: ['APPROVED', 'REJECTED'],
+      schemas: {
+        events: {
+          PLAN_READY: z.object({}),
+          APPROVED: z.object({}),
+          REJECTED: z.object({}),
+        },
+      },
+      context: () => ({}),
+      initial: 'planning',
+      states: {
+        planning: {
+          prompt: 'Prepare a plan.',
+          on: {
+            PLAN_READY: { target: 'awaitingApproval' },
+          },
+        },
+        awaitingApproval: {
+          prompt: 'Wait for approval.',
+          on: {
+            APPROVED: { target: 'done' },
+            REJECTED: { target: 'planning' },
+          },
+        },
+        done: { type: 'final' },
+      },
+    });
+
+    const planning = machine.getInitialState();
+    expect(Object.keys(planning.tools ?? {})).toEqual(['event.PLAN_READY']);
+
+    const awaitingApproval = machine.transition(planning, {
+      type: 'PLAN_READY',
+    });
+    expect(awaitingApproval.value).toBe('awaitingApproval');
+    expect(awaitingApproval.tools).toBeUndefined();
+
+    const done = machine.transition(awaitingApproval, { type: 'APPROVED' });
+    expect(done.value).toBe('done');
+  });
+
+  test('invoke cannot be combined with generation fields', () => {
+    expect(() =>
+      createAgentMachine({
+        id: 'invoke-generation-conflict',
+        context: () => ({}),
+        initial: 'working',
+        states: {
+          working: {
+            prompt: 'Generate something.',
+            invoke: async () => ({}),
+          },
+        },
+      })
+    ).toThrow(
+      "State 'working' cannot combine invoke with prompt, system, tools, or toolChoice"
+    );
+  });
+
+  test('snapshots omit executable generation fields', async () => {
+    const machine = createAgentMachine({
+      id: 'snapshot-generation-fields',
+      context: () => ({}),
+      initial: 'waiting',
+      states: {
+        waiting: {
+          prompt: 'Use the tool.',
+          tools: { search: async () => 'result' },
+          on: { done: { target: 'done' } },
+        },
+        done: { type: 'final' },
+      },
+    });
+
+    const state = machine.getInitialState();
+    expect(state.prompt).toBe('Use the tool.');
+    expect(state.tools).toBeDefined();
+
+    const snapshots = [];
+    for await (const snapshot of machine.stream(state)) {
+      snapshots.push(snapshot);
+      break;
+    }
+
+    expect(snapshots[0]).not.toHaveProperty('prompt');
+    expect(snapshots[0]).not.toHaveProperty('tools');
+  });
+
   test('messages are passed through invoke, onDone, always, and output', async () => {
     const machine = createAgentMachine({
       id: 'messages-always',
@@ -720,16 +1049,16 @@ describe('messages and always', () => {
       initial: 'generating',
       states: {
         generating: {
-          resultSchema: z.object({ text: z.string() }),
+          schemas: { output: z.object({ text: z.string() }) },
           invoke: async ({ messages }) => ({
             text: `reply to ${messages.at(-1)?.content}`,
           }),
-          onDone: ({ result, context, messages }) => ({
+          onDone: ({ output, context, messages }) => ({
             target: 'checking',
             context: { attempts: context.attempts + 1 },
             messages: messages.concat({
               role: 'assistant',
-              content: result.text,
+              content: output.text,
             }),
           }),
         },
@@ -957,16 +1286,16 @@ describe('type inference', () => {
       initial: 'work',
       states: {
         work: {
-          resultSchema: z.object({ doubled: z.number() }),
+          schemas: { output: z.object({ doubled: z.number() }) },
           invoke: async ({ context }) => {
             context.n satisfies number;
             // @ts-expect-error — 'nope' does not exist
             context.nope;
             return { doubled: context.n * 2 };
           },
-          onDone: ({ result }) => ({
+          onDone: ({ output }) => ({
             target: 'done',
-            context: { n: result.doubled },
+            context: { n: output.doubled },
           }),
         },
         done: { type: 'final' },
@@ -1149,17 +1478,16 @@ describe('type inference', () => {
     ).toThrow();
   });
 
-  // ─── inputSchema per state ───
+  // ─── schemas.input per state ───
 
-  test('input typed per state from inputSchema', async () => {
+  test('input typed per state from schemas.input', async () => {
     const machine = createAgentMachine({
       id: 't',
       context: () => ({ result: '' }),
       initial: 'a',
       states: {
         a: {
-          inputSchema: z.object({ count: z.number() }),
-          resultSchema: z.object({ doubled: z.number() }),
+          schemas: { input: z.object({ count: z.number() }), output: z.object({ doubled: z.number() }) },
           invoke: async ({ input }) => {
             input.count satisfies number;
             // @ts-expect-error — count is number not string
@@ -1168,15 +1496,14 @@ describe('type inference', () => {
             input.name;
             return { doubled: input.count * 2 };
           },
-          onDone: ({ result }) => ({
+          onDone: ({ output }) => ({
             target: 'b',
             input: { name: 'hello' },
-            context: { result: String(result.doubled) },
+            context: { result: String(output.doubled) },
           }),
         },
         b: {
-          inputSchema: z.object({ name: z.string() }),
-          resultSchema: z.object({ greeting: z.string() }),
+          schemas: { input: z.object({ name: z.string() }), output: z.object({ greeting: z.string() }) },
           invoke: async ({ input }) => {
             input.name satisfies string;
             // @ts-expect-error — name is string not number
@@ -1185,9 +1512,9 @@ describe('type inference', () => {
             input.count;
             return { greeting: `hi ${input.name}` };
           },
-          onDone: ({ result }) => ({
+          onDone: ({ output }) => ({
             target: 'done',
-            context: { result: result.greeting },
+            context: { result: output.greeting },
           }),
         },
         done: {
@@ -1205,7 +1532,7 @@ describe('type inference', () => {
     expect(r.status === 'done' && r.output).toEqual({ result: 'hi hello' });
   });
 
-  test('no inputSchema → input is Record<string, unknown>', () => {
+  test('no schemas.input → input is Record<string, unknown>', () => {
     createAgentMachine({
       id: 't',
       context: () => ({}),
@@ -1221,33 +1548,65 @@ describe('type inference', () => {
     });
   });
 
-  // ─── type: 'choice' context typing ───
+  test('state resolver snapshot is typed from context and input', () => {
+    createAgentMachine({
+      id: 't',
+      schemas: {
+        input: z.object({ task: z.string() }),
+      },
+      context: (input) => ({ task: input.task, count: 1 }),
+      initial: 'working',
+      states: {
+        working: {
+          schemas: { input: z.object({ attempt: z.number() }) },
+          prompt: ({ snapshot, context, input }) => {
+            snapshot.value satisfies string;
+            snapshot.context.task satisfies string;
+            context.count satisfies number;
+            input.attempt satisfies number;
+            // @ts-expect-error — resolved prompt is not present while resolving
+            snapshot.prompt;
+            // @ts-expect-error — attempt is number not string
+            input.attempt satisfies string;
+            return `${snapshot.value}: ${context.task}`;
+          },
+          on: {
+            done: { target: 'done' },
+          },
+        },
+        done: { type: 'final' },
+      },
+    });
+  });
 
-  test('type: choice gets typed context in prompt and onDone', () => {
+  // ─── decide helper context typing ───
+
+  test('decide helper gets typed context in invoke and onDone', () => {
     const adapter = mockAdapter([{ choice: 'a' }]);
     const machine = createAgentMachine({
       id: 't',
       context: () => ({ topic: 'cats', result: '' }),
-      adapter,
       initial: 'choosing',
       states: {
         choosing: {
-          type: 'choice',
-          resultSchema: choiceResultSchema,
-          model: 'test',
-          prompt: ({ context }) => {
+          schemas: { output: choiceResultSchema },
+          invoke: async ({ context }) => {
             context.topic satisfies string;
             // @ts-expect-error — 'nope' does not exist
             context.nope;
-            return `About ${context.topic}`;
+            return decide({
+              adapter,
+              model: 'test',
+              prompt: `About ${context.topic}`,
+              options: { a: { description: 'A' } },
+            });
           },
-          options: { a: { description: 'A' } },
-          onDone: ({ result, context }) => {
-            result.choice satisfies string;
+          onDone: ({ output, context }) => {
+            output.choice satisfies string;
             // @ts-expect-error
-            result.nope;
+            output.nope;
             context.topic satisfies string;
-            return { target: 'done', context: { result: result.choice } };
+            return { target: 'done', context: { result: output.choice } };
           },
         },
         done: { type: 'final' },
@@ -1297,26 +1656,26 @@ describe('type inference', () => {
     machine.getInitialState(undefined);
   });
 
-  // ─── resultSchema ───
+  // ─── schemas.output ───
 
-  test('resultSchema types invoke return and onDone result', () => {
+  test('schemas.output types invoke return and onDone output', () => {
     createAgentMachine({
       id: 't',
       context: () => ({ total: 0 }),
       initial: 'work',
       states: {
         work: {
-          resultSchema: z.object({ value: z.number() }),
+          schemas: { output: z.object({ value: z.number() }) },
           invoke: async () => {
-            // return type must match resultSchema
+            // return type must match schemas.output
             return { value: 42 };
           },
-          onDone: ({ result }) => {
-            // result is typed from resultSchema
-            result.value satisfies number;
+          onDone: ({ output }) => {
+            // output is typed from schemas.output
+            output.value satisfies number;
             // @ts-expect-error — 'nope' does not exist on result
-            result.nope;
-            return { target: 'done', context: { total: result.value } };
+            output.nope;
+            return { target: 'done', context: { total: output.value } };
           },
         },
         done: { type: 'final' },
@@ -1324,7 +1683,7 @@ describe('type inference', () => {
     });
   });
 
-  test('no resultSchema → onDone result is inferred from invoke', () => {
+  test('no schemas.output → onDone output is inferred from invoke', () => {
     createAgentMachine({
       id: 't',
       context: () => ({}),
@@ -1332,10 +1691,10 @@ describe('type inference', () => {
       states: {
         work: {
           invoke: async () => ({ anything: true }),
-          onDone: ({ result }) => {
-            result.anything satisfies boolean;
+          onDone: ({ output }) => {
+            output.anything satisfies boolean;
             // @ts-expect-error — 'choice' does not exist on invoke result
-            result.choice;
+            output.choice;
             return { target: 'done' };
           },
         },
@@ -1479,8 +1838,9 @@ describe('edge cases', () => {
 describe('createAdapter', () => {
   test('creates custom adapter', () => {
     const a = createAdapter({
-      decide: async () => ({ choice: 'a', data: {} }),
+      generateText: async () => 'ok',
     });
-    expect(a.decide).toBeDefined();
+    expect(a.generateText).toBeDefined();
+    expect('decide' in a).toBe(false);
   });
 });

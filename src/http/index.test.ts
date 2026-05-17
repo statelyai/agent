@@ -66,17 +66,17 @@ describe('http adapter', () => {
           },
         },
         writing: {
-          resultSchema: z.object({
+          schemas: { output: z.object({
             text: z.string(),
-          }),
+          }) },
           invoke: async ({ context }, enq) => {
             enq.emit({ type: 'textPart', delta: context.text });
             return { text: context.text };
           },
-          onDone: ({ result }) => ({
+          onDone: ({ output }) => ({
             target: 'done',
             context: {
-              finalText: result.text,
+              finalText: output.text,
             },
           }),
         },

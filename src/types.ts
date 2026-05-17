@@ -39,6 +39,41 @@ export type AgentMessage = {
   [key: string]: unknown;
 };
 
+export type AgentTools = Record<string, unknown>;
+
+export type AgentToolChoice =
+  | string
+  | number
+  | boolean
+  | null
+  | readonly unknown[]
+  | { [key: string]: unknown };
+
+export type AgentResolverSnapshot<
+  TContext extends Record<string, unknown> = Record<string, unknown>,
+> = Omit<
+  AgentState<TContext>,
+  'model' | 'prompt' | 'system' | 'tools' | 'toolChoice'
+>;
+
+export type StateResolverArgs<
+  TContext extends Record<string, unknown>,
+  TInput = Record<string, unknown>,
+> = {
+  snapshot: AgentResolverSnapshot<TContext>;
+  context: TContext;
+  messages: AgentMessage[];
+  input: TInput;
+};
+
+export type ResolvableStateValue<
+  TValue,
+  TContext extends Record<string, unknown>,
+  TInput = Record<string, unknown>,
+> =
+  | TValue
+  | ((args: StateResolverArgs<TContext, TInput>) => TValue);
+
 export interface InvokeEnqueue {
   emit(part: EmittedPart): void;
 }
@@ -55,6 +90,18 @@ export type { JournalEventRecord, PersistedSnapshot, RunStore } from './runtime/
 // ─── Adapter ───
 
 export interface AgentAdapter {
+  generateText?: (options: {
+    model?: string;
+    system?: string;
+    prompt?: string;
+    messages: AgentMessage[];
+    tools?: AgentTools;
+    toolChoice?: unknown;
+    outputSchema?: StandardSchemaV1;
+  }) => Promise<unknown>;
+}
+
+export interface DecideAdapter {
   decide: (options: {
     model: string;
     prompt: string;
@@ -109,26 +156,28 @@ export interface StateConfig<
   TTarget extends string = string,
   TInputByTarget extends Record<string, any> = {},
 > {
-  type?: 'final' | 'choice';
-  inputSchema?: StandardSchemaV1;
-  resultSchema?: StandardSchemaV1;
+  type?: 'final';
+  schemas?: {
+    input?: StandardSchemaV1;
+    output?: StandardSchemaV1;
+  };
   invoke?: (args: {
     context: TContext;
     messages: AgentMessage[];
     input: Record<string, unknown>;
     signal?: AbortSignal;
   }, enq: InvokeEnqueue) => Promise<unknown>;
-  onDone?: (args: { result: any; context: TContext; messages: AgentMessage[] }) => TransitionResult<TContext, TTarget, TInputByTarget>;
+  onDone?: (args: { output: any; context: TContext; messages: AgentMessage[] }) => TransitionResult<TContext, TTarget, TInputByTarget>;
   always?: TransitionResult<TContext, TTarget, TInputByTarget> | ((args: { context: TContext; messages: AgentMessage[]; input: Record<string, unknown> }, enq: InvokeEnqueue) => TransitionResult<TContext, TTarget, TInputByTarget>);
   on?: Record<string, TransitionResult<TContext, TTarget, TInputByTarget> | ((args: { event: any; context: TContext; messages: AgentMessage[] }, enq: InvokeEnqueue) => TransitionResult<TContext, TTarget, TInputByTarget>)>;
   events?: Record<string, StandardSchemaV1>;
   output?: (args: { context: TContext; messages: AgentMessage[] }) => unknown;
-  // choice-specific
-  model?: string;
+  model?: ResolvableStateValue<string, TContext>;
   adapter?: AgentAdapter;
-  prompt?: string | ((args: { context: TContext; messages: AgentMessage[]; input: Record<string, unknown> }) => string);
-  options?: Record<string, { description: string; schema?: StandardSchemaV1 }>;
-  reasoning?: boolean;
+  prompt?: ResolvableStateValue<string, TContext>;
+  system?: ResolvableStateValue<string, TContext>;
+  tools?: ResolvableStateValue<AgentTools, TContext>;
+  toolChoice?: ResolvableStateValue<AgentToolChoice, TContext>;
 }
 
 type OutputForState<TState> = TState extends {
@@ -158,6 +207,11 @@ export interface AgentState<
   createdAt?: number;
   output?: TOutput;
   error?: unknown;
+  model?: string;
+  prompt?: string;
+  system?: string;
+  tools?: AgentTools;
+  toolChoice?: unknown;
 }
 
 // ─── Execute Result ───
@@ -320,6 +374,7 @@ export interface MachineConfig<
   context: (input: TInput) => TContext;
   messages?: AgentMessage[] | ((input: TInput) => AgentMessage[]);
   adapter?: AgentAdapter;
+  externalEvents?: readonly string[];
   initial:
     | (keyof TStates & string)
     | ((args: { context: TContext }) => { target: keyof TStates & string; input?: Record<string, unknown> });
@@ -339,7 +394,7 @@ export type DecideResultFor<
 export interface DecideOptions<
   TOptions extends Record<string, { description: string; schema?: StandardSchemaV1 }> = Record<string, { description: string; schema?: StandardSchemaV1 }>,
 > {
-  adapter?: AgentAdapter;
+  adapter?: DecideAdapter;
   model: string;
   prompt: string;
   options: TOptions;
@@ -355,7 +410,7 @@ export interface ClassifyResultFor<
 export interface ClassifyOptions<
   TCategories extends Record<string, { description: string }> = Record<string, { description: string }>,
 > {
-  adapter?: AgentAdapter;
+  adapter?: DecideAdapter;
   model: string;
   prompt: string;
   into: TCategories;

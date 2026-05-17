@@ -68,15 +68,15 @@ export function createRaffleExample(
         },
       },
       drawing: {
-        resultSchema: winnerSchema,
+        schemas: { output: winnerSchema },
         invoke: async ({ context }) => pickWinner(context.entries),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
           context: {
-            winner: result.winningEntry,
-            firstRunnerUp: result.firstRunnerUp,
-            secondRunnerUp: result.secondRunnerUp,
-            explanation: result.explanation,
+            winner: output.winningEntry,
+            firstRunnerUp: output.firstRunnerUp,
+            secondRunnerUp: output.secondRunnerUp,
+            explanation: output.explanation,
           },
         }),
       },

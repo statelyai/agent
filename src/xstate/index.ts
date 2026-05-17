@@ -77,10 +77,6 @@ export function toXStateVisualization(machine: AgentMachine): XStateMachineConfi
     }
 
     const meta: NonNullable<XStateStateConfig['meta']>['agent'] = {};
-    if (stateConfig.type === 'choice') {
-      meta.type = 'choice';
-    }
-
     if (stateConfig.invoke) {
       meta.invoke = true;
       xstateState.invoke = {

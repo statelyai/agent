@@ -3,7 +3,7 @@ import {
   createAgentMachine,
   decide,
   decideResultSchema,
-  type AgentAdapter,
+  type DecideAdapter,
 } from '../src/index.js';
 import {
   closePrompt,
@@ -47,7 +47,7 @@ const supervisorOptions = {
 
 export function createSupervisorExample(
   options: {
-    adapter?: AgentAdapter;
+    adapter?: DecideAdapter;
     handle?: (args: {
       request: string;
       attempt: number;
@@ -120,8 +120,7 @@ export function createSupervisorExample(
     }),
     states: {
       handling: {
-        inputSchema: handlingParamsSchema,
-        resultSchema: workerResultSchema,
+        schemas: { input: handlingParamsSchema, output: workerResultSchema },
         invoke: async ({ context, input }) =>
           handle({
             request: context.request,
@@ -129,18 +128,18 @@ export function createSupervisorExample(
             instruction: input.instruction ?? null,
             priorIssues: context.priorIssues,
           }),
-        onDone: ({ result, context, }) => {
+        onDone: ({ output, context, }) => {
           const nextAttemptCount = context.attemptCount + 1;
 
-          if (result.status === 'resolved') {
+          if (output.status === 'resolved') {
             return {
               target: 'done',
               context: {
                 attemptCount: nextAttemptCount,
-                resolution: result.response,
+                resolution: output.response,
                 history: [
                   ...context.history,
-                  `worker:${nextAttemptCount}:resolved:${result.response}`,
+                  `worker:${nextAttemptCount}:resolved:${output.response}`,
                 ],
               },
             };
@@ -150,18 +149,18 @@ export function createSupervisorExample(
             target: 'supervising',
             context: {
               attemptCount: nextAttemptCount,
-              latestIssue: result.issue,
-              priorIssues: [...context.priorIssues, result.issue],
+              latestIssue: output.issue,
+              priorIssues: [...context.priorIssues, output.issue],
               history: [
                 ...context.history,
-                `worker:${nextAttemptCount}:blocked:${result.issue}`,
+                `worker:${nextAttemptCount}:blocked:${output.issue}`,
               ],
             },
           };
         },
       },
       supervising: {
-        resultSchema: decideResultSchema(supervisorOptions),
+        schemas: { output: decideResultSchema(supervisorOptions) },
         invoke: async ({ context }) =>
           decide({
             adapter,
@@ -183,10 +182,10 @@ export function createSupervisorExample(
             ].join('\n'),
             options: supervisorOptions,
           }),
-        onDone: ({ result, context }) => {
-          if (result.choice === 'retry') {
+        onDone: ({ output, context }) => {
+          if (output.choice === 'retry') {
             const instruction =
-              result.data.instruction
+              output.data.instruction
               ?? 'Retry once with a more concrete plan and any available context.';
 
             return {
@@ -205,7 +204,7 @@ export function createSupervisorExample(
           }
 
           const reason =
-            result.data.reason
+            output.data.reason
             ?? `Escalated after ${context.attemptCount} unsuccessful attempts.`;
 
           return {

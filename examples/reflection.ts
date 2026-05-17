@@ -94,41 +94,41 @@ export function createReflectionExample(
     initial: 'drafting',
     states: {
       drafting: {
-        resultSchema: draftSchema,
+        schemas: { output: draftSchema },
         invoke: async ({ context }) => draft(context.task),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'reflecting',
-          context: { draft: result.draft },
+          context: { draft: output.draft },
         }),
       },
       reflecting: {
-        resultSchema: feedbackSchema,
+        schemas: { output: feedbackSchema },
         invoke: async ({ context }) =>
           reflect({
             task: context.task,
             draft: context.draft ?? '',
             revisionCount: context.revisionCount,
           }),
-        onDone: ({ result, context }) => ({
+        onDone: ({ output, context }) => ({
           target:
-            !result.feedback || context.revisionCount >= context.maxRevisions
+            !output.feedback || context.revisionCount >= context.maxRevisions
               ? 'done'
               : 'revising',
-          context: { feedback: result.feedback },
+          context: { feedback: output.feedback },
         }),
       },
       revising: {
-        resultSchema: draftSchema,
+        schemas: { output: draftSchema },
         invoke: async ({ context }) =>
           revise({
             task: context.task,
             draft: context.draft ?? '',
             feedback: context.feedback ?? '',
           }),
-        onDone: ({ result, context }) => ({
+        onDone: ({ output, context }) => ({
           target: 'reflecting',
           context: {
-            draft: result.draft,
+            draft: output.draft,
             revisionCount: context.revisionCount + 1,
           },
         }),

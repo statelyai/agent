@@ -1,6 +1,7 @@
 import type {
   AgentMessage,
   AgentState,
+  AgentToolChoice,
   InitialTransitionResult,
   MachineConfig,
   StandardSchemaResult,
@@ -47,7 +48,7 @@ export function resolveStateConfig(
 
 /** Loose state config for internal runtime use */
 export type StateConfigAny = {
-  type?: 'final' | 'choice';
+  type?: 'final';
   invoke?: (
     args: {
       context: Record<string, unknown>;
@@ -56,16 +57,47 @@ export type StateConfigAny = {
     },
     enq: { emit(part: { type: string; [key: string]: unknown }): void }
   ) => Promise<unknown>;
-  onDone?: (args: { result: unknown; context: Record<string, unknown>; messages: AgentMessage[] }) => TransitionResult;
+  onDone?: (args: { output: unknown; context: Record<string, unknown>; messages: AgentMessage[] }) => TransitionResult;
   always?: TransitionResult | ((args: { context: Record<string, unknown>; messages: AgentMessage[]; input: Record<string, unknown> }, enq: { emit(part: { type: string; [key: string]: unknown }): void }) => TransitionResult);
   on?: Record<string, TransitionResult | ((args: { event: Record<string, unknown>; context: Record<string, unknown>; messages: AgentMessage[] }, enq: { emit(part: { type: string; [key: string]: unknown }): void }) => TransitionResult)>;
   output?: (args: { context: Record<string, unknown>; messages: AgentMessage[] }) => unknown;
-  resultSchema?: StandardSchemaV1;
-  model?: string;
-  adapter?: { decide: (...args: unknown[]) => Promise<unknown> };
-  prompt?: string | ((args: { context: Record<string, unknown>; messages: AgentMessage[]; input: Record<string, unknown> }) => string);
-  options?: Record<string, { description: string; schema?: StandardSchemaV1 }>;
-  reasoning?: boolean;
+  schemas?: {
+    input?: StandardSchemaV1;
+    output?: StandardSchemaV1;
+  };
+  model?: string | ((args: {
+    snapshot: AgentState;
+    context: Record<string, unknown>;
+    messages: AgentMessage[];
+    input: Record<string, unknown>;
+  }) => string);
+  adapter?: {
+    generateText?: (...args: unknown[]) => Promise<unknown>;
+  };
+  prompt?: string | ((args: {
+    snapshot: AgentState;
+    context: Record<string, unknown>;
+    messages: AgentMessage[];
+    input: Record<string, unknown>;
+  }) => string);
+  system?: string | ((args: {
+    snapshot: AgentState;
+    context: Record<string, unknown>;
+    messages: AgentMessage[];
+    input: Record<string, unknown>;
+  }) => string);
+  tools?: Record<string, unknown> | ((args: {
+    snapshot: AgentState;
+    context: Record<string, unknown>;
+    messages: AgentMessage[];
+    input: Record<string, unknown>;
+  }) => Record<string, unknown>);
+  toolChoice?: AgentToolChoice | ((args: {
+    snapshot: AgentState;
+    context: Record<string, unknown>;
+    messages: AgentMessage[];
+    input: Record<string, unknown>;
+  }) => unknown);
   events?: Record<string, StandardSchemaV1>;
 };
 

@@ -1,8 +1,8 @@
 import { z } from 'zod';
-import { createAgentMachine } from '../src/index.js';
+import { createAgentMachine, type AgentAdapter } from '../src/index.js';
 import {
   closePrompt,
-  generateExampleObject,
+  createOpenAiGenerationAdapter,
   isMain,
   prompt,
 } from './_run.js';
@@ -22,11 +22,8 @@ const answerSchema = z.object({
 
 export function createRagExample(
   options: {
+    adapter?: AgentAdapter;
     retrieve?: (question: string) => Promise<z.infer<typeof retrievedDocumentsSchema>>;
-    answer?: (args: {
-      question: string;
-      documents: Array<z.infer<typeof retrievedDocumentSchema>>;
-    }) => Promise<z.infer<typeof answerSchema>>;
   } = {}
 ) {
   const retrieve =
@@ -45,25 +42,9 @@ export function createRagExample(
         ],
       }));
 
-  const answer =
-    options.answer ??
-    ((args: {
-      question: string;
-      documents: Array<z.infer<typeof retrievedDocumentSchema>>;
-    }) =>
-      generateExampleObject({
-        schema: answerSchema,
-        system: 'Answer the question using only the retrieved documents.',
-        prompt: [
-          `Question: ${args.question}`,
-          '',
-          'Documents:',
-          ...args.documents.map((document) => `- [${document.id}] ${document.content}`),
-        ].join('\n'),
-      }));
-
   return createAgentMachine({
     id: 'rag-example',
+    adapter: options.adapter ?? createOpenAiGenerationAdapter(),
     schemas: {
       input: z.object({
         question: z.string(),
@@ -82,23 +63,26 @@ export function createRagExample(
     initial: 'retrieving',
     states: {
       retrieving: {
-        resultSchema: retrievedDocumentsSchema,
+        schemas: { output: retrievedDocumentsSchema },
         invoke: async ({ context }) => retrieve(context.question),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'answering',
-          context: { documents: result.documents },
+          context: { documents: output.documents },
         }),
       },
       answering: {
-        resultSchema: answerSchema,
-        invoke: async ({ context }) =>
-          answer({
-            question: context.question,
-            documents: context.documents,
-          }),
-        onDone: ({ result }) => ({
+        schemas: { output: answerSchema },
+        system: 'Answer the question using only the retrieved documents.',
+        prompt: ({ context }) =>
+          [
+            `Question: ${context.question}`,
+            '',
+            'Documents:',
+            ...context.documents.map((document) => `- [${document.id}] ${document.content}`),
+          ].join('\n'),
+        onDone: ({ output }) => ({
           target: 'done',
-          context: { answer: result.answer },
+          context: { answer: output.answer },
         }),
       },
       done: {

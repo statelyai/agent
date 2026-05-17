@@ -20,13 +20,13 @@ test('supports human-in-the-loop review with explicit pending states and externa
     initial: 'drafting',
     states: {
       drafting: {
-        resultSchema: z.object({ draft: z.string() }),
+        schemas: { output: z.object({ draft: z.string() }) },
         invoke: async ({ context }) => ({
           draft: `Draft for ${context.task}${context.notes.length ? ` (${context.notes.join(', ')})` : ''}`,
         }),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'review',
-          context: { draft: result.draft },
+          context: { draft: output.draft },
         }),
       },
       review: {

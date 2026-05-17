@@ -3,7 +3,7 @@ import {
   createAgentMachine,
   decide,
   decideResultSchema,
-  type AgentAdapter,
+  type DecideAdapter,
 } from '../src/index.js';
 import {
   closePrompt,
@@ -13,7 +13,7 @@ import {
   prompt,
 } from './_run.js';
 
-export function createDecideExample(adapter: AgentAdapter = createOpenAiDecisionAdapter()) {
+export function createDecideExample(adapter: DecideAdapter = createOpenAiDecisionAdapter()) {
   const triageOptions = {
     reply: {
       description: 'Reply directly to the customer.',
@@ -46,7 +46,7 @@ export function createDecideExample(adapter: AgentAdapter = createOpenAiDecision
     initial: 'triage',
     states: {
       triage: {
-        resultSchema: decideResultSchema(triageOptions),
+        schemas: { output: decideResultSchema(triageOptions) },
         invoke: async ({ context }) =>
           decide({
             adapter,
@@ -59,11 +59,11 @@ export function createDecideExample(adapter: AgentAdapter = createOpenAiDecision
             ].join('\n'),
             options: triageOptions,
           }),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
           context: {
-            action: result.choice,
-            payload: result.data,
+            action: output.choice,
+            payload: output.data,
           },
         }),
       },

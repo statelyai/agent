@@ -9,9 +9,14 @@ test('rag workflow retrieves documents and synthesizes a grounded answer', async
         { id: 'doc-2', content: `${question} :: second fact` },
       ],
     }),
-    answer: async ({ question, documents }) => ({
-      answer: `${question} => ${documents.map((document) => document.content).join(' | ')}`,
-    }),
+    adapter: {
+      generateText: async ({ prompt }) => ({
+        answer: String(prompt)
+          .replace('Question: ', '')
+          .replace('\n\nDocuments:\n- [doc-1] ', ' => ')
+          .replace('\n- [doc-2] ', ' | '),
+      }),
+    },
   });
 
   const result = await machine.execute(

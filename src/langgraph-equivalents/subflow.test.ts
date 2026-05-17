@@ -15,13 +15,13 @@ test('supports subflow composition by executing a child machine inside a parent 
     initial: 'researching',
     states: {
       researching: {
-        resultSchema: z.object({ bullets: z.array(z.string()) }),
+        schemas: { output: z.object({ bullets: z.array(z.string()) }) },
         invoke: async ({ context }) => ({
           bullets: [`fact about ${context.topic}`, `another fact about ${context.topic}`],
         }),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
-          context: { bullets: result.bullets },
+          context: { bullets: output.bullets },
         }),
       },
       done: {
@@ -44,7 +44,7 @@ test('supports subflow composition by executing a child machine inside a parent 
     initial: 'researching',
     states: {
       researching: {
-        resultSchema: z.object({ bullets: z.array(z.string()) }),
+        schemas: { output: z.object({ bullets: z.array(z.string()) }) },
         invoke: async ({ context }) => {
           const result = await childMachine.execute(
             childMachine.getInitialState({ topic: context.topic })
@@ -58,19 +58,19 @@ test('supports subflow composition by executing a child machine inside a parent 
             bullets: (result.output as { bullets: string[] }).bullets,
           };
         },
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'writing',
-          context: { bullets: result.bullets },
+          context: { bullets: output.bullets },
         }),
       },
       writing: {
-        resultSchema: z.object({ draft: z.string() }),
+        schemas: { output: z.object({ draft: z.string() }) },
         invoke: async ({ context }) => ({
           draft: `${context.topic}: ${context.bullets.join('; ')}`,
         }),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
-          context: { draft: result.draft },
+          context: { draft: output.draft },
         }),
       },
       done: {

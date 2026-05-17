@@ -3,7 +3,7 @@ import {
   createAgentMachine,
   classify,
   classifyResultSchema,
-  type AgentAdapter,
+  type DecideAdapter,
 } from '../src/index.js';
 import {
   closePrompt,
@@ -14,7 +14,7 @@ import {
 } from './_run.js';
 
 export function createClassifyExample(
-  adapter: AgentAdapter = createOpenAiDecisionAdapter()
+  adapter: DecideAdapter = createOpenAiDecisionAdapter()
 ) {
   const categories = {
     billing: { description: 'Payments, invoices, refunds, and charges.' },
@@ -35,7 +35,7 @@ export function createClassifyExample(
     initial: 'routing',
     states: {
       routing: {
-        resultSchema: classifyResultSchema(categories),
+        schemas: { output: classifyResultSchema(categories) },
         invoke: async ({ context }) =>
           classify({
             adapter,
@@ -43,9 +43,9 @@ export function createClassifyExample(
             prompt: `Classify this support request:\n\n${context.request}`,
             into: categories,
           }),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
-          context: { category: result.category },
+          context: { category: output.category },
         }),
       },
       done: {

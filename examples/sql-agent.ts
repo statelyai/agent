@@ -5,7 +5,7 @@ import {
   decide,
   decideResultSchema,
   startSession,
-  type AgentAdapter,
+  type DecideAdapter,
 } from '../src/index.js';
 import {
   closePrompt,
@@ -49,7 +49,7 @@ const queryExecutionSchema = z.discriminatedUnion('status', [
 
 export function createSqlAgentExample(
   options: {
-    adapter?: AgentAdapter;
+    adapter?: DecideAdapter;
     executeQuery?: (args: {
       question: string;
       schema: string;
@@ -135,7 +135,7 @@ export function createSqlAgentExample(
     initial: 'planning',
     states: {
       planning: {
-        resultSchema: decideResultSchema(planningOptions),
+        schemas: { output: decideResultSchema(planningOptions) },
         invoke: async ({ context }) =>
           decide({
             adapter,
@@ -159,12 +159,12 @@ export function createSqlAgentExample(
             ].join('\n'),
             options: planningOptions,
           }),
-        onDone: ({ result }) => {
-          if (result.choice === 'query') {
+        onDone: ({ output }) => {
+          if (output.choice === 'query') {
             return {
               target: 'querying',
               input: {
-                query: result.data.query,
+                query: output.data.query,
               },
             };
           }
@@ -172,16 +172,15 @@ export function createSqlAgentExample(
           return {
             target: 'done',
             context: {
-              answer: result.data.answer,
+              answer: output.data.answer,
             },
           };
         },
       },
       querying: {
-        inputSchema: z.object({
+        schemas: { input: z.object({
           query: z.string(),
-        }),
-        resultSchema: queryExecutionSchema,
+        }), output: queryExecutionSchema },
         invoke: async ({ context, input }, enq) => {
           enq.emit({
             type: 'toolCall',
@@ -217,15 +216,15 @@ export function createSqlAgentExample(
 
           return resolvedOutput;
         },
-        onDone: ({ result, context }) => ({
+        onDone: ({ output, context }) => ({
           target: 'planning',
           context: {
             queryHistory: [
               ...context.queryHistory,
-              result.query,
+              output.query,
             ],
-            latestRows: result.status === 'success' ? result.rows : null,
-            latestError: result.status === 'error' ? result.error : null,
+            latestRows: output.status === 'success' ? output.rows : null,
+            latestError: output.status === 'error' ? output.error : null,
           },
         }),
       },

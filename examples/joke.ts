@@ -1,9 +1,9 @@
 import { z } from 'zod';
-import { createAgentMachine } from '../src/index.js';
+import { createAgentMachine, type AgentAdapter } from '../src/index.js';
 import {
   closePrompt,
+  createOpenAiGenerationAdapter,
   formatResult,
-  generateExampleObject,
   isMain,
   prompt,
 } from './_run.js';
@@ -18,38 +18,11 @@ const ratingSchema = z.object({
 });
 
 export function createJokeExample(
-  options: {
-    tellJoke?: (topic: string) => Promise<z.infer<typeof jokeSchema>>;
-    rateJoke?: (
-      topic: string,
-      joke: string
-    ) => Promise<z.infer<typeof ratingSchema>>;
-  } = {}
+  adapter: AgentAdapter = createOpenAiGenerationAdapter()
 ) {
-  const tellJoke =
-    options.tellJoke ??
-    ((topic: string) =>
-      generateExampleObject({
-        schema: jokeSchema,
-        system: 'You write short, clean jokes.',
-        prompt: `Write one short joke about ${topic}.`,
-      }));
-  const rateJoke =
-    options.rateJoke ??
-    ((topic: string, joke: string) =>
-      generateExampleObject({
-        schema: ratingSchema,
-        system: 'You are a joke critic. Be fair and concise.',
-        prompt: [
-          `Topic: ${topic}`,
-          `Joke: ${joke}`,
-          '',
-          'Rate the joke from 1 to 10 and explain briefly.',
-        ].join('\n'),
-      }));
-
   return createAgentMachine({
     id: 'joke-example',
+    adapter,
     schemas: {
       input: z.object({ topic: z.string() }),
       output: z.object({
@@ -70,22 +43,30 @@ export function createJokeExample(
     initial: 'telling',
     states: {
       telling: {
-        resultSchema: jokeSchema,
-        invoke: async ({ context }) => tellJoke(context.topic),
-        onDone: ({ result }) => ({
+        schemas: { output: jokeSchema },
+        system: 'You write short, clean jokes.',
+        prompt: ({ context }) => `Write one short joke about ${context.topic}.`,
+        onDone: ({ output }) => ({
           target: 'rating',
-          context: { joke: result.joke },
+          context: { joke: output.joke },
         }),
       },
       rating: {
-        resultSchema: ratingSchema,
-        invoke: async ({ context }) => rateJoke(context.topic, context.joke ?? ''),
-        onDone: ({ result }) => ({
+        schemas: { output: ratingSchema },
+        system: 'You are a joke critic. Be fair and concise.',
+        prompt: ({ context }) =>
+          [
+            `Topic: ${context.topic}`,
+            `Joke: ${context.joke ?? ''}`,
+            '',
+            'Rate the joke from 1 to 10 and explain briefly.',
+          ].join('\n'),
+        onDone: ({ output }) => ({
           target: 'done',
           context: {
-            rating: result.rating,
-            explanation: result.explanation,
-            accepted: result.rating >= 7,
+            rating: output.rating,
+            explanation: output.explanation,
+            accepted: output.rating >= 7,
           },
         }),
       },

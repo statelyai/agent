@@ -63,15 +63,15 @@ export function createPersistenceExample(
         },
       },
       summarizing: {
-        resultSchema: summarySchema,
+        schemas: { output: summarySchema },
         invoke: async ({ context }) =>
           summarize({
             request: context.request,
             approved: context.approved,
           }),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
-          context: { summary: result.summary },
+          context: { summary: output.summary },
         }),
       },
       done: {

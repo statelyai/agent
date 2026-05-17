@@ -1,9 +1,9 @@
 import { z } from 'zod';
-import { createAgentMachine } from '../src/index.js';
+import { createAgentMachine, type AgentAdapter } from '../src/index.js';
 import {
   closePrompt,
+  createOpenAiGenerationAdapter,
   formatResult,
-  generateExampleObject,
   isMain,
   prompt,
 } from './_run.js';
@@ -13,17 +13,11 @@ const summarySchema = z.object({
 });
 
 export function createSimpleExample(
-  summarize: (text: string) => Promise<z.infer<typeof summarySchema>> = async (
-    text
-  ) => {
-    return generateExampleObject({
-      schema: summarySchema,
-      prompt: `Summarize this text in one sentence:\n\n${text}`,
-    });
-  }
+  adapter: AgentAdapter = createOpenAiGenerationAdapter()
 ) {
   return createAgentMachine({
     id: 'simple-example',
+    adapter,
     schemas: {
       input: z.object({ text: z.string() }),
       output: z.object({ summary: z.string().nullable() }),
@@ -35,11 +29,12 @@ export function createSimpleExample(
     initial: 'summarizing',
     states: {
       summarizing: {
-        resultSchema: summarySchema,
-        invoke: async ({ context }) => summarize(context.text),
-        onDone: ({ result }) => ({
+        schemas: { output: summarySchema },
+        prompt: ({ context }) =>
+          `Summarize this text in one sentence:\n\n${context.text}`,
+        onDone: ({ output }) => ({
           target: 'done',
-          context: { summary: result.summary },
+          context: { summary: output.summary },
         }),
       },
       done: {

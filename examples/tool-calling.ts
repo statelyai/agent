@@ -72,7 +72,7 @@ export function createToolCallingExample(
     initial: 'checkingWeather',
     states: {
       checkingWeather: {
-        resultSchema: forecastSchema,
+        schemas: { output: forecastSchema },
         invoke: async ({ context }, enq) => {
           enq.emit({
             type: 'toolCall',
@@ -95,9 +95,9 @@ export function createToolCallingExample(
 
           return output;
         },
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
-          context: { forecast: result.forecast },
+          context: { forecast: output.forecast },
         }),
       },
       done: {

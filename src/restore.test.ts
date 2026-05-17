@@ -22,13 +22,13 @@ test('restoreSession reconstructs from the latest snapshot plus replay tail', as
         },
       },
       processing: {
-        resultSchema: z.object({ value: z.string() }),
+        schemas: { output: z.object({ value: z.string() }) },
         invoke: async ({ context }) => ({
           value: context.approved ? 'approved' : 'rejected',
         }),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
-          context: { result: result.value },
+          context: { result: output.value },
         }),
       },
       done: {

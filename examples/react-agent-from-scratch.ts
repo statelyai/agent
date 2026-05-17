@@ -100,7 +100,7 @@ export function createReactAgentFromScratch(options: {
     initial: 'agent',
     states: {
       agent: {
-        resultSchema: modelResultSchema,
+        schemas: { output: modelResultSchema },
         invoke: async ({ context }, enq) => {
           if (context.stepCount >= maxSteps) {
             return {
@@ -120,8 +120,8 @@ export function createReactAgentFromScratch(options: {
 
           return result;
         },
-        onDone: ({ result, context }) => {
-          if (result.kind === 'final') {
+        onDone: ({ output, context }) => {
+          if (output.kind === 'final') {
             return {
               target: 'done' as const,
               context: {
@@ -130,7 +130,7 @@ export function createReactAgentFromScratch(options: {
                   ...context.messages,
                   {
                     role: 'assistant',
-                    content: result.message,
+                    content: output.message,
                   } satisfies ReactAgentMessage,
                 ],
               },
@@ -142,35 +142,34 @@ export function createReactAgentFromScratch(options: {
             context: {
               stepCount: context.stepCount + 1,
               pendingToolCall: {
-                toolName: result.toolName,
-                input: result.input,
+                toolName: output.toolName,
+                input: output.input,
               },
               messages: [
                 ...context.messages,
                 {
                   role: 'assistant',
                   content:
-                    result.message
-                    ?? `Calling tool ${result.toolName} with ${JSON.stringify(result.input)}`,
+                    output.message
+                    ?? `Calling tool ${output.toolName} with ${JSON.stringify(output.input)}`,
                 } satisfies ReactAgentMessage,
               ],
             },
             input: {
-              toolName: result.toolName,
-              input: result.input,
+              toolName: output.toolName,
+              input: output.input,
             },
           };
         },
       },
       tool: {
-        inputSchema: z.object({
+        schemas: { input: z.object({
           toolName: z.string(),
           input: z.record(z.string(), z.unknown()),
-        }),
-        resultSchema: z.object({
+        }), output: z.object({
           toolName: z.string(),
           output: z.unknown(),
-        }),
+        }) },
         invoke: async ({ input }, enq) => {
           const tool = toolsByName.get(input.toolName);
 
@@ -197,7 +196,7 @@ export function createReactAgentFromScratch(options: {
             output,
           };
         },
-        onDone: ({ result, context }) => ({
+        onDone: ({ output, context }) => ({
           target: 'agent' as const,
           context: {
             pendingToolCall: null,
@@ -205,8 +204,8 @@ export function createReactAgentFromScratch(options: {
               ...context.messages,
               {
                 role: 'tool',
-                name: result.toolName,
-                content: serializeToolOutput(result.output),
+                name: output.toolName,
+                content: serializeToolOutput(output.output),
               } satisfies ReactAgentMessage,
             ],
           },

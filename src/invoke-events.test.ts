@@ -24,11 +24,11 @@ test('invoke success is journaled as an internal machine event', async () => {
     initial: 'processing',
     states: {
       processing: {
-        resultSchema: z.object({ value: z.string() }),
+        schemas: { output: z.object({ value: z.string() }) },
         invoke: async () => ({ value: 'ok' }),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
-          context: { result: result.value },
+          context: { result: output.value },
         }),
       },
       done: {
@@ -105,7 +105,7 @@ test('invalid invoke results fail without journaling a done event', async () => 
     initial: 'processing',
     states: {
       processing: {
-        resultSchema: z.object({ value: z.string() }),
+        schemas: { output: z.object({ value: z.string() }) },
         invoke: async () => ({ value: 42 } as unknown as { value: string }),
       },
     },

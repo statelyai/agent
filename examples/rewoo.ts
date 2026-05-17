@@ -136,22 +136,21 @@ export function createRewooExample(
     initial: 'planning',
     states: {
       planning: {
-        resultSchema: rewooPlanSchema,
+        schemas: { output: rewooPlanSchema },
         invoke: async ({ context }) => plan(context.objective),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'executing',
-          context: { steps: result.steps },
+          context: { steps: output.steps },
           input: { index: 0 },
         }),
       },
       executing: {
-        inputSchema: z.object({
+        schemas: { input: z.object({
           index: z.number().int().min(0),
-        }),
-        resultSchema: z.object({
+        }), output: z.object({
           stepId: z.string(),
           result: z.string(),
-        }),
+        }) },
         invoke: async ({ context, input }) => {
           const step = context.steps[input.index];
 
@@ -172,10 +171,10 @@ export function createRewooExample(
             result: outcome.result,
           };
         },
-        onDone: ({ result, context }) => {
+        onDone: ({ output, context }) => {
           const nextResultsById = {
             ...context.resultsById,
-            [result.stepId]: result.result,
+            [output.stepId]: output.result,
           };
           const nextIndex = Object.keys(nextResultsById).length;
 
@@ -194,16 +193,16 @@ export function createRewooExample(
         },
       },
       solving: {
-        resultSchema: rewooAnswerSchema,
+        schemas: { output: rewooAnswerSchema },
         invoke: async ({ context }) =>
           solve({
             objective: context.objective,
             steps: context.steps,
             resultsById: context.resultsById,
           }),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
-          context: { answer: result.answer },
+          context: { answer: output.answer },
         }),
       },
       done: {

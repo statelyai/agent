@@ -30,15 +30,15 @@ test('streams live invoke output while preserving durable state history', async 
     initial: 'write',
     states: {
       write: {
-        resultSchema: z.object({ text: z.string() }),
+        schemas: { output: z.object({ text: z.string() }) },
         invoke: async (_args, enq) => {
           enq.emit({ type: 'textPart', delta: 'hello' });
           enq.emit({ type: 'textPart', delta: ' world' });
           return { text: 'hello world' };
         },
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
-          context: { text: result.text },
+          context: { text: output.text },
         }),
       },
       done: {

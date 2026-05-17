@@ -87,12 +87,12 @@ export function createCustomerServiceSimExample(
     initial: 'service',
     states: {
       service: {
-        resultSchema: serviceReplySchema,
+        schemas: { output: serviceReplySchema },
         invoke: async ({ context }) => serviceReply(context),
-        onDone: ({ result, context }) => ({
+        onDone: ({ output, context }) => ({
           target: context.turnCount + 1 >= context.maxTurns ? 'done' : 'customer',
           context: {
-            transcript: [...context.transcript, `Agent: ${result.response}`],
+            transcript: [...context.transcript, `Agent: ${output.response}`],
             outcome:
               context.turnCount + 1 >= context.maxTurns
                 ? 'max-turns-reached'
@@ -101,14 +101,14 @@ export function createCustomerServiceSimExample(
         }),
       },
       customer: {
-        resultSchema: customerReplySchema,
+        schemas: { output: customerReplySchema },
         invoke: async ({ context }) => customerReply(context),
-        onDone: ({ result, context }) => ({
-          target: result.done ? 'done' : 'service',
+        onDone: ({ output, context }) => ({
+          target: output.done ? 'done' : 'service',
           context: {
-            transcript: [...context.transcript, `Customer: ${result.response}`],
+            transcript: [...context.transcript, `Customer: ${output.response}`],
             turnCount: context.turnCount + 1,
-            outcome: result.outcome,
+            outcome: output.outcome,
           },
         }),
       },

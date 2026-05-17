@@ -98,7 +98,7 @@ export function createSpecAgentLoopExample(
     initial: 'generating',
     states: {
       generating: {
-        resultSchema: generationSchema,
+        schemas: { output: generationSchema },
         invoke: async ({ context, messages }) =>
           parseTaggedResponse(
             await generate({
@@ -106,22 +106,22 @@ export function createSpecAgentLoopExample(
               messages,
             })
           ),
-        onDone: ({ result, messages }) => ({
-          target: result.specYaml ? 'validating' : 'repairing',
+        onDone: ({ output, messages }) => ({
+          target: output.specYaml ? 'validating' : 'repairing',
           context: {
-            specYaml: result.specYaml,
-            questions: result.questions,
-            status: result.status,
+            specYaml: output.specYaml,
+            questions: output.questions,
+            status: output.status,
           },
-          messages: appendMessages(messages, assistantMessage(result.rawText)),
+          messages: appendMessages(messages, assistantMessage(output.rawText)),
         }),
       },
       validating: {
-        resultSchema: validationSchema,
+        schemas: { output: validationSchema },
         invoke: async ({ context }) => validate(context.specYaml),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'routing',
-          context: { validation: result },
+          context: { validation: output },
         }),
       },
       routing: {

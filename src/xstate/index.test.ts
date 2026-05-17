@@ -33,12 +33,11 @@ test('exports a serializable XState config for visualization', () => {
         },
       },
       working: {
-        inputSchema: z.object({
+        schemas: { input: z.object({
           index: z.number(),
-        }),
-        resultSchema: z.object({
+        }), output: z.object({
           ok: z.boolean(),
-        }),
+        }) },
         invoke: async () => ({ ok: true }),
         onDone: () => ({
           target: 'done',

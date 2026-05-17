@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import type {
   AgentAdapter,
+  DecideAdapter,
   ExecuteResult,
   StandardSchemaV1,
 } from '../src/index.js';
@@ -98,7 +99,7 @@ export function formatResult(result: ExecuteResult<any, any, any>) {
   };
 }
 
-export function createOpenAiDecisionAdapter(): AgentAdapter {
+export function createOpenAiDecisionAdapter(): DecideAdapter {
   return {
     async decide({ model, prompt, options, reasoning }) {
       const optionKeys = Object.keys(options);
@@ -106,7 +107,7 @@ export function createOpenAiDecisionAdapter(): AgentAdapter {
       const allSchemaLess = Object.values(options).every((option) => !option.schema);
 
       if (allSchemaLess && !reasoning) {
-      const choiceResult = await generateText({
+        const choiceResult = await generateText({
           model: createExampleModel(model),
           system: [
             'Choose exactly one option.',
@@ -169,6 +170,29 @@ export function createOpenAiDecisionAdapter(): AgentAdapter {
         data: output.data,
         reasoning: output.reasoning,
       };
+    },
+  };
+}
+
+export function createOpenAiGenerationAdapter(): AgentAdapter {
+  return {
+    async generateText({ model, system, prompt, messages, outputSchema }) {
+      const result = await generateText({
+        model: createExampleModel(model),
+        system,
+        prompt,
+        messages: messages as any,
+        ...(outputSchema
+          ? {
+            output: Output.object({
+              schema: toZodSchema(outputSchema),
+            }),
+          }
+          : {}),
+      });
+
+      const output = result as { output?: unknown; text?: string };
+      return output.output ?? output.text ?? result;
     },
   };
 }

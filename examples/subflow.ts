@@ -38,7 +38,7 @@ export function createSubflowExample(
     initial: 'researching',
     states: {
       researching: {
-        resultSchema: researchSchema,
+        schemas: { output: researchSchema },
         invoke: async ({ context }) =>
           (options.research
             ?? ((topic) =>
@@ -47,9 +47,9 @@ export function createSubflowExample(
                 system: 'You research a topic and return concise bullet points.',
                 prompt: `Return 2 to 4 concise research bullets about ${topic}.`,
               })))(context.topic),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
-          context: { bullets: result.bullets },
+          context: { bullets: output.bullets },
         }),
       },
       done: {
@@ -76,7 +76,7 @@ export function createSubflowExample(
     initial: 'researching',
     states: {
       researching: {
-        resultSchema: researchSchema,
+        schemas: { output: researchSchema },
         invoke: async ({ context }) => {
           const result = await childMachine.execute(
             childMachine.getInitialState({ topic: context.topic })
@@ -90,13 +90,13 @@ export function createSubflowExample(
             bullets: result.output.bullets,
           };
         },
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'writing',
-          context: { bullets: result.bullets },
+          context: { bullets: output.bullets },
         }),
       },
       writing: {
-        resultSchema: draftSchema,
+        schemas: { output: draftSchema },
         invoke: async ({ context }) =>
           (options.write
             ?? (({ topic, bullets }) =>
@@ -112,9 +112,9 @@ export function createSubflowExample(
             topic: context.topic,
             bullets: context.bullets,
           }),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
-          context: { draft: result.draft },
+          context: { draft: output.draft },
         }),
       },
       done: {

@@ -50,14 +50,14 @@ export function createPersistentStreamingExample(
     initial: 'writing',
     states: {
       writing: {
-        resultSchema: textSchema,
+        schemas: { output: textSchema },
         invoke: async (_args, enq) =>
           writeText((delta) => {
             enq.emit({ type: 'textPart', delta });
           }),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
-          context: { finalText: result.text },
+          context: { finalText: output.text },
         }),
       },
       done: {

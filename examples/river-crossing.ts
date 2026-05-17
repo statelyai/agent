@@ -111,17 +111,17 @@ export function createRiverCrossingExample() {
     initial: 'choosing',
     states: {
       choosing: {
-        resultSchema: crossingMoveSchema,
+        schemas: { output: crossingMoveSchema },
         invoke: async ({ context }) =>
           chooseCrossingMove(
             [...context.leftBank],
             [...context.rightBank],
             context.farmerPosition
           ),
-        onDone: ({ result, context }) => {
-          const nextReasoning = [...context.reasoning, result.reasoning];
+        onDone: ({ output, context }) => {
+          const nextReasoning = [...context.reasoning, output.reasoning];
 
-          if (result.move === 'done') {
+          if (output.move === 'done') {
             return {
               target: 'done' as const,
               context: { reasoning: nextReasoning },
@@ -130,16 +130,15 @@ export function createRiverCrossingExample() {
 
           return {
             target: 'moving' as const,
-            input: { move: result.move },
+            input: { move: output.move },
             context: { reasoning: nextReasoning },
           };
         },
       },
       moving: {
-        inputSchema: z.object({
+        schemas: { input: z.object({
           move: crossingMoveSchema.shape.move.exclude(['done']),
-        }),
-        resultSchema: crossingStateSchema,
+        }), output: crossingStateSchema },
         invoke: async ({ context, input }) =>
           moveItem(
             [...context.leftBank],
@@ -147,13 +146,13 @@ export function createRiverCrossingExample() {
             context.farmerPosition,
             input.move as 'takeGoat' | 'takeWolf' | 'takeCabbage' | 'returnEmpty'
           ),
-        onDone: ({ result, context }) => ({
+        onDone: ({ output, context }) => ({
           target: 'choosing',
           context: {
-            leftBank: result.leftBank,
-            rightBank: result.rightBank,
-            farmerPosition: result.farmerPosition,
-            steps: [...context.steps, result.step],
+            leftBank: output.leftBank,
+            rightBank: output.rightBank,
+            farmerPosition: output.farmerPosition,
+            steps: [...context.steps, output.step],
           },
         }),
       },

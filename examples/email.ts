@@ -5,7 +5,7 @@ import {
   decide,
   decideResultSchema,
   startSession,
-  type AgentAdapter,
+  type DecideAdapter,
 } from '../src/index.js';
 import {
   closePrompt,
@@ -29,7 +29,7 @@ type EmailTools = {
 
 export function createEmailExample(
   options: {
-    adapter?: AgentAdapter;
+    adapter?: DecideAdapter;
     tools?: Partial<EmailTools>;
     compose?: (
       input: {
@@ -146,7 +146,7 @@ export function createEmailExample(
     initial: 'checking',
     states: {
       checking: {
-        resultSchema: decideResultSchema(checkingOptions),
+        schemas: { output: decideResultSchema(checkingOptions) },
         invoke: async ({ context }) =>
           decide({
             adapter,
@@ -161,14 +161,14 @@ export function createEmailExample(
             ].join('\n'),
             options: checkingOptions,
           }),
-        onDone: ({ result, context }) => {
+        onDone: ({ output, context }) => {
           if (
-            result.choice === 'askForClarification'
+            output.choice === 'askForClarification'
             && context.clarifications.length === 0
           ) {
             return {
               target: 'clarifying',
-              context: { questions: result.data.questions },
+              context: { questions: output.data.questions },
             };
           }
 
@@ -190,7 +190,7 @@ export function createEmailExample(
         },
       },
       drafting: {
-        resultSchema: draftSchema,
+        schemas: { output: draftSchema },
         invoke: async ({ context }) => {
           const contactName = await tools.lookupContactName(context.email);
           const availability = await tools.lookupAvailability();
@@ -205,9 +205,9 @@ export function createEmailExample(
             signature,
           });
         },
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
-          context: { replyEmail: result.replyEmail },
+          context: { replyEmail: output.replyEmail },
         }),
       },
       done: {

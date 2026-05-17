@@ -5,7 +5,7 @@ import {
   decide,
   decideResultSchema,
   startSession,
-  type AgentAdapter,
+  type DecideAdapter,
 } from '../src/index.js';
 import {
   closePrompt,
@@ -22,7 +22,7 @@ const replySchema = z.object({
 
 export function createChatbotExample(
   options: {
-    adapter?: AgentAdapter;
+    adapter?: DecideAdapter;
     reply?: (transcript: string[]) => Promise<z.infer<typeof replySchema>>;
   } = {}
 ) {
@@ -85,7 +85,7 @@ export function createChatbotExample(
         },
       },
       deciding: {
-        resultSchema: decideResultSchema(decisionOptions),
+        schemas: { output: decideResultSchema(decisionOptions) },
         invoke: async ({ context }) =>
           decide({
             adapter,
@@ -98,19 +98,19 @@ export function createChatbotExample(
             ].join('\n'),
             options: decisionOptions,
           }),
-        onDone: ({ result }) => ({
-          target: result.choice === 'end' ? 'done' : 'replying',
-          context: result.choice === 'end' ? { ended: true } : {},
+        onDone: ({ output }) => ({
+          target: output.choice === 'end' ? 'done' : 'replying',
+          context: output.choice === 'end' ? { ended: true } : {},
         }),
       },
       replying: {
-        resultSchema: replySchema,
+        schemas: { output: replySchema },
         invoke: async ({ context }) => reply(context.transcript),
-        onDone: ({ result, context }) => ({
+        onDone: ({ output, context }) => ({
           target: 'listening',
           context: {
-            lastAssistantMessage: result.response,
-            transcript: [...context.transcript, `Assistant: ${result.response}`],
+            lastAssistantMessage: output.response,
+            transcript: [...context.transcript, `Assistant: ${output.response}`],
           },
         }),
       },

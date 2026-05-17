@@ -118,22 +118,22 @@ export function createWriteABookFlowExample(options: {
     initial: 'outlining',
     states: {
       outlining: {
-        resultSchema: outlineSchema,
+        schemas: { output: outlineSchema },
         invoke: async ({ context }) =>
           createOutline({
             topic: context.topic,
             goal: context.goal,
           }),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'writing',
           context: {
-            title: result.title,
-            outline: result.chapters,
+            title: output.title,
+            outline: output.chapters,
           },
         }),
       },
       writing: {
-        resultSchema: chapterBatchSchema,
+        schemas: { output: chapterBatchSchema },
         invoke: async ({ context }) => {
           const chapters = await Promise.all(
             context.outline.map((chapter) =>
@@ -148,24 +148,24 @@ export function createWriteABookFlowExample(options: {
 
           return { chapters };
         },
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'compiling',
           context: {
-            chapters: result.chapters,
+            chapters: output.chapters,
           },
         }),
       },
       compiling: {
-        resultSchema: manuscriptSchema,
+        schemas: { output: manuscriptSchema },
         invoke: async ({ context }) =>
           compileManuscript({
             title: context.title ?? 'Untitled Book',
             chapters: context.chapters,
           }),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
           context: {
-            manuscript: result.manuscript,
+            manuscript: output.manuscript,
           },
         }),
       },

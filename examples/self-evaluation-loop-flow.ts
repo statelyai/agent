@@ -73,32 +73,32 @@ export function createSelfEvaluationLoopFlowExample(options: {
     initial: 'generating',
     states: {
       generating: {
-        resultSchema: postSchema,
+        schemas: { output: postSchema },
         invoke: async ({ context }) =>
           generatePost({
             topic: context.topic,
             feedback: context.feedback,
             attempt: context.attempt,
           }),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'evaluating',
           context: {
-            post: result.post,
+            post: output.post,
           },
         }),
       },
       evaluating: {
-        resultSchema: evaluationSchema,
+        schemas: { output: evaluationSchema },
         invoke: async ({ context }) => evaluatePost(context.post ?? ''),
-        onDone: ({ result, context }) => ({
+        onDone: ({ output, context }) => ({
           target:
-            result.valid || context.attempt >= context.maxAttempts
+            output.valid || context.attempt >= context.maxAttempts
               ? 'done'
               : 'generating',
           context: {
-            valid: result.valid,
-            feedback: result.feedback,
-            attempt: result.valid
+            valid: output.valid,
+            feedback: output.feedback,
+            attempt: output.valid
               ? context.attempt
               : context.attempt + 1,
           },

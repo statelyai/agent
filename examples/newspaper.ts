@@ -111,49 +111,49 @@ export function createNewspaperExample(
     initial: 'searching',
     states: {
       searching: {
-        resultSchema: searchSchema,
+        schemas: { output: searchSchema },
         invoke: async ({ context }) => search(context.topic),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'curating',
-          context: { searchResults: result.searchResults },
+          context: { searchResults: output.searchResults },
         }),
       },
       curating: {
-        resultSchema: searchSchema,
+        schemas: { output: searchSchema },
         invoke: async ({ context }) => curate(context.topic, context.searchResults),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'writing',
-          context: { searchResults: result.searchResults },
+          context: { searchResults: output.searchResults },
         }),
       },
       writing: {
-        resultSchema: articleSchema,
+        schemas: { output: articleSchema },
         invoke: async ({ context }) => write(context.topic, context.searchResults),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'critiquing',
-          context: { article: result.article },
+          context: { article: output.article },
         }),
       },
       critiquing: {
-        resultSchema: critiqueSchema,
+        schemas: { output: critiqueSchema },
         invoke: async ({ context }) =>
           critique(context.article ?? '', context.revisionCount),
-        onDone: ({ result, context }) => ({
+        onDone: ({ output, context }) => ({
           target:
-            !result.critique || context.revisionCount >= context.maxRevisions
+            !output.critique || context.revisionCount >= context.maxRevisions
               ? 'done'
               : 'revising',
-          context: { critique: result.critique },
+          context: { critique: output.critique },
         }),
       },
       revising: {
-        resultSchema: articleSchema,
+        schemas: { output: articleSchema },
         invoke: async ({ context }) =>
           revise(context.article ?? '', context.critique ?? ''),
-        onDone: ({ result, context }) => ({
+        onDone: ({ output, context }) => ({
           target: 'critiquing',
           context: {
-            article: result.article,
+            article: output.article,
             revisionCount: context.revisionCount + 1,
           },
         }),

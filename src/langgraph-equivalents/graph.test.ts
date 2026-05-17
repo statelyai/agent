@@ -9,27 +9,27 @@ test('supports multi-step workflow accumulation like a sequential state graph', 
     initial: 'node1',
     states: {
       node1: {
-        resultSchema: z.object({ messages: z.array(z.string()) }),
+        schemas: { output: z.object({ messages: z.array(z.string()) }) },
         invoke: async () => ({ messages: ['from node1'] }),
-        onDone: ({ result, context }) => ({
+        onDone: ({ output, context }) => ({
           target: 'node2',
-          context: { messages: [...context.messages, ...result.messages] },
+          context: { messages: [...context.messages, ...output.messages] },
         }),
       },
       node2: {
-        resultSchema: z.object({ messages: z.array(z.string()) }),
+        schemas: { output: z.object({ messages: z.array(z.string()) }) },
         invoke: async () => ({ messages: ['from node2'] }),
-        onDone: ({ result, context }) => ({
+        onDone: ({ output, context }) => ({
           target: 'node3',
-          context: { messages: [...context.messages, ...result.messages] },
+          context: { messages: [...context.messages, ...output.messages] },
         }),
       },
       node3: {
-        resultSchema: z.object({ messages: z.array(z.string()) }),
+        schemas: { output: z.object({ messages: z.array(z.string()) }) },
         invoke: async () => ({ messages: ['from node3'] }),
-        onDone: ({ result, context }) => ({
+        onDone: ({ output, context }) => ({
           target: 'done',
-          context: { messages: [...context.messages, ...result.messages] },
+          context: { messages: [...context.messages, ...output.messages] },
         }),
       },
       done: {
@@ -63,9 +63,9 @@ test('supports conditional routing with explicit machine transitions', async () 
     initial: 'routeRequest',
     states: {
       routeRequest: {
-        resultSchema: z.object({
+        schemas: { output: z.object({
           route: z.enum(['billing', 'general']),
-        }),
+        }) },
         invoke: async ({ context }) => {
           const route = context.request.toLowerCase().includes('refund')
             ? 'billing'
@@ -73,25 +73,25 @@ test('supports conditional routing with explicit machine transitions', async () 
 
           return { route } as const;
         },
-        onDone: ({ result }) => ({
-          target: result.route,
-          context: { route: result.route },
+        onDone: ({ output }) => ({
+          target: output.route,
+          context: { route: output.route },
         }),
       },
       billing: {
-        resultSchema: z.object({ handledBy: z.literal('billing') }),
+        schemas: { output: z.object({ handledBy: z.literal('billing') }) },
         invoke: async () => ({ handledBy: 'billing' as const }), // why do we need to cast to const here?
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
-          context: { handledBy: result.handledBy },
+          context: { handledBy: output.handledBy },
         }),
       },
       general: {
-        resultSchema: z.object({ handledBy: z.literal('general') }),
+        schemas: { output: z.object({ handledBy: z.literal('general') }) },
         invoke: async () => ({ handledBy: 'general' as const }),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
-          context: { handledBy: result.handledBy },
+          context: { handledBy: output.handledBy },
         }),
       },
       done: {

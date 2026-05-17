@@ -85,18 +85,18 @@ export function createMeetingAssistantFlowExample(options: {
     initial: 'extracting',
     states: {
       extracting: {
-        resultSchema: extractionSchema,
+        schemas: { output: extractionSchema },
         invoke: async ({ context }) => extractTasks(context.notes),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'dispatching',
           context: {
-            summary: result.summary,
-            tasks: result.tasks,
+            summary: output.summary,
+            tasks: output.tasks,
           },
         }),
       },
       dispatching: {
-        resultSchema: fanOutSchema,
+        schemas: { output: fanOutSchema },
         invoke: async ({ context }) => {
           const [trello, csv, slack] = await Promise.all([
             addTasksToTrello(context.tasks),
@@ -113,12 +113,12 @@ export function createMeetingAssistantFlowExample(options: {
             slackMessageId: slack.slackMessageId,
           };
         },
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
           context: {
-            trelloCardIds: result.trelloCardIds,
-            csvPath: result.csvPath,
-            slackMessageId: result.slackMessageId,
+            trelloCardIds: output.trelloCardIds,
+            csvPath: output.csvPath,
+            slackMessageId: output.slackMessageId,
           },
         }),
       },

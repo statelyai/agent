@@ -57,23 +57,23 @@ export function createTutorExample(
     initial: 'teaching',
     states: {
       teaching: {
-        resultSchema: feedbackSchema,
+        schemas: { output: feedbackSchema },
         invoke: async ({ context }) =>
           teach(context.conversation.at(-1)?.replace(/^User:\s*/, '') ?? ''),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'responding',
-          context: { feedback: result.instruction },
+          context: { feedback: output.instruction },
         }),
       },
       responding: {
-        resultSchema: responseSchema,
+        schemas: { output: responseSchema },
         invoke: async ({ context }) =>
           respond(context.conversation.at(-1)?.replace(/^User:\s*/, '') ?? ''),
-        onDone: ({ result, context }) => ({
+        onDone: ({ output, context }) => ({
           target: 'done',
           context: {
-            response: result.response,
-            conversation: [...context.conversation, `Tutor: ${result.response}`],
+            response: output.response,
+            conversation: [...context.conversation, `Tutor: ${output.response}`],
           },
         }),
       },

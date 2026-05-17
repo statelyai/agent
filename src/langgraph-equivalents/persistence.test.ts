@@ -25,13 +25,13 @@ test('persists and restores a long-running approval workflow', async () => {
         },
       },
       summarize: {
-        resultSchema: z.object({ summary: z.string() }),
+        schemas: { output: z.object({ summary: z.string() }) },
         invoke: async ({ context }) => ({
           summary: context.approved ? 'approved summary' : 'rejected summary',
         }),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
-          context: { summary: result.summary },
+          context: { summary: output.summary },
         }),
       },
       done: {

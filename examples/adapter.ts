@@ -1,10 +1,9 @@
 import { z } from 'zod';
 import {
-  createAdapter,
   createAgentMachine,
   decide,
   decideResultSchema,
-  type AgentAdapter,
+  type DecideAdapter,
 } from '../src/index.js';
 import {
   closePrompt,
@@ -15,9 +14,7 @@ import {
 } from './_run.js';
 
 export function createAdapterExample(
-  adapter: AgentAdapter = createAdapter({
-    decide: createOpenAiDecisionAdapter().decide,
-  })
+  adapter: DecideAdapter = createOpenAiDecisionAdapter()
 ) {
   const routeOptions = {
     billing: {
@@ -47,7 +44,7 @@ export function createAdapterExample(
     initial: 'route',
     states: {
       route: {
-        resultSchema: decideResultSchema(routeOptions),
+        schemas: { output: decideResultSchema(routeOptions) },
         invoke: async ({ context }) =>
           decide({
             adapter,
@@ -62,12 +59,12 @@ export function createAdapterExample(
             options: routeOptions,
             reasoning: false,
           }),
-        onDone: ({ result }) => {
+        onDone: ({ output }) => {
           return {
             target: 'done',
             context: {
-              route: result.choice,
-              confidence: result.data.confidence,
+              route: output.choice,
+              confidence: output.data.confidence,
             },
           };
         },

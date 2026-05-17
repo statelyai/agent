@@ -98,7 +98,7 @@ export function createNextAiSdkUiRoute(options: {
         },
       },
       drafting: {
-        resultSchema: streamedTextSchema,
+        schemas: { output: streamedTextSchema },
         invoke: async ({ context }, enq) => {
           enq.emit({
             type: 'notification',
@@ -122,10 +122,10 @@ export function createNextAiSdkUiRoute(options: {
             },
           });
         },
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
           context: {
-            finalText: result.text,
+            finalText: output.text,
           },
         }),
       },

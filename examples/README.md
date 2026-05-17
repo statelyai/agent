@@ -39,6 +39,7 @@ These focus on real orchestration patterns:
 - [`meeting-assistant-flow.ts`](/Users/davidkpiano/Code/agent/examples/meeting-assistant-flow.ts)
 - [`self-evaluation-loop-flow.ts`](/Users/davidkpiano/Code/agent/examples/self-evaluation-loop-flow.ts)
 - [`spec-agent-loop.ts`](/Users/davidkpiano/Code/agent/examples/spec-agent-loop.ts)
+- [`workflow-guardrails.ts`](/Users/davidkpiano/Code/agent/examples/workflow-guardrails.ts)
 - [`write-a-book-flow.ts`](/Users/davidkpiano/Code/agent/examples/write-a-book-flow.ts)
 - [`plan-and-execute.ts`](/Users/davidkpiano/Code/agent/examples/plan-and-execute.ts)
 - [`reflection.ts`](/Users/davidkpiano/Code/agent/examples/reflection.ts)

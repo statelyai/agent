@@ -30,16 +30,16 @@ test('returns a live run before initial invoke output and emits ephemeral parts'
     initial: 'writing',
     states: {
       writing: {
-        resultSchema: z.object({ text: z.string() }),
+        schemas: { output: z.object({ text: z.string() }) },
         invoke: async (_args, enq) => {
           enq.emit({ type: 'textPart', delta: 'hel' });
           enq.emit({ type: 'textPart', delta: 'lo' });
 
           return { text: 'hello' };
         },
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
-          context: { finalText: result.text },
+          context: { finalText: output.text },
         }),
       },
       done: {
@@ -110,15 +110,15 @@ test('does not replay prior events to late subscribers', async () => {
     initial: 'writing',
     states: {
       writing: {
-        resultSchema: z.object({ text: z.string() }),
+        schemas: { output: z.object({ text: z.string() }) },
         invoke: async (_args, enq) => {
           enq.emit({ type: 'textPart', delta: 'hel' });
           enq.emit({ type: 'textPart', delta: 'lo' });
           return { text: 'hello' };
         },
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
-          context: { finalText: result.text },
+          context: { finalText: output.text },
         }),
       },
       done: {

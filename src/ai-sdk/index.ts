@@ -1,6 +1,6 @@
 import { generateText, Output } from 'ai';
 import { z } from 'zod';
-import type { AgentAdapter, StandardSchemaV1 } from '../types.js';
+import type { AgentAdapter, DecideAdapter, StandardSchemaV1 } from '../types.js';
 
 type AiSdkGenerateText = typeof generateText;
 type AiSdkModel = Parameters<typeof generateText>[0]['model'];
@@ -11,13 +11,45 @@ export interface CreateAiSdkAdapterOptions {
 }
 
 /**
- * Create an adapter that uses the Vercel AI SDK for decide/classify.
+ * Create an adapter that uses the Vercel AI SDK for generative states.
  * By default, model strings are passed straight through to the AI SDK.
  * For provider helpers such as `openai(...)`, pass `resolveModel`.
  */
 export function createAiSdkAdapter(
   config: CreateAiSdkAdapterOptions = {}
 ): AgentAdapter {
+  const generate = config.generateText ?? generateText;
+
+  return {
+    async generateText({ model, system, prompt, messages, tools, toolChoice, outputSchema }) {
+      const result = await generate({
+        model: resolveModel(model ?? 'default', config.resolveModel),
+        system,
+        prompt,
+        messages: messages as any,
+        tools: tools as any,
+        toolChoice: toolChoice as any,
+        ...(outputSchema
+          ? {
+            output: Output.object({
+              schema: toZodSchema(outputSchema),
+            }),
+          }
+          : {}),
+      });
+
+      const output = result as { output?: unknown; text?: string };
+      return output.output ?? output.text ?? result;
+    },
+  };
+}
+
+/**
+ * Create a decision helper adapter for decide(...) and classify(...).
+ */
+export function createAiSdkDecisionAdapter(
+  config: CreateAiSdkAdapterOptions = {}
+): DecideAdapter {
   const generate = config.generateText ?? generateText;
 
   return {

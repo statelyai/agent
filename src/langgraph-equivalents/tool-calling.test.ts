@@ -46,7 +46,7 @@ test('supports tool-call style invokes with live tool events and final output', 
     initial: 'checkingWeather',
     states: {
       checkingWeather: {
-        resultSchema: z.object({ forecast: z.string() }),
+        schemas: { output: z.object({ forecast: z.string() }) },
         invoke: async ({ context }, enq) => {
           enq.emit({
             type: 'toolCall',
@@ -77,9 +77,9 @@ test('supports tool-call style invokes with live tool events and final output', 
 
           return output;
         },
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
-          context: { forecast: result.forecast },
+          context: { forecast: output.forecast },
         }),
       },
       done: {

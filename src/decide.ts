@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { validateSchemaSync } from './utils.js';
 import type {
-  AgentAdapter,
+  DecideAdapter,
   DecideOptions,
   DecideResultFor,
   StandardSchemaV1,
@@ -39,9 +39,9 @@ export async function decide<
 }
 
 export function requireAdapter(
-  adapter: AgentAdapter | undefined,
+  adapter: DecideAdapter | undefined,
   label: string
-): AgentAdapter {
+): DecideAdapter {
   if (!adapter) {
     throw new Error(`No adapter configured for ${label}`);
   }

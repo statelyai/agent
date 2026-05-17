@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'vitest';
 import { z } from 'zod';
-import { createAiSdkAdapter } from './index.js';
+import { createAiSdkAdapter, createAiSdkDecisionAdapter } from './index.js';
 
 describe('createAiSdkAdapter', () => {
   test('resolves schema-less choices with a custom model resolver', async () => {
     const seen: Array<{ model: unknown; prompt: unknown }> = [];
-    const adapter = createAiSdkAdapter({
+    const adapter = createAiSdkDecisionAdapter({
       resolveModel: (model) => ({ providerResolved: model }) as never,
       generateText: async (options) => {
         seen.push({
@@ -41,7 +41,7 @@ describe('createAiSdkAdapter', () => {
   });
 
   test('returns structured decision payloads for schema-backed options', async () => {
-    const adapter = createAiSdkAdapter({
+    const adapter = createAiSdkDecisionAdapter({
       generateText: async () =>
         ({
           output: {
@@ -78,5 +78,23 @@ describe('createAiSdkAdapter', () => {
       },
       reasoning: 'Need the newest API details.',
     });
+  });
+
+  test('creates a generation-only machine adapter', async () => {
+    const adapter = createAiSdkAdapter({
+      generateText: async (options) =>
+        ({
+          text: `generated ${options.prompt}`,
+        }) as never,
+    });
+
+    await expect(
+      adapter.generateText?.({
+        model: 'openai/gpt-5.4-nano',
+        messages: [],
+        prompt: 'reply',
+      })
+    ).resolves.toBe('generated reply');
+    expect('decide' in adapter).toBe(false);
   });
 });

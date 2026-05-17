@@ -40,7 +40,7 @@ export function createConditionalSubflowExample(
     initial: 'researching',
     states: {
       researching: {
-        resultSchema: researchSchema,
+        schemas: { output: researchSchema },
         invoke: async ({ context }) =>
           (options.research
             ?? ((topic) =>
@@ -49,9 +49,9 @@ export function createConditionalSubflowExample(
                 system: 'Return concise research bullets.',
                 prompt: `Return 2 to 4 bullets about ${topic}.`,
               })))(context.topic),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
-          context: { bullets: result.bullets },
+          context: { bullets: output.bullets },
         }),
       },
       done: {
@@ -78,7 +78,7 @@ export function createConditionalSubflowExample(
     initial: 'drafting',
     states: {
       drafting: {
-        resultSchema: draftSchema,
+        schemas: { output: draftSchema },
         invoke: async ({ context }) =>
           (options.draft
             ?? (({ topic, bullets }) =>
@@ -94,9 +94,9 @@ export function createConditionalSubflowExample(
             topic: context.topic,
             bullets: context.bullets,
           }),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
-          context: { draft: result.draft },
+          context: { draft: output.draft },
         }),
       },
       done: {
@@ -132,7 +132,7 @@ export function createConditionalSubflowExample(
         : { target: 'drafting', input: { bullets: context.bullets } },
     states: {
       researching: {
-        resultSchema: researchSchema,
+        schemas: { output: researchSchema },
         invoke: async ({ context }) => {
           const result = await researchMachine.execute(
             researchMachine.getInitialState({ topic: context.topic })
@@ -144,16 +144,15 @@ export function createConditionalSubflowExample(
 
           return result.output;
         },
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
-          context: { bullets: result.bullets },
+          context: { bullets: output.bullets },
         }),
       },
       drafting: {
-        inputSchema: z.object({
+        schemas: { input: z.object({
           bullets: z.array(z.string()),
-        }),
-        resultSchema: draftSchema,
+        }), output: draftSchema },
         invoke: async ({ context, input }) => {
           const result = await draftMachine.execute(
             draftMachine.getInitialState({
@@ -168,9 +167,9 @@ export function createConditionalSubflowExample(
 
           return result.output;
         },
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
-          context: { draft: result.draft },
+          context: { draft: output.draft },
         }),
       },
       done: {

@@ -42,6 +42,9 @@ import {
   createRiverCrossingExample,
   createSimpleExample,
   createSqlAgentExample,
+  createGuardrailedBugfixWorkflowExample,
+  createGuardrailedIncidentResponseExample,
+  createUnguardedIncidentResponseExample,
   createSubflowExample,
   createSupervisorExample,
   createToolCallingExample,
@@ -82,9 +85,9 @@ function createSseReader(response: Response) {
 
 describe('curated examples', () => {
   test('simple example runs to a final output', async () => {
-    const machine = createSimpleExample(async () => ({
-      summary: 'A short summary.',
-    }));
+    const machine = createSimpleExample({
+      generateText: async () => ({ summary: 'A short summary.' }),
+    });
     const result = await machine.execute(
       machine.getInitialState({ text: 'Longer source text.' })
     );
@@ -162,9 +165,14 @@ describe('curated examples', () => {
           { id: 'doc-2', content: `${question} :: second fact` },
         ],
       }),
-      answer: async ({ question, documents }) => ({
-        answer: `${question} => ${documents.map((document) => document.content).join(' | ')}`,
-      }),
+      adapter: {
+        generateText: async ({ prompt }) => ({
+          answer: String(prompt)
+            .replace('Question: ', '')
+            .replace('\n\nDocuments:\n- [doc-1] ', ' => ')
+            .replace('\n- [doc-2] ', ' | '),
+        }),
+      },
     });
 
     const result = await machine.execute(
@@ -1264,9 +1272,12 @@ describe('curated examples', () => {
   });
 
   test('joke example produces a rating and acceptance flag', async () => {
+    const results = [
+      { joke: 'A short joke about ducks.' },
+      { rating: 9, explanation: 'It works.' },
+    ];
     const machine = createJokeExample({
-      tellJoke: async () => ({ joke: 'A short joke about ducks.' }),
-      rateJoke: async () => ({ rating: 9, explanation: 'It works.' }),
+      generateText: async () => results.shift(),
     });
 
     const result = await machine.execute(
@@ -1887,5 +1898,54 @@ describe('curated examples', () => {
         response: 'Claro, puedo ayudarte.',
       });
     }
+  });
+});
+
+describe('guardrailed workflow examples', () => {
+  test('bugfix example exposes per-state prompts and tools', () => {
+    const machine = createGuardrailedBugfixWorkflowExample();
+
+    const planning = machine.getInitialState({ task: 'Fix divide().' });
+    expect(planning.value).toBe('planning');
+    expect(Object.keys(planning.tools ?? {})).toEqual(
+      expect.arrayContaining([
+        'Read',
+        'Grep',
+        'Glob',
+        'LS',
+        'Bash',
+      ])
+    );
+
+    expect(Object.keys(planning.tools ?? {})).not.toContain('Edit');
+  });
+
+  test('incident response example withholds destructive tools', async () => {
+    const machine = createGuardrailedIncidentResponseExample();
+
+    const diagnose = machine.getInitialState({});
+    expect(diagnose.value).toBe('diagnosing');
+    expect(Object.keys(diagnose.tools ?? {})).toContain('get_logs');
+    expect(Object.keys(diagnose.tools ?? {})).not.toContain('delete_volume');
+
+    const result = await machine.execute(diagnose);
+    expect(result.status).toBe('pending');
+    if (result.status !== 'pending') {
+      throw new Error('Expected approval state');
+    }
+
+    expect(result.state.value).toBe('awaitingApproval');
+    expect(Object.keys(result.state.tools ?? {})).toEqual(
+      expect.arrayContaining(['Read', 'event.APPROVED', 'event.REJECTED'])
+    );
+  });
+
+  test('unguarded incident response example exposes every API action', () => {
+    const machine = createUnguardedIncidentResponseExample();
+    const state = machine.getInitialState({});
+
+    expect(state.value).toBe('working');
+    expect(Object.keys(state.tools ?? {})).toContain('delete_volume');
+    expect(Object.keys(state.tools ?? {})).toContain('restart_service');
   });
 });

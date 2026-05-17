@@ -4,9 +4,9 @@ import {
   createAgentMachine,
   decide,
   decideResultSchema,
-  type AgentAdapter,
+  type DecideAdapter,
 } from '../src/index.js';
-import { createAiSdkAdapter } from '../src/ai-sdk/index.js';
+import { createAiSdkDecisionAdapter } from '../src/ai-sdk/index.js';
 import {
   closePrompt,
   createExampleModel,
@@ -38,7 +38,7 @@ const replySchema = z.object({
 type Route = keyof typeof routeOptions;
 
 export function createAiSdkExample(options: {
-  adapter?: AgentAdapter;
+  adapter?: DecideAdapter;
   draftReply?: (args: {
     route: Route;
     confidence: number;
@@ -47,7 +47,7 @@ export function createAiSdkExample(options: {
 } = {}) {
   const adapter =
     options.adapter ??
-    createAiSdkAdapter({
+    createAiSdkDecisionAdapter({
       resolveModel: (model) => createExampleModel(model),
     });
 
@@ -100,7 +100,7 @@ export function createAiSdkExample(options: {
     initial: 'route',
     states: {
       route: {
-        resultSchema: decideResultSchema(routeOptions),
+        schemas: { output: decideResultSchema(routeOptions) },
         invoke: async ({ context }) =>
           decide({
             adapter,
@@ -112,27 +112,27 @@ export function createAiSdkExample(options: {
             ].join('\n'),
             options: routeOptions,
           }),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'drafting',
           context: {
-            route: result.choice,
-            confidence: result.data.confidence,
+            route: output.choice,
+            confidence: output.data.confidence,
           },
         }),
       },
       drafting: {
-        resultSchema: replySchema,
+        schemas: { output: replySchema },
         invoke: async ({ context }) =>
           draftReply({
             route: context.route ?? 'support',
             confidence: context.confidence ?? 0,
             message: context.message,
           }),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
           context: {
-            subject: result.subject,
-            body: result.body,
+            subject: output.subject,
+            body: output.body,
           },
         }),
       },

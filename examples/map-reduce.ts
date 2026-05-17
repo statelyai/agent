@@ -47,7 +47,7 @@ export function createMapReduceExample(
     initial: 'planning',
     states: {
       planning: {
-        resultSchema: subjectsSchema,
+        schemas: { output: subjectsSchema },
         invoke: async ({ context }) =>
           (options.planSubjects
             ?? ((topic) =>
@@ -56,13 +56,13 @@ export function createMapReduceExample(
                 system: 'You break a topic into a few concrete subtopics.',
                 prompt: `List 2 to 4 specific subtopics worth covering for: ${topic}`,
               })))(context.topic),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'mapping',
-          context: { subjects: result.subjects },
+          context: { subjects: output.subjects },
         }),
       },
       mapping: {
-        resultSchema: jokesSchema,
+        schemas: { output: jokesSchema },
         invoke: async ({ context }) => {
           const jokes = await Promise.all(
             context.subjects.map((subject) =>
@@ -77,13 +77,13 @@ export function createMapReduceExample(
 
           return { jokes };
         },
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'reducing',
-          context: { jokes: result.jokes },
+          context: { jokes: output.jokes },
         }),
       },
       reducing: {
-        resultSchema: bestJokeSchema,
+        schemas: { output: bestJokeSchema },
         invoke: async ({ context }) =>
           (options.chooseBest
             ?? ((jokes) =>
@@ -92,9 +92,9 @@ export function createMapReduceExample(
                 system: 'You pick the strongest joke from a list.',
                 prompt: ['Choose the best joke from this list:', ...jokes].join('\n'),
               })))(context.jokes),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
-          context: { bestJoke: result.bestJoke },
+          context: { bestJoke: output.bestJoke },
         }),
       },
       done: {

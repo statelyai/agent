@@ -98,27 +98,26 @@ export function createPlanAndExecuteExample(
     initial: 'planning',
     states: {
       planning: {
-        resultSchema: planSchema,
+        schemas: { output: planSchema },
         invoke: async ({ context }) => planner(context.goal),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'executing',
-          context: { plan: result.plan },
+          context: { plan: output.plan },
           input: { index: 0 } 
         }),
       },
       executing: {
-        inputSchema: z.object({
+        schemas: { input: z.object({
           index: z.number().int().min(0),
-        }),
-        resultSchema: stepResultSchema,
+        }), output: stepResultSchema },
         invoke: async ({ context, input }) =>
           executeStep({
             goal: context.goal,
             step: context.plan[input.index] ?? '',
             priorResults: context.stepResults,
           }),
-        onDone: ({ result, context }) => {
-          const nextStepResults = [...context.stepResults, result.result];
+        onDone: ({ output, context }) => {
+          const nextStepResults = [...context.stepResults, output.result];
           const nextIndex = nextStepResults.length;
 
           if (nextIndex < context.plan.length) {
@@ -136,16 +135,16 @@ export function createPlanAndExecuteExample(
         },
       },
       synthesizing: {
-        resultSchema: finalAnswerSchema,
+        schemas: { output: finalAnswerSchema },
         invoke: async ({ context }) =>
           synthesize({
             goal: context.goal,
             plan: context.plan,
             stepResults: context.stepResults,
           }),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
-          context: { answer: result.answer },
+          context: { answer: output.answer },
         }),
       },
       done: {

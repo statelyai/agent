@@ -44,9 +44,9 @@ createAgentMachine({
       },
     },
     working: {
-      inputSchema: z.object({
+      schemas: { input: z.object({
         index: z.number(),
-      }),
+      }) },
     },
   },
   schemas: {
@@ -140,16 +140,16 @@ createAgentMachine({
   states: {
     idle: {
       on: {
-        // @ts-expect-error input should be required when the target has inputSchema
+        // @ts-expect-error input should be required when the target has schemas.input
         advance: () => ({
           target: 'working',
         }),
       },
     },
     working: {
-      inputSchema: z.object({
+      schemas: { input: z.object({
         index: z.number(),
-      }),
+      }) },
     },
   },
   schemas: {
@@ -194,7 +194,7 @@ createAgentMachine({
   states: {
     idle: {
       on: {
-        // @ts-expect-error input should be rejected when the target has no inputSchema
+        // @ts-expect-error input should be rejected when the target has no schemas.input
         advance: () => ({
           target: 'done',
           input: {
@@ -233,9 +233,9 @@ createAgentMachine({
       },
     },
     working: {
-      inputSchema: z.object({
+      schemas: { input: z.object({
         index: z.number(),
-      }),
+      }) },
     },
   },
   schemas: {
@@ -264,9 +264,9 @@ createAgentMachine({
       },
     },
     working: {
-      inputSchema: z.object({
+      schemas: { input: z.object({
         index: z.number(),
-      }),
+      }) },
     },
   },
   schemas: {

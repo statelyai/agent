@@ -52,7 +52,7 @@ export function createBranchingExample(
     initial: 'analyzing',
     states: {
       analyzing: {
-        resultSchema: branchResultSchema,
+        schemas: { output: branchResultSchema },
         invoke: async ({ context }) => {
           const [docs, issues, code] = await Promise.all([
             (options.analyzeDocs
@@ -77,13 +77,13 @@ export function createBranchingExample(
 
           return { docs, issues, code };
         },
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'summarizing',
-          context: result,
+          context: output,
         }),
       },
       summarizing: {
-        resultSchema: summarySchema,
+        schemas: { output: summarySchema },
         invoke: async ({ context }) =>
           (options.summarize
             ?? (({ docs, issues, code }) =>
@@ -104,9 +104,9 @@ export function createBranchingExample(
             issues: context.issues ?? '',
             code: context.code ?? '',
           }),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
-          context: { summary: result.summary },
+          context: { summary: output.summary },
         }),
       },
       done: {

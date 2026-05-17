@@ -39,12 +39,11 @@ test('exports finite states and transition edges as Stately graph JSON', () => {
         },
       },
       working: {
-        inputSchema: z.object({
+        schemas: { input: z.object({
           index: z.number(),
-        }),
-        resultSchema: z.object({
+        }), output: z.object({
           ok: z.boolean(),
-        }),
+        }) },
         invoke: async () => ({ ok: true }),
         onDone: () => ({
           target: 'done',

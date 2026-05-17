@@ -17,17 +17,17 @@ test('supports map-reduce style orchestration with dynamic work items inside inv
     initial: 'planning',
     states: {
       planning: {
-        resultSchema: z.object({ subjects: z.array(z.string()) }),
+        schemas: { output: z.object({ subjects: z.array(z.string()) }) },
         invoke: async ({ context }) => ({
           subjects: [`${context.topic} basics`, `${context.topic} advanced`],
         }),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'mapping',
-          context: { subjects: result.subjects },
+          context: { subjects: output.subjects },
         }),
       },
       mapping: {
-        resultSchema: z.object({ jokes: z.array(z.string()) }),
+        schemas: { output: z.object({ jokes: z.array(z.string()) }) },
         invoke: async ({ context }) => {
           const jokes = await Promise.all(
             context.subjects.map(async (subject) => `joke about ${subject}`)
@@ -35,19 +35,19 @@ test('supports map-reduce style orchestration with dynamic work items inside inv
 
           return { jokes };
         },
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'reducing',
-          context: { jokes: result.jokes },
+          context: { jokes: output.jokes },
         }),
       },
       reducing: {
-        resultSchema: z.object({ bestJoke: z.string() }),
+        schemas: { output: z.object({ bestJoke: z.string() }) },
         invoke: async ({ context }) => ({
           bestJoke: context.jokes[0] ?? '',
         }),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
-          context: { bestJoke: result.bestJoke },
+          context: { bestJoke: output.bestJoke },
         }),
       },
       done: {

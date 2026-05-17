@@ -73,12 +73,12 @@ export function createJugsExample() {
     initial: 'choosing',
     states: {
       choosing: {
-        resultSchema: moveSchema,
+        schemas: { output: moveSchema },
         invoke: async ({ context }) => chooseWaterJugMove(context.jug3, context.jug5),
-        onDone: ({ result, context }) => {
-          const nextReasoning = [...context.reasoning, result.reasoning];
+        onDone: ({ output, context }) => {
+          const nextReasoning = [...context.reasoning, output.reasoning];
 
-          if (result.move === 'done') {
+          if (output.move === 'done') {
             return {
               target: 'done' as const,
               context: { reasoning: nextReasoning },
@@ -87,28 +87,27 @@ export function createJugsExample() {
 
           return {
             target: 'applying' as const,
-            input: { move: result.move },
+            input: { move: output.move },
             context: { reasoning: nextReasoning },
           };
         },
       },
       applying: {
-        inputSchema: z.object({
+        schemas: { input: z.object({
           move: moveSchema.shape.move.exclude(['done']),
-        }),
-        resultSchema: applySchema,
+        }), output: applySchema },
         invoke: async ({ context, input }) =>
           applyWaterJugMove(
             context.jug3,
             context.jug5,
             input.move as 'fill5' | 'pour5to3' | 'empty3'
           ),
-        onDone: ({ result, context }) => ({
+        onDone: ({ output, context }) => ({
           target: 'choosing',
           context: {
-            jug3: result.jug3,
-            jug5: result.jug5,
-            steps: [...context.steps, result.step],
+            jug3: output.jug3,
+            jug5: output.jug5,
+            steps: [...context.steps, output.step],
           },
         }),
       },

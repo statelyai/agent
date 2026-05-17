@@ -47,14 +47,14 @@ export function createStreamingSessionHttpController(options: {
     initial: 'writing',
     states: {
       writing: {
-        resultSchema: streamingOutputSchema,
+        schemas: { output: streamingOutputSchema },
         invoke: async ({ context }, enq) =>
           streamer.streamText(context.streamId, context.text, (delta) => {
             enq.emit({ type: 'textPart', delta });
           }),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
-          context: { finalText: result.text },
+          context: { finalText: output.text },
         }),
       },
       done: {

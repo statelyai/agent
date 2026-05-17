@@ -64,16 +64,16 @@ export function createHitlExample(
         },
       },
       drafting: {
-        resultSchema: draftSchema,
+        schemas: { output: draftSchema },
         invoke: async ({ context, messages }) =>
           draftReply({
             task: context.task,
             messages,
           }),
-        onDone: ({ result, messages }) => ({
+        onDone: ({ output, messages }) => ({
           target: 'done',
-          messages: messages.concat({ role: 'assistant', content: result.draft }),
-          context: { draft: result.draft },
+          messages: messages.concat({ role: 'assistant', content: output.draft }),
+          context: { draft: output.draft },
         }),
       },
       done: {

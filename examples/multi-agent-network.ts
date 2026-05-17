@@ -3,7 +3,7 @@ import {
   createAgentMachine,
   decide,
   decideResultSchema,
-  type AgentAdapter,
+  type DecideAdapter,
 } from '../src/index.js';
 import {
   closePrompt,
@@ -42,7 +42,7 @@ const draftHandoffSchema = z.object({
 
 export function createMultiAgentNetworkExample(
   options: {
-    adapter?: AgentAdapter;
+    adapter?: DecideAdapter;
     research?: (args: {
       topic: string;
       focus: string;
@@ -120,15 +120,15 @@ export function createMultiAgentNetworkExample(
     initial: 'researching',
     states: {
       researching: {
-        resultSchema: researchNotesSchema,
+        schemas: { output: researchNotesSchema },
         invoke: async ({ context }) =>
           research({
             topic: context.topic,
             focus: context.focus,
           }),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
-          context: { notes: result.notes },
+          context: { notes: output.notes },
         }),
       },
       done: {
@@ -161,16 +161,16 @@ export function createMultiAgentNetworkExample(
     initial: 'writing',
     states: {
       writing: {
-        resultSchema: draftSchema,
+        schemas: { output: draftSchema },
         invoke: async ({ context }) =>
           write({
             topic: context.topic,
             notes: context.notes,
             angle: context.angle,
           }),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
-          context: { draft: result.draft },
+          context: { draft: output.draft },
         }),
       },
       done: {
@@ -202,7 +202,7 @@ export function createMultiAgentNetworkExample(
     initial: 'coordinating',
     states: {
       coordinating: {
-        resultSchema: decideResultSchema(coordinatorOptions),
+        schemas: { output: decideResultSchema(coordinatorOptions) },
         invoke: async ({ context }) =>
           decide({
             adapter,
@@ -224,21 +224,21 @@ export function createMultiAgentNetworkExample(
             ].join('\n'),
             options: coordinatorOptions,
           }),
-        onDone: ({ result }) => {
-          if (result.choice === 'research') {
+        onDone: ({ output }) => {
+          if (output.choice === 'research') {
             return {
               target: 'researching',
               input: {
-                focus: result.data.focus ?? 'gather the most useful supporting facts',
+                focus: output.data.focus ?? 'gather the most useful supporting facts',
               },
             };
           }
 
-          if (result.choice === 'write') {
+          if (output.choice === 'write') {
             return {
               target: 'writing',
               input: {
-                angle: result.data.angle ?? 'produce the clearest concise draft',
+                angle: output.data.angle ?? 'produce the clearest concise draft',
               },
             };
           }
@@ -249,8 +249,7 @@ export function createMultiAgentNetworkExample(
         },
       },
       researching: {
-        inputSchema: researchParamsSchema,
-        resultSchema: researchHandoffSchema,
+        schemas: { input: researchParamsSchema, output: researchHandoffSchema },
         invoke: async ({ context, input }) => {
           const result = await researchAgent.execute(
             researchAgent.getInitialState({
@@ -268,17 +267,16 @@ export function createMultiAgentNetworkExample(
             handoff: `researcher:${input.focus}`,
           };
         },
-        onDone: ({ result, context }) => ({
+        onDone: ({ output, context }) => ({
           target: 'coordinating',
           context: {
-            notes: result.notes,
-            handoffs: [...context.handoffs, result.handoff],
+            notes: output.notes,
+            handoffs: [...context.handoffs, output.handoff],
           },
         }),
       },
       writing: {
-        inputSchema: writeParamsSchema,
-        resultSchema: draftHandoffSchema,
+        schemas: { input: writeParamsSchema, output: draftHandoffSchema },
         invoke: async ({ context, input }) => {
           const result = await writerAgent.execute(
             writerAgent.getInitialState({
@@ -297,11 +295,11 @@ export function createMultiAgentNetworkExample(
             handoff: `writer:${input.angle}`,
           };
         },
-        onDone: ({ result, context }) => ({
+        onDone: ({ output, context }) => ({
           target: 'coordinating',
           context: {
-            draft: result.draft,
-            handoffs: [...context.handoffs, result.handoff],
+            draft: output.draft,
+            handoffs: [...context.handoffs, output.handoff],
           },
         }),
       },

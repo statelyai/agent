@@ -111,14 +111,14 @@ export function createEmailAutoResponderFlowExample(
             target: 'done',
           },
         },
-        resultSchema: draftResponseSchema,
+        schemas: { output: draftResponseSchema },
         invoke: async ({ context }) => createDraft(context.currentEmail!),
-        onDone: ({ result, context }) => {
+        onDone: ({ output, context }) => {
           const currentEmail = context.currentEmail!;
           const processedIds = [...context.processedIds, currentEmail.id];
           const drafts = {
             ...context.drafts,
-            [currentEmail.id]: result.draft,
+            [currentEmail.id]: output.draft,
           };
           const [nextEmail, ...queue] = context.queue;
 

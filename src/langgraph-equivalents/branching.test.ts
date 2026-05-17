@@ -18,11 +18,11 @@ test('supports branching-style orchestration with plain async fan-out inside inv
     initial: 'analyzing',
     states: {
       analyzing: {
-        resultSchema: z.object({
+        schemas: { output: z.object({
           docs: z.string(),
           issues: z.string(),
           code: z.string(),
-        }),
+        }) },
         invoke: async ({ context }) => {
           const [docs, issues, code] = await Promise.all([
             Promise.resolve(`docs about ${context.topic}`),
@@ -32,20 +32,20 @@ test('supports branching-style orchestration with plain async fan-out inside inv
 
           return { docs, issues, code };
         },
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'summarizing',
-          context: result,
+          context: output,
         }),
       },
       summarizing: {
         // paramsschema could help here, the summary has lots of string | null
-        resultSchema: z.object({ summary: z.string() }),
+        schemas: { output: z.object({ summary: z.string() }) },
         invoke: async ({ context }) => ({
           summary: [context.docs, context.issues, context.code].join(' | '),
         }),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
-          context: { summary: result.summary },
+          context: { summary: output.summary },
         }),
       },
       done: {

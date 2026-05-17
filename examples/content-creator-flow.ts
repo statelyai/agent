@@ -83,17 +83,17 @@ export function createContentCreatorFlowExample(options: {
     initial: 'routing',
     states: {
       routing: {
-        resultSchema: routeSchema,
+        schemas: { output: routeSchema },
         invoke: async ({ context }) => routeRequest(context.request),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'creating',
           context: {
-            route: result.route,
+            route: output.route,
           },
         }),
       },
       creating: {
-        resultSchema: contentSchema,
+        schemas: { output: contentSchema },
         invoke: async ({ context }) => {
           switch (context.route) {
             case 'linkedin':
@@ -105,11 +105,11 @@ export function createContentCreatorFlowExample(options: {
               return createBlog(context.request);
           }
         },
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
           context: {
-            title: result.title,
-            body: result.body,
+            title: output.title,
+            body: output.body,
           },
         }),
       },

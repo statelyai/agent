@@ -98,15 +98,15 @@ test('serializes concurrent sends so each event applies from the latest snapshot
         },
       },
       working: {
-        resultSchema: z.object({ count: z.number() }),
+        schemas: { output: z.object({ count: z.number() }) },
         invoke: async ({ context }) => {
           const gate = gates[invocations++]!;
           await gate.promise;
           return { count: context.count };
         },
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'ready',
-          context: { count: result.count },
+          context: { count: output.count },
         }),
       },
     },

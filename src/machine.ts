@@ -1,6 +1,9 @@
 import type {
   AgentMachine,
   AgentMessage,
+  AgentResolverSnapshot,
+  AgentToolChoice,
+  AgentTools,
   AgentSnapshot,
   AgentState,
   EmittedPart,
@@ -22,6 +25,7 @@ import {
   isAlwaysEventType,
   isDoneInvokeEventType,
   isErrorInvokeEventType,
+  isReservedInternalEventType,
   resolveInitial,
   resolveStateConfig,
   serializeError,
@@ -30,12 +34,30 @@ import {
 import type { StateConfigAny } from './utils.js';
 
 // ─── Type helpers ───
-/** Result type for onDone: typed from invoke return or resultSchema when present */
-type OnDoneResult<TResult> = NoInfer<TResult>;
+/** Output type for onDone: typed from invoke return or state schemas.output when present */
+type OnDoneOutput<TOutput> = NoInfer<TOutput>;
 
 type EventFor<TEvents, E> = E extends keyof TEvents & string
   ? { type: E } & EventPayload<InferOutput<TEvents[E & keyof TEvents]>>
   : { type: E & string; [k: string]: unknown };
+
+type StateResolverArgs<
+  TContext extends Record<string, unknown>,
+  TInput,
+> = {
+  snapshot: AgentResolverSnapshot<TContext>;
+  context: TContext;
+  messages: AgentMessage[];
+  input: NoInfer<TInput>;
+};
+
+type ResolvableStateValue<
+  TValue,
+  TContext extends Record<string, unknown>,
+  TInput,
+> =
+  | TValue
+  | ((args: StateResolverArgs<TContext, TInput>) => TValue);
 
 type StateNodeDef<
   TState,
@@ -47,16 +69,18 @@ type StateNodeDef<
   TInputMap extends Record<string, any>,
   TOutput,
 > = {
-  type?: 'final' | 'choice';
-  inputSchema?: StandardSchemaV1<TInput>;
-  resultSchema?: StandardSchemaV1<TResult>;
+  type?: 'final';
+  schemas?: {
+    input?: StandardSchemaV1<TInput>;
+    output?: StandardSchemaV1<TResult>;
+  };
   invoke?: (args: {
     context: TContext;
     messages: AgentMessage[];
     input: NoInfer<TInput>;
     signal?: AbortSignal;
   }, enq: { emit(part: EmittedPart): void }) => Promise<TResult>;
-  onDone?: (args: { result: OnDoneResult<TResult>; context: TContext; messages: AgentMessage[] }) => TransitionResult<TContext, TTarget, TInputMap>;
+  onDone?: (args: { output: OnDoneOutput<TResult>; context: TContext; messages: AgentMessage[] }) => TransitionResult<TContext, TTarget, TInputMap>;
   always?: TransitionResult<TContext, TTarget, TInputMap> | ((args: {
     context: TContext;
     messages: AgentMessage[];
@@ -69,11 +93,12 @@ type StateNodeDef<
     }, enq: { emit(part: EmittedPart): void }) => TransitionResult<TContext, TTarget, TInputMap>) };
   events?: Record<string, StandardSchemaV1>;
   output?: (args: { context: TContext; messages: AgentMessage[] }) => NoInfer<TOutput>;
-  model?: string;
+  model?: ResolvableStateValue<string, TContext, TInput>;
   adapter?: import('./types.js').AgentAdapter;
-  prompt?: string | ((args: { context: TContext; messages: AgentMessage[]; input: NoInfer<TInput> }) => string);
-  options?: Record<string, { description: string; schema?: StandardSchemaV1 }>;
-  reasoning?: boolean;
+  prompt?: ResolvableStateValue<string, TContext, TInput>;
+  system?: ResolvableStateValue<string, TContext, TInput>;
+  tools?: ResolvableStateValue<AgentTools, TContext, TInput>;
+  toolChoice?: ResolvableStateValue<AgentToolChoice, TContext, TInput>;
 };
 
 type StatesMap<
@@ -116,6 +141,7 @@ export function createAgentMachine<
   context: (input: NoInfer<TInput>) => NoInfer<TContext>;
   messages?: AgentMessage[] | ((input: NoInfer<TInput>) => AgentMessage[]);
   adapter?: import('./types.js').AgentAdapter;
+  externalEvents?: readonly (keyof TEvents & string)[];
   initial:
     | (keyof TInputMap & keyof TResultMap & string)
     | ((args: { context: NoInfer<TContext> }) => {
@@ -146,6 +172,7 @@ export function createAgentMachine<
   context: (input: NoInfer<TInput>) => TContext;
   messages?: AgentMessage[] | ((input: NoInfer<TInput>) => AgentMessage[]);
   adapter?: import('./types.js').AgentAdapter;
+  externalEvents?: readonly (keyof TEvents & string)[];
   initial:
     | (keyof TInputMap & keyof TResultMap & string)
     | ((args: { context: TContext }) => {
@@ -175,6 +202,7 @@ export function createAgentMachine<
   context: (...args: any[]) => TContext;
   messages?: AgentMessage[] | ((input: unknown) => AgentMessage[]);
   adapter?: import('./types.js').AgentAdapter;
+  externalEvents?: readonly (keyof TEvents & string)[];
   initial:
     | (keyof TInputMap & keyof TResultMap & string)
     | ((args: { context: TContext }) => {
@@ -190,8 +218,30 @@ export function createAgentMachine(
   machineConfig: MachineConfig<any, any, any, any, any>
 ): AgentMachine {
   const cfg = machineConfig as MachineConfig;
+  assertValidConfig(cfg);
 
   type SnapshotRuntime = { sessionId: string; createdAt: number };
+  const EVENT_TOOL_PREFIX = 'event.';
+
+  function assertValidConfig(config: MachineConfig) {
+    for (const [stateValue, stateConfig] of Object.entries(config.states)) {
+      if (!stateConfig.invoke) {
+        continue;
+      }
+
+      const hasGenerationFields =
+        stateConfig.prompt !== undefined
+        || stateConfig.system !== undefined
+        || stateConfig.tools !== undefined
+        || stateConfig.toolChoice !== undefined;
+
+      if (hasGenerationFields) {
+        throw new Error(
+          `State '${stateValue}' cannot combine invoke with prompt, system, tools, or toolChoice`
+        );
+      }
+    }
+  }
 
   function createSnapshotRuntime(state: AgentState) {
     if (state.sessionId && state.createdAt !== undefined) {
@@ -217,11 +267,109 @@ export function createAgentMachine(
     state: AgentState,
     runtime: SnapshotRuntime
   ): AgentState {
-    return {
+    return resolveStateFields({
       ...state,
       sessionId: runtime.sessionId,
       createdAt: runtime.createdAt,
+    });
+  }
+
+  function withoutResolvedFields(state: AgentState): AgentState {
+    const {
+      model: _model,
+      prompt: _prompt,
+      system: _system,
+      tools: _tools,
+      toolChoice: _toolChoice,
+      ...rest
+    } = state;
+
+    return rest;
+  }
+
+  function resolveStateFields(state: AgentState): AgentState {
+    const base = withoutResolvedFields(state);
+    const sc = resolveStateConfig(cfg, base.value);
+    const input = getInput(base.value, base.input);
+    const args = {
+      snapshot: base,
+      context: base.context,
+      messages: base.messages,
+      input,
     };
+
+    const model =
+      typeof sc.model === 'function'
+        ? sc.model(args)
+        : sc.model;
+    const prompt =
+      typeof sc.prompt === 'function'
+        ? sc.prompt(args)
+        : sc.prompt;
+    const system =
+      typeof sc.system === 'function'
+        ? sc.system(args)
+        : sc.system;
+    const tools =
+      typeof sc.tools === 'function'
+        ? sc.tools(args)
+        : sc.tools;
+    const toolChoice =
+      typeof sc.toolChoice === 'function'
+        ? sc.toolChoice(args)
+        : sc.toolChoice;
+    const eventTools = getEventTools(base.value);
+    const resolvedTools = {
+      ...(tools ?? {}),
+      ...eventTools,
+    };
+
+    return {
+      ...base,
+      ...(model !== undefined ? { model } : {}),
+      ...(prompt !== undefined ? { prompt } : {}),
+      ...(system !== undefined ? { system } : {}),
+      ...(Object.keys(resolvedTools).length > 0 ? { tools: resolvedTools } : {}),
+      ...(toolChoice !== undefined ? { toolChoice } : {}),
+    };
+  }
+
+  function getEventTools(value: string): AgentTools {
+    const sc = resolveStateConfig(cfg, value);
+    if (!sc.on || !isGenerativeState(sc)) {
+      return {};
+    }
+
+    const tools: AgentTools = {};
+    const externalEvents = new Set(cfg.externalEvents ?? []);
+
+    for (const eventType of Object.keys(sc.on)) {
+      if (isReservedInternalEventType(eventType) || externalEvents.has(eventType)) {
+        continue;
+      }
+
+      const schema = findEventSchema(cfg, value, eventType);
+
+      tools[`${EVENT_TOOL_PREFIX}${eventType}`] = {
+        description: `Transition with event '${eventType}'.`,
+        ...(schema ? { schemas: { input: schema },} : {}),
+        execute: async (input: unknown = {}) => ({
+          ...(input && typeof input === 'object' ? input : {}),
+          type: eventType,
+        }),
+      };
+    }
+
+    return tools;
+  }
+
+  function isGenerativeState(sc: StateConfigAny): boolean {
+    return (
+      sc.prompt !== undefined
+      || sc.system !== undefined
+      || sc.tools !== undefined
+      || sc.toolChoice !== undefined
+    );
   }
 
   function getInitialState(...args: [input?: unknown]): AgentState {
@@ -243,13 +391,13 @@ export function createAgentMachine(
       throw new Error('Initial transition must specify a target state');
     }
 
-    return {
+    return resolveStateFields({
       value: init.target,
       context: init.context ? { ...context, ...init.context } : context,
       messages: init.messages ?? messages,
       status: 'active',
       input: init.input ? { [init.target]: init.input } : {},
-    };
+    });
   }
 
   function resolveState(raw: {
@@ -263,7 +411,7 @@ export function createAgentMachine(
     output?: unknown;
     error?: unknown;
   }): AgentState {
-    return {
+    return resolveStateFields({
       value: raw.value,
       context: raw.context,
       messages: raw.messages ?? [],
@@ -273,7 +421,7 @@ export function createAgentMachine(
       createdAt: raw.createdAt,
       output: raw.output,
       error: raw.error,
-    };
+    });
   }
 
   function transition(
@@ -299,17 +447,17 @@ export function createAgentMachine(
       status = state.status
     ): AgentState {
       if (result.target) {
-        return applyTransition(state, result);
+        return resolveStateFields(applyTransition(withoutResolvedFields(state), result));
       }
 
-      return {
-        ...state,
+      return resolveStateFields({
+        ...withoutResolvedFields(state),
         status,
         context: result.context
           ? { ...state.context, ...result.context }
           : state.context,
         messages: result.messages ?? state.messages,
-      };
+      });
     }
 
     function resolveHandlerResult(
@@ -341,13 +489,13 @@ export function createAgentMachine(
 
     if (isDoneInvokeEventType(state.value, event.type)) {
       const result = 'output' in event ? event.output : undefined;
-      const validatedResult = sc.resultSchema
-        ? validateSchemaSync(sc.resultSchema, result)
+      const validatedOutput = sc.schemas?.output
+        ? validateSchemaSync(sc.schemas.output, result)
         : result;
 
       if (sc.onDone) {
         const trans = sc.onDone({
-          result: validatedResult,
+          output: validatedOutput,
           context: state.context,
           messages: state.messages,
         });
@@ -363,7 +511,7 @@ export function createAgentMachine(
         return resolveHandlerResult(internalHandler, 'pending');
       }
 
-      return { next: { ...state, status: 'pending' }, emitted };
+      return { next: resolveStateFields({ ...withoutResolvedFields(state), status: 'pending' }), emitted };
     }
 
     if (isAlwaysEventType(state.value, event.type)) {
@@ -384,11 +532,11 @@ export function createAgentMachine(
       }
 
       return {
-        next: {
-          ...state,
+        next: resolveStateFields({
+          ...withoutResolvedFields(state),
           status: 'error',
           error: 'error' in event ? event.error : undefined,
-        },
+        }),
         emitted,
       };
     }
@@ -410,11 +558,11 @@ export function createAgentMachine(
     result: unknown
   ): unknown {
     const sc = resolveStateConfig(cfg, value);
-    if (!sc.resultSchema) {
+    if (!sc.schemas?.output) {
       return result;
     }
 
-    return validateSchemaSync(sc.resultSchema, result);
+    return validateSchemaSync(sc.schemas.output, result);
   }
 
   function validateEventPayload(
@@ -477,30 +625,20 @@ export function createAgentMachine(
     };
   }
 
-  async function createChoiceEvent(state: AgentState): Promise<JournalEvent> {
-    const sc = resolveStateConfig(cfg, state.value);
-    const adapter = sc.adapter ?? cfg.adapter;
-    if (!adapter) {
-      return {
-        type: `xstate.error.invoke.${state.value}`,
-        error: { message: `No adapter for '${state.value}'` },
-        at: Date.now(),
-      };
-    }
-
-    const input = getInput(state.value, state.input);
-    const prompt =
-      typeof sc.prompt === 'function'
-        ? sc.prompt({ context: state.context, messages: state.messages, input })
-        : sc.prompt;
-
+  async function createInvokeEvent(
+    state: AgentState,
+    sc: StateConfigAny,
+    onEmit?: (part: EmittedPart) => void
+  ): Promise<JournalEvent> {
     try {
-      const result = await adapter.decide({
-        model: sc.model!,
-        prompt: prompt as string,
-        options: sc.options!,
-        reasoning: sc.reasoning,
-      });
+      const result = await sc.invoke!(
+        {
+          context: state.context,
+          messages: state.messages,
+          input: getInput(state.value, state.input),
+        },
+        createEnqueue(onEmit)
+      );
       const validatedResult = validateReplayableResult(state.value, result);
 
       return {
@@ -517,20 +655,30 @@ export function createAgentMachine(
     }
   }
 
-  async function createInvokeEvent(
-    state: AgentState,
-    sc: StateConfigAny,
-    onEmit?: (part: EmittedPart) => void
-  ): Promise<JournalEvent> {
+  async function createGenerateEvent(state: AgentState): Promise<JournalEvent> {
+    const sc = resolveStateConfig(cfg, state.value);
+    const adapter = sc.adapter ?? cfg.adapter;
+    if (!adapter?.generateText) {
+      return {
+        type: `xstate.error.invoke.${state.value}`,
+        error: { message: `No generateText adapter for '${state.value}'` },
+        at: Date.now(),
+      };
+    }
+
     try {
-      const result = await sc.invoke!(
-        {
-          context: state.context,
-          messages: state.messages,
-          input: getInput(state.value, state.input),
-        },
-        createEnqueue(onEmit)
-      );
+      const messages = state.prompt
+        ? state.messages.concat({ role: 'user', content: state.prompt })
+        : state.messages;
+      const result = await adapter.generateText({
+        model: state.model,
+        system: state.system,
+        prompt: state.prompt,
+        messages,
+        tools: state.tools,
+        toolChoice: state.toolChoice,
+        outputSchema: sc.schemas?.output,
+      });
       const validatedResult = validateReplayableResult(state.value, result);
 
       return {
@@ -563,12 +711,20 @@ export function createAgentMachine(
       };
     }
 
-    if (sc.type === 'choice') {
-      return createChoiceEvent(state);
-    }
-
     if (sc.invoke) {
       return createInvokeEvent(state, sc, onEmit);
+    }
+
+    if (
+      sc.onDone
+      && (
+        sc.prompt !== undefined
+        || sc.system !== undefined
+        || sc.tools !== undefined
+        || sc.toolChoice !== undefined
+      )
+    ) {
+      return createGenerateEvent(state);
     }
 
     return null;
@@ -612,7 +768,7 @@ export function createAgentMachine(
       const output = cfg.schemas?.output
         ? validateSchemaSync(cfg.schemas.output, rawOutput)
         : rawOutput;
-      return { ...state, status: 'done', output };
+      return resolveStateFields({ ...withoutResolvedFields(state), status: 'done', output });
     }
 
     const effectEvent = await getEffectEvent(state);
@@ -621,14 +777,14 @@ export function createAgentMachine(
     }
 
     if (sc.on) {
-      return { ...state, status: 'pending' };
+      return resolveStateFields({ ...withoutResolvedFields(state), status: 'pending' });
     }
 
-    return {
-      ...state,
+    return resolveStateFields({
+      ...withoutResolvedFields(state),
       status: 'error',
       error: `State '${state.value}' has no invoke, events, or final type`,
-    };
+    });
   }
 
   async function execute(state: AgentState): Promise<ExecuteResult> {

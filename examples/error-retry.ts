@@ -56,16 +56,16 @@ export function createErrorRetryExample(
     initial: 'answering',
     states: {
       answering: {
-        resultSchema: answerSchema,
+        schemas: { output: answerSchema },
         invoke: async ({ context }) =>
           answer({
             question: context.question,
             attempt: context.attempt,
           }),
-        onDone: ({ result }) => ({
+        onDone: ({ output }) => ({
           target: 'done',
           context: {
-            answer: result.answer,
+            answer: output.answer,
           },
         }),
         on: {

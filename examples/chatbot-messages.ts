@@ -70,13 +70,13 @@ export function createChatbotMessagesExample(
         },
       },
       replying: {
-        resultSchema: replySchema,
+        schemas: { output: replySchema },
         invoke: async ({ messages }) => reply(messages),
-        onDone: ({ result, messages }) => ({
+        onDone: ({ output, messages }) => ({
           target: 'waitingForUser',
-          messages: messages.concat(result.message),
+          messages: messages.concat(output.message),
           context: {
-            finalMessage: result.message,
+            finalMessage: output.message,
           },
         }),
       },
