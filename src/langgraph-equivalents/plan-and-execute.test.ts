@@ -1,4 +1,5 @@
-import { expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
+import { execute, invoke, stream } from '../local/index.js';
 import { createPlanAndExecuteExample } from '../../examples/plan-and-execute.js';
 
 test('plan-and-execute workflow decomposes a goal and synthesizes a final answer', async () => {
@@ -14,7 +15,7 @@ test('plan-and-execute workflow decomposes a goal and synthesizes a final answer
     }),
   });
 
-  const result = await machine.execute(
+  const result = await execute(machine, 
     machine.getInitialState({ goal: 'understand the repo' })
   );
 

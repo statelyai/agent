@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { execute } from '../src/local/index.js';
 import { createAgentMachine, type AgentAdapter } from '../src/index.js';
 import {
   closePrompt,
@@ -88,7 +89,7 @@ async function main() {
   try {
     const topic = await prompt('Joke topic');
     const machine = createJokeExample();
-    console.log(formatResult(await machine.execute(machine.getInitialState({ topic }))));
+    console.log(formatResult(await execute(machine, machine.getInitialState({ topic }))));
   } finally {
     closePrompt();
   }

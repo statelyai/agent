@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { execute } from '../src/local/index.js';
 import { createAgentMachine } from '../src/index.js';
 import {
   closePrompt,
@@ -128,7 +129,7 @@ async function main() {
   try {
     const issue = await prompt('Customer issue');
     const machine = createCustomerServiceSimExample();
-    console.log(formatResult(await machine.execute(machine.getInitialState({ issue }))));
+    console.log(formatResult(await execute(machine, machine.getInitialState({ issue }))));
   } finally {
     closePrompt();
   }

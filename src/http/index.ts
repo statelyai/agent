@@ -1,10 +1,8 @@
 import {
   createMemoryRunStore,
-} from '../runtime/memory-store.js';
-import {
   restoreSession,
   startSession,
-} from '../runtime/session.js';
+} from '../local/index.js';
 import type {
   AgentMachine,
   AgentRun,

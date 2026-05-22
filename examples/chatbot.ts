@@ -1,10 +1,9 @@
 import { z } from 'zod';
+import { createMemoryRunStore, restoreSession, startSession, waitForRunDone, waitForRunSnapshot } from '../src/local/index.js';
 import {
   createAgentMachine,
-  createMemoryRunStore,
   decide,
   decideResultSchema,
-  startSession,
   type DecideAdapter,
 } from '../src/index.js';
 import {
@@ -13,7 +12,6 @@ import {
   generateExampleObject,
   isMain,
   prompt,
-  waitForRunSnapshot,
 } from './_run.js';
 
 const replySchema = z.object({

@@ -7,7 +7,7 @@ This document tracks where `@statelyai/agent` covers the practical workflow patt
 It is intentionally scoped to:
 
 - runnable workflow patterns
-- state/routing/runtime behavior
+- state/routing authoring behavior
 - human-in-the-loop and iteration behavior
 - examples and tests in this repo
 
@@ -55,5 +55,5 @@ Primary sources:
 ## Differences
 
 - Logic remains explicit state-machine logic instead of CrewAI decorator-based method routing.
-- Durable sessions are modeled through first-class snapshots and event journals rather than framework-managed persistence hidden behind class methods.
+- Session contracts expose snapshots and event journals; production persistence belongs in adapters.
 - Fan-out is expressed in plain JavaScript `Promise.all(...)` inside invokes where that is simpler than introducing framework-specific branching primitives.

@@ -1,5 +1,6 @@
 import { Agent } from 'agents';
-import { restoreSession, startSession, type RunStore } from '../../../../src/index.js';
+import type { RunStore } from '../../../../src/index.js';
+import { restoreSession, startSession } from '../../../../src/local/index.js';
 import {
   createCloudflareAgentRunStore,
   type CloudflareAgentRunStoreState,

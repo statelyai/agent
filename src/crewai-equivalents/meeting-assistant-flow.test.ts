@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
+import { execute, invoke, stream } from '../local/index.js';
 import { createMeetingAssistantFlowExample } from '../../examples/index.js';
 
 describe('CrewAI meeting assistant flow equivalent', () => {
@@ -18,7 +19,7 @@ describe('CrewAI meeting assistant flow equivalent', () => {
       sendSlackNotification: async () => ({ slackMessageId: 'slack-123' }),
     });
 
-    const result = await machine.execute(
+    const result = await execute(machine, 
       machine.getInitialState({
         notes: 'Meeting notes go here.',
       })

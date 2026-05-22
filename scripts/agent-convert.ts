@@ -200,7 +200,6 @@ function isAgentMachine(value: unknown): value is AgentMachine {
     && typeof (value as AgentMachine).id === 'string'
     && typeof (value as AgentMachine).getInitialState === 'function'
     && typeof (value as AgentMachine).transition === 'function'
-    && typeof (value as AgentMachine).execute === 'function'
   );
 }
 

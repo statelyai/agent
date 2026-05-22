@@ -1,4 +1,5 @@
-import { expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
+import { execute, invoke, stream } from '../local/index.js';
 import { z } from 'zod';
 import { createAgentMachine } from '../index.js';
 
@@ -39,7 +40,7 @@ test('supports multi-step workflow accumulation like a sequential state graph', 
     },
   });
 
-  const result = await machine.execute(machine.getInitialState());
+  const result = await execute(machine, machine.getInitialState());
 
   expect(result.status).toBe('done');
   if (result.status === 'done') {
@@ -104,7 +105,7 @@ test('supports conditional routing with explicit machine transitions', async () 
     },
   });
 
-  const result = await machine.execute(
+  const result = await execute(machine, 
     machine.getInitialState({ request: 'I need a refund for my invoice.' })
   );
 

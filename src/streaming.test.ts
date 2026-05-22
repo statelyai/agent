@@ -1,9 +1,8 @@
-import { expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
+import { createMemoryRunStore, restoreSession, startSession, waitForRunDone, waitForRunSnapshot } from './local/index.js';
 import { z } from 'zod';
 import {
   createAgentMachine,
-  createMemoryRunStore,
-  startSession,
 } from './index.js';
 
 function once<T = unknown>(

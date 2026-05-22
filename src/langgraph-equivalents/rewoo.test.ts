@@ -1,4 +1,5 @@
-import { expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
+import { execute, invoke, stream } from '../local/index.js';
 import { createRewooExample } from '../../examples/rewoo.js';
 
 test('rewoo workflow plans named steps, resolves references, and synthesizes a final answer', async () => {
@@ -25,7 +26,7 @@ test('rewoo workflow plans named steps, resolves references, and synthesizes a f
     }),
   });
 
-  const result = await machine.execute(
+  const result = await execute(machine, 
     machine.getInitialState({ objective: 'understand the runtime' })
   );
 

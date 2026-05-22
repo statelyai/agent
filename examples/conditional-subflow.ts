@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { execute } from '../src/local/index.js';
 import { createAgentMachine } from '../src/index.js';
 import {
   closePrompt,
@@ -134,7 +135,7 @@ export function createConditionalSubflowExample(
       researching: {
         schemas: { output: researchSchema },
         invoke: async ({ context }) => {
-          const result = await researchMachine.execute(
+          const result = await execute(researchMachine, 
             researchMachine.getInitialState({ topic: context.topic })
           );
 
@@ -154,7 +155,7 @@ export function createConditionalSubflowExample(
           bullets: z.array(z.string()),
         }), output: draftSchema },
         invoke: async ({ context, input }) => {
-          const result = await draftMachine.execute(
+          const result = await execute(draftMachine, 
             draftMachine.getInitialState({
               topic: context.topic,
               bullets: input.bullets,
@@ -190,7 +191,7 @@ async function main() {
     const modeInput = await prompt('Mode (research/draft)');
     const mode = modeInput === 'draft' ? 'draft' : 'research';
     const machine = createConditionalSubflowExample();
-    const result = await machine.execute(
+    const result = await execute(machine, 
       machine.getInitialState({ topic, mode })
     );
 

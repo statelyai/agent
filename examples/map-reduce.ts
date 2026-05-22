@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { execute } from '../src/local/index.js';
 import { createAgentMachine } from '../src/index.js';
 import {
   closePrompt,
@@ -113,7 +114,7 @@ async function main() {
   try {
     const topic = await prompt('Topic');
     const machine = createMapReduceExample();
-    const result = await machine.execute(machine.getInitialState({ topic }));
+    const result = await execute(machine, machine.getInitialState({ topic }));
     console.log(formatResult(result));
   } finally {
     closePrompt();

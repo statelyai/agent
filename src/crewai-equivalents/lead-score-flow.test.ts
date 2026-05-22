@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
+import { execute, invoke, stream } from '../local/index.js';
 import { createLeadScoreFlowExample } from '../../examples/index.js';
 
 describe('CrewAI lead score flow equivalent', () => {
@@ -26,7 +27,7 @@ describe('CrewAI lead score flow equivalent', () => {
         { id: 'lead-3', company: 'Gamma', contact: 'Gia' },
       ],
     });
-    const firstPass = await machine.execute(initial);
+    const firstPass = await execute(machine, initial);
     expect(firstPass.status).toBe('pending');
     if (firstPass.status !== 'pending') {
       return;
@@ -36,7 +37,7 @@ describe('CrewAI lead score flow equivalent', () => {
       type: 'review.requestChanges',
       note: 'Prefer companies already asking for demos.',
     });
-    const secondPass = await machine.execute(rescored);
+    const secondPass = await execute(machine, rescored);
     expect(secondPass.status).toBe('pending');
     if (secondPass.status !== 'pending') {
       return;
@@ -45,7 +46,7 @@ describe('CrewAI lead score flow equivalent', () => {
     const approved = machine.transition(secondPass.state, {
       type: 'review.approve',
     });
-    const finalResult = await machine.execute(approved);
+    const finalResult = await execute(machine, approved);
 
     expect(finalResult.status).toBe('done');
     if (finalResult.status === 'done') {

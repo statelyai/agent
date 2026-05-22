@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { execute } from '../src/local/index.js';
 import { createAgentMachine, type StandardSchemaV1 } from '../src/index.js';
 
 const messageSchema = z.object({

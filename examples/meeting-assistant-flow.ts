@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { execute } from '../src/local/index.js';
 import { createAgentMachine } from '../src/index.js';
 import {
   closePrompt,
@@ -140,7 +141,7 @@ async function main() {
   try {
     const notes = await prompt('Meeting notes');
     const machine = createMeetingAssistantFlowExample();
-    const result = await machine.execute(machine.getInitialState({ notes }));
+    const result = await execute(machine, machine.getInitialState({ notes }));
     console.log(formatResult(result));
   } finally {
     closePrompt();

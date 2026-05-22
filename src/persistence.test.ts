@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { createMemoryRunStore } from './index.js';
+import { createMemoryRunStore } from './local/index.js';
 
 test('appends and loads journal events in sequence order', async () => {
   const store = createMemoryRunStore();

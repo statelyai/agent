@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { execute } from '../src/local/index.js';
 import { createAgentMachine } from '../src/index.js';
 import {
   closePrompt,
@@ -121,7 +122,7 @@ async function main() {
   try {
     const question = await prompt('Question');
     const machine = createErrorRetryExample();
-    const result = await machine.execute(machine.getInitialState({ question }));
+    const result = await execute(machine, machine.getInitialState({ question }));
 
     console.log(formatResult(result));
   } finally {

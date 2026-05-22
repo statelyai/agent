@@ -1,9 +1,5 @@
-import {
-  createMemoryRunStore,
-  restoreSession,
-  startSession,
-  type PersistedSnapshot,
-} from '../src/index.js';
+import { createMemoryRunStore, restoreSession, startSession, waitForRunDone, waitForRunSnapshot } from '../src/local/index.js';
+import type { PersistedSnapshot } from '../src/index.js';
 import { createMultiAgentNetworkExample } from './multi-agent-network.js';
 
 type NetworkOptions = Parameters<typeof createMultiAgentNetworkExample>[0];

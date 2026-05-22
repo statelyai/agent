@@ -1,4 +1,5 @@
-import { expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
+import { execute, invoke, stream } from '../local/index.js';
 import { z } from 'zod';
 import { createAgentMachine } from '../index.js';
 
@@ -45,7 +46,7 @@ test('supports human-in-the-loop review with explicit pending states and externa
     },
   });
 
-  const first = await machine.execute(
+  const first = await execute(machine, 
     machine.getInitialState({ task: 'reply to customer' })
   );
 
@@ -59,13 +60,13 @@ test('supports human-in-the-loop review with explicit pending states and externa
     type: 'revise',
     note: 'make it shorter',
   });
-  const second = await machine.execute(revised);
+  const second = await execute(machine, revised);
 
   expect(second.status).toBe('pending');
   if (second.status !== 'pending') return;
 
   const approved = machine.transition(second.state, { type: 'approve' });
-  const done = await machine.execute(approved);
+  const done = await execute(machine, approved);
 
   expect(done.status).toBe('done');
   if (done.status === 'done') {

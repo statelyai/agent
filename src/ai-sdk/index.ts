@@ -22,11 +22,9 @@ export function createAiSdkAdapter(
 
   return {
     async generateText({ model, system, prompt, messages, tools, toolChoice, outputSchema }) {
-      const result = await generate({
+      const options: any = {
         model: resolveModel(model ?? 'default', config.resolveModel),
         system,
-        prompt,
-        messages: messages as any,
         tools: tools as any,
         toolChoice: toolChoice as any,
         ...(outputSchema
@@ -36,7 +34,15 @@ export function createAiSdkAdapter(
             }),
           }
           : {}),
-      });
+      };
+
+      if (messages.length > 0) {
+        options.messages = messages as any;
+      } else {
+        options.prompt = prompt ?? '';
+      }
+
+      const result = await generate(options);
 
       const output = result as { output?: unknown; text?: string };
       return output.output ?? output.text ?? result;

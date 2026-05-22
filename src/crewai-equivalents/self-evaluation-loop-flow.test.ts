@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
+import { execute, invoke, stream } from '../local/index.js';
 import { createSelfEvaluationLoopFlowExample } from '../../examples/index.js';
 
 describe('CrewAI self evaluation loop equivalent', () => {
@@ -22,7 +23,7 @@ describe('CrewAI self evaluation loop equivalent', () => {
           },
     });
 
-    const result = await machine.execute(
+    const result = await execute(machine, 
       machine.getInitialState({
         topic: 'Flying cars',
       })

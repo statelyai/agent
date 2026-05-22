@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { execute } from '../src/local/index.js';
 import { createAgentMachine } from '../src/index.js';
 import {
   closePrompt,
@@ -129,7 +130,7 @@ async function main() {
   try {
     const request = await prompt('Content request');
     const machine = createContentCreatorFlowExample();
-    const result = await machine.execute(machine.getInitialState({ request }));
+    const result = await execute(machine, machine.getInitialState({ request }));
     console.log(formatResult(result));
   } finally {
     closePrompt();

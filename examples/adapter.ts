@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { execute } from '../src/local/index.js';
 import {
   createAgentMachine,
   decide,
@@ -85,7 +86,7 @@ async function main() {
     const message = await prompt('Message to route');
     const machine = createAdapterExample();
 
-    console.log(formatResult(await machine.execute(machine.getInitialState({ message }))));
+    console.log(formatResult(await execute(machine, machine.getInitialState({ message }))));
   } finally {
     closePrompt();
   }

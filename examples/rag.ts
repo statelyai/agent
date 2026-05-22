@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { execute } from '../src/local/index.js';
 import { createAgentMachine, type AgentAdapter } from '../src/index.js';
 import {
   closePrompt,
@@ -101,7 +102,7 @@ async function main() {
   try {
     const question = await prompt('Question');
     const machine = createRagExample();
-    const result = await machine.execute(
+    const result = await execute(machine, 
       machine.getInitialState({ question })
     );
 

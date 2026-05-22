@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { execute, invoke, stream } from './local/index.js';
 import { createAgentMachine } from './machine.js';
 
 const machine = createAgentMachine({
@@ -121,7 +122,7 @@ typedMachine.transition(typedState, { type: 'missing' });
 typedMachine.transition(typedState, { type: 'submit', value: 'nope' });
 
 void (async () => {
-  const result = await typedMachine.execute(
+  const result = await execute(typedMachine, 
     typedMachine.transition(typedState, { type: 'submit', value: 2 })
   );
 

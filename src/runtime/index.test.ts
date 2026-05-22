@@ -2,10 +2,13 @@ import { describe, expect, test } from 'vitest';
 import { z } from 'zod';
 import {
   createAgentMachine,
+} from '../index.js';
+import {
   createMemoryRunStore,
   startSession,
-} from '../index.js';
-import { waitForRunDone, waitForRunSnapshot } from './index.js';
+  waitForRunDone,
+  waitForRunSnapshot,
+} from '../local/index.js';
 
 describe('runtime helpers', () => {
   test('waitForRunSnapshot and waitForRunDone observe session lifecycle', async () => {

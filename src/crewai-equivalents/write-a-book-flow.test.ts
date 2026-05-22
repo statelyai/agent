@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
+import { execute, invoke, stream } from '../local/index.js';
 import { createWriteABookFlowExample } from '../../examples/index.js';
 
 describe('CrewAI write a book flow equivalent', () => {
@@ -23,7 +24,7 @@ describe('CrewAI write a book flow equivalent', () => {
       }),
     });
 
-    const result = await machine.execute(
+    const result = await execute(machine, 
       machine.getInitialState({
         topic: 'Workflow systems',
         goal: 'Teach developers how to build durable AI workflows.',

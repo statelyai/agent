@@ -1,4 +1,5 @@
 import { describe, expect, test, vi } from 'vitest';
+import { execute, invoke, stream } from './local/index.js';
 import { z } from 'zod';
 import {
   classify,
@@ -252,10 +253,44 @@ describe('createAgentMachine', () => {
     expect(machine.id).toBe('simple');
     expect(typeof machine.getInitialState).toBe('function');
     expect(typeof machine.transition).toBe('function');
-    expect(typeof machine.invoke).toBe('function');
-    expect(typeof machine.execute).toBe('function');
-    expect(typeof machine.stream).toBe('function');
+    expect(typeof invoke).toBe('function');
+    expect(typeof execute).toBe('function');
+    expect(typeof stream).toBe('function');
     expect(typeof machine.resolveState).toBe('function');
+    expect(typeof machine.getEvents).toBe('function');
+  });
+});
+
+describe('getEvents', () => {
+  test('reads available events from states and snapshots', () => {
+    const machine = createAgentMachine({
+      id: 'events',
+      schemas: {
+        events: {
+          start: z.object({}),
+          ignored: z.object({}),
+        },
+      },
+      context: () => ({}),
+      initial: 'idle',
+      states: {
+        idle: {
+          on: {
+            start: { target: 'done' },
+          },
+        },
+        done: {
+          type: 'final',
+        },
+      },
+    });
+    const state = machine.getInitialState();
+
+    expect(Object.keys(machine.getEvents(state))).toEqual(['start']);
+    expect(
+      Object.keys(machine.getEvents({ ...state, createdAt: 0, sessionId: 's' }))
+    ).toEqual(['start']);
+    expect(machine.getEvents('done')).toEqual({});
   });
 });
 
@@ -308,14 +343,14 @@ describe('invoke', () => {
     const machine = createSimpleMachine();
     let state = machine.getInitialState();
     state = machine.transition(state, { type: 'start' });
-    state = await machine.invoke(state);
+    state = await invoke(machine, state);
     expect(state.value).toBe('done');
     expect(state.context.count).toBe(1);
   });
 
   test('returns pending for event-only states', async () => {
     const machine = createHitlMachine();
-    const state = await machine.invoke(machine.getInitialState({ task: 'x' }));
+    const state = await invoke(machine, machine.getInitialState({ task: 'x' }));
     expect(state.status).toBe('pending');
     expect(state.value).toBe('gathering');
   });
@@ -323,8 +358,8 @@ describe('invoke', () => {
   test('returns done for final states', async () => {
     const machine = createSimpleMachine();
     let s = machine.transition(machine.getInitialState(), { type: 'start' });
-    s = await machine.invoke(s);
-    s = await machine.invoke(s);
+    s = await invoke(machine, s);
+    s = await invoke(machine, s);
     expect(s.status).toBe('done');
     expect(s.output).toEqual({ result: 1 });
   });
@@ -333,7 +368,7 @@ describe('invoke', () => {
     const machine = createDecideMachine(
       mockAdapter([{ choice: 'technical' }])
     );
-    const s = await machine.invoke(machine.getInitialState());
+    const s = await invoke(machine, machine.getInitialState());
     expect(s.value).toBe('handling');
     expect(s.context.category).toBe('technical');
   });
@@ -342,7 +377,7 @@ describe('invoke', () => {
     const machine = createClassifyMachine(
       mockAdapter([{ choice: 'billing' }])
     );
-    const s = await machine.invoke(machine.getInitialState());
+    const s = await invoke(machine, machine.getInitialState());
     expect(s.value).toBe('done');
     expect(s.context.category).toBe('billing');
   });
@@ -365,7 +400,7 @@ describe('invoke', () => {
         done: { type: 'final' },
       },
     });
-    const s = await machine.invoke(machine.getInitialState());
+    const s = await invoke(machine, machine.getInitialState());
     expect(s.status).toBe('error');
   });
 
@@ -384,7 +419,7 @@ describe('invoke', () => {
         ok: { type: 'final' },
       },
     });
-    const s = await machine.invoke(machine.getInitialState());
+    const s = await invoke(machine, machine.getInitialState());
     expect(s.status).toBe('error');
     expect((s.error as Error).message).toBe('boom');
   });
@@ -401,7 +436,7 @@ describe('transition', () => {
 
   test('self-transition (no target)', async () => {
     const machine = createHitlMachine();
-    let s = await machine.invoke(machine.getInitialState({ task: 'x' }));
+    let s = await invoke(machine, machine.getInitialState({ task: 'x' }));
     s = machine.transition(s, { type: 'user.message', message: 'hello' });
     expect(s.value).toBe('gathering');
     expect(s.context.messages[0]!.content).toBe('hello');
@@ -409,7 +444,7 @@ describe('transition', () => {
 
   test('accumulates context', async () => {
     const machine = createHitlMachine();
-    let s = await machine.invoke(machine.getInitialState({ task: 'x' }));
+    let s = await invoke(machine, machine.getInitialState({ task: 'x' }));
     s = machine.transition(s, { type: 'user.message', message: 'one' });
     s = machine.transition(s, { type: 'user.message', message: 'two' });
     expect(s.context.messages.length).toBe(2);
@@ -428,7 +463,7 @@ describe('execute', () => {
   test('runs until done', async () => {
     const machine = createSimpleMachine();
     let s = machine.transition(machine.getInitialState(), { type: 'start' });
-    const r = await machine.execute(s);
+    const r = await execute(machine, s);
     expect(r.status).toBe('done');
     if (r.status === 'done') {
       expect(r.output).toEqual({ result: 1 });
@@ -438,7 +473,7 @@ describe('execute', () => {
 
   test('stops at pending', async () => {
     const machine = createHitlMachine();
-    const r = await machine.execute(machine.getInitialState({ task: 'x' }));
+    const r = await execute(machine, machine.getInitialState({ task: 'x' }));
     expect(r.status).toBe('pending');
     if (r.status === 'pending') {
       expect(r.value).toBe('gathering');
@@ -461,7 +496,7 @@ describe('execute', () => {
         ok: { type: 'final' },
       },
     });
-    const r = await machine.execute(machine.getInitialState());
+    const r = await execute(machine, machine.getInitialState());
     expect(r.status).toBe('error');
   });
 
@@ -469,7 +504,7 @@ describe('execute', () => {
     const machine = createDecideMachine(
       mockAdapter([{ choice: 'technical' }])
     );
-    const r = await machine.execute(machine.getInitialState());
+    const r = await execute(machine, machine.getInitialState());
     expect(r.status).toBe('done');
     if (r.status === 'done') {
       expect(r.output).toEqual({
@@ -487,7 +522,7 @@ describe('stream', () => {
       mockAdapter([{ choice: 'technical' }])
     );
     const snaps = [];
-    for await (const snap of machine.stream(machine.getInitialState())) {
+    for await (const snap of stream(machine, machine.getInitialState())) {
       snaps.push(snap);
     }
     expect(snaps.length).toBeGreaterThanOrEqual(3);
@@ -499,7 +534,7 @@ describe('stream', () => {
 describe('resolveState', () => {
   test('restores from JSON', async () => {
     const machine = createHitlMachine();
-    const r = await machine.execute(machine.getInitialState({ task: 'x' }));
+    const r = await execute(machine, machine.getInitialState({ task: 'x' }));
     const restored = machine.resolveState(JSON.parse(JSON.stringify(r.state)));
     const next = machine.transition(restored, {
       type: 'user.message',
@@ -538,7 +573,7 @@ describe('decide', () => {
         done: { type: 'final' },
       },
     });
-    await machine.invoke(machine.getInitialState());
+    await invoke(machine, machine.getInitialState());
     expect(spy).toHaveBeenCalledWith(
       expect.objectContaining({ model: 'my-model', prompt: 'About cats' })
     );
@@ -573,7 +608,7 @@ describe('decide', () => {
         done: { type: 'final' },
       },
     });
-    const r = await machine.execute(machine.getInitialState());
+    const r = await execute(machine, machine.getInitialState());
     expect(r.status === 'done' && r.context.choice).toBe('state');
   });
 
@@ -624,7 +659,7 @@ describe('decide', () => {
         done: { type: 'final' },
       },
     });
-    const r = await machine.execute(machine.getInitialState());
+    const r = await execute(machine, machine.getInitialState());
     expect(r.status === 'done' && r.context.items).toEqual(['a', 'b']);
   });
 });
@@ -658,7 +693,7 @@ describe('decide helper', () => {
       },
     });
 
-    const r = await machine.execute(machine.getInitialState());
+    const r = await execute(machine, machine.getInitialState());
     expect(r.status).toBe('done');
     if (r.status === 'done') {
       expect(r.output).toEqual({ result: 'technical: App crashes' });
@@ -1022,7 +1057,7 @@ describe('messages and always', () => {
     expect(state.tools).toBeDefined();
 
     const snapshots = [];
-    for await (const snapshot of machine.stream(state)) {
+    for await (const snapshot of stream(machine, state)) {
       snapshots.push(snapshot);
       break;
     }
@@ -1091,7 +1126,7 @@ describe('messages and always', () => {
       },
     });
 
-    const result = await machine.execute(machine.getInitialState({ prompt: 'draft' }));
+    const result = await execute(machine, machine.getInitialState({ prompt: 'draft' }));
 
     expect(result.status).toBe('done');
     if (result.status === 'done') {
@@ -1112,7 +1147,7 @@ describe('classify', () => {
     const machine = createClassifyMachine(
       mockAdapter([{ choice: 'billing' }])
     );
-    const r = await machine.execute(machine.getInitialState());
+    const r = await execute(machine, machine.getInitialState());
     expect(r.status === 'done' && r.output).toEqual({ category: 'billing' });
   });
 });
@@ -1120,7 +1155,7 @@ describe('classify', () => {
 describe('P2: event validation', () => {
   test('rejects invalid payload', async () => {
     const machine = createHitlMachine();
-    const s = await machine.invoke(machine.getInitialState({ task: 'x' }));
+    const s = await invoke(machine, machine.getInitialState({ task: 'x' }));
     expect(() =>
       // @ts-expect-error — deliberately invalid for runtime test
       machine.transition(s, { type: 'user.message', message: 123 })
@@ -1129,7 +1164,7 @@ describe('P2: event validation', () => {
 
   test('accepts valid payload', async () => {
     const machine = createHitlMachine();
-    const s = await machine.invoke(machine.getInitialState({ task: 'x' }));
+    const s = await invoke(machine, machine.getInitialState({ task: 'x' }));
     const next = machine.transition(s, {
       type: 'user.message',
       message: 'ok',
@@ -1148,7 +1183,7 @@ describe('full HITL workflow', () => {
   test('gather → process → review → done', async () => {
     const machine = createHitlMachine();
     let s = machine.getInitialState({ task: 'build' });
-    let r = await machine.execute(s);
+    let r = await execute(machine, s);
     expect(r.status).toBe('pending');
 
     s = machine.transition(r.state, {
@@ -1157,13 +1192,13 @@ describe('full HITL workflow', () => {
     });
     s = machine.transition(s, { type: 'user.message', message: 'req B' });
     s = machine.transition(s, { type: 'user.approve' });
-    r = await machine.execute(s);
+    r = await execute(machine, s);
     expect(r.status === 'pending' && r.context.result).toBe(
       'Processed: req A, req B'
     );
 
     s = machine.transition(r.state, { type: 'user.approve' });
-    r = await machine.execute(s);
+    r = await execute(machine, s);
     expect(r.status === 'done' && r.output).toEqual({
       result: 'Processed: req A, req B',
     });
@@ -1171,9 +1206,9 @@ describe('full HITL workflow', () => {
 
   test('cancel', async () => {
     const machine = createHitlMachine();
-    let r = await machine.execute(machine.getInitialState({ task: 'x' }));
+    let r = await execute(machine, machine.getInitialState({ task: 'x' }));
     const s = machine.transition(r.state, { type: 'user.cancel' });
-    r = await machine.execute(s);
+    r = await execute(machine, s);
     expect(r.status === 'done' && r.output).toEqual({ cancelled: true });
   });
 });
@@ -1301,7 +1336,7 @@ describe('type inference', () => {
         done: { type: 'final' },
       },
     });
-    return machine.execute(machine.getInitialState()).then((r) => {
+    return execute(machine, machine.getInitialState()).then((r) => {
       expect(r.status === 'done' && r.context.n).toBe(84);
     });
   });
@@ -1528,7 +1563,7 @@ describe('type inference', () => {
       ...machine.getInitialState(),
       input: { a: { count: 21 } },
     });
-    const r = await machine.execute(state);
+    const r = await execute(machine, state);
     expect(r.status === 'done' && r.output).toEqual({ result: 'hi hello' });
   });
 
@@ -1725,7 +1760,7 @@ describe('type inference', () => {
       },
     });
 
-    const runResult = await machine.execute(machine.getInitialState());
+    const runResult = await execute(machine, machine.getInitialState());
     if (runResult.status === 'done') {
       runResult.output.count satisfies number;
       runResult.output.label satisfies string;
@@ -1817,7 +1852,7 @@ describe('edge cases', () => {
       initial: 'stuck',
       states: { stuck: { invoke: async () => ({}) } },
     });
-    const s = await machine.invoke(machine.getInitialState());
+    const s = await invoke(machine, machine.getInitialState());
     expect(s.value).toBe('stuck');
   });
 
@@ -1831,7 +1866,7 @@ describe('edge cases', () => {
       status: 'done' as const,
       output: { result: 1 },
     };
-    expect(await machine.invoke(done)).toEqual(done);
+    expect(await invoke(machine, done)).toEqual(done);
   });
 });
 

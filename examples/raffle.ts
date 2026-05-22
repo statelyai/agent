@@ -1,15 +1,13 @@
 import { z } from 'zod';
+import { createMemoryRunStore, restoreSession, startSession, waitForRunDone, waitForRunSnapshot } from '../src/local/index.js';
 import {
   createAgentMachine,
-  createMemoryRunStore,
-  startSession,
 } from '../src/index.js';
 import {
   closePrompt,
   generateExampleObject,
   isMain,
   prompt,
-  waitForRunSnapshot,
 } from './_run.js';
 
 const winnerSchema = z.object({

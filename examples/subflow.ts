@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { execute } from '../src/local/index.js';
 import { createAgentMachine } from '../src/index.js';
 import {
   closePrompt,
@@ -78,7 +79,7 @@ export function createSubflowExample(
       researching: {
         schemas: { output: researchSchema },
         invoke: async ({ context }) => {
-          const result = await childMachine.execute(
+          const result = await execute(childMachine, 
             childMachine.getInitialState({ topic: context.topic })
           );
 
@@ -132,7 +133,7 @@ async function main() {
   try {
     const topic = await prompt('Topic');
     const machine = createSubflowExample();
-    const result = await machine.execute(machine.getInitialState({ topic }));
+    const result = await execute(machine, machine.getInitialState({ topic }));
     console.log(formatResult(result));
   } finally {
     closePrompt();

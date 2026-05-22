@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { execute } from '../src/local/index.js';
 import {
   createAgentMachine,
   decide,
@@ -251,7 +252,7 @@ export function createMultiAgentNetworkExample(
       researching: {
         schemas: { input: researchParamsSchema, output: researchHandoffSchema },
         invoke: async ({ context, input }) => {
-          const result = await researchAgent.execute(
+          const result = await execute(researchAgent, 
             researchAgent.getInitialState({
               topic: context.topic,
               focus: input.focus,
@@ -278,7 +279,7 @@ export function createMultiAgentNetworkExample(
       writing: {
         schemas: { input: writeParamsSchema, output: draftHandoffSchema },
         invoke: async ({ context, input }) => {
-          const result = await writerAgent.execute(
+          const result = await execute(writerAgent, 
             writerAgent.getInitialState({
               topic: context.topic,
               notes: context.notes,
@@ -320,7 +321,7 @@ async function main() {
   try {
     const topic = await prompt('Topic');
     const machine = createMultiAgentNetworkExample();
-    const result = await machine.execute(machine.getInitialState({ topic }));
+    const result = await execute(machine, machine.getInitialState({ topic }));
     console.log(formatResult(result));
   } finally {
     closePrompt();

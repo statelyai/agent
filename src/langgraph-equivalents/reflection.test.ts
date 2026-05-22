@@ -1,4 +1,5 @@
-import { expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
+import { execute, invoke, stream } from '../local/index.js';
 import { createReflectionExample } from '../../examples/reflection.js';
 
 test('reflection workflow revises a draft until critique is cleared', async () => {
@@ -14,7 +15,7 @@ test('reflection workflow revises a draft until critique is cleared', async () =
     }),
   });
 
-  const result = await machine.execute(
+  const result = await execute(machine, 
     machine.getInitialState({ task: 'Write a short explanation.' })
   );
 

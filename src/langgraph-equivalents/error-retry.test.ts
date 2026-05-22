@@ -1,6 +1,7 @@
-import { expect, test, vi } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
+import { execute, invoke, stream } from '../local/index.js';
 import { createErrorRetryExample } from '../../examples/index.js';
-import { createMemoryRunStore, restoreSession } from '../index.js';
+import { createMemoryRunStore, restoreSession } from '../local/index.js';
 
 test('retries failed invoke work through explicit internal error events', async () => {
   let attempts = 0;
@@ -16,7 +17,7 @@ test('retries failed invoke work through explicit internal error events', async 
     };
   });
 
-  const result = await machine.execute(
+  const result = await execute(machine, 
     machine.getInitialState({ question: 'What is durable retry?' })
   );
 
@@ -36,7 +37,7 @@ test('fails after the configured retry budget is exhausted', async () => {
     throw new Error(`still down ${attempt}`);
   }, 2);
 
-  const result = await machine.execute(
+  const result = await execute(machine, 
     machine.getInitialState({ question: 'Will this recover?' })
   );
 

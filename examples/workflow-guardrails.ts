@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { execute } from '../src/local/index.js';
 import { createAgentMachine, type AgentAdapter } from '../src/index.js';
 import { closePrompt, formatResult, isMain, prompt } from './_run.js';
 
@@ -350,7 +351,7 @@ async function main() {
   try {
     const task = await prompt('Task');
     const machine = createGuardrailedBugfixWorkflowExample();
-    const result = await machine.execute(machine.getInitialState({ task }));
+    const result = await execute(machine, machine.getInitialState({ task }));
 
     console.log(formatResult(result));
   } finally {

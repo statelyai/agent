@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { execute } from '../src/local/index.js';
 import {
   createAgentMachine,
   decide,
@@ -239,7 +240,7 @@ async function main() {
     const request = await prompt('Request');
     const machine = createSupervisorExample();
     console.log(
-      formatResult(await machine.execute(machine.getInitialState({ request })))
+      formatResult(await execute(machine, machine.getInitialState({ request })))
     );
   } finally {
     closePrompt();

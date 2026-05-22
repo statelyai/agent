@@ -1,7 +1,7 @@
 {
   "name": "@statelyai/agent",
   "version": "2.0.0",
-  "description": "Lightweight, stateless, framework-agnostic state-machine-driven AI agents",
+  "description": "State-machine authoring layer for AI agents",
   "type": "module",
   "main": "dist/index.cjs",
   "module": "dist/index.mjs",
@@ -27,16 +27,6 @@
         "default": "./dist/ai-sdk.cjs"
       }
     },
-    "./cloudflare": {
-      "import": {
-        "types": "./dist/cloudflare.d.mts",
-        "default": "./dist/cloudflare.mjs"
-      },
-      "require": {
-        "types": "./dist/cloudflare.d.cts",
-        "default": "./dist/cloudflare.cjs"
-      }
-    },
     "./graph": {
       "import": {
         "types": "./dist/graph.d.mts",
@@ -47,34 +37,14 @@
         "default": "./dist/graph.cjs"
       }
     },
-    "./http": {
+    "./local": {
       "import": {
-        "types": "./dist/http.d.mts",
-        "default": "./dist/http.mjs"
+        "types": "./dist/local.d.mts",
+        "default": "./dist/local.mjs"
       },
       "require": {
-        "types": "./dist/http.d.cts",
-        "default": "./dist/http.cjs"
-      }
-    },
-    "./next": {
-      "import": {
-        "types": "./dist/next.d.mts",
-        "default": "./dist/next.mjs"
-      },
-      "require": {
-        "types": "./dist/next.d.cts",
-        "default": "./dist/next.cjs"
-      }
-    },
-    "./runtime": {
-      "import": {
-        "types": "./dist/runtime.d.mts",
-        "default": "./dist/runtime.mjs"
-      },
-      "require": {
-        "types": "./dist/runtime.d.cts",
-        "default": "./dist/runtime.cjs"
+        "types": "./dist/local.d.cts",
+        "default": "./dist/local.cjs"
       }
     },
     "./xstate": {

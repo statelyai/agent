@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
+import { execute, invoke, stream } from '../local/index.js';
 import { createContentCreatorFlowExample } from '../../examples/index.js';
 
 describe('CrewAI content creator flow equivalent', () => {
@@ -11,7 +12,7 @@ describe('CrewAI content creator flow equivalent', () => {
       }),
     });
 
-    const result = await machine.execute(
+    const result = await execute(machine, 
       machine.getInitialState({
         request: 'Announce our AI workflow launch in a short professional post.',
       })

@@ -1,6 +1,7 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
+import { execute, invoke, stream } from './local/index.js';
 import { z } from 'zod';
-import { restoreSession, startSession } from './index.js';
+import { restoreSession, startSession } from './local/index.js';
 
 import {
   createAiSdkExample,
@@ -15,6 +16,7 @@ import {
   createCustomerServiceSimExample,
   createDecideExample,
   createChatbotMessagesExample,
+  createEmailDrafterExample,
   createEmailExample,
   createErrorRetryExample,
   createHitlExample,
@@ -88,7 +90,7 @@ describe('curated examples', () => {
     const machine = createSimpleExample({
       generateText: async () => ({ summary: 'A short summary.' }),
     });
-    const result = await machine.execute(
+    const result = await execute(machine, 
       machine.getInitialState({ text: 'Longer source text.' })
     );
 
@@ -112,7 +114,7 @@ describe('curated examples', () => {
       }),
     });
 
-    const result = await machine.execute(
+    const result = await execute(machine, 
       machine.getInitialState({ message: 'Please refund invoice 123.' })
     );
 
@@ -123,6 +125,140 @@ describe('curated examples', () => {
         confidence: 0.93,
         subject: 'BILLING reply',
         body: 'Please refund invoice 123. :: 0.93',
+      });
+    }
+  });
+
+  test('email drafter follows the prompt, assess, draft, review, send loop', async () => {
+    const outputs = [
+      {
+        satisfied: false,
+        missing: ['to', 'subject'],
+        questions: ['Who should receive it?', 'What subject should I use?'],
+      },
+      {
+        satisfied: true,
+        missing: [],
+        questions: [],
+      },
+      {
+        to: 'Riley',
+        subject: 'Thanks for meeting',
+        body: 'Hi Riley,\n\nThanks for meeting today.',
+      },
+      {
+        to: 'Riley',
+        subject: 'Thanks for meeting',
+        body: 'Hi Riley,\n\nThanks for meeting today. I will send next steps tomorrow.',
+      },
+    ];
+    const sentEmails: Array<{ to: string; subject: string; body: string }> = [];
+    const machine = createEmailDrafterExample({
+      adapter: {
+        generateText: async () => outputs.shift(),
+      },
+      sendEmail: async (draft) => {
+        sentEmails.push(draft);
+      },
+    });
+
+    const first = await execute(machine, machine.getInitialState());
+
+    expect(first.status).toBe('pending');
+    if (first.status !== 'pending') {
+      return;
+    }
+
+    expect(first.value).toBe('prompting');
+
+    const needsMoreInfo = await execute(machine, 
+      machine.transition(first.state, {
+        type: 'PROMPT_SUBMITTED',
+        prompt: 'Write a thank you email after the meeting.',
+      })
+    );
+
+    expect(needsMoreInfo.status).toBe('pending');
+    if (needsMoreInfo.status !== 'pending') {
+      return;
+    }
+
+    expect(needsMoreInfo.value).toBe('needsMoreInfo');
+    expect(needsMoreInfo.context.assessment?.questions).toEqual([
+      'Who should receive it?',
+      'What subject should I use?',
+    ]);
+
+    const afterAnswer = await execute(machine, 
+      machine.transition(needsMoreInfo.state, {
+        type: 'MORE_INFO',
+        details: 'Send it to Riley. Subject: Thanks for meeting.',
+      })
+    );
+
+    expect(afterAnswer.status).toBe('pending');
+    if (afterAnswer.status !== 'pending') {
+      return;
+    }
+
+    expect(afterAnswer.value).toBe('reviewing');
+    expect(afterAnswer.context.draft).toEqual({
+      to: 'Riley',
+      subject: 'Thanks for meeting',
+      body: 'Hi Riley,\n\nThanks for meeting today.',
+    });
+
+    const afterRevise = await execute(machine, 
+      machine.transition(afterAnswer.state, {
+        type: 'REQUEST_CHANGES',
+        changes: 'Mention next steps tomorrow.',
+      })
+    );
+
+    expect(afterRevise.status).toBe('pending');
+    if (afterRevise.status !== 'pending') {
+      return;
+    }
+
+    expect(afterRevise.value).toBe('reviewing');
+    expect(afterRevise.context.draft?.body).toContain('next steps tomorrow');
+
+    const sent = await execute(machine, 
+      machine.transition(afterRevise.state, {
+        type: 'SEND',
+      })
+    );
+
+    expect(sent.status).toBe('pending');
+    if (sent.status !== 'pending') {
+      return;
+    }
+
+    expect(sent.value).toBe('sent');
+    expect(sentEmails).toEqual([
+      {
+        to: 'Riley',
+        subject: 'Thanks for meeting',
+        body: 'Hi Riley,\n\nThanks for meeting today. I will send next steps tomorrow.',
+      },
+    ]);
+
+    const done = await execute(machine, 
+      machine.transition(sent.state, {
+        type: 'END',
+      })
+    );
+
+    expect(done.status).toBe('done');
+    if (done.status === 'done') {
+      expect(done.output).toEqual({
+        sentEmails: [
+          {
+            to: 'Riley',
+            subject: 'Thanks for meeting',
+            body: 'Hi Riley,\n\nThanks for meeting today. I will send next steps tomorrow.',
+          },
+        ],
       });
     }
   });
@@ -142,7 +278,7 @@ describe('curated examples', () => {
         content: 'Hello there',
       },
     });
-    const result = await machine.execute(afterUserMessage);
+    const result = await execute(machine, afterUserMessage);
 
     expect(result.status).toBe('pending');
     if (result.status === 'pending') {
@@ -175,7 +311,7 @@ describe('curated examples', () => {
       },
     });
 
-    const result = await machine.execute(
+    const result = await execute(machine, 
       machine.getInitialState({ question: 'What is LangGraph?' })
     );
 
@@ -773,7 +909,7 @@ describe('curated examples', () => {
 
   test('hitl example exposes typed pending events', async () => {
     const machine = createHitlExample();
-    const result = await machine.execute(
+    const result = await execute(machine, 
       machine.getInitialState({ task: 'Draft an answer' })
     );
 
@@ -793,7 +929,7 @@ describe('curated examples', () => {
       }),
     });
 
-    const result = await machine.execute(
+    const result = await execute(machine, 
       machine.getInitialState({
         request: 'The customer says their invoice is wrong.',
       })
@@ -816,7 +952,7 @@ describe('curated examples', () => {
       }),
     });
 
-    const result = await machine.execute(
+    const result = await execute(machine, 
       machine.getInitialState({
         request: 'I need help with a refund for my duplicate charge.',
       })
@@ -835,7 +971,7 @@ describe('curated examples', () => {
         data: { confidence: 0.9 },
       }),
     });
-    const result = await machine.execute(machine.getInitialState({ message: 'refund my last invoice' }));
+    const result = await execute(machine, machine.getInitialState({ message: 'refund my last invoice' }));
 
     expect(result.status).toBe('done');
     if (result.status === 'done') {
@@ -855,7 +991,7 @@ describe('curated examples', () => {
       return { answer: 'Recovered answer.' };
     });
 
-    const result = await machine.execute(
+    const result = await execute(machine, 
       machine.getInitialState({ question: 'Can this retry?' })
     );
 
@@ -876,7 +1012,7 @@ describe('curated examples', () => {
       }),
     });
 
-    const result = await machine.execute(
+    const result = await execute(machine, 
       machine.getInitialState({
         topic: 'state machines',
         mode: 'draft',
@@ -1048,7 +1184,7 @@ describe('curated examples', () => {
       }),
     });
 
-    const result = await machine.execute(
+    const result = await execute(machine, 
       machine.getInitialState({ topic: 'agents' })
     );
 
@@ -1077,12 +1213,12 @@ describe('curated examples', () => {
       }),
     });
 
-    const decideResult = await decideMachine.execute(
+    const decideResult = await execute(decideMachine, 
       decideMachine.getInitialState({
         request: 'Please answer this support question.',
       })
     );
-    const classifyResult = await classifyMachine.execute(
+    const classifyResult = await execute(classifyMachine, 
       classifyMachine.getInitialState({
         request: 'This is a general support question.',
       })
@@ -1102,7 +1238,7 @@ describe('curated examples', () => {
 
   test('hitl example event schemas validate payloads', async () => {
     const machine = createHitlExample();
-    const pending = await machine.execute(
+    const pending = await execute(machine, 
       machine.getInitialState({ task: 'Draft an answer' })
     );
 
@@ -1125,7 +1261,7 @@ describe('curated examples', () => {
       }),
     });
 
-    const result = await machine.execute(
+    const result = await execute(machine, 
       machine.getInitialState({
         request: 'Please respond to this support request.',
       })
@@ -1150,7 +1286,7 @@ describe('curated examples', () => {
       reply: async () => ({ response: 'Assistant reply' }),
     });
 
-    const pending = await machine.execute(machine.getInitialState());
+    const pending = await execute(machine, machine.getInitialState());
     expect(pending.status).toBe('pending');
 
     if (pending.status === 'pending') {
@@ -1158,7 +1294,7 @@ describe('curated examples', () => {
         type: 'user.message',
         message: 'Hello there',
       });
-      const result = await machine.execute(next);
+      const result = await execute(machine, next);
 
       expect(result.status).toBe('pending');
       if (result.status === 'pending') {
@@ -1180,7 +1316,7 @@ describe('curated examples', () => {
       }),
     });
 
-    const result = await machine.execute(
+    const result = await execute(machine, 
       machine.getInitialState({ issue: 'I want a refund.' })
     );
 
@@ -1240,7 +1376,7 @@ describe('curated examples', () => {
       }),
     });
 
-    const first = await machine.execute(
+    const first = await execute(machine, 
       machine.getInitialState({
         email: 'Can you meet next week?',
         instructions: 'Reply with one specific slot.',
@@ -1255,7 +1391,7 @@ describe('curated examples', () => {
         type: 'user.answer',
         answer: 'Offer Friday afternoon.',
       });
-      const done = await machine.execute(next);
+      const done = await execute(machine, next);
 
       expect(done.status).toBe('done');
       if (done.status === 'done') {
@@ -1280,7 +1416,7 @@ describe('curated examples', () => {
       generateText: async () => results.shift(),
     });
 
-    const result = await machine.execute(
+    const result = await execute(machine, 
       machine.getInitialState({ topic: 'ducks' })
     );
 
@@ -1298,7 +1434,7 @@ describe('curated examples', () => {
 
   test('jugs example solves the 3 and 5 gallon puzzle', async () => {
     const machine = createJugsExample();
-    const result = await machine.execute(machine.getInitialState());
+    const result = await execute(machine, machine.getInitialState());
 
     expect(result.status).toBe('done');
     if (result.status === 'done') {
@@ -1337,7 +1473,7 @@ describe('curated examples', () => {
       }),
     });
 
-    const result = await machine.execute(
+    const result = await execute(machine, 
       machine.getInitialState({ topic: 'agents' })
     );
 
@@ -1361,7 +1497,7 @@ describe('curated examples', () => {
       }),
     });
 
-    const result = await machine.execute(
+    const result = await execute(machine, 
       machine.getInitialState({ topic: 'agents' })
     );
 
@@ -1410,7 +1546,7 @@ describe('curated examples', () => {
       }),
     });
 
-    const result = await machine.execute(
+    const result = await execute(machine, 
       machine.getInitialState({ topic: 'durable agents' })
     );
 
@@ -1450,7 +1586,7 @@ describe('curated examples', () => {
       };
     });
 
-    const { createMemoryRunStore, startSession } = await import('./index.js');
+    const { createMemoryRunStore, startSession } = await import('./local/index.js');
     const run = await startSession(machine, {
       store: createMemoryRunStore(),
       input: { city: 'New York' },
@@ -1534,7 +1670,7 @@ describe('curated examples', () => {
       },
     });
 
-    const result = await machine.execute(
+    const result = await execute(machine, 
       machine.getInitialState({
         question: 'What is Acme owed?',
         schema: 'invoices(customer text, total integer)',
@@ -1558,7 +1694,7 @@ describe('curated examples', () => {
   });
 
   test('react agent example loops through a tool and returns a final answer', async () => {
-    const { createMemoryRunStore, startSession } = await import('./index.js');
+    const { createMemoryRunStore, startSession } = await import('./local/index.js');
     const agent = createReactAgentExample({
       search: async (query) => `result for ${query}`,
       model: async ({ messages }) => {
@@ -1640,7 +1776,7 @@ describe('curated examples', () => {
       }),
     });
 
-    const result = await machine.execute(
+    const result = await execute(machine, 
       machine.getInitialState({ objective: 'understand the repo' })
     );
 
@@ -1698,7 +1834,7 @@ describe('curated examples', () => {
             },
     });
 
-    const result = await machine.execute(
+    const result = await execute(machine, 
       machine.getInitialState({
         request: 'Fix the duplicate subscription charge.',
       })
@@ -1734,7 +1870,7 @@ describe('curated examples', () => {
       }),
     });
 
-    const result = await machine.execute(
+    const result = await execute(machine, 
       machine.getInitialState({ topic: 'Robotics' })
     );
 
@@ -1762,7 +1898,7 @@ describe('curated examples', () => {
       }),
     });
 
-    const result = await machine.execute(
+    const result = await execute(machine, 
       machine.getInitialState({ goal: 'ship a feature' })
     );
 
@@ -1785,7 +1921,7 @@ describe('curated examples', () => {
       explanation: 'Selected the second entry for the demo.',
     }));
 
-    const pending = await machine.execute(machine.getInitialState());
+    const pending = await execute(machine, machine.getInitialState());
     expect(pending.status).toBe('pending');
 
     if (pending.status === 'pending') {
@@ -1803,7 +1939,7 @@ describe('curated examples', () => {
       });
       state = machine.transition(state, { type: 'user.draw' });
 
-      const result = await machine.execute(state);
+      const result = await execute(machine, state);
       expect(result.status).toBe('done');
       if (result.status === 'done') {
         expect(result.output).toEqual({
@@ -1830,7 +1966,7 @@ describe('curated examples', () => {
       }),
     });
 
-    const result = await machine.execute(
+    const result = await execute(machine, 
       machine.getInitialState({ task: 'Explain event sourcing simply.' })
     );
 
@@ -1847,7 +1983,7 @@ describe('curated examples', () => {
 
   test('river crossing example moves every item safely to the right bank', async () => {
     const machine = createRiverCrossingExample();
-    const result = await machine.execute(machine.getInitialState());
+    const result = await execute(machine, machine.getInitialState());
 
     expect(result.status).toBe('done');
     if (result.status === 'done') {
@@ -1883,7 +2019,7 @@ describe('curated examples', () => {
       respond: async () => ({ response: 'Claro, puedo ayudarte.' }),
     });
 
-    const result = await machine.execute(
+    const result = await execute(machine, 
       machine.getInitialState({ message: 'Yo necesito ayuda' })
     );
 
@@ -1928,7 +2064,7 @@ describe('guardrailed workflow examples', () => {
     expect(Object.keys(diagnose.tools ?? {})).toContain('get_logs');
     expect(Object.keys(diagnose.tools ?? {})).not.toContain('delete_volume');
 
-    const result = await machine.execute(diagnose);
+    const result = await execute(machine, diagnose);
     expect(result.status).toBe('pending');
     if (result.status !== 'pending') {
       throw new Error('Expected approval state');

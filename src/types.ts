@@ -82,7 +82,7 @@ type IsExactlyUnknown<T> = unknown extends T
   ? ([T] extends [unknown] ? true : false)
   : false;
 
-// ─── Durable Session Vocabulary ───
+// ─── Session Contract ───
 
 export type { JournalEvent } from './runtime/events.js';
 export type { JournalEventRecord, PersistedSnapshot, RunStore } from './runtime/store.js';
@@ -283,17 +283,13 @@ export interface AgentMachine<
     event: TransitionEvent<TEvents>
   ): AgentState<TContext, keyof TStates & string, TOutput>;
 
-  invoke(
-    state: AgentState<TContext, keyof TStates & string, TOutput>
-  ): Promise<AgentState<TContext, keyof TStates & string, TOutput>>;
+  getEvents(
+    state:
+      | AgentState<TContext, keyof TStates & string, TOutput>
+      | AgentSnapshot<TContext, keyof TStates & string, TOutput>
+      | (keyof TStates & string)
+  ): Record<string, StandardSchemaV1>;
 
-  execute(
-    state: AgentState<TContext, keyof TStates & string, TOutput>
-  ): Promise<ExecuteResult<TContext, keyof TStates & string, TEvents, TOutput>>;
-
-  stream(
-    state: AgentState<TContext, keyof TStates & string, TOutput>
-  ): AsyncGenerator<AgentSnapshot<TContext, keyof TStates & string, TOutput>>;
 }
 
 export interface AgentRun<

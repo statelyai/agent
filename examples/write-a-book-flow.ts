@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { execute } from '../src/local/index.js';
 import { createAgentMachine } from '../src/index.js';
 import {
   closePrompt,
@@ -187,7 +188,7 @@ async function main() {
     const topic = await prompt('Book topic');
     const goal = await prompt('Book goal');
     const machine = createWriteABookFlowExample();
-    const result = await machine.execute(machine.getInitialState({ topic, goal }));
+    const result = await execute(machine, machine.getInitialState({ topic, goal }));
     console.log(formatResult(result));
   } finally {
     closePrompt();

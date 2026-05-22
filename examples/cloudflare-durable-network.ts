@@ -1,8 +1,5 @@
-import {
-  restoreSession,
-  startSession,
-  type AgentSnapshot,
-} from '../src/index.js';
+import { createMemoryRunStore, restoreSession, startSession, waitForRunDone, waitForRunSnapshot } from '../src/local/index.js';
+import type { AgentSnapshot } from '../src/index.js';
 import {
   createDurableObjectRunStore,
   type DurableObjectStateLike,

@@ -1,4 +1,5 @@
-import { expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
+import { execute, invoke, stream } from '../local/index.js';
 import { createMultiAgentNetworkExample } from '../../examples/multi-agent-network.js';
 
 test('multi-agent network coordinates specialist handoffs until a final draft is ready', async () => {
@@ -37,7 +38,7 @@ test('multi-agent network coordinates specialist handoffs until a final draft is
     }),
   });
 
-  const result = await machine.execute(
+  const result = await execute(machine, 
     machine.getInitialState({ topic: 'agent runtimes' })
   );
 

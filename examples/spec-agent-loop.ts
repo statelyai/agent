@@ -1,10 +1,9 @@
 import { z } from 'zod';
+import { createMemoryRunStore, restoreSession, startSession, waitForRunDone, waitForRunSnapshot } from '../src/local/index.js';
 import {
   appendMessages,
   assistantMessage,
   createAgentMachine,
-  createMemoryRunStore,
-  startSession,
   userMessage,
 } from '../src/index.js';
 import {
@@ -12,7 +11,6 @@ import {
   generateExampleText,
   isMain,
   prompt,
-  waitForRunSnapshot,
 } from './_run.js';
 
 const generationSchema = z.object({

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { execute } from '../src/local/index.js';
 import {
   createAgentMachine,
   classify,
@@ -62,7 +63,7 @@ async function main() {
     const request = await prompt('Support request');
     const machine = createClassifyExample();
 
-    console.log(formatResult(await machine.execute(machine.getInitialState({ request }))));
+    console.log(formatResult(await execute(machine, machine.getInitialState({ request }))));
   } finally {
     closePrompt();
   }

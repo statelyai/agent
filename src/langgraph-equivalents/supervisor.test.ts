@@ -1,4 +1,5 @@
-import { expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
+import { execute, invoke, stream } from '../local/index.js';
 import { createSupervisorExample } from '../../examples/supervisor.js';
 
 test('supervisor workflow retries a blocked worker and escalates when repeated attempts fail', async () => {
@@ -36,7 +37,7 @@ test('supervisor workflow retries a blocked worker and escalates when repeated a
     maxAttempts: 2,
   });
 
-  const result = await machine.execute(
+  const result = await execute(machine, 
     machine.getInitialState({
       request: 'Refund the duplicate annual subscription charge.',
     })

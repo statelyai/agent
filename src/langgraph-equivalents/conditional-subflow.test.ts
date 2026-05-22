@@ -1,4 +1,5 @@
-import { expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
+import { execute, invoke, stream } from '../local/index.js';
 import { createConditionalSubflowExample } from '../../examples/index.js';
 
 test('conditionally enters the research subflow from parent input', async () => {
@@ -8,7 +9,7 @@ test('conditionally enters the research subflow from parent input', async () => 
     }),
   });
 
-  const result = await machine.execute(
+  const result = await execute(machine, 
     machine.getInitialState({
       topic: 'agent graphs',
       mode: 'research',
@@ -32,7 +33,7 @@ test('conditionally enters the draft subflow with parent-provided input', async 
     }),
   });
 
-  const result = await machine.execute(
+  const result = await execute(machine, 
     machine.getInitialState({
       topic: 'agent graphs',
       mode: 'draft',

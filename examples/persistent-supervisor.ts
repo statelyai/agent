@@ -1,9 +1,5 @@
-import {
-  createMemoryRunStore,
-  restoreSession,
-  startSession,
-  type PersistedSnapshot,
-} from '../src/index.js';
+import { createMemoryRunStore, restoreSession, startSession, waitForRunDone, waitForRunSnapshot } from '../src/local/index.js';
+import type { PersistedSnapshot } from '../src/index.js';
 import { createSupervisorExample } from './supervisor.js';
 
 type SupervisorOptions = Parameters<typeof createSupervisorExample>[0];

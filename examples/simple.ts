@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { execute } from '../src/local/index.js';
 import { createAgentMachine, type AgentAdapter } from '../src/index.js';
 import {
   closePrompt,
@@ -49,7 +50,7 @@ async function main() {
   try {
     const text = await prompt('Text to summarize');
     const machine = createSimpleExample();
-    const result = await machine.execute(machine.getInitialState({ text }));
+    const result = await execute(machine, machine.getInitialState({ text }));
 
     console.log(formatResult(result));
   } finally {

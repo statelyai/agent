@@ -1,3 +1,4 @@
+import { invoke } from '../local/interpreter.js';
 import type { JournalEvent } from './events.js';
 import { createRunEmitter } from './emitter.js';
 import type {
@@ -201,7 +202,7 @@ function createRun(
       }
 
       runState.current = runtimeMachine.__runtime.withRuntimeMetadata(
-        await machine.invoke(runState.current),
+        await invoke(machine, runState.current),
         runState.runtime
       );
       await persistSnapshot();

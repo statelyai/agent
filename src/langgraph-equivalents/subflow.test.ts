@@ -1,4 +1,5 @@
-import { expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
+import { execute, invoke, stream } from '../local/index.js';
 import { z } from 'zod';
 import { createAgentMachine } from '../index.js';
 
@@ -46,7 +47,7 @@ test('supports subflow composition by executing a child machine inside a parent 
       researching: {
         schemas: { output: z.object({ bullets: z.array(z.string()) }) },
         invoke: async ({ context }) => {
-          const result = await childMachine.execute(
+          const result = await execute(childMachine, 
             childMachine.getInitialState({ topic: context.topic })
           );
 
@@ -83,7 +84,7 @@ test('supports subflow composition by executing a child machine inside a parent 
     },
   });
 
-  const result = await parentMachine.execute(
+  const result = await execute(parentMachine, 
     parentMachine.getInitialState({ topic: 'state machines' })
   );
 

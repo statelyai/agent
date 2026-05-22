@@ -431,6 +431,11 @@ export function createAgentMachine(
     return transitionWithEffects(state, event).next;
   }
 
+  function getEvents(state: AgentState | AgentSnapshot | string) {
+    const value = typeof state === 'string' ? state : state.value;
+    return getAvailableEvents(cfg, value);
+  }
+
   function transitionWithEffects(
     state: AgentState,
     event: { type: string; [k: string]: unknown },
@@ -863,6 +868,7 @@ export function createAgentMachine(
     getInitialState,
     resolveState,
     transition,
+    getEvents,
     invoke,
     execute,
     stream,

@@ -1,4 +1,5 @@
-import { expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
+import { execute, invoke, stream } from './local/index.js';
 import { createAgentMachine } from './index.js';
 
 const machine = createAgentMachine({
@@ -18,7 +19,7 @@ const machine = createAgentMachine({
 
 async function collectSnapshots(state = machine.getInitialState()) {
   const snaps = [];
-  for await (const snap of machine.stream(state)) {
+  for await (const snap of stream(machine, state)) {
     snaps.push(snap);
   }
 

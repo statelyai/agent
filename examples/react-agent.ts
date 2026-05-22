@@ -1,8 +1,5 @@
 import { z } from 'zod';
-import {
-  createMemoryRunStore,
-  startSession,
-} from '../src/index.js';
+import { createMemoryRunStore, restoreSession, startSession, waitForRunDone, waitForRunSnapshot } from '../src/local/index.js';
 import { createReactAgentFromScratch } from './react-agent-from-scratch.js';
 import {
   closePrompt,
@@ -10,7 +7,6 @@ import {
   generateExampleText,
   isMain,
   prompt,
-  waitForRunDone,
 } from './_run.js';
 
 const reactModelResultSchema = z.discriminatedUnion('kind', [

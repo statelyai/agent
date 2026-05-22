@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { execute } from '../src/local/index.js';
 import { createAgentMachine } from '../src/index.js';
 import {
   closePrompt,
@@ -164,7 +165,7 @@ async function main() {
   try {
     const goal = await prompt('Goal');
     const machine = createPlanAndExecuteExample();
-    console.log(formatResult(await machine.execute(machine.getInitialState({ goal }))));
+    console.log(formatResult(await execute(machine, machine.getInitialState({ goal }))));
   } finally {
     closePrompt();
   }

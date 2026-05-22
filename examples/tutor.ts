@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { execute } from '../src/local/index.js';
 import { createAgentMachine } from '../src/index.js';
 import {
   closePrompt,
@@ -93,7 +94,7 @@ async function main() {
   try {
     const message = await prompt('Say something in Spanish');
     const machine = createTutorExample();
-    console.log(formatResult(await machine.execute(machine.getInitialState({ message }))));
+    console.log(formatResult(await execute(machine, machine.getInitialState({ message }))));
   } finally {
     closePrompt();
   }

@@ -7,9 +7,9 @@ This directory is organized by what a developer is trying to do, not by the unde
 ## Start Here
 
 - Building an app route: [`apps/next/`](/Users/davidkpiano/Code/agent/examples/apps/next) or [`apps/cloudflare-agents/`](/Users/davidkpiano/Code/agent/examples/apps/cloudflare-agents)
-- Adding durable sessions: [`persistence.ts`](/Users/davidkpiano/Code/agent/examples/persistence.ts) and [`http-session.ts`](/Users/davidkpiano/Code/agent/examples/http-session.ts)
+- Trying local sessions: [`persistence.ts`](/Users/davidkpiano/Code/agent/examples/persistence.ts) and [`http-session.ts`](/Users/davidkpiano/Code/agent/examples/http-session.ts)
 - Streaming text or tool progress: [`next-ai-sdk-ui.ts`](/Users/davidkpiano/Code/agent/examples/next-ai-sdk-ui.ts), [`http-streaming-session.ts`](/Users/davidkpiano/Code/agent/examples/http-streaming-session.ts), and [`tool-calling.ts`](/Users/davidkpiano/Code/agent/examples/tool-calling.ts)
-- Studying orchestration patterns: start in `Workflow Examples`
+- Studying state-machine workflow patterns: start in `Workflow Examples`
 
 ## App-Shaped Examples
 
@@ -18,15 +18,15 @@ These are the best starting points when you want code that already looks like a 
 - [`apps/next/`](/Users/davidkpiano/Code/agent/examples/apps/next): copy-paste Next.js App Router routes
 - [`apps/cloudflare-agents/`](/Users/davidkpiano/Code/agent/examples/apps/cloudflare-agents): copy-paste Cloudflare Agents Worker layout
 - [`next-ai-sdk-ui.ts`](/Users/davidkpiano/Code/agent/examples/next-ai-sdk-ui.ts): AI SDK UI route helper
-- [`next-app-router.ts`](/Users/davidkpiano/Code/agent/examples/next-app-router.ts): App Router session routes backed by `@statelyai/agent/next` and `@statelyai/agent/http`
-- [`cloudflare-agents.ts`](/Users/davidkpiano/Code/agent/examples/cloudflare-agents.ts): Node-safe Cloudflare Agents example backed by `@statelyai/agent/cloudflare`
+- [`next-app-router.ts`](/Users/davidkpiano/Code/agent/examples/next-app-router.ts): App Router session-route preview code
+- [`cloudflare-agents.ts`](/Users/davidkpiano/Code/agent/examples/cloudflare-agents.ts): Cloudflare Agents adapter preview code
 
 ## Workflow Examples
 
-These focus on real orchestration patterns:
+These focus on state-machine workflow patterns:
 
 - Session-first interactive workflows
-- Durable restore and transport patterns
+- Local restore and transport patterns
 - Multi-step planning, routing, and handoff flows
 
 - [`persistence.ts`](/Users/davidkpiano/Code/agent/examples/persistence.ts)
@@ -47,26 +47,27 @@ These focus on real orchestration patterns:
 - [`rag.ts`](/Users/davidkpiano/Code/agent/examples/rag.ts)
 - [`sql-agent.ts`](/Users/davidkpiano/Code/agent/examples/sql-agent.ts)
 
-## Runtime / Transport Examples
+## Local / Transport Examples
 
 - [`http-session.ts`](/Users/davidkpiano/Code/agent/examples/http-session.ts)
 - [`http-streaming-session.ts`](/Users/davidkpiano/Code/agent/examples/http-streaming-session.ts)
 - [`cloudflare-durable-object.ts`](/Users/davidkpiano/Code/agent/examples/cloudflare-durable-object.ts)
 - [`cloudflare-durable-network.ts`](/Users/davidkpiano/Code/agent/examples/cloudflare-durable-network.ts)
 
-The reusable pieces behind these examples are exported from `@statelyai/agent/http`, `@statelyai/agent/next`, and `@statelyai/agent/cloudflare`.
+The reusable local pieces behind these examples are exported from `@statelyai/agent/local`. Framework-specific adapters should move to separate packages.
 
 ## Reference / Concept Examples
 
 These are smaller building-block examples:
 
 - One-shot machine execution: [`simple.ts`](/Users/davidkpiano/Code/agent/examples/simple.ts), [`decide.ts`](/Users/davidkpiano/Code/agent/examples/decide.ts), [`classify.ts`](/Users/davidkpiano/Code/agent/examples/classify.ts)
-- Interactive session lifecycle: [`chatbot.ts`](/Users/davidkpiano/Code/agent/examples/chatbot.ts), [`chatbot-messages.ts`](/Users/davidkpiano/Code/agent/examples/chatbot-messages.ts), [`hitl.ts`](/Users/davidkpiano/Code/agent/examples/hitl.ts), [`raffle.ts`](/Users/davidkpiano/Code/agent/examples/raffle.ts)
+- Interactive session lifecycle: [`chatbot.ts`](/Users/davidkpiano/Code/agent/examples/chatbot.ts), [`chatbot-messages.ts`](/Users/davidkpiano/Code/agent/examples/chatbot-messages.ts), [`email-drafter.ts`](/Users/davidkpiano/Code/agent/examples/email-drafter.ts), [`hitl.ts`](/Users/davidkpiano/Code/agent/examples/hitl.ts), [`raffle.ts`](/Users/davidkpiano/Code/agent/examples/raffle.ts)
 
 - [`simple.ts`](/Users/davidkpiano/Code/agent/examples/simple.ts)
 - [`decide.ts`](/Users/davidkpiano/Code/agent/examples/decide.ts)
 - [`classify.ts`](/Users/davidkpiano/Code/agent/examples/classify.ts)
 - [`adapter.ts`](/Users/davidkpiano/Code/agent/examples/adapter.ts)
+- [`email-drafter.ts`](/Users/davidkpiano/Code/agent/examples/email-drafter.ts)
 - [`tool-calling.ts`](/Users/davidkpiano/Code/agent/examples/tool-calling.ts)
 - [`hitl.ts`](/Users/davidkpiano/Code/agent/examples/hitl.ts)
 - [`branching.ts`](/Users/davidkpiano/Code/agent/examples/branching.ts)

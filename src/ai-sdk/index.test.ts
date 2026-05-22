@@ -97,4 +97,31 @@ describe('createAiSdkAdapter', () => {
     ).resolves.toBe('generated reply');
     expect('decide' in adapter).toBe(false);
   });
+
+  test('does not send prompt and messages together', async () => {
+    const seen: Array<{ prompt?: unknown; messages?: unknown }> = [];
+    const adapter = createAiSdkAdapter({
+      generateText: async (options) => {
+        seen.push({
+          prompt: options.prompt,
+          messages: options.messages,
+        });
+
+        return { text: 'ok' } as never;
+      },
+    });
+
+    await adapter.generateText?.({
+      model: 'openai/gpt-5.4-nano',
+      prompt: 'reply',
+      messages: [{ role: 'user', content: 'reply' }],
+    });
+
+    expect(seen).toEqual([
+      {
+        prompt: undefined,
+        messages: [{ role: 'user', content: 'reply' }],
+      },
+    ]);
+  });
 });

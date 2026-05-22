@@ -1,8 +1,7 @@
 import { z } from 'zod';
+import { createMemoryRunStore, restoreSession, startSession, waitForRunDone, waitForRunSnapshot } from '../src/local/index.js';
 import {
   createAgentMachine,
-  createMemoryRunStore,
-  startSession,
   type AgentMessage,
 } from '../src/index.js';
 import {
@@ -10,7 +9,6 @@ import {
   generateExampleObject,
   isMain,
   prompt,
-  waitForRunSnapshot,
 } from './_run.js';
 
 const draftSchema = z.object({

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { execute } from '../src/local/index.js';
 import { createAgentMachine } from '../src/index.js';
 import { formatResult, isMain } from './_run.js';
 
@@ -126,7 +127,7 @@ export function createJugsExample() {
 
 async function main() {
   const machine = createJugsExample();
-  console.log(formatResult(await machine.execute(machine.getInitialState())));
+  console.log(formatResult(await execute(machine, machine.getInitialState())));
 }
 
 if (isMain(import.meta.url)) {

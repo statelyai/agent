@@ -1,5 +1,3 @@
-import 'dotenv/config';
-
 import { generateText, Output } from 'ai';
 import { openai } from '@ai-sdk/openai';
 import { createInterface } from 'node:readline/promises';
@@ -12,7 +10,7 @@ import type {
   ExecuteResult,
   StandardSchemaV1,
 } from '../src/index.js';
-export { waitForRunDone, waitForRunSnapshot } from '../src/runtime/index.js';
+export { waitForRunDone, waitForRunSnapshot } from '../src/local/index.js';
 
 export function isMain(moduleUrl: string): boolean {
   const entry = process.argv[1];
@@ -177,11 +175,9 @@ export function createOpenAiDecisionAdapter(): DecideAdapter {
 export function createOpenAiGenerationAdapter(): AgentAdapter {
   return {
     async generateText({ model, system, prompt, messages, outputSchema }) {
-      const result = await generateText({
+      const options: any = {
         model: createExampleModel(model),
         system,
-        prompt,
-        messages: messages as any,
         ...(outputSchema
           ? {
             output: Output.object({
@@ -189,7 +185,15 @@ export function createOpenAiGenerationAdapter(): AgentAdapter {
             }),
           }
           : {}),
-      });
+      };
+
+      if (messages.length > 0) {
+        options.messages = messages as any;
+      } else {
+        options.prompt = prompt ?? '';
+      }
+
+      const result = await generateText(options);
 
       const output = result as { output?: unknown; text?: string };
       return output.output ?? output.text ?? result;

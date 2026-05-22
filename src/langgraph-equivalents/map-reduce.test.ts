@@ -1,4 +1,5 @@
-import { expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
+import { execute, invoke, stream } from '../local/index.js';
 import { z } from 'zod';
 import { createAgentMachine } from '../index.js';
 
@@ -61,7 +62,7 @@ test('supports map-reduce style orchestration with dynamic work items inside inv
     },
   });
 
-  const result = await machine.execute(
+  const result = await execute(machine, 
     machine.getInitialState({ topic: 'state machines' })
   );
 

@@ -1,4 +1,5 @@
-import { expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
+import { execute, invoke, stream } from '../local/index.js';
 import { createChatbotMessagesExample } from '../../examples/index.js';
 
 test('message-centric chatbot workflow accumulates structured messages across turns', async () => {
@@ -16,7 +17,7 @@ test('message-centric chatbot workflow accumulates structured messages across tu
       content: 'Hello there',
     },
   });
-  const firstResult = await machine.execute(afterFirstTurn);
+  const firstResult = await execute(machine, afterFirstTurn);
 
   expect(firstResult.status).toBe('pending');
   if (firstResult.status === 'pending') {
@@ -32,7 +33,7 @@ test('message-centric chatbot workflow accumulates structured messages across tu
         content: 'Can you expand on that?',
       },
     });
-    const secondResult = await machine.execute(afterSecondTurn);
+    const secondResult = await execute(machine, afterSecondTurn);
 
     expect(secondResult.status).toBe('pending');
     if (secondResult.status === 'pending') {

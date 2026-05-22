@@ -1,4 +1,5 @@
-import { expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
+import { execute, invoke, stream } from '../local/index.js';
 import { createRagExample } from '../../examples/index.js';
 
 test('rag workflow retrieves documents and synthesizes a grounded answer', async () => {
@@ -19,7 +20,7 @@ test('rag workflow retrieves documents and synthesizes a grounded answer', async
     },
   });
 
-  const result = await machine.execute(
+  const result = await execute(machine, 
     machine.getInitialState({ question: 'What is LangGraph?' })
   );
 

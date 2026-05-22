@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { createMemoryRunStore, startSession } from '../index.js';
+import { createMemoryRunStore, startSession } from '../local/index.js';
 import { createSqlAgentExample } from '../../examples/sql-agent.js';
 
 function once<T = unknown>(

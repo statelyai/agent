@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { execute } from '../src/local/index.js';
 import { createAgentMachine } from '../src/index.js';
 import {
   closePrompt,
@@ -175,7 +176,7 @@ async function main() {
   try {
     const topic = await prompt('Newspaper topic');
     const machine = createNewspaperExample();
-    console.log(formatResult(await machine.execute(machine.getInitialState({ topic }))));
+    console.log(formatResult(await execute(machine, machine.getInitialState({ topic }))));
   } finally {
     closePrompt();
   }

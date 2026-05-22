@@ -82,6 +82,7 @@ export { createClassifyExample } from './classify.js';
 export { createConditionalSubflowExample } from './conditional-subflow.js';
 export { createCustomerServiceSimExample } from './customer-service-sim.js';
 export { createDecideExample } from './decide.js';
+export { createEmailDrafterExample } from './email-drafter.js';
 export { createEmailExample } from './email.js';
 export { createHitlExample } from './hitl.js';
 export { createJokeExample } from './joke.js';

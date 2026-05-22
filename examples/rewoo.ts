@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { execute } from '../src/local/index.js';
 import { createAgentMachine } from '../src/index.js';
 import {
   closePrompt,
@@ -222,7 +223,7 @@ async function main() {
   try {
     const objective = await prompt('Objective');
     const machine = createRewooExample();
-    const result = await machine.execute(machine.getInitialState({ objective }));
+    const result = await execute(machine, machine.getInitialState({ objective }));
     console.log(formatResult(result));
   } finally {
     closePrompt();

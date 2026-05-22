@@ -1,4 +1,5 @@
 import { generateText, Output } from 'ai';
+import { execute } from '../src/local/index.js';
 import { z } from 'zod';
 import {
   createAgentMachine,
@@ -153,7 +154,7 @@ async function main() {
   try {
     const message = await prompt('Customer message');
     const machine = createAiSdkExample();
-    const result = await machine.execute(machine.getInitialState({ message }));
+    const result = await execute(machine, machine.getInitialState({ message }));
 
     console.log(formatResult(result));
   } finally {
