@@ -31,7 +31,6 @@ Use named text logic and plain XState `invoke` objects. For maximum framework po
 ```ts
 import {
   createAgentSchemas,
-  getAgentEffects,
   setupAgent,
   transitionResult,
 } from '@statelyai/agent';
@@ -80,21 +79,19 @@ const machine = agent.createMachine({
 let [snapshot, actions] = initialTransition(machine, input);
 
 while (snapshot.status !== 'done') {
-  for (const effect of getAgentEffects(actions, {
-    snapshot,
-    schemas: agent.schemas,
-    actors: { draftText },
-  })) {
-    const output = await generateText({
-      ...effect.input,
-      tools: effect.tools,
+  for (const task of machine.getTasks(actions, snapshot)) {
+    const output = await machine.execute(task, {
+      generateText: (request) => generateText(request),
+      streamText: (request) => streamText(request),
     });
-    [snapshot, actions] = transitionResult(machine, snapshot, effect, output);
+    [snapshot, actions] = transitionResult(machine, snapshot, task, output);
   }
 }
 ```
 
 Every agent invoke should have a durable `id`; that ID is used to resume the matching `onDone` transition.
+
+`machine.execute(...)` is convenience only. You can still inspect `task.input`, `task.tools`, and `task.events`, then call any SDK yourself.
 
 ## Allowed Event Tools
 

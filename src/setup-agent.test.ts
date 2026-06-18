@@ -10,6 +10,7 @@ import {
   setupAgent,
   transitionResult,
   type AgentTextInput,
+  type AgentTools,
   type TextLogicInput,
   type TextLogicOutput,
 } from './index.js';
@@ -170,6 +171,100 @@ describe('setupAgent', () => {
         input: expect.objectContaining({ allowedEvents: ['READY_TO_DRAFT'] }),
       })
     );
+
+    expect(machine.getTasks(actions)).toEqual([effect]);
+  });
+
+  test('agent machines execute generated and streamed tasks with host callbacks', async () => {
+    const schemas = createAgentSchemas({
+      context: z.object({ prompt: z.string(), body: z.string().nullable() }),
+      input: z.object({ prompt: z.string() }),
+      output: z.object({ body: z.string() }),
+    });
+
+    const agent = setupAgent({ schemas }).withTasks({
+      draftEmail: {
+        schemas: {
+          input: z.object({ prompt: z.string() }),
+          output: z.object({ body: z.string() }),
+        },
+        model: 'test-model',
+        prompt: ({ input }) => input.prompt,
+      },
+      streamRevision: {
+        kind: 'stream',
+        schemas: {
+          input: z.object({ body: z.string() }),
+          output: z.string(),
+        },
+        model: 'test-model',
+        prompt: ({ input }) => input.body,
+      },
+    });
+
+    const generateMachine = agent.createMachine({
+      context: ({ input }) => ({ prompt: input.prompt, body: null }),
+      initial: 'drafting',
+      states: {
+        drafting: {
+          invoke: {
+            id: 'draft',
+            src: 'draftEmail',
+            input: ({ context }) => ({ prompt: context.prompt }),
+          },
+        },
+      },
+    });
+    const [_generateSnapshot, generateActions] = initialTransition(
+      generateMachine,
+      { prompt: 'Draft it.' }
+    );
+    const [generateTask] = generateMachine.getTasks(generateActions);
+
+    await expect(
+      generateMachine.execute(generateTask!, {
+        generateObject: async (request: AgentTextInput & { tools: AgentTools }) => {
+          expect(request).toEqual(
+            expect.objectContaining({
+              model: 'test-model',
+              prompt: 'Draft it.',
+              tools: {},
+            })
+          );
+          return { object: { body: 'Generated body.' } };
+        },
+        generateText: async () => {
+          throw new Error('generateObject should be preferred for schemas');
+        },
+      })
+    ).resolves.toEqual({ body: 'Generated body.' });
+
+    const streamMachine = agent.createMachine({
+      context: ({ input }) => ({ prompt: input.prompt, body: null }),
+      initial: 'streaming',
+      states: {
+        streaming: {
+          invoke: {
+            id: 'stream',
+            src: 'streamRevision',
+            input: () => ({ body: 'Draft body.' }),
+          },
+        },
+      },
+    });
+    const [_streamSnapshot, streamActions] = initialTransition(streamMachine, {
+      prompt: 'Revise it.',
+    });
+    const [streamTask] = streamMachine.getTasks(streamActions);
+
+    await expect(
+      streamMachine.execute(streamTask!, {
+        streamText: async (request: AgentTextInput & { tools: AgentTools }) => {
+          expect(request.prompt).toBe('Draft body.');
+          return { text: Promise.resolve('Streamed final text.') };
+        },
+      })
+    ).resolves.toBe('Streamed final text.');
   });
 
   test('setupAgent preserves typed action guard and delay names', () => {

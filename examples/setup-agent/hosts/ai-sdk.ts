@@ -21,10 +21,8 @@ import { assign, createActor, initialTransition, toPromise } from 'xstate';
 import { z } from 'zod';
 import {
   createAgentSchemas,
-  getAgentEffects,
   setupAgent,
   transitionResult,
-  type AgentEffect,
   type AgentTextInput,
   type TextLogic,
 } from '../../../src/index.js';
@@ -111,13 +109,6 @@ async function streamWithAiSdk(
   }
 
   return await result.text;
-}
-
-async function executeAgentEffect(
-  effect: AgentEffect,
-  options: AiSdkTextHostOptions = {}
-) {
-  return generateWithAiSdk(effect.input, effect.tools, options);
 }
 
 export function createAiSdkTextActor<TLogic extends TextLogic>(
@@ -214,16 +205,18 @@ export async function runTriagePureTransitionDemo(ticket: string) {
   let [snapshot, actions] = initialTransition(triageMachine, { ticket });
 
   while (snapshot.status !== 'done') {
-    const effects = getAgentEffects(actions, {
-      snapshot,
-      actors: { triageTicket },
-    });
+    const effects = triageMachine.getTasks(actions, snapshot);
     if (effects.length === 0) {
       throw new Error('Machine is waiting without an agent effect.');
     }
 
     for (const effect of effects) {
-      const output = await executeAgentEffect(effect);
+      const output = await triageMachine.execute(effect, {
+        generateObject: (request) =>
+          generateWithAiSdk(request, request.tools),
+        generateText: (request) =>
+          generateWithAiSdk(request, request.tools),
+      });
       [snapshot, actions] = transitionResult(
         triageMachine,
         snapshot,

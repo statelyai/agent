@@ -54,13 +54,13 @@ describe('curated XState setup examples', () => {
     actor.send({
       type: 'PROMPT_SUBMITTED',
       prompt: 'Write a thank you email after the meeting.',
-    });
+    } as never);
     await waitFor(actor, (snapshot) => snapshot.matches('needsMoreInfo'));
 
     actor.send({
       type: 'MORE_INFO',
       details: 'Send it to riley@example.com.',
-    });
+    } as never);
     await waitFor(actor, (snapshot) => snapshot.matches('reviewing'));
 
     expect(actor.getSnapshot().context.draft).toEqual({

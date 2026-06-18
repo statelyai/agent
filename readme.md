@@ -23,7 +23,6 @@ Import `createAgentSchemas(...)` and `setupAgent(...)` from `@statelyai/agent`:
 ```ts
 import {
   createAgentSchemas,
-  getAgentEffects,
   setupAgent,
   transitionResult,
 } from '@statelyai/agent';
@@ -78,23 +77,19 @@ const machine = agent.createMachine({
 let [snapshot, actions] = initialTransition(machine, { prompt: 'Why XState?' });
 
 while (snapshot.status !== 'done') {
-  for (const effect of getAgentEffects(actions, {
-    snapshot,
-    schemas: agent.schemas,
-    actors: { getAnswer },
-  })) {
-    const result = await generateText({
-      ...effect.input,
-      tools: effect.tools,
-    }); // any SDK/framework
-    [snapshot, actions] = transitionResult(machine, snapshot, effect, result);
+  for (const task of machine.getTasks(actions, snapshot)) {
+    const result = await machine.execute(task, {
+      generateText: (request) => generateText(request), // any SDK/framework
+      streamText: (request) => streamText(request),
+    });
+    [snapshot, actions] = transitionResult(machine, snapshot, task, result);
   }
 }
 ```
 
-This is normal XState underneath: use pure `initialTransition(...)` / `transitionResult(...)`, or use `createActor(...)`, snapshots, persistence, guards, actions, and host-provided actors. `setupAgent(...)` adds schema-derived concrete types and retained schemas; `withTasks(...)` adds reusable typed task construction, strongly typed source names, typed invoke input, typed `event.output`, and `getAgentEffects(...)` extraction.
+This is normal XState underneath: use pure `initialTransition(...)` / `transitionResult(...)`, or use `createActor(...)`, snapshots, persistence, guards, actions, and host-provided actors. `setupAgent(...)` adds schema-derived concrete types and retained schemas; `withTasks(...)` adds reusable typed task construction, strongly typed source names, typed invoke input, typed `event.output`, `machine.getTasks(...)`, and `machine.execute(...)`.
 
-When a task declares `events`, `getAgentEffects(...)` returns `event.<TYPE>` tools for those events only if they are currently legal from the snapshot. That lets a model choose legal machine events, such as moves in a game, without exposing every transition.
+When a task declares `events`, `machine.getTasks(...)` returns `event.<TYPE>` tools for those events only if they are currently legal from the snapshot. That lets a model choose legal machine events, such as moves in a game, without exposing every transition.
 
 ## Examples
 

@@ -97,7 +97,9 @@ describe('LangGraph-style workflows authored as raw XState', () => {
         drafting: {
           invoke: {
             src: 'writeDraft',
-            input: ({ context }) => ({ topic: context.topic }),
+            input: ({ context }: { context: { topic: string } }) => ({
+              topic: context.topic,
+            }),
             onDone: {
               target: 'reviewing',
               actions: assign({ draft: ({ event }) => event.output }),
@@ -320,7 +322,9 @@ describe('LangGraph-style workflows authored as raw XState', () => {
         drafting: {
           invoke: {
             src: 'writeDraft',
-            input: ({ context }) => ({ topic: context.topic }),
+            input: ({ context }: { context: { topic: string } }) => ({
+              topic: context.topic,
+            }),
             onDone: {
               target: 'reviewing',
               actions: assign({ draft: ({ event }) => event.output }),
@@ -415,11 +419,14 @@ describe('LangGraph-style workflows authored as raw XState', () => {
         delegating: {
           invoke: {
             src: 'child',
-            input: ({ context }) => ({ topic: context.topic }),
+            input: ({ context }: { context: { topic: string } }) => ({
+              topic: context.topic,
+            }),
             onDone: {
               target: 'done',
               actions: assign({
-                research: ({ event }) => event.output.research,
+                research: ({ event }) =>
+                  (event.output as { research: string }).research,
               }),
             },
           },

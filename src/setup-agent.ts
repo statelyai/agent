@@ -357,6 +357,9 @@ export interface AgentEffect<TInput extends AgentTextInput = AgentTextInput> {
   events: AgentEventDescriptor[];
 }
 
+export type AgentTask<TInput extends AgentTextInput = AgentTextInput> =
+  AgentEffect<TInput>;
+
 export interface AgentEventDescriptor {
   type: string;
   toolName: `${typeof EVENT_TOOL_PREFIX}${string}`;
@@ -518,6 +521,94 @@ export function transitionResult<TLogic extends AnyActorLogic>(
   output: unknown
 ): [SnapshotFrom<TLogic>, ExecutableActionsFrom<TLogic>[]] {
   return transition(logic, snapshot, doneEvent(effect, output) as never);
+}
+
+export type AgentTaskExecutor = (
+  request: AgentTextInput & { tools: AgentTools }
+) => PromiseLike<unknown> | unknown;
+
+export interface AgentTaskExecutors {
+  generateText?: AgentTaskExecutor;
+  generateObject?: AgentTaskExecutor;
+  streamText?: AgentTaskExecutor;
+}
+
+export type AgentMachine<TMachine extends AnyActorLogic = any> =
+  TMachine & {
+  provide: (...args: any[]) => AgentMachine<TMachine>;
+  getTasks(
+    actions: readonly { type?: string; params?: unknown }[],
+    snapshot?: AnyMachineSnapshot
+  ): AgentTask[];
+  execute(task: AgentTask, executors: AgentTaskExecutors): Promise<unknown>;
+};
+
+async function normalizeTaskExecutionResult(result: unknown): Promise<unknown> {
+  const resolved = await result;
+
+  if (!resolved || typeof resolved !== 'object') {
+    return resolved;
+  }
+
+  if ('toolResults' in resolved && Array.isArray(resolved.toolResults)) {
+    const toolOutput = resolved.toolResults.find(
+      (toolResult) =>
+        toolResult
+        && typeof toolResult === 'object'
+        && 'output' in toolResult
+    )?.output;
+
+    if (toolOutput !== undefined) {
+      return toolOutput;
+    }
+  }
+
+  if ('object' in resolved) {
+    return await resolved.object;
+  }
+
+  if ('text' in resolved) {
+    return await resolved.text;
+  }
+
+  return resolved;
+}
+
+function createAgentMachine<TMachine extends AnyActorLogic>(
+  machine: TMachine,
+  options: Pick<AgentEffectOptions, 'schemas' | 'actors'>
+): AgentMachine<TMachine> {
+  return Object.assign(machine, {
+    getTasks(
+      actions: readonly { type?: string; params?: unknown }[],
+      snapshot?: AnyMachineSnapshot
+    ) {
+      return getAgentEffects(actions, {
+        ...options,
+        snapshot,
+      });
+    },
+    async execute(task: AgentTask, executors: AgentTaskExecutors) {
+      const request = {
+        ...task.input,
+        tools: task.tools,
+      };
+      const executor =
+        task.kind === 'stream'
+          ? executors.streamText
+          : task.input.outputSchema && executors.generateObject
+            ? executors.generateObject
+            : executors.generateText;
+
+      if (!executor) {
+        throw new Error(
+          `No executor provided for ${task.kind === 'stream' ? 'stream' : 'generate'} task '${task.id}'.`
+        );
+      }
+
+      return normalizeTaskExecutionResult(await executor(request));
+    },
+  }) as AgentMachine<TMachine>;
 }
 
 // ─── setupAgent ───
@@ -747,7 +838,7 @@ type SetupAgentBaseConfig<
   >['delays'];
 };
 
-type SetupAgentResult<
+type SetupAgentXStateResult<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
   TEventSchemas extends Record<string, StandardSchemaV1>,
   TActors extends { [K in keyof TActors]: AnyActorLogic },
@@ -757,7 +848,6 @@ type SetupAgentResult<
   TActions extends Record<string, ParameterizedObject['params'] | undefined>,
   TGuards extends Record<string, ParameterizedObject['params'] | undefined>,
   TDelay extends string,
-  TTasks extends { [K in keyof TTasks]: AgentTaskLogic } = {},
 > = ReturnType<
   typeof setup<
     ContextOf<TContextSchema>,
@@ -773,7 +863,50 @@ type SetupAgentResult<
     EventObject,
     MetaOf<TMetaSchema>
   >
+>;
+
+type SetupAgentResult<
+  TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
+  TEventSchemas extends Record<string, StandardSchemaV1>,
+  TActors extends { [K in keyof TActors]: AnyActorLogic },
+  TInputSchema extends StandardSchemaV1,
+  TOutputSchema extends StandardSchemaV1,
+  TMetaSchema extends StandardSchemaV1,
+  TActions extends Record<string, ParameterizedObject['params'] | undefined>,
+  TGuards extends Record<string, ParameterizedObject['params'] | undefined>,
+  TDelay extends string,
+  TTasks extends { [K in keyof TTasks]: AgentTaskLogic } = {},
+> = Omit<
+  SetupAgentXStateResult<
+    TContextSchema,
+    TEventSchemas,
+    TActors,
+    TInputSchema,
+    TOutputSchema,
+    TMetaSchema,
+    TActions,
+    TGuards,
+    TDelay
+  >,
+  'createMachine'
 > & {
+  createMachine: <
+    const TConfig extends Parameters<
+      SetupAgentXStateResult<
+        TContextSchema,
+        TEventSchemas,
+        TActors,
+        TInputSchema,
+        TOutputSchema,
+        TMetaSchema,
+        TActions,
+        TGuards,
+        TDelay
+      >['createMachine']
+    >[0],
+  >(
+    config: TConfig
+  ) => any;
   schemas: AgentSchemaPack<
     TContextSchema,
     TEventSchemas,
@@ -993,8 +1126,18 @@ function createSetupAgent<
     guards: config.guards,
     delays: config.delays,
   });
+  const createBaseMachine = base.createMachine.bind(base);
 
   return Object.assign(base, {
+    createMachine(machineConfig: Parameters<typeof base.createMachine>[0]) {
+      return createAgentMachine(createBaseMachine(machineConfig as never), {
+        schemas,
+        actors: {
+          ...config.actors,
+          ...tasks,
+        },
+      });
+    },
     schemas,
     tasks,
     withTasks<const TNextTaskSchemas extends AgentTaskSchemaMap>(
