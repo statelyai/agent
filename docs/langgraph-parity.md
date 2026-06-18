@@ -63,7 +63,7 @@ Remaining gaps are tracked in [`langgraph-gaps.md`](/Users/davidkpiano/Code/agen
 | Multi-agent handoffs | Covered | Expressed as supervisor routing to typed child actors; see [`src/langgraph-equivalents/raw-xstate.test.ts`](/Users/davidkpiano/Code/agent/src/langgraph-equivalents/raw-xstate.test.ts) |
 | SQL/tool-heavy agent workflow | Covered | Query generation, DB execution, and answer synthesis are separate typed states in [`src/langgraph-equivalents/raw-xstate.test.ts`](/Users/davidkpiano/Code/agent/src/langgraph-equivalents/raw-xstate.test.ts) |
 | ReAct-style agent | Covered | Expressed as explicit observe/think/act states or typed tool actor loops |
-| Message-centric chatbot state | Covered | `messagesSchema`, `addMessages(...)`, and plain XState context in [`src/setup-agent.ts`](/Users/davidkpiano/Code/agent/src/setup-agent.ts) |
+| Message-centric chatbot state | Covered | `messagesSchema`, `appendMessages(...)`, and plain XState context in [`src/setup-agent.ts`](/Users/davidkpiano/Code/agent/src/setup-agent.ts) |
 | Retrieval-augmented generation | Covered | Retrieval is a typed host actor; generation is named text logic invoked as `src: 'answerQuestion'` |
 | HTTP / framework transport | Adapter example | Host XState actors behind HTTP, WebSocket, Cloudflare Agents, or any framework runtime |
 | Graph export / visualization support | Covered | Authored machines are normal XState machines and can use the XState/Stately visualization path directly |

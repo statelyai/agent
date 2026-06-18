@@ -1,5 +1,5 @@
 export {
-  addMessages,
+  appendMessages,
   createAgentSchemas,
   createTextLogic,
   doneEvent,
@@ -17,7 +17,6 @@ export { decide, decideResultSchema, requireAdapter } from './decide.js';
 export { classify, classifyResultSchema } from './classify.js';
 export { createAdapter } from './adapter.js';
 export {
-  appendMessages,
   assistantMessage,
   systemMessage,
   userMessage,

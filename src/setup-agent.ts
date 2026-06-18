@@ -3,6 +3,7 @@ import {
   getNextTransitions,
   setup,
   transition,
+  assign,
   type AnyActorLogic,
   type AnyMachineSnapshot,
   type EventObject,
@@ -84,22 +85,18 @@ function missingHostActor(src: string): PromiseActorLogic<any, AgentTextInput> {
 // ─── Message helpers ───
 //
 // Messages are plain context state: declare a `messages` field in the
-// context schema and update it with `assign`. `addMessages` is a property
-// assigner for that idiom — it appends instead of replacing:
+// context schema and update it with `appendMessages(...)`:
 //
-//   actions: assign({
-//     messages: addMessages(({ event }) => userMessage(event.prompt)),
-//   })
+//   actions: appendMessages(({ event }) => userMessage(event.prompt))
 
 export {
-  appendMessages,
   assistantMessage,
   systemMessage,
   userMessage,
   validateSchemaSync,
 } from './utils.js';
 
-export function addMessages<
+function addMessages<
   TContext extends { messages: AgentMessage[] },
   TEvent extends EventObject,
 >(
@@ -116,6 +113,20 @@ export function addMessages<
       ...(Array.isArray(resolved) ? resolved : [resolved]),
     ];
   };
+}
+
+export function appendMessages<
+  TContext extends { messages: AgentMessage[] },
+  TEvent extends EventObject,
+>(
+  resolve:
+    | AgentMessage
+    | AgentMessage[]
+    | ((args: { context: TContext; event: TEvent }) => AgentMessage | AgentMessage[]),
+) {
+  return assign({
+    messages: addMessages(resolve),
+  }) as never;
 }
 
 /** Standard schema for an `AgentMessage[]` context field. */
@@ -916,6 +927,20 @@ type SetupAgentResult<
     TMetaSchema
   >;
   tasks: TTasks;
+  appendMessages(
+    resolve:
+      | AgentMessage
+      | AgentMessage[]
+      | ((args: {
+          context: ContextOf<TContextSchema> & { messages: AgentMessage[] };
+          event: any;
+        }) => AgentMessage | AgentMessage[])
+  ): ReturnType<
+    typeof appendMessages<
+      ContextOf<TContextSchema> & { messages: AgentMessage[] },
+      EventsOf<TEventSchemas>
+    >
+  >;
   withTasks<const TNextTaskSchemas extends AgentTaskSchemaMap>(
     tasks: AgentTaskInput<
       TNextTaskSchemas,
@@ -1141,6 +1166,9 @@ function createSetupAgent<
     },
     schemas,
     tasks,
+    appendMessages(resolve: Parameters<typeof appendMessages>[0]) {
+      return appendMessages(resolve as never);
+    },
     withTasks<const TNextTaskSchemas extends AgentTaskSchemaMap>(
       nextTasks: AgentTaskInput<TNextTaskSchemas, TEventSchemas, typeof schemas>
     ) {

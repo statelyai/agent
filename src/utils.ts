@@ -12,13 +12,6 @@ export function systemMessage(content: string): AgentMessage {
   return { role: 'system', content };
 }
 
-export function appendMessages(
-  messages: AgentMessage[],
-  next: AgentMessage | AgentMessage[]
-): AgentMessage[] {
-  return messages.concat(Array.isArray(next) ? next : [next]);
-}
-
 export function validateSchemaSync<T>(
   schema: StandardSchemaV1<T>,
   value: unknown

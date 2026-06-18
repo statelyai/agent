@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import { assign, fromPromise } from 'xstate';
 import {
-  addMessages,
   type AgentMessage,
   assistantMessage,
   setupAgent,
@@ -164,13 +163,15 @@ export const emailDrafter = agent.createMachine({
       on: {
         PROMPT_SUBMITTED: {
           target: 'evaluating',
-          actions: assign({
-            prompt: ({ event }) => event.prompt,
-            assessment: null,
-            draft: null,
-            draftAnyway: false,
-            messages: addMessages(({ event }) => userMessage(event.prompt)),
-          }),
+          actions: [
+            assign({
+              prompt: ({ event }) => event.prompt,
+              assessment: null,
+              draft: null,
+              draftAnyway: false,
+            }),
+            agent.appendMessages(({ event }) => userMessage(event.prompt)),
+          ],
         },
       },
     },
@@ -217,10 +218,13 @@ export const emailDrafter = agent.createMachine({
       on: {
         MORE_INFO: {
           target: 'evaluating',
-          actions: assign({
-            prompt: ({ context, event }) => `${context.prompt}\n\n${event.details}`,
-            messages: addMessages(({ event }) => userMessage(event.details)),
-          }),
+          actions: [
+            assign({
+              prompt: ({ context, event }) =>
+                `${context.prompt}\n\n${event.details}`,
+            }),
+            agent.appendMessages(({ event }) => userMessage(event.details)),
+          ],
         },
         DRAFT_ANYWAY: {
           target: 'drafting',
@@ -240,15 +244,17 @@ export const emailDrafter = agent.createMachine({
         }),
         onDone: {
           target: 'reviewing',
-          actions: assign({
-            draft: ({ event }) => event.output,
-            messages: addMessages(({ event }) => {
+          actions: [
+            assign({
+              draft: ({ event }) => event.output,
+            }),
+            agent.appendMessages(({ event }) => {
               const draft = event.output;
               return assistantMessage(
                 `To: ${draft.to}\nSubject: ${draft.subject}\n\n${draft.body}`
               );
             }),
-          }),
+          ],
         },
         onError: { target: 'failed' },
       },
@@ -272,14 +278,16 @@ export const emailDrafter = agent.createMachine({
       on: {
         REQUEST_CHANGES: {
           target: 'drafting',
-          actions: assign({
-            prompt: ({ context, event }) =>
-              `${context.prompt}\n\nRevision request: ${event.changes}`,
-            draftAnyway: true,
-            messages: addMessages(({ event }) =>
+          actions: [
+            assign({
+              prompt: ({ context, event }) =>
+                `${context.prompt}\n\nRevision request: ${event.changes}`,
+              draftAnyway: true,
+            }),
+            agent.appendMessages(({ event }) =>
               userMessage(`Revision request: ${event.changes}`)
             ),
-          }),
+          ],
         },
         SEND: { target: 'sending' },
       },
@@ -412,7 +420,10 @@ agent.createMachine({
         input: ({ context }) => ({ prompt: context.prompt }),
         onDone: {
           actions: assign({
-            messages: addMessages(({ event }) => assistantMessage(event.output)),
+            messages: ({ context, event }) => [
+              ...context.messages,
+              assistantMessage(event.output),
+            ],
           }),
         },
       },

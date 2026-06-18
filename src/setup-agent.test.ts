@@ -7,8 +7,10 @@ import {
   getAvailableEvents,
   getAgentEffects,
   getEventTools,
+  messagesSchema,
   setupAgent,
   transitionResult,
+  userMessage,
   type AgentTextInput,
   type AgentTools,
   type TextLogicInput,
@@ -346,6 +348,43 @@ describe('setupAgent', () => {
       },
     });
 
+  });
+
+  test('appendMessages creates a typed action for message context', async () => {
+    const schemas = createAgentSchemas({
+      context: z.object({
+        messages: messagesSchema,
+      }),
+      input: z.object({}),
+      events: {
+        USER_REPLIED: z.object({ text: z.string() }),
+      },
+    });
+    const agent = setupAgent({ schemas });
+    const machine = agent.createMachine({
+      context: { messages: [] },
+      initial: 'waiting',
+      states: {
+        waiting: {
+          on: {
+            USER_REPLIED: {
+              actions: agent.appendMessages(({ event }) => {
+                const text: string = event.text;
+                return userMessage(text);
+              }),
+            },
+          },
+        },
+      },
+    });
+
+    const actor = createActor(machine);
+    actor.start();
+    actor.send({ type: 'USER_REPLIED', text: 'hello' } as never);
+
+    expect(actor.getSnapshot().context.messages).toEqual([
+      { role: 'user', content: 'hello' },
+    ]);
   });
 
   test('authors named text logic with typed input and output', () => {
