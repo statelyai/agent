@@ -17,14 +17,13 @@ import {
   type ModelMessage,
 } from 'ai';
 import { openai } from '@ai-sdk/openai';
-import { assign, createActor, toPromise } from 'xstate';
-import { z } from 'zod';
+import { createActor, toPromise } from 'xstate';
 import {
-  createAgentSchemas,
-  setupAgent,
   type AgentTextInput,
   type TextLogic,
 } from '../../../src/index.js';
+import { jokeMachine, tellJoke } from '../joke.js';
+import { triageMachine, triageTicket } from '../triage.js';
 
 // ─── Host Adapter: AI SDK execution ───
 
@@ -130,64 +129,6 @@ export function createAiSdkStreamingTextActor<TLogic extends TextLogic>(
   );
 }
 
-// ─── Authored Agent: ticket triage ───
-
-const triageSchema = z.object({
-  sentiment: z.enum(['positive', 'neutral', 'negative']),
-  category: z.enum(['billing', 'technical', 'other']),
-  reply: z.string(),
-});
-
-const triageAgent = setupAgent({
-  schemas: createAgentSchemas({
-    context: z.object({
-      ticket: z.string(),
-      triage: triageSchema.nullable(),
-    }),
-    input: z.object({ ticket: z.string() }),
-    output: triageSchema,
-  }),
-}).withTasks({
-  triageTicket: {
-    schemas: {
-      input: z.object({ ticket: z.string() }),
-      output: triageSchema,
-    },
-    model: 'openai/gpt-5.4-nano',
-    system:
-      'Triage the support ticket: sentiment, category, and a short suggested reply.',
-    prompt: ({ input }) => input.ticket,
-  },
-});
-
-const { triageTicket } = triageAgent.tasks;
-
-const triageMachine = triageAgent.createMachine({
-  id: 'ticket-triage',
-  context: ({ input }) => ({ ticket: input.ticket, triage: null }),
-  initial: 'triaging',
-  states: {
-    triaging: {
-      invoke: {
-        id: 'triage',
-        src: 'triageTicket',
-        input: ({ context }) => ({ ticket: context.ticket }),
-        onDone: {
-          target: 'done',
-          actions: assign({
-            triage: ({ event }) => event.output,
-          }),
-        },
-      },
-    },
-    done: {
-      type: 'final',
-      output: ({ context }) =>
-        context.triage ?? { sentiment: 'neutral', category: 'other', reply: '' },
-    },
-  },
-});
-
 export async function runTriageDemo(ticket: string) {
   const actor = createActor(
     triageMachine.provide({
@@ -221,58 +162,6 @@ export async function runTriageStepDemo(ticket: string) {
 
   return step.snapshot.output;
 }
-
-// ─── Authored Agent: streaming joke ───
-
-const jokeAgent = setupAgent({
-  schemas: createAgentSchemas({
-    context: z.object({
-      topic: z.string(),
-      joke: z.string().nullable(),
-    }),
-    input: z.object({ topic: z.string() }),
-    output: z.object({ joke: z.string() }),
-  }),
-}).withTasks({
-  tellJoke: {
-    kind: 'stream',
-    schemas: {
-      input: z.object({ topic: z.string() }),
-      output: z.string(),
-    },
-    model: 'openai/gpt-5.4-nano',
-    system: 'You tell short, punchy jokes.',
-    prompt: ({ input }) => `Tell a joke about ${input.topic}.`,
-  },
-});
-
-const { tellJoke } = jokeAgent.tasks;
-
-const jokeMachine = jokeAgent.createMachine({
-  id: 'joke-streamer',
-  context: ({ input }) => ({ topic: input.topic, joke: null }),
-  // The no-helper route to typed machine output: a root-level `output`
-  // mapper, which XState types against the output schema natively. Final
-  // states stay bare. (`agent.final` is only needed when each final state
-  // computes a DIFFERENT output.)
-  output: ({ context }) => ({ joke: context.joke ?? '' }),
-  initial: 'streaming',
-  states: {
-    streaming: {
-      invoke: {
-        id: 'joke',
-        src: 'tellJoke',
-        input: ({ context }) => ({ topic: context.topic }),
-        onDone: {
-          target: 'done',
-          // event.output is the FINAL streamed text (string)
-          actions: assign({ joke: ({ event }) => event.output }),
-        },
-      },
-    },
-    done: { type: 'final' },
-  },
-});
 
 export async function runStreamingDemo(topic: string) {
   const actor = createActor(
