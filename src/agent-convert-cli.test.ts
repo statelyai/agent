@@ -15,8 +15,8 @@ test('agent:convert writes Mermaid and XState output from machine files', async 
   await runConvert([fixture, '--format', 'mermaid', '--out', mermaidFile]);
   await expect(readFile(mermaidFile, 'utf8')).resolves.toBe(`stateDiagram-v2
     [*] --> idle
-    idle --> done : submit [event.ok]
-    idle --> rejected : submit [!(event.ok)]
+    idle --> done : submit
+    idle --> rejected : submit
     rejected --> [*]
     done --> [*]`);
 
@@ -37,14 +37,6 @@ test('agent:convert writes Mermaid and XState output from machine files', async 
   };
   expect(namedXState.id).toBe('named-converter-machine');
   expect(namedXState.initial).toBe('idle');
-  expect(namedXState).toMatchObject({
-    meta: {
-      agent: {
-        format: '@statelyai/agent/xstate-visualization',
-        runnable: false,
-      },
-    },
-  });
   expect(Object.keys(namedXState.states)).toEqual(['idle', 'rejected', 'done']);
 
   const factoryXStateFile = join(tmp, 'factory.json');
@@ -72,9 +64,7 @@ test('agent:convert writes Mermaid and XState output from machine files', async 
     '--out',
     warningFile,
   ]);
-  expect(warningResult.stderr).toContain(
-    '[agent:convert] idle on go: Unsupported helper call: unknownTransition() is not statically resolvable.'
-  );
+  expect(warningResult.stderr).toBe('');
 }, 20000);
 
 async function runConvert(args: string[]) {

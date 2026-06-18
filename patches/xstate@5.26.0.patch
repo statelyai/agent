@@ -1,0 +1,96 @@
+diff --git a/dist/declarations/src/types.d.ts b/dist/declarations/src/types.d.ts
+index 14556e1b169e71985b5a2c22f238af0a6545b0f4..074f17fc6198b04a122da39d39190c281ea2d16c 100644
+--- a/dist/declarations/src/types.d.ts
++++ b/dist/declarations/src/types.d.ts
+@@ -255,7 +255,7 @@ export type InvokeConfig<TContext extends MachineContext, TEvent extends EventOb
+     onSnapshot?: string | SingleOrArray<TransitionConfigOrTarget<TContext, SnapshotEvent, TEvent, TActor, TAction, TGuard, TDelay, TEmitted, TMeta>>;
+ };
+ export type AnyInvokeConfig = InvokeConfig<any, any, any, any, any, any, any, any>;
+-export interface StateNodeConfig<TContext extends MachineContext, TEvent extends EventObject, TActor extends ProvidedActor, TAction extends ParameterizedObject, TGuard extends ParameterizedObject, TDelay extends string, TTag extends string, _TOutput, TEmitted extends EventObject, TMeta extends MetaObject> {
++export interface StateNodeConfig<TContext extends MachineContext, TEvent extends EventObject, TActor extends ProvidedActor, TAction extends ParameterizedObject, TGuard extends ParameterizedObject, TDelay extends string, TTag extends string, TOutput, TEmitted extends EventObject, TMeta extends MetaObject> {
+     /** The initial state transition. */
+     initial?: InitialTransitionConfig<TContext, TEvent, TActor, TAction, TGuard, TDelay> | string | undefined;
+     /**
+@@ -321,7 +321,7 @@ export interface StateNodeConfig<TContext extends MachineContext, TEvent extends
+      * The output data will be evaluated with the current `context` and placed on
+      * the `.data` property of the event.
+      */
+-    output?: Mapper<TContext, TEvent, unknown, TEvent> | NonReducibleUnknown;
++    output?: Mapper<TContext, TEvent, TOutput, TEvent> | ([unknown] extends [TOutput] ? NonReducibleUnknown : TOutput);
+     /**
+      * The unique ID of the state node, which can be referenced as a transition
+      * target via the `#id` syntax.
+@@ -448,7 +448,8 @@ export type ContextFactory<TContext extends MachineContext, TActor extends Provi
+     StateValue, string, unknown, TODO, // TMeta
+     TODO>, TEvent, AnyEventObject>;
+ }) => TContext;
+-export type MachineConfig<TContext extends MachineContext, TEvent extends EventObject, TActor extends ProvidedActor = ProvidedActor, TAction extends ParameterizedObject = ParameterizedObject, TGuard extends ParameterizedObject = ParameterizedObject, TDelay extends string = string, TTag extends string = string, TInput = any, TOutput = unknown, TEmitted extends EventObject = EventObject, TMeta extends MetaObject = MetaObject> = (Omit<StateNodeConfig<DoNotInfer<TContext>, DoNotInfer<TEvent>, DoNotInfer<TActor>, DoNotInfer<TAction>, DoNotInfer<TGuard>, DoNotInfer<TDelay>, DoNotInfer<TTag>, DoNotInfer<TOutput>, DoNotInfer<TEmitted>, DoNotInfer<TMeta>>, 'output'> & {
++export type MachineConfig<TContext extends MachineContext, TEvent extends EventObject, TActor extends ProvidedActor = ProvidedActor, TAction extends ParameterizedObject = ParameterizedObject, TGuard extends ParameterizedObject = ParameterizedObject, TDelay extends string = string, TTag extends string = string, TInput = any, TOutput = unknown, TEmitted extends EventObject = EventObject, TMeta extends MetaObject = MetaObject> = (Omit<StateNodeConfig<DoNotInfer<TContext>, DoNotInfer<TEvent>, DoNotInfer<TActor>, DoNotInfer<TAction>, DoNotInfer<TGuard>, DoNotInfer<TDelay>, DoNotInfer<TTag>, DoNotInfer<TOutput>, DoNotInfer<TEmitted>, DoNotInfer<TMeta>>, 'output' | 'states'> & {
++    states?: StatesConfig<DoNotInfer<TContext>, DoNotInfer<TEvent>, DoNotInfer<TActor>, DoNotInfer<TAction>, DoNotInfer<TGuard>, DoNotInfer<TDelay>, DoNotInfer<TTag>, DoNotInfer<TOutput>, DoNotInfer<TEmitted>, DoNotInfer<TMeta>> | undefined;
+     /** The initial context (extended state) */
+     /** The machine's own version. */
+     version?: string;
+diff --git a/dist/raise-13e2f823.development.esm.js b/dist/raise-13e2f823.development.esm.js
+index 3ce2c47b3310880c8f12b14c5a225f934d8d21c9..43895003a16b0723e86cc08bc5de0379f96a69fb 100644
+--- a/dist/raise-13e2f823.development.esm.js
++++ b/dist/raise-13e2f823.development.esm.js
+@@ -2163,7 +2163,10 @@ function microstep(transitions, currentSnapshot, actorScope, event, isInitial, i
+ }
+ function getMachineOutput(snapshot, event, actorScope, rootNode, rootCompletionNode) {
+   if (rootNode.output === undefined) {
+-    return;
++    if (rootCompletionNode.output === undefined || !rootCompletionNode.parent) {
++      return;
++    }
++    return resolveOutput(rootCompletionNode.output, snapshot.context, event, actorScope.self);
+   }
+   const doneStateEvent = createDoneStateEvent(rootCompletionNode.id, rootCompletionNode.output !== undefined && rootCompletionNode.parent ? resolveOutput(rootCompletionNode.output, snapshot.context, event, actorScope.self) : undefined);
+   return resolveOutput(rootNode.output, snapshot.context, doneStateEvent, actorScope.self);
+diff --git a/dist/raise-df325116.cjs.js b/dist/raise-df325116.cjs.js
+index c0e38f1527010a93987872f8105bde9b8f394eb5..26d997093102fffb408228a27baff38cb35add89 100644
+--- a/dist/raise-df325116.cjs.js
++++ b/dist/raise-df325116.cjs.js
+@@ -2118,7 +2118,10 @@ function microstep(transitions, currentSnapshot, actorScope, event, isInitial, i
+ }
+ function getMachineOutput(snapshot, event, actorScope, rootNode, rootCompletionNode) {
+   if (rootNode.output === undefined) {
+-    return;
++    if (rootCompletionNode.output === undefined || !rootCompletionNode.parent) {
++      return;
++    }
++    return resolveOutput(rootCompletionNode.output, snapshot.context, event, actorScope.self);
+   }
+   const doneStateEvent = createDoneStateEvent(rootCompletionNode.id, rootCompletionNode.output !== undefined && rootCompletionNode.parent ? resolveOutput(rootCompletionNode.output, snapshot.context, event, actorScope.self) : undefined);
+   return resolveOutput(rootNode.output, snapshot.context, doneStateEvent, actorScope.self);
+diff --git a/dist/raise-e47e3273.development.cjs.js b/dist/raise-e47e3273.development.cjs.js
+index 0d7ee686d439ada49357f9fc0b723d7b5ff4689a..540212f4ee0eb3b1a966fb1f13df183175315f28 100644
+--- a/dist/raise-e47e3273.development.cjs.js
++++ b/dist/raise-e47e3273.development.cjs.js
+@@ -2165,7 +2165,10 @@ function microstep(transitions, currentSnapshot, actorScope, event, isInitial, i
+ }
+ function getMachineOutput(snapshot, event, actorScope, rootNode, rootCompletionNode) {
+   if (rootNode.output === undefined) {
+-    return;
++    if (rootCompletionNode.output === undefined || !rootCompletionNode.parent) {
++      return;
++    }
++    return resolveOutput(rootCompletionNode.output, snapshot.context, event, actorScope.self);
+   }
+   const doneStateEvent = createDoneStateEvent(rootCompletionNode.id, rootCompletionNode.output !== undefined && rootCompletionNode.parent ? resolveOutput(rootCompletionNode.output, snapshot.context, event, actorScope.self) : undefined);
+   return resolveOutput(rootNode.output, snapshot.context, doneStateEvent, actorScope.self);
+diff --git a/dist/raise-f11495d1.esm.js b/dist/raise-f11495d1.esm.js
+index 393ecd91953f78588dda4a37c33f32cdb4537f42..afff6136b8ab4955847434a6151d44c45edbc6a2 100644
+--- a/dist/raise-f11495d1.esm.js
++++ b/dist/raise-f11495d1.esm.js
+@@ -2116,7 +2116,10 @@ function microstep(transitions, currentSnapshot, actorScope, event, isInitial, i
+ }
+ function getMachineOutput(snapshot, event, actorScope, rootNode, rootCompletionNode) {
+   if (rootNode.output === undefined) {
+-    return;
++    if (rootCompletionNode.output === undefined || !rootCompletionNode.parent) {
++      return;
++    }
++    return resolveOutput(rootCompletionNode.output, snapshot.context, event, actorScope.self);
+   }
+   const doneStateEvent = createDoneStateEvent(rootCompletionNode.id, rootCompletionNode.output !== undefined && rootCompletionNode.parent ? resolveOutput(rootCompletionNode.output, snapshot.context, event, actorScope.self) : undefined);
+   return resolveOutput(rootNode.output, snapshot.context, doneStateEvent, actorScope.self);

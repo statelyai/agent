@@ -2,7 +2,99 @@
 
 Stately Agent is the state machine authoring layer for AI agents. Author your AI agents as state machines. Run them anywhere.
 
-The package owns the machine design surface: states, transitions, typed events, messages, generative state schemas, always transitions, and runtime contracts that adapters can implement.
+The package owns one first-class authoring primitive:
+
+- `setupAgent(...).withTasks(...)`: schema-first, SDK-agnostic agent task authoring.
+
+Use `setupAgent(...)` for schema-first control flow. Use normal host code for runtime execution. Stately Agent adds the batteries: reusable text logic, message helpers, examples, retained schemas, and visualization/export affordances.
+
+You can still call the Vercel AI SDK, LangChain, Workers AI, or any other model/tool runtime yourself. The machine only declares behavior; hosts can either execute effects from pure XState transitions or provide actors with `machine.provide({ actors })`. That keeps runtime transparency while making the workflow typed, inspectable, and visualizable.
+
+Choose this over LangGraph when you want agent workflows to be explicit state machines instead of framework-owned graphs: same workflow shapes, strong TypeScript for machine context/events/actors, first-class XState snapshots/guards, visualization by default, and no required runtime backend. Choose it over handrolled workflows when the control flow is important enough to inspect, persist, replay, test, and diagram.
+
+For SDK integration, define named tasks with `setupAgent({ schemas }).withTasks(...)`. The machine declares `invoke: { src: 'getSummary', input, onDone }`; your host reads that task and calls Vercel AI SDK, Cloudflare Workers AI, LangChain, local models, or custom code. Source ids, invoke input, `event.output`, and machine schemas are typed from the registered tasks and schemas. See [`docs/host-actors.md`](/Users/davidkpiano/Code/agent/docs/host-actors.md).
+
+## Agent Machines
+
+<!-- setupAgent root export and helpers from src/index.ts and src/setup-agent.ts -->
+
+Import `createAgentSchemas(...)` and `setupAgent(...)` from `@statelyai/agent`:
+
+```ts
+import {
+  createAgentSchemas,
+  getAgentEffects,
+  setupAgent,
+  transitionResult,
+} from '@statelyai/agent';
+import { assign, initialTransition } from 'xstate';
+import { z } from 'zod';
+
+const contextSchema = z.object({
+  prompt: z.string(),
+  answer: z.string().nullable(),
+});
+const inputSchema = z.object({ prompt: z.string() });
+const answerSchema = z.object({ answer: z.string() });
+
+const schemas = createAgentSchemas({
+  context: contextSchema,
+  input: inputSchema,
+  output: answerSchema,
+});
+
+const agent = setupAgent({ schemas }).withTasks({
+  getAnswer: {
+    schemas: {
+      input: z.object({ prompt: z.string() }),
+      output: answerSchema,
+    },
+    model: 'writer',
+    prompt: ({ input }) => input.prompt,
+  },
+});
+
+const machine = agent.createMachine({
+  context: ({ input }) => ({ prompt: input.prompt, answer: null }),
+  initial: 'answering',
+  states: {
+    answering: {
+      invoke: {
+        id: 'answer',
+        src: 'getAnswer',
+        input: ({ context }) => ({ prompt: context.prompt }),
+        onDone: {
+          target: 'done',
+          actions: assign({
+            answer: ({ event }) => event.output.answer,
+          }),
+        },
+      },
+    },
+    done: { type: 'final' },
+  },
+});
+
+let [snapshot, actions] = initialTransition(machine, { prompt: 'Why XState?' });
+
+while (snapshot.status !== 'done') {
+  for (const effect of getAgentEffects(actions, {
+    snapshot,
+    schemas: agent.schemas,
+    actors: { getAnswer },
+  })) {
+    const result = await generateText({
+      ...effect.input,
+      tools: effect.tools,
+    }); // any SDK/framework
+    [snapshot, actions] = transitionResult(machine, snapshot, effect, result);
+  }
+}
+```
+
+This is normal XState underneath: use pure `initialTransition(...)` / `transitionResult(...)`, or use `createActor(...)`, snapshots, persistence, guards, actions, and host-provided actors. `setupAgent(...)` adds schema-derived concrete types and retained schemas; `withTasks(...)` adds reusable typed task construction, strongly typed source names, typed invoke input, typed `event.output`, and `getAgentEffects(...)` extraction.
+
+When a task declares `events`, `getAgentEffects(...)` returns `event.<TYPE>` tools for those events only if they are currently legal from the snapshot. That lets a model choose legal machine events, such as moves in a game, without exposing every transition.
 
 ## Examples
 
@@ -10,7 +102,7 @@ The package owns the machine design surface: states, transitions, typed events, 
 
 The examples in [`examples/`](/Users/davidkpiano/Code/agent/examples) are intentionally small. Most run in the CLI and use real OpenAI calls when `OPENAI_API_KEY` is set. Runtime-specific examples call out extra environment requirements inline.
 
-If you want examples grouped by intent instead of a flat list, start with [`examples/README.md`](/Users/davidkpiano/Code/agent/examples/README.md). It separates app-shaped examples, state-machine workflow examples, local/session examples, and lower-level reference examples.
+If you want examples grouped by intent instead of a flat list, start with [`examples/README.md`](/Users/davidkpiano/Code/agent/examples/README.md). It separates XState authoring, host adapters, app integrations, and parity coverage.
 
 Run them with `node --import tsx examples/<name>.ts`.
 
@@ -18,48 +110,20 @@ Convert a machine file to diagram output with `pnpm agent:convert <file> --forma
 
 Start here:
 
-- App-shaped integrations: [`examples/apps/next/`](/Users/davidkpiano/Code/agent/examples/apps/next), [`examples/apps/cloudflare-agents/`](/Users/davidkpiano/Code/agent/examples/apps/cloudflare-agents), [`examples/next-ai-sdk-ui.ts`](/Users/davidkpiano/Code/agent/examples/next-ai-sdk-ui.ts), [`examples/cloudflare-agents.ts`](/Users/davidkpiano/Code/agent/examples/cloudflare-agents.ts)
-- Local sessions and transports: [`examples/persistence.ts`](/Users/davidkpiano/Code/agent/examples/persistence.ts), [`examples/http-session.ts`](/Users/davidkpiano/Code/agent/examples/http-session.ts), [`examples/http-streaming-session.ts`](/Users/davidkpiano/Code/agent/examples/http-streaming-session.ts)
-- State-machine workflow patterns: [`examples/rag.ts`](/Users/davidkpiano/Code/agent/examples/rag.ts), [`examples/tool-calling.ts`](/Users/davidkpiano/Code/agent/examples/tool-calling.ts), [`examples/error-retry.ts`](/Users/davidkpiano/Code/agent/examples/error-retry.ts), [`examples/spec-agent-loop.ts`](/Users/davidkpiano/Code/agent/examples/spec-agent-loop.ts), [`examples/persistent-supervisor.ts`](/Users/davidkpiano/Code/agent/examples/persistent-supervisor.ts)
-- CrewAI-style equivalents: [`examples/content-creator-flow.ts`](/Users/davidkpiano/Code/agent/examples/content-creator-flow.ts), [`examples/email-auto-responder-flow.ts`](/Users/davidkpiano/Code/agent/examples/email-auto-responder-flow.ts), [`examples/lead-score-flow.ts`](/Users/davidkpiano/Code/agent/examples/lead-score-flow.ts), [`examples/meeting-assistant-flow.ts`](/Users/davidkpiano/Code/agent/examples/meeting-assistant-flow.ts), [`examples/self-evaluation-loop-flow.ts`](/Users/davidkpiano/Code/agent/examples/self-evaluation-loop-flow.ts), [`examples/write-a-book-flow.ts`](/Users/davidkpiano/Code/agent/examples/write-a-book-flow.ts)
-- Reference examples: [`examples/simple.ts`](/Users/davidkpiano/Code/agent/examples/simple.ts), [`examples/decide.ts`](/Users/davidkpiano/Code/agent/examples/decide.ts), [`examples/classify.ts`](/Users/davidkpiano/Code/agent/examples/classify.ts), [`examples/adapter.ts`](/Users/davidkpiano/Code/agent/examples/adapter.ts), [`examples/email-drafter.ts`](/Users/davidkpiano/Code/agent/examples/email-drafter.ts), [`examples/workflow-guardrails.ts`](/Users/davidkpiano/Code/agent/examples/workflow-guardrails.ts)
+- Agent authoring: [`examples/setup-agent/email-drafter.ts`](/Users/davidkpiano/Code/agent/examples/setup-agent/email-drafter.ts)
+- Host adapters: [`examples/setup-agent/hosts/ai-sdk.ts`](/Users/davidkpiano/Code/agent/examples/setup-agent/hosts/ai-sdk.ts), [`examples/setup-agent/hosts/cloudflare-agent.ts`](/Users/davidkpiano/Code/agent/examples/setup-agent/hosts/cloudflare-agent.ts)
+- Local smoke test: [`examples/setup-agent/smoke.mts`](/Users/davidkpiano/Code/agent/examples/setup-agent/smoke.mts)
+- LangGraph parity: [`src/langgraph-equivalents/raw-xstate.test.ts`](/Users/davidkpiano/Code/agent/src/langgraph-equivalents/raw-xstate.test.ts), [`docs/langgraph-parity.md`](/Users/davidkpiano/Code/agent/docs/langgraph-parity.md), [`docs/langgraph-gaps.md`](/Users/davidkpiano/Code/agent/docs/langgraph-gaps.md)
+- Burr parity: [`src/burr-equivalents/raw-xstate.test.ts`](/Users/davidkpiano/Code/agent/src/burr-equivalents/raw-xstate.test.ts), [`docs/burr-parity.md`](/Users/davidkpiano/Code/agent/docs/burr-parity.md)
 
 Use `classify(...)` when the result is just "what kind of thing is this?" Use `decide(...)` when the result is "what should happen next?" and the chosen branch may need structured data.
 
 CrewAI Flow parity is tracked in [`docs/crewai-parity.md`](/Users/davidkpiano/Code/agent/docs/crewai-parity.md), the same way LangGraph parity is tracked separately.
 
-## Local Adapter
+Burr parity is tracked in [`docs/burr-parity.md`](/Users/davidkpiano/Code/agent/docs/burr-parity.md), focused on action-like authoring patterns without adopting Burr's runtime.
 
-<!-- public local adapter subpath from package.json#exports and src/local/index.ts -->
+## Runtime
 
-Use `@statelyai/agent/local` for local development, tests, and in-process examples:
-
-- `execute(machine, state)`: run the local interpreter until done, pending, or error
-- `invoke(machine, state)`: run one local interpreter step
-- `stream(machine, state)`: yield local interpreter snapshots
-- `startSession(machine, options)`: start a local session backed by a `RunStore`
-- `restoreSession(machine, options)`: restore a local session from a `RunStore`
-- `waitForRunDone(run)`: await terminal success or reject on session error
-- `waitForRunSnapshot(run, predicate)`: await the next snapshot that matches a predicate
-
-Production runtimes should consume the session contract or use framework-specific adapter packages such as `@statelyai/agent-cloudflare` when those packages exist.
-
-## Persistence Adapters
-
-<!-- RunStore contract from src/runtime/store.ts and storage examples from examples/cloudflare-*.ts, examples/http-session.ts, and examples/persistence.ts -->
-
-Runtime adapters are intentionally bring-your-own. Implement the `RunStore` contract with four methods:
-
-- `append(sessionId, event)`
-- `loadEvents(sessionId, afterSequence?)`
-- `loadLatestSnapshot(sessionId)`
-- `saveSnapshot(snapshot)`
-
-Use these examples as templates for your storage layer:
-
-- [`examples/persistence.ts`](/Users/davidkpiano/Code/agent/examples/persistence.ts): the smallest local session flow with an in-memory store
-- [`examples/http-session.ts`](/Users/davidkpiano/Code/agent/examples/http-session.ts): the Request/Response transport shape around the local adapter
-- [`examples/cloudflare-durable-object.ts`](/Users/davidkpiano/Code/agent/examples/cloudflare-durable-object.ts): preview code for a future Cloudflare adapter package
-- [`examples/cloudflare-agents.ts`](/Users/davidkpiano/Code/agent/examples/cloudflare-agents.ts): preview code for syncing a `RunStore` into Cloudflare Agents state
+Runtime is normal XState. Use pure `initialTransition(...)` / `transitionResult(...)` when a framework wants to own execution, or use `createActor(...)`, `toPromise(...)`, snapshots, persisted snapshots, `machine.provide({ actors })`, and your framework transport of choice. Model/tool execution stays under your control.
 
 **Read the documentation: [stately.ai/docs/agents](https://stately.ai/docs/agents)**

@@ -1,82 +1,34 @@
 # Examples
 
-<!-- example groups derived from examples/*.ts, examples/apps/**, and examples/index.ts -->
+<!-- example groups derived from examples/setup-agent/** and examples/index.ts -->
 
-This directory is organized by what a developer is trying to do, not by the underlying primitive.
+This directory is organized around the preferred authoring path: `setupAgent(...).withTasks(...)` machines.
 
 ## Start Here
 
-- Building an app route: [`apps/next/`](/Users/davidkpiano/Code/agent/examples/apps/next) or [`apps/cloudflare-agents/`](/Users/davidkpiano/Code/agent/examples/apps/cloudflare-agents)
-- Trying local sessions: [`persistence.ts`](/Users/davidkpiano/Code/agent/examples/persistence.ts) and [`http-session.ts`](/Users/davidkpiano/Code/agent/examples/http-session.ts)
-- Streaming text or tool progress: [`next-ai-sdk-ui.ts`](/Users/davidkpiano/Code/agent/examples/next-ai-sdk-ui.ts), [`http-streaming-session.ts`](/Users/davidkpiano/Code/agent/examples/http-streaming-session.ts), and [`tool-calling.ts`](/Users/davidkpiano/Code/agent/examples/tool-calling.ts)
-- Studying state-machine workflow patterns: start in `Workflow Examples`
+- Authoring reusable text logic and XState agent machines: [`setup-agent/email-drafter.ts`](/Users/davidkpiano/Code/agent/examples/setup-agent/email-drafter.ts)
+- Running with host actors: [`setup-agent/hosts/ai-sdk.ts`](/Users/davidkpiano/Code/agent/examples/setup-agent/hosts/ai-sdk.ts)
+- Host actor guide: [`../docs/host-actors.md`](/Users/davidkpiano/Code/agent/docs/host-actors.md)
+- Comparing LangGraph and Burr patterns: [`../src/langgraph-equivalents/raw-xstate.test.ts`](/Users/davidkpiano/Code/agent/src/langgraph-equivalents/raw-xstate.test.ts), [`../src/burr-equivalents/raw-xstate.test.ts`](/Users/davidkpiano/Code/agent/src/burr-equivalents/raw-xstate.test.ts)
 
-## App-Shaped Examples
+## XState Examples
 
-These are the best starting points when you want code that already looks like a real app:
+These use `setupAgent(...)` and `withTasks(...)` from `@statelyai/agent`. The runtime is flexible: use `createActor(...)` locally, provide different host actors in apps, or persist XState snapshots in a platform adapter.
 
-- [`apps/next/`](/Users/davidkpiano/Code/agent/examples/apps/next): copy-paste Next.js App Router routes
-- [`apps/cloudflare-agents/`](/Users/davidkpiano/Code/agent/examples/apps/cloudflare-agents): copy-paste Cloudflare Agents Worker layout
-- [`next-ai-sdk-ui.ts`](/Users/davidkpiano/Code/agent/examples/next-ai-sdk-ui.ts): AI SDK UI route helper
-- [`next-app-router.ts`](/Users/davidkpiano/Code/agent/examples/next-app-router.ts): App Router session-route preview code
-- [`cloudflare-agents.ts`](/Users/davidkpiano/Code/agent/examples/cloudflare-agents.ts): Cloudflare Agents adapter preview code
-
-## Workflow Examples
-
-These focus on state-machine workflow patterns:
-
-- Session-first interactive workflows
-- Local restore and transport patterns
-- Multi-step planning, routing, and handoff flows
-
-- [`persistence.ts`](/Users/davidkpiano/Code/agent/examples/persistence.ts)
-- [`persistent-streaming.ts`](/Users/davidkpiano/Code/agent/examples/persistent-streaming.ts)
-- [`persistent-supervisor.ts`](/Users/davidkpiano/Code/agent/examples/persistent-supervisor.ts)
-- [`persistent-multi-agent-network.ts`](/Users/davidkpiano/Code/agent/examples/persistent-multi-agent-network.ts)
-- [`content-creator-flow.ts`](/Users/davidkpiano/Code/agent/examples/content-creator-flow.ts)
-- [`email-auto-responder-flow.ts`](/Users/davidkpiano/Code/agent/examples/email-auto-responder-flow.ts)
-- [`lead-score-flow.ts`](/Users/davidkpiano/Code/agent/examples/lead-score-flow.ts)
-- [`meeting-assistant-flow.ts`](/Users/davidkpiano/Code/agent/examples/meeting-assistant-flow.ts)
-- [`self-evaluation-loop-flow.ts`](/Users/davidkpiano/Code/agent/examples/self-evaluation-loop-flow.ts)
-- [`spec-agent-loop.ts`](/Users/davidkpiano/Code/agent/examples/spec-agent-loop.ts)
-- [`workflow-guardrails.ts`](/Users/davidkpiano/Code/agent/examples/workflow-guardrails.ts)
-- [`write-a-book-flow.ts`](/Users/davidkpiano/Code/agent/examples/write-a-book-flow.ts)
-- [`plan-and-execute.ts`](/Users/davidkpiano/Code/agent/examples/plan-and-execute.ts)
-- [`reflection.ts`](/Users/davidkpiano/Code/agent/examples/reflection.ts)
-- [`rewoo.ts`](/Users/davidkpiano/Code/agent/examples/rewoo.ts)
-- [`rag.ts`](/Users/davidkpiano/Code/agent/examples/rag.ts)
-- [`sql-agent.ts`](/Users/davidkpiano/Code/agent/examples/sql-agent.ts)
-
-## Local / Transport Examples
-
-- [`http-session.ts`](/Users/davidkpiano/Code/agent/examples/http-session.ts)
-- [`http-streaming-session.ts`](/Users/davidkpiano/Code/agent/examples/http-streaming-session.ts)
-- [`cloudflare-durable-object.ts`](/Users/davidkpiano/Code/agent/examples/cloudflare-durable-object.ts)
-- [`cloudflare-durable-network.ts`](/Users/davidkpiano/Code/agent/examples/cloudflare-durable-network.ts)
-
-The reusable local pieces behind these examples are exported from `@statelyai/agent/local`. Framework-specific adapters should move to separate packages.
-
-## Reference / Concept Examples
-
-These are smaller building-block examples:
-
-- One-shot machine execution: [`simple.ts`](/Users/davidkpiano/Code/agent/examples/simple.ts), [`decide.ts`](/Users/davidkpiano/Code/agent/examples/decide.ts), [`classify.ts`](/Users/davidkpiano/Code/agent/examples/classify.ts)
-- Interactive session lifecycle: [`chatbot.ts`](/Users/davidkpiano/Code/agent/examples/chatbot.ts), [`chatbot-messages.ts`](/Users/davidkpiano/Code/agent/examples/chatbot-messages.ts), [`email-drafter.ts`](/Users/davidkpiano/Code/agent/examples/email-drafter.ts), [`hitl.ts`](/Users/davidkpiano/Code/agent/examples/hitl.ts), [`raffle.ts`](/Users/davidkpiano/Code/agent/examples/raffle.ts)
-
-- [`simple.ts`](/Users/davidkpiano/Code/agent/examples/simple.ts)
-- [`decide.ts`](/Users/davidkpiano/Code/agent/examples/decide.ts)
-- [`classify.ts`](/Users/davidkpiano/Code/agent/examples/classify.ts)
-- [`adapter.ts`](/Users/davidkpiano/Code/agent/examples/adapter.ts)
-- [`email-drafter.ts`](/Users/davidkpiano/Code/agent/examples/email-drafter.ts)
-- [`tool-calling.ts`](/Users/davidkpiano/Code/agent/examples/tool-calling.ts)
-- [`hitl.ts`](/Users/davidkpiano/Code/agent/examples/hitl.ts)
-- [`branching.ts`](/Users/davidkpiano/Code/agent/examples/branching.ts)
-- [`subflow.ts`](/Users/davidkpiano/Code/agent/examples/subflow.ts)
-- [`conditional-subflow.ts`](/Users/davidkpiano/Code/agent/examples/conditional-subflow.ts)
+- [`setup-agent/email-drafter.ts`](/Users/davidkpiano/Code/agent/examples/setup-agent/email-drafter.ts): typed email workflow with independently testable text logic
+- [`setup-agent/game-agent.ts`](/Users/davidkpiano/Code/agent/examples/setup-agent/game-agent.ts): turn-based game workflow with whitelisted event tools
+- [`setup-agent/smoke.mts`](/Users/davidkpiano/Code/agent/examples/setup-agent/smoke.mts): deterministic local XState runtime smoke test
+- [`setup-agent/hosts/ai-sdk.ts`](/Users/davidkpiano/Code/agent/examples/setup-agent/hosts/ai-sdk.ts): Vercel AI SDK host actors
+- [`setup-agent/hosts/ai-sdk-game.ts`](/Users/davidkpiano/Code/agent/examples/setup-agent/hosts/ai-sdk-game.ts): Vercel AI SDK pure-transition game runner
+- [`setup-agent/hosts/cloudflare-workers-ai.ts`](/Users/davidkpiano/Code/agent/examples/setup-agent/hosts/cloudflare-workers-ai.ts): Cloudflare Workers AI pure-transition runner
+- [`setup-agent/hosts/tanstack-ai.ts`](/Users/davidkpiano/Code/agent/examples/setup-agent/hosts/tanstack-ai.ts): TanStack AI pure-transition runner sketch
+- [`setup-agent/hosts/cloudflare-agent.ts`](/Users/davidkpiano/Code/agent/examples/setup-agent/hosts/cloudflare-agent.ts): Cloudflare Agents host sketch
 
 ## Parity Tracking
 
 - [`../docs/langgraph-parity.md`](/Users/davidkpiano/Code/agent/docs/langgraph-parity.md)
+- [`../docs/langgraph-gaps.md`](/Users/davidkpiano/Code/agent/docs/langgraph-gaps.md)
 - [`../docs/crewai-parity.md`](/Users/davidkpiano/Code/agent/docs/crewai-parity.md)
+- [`../docs/burr-parity.md`](/Users/davidkpiano/Code/agent/docs/burr-parity.md)
 
-The parity docs track end-result coverage. The files here are the runnable equivalents.
+The parity docs track end-result coverage and remaining gaps. New examples should use `withTasks(...)` for named LLM work and `setupAgent(...)` for schema-first machine authoring.

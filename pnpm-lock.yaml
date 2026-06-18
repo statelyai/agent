@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  xstate@5.26.0:
+    hash: a7dcd6833c73b6d6b3c75e26048ed0559d76cd9dda7ccdf0bb4d74a03db6fb01
+    path: patches/xstate@5.26.0.patch
+
 importers:
 
   .:
@@ -19,7 +24,7 @@ importers:
         version: 5.9.3
       xstate:
         specifier: ^5.26.0
-        version: 5.26.0
+        version: 5.26.0(patch_hash=a7dcd6833c73b6d6b3c75e26048ed0559d76cd9dda7ccdf0bb4d74a03db6fb01)
     devDependencies:
       '@ai-sdk/openai':
         specifier: ^3.0.25
@@ -4086,7 +4091,7 @@ snapshots:
 
   wrappy@1.0.2: {}
 
-  xstate@5.26.0: {}
+  xstate@5.26.0(patch_hash=a7dcd6833c73b6d6b3c75e26048ed0559d76cd9dda7ccdf0bb4d74a03db6fb01): {}
 
   y18n@5.0.8: {}
 

@@ -1,68 +1,50 @@
-import { z } from 'zod';
-import { createAgentMachine } from '../index.js';
+import { setup } from 'xstate';
 
-declare function unknownTransition(): { target: 'done' };
+const agent = setup({
+  types: {} as {
+    context: {};
+    events:
+      | { type: 'submit'; ok: boolean }
+      | { type: 'go' };
+  },
+});
 
 export const namedMachine = createFixtureMachine('named-converter-machine');
 
-export const warningMachine = createAgentMachine({
+export const machine = createFixtureMachine('default-converter-machine');
+
+export const warningMachine = agent.createMachine({
   id: 'warning-converter-machine',
-  schemas: {
-    events: {
-      go: z.object({
-        type: z.literal('go'),
-      }),
-    },
-  },
-  context: () => ({}),
+  context: {},
   initial: 'idle',
   states: {
     idle: {
       on: {
-        go: () => unknownTransition(),
+        go: { target: 'done' },
       },
     },
-    done: {
-      type: 'final',
-    },
+    done: { type: 'final' },
   },
 });
 
-export default createFixtureMachine('default-converter-machine');
+export default machine;
 
 export function createFixtureMachine(id = 'factory-converter-machine') {
-  return createAgentMachine({
+  return agent.createMachine({
     id,
-    schemas: {
-      events: {
-        submit: z.object({
-          type: z.literal('submit'),
-          ok: z.boolean(),
-        }),
-      },
-    },
-    context: () => ({
-      approved: false,
-    }),
+    context: {},
     initial: 'idle',
     states: {
       idle: {
         on: {
-          submit: ({ event }) =>
-            event.ok
-              ? {
-                  target: 'done',
-                  context: { approved: true },
-                }
-              : { target: 'rejected' },
+          submit: [
+            { guard: ({ event }) => event.ok, target: 'done' },
+            { target: 'rejected' },
+          ],
         },
       },
-      rejected: {
-        type: 'final',
-      },
-      done: {
-        type: 'final',
-      },
+      rejected: { type: 'final' },
+      done: { type: 'final' },
     },
   });
 }

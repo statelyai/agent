@@ -1,9 +1,20 @@
-// Core
-export { createAgentMachine } from './machine.js';
+export {
+  addMessages,
+  createAgentSchemas,
+  createTextLogic,
+  doneEvent,
+  EVENT_TOOL_PREFIX,
+  getAvailableEvents,
+  getAgentEffects,
+  getEventTools,
+  messagesSchema,
+  parseOutput,
+  setupAgent,
+  transitionResult,
+  validateSchemaSync,
+} from './setup-agent.js';
 export { decide, decideResultSchema, requireAdapter } from './decide.js';
 export { classify, classifyResultSchema } from './classify.js';
-
-// Adapter
 export { createAdapter } from './adapter.js';
 export {
   appendMessages,
@@ -12,41 +23,40 @@ export {
   userMessage,
 } from './utils.js';
 
-// Types
+export type {
+  AgentEffect,
+  AgentEffectOptions,
+  AgentEventDescriptor,
+  AgentEffectSource,
+  AgentTextInput,
+  AgentSchemaPack,
+  AgentTaskConfig,
+  AgentTaskKind,
+  AgentTaskLogic,
+  TextLogic,
+  TextLogicConfig,
+  TextLogicExecuteArgs,
+  TextLogicExecutor,
+  TextLogicInput,
+  TextLogicOutput,
+} from './setup-agent.js';
+
 export type {
   AgentAdapter,
-  AgentMachine,
+  AgentGenerateTextInput,
   AgentMessage,
-  AgentRun,
-  AgentResolverSnapshot,
-  AgentSnapshot,
-  AgentState,
+  AgentTool,
   AgentToolChoice,
+  AgentToolDescriptor,
+  AgentToolExecute,
   AgentTools,
   ClassifyOptions,
   ClassifyResultFor,
-  DecideOptions,
   DecideAdapter,
+  DecideOptions,
   DecideResultFor,
-  EmittedPart,
-  EmittedUnion,
   EventPayload,
   EventUnion,
-  ExecuteResult,
   InferOutput,
-  InvokeEnqueue,
-  JournalEvent,
-  JournalEventRecord,
-  MachineConfig,
-  PersistedSnapshot,
-  ResolvableStateValue,
-  RestoreSessionOptions,
-  RunStore,
-  SessionOptions,
   StandardSchemaV1,
-  StateConfig,
-  StateResolverArgs,
-  Trace,
-  TransitionEvent,
-  TransitionResult,
 } from './types.js';

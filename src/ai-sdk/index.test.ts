@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { z } from 'zod';
-import { createAiSdkAdapter, createAiSdkDecisionAdapter } from './index.js';
+import { createAiSdkAdapter, createAiSdkDecisionAdapter, toAiSdkTools } from './index.js';
 
 describe('createAiSdkAdapter', () => {
   test('resolves schema-less choices with a custom model resolver', async () => {
@@ -90,7 +90,7 @@ describe('createAiSdkAdapter', () => {
 
     await expect(
       adapter.generateText?.({
-        model: 'openai/gpt-5.4-nano',
+        modelRef: 'openai/gpt-5.4-nano',
         messages: [],
         prompt: 'reply',
       })
@@ -112,7 +112,7 @@ describe('createAiSdkAdapter', () => {
     });
 
     await adapter.generateText?.({
-      model: 'openai/gpt-5.4-nano',
+      modelRef: 'openai/gpt-5.4-nano',
       prompt: 'reply',
       messages: [{ role: 'user', content: 'reply' }],
     });
@@ -123,5 +123,24 @@ describe('createAiSdkAdapter', () => {
         messages: [{ role: 'user', content: 'reply' }],
       },
     ]);
+  });
+
+  test('converts agent tool descriptors to AI SDK tools', () => {
+    const inputSchema = z.object({ target: z.string() });
+    const tools = toAiSdkTools({
+      'event.ATTACK': {
+        description: 'Attack a target.',
+        inputSchema,
+        execute: async (input) => ({ type: 'ATTACK', ...input as object }),
+      },
+    });
+
+    expect(tools['event.ATTACK']).toEqual(
+      expect.objectContaining({
+        description: 'Attack a target.',
+        inputSchema,
+        execute: expect.any(Function),
+      })
+    );
   });
 });

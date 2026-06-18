@@ -1,8 +1,12 @@
 import { writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { analyzeGraph, toMermaid, type AgentGraphWarning } from '../src/graph/index.js';
-import type { AgentMachine } from '../src/index.js';
+import {
+  analyzeGraph,
+  toMermaid,
+  type AgentGraphWarning,
+  type XStateLikeMachine,
+} from '../src/graph/index.js';
 import { toXStateVisualization } from '../src/xstate/index.js';
 
 type Format = 'mermaid' | 'xstate';
@@ -142,7 +146,7 @@ function requiredValue(args: string[], index: number, option: string): string {
   return value;
 }
 
-async function loadMachine(options: CliOptions): Promise<AgentMachine> {
+async function loadMachine(options: CliOptions): Promise<XStateLikeMachine> {
   const fileUrl = pathToFileURL(resolve(options.file!)).href;
   const mod = await import(fileUrl) as Record<string, unknown>;
 
@@ -153,53 +157,53 @@ async function loadMachine(options: CliOptions): Promise<AgentMachine> {
     }
 
     const machine = await factory();
-    return assertAgentMachine(machine, `factory '${options.factoryName}'`);
+    return assertXStateMachine(machine, `factory '${options.factoryName}'`);
   }
 
   if (options.exportName) {
-    return assertAgentMachine(
+    return assertXStateMachine(
       mod[options.exportName],
       `export '${options.exportName}'`
     );
   }
 
   for (const candidate of [mod.default, mod.machine]) {
-    if (isAgentMachine(candidate)) {
+    if (isXStateMachine(candidate)) {
       return candidate;
     }
   }
 
   const namedMachines = Object.entries(mod).filter(([, value]) =>
-    isAgentMachine(value)
+    isXStateMachine(value)
   );
   if (namedMachines.length === 1) {
-    return namedMachines[0]![1] as AgentMachine;
+    return namedMachines[0]![1] as XStateLikeMachine;
   }
 
   throw new Error(
     [
-      'Could not find an agent machine export.',
+      'Could not find an XState machine export.',
       'Export a machine as default or named `machine`, or pass `--export <name>`.',
       'For zero-arg factory exports, pass `--factory <name>`.',
     ].join(' ')
   );
 }
 
-function assertAgentMachine(value: unknown, label: string): AgentMachine {
-  if (!isAgentMachine(value)) {
-    throw new Error(`${label} did not return an agent machine.`);
+function assertXStateMachine(value: unknown, label: string): XStateLikeMachine {
+  if (!isXStateMachine(value)) {
+    throw new Error(`${label} did not return an XState machine.`);
   }
 
   return value;
 }
 
-function isAgentMachine(value: unknown): value is AgentMachine {
+function isXStateMachine(value: unknown): value is XStateLikeMachine {
   return (
     !!value
     && typeof value === 'object'
-    && typeof (value as AgentMachine).id === 'string'
-    && typeof (value as AgentMachine).getInitialState === 'function'
-    && typeof (value as AgentMachine).transition === 'function'
+    && typeof (value as XStateLikeMachine).id === 'string'
+    && !!(value as XStateLikeMachine).config
+    && typeof (value as XStateLikeMachine).config === 'object'
   );
 }
 
@@ -215,8 +219,8 @@ Options:
   -h, --help              Show this help.
 
 Examples:
-  pnpm agent:convert ./examples/simple.ts --factory createSimpleExample
-  pnpm agent:convert ./examples/simple.ts --factory createSimpleExample --format xstate
+  pnpm agent:convert ./examples/setup-agent/email-drafter.ts --export emailDrafter
+  pnpm agent:convert ./examples/setup-agent/email-drafter.ts --export emailDrafter --format xstate
 `);
 }
 

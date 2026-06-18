@@ -5,7 +5,6 @@ export default defineConfig({
     index: 'src/index.ts',
     'ai-sdk': 'src/ai-sdk/index.ts',
     graph: 'src/graph/index.ts',
-    local: 'src/local/index.ts',
     xstate: 'src/xstate/index.ts',
   },
   format: ['esm', 'cjs'],

@@ -1,0 +1,118 @@
+/**
+ * Vercel AI SDK pure-transition host for a non-trivial game workflow.
+ *
+ * Run:
+ *   OPENAI_API_KEY=... node --import tsx examples/setup-agent/hosts/ai-sdk-game.ts
+ */
+import { generateObject, generateText, stepCountIs, type LanguageModel } from 'ai';
+import { openai } from '@ai-sdk/openai';
+import { initialTransition, transition } from 'xstate';
+import { toAiSdkTools } from '../../../src/ai-sdk/index.js';
+import {
+  getAgentEffects,
+  transitionResult,
+  type AgentEffect,
+  type AgentTextInput,
+} from '../../../src/index.js';
+import {
+  chooseMove,
+  gameMachine,
+  gameSchemas,
+  summarizeTurn,
+  turnSummarySchema,
+} from '../game-agent.js';
+
+function resolveModel(modelRef: string): LanguageModel {
+  return openai(modelRef.replace(/^openai\//, ''));
+}
+
+async function runGenerateEffect(effect: AgentEffect) {
+  const input = effect.input as AgentTextInput;
+  const model = resolveModel(input.model);
+  const prompt = input.prompt ?? '';
+  const tools = toAiSdkTools(effect.tools);
+
+  if (Object.keys(tools).length > 0) {
+    const result = await generateText({
+      model,
+      system: input.system,
+      prompt,
+      tools,
+      toolChoice: 'required',
+      stopWhen: stepCountIs(1),
+      temperature: input.temperature,
+    });
+
+    const event = result.toolResults[0]?.output;
+    if (event && typeof event === 'object' && 'type' in event) {
+      return { kind: 'event' as const, event };
+    }
+
+    return { kind: 'output' as const, output: result.text };
+  }
+
+  if (input.outputSchema) {
+    const { object } = await generateObject({
+      model,
+      system: input.system,
+      prompt,
+      schema: input.outputSchema as z.ZodType,
+      temperature: input.temperature,
+    });
+    return { kind: 'output' as const, output: object };
+  }
+
+  const { text } = await generateText({
+    model,
+    system: input.system,
+    prompt,
+    temperature: input.temperature,
+  });
+  return { kind: 'output' as const, output: text };
+}
+
+export async function runAiSdkGameTurn(input = { playerHp: 20, enemyHp: 15 }) {
+  let [snapshot, actions] = initialTransition(gameMachine, input);
+
+  while (snapshot.status !== 'done') {
+    const [effect] = getAgentEffects(actions, {
+      snapshot,
+      schemas: gameSchemas,
+      actors: { chooseMove, summarizeTurn },
+    });
+
+    if (!effect) {
+      throw new Error('Machine is waiting without an agent effect.');
+    }
+
+    const result = await runGenerateEffect(effect);
+
+    if (result.kind === 'event') {
+      [snapshot, actions] = transition(
+        gameMachine,
+        snapshot,
+        result.event as never
+      );
+    } else {
+      [snapshot, actions] = transitionResult(
+        gameMachine,
+        snapshot,
+        effect,
+        result.output
+      );
+    }
+  }
+
+  return snapshot.output;
+}
+
+async function main() {
+  const output = await runAiSdkGameTurn();
+  console.log(output);
+}
+
+if (process.env.OPENAI_API_KEY) {
+  void main();
+}
+
+export { turnSummarySchema };

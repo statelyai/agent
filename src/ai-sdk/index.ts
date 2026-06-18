@@ -1,18 +1,24 @@
-import { generateText, Output } from 'ai';
+import { generateText, Output, tool } from 'ai';
 import { z } from 'zod';
-import type { AgentAdapter, DecideAdapter, StandardSchemaV1 } from '../types.js';
+import type {
+  AgentAdapter,
+  AgentGenerateTextInput,
+  AgentTools,
+  DecideAdapter,
+  StandardSchemaV1,
+} from '../types.js';
 
 type AiSdkGenerateText = typeof generateText;
 type AiSdkModel = Parameters<typeof generateText>[0]['model'];
 
 export interface CreateAiSdkAdapterOptions {
-  resolveModel?: (model: string) => AiSdkModel;
+  resolveModel?: (modelRef: string) => AiSdkModel;
   generateText?: AiSdkGenerateText;
 }
 
 /**
  * Create an adapter that uses the Vercel AI SDK for generative states.
- * By default, model strings are passed straight through to the AI SDK.
+ * By default, model refs are passed straight through to the AI SDK.
  * For provider helpers such as `openai(...)`, pass `resolveModel`.
  */
 export function createAiSdkAdapter(
@@ -21,33 +27,85 @@ export function createAiSdkAdapter(
   const generate = config.generateText ?? generateText;
 
   return {
-    async generateText({ model, system, prompt, messages, tools, toolChoice, outputSchema }) {
-      const options: any = {
-        model: resolveModel(model ?? 'default', config.resolveModel),
-        system,
-        tools: tools as any,
-        toolChoice: toolChoice as any,
-        ...(outputSchema
-          ? {
-            output: Output.object({
-              schema: toZodSchema(outputSchema),
-            }),
-          }
-          : {}),
-      };
-
-      if (messages.length > 0) {
-        options.messages = messages as any;
-      } else {
-        options.prompt = prompt ?? '';
-      }
-
-      const result = await generate(options);
+    async generateText(input) {
+      const result = await generate(toAiSdkGenerateTextOptions(input, {
+        resolveModel: config.resolveModel,
+      }));
 
       const output = result as { output?: unknown; text?: string };
       return output.output ?? output.text ?? result;
     },
   };
+}
+
+export function toAiSdkGenerateTextOptions(
+  { modelRef, system, prompt, messages, tools, toolChoice, outputSchema }: AgentGenerateTextInput,
+  config: Pick<CreateAiSdkAdapterOptions, 'resolveModel'> = {}
+): Parameters<typeof generateText>[0] {
+  const options: any = {
+    model: resolveModel(modelRef ?? 'default', config.resolveModel),
+    system,
+    tools: tools ? toAiSdkTools(tools) : undefined,
+    toolChoice: toAiSdkToolChoice(toolChoice),
+    ...(outputSchema
+      ? {
+        output: Output.object({
+          schema: toZodSchema(outputSchema),
+        }),
+      }
+      : {}),
+  };
+
+  if (messages.length > 0) {
+    options.messages = messages as any;
+  } else {
+    options.prompt = prompt ?? '';
+  }
+
+  return options;
+}
+
+export function toAiSdkTools(tools: AgentTools) {
+  return Object.fromEntries(
+    Object.entries(tools).flatMap(([name, descriptor]) => {
+      if (!descriptor) {
+        return [];
+      }
+
+      if (typeof descriptor === 'function') {
+        return [[
+          name,
+          tool({
+            inputSchema: z.unknown(),
+            execute: descriptor as any,
+          } as any),
+        ]];
+      }
+
+      const inputSchema =
+        descriptor.inputSchema
+        ?? (descriptor.schemas as { input?: StandardSchemaV1 } | undefined)?.input;
+      const toolOptions: Record<string, unknown> = {
+        description: descriptor.description,
+        inputSchema: inputSchema ? toZodSchema(inputSchema) : z.unknown(),
+        execute: descriptor.execute as any,
+      };
+
+      return [[name, tool(toolOptions as any)]];
+    })
+  );
+}
+
+function toAiSdkToolChoice(toolChoice: AgentGenerateTextInput['toolChoice']) {
+  if (!toolChoice) {
+    return undefined;
+  }
+
+  if (typeof toolChoice === 'object') {
+    return { type: 'tool' as const, toolName: toolChoice.name };
+  }
+
+  return toolChoice;
 }
 
 /**
@@ -145,17 +203,17 @@ function toZodSchema(schema: StandardSchemaV1): z.ZodType {
 }
 
 /**
- * Resolve a model string to an AI SDK model.
+ * Resolve a portable model ref to an AI SDK model.
  * Supports custom resolution when users prefer provider helpers such as
  * `openai('gpt-5.4-nano')`.
  */
 function resolveModel(
-  model: string,
-  resolver?: (model: string) => AiSdkModel
+  modelRef: string,
+  resolver?: (modelRef: string) => AiSdkModel
 ): AiSdkModel {
   if (resolver) {
-    return resolver(model);
+    return resolver(modelRef);
   }
 
-  return model as any;
+  return modelRef as any;
 }
