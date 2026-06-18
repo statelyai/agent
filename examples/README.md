@@ -19,9 +19,9 @@ These use `setupAgent(...)` and `withTasks(...)` from `@statelyai/agent`. The ru
 - [`setup-agent/game-agent.ts`](/Users/davidkpiano/Code/agent/examples/setup-agent/game-agent.ts): turn-based game workflow with whitelisted event tools
 - [`setup-agent/smoke.mts`](/Users/davidkpiano/Code/agent/examples/setup-agent/smoke.mts): deterministic local XState runtime smoke test
 - [`setup-agent/hosts/ai-sdk.ts`](/Users/davidkpiano/Code/agent/examples/setup-agent/hosts/ai-sdk.ts): Vercel AI SDK host actors
-- [`setup-agent/hosts/ai-sdk-game.ts`](/Users/davidkpiano/Code/agent/examples/setup-agent/hosts/ai-sdk-game.ts): Vercel AI SDK pure-transition game runner
-- [`setup-agent/hosts/cloudflare-workers-ai.ts`](/Users/davidkpiano/Code/agent/examples/setup-agent/hosts/cloudflare-workers-ai.ts): Cloudflare Workers AI pure-transition runner
-- [`setup-agent/hosts/tanstack-ai.ts`](/Users/davidkpiano/Code/agent/examples/setup-agent/hosts/tanstack-ai.ts): TanStack AI pure-transition runner sketch
+- [`setup-agent/hosts/ai-sdk-game.ts`](/Users/davidkpiano/Code/agent/examples/setup-agent/hosts/ai-sdk-game.ts): Vercel AI SDK step runner
+- [`setup-agent/hosts/cloudflare-workers-ai.ts`](/Users/davidkpiano/Code/agent/examples/setup-agent/hosts/cloudflare-workers-ai.ts): Cloudflare Workers AI step runner
+- [`setup-agent/hosts/tanstack-ai.ts`](/Users/davidkpiano/Code/agent/examples/setup-agent/hosts/tanstack-ai.ts): TanStack AI step runner sketch
 - [`setup-agent/hosts/cloudflare-agent.ts`](/Users/davidkpiano/Code/agent/examples/setup-agent/hosts/cloudflare-agent.ts): Cloudflare Agents host sketch
 
 ## Parity Tracking

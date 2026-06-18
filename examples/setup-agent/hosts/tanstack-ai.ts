@@ -1,22 +1,16 @@
 /**
- * TanStack AI pure-transition host for the game workflow.
+ * TanStack AI step host for the game workflow.
  *
  * Install peer SDKs in an app:
  *   pnpm add @tanstack/ai @tanstack/ai-openai
  *
  * Then run with an OpenAI-compatible TanStack adapter.
  */
-import { initialTransition, transition } from 'xstate';
 import {
-  getAgentEffects,
-  transitionResult,
   type AgentEffect,
 } from '../../../src/index.js';
 import {
-  chooseMove,
   gameMachine,
-  gameSchemas,
-  summarizeTurn,
 } from '../game-agent.js';
 
 type TanStackChat = (options: {
@@ -69,43 +63,26 @@ export async function runTanStackGameTurn(args: {
   adapter: unknown;
   input?: { playerHp: number; enemyHp: number };
 }) {
-  let [snapshot, actions] = initialTransition(
-    gameMachine,
-    args.input ?? { playerHp: 20, enemyHp: 15 }
-  );
+  let step = gameMachine.initial(args.input ?? { playerHp: 20, enemyHp: 15 });
 
-  while (snapshot.status !== 'done') {
-    const [effect] = getAgentEffects(actions, {
-      snapshot,
-      schemas: gameSchemas,
-      actors: { chooseMove, summarizeTurn },
-    });
-
-    if (!effect) {
-      throw new Error('Machine is waiting without an agent effect.');
+  while (!step.done) {
+    const [task] = step.tasks;
+    if (!task) {
+      throw new Error('Machine is waiting without an agent task.');
     }
 
     const result = await runTanStackEffect({
       chat: args.chat,
       adapter: args.adapter,
-      effect,
+      effect: task,
     });
 
     if (result.kind === 'event') {
-      [snapshot, actions] = transition(
-        gameMachine,
-        snapshot,
-        result.event as never
-      );
+      step = gameMachine.transition(step, result.event as never);
     } else {
-      [snapshot, actions] = transitionResult(
-        gameMachine,
-        snapshot,
-        effect,
-        result.output
-      );
+      step = gameMachine.resolve(step, task, result.output);
     }
   }
 
-  return snapshot.output;
+  return step.snapshot.output;
 }

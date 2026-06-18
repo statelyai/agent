@@ -1,21 +1,15 @@
 /**
- * Cloudflare Workers AI pure-transition host for the game workflow.
+ * Cloudflare Workers AI step host for the game workflow.
  *
  * Run with Wrangler in a Worker that has an `AI` binding. Workers AI does not
  * expose the same tool-calling shape as the Vercel AI SDK binding path, so this
  * host serializes allowed event tools into the prompt and accepts JSON output.
  */
-import { initialTransition, transition } from 'xstate';
 import {
-  getAgentEffects,
-  transitionResult,
   type AgentEffect,
 } from '../../../src/index.js';
 import {
-  chooseMove,
   gameMachine,
-  gameSchemas,
-  summarizeTurn,
 } from '../game-agent.js';
 
 interface Env {
@@ -73,38 +67,24 @@ export async function runCloudflareGameTurn(
   env: Env,
   input = { playerHp: 20, enemyHp: 15 }
 ) {
-  let [snapshot, actions] = initialTransition(gameMachine, input);
+  let step = gameMachine.initial(input);
 
-  while (snapshot.status !== 'done') {
-    const [effect] = getAgentEffects(actions, {
-      snapshot,
-      schemas: gameSchemas,
-      actors: { chooseMove, summarizeTurn },
-    });
-
-    if (!effect) {
-      throw new Error('Machine is waiting without an agent effect.');
+  while (!step.done) {
+    const [task] = step.tasks;
+    if (!task) {
+      throw new Error('Machine is waiting without an agent task.');
     }
 
-    const result = await runWorkersAiEffect(env, effect);
+    const result = await runWorkersAiEffect(env, task);
 
     if (result.kind === 'event') {
-      [snapshot, actions] = transition(
-        gameMachine,
-        snapshot,
-        result.event as never
-      );
+      step = gameMachine.transition(step, result.event as never);
     } else {
-      [snapshot, actions] = transitionResult(
-        gameMachine,
-        snapshot,
-        effect,
-        result.output
-      );
+      step = gameMachine.resolve(step, task, result.output);
     }
   }
 
-  return snapshot.output;
+  return step.snapshot.output;
 }
 
 export default {

@@ -1,24 +1,19 @@
 /**
- * Vercel AI SDK pure-transition host for a non-trivial game workflow.
+ * Vercel AI SDK step host for a non-trivial game workflow.
  *
  * Run:
  *   OPENAI_API_KEY=... node --import tsx examples/setup-agent/hosts/ai-sdk-game.ts
  */
 import { generateText, Output, stepCountIs, type LanguageModel } from 'ai';
 import { openai } from '@ai-sdk/openai';
-import { initialTransition, transition } from 'xstate';
+import { z } from 'zod';
 import { toAiSdkTools } from '../../../src/ai-sdk/index.js';
 import {
-  getAgentEffects,
-  transitionResult,
   type AgentEffect,
   type AgentTextInput,
 } from '../../../src/index.js';
 import {
-  chooseMove,
   gameMachine,
-  gameSchemas,
-  summarizeTurn,
   turnSummarySchema,
 } from '../game-agent.js';
 
@@ -74,38 +69,24 @@ async function runGenerateEffect(effect: AgentEffect) {
 }
 
 export async function runAiSdkGameTurn(input = { playerHp: 20, enemyHp: 15 }) {
-  let [snapshot, actions] = initialTransition(gameMachine, input);
+  let step = gameMachine.initial(input);
 
-  while (snapshot.status !== 'done') {
-    const [effect] = getAgentEffects(actions, {
-      snapshot,
-      schemas: gameSchemas,
-      actors: { chooseMove, summarizeTurn },
-    });
-
-    if (!effect) {
-      throw new Error('Machine is waiting without an agent effect.');
+  while (!step.done) {
+    const [task] = step.tasks;
+    if (!task) {
+      throw new Error('Machine is waiting without an agent task.');
     }
 
-    const result = await runGenerateEffect(effect);
+    const result = await runGenerateEffect(task);
 
     if (result.kind === 'event') {
-      [snapshot, actions] = transition(
-        gameMachine,
-        snapshot,
-        result.event as never
-      );
+      step = gameMachine.transition(step, result.event as never);
     } else {
-      [snapshot, actions] = transitionResult(
-        gameMachine,
-        snapshot,
-        effect,
-        result.output
-      );
+      step = gameMachine.resolve(step, task, result.output);
     }
   }
 
-  return snapshot.output;
+  return step.snapshot.output;
 }
 
 async function main() {

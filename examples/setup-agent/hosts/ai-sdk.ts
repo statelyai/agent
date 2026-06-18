@@ -17,17 +17,16 @@ import {
   type ModelMessage,
 } from 'ai';
 import { openai } from '@ai-sdk/openai';
-import { assign, createActor, initialTransition, toPromise } from 'xstate';
+import { assign, createActor, toPromise } from 'xstate';
 import { z } from 'zod';
 import {
   createAgentSchemas,
   setupAgent,
-  transitionResult,
   type AgentTextInput,
   type TextLogic,
 } from '../../../src/index.js';
 
-// ─── The host adapter: named text logic, implemented with the AI SDK ───
+// ─── Host Adapter: AI SDK execution ───
 
 interface AiSdkTextHostOptions {
   resolveModel?: (modelRef: string) => LanguageModel;
@@ -131,7 +130,7 @@ export function createAiSdkStreamingTextActor<TLogic extends TextLogic>(
   );
 }
 
-// ─── Demo 1: generateText with an object output schema ───
+// ─── Authored Agent: ticket triage ───
 
 const triageSchema = z.object({
   sentiment: z.enum(['positive', 'neutral', 'negative']),
@@ -203,33 +202,27 @@ export async function runTriageDemo(ticket: string) {
   return output; // machine output, typed by the output schema
 }
 
-export async function runTriagePureTransitionDemo(ticket: string) {
-  let [snapshot, actions] = initialTransition(triageMachine, { ticket });
+export async function runTriageStepDemo(ticket: string) {
+  let step = triageMachine.initial({ ticket });
 
-  while (snapshot.status !== 'done') {
-    const effects = triageMachine.getTasks(actions, snapshot);
-    if (effects.length === 0) {
-      throw new Error('Machine is waiting without an agent effect.');
+  while (!step.done) {
+    if (step.tasks.length === 0) {
+      throw new Error('Machine is waiting without an agent task.');
     }
 
-    for (const effect of effects) {
-      const output = await triageMachine.execute(effect, {
+    for (const task of step.tasks) {
+      const output = await triageMachine.execute(task, {
         generateText: (request) =>
           generateWithAiSdk(request, request.tools),
       });
-      [snapshot, actions] = transitionResult(
-        triageMachine,
-        snapshot,
-        effect,
-        output
-      );
+      step = triageMachine.resolve(step, task, output);
     }
   }
 
-  return snapshot.output;
+  return step.snapshot.output;
 }
 
-// ─── Demo 2: streamText actually streaming ───
+// ─── Authored Agent: streaming joke ───
 
 const jokeAgent = setupAgent({
   schemas: createAgentSchemas({
