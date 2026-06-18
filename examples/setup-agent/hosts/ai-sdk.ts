@@ -9,8 +9,8 @@
  * Run: OPENAI_API_KEY=... node --import tsx examples/setup-agent/hosts/ai-sdk.ts
  */
 import {
-  generateObject,
   generateText as aiGenerateText,
+  Output,
   streamText as aiStreamText,
   type FlexibleSchema,
   type LanguageModel,
@@ -73,11 +73,13 @@ async function generateWithAiSdk(
   };
 
   if (input.outputSchema) {
-    const { object } = await generateObject({
+    const { output } = await aiGenerateText({
       ...common,
-      schema: input.outputSchema as FlexibleSchema<unknown>,
+      output: Output.object({
+        schema: input.outputSchema as FlexibleSchema<unknown>,
+      }),
     });
-    return object;
+    return output;
   }
 
   const { text } = await aiGenerateText(common);
@@ -212,8 +214,6 @@ export async function runTriagePureTransitionDemo(ticket: string) {
 
     for (const effect of effects) {
       const output = await triageMachine.execute(effect, {
-        generateObject: (request) =>
-          generateWithAiSdk(request, request.tools),
         generateText: (request) =>
           generateWithAiSdk(request, request.tools),
       });

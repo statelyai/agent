@@ -223,18 +223,16 @@ describe('setupAgent', () => {
 
     await expect(
       generateMachine.execute(generateTask!, {
-        generateObject: async (request: AgentTextInput & { tools: AgentTools }) => {
+        generateText: async (request: AgentTextInput & { tools: AgentTools }) => {
           expect(request).toEqual(
             expect.objectContaining({
               model: 'test-model',
               prompt: 'Draft it.',
+              outputSchema: agent.tasks.draftEmail.schemas.output,
               tools: {},
             })
           );
-          return { object: { body: 'Generated body.' } };
-        },
-        generateText: async () => {
-          throw new Error('generateObject should be preferred for schemas');
+          return { output: { body: 'Generated body.' } };
         },
       })
     ).resolves.toEqual({ body: 'Generated body.' });
@@ -259,6 +257,9 @@ describe('setupAgent', () => {
 
     await expect(
       streamMachine.execute(streamTask!, {
+        generateText: async () => {
+          throw new Error('streamText should be used for stream tasks');
+        },
         streamText: async (request: AgentTextInput & { tools: AgentTools }) => {
           expect(request.prompt).toBe('Draft body.');
           return { text: Promise.resolve('Streamed final text.') };

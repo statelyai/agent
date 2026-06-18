@@ -125,14 +125,14 @@ When you want XState to execute invokes directly, provide implementations for th
 ```ts
 const executableDraftText = agent.tasks.draftText.withExecutor(
   async ({ request, signal }) => {
-    const result = await generateObject({
+    const result = await generateText({
       model: resolveModel(request.model),
       system: request.system,
       prompt: request.prompt ?? '',
-      schema: request.outputSchema as never,
+      output: Output.object({ schema: request.outputSchema as never }),
       abortSignal: signal,
     });
-    return result.object;
+    return result.output;
   }
 );
 ```
@@ -140,19 +140,19 @@ const executableDraftText = agent.tasks.draftText.withExecutor(
 For app-level adapters, overriding with `withExecutor(...)` is often cleaner:
 
 ```ts
-import { generateObject, generateText } from 'ai';
+import { generateText, Output } from 'ai';
 
 const actors = {
   draftText: agent.tasks.draftText.withExecutor(async ({ request, signal }) => {
     if (request.outputSchema) {
-      const result = await generateObject({
+      const result = await generateText({
         model: resolveModel(request.model),
         system: request.system,
         prompt: request.prompt ?? '',
-        schema: request.outputSchema as never,
+        output: Output.object({ schema: request.outputSchema as never }),
         abortSignal: signal,
       });
-      return result.object;
+      return result.output;
     }
 
     const result = await generateText({

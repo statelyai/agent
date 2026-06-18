@@ -4,7 +4,7 @@
  * Run:
  *   OPENAI_API_KEY=... node --import tsx examples/setup-agent/hosts/ai-sdk-game.ts
  */
-import { generateObject, generateText, stepCountIs, type LanguageModel } from 'ai';
+import { generateText, Output, stepCountIs, type LanguageModel } from 'ai';
 import { openai } from '@ai-sdk/openai';
 import { initialTransition, transition } from 'xstate';
 import { toAiSdkTools } from '../../../src/ai-sdk/index.js';
@@ -52,14 +52,16 @@ async function runGenerateEffect(effect: AgentEffect) {
   }
 
   if (input.outputSchema) {
-    const { object } = await generateObject({
+    const { output } = await generateText({
       model,
       system: input.system,
       prompt,
-      schema: input.outputSchema as z.ZodType,
+      output: Output.object({
+        schema: input.outputSchema as z.ZodType,
+      }),
       temperature: input.temperature,
     });
-    return { kind: 'output' as const, output: object };
+    return { kind: 'output' as const, output };
   }
 
   const { text } = await generateText({

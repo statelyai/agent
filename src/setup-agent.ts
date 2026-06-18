@@ -528,8 +528,7 @@ export type AgentTaskExecutor = (
 ) => PromiseLike<unknown> | unknown;
 
 export interface AgentTaskExecutors {
-  generateText?: AgentTaskExecutor;
-  generateObject?: AgentTaskExecutor;
+  generateText: AgentTaskExecutor;
   streamText?: AgentTaskExecutor;
 }
 
@@ -567,6 +566,10 @@ async function normalizeTaskExecutionResult(result: unknown): Promise<unknown> {
     return await resolved.object;
   }
 
+  if ('output' in resolved) {
+    return await resolved.output;
+  }
+
   if ('text' in resolved) {
     return await resolved.text;
   }
@@ -596,9 +599,7 @@ function createAgentMachine<TMachine extends AnyActorLogic>(
       const executor =
         task.kind === 'stream'
           ? executors.streamText
-          : task.input.outputSchema && executors.generateObject
-            ? executors.generateObject
-            : executors.generateText;
+          : executors.generateText;
 
       if (!executor) {
         throw new Error(
