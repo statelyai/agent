@@ -47,10 +47,14 @@ async function main() {
 
 function writeWarnings(warnings: AgentGraphWarning[]) {
   for (const warning of warnings) {
+    const location = warning.event
+      ? `${warning.state} on ${warning.event}:`
+      : `${warning.state}:`;
     process.stderr.write(
       [
         '[agent:convert]',
-        `${warning.state} on ${warning.event}:`,
+        warning.code,
+        location,
         warning.message,
       ].join(' ') + '\n'
     );

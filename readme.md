@@ -24,9 +24,8 @@ Import `createAgentSchemas(...)` and `setupAgent(...)` from `@statelyai/agent`:
 import {
   createAgentSchemas,
   setupAgent,
-  transitionResult,
 } from '@statelyai/agent';
-import { assign, initialTransition } from 'xstate';
+import { assign } from 'xstate';
 import { z } from 'zod';
 
 const contextSchema = z.object({
@@ -74,20 +73,20 @@ const machine = agent.createMachine({
   },
 });
 
-let [snapshot, actions] = initialTransition(machine, { prompt: 'Why XState?' });
+let step = machine.initial({ prompt: 'Why XState?' });
 
-while (snapshot.status !== 'done') {
-  for (const task of machine.getTasks(actions, snapshot)) {
+while (!step.done) {
+  for (const task of step.tasks) {
     const result = await machine.execute(task, {
       generateText: (request) => generateText(request), // any SDK/framework
       streamText: (request) => streamText(request),
     });
-    [snapshot, actions] = transitionResult(machine, snapshot, task, result);
+    step = machine.resolve(step, task, result);
   }
 }
 ```
 
-This is normal XState underneath: use pure `initialTransition(...)` / `transitionResult(...)`, or use `createActor(...)`, snapshots, persistence, guards, actions, and host-provided actors. `setupAgent(...)` adds schema-derived concrete types and retained schemas; `withTasks(...)` adds reusable typed task construction, strongly typed source names, typed invoke input, typed `event.output`, `machine.getTasks(...)`, and `machine.execute(...)`.
+This is normal XState underneath: use `machine.initial(...)`, `machine.transition(...)`, and `machine.resolve(...)` for the blessed step loop; drop down to pure `initialTransition(...)` / `transitionResult(...)`; or use `createActor(...)`, snapshots, persistence, guards, actions, and host-provided actors. `setupAgent(...)` adds schema-derived concrete types and retained schemas; `withTasks(...)` adds reusable typed task construction, strongly typed source names, typed invoke input, typed `event.output`, `step.tasks`, `machine.getTasks(...)`, and `machine.execute(...)`.
 
 When a task declares `events`, `machine.getTasks(...)` returns `event.<TYPE>` tools for those events only if they are currently legal from the snapshot. That lets a model choose legal machine events, such as moves in a game, without exposing every transition.
 
@@ -119,6 +118,6 @@ Burr parity is tracked in [`docs/burr-parity.md`](/Users/davidkpiano/Code/agent/
 
 ## Runtime
 
-Runtime is normal XState. Use pure `initialTransition(...)` / `transitionResult(...)` when a framework wants to own execution, or use `createActor(...)`, `toPromise(...)`, snapshots, persisted snapshots, `machine.provide({ actors })`, and your framework transport of choice. Model/tool execution stays under your control.
+Runtime is normal XState. Use the agent step helpers when you want the package to collect tasks for you, pure `initialTransition(...)` / `transitionResult(...)` when a framework wants to own every transition detail, or `createActor(...)`, `toPromise(...)`, snapshots, persisted snapshots, `machine.provide({ actors })`, and your framework transport of choice. Model/tool execution stays under your control.
 
 **Read the documentation: [stately.ai/docs/agents](https://stately.ai/docs/agents)**

@@ -1,6 +1,7 @@
 import {
   fromPromise,
   getNextTransitions,
+  initialTransition,
   setup,
   transition,
   assign,
@@ -25,18 +26,8 @@ import type {
 } from './types.js';
 import { validateSchemaSync } from './utils.js';
 
-// ─── Built-in text actors ───
-//
-// `agent.generate` and `agent.stream` are well-known actor sources
-// registered by `setupAgent`. The machine declares the call; the host
-// provides the execution (via `machine.provide({ actors })` or a runtime
-// adapter). Streaming is a host concern: `agent.stream` resolves with
-// the final text once the stream completes — incremental chunks flow
-// through the host's side channel (HTTP stream, WebSocket, stdout), never
-// through the machine's journal.
-
-/** Portable LCD input both built-in text actors receive. */
-export interface AgentTextInput<TMetadata = unknown> {
+/** Portable LCD input text tasks pass to host executors. */
+export interface AgentTextInput<TMetadata = Record<string, unknown>> {
   model: string;
   system?: string;
   prompt?: string;
@@ -45,7 +36,7 @@ export interface AgentTextInput<TMetadata = unknown> {
   tools?: AgentTools;
   toolChoice?: AgentToolChoice;
   /** Machine event types to expose as model-call tools for this state. */
-  allowedEvents?: readonly string[];
+  eventTypes?: readonly string[];
   outputSchema?: StandardSchemaV1;
   temperature?: number;
   maxTokens?: number;
@@ -59,27 +50,6 @@ export interface AgentTextInput<TMetadata = unknown> {
    * hints. The machine carries it; the host decides what it means.
    */
   metadata?: TMetadata;
-}
-
-const AGENT_GENERATE_SRC = 'agent.generate' as const;
-const AGENT_STREAM_SRC = 'agent.stream' as const;
-
-// `generateText` output is `any` at the actor level on purpose: generated
-// object shapes are runtime data. Keep `onDone` plain XState and validate
-// with the shared `input.outputSchema` where you assign/use the value.
-type BuiltinTextActors = {
-  'agent.generate': PromiseActorLogic<any, AgentTextInput>;
-  'agent.stream': PromiseActorLogic<string, AgentTextInput>;
-};
-
-function missingHostActor(src: string): PromiseActorLogic<any, AgentTextInput> {
-  return fromPromise<any, AgentTextInput>(async () => {
-    throw new Error(
-      `'${src}' has no host execution. Provide an implementation with ` +
-        `machine.provide({ actors: { '${src}': ... } }) or run the machine ` +
-        `through an agent runtime adapter.`
-    );
-  });
 }
 
 // ─── Message helpers ───
@@ -177,7 +147,7 @@ function resolveTextLogicValue<TValue, TInput>(
 export interface TextLogicConfig<
   TInputSchema extends StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1,
-  TMetadata = unknown,
+  TMetadata = Record<string, unknown>,
 > {
   schemas: {
     input: TInputSchema;
@@ -195,7 +165,7 @@ export interface TextLogicConfig<
     AgentToolChoice | undefined,
     InferOutput<TInputSchema>
   >;
-  allowedEvents?: ResolveTextLogicValue<
+  events?: ResolveTextLogicValue<
     readonly string[] | undefined,
     InferOutput<TInputSchema>
   >;
@@ -211,7 +181,7 @@ export interface TextLogicConfig<
   metadata?: ResolveTextLogicValue<TMetadata | undefined, InferOutput<TInputSchema>>;
 }
 
-export interface TextLogicExecuteArgs<TInput, TMetadata = unknown> {
+export interface TextLogicExecuteArgs<TInput, TMetadata = Record<string, unknown>> {
   input: TInput;
   request: AgentTextInput<TMetadata>;
   signal: AbortSignal;
@@ -231,7 +201,7 @@ export type TextLogicExecutor<
 export interface TextLogic<
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1 = StandardSchemaV1,
-  TMetadata = unknown,
+  TMetadata = Record<string, unknown>,
 > extends PromiseActorLogic<
     InferOutput<TOutputSchema>,
     InferOutput<TInputSchema>
@@ -252,7 +222,7 @@ export type AgentTaskKind = 'generate' | 'stream';
 export interface AgentTaskLogic<
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1 = StandardSchemaV1,
-  TMetadata = unknown,
+  TMetadata = Record<string, unknown>,
 > extends TextLogic<TInputSchema, TOutputSchema, TMetadata> {
   readonly taskKind: AgentTaskKind;
 }
@@ -270,7 +240,7 @@ export type TextLogicOutput<TLogic extends TextLogic> =
 export function createTextLogic<
   TInputSchema extends StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1,
-  TMetadata = unknown,
+  TMetadata = Record<string, unknown>,
 >(
   config: TextLogicConfig<TInputSchema, TOutputSchema, TMetadata>,
   execute?: TextLogicExecutor<TInputSchema, TOutputSchema, TMetadata>
@@ -291,7 +261,7 @@ export function createTextLogic<
       messages: resolveTextLogicValue(config.messages, args),
       tools: resolveTextLogicValue(config.tools, args),
       toolChoice: resolveTextLogicValue(config.toolChoice, args),
-      allowedEvents: resolveTextLogicValue(config.allowedEvents, args),
+      eventTypes: resolveTextLogicValue(config.events, args),
       outputSchema: config.schemas.output,
       temperature: resolveTextLogicValue(config.temperature, args),
       maxTokens: resolveTextLogicValue(config.maxTokens, args),
@@ -355,7 +325,7 @@ function isAgentTaskLogic(value: unknown): value is AgentTaskLogic {
   return isTextLogic(value) && typeof (value as AgentTaskLogic).taskKind === 'string';
 }
 
-export type AgentEffectSource = 'agent.generate' | 'agent.stream' | (string & {});
+export type AgentEffectSource = string & {};
 
 export const EVENT_TOOL_PREFIX = 'event.' as const;
 
@@ -388,20 +358,16 @@ export interface AgentEffectOptions {
   actors?: Record<string, unknown>;
 }
 
-function isAgentEffectSource(src: unknown): src is AgentEffectSource {
-  return src === AGENT_GENERATE_SRC || src === AGENT_STREAM_SRC;
-}
-
 export function getAvailableEvents(
   snapshot: AnyMachineSnapshot,
   options: Pick<AgentEffectOptions, 'events' | 'schemas'> & {
-    allowedEvents?: readonly string[];
+    eventTypes?: readonly string[];
   } = {}
 ): AgentEventDescriptor[] {
-  const allowedEvents =
-    options.allowedEvents === undefined
+  const eventTypes =
+    options.eventTypes === undefined
       ? undefined
-      : new Set(options.allowedEvents);
+      : new Set(options.eventTypes);
   const seen = new Set<string>();
 
   return getNextTransitions(snapshot).flatMap((transitionDefinition) => {
@@ -411,7 +377,7 @@ export function getAvailableEvents(
       !eventType
       || eventType === '*'
       || eventType.startsWith('xstate.')
-      || (allowedEvents && !allowedEvents.has(eventType))
+      || (eventTypes && !eventTypes.has(eventType))
       || seen.has(eventType)
     ) {
       return [];
@@ -431,7 +397,7 @@ export function getAvailableEvents(
 export function getEventTools(
   snapshot: AnyMachineSnapshot,
   options: Pick<AgentEffectOptions, 'events' | 'schemas'> & {
-    allowedEvents?: readonly string[];
+    eventTypes?: readonly string[];
   } = {}
 ): AgentTools {
   return Object.fromEntries(
@@ -472,11 +438,9 @@ export function getAgentEffects(
     }
 
     const textLogic = options.actors?.[params.src];
-    const input = isAgentEffectSource(params.src)
-      ? params.input as AgentTextInput
-      : isTextLogic(textLogic)
-        ? textLogic.request(params.input as never)
-        : undefined;
+    const input = isTextLogic(textLogic)
+      ? textLogic.request(params.input as never)
+      : undefined;
 
     if (!input) {
       return [];
@@ -486,7 +450,7 @@ export function getAgentEffects(
       ? getAvailableEvents(options.snapshot, {
         events: options.events,
         schemas: options.schemas,
-        allowedEvents: input.allowedEvents,
+        eventTypes: input.eventTypes,
       })
       : [];
     const eventTools = Object.fromEntries(
@@ -543,9 +507,26 @@ export interface AgentTaskExecutors {
   streamText?: AgentTaskExecutor;
 }
 
+export interface AgentStep<TSnapshot extends AnyMachineSnapshot = AnyMachineSnapshot> {
+  snapshot: TSnapshot;
+  actions: readonly { type?: string; params?: unknown }[];
+  tasks: AgentTask[];
+  done: boolean;
+}
+
 export type AgentMachine<TMachine extends AnyActorLogic = any> =
   TMachine & {
   provide: (...args: any[]) => AgentMachine<TMachine>;
+  initial(input?: unknown): AgentStep<SnapshotFrom<TMachine>>;
+  transition(
+    snapshotOrStep: SnapshotFrom<TMachine> | AgentStep<SnapshotFrom<TMachine>>,
+    event: EventObject
+  ): AgentStep<SnapshotFrom<TMachine>>;
+  resolve(
+    step: AgentStep<SnapshotFrom<TMachine>>,
+    task: Pick<AgentEffect, 'id'> | string,
+    output: unknown
+  ): AgentStep<SnapshotFrom<TMachine>>;
   getTasks(
     actions: readonly { type?: string; params?: unknown }[],
     snapshot?: AnyMachineSnapshot
@@ -592,7 +573,35 @@ function createAgentMachine<TMachine extends AnyActorLogic>(
   machine: TMachine,
   options: Pick<AgentEffectOptions, 'schemas' | 'actors'>
 ): AgentMachine<TMachine> {
-  return Object.assign(machine, {
+  const originalTransition = machine.transition.bind(machine);
+  const agentMachine = Object.assign(machine, {
+    initial(input?: unknown) {
+      const [snapshot, actions] = initialTransition(agentMachine, input as never);
+      return createAgentStep(agentMachine, snapshot, actions);
+    },
+    transition(
+      snapshotOrStep: SnapshotFrom<TMachine> | AgentStep<SnapshotFrom<TMachine>>,
+      event: EventObject,
+      actorScope?: unknown
+    ) {
+      if (actorScope !== undefined) {
+        return originalTransition(snapshotOrStep as never, event as never, actorScope as never);
+      }
+
+      const snapshot = isAgentStep(snapshotOrStep)
+        ? snapshotOrStep.snapshot
+        : snapshotOrStep;
+      const [nextSnapshot, actions] = transition(agentMachine, snapshot, event as never);
+      return createAgentStep(agentMachine, nextSnapshot, actions);
+    },
+    resolve(
+      step: AgentStep<SnapshotFrom<TMachine>>,
+      task: Pick<AgentEffect, 'id'> | string,
+      output: unknown
+    ) {
+      const [snapshot, actions] = transitionResult(agentMachine, step.snapshot, task, output);
+      return createAgentStep(agentMachine, snapshot, actions);
+    },
     getTasks(
       actions: readonly { type?: string; params?: unknown }[],
       snapshot?: AnyMachineSnapshot
@@ -621,6 +630,33 @@ function createAgentMachine<TMachine extends AnyActorLogic>(
       return normalizeTaskExecutionResult(await executor(request));
     },
   }) as AgentMachine<TMachine>;
+
+  return agentMachine;
+}
+
+function createAgentStep<TMachine extends AnyActorLogic>(
+  machine: AgentMachine<TMachine>,
+  snapshot: SnapshotFrom<TMachine>,
+  actions: readonly { type?: string; params?: unknown }[]
+): AgentStep<SnapshotFrom<TMachine>> {
+  return {
+    snapshot,
+    actions,
+    tasks: machine.getTasks(actions, snapshot),
+    done: (snapshot as AnyMachineSnapshot).status === 'done',
+  };
+}
+
+function isAgentStep<TSnapshot extends AnyMachineSnapshot>(
+  value: unknown
+): value is AgentStep<TSnapshot> {
+  return (
+    !!value
+    && typeof value === 'object'
+    && 'snapshot' in value
+    && 'actions' in value
+    && 'tasks' in value
+  );
 }
 
 // ─── setupAgent ───
@@ -642,8 +678,6 @@ type SetupActors<TActors extends { [K in keyof TActors]: AnyActorLogic }> = {
     ? PromiseActorLogic<TOutput, TInput>
     : TActors[K];
 };
-type AgentSetupActors<TActors extends { [K in keyof TActors]: AnyActorLogic }> =
-  SetupActors<TActors> & BuiltinTextActors;
 
 export interface AgentSchemaPack<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>> = StandardSchemaV1<Record<string, unknown>>,
@@ -719,10 +753,10 @@ export type AgentTaskConfig<
   TSchemas extends AgentSchemaPack<any, TEventSchemas, any, any, any>,
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1 = StandardSchemaV1,
-  TMetadata = unknown,
+  TMetadata = Record<string, unknown>,
 > = Omit<
   TextLogicConfig<TInputSchema, TOutputSchema, TMetadata>,
-  'allowedEvents'
+  'events'
 > & {
   kind?: AgentTaskKind;
   events?: AgentTaskEvents<TEventSchemas, TSchemas, TInputSchema>;
@@ -748,7 +782,7 @@ type AgentTaskInput<
     TTaskSchemas[K]['output']
   > & {
     schemas: TTaskSchemas[K];
-    allowedEvents?: never;
+    eventTypes?: never;
   };
 };
 
@@ -773,7 +807,7 @@ type AgentSetupConfigOptions<
   typeof setup<
     ContextOf<TContextSchema>,
     EventsOf<TEventSchemas>,
-    AgentSetupActors<TActors>,
+    SetupActors<TActors>,
     {},
     TActions,
     TGuards,
@@ -864,7 +898,7 @@ type SetupAgentXStateResult<
   typeof setup<
     ContextOf<TContextSchema>,
     EventsOf<TEventSchemas>,
-    AgentSetupActors<TActors>,
+    SetupActors<TActors>,
     {},
     TActions,
     TGuards,
@@ -971,9 +1005,7 @@ type SetupAgentResult<
  * Schema-first `setup(...)` for agent machines. Context, events, machine
  * input, machine output, and state/transition meta are all standard
  * schemas — no `{} as Type` casts — and are retained on `result.schemas`
- * for runtime validation. Registers the well-known `agent.generate`
- * and `agent.stream` actors so machines can invoke them with plain
- * XState config.
+ * for runtime validation.
  */
 export function setupAgent<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
@@ -1021,7 +1053,7 @@ function createTaskActors<
     Object.entries(tasks).map(([key, task]) => {
       const logic = createTextLogic({
         ...task,
-        allowedEvents: task.events
+        events: task.events
           ? ({ input }) =>
               typeof task.events === 'function'
                 ? task.events({ input, schemas })
@@ -1115,7 +1147,7 @@ function createSetupAgent<
   const base = setup<
     ContextOf<TContextSchema>,
     EventsOf<TEventSchemas>,
-    AgentSetupActors<TActors>,
+    SetupActors<TActors>,
     {},
     TActions,
     TGuards,
@@ -1135,8 +1167,6 @@ function createSetupAgent<
     },
     actors: {
       ...config.actors,
-      [AGENT_GENERATE_SRC]: missingHostActor(AGENT_GENERATE_SRC),
-      [AGENT_STREAM_SRC]: missingHostActor(AGENT_STREAM_SRC),
     } as AgentSetupConfigOptions<
       TContextSchema,
       TEventSchemas,

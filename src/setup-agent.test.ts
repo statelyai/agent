@@ -13,8 +13,6 @@ import {
   userMessage,
   type AgentTextInput,
   type AgentTools,
-  type TextLogicInput,
-  type TextLogicOutput,
 } from './index.js';
 
 describe('setupAgent', () => {
@@ -65,7 +63,7 @@ describe('setupAgent', () => {
       expect.objectContaining({
         model: 'test-model',
         prompt: 'Draft it.',
-        allowedEvents: ['READY_TO_DRAFT'],
+        eventTypes: ['READY_TO_DRAFT'],
       })
     );
 
@@ -96,15 +94,15 @@ describe('setupAgent', () => {
     });
 
     setupAgent({ schemas }).withTasks({
-      badAllowedEvents: {
+      badEventTypes: {
         schemas: {
           input: z.object({ prompt: z.string() }),
           output: z.object({ body: z.string() }),
         },
         model: 'test-model',
         prompt: ({ input }) => input.prompt,
-        // @ts-expect-error use task events, not raw text logic allowedEvents
-        allowedEvents: ['READY_TO_DRAFT'],
+        // @ts-expect-error use task events, not raw text logic eventTypes
+        eventTypes: ['READY_TO_DRAFT'],
       },
     });
 
@@ -170,7 +168,7 @@ describe('setupAgent', () => {
     expect(effect).toEqual(
       expect.objectContaining({
         kind: 'generate',
-        input: expect.objectContaining({ allowedEvents: ['READY_TO_DRAFT'] }),
+        input: expect.objectContaining({ eventTypes: ['READY_TO_DRAFT'] }),
       })
     );
 
@@ -387,17 +385,27 @@ describe('setupAgent', () => {
     ]);
   });
 
-  test('authors named text logic with typed input and output', () => {
-    const getSummary = createTextLogic({
-      schemas: {
-        input: z.object({ article: z.string() }),
-        output: z.object({ summary: z.string() }),
+  test('authors named tasks with typed input and output', () => {
+    const agent = setupAgent({
+      context: z.object({
+        article: z.string(),
+        summary: z.string().nullable(),
+      }),
+      input: z.object({ article: z.string() }),
+      output: z.object({ summary: z.string() }),
+    }).withTasks({
+      getSummary: {
+        schemas: {
+          input: z.object({ article: z.string() }),
+          output: z.object({ summary: z.string() }),
+        },
+        model: 'test-model',
+        system: 'Summarize articles.',
+        prompt: ({ input }) => `Summarize:\n${input.article}`,
+        temperature: ({ input }) => input.article.length > 10 ? 0.2 : 0,
       },
-      model: 'test-model',
-      system: 'Summarize articles.',
-      prompt: ({ input }) => `Summarize:\n${input.article}`,
-      temperature: ({ input }) => input.article.length > 10 ? 0.2 : 0,
     });
+    const { getSummary } = agent.tasks;
 
     expect(getSummary.request({ article: 'A long article.' })).toEqual(
       expect.objectContaining({
@@ -408,16 +416,6 @@ describe('setupAgent', () => {
         temperature: 0.2,
       })
     );
-
-    const agent = setupAgent({
-      context: z.object({
-        article: z.string(),
-        summary: z.string().nullable(),
-      }),
-      input: z.object({ article: z.string() }),
-      output: z.object({ summary: z.string() }),
-      actors: { getSummary },
-    });
 
     agent.createMachine({
       initial: 'summarizing',
@@ -479,12 +477,13 @@ describe('setupAgent', () => {
       article: 'State machines make agents inspectable.',
     });
     const [effect] = getAgentEffects(actions, {
-      actors: { getSummary },
+      actors: agent.tasks,
     });
 
     expect(effect).toEqual({
       id: 'getSummary',
       src: 'getSummary',
+      kind: 'generate',
       input: expect.objectContaining({
         model: 'test-model',
         system: 'Summarize articles.',
@@ -624,18 +623,6 @@ describe('setupAgent', () => {
       subject: z.string(),
       body: z.string(),
     });
-    const draftEmail = createTextLogic({
-      schemas: {
-        input: z.object({ prompt: z.string() }),
-        output: draftSchema,
-      },
-      model: 'test-model',
-      prompt: ({ input }) => input.prompt,
-      metadata: ({ input }) => ({
-        temperature: input.prompt.length > 0 ? 0.2 : 0,
-        traceId: `draft:${input.prompt}`,
-      }),
-    });
 
     const agent = setupAgent({
       context: z.object({
@@ -647,8 +634,21 @@ describe('setupAgent', () => {
       events: {
         RETRY: z.object({ prompt: z.string() }),
       },
-      actors: { draftEmail },
+    }).withTasks({
+      draftEmail: {
+        schemas: {
+          input: z.object({ prompt: z.string() }),
+          output: draftSchema,
+        },
+        model: 'test-model',
+        prompt: ({ input }) => input.prompt,
+        metadata: ({ input }) => ({
+          temperature: input.prompt.length > 0 ? 0.2 : 0,
+          traceId: `draft:${input.prompt}`,
+        }),
+      },
     });
+    const { draftEmail } = agent.tasks;
 
     agent.createMachine({
       initial: 'drafting',
@@ -710,24 +710,18 @@ describe('setupAgent', () => {
     const actor = createActor(
       machine.provide({
         actors: {
-          draftEmail: fromPromise<
-            TextLogicOutput<typeof draftEmail>,
-            TextLogicInput<typeof draftEmail>
-          >(
-            async ({ input }) => {
-              const request = draftEmail.request(input);
-              calls.push(
-                request as AgentTextInput<{
-                  temperature: number;
-                  traceId: string;
-                }>
-              );
-              return {
-                subject: `Re: ${request.prompt}`,
-                body: 'Typed raw XState machine body.',
-              };
-            }
-          ),
+          draftEmail: draftEmail.withExecutor(async ({ request }) => {
+            calls.push(
+              request as AgentTextInput<{
+                temperature: number;
+                traceId: string;
+              }>
+            );
+            return {
+              subject: `Re: ${request.prompt}`,
+              body: 'Typed raw XState machine body.',
+            };
+          }),
         },
       }),
       { input: { prompt: 'launch note' } }
@@ -751,17 +745,8 @@ describe('setupAgent', () => {
     ]);
   });
 
-  test('extracts agent effects from pure XState transitions', () => {
+  test('extracts agent effects from pure XState transitions', async () => {
     const answerSchema = z.object({ answer: z.string() });
-    const answerQuestion = createTextLogic({
-      schemas: {
-        input: z.object({ prompt: z.string() }),
-        output: answerSchema,
-      },
-      model: 'test-model',
-      prompt: ({ input }) => input.prompt,
-      temperature: 0.2,
-    });
     const agent = setupAgent({
       context: z.object({
         prompt: z.string(),
@@ -769,8 +754,18 @@ describe('setupAgent', () => {
       }),
       input: z.object({ prompt: z.string() }),
       output: z.object({ answer: z.string() }),
-      actors: { answerQuestion },
+    }).withTasks({
+      answerQuestion: {
+        schemas: {
+          input: z.object({ prompt: z.string() }),
+          output: answerSchema,
+        },
+        model: 'test-model',
+        prompt: ({ input }) => input.prompt,
+        temperature: 0.2,
+      },
     });
+    const { answerQuestion } = agent.tasks;
 
     const machine = agent.createMachine({
       id: 'pure-agent-loop',
@@ -801,12 +796,13 @@ describe('setupAgent', () => {
       prompt: 'why state machines?',
     });
     const [effect] = getAgentEffects(actions, {
-      actors: { answerQuestion },
+      actors: agent.tasks,
     });
 
     expect(effect).toEqual({
       id: 'answer',
       src: 'answerQuestion',
+      kind: 'generate',
       input: expect.objectContaining({
         model: 'test-model',
         prompt: 'why state machines?',
@@ -826,18 +822,35 @@ describe('setupAgent', () => {
     expect(snapshot.output).toEqual({
       answer: 'Because the workflow matters.',
     });
+
+    let step = machine.initial({
+      prompt: 'why agent machines?',
+    });
+    expect(step.done).toBe(false);
+    expect(step.tasks).toHaveLength(1);
+    expect(step.tasks[0]).toEqual(
+      expect.objectContaining({
+        id: 'answer',
+        src: 'answerQuestion',
+      })
+    );
+
+    const output = await machine.execute(step.tasks[0]!, {
+      generateText: (request: AgentTextInput & { tools: AgentTools }) => ({
+        object: {
+          answer: `Answered: ${request.prompt}`,
+        },
+      }),
+    });
+    step = machine.resolve(step, step.tasks[0]!, output);
+
+    expect(step.done).toBe(true);
+    expect(step.snapshot.output).toEqual({
+      answer: 'Answered: why agent machines?',
+    });
   });
 
-  test('agent effects expose only whitelisted allowed state events as tools', async () => {
-    const chooseMove = createTextLogic({
-      schemas: {
-        input: z.object({ prompt: z.string() }),
-        output: z.string(),
-      },
-      model: 'test-model',
-      prompt: ({ input }) => input.prompt,
-      allowedEvents: ['ATTACK', 'DEFEND', 'HEAL'],
-    });
+  test('agent effects expose only selected state events as tools', async () => {
     const agent = setupAgent({
       context: z.object({ prompt: z.string() }),
       input: z.object({ prompt: z.string() }),
@@ -846,7 +859,16 @@ describe('setupAgent', () => {
         DEFEND: z.object({}),
         PAUSE: z.object({}),
       },
-      actors: { chooseMove },
+    }).withTasks({
+      chooseMove: {
+        schemas: {
+          input: z.object({ prompt: z.string() }),
+          output: z.string(),
+        },
+        model: 'test-model',
+        prompt: ({ input }) => input.prompt,
+        events: ['ATTACK', 'DEFEND'],
+      },
     });
 
     const machine = agent.createMachine({
@@ -875,10 +897,17 @@ describe('setupAgent', () => {
     const [snapshot, actions] = initialTransition(machine, {
       prompt: 'Choose the next move.',
     });
+    const initialStep = machine.initial({ prompt: 'Choose the next move.' });
+    const attackStep = machine.transition(initialStep, {
+      type: 'ATTACK',
+      target: 'orc',
+    });
+
+    expect(attackStep.done).toBe(true);
 
     expect(getAvailableEvents(snapshot, {
       schemas: agent.schemas,
-      allowedEvents: ['ATTACK', 'DEFEND', 'HEAL'],
+      eventTypes: ['ATTACK', 'DEFEND', 'HEAL'],
     })).toEqual([
       expect.objectContaining({ type: 'ATTACK', toolName: 'event.ATTACK' }),
       expect.objectContaining({ type: 'DEFEND', toolName: 'event.DEFEND' }),
@@ -887,7 +916,7 @@ describe('setupAgent', () => {
     const [effect] = getAgentEffects(actions, {
       snapshot,
       schemas: agent.schemas,
-      actors: { chooseMove },
+      actors: agent.tasks,
     });
 
     expect(effect!.events.map((event) => event.type)).toEqual([
@@ -910,7 +939,7 @@ describe('setupAgent', () => {
 
     expect(Object.keys(getEventTools(snapshot, {
       schemas: agent.schemas,
-      allowedEvents: ['ATTACK', 'DEFEND', 'HEAL'],
+      eventTypes: ['ATTACK', 'DEFEND', 'HEAL'],
     }))).toEqual(['event.ATTACK', 'event.DEFEND']);
   });
 });

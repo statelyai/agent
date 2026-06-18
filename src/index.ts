@@ -31,6 +31,7 @@ export type {
   AgentTask,
   AgentTextInput,
   AgentSchemaPack,
+  AgentStep,
   AgentTaskConfig,
   AgentTaskExecutor,
   AgentTaskExecutors,

@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import { setup } from 'xstate';
-import { toGraph, toMermaid } from './index.js';
+import { analyzeGraph, toGraph, toMermaid } from './index.js';
 
 test('exports finite states and transition edges from XState setup machines', () => {
   const agent = setup({
@@ -59,4 +59,70 @@ test('exports Mermaid from XState setup machines', () => {
 
   expect(toMermaid(machine)).toContain('stateDiagram-v2');
   expect(toMermaid(machine)).toContain('a --> b');
+});
+
+test('warns about invalid graph structure', () => {
+  const analysis = analyzeGraph({
+    id: 'warning-export',
+    config: {
+      initial: 'idle',
+      states: {
+        idle: {
+          on: {
+            NEXT: { target: 'missing' },
+          },
+        },
+        invoking: {
+          invoke: {
+            src: 'draftEmail',
+            onDone: { target: 'done' },
+          },
+        },
+        orphan: {},
+        done: { type: 'final' },
+      },
+    },
+  });
+
+  expect(analysis.warnings).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        code: 'dangling-target',
+        state: 'idle',
+        event: 'NEXT',
+        target: 'missing',
+      }),
+      expect.objectContaining({
+        code: 'missing-invoke-id',
+        state: 'invoking',
+      }),
+      expect.objectContaining({
+        code: 'unreachable-state',
+        state: 'orphan',
+      }),
+      expect.objectContaining({
+        code: 'dead-end-state',
+        state: 'orphan',
+      }),
+    ])
+  );
+});
+
+test('warns about missing initial state', () => {
+  const analysis = analyzeGraph({
+    id: 'missing-initial-export',
+    config: {
+      initial: 'unknown',
+      states: {
+        idle: {},
+      },
+    },
+  });
+
+  expect(analysis.warnings).toContainEqual(
+    expect.objectContaining({
+      code: 'missing-initial',
+      state: 'unknown',
+    })
+  );
 });

@@ -32,9 +32,8 @@ Use named text logic and plain XState `invoke` objects. For maximum framework po
 import {
   createAgentSchemas,
   setupAgent,
-  transitionResult,
 } from '@statelyai/agent';
-import { assign, initialTransition } from 'xstate';
+import { assign } from 'xstate';
 
 const schemas = createAgentSchemas({
   context: contextSchema,
@@ -76,15 +75,15 @@ const machine = agent.createMachine({
   },
 });
 
-let [snapshot, actions] = initialTransition(machine, input);
+let step = machine.initial(input);
 
-while (snapshot.status !== 'done') {
-  for (const task of machine.getTasks(actions, snapshot)) {
+while (!step.done) {
+  for (const task of step.tasks) {
     const output = await machine.execute(task, {
       generateText: (request) => generateText(request),
       streamText: (request) => streamText(request),
     });
-    [snapshot, actions] = transitionResult(machine, snapshot, task, output);
+    step = machine.resolve(step, task, output);
   }
 }
 ```
@@ -92,6 +91,14 @@ while (snapshot.status !== 'done') {
 Every agent invoke should have a durable `id`; that ID is used to resume the matching `onDone` transition.
 
 `machine.execute(...)` is convenience only. You can still inspect `task.input`, `task.tools`, and `task.events`, then call any SDK yourself.
+
+For external events, advance the same step object:
+
+```ts
+step = machine.transition(step, { type: 'REVISE', prompt: nextPrompt });
+```
+
+Use `initialTransition(...)`, `transition(...)`, and `transitionResult(...)` directly when a host wants to own the full XState action list instead of the `step.tasks` abstraction.
 
 ## Allowed Event Tools
 
@@ -200,9 +207,9 @@ Streaming chunks should stay in the host side channel: HTTP stream, WebSocket, A
 
 The same task logic can be executed with `generateText(...)` or `streamText(...)`; the host decides.
 
-## Low-Level Built-Ins
+## Low-Level Primitive
 
-`agent.generate`, `agent.stream`, and `createTextLogic(...)` still exist as low-level escape hatches. Prefer `setupAgent(...).withTasks(...)` for new authoring because it gives reusable request construction, typed source names, typed invoke input, typed `event.output`, and schema-typed machine event tools.
+`createTextLogic(...)` exists as a low-level primitive. Prefer `setupAgent(...).withTasks(...)` for new authoring because it gives reusable request construction, typed source names, typed invoke input, typed `event.output`, and schema-typed machine event tools.
 
 ## Why This Shape
 

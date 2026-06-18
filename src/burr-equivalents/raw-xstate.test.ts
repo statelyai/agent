@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { z } from 'zod';
 import { assign, createActor, fromPromise, toPromise, waitFor } from 'xstate';
-import { createTextLogic, setupAgent } from '../index.js';
+import { setupAgent } from '../index.js';
 
 describe('Burr-style examples authored as XState setup machines', () => {
   test('hello-world-counter uses explicit state and guarded looping', async () => {
@@ -52,24 +52,6 @@ describe('Burr-style examples authored as XState setup machines', () => {
   });
 
   test('conversational RAG stores memory in machine context before answering', async () => {
-    const answerWithDocuments = createTextLogic({
-      schemas: {
-        input: z.object({
-          question: z.string(),
-          documents: z.array(z.string()),
-          memory: z.array(z.string()),
-        }),
-        output: z.string(),
-      },
-      model: 'rag-answerer',
-      prompt: ({ input }) =>
-        [
-          `Q: ${input.question}`,
-          `Memory: ${input.memory.join(' | ')}`,
-          `Docs: ${input.documents.join(' | ')}`,
-        ].join('\n'),
-    });
-
     const agent = setupAgent({
       context: z.object({
         question: z.string(),
@@ -83,10 +65,27 @@ describe('Burr-style examples authored as XState setup machines', () => {
       }),
       output: z.object({ answer: z.string(), memory: z.array(z.string()) }),
       actors: {
-        answerWithDocuments,
         retrieve: fromPromise<string[], { question: string }>(
           async ({ input }) => [`doc:${input.question}`, 'doc:remembered-state']
         ),
+      },
+    }).withTasks({
+      answerWithDocuments: {
+        schemas: {
+          input: z.object({
+            question: z.string(),
+            documents: z.array(z.string()),
+            memory: z.array(z.string()),
+          }),
+          output: z.string(),
+        },
+        model: 'rag-answerer',
+        prompt: ({ input }) =>
+          [
+            `Q: ${input.question}`,
+            `Memory: ${input.memory.join(' | ')}`,
+            `Docs: ${input.documents.join(' | ')}`,
+          ].join('\n'),
       },
     });
 
@@ -144,8 +143,9 @@ describe('Burr-style examples authored as XState setup machines', () => {
     const actor = createActor(
       machine.provide({
         actors: {
-          answerWithDocuments: answerWithDocuments.withExecutor(async ({ input }) =>
-            `answer:${input.documents.join(',')}:memory=${input.memory.length}`
+          answerWithDocuments: agent.tasks.answerWithDocuments.withExecutor(
+            async ({ input }) =>
+              `answer:${input.documents.join(',')}:memory=${input.memory.length}`
           ),
         },
       }),
@@ -168,23 +168,6 @@ describe('Burr-style examples authored as XState setup machines', () => {
     const modeSchema = z.object({
       mode: z.enum(['answer_question', 'generate_code', 'generate_image', 'unknown']),
     });
-    const chooseMode = createTextLogic({
-      schemas: {
-        input: z.object({ prompt: z.string() }),
-        output: modeSchema,
-      },
-      model: 'mode-router',
-      system: 'Choose the response mode.',
-      prompt: ({ input }) => input.prompt,
-    });
-    const answerPrompt = createTextLogic({
-      schemas: {
-        input: z.object({ prompt: z.string(), mode: modeSchema.shape.mode }),
-        output: z.string(),
-      },
-      model: 'streaming-writer',
-      prompt: ({ input }) => `${input.mode}:${input.prompt}`,
-    });
 
     const agent = setupAgent({
       context: z.object({
@@ -195,7 +178,25 @@ describe('Burr-style examples authored as XState setup machines', () => {
       }),
       input: z.object({ prompt: z.string() }),
       output: z.object({ response: z.string() }),
-      actors: { chooseMode, answerPrompt },
+    }).withTasks({
+      chooseMode: {
+        schemas: {
+          input: z.object({ prompt: z.string() }),
+          output: modeSchema,
+        },
+        model: 'mode-router',
+        system: 'Choose the response mode.',
+        prompt: ({ input }) => input.prompt,
+      },
+      answerPrompt: {
+        kind: 'stream',
+        schemas: {
+          input: z.object({ prompt: z.string(), mode: modeSchema.shape.mode }),
+          output: z.string(),
+        },
+        model: 'streaming-writer',
+        prompt: ({ input }) => `${input.mode}:${input.prompt}`,
+      },
     });
 
     const machine = agent.createMachine({
@@ -265,12 +266,16 @@ describe('Burr-style examples authored as XState setup machines', () => {
     const actor = createActor(
       machine.provide({
         actors: {
-          chooseMode: chooseMode.withExecutor(async () => ({ mode: 'generate_code' })),
-          answerPrompt: answerPrompt.withExecutor(async ({ input }) => {
-            chunks.push('chunk:1');
-            chunks.push('chunk:2');
-            return `response:${input.mode}:${input.prompt}`;
-          }),
+          chooseMode: agent.tasks.chooseMode.withExecutor(
+            async () => ({ mode: 'generate_code' })
+          ),
+          answerPrompt: agent.tasks.answerPrompt.withExecutor(
+            async ({ input }) => {
+              chunks.push('chunk:1');
+              chunks.push('chunk:2');
+              return `response:${input.mode}:${input.prompt}`;
+            }
+          ),
         },
       }),
       { input: { prompt: 'write a TypeScript function' } }
@@ -285,49 +290,27 @@ describe('Burr-style examples authored as XState setup machines', () => {
   });
 
   test('tool-calling separates tool selection, tool execution, and final formatting', async () => {
-    const selectTool = createTextLogic({
-      schemas: {
-        input: z.object({ query: z.string() }),
-        output: z.discriminatedUnion('tool', [
-          z.object({
-            tool: z.literal('queryWeather'),
-            parameters: z.object({ latitude: z.number(), longitude: z.number() }),
-          }),
-          z.object({
-            tool: z.literal('fallback'),
-            parameters: z.object({ response: z.string() }),
-          }),
-        ]),
-      },
-      model: 'tool-router',
-      system: 'Select exactly one tool.',
-      prompt: ({ input }) => input.query,
-    });
-    const formatResult = createTextLogic({
-      schemas: {
-        input: z.object({
-          query: z.string(),
-          rawResponse: z.record(z.string(), z.unknown()),
-        }),
-        output: z.string(),
-      },
-      model: 'formatter',
-      prompt: ({ input }) =>
-        `Question: ${input.query}\nData: ${JSON.stringify(input.rawResponse)}`,
-    });
+    const selectedToolSchema = z.discriminatedUnion('tool', [
+      z.object({
+        tool: z.literal('queryWeather'),
+        parameters: z.object({ latitude: z.number(), longitude: z.number() }),
+      }),
+      z.object({
+        tool: z.literal('fallback'),
+        parameters: z.object({ response: z.string() }),
+      }),
+    ]);
 
     const agent = setupAgent({
       context: z.object({
         query: z.string(),
-        selected: selectTool.schemas.output.nullable(),
+        selected: selectedToolSchema.nullable(),
         rawResponse: z.record(z.string(), z.unknown()).nullable(),
         finalOutput: z.string().nullable(),
       }),
       input: z.object({ query: z.string() }),
       output: z.object({ finalOutput: z.string() }),
       actors: {
-        selectTool,
-        formatResult,
         queryWeather: fromPromise<
           Record<string, unknown>,
           { latitude: number; longitude: number }
@@ -338,6 +321,28 @@ describe('Burr-style examples authored as XState setup machines', () => {
         fallback: fromPromise<Record<string, unknown>, { response: string }>(
           async ({ input }) => ({ response: input.response })
         ),
+      },
+    }).withTasks({
+      selectTool: {
+        schemas: {
+          input: z.object({ query: z.string() }),
+          output: selectedToolSchema,
+        },
+        model: 'tool-router',
+        system: 'Select exactly one tool.',
+        prompt: ({ input }) => input.query,
+      },
+      formatResult: {
+        schemas: {
+          input: z.object({
+            query: z.string(),
+            rawResponse: z.record(z.string(), z.unknown()),
+          }),
+          output: z.string(),
+        },
+        model: 'formatter',
+        prompt: ({ input }) =>
+          `Question: ${input.query}\nData: ${JSON.stringify(input.rawResponse)}`,
       },
     });
 
@@ -419,11 +424,15 @@ describe('Burr-style examples authored as XState setup machines', () => {
     const actor = createActor(
       machine.provide({
         actors: {
-          selectTool: selectTool.withExecutor(async () => ({
-            tool: 'queryWeather',
-            parameters: { latitude: 37.77, longitude: -122.42 },
-          })),
-          formatResult: formatResult.withExecutor(async ({ input }) => `formatted:${input.rawResponse.forecast}`),
+          selectTool: agent.tasks.selectTool.withExecutor(
+            async () => ({
+              tool: 'queryWeather',
+              parameters: { latitude: 37.77, longitude: -122.42 },
+            })
+          ),
+          formatResult: agent.tasks.formatResult.withExecutor(
+            async ({ input }) => `formatted:${input.rawResponse.forecast}`
+          ),
         },
       }),
       { input: { query: 'weather in San Francisco' } }
@@ -447,15 +456,6 @@ describe('Burr-style examples authored as XState setup machines', () => {
       concepts: z.array(conceptSchema),
       keyTakeaways: z.array(z.string()),
     });
-    const generatePost = createTextLogic({
-      schemas: {
-        input: z.object({ transcript: z.string() }),
-        output: postSchema,
-      },
-      model: 'post-writer',
-      system: 'Generate a social media post from the transcript.',
-      prompt: ({ input }) => input.transcript,
-    });
 
     const agent = setupAgent({
       context: z.object({
@@ -466,10 +466,19 @@ describe('Burr-style examples authored as XState setup machines', () => {
       input: z.object({ youtubeUrl: z.string() }),
       output: z.object({ post: postSchema }),
       actors: {
-        generatePost,
         getTranscript: fromPromise<string, { youtubeUrl: string }>(
           async ({ input }) => `transcript:${input.youtubeUrl}`
         ),
+      },
+    }).withTasks({
+      generatePost: {
+        schemas: {
+          input: z.object({ transcript: z.string() }),
+          output: postSchema,
+        },
+        model: 'post-writer',
+        system: 'Generate a social media post from the transcript.',
+        prompt: ({ input }) => input.transcript,
       },
     });
 
@@ -520,7 +529,7 @@ describe('Burr-style examples authored as XState setup machines', () => {
     const actor = createActor(
       machine.provide({
         actors: {
-          generatePost: generatePost.withExecutor(async ({ input }) => ({
+          generatePost: agent.tasks.generatePost.withExecutor(async ({ input }) => ({
             topic: 'Burr',
             hook: 'Stateful AI apps need structure.',
             body: input.transcript,
@@ -545,13 +554,8 @@ describe('Burr-style examples authored as XState setup machines', () => {
   });
 
   test('multi-agent collaboration is supervisor routing over typed workers', async () => {
-    const routeWork = createTextLogic({
-      schemas: {
-        input: z.object({ task: z.string() }),
-        output: z.object({ route: z.enum(['researcher', 'chartGenerator']) }),
-      },
-      model: 'supervisor',
-      prompt: ({ input }) => input.task,
+    const routeSchema = z.object({
+      route: z.enum(['researcher', 'chartGenerator']),
     });
 
     const agent = setupAgent({
@@ -563,13 +567,21 @@ describe('Burr-style examples authored as XState setup machines', () => {
       input: z.object({ task: z.string() }),
       output: z.object({ result: z.string() }),
       actors: {
-        routeWork,
         researcher: fromPromise<string, { task: string }>(
           async ({ input }) => `research:${input.task}`
         ),
         chartGenerator: fromPromise<string, { task: string }>(
           async ({ input }) => `chart:${input.task}`
         ),
+      },
+    }).withTasks({
+      routeWork: {
+        schemas: {
+          input: z.object({ task: z.string() }),
+          output: routeSchema,
+        },
+        model: 'supervisor',
+        prompt: ({ input }) => input.task,
       },
     });
 
@@ -631,7 +643,9 @@ describe('Burr-style examples authored as XState setup machines', () => {
     const actor = createActor(
       machine.provide({
         actors: {
-          routeWork: routeWork.withExecutor(async () => ({ route: 'chartGenerator' })),
+          routeWork: agent.tasks.routeWork.withExecutor(
+            async () => ({ route: 'chartGenerator' })
+          ),
         },
       }),
       { input: { task: 'plot revenue' } }
