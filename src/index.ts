@@ -13,8 +13,6 @@ export {
   transitionResult,
   validateSchemaSync,
 } from './setup-agent.js';
-export { decide, decideResultSchema, requireAdapter } from './decide.js';
-export { classify, classifyResultSchema } from './classify.js';
 export { createAdapter } from './adapter.js';
 export {
   assistantMessage,
@@ -54,11 +52,6 @@ export type {
   AgentToolDescriptor,
   AgentToolExecute,
   AgentTools,
-  ClassifyOptions,
-  ClassifyResultFor,
-  DecideAdapter,
-  DecideOptions,
-  DecideResultFor,
   EventPayload,
   EventUnion,
   InferOutput,

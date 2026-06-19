@@ -110,8 +110,6 @@ Start here:
 - LangGraph parity: [`src/langgraph-equivalents/raw-xstate.test.ts`](/Users/davidkpiano/Code/agent/src/langgraph-equivalents/raw-xstate.test.ts), [`docs/langgraph-parity.md`](/Users/davidkpiano/Code/agent/docs/langgraph-parity.md), [`docs/langgraph-gaps.md`](/Users/davidkpiano/Code/agent/docs/langgraph-gaps.md)
 - Burr parity: [`src/burr-equivalents/raw-xstate.test.ts`](/Users/davidkpiano/Code/agent/src/burr-equivalents/raw-xstate.test.ts), [`docs/burr-parity.md`](/Users/davidkpiano/Code/agent/docs/burr-parity.md)
 
-Use `classify(...)` when the result is just "what kind of thing is this?" Use `decide(...)` when the result is "what should happen next?" and the chosen branch may need structured data.
-
 CrewAI Flow parity is tracked in [`docs/crewai-parity.md`](/Users/davidkpiano/Code/agent/docs/crewai-parity.md), the same way LangGraph parity is tracked separately.
 
 Burr parity is tracked in [`docs/burr-parity.md`](/Users/davidkpiano/Code/agent/docs/burr-parity.md), focused on action-like authoring patterns without adopting Burr's runtime.

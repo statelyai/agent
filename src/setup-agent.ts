@@ -574,7 +574,17 @@ function createAgentMachine<TMachine extends AnyActorLogic>(
   options: Pick<AgentEffectOptions, 'schemas' | 'actors'>
 ): AgentMachine<TMachine> {
   const originalTransition = machine.transition.bind(machine);
+  const originalProvide = 'provide' in machine
+    ? (machine.provide as (...args: any[]) => TMachine).bind(machine)
+    : undefined;
   const agentMachine = Object.assign(machine, {
+    provide(...args: any[]) {
+      if (!originalProvide) {
+        throw new Error('This actor logic does not support provide(...).');
+      }
+
+      return createAgentMachine(originalProvide(...args), options);
+    },
     initial(input?: unknown) {
       const [snapshot, actions] = initialTransition(agentMachine, input as never);
       return createAgentStep(agentMachine, snapshot, actions);
@@ -627,7 +637,11 @@ function createAgentMachine<TMachine extends AnyActorLogic>(
         );
       }
 
-      return normalizeTaskExecutionResult(await executor(request));
+      const output = await normalizeTaskExecutionResult(await executor(request));
+
+      return task.input.outputSchema
+        ? validateSchemaSync(task.input.outputSchema, output)
+        : output;
     },
   }) as AgentMachine<TMachine>;
 

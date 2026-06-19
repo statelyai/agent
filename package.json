@@ -66,9 +66,7 @@
     "ai",
     "state machine",
     "agent",
-    "statechart",
-    "classify",
-    "decide"
+    "statechart"
   ],
   "author": "David Khourshid <david@stately.ai>",
   "license": "MIT",
@@ -86,14 +84,6 @@
     "tsx": "^4.21.0",
     "vitest": "^2.1.2",
     "zod": "^4.3.6"
-  },
-  "peerDependencies": {
-    "zod": "^4.0.0"
-  },
-  "peerDependenciesMeta": {
-    "zod": {
-      "optional": true
-    }
   },
   "publishConfig": {
     "access": "public"

@@ -268,6 +268,79 @@ describe('setupAgent', () => {
     ).resolves.toBe('Streamed final text.');
   });
 
+  test('provided agent machines preserve step helpers', () => {
+    const agent = setupAgent({
+      context: z.object({ prompt: z.string() }),
+      input: z.object({ prompt: z.string() }),
+    }).withTasks({
+      answer: {
+        schemas: {
+          input: z.object({ prompt: z.string() }),
+          output: z.object({ answer: z.string() }),
+        },
+        model: 'test-model',
+        prompt: ({ input }) => input.prompt,
+      },
+    });
+
+    const machine = agent.createMachine({
+      context: ({ input }) => ({ prompt: input.prompt }),
+      initial: 'answering',
+      states: {
+        answering: {
+          invoke: {
+            id: 'answer',
+            src: 'answer',
+            input: ({ context }) => ({ prompt: context.prompt }),
+          },
+        },
+      },
+    });
+    const provided = machine.provide({ actors: {} });
+    const step = provided.initial({ prompt: 'hello' });
+
+    expect(provided.getTasks(step.actions, step.snapshot)).toHaveLength(1);
+    expect(typeof provided.execute).toBe('function');
+    expect(typeof provided.resolve).toBe('function');
+  });
+
+  test('agent machine step execution validates task output schemas', async () => {
+    const agent = setupAgent({
+      context: z.object({ prompt: z.string() }),
+      input: z.object({ prompt: z.string() }),
+    }).withTasks({
+      answer: {
+        schemas: {
+          input: z.object({ prompt: z.string() }),
+          output: z.object({ answer: z.string() }),
+        },
+        model: 'test-model',
+        prompt: ({ input }) => input.prompt,
+      },
+    });
+
+    const machine = agent.createMachine({
+      context: ({ input }) => ({ prompt: input.prompt }),
+      initial: 'answering',
+      states: {
+        answering: {
+          invoke: {
+            id: 'answer',
+            src: 'answer',
+            input: ({ context }) => ({ prompt: context.prompt }),
+          },
+        },
+      },
+    });
+    const step = machine.initial({ prompt: 'hello' });
+
+    await expect(
+      machine.execute(step.tasks[0]!, {
+        generateText: () => ({ answer: 123 }),
+      })
+    ).rejects.toThrow('expected string');
+  });
+
   test('setupAgent preserves typed action guard and delay names', () => {
     const schemas = createAgentSchemas({
       context: z.object({ prompt: z.string(), ready: z.boolean() }),
