@@ -20,8 +20,10 @@ import { openai } from '@ai-sdk/openai';
 import { createActor, toPromise } from 'xstate';
 import {
   type AgentTextInput,
-  type TextLogic,
+  type AgentTools,
+  type TextLogicExecutor,
 } from '../../../src/index.js';
+import { toAiSdkTools } from '../../../src/ai-sdk/index.js';
 import { jokeMachine, tellJoke } from '../joke.js';
 import { triageMachine, triageTicket } from '../triage.js';
 
@@ -66,8 +68,10 @@ async function generateWithAiSdk(
     topP: input.topP,
     seed: input.seed,
     stopSequences: input.stopSequences,
-    tools,
-    toolChoice: input.toolChoice,
+    tools: tools ? toAiSdkTools(tools) : undefined,
+    toolChoice: typeof input.toolChoice === 'object'
+      ? { type: 'tool' as const, toolName: input.toolChoice.name }
+      : input.toolChoice,
   };
 
   if (input.outputSchema) {
@@ -111,7 +115,11 @@ async function streamWithAiSdk(
   return await result.text;
 }
 
-export function createAiSdkTextActor<TLogic extends TextLogic>(
+type ExecutableTextLogic = {
+  withExecutor(execute: TextLogicExecutor<any, any, any>): unknown;
+};
+
+export function createAiSdkTextActor<TLogic extends ExecutableTextLogic>(
   logic: TLogic,
   options: AiSdkTextHostOptions = {}
 ) {
@@ -120,7 +128,7 @@ export function createAiSdkTextActor<TLogic extends TextLogic>(
   );
 }
 
-export function createAiSdkStreamingTextActor<TLogic extends TextLogic>(
+export function createAiSdkStreamingTextActor<TLogic extends ExecutableTextLogic>(
   logic: TLogic,
   options: AiSdkTextHostOptions = {}
 ) {
@@ -153,7 +161,7 @@ export async function runTriageStepDemo(ticket: string) {
 
     for (const task of step.tasks) {
       const output = await triageMachine.execute(task, {
-        generateText: (request) =>
+        generateText: (request: AgentTextInput & { tools: AgentTools }) =>
           generateWithAiSdk(request, request.tools),
       });
       step = triageMachine.resolve(step, task, output);

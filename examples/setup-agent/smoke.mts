@@ -27,11 +27,11 @@ const machine = emailDrafter.provide({
 const actor = createActor(machine);
 actor.start();
 
-actor.send({ type: 'PROMPT_SUBMITTED', prompt: 'email sam' });
+actor.send({ type: 'PROMPT_SUBMITTED', prompt: 'email sam' } as any);
 await waitFor(actor, (s) => s.matches('needsMoreInfo'));
 console.log('1. needsMoreInfo meta:', JSON.stringify(actor.getSnapshot().getMeta(), null, 0).slice(0, 80), '…');
 
-actor.send({ type: 'MORE_INFO', details: 'sam@example.com, say hello' });
+actor.send({ type: 'MORE_INFO', details: 'sam@example.com, say hello' } as any);
 await waitFor(actor, (s) => s.matches('reviewing'));
 console.log('2. reviewing, draft:', actor.getSnapshot().context.draft);
 console.log('3. messages:', actor.getSnapshot().context.messages.map((m: any) => m.role));

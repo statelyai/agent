@@ -13,7 +13,6 @@ export {
   transitionResult,
   validateSchemaSync,
 } from './setup-agent.js';
-export { createAdapter } from './adapter.js';
 export {
   assistantMessage,
   systemMessage,
@@ -44,8 +43,6 @@ export type {
 } from './setup-agent.js';
 
 export type {
-  AgentAdapter,
-  AgentGenerateTextInput,
   AgentMessage,
   AgentTool,
   AgentToolChoice,

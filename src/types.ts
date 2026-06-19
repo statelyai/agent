@@ -40,17 +40,3 @@ export type AgentToolChoice =
   | 'none'
   | 'required'
   | { type: 'tool'; name: string };
-
-export interface AgentGenerateTextInput {
-  modelRef?: string;
-  system?: string;
-  prompt?: string;
-  messages: AgentMessage[];
-  tools?: AgentTools;
-  toolChoice?: AgentToolChoice;
-  outputSchema?: StandardSchemaV1;
-}
-
-export interface AgentAdapter {
-  generateText?: (options: AgentGenerateTextInput) => Promise<unknown>;
-}

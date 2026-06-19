@@ -643,7 +643,7 @@ function createAgentMachine<TMachine extends AnyActorLogic>(
         ? validateSchemaSync(task.input.outputSchema, output)
         : output;
     },
-  }) as AgentMachine<TMachine>;
+  }) as unknown as AgentMachine<TMachine>;
 
   return agentMachine;
 }
@@ -966,7 +966,7 @@ type SetupAgentResult<
     >[0],
   >(
     config: TConfig
-  ) => any;
+  ) => AgentMachine<any>;
   schemas: AgentSchemaPack<
     TContextSchema,
     TEventSchemas,
