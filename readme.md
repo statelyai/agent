@@ -2,9 +2,10 @@
 
 Stately Agent is the state machine authoring layer for AI agents. Author your AI agents as state machines. Run them anywhere.
 
-The package owns one first-class authoring primitive:
+The package owns these first-class authoring surfaces:
 
-- `setupAgent(...).withTasks(...)`: schema-first, SDK-agnostic agent task authoring.
+- `createTextLogic(...)`: reusable, schema-typed model-call actors.
+- `agent.generateText` / `agent.streamText`: built-in model-call actor sources auto-provided by `setupAgent(...)`.
 - `setupAgent.fromConfig(...)`: static workflow config lowered to the same agent machine shape.
 
 Use `setupAgent(...)` for schema-first control flow. Use normal host code for runtime execution. Stately Agent adds the batteries: reusable text logic, message helpers, examples, retained schemas, and visualization/export affordances.
@@ -13,7 +14,7 @@ You can still call the Vercel AI SDK, LangChain, Workers AI, or any other model/
 
 Choose this over LangGraph when you want agent workflows to be explicit state machines instead of framework-owned graphs: same workflow shapes, strong TypeScript for machine context/events/actors, first-class XState snapshots/guards, visualization by default, and no required runtime backend. Choose it over handrolled workflows when the control flow is important enough to inspect, persist, replay, test, and diagram.
 
-For SDK integration, define named tasks with `setupAgent({ schemas }).withTasks(...)`. The machine declares `invoke: { src: 'getSummary', input, onDone }`; your host reads that task and calls Vercel AI SDK, Cloudflare Workers AI, LangChain, local models, or custom code. Source ids, invoke input, `event.output`, and machine schemas are typed from the registered tasks and schemas. See [`docs/host-actors.md`](/Users/davidkpiano/Code/agent/docs/host-actors.md).
+For SDK integration, invoke the built-in `agent.generateText` / `agent.streamText` actors directly or register reusable `createTextLogic(...)` actors. Your host reads returned tasks and calls Vercel AI SDK, Cloudflare Workers AI, LangChain, local models, or custom code. Reusable text actors can also be tested standalone with `logic.request(input)` and `logic.execute(input, executors)`. See [`docs/host-actors.md`](/Users/davidkpiano/Code/agent/docs/host-actors.md).
 
 ## Agent Machines
 
@@ -24,6 +25,7 @@ Import `createAgentSchemas(...)` and `setupAgent(...)` from `@statelyai/agent`:
 ```ts
 import {
   createAgentSchemas,
+  parseOutput,
   setupAgent,
 } from '@statelyai/agent';
 import { assign } from 'xstate';
@@ -41,17 +43,7 @@ const schemas = createAgentSchemas({
   input: inputSchema,
   output: answerSchema,
 });
-
-const agent = setupAgent({ schemas }).withTasks({
-  getAnswer: {
-    schemas: {
-      input: z.object({ prompt: z.string() }),
-      output: answerSchema,
-    },
-    model: 'writer',
-    prompt: ({ input }) => input.prompt,
-  },
-});
+const agent = setupAgent({ schemas });
 
 const machine = agent.createMachine({
   context: ({ input }) => ({ prompt: input.prompt, answer: null }),
@@ -60,12 +52,16 @@ const machine = agent.createMachine({
     answering: {
       invoke: {
         id: 'answer',
-        src: 'getAnswer',
-        input: ({ context }) => ({ prompt: context.prompt }),
+        src: 'agent.generateText',
+        input: ({ context }) => ({
+          model: 'writer',
+          prompt: context.prompt,
+          outputSchema: answerSchema,
+        }),
         onDone: {
           target: 'done',
           actions: assign({
-            answer: ({ event }) => event.output.answer,
+            answer: ({ event }) => parseOutput(answerSchema, event.output).answer,
           }),
         },
       },
@@ -87,7 +83,7 @@ while (!step.done) {
 }
 ```
 
-This is normal XState underneath: use `machine.initial(...)`, `machine.transition(...)`, and `machine.resolve(...)` for the blessed step loop; drop down to pure `initialTransition(...)` / `transitionResult(...)`; or use `createActor(...)`, snapshots, persistence, guards, actions, and host-provided actors. `setupAgent(...)` adds schema-derived concrete types and retained schemas; `withTasks(...)` adds reusable typed task construction, strongly typed source names, typed invoke input, typed `event.output`, `step.tasks`, `machine.getTasks(...)`, and `machine.execute(...)`.
+This is normal XState underneath: use `machine.initial(...)`, `machine.transition(...)`, and `machine.resolve(...)` for the blessed step loop; drop down to pure `initialTransition(...)` / `transitionResult(...)`; or use `createActor(...)`, snapshots, persistence, guards, actions, and host-provided actors. `setupAgent(...)` adds schema-derived concrete types, retained schemas, built-in text actor sources, reusable text actors, `step.tasks`, `machine.getTasks(...)`, and `machine.execute(...)`.
 
 When a task declares `events`, `machine.getTasks(...)` returns `event.<TYPE>` tools for those events only if they are currently legal from the snapshot. That lets a model choose legal machine events, such as moves in a game, without exposing every transition.
 
@@ -101,7 +97,7 @@ The package also publishes a JSON Schema for static, declarative agent workflow 
 import workflowSchema from '@statelyai/agent/agent-workflow.json';
 ```
 
-Use `setupAgent.fromConfig(...)` to lower static definitions to the same agent machine shape as TS-first `setupAgent(...).withTasks(...)` authoring. Static definitions separate model tasks from XState-like control flow:
+Use `setupAgent.fromConfig(...)` to lower static definitions to the same agent machine shape as TS-first `setupAgent(...)` authoring. Static definitions separate model tasks from XState-like control flow:
 
 ```yaml
 tasks:

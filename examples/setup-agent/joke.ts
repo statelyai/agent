@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { assign } from 'xstate';
-import { createAgentSchemas, setupAgent } from '../../src/index.js';
+import { createAgentSchemas, createTextLogic, setupAgent } from '../../src/index.js';
 
 const jokeSchema = z.object({
   joke: z.string(),
@@ -15,20 +15,23 @@ const schemas = createAgentSchemas({
   output: jokeSchema,
 });
 
-const jokeAgent = setupAgent({ schemas }).withTasks({
-  tellJoke: {
-    kind: 'stream',
-    schemas: {
-      input: z.object({ topic: z.string() }),
-      output: z.string(),
-    },
-    model: 'openai/gpt-5.4-nano',
-    system: 'You tell short, punchy jokes.',
-    prompt: ({ input }) => `Tell a joke about ${input.topic}.`,
+export const tellJoke = createTextLogic({
+  kind: 'stream',
+  schemas: {
+    input: z.object({ topic: z.string() }),
+    output: z.string(),
   },
+  model: 'openai/gpt-5.4-nano',
+  system: 'You tell short, punchy jokes.',
+  prompt: ({ input }) => `Tell a joke about ${input.topic}.`,
 });
 
-export const { tellJoke } = jokeAgent.tasks;
+const jokeAgent = setupAgent({
+  schemas,
+  actors: {
+    tellJoke,
+  },
+});
 
 export const jokeSchemas = jokeAgent.schemas;
 

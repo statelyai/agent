@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { assign } from 'xstate';
-import { createAgentSchemas, setupAgent } from '../../src/index.js';
+import { createAgentSchemas, createTextLogic, setupAgent } from '../../src/index.js';
 
 export const triageSchema = z.object({
   sentiment: z.enum(['positive', 'neutral', 'negative']),
@@ -17,20 +17,23 @@ const schemas = createAgentSchemas({
   output: triageSchema,
 });
 
-const triageAgent = setupAgent({ schemas }).withTasks({
-  triageTicket: {
-    schemas: {
-      input: z.object({ ticket: z.string() }),
-      output: triageSchema,
-    },
-    model: 'openai/gpt-5.4-nano',
-    system:
-      'Triage the support ticket: sentiment, category, and a short suggested reply.',
-    prompt: ({ input }) => input.ticket,
+export const triageTicket = createTextLogic({
+  schemas: {
+    input: z.object({ ticket: z.string() }),
+    output: triageSchema,
   },
+  model: 'openai/gpt-5.4-nano',
+  system:
+    'Triage the support ticket: sentiment, category, and a short suggested reply.',
+  prompt: ({ input }) => input.ticket,
 });
 
-export const { triageTicket } = triageAgent.tasks;
+const triageAgent = setupAgent({
+  schemas,
+  actors: {
+    triageTicket,
+  },
+});
 
 export const triageSchemas = triageAgent.schemas;
 

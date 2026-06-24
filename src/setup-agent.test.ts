@@ -8,9 +8,9 @@ import {
   getAgentEffects,
   getEventTools,
   messagesSchema,
+  parseOutput,
   setupAgent,
   transitionResult,
-  USER_INPUT_ACTOR,
   userMessage,
   type AgentTextInput,
   type AgentTools,
@@ -269,6 +269,125 @@ describe('setupAgent', () => {
     ).resolves.toBe('Streamed final text.');
   });
 
+  test('setupAgent auto-provides built-in generateText and streamText sources', async () => {
+    const answerSchema = z.object({ answer: z.string() });
+    const schemas = createAgentSchemas({
+      context: z.object({
+        prompt: z.string(),
+        answer: z.string().nullable(),
+        streamed: z.string().nullable(),
+      }),
+      input: z.object({ prompt: z.string() }),
+      output: z.object({
+        answer: z.string(),
+        streamed: z.string(),
+      }),
+    });
+    const agent = setupAgent({ schemas });
+    const machine = agent.createMachine({
+      context: ({ input }) => ({
+        prompt: input.prompt,
+        answer: null,
+        streamed: null,
+      }),
+      initial: 'answering',
+      states: {
+        answering: {
+          invoke: {
+            id: 'answer',
+            src: 'agent.generateText',
+            input: ({ context }) => ({
+              model: 'test-model',
+              prompt: context.prompt,
+              outputSchema: answerSchema,
+              temperature: 0.2,
+            }),
+            onDone: {
+              target: 'streaming',
+              actions: assign({
+                answer: ({ event }) => parseOutput(answerSchema, event.output).answer,
+              }),
+            },
+          },
+        },
+        streaming: {
+          invoke: {
+            id: 'stream',
+            src: 'agent.streamText',
+            input: ({ context }) => ({
+              model: 'test-model',
+              prompt: `Expand ${context.answer}`,
+            }),
+            onDone: {
+              target: 'done',
+              actions: assign({
+                streamed: ({ event }) => event.output as string,
+              }),
+            },
+          },
+        },
+        done: {
+          type: 'final',
+          output: ({ context }) => ({
+            answer: context.answer ?? '',
+            streamed: context.streamed ?? '',
+          }),
+        },
+      },
+    });
+
+    let step = machine.initial({ prompt: 'Why machines?' });
+    expect(step.tasks).toEqual([
+      expect.objectContaining({
+        kind: 'generate',
+        id: 'answer',
+        src: 'agent.generateText',
+        input: expect.objectContaining({
+          model: 'test-model',
+          prompt: 'Why machines?',
+          outputSchema: answerSchema,
+          temperature: 0.2,
+        }),
+      }),
+    ]);
+
+    const answer = await machine.execute(step.tasks[0]!, {
+      generateText: async (request: AgentTextInput & { tools: AgentTools }) => {
+        expect(request.tools).toEqual({});
+        return { output: { answer: `Answered ${request.prompt}` } };
+      },
+    });
+    step = machine.resolve(step, step.tasks[0]!, answer);
+
+    expect(step.tasks).toEqual([
+      expect.objectContaining({
+        kind: 'stream',
+        id: 'stream',
+        src: 'agent.streamText',
+        input: expect.objectContaining({
+          model: 'test-model',
+          prompt: 'Expand Answered Why machines?',
+        }),
+      }),
+    ]);
+
+    const streamed = await machine.execute(step.tasks[0]!, {
+      generateText: async () => {
+        throw new Error('generateText should not be used for stream tasks');
+      },
+      streamText: async (request: AgentTextInput & { tools: AgentTools }) => ({
+        text: `Streamed ${request.prompt}`,
+      }),
+    });
+    step = machine.resolve(step, step.tasks[0]!, streamed);
+
+    expect(step.done).toBe(true);
+    expect(step.snapshot.output).toEqual({
+      answer: 'Answered Why machines?',
+      streamed: 'Streamed Expand Answered Why machines?',
+    });
+  });
+
   test('provided agent machines preserve step helpers', () => {
     const agent = setupAgent({
       context: z.object({ prompt: z.string() }),
@@ -459,7 +578,18 @@ describe('setupAgent', () => {
     ]);
   });
 
-  test('authors named tasks with typed input and output', () => {
+  test('authors reusable text actors with typed input and output', async () => {
+    const getSummary = createTextLogic({
+      kind: 'generate',
+      schemas: {
+        input: z.object({ article: z.string() }),
+        output: z.object({ summary: z.string() }),
+      },
+      model: 'test-model',
+      system: 'Summarize articles.',
+      prompt: ({ input }) => `Summarize:\n${input.article}`,
+      temperature: ({ input }) => input.article.length > 10 ? 0.2 : 0,
+    });
     const agent = setupAgent({
       context: z.object({
         article: z.string(),
@@ -467,19 +597,10 @@ describe('setupAgent', () => {
       }),
       input: z.object({ article: z.string() }),
       output: z.object({ summary: z.string() }),
-    }).withTasks({
-      getSummary: {
-        schemas: {
-          input: z.object({ article: z.string() }),
-          output: z.object({ summary: z.string() }),
-        },
-        model: 'test-model',
-        system: 'Summarize articles.',
-        prompt: ({ input }) => `Summarize:\n${input.article}`,
-        temperature: ({ input }) => input.article.length > 10 ? 0.2 : 0,
+      actors: {
+        getSummary,
       },
     });
-    const { getSummary } = agent.tasks;
 
     expect(getSummary.request({ article: 'A long article.' })).toEqual(
       expect.objectContaining({
@@ -551,7 +672,7 @@ describe('setupAgent', () => {
       article: 'State machines make agents inspectable.',
     });
     const [effect] = getAgentEffects(actions, {
-      actors: agent.tasks,
+      actors: { getSummary },
     });
 
     expect(effect).toEqual({
@@ -574,6 +695,70 @@ describe('setupAgent', () => {
 
     expect(snapshot.status).toBe('done');
     expect(snapshot.output).toEqual({ summary: 'Agents become inspectable.' });
+
+    await expect(getSummary.execute({ article: 'A long article.' }, {
+      generateText: async (request: AgentTextInput & { tools: AgentTools }) => {
+        expect(request.prompt).toBe('Summarize:\nA long article.');
+        expect(request.tools).toEqual({});
+        return { output: { summary: 'Standalone summary.' } };
+      },
+    })).resolves.toEqual({ summary: 'Standalone summary.' });
+  });
+
+  test('reusable stream text actors execute with streamText', async () => {
+    const streamSummary = createTextLogic({
+      kind: 'stream',
+      schemas: {
+        input: z.object({ article: z.string() }),
+        output: z.string(),
+      },
+      model: 'test-model',
+      prompt: ({ input }) => `Stream:\n${input.article}`,
+    });
+    const agent = setupAgent({
+      context: z.object({ article: z.string() }),
+      input: z.object({ article: z.string() }),
+      actors: { streamSummary },
+    });
+    const machine = agent.createMachine({
+      context: ({ input }) => ({ article: input.article }),
+      initial: 'streaming',
+      states: {
+        streaming: {
+          invoke: {
+            id: 'streamSummary',
+            src: 'streamSummary',
+            input: ({ context }) => ({ article: context.article }),
+          },
+        },
+      },
+    });
+    const step = machine.initial({ article: 'State machines.' });
+
+    expect(step.tasks[0]).toEqual(expect.objectContaining({
+      kind: 'stream',
+      src: 'streamSummary',
+    }));
+    await expect(machine.execute(step.tasks[0]!, {
+      generateText: async () => {
+        throw new Error('generateText should not be used');
+      },
+      streamText: async (request: AgentTextInput & { tools: AgentTools }) => {
+        expect(request.prompt).toBe('Stream:\nState machines.');
+        return { text: 'streamed summary' };
+      },
+    })).resolves.toBe('streamed summary');
+
+    await expect(streamSummary.execute({ article: 'State machines.' }, {
+      generateText: async () => {
+        throw new Error('generateText should not be used');
+      },
+      streamText: async (request: AgentTextInput & { tools: AgentTools }) => {
+        expect(request.prompt).toBe('Stream:\nState machines.');
+        expect(request.tools).toEqual({});
+        return { text: 'standalone stream' };
+      },
+    })).resolves.toBe('standalone stream');
   });
 
   test('named text logic can optionally execute as a promise actor', async () => {
@@ -1164,7 +1349,7 @@ describe('setupAgent', () => {
         askRecipient: {
           invoke: {
             id: 'recipient',
-            src: USER_INPUT_ACTOR,
+            src: 'agent.userInput',
             input: {
               prompt: 'Who should receive this email?',
               schema: {
@@ -1207,7 +1392,7 @@ describe('setupAgent', () => {
       },
     }).provide({
       actors: {
-        [USER_INPUT_ACTOR]: fromPromise(async ({ input }) => {
+        'agent.userInput': fromPromise(async ({ input }) => {
           expect(input).toEqual(
             expect.objectContaining({
               prompt: 'Who should receive this email?',

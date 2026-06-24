@@ -11,7 +11,6 @@ export {
   parseOutput,
   setupAgent,
   transitionResult,
-  USER_INPUT_ACTOR,
   validateSchemaSync,
 } from './setup-agent.js';
 export {

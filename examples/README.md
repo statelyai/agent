@@ -2,7 +2,7 @@
 
 <!-- example groups derived from examples/setup-agent/** and examples/index.ts -->
 
-This directory is organized around the preferred authoring path: `setupAgent(...).withTasks(...)` machines.
+This directory is organized around `setupAgent(...)` machines with built-in text actor sources or reusable text actors.
 
 ## Start Here
 
@@ -13,7 +13,7 @@ This directory is organized around the preferred authoring path: `setupAgent(...
 
 ## XState Examples
 
-These use `setupAgent(...)` and `withTasks(...)` from `@statelyai/agent`. The runtime is flexible: use `createActor(...)` locally, provide different host actors in apps, or persist XState snapshots in a platform adapter.
+These use `setupAgent(...)` from `@statelyai/agent`. The runtime is flexible: use `createActor(...)` locally, provide different host actors in apps, or persist XState snapshots in a platform adapter.
 
 - [`setup-agent/email-drafter.ts`](/Users/davidkpiano/Code/agent/examples/setup-agent/email-drafter.ts): typed email workflow with independently testable text logic
 - [`setup-agent/game-agent.ts`](/Users/davidkpiano/Code/agent/examples/setup-agent/game-agent.ts): turn-based game workflow with whitelisted event tools
@@ -31,4 +31,4 @@ These use `setupAgent(...)` and `withTasks(...)` from `@statelyai/agent`. The ru
 - [`../docs/crewai-parity.md`](/Users/davidkpiano/Code/agent/docs/crewai-parity.md)
 - [`../docs/burr-parity.md`](/Users/davidkpiano/Code/agent/docs/burr-parity.md)
 
-The parity docs track end-result coverage and remaining gaps. New examples should use `withTasks(...)` for named LLM work and `setupAgent(...)` for schema-first machine authoring.
+The parity docs track end-result coverage and remaining gaps. New examples should use built-in `agent.generateText` / `agent.streamText` for inline LLM work, `createTextLogic(...)` for reusable LLM work, and `setupAgent(...)` for schema-first machine authoring.

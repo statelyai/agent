@@ -3,6 +3,7 @@ import { assign, fromPromise } from 'xstate';
 import {
   type AgentMessage,
   assistantMessage,
+  createTextLogic,
   setupAgent,
   userMessage,
 } from '../../src/index.js';
@@ -78,6 +79,50 @@ const eventSchemas = {
 
 const outputSchema = z.object({ sentEmails: z.array(emailDraftSchema) });
 
+export const evaluatePrompt = createTextLogic({
+  schemas: {
+    input: z.object({ prompt: z.string() }),
+    output: promptAssessmentSchema,
+  },
+  model: 'openai/gpt-5.4-nano',
+  system:
+    'Evaluate an email drafting request. Require recipient, subject, and body details. Return missing fields and one question per gap.',
+  prompt: ({ input }) => input.prompt,
+});
+
+export const draftEmail = createTextLogic({
+  schemas: {
+    input: z.object({
+      prompt: z.string(),
+      draftAnyway: z.boolean(),
+      messages: z.custom<AgentMessage[]>((value) => Array.isArray(value)),
+    }),
+    output: emailDraftSchema,
+  },
+  model: 'openai/gpt-5.4-nano',
+  system: ({ input }) =>
+    [
+      'Draft a polished email from the request.',
+      input.draftAnyway
+        ? 'Infer reasonable details only because the user chose to draft anyway.'
+        : 'Use the provided details without inventing missing essentials.',
+    ].join('\n'),
+  messages: ({ input }) => [
+    ...input.messages,
+    userMessage(input.prompt),
+  ],
+});
+
+export const streamDraft = createTextLogic({
+  kind: 'stream',
+  schemas: {
+    input: z.object({ prompt: z.string() }),
+    output: z.string(),
+  },
+  model: 'openai/gpt-5.4-nano',
+  prompt: ({ input }) => input.prompt,
+});
+
 const agent = setupAgent({
   context: contextSchema,
   events: eventSchemas,
@@ -90,52 +135,11 @@ const agent = setupAgent({
         return { sent: true };
       }
     ),
-  },
-}).withTasks({
-  evaluatePrompt: {
-    schemas: {
-      input: z.object({ prompt: z.string() }),
-      output: promptAssessmentSchema,
-    },
-    model: 'openai/gpt-5.4-nano',
-    system:
-      'Evaluate an email drafting request. Require recipient, subject, and body details. Return missing fields and one question per gap.',
-    prompt: ({ input }) => input.prompt,
-  },
-  draftEmail: {
-    schemas: {
-      input: z.object({
-        prompt: z.string(),
-        draftAnyway: z.boolean(),
-        messages: z.custom<AgentMessage[]>((value) => Array.isArray(value)),
-      }),
-      output: emailDraftSchema,
-    },
-    model: 'openai/gpt-5.4-nano',
-    system: ({ input }) =>
-      [
-        'Draft a polished email from the request.',
-        input.draftAnyway
-          ? 'Infer reasonable details only because the user chose to draft anyway.'
-          : 'Use the provided details without inventing missing essentials.',
-      ].join('\n'),
-    messages: ({ input }) => [
-      ...input.messages,
-      userMessage(input.prompt),
-    ],
-  },
-  streamDraft: {
-    kind: 'stream',
-    schemas: {
-      input: z.object({ prompt: z.string() }),
-      output: z.string(),
-    },
-    model: 'openai/gpt-5.4-nano',
-    prompt: ({ input }) => input.prompt,
+    evaluatePrompt,
+    draftEmail,
+    streamDraft,
   },
 });
-
-export const { evaluatePrompt, draftEmail, streamDraft } = agent.tasks;
 
 export const emailDrafterSchemas = agent.schemas;
 

@@ -7,7 +7,7 @@ This document tracks where authored `@statelyai/agent` machines can model the pr
 It is intentionally scoped to:
 
 - state-machine authoring concepts
-- full type-safe XState authoring through `setupAgent(...).withTasks(...)`
+- full type-safe XState authoring through `setupAgent(...)`, built-in text actor sources, and reusable `createTextLogic(...)` actors
 - XState actor, snapshot, and host-adapter behavior
 - adapter and transport example behavior
 - runnable examples and tests in this repo
@@ -38,7 +38,7 @@ The strongest reason to choose `@statelyai/agent` over LangGraph is that the wor
 - visualization comes from the authored machine, not a separate reconstruction
 - model and tool execution stay in host code, so Vercel AI SDK, LangChain, Workers AI, SQL clients, and local functions remain swappable
 
-The strongest reason to choose it over handrolling is that agent control flow is usually the product. Once a workflow needs branching, review gates, retries, persistence, subflows, or multi-agent routing, plain async functions become implicit state machines. `withTasks(...)` makes model steps individually testable, and `setupAgent(...)` makes the state machine explicit without taking over the runtime.
+The strongest reason to choose it over handrolling is that agent control flow is usually the product. Once a workflow needs branching, review gates, retries, persistence, subflows, or multi-agent routing, plain async functions become implicit state machines. `createTextLogic(...)` makes model steps individually testable, and `setupAgent(...)` makes the state machine explicit without taking over the runtime.
 
 Remaining gaps are tracked in [`langgraph-gaps.md`](/Users/davidkpiano/Code/agent/docs/langgraph-gaps.md).
 
@@ -48,7 +48,7 @@ Remaining gaps are tracked in [`langgraph-gaps.md`](/Users/davidkpiano/Code/agen
 
 | LangGraphJS concept | Status | Agent equivalent |
 | --- | --- | --- |
-| Graph/state-machine authoring with typed state/events | Covered | `setupAgent(...).withTasks(...)`, [`examples/setup-agent/email-drafter.ts`](/Users/davidkpiano/Code/agent/examples/setup-agent/email-drafter.ts), [`src/setup-agent.test.ts`](/Users/davidkpiano/Code/agent/src/setup-agent.test.ts), [`src/langgraph-equivalents/raw-xstate.test.ts`](/Users/davidkpiano/Code/agent/src/langgraph-equivalents/raw-xstate.test.ts) |
+| Graph/state-machine authoring with typed state/events | Covered | `setupAgent(...)`, built-in `agent.generateText` / `agent.streamText`, `createTextLogic(...)`, [`examples/setup-agent/email-drafter.ts`](/Users/davidkpiano/Code/agent/examples/setup-agent/email-drafter.ts), [`src/setup-agent.test.ts`](/Users/davidkpiano/Code/agent/src/setup-agent.test.ts), [`src/langgraph-equivalents/raw-xstate.test.ts`](/Users/davidkpiano/Code/agent/src/langgraph-equivalents/raw-xstate.test.ts) |
 | Branching / conditional routing | Covered | [`src/langgraph-equivalents/raw-xstate.test.ts`](/Users/davidkpiano/Code/agent/src/langgraph-equivalents/raw-xstate.test.ts) |
 | Subgraphs / nested flows | Covered | [`src/langgraph-equivalents/raw-xstate.test.ts`](/Users/davidkpiano/Code/agent/src/langgraph-equivalents/raw-xstate.test.ts) |
 | Human-in-the-loop / approval gate | Covered | [`src/langgraph-equivalents/raw-xstate.test.ts`](/Users/davidkpiano/Code/agent/src/langgraph-equivalents/raw-xstate.test.ts) |
@@ -70,7 +70,7 @@ Remaining gaps are tracked in [`langgraph-gaps.md`](/Users/davidkpiano/Code/agen
 
 ## XState coverage
 
-`setupAgent(...).withTasks(...)` is the first-class path. Current tests cover these applicable LangGraph example shapes with typed XState machines and local `createActor(...)` execution:
+`setupAgent(...)` is the first-class path; built-in text actor sources cover inline model calls, while `createTextLogic(...)` covers reusable named model calls. Current tests cover these applicable LangGraph example shapes with typed XState machines and local `createActor(...)` execution:
 
 - conditional routing
 - human-in-the-loop approval
@@ -93,7 +93,7 @@ Remaining gaps are tracked in [`langgraph-gaps.md`](/Users/davidkpiano/Code/agen
 These are currently deliberate, not gaps:
 
 - Logic stays pure: `(state, event) -> { nextState, effects }`.
-- Developers author normal XState with `setupAgent(...).withTasks(...)`; LangGraph-style workflows map without giving up runtime control.
+- Developers author normal XState with `setupAgent(...)`; LangGraph-style workflows map without giving up runtime control.
 - Emitted events are live runtime effects, not durable journal entries.
 - Session behavior is based on first-class snapshot + event contracts; production durability belongs in adapters.
 - `run.on(...)` is reserved for emitted events only; terminal/runtime hooks use dedicated methods like `run.onDone(...)`.

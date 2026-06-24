@@ -1,6 +1,6 @@
 # Host Actors
 
-`setupAgent(...).withTasks(...)` describes model work as named tasks. The host still owns execution.
+`setupAgent(...)` auto-provides built-in `agent.generateText` and `agent.streamText` actor sources. `createTextLogic(...)` describes reusable named model work. The host still owns execution.
 
 The text logic declares:
 
@@ -31,6 +31,7 @@ Use named text logic and plain XState `invoke` objects. For maximum framework po
 ```ts
 import {
   createAgentSchemas,
+  parseOutput,
   setupAgent,
 } from '@statelyai/agent';
 import { assign } from 'xstate';
@@ -42,18 +43,7 @@ const schemas = createAgentSchemas({
   events: eventSchemas,
 });
 
-const agent = setupAgent({ schemas }).withTasks({
-  draftText: {
-    schemas: {
-      input: draftInputSchema,
-      output: resultSchema,
-    },
-    model: 'openai/gpt-5.4-nano',
-    prompt: ({ input }) => input.prompt,
-    temperature: 0.2,
-    events: ['APPROVE', 'REVISE'],
-  },
-});
+const agent = setupAgent({ schemas });
 
 const machine = agent.createMachine({
   initial: 'generating',
@@ -61,12 +51,18 @@ const machine = agent.createMachine({
     generating: {
       invoke: {
         id: 'draft',
-        src: 'draftText',
-        input: ({ context }) => ({ prompt: context.prompt }),
+        src: 'agent.generateText',
+        input: ({ context }) => ({
+          model: 'openai/gpt-5.4-nano',
+          prompt: context.prompt,
+          outputSchema: resultSchema,
+          temperature: 0.2,
+          eventTypes: ['APPROVE', 'REVISE'],
+        }),
         onDone: {
           target: 'done',
           actions: assign({
-            result: ({ event }) => event.output,
+            result: ({ event }) => parseOutput(resultSchema, event.output),
           }),
         },
       },
@@ -105,12 +101,11 @@ Use `initialTransition(...)`, `transition(...)`, and `transitionResult(...)` dir
 Use `agent.userInput` when workflow logic needs to wait for a human. It is a normal invoked actor; the host owns how the request is delivered and resumed.
 
 ```ts
-import { USER_INPUT_ACTOR } from '@statelyai/agent';
 import { fromPromise } from 'xstate';
 
 const machine = setupAgent.fromConfig(config).provide({
   actors: {
-    [USER_INPUT_ACTOR]: fromPromise(async ({ input }) => {
+    'agent.userInput': fromPromise(async ({ input }) => {
       return showFormAndWaitForSubmit(input);
     }),
   },
@@ -161,10 +156,10 @@ Only events listed in task `events` are exposed. If an event is listed but is no
 
 ## Actor Runtime
 
-When you want XState to execute invokes directly, provide implementations for the named task actors with `logic.withExecutor(...)`. The lower-level `createTextLogic(...)` primitive also accepts an executor, but `withTasks(...)` is the preferred authoring path.
+When you want XState to execute named text invokes directly, provide implementations with `logic.withExecutor(...)`. Use direct `agent.generateText` / `agent.streamText` invokes when the request belongs at the state node; use `createTextLogic(...)` when the model-call shape should be named and reused.
 
 ```ts
-const executableDraftText = agent.tasks.draftText.withExecutor(
+const executableDraftText = draftText.withExecutor(
   async ({ request, signal }) => {
     const result = await generateText({
       model: resolveModel(request.model),
@@ -184,7 +179,7 @@ For app-level adapters, overriding with `withExecutor(...)` is often cleaner:
 import { generateText, Output } from 'ai';
 
 const actors = {
-  draftText: agent.tasks.draftText.withExecutor(async ({ request, signal }) => {
+  draftText: draftText.withExecutor(async ({ request, signal }) => {
     if (request.outputSchema) {
       const result = await generateText({
         model: resolveModel(request.model),
@@ -218,17 +213,23 @@ createActor(machine.provide({ actors }), { input }).start();
 Use `metadata` for host-specific details. It is intentionally not interpreted by `@statelyai/agent`.
 
 ```ts
-const agent = setupAgent({ schemas }).withTasks({
-  draftText: {
-    schemas: {
-      input: draftInputSchema,
-      output: resultSchema,
-    },
-    model: 'openai/gpt-5.4-nano',
-    prompt: ({ input }) => input.prompt,
-    metadata: ({ input }) => ({
-      traceId: input.requestId,
-    }),
+const draftText = createTextLogic({
+  kind: 'generate',
+  schemas: {
+    input: draftInputSchema,
+    output: resultSchema,
+  },
+  model: 'openai/gpt-5.4-nano',
+  prompt: ({ input }) => input.prompt,
+  metadata: ({ input }) => ({
+    traceId: input.requestId,
+  }),
+});
+
+const agent = setupAgent({
+  schemas,
+  actors: {
+    draftText,
   },
 });
 ```
@@ -243,7 +244,22 @@ The same task logic can be executed with `generateText(...)` or `streamText(...)
 
 ## Low-Level Primitive
 
-`createTextLogic(...)` exists as a low-level primitive. Prefer `setupAgent(...).withTasks(...)` for new authoring because it gives reusable request construction, typed source names, typed invoke input, typed `event.output`, and schema-typed machine event tools.
+Use `createTextLogic(...)` for reusable named model calls with typed source names, typed invoke input, typed `event.output`, and schema-typed machine event tools.
+
+Standalone inspection:
+
+```ts
+const request = draftText.request({ prompt: 'Draft a launch email.' });
+```
+
+Standalone execution:
+
+```ts
+const output = await draftText.execute(
+  { prompt: 'Draft a launch email.' },
+  { generateText, streamText }
+);
+```
 
 ## Why This Shape
 
