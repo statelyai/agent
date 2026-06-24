@@ -10,6 +10,7 @@ import {
   messagesSchema,
   setupAgent,
   transitionResult,
+  USER_INPUT_ACTOR,
   userMessage,
   type AgentTextInput,
   type AgentTools,
@@ -1014,5 +1015,217 @@ describe('setupAgent', () => {
       schemas: agent.schemas,
       eventTypes: ['ATTACK', 'DEFEND', 'HEAL'],
     }))).toEqual(['event.ATTACK', 'event.DEFEND']);
+  });
+
+  test('fromConfig lowers static task workflows to agent machine steps', async () => {
+    const machine = setupAgent.fromConfig({
+      id: 'static-answer',
+      schemas: {
+        input: {
+          type: 'object',
+          properties: {
+            question: { type: 'string' },
+          },
+          required: ['question'],
+        },
+        context: {
+          type: 'object',
+          properties: {
+            question: { type: 'string' },
+            answer: { type: 'string' },
+          },
+          required: ['question'],
+        },
+        output: {
+          type: 'object',
+          properties: {
+            answer: { type: 'string' },
+          },
+          required: ['answer'],
+        },
+      },
+      context: {
+        question: '{{ input.question }}',
+      },
+      tasks: {
+        answerQuestion: {
+          model: 'test-model',
+          prompt: 'Question: {{ input.question }}',
+          input: {
+            type: 'object',
+            properties: {
+              question: { type: 'string' },
+            },
+            required: ['question'],
+          },
+          output: {
+            type: 'object',
+            properties: {
+              answer: { type: 'string' },
+            },
+            required: ['answer'],
+          },
+        },
+      },
+      initial: 'answering',
+      states: {
+        answering: {
+          invoke: {
+            id: 'answer',
+            src: 'answerQuestion',
+            input: {
+              question: '{{ context.question }}',
+            },
+            onDone: {
+              target: 'done',
+              assign: {
+                answer: '{{ event.output.answer }}',
+              },
+            },
+          },
+        },
+        done: {
+          type: 'final',
+          output: {
+            answer: '{{ context.answer }}',
+          },
+        },
+      },
+    });
+
+    let step = machine.initial({ question: 'Why statecharts?' });
+
+    expect(step.tasks).toEqual([
+      expect.objectContaining({
+        id: 'answer',
+        src: 'answerQuestion',
+        input: expect.objectContaining({
+          model: 'test-model',
+          prompt: 'Question: Why statecharts?',
+        }),
+      }),
+    ]);
+
+    const output = await machine.execute(step.tasks[0]!, {
+      generateText: async () => ({ output: { answer: 'Because logic matters.' } }),
+    });
+    step = machine.resolve(step, step.tasks[0]!, output);
+
+    expect(step.done).toBe(true);
+    expect(step.snapshot.output).toEqual({ answer: 'Because logic matters.' });
+  });
+
+  test('agent.userInput is a blessed host-provided actor for static workflows', async () => {
+    const machine = setupAgent.fromConfig({
+      id: 'static-user-input',
+      schemas: {
+        input: {
+          type: 'object',
+          properties: {},
+        },
+        context: {
+          type: 'object',
+          properties: {
+            recipient: { type: 'string' },
+            draft: { type: 'string' },
+          },
+        },
+        output: {
+          type: 'object',
+          properties: {
+            draft: { type: 'string' },
+          },
+          required: ['draft'],
+        },
+      },
+      context: {},
+      tasks: {
+        draftEmail: {
+          model: 'writer',
+          prompt: 'Draft email to {{ input.recipient }}',
+          input: {
+            type: 'object',
+            properties: {
+              recipient: { type: 'string' },
+            },
+            required: ['recipient'],
+          },
+          output: {
+            type: 'object',
+            properties: {
+              draft: { type: 'string' },
+            },
+            required: ['draft'],
+          },
+        },
+      },
+      initial: 'askRecipient',
+      states: {
+        askRecipient: {
+          invoke: {
+            id: 'recipient',
+            src: USER_INPUT_ACTOR,
+            input: {
+              prompt: 'Who should receive this email?',
+              schema: {
+                type: 'object',
+                properties: {
+                  recipient: { type: 'string' },
+                },
+                required: ['recipient'],
+              },
+            },
+            onDone: {
+              target: 'draftEmail',
+              assign: {
+                recipient: '{{ event.output.recipient }}',
+              },
+            },
+          },
+        },
+        draftEmail: {
+          invoke: {
+            id: 'draft',
+            src: 'draftEmail',
+            input: {
+              recipient: '{{ context.recipient }}',
+            },
+            onDone: {
+              target: 'done',
+              assign: {
+                draft: '{{ event.output.draft }}',
+              },
+            },
+          },
+        },
+        done: {
+          type: 'final',
+          output: {
+            draft: '{{ context.draft }}',
+          },
+        },
+      },
+    }).provide({
+      actors: {
+        [USER_INPUT_ACTOR]: fromPromise(async ({ input }) => {
+          expect(input).toEqual(
+            expect.objectContaining({
+              prompt: 'Who should receive this email?',
+              schema: expect.objectContaining({ type: 'object' }),
+            })
+          );
+          return { recipient: 'Ada' };
+        }),
+        draftEmail: fromPromise(async ({ input }) => {
+          expect(input).toEqual({ recipient: 'Ada' });
+          return { draft: 'Hello Ada.' };
+        }),
+      },
+    });
+
+    const actor = createActor(machine, { input: {} }).start();
+    await waitFor(actor, (snapshot) => snapshot.status === 'done');
+
+    expect(actor.getSnapshot().output).toEqual({ draft: 'Hello Ada.' });
   });
 });

@@ -26,6 +26,8 @@ import type {
 } from './types.js';
 import { validateSchemaSync } from './utils.js';
 
+export const USER_INPUT_ACTOR = 'agent.userInput' as const;
+
 /** Portable LCD input text tasks pass to host executors. */
 export interface AgentTextInput<TMetadata = Record<string, unknown>> {
   model: string;
@@ -51,6 +53,193 @@ export interface AgentTextInput<TMetadata = Record<string, unknown>> {
    */
   metadata?: TMetadata;
 }
+
+export interface AgentUserInput<TMetadata = Record<string, unknown>> {
+  prompt?: string;
+  schema?: StandardSchemaV1;
+  metadata?: TMetadata;
+}
+
+type BuiltinAgentActors = {
+  [USER_INPUT_ACTOR]: PromiseActorLogic<unknown, AgentUserInput>;
+};
+
+const userInputActor = fromPromise<unknown, AgentUserInput>(async () => {
+  throw new Error(
+    `'${USER_INPUT_ACTOR}' has no host execution. Provide an implementation ` +
+      `with machine.provide({ actors: { '${USER_INPUT_ACTOR}': ... } }).`
+  );
+});
+
+function missingActor(src: string): PromiseActorLogic<unknown, unknown> {
+  return fromPromise<unknown, unknown>(async () => {
+    throw new Error(
+      `'${src}' has no host execution. Provide an implementation with ` +
+        `machine.provide({ actors: { '${src}': ... } }).`
+    );
+  });
+}
+
+type JsonSchemaObject = {
+  type?: string | string[];
+  properties?: Record<string, JsonSchemaObject>;
+  required?: string[];
+  items?: JsonSchemaObject;
+  enum?: unknown[];
+  const?: unknown;
+  additionalProperties?: unknown;
+  [key: string]: unknown;
+};
+
+function jsonSchemaToStandardSchema<T = unknown>(
+  schema: JsonSchemaObject | undefined,
+  name = 'schema'
+): StandardSchemaV1<T> {
+  const resolvedSchema = schema ?? {};
+
+  return {
+    '~standard': {
+      version: 1,
+      vendor: 'statelyai-agent-json-schema',
+      validate(value: unknown) {
+        const issues: { message: string }[] = [];
+        validateJsonSchemaValue(resolvedSchema, value, name, issues);
+        return issues.length > 0 ? { issues } : { value: value as T };
+      },
+    },
+  };
+}
+
+function validateJsonSchemaValue(
+  schema: JsonSchemaObject,
+  value: unknown,
+  path: string,
+  issues: { message: string }[]
+) {
+  if (schema.const !== undefined && value !== schema.const) {
+    issues.push({ message: `${path} must equal ${JSON.stringify(schema.const)}` });
+    return;
+  }
+
+  if (schema.enum && !schema.enum.some((item) => item === value)) {
+    issues.push({ message: `${path} must be one of ${schema.enum.join(', ')}` });
+    return;
+  }
+
+  const type = Array.isArray(schema.type) ? schema.type[0] : schema.type;
+  if (!type) {
+    return;
+  }
+
+  if (type === 'object') {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      issues.push({ message: `${path} must be an object` });
+      return;
+    }
+
+    const objectValue = value as Record<string, unknown>;
+    for (const requiredKey of schema.required ?? []) {
+      if (!(requiredKey in objectValue)) {
+        issues.push({ message: `${path}.${requiredKey} is required` });
+      }
+    }
+
+    for (const [key, propertySchema] of Object.entries(schema.properties ?? {})) {
+      if (key in objectValue) {
+        validateJsonSchemaValue(
+          propertySchema,
+          objectValue[key],
+          `${path}.${key}`,
+          issues
+        );
+      }
+    }
+    return;
+  }
+
+  if (type === 'array') {
+    if (!Array.isArray(value)) {
+      issues.push({ message: `${path} must be an array` });
+      return;
+    }
+
+    if (schema.items) {
+      value.forEach((item, index) =>
+        validateJsonSchemaValue(schema.items!, item, `${path}[${index}]`, issues)
+      );
+    }
+    return;
+  }
+
+  const ok =
+    (type === 'string' && typeof value === 'string')
+    || (type === 'number' && typeof value === 'number')
+    || (type === 'integer' && Number.isInteger(value))
+    || (type === 'boolean' && typeof value === 'boolean')
+    || (type === 'null' && value === null);
+
+  if (!ok) {
+    issues.push({ message: `${path} must be ${type}` });
+  }
+}
+
+const wholeExpressionPattern = /^\{\{\s*([\s\S]*?)\s*\}\}$/;
+const templateExpressionPattern = /\{\{\s*([\s\S]*?)\s*\}\}/g;
+
+type ExpressionScope = {
+  context?: unknown;
+  event?: unknown;
+  input?: unknown;
+  output?: unknown;
+};
+
+function evaluatePathExpression(expression: string, scope: ExpressionScope): unknown {
+  const parts = expression.trim().split('.').filter(Boolean);
+  let current: unknown = scope;
+
+  for (const part of parts) {
+    if (!current || typeof current !== 'object') {
+      return undefined;
+    }
+    current = (current as Record<string, unknown>)[part];
+  }
+
+  return current;
+}
+
+function evaluateExpressionValue(value: unknown, scope: ExpressionScope): unknown {
+  if (typeof value === 'string') {
+    const wholeMatch = value.match(wholeExpressionPattern);
+    if (wholeMatch?.[1]) {
+      return evaluatePathExpression(wholeMatch[1], scope);
+    }
+
+    return value.replace(templateExpressionPattern, (_match, expression: string) => {
+      const resolved = evaluatePathExpression(expression, scope);
+      return resolved === undefined || resolved === null ? '' : String(resolved);
+    });
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => evaluateExpressionValue(item, scope));
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key,
+        evaluateExpressionValue(item, scope),
+      ])
+    );
+  }
+
+  return value;
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
 
 // ─── Message helpers ───
 //
@@ -1058,6 +1247,419 @@ export function setupAgent<
   return createSetupAgent(config, {});
 }
 
+export interface AgentWorkflowConfig {
+  key?: string;
+  id?: string;
+  version?: string;
+  description?: string;
+  schemas?: {
+    input?: JsonSchemaObject;
+    context?: JsonSchemaObject;
+    events?: Record<string, JsonSchemaObject>;
+    output?: JsonSchemaObject;
+    meta?: JsonSchemaObject;
+  };
+  context?: Record<string, unknown>;
+  tasks?: Record<string, AgentWorkflowTaskConfig>;
+  actors?: Record<string, AgentWorkflowActorConfig>;
+  initial: string;
+  states: Record<string, AgentWorkflowStateConfig>;
+  meta?: Record<string, unknown>;
+}
+
+export interface AgentWorkflowTaskConfig {
+  kind?: AgentTaskKind;
+  description?: string;
+  model: unknown;
+  system?: unknown;
+  prompt?: unknown;
+  messages?: unknown;
+  input: JsonSchemaObject;
+  output: JsonSchemaObject;
+  events?: unknown;
+  tools?: AgentTools;
+  toolChoice?: AgentToolChoice | unknown;
+  temperature?: unknown;
+  maxTokens?: unknown;
+  topP?: unknown;
+  topK?: unknown;
+  seed?: unknown;
+  stopSequences?: unknown;
+  metadata?: unknown;
+}
+
+export interface AgentWorkflowActorConfig {
+  input?: JsonSchemaObject;
+  output?: JsonSchemaObject;
+  description?: string;
+}
+
+export interface AgentWorkflowStateConfig {
+  description?: string;
+  type?: 'parallel' | 'history' | 'final';
+  initial?: string;
+  states?: Record<string, AgentWorkflowStateConfig>;
+  invoke?: AgentWorkflowInvokeConfig | AgentWorkflowInvokeConfig[];
+  on?: Record<string, AgentWorkflowTransitionConfig | AgentWorkflowTransitionConfig[]>;
+  always?: AgentWorkflowTransitionConfig | AgentWorkflowTransitionConfig[];
+  onDone?: AgentWorkflowTransitionConfig | AgentWorkflowTransitionConfig[];
+  after?: Record<string, AgentWorkflowTransitionConfig | AgentWorkflowTransitionConfig[]>;
+  entry?: AgentWorkflowActionConfig | AgentWorkflowActionConfig[];
+  exit?: AgentWorkflowActionConfig | AgentWorkflowActionConfig[];
+  tags?: string[];
+  output?: unknown;
+  meta?: Record<string, unknown>;
+}
+
+export interface AgentWorkflowInvokeConfig {
+  id?: string;
+  src: string;
+  input?: unknown;
+  onDone?: AgentWorkflowTransitionConfig | AgentWorkflowTransitionConfig[];
+  onError?: AgentWorkflowTransitionConfig | AgentWorkflowTransitionConfig[];
+  meta?: Record<string, unknown>;
+}
+
+export interface AgentWorkflowTransitionConfig {
+  target?: string | string[];
+  guard?: unknown;
+  assign?: Record<string, unknown>;
+  actions?: AgentWorkflowActionConfig | AgentWorkflowActionConfig[];
+  description?: string;
+  reenter?: boolean;
+  meta?: Record<string, unknown>;
+}
+
+export interface AgentWorkflowActionConfig {
+  type: string;
+  params?: unknown;
+  assign?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+function createSchemasFromWorkflowConfig(
+  config: AgentWorkflowConfig
+): AgentSchemaPack<
+  StandardSchemaV1<Record<string, unknown>>,
+  Record<string, StandardSchemaV1>,
+  StandardSchemaV1,
+  StandardSchemaV1,
+  StandardSchemaV1<MetaObject>
+> {
+  return createAgentSchemas({
+    context: jsonSchemaToStandardSchema<Record<string, unknown>>(
+      config.schemas?.context ?? { type: 'object' },
+      'context'
+    ),
+    events: Object.fromEntries(
+      Object.entries(config.schemas?.events ?? {}).map(([key, schema]) => [
+        key,
+        jsonSchemaToStandardSchema(schema, `event.${key}`),
+      ])
+    ),
+    input: jsonSchemaToStandardSchema(config.schemas?.input, 'input'),
+    output: jsonSchemaToStandardSchema(config.schemas?.output, 'output'),
+    meta: jsonSchemaToStandardSchema<MetaObject>(config.schemas?.meta, 'meta'),
+  });
+}
+
+function createTasksFromWorkflowConfig(
+  config: AgentWorkflowConfig
+): AgentTaskInput<
+  Record<string, { input: StandardSchemaV1; output: StandardSchemaV1 }>,
+  Record<string, StandardSchemaV1>,
+  AgentSchemaPack<any, Record<string, StandardSchemaV1>, any, any, any>
+> {
+  return Object.fromEntries(
+    Object.entries(config.tasks ?? {}).map(([key, task]) => [
+      key,
+      {
+        kind: task.kind,
+        description: task.description,
+        schemas: {
+          input: jsonSchemaToStandardSchema(task.input, `${key}.input`),
+          output: jsonSchemaToStandardSchema(task.output, `${key}.output`),
+        },
+        model: ({ input }) =>
+          String(evaluateExpressionValue(task.model, { input }) ?? ''),
+        system: task.system === undefined
+          ? undefined
+          : ({ input }) =>
+              evaluateExpressionValue(task.system, { input }) as string | undefined,
+        prompt: task.prompt === undefined
+          ? undefined
+          : ({ input }) =>
+              evaluateExpressionValue(task.prompt, { input }) as string | undefined,
+        messages: task.messages === undefined
+          ? undefined
+          : ({ input }) =>
+              evaluateExpressionValue(task.messages, { input }) as
+                | AgentMessage[]
+                | undefined,
+        tools: task.tools,
+        toolChoice: task.toolChoice as AgentToolChoice | undefined,
+        events: task.events === undefined
+          ? undefined
+          : ({ input }) => {
+              const events = evaluateExpressionValue(task.events, { input });
+              return Array.isArray(events)
+                ? events.filter((event): event is string => typeof event === 'string')
+                : [];
+            },
+        temperature: task.temperature === undefined
+          ? undefined
+          : ({ input }) =>
+              evaluateExpressionValue(task.temperature, { input }) as
+                | number
+                | undefined,
+        maxTokens: task.maxTokens === undefined
+          ? undefined
+          : ({ input }) =>
+              evaluateExpressionValue(task.maxTokens, { input }) as number | undefined,
+        topP: task.topP === undefined
+          ? undefined
+          : ({ input }) =>
+              evaluateExpressionValue(task.topP, { input }) as number | undefined,
+        topK: task.topK === undefined
+          ? undefined
+          : ({ input }) =>
+              evaluateExpressionValue(task.topK, { input }) as number | undefined,
+        seed: task.seed === undefined
+          ? undefined
+          : ({ input }) =>
+              evaluateExpressionValue(task.seed, { input }) as number | undefined,
+        stopSequences: task.stopSequences === undefined
+          ? undefined
+          : ({ input }) =>
+              evaluateExpressionValue(task.stopSequences, { input }) as
+                | string[]
+                | undefined,
+        metadata: task.metadata === undefined
+          ? undefined
+          : ({ input }) => evaluateExpressionValue(task.metadata, { input }),
+      },
+    ])
+  ) as AgentTaskInput<
+    Record<string, { input: StandardSchemaV1; output: StandardSchemaV1 }>,
+    Record<string, StandardSchemaV1>,
+    AgentSchemaPack<any, Record<string, StandardSchemaV1>, any, any, any>
+  >;
+}
+
+function createActorPlaceholdersFromWorkflowConfig(config: AgentWorkflowConfig) {
+  return Object.fromEntries(
+    Object.keys(config.actors ?? {}).map((key) => [key, missingActor(key)])
+  ) as Record<string, PromiseActorLogic<unknown, unknown>>;
+}
+
+function createAssignAction(assignConfig: Record<string, unknown>) {
+  return assign(
+    Object.fromEntries(
+      Object.entries(assignConfig).map(([key, value]) => [
+        key,
+        ({ context, event }: { context: unknown; event: unknown }) =>
+          evaluateExpressionValue(value, { context, event }),
+      ])
+    ) as never
+  );
+}
+
+function lowerWorkflowActions(
+  actionConfig: AgentWorkflowActionConfig | AgentWorkflowActionConfig[] | undefined
+) {
+  if (!actionConfig) {
+    return undefined;
+  }
+
+  const actions = Array.isArray(actionConfig) ? actionConfig : [actionConfig];
+  return actions.map((action) =>
+    action.assign
+      ? createAssignAction(action.assign)
+      : {
+          type: action.type,
+          params: ({ context, event }: { context: unknown; event: unknown }) =>
+            evaluateExpressionValue(action.params, { context, event }),
+        }
+  );
+}
+
+function lowerWorkflowTransition(
+  transitionConfig: AgentWorkflowTransitionConfig
+) {
+  const actions = [
+    ...(transitionConfig.assign ? [createAssignAction(transitionConfig.assign)] : []),
+    ...(lowerWorkflowActions(transitionConfig.actions) ?? []),
+  ];
+
+  return {
+    ...(transitionConfig.target !== undefined
+      ? { target: transitionConfig.target }
+      : {}),
+    ...(transitionConfig.guard !== undefined
+      ? {
+          guard:
+            typeof transitionConfig.guard === 'string'
+              ? ({ context, event }: { context: unknown; event: unknown }) =>
+                  Boolean(evaluateExpressionValue(transitionConfig.guard, {
+                    context,
+                    event,
+                  }))
+              : transitionConfig.guard,
+        }
+      : {}),
+    ...(actions.length > 0 ? { actions } : {}),
+    ...(transitionConfig.description !== undefined
+      ? { description: transitionConfig.description }
+      : {}),
+    ...(transitionConfig.reenter !== undefined
+      ? { reenter: transitionConfig.reenter }
+      : {}),
+    ...(transitionConfig.meta !== undefined ? { meta: transitionConfig.meta } : {}),
+  };
+}
+
+function lowerWorkflowTransitionOrArray(
+  transitionConfig:
+    | AgentWorkflowTransitionConfig
+    | AgentWorkflowTransitionConfig[]
+    | undefined
+) {
+  if (!transitionConfig) {
+    return undefined;
+  }
+
+  return Array.isArray(transitionConfig)
+    ? transitionConfig.map(lowerWorkflowTransition)
+    : lowerWorkflowTransition(transitionConfig);
+}
+
+function lowerWorkflowInvoke(
+  invokeConfig: AgentWorkflowInvokeConfig
+) {
+  return {
+    ...(invokeConfig.id !== undefined ? { id: invokeConfig.id } : {}),
+    src: invokeConfig.src,
+    ...(invokeConfig.input !== undefined
+      ? {
+          input: ({ context, event }: { context: unknown; event: unknown }) =>
+            evaluateExpressionValue(invokeConfig.input, { context, event }),
+        }
+      : {}),
+    ...(invokeConfig.onDone !== undefined
+      ? { onDone: lowerWorkflowTransitionOrArray(invokeConfig.onDone) }
+      : {}),
+    ...(invokeConfig.onError !== undefined
+      ? { onError: lowerWorkflowTransitionOrArray(invokeConfig.onError) }
+      : {}),
+    ...(invokeConfig.meta !== undefined ? { meta: invokeConfig.meta } : {}),
+  };
+}
+
+function lowerWorkflowState(stateConfig: AgentWorkflowStateConfig): Record<string, unknown> {
+  return {
+    ...(stateConfig.description !== undefined
+      ? { description: stateConfig.description }
+      : {}),
+    ...(stateConfig.type !== undefined ? { type: stateConfig.type } : {}),
+    ...(stateConfig.initial !== undefined ? { initial: stateConfig.initial } : {}),
+    ...(stateConfig.states !== undefined
+      ? {
+          states: Object.fromEntries(
+            Object.entries(stateConfig.states).map(([key, child]) => [
+              key,
+              lowerWorkflowState(child),
+            ])
+          ),
+        }
+      : {}),
+    ...(stateConfig.invoke !== undefined
+      ? {
+          invoke: Array.isArray(stateConfig.invoke)
+            ? stateConfig.invoke.map(lowerWorkflowInvoke)
+            : lowerWorkflowInvoke(stateConfig.invoke),
+        }
+      : {}),
+    ...(stateConfig.on !== undefined
+      ? {
+          on: Object.fromEntries(
+            Object.entries(stateConfig.on).map(([eventType, transitionConfig]) => [
+              eventType,
+              lowerWorkflowTransitionOrArray(transitionConfig),
+            ])
+          ),
+        }
+      : {}),
+    ...(stateConfig.always !== undefined
+      ? { always: lowerWorkflowTransitionOrArray(stateConfig.always) }
+      : {}),
+    ...(stateConfig.onDone !== undefined
+      ? { onDone: lowerWorkflowTransitionOrArray(stateConfig.onDone) }
+      : {}),
+    ...(stateConfig.after !== undefined
+      ? {
+          after: Object.fromEntries(
+            Object.entries(stateConfig.after).map(([delay, transitionConfig]) => [
+              delay,
+              lowerWorkflowTransitionOrArray(transitionConfig),
+            ])
+          ),
+        }
+      : {}),
+    ...(stateConfig.entry !== undefined
+      ? { entry: lowerWorkflowActions(stateConfig.entry) }
+      : {}),
+    ...(stateConfig.exit !== undefined
+      ? { exit: lowerWorkflowActions(stateConfig.exit) }
+      : {}),
+    ...(stateConfig.tags !== undefined ? { tags: stateConfig.tags } : {}),
+    ...(stateConfig.output !== undefined
+      ? {
+          output: ({ context, event }: { context: unknown; event: unknown }) =>
+            evaluateExpressionValue(stateConfig.output, { context, event }),
+        }
+      : {}),
+    ...(stateConfig.meta !== undefined ? { meta: stateConfig.meta } : {}),
+  };
+}
+
+function setupAgentFromConfig(config: AgentWorkflowConfig): AgentMachine {
+  const schemas = createSchemasFromWorkflowConfig(config);
+  const tasks = createTasksFromWorkflowConfig(config);
+  const actors = createActorPlaceholdersFromWorkflowConfig(config);
+  const agent = setupAgent({
+    schemas,
+    actors,
+  }).withTasks(tasks);
+
+  return agent.createMachine({
+    ...(config.id !== undefined ? { id: config.id } : {}),
+    ...(config.description !== undefined ? { description: config.description } : {}),
+    ...(config.context !== undefined
+      ? {
+          context: ({ input }: { input: unknown }) =>
+            validateSchemaSync(
+              schemas.context,
+              evaluateExpressionValue(config.context, { input })
+            ),
+        }
+      : {}),
+    initial: config.initial,
+    states: Object.fromEntries(
+      Object.entries(config.states).map(([key, state]) => [
+        key,
+        lowerWorkflowState(state),
+      ])
+    ),
+    ...(config.meta !== undefined ? { meta: config.meta } : {}),
+  } as never);
+}
+
+export namespace setupAgent {
+  export function fromConfig(config: AgentWorkflowConfig): AgentMachine {
+    return setupAgentFromConfig(config);
+  }
+}
+
 function createTaskActors<
   TEventSchemas extends Record<string, StandardSchemaV1>,
   TSchemas extends AgentSchemaPack<any, TEventSchemas, any, any, any>,
@@ -1180,6 +1782,7 @@ function createSetupAgent<
       meta: MetaOf<TMetaSchema>;
     },
     actors: {
+      [USER_INPUT_ACTOR]: userInputActor,
       ...config.actors,
     } as AgentSetupConfigOptions<
       TContextSchema,

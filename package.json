@@ -46,10 +46,12 @@
         "types": "./dist/xstate.d.cts",
         "default": "./dist/xstate.cjs"
       }
-    }
+    },
+    "./agent-workflow.json": "./schemas/agent-workflow.json"
   },
   "files": [
-    "dist"
+    "dist",
+    "schemas"
   ],
   "scripts": {
     "agent:convert": "tsx scripts/agent-convert.ts",

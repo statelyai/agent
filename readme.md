@@ -5,6 +5,7 @@ Stately Agent is the state machine authoring layer for AI agents. Author your AI
 The package owns one first-class authoring primitive:
 
 - `setupAgent(...).withTasks(...)`: schema-first, SDK-agnostic agent task authoring.
+- `setupAgent.fromConfig(...)`: static workflow config lowered to the same agent machine shape.
 
 Use `setupAgent(...)` for schema-first control flow. Use normal host code for runtime execution. Stately Agent adds the batteries: reusable text logic, message helpers, examples, retained schemas, and visualization/export affordances.
 
@@ -89,6 +90,78 @@ while (!step.done) {
 This is normal XState underneath: use `machine.initial(...)`, `machine.transition(...)`, and `machine.resolve(...)` for the blessed step loop; drop down to pure `initialTransition(...)` / `transitionResult(...)`; or use `createActor(...)`, snapshots, persistence, guards, actions, and host-provided actors. `setupAgent(...)` adds schema-derived concrete types and retained schemas; `withTasks(...)` adds reusable typed task construction, strongly typed source names, typed invoke input, typed `event.output`, `step.tasks`, `machine.getTasks(...)`, and `machine.execute(...)`.
 
 When a task declares `events`, `machine.getTasks(...)` returns `event.<TYPE>` tools for those events only if they are currently legal from the snapshot. That lets a model choose legal machine events, such as moves in a game, without exposing every transition.
+
+## Static Workflow Definitions
+
+<!-- static agent workflow JSON Schema export from package.json and schemas/agent-workflow.json -->
+
+The package also publishes a JSON Schema for static, declarative agent workflow definitions:
+
+```ts
+import workflowSchema from '@statelyai/agent/agent-workflow.json';
+```
+
+Use `setupAgent.fromConfig(...)` to lower static definitions to the same agent machine shape as TS-first `setupAgent(...).withTasks(...)` authoring. Static definitions separate model tasks from XState-like control flow:
+
+```yaml
+tasks:
+  answerQuestion:
+    model: openai/gpt-4.1
+    system: "You answer for {{ context.userName }}."
+    prompt: "Question: {{ input.question }}"
+    input:
+      type: object
+      properties:
+        question: { type: string }
+      required: [question]
+    output:
+      type: object
+      properties:
+        answer: { type: string }
+      required: [answer]
+
+initial: thinking
+states:
+  thinking:
+    invoke:
+      src: answerQuestion
+      input:
+        question: "{{ context.question }}"
+      onDone:
+        target: done
+        assign:
+          answer: "{{ event.output.answer }}"
+  done:
+    type: final
+```
+
+Then:
+
+```ts
+const machine = setupAgent.fromConfig(config);
+```
+
+Values wrapped as whole strings, such as `"{{ context.question }}"`, are typed expressions. Text fields like `system` and `prompt` are templates and may embed `{{ }}` expressions inside larger strings. The current lowering supports simple dot-path expressions over `input`, `context`, and `event`.
+
+Human input is a normal host-provided actor. Static workflows can invoke `agent.userInput`; the host decides whether that means a CLI prompt, UI form, Slack interaction, or webhook pause:
+
+```yaml
+states:
+  askRecipient:
+    invoke:
+      src: agent.userInput
+      input:
+        prompt: "Who should receive this email?"
+        schema:
+          type: object
+          properties:
+            recipient: { type: string }
+          required: [recipient]
+      onDone:
+        target: drafting
+        assign:
+          recipient: "{{ event.output.recipient }}"
+```
 
 ## Examples
 

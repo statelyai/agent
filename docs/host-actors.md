@@ -100,6 +100,40 @@ step = machine.transition(step, { type: 'REVISE', prompt: nextPrompt });
 
 Use `initialTransition(...)`, `transition(...)`, and `transitionResult(...)` directly when a host wants to own the full XState action list instead of the `step.tasks` abstraction.
 
+## User Input
+
+Use `agent.userInput` when workflow logic needs to wait for a human. It is a normal invoked actor; the host owns how the request is delivered and resumed.
+
+```ts
+import { USER_INPUT_ACTOR } from '@statelyai/agent';
+import { fromPromise } from 'xstate';
+
+const machine = setupAgent.fromConfig(config).provide({
+  actors: {
+    [USER_INPUT_ACTOR]: fromPromise(async ({ input }) => {
+      return showFormAndWaitForSubmit(input);
+    }),
+  },
+});
+```
+
+Static config uses the same actor source:
+
+```yaml
+invoke:
+  src: agent.userInput
+  input:
+    prompt: "Who should receive this email?"
+    schema:
+      type: object
+      properties:
+        recipient: { type: string }
+      required: [recipient]
+  onDone:
+    assign:
+      recipient: "{{ event.output.recipient }}"
+```
+
 ## Allowed Event Tools
 
 Use task `events` to expose specific state transitions as tools. `getAgentEffects(...)` validates that those events are legal from the current snapshot and returns event tools separately from the model-call input.

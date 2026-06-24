@@ -11,6 +11,7 @@ export {
   parseOutput,
   setupAgent,
   transitionResult,
+  USER_INPUT_ACTOR,
   validateSchemaSync,
 } from './setup-agent.js';
 export {
@@ -25,6 +26,14 @@ export type {
   AgentEventDescriptor,
   AgentEffectSource,
   AgentMachine,
+  AgentUserInput,
+  AgentWorkflowActionConfig,
+  AgentWorkflowActorConfig,
+  AgentWorkflowConfig,
+  AgentWorkflowInvokeConfig,
+  AgentWorkflowStateConfig,
+  AgentWorkflowTaskConfig,
+  AgentWorkflowTransitionConfig,
   AgentTask,
   AgentTextInput,
   AgentSchemaPack,
