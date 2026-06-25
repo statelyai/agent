@@ -103,7 +103,7 @@ await agent.requests.answerQuestion.execute(
 
 This is normal XState underneath: use `machine.initial(...)`, `machine.transition(...)`, and `machine.resolve(...)` for the blessed step loop; drop down to pure `initialTransition(...)` / `transitionResult(...)`; or use `createActor(...)`, snapshots, persistence, guards, actions, and host-provided actors. `setupAgent(...)` adds schema-derived concrete types, retained schemas, built-in text actor sources, reusable text actors, `step.requests`, `machine.getRequests(...)`, and `machine.execute(...)`.
 
-When a request declares `events`, `machine.getRequests(...)` returns `event.<TYPE>` tools for those events only if they are currently legal from the snapshot. That lets a model choose legal machine events, such as moves in a game, without exposing every transition.
+When a request declares `events`, `machine.getRequests(...)` returns `send_event_<TYPE>` tools for those events only if they are currently legal from the snapshot. That lets a model choose legal machine events, such as moves in a game, without exposing every transition.
 
 ## Static Workflow Definitions
 

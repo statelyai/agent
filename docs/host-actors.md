@@ -150,13 +150,13 @@ const requests = getAgentRequests(actions, {
 
 const request = requests[0];
 Object.keys(request.tools);
-// ['event.ATTACK', 'event.DEFEND']
+// ['send_event_ATTACK', 'send_event_DEFEND']
 ```
 
 Each event tool returns the event object:
 
 ```ts
-await request.tools['event.ATTACK'].execute({ target: 'orc' });
+await request.tools.send_event_ATTACK.execute({ target: 'orc' });
 // { type: 'ATTACK', target: 'orc' }
 ```
 

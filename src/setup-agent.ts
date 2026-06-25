@@ -662,7 +662,50 @@ function isAgentRequestLogic(value: unknown): value is AgentRequestLogic {
 
 export type AgentRequestSource = string & {};
 
-export const EVENT_TOOL_PREFIX = 'event.' as const;
+export const EVENT_TOOL_PREFIX = 'send_event_' as const;
+
+export type AgentEventToolNameResolver = (args: {
+  eventType: string;
+  defaultToolName: string;
+}) => string;
+
+function hashString(value: string): string {
+  let hash = 5381;
+  for (let i = 0; i < value.length; i++) {
+    hash = (hash * 33) ^ value.charCodeAt(i);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function sanitizeEventToolName(eventType: string): `${typeof EVENT_TOOL_PREFIX}${string}` {
+  const sanitizedType = eventType.replace(/[^a-zA-Z0-9_-]/g, '_') || 'event';
+  const base = `${EVENT_TOOL_PREFIX}${sanitizedType}`;
+
+  if (base.length <= 64) {
+    return base as `${typeof EVENT_TOOL_PREFIX}${string}`;
+  }
+
+  const hash = hashString(eventType);
+  const prefixLength = 64 - hash.length - 1;
+  return `${base.slice(0, prefixLength)}_${hash}` as `${typeof EVENT_TOOL_PREFIX}${string}`;
+}
+
+function disambiguateEventToolName(
+  toolName: string,
+  eventType: string,
+  usedToolNames: Set<string>
+): string {
+  if (!usedToolNames.has(toolName)) {
+    usedToolNames.add(toolName);
+    return toolName;
+  }
+
+  const hash = hashString(eventType);
+  const suffix = `_${hash}`;
+  const uniqueToolName = `${toolName.slice(0, 64 - suffix.length)}${suffix}`;
+  usedToolNames.add(uniqueToolName);
+  return uniqueToolName;
+}
 
 export interface AgentRequest<TInput extends AgentTextRequest = AgentTextRequest> {
   id: string;
@@ -675,7 +718,7 @@ export interface AgentRequest<TInput extends AgentTextRequest = AgentTextRequest
 
 export interface AgentEventDescriptor {
   type: string;
-  toolName: `${typeof EVENT_TOOL_PREFIX}${string}`;
+  toolName: string;
   inputSchema?: StandardSchemaV1;
 }
 
@@ -688,11 +731,13 @@ export interface AgentRequestOptions {
   events?: Record<string, StandardSchemaV1>;
   schemas?: AgentSchemas;
   actors?: Record<string, unknown>;
+  /** Customize machine-event tool names. Defaults to send_event_<TYPE>. */
+  eventToolName?: AgentEventToolNameResolver;
 }
 
 export function getAvailableEvents(
   snapshot: AnyMachineSnapshot,
-  options: Pick<AgentRequestOptions, 'events' | 'schemas'> & {
+  options: Pick<AgentRequestOptions, 'events' | 'schemas' | 'eventToolName'> & {
     eventTypes?: readonly string[];
   } = {}
 ): AgentEventDescriptor[] {
@@ -701,6 +746,7 @@ export function getAvailableEvents(
       ? undefined
       : new Set(options.eventTypes);
   const seen = new Set<string>();
+  const usedToolNames = new Set<string>();
 
   return getNextTransitions(snapshot).flatMap((transitionDefinition) => {
     const eventType = transitionDefinition.eventType;
@@ -716,9 +762,14 @@ export function getAvailableEvents(
     }
 
     seen.add(eventType);
+    const defaultToolName = sanitizeEventToolName(eventType);
+    const toolName = options.eventToolName
+      ? options.eventToolName({ eventType, defaultToolName })
+      : disambiguateEventToolName(defaultToolName, eventType, usedToolNames);
+
     return [{
       type: eventType,
-      toolName: `${EVENT_TOOL_PREFIX}${eventType}` as const,
+      toolName,
       ...((options.events ?? options.schemas?.events)?.[eventType]
         ? { inputSchema: (options.events ?? options.schemas?.events)![eventType] }
         : {}),
@@ -728,7 +779,7 @@ export function getAvailableEvents(
 
 export function getEventTools(
   snapshot: AnyMachineSnapshot,
-  options: Pick<AgentRequestOptions, 'events' | 'schemas'> & {
+  options: Pick<AgentRequestOptions, 'events' | 'schemas' | 'eventToolName'> & {
     eventTypes?: readonly string[];
   } = {}
 ): AgentTools {
@@ -783,6 +834,7 @@ export function getAgentRequests(
         events: options.events,
         schemas: options.schemas,
         eventTypes: input.eventTypes,
+        eventToolName: options.eventToolName,
       })
       : [];
     const eventTools = Object.fromEntries(
@@ -871,7 +923,8 @@ export type AgentMachine<TMachine extends AnyActorLogic = any> =
   ): AgentStep<SnapshotFrom<TMachine>>;
   getRequests(
     actions: readonly { type?: string; params?: unknown }[],
-    snapshot?: AnyMachineSnapshot
+    snapshot?: AnyMachineSnapshot,
+    options?: Pick<AgentRequestOptions, 'eventToolName'>
   ): AgentRequest[];
   execute(request: AgentRequest, executors: AgentRequestExecutors): Promise<unknown>;
 };
@@ -984,10 +1037,12 @@ function createAgentMachine<TMachine extends AnyActorLogic>(
     },
     getRequests(
       actions: readonly { type?: string; params?: unknown }[],
-      snapshot?: AnyMachineSnapshot
+      snapshot?: AnyMachineSnapshot,
+      requestOptions: Pick<AgentRequestOptions, 'eventToolName'> = {}
     ) {
       return getAgentRequests(actions, {
         ...options,
+        ...requestOptions,
         snapshot,
       });
     },

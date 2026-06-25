@@ -1232,11 +1232,25 @@ describe('setupAgent', () => {
         eventTypes: ['ATTACK', 'DEFEND', 'HEAL'],
       }),
     ).toEqual([
-      expect.objectContaining({ type: 'ATTACK', toolName: 'event.ATTACK' }),
-      expect.objectContaining({ type: 'DEFEND', toolName: 'event.DEFEND' }),
+      expect.objectContaining({ type: 'ATTACK', toolName: 'send_event_ATTACK' }),
+      expect.objectContaining({ type: 'DEFEND', toolName: 'send_event_DEFEND' }),
+    ]);
+
+    expect(
+      getAvailableEvents(snapshot, {
+        schemas: agent.schemas,
+        eventTypes: ['ATTACK'],
+        eventToolName: ({ eventType }) => `machine_${eventType.toLowerCase()}`,
+      }),
+    ).toEqual([
+      expect.objectContaining({ type: 'ATTACK', toolName: 'machine_attack' }),
     ]);
 
     const [request] = machine.getRequests(actions, snapshot);
+    const [customNamedRequest] = machine.getRequests(actions, snapshot, {
+      eventToolName: ({ eventType }: { eventType: string }) =>
+        `machine_${eventType.toLowerCase()}`,
+    });
 
     expect(
       request!.events.map((event: AgentEventDescriptor) => event.type),
@@ -1245,11 +1259,15 @@ describe('setupAgent', () => {
       'DEFEND',
     ]);
     expect(Object.keys(request!.tools)).toEqual([
-      'event.ATTACK',
-      'event.DEFEND',
+      'send_event_ATTACK',
+      'send_event_DEFEND',
+    ]);
+    expect(Object.keys(customNamedRequest!.tools)).toEqual([
+      'machine_attack',
+      'machine_defend',
     ]);
 
-    const attackTool = request!.tools['event.ATTACK']!;
+    const attackTool = request!.tools['send_event_ATTACK']!;
     if (typeof attackTool === 'function') {
       throw new Error('Expected event tool descriptor.');
     }
@@ -1265,7 +1283,7 @@ describe('setupAgent', () => {
           eventTypes: ['ATTACK', 'DEFEND', 'HEAL'],
         }),
       ),
-    ).toEqual(['event.ATTACK', 'event.DEFEND']);
+    ).toEqual(['send_event_ATTACK', 'send_event_DEFEND']);
   });
 
   test('fromConfig lowers static request workflows to agent machine steps', async () => {

@@ -23,6 +23,7 @@ export type {
   AgentRequest,
   AgentRequestOptions,
   AgentEventDescriptor,
+  AgentEventToolNameResolver,
   AgentRequestSource,
   AgentMachine,
   AgentUserInput,

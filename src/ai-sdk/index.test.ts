@@ -6,14 +6,14 @@ describe('toAiSdkTools', () => {
   test('converts agent tool descriptors to AI SDK tools', () => {
     const inputSchema = z.object({ target: z.string() });
     const tools = toAiSdkTools({
-      'event.ATTACK': {
+      send_event_ATTACK: {
         description: 'Attack a target.',
         inputSchema,
         execute: async (input) => ({ type: 'ATTACK', ...input as object }),
       },
     });
 
-    expect(tools['event.ATTACK']).toEqual(
+    expect(tools.send_event_ATTACK).toEqual(
       expect.objectContaining({
         description: 'Attack a target.',
         inputSchema,
