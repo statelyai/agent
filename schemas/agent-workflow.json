@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://stately.ai/schemas/agent-workflow.json",
   "title": "Stately Agent Workflow Definition",
-  "description": "Static, declarative agent workflow definition that can be lowered to a setupAgent(...).withTasks(...) XState machine.",
+  "description": "Static, declarative agent workflow definition that can be lowered to a setupAgent(...) XState machine.",
   "type": "object",
   "required": ["initial", "states"],
   "properties": {
@@ -35,14 +35,14 @@
       "description": "Initial XState context. Values may be JSON literals or whole-string {{ }} expressions evaluated with machine input.",
       "$ref": "#/$defs/ExpressionObject"
     },
-    "tasks": {
-      "description": "Named model tasks that become typed invoke sources.",
+    "requests": {
+      "description": "Named model requests that become typed invoke sources.",
       "type": "object",
       "propertyNames": {
         "$ref": "#/$defs/Identifier"
       },
       "additionalProperties": {
-        "$ref": "#/$defs/Task"
+        "$ref": "#/$defs/Request"
       },
       "default": {}
     },
@@ -176,11 +176,11 @@
       },
       "additionalProperties": false
     },
-    "Task": {
+    "Request": {
       "type": "object",
       "required": ["model", "input", "output"],
       "properties": {
-        "kind": {
+        "mode": {
           "type": "string",
           "enum": ["generate", "stream"],
           "default": "generate"
@@ -215,7 +215,7 @@
           "$ref": "#/$defs/JsonSchema"
         },
         "events": {
-          "description": "Machine event types this task may expose as host/model tools.",
+          "description": "Machine event types this request may expose as host/model tools.",
           "anyOf": [
             { "$ref": "#/$defs/ExpressionString" },
             {

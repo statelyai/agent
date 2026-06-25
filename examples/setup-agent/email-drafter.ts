@@ -114,7 +114,7 @@ export const draftEmail = createTextLogic({
 });
 
 export const streamDraft = createTextLogic({
-  kind: 'stream',
+  mode: 'stream',
   schemas: {
     input: z.object({ prompt: z.string() }),
     output: z.string(),

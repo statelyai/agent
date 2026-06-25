@@ -1,6 +1,6 @@
 # Host Actors
 
-`setupAgent(...)` auto-provides built-in `agent.generateText` and `agent.streamText` actor sources. `createTextLogic(...)` describes reusable named model work. The host still owns execution.
+`setupAgent(...)` accepts schema-bound `requests` and auto-provides built-in `agent.generateText` and `agent.streamText` actor sources. `createTextLogic(...)` describes reusable named model work. The host still owns execution.
 
 The text logic declares:
 
@@ -26,7 +26,7 @@ The host provides:
 
 ## Blessed Pattern
 
-Use named text logic and plain XState `invoke` objects. For maximum framework portability, run the machine with XState's pure transition functions and execute returned agent effects yourself.
+Use named request configs and plain XState `invoke` objects. For maximum framework portability, run the machine with XState's pure transition functions and execute returned agent requests yourself.
 
 ```ts
 import {
@@ -43,7 +43,21 @@ const schemas = createAgentSchemas({
   events: eventSchemas,
 });
 
-const agent = setupAgent({ schemas });
+const agent = setupAgent({
+  schemas,
+  requests: {
+    draftText: {
+      schemas: {
+        input: z.object({ prompt: z.string() }),
+        output: resultSchema,
+      },
+      model: 'openai/gpt-5.4-nano',
+      prompt: ({ input }) => input.prompt,
+      temperature: 0.2,
+      events: ['APPROVE', 'REVISE'],
+    },
+  },
+});
 
 const machine = agent.createMachine({
   initial: 'generating',
@@ -51,14 +65,8 @@ const machine = agent.createMachine({
     generating: {
       invoke: {
         id: 'draft',
-        src: 'agent.generateText',
-        input: ({ context }) => ({
-          model: 'openai/gpt-5.4-nano',
-          prompt: context.prompt,
-          outputSchema: resultSchema,
-          temperature: 0.2,
-          eventTypes: ['APPROVE', 'REVISE'],
-        }),
+        src: 'draftText',
+        input: ({ context }) => ({ prompt: context.prompt }),
         onDone: {
           target: 'done',
           actions: assign({
@@ -74,19 +82,19 @@ const machine = agent.createMachine({
 let step = machine.initial(input);
 
 while (!step.done) {
-  for (const task of step.tasks) {
-    const output = await machine.execute(task, {
+  for (const request of step.requests) {
+    const output = await machine.execute(request, {
       generateText: (request) => generateText(request),
       streamText: (request) => streamText(request),
     });
-    step = machine.resolve(step, task, output);
+    step = machine.resolve(step, request, output);
   }
 }
 ```
 
 Every agent invoke should have a durable `id`; that ID is used to resume the matching `onDone` transition.
 
-`machine.execute(...)` is convenience only. You can still inspect `task.input`, `task.tools`, and `task.events`, then call any SDK yourself.
+`machine.execute(...)` is convenience only. You can still inspect `request.input`, `request.tools`, and `request.events`, then call any SDK yourself.
 
 For external events, advance the same step object:
 
@@ -94,7 +102,7 @@ For external events, advance the same step object:
 step = machine.transition(step, { type: 'REVISE', prompt: nextPrompt });
 ```
 
-Use `initialTransition(...)`, `transition(...)`, and `transitionResult(...)` directly when a host wants to own the full XState action list instead of the `step.tasks` abstraction.
+Use `initialTransition(...)`, `transition(...)`, and `transitionResult(...)` directly when a host wants to own the full XState action list instead of the `step.requests` abstraction.
 
 ## User Input
 
@@ -131,28 +139,30 @@ invoke:
 
 ## Allowed Event Tools
 
-Use task `events` to expose specific state transitions as tools. `getAgentEffects(...)` validates that those events are legal from the current snapshot and returns event tools separately from the model-call input.
+Use request `events` to expose specific state transitions as tools. `getAgentRequests(...)` validates that those events are legal from the current snapshot and returns event tools separately from the model-call input.
 
 ```ts
-const effects = getAgentEffects(actions, {
+const requests = getAgentRequests(actions, {
   snapshot,
   schemas: agent.schemas,
   actors: { chooseMove },
 });
 
-const effect = effects[0];
-Object.keys(effect.tools);
+const request = requests[0];
+Object.keys(request.tools);
 // ['event.ATTACK', 'event.DEFEND']
 ```
 
 Each event tool returns the event object:
 
 ```ts
-await effect.tools['event.ATTACK'].execute({ target: 'orc' });
+await request.tools['event.ATTACK'].execute({ target: 'orc' });
 // { type: 'ATTACK', target: 'orc' }
 ```
 
-Only events listed in task `events` are exposed. If an event is listed but is not legal from the current state, it is omitted.
+Only events listed in request `events` are exposed. If an event is listed but is not legal from the current state, it is omitted.
+
+Use `events` when authoring `setupAgent({ requests })` or `createTextLogic(...)`. `eventTypes` is the lowered `AgentTextRequest` field and the low-level input for direct `agent.generateText` / `agent.streamText` invokes.
 
 ## Actor Runtime
 
@@ -214,7 +224,7 @@ Use `metadata` for host-specific details. It is intentionally not interpreted by
 
 ```ts
 const draftText = createTextLogic({
-  kind: 'generate',
+  mode: 'generate',
   schemas: {
     input: draftInputSchema,
     output: resultSchema,
@@ -240,7 +250,7 @@ This is different from XState `meta`. XState `meta` describes state nodes and tr
 
 Streaming chunks should stay in the host side channel: HTTP stream, WebSocket, AI SDK UI stream, stdout, tracing callback, etc. The machine transitions on the final text. That keeps snapshots deterministic and replayable.
 
-The same task logic can be executed with `generateText(...)` or `streamText(...)`; the host decides.
+The same request logic can be executed with `generateText(...)` or `streamText(...)`; the host decides.
 
 ## Low-Level Primitive
 

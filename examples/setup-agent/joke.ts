@@ -16,7 +16,7 @@ const schemas = createAgentSchemas({
 });
 
 export const tellJoke = createTextLogic({
-  kind: 'stream',
+  mode: 'stream',
   schemas: {
     input: z.object({ topic: z.string() }),
     output: z.string(),

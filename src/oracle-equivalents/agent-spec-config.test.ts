@@ -129,7 +129,7 @@ describe('Oracle Agent Spec-style static workflows', () => {
     expect(nestedStep.snapshot.output).toEqual({ result: 'yes' });
   });
 
-  test('adapts sequential LLM and tool nodes to invoked tasks and host actors', async () => {
+  test('adapts sequential LLM and tool nodes to invoked requests and host actors', async () => {
     // Adapted from Oracle Agent Spec
     // pyagentspec/tests/agentspec_configs/example_serialized_flow.yaml
     // Oracle Agent Spec is distributed under Apache-2.0 or UPL-1.0.
@@ -153,7 +153,7 @@ describe('Oracle Agent Spec-style static workflows', () => {
         },
       },
       context: {},
-      tasks: {
+      requests: {
         node12: {
           model: 'agi_model1',
           prompt: 'something something',

@@ -19,7 +19,7 @@ import {
 import { openai } from '@ai-sdk/openai';
 import { createActor, toPromise } from 'xstate';
 import {
-  type AgentTextInput,
+  type AgentTextRequest,
   type AgentTools,
   type TextLogicExecutor,
 } from '../../../src/index.js';
@@ -43,7 +43,7 @@ function resolveAiSdkModel(
     : openai(modelRef.replace(/^openai\//, ''));
 }
 
-function toModelMessages(input: AgentTextInput): ModelMessage[] | undefined {
+function toModelMessages(input: AgentTextRequest): ModelMessage[] | undefined {
   return input.messages?.map((message) => ({
     role: message.role as 'user' | 'assistant' | 'system',
     content: message.content,
@@ -51,8 +51,8 @@ function toModelMessages(input: AgentTextInput): ModelMessage[] | undefined {
 }
 
 async function generateWithAiSdk(
-  input: AgentTextInput,
-  tools: AgentTextInput['tools'] = input.tools,
+  input: AgentTextRequest,
+  tools: AgentTextRequest['tools'] = input.tools,
   options: AiSdkTextHostOptions = {},
   signal?: AbortSignal
 ) {
@@ -89,7 +89,7 @@ async function generateWithAiSdk(
 }
 
 async function streamWithAiSdk(
-  input: AgentTextInput,
+  input: AgentTextRequest,
   options: AiSdkTextHostOptions = {},
   signal?: AbortSignal
 ) {
@@ -155,16 +155,16 @@ export async function runTriageStepDemo(ticket: string) {
   let step = triageMachine.initial({ ticket });
 
   while (!step.done) {
-    if (step.tasks.length === 0) {
-      throw new Error('Machine is waiting without an agent task.');
+    if (step.requests.length === 0) {
+      throw new Error('Machine is waiting without an agent request.');
     }
 
-    for (const task of step.tasks) {
-      const output = await triageMachine.execute(task, {
-        generateText: (request: AgentTextInput & { tools: AgentTools }) =>
+    for (const request of step.requests) {
+      const output = await triageMachine.execute(request, {
+        generateText: (request: AgentTextRequest & { tools: AgentTools }) =>
           generateWithAiSdk(request, request.tools),
       });
-      step = triageMachine.resolve(step, task, output);
+      step = triageMachine.resolve(step, request, output);
     }
   }
 

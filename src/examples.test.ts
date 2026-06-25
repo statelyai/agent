@@ -11,15 +11,15 @@ import {
   summarizeTurn,
 } from '../examples/index.js';
 import {
-  getAgentEffects,
-  type AgentTextInput,
+  getAgentRequests,
+  type AgentTextRequest,
   transitionResult,
 } from './index.js';
 import { initialTransition, transition } from 'xstate';
 
 describe('curated XState setup examples', () => {
   test('email drafter follows prompt, revise, send loop with normal XState runtime', async () => {
-    const calls: AgentTextInput[] = [];
+    const calls: AgentTextRequest[] = [];
     const sent: unknown[] = [];
     const machine = emailDrafter.provide({
       actors: {
@@ -128,7 +128,7 @@ describe('curated XState setup examples', () => {
       enemyHp: 15,
     });
 
-    const [chooseMove] = getAgentEffects(actions, {
+    const [chooseMove] = getAgentRequests(actions, {
       snapshot,
       schemas: gameSchemas,
       actors: { chooseMove: chooseMoveLogic, summarizeTurn },
@@ -147,7 +147,7 @@ describe('curated XState setup examples', () => {
     const attackEvent = await attackTool.execute?.({ target: 'goblin' });
 
     [snapshot, actions] = transition(gameMachine, snapshot, attackEvent as never);
-    const [summarize] = getAgentEffects(actions, {
+    const [summarize] = getAgentRequests(actions, {
       snapshot,
       schemas: gameSchemas,
       actors: { chooseMove: chooseMoveLogic, summarizeTurn },

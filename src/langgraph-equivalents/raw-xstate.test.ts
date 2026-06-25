@@ -12,14 +12,15 @@ describe('LangGraph-style workflows authored as raw XState', () => {
       }),
       input: z.object({ request: z.string() }),
       output: z.object({ route: z.enum(['answer', 'escalate']) }),
-    }).withTasks({
-      routeRequest: {
-        schemas: {
-          input: z.object({ request: z.string() }),
-          output: z.object({ route: z.enum(['answer', 'escalate']) }),
+      requests: {
+        routeRequest: {
+          schemas: {
+            input: z.object({ request: z.string() }),
+            output: z.object({ route: z.enum(['answer', 'escalate']) }),
+          },
+          model: 'classifier',
+          prompt: ({ input }) => input.request,
         },
-        model: 'classifier',
-        prompt: ({ input }) => input.request,
       },
     });
 
@@ -40,24 +41,33 @@ describe('LangGraph-style workflows authored as raw XState', () => {
         },
         routing: {
           always: [
-            { guard: ({ context }) => context.route === 'escalate', target: 'escalated' },
+            {
+              guard: ({ context }) => context.route === 'escalate',
+              target: 'escalated',
+            },
             { target: 'answered' },
           ],
         },
-        answered: { type: 'final', output: () => ({ route: 'answer' as const }) },
-        escalated: { type: 'final', output: () => ({ route: 'escalate' as const }) },
+        answered: {
+          type: 'final',
+          output: () => ({ route: 'answer' as const }),
+        },
+        escalated: {
+          type: 'final',
+          output: () => ({ route: 'escalate' as const }),
+        },
       },
     });
 
     const actor = createActor(
       machine.provide({
         actors: {
-          routeRequest: agent.tasks.routeRequest.withExecutor(
-            async () => ({ route: 'escalate' })
-          ),
+          routeRequest: agent.requests.routeRequest.withExecutor(async () => ({
+            route: 'escalate',
+          })),
         },
       }),
-      { input: { request: 'billing is broken' } }
+      { input: { request: 'billing is broken' } },
     );
 
     actor.start();
@@ -78,14 +88,15 @@ describe('LangGraph-style workflows authored as raw XState', () => {
         APPROVE: z.object({}),
         REJECT: z.object({ reason: z.string() }),
       },
-    }).withTasks({
-      writeDraft: {
-        schemas: {
-          input: z.object({ topic: z.string() }),
-          output: z.string(),
+      requests: {
+        writeDraft: {
+          schemas: {
+            input: z.object({ topic: z.string() }),
+            output: z.string(),
+          },
+          model: 'writer',
+          prompt: ({ input }) => input.topic,
         },
-        model: 'writer',
-        prompt: ({ input }) => input.topic,
       },
     });
 
@@ -131,12 +142,12 @@ describe('LangGraph-style workflows authored as raw XState', () => {
     const actor = createActor(
       machine.provide({
         actors: {
-          writeDraft: agent.tasks.writeDraft.withExecutor(
-            async ({ input }) => `Draft: ${input.topic}`
+          writeDraft: agent.requests.writeDraft.withExecutor(
+            async ({ input }) => `Draft: ${input.topic}`,
           ),
         },
       }),
-      { input: { topic: 'release notes' } }
+      { input: { topic: 'release notes' } },
     );
 
     actor.start();
@@ -154,40 +165,44 @@ describe('LangGraph-style workflows authored as raw XState', () => {
     const planSchema = z.object({
       steps: z.array(z.string()),
     });
-
     const agent = setupAgent({
       context: z.object({
-        task: z.string(),
+        request: z.string(),
         steps: z.array(z.string()),
         results: z.array(z.string()),
       }),
-      input: z.object({ task: z.string() }),
+      input: z.object({ request: z.string() }),
       output: z.object({ results: z.array(z.string()) }),
       actors: {
         runStep: fromPromise<string, { step: string }>(
-          async ({ input }) => `done:${input.step}`
+          async ({ input }) => `done:${input.step}`,
         ),
       },
-    }).withTasks({
-      planTask: {
-        schemas: {
-          input: z.object({ task: z.string() }),
-          output: planSchema,
+      requests: {
+        planTask: {
+          schemas: {
+            input: z.object({ request: z.string() }),
+            output: planSchema,
+          },
+          model: 'planner',
+          prompt: ({ input }) => input.request,
         },
-        model: 'planner',
-        prompt: ({ input }) => input.task,
       },
     });
 
     const machine = agent.createMachine({
       id: 'raw-xstate-plan-and-execute',
-      context: ({ input }) => ({ task: input.task, steps: [], results: [] }),
+      context: ({ input }) => ({
+        request: input.request,
+        steps: [],
+        results: [],
+      }),
       initial: 'planning',
       states: {
         planning: {
           invoke: {
             src: 'planTask',
-            input: ({ context }) => ({ task: context.task }),
+            input: ({ context }) => ({ request: context.request }),
             onDone: {
               target: 'running',
               actions: assign({ steps: ({ event }) => event.output.steps }),
@@ -202,14 +217,20 @@ describe('LangGraph-style workflows authored as raw XState', () => {
               target: 'checking',
               actions: assign({
                 steps: ({ context }) => context.steps.slice(1),
-                results: ({ context, event }) => [...context.results, event.output],
+                results: ({ context, event }) => [
+                  ...context.results,
+                  event.output,
+                ],
               }),
             },
           },
         },
         checking: {
           always: [
-            { guard: ({ context }) => context.steps.length > 0, target: 'running' },
+            {
+              guard: ({ context }) => context.steps.length > 0,
+              target: 'running',
+            },
             { target: 'done' },
           ],
         },
@@ -223,12 +244,12 @@ describe('LangGraph-style workflows authored as raw XState', () => {
     const actor = createActor(
       machine.provide({
         actors: {
-          planTask: agent.tasks.planTask.withExecutor(
-            async () => ({ steps: ['research', 'write'] })
-          ),
+          planTask: agent.requests.planTask.withExecutor(async () => ({
+            steps: ['research', 'write'],
+          })),
         },
       }),
-      { input: { task: 'make a brief' } }
+      { input: { request: 'make a brief' } },
     );
 
     actor.start();
@@ -303,14 +324,15 @@ describe('LangGraph-style workflows authored as raw XState', () => {
       events: {
         APPROVE: z.object({}),
       },
-    }).withTasks({
-      writeDraft: {
-        schemas: {
-          input: z.object({ topic: z.string() }),
-          output: z.string(),
+      requests: {
+        writeDraft: {
+          schemas: {
+            input: z.object({ topic: z.string() }),
+            output: z.string(),
+          },
+          model: 'writer',
+          prompt: ({ input }) => input.topic,
         },
-        model: 'writer',
-        prompt: ({ input }) => input.topic,
       },
     });
 
@@ -342,8 +364,8 @@ describe('LangGraph-style workflows authored as raw XState', () => {
     });
 
     const actors = {
-      writeDraft: agent.tasks.writeDraft.withExecutor(
-        async ({ input }) => `Draft: ${input.topic}`
+      writeDraft: agent.requests.writeDraft.withExecutor(
+        async ({ input }) => `Draft: ${input.topic}`,
       ),
     };
     const first = createActor(machine.provide({ actors }), {
@@ -373,14 +395,15 @@ describe('LangGraph-style workflows authored as raw XState', () => {
       context: z.object({ topic: z.string(), research: z.string().nullable() }),
       input: z.object({ topic: z.string() }),
       output: z.object({ research: z.string() }),
-    }).withTasks({
-      researchTopic: {
-        schemas: {
-          input: z.object({ topic: z.string() }),
-          output: z.string(),
+      requests: {
+        researchTopic: {
+          schemas: {
+            input: z.object({ topic: z.string() }),
+            output: z.string(),
+          },
+          model: 'researcher',
+          prompt: ({ input }) => input.topic,
         },
-        model: 'researcher',
-        prompt: ({ input }) => input.topic,
       },
     });
     const childMachine = childAgent.createMachine({
@@ -443,19 +466,21 @@ describe('LangGraph-style workflows authored as raw XState', () => {
         actors: {
           child: childMachine.provide({
             actors: {
-              researchTopic: childAgent.tasks.researchTopic.withExecutor(
-                async ({ input }) => `Research: ${input.topic}`
+              researchTopic: childAgent.requests.researchTopic.withExecutor(
+                async ({ input }) => `Research: ${input.topic}`,
               ),
             },
           }),
         },
       }),
-      { input: { topic: 'agents' } }
+      { input: { topic: 'agents' } },
     );
     actor.start();
     await toPromise(actor);
 
-    expect(actor.getSnapshot().output).toEqual({ research: 'Research: agents' });
+    expect(actor.getSnapshot().output).toEqual({
+      research: 'Research: agents',
+    });
   });
 
   test('supervisor handoff is explicit typed routing', async () => {
@@ -469,20 +494,21 @@ describe('LangGraph-style workflows authored as raw XState', () => {
       output: z.object({ result: z.string() }),
       actors: {
         research: fromPromise<string, { request: string }>(
-          async ({ input }) => `research:${input.request}`
+          async ({ input }) => `research:${input.request}`,
         ),
         write: fromPromise<string, { request: string }>(
-          async ({ input }) => `write:${input.request}`
+          async ({ input }) => `write:${input.request}`,
         ),
       },
-    }).withTasks({
-      routeRequest: {
-        schemas: {
-          input: z.object({ request: z.string() }),
-          output: z.object({ route: z.enum(['research', 'write']) }),
+      requests: {
+        routeRequest: {
+          schemas: {
+            input: z.object({ request: z.string() }),
+            output: z.object({ route: z.enum(['research', 'write']) }),
+          },
+          model: 'router',
+          prompt: ({ input }) => input.request,
         },
-        model: 'router',
-        prompt: ({ input }) => input.request,
       },
     });
 
@@ -507,7 +533,10 @@ describe('LangGraph-style workflows authored as raw XState', () => {
         },
         dispatch: {
           always: [
-            { guard: ({ context }) => context.route === 'research', target: 'researching' },
+            {
+              guard: ({ context }) => context.route === 'research',
+              target: 'researching',
+            },
             { target: 'writing' },
           ],
         },
@@ -541,12 +570,12 @@ describe('LangGraph-style workflows authored as raw XState', () => {
     const actor = createActor(
       machine.provide({
         actors: {
-          routeRequest: agent.tasks.routeRequest.withExecutor(
-            async () => ({ route: 'research' })
-          ),
+          routeRequest: agent.requests.routeRequest.withExecutor(async () => ({
+            route: 'research',
+          })),
         },
       }),
-      { input: { request: 'compare frameworks' } }
+      { input: { request: 'compare frameworks' } },
     );
     actor.start();
     await toPromise(actor);
@@ -569,18 +598,21 @@ describe('LangGraph-style workflows authored as raw XState', () => {
         summarizeAll: fromPromise<string[], { sections: string[] }>(
           async ({ input }) =>
             Promise.all(
-              input.sections.map(async (section: string) => `summary:${section}`)
-            )
+              input.sections.map(
+                async (section: string) => `summary:${section}`,
+              ),
+            ),
         ),
       },
-    }).withTasks({
-      reduceSummaries: {
-        schemas: {
-          input: z.object({ summaries: z.array(z.string()) }),
-          output: z.string(),
+      requests: {
+        reduceSummaries: {
+          schemas: {
+            input: z.object({ summaries: z.array(z.string()) }),
+            output: z.string(),
+          },
+          model: 'reducer',
+          prompt: ({ input }) => input.summaries.join('\n'),
         },
-        model: 'reducer',
-        prompt: ({ input }) => input.summaries.join('\n'),
       },
     });
 
@@ -623,12 +655,12 @@ describe('LangGraph-style workflows authored as raw XState', () => {
     const actor = createActor(
       machine.provide({
         actors: {
-          reduceSummaries: agent.tasks.reduceSummaries.withExecutor(
-            async ({ input }) => `reduced:${input.summaries.join('\n')}`
+          reduceSummaries: agent.requests.reduceSummaries.withExecutor(
+            async ({ input }) => `reduced:${input.summaries.join('\n')}`,
           ),
         },
       }),
-      { input: { sections: ['a', 'b'] } }
+      { input: { sections: ['a', 'b'] } },
     );
     actor.start();
     await toPromise(actor);
@@ -649,20 +681,22 @@ describe('LangGraph-style workflows authored as raw XState', () => {
       output: z.object({ answer: z.string() }),
       actors: {
         retrieve: fromPromise<string[], { question: string }>(
-          async ({ input }) => [`doc:${input.question}`, 'doc:typed state']
+          async ({ input }) => [`doc:${input.question}`, 'doc:typed state'],
         ),
       },
-    }).withTasks({
-      answerQuestion: {
-        schemas: {
-          input: z.object({
-            question: z.string(),
-            documents: z.array(z.string()),
-          }),
-          output: z.string(),
+      requests: {
+        answerQuestion: {
+          schemas: {
+            input: z.object({
+              question: z.string(),
+              documents: z.array(z.string()),
+            }),
+            output: z.string(),
+          },
+          model: 'answerer',
+          prompt: ({ input }) =>
+            `Q: ${input.question}\nDocs:\n${input.documents.join('\n')}`,
         },
-        model: 'answerer',
-        prompt: ({ input }) => `Q: ${input.question}\nDocs:\n${input.documents.join('\n')}`,
       },
     });
 
@@ -708,13 +742,13 @@ describe('LangGraph-style workflows authored as raw XState', () => {
     const actor = createActor(
       machine.provide({
         actors: {
-          answerQuestion: agent.tasks.answerQuestion.withExecutor(
+          answerQuestion: agent.requests.answerQuestion.withExecutor(
             async ({ input }) =>
-              `answer from Q: ${input.question}\nDocs:\n${input.documents.join('\n')}`
+              `answer from Q: ${input.question}\nDocs:\n${input.documents.join('\n')}`,
           ),
         },
       }),
-      { input: { question: 'why xstate agents?' } }
+      { input: { question: 'why xstate agents?' } },
     );
     actor.start();
     await toPromise(actor);
@@ -722,7 +756,7 @@ describe('LangGraph-style workflows authored as raw XState', () => {
     expect(actor.getSnapshot().output).toEqual(
       expect.objectContaining({
         answer: expect.stringContaining('doc:typed state'),
-      })
+      }),
     );
   });
 
@@ -741,28 +775,29 @@ describe('LangGraph-style workflows authored as raw XState', () => {
       }),
       input: z.object({ prompt: z.string() }),
       output: z.object({ draft: z.string() }),
-    }).withTasks({
-      writeDraft: {
-        schemas: {
-          input: z.object({
-            prompt: z.string(),
-            feedback: z.string().nullable(),
-          }),
-          output: z.string(),
+      requests: {
+        writeDraft: {
+          schemas: {
+            input: z.object({
+              prompt: z.string(),
+              feedback: z.string().nullable(),
+            }),
+            output: z.string(),
+          },
+          model: 'writer',
+          prompt: ({ input }) =>
+            input.feedback
+              ? `${input.prompt}\nRevise: ${input.feedback}`
+              : input.prompt,
         },
-        model: 'writer',
-        prompt: ({ input }) =>
-          input.feedback
-            ? `${input.prompt}\nRevise: ${input.feedback}`
-            : input.prompt,
-      },
-      critiqueDraft: {
-        schemas: {
-          input: z.object({ draft: z.string() }),
-          output: critiqueSchema,
+        critiqueDraft: {
+          schemas: {
+            input: z.object({ draft: z.string() }),
+            output: critiqueSchema,
+          },
+          model: 'critic',
+          prompt: ({ input }) => input.draft,
         },
-        model: 'critic',
-        prompt: ({ input }) => input.draft,
       },
     });
 
@@ -818,25 +853,24 @@ describe('LangGraph-style workflows authored as raw XState', () => {
     const actor = createActor(
       machine.provide({
         actors: {
-          writeDraft: agent.tasks.writeDraft.withExecutor(
-            async ({ input }) => `draft:${
-              input.feedback
-                ? `${input.prompt}\nRevise: ${input.feedback}`
-                : input.prompt
-            }`
+          writeDraft: agent.requests.writeDraft.withExecutor(
+            async ({ input }) =>
+              `draft:${
+                input.feedback
+                  ? `${input.prompt}\nRevise: ${input.feedback}`
+                  : input.prompt
+              }`,
           ),
-          critiqueDraft: agent.tasks.critiqueDraft.withExecutor(
-            async () => {
-              critiqueCount += 1;
-              return {
-                approved: critiqueCount > 1,
-                feedback: critiqueCount > 1 ? 'ship' : 'add evidence',
-              };
-            }
-          ),
+          critiqueDraft: agent.requests.critiqueDraft.withExecutor(async () => {
+            critiqueCount += 1;
+            return {
+              approved: critiqueCount > 1,
+              feedback: critiqueCount > 1 ? 'ship' : 'add evidence',
+            };
+          }),
         },
       }),
-      { input: { prompt: 'make the case' } }
+      { input: { prompt: 'make the case' } },
     );
     actor.start();
     await toPromise(actor);
@@ -851,14 +885,14 @@ describe('LangGraph-style workflows authored as raw XState', () => {
       steps: z.array(
         z.object({
           id: z.string(),
-          task: z.string(),
-        })
+          request: z.string(),
+        }),
       ),
     });
     const agent = setupAgent({
       context: z.object({
         goal: z.string(),
-        steps: z.array(z.object({ id: z.string(), task: z.string() })),
+        steps: z.array(z.object({ id: z.string(), request: z.string() })),
         evidence: z.record(z.string(), z.string()),
         answer: z.string().nullable(),
       }),
@@ -870,32 +904,33 @@ describe('LangGraph-style workflows authored as raw XState', () => {
       actors: {
         executePlan: fromPromise<
           Record<string, string>,
-          { steps: Array<{ id: string; task: string }> }
+          { steps: Array<{ id: string; request: string }> }
         >(async ({ input }) =>
           Object.fromEntries(
-            input.steps.map((step: { id: string; task: string }) => [
+            input.steps.map((step: { id: string; request: string }) => [
               step.id,
-              `result:${step.task}`,
-            ])
-          )
+              `result:${step.request}`,
+            ]),
+          ),
         ),
       },
-    }).withTasks({
-      planWork: {
-        schemas: {
-          input: z.object({ goal: z.string() }),
-          output: planSchema,
+      requests: {
+        planWork: {
+          schemas: {
+            input: z.object({ goal: z.string() }),
+            output: planSchema,
+          },
+          model: 'planner',
+          prompt: ({ input }) => input.goal,
         },
-        model: 'planner',
-        prompt: ({ input }) => input.goal,
-      },
-      solveWork: {
-        schemas: {
-          input: z.object({ evidence: z.record(z.string(), z.string()) }),
-          output: z.string(),
+        solveWork: {
+          schemas: {
+            input: z.object({ evidence: z.record(z.string(), z.string()) }),
+            output: z.string(),
+          },
+          model: 'solver',
+          prompt: ({ input }) => JSON.stringify(input.evidence),
         },
-        model: 'solver',
-        prompt: ({ input }) => JSON.stringify(input.evidence),
       },
     });
 
@@ -952,15 +987,15 @@ describe('LangGraph-style workflows authored as raw XState', () => {
     const actor = createActor(
       machine.provide({
         actors: {
-          planWork: agent.tasks.planWork.withExecutor(
-            async ({ input }) => ({ steps: [{ id: 'E1', task: input.goal }] })
-          ),
-          solveWork: agent.tasks.solveWork.withExecutor(
-            async ({ input }) => `answer:${JSON.stringify(input.evidence)}`
+          planWork: agent.requests.planWork.withExecutor(async ({ input }) => ({
+            steps: [{ id: 'E1', request: input.goal }],
+          })),
+          solveWork: agent.requests.solveWork.withExecutor(
+            async ({ input }) => `answer:${JSON.stringify(input.evidence)}`,
           ),
         },
       }),
-      { input: { goal: 'compare tools' } }
+      { input: { goal: 'compare tools' } },
     );
     actor.start();
     await toPromise(actor);
@@ -969,7 +1004,7 @@ describe('LangGraph-style workflows authored as raw XState', () => {
       answer: 'answer:{"E1":"result:compare tools"}',
       evidence: { E1: 'result:compare tools' },
     });
-    });
+  });
 
   test('SQL-style agents keep query generation, execution, and answer synthesis explicit', async () => {
     const querySchema = z.object({ sql: z.string() });
@@ -988,22 +1023,25 @@ describe('LangGraph-style workflows authored as raw XState', () => {
           { sql: string }
         >(async ({ input }) => [{ total: '42', sql: input.sql }]),
       },
-    }).withTasks({
-      writeQuery: {
-        schemas: {
-          input: z.object({ question: z.string() }),
-          output: querySchema,
+      requests: {
+        writeQuery: {
+          schemas: {
+            input: z.object({ question: z.string() }),
+            output: querySchema,
+          },
+          model: 'sql-writer',
+          prompt: ({ input }) => input.question,
         },
-        model: 'sql-writer',
-        prompt: ({ input }) => input.question,
-      },
-      answerRows: {
-        schemas: {
-          input: z.object({ rows: z.array(z.record(z.string(), z.string())) }),
-          output: z.string(),
+        answerRows: {
+          schemas: {
+            input: z.object({
+              rows: z.array(z.record(z.string(), z.string())),
+            }),
+            output: z.string(),
+          },
+          model: 'answerer',
+          prompt: ({ input }) => JSON.stringify(input.rows),
         },
-        model: 'answerer',
-        prompt: ({ input }) => JSON.stringify(input.rows),
       },
     });
 
@@ -1060,22 +1098,23 @@ describe('LangGraph-style workflows authored as raw XState', () => {
     const actor = createActor(
       machine.provide({
         actors: {
-          writeQuery: agent.tasks.writeQuery.withExecutor(
-            async () => ({ sql: 'select count(*) as total from users' })
-          ),
-          answerRows: agent.tasks.answerRows.withExecutor(
-            async ({ input }) => `final:${JSON.stringify(input.rows)}`
+          writeQuery: agent.requests.writeQuery.withExecutor(async () => ({
+            sql: 'select count(*) as total from users',
+          })),
+          answerRows: agent.requests.answerRows.withExecutor(
+            async ({ input }) => `final:${JSON.stringify(input.rows)}`,
           ),
         },
       }),
-      { input: { question: 'how many users?' } }
+      { input: { question: 'how many users?' } },
     );
     actor.start();
     await toPromise(actor);
 
     expect(actor.getSnapshot().output).toEqual({
       sql: 'select count(*) as total from users',
-      answer: 'final:[{"total":"42","sql":"select count(*) as total from users"}]',
+      answer:
+        'final:[{"total":"42","sql":"select count(*) as total from users"}]',
     });
   });
 
@@ -1093,10 +1132,10 @@ describe('LangGraph-style workflows authored as raw XState', () => {
       },
       actors: {
         research: fromPromise<string, { topic: string }>(
-          async ({ input }) => `research:${input.topic}`
+          async ({ input }) => `research:${input.topic}`,
         ),
         write: fromPromise<string, { research: string }>(
-          async ({ input }) => `draft:${input.research}`
+          async ({ input }) => `draft:${input.research}`,
         ),
       },
     });
@@ -1165,15 +1204,16 @@ describe('LangGraph-style workflows authored as raw XState', () => {
       context: z.object({ topic: z.string(), text: z.string().nullable() }),
       input: z.object({ topic: z.string() }),
       output: z.object({ text: z.string() }),
-    }).withTasks({
-      streamTopic: {
-        kind: 'stream',
-        schemas: {
-          input: z.object({ topic: z.string() }),
-          output: z.string(),
+      requests: {
+        streamTopic: {
+          mode: 'stream',
+          schemas: {
+            input: z.object({ topic: z.string() }),
+            output: z.string(),
+          },
+          model: 'writer',
+          prompt: ({ input }) => input.topic,
         },
-        model: 'writer',
-        prompt: ({ input }) => input.topic,
       },
     });
 
@@ -1202,16 +1242,16 @@ describe('LangGraph-style workflows authored as raw XState', () => {
     const actor = createActor(
       machine.provide({
         actors: {
-          streamTopic: agent.tasks.streamTopic.withExecutor(
+          streamTopic: agent.requests.streamTopic.withExecutor(
             async ({ input }) => {
               chunks.push('hello');
               chunks.push(input.topic);
               return chunks.join(' ');
-            }
+            },
           ),
         },
       }),
-      { input: { topic: 'agents' } }
+      { input: { topic: 'agents' } },
     );
     actor.start();
     await toPromise(actor);

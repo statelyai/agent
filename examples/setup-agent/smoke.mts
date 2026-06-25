@@ -4,9 +4,9 @@ import {
   emailDrafter,
   evaluatePrompt,
 } from './email-drafter.js';
-import type { AgentTextInput } from '../../src/index.js';
+import type { AgentTextRequest } from '../../src/index.js';
 
-const calls: AgentTextInput[] = [];
+const calls: AgentTextRequest[] = [];
 
 const machine = emailDrafter.provide({
   actors: {

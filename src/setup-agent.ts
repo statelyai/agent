@@ -30,10 +30,10 @@ const USER_INPUT_ACTOR = 'agent.userInput' as const;
 const GENERATE_TEXT_ACTOR = 'agent.generateText' as const;
 const STREAM_TEXT_ACTOR = 'agent.streamText' as const;
 
-export type AgentTaskKind = 'generate' | 'stream';
+export type AgentRequestMode = 'generate' | 'stream';
 
-/** Portable LCD input text tasks pass to host executors. */
-export interface AgentTextInput<TMetadata = Record<string, unknown>> {
+/** Portable LCD input text requests pass to host executors. */
+export interface AgentTextRequest<TMetadata = Record<string, unknown>> {
   model: string;
   system?: string;
   prompt?: string;
@@ -65,12 +65,12 @@ export interface AgentUserInput<TMetadata = Record<string, unknown>> {
 }
 
 type BuiltinAgentActors = {
-  [GENERATE_TEXT_ACTOR]: PromiseActorLogic<unknown, AgentTextInput>;
-  [STREAM_TEXT_ACTOR]: PromiseActorLogic<unknown, AgentTextInput>;
+  [GENERATE_TEXT_ACTOR]: PromiseActorLogic<unknown, AgentTextRequest>;
+  [STREAM_TEXT_ACTOR]: PromiseActorLogic<unknown, AgentTextRequest>;
   [USER_INPUT_ACTOR]: PromiseActorLogic<unknown, AgentUserInput>;
 };
 
-const agentTextInputSchema: StandardSchemaV1<AgentTextInput> = {
+const agentTextInputSchema: StandardSchemaV1<AgentTextRequest> = {
   '~standard': {
     version: 1,
     vendor: 'statelyai-agent',
@@ -78,10 +78,10 @@ const agentTextInputSchema: StandardSchemaV1<AgentTextInput> = {
       const ok =
         !!value
         && typeof value === 'object'
-        && typeof (value as AgentTextInput).model === 'string';
+        && typeof (value as AgentTextRequest).model === 'string';
 
       return ok
-        ? { value: value as AgentTextInput }
+        ? { value: value as AgentTextRequest }
         : { issues: [{ message: 'Expected agent text input with a model' }] };
     },
   },
@@ -111,30 +111,30 @@ const stringOutputSchema: StandardSchemaV1<string> = {
 
 function createBuiltinTextActor(
   src: typeof GENERATE_TEXT_ACTOR | typeof STREAM_TEXT_ACTOR,
-  taskKind: AgentTaskKind,
+  mode: AgentRequestMode,
   outputSchema: StandardSchemaV1
-): AgentTaskLogic<StandardSchemaV1<AgentTextInput>, StandardSchemaV1> {
-  const logic = fromPromise<unknown, AgentTextInput>(async () => {
+): AgentRequestLogic<StandardSchemaV1<AgentTextRequest>, StandardSchemaV1> {
+  const logic = fromPromise<unknown, AgentTextRequest>(async () => {
     throw new Error(
       `'${src}' has no host execution. Provide an implementation with ` +
         `machine.provide({ actors: { '${src}': ... } }) or execute the ` +
-        `returned agent task with machine.execute(...).`
+        `returned agent request with machine.execute(...).`
     );
   });
 
   return Object.assign(logic, {
     kind: 'statelyai.textLogic' as const,
-    taskKind,
+    mode,
     schemas: {
       input: agentTextInputSchema,
       output: outputSchema,
     },
-    request(input: AgentTextInput) {
+    request(input: AgentTextRequest) {
       return validateSchemaSync(agentTextInputSchema, input);
     },
-    async execute(input: AgentTextInput, executors: AgentTaskExecutors) {
+    async execute(input: AgentTextRequest, executors: AgentRequestExecutors) {
       const output = await executeAgentTextRequest(
-        taskKind,
+        mode,
         src,
         validateSchemaSync(agentTextInputSchema, input),
         executors
@@ -144,13 +144,13 @@ function createBuiltinTextActor(
     },
     withExecutor(
       execute: TextLogicExecutor<
-        StandardSchemaV1<AgentTextInput>,
+        StandardSchemaV1<AgentTextRequest>,
         StandardSchemaV1<unknown>,
         Record<string, unknown>
       >
     ) {
       return Object.assign(createTextLogic({
-        kind: taskKind,
+        mode,
         schemas: {
           input: agentTextInputSchema,
           output: outputSchema,
@@ -169,10 +169,10 @@ function createBuiltinTextActor(
         seed: ({ input }) => input.seed,
         stopSequences: ({ input }) => input.stopSequences,
         metadata: ({ input }) => input.metadata,
-      }, execute), { taskKind });
+      }, execute));
     },
-  }) as AgentTaskLogic<
-    StandardSchemaV1<AgentTextInput>,
+  }) as AgentRequestLogic<
+    StandardSchemaV1<AgentTextRequest>,
     StandardSchemaV1
   >;
 }
@@ -467,7 +467,7 @@ export interface TextLogicConfig<
   TOutputSchema extends StandardSchemaV1,
   TMetadata = Record<string, unknown>,
 > {
-  kind?: AgentTaskKind;
+  mode?: AgentRequestMode;
   schemas: {
     input: TInputSchema;
     output: TOutputSchema;
@@ -502,7 +502,7 @@ export interface TextLogicConfig<
 
 export interface TextLogicExecuteArgs<TInput, TMetadata = Record<string, unknown>> {
   input: TInput;
-  request: AgentTextInput<TMetadata>;
+  request: AgentTextRequest<TMetadata>;
   signal: AbortSignal;
   system: unknown;
   self: unknown;
@@ -526,27 +526,26 @@ export interface TextLogic<
     InferOutput<TInputSchema>
   > {
   readonly kind: 'statelyai.textLogic';
-  readonly taskKind: AgentTaskKind;
+  readonly mode: AgentRequestMode;
   readonly schemas: {
     readonly input: TInputSchema;
     readonly output: TOutputSchema;
   };
-  request(input: InferOutput<TInputSchema>): AgentTextInput<TMetadata>;
+  request(input: InferOutput<TInputSchema>): AgentTextRequest<TMetadata>;
   execute(
     input: InferOutput<TInputSchema>,
-    executors: AgentTaskExecutors
+    executors: AgentRequestExecutors
   ): Promise<InferOutput<TOutputSchema>>;
   withExecutor(
     execute: TextLogicExecutor<TInputSchema, TOutputSchema, TMetadata>
   ): TextLogic<TInputSchema, TOutputSchema, TMetadata>;
 }
 
-export interface AgentTaskLogic<
+export interface AgentRequestLogic<
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1 = StandardSchemaV1,
   TMetadata = Record<string, unknown>,
 > extends TextLogic<TInputSchema, TOutputSchema, TMetadata> {
-  readonly taskKind: AgentTaskKind;
 }
 
 export type TextLogicInput<TLogic extends TextLogic> =
@@ -569,7 +568,7 @@ export function createTextLogic<
 ): TextLogic<TInputSchema, TOutputSchema, TMetadata> {
   type TInput = InferOutput<TInputSchema>;
   type TOutput = InferOutput<TOutputSchema>;
-  const request = (input: TInput): AgentTextInput<TMetadata> => {
+  const request = (input: TInput): AgentTextRequest<TMetadata> => {
     const parsedInput = validateSchemaSync<TInput>(
       config.schemas.input as StandardSchemaV1<TInput>,
       input
@@ -602,7 +601,7 @@ export function createTextLogic<
         throw new Error(
           'Text logic has no host execution. Pass an executor as the second ' +
             'argument to createTextLogic(...), provide a runtime adapter, or ' +
-            'extract it with getAgentEffects(..., { actors }).'
+            'extract it with getAgentRequests(..., { actors }).'
         );
       }
 
@@ -624,12 +623,12 @@ export function createTextLogic<
 
   return Object.assign(logic, {
     kind: 'statelyai.textLogic' as const,
-    taskKind: config.kind ?? 'generate',
+    mode: config.mode ?? 'generate',
     schemas: config.schemas,
     request,
-    async execute(input: TInput, executors: AgentTaskExecutors) {
+    async execute(input: TInput, executors: AgentRequestExecutors) {
       const output = await executeAgentTextRequest(
-        config.kind ?? 'generate',
+        config.mode ?? 'generate',
         'textLogic',
         request(input),
         executors
@@ -657,25 +656,22 @@ function isTextLogic(value: unknown): value is TextLogic {
   );
 }
 
-function isAgentTaskLogic(value: unknown): value is AgentTaskLogic {
-  return isTextLogic(value) && typeof (value as AgentTaskLogic).taskKind === 'string';
+function isAgentRequestLogic(value: unknown): value is AgentRequestLogic {
+  return isTextLogic(value);
 }
 
-export type AgentEffectSource = string & {};
+export type AgentRequestSource = string & {};
 
 export const EVENT_TOOL_PREFIX = 'event.' as const;
 
-export interface AgentEffect<TInput extends AgentTextInput = AgentTextInput> {
+export interface AgentRequest<TInput extends AgentTextRequest = AgentTextRequest> {
   id: string;
-  src: AgentEffectSource;
-  kind?: AgentTaskKind;
+  src: AgentRequestSource;
+  mode?: AgentRequestMode;
   input: TInput;
   tools: AgentTools;
   events: AgentEventDescriptor[];
 }
-
-export type AgentTask<TInput extends AgentTextInput = AgentTextInput> =
-  AgentEffect<TInput>;
 
 export interface AgentEventDescriptor {
   type: string;
@@ -687,7 +683,7 @@ export interface AgentSchemas {
   events?: Record<string, StandardSchemaV1>;
 }
 
-export interface AgentEffectOptions {
+export interface AgentRequestOptions {
   snapshot?: AnyMachineSnapshot;
   events?: Record<string, StandardSchemaV1>;
   schemas?: AgentSchemas;
@@ -696,7 +692,7 @@ export interface AgentEffectOptions {
 
 export function getAvailableEvents(
   snapshot: AnyMachineSnapshot,
-  options: Pick<AgentEffectOptions, 'events' | 'schemas'> & {
+  options: Pick<AgentRequestOptions, 'events' | 'schemas'> & {
     eventTypes?: readonly string[];
   } = {}
 ): AgentEventDescriptor[] {
@@ -732,7 +728,7 @@ export function getAvailableEvents(
 
 export function getEventTools(
   snapshot: AnyMachineSnapshot,
-  options: Pick<AgentEffectOptions, 'events' | 'schemas'> & {
+  options: Pick<AgentRequestOptions, 'events' | 'schemas'> & {
     eventTypes?: readonly string[];
   } = {}
 ): AgentTools {
@@ -751,10 +747,10 @@ export function getEventTools(
   );
 }
 
-export function getAgentEffects(
+export function getAgentRequests(
   actions: readonly { type?: string; params?: unknown }[],
-  options: AgentEffectOptions = {}
-): AgentEffect[] {
+  options: AgentRequestOptions = {}
+): AgentRequest[] {
   return actions.flatMap((action) => {
     if (action.type !== 'xstate.spawnChild') {
       return [];
@@ -806,7 +802,7 @@ export function getAgentEffects(
     return [{
       id: params.id,
       src: params.src,
-      ...(isAgentTaskLogic(textLogic) ? { kind: textLogic.taskKind } : {}),
+      ...(isAgentRequestLogic(textLogic) ? { mode: textLogic.mode } : {}),
       input,
       tools: {
         ...(input.tools ?? {}),
@@ -818,35 +814,45 @@ export function getAgentEffects(
 }
 
 export function doneEvent(
-  effect: Pick<AgentEffect, 'id'> | string,
+  request: Pick<AgentRequest, 'id'> | string,
   output: unknown
 ): { type: `xstate.done.actor.${string}`; output: unknown } {
-  const id = typeof effect === 'string' ? effect : effect.id;
+  const id = typeof request === 'string' ? request : request.id;
   return { type: `xstate.done.actor.${id}`, output };
 }
 
 export function transitionResult<TLogic extends AnyActorLogic>(
   logic: TLogic,
   snapshot: SnapshotFrom<TLogic>,
-  effect: Pick<AgentEffect, 'id'> | string,
+  request: Pick<AgentRequest, 'id'> | string,
   output: unknown
 ): [SnapshotFrom<TLogic>, ExecutableActionsFrom<TLogic>[]] {
-  return transition(logic, snapshot, doneEvent(effect, output) as never);
+  return transition(logic, snapshot, doneEvent(request, output) as never);
 }
 
-export type AgentTaskExecutor = (
-  request: AgentTextInput & { tools: AgentTools }
-) => PromiseLike<unknown> | unknown;
+export type AgentRequestExecutorResult =
+  | { output: unknown }
+  | { object: unknown }
+  | { text: string }
+  | { toolResults: Array<{ output?: unknown }> }
+  | unknown;
 
-export interface AgentTaskExecutors {
-  generateText: AgentTaskExecutor;
-  streamText?: AgentTaskExecutor;
+export type AgentRequestExecutor<TResult = AgentRequestExecutorResult> = (
+  request: AgentTextRequest & { tools: AgentTools }
+) => PromiseLike<TResult> | TResult;
+
+export interface AgentRequestExecutors<
+  TGenerateResult = AgentRequestExecutorResult,
+  TStreamResult = AgentRequestExecutorResult,
+> {
+  generateText: AgentRequestExecutor<TGenerateResult>;
+  streamText?: AgentRequestExecutor<TStreamResult>;
 }
 
 export interface AgentStep<TSnapshot extends AnyMachineSnapshot = AnyMachineSnapshot> {
   snapshot: TSnapshot;
   actions: readonly { type?: string; params?: unknown }[];
-  tasks: AgentTask[];
+  requests: AgentRequest[];
   done: boolean;
 }
 
@@ -860,17 +866,17 @@ export type AgentMachine<TMachine extends AnyActorLogic = any> =
   ): AgentStep<SnapshotFrom<TMachine>>;
   resolve(
     step: AgentStep<SnapshotFrom<TMachine>>,
-    task: Pick<AgentEffect, 'id'> | string,
+    request: Pick<AgentRequest, 'id'> | string,
     output: unknown
   ): AgentStep<SnapshotFrom<TMachine>>;
-  getTasks(
+  getRequests(
     actions: readonly { type?: string; params?: unknown }[],
     snapshot?: AnyMachineSnapshot
-  ): AgentTask[];
-  execute(task: AgentTask, executors: AgentTaskExecutors): Promise<unknown>;
+  ): AgentRequest[];
+  execute(request: AgentRequest, executors: AgentRequestExecutors): Promise<unknown>;
 };
 
-async function normalizeTaskExecutionResult(result: unknown): Promise<unknown> {
+async function normalizeRequestExecutionResult(result: unknown): Promise<unknown> {
   const resolved = await result;
 
   if (!resolved || typeof resolved !== 'object') {
@@ -906,10 +912,10 @@ async function normalizeTaskExecutionResult(result: unknown): Promise<unknown> {
 }
 
 async function executeAgentTextRequest(
-  taskKind: AgentTaskKind,
+  mode: AgentRequestMode,
   id: string,
-  input: AgentTextInput<any>,
-  executors: AgentTaskExecutors,
+  input: AgentTextRequest<any>,
+  executors: AgentRequestExecutors,
   tools: AgentTools = {}
 ): Promise<unknown> {
   const request = {
@@ -920,22 +926,22 @@ async function executeAgentTextRequest(
     },
   };
   const executor =
-    taskKind === 'stream'
+    mode === 'stream'
       ? executors.streamText
       : executors.generateText;
 
   if (!executor) {
     throw new Error(
-      `No executor provided for ${taskKind === 'stream' ? 'stream' : 'generate'} task '${id}'.`
+      `No executor provided for ${mode === 'stream' ? 'stream' : 'generate'} request '${id}'.`
     );
   }
 
-  return normalizeTaskExecutionResult(await executor(request));
+  return normalizeRequestExecutionResult(await executor(request));
 }
 
 function createAgentMachine<TMachine extends AnyActorLogic>(
   machine: TMachine,
-  options: Pick<AgentEffectOptions, 'schemas' | 'actors'>
+  options: Pick<AgentRequestOptions, 'schemas' | 'actors'>
 ): AgentMachine<TMachine> {
   const originalTransition = machine.transition.bind(machine);
   const originalProvide = 'provide' in machine
@@ -970,32 +976,32 @@ function createAgentMachine<TMachine extends AnyActorLogic>(
     },
     resolve(
       step: AgentStep<SnapshotFrom<TMachine>>,
-      task: Pick<AgentEffect, 'id'> | string,
+      request: Pick<AgentRequest, 'id'> | string,
       output: unknown
     ) {
-      const [snapshot, actions] = transitionResult(agentMachine, step.snapshot, task, output);
+      const [snapshot, actions] = transitionResult(agentMachine, step.snapshot, request, output);
       return createAgentStep(agentMachine, snapshot, actions);
     },
-    getTasks(
+    getRequests(
       actions: readonly { type?: string; params?: unknown }[],
       snapshot?: AnyMachineSnapshot
     ) {
-      return getAgentEffects(actions, {
+      return getAgentRequests(actions, {
         ...options,
         snapshot,
       });
     },
-    async execute(task: AgentTask, executors: AgentTaskExecutors) {
+    async execute(request: AgentRequest, executors: AgentRequestExecutors) {
       const output = await executeAgentTextRequest(
-        task.kind ?? 'generate',
-        task.id,
-        task.input,
+        request.mode ?? 'generate',
+        request.id,
+        request.input,
         executors,
-        task.tools
+        request.tools
       );
 
-      return task.input.outputSchema
-        ? validateSchemaSync(task.input.outputSchema, output)
+      return request.input.outputSchema
+        ? validateSchemaSync(request.input.outputSchema, output)
         : output;
     },
   }) as unknown as AgentMachine<TMachine>;
@@ -1011,7 +1017,7 @@ function createAgentStep<TMachine extends AnyActorLogic>(
   return {
     snapshot,
     actions,
-    tasks: machine.getTasks(actions, snapshot),
+    requests: machine.getRequests(actions, snapshot),
     done: (snapshot as AnyMachineSnapshot).status === 'done',
   };
 }
@@ -1024,7 +1030,7 @@ function isAgentStep<TSnapshot extends AnyMachineSnapshot>(
     && typeof value === 'object'
     && 'snapshot' in value
     && 'actions' in value
-    && 'tasks' in value
+    && 'requests' in value
   );
 }
 
@@ -1108,7 +1114,7 @@ export function createAgentSchemas<
   };
 }
 
-type AgentTaskEvents<
+type AgentRequestEvents<
   TEventSchemas extends Record<string, StandardSchemaV1>,
   TSchemas extends AgentSchemaPack<any, TEventSchemas, any, any, any>,
   TInputSchema extends StandardSchemaV1,
@@ -1119,7 +1125,7 @@ type AgentTaskEvents<
       schemas: TSchemas;
     }) => readonly (keyof TEventSchemas & string)[]);
 
-export type AgentTaskConfig<
+type AgentRequestConfig<
   TEventSchemas extends Record<string, StandardSchemaV1>,
   TSchemas extends AgentSchemaPack<any, TEventSchemas, any, any, any>,
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1,
@@ -1129,11 +1135,11 @@ export type AgentTaskConfig<
   TextLogicConfig<TInputSchema, TOutputSchema, TMetadata>,
   'events'
 > & {
-  kind?: AgentTaskKind;
-  events?: AgentTaskEvents<TEventSchemas, TSchemas, TInputSchema>;
+  mode?: AgentRequestMode;
+  events?: AgentRequestEvents<TEventSchemas, TSchemas, TInputSchema>;
 };
 
-type AgentTaskSchemaMap = Record<
+type AgentRequestSchemaMap = Record<
   string,
   {
     input: StandardSchemaV1;
@@ -1141,28 +1147,33 @@ type AgentTaskSchemaMap = Record<
   }
 >;
 
-type AgentTaskInput<
-  TTaskSchemas extends AgentTaskSchemaMap,
+type AgentRequestInput<
+  TRequestSchemas extends AgentRequestSchemaMap,
   TEventSchemas extends Record<string, StandardSchemaV1>,
   TSchemas extends AgentSchemaPack<any, TEventSchemas, any, any, any>,
 > = {
-  [K in keyof TTaskSchemas]: AgentTaskConfig<
+  [K in keyof TRequestSchemas]: AgentRequestConfig<
     TEventSchemas,
     TSchemas,
-    TTaskSchemas[K]['input'],
-    TTaskSchemas[K]['output']
+    TRequestSchemas[K]['input'],
+    TRequestSchemas[K]['output']
   > & {
-    schemas: TTaskSchemas[K];
+    schemas: TRequestSchemas[K];
     eventTypes?: never;
   };
 };
 
-type TaskActors<TTaskSchemas extends AgentTaskSchemaMap> = {
-  [K in keyof TTaskSchemas]: AgentTaskLogic<
-    TTaskSchemas[K]['input'],
-    TTaskSchemas[K]['output']
+type RequestActors<TRequestSchemas extends AgentRequestSchemaMap> = {
+  [K in keyof TRequestSchemas]: AgentRequestLogic<
+    TRequestSchemas[K]['input'],
+    TRequestSchemas[K]['output']
   >;
 };
+
+type AgentAllActors<
+  TActors extends { [K in keyof TActors]: AnyActorLogic },
+  TRequestSchemas extends AgentRequestSchemaMap,
+> = TActors & RequestActors<TRequestSchemas>;
 
 type AgentSetupConfigOptions<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
@@ -1174,11 +1185,12 @@ type AgentSetupConfigOptions<
   TActions extends Record<string, ParameterizedObject['params'] | undefined>,
   TGuards extends Record<string, ParameterizedObject['params'] | undefined>,
   TDelay extends string,
+  TRequestSchemas extends AgentRequestSchemaMap,
 > = Parameters<
   typeof setup<
     ContextOf<TContextSchema>,
     EventsOf<TEventSchemas>,
-    SetupActors<AgentSetupActors<TActors>>,
+    SetupActors<AgentSetupActors<AgentAllActors<TActors, TRequestSchemas>>>,
     {},
     TActions,
     TGuards,
@@ -1201,6 +1213,7 @@ type SetupAgentBaseConfig<
   TActions extends Record<string, ParameterizedObject['params'] | undefined>,
   TGuards extends Record<string, ParameterizedObject['params'] | undefined>,
   TDelay extends string,
+  TRequestSchemas extends AgentRequestSchemaMap,
 > = (
   | {
       schemas: AgentSchemaPack<
@@ -1220,6 +1233,17 @@ type SetupAgentBaseConfig<
     >
 ) & {
   actors?: TActors;
+  requests?: AgentRequestInput<
+    TRequestSchemas,
+    TEventSchemas,
+    AgentSchemaPack<
+      TContextSchema,
+      TEventSchemas,
+      TInputSchema,
+      TOutputSchema,
+      TMetaSchema
+    >
+  >;
   actions?: AgentSetupConfigOptions<
     TContextSchema,
     TEventSchemas,
@@ -1229,7 +1253,8 @@ type SetupAgentBaseConfig<
     TMetaSchema,
     TActions,
     TGuards,
-    TDelay
+    TDelay,
+    TRequestSchemas
   >['actions'];
   guards?: AgentSetupConfigOptions<
     TContextSchema,
@@ -1240,7 +1265,8 @@ type SetupAgentBaseConfig<
     TMetaSchema,
     TActions,
     TGuards,
-    TDelay
+    TDelay,
+    TRequestSchemas
   >['guards'];
   delays?: AgentSetupConfigOptions<
     TContextSchema,
@@ -1251,7 +1277,8 @@ type SetupAgentBaseConfig<
     TMetaSchema,
     TActions,
     TGuards,
-    TDelay
+    TDelay,
+    TRequestSchemas
   >['delays'];
 };
 
@@ -1259,6 +1286,7 @@ type SetupAgentXStateResult<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
   TEventSchemas extends Record<string, StandardSchemaV1>,
   TActors extends { [K in keyof TActors]: AnyActorLogic },
+  TRequestSchemas extends AgentRequestSchemaMap,
   TInputSchema extends StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1,
   TMetaSchema extends StandardSchemaV1,
@@ -1269,7 +1297,7 @@ type SetupAgentXStateResult<
   typeof setup<
     ContextOf<TContextSchema>,
     EventsOf<TEventSchemas>,
-    SetupActors<AgentSetupActors<TActors>>,
+    SetupActors<AgentSetupActors<AgentAllActors<TActors, TRequestSchemas>>>,
     {},
     TActions,
     TGuards,
@@ -1286,18 +1314,19 @@ type SetupAgentResult<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
   TEventSchemas extends Record<string, StandardSchemaV1>,
   TActors extends { [K in keyof TActors]: AnyActorLogic },
+  TRequestSchemas extends AgentRequestSchemaMap,
   TInputSchema extends StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1,
   TMetaSchema extends StandardSchemaV1,
   TActions extends Record<string, ParameterizedObject['params'] | undefined>,
   TGuards extends Record<string, ParameterizedObject['params'] | undefined>,
   TDelay extends string,
-  TTasks extends { [K in keyof TTasks]: AgentTaskLogic } = {},
 > = Omit<
   SetupAgentXStateResult<
     TContextSchema,
     TEventSchemas,
     TActors,
+    TRequestSchemas,
     TInputSchema,
     TOutputSchema,
     TMetaSchema,
@@ -1313,6 +1342,7 @@ type SetupAgentResult<
         TContextSchema,
         TEventSchemas,
         TActors,
+        TRequestSchemas,
         TInputSchema,
         TOutputSchema,
         TMetaSchema,
@@ -1331,7 +1361,7 @@ type SetupAgentResult<
     TOutputSchema,
     TMetaSchema
   >;
-  tasks: TTasks;
+  readonly requests: RequestActors<TRequestSchemas>;
   appendMessages(
     resolve:
       | AgentMessage
@@ -1346,30 +1376,6 @@ type SetupAgentResult<
       EventsOf<TEventSchemas>
     >
   >;
-  withTasks<const TNextTaskSchemas extends AgentTaskSchemaMap>(
-    tasks: AgentTaskInput<
-      TNextTaskSchemas,
-      TEventSchemas,
-      AgentSchemaPack<
-        TContextSchema,
-        TEventSchemas,
-        TInputSchema,
-        TOutputSchema,
-        TMetaSchema
-      >
-    >
-  ): SetupAgentResult<
-    TContextSchema,
-    TEventSchemas,
-    TActors & TaskActors<TNextTaskSchemas>,
-    TInputSchema,
-    TOutputSchema,
-    TMetaSchema,
-    TActions,
-    TGuards,
-    TDelay,
-    TTasks & TaskActors<TNextTaskSchemas>
-  >;
 };
 
 /**
@@ -1382,6 +1388,7 @@ export function setupAgent<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
   TEventSchemas extends Record<string, StandardSchemaV1>,
   TActors extends { [K in keyof TActors]: AnyActorLogic },
+  TRequestSchemas extends AgentRequestSchemaMap = {},
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
   TOutputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
   TMetaSchema extends StandardSchemaV1 = StandardSchemaV1<MetaObject>,
@@ -1398,21 +1405,22 @@ export function setupAgent<
     TMetaSchema,
     TActions,
     TGuards,
-    TDelay
+    TDelay,
+    TRequestSchemas
   >
 ): SetupAgentResult<
   TContextSchema,
   TEventSchemas,
   TActors,
+  TRequestSchemas,
   TInputSchema,
   TOutputSchema,
   TMetaSchema,
   TActions,
   TGuards,
-  TDelay,
-  {}
+  TDelay
 > {
-  return createSetupAgent(config, {});
+  return createSetupAgent(config);
 }
 
 export interface AgentWorkflowConfig {
@@ -1428,15 +1436,15 @@ export interface AgentWorkflowConfig {
     meta?: JsonSchemaObject;
   };
   context?: Record<string, unknown>;
-  tasks?: Record<string, AgentWorkflowTaskConfig>;
+  requests?: Record<string, AgentWorkflowRequestConfig>;
   actors?: Record<string, AgentWorkflowActorConfig>;
   initial: string;
   states: Record<string, AgentWorkflowStateConfig>;
   meta?: Record<string, unknown>;
 }
 
-export interface AgentWorkflowTaskConfig {
-  kind?: AgentTaskKind;
+export interface AgentWorkflowRequestConfig {
+  mode?: AgentRequestMode;
   description?: string;
   model: unknown;
   system?: unknown;
@@ -1531,83 +1539,83 @@ function createSchemasFromWorkflowConfig(
   });
 }
 
-function createTasksFromWorkflowConfig(
+function createRequestsFromWorkflowConfig(
   config: AgentWorkflowConfig
-): AgentTaskInput<
+): AgentRequestInput<
   Record<string, { input: StandardSchemaV1; output: StandardSchemaV1 }>,
   Record<string, StandardSchemaV1>,
   AgentSchemaPack<any, Record<string, StandardSchemaV1>, any, any, any>
 > {
   return Object.fromEntries(
-    Object.entries(config.tasks ?? {}).map(([key, task]) => [
+    Object.entries(config.requests ?? {}).map(([key, request]) => [
       key,
       {
-        kind: task.kind,
-        description: task.description,
+        mode: request.mode,
+        description: request.description,
         schemas: {
-          input: jsonSchemaToStandardSchema(task.input, `${key}.input`),
-          output: jsonSchemaToStandardSchema(task.output, `${key}.output`),
+          input: jsonSchemaToStandardSchema(request.input, `${key}.input`),
+          output: jsonSchemaToStandardSchema(request.output, `${key}.output`),
         },
         model: ({ input }) =>
-          String(evaluateExpressionValue(task.model, { input }) ?? ''),
-        system: task.system === undefined
+          String(evaluateExpressionValue(request.model, { input }) ?? ''),
+        system: request.system === undefined
           ? undefined
           : ({ input }) =>
-              evaluateExpressionValue(task.system, { input }) as string | undefined,
-        prompt: task.prompt === undefined
+              evaluateExpressionValue(request.system, { input }) as string | undefined,
+        prompt: request.prompt === undefined
           ? undefined
           : ({ input }) =>
-              evaluateExpressionValue(task.prompt, { input }) as string | undefined,
-        messages: task.messages === undefined
+              evaluateExpressionValue(request.prompt, { input }) as string | undefined,
+        messages: request.messages === undefined
           ? undefined
           : ({ input }) =>
-              evaluateExpressionValue(task.messages, { input }) as
+              evaluateExpressionValue(request.messages, { input }) as
                 | AgentMessage[]
                 | undefined,
-        tools: task.tools,
-        toolChoice: task.toolChoice as AgentToolChoice | undefined,
-        events: task.events === undefined
+        tools: request.tools,
+        toolChoice: request.toolChoice as AgentToolChoice | undefined,
+        events: request.events === undefined
           ? undefined
           : ({ input }) => {
-              const events = evaluateExpressionValue(task.events, { input });
+              const events = evaluateExpressionValue(request.events, { input });
               return Array.isArray(events)
                 ? events.filter((event): event is string => typeof event === 'string')
                 : [];
             },
-        temperature: task.temperature === undefined
+        temperature: request.temperature === undefined
           ? undefined
           : ({ input }) =>
-              evaluateExpressionValue(task.temperature, { input }) as
+              evaluateExpressionValue(request.temperature, { input }) as
                 | number
                 | undefined,
-        maxTokens: task.maxTokens === undefined
+        maxTokens: request.maxTokens === undefined
           ? undefined
           : ({ input }) =>
-              evaluateExpressionValue(task.maxTokens, { input }) as number | undefined,
-        topP: task.topP === undefined
+              evaluateExpressionValue(request.maxTokens, { input }) as number | undefined,
+        topP: request.topP === undefined
           ? undefined
           : ({ input }) =>
-              evaluateExpressionValue(task.topP, { input }) as number | undefined,
-        topK: task.topK === undefined
+              evaluateExpressionValue(request.topP, { input }) as number | undefined,
+        topK: request.topK === undefined
           ? undefined
           : ({ input }) =>
-              evaluateExpressionValue(task.topK, { input }) as number | undefined,
-        seed: task.seed === undefined
+              evaluateExpressionValue(request.topK, { input }) as number | undefined,
+        seed: request.seed === undefined
           ? undefined
           : ({ input }) =>
-              evaluateExpressionValue(task.seed, { input }) as number | undefined,
-        stopSequences: task.stopSequences === undefined
+              evaluateExpressionValue(request.seed, { input }) as number | undefined,
+        stopSequences: request.stopSequences === undefined
           ? undefined
           : ({ input }) =>
-              evaluateExpressionValue(task.stopSequences, { input }) as
+              evaluateExpressionValue(request.stopSequences, { input }) as
                 | string[]
                 | undefined,
-        metadata: task.metadata === undefined
+        metadata: request.metadata === undefined
           ? undefined
-          : ({ input }) => evaluateExpressionValue(task.metadata, { input }),
+          : ({ input }) => evaluateExpressionValue(request.metadata, { input }),
       },
     ])
-  ) as AgentTaskInput<
+  ) as AgentRequestInput<
     Record<string, { input: StandardSchemaV1; output: StandardSchemaV1 }>,
     Record<string, StandardSchemaV1>,
     AgentSchemaPack<any, Record<string, StandardSchemaV1>, any, any, any>
@@ -1792,14 +1800,14 @@ function lowerWorkflowState(stateConfig: AgentWorkflowStateConfig): Record<strin
 
 function setupAgentFromConfig(config: AgentWorkflowConfig): AgentMachine {
   const schemas = createSchemasFromWorkflowConfig(config);
-  const tasks = createTasksFromWorkflowConfig(config);
-  const taskActors = createTaskActors(schemas, tasks);
+  const requests = createRequestsFromWorkflowConfig(config);
+  const requestActors = createRequestActors(schemas, requests);
   const actors = createActorPlaceholdersFromWorkflowConfig(config);
   const agent = setupAgent({
     schemas,
     actors: {
       ...actors,
-      ...taskActors,
+      ...requestActors,
     },
   });
 
@@ -1832,21 +1840,21 @@ export namespace setupAgent {
   }
 }
 
-function createTaskActors<
+function createRequestActors<
   TEventSchemas extends Record<string, StandardSchemaV1>,
   TSchemas extends AgentSchemaPack<any, TEventSchemas, any, any, any>,
-  TTaskSchemas extends AgentTaskSchemaMap,
->(schemas: TSchemas, tasks: AgentTaskInput<TTaskSchemas, TEventSchemas, TSchemas>): TaskActors<TTaskSchemas> {
+  TRequestSchemas extends AgentRequestSchemaMap,
+>(schemas: TSchemas, requests: AgentRequestInput<TRequestSchemas, TEventSchemas, TSchemas>): RequestActors<TRequestSchemas> {
   return Object.fromEntries(
-    Object.entries(tasks).map(([key, task]) => {
+    Object.entries(requests).map(([key, request]) => {
       const logic = createTextLogic({
-        ...task,
-        kind: task.kind ?? 'generate',
-        events: task.events
+        ...request,
+        mode: request.mode ?? 'generate',
+        events: request.events
           ? ({ input }) =>
-              typeof task.events === 'function'
-                ? task.events({ input, schemas })
-                : task.events
+              typeof request.events === 'function'
+                ? request.events({ input, schemas })
+                : request.events
           : undefined,
       } as TextLogicConfig<StandardSchemaV1, StandardSchemaV1>);
 
@@ -1855,7 +1863,7 @@ function createTaskActors<
         logic,
       ];
     })
-  ) as TaskActors<TTaskSchemas>;
+  ) as RequestActors<TRequestSchemas>;
 }
 
 function normalizeAgentSchemas<
@@ -1898,13 +1906,13 @@ function createSetupAgent<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
   TEventSchemas extends Record<string, StandardSchemaV1>,
   TActors extends { [K in keyof TActors]: AnyActorLogic },
+  TRequestSchemas extends AgentRequestSchemaMap,
   TInputSchema extends StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1,
   TMetaSchema extends StandardSchemaV1,
   TActions extends Record<string, ParameterizedObject['params'] | undefined>,
   TGuards extends Record<string, ParameterizedObject['params'] | undefined>,
   TDelay extends string,
-  TTasks extends { [K in keyof TTasks]: AgentTaskLogic },
 >(
   config: SetupAgentBaseConfig<
     TContextSchema,
@@ -1915,26 +1923,34 @@ function createSetupAgent<
     TMetaSchema,
     TActions,
     TGuards,
-    TDelay
-  >,
-  tasks: TTasks
+    TDelay,
+    TRequestSchemas
+  >
 ): SetupAgentResult<
   TContextSchema,
   TEventSchemas,
   TActors,
+  TRequestSchemas,
   TInputSchema,
   TOutputSchema,
   TMetaSchema,
   TActions,
   TGuards,
-  TDelay,
-  TTasks
+  TDelay
 > {
   const schemas = normalizeAgentSchemas(config);
+  const requestActors = createRequestActors(
+    schemas,
+    (config.requests ?? {}) as AgentRequestInput<
+      TRequestSchemas,
+      TEventSchemas,
+      typeof schemas
+    >
+  );
   const base = setup<
     ContextOf<TContextSchema>,
     EventsOf<TEventSchemas>,
-    SetupActors<AgentSetupActors<TActors>>,
+    SetupActors<AgentSetupActors<AgentAllActors<TActors, TRequestSchemas>>>,
     {},
     TActions,
     TGuards,
@@ -1956,6 +1972,7 @@ function createSetupAgent<
       ...builtinTextActors,
       [USER_INPUT_ACTOR]: userInputActor,
       ...config.actors,
+      ...requestActors,
     } as AgentSetupConfigOptions<
       TContextSchema,
       TEventSchemas,
@@ -1965,7 +1982,8 @@ function createSetupAgent<
       TMetaSchema,
       TActions,
       TGuards,
-      TDelay
+      TDelay,
+      TRequestSchemas
     >['actors'],
     actions: config.actions,
     guards: config.guards,
@@ -1980,41 +1998,25 @@ function createSetupAgent<
         actors: {
           ...builtinTextActors,
           ...config.actors,
-          ...tasks,
+          ...requestActors,
         },
       });
     },
     schemas,
-    tasks,
+    requests: requestActors,
     appendMessages(resolve: Parameters<typeof appendMessages>[0]) {
       return appendMessages(resolve as never);
-    },
-    withTasks<const TNextTaskSchemas extends AgentTaskSchemaMap>(
-      nextTasks: AgentTaskInput<TNextTaskSchemas, TEventSchemas, typeof schemas>
-    ) {
-      const taskActors = createTaskActors(schemas, nextTasks) as TaskActors<TNextTaskSchemas>;
-      return createSetupAgent({
-        ...config,
-        schemas,
-        actors: {
-          ...config.actors,
-          ...taskActors,
-        } as TActors & TaskActors<TNextTaskSchemas>,
-      }, {
-        ...tasks,
-        ...taskActors,
-      } as TTasks & TaskActors<TNextTaskSchemas>);
     },
   }) as unknown as SetupAgentResult<
     TContextSchema,
     TEventSchemas,
     TActors,
+    TRequestSchemas,
     TInputSchema,
     TOutputSchema,
     TMetaSchema,
     TActions,
     TGuards,
-    TDelay,
-    TTasks
+    TDelay
   >;
 }

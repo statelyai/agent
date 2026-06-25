@@ -4,17 +4,18 @@ Stately Agent is the state machine authoring layer for AI agents. Author your AI
 
 The package owns these first-class authoring surfaces:
 
+- `setupAgent({ requests })`: schema-bound, event-typed model request definitions.
 - `createTextLogic(...)`: reusable, schema-typed model-call actors.
 - `agent.generateText` / `agent.streamText`: built-in model-call actor sources auto-provided by `setupAgent(...)`.
 - `setupAgent.fromConfig(...)`: static workflow config lowered to the same agent machine shape.
 
 Use `setupAgent(...)` for schema-first control flow. Use normal host code for runtime execution. Stately Agent adds the batteries: reusable text logic, message helpers, examples, retained schemas, and visualization/export affordances.
 
-You can still call the Vercel AI SDK, LangChain, Workers AI, or any other model/tool runtime yourself. The machine only declares behavior; hosts can either execute effects from pure XState transitions or provide actors with `machine.provide({ actors })`. That keeps runtime transparency while making the workflow typed, inspectable, and visualizable.
+You can still call the Vercel AI SDK, LangChain, Workers AI, or any other model/tool runtime yourself. The machine only declares behavior; hosts can either execute requests from pure XState transitions or provide actors with `machine.provide({ actors })`. That keeps runtime transparency while making the workflow typed, inspectable, and visualizable.
 
 Choose this over LangGraph when you want agent workflows to be explicit state machines instead of framework-owned graphs: same workflow shapes, strong TypeScript for machine context/events/actors, first-class XState snapshots/guards, visualization by default, and no required runtime backend. Choose it over handrolled workflows when the control flow is important enough to inspect, persist, replay, test, and diagram.
 
-For SDK integration, invoke the built-in `agent.generateText` / `agent.streamText` actors directly or register reusable `createTextLogic(...)` actors. Your host reads returned tasks and calls Vercel AI SDK, Cloudflare Workers AI, LangChain, local models, or custom code. Reusable text actors can also be tested standalone with `logic.request(input)` and `logic.execute(input, executors)`. See [`docs/host-actors.md`](/Users/davidkpiano/Code/agent/docs/host-actors.md).
+For SDK integration, define request configs under `setupAgent({ requests })`, invoke the built-in `agent.generateText` / `agent.streamText` actors directly, or register reusable `createTextLogic(...)` actors. Your host reads returned requests and calls Vercel AI SDK, Cloudflare Workers AI, LangChain, local models, or custom code. Setup-bound requests can be tested standalone with `agent.requests.name.request(input)` and `agent.requests.name.execute(input, executors)`. Reusable text actors can also be tested standalone with `logic.request(input)` and `logic.execute(input, executors)`. See [`docs/host-actors.md`](/Users/davidkpiano/Code/agent/docs/host-actors.md).
 
 ## Agent Machines
 
@@ -43,7 +44,19 @@ const schemas = createAgentSchemas({
   input: inputSchema,
   output: answerSchema,
 });
-const agent = setupAgent({ schemas });
+const agent = setupAgent({
+  schemas,
+  requests: {
+    answerQuestion: {
+      schemas: {
+        input: z.object({ prompt: z.string() }),
+        output: answerSchema,
+      },
+      model: 'writer',
+      prompt: ({ input }) => input.prompt,
+    },
+  },
+});
 
 const machine = agent.createMachine({
   context: ({ input }) => ({ prompt: input.prompt, answer: null }),
@@ -52,12 +65,8 @@ const machine = agent.createMachine({
     answering: {
       invoke: {
         id: 'answer',
-        src: 'agent.generateText',
-        input: ({ context }) => ({
-          model: 'writer',
-          prompt: context.prompt,
-          outputSchema: answerSchema,
-        }),
+        src: 'answerQuestion',
+        input: ({ context }) => ({ prompt: context.prompt }),
         onDone: {
           target: 'done',
           actions: assign({
@@ -73,19 +82,28 @@ const machine = agent.createMachine({
 let step = machine.initial({ prompt: 'Why XState?' });
 
 while (!step.done) {
-  for (const task of step.tasks) {
-    const result = await machine.execute(task, {
+  for (const request of step.requests) {
+    const result = await machine.execute(request, {
       generateText: (request) => generateText(request), // any SDK/framework
       streamText: (request) => streamText(request),
     });
-    step = machine.resolve(step, task, result);
+    step = machine.resolve(step, request, result);
   }
 }
 ```
 
-This is normal XState underneath: use `machine.initial(...)`, `machine.transition(...)`, and `machine.resolve(...)` for the blessed step loop; drop down to pure `initialTransition(...)` / `transitionResult(...)`; or use `createActor(...)`, snapshots, persistence, guards, actions, and host-provided actors. `setupAgent(...)` adds schema-derived concrete types, retained schemas, built-in text actor sources, reusable text actors, `step.tasks`, `machine.getTasks(...)`, and `machine.execute(...)`.
+Test a single setup-bound request without running the machine:
 
-When a task declares `events`, `machine.getTasks(...)` returns `event.<TYPE>` tools for those events only if they are currently legal from the snapshot. That lets a model choose legal machine events, such as moves in a game, without exposing every transition.
+```ts
+await agent.requests.answerQuestion.execute(
+  { prompt: 'Why XState?' },
+  { generateText }
+);
+```
+
+This is normal XState underneath: use `machine.initial(...)`, `machine.transition(...)`, and `machine.resolve(...)` for the blessed step loop; drop down to pure `initialTransition(...)` / `transitionResult(...)`; or use `createActor(...)`, snapshots, persistence, guards, actions, and host-provided actors. `setupAgent(...)` adds schema-derived concrete types, retained schemas, built-in text actor sources, reusable text actors, `step.requests`, `machine.getRequests(...)`, and `machine.execute(...)`.
+
+When a request declares `events`, `machine.getRequests(...)` returns `event.<TYPE>` tools for those events only if they are currently legal from the snapshot. That lets a model choose legal machine events, such as moves in a game, without exposing every transition.
 
 ## Static Workflow Definitions
 
@@ -97,10 +115,10 @@ The package also publishes a JSON Schema for static, declarative agent workflow 
 import workflowSchema from '@statelyai/agent/agent-workflow.json';
 ```
 
-Use `setupAgent.fromConfig(...)` to lower static definitions to the same agent machine shape as TS-first `setupAgent(...)` authoring. Static definitions separate model tasks from XState-like control flow:
+Use `setupAgent.fromConfig(...)` to lower static definitions to the same agent machine shape as TS-first `setupAgent(...)` authoring. Static definitions separate model requests from XState-like control flow:
 
 ```yaml
-tasks:
+requests:
   answerQuestion:
     model: openai/gpt-4.1
     system: "You answer for {{ context.userName }}."
@@ -185,6 +203,6 @@ Burr parity is tracked in [`docs/burr-parity.md`](/Users/davidkpiano/Code/agent/
 
 ## Runtime
 
-Runtime is normal XState. Use the agent step helpers when you want the package to collect tasks for you, pure `initialTransition(...)` / `transitionResult(...)` when a framework wants to own every transition detail, or `createActor(...)`, `toPromise(...)`, snapshots, persisted snapshots, `machine.provide({ actors })`, and your framework transport of choice. Model/tool execution stays under your control.
+Runtime is normal XState. Use the agent step helpers when you want the package to collect requests for you, pure `initialTransition(...)` / `transitionResult(...)` when a framework wants to own every transition detail, or `createActor(...)`, `toPromise(...)`, snapshots, persisted snapshots, `machine.provide({ actors })`, and your framework transport of choice. Model/tool execution stays under your control.
 
 **Read the documentation: [stately.ai/docs/agents](https://stately.ai/docs/agents)**

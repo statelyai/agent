@@ -26,7 +26,7 @@ As of June 18, 2026, the upstream Burr examples directory includes examples such
 | Burr example pattern | Status | Agent equivalent |
 | --- | --- | --- |
 | Hello world counter / guarded loop | Covered | Explicit XState state, guarded loop, and final output in [`src/burr-equivalents/raw-xstate.test.ts`](/Users/davidkpiano/Code/agent/src/burr-equivalents/raw-xstate.test.ts) |
-| Conversational RAG with memory in state | Covered | Retrieval as typed host actor, memory in machine context, answer as named task logic |
+| Conversational RAG with memory in state | Covered | Retrieval as typed host actor, memory in machine context, answer as named request logic |
 | Streaming overview router | Covered | Safety check, mode routing, streaming side channel, final text transition |
 | Tool calling | Covered | Tool selection as structured text logic, local tool actors, final formatter text logic |
 | Typed state / structured output | Covered | Schema-derived context/output plus named structured text logic |

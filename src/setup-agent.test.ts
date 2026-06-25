@@ -1,23 +1,30 @@
 import { describe, expect, test } from 'vitest';
 import { z } from 'zod';
-import { assign, createActor, fromPromise, initialTransition, waitFor } from 'xstate';
+import {
+  assign,
+  createActor,
+  fromPromise,
+  initialTransition,
+  waitFor,
+} from 'xstate';
 import {
   createAgentSchemas,
   createTextLogic,
   getAvailableEvents,
-  getAgentEffects,
+  getAgentRequests,
   getEventTools,
   messagesSchema,
   parseOutput,
   setupAgent,
   transitionResult,
   userMessage,
-  type AgentTextInput,
+  type AgentTextRequest,
   type AgentTools,
+  type AgentEventDescriptor,
 } from './index.js';
 
 describe('setupAgent', () => {
-  test('withTasks creates typed task actors from schemas', () => {
+  test('setupAgent accepts schema-bound request configs', async () => {
     const schemas = createAgentSchemas({
       context: z.object({
         prompt: z.string(),
@@ -31,79 +38,82 @@ describe('setupAgent', () => {
       },
     });
 
-    const agent = setupAgent({ schemas }).withTasks({
-      draftEmail: {
-        kind: 'generate',
-        schemas: {
-          input: z.object({ prompt: z.string() }),
-          output: z.object({ body: z.string() }),
+    const agent = setupAgent({
+      schemas,
+      requests: {
+        draftEmail: {
+          mode: 'generate',
+          schemas: {
+            input: z.object({ prompt: z.string() }),
+            output: z.object({ body: z.string() }),
+          },
+          model: 'test-model',
+          prompt: ({ input }) => input.prompt,
+          events: ({ input, schemas }) => {
+            const prompt: string = input.prompt;
+            schemas.events.READY_TO_DRAFT;
+            // @ts-expect-error request events input is typed from schemas.input
+            input.body;
+            return prompt.length > 0 ? ['READY_TO_DRAFT'] : [];
+          },
         },
-        model: 'test-model',
-        prompt: ({ input }) => input.prompt,
-        events: ({ input, schemas }) => {
-          const prompt: string = input.prompt;
-          schemas.events.READY_TO_DRAFT;
-          // @ts-expect-error task events input is typed from schemas.input
-          input.body;
-          return prompt.length > 0 ? ['READY_TO_DRAFT'] : [];
+        streamRevision: {
+          mode: 'stream',
+          schemas: {
+            input: z.object({ body: z.string() }),
+            output: z.object({ body: z.string() }),
+          },
+          model: 'test-model',
+          prompt: ({ input }) => input.body,
         },
-      },
-      streamRevision: {
-        kind: 'stream',
-        schemas: {
-          input: z.object({ body: z.string() }),
-          output: z.object({ body: z.string() }),
-        },
-        model: 'test-model',
-        prompt: ({ input }) => input.body,
-      },
-    });
-
-    expect(agent.tasks.draftEmail.taskKind).toBe('generate');
-    expect(agent.tasks.draftEmail.request({ prompt: 'Draft it.' })).toEqual(
-      expect.objectContaining({
-        model: 'test-model',
-        prompt: 'Draft it.',
-        eventTypes: ['READY_TO_DRAFT'],
-      })
-    );
-
-    setupAgent({ schemas }).withTasks({
-      badKind: {
-        // @ts-expect-error task kind is constrained
-        kind: 'foo',
-        schemas: {
-          input: z.object({ prompt: z.string() }),
-          output: z.object({ body: z.string() }),
-        },
-        model: 'test-model',
-        prompt: ({ input }) => input.prompt,
       },
     });
 
-    setupAgent({ schemas }).withTasks({
-      badEvent: {
-        schemas: {
-          input: z.object({ prompt: z.string() }),
-          output: z.object({ body: z.string() }),
+    setupAgent({
+      schemas,
+      requests: {
+        badKind: {
+          // @ts-expect-error request mode is constrained
+          mode: 'foo',
+          schemas: {
+            input: z.object({ prompt: z.string() }),
+            output: z.object({ body: z.string() }),
+          },
+          model: 'test-model',
+          prompt: ({ input }) => input.prompt,
         },
-        model: 'test-model',
-        prompt: ({ input }) => input.prompt,
-        // @ts-expect-error events are keyed by machine event schemas
-        events: ['DRAT_EMAIL_TYPO'],
       },
     });
 
-    setupAgent({ schemas }).withTasks({
-      badEventTypes: {
-        schemas: {
-          input: z.object({ prompt: z.string() }),
-          output: z.object({ body: z.string() }),
+    setupAgent({
+      schemas,
+      requests: {
+        badEvent: {
+          schemas: {
+            input: z.object({ prompt: z.string() }),
+            output: z.object({ body: z.string() }),
+          },
+          model: 'test-model',
+          prompt: ({ input }) => input.prompt,
+          // @ts-expect-error events are keyed by machine event schemas
+          events: ['DRAT_EMAIL_TYPO'],
         },
-        model: 'test-model',
-        prompt: ({ input }) => input.prompt,
-        // @ts-expect-error use task events, not raw text logic eventTypes
-        eventTypes: ['READY_TO_DRAFT'],
+      },
+    });
+
+    setupAgent({
+      schemas,
+      requests: {
+        badEventTypes: {
+          schemas: {
+            input: z.object({ prompt: z.string() }),
+            output: z.object({ body: z.string() }),
+          },
+          model: 'test-model',
+          prompt: ({ input }) => input.prompt,
+          // @ts-expect-error use request events, not raw text logic eventTypes
+          eventTypes: ['READY_TO_DRAFT'],
+        },
       },
     });
 
@@ -112,7 +122,7 @@ describe('setupAgent', () => {
       initial: 'drafting',
       states: {
         drafting: {
-          // @ts-expect-error task source ids are strongly typed
+          // @ts-expect-error request source ids are strongly typed
           invoke: {
             src: 'dratemaltypo',
             input: { prompt: 'Draft it.' },
@@ -128,7 +138,7 @@ describe('setupAgent', () => {
         drafting: {
           invoke: {
             src: 'draftEmail',
-            // @ts-expect-error task input is schema-typed
+            // @ts-expect-error request input is schema-typed
             input: { whoopsanything: 42 },
           },
         },
@@ -162,44 +172,66 @@ describe('setupAgent', () => {
     const [_snapshot, actions] = initialTransition(machine, {
       prompt: 'Draft it.',
     });
-    const [effect] = getAgentEffects(actions, {
-      actors: agent.tasks,
-    });
+    const [request] = machine.getRequests(actions);
 
-    expect(effect).toEqual(
+    expect(agent.requests.draftEmail.mode).toBe('generate');
+    expect(agent.requests.draftEmail.request({ prompt: 'Draft it.' })).toEqual(
       expect.objectContaining({
-        kind: 'generate',
-        input: expect.objectContaining({ eventTypes: ['READY_TO_DRAFT'] }),
-      })
+        model: 'test-model',
+        prompt: 'Draft it.',
+        eventTypes: ['READY_TO_DRAFT'],
+      }),
     );
 
-    expect(machine.getTasks(actions)).toEqual([effect]);
+    expect(request).toEqual(
+      expect.objectContaining({
+        mode: 'generate',
+        input: expect.objectContaining({ eventTypes: ['READY_TO_DRAFT'] }),
+      }),
+    );
+
+    expect(machine.getRequests(actions)).toEqual([request]);
+
+    await expect(
+      agent.requests.draftEmail.execute(
+        { prompt: 'Draft it.' },
+        {
+          generateText: async (request) => {
+            expect(request.prompt).toBe('Draft it.');
+            expect(request.eventTypes).toEqual(['READY_TO_DRAFT']);
+            return { output: { body: 'Standalone body.' } };
+          },
+        },
+      ),
+    ).resolves.toEqual({ body: 'Standalone body.' });
   });
 
-  test('agent machines execute generated and streamed tasks with host callbacks', async () => {
+  test('agent machines execute generated and streamed requests with host callbacks', async () => {
     const schemas = createAgentSchemas({
       context: z.object({ prompt: z.string(), body: z.string().nullable() }),
       input: z.object({ prompt: z.string() }),
       output: z.object({ body: z.string() }),
     });
-
-    const agent = setupAgent({ schemas }).withTasks({
-      draftEmail: {
-        schemas: {
-          input: z.object({ prompt: z.string() }),
-          output: z.object({ body: z.string() }),
+    const agent = setupAgent({
+      schemas,
+      requests: {
+        draftEmail: {
+          schemas: {
+            input: z.object({ prompt: z.string() }),
+            output: z.object({ body: z.string() }),
+          },
+          model: 'test-model',
+          prompt: ({ input }) => input.prompt,
         },
-        model: 'test-model',
-        prompt: ({ input }) => input.prompt,
-      },
-      streamRevision: {
-        kind: 'stream',
-        schemas: {
-          input: z.object({ body: z.string() }),
-          output: z.string(),
+        streamRevision: {
+          mode: 'stream',
+          schemas: {
+            input: z.object({ body: z.string() }),
+            output: z.string(),
+          },
+          model: 'test-model',
+          prompt: ({ input }) => input.body,
         },
-        model: 'test-model',
-        prompt: ({ input }) => input.body,
       },
     });
 
@@ -218,24 +250,26 @@ describe('setupAgent', () => {
     });
     const [_generateSnapshot, generateActions] = initialTransition(
       generateMachine,
-      { prompt: 'Draft it.' }
+      { prompt: 'Draft it.' },
     );
-    const [generateTask] = generateMachine.getTasks(generateActions);
+    const [generateTask] = generateMachine.getRequests(generateActions);
 
     await expect(
       generateMachine.execute(generateTask!, {
-        generateText: async (request: AgentTextInput & { tools: AgentTools }) => {
+        generateText: async (
+          request: AgentTextRequest & { tools: AgentTools },
+        ) => {
           expect(request).toEqual(
             expect.objectContaining({
               model: 'test-model',
               prompt: 'Draft it.',
-              outputSchema: agent.tasks.draftEmail.schemas.output,
+              outputSchema: agent.requests.draftEmail.schemas.output,
               tools: {},
-            })
+            }),
           );
           return { output: { body: 'Generated body.' } };
         },
-      })
+      }),
     ).resolves.toEqual({ body: 'Generated body.' });
 
     const streamMachine = agent.createMachine({
@@ -254,18 +288,20 @@ describe('setupAgent', () => {
     const [_streamSnapshot, streamActions] = initialTransition(streamMachine, {
       prompt: 'Revise it.',
     });
-    const [streamTask] = streamMachine.getTasks(streamActions);
+    const [streamTask] = streamMachine.getRequests(streamActions);
 
     await expect(
       streamMachine.execute(streamTask!, {
         generateText: async () => {
-          throw new Error('streamText should be used for stream tasks');
+          throw new Error('streamText should be used for stream requests');
         },
-        streamText: async (request: AgentTextInput & { tools: AgentTools }) => {
+        streamText: async (
+          request: AgentTextRequest & { tools: AgentTools },
+        ) => {
           expect(request.prompt).toBe('Draft body.');
           return { text: Promise.resolve('Streamed final text.') };
         },
-      })
+      }),
     ).resolves.toBe('Streamed final text.');
   });
 
@@ -305,7 +341,8 @@ describe('setupAgent', () => {
             onDone: {
               target: 'streaming',
               actions: assign({
-                answer: ({ event }) => parseOutput(answerSchema, event.output).answer,
+                answer: ({ event }) =>
+                  parseOutput(answerSchema, event.output).answer,
               }),
             },
           },
@@ -337,9 +374,9 @@ describe('setupAgent', () => {
     });
 
     let step = machine.initial({ prompt: 'Why machines?' });
-    expect(step.tasks).toEqual([
+    expect(step.requests).toEqual([
       expect.objectContaining({
-        kind: 'generate',
+        mode: 'generate',
         id: 'answer',
         src: 'agent.generateText',
         input: expect.objectContaining({
@@ -351,17 +388,19 @@ describe('setupAgent', () => {
       }),
     ]);
 
-    const answer = await machine.execute(step.tasks[0]!, {
-      generateText: async (request: AgentTextInput & { tools: AgentTools }) => {
+    const answer = await machine.execute(step.requests[0]!, {
+      generateText: async (
+        request: AgentTextRequest & { tools: AgentTools },
+      ) => {
         expect(request.tools).toEqual({});
         return { output: { answer: `Answered ${request.prompt}` } };
       },
     });
-    step = machine.resolve(step, step.tasks[0]!, answer);
+    step = machine.resolve(step, step.requests[0]!, answer);
 
-    expect(step.tasks).toEqual([
+    expect(step.requests).toEqual([
       expect.objectContaining({
-        kind: 'stream',
+        mode: 'stream',
         id: 'stream',
         src: 'agent.streamText',
         input: expect.objectContaining({
@@ -371,15 +410,17 @@ describe('setupAgent', () => {
       }),
     ]);
 
-    const streamed = await machine.execute(step.tasks[0]!, {
+    const streamed = await machine.execute(step.requests[0]!, {
       generateText: async () => {
-        throw new Error('generateText should not be used for stream tasks');
+        throw new Error('generateText should not be used for stream requests');
       },
-      streamText: async (request: AgentTextInput & { tools: AgentTools }) => ({
+      streamText: async (
+        request: AgentTextRequest & { tools: AgentTools },
+      ) => ({
         text: `Streamed ${request.prompt}`,
       }),
     });
-    step = machine.resolve(step, step.tasks[0]!, streamed);
+    step = machine.resolve(step, step.requests[0]!, streamed);
 
     expect(step.done).toBe(true);
     expect(step.snapshot.output).toEqual({
@@ -392,14 +433,15 @@ describe('setupAgent', () => {
     const agent = setupAgent({
       context: z.object({ prompt: z.string() }),
       input: z.object({ prompt: z.string() }),
-    }).withTasks({
-      answer: {
-        schemas: {
-          input: z.object({ prompt: z.string() }),
-          output: z.object({ answer: z.string() }),
+      requests: {
+        answer: {
+          schemas: {
+            input: z.object({ prompt: z.string() }),
+            output: z.object({ answer: z.string() }),
+          },
+          model: 'test-model',
+          prompt: ({ input }) => input.prompt,
         },
-        model: 'test-model',
-        prompt: ({ input }) => input.prompt,
       },
     });
 
@@ -419,23 +461,24 @@ describe('setupAgent', () => {
     const provided = machine.provide({ actors: {} });
     const step = provided.initial({ prompt: 'hello' });
 
-    expect(provided.getTasks(step.actions, step.snapshot)).toHaveLength(1);
+    expect(provided.getRequests(step.actions, step.snapshot)).toHaveLength(1);
     expect(typeof provided.execute).toBe('function');
     expect(typeof provided.resolve).toBe('function');
   });
 
-  test('agent machine step execution validates task output schemas', async () => {
+  test('agent machine step execution validates request output schemas', async () => {
     const agent = setupAgent({
       context: z.object({ prompt: z.string() }),
       input: z.object({ prompt: z.string() }),
-    }).withTasks({
-      answer: {
-        schemas: {
-          input: z.object({ prompt: z.string() }),
-          output: z.object({ answer: z.string() }),
+      requests: {
+        answer: {
+          schemas: {
+            input: z.object({ prompt: z.string() }),
+            output: z.object({ answer: z.string() }),
+          },
+          model: 'test-model',
+          prompt: ({ input }) => input.prompt,
         },
-        model: 'test-model',
-        prompt: ({ input }) => input.prompt,
       },
     });
 
@@ -455,9 +498,9 @@ describe('setupAgent', () => {
     const step = machine.initial({ prompt: 'hello' });
 
     await expect(
-      machine.execute(step.tasks[0]!, {
+      machine.execute(step.requests[0]!, {
         generateText: () => ({ answer: 123 }),
-      })
+      }),
     ).rejects.toThrow('expected string');
   });
 
@@ -538,7 +581,6 @@ describe('setupAgent', () => {
         done: { type: 'final' },
       },
     });
-
   });
 
   test('appendMessages creates a typed action for message context', async () => {
@@ -580,7 +622,7 @@ describe('setupAgent', () => {
 
   test('authors reusable text actors with typed input and output', async () => {
     const getSummary = createTextLogic({
-      kind: 'generate',
+      mode: 'generate',
       schemas: {
         input: z.object({ article: z.string() }),
         output: z.object({ summary: z.string() }),
@@ -588,7 +630,7 @@ describe('setupAgent', () => {
       model: 'test-model',
       system: 'Summarize articles.',
       prompt: ({ input }) => `Summarize:\n${input.article}`,
-      temperature: ({ input }) => input.article.length > 10 ? 0.2 : 0,
+      temperature: ({ input }) => (input.article.length > 10 ? 0.2 : 0),
     });
     const agent = setupAgent({
       context: z.object({
@@ -609,7 +651,7 @@ describe('setupAgent', () => {
         prompt: 'Summarize:\nA long article.',
         outputSchema: getSummary.schemas.output,
         temperature: 0.2,
-      })
+      }),
     );
 
     agent.createMachine({
@@ -671,14 +713,14 @@ describe('setupAgent', () => {
     let [snapshot, actions] = initialTransition(machine, {
       article: 'State machines make agents inspectable.',
     });
-    const [effect] = getAgentEffects(actions, {
+    const [request] = getAgentRequests(actions, {
       actors: { getSummary },
     });
 
-    expect(effect).toEqual({
+    expect(request).toEqual({
       id: 'getSummary',
       src: 'getSummary',
-      kind: 'generate',
+      mode: 'generate',
       input: expect.objectContaining({
         model: 'test-model',
         system: 'Summarize articles.',
@@ -689,25 +731,32 @@ describe('setupAgent', () => {
       events: [],
     });
 
-    [snapshot] = transitionResult(machine, snapshot, effect!, {
+    [snapshot] = transitionResult(machine, snapshot, request!, {
       summary: 'Agents become inspectable.',
     });
 
     expect(snapshot.status).toBe('done');
     expect(snapshot.output).toEqual({ summary: 'Agents become inspectable.' });
 
-    await expect(getSummary.execute({ article: 'A long article.' }, {
-      generateText: async (request: AgentTextInput & { tools: AgentTools }) => {
-        expect(request.prompt).toBe('Summarize:\nA long article.');
-        expect(request.tools).toEqual({});
-        return { output: { summary: 'Standalone summary.' } };
-      },
-    })).resolves.toEqual({ summary: 'Standalone summary.' });
+    await expect(
+      getSummary.execute(
+        { article: 'A long article.' },
+        {
+          generateText: async (
+            request: AgentTextRequest & { tools: AgentTools },
+          ) => {
+            expect(request.prompt).toBe('Summarize:\nA long article.');
+            expect(request.tools).toEqual({});
+            return { output: { summary: 'Standalone summary.' } };
+          },
+        },
+      ),
+    ).resolves.toEqual({ summary: 'Standalone summary.' });
   });
 
   test('reusable stream text actors execute with streamText', async () => {
     const streamSummary = createTextLogic({
-      kind: 'stream',
+      mode: 'stream',
       schemas: {
         input: z.object({ article: z.string() }),
         output: z.string(),
@@ -735,30 +784,43 @@ describe('setupAgent', () => {
     });
     const step = machine.initial({ article: 'State machines.' });
 
-    expect(step.tasks[0]).toEqual(expect.objectContaining({
-      kind: 'stream',
-      src: 'streamSummary',
-    }));
-    await expect(machine.execute(step.tasks[0]!, {
-      generateText: async () => {
-        throw new Error('generateText should not be used');
-      },
-      streamText: async (request: AgentTextInput & { tools: AgentTools }) => {
-        expect(request.prompt).toBe('Stream:\nState machines.');
-        return { text: 'streamed summary' };
-      },
-    })).resolves.toBe('streamed summary');
+    expect(step.requests[0]).toEqual(
+      expect.objectContaining({
+        mode: 'stream',
+        src: 'streamSummary',
+      }),
+    );
+    await expect(
+      machine.execute(step.requests[0]!, {
+        generateText: async () => {
+          throw new Error('generateText should not be used');
+        },
+        streamText: async (
+          request: AgentTextRequest & { tools: AgentTools },
+        ) => {
+          expect(request.prompt).toBe('Stream:\nState machines.');
+          return { text: 'streamed summary' };
+        },
+      }),
+    ).resolves.toBe('streamed summary');
 
-    await expect(streamSummary.execute({ article: 'State machines.' }, {
-      generateText: async () => {
-        throw new Error('generateText should not be used');
-      },
-      streamText: async (request: AgentTextInput & { tools: AgentTools }) => {
-        expect(request.prompt).toBe('Stream:\nState machines.');
-        expect(request.tools).toEqual({});
-        return { text: 'standalone stream' };
-      },
-    })).resolves.toBe('standalone stream');
+    await expect(
+      streamSummary.execute(
+        { article: 'State machines.' },
+        {
+          generateText: async () => {
+            throw new Error('generateText should not be used');
+          },
+          streamText: async (
+            request: AgentTextRequest & { tools: AgentTools },
+          ) => {
+            expect(request.prompt).toBe('Stream:\nState machines.');
+            expect(request.tools).toEqual({});
+            return { text: 'standalone stream' };
+          },
+        },
+      ),
+    ).resolves.toBe('standalone stream');
   });
 
   test('named text logic can optionally execute as a promise actor', async () => {
@@ -776,7 +838,7 @@ describe('setupAgent', () => {
         return {
           answer: `${request.model}:${input.question}`,
         };
-      }
+      },
     );
 
     const agent = setupAgent({
@@ -833,7 +895,7 @@ describe('setupAgent', () => {
         model: 'test-model',
         prompt: ({ input }) => input.question,
       },
-      async () => ({ nope: true }) as unknown as { answer: string }
+      async () => ({ nope: true }) as unknown as { answer: string },
     );
 
     const agent = setupAgent({
@@ -882,7 +944,6 @@ describe('setupAgent', () => {
       subject: z.string(),
       body: z.string(),
     });
-
     const agent = setupAgent({
       context: z.object({
         prompt: z.string(),
@@ -893,21 +954,22 @@ describe('setupAgent', () => {
       events: {
         RETRY: z.object({ prompt: z.string() }),
       },
-    }).withTasks({
-      draftEmail: {
-        schemas: {
-          input: z.object({ prompt: z.string() }),
-          output: draftSchema,
+      requests: {
+        draftEmail: {
+          schemas: {
+            input: z.object({ prompt: z.string() }),
+            output: draftSchema,
+          },
+          model: 'test-model',
+          prompt: ({ input }) => input.prompt,
+          metadata: ({ input }) => ({
+            temperature: input.prompt.length > 0 ? 0.2 : 0,
+            traceId: `draft:${input.prompt}`,
+          }),
         },
-        model: 'test-model',
-        prompt: ({ input }) => input.prompt,
-        metadata: ({ input }) => ({
-          temperature: input.prompt.length > 0 ? 0.2 : 0,
-          traceId: `draft:${input.prompt}`,
-        }),
       },
     });
-    const { draftEmail } = agent.tasks;
+    const { draftEmail } = agent.requests;
 
     agent.createMachine({
       initial: 'drafting',
@@ -959,22 +1021,22 @@ describe('setupAgent', () => {
         },
         done: {
           type: 'final',
-          output: ({ context }) =>
-            context.draft ?? { subject: '', body: '' },
+          output: ({ context }) => context.draft ?? { subject: '', body: '' },
         },
       },
     });
 
-    const calls: AgentTextInput<{ temperature: number; traceId: string }>[] = [];
+    const calls: AgentTextRequest<{ temperature: number; traceId: string }>[] =
+      [];
     const actor = createActor(
       machine.provide({
         actors: {
           draftEmail: draftEmail.withExecutor(async ({ request }) => {
             calls.push(
-              request as AgentTextInput<{
+              request as AgentTextRequest<{
                 temperature: number;
                 traceId: string;
-              }>
+              }>,
             );
             return {
               subject: `Re: ${request.prompt}`,
@@ -983,7 +1045,7 @@ describe('setupAgent', () => {
           }),
         },
       }),
-      { input: { prompt: 'launch note' } }
+      { input: { prompt: 'launch note' } },
     );
 
     actor.start();
@@ -1004,7 +1066,7 @@ describe('setupAgent', () => {
     ]);
   });
 
-  test('extracts agent effects from pure XState transitions', async () => {
+  test('extracts agent requests from pure XState transitions', async () => {
     const answerSchema = z.object({ answer: z.string() });
     const agent = setupAgent({
       context: z.object({
@@ -1013,18 +1075,19 @@ describe('setupAgent', () => {
       }),
       input: z.object({ prompt: z.string() }),
       output: z.object({ answer: z.string() }),
-    }).withTasks({
-      answerQuestion: {
-        schemas: {
-          input: z.object({ prompt: z.string() }),
-          output: answerSchema,
+      requests: {
+        answerQuestion: {
+          schemas: {
+            input: z.object({ prompt: z.string() }),
+            output: answerSchema,
+          },
+          model: 'test-model',
+          prompt: ({ input }) => input.prompt,
+          temperature: 0.2,
         },
-        model: 'test-model',
-        prompt: ({ input }) => input.prompt,
-        temperature: 0.2,
       },
     });
-    const { answerQuestion } = agent.tasks;
+    const { answerQuestion } = agent.requests;
 
     const machine = agent.createMachine({
       id: 'pure-agent-loop',
@@ -1054,14 +1117,12 @@ describe('setupAgent', () => {
     let [snapshot, actions] = initialTransition(machine, {
       prompt: 'why state machines?',
     });
-    const [effect] = getAgentEffects(actions, {
-      actors: agent.tasks,
-    });
+    const [request] = machine.getRequests(actions);
 
-    expect(effect).toEqual({
+    expect(request).toEqual({
       id: 'answer',
       src: 'answerQuestion',
-      kind: 'generate',
+      mode: 'generate',
       input: expect.objectContaining({
         model: 'test-model',
         prompt: 'why state machines?',
@@ -1072,11 +1133,11 @@ describe('setupAgent', () => {
       events: [],
     });
 
-    [snapshot, actions] = transitionResult(machine, snapshot, effect!, {
+    [snapshot, actions] = transitionResult(machine, snapshot, request!, {
       answer: 'Because the workflow matters.',
     });
 
-    expect(getAgentEffects(actions)).toEqual([]);
+    expect(getAgentRequests(actions)).toEqual([]);
     expect(snapshot.status).toBe('done');
     expect(snapshot.output).toEqual({
       answer: 'Because the workflow matters.',
@@ -1086,22 +1147,22 @@ describe('setupAgent', () => {
       prompt: 'why agent machines?',
     });
     expect(step.done).toBe(false);
-    expect(step.tasks).toHaveLength(1);
-    expect(step.tasks[0]).toEqual(
+    expect(step.requests).toHaveLength(1);
+    expect(step.requests[0]).toEqual(
       expect.objectContaining({
         id: 'answer',
         src: 'answerQuestion',
-      })
+      }),
     );
 
-    const output = await machine.execute(step.tasks[0]!, {
-      generateText: (request: AgentTextInput & { tools: AgentTools }) => ({
+    const output = await machine.execute(step.requests[0]!, {
+      generateText: (request: AgentTextRequest & { tools: AgentTools }) => ({
         object: {
           answer: `Answered: ${request.prompt}`,
         },
       }),
     });
-    step = machine.resolve(step, step.tasks[0]!, output);
+    step = machine.resolve(step, step.requests[0]!, output);
 
     expect(step.done).toBe(true);
     expect(step.snapshot.output).toEqual({
@@ -1109,7 +1170,7 @@ describe('setupAgent', () => {
     });
   });
 
-  test('agent effects expose only selected state events as tools', async () => {
+  test('agent requests expose only selected state events as tools', async () => {
     const agent = setupAgent({
       context: z.object({ prompt: z.string() }),
       input: z.object({ prompt: z.string() }),
@@ -1118,15 +1179,16 @@ describe('setupAgent', () => {
         DEFEND: z.object({}),
         PAUSE: z.object({}),
       },
-    }).withTasks({
-      chooseMove: {
-        schemas: {
-          input: z.object({ prompt: z.string() }),
-          output: z.string(),
+      requests: {
+        chooseMove: {
+          schemas: {
+            input: z.object({ prompt: z.string() }),
+            output: z.string(),
+          },
+          model: 'test-model',
+          prompt: ({ input }) => input.prompt,
+          events: ['ATTACK', 'DEFEND'],
         },
-        model: 'test-model',
-        prompt: ({ input }) => input.prompt,
-        events: ['ATTACK', 'DEFEND'],
       },
     });
 
@@ -1164,30 +1226,30 @@ describe('setupAgent', () => {
 
     expect(attackStep.done).toBe(true);
 
-    expect(getAvailableEvents(snapshot, {
-      schemas: agent.schemas,
-      eventTypes: ['ATTACK', 'DEFEND', 'HEAL'],
-    })).toEqual([
+    expect(
+      getAvailableEvents(snapshot, {
+        schemas: agent.schemas,
+        eventTypes: ['ATTACK', 'DEFEND', 'HEAL'],
+      }),
+    ).toEqual([
       expect.objectContaining({ type: 'ATTACK', toolName: 'event.ATTACK' }),
       expect.objectContaining({ type: 'DEFEND', toolName: 'event.DEFEND' }),
     ]);
 
-    const [effect] = getAgentEffects(actions, {
-      snapshot,
-      schemas: agent.schemas,
-      actors: agent.tasks,
-    });
+    const [request] = machine.getRequests(actions, snapshot);
 
-    expect(effect!.events.map((event) => event.type)).toEqual([
+    expect(
+      request!.events.map((event: AgentEventDescriptor) => event.type),
+    ).toEqual([
       'ATTACK',
       'DEFEND',
     ]);
-    expect(Object.keys(effect!.tools)).toEqual([
+    expect(Object.keys(request!.tools)).toEqual([
       'event.ATTACK',
       'event.DEFEND',
     ]);
 
-    const attackTool = effect!.tools['event.ATTACK']!;
+    const attackTool = request!.tools['event.ATTACK']!;
     if (typeof attackTool === 'function') {
       throw new Error('Expected event tool descriptor.');
     }
@@ -1196,13 +1258,17 @@ describe('setupAgent', () => {
       target: 'orc',
     });
 
-    expect(Object.keys(getEventTools(snapshot, {
-      schemas: agent.schemas,
-      eventTypes: ['ATTACK', 'DEFEND', 'HEAL'],
-    }))).toEqual(['event.ATTACK', 'event.DEFEND']);
+    expect(
+      Object.keys(
+        getEventTools(snapshot, {
+          schemas: agent.schemas,
+          eventTypes: ['ATTACK', 'DEFEND', 'HEAL'],
+        }),
+      ),
+    ).toEqual(['event.ATTACK', 'event.DEFEND']);
   });
 
-  test('fromConfig lowers static task workflows to agent machine steps', async () => {
+  test('fromConfig lowers static request workflows to agent machine steps', async () => {
     const machine = setupAgent.fromConfig({
       id: 'static-answer',
       schemas: {
@@ -1232,7 +1298,7 @@ describe('setupAgent', () => {
       context: {
         question: '{{ input.question }}',
       },
-      tasks: {
+      requests: {
         answerQuestion: {
           model: 'test-model',
           prompt: 'Question: {{ input.question }}',
@@ -1280,7 +1346,7 @@ describe('setupAgent', () => {
 
     let step = machine.initial({ question: 'Why statecharts?' });
 
-    expect(step.tasks).toEqual([
+    expect(step.requests).toEqual([
       expect.objectContaining({
         id: 'answer',
         src: 'answerQuestion',
@@ -1291,49 +1357,32 @@ describe('setupAgent', () => {
       }),
     ]);
 
-    const output = await machine.execute(step.tasks[0]!, {
-      generateText: async () => ({ output: { answer: 'Because logic matters.' } }),
+    const output = await machine.execute(step.requests[0]!, {
+      generateText: async () => ({
+        output: { answer: 'Because logic matters.' },
+      }),
     });
-    step = machine.resolve(step, step.tasks[0]!, output);
+    step = machine.resolve(step, step.requests[0]!, output);
 
     expect(step.done).toBe(true);
     expect(step.snapshot.output).toEqual({ answer: 'Because logic matters.' });
   });
 
   test('agent.userInput is a blessed host-provided actor for static workflows', async () => {
-    const machine = setupAgent.fromConfig({
-      id: 'static-user-input',
-      schemas: {
-        input: {
-          type: 'object',
-          properties: {},
-        },
-        context: {
-          type: 'object',
-          properties: {
-            recipient: { type: 'string' },
-            draft: { type: 'string' },
-          },
-        },
-        output: {
-          type: 'object',
-          properties: {
-            draft: { type: 'string' },
-          },
-          required: ['draft'],
-        },
-      },
-      context: {},
-      tasks: {
-        draftEmail: {
-          model: 'writer',
-          prompt: 'Draft email to {{ input.recipient }}',
+    const machine = setupAgent
+      .fromConfig({
+        id: 'static-user-input',
+        schemas: {
           input: {
+            type: 'object',
+            properties: {},
+          },
+          context: {
             type: 'object',
             properties: {
               recipient: { type: 'string' },
+              draft: { type: 'string' },
             },
-            required: ['recipient'],
           },
           output: {
             type: 'object',
@@ -1343,70 +1392,91 @@ describe('setupAgent', () => {
             required: ['draft'],
           },
         },
-      },
-      initial: 'askRecipient',
-      states: {
-        askRecipient: {
-          invoke: {
-            id: 'recipient',
-            src: 'agent.userInput',
+        context: {},
+        requests: {
+          draftEmail: {
+            model: 'writer',
+            prompt: 'Draft email to {{ input.recipient }}',
             input: {
-              prompt: 'Who should receive this email?',
-              schema: {
-                type: 'object',
-                properties: {
-                  recipient: { type: 'string' },
+              type: 'object',
+              properties: {
+                recipient: { type: 'string' },
+              },
+              required: ['recipient'],
+            },
+            output: {
+              type: 'object',
+              properties: {
+                draft: { type: 'string' },
+              },
+              required: ['draft'],
+            },
+          },
+        },
+        initial: 'askRecipient',
+        states: {
+          askRecipient: {
+            invoke: {
+              id: 'recipient',
+              src: 'agent.userInput',
+              input: {
+                prompt: 'Who should receive this email?',
+                schema: {
+                  type: 'object',
+                  properties: {
+                    recipient: { type: 'string' },
+                  },
+                  required: ['recipient'],
                 },
-                required: ['recipient'],
               },
-            },
-            onDone: {
-              target: 'draftEmail',
-              assign: {
-                recipient: '{{ event.output.recipient }}',
-              },
-            },
-          },
-        },
-        draftEmail: {
-          invoke: {
-            id: 'draft',
-            src: 'draftEmail',
-            input: {
-              recipient: '{{ context.recipient }}',
-            },
-            onDone: {
-              target: 'done',
-              assign: {
-                draft: '{{ event.output.draft }}',
+              onDone: {
+                target: 'draftEmail',
+                assign: {
+                  recipient: '{{ event.output.recipient }}',
+                },
               },
             },
           },
-        },
-        done: {
-          type: 'final',
-          output: {
-            draft: '{{ context.draft }}',
+          draftEmail: {
+            invoke: {
+              id: 'draft',
+              src: 'draftEmail',
+              input: {
+                recipient: '{{ context.recipient }}',
+              },
+              onDone: {
+                target: 'done',
+                assign: {
+                  draft: '{{ event.output.draft }}',
+                },
+              },
+            },
+          },
+          done: {
+            type: 'final',
+            output: {
+              draft: '{{ context.draft }}',
+            },
           },
         },
-      },
-    }).provide({
-      actors: {
-        'agent.userInput': fromPromise(async ({ input }) => {
-          expect(input).toEqual(
-            expect.objectContaining({
-              prompt: 'Who should receive this email?',
-              schema: expect.objectContaining({ type: 'object' }),
-            })
-          );
-          return { recipient: 'Ada' };
-        }),
-        draftEmail: fromPromise(async ({ input }) => {
-          expect(input).toEqual({ recipient: 'Ada' });
-          return { draft: 'Hello Ada.' };
-        }),
-      },
-    });
+      })
+      .provide({
+        actors: {
+          'agent.userInput': fromPromise(async ({ input }) => {
+            expect(input).toEqual(
+              expect.objectContaining({
+                prompt: 'Who should receive this email?',
+                schema: expect.objectContaining({ type: 'object' }),
+              }),
+            );
+            return { recipient: 'Ada' };
+          }),
+          draftEmail: fromPromise(async ({ input }) => {
+            expect(input).toEqual({ recipient: 'Ada' });
+            return { draft: 'Hello Ada.' };
+          }),
+        },
+      });
 
     const actor = createActor(machine, { input: {} }).start();
     await waitFor(actor, (snapshot) => snapshot.status === 'done');

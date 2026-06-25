@@ -12,32 +12,40 @@ describe('CrewAI-style flows authored as XState setup machines', () => {
         content: z.string().nullable(),
       }),
       input: z.object({ request: z.string() }),
-      output: z.object({ route: z.enum(['linkedin', 'blog']), content: z.string() }),
-    }).withTasks({
-      routeContent: {
-        schemas: {
-          input: z.object({ request: z.string() }),
-          output: z.object({ route: z.enum(['linkedin', 'blog']) }),
+      output: z.object({
+        route: z.enum(['linkedin', 'blog']),
+        content: z.string(),
+      }),
+      requests: {
+        routeContent: {
+          schemas: {
+            input: z.object({ request: z.string() }),
+            output: z.object({ route: z.enum(['linkedin', 'blog']) }),
+          },
+          model: 'router',
+          prompt: ({ input }) => input.request,
         },
-        model: 'router',
-        prompt: ({ input }) => input.request,
-      },
-      createContent: {
-        schemas: {
-          input: z.object({
-            route: z.enum(['linkedin', 'blog']),
-            request: z.string(),
-          }),
-          output: z.string(),
+        createContent: {
+          schemas: {
+            input: z.object({
+              route: z.enum(['linkedin', 'blog']),
+              request: z.string(),
+            }),
+            output: z.string(),
+          },
+          model: 'writer',
+          prompt: ({ input }) => `${input.route}:${input.request}`,
         },
-        model: 'writer',
-        prompt: ({ input }) => `${input.route}:${input.request}`,
       },
     });
 
     const machine = agent.createMachine({
       id: 'crewai-content-creator-xstate',
-      context: ({ input }) => ({ request: input.request, route: null, content: null }),
+      context: ({ input }) => ({
+        request: input.request,
+        route: null,
+        content: null,
+      }),
       initial: 'routing',
       states: {
         routing: {
@@ -76,15 +84,15 @@ describe('CrewAI-style flows authored as XState setup machines', () => {
     const actor = createActor(
       machine.provide({
         actors: {
-          routeContent: agent.tasks.routeContent.withExecutor(
-            async () => ({ route: 'linkedin' })
-          ),
-          createContent: agent.tasks.createContent.withExecutor(
+          routeContent: agent.requests.routeContent.withExecutor(async () => ({
+            route: 'linkedin',
+          })),
+          createContent: agent.requests.createContent.withExecutor(
             async ({ input }) => `Post for ${input.route}:${input.request}`,
           ),
         },
       }),
-      { input: { request: 'launch update' } }
+      { input: { request: 'launch update' } },
     );
     actor.start();
     await toPromise(actor);
@@ -108,20 +116,21 @@ describe('CrewAI-style flows authored as XState setup machines', () => {
       actors: {
         writeChapters: fromPromise<string[], { chapters: string[] }>(
           async ({ input }) =>
-            input.chapters.map((chapter: string) => `${chapter}: body`)
+            input.chapters.map((chapter: string) => `${chapter}: body`),
         ),
       },
-    }).withTasks({
-      outlineBook: {
-        schemas: {
-          input: z.object({ brief: z.string() }),
-          output: z.object({
-            title: z.string(),
-            chapters: z.array(z.string()),
-          }),
+      requests: {
+        outlineBook: {
+          schemas: {
+            input: z.object({ brief: z.string() }),
+            output: z.object({
+              title: z.string(),
+              chapters: z.array(z.string()),
+            }),
+          },
+          model: 'outliner',
+          prompt: ({ input }) => input.brief,
         },
-        model: 'outliner',
-        prompt: ({ input }) => input.brief,
       },
     });
 
@@ -173,12 +182,13 @@ describe('CrewAI-style flows authored as XState setup machines', () => {
     const actor = createActor(
       machine.provide({
         actors: {
-          outlineBook: agent.tasks.outlineBook.withExecutor(
-            async () => ({ title: 'The Workflow Book', chapters: ['Intro', 'Runtime'] })
-          ),
+          outlineBook: agent.requests.outlineBook.withExecutor(async () => ({
+            title: 'The Workflow Book',
+            chapters: ['Intro', 'Runtime'],
+          })),
         },
       }),
-      { input: { brief: 'state machines for agents' } }
+      { input: { brief: 'state machines for agents' } },
     );
     actor.start();
     await toPromise(actor);

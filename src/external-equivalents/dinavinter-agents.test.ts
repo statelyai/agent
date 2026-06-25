@@ -11,12 +11,12 @@ import {
   type EventObject,
 } from 'xstate';
 import {
-  type AgentTask,
+  type AgentRequest,
   assistantMessage,
   createAgentSchemas,
   setupAgent,
   transitionResult,
-  type AgentTextInput,
+  type AgentTextRequest,
   type AgentTools,
 } from '../index.js';
 
@@ -50,25 +50,27 @@ describe('dinavinter/agents-style XState agents', () => {
           async ({ input }) => {
             calls.push({ actor: 'createThread', request: input.request });
             return 'thread_123';
-          }
+          },
         ),
-        sendMessage: fromPromise<
-          string,
-          { threadId: string; message: string }
-        >(async ({ input }) => {
-          calls.push({ actor: 'sendMessage', input });
-          return 'message_123';
-        }),
+        sendMessage: fromPromise<string, { threadId: string; message: string }>(
+          async ({ input }) => {
+            calls.push({ actor: 'sendMessage', input });
+            return 'message_123';
+          },
+        ),
         streamThread: fromCallback<EventObject, { threadId: string }>(
           ({ input, sendBack }) => {
             calls.push({ actor: 'streamThread', input });
             queueMicrotask(() => {
               sendBack({ type: 'TEXT_DELTA', text: 'using ' });
               sendBack({ type: 'TEXT_DELTA', text: 'setupAgent' });
-              sendBack({ type: 'IMAGE_URL', url: 'https://example.com/test.png' });
+              sendBack({
+                type: 'IMAGE_URL',
+                url: 'https://example.com/test.png',
+              });
               sendBack({ type: 'STREAM_DONE' });
             });
-          }
+          },
         ),
       },
     });
@@ -180,7 +182,7 @@ describe('dinavinter/agents-style XState agents', () => {
     ]);
   });
 
-  test('screen-set builder maps streamed object UI drafts to structured task output', async () => {
+  test('screen-set builder maps streamed object UI drafts to structured request output', async () => {
     const fieldSchema = z.object({
       type: z.enum(['text', 'email', 'password', 'submit']),
       name: z.string(),
@@ -198,15 +200,18 @@ describe('dinavinter/agents-style XState agents', () => {
       input: z.object({ request: z.string() }),
       output: screenDraftSchema,
     });
-    const agent = setupAgent({ schemas }).withTasks({
-      draftScreen: {
-        schemas: {
-          input: z.object({ request: z.string() }),
-          output: screenDraftSchema,
+    const agent = setupAgent({
+      schemas,
+      requests: {
+        draftScreen: {
+          schemas: {
+            input: z.object({ request: z.string() }),
+            output: screenDraftSchema,
+          },
+          model: 'openai/gpt-5.4-nano',
+          system: 'Create a form screen draft from the user request.',
+          prompt: ({ input }) => input.request,
         },
-        model: 'openai/gpt-5.4-nano',
-        system: 'Create a form screen draft from the user request.',
-        prompt: ({ input }) => input.request,
       },
     });
     const machine = agent.createMachine({
@@ -226,8 +231,7 @@ describe('dinavinter/agents-style XState agents', () => {
         },
         done: {
           type: 'final',
-          output: ({ context }) =>
-            context.draft ?? { title: '', fields: [] },
+          output: ({ context }) => context.draft ?? { title: '', fields: [] },
         },
       },
     });
@@ -235,11 +239,15 @@ describe('dinavinter/agents-style XState agents', () => {
     let [snapshot, actions] = initialTransition(machine, {
       request: 'Build a signup wizard.',
     });
-    const [task] = machine.getTasks(actions, snapshot);
+    const [request] = machine.getRequests(actions, snapshot);
 
-    const output = await machine.execute(task!, {
-      generateText: async (request: AgentTextInput & { tools: AgentTools }) => {
-        expect(request.outputSchema).toBe(agent.tasks.draftScreen.schemas.output);
+    const output = await machine.execute(request!, {
+      generateText: async (
+        request: AgentTextRequest & { tools: AgentTools },
+      ) => {
+        expect(request.outputSchema).toBe(
+          agent.requests.draftScreen.schemas.output,
+        );
         expect(request.prompt).toBe('Build a signup wizard.');
         return {
           output: {
@@ -254,9 +262,9 @@ describe('dinavinter/agents-style XState agents', () => {
       },
     });
 
-    [snapshot, actions] = transitionResult(machine, snapshot, task!, output);
+    [snapshot, actions] = transitionResult(machine, snapshot, request!, output);
 
-    expect(machine.getTasks(actions, snapshot)).toEqual([]);
+    expect(machine.getRequests(actions, snapshot)).toEqual([]);
     expect(snapshot.output).toEqual({
       title: 'Signup',
       fields: [
@@ -267,7 +275,7 @@ describe('dinavinter/agents-style XState agents', () => {
     });
   });
 
-  test('parallel agent runs independent model tasks as explicit XState invokes', async () => {
+  test('parallel agent runs independent model requests as explicit XState invokes', async () => {
     const resultSchema = z.object({
       thought: z.string(),
       doodleQuery: z.string(),
@@ -281,23 +289,26 @@ describe('dinavinter/agents-style XState agents', () => {
       input: z.object({ topic: z.string() }),
       output: resultSchema,
     });
-    const agent = setupAgent({ schemas }).withTasks({
-      think: {
-        kind: 'stream',
-        schemas: {
-          input: z.object({ topic: z.string() }),
-          output: z.string(),
+    const agent = setupAgent({
+      schemas,
+      requests: {
+        think: {
+          mode: 'stream',
+          schemas: {
+            input: z.object({ topic: z.string() }),
+            output: z.string(),
+          },
+          model: 'openai/gpt-5.4-nano',
+          prompt: ({ input }) => `Think about ${input.topic}.`,
         },
-        model: 'openai/gpt-5.4-nano',
-        prompt: ({ input }) => `Think about ${input.topic}.`,
-      },
-      findDoodle: {
-        schemas: {
-          input: z.object({ topic: z.string() }),
-          output: z.object({ query: z.string() }),
+        findDoodle: {
+          schemas: {
+            input: z.object({ topic: z.string() }),
+            output: z.object({ query: z.string() }),
+          },
+          model: 'openai/gpt-5.4-nano',
+          prompt: ({ input }) => `Find a doodle for ${input.topic}.`,
         },
-        model: 'openai/gpt-5.4-nano',
-        prompt: ({ input }) => `Find a doodle for ${input.topic}.`,
       },
     });
     const machine = agent.createMachine({
@@ -352,19 +363,26 @@ describe('dinavinter/agents-style XState agents', () => {
     });
 
     let [snapshot, actions] = initialTransition(machine, { topic: 'XState' });
-    const tasks = machine.getTasks(actions, snapshot);
+    const requests = machine.getRequests(actions, snapshot);
 
-    expect(tasks.map((task: AgentTask) => [task.id, task.kind])).toEqual([
+    expect(
+      requests.map((request: AgentRequest) => [request.id, request.mode]),
+    ).toEqual([
       ['think', 'stream'],
       ['findDoodle', 'generate'],
     ]);
 
-    for (const task of tasks) {
-      const output = await machine.execute(task, {
+    for (const request of requests) {
+      const output = await machine.execute(request, {
         generateText: async () => ({ output: { query: 'statechart sketch' } }),
         streamText: async () => ({ text: 'State machines make flow visible.' }),
       });
-      [snapshot, actions] = transitionResult(machine, snapshot, task, output);
+      [snapshot, actions] = transitionResult(
+        machine,
+        snapshot,
+        request,
+        output,
+      );
     }
 
     expect(snapshot.status).toBe('done');
