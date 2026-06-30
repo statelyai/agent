@@ -1,0 +1,16 @@
+{
+  "name": "langgraph-rag",
+  "title": "LangGraph RAG",
+  "kind": "comparison-example",
+  "origin": {
+    "type": "external-framework",
+    "source": "LangGraph examples and common workflow patterns",
+    "url": "https://github.com/langchain-ai/langgraphjs/tree/main/examples"
+  },
+  "comparison": {
+    "targets": [
+      "LangGraph"
+    ],
+    "purpose": "RAG keeps retrieval as a typed host actor before generation"
+  }
+}

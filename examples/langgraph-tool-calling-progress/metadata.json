@@ -1,0 +1,16 @@
+{
+  "name": "langgraph-tool-calling-progress",
+  "title": "LangGraph Tool Calling Progress",
+  "kind": "comparison-example",
+  "origin": {
+    "type": "external-framework",
+    "source": "LangGraph examples and common workflow patterns",
+    "url": "https://github.com/langchain-ai/langgraphjs/tree/main/examples"
+  },
+  "comparison": {
+    "targets": [
+      "LangGraph"
+    ],
+    "purpose": "tool-calling streams typed host-side progress"
+  }
+}

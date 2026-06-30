@@ -1,0 +1,14 @@
+{
+  "name": "joke",
+  "title": "Streaming Joke",
+  "kind": "agent-workflow",
+  "origin": {
+    "type": "stately-agent",
+    "source": "Extracted from the AI SDK host demo in this repository",
+    "url": null
+  },
+  "comparison": {
+    "targets": ["Vercel AI SDK", "LangGraph"],
+    "purpose": "Shows a minimal stream-text actor that can be executed by different hosts."
+  }
+}

@@ -8,7 +8,9 @@ import {
   chooseMove as chooseMoveLogic,
   gameMachine,
   gameSchemas,
+  jokeMachine,
   summarizeTurn,
+  tellJoke as tellJokeLogic,
 } from '../examples/index.js';
 import {
   getAgentRequests,
@@ -172,6 +174,31 @@ describe('curated XState setup examples', () => {
       summary: 'You strike the goblin.',
       playerHp: 20,
       enemyHp: 9,
+    });
+  });
+
+  test('joke workflow loops until user feedback is done', async () => {
+    const feedback = ['try another one', 'ok done'];
+    let jokes = 0;
+    const machine = jokeMachine.provide({
+      actorSources: {
+        tellJoke: tellJokeLogic.withExecutor(async ({ input }) => {
+          jokes += 1;
+          return `joke ${jokes} about ${input.topic}`;
+        }),
+        'agent.userInput': createAsyncLogic({
+          run: async () => ({ feedback: feedback.shift() ?? 'done' }),
+        }),
+      },
+    });
+
+    const actor = createActor(machine, { input: { topic: 'state machines' } });
+    actor.start();
+    await toPromise(actor);
+
+    expect(jokes).toBe(2);
+    expect(actor.getSnapshot().output).toEqual({
+      joke: 'joke 2 about state machines',
     });
   });
 });

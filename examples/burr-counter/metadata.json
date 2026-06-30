@@ -1,0 +1,16 @@
+{
+  "name": "burr-counter",
+  "title": "Burr Counter",
+  "kind": "comparison-example",
+  "origin": {
+    "type": "external-framework",
+    "source": "Apache Burr examples",
+    "url": "https://github.com/apache/burr/tree/main/examples"
+  },
+  "comparison": {
+    "targets": [
+      "Burr"
+    ],
+    "purpose": "hello-world-counter uses explicit state and guarded looping"
+  }
+}

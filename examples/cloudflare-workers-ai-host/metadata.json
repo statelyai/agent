@@ -1,0 +1,14 @@
+{
+  "name": "cloudflare-workers-ai-host",
+  "title": "Cloudflare Workers AI Host",
+  "kind": "host-adapter",
+  "origin": {
+    "type": "platform-adapter",
+    "source": "Cloudflare Workers AI integration sketch",
+    "url": "https://developers.cloudflare.com/workers-ai/"
+  },
+  "comparison": {
+    "targets": ["Cloudflare Workers AI", "tool-free model runtimes"],
+    "purpose": "Shows allowed event choices serialized into prompts when the provider lacks native tool calling."
+  }
+}

@@ -223,8 +223,8 @@ Options:
   -h, --help              Show this help.
 
 Examples:
-  pnpm agent:convert ./examples/setup-agent/email-drafter.ts --export emailDrafter
-  pnpm agent:convert ./examples/setup-agent/email-drafter.ts --export emailDrafter --format xstate
+  pnpm agent:convert ./examples/email-drafter/index.ts --export emailDrafter
+  pnpm agent:convert ./examples/email-drafter/index.ts --export emailDrafter --format xstate
 `);
 }
 

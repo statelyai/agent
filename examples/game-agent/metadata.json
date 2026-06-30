@@ -1,0 +1,14 @@
+{
+  "name": "game-agent",
+  "title": "Turn-Based Game Agent",
+  "kind": "agent-workflow",
+  "origin": {
+    "type": "stately-agent",
+    "source": "Created in this repository",
+    "url": null
+  },
+  "comparison": {
+    "targets": ["LangGraph", "Burr", "Flowise"],
+    "purpose": "Shows event-tool constrained agent decisions inside explicit state-machine control flow."
+  }
+}

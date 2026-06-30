@@ -58,7 +58,7 @@
     "build": "tsdown",
     "lint": "pnpm run lint:src && pnpm run lint:examples",
     "lint:src": "tsc --noEmit",
-    "lint:examples": "tsc -p examples/setup-agent/tsconfig.json --noEmit",
+    "lint:examples": "tsc -p examples/tsconfig.json --noEmit",
     "test": "vitest",
     "test:ci": "vitest --run",
     "prepublishOnly": "tsdown",

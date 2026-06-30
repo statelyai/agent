@@ -1,0 +1,16 @@
+{
+  "name": "langgraph-conditional-routing",
+  "title": "LangGraph Conditional Routing",
+  "kind": "comparison-example",
+  "origin": {
+    "type": "external-framework",
+    "source": "LangGraph conditional routing pattern",
+    "url": "https://github.com/langchain-ai/langgraphjs/tree/main/examples"
+  },
+  "comparison": {
+    "targets": [
+      "LangGraph"
+    ],
+    "purpose": "Shows a LangGraph-style classifier plus conditional edge as setupAgent and explicit XState choice flow."
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "ai-sdk-host",
+  "title": "Vercel AI SDK Host",
+  "kind": "host-adapter",
+  "origin": {
+    "type": "sdk-adapter",
+    "source": "Vercel AI SDK integration sketch",
+    "url": "https://ai-sdk.dev"
+  },
+  "comparison": {
+    "targets": ["Vercel AI SDK", "LangGraph runtime adapters"],
+    "purpose": "Shows host-owned generateText and streamText execution for reusable XState text logic."
+  }
+}

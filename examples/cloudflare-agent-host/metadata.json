@@ -1,0 +1,14 @@
+{
+  "name": "cloudflare-agent-host",
+  "title": "Cloudflare Agents Host",
+  "kind": "host-adapter",
+  "origin": {
+    "type": "platform-adapter",
+    "source": "Cloudflare Agents integration sketch",
+    "url": "https://developers.cloudflare.com/agents/"
+  },
+  "comparison": {
+    "targets": ["Cloudflare Agents", "durable agent runtimes"],
+    "purpose": "Shows persisted XState actor snapshots inside a Cloudflare Agent host."
+  }
+}

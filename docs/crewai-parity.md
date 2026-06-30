@@ -36,16 +36,16 @@ Primary sources:
 
 ## Matrix
 
-<!-- parity matrix derived from src/crewai-equivalents/*.test.ts and docs/crewai-parity.md scope -->
+<!-- parity matrix derived from examples/crewai-*/metadata.json and docs/crewai-parity.md scope -->
 
 | CrewAI Flow example | Status | Agent equivalent |
 | --- | --- | --- |
-| Content Creator Flow | Covered | [`src/crewai-equivalents/raw-xstate.test.ts`](/Users/davidkpiano/Code/agent/src/crewai-equivalents/raw-xstate.test.ts) |
+| Content Creator Flow | Covered | [`examples/crewai-content-creator/index.test.ts`](/Users/davidkpiano/Code/agent/examples/crewai-content-creator/index.test.ts) |
 | Email Auto Responder Flow | Covered | Same XState `setup(...)` primitives as content routing plus persisted XState snapshots |
 | Lead Score Flow | Covered | Same XState `setup(...)` primitives as HITL review plus typed worker actors |
 | Meeting Assistant Flow | Covered | Same XState `setup(...)` primitives as fan-out worker actors |
 | Self Evaluation Loop Flow | Covered | Same XState `setup(...)` primitives as guarded retry/re-entry |
-| Write a Book with Flows | Covered | [`src/crewai-equivalents/raw-xstate.test.ts`](/Users/davidkpiano/Code/agent/src/crewai-equivalents/raw-xstate.test.ts) |
+| Write a Book with Flows | Covered | [`examples/crewai-write-a-book/index.test.ts`](/Users/davidkpiano/Code/agent/examples/crewai-write-a-book/index.test.ts) |
 
 ## Notes
 

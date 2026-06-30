@@ -1,0 +1,16 @@
+{
+  "name": "langgraph-snapshot-persistence",
+  "title": "LangGraph Snapshot Persistence",
+  "kind": "comparison-example",
+  "origin": {
+    "type": "external-framework",
+    "source": "LangGraph examples and common workflow patterns",
+    "url": "https://github.com/langchain-ai/langgraphjs/tree/main/examples"
+  },
+  "comparison": {
+    "targets": [
+      "LangGraph"
+    ],
+    "purpose": "persistence restores from XState snapshots without a custom runtime"
+  }
+}

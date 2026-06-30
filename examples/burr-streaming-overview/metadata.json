@@ -1,0 +1,16 @@
+{
+  "name": "burr-streaming-overview",
+  "title": "Burr Streaming Overview",
+  "kind": "comparison-example",
+  "origin": {
+    "type": "external-framework",
+    "source": "Apache Burr examples",
+    "url": "https://github.com/apache/burr/tree/main/examples"
+  },
+  "comparison": {
+    "targets": [
+      "Burr"
+    ],
+    "purpose": "streaming-overview router keeps safety and mode as explicit states"
+  }
+}

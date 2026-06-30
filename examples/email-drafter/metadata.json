@@ -1,0 +1,14 @@
+{
+  "name": "email-drafter",
+  "title": "Email Drafter",
+  "kind": "agent-workflow",
+  "origin": {
+    "type": "stately-agent",
+    "source": "Created in this repository",
+    "url": null
+  },
+  "comparison": {
+    "targets": ["LangGraph", "Burr"],
+    "purpose": "Shows an XState-authored agent with reusable text logic, message history, human review, and typed outputs."
+  }
+}

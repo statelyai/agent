@@ -1,0 +1,16 @@
+{
+  "name": "dinavinter-test-agent",
+  "title": "dinavinter/agents Test Agent",
+  "kind": "comparison-example",
+  "origin": {
+    "type": "external-library",
+    "source": "dinavinter/agents README examples",
+    "url": "https://github.com/dinavinter/agents#test-agent"
+  },
+  "comparison": {
+    "targets": [
+      "dinavinter/agents"
+    ],
+    "purpose": "test agent keeps Assistant thread APIs as host actors and streams events into state"
+  }
+}

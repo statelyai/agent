@@ -21,16 +21,16 @@ As of June 18, 2026, the upstream Burr examples directory includes examples such
 
 ## Matrix
 
-<!-- parity matrix derived from src/burr-equivalents/*.test.ts and docs/burr-parity.md scope -->
+<!-- parity matrix derived from examples/burr-*/metadata.json and docs/burr-parity.md scope -->
 
 | Burr example pattern | Status | Agent equivalent |
 | --- | --- | --- |
-| Hello world counter / guarded loop | Covered | Explicit XState state, guarded loop, and final output in [`src/burr-equivalents/raw-xstate.test.ts`](/Users/davidkpiano/Code/agent/src/burr-equivalents/raw-xstate.test.ts) |
-| Conversational RAG with memory in state | Covered | Retrieval as typed host actor, memory in machine context, answer as named request logic |
-| Streaming overview router | Covered | Safety check, mode routing, streaming side channel, final text transition |
-| Tool calling | Covered | Tool selection as structured text logic, local tool actors, final formatter text logic |
-| Typed state / structured output | Covered | Schema-derived context/output plus named structured text logic |
-| Multi-agent collaboration | Covered | Supervisor routing to typed worker actors |
+| Hello world counter / guarded loop | Covered | Explicit XState state, guarded loop, and final output in [`examples/burr-counter/index.test.ts`](/Users/davidkpiano/Code/agent/examples/burr-counter/index.test.ts) |
+| Conversational RAG with memory in state | Covered | Retrieval as typed host actor, memory in machine context, answer as named request logic in [`examples/burr-conversational-rag/index.test.ts`](/Users/davidkpiano/Code/agent/examples/burr-conversational-rag/index.test.ts) |
+| Streaming overview router | Covered | Safety check, mode routing, streaming side channel, final text transition in [`examples/burr-streaming-overview/index.test.ts`](/Users/davidkpiano/Code/agent/examples/burr-streaming-overview/index.test.ts) |
+| Tool calling | Covered | Tool selection as structured text logic, local tool actors, final formatter text logic in [`examples/burr-tool-calling/index.test.ts`](/Users/davidkpiano/Code/agent/examples/burr-tool-calling/index.test.ts) |
+| Typed state / structured output | Covered | Schema-derived context/output plus named structured text logic in [`examples/burr-typed-state/index.test.ts`](/Users/davidkpiano/Code/agent/examples/burr-typed-state/index.test.ts) |
+| Multi-agent collaboration | Covered | Supervisor routing to typed worker actors in [`examples/burr-multi-agent-collaboration/index.test.ts`](/Users/davidkpiano/Code/agent/examples/burr-multi-agent-collaboration/index.test.ts) |
 
 ## Why This Is Different
 

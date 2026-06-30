@@ -186,19 +186,21 @@ states:
 
 The examples in [`examples/`](/Users/davidkpiano/Code/agent/examples) are intentionally small. Most run in the CLI and use real OpenAI calls when `OPENAI_API_KEY` is set. Runtime-specific examples call out extra environment requirements inline.
 
-If you want examples grouped by intent instead of a flat list, start with [`examples/README.md`](/Users/davidkpiano/Code/agent/examples/README.md). It separates XState authoring, host adapters, app integrations, and parity coverage.
+Examples are flat directories under [`examples/`](/Users/davidkpiano/Code/agent/examples). Each directory includes `metadata.json` with origin and comparison notes.
 
-Run them with `node --import tsx examples/<name>.ts`.
+Run them with `node --import tsx examples/<name>/index.ts`.
 
 Convert a machine file to diagram output with `pnpm agent:convert <file> --format mermaid` or `pnpm agent:convert <file> --format xstate`. Static analysis warnings are printed to stderr. For programmatic access, use `analyzeGraph(...)` from `@statelyai/agent/graph`; warnings are returned explicitly instead of being hidden in graph metadata.
 
 Start here:
 
-- Agent authoring: [`examples/setup-agent/email-drafter.ts`](/Users/davidkpiano/Code/agent/examples/setup-agent/email-drafter.ts)
-- Host adapters: [`examples/setup-agent/hosts/ai-sdk.ts`](/Users/davidkpiano/Code/agent/examples/setup-agent/hosts/ai-sdk.ts), [`examples/setup-agent/hosts/cloudflare-agent.ts`](/Users/davidkpiano/Code/agent/examples/setup-agent/hosts/cloudflare-agent.ts)
-- Local smoke test: [`examples/setup-agent/smoke.mts`](/Users/davidkpiano/Code/agent/examples/setup-agent/smoke.mts)
-- LangGraph parity: [`src/langgraph-equivalents/raw-xstate.test.ts`](/Users/davidkpiano/Code/agent/src/langgraph-equivalents/raw-xstate.test.ts), [`docs/langgraph-parity.md`](/Users/davidkpiano/Code/agent/docs/langgraph-parity.md), [`docs/langgraph-gaps.md`](/Users/davidkpiano/Code/agent/docs/langgraph-gaps.md)
-- Burr parity: [`src/burr-equivalents/raw-xstate.test.ts`](/Users/davidkpiano/Code/agent/src/burr-equivalents/raw-xstate.test.ts), [`docs/burr-parity.md`](/Users/davidkpiano/Code/agent/docs/burr-parity.md)
+- Agent authoring: [`examples/email-drafter/index.ts`](/Users/davidkpiano/Code/agent/examples/email-drafter/index.ts)
+- Framework comparisons: [`examples/langgraph-conditional-routing/index.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-conditional-routing/index.ts), [`examples/burr-conversational-rag/index.ts`](/Users/davidkpiano/Code/agent/examples/burr-conversational-rag/index.ts), [`examples/crewai-content-creator/index.ts`](/Users/davidkpiano/Code/agent/examples/crewai-content-creator/index.ts)
+- Host adapters: [`examples/ai-sdk-host/index.ts`](/Users/davidkpiano/Code/agent/examples/ai-sdk-host/index.ts), [`examples/cloudflare-agent-host/index.ts`](/Users/davidkpiano/Code/agent/examples/cloudflare-agent-host/index.ts)
+- Local smoke test: [`examples/email-drafter-smoke/index.mts`](/Users/davidkpiano/Code/agent/examples/email-drafter-smoke/index.mts)
+- LangGraph parity: [`examples/langgraph-conditional-routing/index.test.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-conditional-routing/index.test.ts), [`examples/langgraph-rewoo/index.test.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-rewoo/index.test.ts), [`docs/langgraph-parity.md`](/Users/davidkpiano/Code/agent/docs/langgraph-parity.md), [`docs/langgraph-gaps.md`](/Users/davidkpiano/Code/agent/docs/langgraph-gaps.md)
+- Burr parity: [`examples/burr-counter/index.test.ts`](/Users/davidkpiano/Code/agent/examples/burr-counter/index.test.ts), [`examples/burr-tool-calling/index.test.ts`](/Users/davidkpiano/Code/agent/examples/burr-tool-calling/index.test.ts), [`docs/burr-parity.md`](/Users/davidkpiano/Code/agent/docs/burr-parity.md)
+- CrewAI parity: [`examples/crewai-content-creator/index.test.ts`](/Users/davidkpiano/Code/agent/examples/crewai-content-creator/index.test.ts), [`examples/crewai-write-a-book/index.test.ts`](/Users/davidkpiano/Code/agent/examples/crewai-write-a-book/index.test.ts), [`docs/crewai-parity.md`](/Users/davidkpiano/Code/agent/docs/crewai-parity.md)
 
 CrewAI Flow parity is tracked in [`docs/crewai-parity.md`](/Users/davidkpiano/Code/agent/docs/crewai-parity.md), the same way LangGraph parity is tracked separately.
 

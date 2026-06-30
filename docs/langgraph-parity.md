@@ -44,24 +44,24 @@ Remaining gaps are tracked in [`langgraph-gaps.md`](/Users/davidkpiano/Code/agen
 
 ## Matrix
 
-<!-- parity matrix derived from examples/index.ts, src/langgraph-equivalents/*.test.ts, and docs/langgraph-parity.md scope -->
+<!-- parity matrix derived from examples/langgraph-*/metadata.json and docs/langgraph-parity.md scope -->
 
 | LangGraphJS concept | Status | Agent equivalent |
 | --- | --- | --- |
-| Graph/state-machine authoring with typed state/events | Covered | XState `setup(...)`, `createTextLogic(...)`, [`examples/setup-agent/email-drafter.ts`](/Users/davidkpiano/Code/agent/examples/setup-agent/email-drafter.ts), [`src/setup-agent.test.ts`](/Users/davidkpiano/Code/agent/src/setup-agent.test.ts), [`src/langgraph-equivalents/raw-xstate.test.ts`](/Users/davidkpiano/Code/agent/src/langgraph-equivalents/raw-xstate.test.ts) |
-| Branching / conditional routing | Covered | [`src/langgraph-equivalents/raw-xstate.test.ts`](/Users/davidkpiano/Code/agent/src/langgraph-equivalents/raw-xstate.test.ts) |
-| Subgraphs / nested flows | Covered | [`src/langgraph-equivalents/raw-xstate.test.ts`](/Users/davidkpiano/Code/agent/src/langgraph-equivalents/raw-xstate.test.ts) |
-| Human-in-the-loop / approval gate | Covered | [`src/langgraph-equivalents/raw-xstate.test.ts`](/Users/davidkpiano/Code/agent/src/langgraph-equivalents/raw-xstate.test.ts) |
-| Session restore from snapshots | Covered | [`src/langgraph-equivalents/raw-xstate.test.ts`](/Users/davidkpiano/Code/agent/src/langgraph-equivalents/raw-xstate.test.ts) |
-| Streaming side channels | Covered | [`src/langgraph-equivalents/raw-xstate.test.ts`](/Users/davidkpiano/Code/agent/src/langgraph-equivalents/raw-xstate.test.ts), [`examples/setup-agent/hosts/ai-sdk.ts`](/Users/davidkpiano/Code/agent/examples/setup-agent/hosts/ai-sdk.ts) |
-| Tool calling with intermediate progress | Covered | [`src/langgraph-equivalents/raw-xstate.test.ts`](/Users/davidkpiano/Code/agent/src/langgraph-equivalents/raw-xstate.test.ts) |
-| Plan-and-execute | Covered | [`src/langgraph-equivalents/raw-xstate.test.ts`](/Users/davidkpiano/Code/agent/src/langgraph-equivalents/raw-xstate.test.ts) |
-| Map-reduce / fan-out workflows | Covered | Expressed with normal XState actors plus `Promise.all(...)`; see [`src/langgraph-equivalents/raw-xstate.test.ts`](/Users/davidkpiano/Code/agent/src/langgraph-equivalents/raw-xstate.test.ts) |
-| Reflection / retry loops | Covered | Explicit draft/critique/check loop with shared critique schema in [`src/langgraph-equivalents/raw-xstate.test.ts`](/Users/davidkpiano/Code/agent/src/langgraph-equivalents/raw-xstate.test.ts) |
-| ReWOO-style planner / worker decomposition | Covered | Planner output schema, worker evidence map, and final solver state in [`src/langgraph-equivalents/raw-xstate.test.ts`](/Users/davidkpiano/Code/agent/src/langgraph-equivalents/raw-xstate.test.ts) |
-| Supervisor routing | Covered | [`src/langgraph-equivalents/raw-xstate.test.ts`](/Users/davidkpiano/Code/agent/src/langgraph-equivalents/raw-xstate.test.ts) |
-| Multi-agent handoffs | Covered | Expressed as supervisor routing to typed child actors; see [`src/langgraph-equivalents/raw-xstate.test.ts`](/Users/davidkpiano/Code/agent/src/langgraph-equivalents/raw-xstate.test.ts) |
-| SQL/tool-heavy agent workflow | Covered | Query generation, DB execution, and answer synthesis are separate typed states in [`src/langgraph-equivalents/raw-xstate.test.ts`](/Users/davidkpiano/Code/agent/src/langgraph-equivalents/raw-xstate.test.ts) |
+| Graph/state-machine authoring with typed state/events | Covered | XState `setup(...)`, `createTextLogic(...)`, [`examples/email-drafter/index.ts`](/Users/davidkpiano/Code/agent/examples/email-drafter/index.ts), [`src/setup-agent.test.ts`](/Users/davidkpiano/Code/agent/src/setup-agent.test.ts), [`examples/langgraph-conditional-routing/index.test.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-conditional-routing/index.test.ts) |
+| Branching / conditional routing | Covered | [`examples/langgraph-conditional-routing/index.test.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-conditional-routing/index.test.ts) |
+| Subgraphs / nested flows | Covered | [`examples/langgraph-subflows/index.test.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-subflows/index.test.ts) |
+| Human-in-the-loop / approval gate | Covered | [`examples/langgraph-human-in-the-loop/index.test.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-human-in-the-loop/index.test.ts) |
+| Session restore from snapshots | Covered | [`examples/langgraph-snapshot-persistence/index.test.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-snapshot-persistence/index.test.ts) |
+| Streaming side channels | Covered | [`examples/langgraph-streaming-side-channel/index.test.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-streaming-side-channel/index.test.ts), [`examples/ai-sdk-host/index.ts`](/Users/davidkpiano/Code/agent/examples/ai-sdk-host/index.ts) |
+| Tool calling with intermediate progress | Covered | [`examples/langgraph-tool-calling-progress/index.test.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-tool-calling-progress/index.test.ts) |
+| Plan-and-execute | Covered | [`examples/langgraph-plan-and-execute/index.test.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-plan-and-execute/index.test.ts) |
+| Map-reduce / fan-out workflows | Covered | Expressed with normal XState actors plus `Promise.all(...)`; see [`examples/langgraph-map-reduce/index.test.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-map-reduce/index.test.ts) |
+| Reflection / retry loops | Covered | Explicit draft/critique/check loop with shared critique schema in [`examples/langgraph-reflection-loop/index.test.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-reflection-loop/index.test.ts) |
+| ReWOO-style planner / worker decomposition | Covered | Planner output schema, worker evidence map, and final solver state in [`examples/langgraph-rewoo/index.test.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-rewoo/index.test.ts) |
+| Supervisor routing | Covered | [`examples/langgraph-supervisor-handoff/index.test.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-supervisor-handoff/index.test.ts) |
+| Multi-agent handoffs | Covered | Expressed as supervisor routing to typed child actors; see [`examples/langgraph-persistent-multi-agent-network/index.test.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-persistent-multi-agent-network/index.test.ts) |
+| SQL/tool-heavy agent workflow | Covered | Query generation, DB execution, and answer synthesis are separate typed states in [`examples/langgraph-sql-agent/index.test.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-sql-agent/index.test.ts) |
 | ReAct-style agent | Covered | Expressed as explicit observe/think/act states or typed tool actor loops |
 | Message-centric chatbot state | Covered | `messagesSchema`, `appendMessages(...)`, and plain XState context in [`src/setup-agent.ts`](/Users/davidkpiano/Code/agent/src/setup-agent.ts) |
 | Retrieval-augmented generation | Covered | Retrieval is a typed host actor; generation is named text logic invoked as `src: 'answerQuestion'` |

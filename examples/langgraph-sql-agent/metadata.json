@@ -1,0 +1,16 @@
+{
+  "name": "langgraph-sql-agent",
+  "title": "LangGraph SQL Agent",
+  "kind": "comparison-example",
+  "origin": {
+    "type": "external-framework",
+    "source": "LangGraph examples and common workflow patterns",
+    "url": "https://github.com/langchain-ai/langgraphjs/tree/main/examples"
+  },
+  "comparison": {
+    "targets": [
+      "LangGraph"
+    ],
+    "purpose": "SQL-style agents keep query generation, execution, and answer synthesis explicit"
+  }
+}

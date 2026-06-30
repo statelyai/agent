@@ -4,7 +4,7 @@ export {
   emailDrafter,
   emailDrafterSchemas,
   evaluatePrompt,
-} from './setup-agent/email-drafter.js';
+} from './email-drafter/index.js';
 export {
   chooseMove,
   gameActors,
@@ -12,17 +12,26 @@ export {
   gameSchemas,
   summarizeTurn,
   turnSummarySchema,
-} from './setup-agent/game-agent.js';
+} from './game-agent/index.js';
 export {
   jokeActors,
   jokeMachine,
   jokeSchemas,
   tellJoke,
-} from './setup-agent/joke.js';
+} from './joke/index.js';
 export {
   triageActors,
   triageMachine,
   triageSchemas,
   triageSchema,
   triageTicket,
-} from './setup-agent/triage.js';
+} from './triage/index.js';
+export {
+  runLangGraphConditionalRoutingExample,
+} from './langgraph-conditional-routing/index.js';
+export {
+  runBurrConversationalRAGExample,
+} from './burr-conversational-rag/index.js';
+export {
+  runCrewAIContentCreatorExample,
+} from './crewai-content-creator/index.js';

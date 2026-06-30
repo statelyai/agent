@@ -1,0 +1,16 @@
+{
+  "name": "langgraph-persistent-multi-agent-network",
+  "title": "LangGraph Persistent Multi-Agent Network",
+  "kind": "comparison-example",
+  "origin": {
+    "type": "external-framework",
+    "source": "LangGraph examples and common workflow patterns",
+    "url": "https://github.com/langchain-ai/langgraphjs/tree/main/examples"
+  },
+  "comparison": {
+    "targets": [
+      "LangGraph"
+    ],
+    "purpose": "persistent multi-agent networks resume with plain XState snapshots"
+  }
+}
