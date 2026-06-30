@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { assign } from 'xstate';
-import { createAgentSchemas, createTextLogic, setupAgent } from '../../src/index.js';
+import { setup } from 'xstate';
+import { createAgentSchemas, createTextLogic } from '../../src/index.js';
 
 const jokeSchema = z.object({
   joke: z.string(),
@@ -26,14 +26,16 @@ export const tellJoke = createTextLogic({
   prompt: ({ input }) => `Tell a joke about ${input.topic}.`,
 });
 
-const jokeAgent = setupAgent({
+export const jokeActors = {
+  tellJoke,
+};
+
+const jokeAgent = setup({
   schemas,
-  actors: {
-    tellJoke,
-  },
+  actorSources: jokeActors,
 });
 
-export const jokeSchemas = jokeAgent.schemas;
+export const jokeSchemas = schemas;
 
 export const jokeMachine = jokeAgent.createMachine({
   id: 'joke-streamer',
@@ -46,10 +48,10 @@ export const jokeMachine = jokeAgent.createMachine({
         id: 'joke',
         src: 'tellJoke',
         input: ({ context }) => ({ topic: context.topic }),
-        onDone: {
+        onDone: ({ output }) => ({
           target: 'done',
-          actions: assign({ joke: ({ event }) => event.output }),
-        },
+          context: { joke: output },
+        }),
       },
     },
     done: { type: 'final' },

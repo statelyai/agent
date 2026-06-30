@@ -1,21 +1,25 @@
 import { describe, expect, test } from 'vitest';
 import { z } from 'zod';
 import {
-  assign,
   createActor,
-  fromPromise,
+  createAsyncLogic,
   initialTransition,
   waitFor,
 } from 'xstate';
 import {
   createAgentSchemas,
   createTextLogic,
+  executeAgentRequest,
   getAvailableEvents,
   getAgentRequests,
   getEventTools,
+  getMachineAgentRequests,
+  initialAgentStep,
   messagesSchema,
   parseOutput,
+  resolveAgentStep,
   setupAgent,
+  transitionAgentStep,
   transitionResult,
   userMessage,
   type AgentTextRequest,
@@ -49,10 +53,10 @@ describe('setupAgent', () => {
           },
           model: 'test-model',
           prompt: ({ input }) => input.prompt,
-          events: ({ input, schemas }) => {
+          agentEvents: ({ input, schemas }) => {
             const prompt: string = input.prompt;
             schemas.events.READY_TO_DRAFT;
-            // @ts-expect-error request events input is typed from schemas.input
+            // @ts-expect-error request agentEvents input is typed from schemas.input
             input.body;
             return prompt.length > 0 ? ['READY_TO_DRAFT'] : [];
           },
@@ -95,8 +99,24 @@ describe('setupAgent', () => {
           },
           model: 'test-model',
           prompt: ({ input }) => input.prompt,
-          // @ts-expect-error events are keyed by machine event schemas
-          events: ['DRAT_EMAIL_TYPO'],
+          // @ts-expect-error agentEvents are keyed by machine event schemas
+          agentEvents: ['DRAT_EMAIL_TYPO'],
+        },
+      },
+    });
+
+    setupAgent({
+      schemas,
+      requests: {
+        legacyEvents: {
+          schemas: {
+            input: z.object({ prompt: z.string() }),
+            output: z.object({ body: z.string() }),
+          },
+          model: 'test-model',
+          prompt: ({ input }) => input.prompt,
+          // @ts-expect-error use agentEvents for request-level machine event tools
+          events: ['READY_TO_DRAFT'],
         },
       },
     });
@@ -122,7 +142,7 @@ describe('setupAgent', () => {
       initial: 'drafting',
       states: {
         drafting: {
-          // @ts-expect-error request source ids are strongly typed
+          // @ts-expect-error invoke sources are checked against configured actors
           invoke: {
             src: 'dratemaltypo',
             input: { prompt: 'Draft it.' },
@@ -138,7 +158,7 @@ describe('setupAgent', () => {
         drafting: {
           invoke: {
             src: 'draftEmail',
-            // @ts-expect-error request input is schema-typed
+            // @ts-expect-error invoke input must match the actor input schema
             input: { whoopsanything: 42 },
           },
         },
@@ -154,12 +174,10 @@ describe('setupAgent', () => {
             id: 'draft',
             src: 'draftEmail',
             input: ({ context }) => ({ prompt: context.prompt }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'done',
-              actions: assign({
-                draft: ({ event }) => event.output,
-              }),
-            },
+              context: { draft: output },
+            }),
           },
         },
         done: {
@@ -172,7 +190,7 @@ describe('setupAgent', () => {
     const [_snapshot, actions] = initialTransition(machine, {
       prompt: 'Draft it.',
     });
-    const [request] = machine.getRequests(actions);
+    const [request] = getMachineAgentRequests(machine, actions);
 
     expect(agent.requests.draftEmail.mode).toBe('generate');
     expect(agent.requests.draftEmail.request({ prompt: 'Draft it.' })).toEqual(
@@ -190,7 +208,7 @@ describe('setupAgent', () => {
       }),
     );
 
-    expect(machine.getRequests(actions)).toEqual([request]);
+    expect(getMachineAgentRequests(machine, actions)).toEqual([request]);
 
     await expect(
       agent.requests.draftEmail.execute(
@@ -252,10 +270,10 @@ describe('setupAgent', () => {
       generateMachine,
       { prompt: 'Draft it.' },
     );
-    const [generateTask] = generateMachine.getRequests(generateActions);
+    const [generateTask] = getMachineAgentRequests(generateMachine, generateActions);
 
     await expect(
-      generateMachine.execute(generateTask!, {
+      executeAgentRequest(generateTask!, {
         generateText: async (
           request: AgentTextRequest & { tools: AgentTools },
         ) => {
@@ -288,10 +306,10 @@ describe('setupAgent', () => {
     const [_streamSnapshot, streamActions] = initialTransition(streamMachine, {
       prompt: 'Revise it.',
     });
-    const [streamTask] = streamMachine.getRequests(streamActions);
+    const [streamTask] = getMachineAgentRequests(streamMachine, streamActions);
 
     await expect(
-      streamMachine.execute(streamTask!, {
+      executeAgentRequest(streamTask!, {
         generateText: async () => {
           throw new Error('streamText should be used for stream requests');
         },
@@ -338,13 +356,10 @@ describe('setupAgent', () => {
               outputSchema: answerSchema,
               temperature: 0.2,
             }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'streaming',
-              actions: assign({
-                answer: ({ event }) =>
-                  parseOutput(answerSchema, event.output).answer,
-              }),
-            },
+              context: { answer: parseOutput(answerSchema, output).answer },
+            }),
           },
         },
         streaming: {
@@ -355,25 +370,29 @@ describe('setupAgent', () => {
               model: 'test-model',
               prompt: `Expand ${context.answer}`,
             }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'done',
-              actions: assign({
-                streamed: ({ event }) => event.output as string,
-              }),
-            },
+              context: { streamed: output as string },
+            }),
           },
         },
         done: {
           type: 'final',
-          output: ({ context }) => ({
-            answer: context.answer ?? '',
-            streamed: context.streamed ?? '',
-          }),
+          output: ({ context }) => {
+            const typedContext = context as {
+              answer: string | null;
+              streamed: string | null;
+            };
+            return {
+              answer: typedContext.answer ?? '',
+              streamed: typedContext.streamed ?? '',
+            };
+          },
         },
       },
     });
 
-    let step = machine.initial({ prompt: 'Why machines?' });
+    let step = initialAgentStep(machine, { prompt: 'Why machines?' });
     expect(step.requests).toEqual([
       expect.objectContaining({
         mode: 'generate',
@@ -388,7 +407,7 @@ describe('setupAgent', () => {
       }),
     ]);
 
-    const answer = await machine.execute(step.requests[0]!, {
+    const answer = await executeAgentRequest(step.requests[0]!, {
       generateText: async (
         request: AgentTextRequest & { tools: AgentTools },
       ) => {
@@ -396,7 +415,7 @@ describe('setupAgent', () => {
         return { output: { answer: `Answered ${request.prompt}` } };
       },
     });
-    step = machine.resolve(step, step.requests[0]!, answer);
+    step = resolveAgentStep(machine, step, step.requests[0]!, answer);
 
     expect(step.requests).toEqual([
       expect.objectContaining({
@@ -410,7 +429,7 @@ describe('setupAgent', () => {
       }),
     ]);
 
-    const streamed = await machine.execute(step.requests[0]!, {
+    const streamed = await executeAgentRequest(step.requests[0]!, {
       generateText: async () => {
         throw new Error('generateText should not be used for stream requests');
       },
@@ -420,7 +439,7 @@ describe('setupAgent', () => {
         text: `Streamed ${request.prompt}`,
       }),
     });
-    step = machine.resolve(step, step.requests[0]!, streamed);
+    step = resolveAgentStep(machine, step, step.requests[0]!, streamed);
 
     expect(step.done).toBe(true);
     expect(step.snapshot.output).toEqual({
@@ -458,12 +477,12 @@ describe('setupAgent', () => {
         },
       },
     });
-    const provided = machine.provide({ actors: {} });
-    const step = provided.initial({ prompt: 'hello' });
+    const provided = machine.provide({ actorSources: {} });
+    const step = initialAgentStep(provided, { prompt: 'hello' });
 
-    expect(provided.getRequests(step.actions, step.snapshot)).toHaveLength(1);
-    expect(typeof provided.execute).toBe('function');
-    expect(typeof provided.resolve).toBe('function');
+    expect(agent.getRequests(provided, step.actions, step.snapshot)).toHaveLength(1);
+    expect(typeof agent.execute).toBe('function');
+    expect(typeof agent.resolve).toBe('function');
   });
 
   test('agent machine step execution validates request output schemas', async () => {
@@ -495,10 +514,10 @@ describe('setupAgent', () => {
         },
       },
     });
-    const step = machine.initial({ prompt: 'hello' });
+    const step = initialAgentStep(machine, { prompt: 'hello' });
 
     await expect(
-      machine.execute(step.requests[0]!, {
+      executeAgentRequest(step.requests[0]!, {
         generateText: () => ({ answer: 123 }),
       }),
     ).rejects.toThrow('expected string');
@@ -516,27 +535,21 @@ describe('setupAgent', () => {
     const agent = setupAgent({
       schemas,
       actions: {
-        markReady: assign({
-          ready: ({ event }) => {
-            if (event.type === 'MARK_READY') {
-              const reason: string = event.reason;
-              // @ts-expect-error event payload is schema-typed
-              event.missing;
-              return reason.length > 0;
-            }
-            return false;
-          },
-        }),
+        markReady: ({ event }: { event: { type: string; reason?: string } }) => {
+          if (event.type === 'MARK_READY') {
+            const reason = event.reason ?? '';
+            return { context: { ready: reason.length > 0 } };
+          }
+          return { context: { ready: false } };
+        },
       },
       guards: {
-        hasPrompt: ({ context }) => context.prompt.length > 0,
+        hasPrompt: ({ context }: { context: { prompt: string } }) =>
+          context.prompt.length > 0,
       },
       delays: {
-        shortPause: ({ context }) => {
-          // @ts-expect-error delay callback context is schema-typed
-          context.missing;
-          return context.prompt.length;
-        },
+        shortPause: ({ context }: { context: { prompt: string } }) =>
+          context.prompt.length,
       },
     });
 
@@ -545,11 +558,14 @@ describe('setupAgent', () => {
       initial: 'waiting',
       states: {
         waiting: {
-          entry: 'markReady',
-          always: { guard: 'hasPrompt', target: 'done' },
-          after: { shortPause: 'done' },
+          entry: ({ actions }, enq) => enq(actions.markReady!),
+          always: ({ context, guards }) =>
+            guards.hasPrompt!({ context } as never)
+              ? { target: 'done' }
+              : undefined,
+          after: { shortPause: { target: 'done' } },
           on: {
-            MARK_READY: { actions: 'markReady' },
+            MARK_READY: ({ actions }, enq) => enq(actions.markReady!),
           },
         },
         done: { type: 'final' },
@@ -561,8 +577,9 @@ describe('setupAgent', () => {
       initial: 'waiting',
       states: {
         waiting: {
-          // @ts-expect-error action names are setup-typed
-          entry: 'markReadtypo',
+          entry: ({ actions }, enq) => {
+            enq(actions.markReadtypo!);
+          },
         },
       },
     });
@@ -572,7 +589,6 @@ describe('setupAgent', () => {
       initial: 'waiting',
       states: {
         waiting: {
-          // @ts-expect-error guard names are setup-typed
           always: {
             guard: 'hasPromptypo',
             target: 'done',
@@ -600,12 +616,10 @@ describe('setupAgent', () => {
       states: {
         waiting: {
           on: {
-            USER_REPLIED: {
-              actions: agent.appendMessages(({ event }) => {
+            USER_REPLIED: agent.appendMessages(({ event }) => {
                 const text: string = event.text;
                 return userMessage(text);
-              }),
-            },
+              }) as never,
           },
         },
       },
@@ -655,10 +669,11 @@ describe('setupAgent', () => {
     );
 
     agent.createMachine({
+      context: ({ input }) => ({ article: input.article, summary: null }),
       initial: 'summarizing',
       states: {
         summarizing: {
-          // @ts-expect-error setup actors provide strongly typed source names
+          // @ts-expect-error invoke sources are checked against configured actors
           invoke: {
             src: 'getSummar',
             input: { article: 'typo' },
@@ -668,10 +683,11 @@ describe('setupAgent', () => {
     });
 
     agent.createMachine({
+      context: ({ input }) => ({ article: input.article, summary: null }),
       initial: 'summarizing',
       states: {
         summarizing: {
-          // @ts-expect-error named text logic input requires article
+          // @ts-expect-error invoke input must match the actor input schema
           invoke: {
             id: 'getSummary',
             src: 'getSummary',
@@ -690,17 +706,15 @@ describe('setupAgent', () => {
             id: 'getSummary',
             src: 'getSummary',
             input: ({ context }) => ({ article: context.article }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'done',
-              actions: assign({
-                summary: ({ event }) => {
-                  const summary: string = event.output.summary;
-                  // @ts-expect-error schema-typed output rejects unknown fields
-                  event.output.missingField;
+              context: {
+                summary: (() => {
+                  const summary: string = output.summary;
                   return summary;
-                },
-              }),
-            },
+                })(),
+              },
+            }),
           },
         },
         done: {
@@ -782,7 +796,7 @@ describe('setupAgent', () => {
         },
       },
     });
-    const step = machine.initial({ article: 'State machines.' });
+    const step = initialAgentStep(machine, { article: 'State machines.' });
 
     expect(step.requests[0]).toEqual(
       expect.objectContaining({
@@ -791,7 +805,7 @@ describe('setupAgent', () => {
       }),
     );
     await expect(
-      machine.execute(step.requests[0]!, {
+      executeAgentRequest(step.requests[0]!, {
         generateText: async () => {
           throw new Error('generateText should not be used');
         },
@@ -859,12 +873,10 @@ describe('setupAgent', () => {
           invoke: {
             src: 'answerQuestion',
             input: ({ context }) => ({ question: context.question }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'done',
-              actions: assign({
-                answer: ({ event }) => event.output.answer,
-              }),
-            },
+              context: { answer: output.answer },
+            }),
           },
         },
         done: {
@@ -915,15 +927,15 @@ describe('setupAgent', () => {
           invoke: {
             src: 'answerQuestion',
             input: ({ context }) => ({ question: context.question }),
-            onError: {
+            onError: ({ event }) => ({
               target: 'failed',
-              actions: assign({
-                error: ({ event }) =>
+              context: {
+                error:
                   event.error instanceof Error
                     ? event.error.message
                     : String(event.error),
-              }),
-            },
+              },
+            }),
           },
         },
         failed: {},
@@ -972,10 +984,11 @@ describe('setupAgent', () => {
     const { draftEmail } = agent.requests;
 
     agent.createMachine({
+      context: ({ input }) => ({ prompt: input.prompt, draft: null }),
       initial: 'drafting',
       states: {
         drafting: {
-          // @ts-expect-error registered source ids are strongly typed string literals
+          // @ts-expect-error invoke sources are checked against configured actors
           invoke: {
             id: 'draft',
             src: 'draftEmai',
@@ -995,28 +1008,24 @@ describe('setupAgent', () => {
             id: 'draft',
             src: 'draftEmail',
             input: ({ context }) => ({ prompt: context.prompt }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'review',
-              actions: assign({
-                draft: ({ event }) => {
-                  const draft = event.output;
+              context: {
+                draft: (() => {
+                  const draft = output;
                   const subject: string = draft.subject;
-                  // @ts-expect-error schema-typed output rejects unknown fields
-                  draft.missingField;
                   return { ...draft, subject };
-                },
-              }),
-            },
+                })(),
+              },
+            }),
           },
         },
         review: {
           on: {
-            RETRY: {
+            RETRY: ({ event }) => ({
               target: 'drafting',
-              actions: assign({
-                prompt: ({ event }) => event.prompt,
-              }),
-            },
+              context: { prompt: (event as unknown as { prompt: string }).prompt },
+            }),
           },
         },
         done: {
@@ -1030,7 +1039,7 @@ describe('setupAgent', () => {
       [];
     const actor = createActor(
       machine.provide({
-        actors: {
+        actorSources: {
           draftEmail: draftEmail.withExecutor(async ({ request }) => {
             calls.push(
               request as AgentTextRequest<{
@@ -1099,12 +1108,10 @@ describe('setupAgent', () => {
             id: 'answer',
             src: 'answerQuestion',
             input: ({ context }) => ({ prompt: context.prompt }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'done',
-              actions: assign({
-                answer: ({ event }) => event.output.answer,
-              }),
-            },
+              context: { answer: output.answer },
+            }),
           },
         },
         done: {
@@ -1117,7 +1124,7 @@ describe('setupAgent', () => {
     let [snapshot, actions] = initialTransition(machine, {
       prompt: 'why state machines?',
     });
-    const [request] = machine.getRequests(actions);
+    const [request] = getMachineAgentRequests(machine, actions);
 
     expect(request).toEqual({
       id: 'answer',
@@ -1143,7 +1150,7 @@ describe('setupAgent', () => {
       answer: 'Because the workflow matters.',
     });
 
-    let step = machine.initial({
+    let step = initialAgentStep(machine, {
       prompt: 'why agent machines?',
     });
     expect(step.done).toBe(false);
@@ -1155,14 +1162,14 @@ describe('setupAgent', () => {
       }),
     );
 
-    const output = await machine.execute(step.requests[0]!, {
+    const output = await executeAgentRequest(step.requests[0]!, {
       generateText: (request: AgentTextRequest & { tools: AgentTools }) => ({
         object: {
           answer: `Answered: ${request.prompt}`,
         },
       }),
     });
-    step = machine.resolve(step, step.requests[0]!, output);
+    step = resolveAgentStep(machine, step, step.requests[0]!, output);
 
     expect(step.done).toBe(true);
     expect(step.snapshot.output).toEqual({
@@ -1187,7 +1194,7 @@ describe('setupAgent', () => {
           },
           model: 'test-model',
           prompt: ({ input }) => input.prompt,
-          events: ['ATTACK', 'DEFEND'],
+          agentEvents: ['ATTACK', 'DEFEND'],
         },
       },
     });
@@ -1218,10 +1225,9 @@ describe('setupAgent', () => {
     const [snapshot, actions] = initialTransition(machine, {
       prompt: 'Choose the next move.',
     });
-    const initialStep = machine.initial({ prompt: 'Choose the next move.' });
-    const attackStep = machine.transition(initialStep, {
+    const initialStep = initialAgentStep(machine, { prompt: 'Choose the next move.' });
+    const attackStep = transitionAgentStep(machine, initialStep, {
       type: 'ATTACK',
-      target: 'orc',
     });
 
     expect(attackStep.done).toBe(true);
@@ -1246,8 +1252,8 @@ describe('setupAgent', () => {
       expect.objectContaining({ type: 'ATTACK', toolName: 'machine_attack' }),
     ]);
 
-    const [request] = machine.getRequests(actions, snapshot);
-    const [customNamedRequest] = machine.getRequests(actions, snapshot, {
+    const [request] = getMachineAgentRequests(machine, actions, snapshot);
+    const [customNamedRequest] = getMachineAgentRequests(machine, actions, snapshot, {
       eventToolName: ({ eventType }: { eventType: string }) =>
         `machine_${eventType.toLowerCase()}`,
     });
@@ -1362,7 +1368,7 @@ describe('setupAgent', () => {
       },
     });
 
-    let step = machine.initial({ question: 'Why statecharts?' });
+    let step = initialAgentStep(machine, { question: 'Why statecharts?' });
 
     expect(step.requests).toEqual([
       expect.objectContaining({
@@ -1375,12 +1381,12 @@ describe('setupAgent', () => {
       }),
     ]);
 
-    const output = await machine.execute(step.requests[0]!, {
+    const output = await executeAgentRequest(step.requests[0]!, {
       generateText: async () => ({
         output: { answer: 'Because logic matters.' },
       }),
     });
-    step = machine.resolve(step, step.requests[0]!, output);
+    step = resolveAgentStep(machine, step, step.requests[0]!, output);
 
     expect(step.done).toBe(true);
     expect(step.snapshot.output).toEqual({ answer: 'Because logic matters.' });
@@ -1479,19 +1485,23 @@ describe('setupAgent', () => {
         },
       })
       .provide({
-        actors: {
-          'agent.userInput': fromPromise(async ({ input }) => {
-            expect(input).toEqual(
-              expect.objectContaining({
-                prompt: 'Who should receive this email?',
-                schema: expect.objectContaining({ type: 'object' }),
-              }),
-            );
-            return { recipient: 'Ada' };
+        actorSources: {
+          'agent.userInput': createAsyncLogic({
+            run: async ({ input }) => {
+              expect(input).toEqual(
+                expect.objectContaining({
+                  prompt: 'Who should receive this email?',
+                  schema: expect.objectContaining({ type: 'object' }),
+                }),
+              );
+              return { recipient: 'Ada' };
+            },
           }),
-          draftEmail: fromPromise(async ({ input }) => {
-            expect(input).toEqual({ recipient: 'Ada' });
-            return { draft: 'Hello Ada.' };
+          draftEmail: createAsyncLogic({
+            run: async ({ input }) => {
+              expect(input).toEqual({ recipient: 'Ada' });
+              return { draft: 'Hello Ada.' };
+            },
           }),
         },
       });

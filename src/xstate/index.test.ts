@@ -1,17 +1,19 @@
 import { expect, test } from 'vitest';
-import { setup } from 'xstate';
+import { setup, types } from 'xstate';
 import { toXStateMachine, toXStateVisualization } from './index.js';
 
 test('returns the serializable XState config for XState setup machines', () => {
   const agent = setup({
-    types: {} as { context: {} },
+    schemas: {
+      context: types<{}>(),
+    },
   });
   const machine = agent.createMachine({
     id: 'xstate-export',
     context: {},
     initial: 'idle',
     states: {
-      idle: { on: { NEXT: 'done' } },
+      idle: { on: { NEXT: { target: 'done' } } },
       done: { type: 'final' },
     },
   });

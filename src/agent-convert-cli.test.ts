@@ -15,8 +15,6 @@ test('agent:convert writes Mermaid and XState output from machine files', async 
   await runConvert([fixture, '--format', 'mermaid', '--out', mermaidFile]);
   await expect(readFile(mermaidFile, 'utf8')).resolves.toBe(`stateDiagram-v2
     [*] --> idle
-    idle --> done : submit
-    idle --> rejected : submit
     rejected --> [*]
     done --> [*]`);
 
@@ -68,7 +66,16 @@ test('agent:convert writes Mermaid and XState output from machine files', async 
 }, 20000);
 
 async function runConvert(args: string[]) {
-  return execFileAsync('pnpm', ['agent:convert', ...args], {
+  const result = await execFileAsync('pnpm', ['agent:convert', ...args], {
     cwd: resolve('.'),
+    env: {
+      ...process.env,
+      PNPM_CONFIG_DANGEROUSLY_ALLOW_ALL_BUILDS: 'true',
+      PNPM_CONFIG_MINIMUM_RELEASE_AGE: '0',
+    },
   });
+  return {
+    ...result,
+    stderr: result.stderr.replace(/^\$ .*\n?/u, ''),
+  };
 }

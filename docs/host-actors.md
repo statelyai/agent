@@ -1,10 +1,16 @@
 # Host Actors
 
-`setupAgent(...)` accepts schema-bound `requests` and auto-provides built-in `agent.generateText` and `agent.streamText` actor sources. `createTextLogic(...)` describes reusable named model work. The host still owns execution.
+`setupAgent(...)` is the quickstart for text agents: invoke `agent.generateText` or `agent.streamText` inline, extract returned requests, and let the host call the SDK. Use `createTextLogic(...)` when that model work deserves a reusable name. The host still owns execution.
 
-The text logic declares:
+Inline `agent.generateText` declares:
 
-- input and output schemas
+- model request fields
+- optional output schema
+- optional tools, machine events, metadata, and common model options
+
+Reusable text logic also declares:
+
+- input and output schemas for the reusable actor
 - model reference
 - prompt/messages/system content
 - optional tools, machine events, metadata, and common model options
@@ -24,17 +30,23 @@ The host provides:
 - provider options
 - persistence and transport
 
-## Blessed Pattern
+## Quickstart Pattern
 
-Use named request configs and plain XState `invoke` objects. For maximum framework portability, run the machine with XState's pure transition functions and execute returned agent requests yourself.
+<!-- setupAgent built-in agent.generateText execution helpers exported from src/index.ts and src/setup-agent.ts -->
+
+Use `setupAgent(...)` and inline `agent.generateText` for text-only flows. For maximum framework portability, run the machine with XState's pure transition functions and execute returned agent requests yourself.
 
 ```ts
 import {
   createAgentSchemas,
+  executeAgentRequest,
+  getAgentRequests,
+  initialAgentStep,
   parseOutput,
+  resolveAgentStep,
+  transitionAgentStep,
   setupAgent,
 } from '@statelyai/agent';
-import { assign } from 'xstate';
 
 const schemas = createAgentSchemas({
   context: contextSchema,
@@ -43,63 +55,52 @@ const schemas = createAgentSchemas({
   events: eventSchemas,
 });
 
-const agent = setupAgent({
-  schemas,
-  requests: {
-    draftText: {
-      schemas: {
-        input: z.object({ prompt: z.string() }),
-        output: resultSchema,
-      },
-      model: 'openai/gpt-5.4-nano',
-      prompt: ({ input }) => input.prompt,
-      temperature: 0.2,
-      events: ['APPROVE', 'REVISE'],
-    },
-  },
-});
-
+const agent = setupAgent({ schemas });
 const machine = agent.createMachine({
   initial: 'generating',
   states: {
     generating: {
       invoke: {
         id: 'draft',
-        src: 'draftText',
-        input: ({ context }) => ({ prompt: context.prompt }),
-        onDone: {
+        src: 'agent.generateText',
+        input: ({ context }) => ({
+          model: 'openai/gpt-5.4-nano',
+          prompt: context.prompt,
+          outputSchema: resultSchema,
+          temperature: 0.2,
+          eventTypes: ['APPROVE', 'REVISE'],
+        }),
+        onDone: ({ output }) => ({
           target: 'done',
-          actions: assign({
-            result: ({ event }) => parseOutput(resultSchema, event.output),
-          }),
-        },
+          context: { result: parseOutput(resultSchema, output) },
+        }),
       },
     },
     done: { type: 'final' },
   },
 });
 
-let step = machine.initial(input);
+let step = initialAgentStep(machine, input);
 
 while (!step.done) {
   for (const request of step.requests) {
-    const output = await machine.execute(request, {
+    const output = await executeAgentRequest(request, {
       generateText: (request) => generateText(request),
       streamText: (request) => streamText(request),
     });
-    step = machine.resolve(step, request, output);
+    step = resolveAgentStep(machine, step, request, output);
   }
 }
 ```
 
 Every agent invoke should have a durable `id`; that ID is used to resume the matching `onDone` transition.
 
-`machine.execute(...)` is convenience only. You can still inspect `request.input`, `request.tools`, and `request.events`, then call any SDK yourself.
+`executeAgentRequest(...)` is convenience only. You can still inspect `request.input`, `request.tools`, and `request.events`, then call any SDK yourself.
 
 For external events, advance the same step object:
 
 ```ts
-step = machine.transition(step, { type: 'REVISE', prompt: nextPrompt });
+step = transitionAgentStep(machine, step, { type: 'REVISE', prompt: nextPrompt });
 ```
 
 Use `initialTransition(...)`, `transition(...)`, and `transitionResult(...)` directly when a host wants to own the full XState action list instead of the `step.requests` abstraction.
@@ -109,12 +110,12 @@ Use `initialTransition(...)`, `transition(...)`, and `transitionResult(...)` dir
 Use `agent.userInput` when workflow logic needs to wait for a human. It is a normal invoked actor; the host owns how the request is delivered and resumed.
 
 ```ts
-import { fromPromise } from 'xstate';
+import { createAsyncLogic } from 'xstate';
 
 const machine = setupAgent.fromConfig(config).provide({
-  actors: {
-    'agent.userInput': fromPromise(async ({ input }) => {
-      return showFormAndWaitForSubmit(input);
+  actorSources: {
+    'agent.userInput': createAsyncLogic({
+      run: async ({ input }) => showFormAndWaitForSubmit(input),
     }),
   },
 });
@@ -139,12 +140,12 @@ invoke:
 
 ## Allowed Event Tools
 
-Use request `events` to expose specific state transitions as tools. `getAgentRequests(...)` validates that those events are legal from the current snapshot and returns event tools separately from the model-call input.
+Use request `agentEvents` to expose specific state transitions as tools. `getAgentRequests(...)` validates that those events are legal from the current snapshot and returns event tools separately from the model-call input.
 
 ```ts
 const requests = getAgentRequests(actions, {
   snapshot,
-  schemas: agent.schemas,
+  schemas,
   actors: { chooseMove },
 });
 
@@ -160,9 +161,9 @@ await request.tools.send_event_ATTACK.execute({ target: 'orc' });
 // { type: 'ATTACK', target: 'orc' }
 ```
 
-Only events listed in request `events` are exposed. If an event is listed but is not legal from the current state, it is omitted.
+Only events listed in request `agentEvents` are exposed. If an event is listed but is not legal from the current state, it is omitted.
 
-Use `events` when authoring `setupAgent({ requests })` or `createTextLogic(...)`. `eventTypes` is the lowered `AgentTextRequest` field and the low-level input for direct `agent.generateText` / `agent.streamText` invokes.
+Use `eventTypes` for direct `agent.generateText` / `agent.streamText` invokes. Use `agentEvents` when authoring reusable `createTextLogic(...)`.
 
 ## Actor Runtime
 
@@ -215,7 +216,7 @@ const actors = {
 Then run any machine with those actors:
 
 ```ts
-createActor(machine.provide({ actors }), { input }).start();
+createActor(machine.provide({ actorSources: actors }), { input }).start();
 ```
 
 ## Metadata
@@ -236,11 +237,9 @@ const draftText = createTextLogic({
   }),
 });
 
-const agent = setupAgent({
+const agentSetup = setup({
   schemas,
-  actors: {
-    draftText,
-  },
+  actorSources: { draftText },
 });
 ```
 

@@ -1,11 +1,12 @@
-import { setup } from 'xstate';
+import { setup, types, type AnyStateMachine } from 'xstate';
 
 const agent = setup({
-  types: {} as {
-    context: {};
-    events:
-      | { type: 'submit'; ok: boolean }
-      | { type: 'go' };
+  schemas: {
+    context: types<{}>(),
+    events: {
+      submit: types<{ ok: boolean }>(),
+      go: types<{}>(),
+    },
   },
 });
 
@@ -29,7 +30,9 @@ export const warningMachine = agent.createMachine({
 
 export default machine;
 
-export function createFixtureMachine(id = 'factory-converter-machine') {
+export function createFixtureMachine(
+  id = 'factory-converter-machine'
+): AnyStateMachine {
   return agent.createMachine({
     id,
     context: {},
@@ -37,10 +40,8 @@ export function createFixtureMachine(id = 'factory-converter-machine') {
     states: {
       idle: {
         on: {
-          submit: [
-            { guard: ({ event }) => event.ok, target: 'done' },
-            { target: 'rejected' },
-          ],
+          submit: ({ event }) =>
+            event.ok ? { target: 'done' } : { target: 'rejected' },
         },
       },
       rejected: { type: 'final' },

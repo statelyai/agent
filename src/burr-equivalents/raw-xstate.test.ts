@@ -1,18 +1,18 @@
 import { describe, expect, test } from 'vitest';
 import { z } from 'zod';
-import { assign, createActor, fromPromise, toPromise, waitFor } from 'xstate';
-import { setupAgent } from '../index.js';
+import { createActor, createAsyncLogic, toPromise, waitFor } from 'xstate';
+import { createExampleSetup } from '../example-setup.test-utils.js';
 
 describe('Burr-style examples authored as XState setup machines', () => {
   test('hello-world-counter uses explicit state and guarded looping', async () => {
-    const agent = setupAgent({
+    const agent = createExampleSetup({
       context: z.object({ counter: z.number(), countUpTo: z.number() }),
       input: z.object({ countUpTo: z.number() }),
       output: z.object({ counter: z.number() }),
       actors: {
-        increment: fromPromise<number, { counter: number }>(
-          async ({ input }) => input.counter + 1,
-        ),
+        increment: createAsyncLogic<number, { counter: number }>({
+          run: async ({ input }) => input.counter + 1,
+        }),
       },
     });
 
@@ -25,20 +25,17 @@ describe('Burr-style examples authored as XState setup machines', () => {
           invoke: {
             src: 'increment',
             input: ({ context }) => ({ counter: context.counter }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'checking',
-              actions: assign({ counter: ({ event }) => event.output }),
-            },
+              context: { counter: output },
+            }),
           },
         },
         checking: {
-          always: [
-            {
-              guard: ({ context }) => context.counter < context.countUpTo,
-              target: 'counter',
-            },
-            { target: 'result' },
-          ],
+          always: ({ context }) =>
+            context.counter < context.countUpTo
+              ? { target: 'counter' }
+              : { target: 'result' },
         },
         result: {
           type: 'final',
@@ -55,7 +52,7 @@ describe('Burr-style examples authored as XState setup machines', () => {
   });
 
   test('conversational RAG stores memory in machine context before answering', async () => {
-    const agent = setupAgent({
+    const agent = createExampleSetup({
       context: z.object({
         question: z.string(),
         memory: z.array(z.string()),
@@ -68,12 +65,12 @@ describe('Burr-style examples authored as XState setup machines', () => {
       }),
       output: z.object({ answer: z.string(), memory: z.array(z.string()) }),
       actors: {
-        retrieve: fromPromise<string[], { question: string }>(
-          async ({ input }) => [
+        retrieve: createAsyncLogic<string[], { question: string }>({
+          run: async ({ input }) => [
             `doc:${input.question}`,
             'doc:remembered-state',
           ],
-        ),
+        }),
       },
       requests: {
         answerWithDocuments: {
@@ -110,10 +107,10 @@ describe('Burr-style examples authored as XState setup machines', () => {
           invoke: {
             src: 'retrieve',
             input: ({ context }) => ({ question: context.question }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'answering',
-              actions: assign({ documents: ({ event }) => event.output }),
-            },
+              context: { documents: output },
+            }),
           },
         },
         answering: {
@@ -124,17 +121,17 @@ describe('Burr-style examples authored as XState setup machines', () => {
               documents: context.documents,
               memory: context.memory,
             }),
-            onDone: {
+            onDone: ({ context, output }) => ({
               target: 'done',
-              actions: assign({
-                answer: ({ event }) => event.output,
-                memory: ({ context, event }) => [
+              context: {
+                answer: output,
+                memory: [
                   ...context.memory,
                   context.question,
-                  event.output,
+                  output,
                 ],
-              }),
-            },
+              },
+            }),
           },
         },
         done: {
@@ -149,7 +146,7 @@ describe('Burr-style examples authored as XState setup machines', () => {
 
     const actor = createActor(
       machine.provide({
-        actors: {
+        actorSources: {
           answerWithDocuments: agent.requests.answerWithDocuments.withExecutor(
             async ({ input }) =>
               `answer:${input.documents.join(',')}:memory=${input.memory.length}`,
@@ -180,7 +177,7 @@ describe('Burr-style examples authored as XState setup machines', () => {
         'unknown',
       ]),
     });
-    const agent = setupAgent({
+    const agent = createExampleSetup({
       context: z.object({
         prompt: z.string(),
         safe: z.boolean(),
@@ -225,32 +222,29 @@ describe('Burr-style examples authored as XState setup machines', () => {
       initial: 'checkSafety',
       states: {
         checkSafety: {
-          entry: assign({
-            safe: ({ context }) => !context.prompt.includes('unsafe'),
+          entry: ({ context }) => ({
+            context: { safe: !context.prompt.includes('unsafe') },
           }),
-          always: [
-            { guard: ({ context }) => context.safe, target: 'decideMode' },
-            { target: 'unsafeResponse' },
-          ],
+          always: ({ context }) =>
+            context.safe
+              ? { target: 'decideMode' }
+              : { target: 'unsafeResponse' },
         },
         decideMode: {
           invoke: {
             src: 'chooseMode',
             input: ({ context }) => ({ prompt: context.prompt }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'route',
-              actions: assign({ mode: ({ event }) => event.output.mode }),
-            },
+              context: { mode: output.mode },
+            }),
           },
         },
         route: {
-          always: [
-            {
-              guard: ({ context }) => context.mode === 'unknown',
-              target: 'promptForMore',
-            },
-            { target: 'answering' },
-          ],
+          always: ({ context }) =>
+            context.mode === 'unknown'
+              ? { target: 'promptForMore' }
+              : { target: 'answering' },
         },
         answering: {
           invoke: {
@@ -259,18 +253,18 @@ describe('Burr-style examples authored as XState setup machines', () => {
               prompt: context.prompt,
               mode: context.mode ?? 'answer_question',
             }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'done',
-              actions: assign({ response: ({ event }) => event.output }),
-            },
+              context: { response: output },
+            }),
           },
         },
         promptForMore: {
-          entry: assign({ response: 'Please clarify.' }),
+          entry: () => ({ context: { response: 'Please clarify.' } }),
           always: { target: 'done' },
         },
         unsafeResponse: {
-          entry: assign({ response: 'I cannot respond to that.' }),
+          entry: () => ({ context: { response: 'I cannot respond to that.' } }),
           always: { target: 'done' },
         },
         done: {
@@ -283,7 +277,7 @@ describe('Burr-style examples authored as XState setup machines', () => {
     const chunks: string[] = [];
     const actor = createActor(
       machine.provide({
-        actors: {
+        actorSources: {
           chooseMode: agent.requests.chooseMode.withExecutor(async () => ({
             mode: 'generate_code',
           })),
@@ -318,7 +312,7 @@ describe('Burr-style examples authored as XState setup machines', () => {
         parameters: z.object({ response: z.string() }),
       }),
     ]);
-    const agent = setupAgent({
+    const agent = createExampleSetup({
       context: z.object({
         query: z.string(),
         selected: selectedToolSchema.nullable(),
@@ -328,16 +322,18 @@ describe('Burr-style examples authored as XState setup machines', () => {
       input: z.object({ query: z.string() }),
       output: z.object({ finalOutput: z.string() }),
       actors: {
-        queryWeather: fromPromise<
+        queryWeather: createAsyncLogic<
           Record<string, unknown>,
           { latitude: number; longitude: number }
-        >(async ({ input }) => ({
-          forecast: 'sunny',
-          location: `${input.latitude},${input.longitude}`,
-        })),
-        fallback: fromPromise<Record<string, unknown>, { response: string }>(
-          async ({ input }) => ({ response: input.response }),
-        ),
+        >({
+          run: async ({ input }) => ({
+            forecast: 'sunny',
+            location: `${input.latitude},${input.longitude}`,
+          }),
+        }),
+        fallback: createAsyncLogic<Record<string, unknown>, { response: string }>({
+          run: async ({ input }) => ({ response: input.response }),
+        }),
       },
       requests: {
         selectTool: {
@@ -378,20 +374,17 @@ describe('Burr-style examples authored as XState setup machines', () => {
           invoke: {
             src: 'selectTool',
             input: ({ context }) => ({ query: context.query }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'dispatch',
-              actions: assign({ selected: ({ event }) => event.output }),
-            },
+              context: { selected: output },
+            }),
           },
         },
         dispatch: {
-          always: [
-            {
-              guard: ({ context }) => context.selected?.tool === 'queryWeather',
-              target: 'queryingWeather',
-            },
-            { target: 'fallingBack' },
-          ],
+          always: ({ context }) =>
+            context.selected?.tool === 'queryWeather'
+              ? { target: 'queryingWeather' }
+              : { target: 'fallingBack' },
         },
         queryingWeather: {
           invoke: {
@@ -400,10 +393,10 @@ describe('Burr-style examples authored as XState setup machines', () => {
               context.selected?.tool === 'queryWeather'
                 ? context.selected.parameters
                 : { latitude: 0, longitude: 0 },
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'formatting',
-              actions: assign({ rawResponse: ({ event }) => event.output }),
-            },
+              context: { rawResponse: output },
+            }),
           },
         },
         fallingBack: {
@@ -413,10 +406,10 @@ describe('Burr-style examples authored as XState setup machines', () => {
               context.selected?.tool === 'fallback'
                 ? context.selected.parameters
                 : { response: 'No tool selected.' },
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'formatting',
-              actions: assign({ rawResponse: ({ event }) => event.output }),
-            },
+              context: { rawResponse: output },
+            }),
           },
         },
         formatting: {
@@ -426,10 +419,10 @@ describe('Burr-style examples authored as XState setup machines', () => {
               query: context.query,
               rawResponse: context.rawResponse ?? {},
             }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'done',
-              actions: assign({ finalOutput: ({ event }) => event.output }),
-            },
+              context: { finalOutput: output },
+            }),
           },
         },
         done: {
@@ -441,7 +434,7 @@ describe('Burr-style examples authored as XState setup machines', () => {
 
     const actor = createActor(
       machine.provide({
-        actors: {
+        actorSources: {
           selectTool: agent.requests.selectTool.withExecutor(async () => ({
             tool: 'queryWeather',
             parameters: { latitude: 37.77, longitude: -122.42 },
@@ -474,7 +467,7 @@ describe('Burr-style examples authored as XState setup machines', () => {
       concepts: z.array(conceptSchema),
       keyTakeaways: z.array(z.string()),
     });
-    const agent = setupAgent({
+    const agent = createExampleSetup({
       context: z.object({
         youtubeUrl: z.string(),
         transcript: z.string().nullable(),
@@ -483,9 +476,9 @@ describe('Burr-style examples authored as XState setup machines', () => {
       input: z.object({ youtubeUrl: z.string() }),
       output: z.object({ post: postSchema }),
       actors: {
-        getTranscript: fromPromise<string, { youtubeUrl: string }>(
-          async ({ input }) => `transcript:${input.youtubeUrl}`,
-        ),
+        getTranscript: createAsyncLogic<string, { youtubeUrl: string }>({
+          run: async ({ input }) => `transcript:${input.youtubeUrl}`,
+        }),
       },
       requests: {
         generatePost: {
@@ -513,20 +506,20 @@ describe('Burr-style examples authored as XState setup machines', () => {
           invoke: {
             src: 'getTranscript',
             input: ({ context }) => ({ youtubeUrl: context.youtubeUrl }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'generatingPost',
-              actions: assign({ transcript: ({ event }) => event.output }),
-            },
+              context: { transcript: output },
+            }),
           },
         },
         generatingPost: {
           invoke: {
             src: 'generatePost',
             input: ({ context }) => ({ transcript: context.transcript ?? '' }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'done',
-              actions: assign({ post: ({ event }) => event.output }),
-            },
+              context: { post: output },
+            }),
           },
         },
         done: {
@@ -546,7 +539,7 @@ describe('Burr-style examples authored as XState setup machines', () => {
 
     const actor = createActor(
       machine.provide({
-        actors: {
+        actorSources: {
           generatePost: agent.requests.generatePost.withExecutor(
             async ({ input }) => ({
               topic: 'Burr',
@@ -579,7 +572,7 @@ describe('Burr-style examples authored as XState setup machines', () => {
     const routeSchema = z.object({
       route: z.enum(['researcher', 'chartGenerator']),
     });
-    const agent = setupAgent({
+    const agent = createExampleSetup({
       context: z.object({
         request: z.string(),
         route: z.enum(['researcher', 'chartGenerator']).nullable(),
@@ -588,12 +581,12 @@ describe('Burr-style examples authored as XState setup machines', () => {
       input: z.object({ request: z.string() }),
       output: z.object({ result: z.string() }),
       actors: {
-        researcher: fromPromise<string, { request: string }>(
-          async ({ input }) => `research:${input.request}`,
-        ),
-        chartGenerator: fromPromise<string, { request: string }>(
-          async ({ input }) => `chart:${input.request}`,
-        ),
+        researcher: createAsyncLogic<string, { request: string }>({
+          run: async ({ input }) => `research:${input.request}`,
+        }),
+        chartGenerator: createAsyncLogic<string, { request: string }>({
+          run: async ({ input }) => `chart:${input.request}`,
+        }),
       },
       requests: {
         routeWork: {
@@ -620,39 +613,36 @@ describe('Burr-style examples authored as XState setup machines', () => {
           invoke: {
             src: 'routeWork',
             input: ({ context }) => ({ request: context.request }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'dispatch',
-              actions: assign({ route: ({ event }) => event.output.route }),
-            },
+              context: { route: output.route },
+            }),
           },
         },
         dispatch: {
-          always: [
-            {
-              guard: ({ context }) => context.route === 'chartGenerator',
-              target: 'charting',
-            },
-            { target: 'researching' },
-          ],
+          always: ({ context }) =>
+            context.route === 'chartGenerator'
+              ? { target: 'charting' }
+              : { target: 'researching' },
         },
         researching: {
           invoke: {
             src: 'researcher',
             input: ({ context }) => ({ request: context.request }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'done',
-              actions: assign({ result: ({ event }) => event.output }),
-            },
+              context: { result: output },
+            }),
           },
         },
         charting: {
           invoke: {
             src: 'chartGenerator',
             input: ({ context }) => ({ request: context.request }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'done',
-              actions: assign({ result: ({ event }) => event.output }),
-            },
+              context: { result: output },
+            }),
           },
         },
         done: {
@@ -664,7 +654,7 @@ describe('Burr-style examples authored as XState setup machines', () => {
 
     const actor = createActor(
       machine.provide({
-        actors: {
+        actorSources: {
           routeWork: agent.requests.routeWork.withExecutor(async () => ({
             route: 'chartGenerator',
           })),

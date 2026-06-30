@@ -1,13 +1,13 @@
-export interface StandardSchemaV1<Output = unknown> {
+export interface StandardSchemaV1<Input = unknown, Output = Input> {
   readonly '~standard': {
     readonly version: 1;
     readonly vendor: string;
     readonly validate: (value: unknown) => any;
-    readonly types?: { readonly input?: unknown; readonly output?: Output };
+    readonly types?: { readonly input: Input; readonly output: Output };
   };
 }
 
-export type InferOutput<T> = T extends StandardSchemaV1<infer O> ? O : never;
+export type InferOutput<T> = T extends StandardSchemaV1<any, infer O> ? O : never;
 
 export type EventPayload<T> = T extends Record<string, never> ? unknown : T;
 

@@ -37,7 +37,7 @@ As of June 18, 2026, the upstream Burr examples directory includes examples such
 Burr action definitions are runtime-owned executable steps. `@statelyai/agent` keeps those steps as portable authoring contracts:
 
 - Built-in text actor sources own inline model-call requests; `createTextLogic(...)` owns reusable typed request construction.
-- `setupAgent(...)` owns typed machine authoring.
+- XState `setup(...)` owns typed machine authoring.
 - Hosts own model providers, streaming, persistence, tracing, and deployment.
 
 That gives Burr-style individually testable actions without adopting a Burr-style runtime.

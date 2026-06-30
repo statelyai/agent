@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'vitest';
 import { z } from 'zod';
-import { assign, createActor, fromPromise, toPromise } from 'xstate';
-import { setupAgent } from '../index.js';
+import { createActor, createAsyncLogic, toPromise } from 'xstate';
+import { createExampleSetup } from '../example-setup.test-utils.js';
 
 describe('CrewAI-style flows authored as XState setup machines', () => {
   test('content creator routes and generates specialized content', async () => {
-    const agent = setupAgent({
+    const agent = createExampleSetup({
       context: z.object({
         request: z.string(),
         route: z.enum(['linkedin', 'blog']).nullable(),
@@ -52,10 +52,10 @@ describe('CrewAI-style flows authored as XState setup machines', () => {
           invoke: {
             src: 'routeContent',
             input: ({ context }) => ({ request: context.request }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'creating',
-              actions: assign({ route: ({ event }) => event.output.route }),
-            },
+              context: { route: output.route },
+            }),
           },
         },
         creating: {
@@ -65,10 +65,10 @@ describe('CrewAI-style flows authored as XState setup machines', () => {
               route: context.route ?? 'blog',
               request: context.request,
             }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'done',
-              actions: assign({ content: ({ event }) => event.output }),
-            },
+              context: { content: output },
+            }),
           },
         },
         done: {
@@ -83,7 +83,7 @@ describe('CrewAI-style flows authored as XState setup machines', () => {
 
     const actor = createActor(
       machine.provide({
-        actors: {
+        actorSources: {
           routeContent: agent.requests.routeContent.withExecutor(async () => ({
             route: 'linkedin',
           })),
@@ -104,7 +104,7 @@ describe('CrewAI-style flows authored as XState setup machines', () => {
   });
 
   test('write-a-book fans out chapter workers and compiles a manuscript', async () => {
-    const agent = setupAgent({
+    const agent = createExampleSetup({
       context: z.object({
         brief: z.string(),
         title: z.string().nullable(),
@@ -114,10 +114,10 @@ describe('CrewAI-style flows authored as XState setup machines', () => {
       input: z.object({ brief: z.string() }),
       output: z.object({ title: z.string(), manuscript: z.string() }),
       actors: {
-        writeChapters: fromPromise<string[], { chapters: string[] }>(
-          async ({ input }) =>
+        writeChapters: createAsyncLogic<string[], { chapters: string[] }>({
+          run: async ({ input }) =>
             input.chapters.map((chapter: string) => `${chapter}: body`),
-        ),
+        }),
       },
       requests: {
         outlineBook: {
@@ -148,25 +148,23 @@ describe('CrewAI-style flows authored as XState setup machines', () => {
           invoke: {
             src: 'outlineBook',
             input: ({ context }) => ({ brief: context.brief }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'writing',
-              actions: assign({
-                title: ({ event }) => event.output.title,
-                chapters: ({ event }) => event.output.chapters,
-              }),
-            },
+              context: {
+                title: output.title,
+                chapters: output.chapters,
+              },
+            }),
           },
         },
         writing: {
           invoke: {
             src: 'writeChapters',
             input: ({ context }) => ({ chapters: context.chapters }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'done',
-              actions: assign({
-                manuscript: ({ event }) => event.output.join('\n'),
-              }),
-            },
+              context: { manuscript: output.join('\n') },
+            }),
           },
         },
         done: {
@@ -181,7 +179,7 @@ describe('CrewAI-style flows authored as XState setup machines', () => {
 
     const actor = createActor(
       machine.provide({
-        actors: {
+        actorSources: {
           outlineBook: agent.requests.outlineBook.withExecutor(async () => ({
             title: 'The Workflow Book',
             chapters: ['Intro', 'Runtime'],

@@ -39,7 +39,7 @@ export class EmailDrafterAgent extends Agent<Env, EmailDrafterState> {
     const workersai = createWorkersAI({ binding: this.env.AI });
 
     const machine = emailDrafter.provide({
-      actors: {
+      actorSources: {
         evaluatePrompt: createAiSdkTextActor(evaluatePrompt, {
           resolveModel: (modelRef) => workersai(modelRef as never),
         }),

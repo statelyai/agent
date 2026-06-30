@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { createActor, fromPromise, toPromise, waitFor } from 'xstate';
+import { createActor, createAsyncLogic, toPromise, waitFor } from 'xstate';
 import {
   emailDrafter,
   emailDrafterSchemas,
@@ -22,7 +22,7 @@ describe('curated XState setup examples', () => {
     const calls: AgentTextRequest[] = [];
     const sent: unknown[] = [];
     const machine = emailDrafter.provide({
-      actors: {
+      actorSources: {
         evaluatePrompt: evaluatePrompt.withExecutor(async ({ input, request }) => {
           calls.push(request);
           const satisfied =
@@ -41,9 +41,14 @@ describe('curated XState setup examples', () => {
             body: 'Hi Riley, thanks for meeting today.',
           };
         }),
-        sendEmail: fromPromise(async ({ input }) => {
-          sent.push(input);
-          return { sent: true };
+        sendEmail: createAsyncLogic<
+          { sent: boolean },
+          { draft: { to: string; subject: string; body: string } }
+        >({
+          run: async ({ input }) => {
+            sent.push(input);
+            return { sent: true };
+          },
         }),
       },
     });
@@ -54,13 +59,13 @@ describe('curated XState setup examples', () => {
     actor.send({
       type: 'PROMPT_SUBMITTED',
       prompt: 'Write a thank you email after the meeting.',
-    } as never);
+    });
     await waitFor(actor, (snapshot) => snapshot.matches('needsMoreInfo'));
 
     actor.send({
       type: 'MORE_INFO',
       details: 'Send it to riley@example.com.',
-    } as never);
+    });
     await waitFor(actor, (snapshot) => snapshot.matches('reviewing'));
 
     expect(actor.getSnapshot().context.draft).toEqual({

@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'vitest';
 import { z } from 'zod';
-import { assign, createActor, fromPromise, toPromise, waitFor } from 'xstate';
-import { setupAgent } from '../index.js';
+import { createActor, createAsyncLogic, toPromise, waitFor } from 'xstate';
+import { createExampleSetup } from '../example-setup.test-utils.js';
 
 describe('LangGraph-style workflows authored as raw XState', () => {
   test('conditional routing uses declarative text actor input', async () => {
-    const agent = setupAgent({
+    const agent = createExampleSetup({
       context: z.object({
         request: z.string(),
         route: z.enum(['answer', 'escalate']).nullable(),
@@ -27,26 +27,24 @@ describe('LangGraph-style workflows authored as raw XState', () => {
     const machine = agent.createMachine({
       id: 'raw-xstate-branching',
       context: ({ input }) => ({ request: input.request, route: null }),
+      output: ({ context }) => ({ route: context.route ?? 'answer' }),
       initial: 'classifying',
       states: {
         classifying: {
           invoke: {
             src: 'routeRequest',
             input: ({ context }) => ({ request: context.request }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'routing',
-              actions: assign({ route: ({ event }) => event.output.route }),
-            },
+              context: { route: output.route },
+            }),
           },
         },
         routing: {
-          always: [
-            {
-              guard: ({ context }) => context.route === 'escalate',
-              target: 'escalated',
-            },
-            { target: 'answered' },
-          ],
+          always: ({ context }) =>
+            context.route === 'escalate'
+              ? { target: 'escalated' }
+              : { target: 'answered' },
         },
         answered: {
           type: 'final',
@@ -61,7 +59,7 @@ describe('LangGraph-style workflows authored as raw XState', () => {
 
     const actor = createActor(
       machine.provide({
-        actors: {
+        actorSources: {
           routeRequest: agent.requests.routeRequest.withExecutor(async () => ({
             route: 'escalate',
           })),
@@ -77,7 +75,7 @@ describe('LangGraph-style workflows authored as raw XState', () => {
   });
 
   test('human-in-the-loop approval uses typed external events', async () => {
-    const agent = setupAgent({
+    const agent = createExampleSetup({
       context: z.object({
         topic: z.string(),
         draft: z.string().nullable(),
@@ -111,22 +109,21 @@ describe('LangGraph-style workflows authored as raw XState', () => {
             input: ({ context }: { context: { topic: string } }) => ({
               topic: context.topic,
             }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'reviewing',
-              actions: assign({ draft: ({ event }) => event.output }),
-            },
+              context: { draft: output },
+            }),
           },
         },
         reviewing: {
           on: {
             APPROVE: { target: 'published' },
-            REJECT: {
+            REJECT: ({ context, event }) => ({
               target: 'drafting',
-              actions: assign({
-                topic: ({ context, event }) =>
-                  `${context.topic}\nRevision: ${event.reason}`,
-              }),
-            },
+              context: {
+                topic: `${context.topic}\nRevision: ${(event as unknown as { reason: string }).reason}`,
+              },
+            }),
           },
         },
         published: {
@@ -141,7 +138,7 @@ describe('LangGraph-style workflows authored as raw XState', () => {
 
     const actor = createActor(
       machine.provide({
-        actors: {
+        actorSources: {
           writeDraft: agent.requests.writeDraft.withExecutor(
             async ({ input }) => `Draft: ${input.topic}`,
           ),
@@ -165,7 +162,7 @@ describe('LangGraph-style workflows authored as raw XState', () => {
     const planSchema = z.object({
       steps: z.array(z.string()),
     });
-    const agent = setupAgent({
+    const agent = createExampleSetup({
       context: z.object({
         request: z.string(),
         steps: z.array(z.string()),
@@ -174,9 +171,9 @@ describe('LangGraph-style workflows authored as raw XState', () => {
       input: z.object({ request: z.string() }),
       output: z.object({ results: z.array(z.string()) }),
       actors: {
-        runStep: fromPromise<string, { step: string }>(
-          async ({ input }) => `done:${input.step}`,
-        ),
+        runStep: createAsyncLogic<string, { step: string }>({
+          run: async ({ input }) => `done:${input.step}`,
+        }),
       },
       requests: {
         planTask: {
@@ -203,36 +200,28 @@ describe('LangGraph-style workflows authored as raw XState', () => {
           invoke: {
             src: 'planTask',
             input: ({ context }) => ({ request: context.request }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'running',
-              actions: assign({ steps: ({ event }) => event.output.steps }),
-            },
+              context: { steps: output.steps },
+            }),
           },
         },
         running: {
           invoke: {
             src: 'runStep',
             input: ({ context }) => ({ step: context.steps[0] ?? '' }),
-            onDone: {
+            onDone: ({ context, output }) => ({
               target: 'checking',
-              actions: assign({
-                steps: ({ context }) => context.steps.slice(1),
-                results: ({ context, event }) => [
-                  ...context.results,
-                  event.output,
-                ],
-              }),
-            },
+              context: {
+                steps: context.steps.slice(1),
+                results: [...context.results, output],
+              },
+            }),
           },
         },
         checking: {
-          always: [
-            {
-              guard: ({ context }) => context.steps.length > 0,
-              target: 'running',
-            },
-            { target: 'done' },
-          ],
+          always: ({ context }) =>
+            context.steps.length > 0 ? { target: 'running' } : { target: 'done' },
         },
         done: {
           type: 'final',
@@ -243,7 +232,7 @@ describe('LangGraph-style workflows authored as raw XState', () => {
 
     const actor = createActor(
       machine.provide({
-        actors: {
+        actorSources: {
           planTask: agent.requests.planTask.withExecutor(async () => ({
             steps: ['research', 'write'],
           })),
@@ -262,7 +251,7 @@ describe('LangGraph-style workflows authored as raw XState', () => {
 
   test('tool-calling streams typed host-side progress', async () => {
     const emitted: string[] = [];
-    const agent = setupAgent({
+    const agent = createExampleSetup({
       context: z.object({
         city: z.string(),
         forecast: z.string().nullable(),
@@ -270,11 +259,13 @@ describe('LangGraph-style workflows authored as raw XState', () => {
       input: z.object({ city: z.string() }),
       output: z.object({ forecast: z.string() }),
       actors: {
-        getWeather: fromPromise<string, { city: string }>(async ({ input }) => {
-          emitted.push(`call:${input.city}`);
-          emitted.push(`progress:${input.city}:1`);
-          emitted.push(`progress:${input.city}:2`);
-          return `Sunny in ${input.city}`;
+        getWeather: createAsyncLogic<string, { city: string }>({
+          run: async ({ input }) => {
+            emitted.push(`call:${input.city}`);
+            emitted.push(`progress:${input.city}:1`);
+            emitted.push(`progress:${input.city}:2`);
+            return `Sunny in ${input.city}`;
+          },
         }),
       },
     });
@@ -288,10 +279,10 @@ describe('LangGraph-style workflows authored as raw XState', () => {
           invoke: {
             src: 'getWeather',
             input: ({ context }) => ({ city: context.city }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'done',
-              actions: assign({ forecast: ({ event }) => event.output }),
-            },
+              context: { forecast: output },
+            }),
           },
         },
         done: {
@@ -314,7 +305,7 @@ describe('LangGraph-style workflows authored as raw XState', () => {
   });
 
   test('persistence restores from XState snapshots without a custom runtime', async () => {
-    const agent = setupAgent({
+    const agent = createExampleSetup({
       context: z.object({
         topic: z.string(),
         draft: z.string().nullable(),
@@ -347,10 +338,10 @@ describe('LangGraph-style workflows authored as raw XState', () => {
             input: ({ context }: { context: { topic: string } }) => ({
               topic: context.topic,
             }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'reviewing',
-              actions: assign({ draft: ({ event }) => event.output }),
-            },
+              context: { draft: output },
+            }),
           },
         },
         reviewing: {
@@ -368,7 +359,7 @@ describe('LangGraph-style workflows authored as raw XState', () => {
         async ({ input }) => `Draft: ${input.topic}`,
       ),
     };
-    const first = createActor(machine.provide({ actors }), {
+    const first = createActor(machine.provide({ actorSources: actors }), {
       input: { topic: 'incident update' },
     });
     first.start();
@@ -377,7 +368,7 @@ describe('LangGraph-style workflows authored as raw XState', () => {
     const persisted = first.getPersistedSnapshot();
     first.stop();
 
-    const restored = createActor(machine.provide({ actors }), {
+    const restored = createActor(machine.provide({ actorSources: actors }), {
       input: { topic: 'incident update' },
       snapshot: persisted,
     });
@@ -391,7 +382,7 @@ describe('LangGraph-style workflows authored as raw XState', () => {
   });
 
   test('subflows compose as typed child actors', async () => {
-    const childAgent = setupAgent({
+    const childAgent = createExampleSetup({
       context: z.object({ topic: z.string(), research: z.string().nullable() }),
       input: z.object({ topic: z.string() }),
       output: z.object({ research: z.string() }),
@@ -415,10 +406,10 @@ describe('LangGraph-style workflows authored as raw XState', () => {
           invoke: {
             src: 'researchTopic',
             input: ({ context }) => ({ topic: context.topic }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'done',
-              actions: assign({ research: ({ event }) => event.output }),
-            },
+              context: { research: output },
+            }),
           },
         },
         done: {
@@ -428,7 +419,7 @@ describe('LangGraph-style workflows authored as raw XState', () => {
       },
     });
 
-    const parentAgent = setupAgent({
+    const parentAgent = createExampleSetup({
       context: z.object({ topic: z.string(), research: z.string().nullable() }),
       input: z.object({ topic: z.string() }),
       output: z.object({ research: z.string() }),
@@ -445,13 +436,10 @@ describe('LangGraph-style workflows authored as raw XState', () => {
             input: ({ context }: { context: { topic: string } }) => ({
               topic: context.topic,
             }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'done',
-              actions: assign({
-                research: ({ event }) =>
-                  (event.output as { research: string }).research,
-              }),
-            },
+              context: { research: (output as { research: string }).research },
+            }),
           },
         },
         done: {
@@ -463,9 +451,9 @@ describe('LangGraph-style workflows authored as raw XState', () => {
 
     const actor = createActor(
       parentMachine.provide({
-        actors: {
+        actorSources: {
           child: childMachine.provide({
-            actors: {
+            actorSources: {
               researchTopic: childAgent.requests.researchTopic.withExecutor(
                 async ({ input }) => `Research: ${input.topic}`,
               ),
@@ -484,7 +472,7 @@ describe('LangGraph-style workflows authored as raw XState', () => {
   });
 
   test('supervisor handoff is explicit typed routing', async () => {
-    const agent = setupAgent({
+    const agent = createExampleSetup({
       context: z.object({
         request: z.string(),
         route: z.enum(['research', 'write']).nullable(),
@@ -493,12 +481,12 @@ describe('LangGraph-style workflows authored as raw XState', () => {
       input: z.object({ request: z.string() }),
       output: z.object({ result: z.string() }),
       actors: {
-        research: fromPromise<string, { request: string }>(
-          async ({ input }) => `research:${input.request}`,
-        ),
-        write: fromPromise<string, { request: string }>(
-          async ({ input }) => `write:${input.request}`,
-        ),
+        research: createAsyncLogic<string, { request: string }>({
+          run: async ({ input }) => `research:${input.request}`,
+        }),
+        write: createAsyncLogic<string, { request: string }>({
+          run: async ({ input }) => `write:${input.request}`,
+        }),
       },
       requests: {
         routeRequest: {
@@ -525,39 +513,36 @@ describe('LangGraph-style workflows authored as raw XState', () => {
           invoke: {
             src: 'routeRequest',
             input: ({ context }) => ({ request: context.request }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'dispatch',
-              actions: assign({ route: ({ event }) => event.output.route }),
-            },
+              context: { route: output.route },
+            }),
           },
         },
         dispatch: {
-          always: [
-            {
-              guard: ({ context }) => context.route === 'research',
-              target: 'researching',
-            },
-            { target: 'writing' },
-          ],
+          always: ({ context }) =>
+            context.route === 'research'
+              ? { target: 'researching' }
+              : { target: 'writing' },
         },
         researching: {
           invoke: {
             src: 'research',
             input: ({ context }) => ({ request: context.request }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'done',
-              actions: assign({ result: ({ event }) => event.output }),
-            },
+              context: { result: output },
+            }),
           },
         },
         writing: {
           invoke: {
             src: 'write',
             input: ({ context }) => ({ request: context.request }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'done',
-              actions: assign({ result: ({ event }) => event.output }),
-            },
+              context: { result: output },
+            }),
           },
         },
         done: {
@@ -569,7 +554,7 @@ describe('LangGraph-style workflows authored as raw XState', () => {
 
     const actor = createActor(
       machine.provide({
-        actors: {
+        actorSources: {
           routeRequest: agent.requests.routeRequest.withExecutor(async () => ({
             route: 'research',
           })),
@@ -586,7 +571,7 @@ describe('LangGraph-style workflows authored as raw XState', () => {
   });
 
   test('map-reduce fan-out uses typed local actors and normal JavaScript concurrency', async () => {
-    const agent = setupAgent({
+    const agent = createExampleSetup({
       context: z.object({
         sections: z.array(z.string()),
         summaries: z.array(z.string()),
@@ -595,14 +580,14 @@ describe('LangGraph-style workflows authored as raw XState', () => {
       input: z.object({ sections: z.array(z.string()) }),
       output: z.object({ final: z.string() }),
       actors: {
-        summarizeAll: fromPromise<string[], { sections: string[] }>(
-          async ({ input }) =>
+        summarizeAll: createAsyncLogic<string[], { sections: string[] }>({
+          run: async ({ input }) =>
             Promise.all(
               input.sections.map(
                 async (section: string) => `summary:${section}`,
               ),
             ),
-        ),
+        }),
       },
       requests: {
         reduceSummaries: {
@@ -629,20 +614,20 @@ describe('LangGraph-style workflows authored as raw XState', () => {
           invoke: {
             src: 'summarizeAll',
             input: ({ context }) => ({ sections: context.sections }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'reducing',
-              actions: assign({ summaries: ({ event }) => event.output }),
-            },
+              context: { summaries: output },
+            }),
           },
         },
         reducing: {
           invoke: {
             src: 'reduceSummaries',
             input: ({ context }) => ({ summaries: context.summaries }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'done',
-              actions: assign({ final: ({ event }) => event.output }),
-            },
+              context: { final: output },
+            }),
           },
         },
         done: {
@@ -654,7 +639,7 @@ describe('LangGraph-style workflows authored as raw XState', () => {
 
     const actor = createActor(
       machine.provide({
-        actors: {
+        actorSources: {
           reduceSummaries: agent.requests.reduceSummaries.withExecutor(
             async ({ input }) => `reduced:${input.summaries.join('\n')}`,
           ),
@@ -671,7 +656,7 @@ describe('LangGraph-style workflows authored as raw XState', () => {
   });
 
   test('RAG keeps retrieval as a typed host actor before generation', async () => {
-    const agent = setupAgent({
+    const agent = createExampleSetup({
       context: z.object({
         question: z.string(),
         documents: z.array(z.string()),
@@ -680,9 +665,9 @@ describe('LangGraph-style workflows authored as raw XState', () => {
       input: z.object({ question: z.string() }),
       output: z.object({ answer: z.string() }),
       actors: {
-        retrieve: fromPromise<string[], { question: string }>(
-          async ({ input }) => [`doc:${input.question}`, 'doc:typed state'],
-        ),
+        retrieve: createAsyncLogic<string[], { question: string }>({
+          run: async ({ input }) => [`doc:${input.question}`, 'doc:typed state'],
+        }),
       },
       requests: {
         answerQuestion: {
@@ -713,10 +698,10 @@ describe('LangGraph-style workflows authored as raw XState', () => {
           invoke: {
             src: 'retrieve',
             input: ({ context }) => ({ question: context.question }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'answering',
-              actions: assign({ documents: ({ event }) => event.output }),
-            },
+              context: { documents: output },
+            }),
           },
         },
         answering: {
@@ -726,10 +711,10 @@ describe('LangGraph-style workflows authored as raw XState', () => {
               question: context.question,
               documents: context.documents,
             }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'done',
-              actions: assign({ answer: ({ event }) => event.output }),
-            },
+              context: { answer: output },
+            }),
           },
         },
         done: {
@@ -741,7 +726,7 @@ describe('LangGraph-style workflows authored as raw XState', () => {
 
     const actor = createActor(
       machine.provide({
-        actors: {
+        actorSources: {
           answerQuestion: agent.requests.answerQuestion.withExecutor(
             async ({ input }) =>
               `answer from Q: ${input.question}\nDocs:\n${input.documents.join('\n')}`,
@@ -766,7 +751,7 @@ describe('LangGraph-style workflows authored as raw XState', () => {
       feedback: z.string(),
     });
     let critiqueCount = 0;
-    const agent = setupAgent({
+    const agent = createExampleSetup({
       context: z.object({
         prompt: z.string(),
         draft: z.string().nullable(),
@@ -818,30 +803,28 @@ describe('LangGraph-style workflows authored as raw XState', () => {
               prompt: context.prompt,
               feedback: context.feedback,
             }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'critiquing',
-              actions: assign({ draft: ({ event }) => event.output }),
-            },
+              context: { draft: output },
+            }),
           },
         },
         critiquing: {
           invoke: {
             src: 'critiqueDraft',
             input: ({ context }) => ({ draft: context.draft ?? '' }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'checking',
-              actions: assign({
-                approved: ({ event }) => event.output.approved,
-                feedback: ({ event }) => event.output.feedback,
-              }),
-            },
+              context: {
+                approved: output.approved,
+                feedback: output.feedback,
+              },
+            }),
           },
         },
         checking: {
-          always: [
-            { guard: ({ context }) => context.approved, target: 'done' },
-            { target: 'drafting' },
-          ],
+          always: ({ context }) =>
+            context.approved ? { target: 'done' } : { target: 'drafting' },
         },
         done: {
           type: 'final',
@@ -852,7 +835,7 @@ describe('LangGraph-style workflows authored as raw XState', () => {
 
     const actor = createActor(
       machine.provide({
-        actors: {
+        actorSources: {
           writeDraft: agent.requests.writeDraft.withExecutor(
             async ({ input }) =>
               `draft:${
@@ -889,7 +872,7 @@ describe('LangGraph-style workflows authored as raw XState', () => {
         }),
       ),
     });
-    const agent = setupAgent({
+    const agent = createExampleSetup({
       context: z.object({
         goal: z.string(),
         steps: z.array(z.object({ id: z.string(), request: z.string() })),
@@ -902,17 +885,18 @@ describe('LangGraph-style workflows authored as raw XState', () => {
         evidence: z.record(z.string(), z.string()),
       }),
       actors: {
-        executePlan: fromPromise<
+        executePlan: createAsyncLogic<
           Record<string, string>,
           { steps: Array<{ id: string; request: string }> }
-        >(async ({ input }) =>
-          Object.fromEntries(
-            input.steps.map((step: { id: string; request: string }) => [
-              step.id,
-              `result:${step.request}`,
-            ]),
-          ),
-        ),
+        >({
+          run: async ({ input }) =>
+            Object.fromEntries(
+              input.steps.map((step: { id: string; request: string }) => [
+                step.id,
+                `result:${step.request}`,
+              ]),
+            ),
+        }),
       },
       requests: {
         planWork: {
@@ -948,30 +932,30 @@ describe('LangGraph-style workflows authored as raw XState', () => {
           invoke: {
             src: 'planWork',
             input: ({ context }) => ({ goal: context.goal }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'working',
-              actions: assign({ steps: ({ event }) => event.output.steps }),
-            },
+              context: { steps: output.steps },
+            }),
           },
         },
         working: {
           invoke: {
             src: 'executePlan',
             input: ({ context }) => ({ steps: context.steps }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'solving',
-              actions: assign({ evidence: ({ event }) => event.output }),
-            },
+              context: { evidence: output },
+            }),
           },
         },
         solving: {
           invoke: {
             src: 'solveWork',
             input: ({ context }) => ({ evidence: context.evidence }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'done',
-              actions: assign({ answer: ({ event }) => event.output }),
-            },
+              context: { answer: output },
+            }),
           },
         },
         done: {
@@ -986,7 +970,7 @@ describe('LangGraph-style workflows authored as raw XState', () => {
 
     const actor = createActor(
       machine.provide({
-        actors: {
+        actorSources: {
           planWork: agent.requests.planWork.withExecutor(async ({ input }) => ({
             steps: [{ id: 'E1', request: input.goal }],
           })),
@@ -1008,7 +992,7 @@ describe('LangGraph-style workflows authored as raw XState', () => {
 
   test('SQL-style agents keep query generation, execution, and answer synthesis explicit', async () => {
     const querySchema = z.object({ sql: z.string() });
-    const agent = setupAgent({
+    const agent = createExampleSetup({
       context: z.object({
         question: z.string(),
         sql: z.string().nullable(),
@@ -1018,10 +1002,12 @@ describe('LangGraph-style workflows authored as raw XState', () => {
       input: z.object({ question: z.string() }),
       output: z.object({ sql: z.string(), answer: z.string() }),
       actors: {
-        queryDatabase: fromPromise<
+        queryDatabase: createAsyncLogic<
           Array<Record<string, string>>,
           { sql: string }
-        >(async ({ input }) => [{ total: '42', sql: input.sql }]),
+        >({
+          run: async ({ input }) => [{ total: '42', sql: input.sql }],
+        }),
       },
       requests: {
         writeQuery: {
@@ -1059,30 +1045,30 @@ describe('LangGraph-style workflows authored as raw XState', () => {
           invoke: {
             src: 'writeQuery',
             input: ({ context }) => ({ question: context.question }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'querying',
-              actions: assign({ sql: ({ event }) => event.output.sql }),
-            },
+              context: { sql: output.sql },
+            }),
           },
         },
         querying: {
           invoke: {
             src: 'queryDatabase',
             input: ({ context }) => ({ sql: context.sql ?? '' }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'answering',
-              actions: assign({ rows: ({ event }) => event.output }),
-            },
+              context: { rows: output },
+            }),
           },
         },
         answering: {
           invoke: {
             src: 'answerRows',
             input: ({ context }) => ({ rows: context.rows }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'done',
-              actions: assign({ answer: ({ event }) => event.output }),
-            },
+              context: { answer: output },
+            }),
           },
         },
         done: {
@@ -1097,7 +1083,7 @@ describe('LangGraph-style workflows authored as raw XState', () => {
 
     const actor = createActor(
       machine.provide({
-        actors: {
+        actorSources: {
           writeQuery: agent.requests.writeQuery.withExecutor(async () => ({
             sql: 'select count(*) as total from users',
           })),
@@ -1119,7 +1105,7 @@ describe('LangGraph-style workflows authored as raw XState', () => {
   });
 
   test('persistent multi-agent networks resume with plain XState snapshots', async () => {
-    const agent = setupAgent({
+    const agent = createExampleSetup({
       context: z.object({
         topic: z.string(),
         research: z.string().nullable(),
@@ -1131,12 +1117,12 @@ describe('LangGraph-style workflows authored as raw XState', () => {
         CONTINUE: z.object({}),
       },
       actors: {
-        research: fromPromise<string, { topic: string }>(
-          async ({ input }) => `research:${input.topic}`,
-        ),
-        write: fromPromise<string, { research: string }>(
-          async ({ input }) => `draft:${input.research}`,
-        ),
+        research: createAsyncLogic<string, { topic: string }>({
+          run: async ({ input }) => `research:${input.topic}`,
+        }),
+        write: createAsyncLogic<string, { research: string }>({
+          run: async ({ input }) => `draft:${input.research}`,
+        }),
       },
     });
 
@@ -1153,10 +1139,10 @@ describe('LangGraph-style workflows authored as raw XState', () => {
           invoke: {
             src: 'research',
             input: ({ context }) => ({ topic: context.topic }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'waitingToWrite',
-              actions: assign({ research: ({ event }) => event.output }),
-            },
+              context: { research: output },
+            }),
           },
         },
         waitingToWrite: {
@@ -1166,10 +1152,10 @@ describe('LangGraph-style workflows authored as raw XState', () => {
           invoke: {
             src: 'write',
             input: ({ context }) => ({ research: context.research ?? '' }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'done',
-              actions: assign({ draft: ({ event }) => event.output }),
-            },
+              context: { draft: output },
+            }),
           },
         },
         done: {
@@ -1200,7 +1186,7 @@ describe('LangGraph-style workflows authored as raw XState', () => {
 
   test('streaming keeps chunks in the host side channel', async () => {
     const chunks: string[] = [];
-    const agent = setupAgent({
+    const agent = createExampleSetup({
       context: z.object({ topic: z.string(), text: z.string().nullable() }),
       input: z.object({ topic: z.string() }),
       output: z.object({ text: z.string() }),
@@ -1226,10 +1212,10 @@ describe('LangGraph-style workflows authored as raw XState', () => {
           invoke: {
             src: 'streamTopic',
             input: ({ context }) => ({ topic: context.topic }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'done',
-              actions: assign({ text: ({ event }) => event.output }),
-            },
+              context: { text: output },
+            }),
           },
         },
         done: {
@@ -1241,7 +1227,7 @@ describe('LangGraph-style workflows authored as raw XState', () => {
 
     const actor = createActor(
       machine.provide({
-        actors: {
+        actorSources: {
           streamTopic: agent.requests.streamTopic.withExecutor(
             async ({ input }) => {
               chunks.push('hello');

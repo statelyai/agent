@@ -5,7 +5,12 @@
  * expose the same tool-calling shape as the Vercel AI SDK binding path, so this
  * host serializes allowed event tools into the prompt and accepts JSON output.
  */
-import { type AgentRequest } from '../../../src/index.js';
+import {
+  initialAgentStep,
+  resolveAgentStep,
+  transitionAgentStep,
+  type AgentRequest,
+} from '../../../src/index.js';
 import { gameMachine } from '../game-agent.js';
 
 interface Env {
@@ -36,7 +41,7 @@ function promptWithAllowedEvents(request: AgentRequest): string {
 async function runWorkersAiRequest(env: Env, request: AgentRequest) {
   const response = (await env.AI.run(request.input.model, {
     system: request.input.system,
-    prompt: promptWithAllowedEvents(effect),
+    prompt: promptWithAllowedEvents(request),
     temperature: request.input.temperature,
     max_tokens: request.input.maxTokens,
   })) as { response?: string } | string | Record<string, unknown>;
@@ -63,7 +68,7 @@ export async function runCloudflareGameTurn(
   env: Env,
   input = { playerHp: 20, enemyHp: 15 },
 ) {
-  let step = gameMachine.initial(input);
+  let step = initialAgentStep(gameMachine, input);
 
   while (!step.done) {
     const [request] = step.requests;
@@ -74,9 +79,9 @@ export async function runCloudflareGameTurn(
     const result = await runWorkersAiRequest(env, request);
 
     if (result.kind === 'event') {
-      step = gameMachine.transition(step, result.event as never);
+      step = transitionAgentStep(gameMachine, step, result.event as never);
     } else {
-      step = gameMachine.resolve(step, request, result.output);
+      step = resolveAgentStep(gameMachine, step, request, result.output);
     }
   }
 

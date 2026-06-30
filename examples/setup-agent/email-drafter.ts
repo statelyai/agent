@@ -1,10 +1,9 @@
 import { z } from 'zod';
-import { assign, fromPromise } from 'xstate';
+import { createAsyncLogic, setup } from 'xstate';
 import {
   type AgentMessage,
   assistantMessage,
   createTextLogic,
-  setupAgent,
   userMessage,
 } from '../../src/index.js';
 
@@ -62,7 +61,6 @@ const contextSchema = z.object({
   prompt: z.string(),
   assessment: promptAssessmentSchema.nullable(),
   draft: emailDraftSchema.nullable(),
-  draftAnyway: z.boolean(),
   sentEmails: z.array(emailDraftSchema),
   messages: z.custom<AgentMessage[]>((value) => Array.isArray(value)),
 });
@@ -94,19 +92,13 @@ export const draftEmail = createTextLogic({
   schemas: {
     input: z.object({
       prompt: z.string(),
-      draftAnyway: z.boolean(),
       messages: z.custom<AgentMessage[]>((value) => Array.isArray(value)),
     }),
     output: emailDraftSchema,
   },
   model: 'openai/gpt-5.4-nano',
-  system: ({ input }) =>
-    [
-      'Draft a polished email from the request.',
-      input.draftAnyway
-        ? 'Infer reasonable details only because the user chose to draft anyway.'
-        : 'Use the provided details without inventing missing essentials.',
-    ].join('\n'),
+  system:
+    'Draft a polished email from the request. Use the provided details without inventing missing essentials unless the user explicitly asked to draft anyway.',
   messages: ({ input }) => [
     ...input.messages,
     userMessage(input.prompt),
@@ -123,39 +115,44 @@ export const streamDraft = createTextLogic({
   prompt: ({ input }) => input.prompt,
 });
 
-const agent = setupAgent({
+export const emailDrafterSchemas = {
   context: contextSchema,
   events: eventSchemas,
   output: outputSchema,
   meta: metaSchema,
-  actors: {
-    sendEmail: fromPromise<{ sent: boolean }, { draft: EmailDraft }>(
-      async ({ input }) => {
-        void input.draft;
-        return { sent: true };
-      }
-    ),
-    evaluatePrompt,
-    draftEmail,
-    streamDraft,
-  },
-});
+};
 
-export const emailDrafterSchemas = agent.schemas;
+export const emailDrafterActors = {
+  sendEmail: createAsyncLogic<{ sent: boolean }, { draft: EmailDraft }>({
+    run: async ({ input }) => {
+      void input.draft;
+      return { sent: true };
+    },
+  }),
+  evaluatePrompt,
+  draftEmail,
+  streamDraft,
+};
+
+const agent = setup({
+  schemas: emailDrafterSchemas,
+  actorSources: emailDrafterActors,
+});
 
 export const emailDrafter = agent.createMachine({
   id: 'email-drafter',
+  output: ({ context }) => ({ sentEmails: context.sentEmails }),
   context: {
     prompt: '',
     assessment: null,
     draft: null,
-    draftAnyway: false,
     sentEmails: [],
     messages: [],
   },
   initial: 'prompting',
   states: {
     prompting: {
+      agent: { kind: 'human' },
       meta: {
         interaction: {
           type: 'text',
@@ -165,46 +162,42 @@ export const emailDrafter = agent.createMachine({
         },
       },
       on: {
-        PROMPT_SUBMITTED: {
+        PROMPT_SUBMITTED: ({ event }) => ({
           target: 'evaluating',
-          actions: [
-            assign({
-              prompt: ({ event }) => event.prompt,
-              assessment: null,
-              draft: null,
-              draftAnyway: false,
-            }),
-            agent.appendMessages(({ event }) => userMessage(event.prompt)),
-          ],
-        },
+          context: {
+            prompt: event.prompt,
+            assessment: null,
+            draft: null,
+            messages: [userMessage(event.prompt)],
+          },
+        }),
       },
     },
 
     evaluating: {
+      agent: { kind: 'text' },
       invoke: {
-        id: 'evaluatePrompt',
         src: 'evaluatePrompt',
         input: ({ context }) => ({ prompt: context.prompt }),
-        onDone: [
-          {
-            guard: ({ event }) => event.output.satisfied,
-            target: 'drafting',
-            actions: assign({
-              assessment: ({ event }) => event.output,
-            }),
-          },
-          {
+        onDone: ({ output }) => {
+          if (output.satisfied) {
+            return {
+              target: 'drafting',
+              context: { assessment: output },
+            };
+          }
+
+          return {
             target: 'needsMoreInfo',
-            actions: assign({
-              assessment: ({ event }) => event.output,
-            }),
-          },
-        ],
+            context: { assessment: output },
+          };
+        },
         onError: { target: 'failed' },
       },
     },
 
     needsMoreInfo: {
+      agent: { kind: 'human' },
       meta: {
         interaction: {
           type: 'select',
@@ -220,51 +213,55 @@ export const emailDrafter = agent.createMachine({
         },
       },
       on: {
-        MORE_INFO: {
+        MORE_INFO: ({ context, event }) => ({
           target: 'evaluating',
-          actions: [
-            assign({
-              prompt: ({ context, event }) =>
-                `${context.prompt}\n\n${event.details}`,
-            }),
-            agent.appendMessages(({ event }) => userMessage(event.details)),
-          ],
-        },
-        DRAFT_ANYWAY: {
+          context: {
+            prompt: `${context.prompt}\n\n${event.details}`,
+            messages: [...context.messages, userMessage(event.details)],
+          },
+        }),
+        DRAFT_ANYWAY: ({ context }) => ({
           target: 'drafting',
-          actions: assign({ draftAnyway: true }),
-        },
+          context: {
+            prompt: `${context.prompt}\n\nDraft anyway with reasonable assumptions.`,
+            messages: [
+              ...context.messages,
+              userMessage('Draft anyway with reasonable assumptions.'),
+            ],
+          },
+        }),
       },
     },
 
     drafting: {
+      agent: { kind: 'text' },
       invoke: {
-        id: 'draftEmail',
         src: 'draftEmail',
         input: ({ context }) => ({
           prompt: context.prompt,
-          draftAnyway: context.draftAnyway,
           messages: context.messages,
         }),
-        onDone: {
-          target: 'reviewing',
-          actions: [
-            assign({
-              draft: ({ event }) => event.output,
-            }),
-            agent.appendMessages(({ event }) => {
-              const draft = event.output;
-              return assistantMessage(
-                `To: ${draft.to}\nSubject: ${draft.subject}\n\n${draft.body}`
-              );
-            }),
-          ],
+        onDone: ({ context, output }) => {
+          const draft = output;
+          return {
+            target: 'reviewing',
+            context: {
+              draft,
+              messages: [
+                ...context.messages,
+                assistantMessage(
+                  `To: ${draft.to}\nSubject: ${draft.subject}\n\n${draft.body}`
+                ),
+              ],
+            },
+          };
         },
         onError: { target: 'failed' },
       },
     },
 
     reviewing: {
+      agent: { kind: 'human' },
       meta: {
         interaction: {
           type: 'select',
@@ -280,19 +277,16 @@ export const emailDrafter = agent.createMachine({
         },
       },
       on: {
-        REQUEST_CHANGES: {
+        REQUEST_CHANGES: ({ context, event }) => ({
           target: 'drafting',
-          actions: [
-            assign({
-              prompt: ({ context, event }) =>
-                `${context.prompt}\n\nRevision request: ${event.changes}`,
-              draftAnyway: true,
-            }),
-            agent.appendMessages(({ event }) =>
-              userMessage(`Revision request: ${event.changes}`)
-            ),
-          ],
-        },
+          context: {
+            prompt: `${context.prompt}\n\nRevision request: ${event.changes}`,
+            messages: [
+              ...context.messages,
+              userMessage(`Revision request: ${event.changes}`),
+            ],
+          },
+        }),
         SEND: { target: 'sending' },
       },
     },
@@ -301,20 +295,20 @@ export const emailDrafter = agent.createMachine({
       invoke: {
         src: 'sendEmail',
         input: ({ context }) => ({ draft: context.draft! }),
-        onDone: {
+        onDone: ({ context }) => ({
           target: 'sent',
-          actions: assign({
-            sentEmails: ({ context }) =>
-              context.draft
-                ? [...context.sentEmails, context.draft]
-                : context.sentEmails,
-          }),
-        },
+          context: {
+            sentEmails: context.draft
+              ? [...context.sentEmails, context.draft]
+              : context.sentEmails,
+          },
+        }),
         onError: { target: 'failed' },
       },
     },
 
     sent: {
+      agent: { kind: 'human' },
       meta: {
         display: ['Email sent.'],
         interaction: {
@@ -328,12 +322,11 @@ export const emailDrafter = agent.createMachine({
       on: {
         ANOTHER: {
           target: 'prompting',
-          actions: assign({
+          context: {
             prompt: '',
             assessment: null,
             draft: null,
-            draftAnyway: false,
-          }),
+          },
         },
         END: { target: 'done' },
       },
@@ -359,7 +352,6 @@ agent.createMachine({
     prompt: '',
     assessment: null,
     draft: null,
-    draftAnyway: false,
     sentEmails: [],
     messages: [],
   },
@@ -371,18 +363,17 @@ agent.createMachine({
         interaction: { type: 'banner' },
       },
       on: {
-        MORE_INFO: {
-          actions: assign({
+        MORE_INFO: ({ event }) => ({
+          context: {
             // @ts-expect-error MORE_INFO carries `details`, not `changes`
-            prompt: ({ event }) => event.changes,
-          }),
-        },
+            prompt: event.changes,
+          },
+        }),
       },
     },
     probeFinal: {
       type: 'final',
-      // @ts-expect-error machine output is { sentEmails: EmailDraft[] }
-      output: () => 'not the machine output',
+      output: ({ context }) => ({ sentEmails: context.sentEmails }),
     },
   },
 });
@@ -393,7 +384,6 @@ agent.createMachine({
     prompt: '',
     assessment: null,
     draft: null,
-    draftAnyway: false,
     sentEmails: [],
     messages: [],
   },
@@ -401,7 +391,11 @@ agent.createMachine({
   output: () => ({ wrong: true }),
   initial: 'probe',
   states: {
-    probe: { type: 'final' },
+    probe: {
+      type: 'final',
+      // @ts-expect-error top-level final state output is { sentEmails: EmailDraft[] }
+      output: () => ({ wrong: true }),
+    },
   },
 });
 
@@ -411,7 +405,6 @@ agent.createMachine({
     prompt: '',
     assessment: null,
     draft: null,
-    draftAnyway: false,
     sentEmails: [],
     messages: [],
   },
@@ -422,14 +415,14 @@ agent.createMachine({
         id: 'streamDraft',
         src: 'streamDraft',
         input: ({ context }) => ({ prompt: context.prompt }),
-        onDone: {
-          actions: assign({
-            messages: ({ context, event }) => [
+        onDone: ({ context, output }) => ({
+          context: {
+            messages: [
               ...context.messages,
-              assistantMessage(event.output),
+              assistantMessage(output),
             ],
-          }),
-        },
+          },
+        }),
       },
     },
   },

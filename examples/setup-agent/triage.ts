@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { assign } from 'xstate';
-import { createAgentSchemas, createTextLogic, setupAgent } from '../../src/index.js';
+import { setup } from 'xstate';
+import { createAgentSchemas, createTextLogic } from '../../src/index.js';
 
 export const triageSchema = z.object({
   sentiment: z.enum(['positive', 'neutral', 'negative']),
@@ -28,17 +28,21 @@ export const triageTicket = createTextLogic({
   prompt: ({ input }) => input.ticket,
 });
 
-const triageAgent = setupAgent({
+export const triageActors = {
+  triageTicket,
+};
+
+const triageAgent = setup({
   schemas,
-  actors: {
-    triageTicket,
-  },
+  actorSources: triageActors,
 });
 
-export const triageSchemas = triageAgent.schemas;
+export const triageSchemas = schemas;
 
 export const triageMachine = triageAgent.createMachine({
   id: 'ticket-triage',
+  output: ({ context }) =>
+    context.triage ?? { sentiment: 'neutral', category: 'other', reply: '' },
   context: ({ input }) => ({ ticket: input.ticket, triage: null }),
   initial: 'triaging',
   states: {
@@ -47,18 +51,14 @@ export const triageMachine = triageAgent.createMachine({
         id: 'triage',
         src: 'triageTicket',
         input: ({ context }) => ({ ticket: context.ticket }),
-        onDone: {
+        onDone: ({ output }) => ({
           target: 'done',
-          actions: assign({
-            triage: ({ event }) => event.output,
-          }),
-        },
+          context: { triage: output },
+        }),
       },
     },
     done: {
       type: 'final',
-      output: ({ context }) =>
-        context.triage ?? { sentiment: 'neutral', category: 'other', reply: '' },
     },
   },
 });

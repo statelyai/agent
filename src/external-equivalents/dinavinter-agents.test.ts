@@ -1,10 +1,9 @@
 import { describe, expect, test } from 'vitest';
 import { z } from 'zod';
 import {
-  assign,
   createActor,
-  fromCallback,
-  fromPromise,
+  createAsyncLogic,
+  createCallbackLogic,
   initialTransition,
   transition,
   waitFor,
@@ -14,11 +13,13 @@ import {
   type AgentRequest,
   assistantMessage,
   createAgentSchemas,
-  setupAgent,
+  executeAgentRequest,
+  getAgentRequests,
   transitionResult,
   type AgentTextRequest,
   type AgentTools,
 } from '../index.js';
+import { createExampleSetup } from '../example-setup.test-utils.js';
 
 describe('dinavinter/agents-style XState agents', () => {
   test('test agent keeps Assistant thread APIs as host actors and streams events into state', async () => {
@@ -43,27 +44,27 @@ describe('dinavinter/agents-style XState agents', () => {
       },
     });
 
-    const agent = setupAgent({
+    const agent = createExampleSetup({
       schemas,
       actors: {
-        createThread: fromPromise<string, { request: string }>(
-          async ({ input }) => {
+        createThread: createAsyncLogic<string, { request: string }>({
+          run: async ({ input }) => {
             calls.push({ actor: 'createThread', request: input.request });
             return 'thread_123';
           },
-        ),
-        sendMessage: fromPromise<string, { threadId: string; message: string }>(
-          async ({ input }) => {
+        }),
+        sendMessage: createAsyncLogic<string, { threadId: string; message: string }>({
+          run: async ({ input }) => {
             calls.push({ actor: 'sendMessage', input });
             return 'message_123';
           },
-        ),
-        streamThread: fromCallback<EventObject, { threadId: string }>(
+        }),
+        streamThread: createCallbackLogic<EventObject, { threadId: string }>(
           ({ input, sendBack }) => {
             calls.push({ actor: 'streamThread', input });
             queueMicrotask(() => {
               sendBack({ type: 'TEXT_DELTA', text: 'using ' });
-              sendBack({ type: 'TEXT_DELTA', text: 'setupAgent' });
+              sendBack({ type: 'TEXT_DELTA', text: 'XState' });
               sendBack({
                 type: 'IMAGE_URL',
                 url: 'https://example.com/test.png',
@@ -93,12 +94,10 @@ describe('dinavinter/agents-style XState agents', () => {
             input: ({ context }: { context: { request: string } }) => ({
               request: context.request,
             }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'sendingMessage',
-              actions: assign({
-                threadId: ({ event }) => event.output as string,
-              }),
-            },
+              context: { threadId: output },
+            }),
           },
         },
         sendingMessage: {
@@ -113,12 +112,10 @@ describe('dinavinter/agents-style XState agents', () => {
               threadId: context.threadId!,
               message: context.request,
             }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'streaming',
-              actions: assign({
-                messageId: ({ event }) => event.output as string,
-              }),
-            },
+              context: { messageId: output },
+            }),
           },
         },
         streaming: {
@@ -130,19 +127,22 @@ describe('dinavinter/agents-style XState agents', () => {
             }),
           },
           on: {
-            TEXT_DELTA: {
-              actions: assign({
-                chunks: ({ context, event }) => [...context.chunks, event.text],
-              }),
-            },
-            IMAGE_URL: {
-              actions: assign({
-                messages: ({ context, event }) => [
-                  ...context.messages,
-                  assistantMessage(event.url),
+            TEXT_DELTA: ({ context, event }) => ({
+              context: {
+                chunks: [
+                  ...context.chunks,
+                  (event as unknown as { text: string }).text,
                 ],
-              }),
-            },
+              },
+            }),
+            IMAGE_URL: ({ context, event }) => ({
+              context: {
+                messages: [
+                  ...context.messages,
+                  assistantMessage((event as unknown as { url: string }).url),
+                ],
+              },
+            }),
             STREAM_DONE: { target: 'done' },
           },
         },
@@ -164,7 +164,7 @@ describe('dinavinter/agents-style XState agents', () => {
 
     expect(actor.getSnapshot().output).toEqual({
       threadId: 'thread_123',
-      text: 'using setupAgent',
+      text: 'using XState',
     });
     expect(actor.getSnapshot().context.messages).toEqual([
       { role: 'assistant', content: 'https://example.com/test.png' },
@@ -200,7 +200,7 @@ describe('dinavinter/agents-style XState agents', () => {
       input: z.object({ request: z.string() }),
       output: screenDraftSchema,
     });
-    const agent = setupAgent({
+    const agent = createExampleSetup({
       schemas,
       requests: {
         draftScreen: {
@@ -223,15 +223,17 @@ describe('dinavinter/agents-style XState agents', () => {
             id: 'draftScreen',
             src: 'draftScreen',
             input: ({ context }) => ({ request: context.request }),
-            onDone: {
+            onDone: ({ output }) => ({
               target: 'done',
-              actions: assign({ draft: ({ event }) => event.output }),
-            },
+              context: { draft: output },
+            }),
           },
         },
         done: {
           type: 'final',
-          output: ({ context }) => context.draft ?? { title: '', fields: [] },
+          output: ({ context }) =>
+            (context as { draft: z.infer<typeof screenDraftSchema> | null }).draft
+            ?? { title: '', fields: [] },
         },
       },
     });
@@ -239,9 +241,13 @@ describe('dinavinter/agents-style XState agents', () => {
     let [snapshot, actions] = initialTransition(machine, {
       request: 'Build a signup wizard.',
     });
-    const [request] = machine.getRequests(actions, snapshot);
+    const [request] = getAgentRequests(actions, {
+      snapshot,
+      schemas,
+      actors: agent.requests,
+    });
 
-    const output = await machine.execute(request!, {
+    const output = await executeAgentRequest(request!, {
       generateText: async (
         request: AgentTextRequest & { tools: AgentTools },
       ) => {
@@ -264,7 +270,11 @@ describe('dinavinter/agents-style XState agents', () => {
 
     [snapshot, actions] = transitionResult(machine, snapshot, request!, output);
 
-    expect(machine.getRequests(actions, snapshot)).toEqual([]);
+    expect(getAgentRequests(actions, {
+      snapshot,
+      schemas,
+      actors: agent.requests,
+    })).toEqual([]);
     expect(snapshot.output).toEqual({
       title: 'Signup',
       fields: [
@@ -289,7 +299,7 @@ describe('dinavinter/agents-style XState agents', () => {
       input: z.object({ topic: z.string() }),
       output: resultSchema,
     });
-    const agent = setupAgent({
+    const agent = createExampleSetup({
       schemas,
       requests: {
         think: {
@@ -327,10 +337,10 @@ describe('dinavinter/agents-style XState agents', () => {
                 id: 'think',
                 src: 'think',
                 input: ({ context }) => ({ topic: context.topic }),
-                onDone: {
+                onDone: ({ output }) => ({
                   target: 'done',
-                  actions: assign({ thought: ({ event }) => event.output }),
-                },
+                  context: { thought: output },
+                }),
               },
             },
             done: { type: 'final' },
@@ -344,12 +354,10 @@ describe('dinavinter/agents-style XState agents', () => {
                 id: 'findDoodle',
                 src: 'findDoodle',
                 input: ({ context }) => ({ topic: context.topic }),
-                onDone: {
+                onDone: ({ output }) => ({
                   target: 'done',
-                  actions: assign({
-                    doodleQuery: ({ event }) => event.output.query,
-                  }),
-                },
+                  context: { doodleQuery: output.query },
+                }),
               },
             },
             done: { type: 'final' },
@@ -363,7 +371,11 @@ describe('dinavinter/agents-style XState agents', () => {
     });
 
     let [snapshot, actions] = initialTransition(machine, { topic: 'XState' });
-    const requests = machine.getRequests(actions, snapshot);
+    const requests = getAgentRequests(actions, {
+      snapshot,
+      schemas,
+      actors: agent.requests,
+    });
 
     expect(
       requests.map((request: AgentRequest) => [request.id, request.mode]),
@@ -373,7 +385,7 @@ describe('dinavinter/agents-style XState agents', () => {
     ]);
 
     for (const request of requests) {
-      const output = await machine.execute(request, {
+      const output = await executeAgentRequest(request, {
         generateText: async () => ({ output: { query: 'statechart sketch' } }),
         streamText: async () => ({ text: 'State machines make flow visible.' }),
       });

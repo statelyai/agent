@@ -1,19 +1,22 @@
 import {
-  fromPromise,
+  createAsyncLogic,
   getNextTransitions,
   initialTransition,
   setup,
   transition,
-  assign,
   type AnyActorLogic,
   type AnyMachineSnapshot,
+  type AnySetupConfig,
+  type AnyStateMachine,
+  type AsyncActorLogic,
   type EventObject,
-  type ExecutableActionsFrom,
+  type EventFromLogic,
+  type ExecutableActionObjectFromLogic,
   type MachineContext,
   type MetaObject,
   type NonReducibleUnknown,
-  type ParameterizedObject,
-  type PromiseActorLogic,
+  type SetupConfig,
+  type SetupReturnFromConfig,
   type SnapshotFrom,
 } from 'xstate';
 import type {
@@ -65,10 +68,13 @@ export interface AgentUserInput<TMetadata = Record<string, unknown>> {
 }
 
 type BuiltinAgentActors = {
-  [GENERATE_TEXT_ACTOR]: PromiseActorLogic<unknown, AgentTextRequest>;
-  [STREAM_TEXT_ACTOR]: PromiseActorLogic<unknown, AgentTextRequest>;
-  [USER_INPUT_ACTOR]: PromiseActorLogic<unknown, AgentUserInput>;
+  [GENERATE_TEXT_ACTOR]: AsyncActorLogic<unknown, AgentTextRequest>;
+  [STREAM_TEXT_ACTOR]: AsyncActorLogic<unknown, AgentTextRequest>;
+  [USER_INPUT_ACTOR]: AsyncActorLogic<unknown, AgentUserInput>;
 };
+
+type AgentExecutionOptions = Pick<AgentRequestOptions, 'schemas' | 'actors'>;
+const agentExecutionOptions = new WeakMap<object, AgentExecutionOptions>();
 
 const agentTextInputSchema: StandardSchemaV1<AgentTextRequest> = {
   '~standard': {
@@ -114,12 +120,14 @@ function createBuiltinTextActor(
   mode: AgentRequestMode,
   outputSchema: StandardSchemaV1
 ): AgentRequestLogic<StandardSchemaV1<AgentTextRequest>, StandardSchemaV1> {
-  const logic = fromPromise<unknown, AgentTextRequest>(async () => {
-    throw new Error(
-      `'${src}' has no host execution. Provide an implementation with ` +
-        `machine.provide({ actors: { '${src}': ... } }) or execute the ` +
-        `returned agent request with machine.execute(...).`
-    );
+  const logic = createAsyncLogic<unknown, AgentTextRequest>({
+    run: async () => {
+      throw new Error(
+        `'${src}' has no host execution. Provide an implementation with ` +
+          `machine.provide({ actorSources: { '${src}': ... } }) or execute the ` +
+        `returned agent request with executeAgentRequest(...).`
+      );
+    },
   });
 
   return Object.assign(logic, {
@@ -161,7 +169,7 @@ function createBuiltinTextActor(
         messages: ({ input }) => input.messages,
         tools: ({ input }) => input.tools,
         toolChoice: ({ input }) => input.toolChoice,
-        events: ({ input }) => input.eventTypes,
+        agentEvents: ({ input }) => input.eventTypes,
         temperature: ({ input }) => input.temperature,
         maxTokens: ({ input }) => input.maxTokens,
         topP: ({ input }) => input.topP,
@@ -193,19 +201,23 @@ const builtinTextActors = {
   typeof GENERATE_TEXT_ACTOR | typeof STREAM_TEXT_ACTOR
 >;
 
-const userInputActor = fromPromise<unknown, AgentUserInput>(async () => {
-  throw new Error(
-    `'${USER_INPUT_ACTOR}' has no host execution. Provide an implementation ` +
-      `with machine.provide({ actors: { '${USER_INPUT_ACTOR}': ... } }).`
-  );
+const userInputActor = createAsyncLogic<unknown, AgentUserInput>({
+  run: async () => {
+    throw new Error(
+      `'${USER_INPUT_ACTOR}' has no host execution. Provide an implementation ` +
+        `with machine.provide({ actorSources: { '${USER_INPUT_ACTOR}': ... } }).`
+    );
+  },
 });
 
-function missingActor(src: string): PromiseActorLogic<unknown, unknown> {
-  return fromPromise<unknown, unknown>(async () => {
-    throw new Error(
-      `'${src}' has no host execution. Provide an implementation with ` +
-        `machine.provide({ actors: { '${src}': ... } }).`
-    );
+function missingActor(src: string): AsyncActorLogic<unknown, unknown> {
+  return createAsyncLogic<unknown, unknown>({
+    run: async () => {
+      throw new Error(
+        `'${src}' has no host execution. Provide an implementation with ` +
+          `machine.provide({ actorSources: { '${src}': ... } }).`
+      );
+    },
   });
 }
 
@@ -411,10 +423,14 @@ export function appendMessages<
     | AgentMessage
     | AgentMessage[]
     | ((args: { context: TContext; event: TEvent }) => AgentMessage | AgentMessage[]),
-) {
-  return assign({
-    messages: addMessages(resolve),
-  }) as never;
+): (args: { context: TContext; event: TEvent }) => {
+  context: { messages: AgentMessage[] };
+} {
+  return (args: { context: TContext; event: TEvent }) => ({
+    context: {
+      messages: addMessages(resolve)(args),
+    },
+  });
 }
 
 /** Standard schema for an `AgentMessage[]` context field. */
@@ -484,7 +500,8 @@ export interface TextLogicConfig<
     AgentToolChoice | undefined,
     InferOutput<TInputSchema>
   >;
-  events?: ResolveTextLogicValue<
+  /** Machine event types to expose to the model as event tools. */
+  agentEvents?: ResolveTextLogicValue<
     readonly string[] | undefined,
     InferOutput<TInputSchema>
   >;
@@ -521,7 +538,7 @@ export interface TextLogic<
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1 = StandardSchemaV1,
   TMetadata = Record<string, unknown>,
-> extends PromiseActorLogic<
+> extends AsyncActorLogic<
     InferOutput<TOutputSchema>,
     InferOutput<TInputSchema>
   > {
@@ -582,7 +599,7 @@ export function createTextLogic<
       messages: resolveTextLogicValue(config.messages, args),
       tools: resolveTextLogicValue(config.tools, args),
       toolChoice: resolveTextLogicValue(config.toolChoice, args),
-      eventTypes: resolveTextLogicValue(config.events, args),
+      eventTypes: resolveTextLogicValue(config.agentEvents, args),
       outputSchema: config.schemas.output,
       temperature: resolveTextLogicValue(config.temperature, args),
       maxTokens: resolveTextLogicValue(config.maxTokens, args),
@@ -593,8 +610,8 @@ export function createTextLogic<
       metadata: resolveTextLogicValue(config.metadata, args),
     };
   };
-  const logic = fromPromise<TOutput, TInput>(
-    async ({ input, signal, system, self, emit }) => {
+  const logic = createAsyncLogic<TOutput, TInput>({
+    run: async ({ input, signal, system, self }, enq) => {
       const resolvedRequest = request(input);
 
       if (!execute) {
@@ -611,15 +628,15 @@ export function createTextLogic<
         signal,
         system,
         self,
-        emit: emit as (emitted: EventObject) => void,
+        emit: enq.emit as (emitted: EventObject) => void,
       });
 
       return validateSchemaSync<TOutput>(
         config.schemas.output as StandardSchemaV1<TOutput>,
         output
       );
-    }
-  );
+    },
+  });
 
   return Object.assign(logic, {
     kind: 'statelyai.textLogic' as const,
@@ -799,15 +816,17 @@ export function getEventTools(
 }
 
 export function getAgentRequests(
-  actions: readonly { type?: string; params?: unknown }[],
+  actions: readonly { type?: string; params?: unknown; id?: unknown; src?: unknown; input?: unknown; logic?: unknown }[],
   options: AgentRequestOptions = {}
 ): AgentRequest[] {
   return actions.flatMap((action) => {
-    if (action.type !== 'xstate.spawnChild') {
+    if (action.type !== 'xstate.spawnChild' && action.type !== '@xstate.start') {
       return [];
     }
 
-    const params = action.params as
+    const params = action.type === '@xstate.start'
+      ? action
+      : action.params as
       | { id?: unknown; src?: unknown; input?: unknown }
       | undefined;
     if (!params || typeof params.src !== 'string') {
@@ -820,7 +839,9 @@ export function getAgentRequests(
       );
     }
 
-    const textLogic = options.actors?.[params.src];
+    const textLogic = isTextLogic(action.logic)
+      ? action.logic
+      : options.actors?.[params.src];
     const input = isTextLogic(textLogic)
       ? textLogic.request(params.input as never)
       : undefined;
@@ -878,8 +899,11 @@ export function transitionResult<TLogic extends AnyActorLogic>(
   snapshot: SnapshotFrom<TLogic>,
   request: Pick<AgentRequest, 'id'> | string,
   output: unknown
-): [SnapshotFrom<TLogic>, ExecutableActionsFrom<TLogic>[]] {
-  return transition(logic, snapshot, doneEvent(request, output) as never);
+): [SnapshotFrom<TLogic>, ExecutableActionObjectFromLogic<TLogic>[]] {
+  const event = doneEvent(request, output);
+  const result = transition(logic, snapshot, event as never);
+  applyFinalStateOutput(logic, result[0], event);
+  return result;
 }
 
 export type AgentRequestExecutorResult =
@@ -907,27 +931,6 @@ export interface AgentStep<TSnapshot extends AnyMachineSnapshot = AnyMachineSnap
   requests: AgentRequest[];
   done: boolean;
 }
-
-export type AgentMachine<TMachine extends AnyActorLogic = any> =
-  TMachine & {
-  provide: (...args: any[]) => AgentMachine<TMachine>;
-  initial(input?: unknown): AgentStep<SnapshotFrom<TMachine>>;
-  transition(
-    snapshotOrStep: SnapshotFrom<TMachine> | AgentStep<SnapshotFrom<TMachine>>,
-    event: EventObject
-  ): AgentStep<SnapshotFrom<TMachine>>;
-  resolve(
-    step: AgentStep<SnapshotFrom<TMachine>>,
-    request: Pick<AgentRequest, 'id'> | string,
-    output: unknown
-  ): AgentStep<SnapshotFrom<TMachine>>;
-  getRequests(
-    actions: readonly { type?: string; params?: unknown }[],
-    snapshot?: AnyMachineSnapshot,
-    options?: Pick<AgentRequestOptions, 'eventToolName'>
-  ): AgentRequest[];
-  execute(request: AgentRequest, executors: AgentRequestExecutors): Promise<unknown>;
-};
 
 async function normalizeRequestExecutionResult(result: unknown): Promise<unknown> {
   const resolved = await result;
@@ -992,89 +995,165 @@ async function executeAgentTextRequest(
   return normalizeRequestExecutionResult(await executor(request));
 }
 
-function createAgentMachine<TMachine extends AnyActorLogic>(
+function getRegisteredAgentExecutionOptions(
+  machine: AnyActorLogic,
+  options?: Partial<AgentExecutionOptions>
+): AgentExecutionOptions {
+  return {
+    ...(agentExecutionOptions.get(machine as object) ?? {}),
+    ...options,
+  };
+}
+
+export function initialAgentStep<TMachine extends AnyActorLogic>(
   machine: TMachine,
-  options: Pick<AgentRequestOptions, 'schemas' | 'actors'>
-): AgentMachine<TMachine> {
-  const originalTransition = machine.transition.bind(machine);
-  const originalProvide = 'provide' in machine
-    ? (machine.provide as (...args: any[]) => TMachine).bind(machine)
-    : undefined;
-  const agentMachine = Object.assign(machine, {
-    provide(...args: any[]) {
-      if (!originalProvide) {
-        throw new Error('This actor logic does not support provide(...).');
-      }
+  input?: unknown,
+  options?: Partial<AgentExecutionOptions>
+): AgentStep<SnapshotFrom<TMachine>> {
+  const [snapshot, actions] = initialTransition(machine, input as never);
+  return createAgentStep(machine, snapshot, actions, getRegisteredAgentExecutionOptions(machine, options));
+}
 
-      return createAgentMachine(originalProvide(...args), options);
-    },
-    initial(input?: unknown) {
-      const [snapshot, actions] = initialTransition(agentMachine, input as never);
-      return createAgentStep(agentMachine, snapshot, actions);
-    },
-    transition(
-      snapshotOrStep: SnapshotFrom<TMachine> | AgentStep<SnapshotFrom<TMachine>>,
-      event: EventObject,
-      actorScope?: unknown
-    ) {
-      if (actorScope !== undefined) {
-        return originalTransition(snapshotOrStep as never, event as never, actorScope as never);
-      }
+export function transitionAgentStep<TMachine extends AnyActorLogic>(
+  machine: TMachine,
+  snapshotOrStep: SnapshotFrom<TMachine> | AgentStep<SnapshotFrom<TMachine>>,
+  event: EventFromLogic<TMachine>,
+  options?: Partial<AgentExecutionOptions>
+): AgentStep<SnapshotFrom<TMachine>> {
+  const snapshot = isAgentStep(snapshotOrStep)
+    ? snapshotOrStep.snapshot
+    : snapshotOrStep;
+  const [nextSnapshot, actions] = transition(machine, snapshot, event as never);
+  return createAgentStep(machine, nextSnapshot, actions, getRegisteredAgentExecutionOptions(machine, options));
+}
 
-      const snapshot = isAgentStep(snapshotOrStep)
-        ? snapshotOrStep.snapshot
-        : snapshotOrStep;
-      const [nextSnapshot, actions] = transition(agentMachine, snapshot, event as never);
-      return createAgentStep(agentMachine, nextSnapshot, actions);
-    },
-    resolve(
-      step: AgentStep<SnapshotFrom<TMachine>>,
-      request: Pick<AgentRequest, 'id'> | string,
-      output: unknown
-    ) {
-      const [snapshot, actions] = transitionResult(agentMachine, step.snapshot, request, output);
-      return createAgentStep(agentMachine, snapshot, actions);
-    },
-    getRequests(
-      actions: readonly { type?: string; params?: unknown }[],
-      snapshot?: AnyMachineSnapshot,
-      requestOptions: Pick<AgentRequestOptions, 'eventToolName'> = {}
-    ) {
-      return getAgentRequests(actions, {
-        ...options,
-        ...requestOptions,
-        snapshot,
-      });
-    },
-    async execute(request: AgentRequest, executors: AgentRequestExecutors) {
-      const output = await executeAgentTextRequest(
-        request.mode ?? 'generate',
-        request.id,
-        request.input,
-        executors,
-        request.tools
-      );
+export function resolveAgentStep<TMachine extends AnyActorLogic>(
+  machine: TMachine,
+  step: AgentStep<SnapshotFrom<TMachine>>,
+  request: Pick<AgentRequest, 'id'> | string,
+  output: unknown,
+  options?: Partial<AgentExecutionOptions>
+): AgentStep<SnapshotFrom<TMachine>> {
+  const [snapshot, actions] = transitionResult(machine, step.snapshot, request, output);
+  return createAgentStep(machine, snapshot, actions, getRegisteredAgentExecutionOptions(machine, options));
+}
 
-      return request.input.outputSchema
-        ? validateSchemaSync(request.input.outputSchema, output)
-        : output;
-    },
-  }) as unknown as AgentMachine<TMachine>;
+export function getMachineAgentRequests(
+  machine: AnyActorLogic,
+  actions: readonly { type?: string; params?: unknown }[],
+  snapshot?: AnyMachineSnapshot,
+  options: Pick<AgentRequestOptions, 'eventToolName'> & Partial<AgentExecutionOptions> = {}
+): AgentRequest[] {
+  const machineOptions = getRegisteredAgentExecutionOptions(machine, options);
 
-  return agentMachine;
+  return getAgentRequests(actions, {
+    ...machineOptions,
+    ...options,
+    snapshot,
+  });
+}
+
+export async function executeAgentRequest(
+  request: AgentRequest,
+  executors: AgentRequestExecutors
+): Promise<unknown> {
+  const output = await executeAgentTextRequest(
+    request.mode ?? 'generate',
+    request.id,
+    request.input,
+    executors,
+    request.tools
+  );
+
+  return request.input.outputSchema
+    ? validateSchemaSync(request.input.outputSchema, output)
+    : output;
 }
 
 function createAgentStep<TMachine extends AnyActorLogic>(
-  machine: AgentMachine<TMachine>,
+  machine: TMachine,
   snapshot: SnapshotFrom<TMachine>,
-  actions: readonly { type?: string; params?: unknown }[]
+  actions: readonly { type?: string; params?: unknown }[],
+  options?: AgentExecutionOptions
 ): AgentStep<SnapshotFrom<TMachine>> {
+  applyFinalStateOutput(machine, snapshot);
+
   return {
     snapshot,
     actions,
-    requests: machine.getRequests(actions, snapshot),
+    requests: getAgentRequests(actions, {
+      ...options,
+      snapshot: snapshot as AnyMachineSnapshot,
+    }),
     done: (snapshot as AnyMachineSnapshot).status === 'done',
   };
+}
+
+function resolveStateValueConfig(
+  config: { states?: Record<string, any> },
+  value: unknown
+): any {
+  if (typeof value === 'string') {
+    return config.states?.[value];
+  }
+
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  for (const [key, childValue] of Object.entries(value)) {
+    const childConfig = config.states?.[key];
+    if (!childConfig) {
+      continue;
+    }
+
+    if (childConfig.type === 'final') {
+      return childConfig;
+    }
+
+    const nested = resolveStateValueConfig(childConfig, childValue);
+    if (nested) {
+      return nested;
+    }
+  }
+
+  return undefined;
+}
+
+function applyFinalStateOutput(
+  logic: AnyActorLogic,
+  snapshot: unknown,
+  event?: EventObject
+) {
+  const machineSnapshot = snapshot as AnyMachineSnapshot & {
+    output?: unknown;
+    context?: unknown;
+    value?: unknown;
+  };
+
+  if (
+    machineSnapshot.status !== 'done'
+    || machineSnapshot.output !== undefined
+    || !('config' in logic)
+  ) {
+    return;
+  }
+
+  const config = (logic as { config?: { states?: Record<string, any> } }).config;
+  if (!config) {
+    return;
+  }
+
+  const stateConfig = resolveStateValueConfig(config, machineSnapshot.value);
+  const output = stateConfig?.output;
+  if (output === undefined) {
+    return;
+  }
+
+  machineSnapshot.output =
+    typeof output === 'function'
+      ? output({ context: machineSnapshot.context, event })
+      : output;
 }
 
 function isAgentStep<TSnapshot extends AnyMachineSnapshot>(
@@ -1104,8 +1183,8 @@ type MetaOf<TMetaSchema extends StandardSchemaV1> = Constrain<
   MetaObject
 >;
 type SetupActors<TActors extends { [K in keyof TActors]: AnyActorLogic }> = {
-  [K in keyof TActors]: TActors[K] extends PromiseActorLogic<infer TOutput, infer TInput>
-    ? PromiseActorLogic<TOutput, TInput>
+  [K in keyof TActors]: TActors[K] extends AsyncActorLogic<infer TOutput, infer TInput>
+    ? AsyncActorLogic<TOutput, TInput>
     : TActors[K];
 };
 type AgentSetupActors<TActors extends { [K in keyof TActors]: AnyActorLogic }> =
@@ -1188,10 +1267,10 @@ type AgentRequestConfig<
   TMetadata = Record<string, unknown>,
 > = Omit<
   TextLogicConfig<TInputSchema, TOutputSchema, TMetadata>,
-  'events'
+  'agentEvents'
 > & {
   mode?: AgentRequestMode;
-  events?: AgentRequestEvents<TEventSchemas, TSchemas, TInputSchema>;
+  agentEvents?: AgentRequestEvents<TEventSchemas, TSchemas, TInputSchema>;
 };
 
 type AgentRequestSchemaMap = Record<
@@ -1230,33 +1309,28 @@ type AgentAllActors<
   TRequestSchemas extends AgentRequestSchemaMap,
 > = TActors & RequestActors<TRequestSchemas>;
 
-type AgentSetupConfigOptions<
+type AgentSetupXStateConfig<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
   TEventSchemas extends Record<string, StandardSchemaV1>,
   TActors extends { [K in keyof TActors]: AnyActorLogic },
+  TRequestSchemas extends AgentRequestSchemaMap,
   TInputSchema extends StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1,
   TMetaSchema extends StandardSchemaV1,
-  TActions extends Record<string, ParameterizedObject['params'] | undefined>,
-  TGuards extends Record<string, ParameterizedObject['params'] | undefined>,
-  TDelay extends string,
-  TRequestSchemas extends AgentRequestSchemaMap,
-> = Parameters<
-  typeof setup<
-    ContextOf<TContextSchema>,
-    EventsOf<TEventSchemas>,
-    SetupActors<AgentSetupActors<AgentAllActors<TActors, TRequestSchemas>>>,
-    {},
-    TActions,
-    TGuards,
-    TDelay,
-    string,
-    InferOutput<TInputSchema>,
-    Constrain<InferOutput<TOutputSchema>, NonReducibleUnknown>,
-    EventObject,
-    MetaOf<TMetaSchema>
-  >
->[0];
+> = SetupConfig<
+  {
+    context: TContextSchema;
+    events: TEventSchemas;
+    input: TInputSchema;
+    output: TOutputSchema;
+    meta: TMetaSchema;
+  },
+  Record<string, never>,
+  NonNullable<AnySetupConfig['actions']>,
+  SetupActors<AgentSetupActors<AgentAllActors<TActors, TRequestSchemas>>>,
+  NonNullable<AnySetupConfig['guards']>,
+  NonNullable<AnySetupConfig['delays']>
+>;
 
 type SetupAgentBaseConfig<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
@@ -1265,9 +1339,6 @@ type SetupAgentBaseConfig<
   TInputSchema extends StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1,
   TMetaSchema extends StandardSchemaV1,
-  TActions extends Record<string, ParameterizedObject['params'] | undefined>,
-  TGuards extends Record<string, ParameterizedObject['params'] | undefined>,
-  TDelay extends string,
   TRequestSchemas extends AgentRequestSchemaMap,
 > = (
   | {
@@ -1299,42 +1370,9 @@ type SetupAgentBaseConfig<
       TMetaSchema
     >
   >;
-  actions?: AgentSetupConfigOptions<
-    TContextSchema,
-    TEventSchemas,
-    TActors,
-    TInputSchema,
-    TOutputSchema,
-    TMetaSchema,
-    TActions,
-    TGuards,
-    TDelay,
-    TRequestSchemas
-  >['actions'];
-  guards?: AgentSetupConfigOptions<
-    TContextSchema,
-    TEventSchemas,
-    TActors,
-    TInputSchema,
-    TOutputSchema,
-    TMetaSchema,
-    TActions,
-    TGuards,
-    TDelay,
-    TRequestSchemas
-  >['guards'];
-  delays?: AgentSetupConfigOptions<
-    TContextSchema,
-    TEventSchemas,
-    TActors,
-    TInputSchema,
-    TOutputSchema,
-    TMetaSchema,
-    TActions,
-    TGuards,
-    TDelay,
-    TRequestSchemas
-  >['delays'];
+  actions?: NonNullable<AnySetupConfig['actions']>;
+  guards?: NonNullable<AnySetupConfig['guards']>;
+  delays?: NonNullable<AnySetupConfig['delays']>;
 };
 
 type SetupAgentXStateResult<
@@ -1345,23 +1383,15 @@ type SetupAgentXStateResult<
   TInputSchema extends StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1,
   TMetaSchema extends StandardSchemaV1,
-  TActions extends Record<string, ParameterizedObject['params'] | undefined>,
-  TGuards extends Record<string, ParameterizedObject['params'] | undefined>,
-  TDelay extends string,
-> = ReturnType<
-  typeof setup<
-    ContextOf<TContextSchema>,
-    EventsOf<TEventSchemas>,
-    SetupActors<AgentSetupActors<AgentAllActors<TActors, TRequestSchemas>>>,
-    {},
-    TActions,
-    TGuards,
-    TDelay,
-    string,
-    InferOutput<TInputSchema>,
-    Constrain<InferOutput<TOutputSchema>, NonReducibleUnknown>,
-    EventObject,
-    MetaOf<TMetaSchema>
+> = SetupReturnFromConfig<
+  AgentSetupXStateConfig<
+    TContextSchema,
+    TEventSchemas,
+    TActors,
+    TRequestSchemas,
+    TInputSchema,
+    TOutputSchema,
+    TMetaSchema
   >
 >;
 
@@ -1373,9 +1403,6 @@ type SetupAgentResult<
   TInputSchema extends StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1,
   TMetaSchema extends StandardSchemaV1,
-  TActions extends Record<string, ParameterizedObject['params'] | undefined>,
-  TGuards extends Record<string, ParameterizedObject['params'] | undefined>,
-  TDelay extends string,
 > = Omit<
   SetupAgentXStateResult<
     TContextSchema,
@@ -1384,31 +1411,19 @@ type SetupAgentResult<
     TRequestSchemas,
     TInputSchema,
     TOutputSchema,
-    TMetaSchema,
-    TActions,
-    TGuards,
-    TDelay
-  >,
+    TMetaSchema
+>,
   'createMachine'
 > & {
-  createMachine: <
-    const TConfig extends Parameters<
-      SetupAgentXStateResult<
-        TContextSchema,
-        TEventSchemas,
-        TActors,
-        TRequestSchemas,
-        TInputSchema,
-        TOutputSchema,
-        TMetaSchema,
-        TActions,
-        TGuards,
-        TDelay
-      >['createMachine']
-    >[0],
-  >(
-    config: TConfig
-  ) => AgentMachine<any>;
+  createMachine: SetupAgentXStateResult<
+    TContextSchema,
+    TEventSchemas,
+    TActors,
+    TRequestSchemas,
+    TInputSchema,
+    TOutputSchema,
+    TMetaSchema
+  >['createMachine'];
   schemas: AgentSchemaPack<
     TContextSchema,
     TEventSchemas,
@@ -1417,6 +1432,28 @@ type SetupAgentResult<
     TMetaSchema
   >;
   readonly requests: RequestActors<TRequestSchemas>;
+  initial<TMachine extends AnyActorLogic>(
+    machine: TMachine,
+    input?: unknown
+  ): AgentStep<SnapshotFrom<TMachine>>;
+  transition<TMachine extends AnyActorLogic>(
+    machine: TMachine,
+    snapshotOrStep: SnapshotFrom<TMachine> | AgentStep<SnapshotFrom<TMachine>>,
+    event: EventFromLogic<TMachine>
+  ): AgentStep<SnapshotFrom<TMachine>>;
+  resolve<TMachine extends AnyActorLogic>(
+    machine: TMachine,
+    step: AgentStep<SnapshotFrom<TMachine>>,
+    request: Pick<AgentRequest, 'id'> | string,
+    output: unknown
+  ): AgentStep<SnapshotFrom<TMachine>>;
+  getRequests(
+    machine: AnyActorLogic,
+    actions: readonly { type?: string; params?: unknown }[],
+    snapshot?: AnyMachineSnapshot,
+    options?: Pick<AgentRequestOptions, 'eventToolName'>
+  ): AgentRequest[];
+  execute(request: AgentRequest, executors: AgentRequestExecutors): Promise<unknown>;
   appendMessages(
     resolve:
       | AgentMessage
@@ -1447,9 +1484,6 @@ export function setupAgent<
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
   TOutputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
   TMetaSchema extends StandardSchemaV1 = StandardSchemaV1<MetaObject>,
-  TActions extends Record<string, ParameterizedObject['params'] | undefined> = {},
-  TGuards extends Record<string, ParameterizedObject['params'] | undefined> = {},
-  TDelay extends string = never,
 >(
   config: SetupAgentBaseConfig<
     TContextSchema,
@@ -1458,9 +1492,6 @@ export function setupAgent<
     TInputSchema,
     TOutputSchema,
     TMetaSchema,
-    TActions,
-    TGuards,
-    TDelay,
     TRequestSchemas
   >
 ): SetupAgentResult<
@@ -1470,10 +1501,7 @@ export function setupAgent<
   TRequestSchemas,
   TInputSchema,
   TOutputSchema,
-  TMetaSchema,
-  TActions,
-  TGuards,
-  TDelay
+  TMetaSchema
 > {
   return createSetupAgent(config);
 }
@@ -1507,7 +1535,7 @@ export interface AgentWorkflowRequestConfig {
   messages?: unknown;
   input: JsonSchemaObject;
   output: JsonSchemaObject;
-  events?: unknown;
+  agentEvents?: unknown;
   tools?: AgentTools;
   toolChoice?: AgentToolChoice | unknown;
   temperature?: unknown;
@@ -1629,10 +1657,10 @@ function createRequestsFromWorkflowConfig(
                 | undefined,
         tools: request.tools,
         toolChoice: request.toolChoice as AgentToolChoice | undefined,
-        events: request.events === undefined
+        agentEvents: request.agentEvents === undefined
           ? undefined
           : ({ input }) => {
-              const events = evaluateExpressionValue(request.events, { input });
+              const events = evaluateExpressionValue(request.agentEvents, { input });
               return Array.isArray(events)
                 ? events.filter((event): event is string => typeof event === 'string')
                 : [];
@@ -1680,19 +1708,18 @@ function createRequestsFromWorkflowConfig(
 function createActorPlaceholdersFromWorkflowConfig(config: AgentWorkflowConfig) {
   return Object.fromEntries(
     Object.keys(config.actors ?? {}).map((key) => [key, missingActor(key)])
-  ) as Record<string, PromiseActorLogic<unknown, unknown>>;
+  ) as Record<string, AsyncActorLogic<unknown, unknown>>;
 }
 
 function createAssignAction(assignConfig: Record<string, unknown>) {
-  return assign(
-    Object.fromEntries(
+  return ({ context, event }: { context: Record<string, unknown>; event: unknown }) => ({
+    context: Object.fromEntries(
       Object.entries(assignConfig).map(([key, value]) => [
         key,
-        ({ context, event }: { context: unknown; event: unknown }) =>
-          evaluateExpressionValue(value, { context, event }),
+        evaluateExpressionValue(value, { context, event }),
       ])
-    ) as never
-  );
+    ),
+  });
 }
 
 function lowerWorkflowActions(
@@ -1714,31 +1741,41 @@ function lowerWorkflowActions(
   );
 }
 
-function lowerWorkflowTransition(
-  transitionConfig: AgentWorkflowTransitionConfig
+function workflowTransitionMatches(
+  transitionConfig: AgentWorkflowTransitionConfig,
+  scope: { context: unknown; event: unknown }
 ) {
-  const actions = [
-    ...(transitionConfig.assign ? [createAssignAction(transitionConfig.assign)] : []),
-    ...(lowerWorkflowActions(transitionConfig.actions) ?? []),
-  ];
+  if (transitionConfig.guard === undefined) {
+    return true;
+  }
 
+  if (typeof transitionConfig.guard === 'string') {
+    return Boolean(evaluateExpressionValue(transitionConfig.guard, scope));
+  }
+
+  return typeof transitionConfig.guard === 'function'
+    ? transitionConfig.guard(scope as never)
+    : false;
+}
+
+function lowerWorkflowTransitionResult(
+  transitionConfig: AgentWorkflowTransitionConfig,
+  scope: { context: unknown; event: unknown }
+) {
   return {
     ...(transitionConfig.target !== undefined
       ? { target: transitionConfig.target }
       : {}),
-    ...(transitionConfig.guard !== undefined
+    ...(transitionConfig.assign
       ? {
-          guard:
-            typeof transitionConfig.guard === 'string'
-              ? ({ context, event }: { context: unknown; event: unknown }) =>
-                  Boolean(evaluateExpressionValue(transitionConfig.guard, {
-                    context,
-                    event,
-                  }))
-              : transitionConfig.guard,
+          context: Object.fromEntries(
+            Object.entries(transitionConfig.assign).map(([key, value]) => [
+              key,
+              evaluateExpressionValue(value, scope),
+            ])
+          ),
         }
       : {}),
-    ...(actions.length > 0 ? { actions } : {}),
     ...(transitionConfig.description !== undefined
       ? { description: transitionConfig.description }
       : {}),
@@ -1746,6 +1783,17 @@ function lowerWorkflowTransition(
       ? { reenter: transitionConfig.reenter }
       : {}),
     ...(transitionConfig.meta !== undefined ? { meta: transitionConfig.meta } : {}),
+  };
+}
+
+function lowerWorkflowTransition(
+  transitionConfig: AgentWorkflowTransitionConfig
+) {
+  return ({ context, event }: { context: unknown; event: unknown }) => {
+    const scope = { context, event };
+    return workflowTransitionMatches(transitionConfig, scope)
+      ? lowerWorkflowTransitionResult(transitionConfig, scope)
+      : undefined;
   };
 }
 
@@ -1760,7 +1808,15 @@ function lowerWorkflowTransitionOrArray(
   }
 
   return Array.isArray(transitionConfig)
-    ? transitionConfig.map(lowerWorkflowTransition)
+    ? ({ context, event }: { context: unknown; event: unknown }) => {
+        const scope = { context, event };
+        const transition = transitionConfig.find((candidate) =>
+          workflowTransitionMatches(candidate, scope)
+        );
+        return transition
+          ? lowerWorkflowTransitionResult(transition, scope)
+          : undefined;
+      }
     : lowerWorkflowTransition(transitionConfig);
 }
 
@@ -1853,7 +1909,7 @@ function lowerWorkflowState(stateConfig: AgentWorkflowStateConfig): Record<strin
   };
 }
 
-function setupAgentFromConfig(config: AgentWorkflowConfig): AgentMachine {
+function setupAgentFromConfig(config: AgentWorkflowConfig): AnyStateMachine {
   const schemas = createSchemasFromWorkflowConfig(config);
   const requests = createRequestsFromWorkflowConfig(config);
   const requestActors = createRequestActors(schemas, requests);
@@ -1889,8 +1945,41 @@ function setupAgentFromConfig(config: AgentWorkflowConfig): AgentMachine {
   } as never);
 }
 
+function collectFinalStateOutputs(
+  states: Record<string, any> | undefined,
+  outputs: unknown[] = []
+) {
+  for (const state of Object.values(states ?? {})) {
+    if (state?.type === 'final' && state.output !== undefined) {
+      outputs.push(state.output);
+    }
+    collectFinalStateOutputs(state?.states, outputs);
+  }
+
+  return outputs;
+}
+
+function withRootOutputFromSingleFinal<TConfig>(config: TConfig): TConfig {
+  if (
+    !config
+    || typeof config !== 'object'
+    || 'output' in config
+    || !('states' in config)
+  ) {
+    return config;
+  }
+
+  const outputs = collectFinalStateOutputs(
+    (config as { states?: Record<string, any> }).states
+  );
+
+  return outputs.length === 1
+    ? ({ ...config, output: outputs[0] } as TConfig)
+    : config;
+}
+
 export namespace setupAgent {
-  export function fromConfig(config: AgentWorkflowConfig): AgentMachine {
+  export function fromConfig(config: AgentWorkflowConfig): AnyStateMachine {
     return setupAgentFromConfig(config);
   }
 }
@@ -1905,11 +1994,12 @@ function createRequestActors<
       const logic = createTextLogic({
         ...request,
         mode: request.mode ?? 'generate',
-        events: request.events
-          ? ({ input }) =>
-              typeof request.events === 'function'
-                ? request.events({ input, schemas })
-                : request.events
+        agentEvents: request.agentEvents
+          ? ({ input }) => {
+              return typeof request.agentEvents === 'function'
+                ? request.agentEvents({ input, schemas })
+                : request.agentEvents;
+            }
           : undefined,
       } as TextLogicConfig<StandardSchemaV1, StandardSchemaV1>);
 
@@ -1957,6 +2047,84 @@ function normalizeAgentSchemas<
     : createAgentSchemas(config);
 }
 
+function normalizeAgentRequestInput<
+  TRequestSchemas extends AgentRequestSchemaMap,
+  TEventSchemas extends Record<string, StandardSchemaV1>,
+  TSchemas extends AgentSchemaPack<any, TEventSchemas, any, any, any>,
+>(
+  requests: AgentRequestInput<TRequestSchemas, TEventSchemas, TSchemas> | undefined
+): AgentRequestInput<TRequestSchemas, TEventSchemas, TSchemas> {
+  return requests ?? ({} as AgentRequestInput<TRequestSchemas, TEventSchemas, TSchemas>);
+}
+
+function createAgentActorSources<
+  TActors extends { [K in keyof TActors]: AnyActorLogic },
+  TRequestSchemas extends AgentRequestSchemaMap,
+>(
+  actors: TActors | undefined,
+  requestActors: RequestActors<TRequestSchemas>
+): SetupActors<AgentSetupActors<AgentAllActors<TActors, TRequestSchemas>>> {
+  return {
+    ...builtinTextActors,
+    [USER_INPUT_ACTOR]: userInputActor,
+    ...actors,
+    ...requestActors,
+  } as SetupActors<AgentSetupActors<AgentAllActors<TActors, TRequestSchemas>>>;
+}
+
+function createAgentSetupConfig<
+  TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
+  TEventSchemas extends Record<string, StandardSchemaV1>,
+  TActors extends { [K in keyof TActors]: AnyActorLogic },
+  TRequestSchemas extends AgentRequestSchemaMap,
+  TInputSchema extends StandardSchemaV1,
+  TOutputSchema extends StandardSchemaV1,
+  TMetaSchema extends StandardSchemaV1,
+>(
+  schemas: AgentSchemaPack<
+    TContextSchema,
+    TEventSchemas,
+    TInputSchema,
+    TOutputSchema,
+    TMetaSchema
+  >,
+  actorSources: SetupActors<AgentSetupActors<AgentAllActors<TActors, TRequestSchemas>>>,
+  config: Pick<
+    SetupAgentBaseConfig<
+      TContextSchema,
+      TEventSchemas,
+      TActors,
+      TInputSchema,
+      TOutputSchema,
+      TMetaSchema,
+      TRequestSchemas
+    >,
+    'actions' | 'guards' | 'delays'
+  >
+): AgentSetupXStateConfig<
+  TContextSchema,
+  TEventSchemas,
+  TActors,
+  TRequestSchemas,
+  TInputSchema,
+  TOutputSchema,
+  TMetaSchema
+> {
+  return {
+    schemas: {
+      context: schemas.context,
+      events: schemas.events,
+      input: schemas.input,
+      output: schemas.output,
+      meta: schemas.meta,
+    },
+    actorSources,
+    actions: config.actions,
+    guards: config.guards,
+    delays: config.delays,
+  };
+}
+
 function createSetupAgent<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
   TEventSchemas extends Record<string, StandardSchemaV1>,
@@ -1965,9 +2133,6 @@ function createSetupAgent<
   TInputSchema extends StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1,
   TMetaSchema extends StandardSchemaV1,
-  TActions extends Record<string, ParameterizedObject['params'] | undefined>,
-  TGuards extends Record<string, ParameterizedObject['params'] | undefined>,
-  TDelay extends string,
 >(
   config: SetupAgentBaseConfig<
     TContextSchema,
@@ -1976,9 +2141,6 @@ function createSetupAgent<
     TInputSchema,
     TOutputSchema,
     TMetaSchema,
-    TActions,
-    TGuards,
-    TDelay,
     TRequestSchemas
   >
 ): SetupAgentResult<
@@ -1988,79 +2150,84 @@ function createSetupAgent<
   TRequestSchemas,
   TInputSchema,
   TOutputSchema,
-  TMetaSchema,
-  TActions,
-  TGuards,
-  TDelay
+  TMetaSchema
 > {
   const schemas = normalizeAgentSchemas(config);
+  const requests = normalizeAgentRequestInput<
+    TRequestSchemas,
+    TEventSchemas,
+    typeof schemas
+  >(config.requests);
   const requestActors = createRequestActors(
     schemas,
-    (config.requests ?? {}) as AgentRequestInput<
-      TRequestSchemas,
-      TEventSchemas,
-      typeof schemas
-    >
+    requests
   );
-  const base = setup<
-    ContextOf<TContextSchema>,
-    EventsOf<TEventSchemas>,
-    SetupActors<AgentSetupActors<AgentAllActors<TActors, TRequestSchemas>>>,
-    {},
-    TActions,
-    TGuards,
-    TDelay,
-    string,
-    InferOutput<TInputSchema>,
-    Constrain<InferOutput<TOutputSchema>, NonReducibleUnknown>,
-    EventObject,
-    MetaOf<TMetaSchema>
-  >({
-    types: {} as {
-      context: ContextOf<TContextSchema>;
-      events: EventsOf<TEventSchemas>;
-      input: InferOutput<TInputSchema>;
-      output: Constrain<InferOutput<TOutputSchema>, NonReducibleUnknown>;
-      meta: MetaOf<TMetaSchema>;
-    },
-    actors: {
-      ...builtinTextActors,
-      [USER_INPUT_ACTOR]: userInputActor,
-      ...config.actors,
-      ...requestActors,
-    } as AgentSetupConfigOptions<
+  const actorSources = createAgentActorSources(config.actors, requestActors);
+  const setupConfig = createAgentSetupConfig<
       TContextSchema,
       TEventSchemas,
       TActors,
+      TRequestSchemas,
       TInputSchema,
       TOutputSchema,
-      TMetaSchema,
-      TActions,
-      TGuards,
-      TDelay,
-      TRequestSchemas
-    >['actors'],
-    actions: config.actions,
-    guards: config.guards,
-    delays: config.delays,
-  });
+      TMetaSchema
+    >(schemas, actorSources, config);
+  const base = setup(setupConfig);
   const createBaseMachine = base.createMachine.bind(base);
+  const machineOptions = {
+    schemas,
+    actors: actorSources,
+  };
 
   return Object.assign(base, {
     createMachine(machineConfig: Parameters<typeof base.createMachine>[0]) {
-      return createAgentMachine(createBaseMachine(machineConfig as never), {
-        schemas,
-        actors: {
-          ...builtinTextActors,
-          ...config.actors,
-          ...requestActors,
-        },
-      });
+      const machine = createBaseMachine(
+        withRootOutputFromSingleFinal(machineConfig) as never
+      );
+      agentExecutionOptions.set(machine as object, machineOptions);
+      return machine;
     },
     schemas,
     requests: requestActors,
+    initial(machine: AnyActorLogic, input?: unknown) {
+      return initialAgentStep(machine, input, machineOptions);
+    },
+    transition(
+      machine: AnyActorLogic,
+      snapshotOrStep: AnyMachineSnapshot | AgentStep,
+      event: EventObject
+    ) {
+      return transitionAgentStep(
+        machine,
+        snapshotOrStep as never,
+        event as never,
+        machineOptions
+      );
+    },
+    resolve(
+      machine: AnyActorLogic,
+      step: AgentStep,
+      request: Pick<AgentRequest, 'id'> | string,
+      output: unknown
+    ) {
+      return resolveAgentStep(machine, step as never, request, output, machineOptions);
+    },
+    getRequests(
+      machine: AnyActorLogic,
+      actions: readonly { type?: string; params?: unknown }[],
+      snapshot?: AnyMachineSnapshot,
+      requestOptions: Pick<AgentRequestOptions, 'eventToolName'> = {}
+    ) {
+      return getMachineAgentRequests(machine, actions, snapshot, {
+        ...machineOptions,
+        ...requestOptions,
+      });
+    },
+    execute(request: AgentRequest, executors: AgentRequestExecutors) {
+      return executeAgentRequest(request, executors);
+    },
     appendMessages(resolve: Parameters<typeof appendMessages>[0]) {
-      return appendMessages(resolve as never);
+      return appendMessages(resolve);
     },
   }) as unknown as SetupAgentResult<
     TContextSchema,
@@ -2069,9 +2236,6 @@ function createSetupAgent<
     TRequestSchemas,
     TInputSchema,
     TOutputSchema,
-    TMetaSchema,
-    TActions,
-    TGuards,
-    TDelay
+    TMetaSchema
   >;
 }

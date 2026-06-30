@@ -1,4 +1,4 @@
-import { createActor, fromPromise, waitFor } from 'xstate';
+import { createActor, createAsyncLogic, waitFor } from 'xstate';
 import {
   draftEmail,
   emailDrafter,
@@ -9,7 +9,7 @@ import type { AgentTextRequest } from '../../src/index.js';
 const calls: AgentTextRequest[] = [];
 
 const machine = emailDrafter.provide({
-  actors: {
+  actorSources: {
     evaluatePrompt: evaluatePrompt.withExecutor(async ({ request }) => {
       calls.push(request);
       // first evaluation: unsatisfied; second: satisfied
@@ -20,18 +20,18 @@ const machine = emailDrafter.provide({
       calls.push(request);
       return { to: 'sam@example.com', subject: 'Hello', body: 'Hi Sam!' };
     }),
-    sendEmail: fromPromise(async () => ({ sent: true })),
-  } as any,
+    sendEmail: createAsyncLogic({ run: async () => ({ sent: true }) }),
+  },
 });
 
 const actor = createActor(machine);
 actor.start();
 
-actor.send({ type: 'PROMPT_SUBMITTED', prompt: 'email sam' } as any);
+actor.send({ type: 'PROMPT_SUBMITTED', prompt: 'email sam' });
 await waitFor(actor, (s) => s.matches('needsMoreInfo'));
 console.log('1. needsMoreInfo meta:', JSON.stringify(actor.getSnapshot().getMeta(), null, 0).slice(0, 80), '…');
 
-actor.send({ type: 'MORE_INFO', details: 'sam@example.com, say hello' } as any);
+actor.send({ type: 'MORE_INFO', details: 'sam@example.com, say hello' });
 await waitFor(actor, (s) => s.matches('reviewing'));
 console.log('2. reviewing, draft:', actor.getSnapshot().context.draft);
 console.log('3. messages:', actor.getSnapshot().context.messages.map((m: any) => m.role));

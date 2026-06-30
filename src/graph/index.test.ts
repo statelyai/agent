@@ -1,13 +1,15 @@
 import { expect, test } from 'vitest';
-import { setup } from 'xstate';
+import { setup, types } from 'xstate';
 import { analyzeGraph, toGraph, toMermaid } from './index.js';
 
 test('exports finite states and transition edges from XState setup machines', () => {
   const agent = setup({
-    types: {} as {
-      context: { count: number };
-      input: { count: number };
-      events: { type: 'NEXT' };
+    schemas: {
+      context: types<{ count: number }>(),
+      input: types<{ count: number }>(),
+      events: {
+        NEXT: types<{}>(),
+      },
     },
   });
   const machine = agent.createMachine({
@@ -45,7 +47,9 @@ test('exports finite states and transition edges from XState setup machines', ()
 
 test('exports Mermaid from XState setup machines', () => {
   const agent = setup({
-    types: {} as { context: {} },
+    schemas: {
+      context: types<{}>(),
+    },
   });
   const machine = agent.createMachine({
     id: 'mermaid-export',

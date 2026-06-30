@@ -7,12 +7,15 @@
 import { generateText, Output, stepCountIs, type LanguageModel } from 'ai';
 import { openai } from '@ai-sdk/openai';
 import { z } from 'zod';
+import { initialTransition, transition } from 'xstate';
 import { toAiSdkTools } from '../../../src/ai-sdk/index.js';
 import {
+  getAgentRequests,
   type AgentRequest,
   type AgentTextRequest,
+  transitionResult,
 } from '../../../src/index.js';
-import { gameMachine, turnSummarySchema } from '../game-agent.js';
+import { gameActors, gameMachine, gameSchemas, turnSummarySchema } from '../game-agent.js';
 
 function resolveModel(modelRef: string): LanguageModel {
   return openai(modelRef.replace(/^openai\//, ''));
@@ -66,10 +69,14 @@ async function runGenerateRequest(request: AgentRequest) {
 }
 
 export async function runAiSdkGameTurn(input = { playerHp: 20, enemyHp: 15 }) {
-  let step = gameMachine.initial(input);
+  let [snapshot, actions]: [any, any[]] = initialTransition(gameMachine, input);
 
-  while (!step.done) {
-    const [request] = step.requests;
+  while (snapshot.status !== 'done') {
+    const [request] = getAgentRequests(actions, {
+      snapshot,
+      schemas: gameSchemas,
+      actors: gameActors,
+    });
     if (!request) {
       throw new Error('Machine is waiting without an agent request.');
     }
@@ -77,13 +84,18 @@ export async function runAiSdkGameTurn(input = { playerHp: 20, enemyHp: 15 }) {
     const result = await runGenerateRequest(request);
 
     if (result.kind === 'event') {
-      step = gameMachine.transition(step, result.event as never);
+      [snapshot, actions] = transition(gameMachine, snapshot, result.event as never);
     } else {
-      step = gameMachine.resolve(step, request, result.output);
+      [snapshot, actions] = transitionResult(
+        gameMachine as any,
+        snapshot,
+        request,
+        result.output
+      );
     }
   }
 
-  return step.snapshot.output;
+  return snapshot.output;
 }
 
 async function main() {

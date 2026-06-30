@@ -214,7 +214,7 @@
         "output": {
           "$ref": "#/$defs/JsonSchema"
         },
-        "events": {
+        "agentEvents": {
           "description": "Machine event types this request may expose as host/model tools.",
           "anyOf": [
             { "$ref": "#/$defs/ExpressionString" },

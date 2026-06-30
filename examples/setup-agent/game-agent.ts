@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { assign } from 'xstate';
-import { createAgentSchemas, createTextLogic, setupAgent } from '../../src/index.js';
+import { setup } from 'xstate';
+import { createAgentSchemas, createTextLogic } from '../../src/index.js';
 
 export const turnSummarySchema = z.object({
   summary: z.string(),
@@ -8,38 +8,40 @@ export const turnSummarySchema = z.object({
   playerHp: z.number(),
 });
 
-const contextSchema = z.object({
-  playerHp: z.number(),
-  enemyHp: z.number(),
-  defended: z.boolean(),
-  lastSummary: z.string().nullable(),
+export const gameSchemas = createAgentSchemas({
+  context: z.object({
+    playerHp: z.number(),
+    enemyHp: z.number(),
+    defended: z.boolean(),
+    lastSummary: z.string().nullable(),
+  }),
+  input: z.object({
+    playerHp: z.number().default(20),
+    enemyHp: z.number().default(15),
+  }),
+  output: z.object({
+    outcome: z.enum(['continue', 'won', 'lost', 'fled']),
+    summary: z.string(),
+    playerHp: z.number(),
+    enemyHp: z.number(),
+  }),
+  events: {
+    ATTACK: z.object({ target: z.string().default('goblin') }),
+    DEFEND: z.object({}),
+    HEAL: z.object({ amount: z.number().min(1).max(8).default(4) }),
+    FLEE: z.object({}),
+  },
 });
 
-const inputSchema = z.object({
-  playerHp: z.number().default(20),
-  enemyHp: z.number().default(15),
-});
+type GameEventType = keyof typeof gameSchemas.events;
 
-const outputSchema = z.object({
-  outcome: z.enum(['continue', 'won', 'lost', 'fled']),
-  summary: z.string(),
-  playerHp: z.number(),
-  enemyHp: z.number(),
-});
-
-const eventSchemas = {
-  ATTACK: z.object({ target: z.string().default('goblin') }),
-  DEFEND: z.object({}),
-  HEAL: z.object({ amount: z.number().min(1).max(8).default(4) }),
-  FLEE: z.object({}),
-};
-
-const schemas = createAgentSchemas({
-  context: contextSchema,
-  input: inputSchema,
-  output: outputSchema,
-  events: eventSchemas,
-});
+const defaultMoveEvents = ['ATTACK', 'DEFEND', 'FLEE'] satisfies GameEventType[];
+const lowHpMoveEvents = [
+  'ATTACK',
+  'DEFEND',
+  'HEAL',
+  'FLEE',
+] satisfies GameEventType[];
 
 export const chooseMove = createTextLogic({
   schemas: {
@@ -57,10 +59,10 @@ export const chooseMove = createTextLogic({
       `Enemy HP: ${input.enemyHp}`,
       'Pick the best legal move.',
     ].join('\n'),
-  events: ({ input }) =>
+  agentEvents: ({ input }) =>
     input.playerHp <= 6
-      ? ['ATTACK', 'DEFEND', 'HEAL', 'FLEE']
-      : ['ATTACK', 'DEFEND', 'FLEE'],
+      ? lowHpMoveEvents
+      : defaultMoveEvents,
 });
 
 export const summarizeTurn = createTextLogic({
@@ -82,15 +84,15 @@ export const summarizeTurn = createTextLogic({
     ].join('\n'),
 });
 
-const gameAgent = setupAgent({
-  schemas,
-  actors: {
-    chooseMove,
-    summarizeTurn,
-  },
-});
+export const gameActors = {
+  chooseMove,
+  summarizeTurn,
+};
 
-export const gameSchemas = gameAgent.schemas;
+const gameAgent = setup({
+  schemas: gameSchemas,
+  actorSources: gameActors,
+});
 
 export const gameMachine = gameAgent.createMachine({
   id: 'turn-based-game-agent',
@@ -113,26 +115,30 @@ export const gameMachine = gameAgent.createMachine({
         onDone: { target: 'summarizing' },
       },
       on: {
-        ATTACK: {
+        ATTACK: ({ context }) => ({
           target: 'summarizing',
-          actions: assign({
-            enemyHp: ({ context }) => Math.max(0, context.enemyHp - 6),
+          context: {
+            enemyHp: Math.max(0, context.enemyHp - 6),
             defended: false,
-          }),
-        },
+          },
+        }),
         DEFEND: {
           target: 'summarizing',
-          actions: assign({ defended: true }),
+          context: { defended: true },
         },
-        HEAL: {
+        HEAL: ({ context, event }) => ({
           target: 'summarizing',
-          actions: assign({
-            playerHp: ({ context, event }) =>
-              Math.min(20, context.playerHp + event.amount),
+          context: {
+            playerHp: Math.min(20, context.playerHp + event.amount),
             defended: false,
-          }),
+          },
+        }),
+        FLEE: {
+          target: 'fled',
+          context: {
+            lastSummary: 'You fled the encounter.',
+          },
         },
-        FLEE: { target: 'fled' },
       },
     },
     summarizing: {
@@ -144,22 +150,27 @@ export const gameMachine = gameAgent.createMachine({
           enemyHp: context.enemyHp,
           defended: context.defended,
         }),
-        onDone: {
+        onDone: ({ output }) => ({
           target: 'checkingOutcome',
-          actions: assign({
-            playerHp: ({ event }) => event.output.playerHp,
-            enemyHp: ({ event }) => event.output.enemyHp,
-            lastSummary: ({ event }) => event.output.summary,
-          }),
-        },
+          context: {
+            playerHp: output.playerHp,
+            enemyHp: output.enemyHp,
+            lastSummary: output.summary,
+          },
+        }),
       },
     },
     checkingOutcome: {
-      always: [
-        { guard: ({ context }) => context.enemyHp <= 0, target: 'won' },
-        { guard: ({ context }) => context.playerHp <= 0, target: 'lost' },
-        { target: 'done' },
-      ],
+      type: 'choice',
+      choice: ({ context }) => {
+        if (context.enemyHp <= 0) {
+          return { target: 'won' };
+        }
+        if (context.playerHp <= 0) {
+          return { target: 'lost' };
+        }
+        return { target: 'done' };
+      },
     },
     done: {
       type: 'final',
@@ -192,10 +203,29 @@ export const gameMachine = gameAgent.createMachine({
       type: 'final',
       output: ({ context }) => ({
         outcome: 'fled',
-        summary: 'You fled the encounter.',
+        summary: context.lastSummary ?? 'You fled the encounter.',
         playerHp: context.playerHp,
         enemyHp: context.enemyHp,
       }),
+    },
+  },
+});
+
+gameAgent.createMachine({
+  context: {
+    playerHp: 20,
+    enemyHp: 15,
+    defended: false,
+    lastSummary: null,
+  },
+  // @ts-expect-error root machine output must match gameSchemas.output
+  output: () => ({ wrong: true }),
+  initial: 'probe',
+  states: {
+    probe: {
+      type: 'final',
+      // @ts-expect-error top-level final state output must match gameSchemas.output
+      output: () => ({ wrong: true }),
     },
   },
 });

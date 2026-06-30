@@ -6,8 +6,10 @@
  *
  * Then run with an OpenAI-compatible TanStack adapter.
  */
+import { initialTransition, transition } from 'xstate';
 import { type AgentRequest } from '../../../src/index.js';
-import { gameMachine } from '../game-agent.js';
+import { getAgentRequests, transitionResult } from '../../../src/index.js';
+import { gameActors, gameMachine, gameSchemas } from '../game-agent.js';
 
 type TanStackChat = (options: {
   adapter: unknown;
@@ -59,10 +61,17 @@ export async function runTanStackGameTurn(args: {
   adapter: unknown;
   input?: { playerHp: number; enemyHp: number };
 }) {
-  let step = gameMachine.initial(args.input ?? { playerHp: 20, enemyHp: 15 });
+  let [snapshot, actions]: [any, any[]] = initialTransition(
+    gameMachine,
+    args.input ?? { playerHp: 20, enemyHp: 15 }
+  );
 
-  while (!step.done) {
-    const [request] = step.requests;
+  while (snapshot.status !== 'done') {
+    const [request] = getAgentRequests(actions, {
+      snapshot,
+      schemas: gameSchemas,
+      actors: gameActors,
+    });
     if (!request) {
       throw new Error('Machine is waiting without an agent request.');
     }
@@ -74,11 +83,16 @@ export async function runTanStackGameTurn(args: {
     });
 
     if (result.kind === 'event') {
-      step = gameMachine.transition(step, result.event as never);
+      [snapshot, actions] = transition(gameMachine, snapshot, result.event as never);
     } else {
-      step = gameMachine.resolve(step, request, result.output);
+      [snapshot, actions] = transitionResult(
+        gameMachine as any,
+        snapshot,
+        request,
+        result.output
+      );
     }
   }
 
-  return step.snapshot.output;
+  return snapshot.output;
 }

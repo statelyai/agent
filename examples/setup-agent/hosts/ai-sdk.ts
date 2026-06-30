@@ -1,5 +1,5 @@
 /**
- * Vercel AI SDK host for `setupAgent(...)` machines.
+ * Vercel AI SDK host for XState agent machines.
  *
  * The machine declares named text logic calls; this host provides their
  * execution with the AI SDK. Streaming chunks flow through the host side
@@ -17,15 +17,17 @@ import {
   type ModelMessage,
 } from 'ai';
 import { openai } from '@ai-sdk/openai';
-import { createActor, toPromise } from 'xstate';
+import { createActor, initialTransition, toPromise } from 'xstate';
 import {
+  getAgentRequests,
   type AgentTextRequest,
   type AgentTools,
   type TextLogicExecutor,
+  transitionResult,
 } from '../../../src/index.js';
 import { toAiSdkTools } from '../../../src/ai-sdk/index.js';
-import { jokeMachine, tellJoke } from '../joke.js';
-import { triageMachine, triageTicket } from '../triage.js';
+import { jokeActors, jokeMachine, tellJoke } from '../joke.js';
+import { triageActors, triageMachine, triageSchemas, triageTicket } from '../triage.js';
 
 // ─── Host Adapter: AI SDK execution ───
 
@@ -140,52 +142,65 @@ export function createAiSdkStreamingTextActor<TLogic extends ExecutableTextLogic
 export async function runTriageDemo(ticket: string) {
   const actor = createActor(
     triageMachine.provide({
-      actors: {
-        triageTicket: createAiSdkTextActor(triageTicket),
+      actorSources: {
+        triageTicket: createAiSdkTextActor(triageTicket) as never,
       },
-    }),
+    }) as any,
     { input: { ticket } }
   );
   actor.start();
-  const output = await toPromise(actor);
+  const output = await toPromise(actor as any);
   return output; // machine output, typed by the output schema
 }
 
 export async function runTriageStepDemo(ticket: string) {
-  let step = triageMachine.initial({ ticket });
+  let [snapshot, actions]: [any, any[]] = initialTransition(
+    triageMachine as any,
+    { ticket }
+  );
 
-  while (!step.done) {
-    if (step.requests.length === 0) {
+  while (snapshot.status !== 'done') {
+    const requests = getAgentRequests(actions, {
+      snapshot,
+      schemas: triageSchemas,
+      actors: triageActors,
+    });
+    if (requests.length === 0) {
       throw new Error('Machine is waiting without an agent request.');
     }
 
-    for (const request of step.requests) {
-      const output = await triageMachine.execute(request, {
-        generateText: (request: AgentTextRequest & { tools: AgentTools }) =>
-          generateWithAiSdk(request, request.tools),
-      });
-      step = triageMachine.resolve(step, request, output);
+    for (const request of requests) {
+      const output = await generateWithAiSdk(
+        request.input,
+        request.tools
+      );
+      [snapshot, actions] = transitionResult(
+        triageMachine as any,
+        snapshot,
+        request,
+        output
+      );
     }
   }
 
-  return step.snapshot.output;
+  return snapshot.output;
 }
 
 export async function runStreamingDemo(topic: string) {
   const actor = createActor(
     jokeMachine.provide({
-      actors: {
+      actorSources: {
         tellJoke: createAiSdkStreamingTextActor(tellJoke, {
           // The side channel: chunks go to stdout as they arrive. In a server
           // this is a UIMessageStream writer or Response stream instead.
           onChunk: (chunk) => process.stdout.write(chunk),
-        }),
+        }) as never,
       },
-    }),
+    }) as any,
     { input: { topic } }
   );
   actor.start();
-  await toPromise(actor);
+  await toPromise(actor as any);
   process.stdout.write('\n');
 }
 

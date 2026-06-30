@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
-import { createActor, fromPromise, waitFor } from 'xstate';
-import { setupAgent } from '../index.js';
+import { createActor, createAsyncLogic, waitFor } from 'xstate';
+import { initialAgentStep, setupAgent } from '../index.js';
 
 describe('Oracle Agent Spec-style static workflows', () => {
   test('adapts branching and data-flow edges to state guards and assignments', () => {
@@ -106,7 +106,7 @@ describe('Oracle Agent Spec-style static workflows', () => {
       },
     });
 
-    const yesStep = machine.initial({
+    const yesStep = initialAgentStep(machine, {
       input1: 'yes',
       input2: 'no',
       input1IsYes: true,
@@ -117,7 +117,7 @@ describe('Oracle Agent Spec-style static workflows', () => {
     expect(yesStep.done).toBe(true);
     expect(yesStep.snapshot.output).toEqual({ result: 'yes' });
 
-    const nestedStep = machine.initial({
+    const nestedStep = initialAgentStep(machine, {
       input1: 'maybe',
       input2: 'yes',
       input1IsYes: false,
@@ -259,17 +259,23 @@ describe('Oracle Agent Spec-style static workflows', () => {
         },
       },
     }).provide({
-      actors: {
-        node12: fromPromise(async () => ({
-          generated_text: 'first generated text',
-        })),
-        node3: fromPromise(async ({ input }) => {
-          expect(input).toEqual({ previous: 'first generated text' });
-          return { generated_text: 'second generated text' };
+      actorSources: {
+        node12: createAsyncLogic({
+          run: async () => ({
+            generated_text: 'first generated text',
+          }),
         }),
-        toolNode: fromPromise(async ({ input }) => {
-          expect(input).toEqual({ city_name: 'zurich' });
-          return { forecast: 'sunny' };
+        node3: createAsyncLogic({
+          run: async ({ input }) => {
+            expect(input).toEqual({ previous: 'first generated text' });
+            return { generated_text: 'second generated text' };
+          },
+        }),
+        toolNode: createAsyncLogic({
+          run: async ({ input }) => {
+            expect(input).toEqual({ city_name: 'zurich' });
+            return { forecast: 'sunny' };
+          },
         }),
       },
     });

@@ -41,16 +41,16 @@ Primary sources:
 | CrewAI Flow example | Status | Agent equivalent |
 | --- | --- | --- |
 | Content Creator Flow | Covered | [`src/crewai-equivalents/raw-xstate.test.ts`](/Users/davidkpiano/Code/agent/src/crewai-equivalents/raw-xstate.test.ts) |
-| Email Auto Responder Flow | Covered | Same `setupAgent(...)`/XState primitives as content routing plus persisted XState snapshots |
-| Lead Score Flow | Covered | Same `setupAgent(...)`/XState primitives as HITL review plus typed worker actors |
-| Meeting Assistant Flow | Covered | Same `setupAgent(...)`/XState primitives as fan-out worker actors |
-| Self Evaluation Loop Flow | Covered | Same `setupAgent(...)`/XState primitives as guarded retry/re-entry |
+| Email Auto Responder Flow | Covered | Same XState `setup(...)` primitives as content routing plus persisted XState snapshots |
+| Lead Score Flow | Covered | Same XState `setup(...)` primitives as HITL review plus typed worker actors |
+| Meeting Assistant Flow | Covered | Same XState `setup(...)` primitives as fan-out worker actors |
+| Self Evaluation Loop Flow | Covered | Same XState `setup(...)` primitives as guarded retry/re-entry |
 | Write a Book with Flows | Covered | [`src/crewai-equivalents/raw-xstate.test.ts`](/Users/davidkpiano/Code/agent/src/crewai-equivalents/raw-xstate.test.ts) |
 
 ## Notes
 
 - CrewAI’s `content_creator_flow/` directory in the current examples repo clone is empty, so that equivalence is based on the current official descriptions: multi-format content routing across blog, LinkedIn, and research outputs.
-- Several of these patterns overlap with LangGraph-style examples; they are represented with `setupAgent(...)`/XState tests so the parity surface is explicit without maintaining duplicate legacy example files.
+- Several of these patterns overlap with LangGraph-style examples; they are represented with typed XState tests so the parity surface is explicit without maintaining duplicate legacy example files.
 
 ## Differences
 
