@@ -152,7 +152,6 @@ export const emailDrafter = agent.createMachine({
   initial: 'prompting',
   states: {
     prompting: {
-      agent: { kind: 'human' },
       meta: {
         interaction: {
           type: 'text',
@@ -175,7 +174,6 @@ export const emailDrafter = agent.createMachine({
     },
 
     evaluating: {
-      agent: { kind: 'text' },
       invoke: {
         src: 'evaluatePrompt',
         input: ({ context }) => ({ prompt: context.prompt }),
@@ -197,7 +195,6 @@ export const emailDrafter = agent.createMachine({
     },
 
     needsMoreInfo: {
-      agent: { kind: 'human' },
       meta: {
         interaction: {
           type: 'select',
@@ -234,7 +231,6 @@ export const emailDrafter = agent.createMachine({
     },
 
     drafting: {
-      agent: { kind: 'text' },
       invoke: {
         src: 'draftEmail',
         input: ({ context }) => ({
@@ -261,7 +257,6 @@ export const emailDrafter = agent.createMachine({
     },
 
     reviewing: {
-      agent: { kind: 'human' },
       meta: {
         interaction: {
           type: 'select',
@@ -308,7 +303,6 @@ export const emailDrafter = agent.createMachine({
     },
 
     sent: {
-      agent: { kind: 'human' },
       meta: {
         display: ['Email sent.'],
         interaction: {

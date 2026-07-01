@@ -1,0 +1,14 @@
+{
+  "name": "debate-sub-agents",
+  "title": "Debate Sub-Agents",
+  "kind": "comparison-example",
+  "origin": {
+    "type": "native-xstate",
+    "source": "XState actor-model debate workflow",
+    "url": "https://stately.ai/docs/actors"
+  },
+  "comparison": {
+    "targets": ["XState actor model", "event-based sub-agents", "multi-agent debate"],
+    "purpose": "Shows a facilitator invoking two long-lived debater agents and scheduling AB turns through typed events."
+  }
+}

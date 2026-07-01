@@ -1,0 +1,14 @@
+{
+  "name": "xstate-sub-agents",
+  "title": "XState Sub-Agents",
+  "kind": "comparison-example",
+  "origin": {
+    "type": "native-xstate",
+    "source": "XState actor model",
+    "url": "https://stately.ai/docs/actors"
+  },
+  "comparison": {
+    "targets": ["XState actor model", "sub-agents", "nested agent machines"],
+    "purpose": "Shows multi-step agent machines invoking other multi-step agent machines as normal XState child actors."
+  }
+}

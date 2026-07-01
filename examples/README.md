@@ -24,10 +24,13 @@ These use normal XState `setup(...)` plus `createTextLogic(...)` from `@statelya
 - [`crewai-content-creator/index.ts`](/Users/davidkpiano/Code/agent/examples/crewai-content-creator/index.ts): CrewAI Flow-style route-and-generate workflow
 - [`email-drafter-smoke/index.mts`](/Users/davidkpiano/Code/agent/examples/email-drafter-smoke/index.mts): deterministic local XState runtime smoke test
 - [`ai-sdk-host/index.ts`](/Users/davidkpiano/Code/agent/examples/ai-sdk-host/index.ts): Vercel AI SDK host actors
+- [`ai-sdk-sub-agents/index.ts`](/Users/davidkpiano/Code/agent/examples/ai-sdk-sub-agents/index.ts): Vercel AI SDK ToolLoopAgent workers exposed as host-owned tools
+- [`debate-sub-agents/index.ts`](/Users/davidkpiano/Code/agent/examples/debate-sub-agents/index.ts): facilitator schedules two event-based debater sub-agents
 - [`ai-sdk-game-host/index.ts`](/Users/davidkpiano/Code/agent/examples/ai-sdk-game-host/index.ts): Vercel AI SDK step runner
 - [`cloudflare-workers-ai-host/index.ts`](/Users/davidkpiano/Code/agent/examples/cloudflare-workers-ai-host/index.ts): Cloudflare Workers AI step runner
 - [`tanstack-ai-host/index.ts`](/Users/davidkpiano/Code/agent/examples/tanstack-ai-host/index.ts): TanStack AI step runner sketch
 - [`cloudflare-agent-host/index.ts`](/Users/davidkpiano/Code/agent/examples/cloudflare-agent-host/index.ts): Cloudflare Agents host sketch
+- [`xstate-sub-agents/index.ts`](/Users/davidkpiano/Code/agent/examples/xstate-sub-agents/index.ts): multi-step agent machines invoking other agent machines as XState child actors
 
 ## Comparison Examples
 

@@ -35,3 +35,17 @@ export {
 export {
   runCrewAIContentCreatorExample,
 } from './crewai-content-creator/index.js';
+export {
+  createAiSdkSubAgentWorkflow,
+  createAiSdkSubAgents,
+  runAiSdkSubAgentsDemo,
+  runAiSdkSubAgentsDeterministicExample,
+} from './ai-sdk-sub-agents/index.js';
+export {
+  createXStateSubAgentWorkflow,
+  runXStateSubAgentsExample,
+} from './xstate-sub-agents/index.js';
+export {
+  createDebateSubAgentsWorkflow,
+  runDebateSubAgentsExample,
+} from './debate-sub-agents/index.js';
