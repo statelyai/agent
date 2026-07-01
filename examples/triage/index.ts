@@ -22,7 +22,7 @@ export const triageTicket = createTextLogic({
     input: z.object({ ticket: z.string() }),
     output: triageSchema,
   },
-  model: 'openai/gpt-5.4-nano',
+  model: 'openai/gpt-4.1-mini',
   system:
     'Triage the support ticket: sentiment, category, and a short suggested reply.',
   prompt: ({ input }) => input.ticket,

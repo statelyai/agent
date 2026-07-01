@@ -51,7 +51,7 @@ export const chooseMove = createTextLogic({
     }),
     output: z.string(),
   },
-  model: 'openai/gpt-5.4-nano',
+  model: 'openai/gpt-4.1-mini',
   system: 'You are playing a turn-based game. Choose exactly one legal event tool.',
   prompt: ({ input }) =>
     [
@@ -74,7 +74,7 @@ export const summarizeTurn = createTextLogic({
     }),
     output: turnSummarySchema,
   },
-  model: 'openai/gpt-5.4-nano',
+  model: 'openai/gpt-4.1-mini',
   system: 'Narrate the turn and return updated HP totals.',
   prompt: ({ input }) =>
     [

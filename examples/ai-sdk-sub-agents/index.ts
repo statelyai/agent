@@ -10,24 +10,48 @@ import assert from 'node:assert/strict';
 import { openai } from '@ai-sdk/openai';
 import {
   generateText,
+  type GenerateTextResult,
   Output,
   stepCountIs,
+  type StreamTextResult,
   ToolLoopAgent,
   type Agent,
   type LanguageModel,
 } from 'ai';
 import { z } from 'zod';
-import { createActor, toPromise, type AnyStateMachine } from 'xstate';
-import { setupAgent, type AgentTool, type AgentToolExecute } from '../../src/index.js';
+import {
+  createActor,
+  toPromise,
+  type AnyActorLogic,
+  type AnyStateMachine,
+} from 'xstate';
+import {
+  setupAgent,
+  type AgentRequestLogic,
+  type AgentTool,
+  type AgentToolExecute,
+} from '../../src/index.js';
 import { toAiSdkTools } from '../../src/ai-sdk/index.js';
 
 const answerSchema = z.object({ answer: z.string() });
+const taskInputSchema = z.object({ task: z.string() });
 
 type SubAgentName = 'researcher' | 'writer';
 type SubAgents = Record<SubAgentName, Agent>;
+type SuperviseLogic = AgentRequestLogic<typeof taskInputSchema, typeof answerSchema>;
 type SubAgentWorkflow = {
-  agent: { requests: Record<string, any> };
-  machine: AnyStateMachine;
+  agent: {
+    requests: {
+      supervise: SuperviseLogic;
+    };
+  };
+  machine: AnyStateMachine & {
+    provide(config: {
+      actorSources: {
+        supervise: SuperviseLogic;
+      };
+    }): AnyActorLogic;
+  };
 };
 
 export function createAiSdkSubAgents(model: LanguageModel): SubAgents {
@@ -70,12 +94,12 @@ export function createAiSdkSubAgentWorkflow(
       task: z.string(),
       answer: z.string().nullable(),
     }),
-    input: z.object({ task: z.string() }),
+    input: taskInputSchema,
     output: answerSchema,
     requests: {
       supervise: {
         schemas: {
-          input: z.object({ task: z.string() }),
+          input: taskInputSchema,
           output: answerSchema,
         },
         model: 'openai/gpt-4.1-mini',
@@ -122,7 +146,10 @@ export function createAiSdkSubAgentWorkflow(
     },
   });
 
-  return { agent, machine };
+  return {
+    agent,
+    machine: machine as unknown as SubAgentWorkflow['machine'],
+  };
 }
 
 export async function runAiSdkSubAgentsDemo(task: string) {
@@ -135,7 +162,7 @@ export async function runAiSdkSubAgentsDemo(task: string) {
     machine.provide({
       actorSources: {
         supervise: agent.requests.supervise.withExecutor(
-          async ({ request, signal }: any) => {
+          async ({ request, signal }) => {
             const { output } = await generateText({
               model,
               system: request.system,
@@ -149,13 +176,13 @@ export async function runAiSdkSubAgentsDemo(task: string) {
           },
         ),
       },
-    }) as any,
+    }) as unknown as AnyActorLogic,
     { input: { task } },
   );
 
   actor.start();
-  await toPromise(actor as any);
-  return (actor.getSnapshot() as any).output;
+  await toPromise(actor);
+  return actor.getSnapshot().output;
 }
 
 export async function runAiSdkSubAgentsDeterministicExample() {
@@ -167,9 +194,9 @@ export async function runAiSdkSubAgentsDeterministicExample() {
       tools: {},
       generate: async ({ prompt }) => {
         calls.push(`researcher:${prompt}`);
-        return { text: `notes:${prompt}` } as any;
+        return { text: `notes:${prompt}` } as GenerateTextResult<{}, never>;
       },
-      stream: async () => ({}) as any,
+      stream: async () => ({}) as StreamTextResult<{}, never>,
     },
     writer: {
       version: 'agent-v1',
@@ -177,9 +204,9 @@ export async function runAiSdkSubAgentsDeterministicExample() {
       tools: {},
       generate: async ({ prompt }) => {
         calls.push(`writer:${prompt}`);
-        return { text: `final:${prompt}` } as any;
+        return { text: `final:${prompt}` } as GenerateTextResult<{}, never>;
       },
-      stream: async () => ({}) as any,
+      stream: async () => ({}) as StreamTextResult<{}, never>,
     },
   };
   const { agent, machine } = createAiSdkSubAgentWorkflow(fakeSubAgents);
@@ -187,7 +214,7 @@ export async function runAiSdkSubAgentsDeterministicExample() {
   const actor = createActor(
     machine.provide({
       actorSources: {
-        supervise: agent.requests.supervise.withExecutor(async ({ request }: any) => {
+        supervise: agent.requests.supervise.withExecutor(async ({ request }) => {
           const notes = await executeTool(request.tools?.askResearcher, {
             prompt: request.prompt,
           });
@@ -197,25 +224,24 @@ export async function runAiSdkSubAgentsDeterministicExample() {
           return { answer: String(answer) };
         }),
       },
-    }) as any,
+    }) as unknown as AnyActorLogic,
     { input: { task: 'compose agent note' } },
   );
   actor.start();
-  await toPromise(actor as any);
+  await toPromise(actor);
 
   assert.deepEqual(calls, [
     'researcher:compose agent note',
     'writer:notes:compose agent note',
   ]);
-  assert.deepEqual((actor.getSnapshot() as any).output, {
+  assert.deepEqual(actor.getSnapshot().output, {
     answer: 'final:notes:compose agent note',
   });
 }
 
 if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
   if (!process.env.OPENAI_API_KEY) {
-    await runAiSdkSubAgentsDeterministicExample();
-  } else {
-    console.log(await runAiSdkSubAgentsDemo('Explain composable agents.'));
+    throw new Error('Set OPENAI_API_KEY to run this example.');
   }
+  console.log(await runAiSdkSubAgentsDemo('Explain composable agents.'));
 }

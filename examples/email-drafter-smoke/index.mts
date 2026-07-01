@@ -34,7 +34,10 @@ console.log('1. needsMoreInfo meta:', JSON.stringify(actor.getSnapshot().getMeta
 actor.send({ type: 'MORE_INFO', details: 'sam@example.com, say hello' });
 await waitFor(actor, (s) => s.matches('reviewing'));
 console.log('2. reviewing, draft:', actor.getSnapshot().context.draft);
-console.log('3. messages:', actor.getSnapshot().context.messages.map((m: any) => m.role));
+console.log(
+  '3. messages:',
+  actor.getSnapshot().context.messages.map((m: { role: string }) => m.role),
+);
 
 actor.send({ type: 'SEND' });
 await waitFor(actor, (s) => s.matches('sent'));

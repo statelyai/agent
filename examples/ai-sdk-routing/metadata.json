@@ -1,0 +1,14 @@
+{
+  "name": "ai-sdk-routing",
+  "title": "Vercel AI SDK Routing",
+  "kind": "comparison",
+  "origin": {
+    "type": "docs",
+    "source": "Vercel AI SDK routing workflow",
+    "url": "https://ai-sdk.dev/docs/agents/workflows#routing"
+  },
+  "comparison": {
+    "targets": ["Vercel AI SDK", "routing"],
+    "purpose": "Ports AI SDK routing into an explicit XState machine."
+  }
+}

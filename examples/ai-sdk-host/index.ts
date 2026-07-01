@@ -17,13 +17,22 @@ import {
   type ModelMessage,
 } from 'ai';
 import { openai } from '@ai-sdk/openai';
-import { createActor, createAsyncLogic, initialTransition, toPromise } from 'xstate';
+import {
+  createActor,
+  createAsyncLogic,
+  initialTransition,
+  toPromise,
+  type AnyActorLogic,
+  type AnyStateMachine,
+} from 'xstate';
 import {
   getAgentRequests,
   type AgentTextRequest,
   type AgentTools,
-  type TextLogicExecutor,
+  type StandardSchemaV1,
+  type TextLogic,
   transitionResult,
+  validateSchemaSync,
 } from '../../src/index.js';
 import { toAiSdkTools } from '../../src/ai-sdk/index.js';
 import { jokeActors, jokeMachine, tellJoke } from '../joke/index.js';
@@ -52,6 +61,18 @@ function toModelMessages(input: AgentTextRequest): ModelMessage[] | undefined {
   }));
 }
 
+function getJsonSchemaType(schema: StandardSchemaV1 | undefined) {
+  const jsonSchema = (
+    schema?.['~standard'] as {
+      jsonSchema?: { input?: () => { type?: unknown } | Promise<{ type?: unknown }> };
+    } | undefined
+  )?.jsonSchema?.input?.();
+
+  return jsonSchema && !(jsonSchema instanceof Promise)
+    ? jsonSchema.type
+    : undefined;
+}
+
 async function generateWithAiSdk(
   input: AgentTextRequest,
   tools: AgentTextRequest['tools'] = input.tools,
@@ -76,7 +97,7 @@ async function generateWithAiSdk(
       : input.toolChoice,
   };
 
-  if (input.outputSchema) {
+  if (input.outputSchema && getJsonSchemaType(input.outputSchema) === 'object') {
     const { output } = await aiGenerateText({
       ...common,
       output: Output.object({
@@ -87,7 +108,9 @@ async function generateWithAiSdk(
   }
 
   const { text } = await aiGenerateText(common);
-  return text;
+  return input.outputSchema
+    ? validateSchemaSync(input.outputSchema, text)
+    : text;
 }
 
 async function streamWithAiSdk(
@@ -117,23 +140,27 @@ async function streamWithAiSdk(
   return await result.text;
 }
 
-type ExecutableTextLogic = {
-  withExecutor(execute: TextLogicExecutor<any, any, any>): unknown;
-};
-
-export function createAiSdkTextActor<TLogic extends ExecutableTextLogic>(
-  logic: TLogic,
+export function createAiSdkTextActor<
+  TInputSchema extends StandardSchemaV1,
+  TOutputSchema extends StandardSchemaV1,
+  TMetadata extends Record<string, unknown> = Record<string, unknown>,
+>(
+  logic: TextLogic<TInputSchema, TOutputSchema, TMetadata>,
   options: AiSdkTextHostOptions = {}
-) {
+): TextLogic<TInputSchema, TOutputSchema, TMetadata> {
   return logic.withExecutor(async ({ request, signal }) =>
     await generateWithAiSdk(request, undefined, options, signal) as never
   );
 }
 
-export function createAiSdkStreamingTextActor<TLogic extends ExecutableTextLogic>(
-  logic: TLogic,
+export function createAiSdkStreamingTextActor<
+  TInputSchema extends StandardSchemaV1,
+  TOutputSchema extends StandardSchemaV1,
+  TMetadata extends Record<string, unknown> = Record<string, unknown>,
+>(
+  logic: TextLogic<TInputSchema, TOutputSchema, TMetadata>,
   options: AiSdkTextHostOptions = {}
-) {
+): TextLogic<TInputSchema, TOutputSchema, TMetadata> {
   return logic.withExecutor(async ({ request, signal }) =>
     await streamWithAiSdk(request, options, signal) as never
   );
@@ -145,17 +172,17 @@ export async function runTriageDemo(ticket: string) {
       actorSources: {
         triageTicket: createAiSdkTextActor(triageTicket) as never,
       },
-    }) as any,
+    }) as unknown as AnyActorLogic,
     { input: { ticket } }
   );
   actor.start();
-  const output = await toPromise(actor as any);
+  const output = await toPromise(actor);
   return output; // machine output, typed by the output schema
 }
 
 export async function runTriageStepDemo(ticket: string) {
   let [snapshot, actions]: [any, any[]] = initialTransition(
-    triageMachine as any,
+    triageMachine as unknown as AnyStateMachine,
     { ticket }
   );
 
@@ -175,7 +202,7 @@ export async function runTriageStepDemo(ticket: string) {
         request.tools
       );
       [snapshot, actions] = transitionResult(
-        triageMachine as any,
+        triageMachine as unknown as AnyStateMachine,
         snapshot,
         request,
         output
@@ -199,11 +226,11 @@ export async function runStreamingDemo(topic: string) {
           run: async () => ({ feedback: 'ok, done' }),
         }),
       },
-    }) as any,
+    }) as unknown as AnyActorLogic,
     { input: { topic } }
   );
   actor.start();
-  await toPromise(actor as any);
+  await toPromise(actor);
   process.stdout.write('\n');
 }
 
@@ -214,6 +241,9 @@ async function main() {
   await runStreamingDemo('state machines');
 }
 
-if (process.env.OPENAI_API_KEY) {
+if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error('Set OPENAI_API_KEY to run this example.');
+  }
   void main();
 }

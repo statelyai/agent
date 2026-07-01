@@ -6,7 +6,7 @@
  *
  * Then run with an OpenAI-compatible TanStack adapter.
  */
-import { initialTransition, transition } from 'xstate';
+import { initialTransition, transition, type AnyStateMachine } from 'xstate';
 import { type AgentRequest } from '../../src/index.js';
 import { getAgentRequests, transitionResult } from '../../src/index.js';
 import { gameActors, gameMachine, gameSchemas } from '../game-agent/index.js';
@@ -86,7 +86,7 @@ export async function runTanStackGameTurn(args: {
       [snapshot, actions] = transition(gameMachine, snapshot, result.event as never);
     } else {
       [snapshot, actions] = transitionResult(
-        gameMachine as any,
+        gameMachine as unknown as AnyStateMachine,
         snapshot,
         request,
         result.output

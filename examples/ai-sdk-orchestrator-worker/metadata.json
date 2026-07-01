@@ -1,0 +1,14 @@
+{
+  "name": "ai-sdk-orchestrator-worker",
+  "title": "Vercel AI SDK Orchestrator-Worker",
+  "kind": "comparison",
+  "origin": {
+    "type": "docs",
+    "source": "Vercel AI SDK orchestrator-worker workflow",
+    "url": "https://ai-sdk.dev/docs/agents/workflows#orchestrator-worker"
+  },
+  "comparison": {
+    "targets": ["Vercel AI SDK", "orchestrator-worker"],
+    "purpose": "Ports AI SDK orchestrator-worker into an explicit XState machine."
+  }
+}

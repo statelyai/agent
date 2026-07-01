@@ -25,6 +25,11 @@ These use normal XState `setup(...)` plus `createTextLogic(...)` from `@statelya
 - [`email-drafter-smoke/index.mts`](/Users/davidkpiano/Code/agent/examples/email-drafter-smoke/index.mts): deterministic local XState runtime smoke test
 - [`ai-sdk-host/index.ts`](/Users/davidkpiano/Code/agent/examples/ai-sdk-host/index.ts): Vercel AI SDK host actors
 - [`ai-sdk-sub-agents/index.ts`](/Users/davidkpiano/Code/agent/examples/ai-sdk-sub-agents/index.ts): Vercel AI SDK ToolLoopAgent workers exposed as host-owned tools
+- [`ai-sdk-marketing-chain/index.ts`](/Users/davidkpiano/Code/agent/examples/ai-sdk-marketing-chain/index.ts): Vercel AI SDK sequential chain as an explicit XState machine
+- [`ai-sdk-routing/index.ts`](/Users/davidkpiano/Code/agent/examples/ai-sdk-routing/index.ts): Vercel AI SDK routing as an explicit XState machine
+- [`ai-sdk-parallel-review/index.ts`](/Users/davidkpiano/Code/agent/examples/ai-sdk-parallel-review/index.ts): Vercel AI SDK parallel review as an explicit XState machine
+- [`ai-sdk-orchestrator-worker/index.ts`](/Users/davidkpiano/Code/agent/examples/ai-sdk-orchestrator-worker/index.ts): Vercel AI SDK orchestrator-worker as an explicit XState machine
+- [`ai-sdk-evaluator-optimizer/index.ts`](/Users/davidkpiano/Code/agent/examples/ai-sdk-evaluator-optimizer/index.ts): Vercel AI SDK evaluator-optimizer as an explicit XState machine
 - [`debate-sub-agents/index.ts`](/Users/davidkpiano/Code/agent/examples/debate-sub-agents/index.ts): facilitator schedules two event-based debater sub-agents
 - [`ai-sdk-game-host/index.ts`](/Users/davidkpiano/Code/agent/examples/ai-sdk-game-host/index.ts): Vercel AI SDK step runner
 - [`cloudflare-workers-ai-host/index.ts`](/Users/davidkpiano/Code/agent/examples/cloudflare-workers-ai-host/index.ts): Cloudflare Workers AI step runner

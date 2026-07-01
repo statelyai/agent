@@ -21,7 +21,7 @@ export const tellJoke = createTextLogic({
     input: z.object({ topic: z.string() }),
     output: z.string(),
   },
-  model: 'openai/gpt-5.4-nano',
+  model: 'openai/gpt-4.1-mini',
   system: 'You tell short, punchy jokes.',
   prompt: ({ input }) => `Tell a joke about ${input.topic}.`,
 });

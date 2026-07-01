@@ -9,7 +9,7 @@
 import { generateText, Output, stepCountIs, type LanguageModel } from 'ai';
 import { openai } from '@ai-sdk/openai';
 import { z } from 'zod';
-import { initialTransition, transition } from 'xstate';
+import { initialTransition, transition, type AnyStateMachine } from 'xstate';
 import { toAiSdkTools } from '../../src/ai-sdk/index.js';
 import {
   getAgentRequests,
@@ -89,7 +89,7 @@ export async function runAiSdkGameTurn(input = { playerHp: 20, enemyHp: 15 }) {
       [snapshot, actions] = transition(gameMachine, snapshot, result.event as never);
     } else {
       [snapshot, actions] = transitionResult(
-        gameMachine as any,
+        gameMachine as unknown as AnyStateMachine,
         snapshot,
         request,
         result.output
@@ -105,7 +105,10 @@ async function main() {
   console.log(output);
 }
 
-if (process.env.OPENAI_API_KEY) {
+if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error('Set OPENAI_API_KEY to run this example.');
+  }
   void main();
 }
 

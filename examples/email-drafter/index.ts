@@ -82,7 +82,7 @@ export const evaluatePrompt = createTextLogic({
     input: z.object({ prompt: z.string() }),
     output: promptAssessmentSchema,
   },
-  model: 'openai/gpt-5.4-nano',
+  model: 'openai/gpt-4.1-mini',
   system:
     'Evaluate an email drafting request. Require recipient, subject, and body details. Return missing fields and one question per gap.',
   prompt: ({ input }) => input.prompt,
@@ -96,7 +96,7 @@ export const draftEmail = createTextLogic({
     }),
     output: emailDraftSchema,
   },
-  model: 'openai/gpt-5.4-nano',
+  model: 'openai/gpt-4.1-mini',
   system:
     'Draft a polished email from the request. Use the provided details without inventing missing essentials unless the user explicitly asked to draft anyway.',
   messages: ({ input }) => [
@@ -111,7 +111,7 @@ export const streamDraft = createTextLogic({
     input: z.object({ prompt: z.string() }),
     output: z.string(),
   },
-  model: 'openai/gpt-5.4-nano',
+  model: 'openai/gpt-4.1-mini',
   prompt: ({ input }) => input.prompt,
 });
 

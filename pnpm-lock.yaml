@@ -18,8 +18,8 @@ importers:
         specifier: ^5.6.2
         version: 5.9.3
       xstate:
-        specifier: 6.0.0-alpha.12
-        version: 6.0.0-alpha.12
+        specifier: 6.0.0-alpha.15
+        version: 6.0.0-alpha.15
     devDependencies:
       '@ai-sdk/openai':
         specifier: ^3.0.25
@@ -2124,8 +2124,8 @@ packages:
   wrappy@1.0.2:
     resolution: {integrity: sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==, tarball: https://registry.npmjs.org/wrappy/-/wrappy-1.0.2.tgz}
 
-  xstate@6.0.0-alpha.12:
-    resolution: {integrity: sha512-ekDMVV12EPPLIFeTxHaJPXxe50Vbf0/T2Yd71xCHy99ikrBSjNSTKSCGh5/OG6BJ1YN73/2i7/agAYiep/xsxw==, tarball: https://registry.npmjs.org/xstate/-/xstate-6.0.0-alpha.12.tgz}
+  xstate@6.0.0-alpha.15:
+    resolution: {integrity: sha512-Ptd6SPqobepLhZlQ3hBIxbsFqlU+BFP+Yn/OUvPh0YmTzvyHf58ePFiTsNs7h9StPdPpGtJqOpoeTgcIVAXwBQ==, tarball: https://registry.npmjs.org/xstate/-/xstate-6.0.0-alpha.15.tgz}
 
   y18n@5.0.8:
     resolution: {integrity: sha512-0pfFzegeDWJHJIAmTLRP2DwHjdF5s7jo9tuztdQxAhINCdvS+3nGINqPd00AphqJR/0LhANUS6/+7SCb98YOfA==, tarball: https://registry.npmjs.org/y18n/-/y18n-5.0.8.tgz}
@@ -4086,7 +4086,7 @@ snapshots:
 
   wrappy@1.0.2: {}
 
-  xstate@6.0.0-alpha.12: {}
+  xstate@6.0.0-alpha.15: {}
 
   y18n@5.0.8: {}
 

@@ -261,7 +261,11 @@ export async function runDebateSubAgentsExample() {
     machine.provide({
       actorSources: {
         concludeDebate: agent.requests.concludeDebate.withExecutor(
-          async ({ input }: any) => ({
+          async ({
+            input,
+          }: {
+            input: { transcript: string[]; question: string };
+          }) => ({
             conclusion: `conclusion:${input.transcript.length}:${input.question}`,
           }),
         ),

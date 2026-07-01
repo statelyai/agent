@@ -1,0 +1,14 @@
+{
+  "name": "ai-sdk-evaluator-optimizer",
+  "title": "Vercel AI SDK Evaluator-Optimizer",
+  "kind": "comparison",
+  "origin": {
+    "type": "docs",
+    "source": "Vercel AI SDK evaluator-optimizer workflow",
+    "url": "https://ai-sdk.dev/docs/agents/workflows#evaluator-optimizer"
+  },
+  "comparison": {
+    "targets": ["Vercel AI SDK", "evaluator-optimizer"],
+    "purpose": "Ports AI SDK evaluator-optimizer into an explicit XState machine."
+  }
+}
