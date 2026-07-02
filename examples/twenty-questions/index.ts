@@ -22,7 +22,6 @@ import { generateText, stepCountIs, tool, type LanguageModel } from 'ai';
 import { openai } from '@ai-sdk/openai';
 import {
   createAgentSchemas,
-  createDecisionLogic,
   getAcceptedEvents,
   runAgent,
   sendDecision,
@@ -53,44 +52,44 @@ export const twentyQuestionsSchemas = createAgentSchemas({
   },
 });
 
-export const chooseAction = createDecisionLogic({
-  schemas: {
-    input: z.object({
-      questionsRemaining: z.number(),
-      transcript: z.array(
-        z.object({ question: z.string(), answer: z.enum(['yes', 'no']) })
-      ),
-    }),
-  },
-  model: 'openai/gpt-4.1-mini',
-  system:
-    'You are playing twenty questions. Ask one yes/no question at a time to ' +
-    'narrow down the secret, or guess once you are confident. You have a ' +
-    'limited number of questions remaining.',
-  prompt: ({ input }) =>
-    [
-      `Questions remaining: ${input.questionsRemaining}`,
-      'Transcript so far:',
-      input.transcript.length === 0
-        ? '(none yet)'
-        : input.transcript
-            .map((turn) => `Q: ${turn.question}\nA: ${turn.answer}`)
-            .join('\n'),
-      input.questionsRemaining > 0
-        ? 'Ask a yes/no question (ASK) or make your guess (GUESS).'
-        : 'You are out of questions — you must guess now (GUESS).',
-    ].join('\n'),
-  allowedEvents: ['ASK', 'GUESS'] as const,
-});
-
-export const twentyQuestionsActors = {
-  chooseAction,
-};
-
 const agent = setupAgent({
   schemas: twentyQuestionsSchemas,
-  actors: twentyQuestionsActors,
+  decisions: {
+    chooseAction: {
+      schemas: {
+        input: z.object({
+          questionsRemaining: z.number(),
+          transcript: z.array(
+            z.object({ question: z.string(), answer: z.enum(['yes', 'no']) })
+          ),
+        }),
+      },
+      model: 'openai/gpt-4.1-mini',
+      system:
+        'You are playing twenty questions. Ask one yes/no question at a time to ' +
+        'narrow down the secret, or guess once you are confident. You have a ' +
+        'limited number of questions remaining.',
+      prompt: ({ input }) =>
+        [
+          `Questions remaining: ${input.questionsRemaining}`,
+          'Transcript so far:',
+          input.transcript.length === 0
+            ? '(none yet)'
+            : input.transcript
+                .map((turn) => `Q: ${turn.question}\nA: ${turn.answer}`)
+                .join('\n'),
+          input.questionsRemaining > 0
+            ? 'Ask a yes/no question (ASK) or make your guess (GUESS).'
+            : 'You are out of questions — you must guess now (GUESS).',
+        ].join('\n'),
+      // Typo'd event names are caught at compile time — allowedEvents is
+      // typed against the machine's event-schema keys (ASK | GUESS | ANSWER_YES | ANSWER_NO).
+      allowedEvents: ['ASK', 'GUESS'] as const,
+    },
+  },
 });
+
+export const chooseAction = agent.decisions.chooseAction;
 
 export const twentyQuestionsMachine = agent.createMachine({
   id: 'twenty-questions',

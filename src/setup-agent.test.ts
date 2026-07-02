@@ -1973,3 +1973,195 @@ describe('decision live path (createActor)', () => {
     expect(actor.getSnapshot().value).toBe('fumbled');
   });
 });
+
+describe('co-located decisions (setupAgent({ decisions }))', () => {
+  const attackSchema = z.object({ target: z.string() });
+
+  const decisionSchemas = createAgentSchemas({
+    context: z.object({}),
+    input: z.object({}),
+    events: {
+      ATTACK: attackSchema,
+      DEFEND: z.object({}),
+    },
+  });
+
+  function buildMachine() {
+    const agent = setupAgent({
+      schemas: decisionSchemas,
+      decisions: {
+        chooseMove: {
+          schemas: { input: z.object({ prompt: z.string() }) },
+          model: 'test-model',
+          prompt: ({ input }) => input.prompt,
+          allowedEvents: ['ATTACK', 'DEFEND'] as const,
+        },
+      },
+    });
+
+    const machine = agent.createMachine({
+      id: 'co-located-decision-agent',
+      context: {},
+      initial: 'choosingMove',
+      states: {
+        choosingMove: {
+          invoke: {
+            id: 'choosingMove',
+            src: 'chooseMove',
+            input: { prompt: 'Choose a move.' },
+            onDone: sendDecision(),
+            onError: { target: 'fumbled' },
+          },
+          on: {
+            ATTACK: { target: 'attacked' },
+            DEFEND: { target: 'defended' },
+          },
+        },
+        attacked: { type: 'final' },
+        defended: {},
+        fumbled: {},
+      },
+    });
+
+    return { agent, machine };
+  }
+
+  test('runs to completion through runAgent with a mock decide', async () => {
+    const { machine } = buildMachine();
+
+    const result = await runAgent(machine, {
+      input: {},
+      generateText: async () => ({}),
+      decide: async () => ({ event: { type: 'ATTACK', target: 'goblin' } }),
+    });
+
+    expect(result.status).toBe('done');
+    expect(result.status === 'done' && result.snapshot.value).toBe('attacked');
+  });
+
+  test('agent.decisions.<k>.withExecutor + createActor resolves and delivers the chosen event', async () => {
+    const { machine, agent } = buildMachine();
+
+    const actor = createActor(
+      machine.provide({
+        actorSources: {
+          chooseMove: agent.decisions.chooseMove.withExecutor(
+            async (): Promise<{ event: ChosenEvent }> => ({
+              event: { type: 'DEFEND' },
+            }),
+          ),
+        },
+      }),
+      { input: {} },
+    ).start();
+
+    await waitFor(actor, (snapshot) => snapshot.matches('defended'));
+
+    expect(actor.getSnapshot().value).toBe('defended');
+  });
+
+  test('initialAgentStep surfaces the co-located decision as kind: decision with intersected events', () => {
+    const { machine } = buildMachine();
+    const step = initialAgentStep(machine, {}, { schemas: decisionSchemas });
+
+    expect(step.requests).toHaveLength(1);
+    const [request] = step.requests;
+    expect(request!.kind).toBe('decision');
+
+    const decisionRequest = request as AgentDecisionRequest;
+    expect(decisionRequest.events.map((event) => event.type).sort()).toEqual([
+      'ATTACK',
+      'DEFEND',
+    ]);
+    const attackEvent = decisionRequest.events.find((event) => event.type === 'ATTACK');
+    expect(attackEvent?.inputSchema).toBe(attackSchema);
+  });
+
+  test('a key defined in both actors and decisions throws at setup time', () => {
+    const chooseMove = createAsyncLogic<unknown, unknown>({ run: async () => ({}) });
+
+    expect(() =>
+      setupAgent({
+        schemas: decisionSchemas,
+        actors: { chooseMove },
+        decisions: {
+          chooseMove: {
+            model: 'test-model',
+            allowedEvents: ['ATTACK', 'DEFEND'] as const,
+          },
+        },
+      }),
+    ).toThrow(/chooseMove.*actors.*decisions|chooseMove.*decisions.*actors/i);
+  });
+
+  test('a key defined in both requests and decisions throws at setup time', () => {
+    expect(() =>
+      setupAgent({
+        schemas: decisionSchemas,
+        requests: {
+          shared: {
+            schemas: { input: z.object({}), output: z.object({}) },
+            model: 'test-model',
+          },
+        },
+        decisions: {
+          shared: {
+            model: 'test-model',
+            allowedEvents: ['ATTACK', 'DEFEND'] as const,
+          },
+        },
+      }),
+    ).toThrow(/shared/);
+  });
+
+  test('type probes: allowedEvents is checked against the machine event-schema keys', () => {
+    // Legal: 'ATTACK' is a declared event.
+    setupAgent({
+      schemas: decisionSchemas,
+      decisions: {
+        chooseMove: {
+          model: 'test-model',
+          allowedEvents: ['ATTACK'],
+        },
+      },
+    });
+
+    // Illegal: typo'd event name.
+    setupAgent({
+      schemas: decisionSchemas,
+      decisions: {
+        chooseMove: {
+          model: 'test-model',
+          // @ts-expect-error 'ATTAK' is not a declared event
+          allowedEvents: ['ATTAK'],
+        },
+      },
+    });
+
+    // Illegal: typo'd event name in the function form.
+    setupAgent({
+      schemas: decisionSchemas,
+      decisions: {
+        chooseMove: {
+          model: 'test-model',
+          // @ts-expect-error 'DEFENT' is not a declared event
+          allowedEvents: () => ['DEFENT'],
+        },
+      },
+    });
+
+    // Resolver-form input is typed from the decision's own input schema.
+    setupAgent({
+      schemas: decisionSchemas,
+      decisions: {
+        chooseMove: {
+          schemas: { input: z.object({ prompt: z.string() }) },
+          model: ({ input }) => input.prompt,
+          // @ts-expect-error 'input' is typed from this decision's schema, not any other's
+          prompt: ({ input }) => input.notAField,
+          allowedEvents: ['ATTACK', 'DEFEND'],
+        },
+      },
+    });
+  });
+});

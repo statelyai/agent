@@ -28,7 +28,6 @@ export {
 } from './triage/index.js';
 export {
   chooseAction,
-  twentyQuestionsActors,
   twentyQuestionsMachine,
   twentyQuestionsSchemas,
 } from './twenty-questions/index.js';

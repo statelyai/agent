@@ -2331,10 +2331,64 @@ type RequestActors<TRequestSchemas extends AgentRequestSchemaMap> = {
   >;
 };
 
+// ─── Co-located decisions ───
+//
+// Symmetric with the `requests:` block above. The key typing difference: a
+// standalone `createDecisionLogic(...)` types `allowedEvents` only as
+// `string[]` (it has no machine to check event names against). The
+// co-located form knows `TEventSchemas` (from the same `setupAgent(...)`
+// call), so `allowedEvents` is typed against `keyof TEventSchemas & string`
+// — a typo'd event name is a type error. Deferred from P0 to P1 per
+// docs/p0-design.md §2.3.
+// NOTE: `schemas` is deliberately NOT a field of this generic interface —
+// it is intersected in separately by `AgentDecisionsInput` below, computed
+// directly from `TDecisionSchemas[K]` rather than threaded through a type
+// parameter that's *also* used elsewhere in the same interface. When a
+// single generic parameter is used in two sibling properties of a mapped
+// type's value (e.g. both `schemas` and `prompt` referencing `TInputSchema`),
+// TS's contextual inference for object-literal properties collapses to
+// `unknown` instead of narrowing per-key. Keeping `schemas` external and
+// computed from the same conditional type as the other fields' input avoids
+// that collapse (mirrors how `AgentRequestInput` intersects `schemas:
+// TRequestSchemas[K]` in rather than passing it through `AgentRequestConfig`).
+type AgentDecisionConfig<
+  TEventSchemas extends Record<string, StandardSchemaV1>,
+  TInputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
+  TMetadata extends Record<string, unknown> = Record<string, unknown>,
+> = Omit<
+  DecisionLogicConfig<TInputSchema, keyof TEventSchemas & string, TMetadata>,
+  'schemas'
+>;
+
+type AgentDecisionSchemaMap = Record<string, { input: StandardSchemaV1 } | undefined>;
+
+type AgentDecisionsInput<
+  TEventSchemas extends Record<string, StandardSchemaV1>,
+  TDecisionSchemas extends AgentDecisionSchemaMap,
+> = {
+  [K in keyof TDecisionSchemas]: AgentDecisionConfig<
+    TEventSchemas,
+    TDecisionSchemas[K] extends { input: StandardSchemaV1 }
+      ? TDecisionSchemas[K]['input']
+      : StandardSchemaV1<NonReducibleUnknown>
+  > & {
+    schemas?: TDecisionSchemas[K];
+  };
+};
+
+type DecisionActors<TDecisionSchemas extends AgentDecisionSchemaMap> = {
+  [K in keyof TDecisionSchemas]: DecisionLogic<
+    TDecisionSchemas[K] extends { input: StandardSchemaV1 }
+      ? TDecisionSchemas[K]['input']
+      : StandardSchemaV1<NonReducibleUnknown>
+  >;
+};
+
 type AgentAllActors<
   TActors extends { [K in keyof TActors]: AnyActorLogic },
   TRequestSchemas extends AgentRequestSchemaMap,
-> = TActors & RequestActors<TRequestSchemas>;
+  TDecisionSchemas extends AgentDecisionSchemaMap,
+> = TActors & RequestActors<TRequestSchemas> & DecisionActors<TDecisionSchemas>;
 
 // Emit the `events` schema key ONLY when there are event schemas. When
 // `TEventSchemas` is empty (`{}`), the key is omitted entirely so xstate falls
@@ -2367,6 +2421,7 @@ type AgentSetupXStateConfig<
   TEventSchemas extends Record<string, StandardSchemaV1>,
   TActors extends { [K in keyof TActors]: AnyActorLogic },
   TRequestSchemas extends AgentRequestSchemaMap,
+  TDecisionSchemas extends AgentDecisionSchemaMap,
   TInputSchema extends StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1,
   TMetaSchema extends StandardSchemaV1,
@@ -2377,7 +2432,9 @@ type AgentSetupXStateConfig<
     output: TOutputSchema;
     meta: TMetaSchema;
   } & AgentSetupEventsSchema<TEventSchemas>;
-  actorSources: SetupActors<AgentSetupActors<AgentAllActors<TActors, TRequestSchemas>>>;
+  actorSources: SetupActors<
+    AgentSetupActors<AgentAllActors<TActors, TRequestSchemas, TDecisionSchemas>>
+  >;
   actions?: NonNullable<AnySetupConfig['actions']>;
   guards?: NonNullable<AnySetupConfig['guards']>;
   delays?: NonNullable<AnySetupConfig['delays']>;
@@ -2391,6 +2448,7 @@ type SetupAgentBaseConfig<
   TOutputSchema extends StandardSchemaV1,
   TMetaSchema extends StandardSchemaV1,
   TRequestSchemas extends AgentRequestSchemaMap,
+  TDecisionSchemas extends AgentDecisionSchemaMap,
 > = (
   | {
       schemas: AgentSchemaPack<
@@ -2411,6 +2469,7 @@ type SetupAgentBaseConfig<
 ) & {
   actors?: TActors;
   requests?: AgentRequestInput<TRequestSchemas>;
+  decisions?: AgentDecisionsInput<TEventSchemas, TDecisionSchemas>;
   actions?: NonNullable<AnySetupConfig['actions']>;
   guards?: NonNullable<AnySetupConfig['guards']>;
   delays?: NonNullable<AnySetupConfig['delays']>;
@@ -2421,6 +2480,7 @@ type SetupAgentXStateResult<
   TEventSchemas extends Record<string, StandardSchemaV1>,
   TActors extends { [K in keyof TActors]: AnyActorLogic },
   TRequestSchemas extends AgentRequestSchemaMap,
+  TDecisionSchemas extends AgentDecisionSchemaMap,
   TInputSchema extends StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1,
   TMetaSchema extends StandardSchemaV1,
@@ -2430,6 +2490,7 @@ type SetupAgentXStateResult<
     TEventSchemas,
     TActors,
     TRequestSchemas,
+    TDecisionSchemas,
     TInputSchema,
     TOutputSchema,
     TMetaSchema
@@ -2441,6 +2502,7 @@ type SetupAgentResult<
   TEventSchemas extends Record<string, StandardSchemaV1>,
   TActors extends { [K in keyof TActors]: AnyActorLogic },
   TRequestSchemas extends AgentRequestSchemaMap,
+  TDecisionSchemas extends AgentDecisionSchemaMap,
   TInputSchema extends StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1,
   TMetaSchema extends StandardSchemaV1,
@@ -2450,6 +2512,7 @@ type SetupAgentResult<
     TEventSchemas,
     TActors,
     TRequestSchemas,
+    TDecisionSchemas,
     TInputSchema,
     TOutputSchema,
     TMetaSchema
@@ -2461,6 +2524,7 @@ type SetupAgentResult<
     TEventSchemas,
     TActors,
     TRequestSchemas,
+    TDecisionSchemas,
     TInputSchema,
     TOutputSchema,
     TMetaSchema
@@ -2473,6 +2537,7 @@ type SetupAgentResult<
     TMetaSchema
   >;
   readonly requests: RequestActors<TRequestSchemas>;
+  readonly decisions: DecisionActors<TDecisionSchemas>;
   initial<TMachine extends AnyActorLogic>(
     machine: TMachine,
     input?: unknown
@@ -2522,6 +2587,7 @@ export function setupAgent<
   TEventSchemas extends Record<string, StandardSchemaV1>,
   TActors extends { [K in keyof TActors]: AnyActorLogic },
   TRequestSchemas extends AgentRequestSchemaMap = {},
+  TDecisionSchemas extends AgentDecisionSchemaMap = {},
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
   TOutputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
   TMetaSchema extends StandardSchemaV1 = StandardSchemaV1<MetaObject>,
@@ -2533,13 +2599,15 @@ export function setupAgent<
     TInputSchema,
     TOutputSchema,
     TMetaSchema,
-    TRequestSchemas
+    TRequestSchemas,
+    TDecisionSchemas
   >
 ): SetupAgentResult<
   TContextSchema,
   TEventSchemas,
   TActors,
   TRequestSchemas,
+  TDecisionSchemas,
   TInputSchema,
   TOutputSchema,
   TMetaSchema
@@ -3031,6 +3099,20 @@ function createRequestActors<
   ) as RequestActors<TRequestSchemas>;
 }
 
+function createDecisionActors<
+  TEventSchemas extends Record<string, StandardSchemaV1>,
+  TDecisionSchemas extends AgentDecisionSchemaMap,
+>(
+  decisions: AgentDecisionsInput<TEventSchemas, TDecisionSchemas>
+): DecisionActors<TDecisionSchemas> {
+  return Object.fromEntries(
+    Object.entries(decisions).map(([key, decision]) => [
+      key,
+      createDecisionLogic(decision as DecisionLogicConfig<StandardSchemaV1>),
+    ])
+  ) as DecisionActors<TDecisionSchemas>;
+}
+
 function normalizeAgentSchemas<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
   TEventSchemas extends Record<string, StandardSchemaV1>,
@@ -3075,20 +3157,71 @@ function normalizeAgentRequestInput<
   return requests ?? ({} as AgentRequestInput<TRequestSchemas>);
 }
 
+function normalizeAgentDecisionInput<
+  TEventSchemas extends Record<string, StandardSchemaV1>,
+  TDecisionSchemas extends AgentDecisionSchemaMap,
+>(
+  decisions: AgentDecisionsInput<TEventSchemas, TDecisionSchemas> | undefined
+): AgentDecisionsInput<TEventSchemas, TDecisionSchemas> {
+  return decisions ?? ({} as AgentDecisionsInput<TEventSchemas, TDecisionSchemas>);
+}
+
+/**
+ * Runtime guard: a key appearing in more than one of `actors`/`requests`/
+ * `decisions` is almost certainly a mistake (whichever spread applies last
+ * would silently win) — fail fast with a clear message rather than let one
+ * implementation shadow another.
+ */
+function assertNoActorKeyCollisions(
+  actors: Record<string, unknown> | undefined,
+  requests: Record<string, unknown>,
+  decisions: Record<string, unknown>
+): void {
+  const seenIn = new Map<string, string>();
+  const groups: [string, Record<string, unknown> | undefined][] = [
+    ['actors', actors],
+    ['requests', requests],
+    ['decisions', decisions],
+  ];
+
+  for (const [groupName, group] of groups) {
+    for (const key of Object.keys(group ?? {})) {
+      const existingGroup = seenIn.get(key);
+      if (existingGroup) {
+        throw new Error(
+          `setupAgent: key '${key}' is defined in both '${existingGroup}' and ` +
+            `'${groupName}'. Each actor source key must be unique across ` +
+            `'actors', 'requests', and 'decisions'.`
+        );
+      }
+      seenIn.set(key, groupName);
+    }
+  }
+}
+
 function createAgentActorSources<
   TActors extends { [K in keyof TActors]: AnyActorLogic },
   TRequestSchemas extends AgentRequestSchemaMap,
+  TDecisionSchemas extends AgentDecisionSchemaMap,
 >(
   actors: TActors | undefined,
-  requestActors: RequestActors<TRequestSchemas>
-): SetupActors<AgentSetupActors<AgentAllActors<TActors, TRequestSchemas>>> {
+  requestActors: RequestActors<TRequestSchemas>,
+  decisionActors: DecisionActors<TDecisionSchemas>
+): SetupActors<AgentSetupActors<AgentAllActors<TActors, TRequestSchemas, TDecisionSchemas>>> {
+  assertNoActorKeyCollisions(
+    actors as Record<string, unknown> | undefined,
+    requestActors as Record<string, unknown>,
+    decisionActors as Record<string, unknown>
+  );
+
   return {
     ...builtinTextActors,
     [USER_INPUT_ACTOR]: userInputActor,
     [DECIDE_ACTOR]: createDecideActor(),
     ...actors,
     ...requestActors,
-  } as SetupActors<AgentSetupActors<AgentAllActors<TActors, TRequestSchemas>>>;
+    ...decisionActors,
+  } as SetupActors<AgentSetupActors<AgentAllActors<TActors, TRequestSchemas, TDecisionSchemas>>>;
 }
 
 function createAgentSetupConfig<
@@ -3096,6 +3229,7 @@ function createAgentSetupConfig<
   TEventSchemas extends Record<string, StandardSchemaV1>,
   TActors extends { [K in keyof TActors]: AnyActorLogic },
   TRequestSchemas extends AgentRequestSchemaMap,
+  TDecisionSchemas extends AgentDecisionSchemaMap,
   TInputSchema extends StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1,
   TMetaSchema extends StandardSchemaV1,
@@ -3107,7 +3241,9 @@ function createAgentSetupConfig<
     TOutputSchema,
     TMetaSchema
   >,
-  actorSources: SetupActors<AgentSetupActors<AgentAllActors<TActors, TRequestSchemas>>>,
+  actorSources: SetupActors<
+    AgentSetupActors<AgentAllActors<TActors, TRequestSchemas, TDecisionSchemas>>
+  >,
   config: Pick<
     SetupAgentBaseConfig<
       TContextSchema,
@@ -3116,7 +3252,8 @@ function createAgentSetupConfig<
       TInputSchema,
       TOutputSchema,
       TMetaSchema,
-      TRequestSchemas
+      TRequestSchemas,
+      TDecisionSchemas
     >,
     'actions' | 'guards' | 'delays'
   >
@@ -3125,6 +3262,7 @@ function createAgentSetupConfig<
   TEventSchemas,
   TActors,
   TRequestSchemas,
+  TDecisionSchemas,
   TInputSchema,
   TOutputSchema,
   TMetaSchema
@@ -3149,6 +3287,7 @@ function createSetupAgent<
   TEventSchemas extends Record<string, StandardSchemaV1>,
   TActors extends { [K in keyof TActors]: AnyActorLogic },
   TRequestSchemas extends AgentRequestSchemaMap,
+  TDecisionSchemas extends AgentDecisionSchemaMap,
   TInputSchema extends StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1,
   TMetaSchema extends StandardSchemaV1,
@@ -3160,13 +3299,15 @@ function createSetupAgent<
     TInputSchema,
     TOutputSchema,
     TMetaSchema,
-    TRequestSchemas
+    TRequestSchemas,
+    TDecisionSchemas
   >
 ): SetupAgentResult<
   TContextSchema,
   TEventSchemas,
   TActors,
   TRequestSchemas,
+  TDecisionSchemas,
   TInputSchema,
   TOutputSchema,
   TMetaSchema
@@ -3174,12 +3315,17 @@ function createSetupAgent<
   const schemas = normalizeAgentSchemas(config);
   const requests = normalizeAgentRequestInput<TRequestSchemas>(config.requests);
   const requestActors = createRequestActors(requests);
-  const actorSources = createAgentActorSources(config.actors, requestActors);
+  const decisions = normalizeAgentDecisionInput<TEventSchemas, TDecisionSchemas>(
+    config.decisions
+  );
+  const decisionActors = createDecisionActors(decisions);
+  const actorSources = createAgentActorSources(config.actors, requestActors, decisionActors);
   const setupConfig = createAgentSetupConfig<
       TContextSchema,
       TEventSchemas,
       TActors,
       TRequestSchemas,
+      TDecisionSchemas,
       TInputSchema,
       TOutputSchema,
       TMetaSchema
@@ -3201,6 +3347,7 @@ function createSetupAgent<
     },
     schemas,
     requests: requestActors,
+    decisions: decisionActors,
     initial(machine: AnyActorLogic, input?: unknown) {
       return initialAgentStep(machine, input, machineOptions);
     },
@@ -3246,6 +3393,7 @@ function createSetupAgent<
     TEventSchemas,
     TActors,
     TRequestSchemas,
+    TDecisionSchemas,
     TInputSchema,
     TOutputSchema,
     TMetaSchema
