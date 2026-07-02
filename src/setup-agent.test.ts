@@ -11,13 +11,16 @@ import {
   createTextLogic,
   executeAgentRequest,
   getAvailableEvents,
+  getAgentOutputMode,
   getAgentRequests,
   getEventTools,
   getMachineAgentRequests,
   initialAgentStep,
+  isStructuredOutputSchema,
   messagesSchema,
   parseOutput,
   resolveAgentStep,
+  runAgent,
   setupAgent,
   transitionAgentStep,
   transitionResult,
@@ -1175,6 +1178,26 @@ describe('setupAgent', () => {
     expect(step.snapshot.output).toEqual({
       answer: 'Answered: why agent machines?',
     });
+
+    const runOutput = await runAgent(machine, {
+      input: { prompt: 'why run agents?' },
+      generateText: (request: AgentTextRequest & { tools: AgentTools }) => ({
+        object: {
+          answer: `Ran: ${request.prompt}`,
+        },
+      }),
+    });
+    expect(runOutput).toEqual({ answer: 'Ran: why run agents?' });
+  });
+
+  test('detects structured output schemas separately from validation-only schemas', () => {
+    const objectSchema = z.object({ answer: z.string() });
+    const stringSchema = z.string();
+
+    expect(getAgentOutputMode(objectSchema)).toBe('structured');
+    expect(isStructuredOutputSchema(objectSchema)).toBe(true);
+    expect(getAgentOutputMode(stringSchema)).toBe('text');
+    expect(isStructuredOutputSchema(stringSchema)).toBe(false);
   });
 
   test('agent requests expose only selected state events as tools', async () => {

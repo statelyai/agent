@@ -15,6 +15,7 @@ import {
   type MachineContext,
   type MetaObject,
   type NonReducibleUnknown,
+  type OutputFrom,
   type SetupConfig,
   type SetupReturnFromConfig,
   type SnapshotFrom,
@@ -930,6 +931,63 @@ export interface AgentStep<TSnapshot extends AnyMachineSnapshot = AnyMachineSnap
   actions: readonly { type?: string; params?: unknown }[];
   requests: AgentRequest[];
   done: boolean;
+}
+
+export type AgentOutputMode = 'structured' | 'text';
+
+export function getAgentOutputMode(schema?: StandardSchemaV1): AgentOutputMode {
+  const type = getStandardSchemaJsonType(schema);
+  return type === 'object' ? 'structured' : 'text';
+}
+
+export function isStructuredOutputSchema(schema?: StandardSchemaV1): boolean {
+  return getAgentOutputMode(schema) === 'structured';
+}
+
+function getStandardSchemaJsonType(schema?: StandardSchemaV1) {
+  const jsonSchema = (
+    schema?.['~standard'] as {
+      jsonSchema?: { input?: () => { type?: unknown } | Promise<{ type?: unknown }> };
+    } | undefined
+  )?.jsonSchema?.input?.();
+
+  return jsonSchema && !(jsonSchema instanceof Promise)
+    ? jsonSchema.type
+    : undefined;
+}
+
+export interface RunAgentOptions extends AgentRequestExecutors, Partial<AgentExecutionOptions> {
+  input?: unknown;
+  maxRequests?: number;
+}
+
+export async function runAgent<TMachine extends AnyActorLogic>(
+  machine: TMachine,
+  options: RunAgentOptions
+): Promise<OutputFrom<TMachine>> {
+  const { input, maxRequests = 100, ...executionOptions } = options;
+  let step = initialAgentStep(machine, input, executionOptions);
+  let requestCount = 0;
+
+  while (!step.done) {
+    if (step.requests.length === 0) {
+      throw new Error('Agent run paused with no pending requests.');
+    }
+
+    for (const request of step.requests) {
+      requestCount += 1;
+      if (requestCount > maxRequests) {
+        throw new Error(`Agent run exceeded maxRequests (${maxRequests}).`);
+      }
+      const output = await executeAgentRequest(request, options);
+      step = resolveAgentStep(machine, step, request, output, executionOptions);
+      if (step.done) {
+        break;
+      }
+    }
+  }
+
+  return (step.snapshot as AnyMachineSnapshot).output as OutputFrom<TMachine>;
 }
 
 async function normalizeRequestExecutionResult(result: unknown): Promise<unknown> {

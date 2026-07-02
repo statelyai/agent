@@ -10,7 +10,8 @@ The package owns these first-class authoring surfaces:
 - XState `setup({ schemas, actorSources })`: typed machine authoring with normal XState.
 - `agent.generateText` / `agent.streamText`: built-in model-call actor sources for inline text-only workflows.
 - `setupAgent.fromConfig(...)`: static workflow config lowered to a normal XState machine.
-- `initialAgentStep(...)`, `transitionAgentStep(...)`, `resolveAgentStep(...)`, `executeAgentRequest(...)`: opt-in helpers for host-owned execution.
+- `runAgent(...)`: host-owned execution loop for request-driven machines.
+- `initialAgentStep(...)`, `transitionAgentStep(...)`, `resolveAgentStep(...)`, `executeAgentRequest(...)`: lower-level helpers for custom host loops.
 
 Use `setupAgent(...)` for the fastest text-agent path. Use normal XState `setup(...)` when you want the thinnest possible XState surface. Use normal host code for runtime execution. Stately Agent adds the batteries: built-in text actors, reusable text logic, message helpers, examples, retained schemas, and visualization/export affordances.
 
@@ -29,10 +30,8 @@ For text-only workflows, `setupAgent(...)` gives you typed schemas plus built-in
 ```ts
 import {
   createAgentSchemas,
-  executeAgentRequest,
-  initialAgentStep,
   parseOutput,
-  resolveAgentStep,
+  runAgent,
   setupAgent,
 } from '@statelyai/agent';
 import { z } from 'zod';
@@ -74,17 +73,11 @@ const machine = agent.createMachine({
   },
 });
 
-let step = initialAgentStep(machine, { prompt: 'Why XState?' });
-
-while (!step.done) {
-  for (const request of step.requests) {
-    const result = await executeAgentRequest(request, {
-      generateText: (request) => generateText(request), // any SDK/framework
-      streamText: (request) => streamText(request),
-    });
-    step = resolveAgentStep(machine, step, request, result);
-  }
-}
+const output = await runAgent(machine, {
+  input: { prompt: 'Why XState?' },
+  generateText: (request) => generateText(request), // any SDK/framework
+  streamText: (request) => streamText(request),
+});
 ```
 
 When a request becomes reusable, extract it:
@@ -104,7 +97,7 @@ const answerQuestion = createTextLogic({
 await answerQuestion.execute({ prompt: 'Why XState?' }, { generateText });
 ```
 
-This is normal XState. Use `initialAgentStep(...)`, `transitionAgentStep(...)`, `resolveAgentStep(...)`, and `executeAgentRequest(...)` for the blessed step loop; drop down to pure `initialTransition(...)` / `transitionResult(...)`; or use `createActor(...)`, snapshots, persistence, guards, actions, and host-provided actor sources. Stately Agent adds schema bundles, reusable text actors, message helpers, and request extraction.
+This is normal XState. Use `runAgent(...)` for request-driven local execution; use `initialAgentStep(...)`, `transitionAgentStep(...)`, `resolveAgentStep(...)`, and `executeAgentRequest(...)` for custom host loops; drop down to pure `initialTransition(...)` / `transitionResult(...)`; or use `createActor(...)`, snapshots, persistence, guards, actions, and host-provided actor sources. Stately Agent adds schema bundles, reusable text actors, message helpers, and request extraction.
 
 When a request declares `agentEvents`, `getAgentRequests(...)` returns `send_event_<TYPE>` tools for those events only if they are currently legal from the snapshot. That lets a model choose legal machine events, such as moves in a game, without exposing every transition.
 
@@ -124,8 +117,8 @@ Use `setupAgent.fromConfig(...)` to lower static definitions to a normal XState 
 requests:
   answerQuestion:
     model: openai/gpt-4.1
-    system: "You answer for {{ context.userName }}."
-    prompt: "Question: {{ input.question }}"
+    system: "Answer the user's question."
+    prompt: "{{ input.question }}"
     input:
       type: object
       properties:
@@ -158,7 +151,7 @@ Then:
 const machine = setupAgent.fromConfig(config);
 ```
 
-Values wrapped as whole strings, such as `"{{ context.question }}"`, are typed expressions. Text fields like `system` and `prompt` are templates and may embed `{{ }}` expressions inside larger strings. The current lowering supports simple dot-path expressions over `input`, `context`, and `event`.
+Values wrapped as whole strings, such as `"{{ context.question }}"`, are typed expressions. The current lowering supports simple dot-path expressions over `input`, `context`, and `event`.
 
 Human input is a normal host-provided actor. Static workflows can invoke `agent.userInput`; the host decides whether that means a CLI prompt, UI form, Slack interaction, or webhook pause:
 
@@ -210,6 +203,6 @@ Burr parity is tracked in [`docs/burr-parity.md`](/Users/davidkpiano/Code/agent/
 
 ## Runtime
 
-Runtime is normal XState. Use the agent step helpers when you want the package to collect requests for you, pure `initialTransition(...)` / `transitionResult(...)` when a framework wants to own every transition detail, or `createActor(...)`, `toPromise(...)`, snapshots, persisted snapshots, `machine.provide({ actorSources })`, and your framework transport of choice. Model/tool execution stays under your control.
+Runtime is normal XState. Use `runAgent(...)` when you want the package to collect and resolve requests for you, pure `initialTransition(...)` / `transitionResult(...)` when a framework wants to own every transition detail, or `createActor(...)`, `toPromise(...)`, snapshots, persisted snapshots, `machine.provide({ actorSources })`, and your framework transport of choice. Model/tool execution stays under your control.
 
 **Read the documentation: [stately.ai/docs/agents](https://stately.ai/docs/agents)**

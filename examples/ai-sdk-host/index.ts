@@ -27,6 +27,7 @@ import {
 } from 'xstate';
 import {
   getAgentRequests,
+  isStructuredOutputSchema,
   type AgentTextRequest,
   type AgentTools,
   type StandardSchemaV1,
@@ -61,18 +62,6 @@ function toModelMessages(input: AgentTextRequest): ModelMessage[] | undefined {
   }));
 }
 
-function getJsonSchemaType(schema: StandardSchemaV1 | undefined) {
-  const jsonSchema = (
-    schema?.['~standard'] as {
-      jsonSchema?: { input?: () => { type?: unknown } | Promise<{ type?: unknown }> };
-    } | undefined
-  )?.jsonSchema?.input?.();
-
-  return jsonSchema && !(jsonSchema instanceof Promise)
-    ? jsonSchema.type
-    : undefined;
-}
-
 async function generateWithAiSdk(
   input: AgentTextRequest,
   tools: AgentTextRequest['tools'] = input.tools,
@@ -97,7 +86,7 @@ async function generateWithAiSdk(
       : input.toolChoice,
   };
 
-  if (input.outputSchema && getJsonSchemaType(input.outputSchema) === 'object') {
+  if (isStructuredOutputSchema(input.outputSchema)) {
     const { output } = await aiGenerateText({
       ...common,
       output: Output.object({

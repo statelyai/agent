@@ -34,17 +34,13 @@ The host provides:
 
 <!-- setupAgent built-in agent.generateText execution helpers exported from src/index.ts and src/setup-agent.ts -->
 
-Use `setupAgent(...)` and inline `agent.generateText` for text-only flows. For maximum framework portability, run the machine with XState's pure transition functions and execute returned agent requests yourself.
+Use `setupAgent(...)` and inline `agent.generateText` for text-only flows. Use `runAgent(...)` for the common local loop.
 
 ```ts
 import {
   createAgentSchemas,
-  executeAgentRequest,
-  getAgentRequests,
-  initialAgentStep,
   parseOutput,
-  resolveAgentStep,
-  transitionAgentStep,
+  runAgent,
   setupAgent,
 } from '@statelyai/agent';
 
@@ -80,22 +76,16 @@ const machine = agent.createMachine({
   },
 });
 
-let step = initialAgentStep(machine, input);
-
-while (!step.done) {
-  for (const request of step.requests) {
-    const output = await executeAgentRequest(request, {
-      generateText: (request) => generateText(request),
-      streamText: (request) => streamText(request),
-    });
-    step = resolveAgentStep(machine, step, request, output);
-  }
-}
+const output = await runAgent(machine, {
+  input,
+  generateText: (request) => generateText(request),
+  streamText: (request) => streamText(request),
+});
 ```
 
 Every agent invoke should have a durable `id`; that ID is used to resume the matching `onDone` transition.
 
-`executeAgentRequest(...)` is convenience only. You can still inspect `request.input`, `request.tools`, and `request.events`, then call any SDK yourself.
+`runAgent(...)` is convenience only. You can still inspect `request.input`, `request.tools`, and `request.events`, then call any SDK yourself with `initialAgentStep(...)`, `executeAgentRequest(...)`, and `resolveAgentStep(...)`.
 
 For external events, advance the same step object:
 
@@ -170,28 +160,11 @@ Use `eventTypes` for direct `agent.generateText` / `agent.streamText` invokes. U
 When you want XState to execute named text invokes directly, provide implementations with `logic.withExecutor(...)`. Use direct `agent.generateText` / `agent.streamText` invokes when the request belongs at the state node; use `createTextLogic(...)` when the model-call shape should be named and reused.
 
 ```ts
+import { isStructuredOutputSchema, validateSchemaSync } from '@statelyai/agent';
+
 const executableDraftText = draftText.withExecutor(
   async ({ request, signal }) => {
-    const result = await generateText({
-      model: resolveModel(request.model),
-      system: request.system,
-      prompt: request.prompt ?? '',
-      output: Output.object({ schema: request.outputSchema as never }),
-      abortSignal: signal,
-    });
-    return result.output;
-  }
-);
-```
-
-For app-level adapters, overriding with `withExecutor(...)` is often cleaner:
-
-```ts
-import { generateText, Output } from 'ai';
-
-const actors = {
-  draftText: draftText.withExecutor(async ({ request, signal }) => {
-    if (request.outputSchema) {
+    if (isStructuredOutputSchema(request.outputSchema)) {
       const result = await generateText({
         model: resolveModel(request.model),
         system: request.system,
@@ -208,7 +181,41 @@ const actors = {
       prompt: request.prompt ?? '',
       abortSignal: signal,
     });
-    return result.text as never;
+    return request.outputSchema
+      ? validateSchemaSync(request.outputSchema, result.text)
+      : result.text;
+  }
+);
+```
+
+For app-level adapters, overriding with `withExecutor(...)` is often cleaner:
+
+```ts
+import { generateText, Output } from 'ai';
+import { isStructuredOutputSchema, validateSchemaSync } from '@statelyai/agent';
+
+const actors = {
+  draftText: draftText.withExecutor(async ({ request, signal }) => {
+    if (isStructuredOutputSchema(request.outputSchema)) {
+      const result = await generateText({
+        model: resolveModel(request.model),
+        system: request.system,
+        prompt: request.prompt ?? '',
+        output: Output.object({ schema: request.outputSchema as never }),
+        abortSignal: signal,
+      });
+      return result.output;
+    }
+
+    const result = await generateText({
+      model: resolveModel(request.model),
+      system: request.system,
+      prompt: request.prompt ?? '',
+      abortSignal: signal,
+    });
+    return request.outputSchema
+      ? validateSchemaSync(request.outputSchema, result.text)
+      : result.text;
   }),
 };
 ```
