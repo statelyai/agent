@@ -1,13 +1,7 @@
 import { z } from 'zod';
-import {
-  createActor,
-  createAsyncLogic,
-  setup,
-  toPromise,
-  type AnyActorLogic,
-} from 'xstate';
-import { createAgentSchemas, createTextLogic } from '../../src/index.js';
-import { createAiSdkTextActor } from '../ai-sdk-host/index.js';
+import { setup } from 'xstate';
+import { createAgentSchemas, createTextLogic, runAgent } from '../../src/index.js';
+import { createAiSdkTextExecutor } from '../ai-sdk-host/index.js';
 
 const implementationPlanSchema = z.object({
   files: z.array(z.object({
@@ -24,6 +18,12 @@ const fileChangeSchema = z.object({
   explanation: z.string(),
   code: z.string(),
 });
+const contextSchema = z.object({
+  featureRequest: z.string(),
+  plan: implementationPlanSchema.nullable(),
+  changes: z.array(fileChangeSchema),
+});
+type OrchestratorWorkerContext = z.infer<typeof contextSchema>;
 
 export const planImplementation = createTextLogic({
   schemas: {
@@ -35,13 +35,21 @@ export const planImplementation = createTextLogic({
   prompt: ({ input }) => input.featureRequest,
 });
 
+function createPlannedFileChanges(
+  featureRequest: string,
+  plan: z.infer<typeof implementationPlanSchema>,
+): Array<z.infer<typeof fileChangeSchema>> {
+  return plan.files.map((file) => ({
+    filePath: file.filePath,
+    changeType: file.changeType,
+    explanation: `Implement ${file.purpose} for ${featureRequest}`,
+    code: `// ${file.changeType} ${file.filePath}`,
+  }));
+}
+
 const agent = setup({
   schemas: createAgentSchemas({
-    context: z.object({
-      featureRequest: z.string(),
-      plan: implementationPlanSchema.nullable(),
-      changes: z.array(fileChangeSchema),
-    }),
+    context: contextSchema,
     input: z.object({ featureRequest: z.string() }),
     output: z.object({
       plan: implementationPlanSchema,
@@ -50,21 +58,6 @@ const agent = setup({
   }),
   actorSources: {
     planImplementation,
-    implementPlannedFiles: createAsyncLogic<
-      z.infer<typeof fileChangeSchema>[],
-      {
-        featureRequest: string;
-        plan: z.infer<typeof implementationPlanSchema>;
-      }
-    >({
-      run: async ({ input }) =>
-        Promise.all(input.plan.files.map(async (file) => ({
-          filePath: file.filePath,
-          changeType: file.changeType,
-          explanation: `Implement ${file.purpose} for ${input.featureRequest}`,
-          code: `// ${file.changeType} ${file.filePath}`,
-        }))),
-    }),
   },
 });
 
@@ -92,33 +85,26 @@ export const aiSdkOrchestratorWorkerMachine = agent.createMachine({
       },
     },
     implementing: {
-      invoke: {
-        src: 'implementPlannedFiles',
-        input: ({ context }) => ({
-          featureRequest: context.featureRequest,
-          plan: context.plan ?? { files: [], estimatedComplexity: 'low' },
-        }),
-        onDone: ({ output }) => ({
-          target: 'done',
-          context: { changes: output },
-        }),
-      },
+      type: 'choice',
+      choice: ({ context }: { context: OrchestratorWorkerContext }) => ({
+        target: 'done',
+        context: {
+          changes: createPlannedFileChanges(
+            context.featureRequest,
+            context.plan ?? { files: [], estimatedComplexity: 'low' },
+          ),
+        },
+      }),
     },
     done: { type: 'final' },
   },
 });
 
 export async function runAiSdkOrchestratorWorkerExample() {
-  const actor = createActor(
-    aiSdkOrchestratorWorkerMachine.provide({
-      actorSources: {
-        planImplementation: createAiSdkTextActor(planImplementation),
-      },
-    }) as unknown as AnyActorLogic,
-    { input: { featureRequest: 'Add settings page' } },
-  );
-  actor.start();
-  return await toPromise(actor);
+  return await runAgent(aiSdkOrchestratorWorkerMachine, {
+    input: { featureRequest: 'Add settings page' },
+    generateText: createAiSdkTextExecutor(),
+  });
 }
 
 if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {

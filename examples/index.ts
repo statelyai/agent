@@ -36,7 +36,6 @@ export {
   runCrewAIContentCreatorExample,
 } from './crewai-content-creator/index.js';
 export {
-  createAiSdkSubAgentWorkflow,
   createAiSdkSubAgents,
   runAiSdkSubAgentsDemo,
   runAiSdkSubAgentsDeterministicExample,

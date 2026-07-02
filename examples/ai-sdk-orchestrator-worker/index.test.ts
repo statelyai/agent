@@ -1,11 +1,8 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { z } from 'zod';
-import { createActor, toPromise, type AnyActorLogic } from 'xstate';
-import {
-  aiSdkOrchestratorWorkerMachine,
-  planImplementation,
-} from './index.js';
+import { runAgent } from '../../src/index.js';
+import { aiSdkOrchestratorWorkerMachine } from './index.js';
 
 const fileChangeSchema = z.object({
   filePath: z.string(),
@@ -15,13 +12,12 @@ const fileChangeSchema = z.object({
 });
 
 test('AI SDK orchestrator-worker maps to an explicit machine', async () => {
-  const actor = createActor(
-    aiSdkOrchestratorWorkerMachine.provide({
-      actorSources: {
-        planImplementation: planImplementation.withExecutor(async () => ({
-          files: [
-            {
-              purpose: 'Add UI',
+  const output = await runAgent(aiSdkOrchestratorWorkerMachine, {
+    input: { featureRequest: 'Add settings page' },
+    generateText: async () => ({
+      files: [
+        {
+          purpose: 'Add UI',
               filePath: 'app/page.tsx',
               changeType: 'modify',
             },
@@ -30,21 +26,14 @@ test('AI SDK orchestrator-worker maps to an explicit machine', async () => {
               filePath: 'app/page.test.tsx',
               changeType: 'create',
             },
-          ],
-          estimatedComplexity: 'medium',
-        })),
-      },
-    }) as unknown as AnyActorLogic,
-    { input: { featureRequest: 'Add settings page' } },
-  );
-  actor.start();
-  await toPromise(actor);
+      ],
+      estimatedComplexity: 'medium',
+    }),
+  });
   assert.deepEqual(
-    actor
-      .getSnapshot()
-      .output.changes.map((change: z.infer<typeof fileChangeSchema>) =>
-        change.filePath,
-      ),
+    output.changes.map((change: z.infer<typeof fileChangeSchema>) =>
+      change.filePath,
+    ),
     ['app/page.tsx', 'app/page.test.tsx'],
   );
 });

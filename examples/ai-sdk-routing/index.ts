@@ -1,7 +1,7 @@
 import { z } from 'zod';
-import { createActor, setup, toPromise, type AnyActorLogic } from 'xstate';
-import { createAgentSchemas, createTextLogic } from '../../src/index.js';
-import { createAiSdkTextActor } from '../ai-sdk-host/index.js';
+import { setup } from 'xstate';
+import { createAgentSchemas, createTextLogic, runAgent } from '../../src/index.js';
+import { createAiSdkTextExecutor } from '../ai-sdk-host/index.js';
 
 const classificationSchema = z.object({
   reasoning: z.string(),
@@ -103,17 +103,10 @@ export const aiSdkRoutingMachine = agent.createMachine({
 });
 
 export async function runAiSdkRoutingExample() {
-  const actor = createActor(
-    aiSdkRoutingMachine.provide({
-      actorSources: {
-        classifyCustomerQuery: createAiSdkTextActor(classifyCustomerQuery),
-        answerCustomerQuery: createAiSdkTextActor(answerCustomerQuery),
-      },
-    }) as unknown as AnyActorLogic,
-    { input: { query: 'The app crashes on launch.' } },
-  );
-  actor.start();
-  return await toPromise(actor);
+  return await runAgent(aiSdkRoutingMachine, {
+    input: { query: 'The app crashes on launch.' },
+    generateText: createAiSdkTextExecutor(),
+  });
 }
 
 if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {

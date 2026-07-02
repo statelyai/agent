@@ -20,16 +20,11 @@ import {
 } from 'ai';
 import { z } from 'zod';
 import {
-  createActor,
-  toPromise,
-  type AnyActorLogic,
-  type AnyStateMachine,
-} from 'xstate';
-import {
   setupAgent,
   type AgentRequestLogic,
   type AgentTool,
   type AgentToolExecute,
+  runAgent,
 } from '../../src/index.js';
 import { toAiSdkTools } from '../../src/ai-sdk/index.js';
 
@@ -39,20 +34,6 @@ const taskInputSchema = z.object({ task: z.string() });
 type SubAgentName = 'researcher' | 'writer';
 type SubAgents = Record<SubAgentName, Agent>;
 type SuperviseLogic = AgentRequestLogic<typeof taskInputSchema, typeof answerSchema>;
-type SubAgentWorkflow = {
-  agent: {
-    requests: {
-      supervise: SuperviseLogic;
-    };
-  };
-  machine: AnyStateMachine & {
-    provide(config: {
-      actorSources: {
-        supervise: SuperviseLogic;
-      };
-    }): AnyActorLogic;
-  };
-};
 
 export function createAiSdkSubAgents(model: LanguageModel): SubAgents {
   return {
@@ -86,9 +67,9 @@ function executeTool(tool: AgentTool | undefined, input: unknown) {
   return typeof tool === 'function' ? tool(input) : tool?.execute?.(input);
 }
 
-export function createAiSdkSubAgentWorkflow(
+function createAiSdkSubAgentWorkflow(
   subAgents: SubAgents,
-): SubAgentWorkflow {
+) {
   const agent = setupAgent({
     context: z.object({
       task: z.string(),
@@ -148,7 +129,7 @@ export function createAiSdkSubAgentWorkflow(
 
   return {
     agent,
-    machine: machine as unknown as SubAgentWorkflow['machine'],
+    machine,
   };
 }
 
@@ -158,31 +139,20 @@ export async function runAiSdkSubAgentsDemo(task: string) {
     createAiSdkSubAgents(model),
   );
 
-  const actor = createActor(
-    machine.provide({
-      actorSources: {
-        supervise: agent.requests.supervise.withExecutor(
-          async ({ request, signal }) => {
-            const { output } = await generateText({
-              model,
-              system: request.system,
-              prompt: request.prompt ?? '',
-              tools: toAiSdkTools(request.tools ?? {}),
-              output: Output.object({ schema: answerSchema }),
-              stopWhen: stepCountIs(8),
-              abortSignal: signal,
-            });
-            return output;
-          },
-        ),
-      },
-    }) as unknown as AnyActorLogic,
-    { input: { task } },
-  );
-
-  actor.start();
-  await toPromise(actor);
-  return actor.getSnapshot().output;
+  return await runAgent(machine, {
+    input: { task },
+    generateText: async (request) => {
+      const { output } = await generateText({
+        model,
+        system: request.system,
+        prompt: request.prompt ?? '',
+        tools: toAiSdkTools(request.tools ?? {}),
+        output: Output.object({ schema: answerSchema }),
+        stopWhen: stepCountIs(8),
+      });
+      return output;
+    },
+  });
 }
 
 export async function runAiSdkSubAgentsDeterministicExample() {
@@ -209,32 +179,26 @@ export async function runAiSdkSubAgentsDeterministicExample() {
       stream: async () => ({}) as StreamTextResult<{}, never>,
     },
   };
-  const { agent, machine } = createAiSdkSubAgentWorkflow(fakeSubAgents);
+  const { machine } = createAiSdkSubAgentWorkflow(fakeSubAgents);
 
-  const actor = createActor(
-    machine.provide({
-      actorSources: {
-        supervise: agent.requests.supervise.withExecutor(async ({ request }) => {
-          const notes = await executeTool(request.tools?.askResearcher, {
-            prompt: request.prompt,
-          });
-          const answer = await executeTool(request.tools?.askWriter, {
-            prompt: String(notes),
-          });
-          return { answer: String(answer) };
-        }),
-      },
-    }) as unknown as AnyActorLogic,
-    { input: { task: 'compose agent note' } },
-  );
-  actor.start();
-  await toPromise(actor);
+  const output = await runAgent(machine, {
+    input: { task: 'compose agent note' },
+    generateText: async (request) => {
+      const notes = await executeTool(request.tools?.askResearcher, {
+        prompt: request.prompt,
+      });
+      const answer = await executeTool(request.tools?.askWriter, {
+        prompt: String(notes),
+      });
+      return { answer: String(answer) };
+    },
+  });
 
   assert.deepEqual(calls, [
     'researcher:compose agent note',
     'writer:notes:compose agent note',
   ]);
-  assert.deepEqual(actor.getSnapshot().output, {
+  assert.deepEqual(output, {
     answer: 'final:notes:compose agent note',
   });
 }

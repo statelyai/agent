@@ -1,19 +1,19 @@
 import { z } from 'zod';
-import {
-  createActor,
-  createAsyncLogic,
-  setup,
-  toPromise,
-  type AnyActorLogic,
-} from 'xstate';
-import { createAgentSchemas, createTextLogic } from '../../src/index.js';
-import { createAiSdkTextActor } from '../ai-sdk-host/index.js';
+import { setup } from 'xstate';
+import { createAgentSchemas, createTextLogic, runAgent } from '../../src/index.js';
+import { createAiSdkTextExecutor } from '../ai-sdk-host/index.js';
 
 const reviewSchema = z.object({
   type: z.enum(['security', 'performance', 'maintainability']),
   findings: z.array(z.string()),
   severity: z.enum(['low', 'medium', 'high']),
 });
+const contextSchema = z.object({
+  code: z.string(),
+  reviews: z.array(reviewSchema),
+  summary: z.string().nullable(),
+});
+type ParallelReviewContext = z.infer<typeof contextSchema>;
 
 export const summarizeCodeReviews = createTextLogic({
   schemas: {
@@ -25,13 +25,29 @@ export const summarizeCodeReviews = createTextLogic({
   prompt: ({ input }) => JSON.stringify(input.reviews, null, 2),
 });
 
+function createCodeReviews(code: string): Array<z.infer<typeof reviewSchema>> {
+  return [
+    {
+      type: 'security',
+      findings: [`security:${code.length}`],
+      severity: 'low',
+    },
+    {
+      type: 'performance',
+      findings: [`performance:${code.length}`],
+      severity: 'medium',
+    },
+    {
+      type: 'maintainability',
+      findings: [`maintainability:${code.length}`],
+      severity: 'low',
+    },
+  ];
+}
+
 const agent = setup({
   schemas: createAgentSchemas({
-    context: z.object({
-      code: z.string(),
-      reviews: z.array(reviewSchema),
-      summary: z.string().nullable(),
-    }),
+    context: contextSchema,
     input: z.object({ code: z.string() }),
     output: z.object({
       reviews: z.array(reviewSchema),
@@ -39,29 +55,6 @@ const agent = setup({
     }),
   }),
   actorSources: {
-    runParallelReviews: createAsyncLogic<
-      z.infer<typeof reviewSchema>[],
-      { code: string }
-    >({
-      run: async ({ input }) =>
-        Promise.all([
-          {
-            type: 'security' as const,
-            findings: [`security:${input.code.length}`],
-            severity: 'low' as const,
-          },
-          {
-            type: 'performance' as const,
-            findings: [`performance:${input.code.length}`],
-            severity: 'medium' as const,
-          },
-          {
-            type: 'maintainability' as const,
-            findings: [`maintainability:${input.code.length}`],
-            severity: 'low' as const,
-          },
-        ]),
-    }),
     summarizeCodeReviews,
   },
 });
@@ -80,14 +73,11 @@ export const aiSdkParallelReviewMachine = agent.createMachine({
   initial: 'reviewing',
   states: {
     reviewing: {
-      invoke: {
-        src: 'runParallelReviews',
-        input: ({ context }) => ({ code: context.code }),
-        onDone: ({ output }) => ({
-          target: 'summarizing',
-          context: { reviews: output },
-        }),
-      },
+      type: 'choice',
+      choice: ({ context }: { context: ParallelReviewContext }) => ({
+        target: 'summarizing',
+        context: { reviews: createCodeReviews(context.code) },
+      }),
     },
     summarizing: {
       invoke: {
@@ -104,16 +94,10 @@ export const aiSdkParallelReviewMachine = agent.createMachine({
 });
 
 export async function runAiSdkParallelReviewExample() {
-  const actor = createActor(
-    aiSdkParallelReviewMachine.provide({
-      actorSources: {
-        summarizeCodeReviews: createAiSdkTextActor(summarizeCodeReviews),
-      },
-    }) as unknown as AnyActorLogic,
-    { input: { code: 'const x = eval(input);' } },
-  );
-  actor.start();
-  return await toPromise(actor);
+  return await runAgent(aiSdkParallelReviewMachine, {
+    input: { code: 'const x = eval(input);' },
+    generateText: createAiSdkTextExecutor(),
+  });
 }
 
 if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {

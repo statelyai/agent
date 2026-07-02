@@ -9,15 +9,18 @@
 import { generateText, Output, stepCountIs, type LanguageModel } from 'ai';
 import { openai } from '@ai-sdk/openai';
 import { z } from 'zod';
-import { initialTransition, transition, type AnyStateMachine } from 'xstate';
 import { toAiSdkTools } from '../../src/ai-sdk/index.js';
 import {
-  getAgentRequests,
+  initialAgentStep,
   type AgentRequest,
   type AgentTextRequest,
-  transitionResult,
+  type EventUnion,
+  resolveAgentStep,
+  transitionAgentStep,
 } from '../../src/index.js';
 import { gameActors, gameMachine, gameSchemas, turnSummarySchema } from '../game-agent/index.js';
+
+type GameEvent = EventUnion<typeof gameSchemas.events>;
 
 function resolveModel(modelRef: string): LanguageModel {
   return openai(modelRef.replace(/^openai\//, ''));
@@ -70,15 +73,31 @@ async function runGenerateRequest(request: AgentRequest) {
   return { kind: 'output' as const, output: text };
 }
 
-export async function runAiSdkGameTurn(input = { playerHp: 20, enemyHp: 15 }) {
-  let [snapshot, actions]: [any, any[]] = initialTransition(gameMachine, input);
+function parseGameEvent(value: unknown): GameEvent {
+  if (!value || typeof value !== 'object' || !('type' in value)) {
+    throw new Error('Model returned an invalid game event.');
+  }
 
-  while (snapshot.status !== 'done') {
-    const [request] = getAgentRequests(actions, {
-      snapshot,
-      schemas: gameSchemas,
-      actors: gameActors,
-    });
+  const type = String(value.type);
+  const schema = gameSchemas.events[type as keyof typeof gameSchemas.events];
+  if (!schema) {
+    throw new Error(`Model returned unsupported game event: ${type}`);
+  }
+
+  return {
+    type,
+    ...schema.parse(value),
+  } as GameEvent;
+}
+
+export async function runAiSdkGameTurn(input = { playerHp: 20, enemyHp: 15 }) {
+  let step = initialAgentStep(gameMachine, input, {
+    schemas: gameSchemas,
+    actors: gameActors,
+  });
+
+  while (!step.done) {
+    const [request] = step.requests;
     if (!request) {
       throw new Error('Machine is waiting without an agent request.');
     }
@@ -86,18 +105,25 @@ export async function runAiSdkGameTurn(input = { playerHp: 20, enemyHp: 15 }) {
     const result = await runGenerateRequest(request);
 
     if (result.kind === 'event') {
-      [snapshot, actions] = transition(gameMachine, snapshot, result.event as never);
+      step = transitionAgentStep(gameMachine, step, parseGameEvent(result.event), {
+        schemas: gameSchemas,
+        actors: gameActors,
+      });
     } else {
-      [snapshot, actions] = transitionResult(
-        gameMachine as unknown as AnyStateMachine,
-        snapshot,
+      step = resolveAgentStep(
+        gameMachine,
+        step,
         request,
-        result.output
+        result.output,
+        {
+          schemas: gameSchemas,
+          actors: gameActors,
+        }
       );
     }
   }
 
-  return snapshot.output;
+  return step.snapshot.output;
 }
 
 async function main() {

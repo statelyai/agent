@@ -248,10 +248,17 @@ function jsonSchemaToStandardSchema<T = unknown>(
         validateJsonSchemaValue(resolvedSchema, value, name, issues);
         return issues.length > 0 ? { issues } : { value: value as T };
       },
+      jsonSchema: {
+        input: () => resolvedSchema,
+      },
     },
   };
 }
 
+// Only used by setupAgent.fromConfig(...) for static JSON/YAML workflow
+// configs. JS callers should pass a real Standard Schema validator such as Zod
+// to setupAgent(...); this intentionally covers the small JSON Schema subset we
+// need for config boundary validation and provider structured-output metadata.
 function validateJsonSchemaValue(
   schema: JsonSchemaObject,
   value: unknown,
@@ -325,8 +332,8 @@ function validateJsonSchemaValue(
   }
 }
 
-const wholeExpressionPattern = /^\{\{\s*([\s\S]*?)\s*\}\}$/;
-const templateExpressionPattern = /\{\{\s*([\s\S]*?)\s*\}\}/g;
+const workflowConfigWholeExpressionPattern = /^\{\{\s*([\s\S]*?)\s*\}\}$/;
+const workflowConfigTemplateExpressionPattern = /\{\{\s*([\s\S]*?)\s*\}\}/g;
 
 type ExpressionScope = {
   context?: unknown;
@@ -335,7 +342,9 @@ type ExpressionScope = {
   output?: unknown;
 };
 
-function evaluatePathExpression(expression: string, scope: ExpressionScope): unknown {
+// Static workflow configs cannot carry functions, so this tiny expression
+// layer lowers JSON/YAML values into normal JS values before machine creation.
+function evaluateWorkflowConfigPath(expression: string, scope: ExpressionScope): unknown {
   const parts = expression.trim().split('.').filter(Boolean);
   let current: unknown = scope;
 
@@ -349,28 +358,28 @@ function evaluatePathExpression(expression: string, scope: ExpressionScope): unk
   return current;
 }
 
-function evaluateExpressionValue(value: unknown, scope: ExpressionScope): unknown {
+function evaluateWorkflowConfigValue(value: unknown, scope: ExpressionScope): unknown {
   if (typeof value === 'string') {
-    const wholeMatch = value.match(wholeExpressionPattern);
+    const wholeMatch = value.match(workflowConfigWholeExpressionPattern);
     if (wholeMatch?.[1]) {
-      return evaluatePathExpression(wholeMatch[1], scope);
+      return evaluateWorkflowConfigPath(wholeMatch[1], scope);
     }
 
-    return value.replace(templateExpressionPattern, (_match, expression: string) => {
-      const resolved = evaluatePathExpression(expression, scope);
+    return value.replace(workflowConfigTemplateExpressionPattern, (_match, expression: string) => {
+      const resolved = evaluateWorkflowConfigPath(expression, scope);
       return resolved === undefined || resolved === null ? '' : String(resolved);
     });
   }
 
   if (Array.isArray(value)) {
-    return value.map((item) => evaluateExpressionValue(item, scope));
+    return value.map((item) => evaluateWorkflowConfigValue(item, scope));
   }
 
   if (value && typeof value === 'object') {
     return Object.fromEntries(
       Object.entries(value).map(([key, item]) => [
         key,
-        evaluateExpressionValue(item, scope),
+        evaluateWorkflowConfigValue(item, scope),
       ])
     );
   }
@@ -805,7 +814,7 @@ export function getEventTools(
     getAvailableEvents(snapshot, options).map((event) => [
       event.toolName,
       {
-        description: `Transition with event '${event.type}'.`,
+        description: `Send the '${event.type}' event. Available from the current state.`,
         ...(event.inputSchema ? { inputSchema: event.inputSchema } : {}),
         execute: async (input: unknown = {}) => ({
           ...(input && typeof input === 'object' ? input : {}),
@@ -863,7 +872,7 @@ export function getAgentRequests(
       events.map((event) => [
         event.toolName,
         {
-          description: `Transition with event '${event.type}'.`,
+          description: `Send the '${event.type}' event. Available from the current state.`,
           ...(event.inputSchema ? { inputSchema: event.inputSchema } : {}),
           execute: async (toolInput: unknown = {}) => ({
             ...(toolInput && typeof toolInput === 'object' ? toolInput : {}),
@@ -974,12 +983,20 @@ export async function runAgent<TMachine extends AnyActorLogic>(
       throw new Error('Agent run paused with no pending requests.');
     }
 
-    for (const request of step.requests) {
-      requestCount += 1;
-      if (requestCount > maxRequests) {
-        throw new Error(`Agent run exceeded maxRequests (${maxRequests}).`);
-      }
-      const output = await executeAgentRequest(request, options);
+    const requests = step.requests;
+    requestCount += requests.length;
+    if (requestCount > maxRequests) {
+      throw new Error(`Agent run exceeded maxRequests (${maxRequests}).`);
+    }
+
+    const results = await Promise.all(
+      requests.map(async (request) => ({
+        request,
+        output: await executeAgentRequest(request, options),
+      }))
+    );
+
+    for (const { request, output } of results) {
       step = resolveAgentStep(machine, step, request, output, executionOptions);
       if (step.done) {
         break;
@@ -1564,6 +1581,7 @@ export function setupAgent<
   return createSetupAgent(config);
 }
 
+/** Serializable JSON/YAML workflow config. JS authoring should use setupAgent(...). */
 export interface AgentWorkflowConfig {
   key?: string;
   id?: string;
@@ -1698,19 +1716,19 @@ function createRequestsFromWorkflowConfig(
           output: jsonSchemaToStandardSchema(request.output, `${key}.output`),
         },
         model: ({ input }) =>
-          String(evaluateExpressionValue(request.model, { input }) ?? ''),
+          String(evaluateWorkflowConfigValue(request.model, { input }) ?? ''),
         system: request.system === undefined
           ? undefined
           : ({ input }) =>
-              evaluateExpressionValue(request.system, { input }) as string | undefined,
+              evaluateWorkflowConfigValue(request.system, { input }) as string | undefined,
         prompt: request.prompt === undefined
           ? undefined
           : ({ input }) =>
-              evaluateExpressionValue(request.prompt, { input }) as string | undefined,
+              evaluateWorkflowConfigValue(request.prompt, { input }) as string | undefined,
         messages: request.messages === undefined
           ? undefined
           : ({ input }) =>
-              evaluateExpressionValue(request.messages, { input }) as
+              evaluateWorkflowConfigValue(request.messages, { input }) as
                 | AgentMessage[]
                 | undefined,
         tools: request.tools,
@@ -1718,7 +1736,7 @@ function createRequestsFromWorkflowConfig(
         agentEvents: request.agentEvents === undefined
           ? undefined
           : ({ input }) => {
-              const events = evaluateExpressionValue(request.agentEvents, { input });
+              const events = evaluateWorkflowConfigValue(request.agentEvents, { input });
               return Array.isArray(events)
                 ? events.filter((event): event is string => typeof event === 'string')
                 : [];
@@ -1726,34 +1744,34 @@ function createRequestsFromWorkflowConfig(
         temperature: request.temperature === undefined
           ? undefined
           : ({ input }) =>
-              evaluateExpressionValue(request.temperature, { input }) as
+              evaluateWorkflowConfigValue(request.temperature, { input }) as
                 | number
                 | undefined,
         maxTokens: request.maxTokens === undefined
           ? undefined
           : ({ input }) =>
-              evaluateExpressionValue(request.maxTokens, { input }) as number | undefined,
+              evaluateWorkflowConfigValue(request.maxTokens, { input }) as number | undefined,
         topP: request.topP === undefined
           ? undefined
           : ({ input }) =>
-              evaluateExpressionValue(request.topP, { input }) as number | undefined,
+              evaluateWorkflowConfigValue(request.topP, { input }) as number | undefined,
         topK: request.topK === undefined
           ? undefined
           : ({ input }) =>
-              evaluateExpressionValue(request.topK, { input }) as number | undefined,
+              evaluateWorkflowConfigValue(request.topK, { input }) as number | undefined,
         seed: request.seed === undefined
           ? undefined
           : ({ input }) =>
-              evaluateExpressionValue(request.seed, { input }) as number | undefined,
+              evaluateWorkflowConfigValue(request.seed, { input }) as number | undefined,
         stopSequences: request.stopSequences === undefined
           ? undefined
           : ({ input }) =>
-              evaluateExpressionValue(request.stopSequences, { input }) as
+              evaluateWorkflowConfigValue(request.stopSequences, { input }) as
                 | string[]
                 | undefined,
         metadata: request.metadata === undefined
           ? undefined
-          : ({ input }) => evaluateExpressionValue(request.metadata, { input }),
+          : ({ input }) => evaluateWorkflowConfigValue(request.metadata, { input }),
       },
     ])
   ) as AgentRequestInput<
@@ -1774,7 +1792,7 @@ function createAssignAction(assignConfig: Record<string, unknown>) {
     context: Object.fromEntries(
       Object.entries(assignConfig).map(([key, value]) => [
         key,
-        evaluateExpressionValue(value, { context, event }),
+        evaluateWorkflowConfigValue(value, { context, event }),
       ])
     ),
   });
@@ -1794,7 +1812,7 @@ function lowerWorkflowActions(
       : {
           type: action.type,
           params: ({ context, event }: { context: unknown; event: unknown }) =>
-            evaluateExpressionValue(action.params, { context, event }),
+            evaluateWorkflowConfigValue(action.params, { context, event }),
         }
   );
 }
@@ -1808,7 +1826,7 @@ function workflowTransitionMatches(
   }
 
   if (typeof transitionConfig.guard === 'string') {
-    return Boolean(evaluateExpressionValue(transitionConfig.guard, scope));
+    return Boolean(evaluateWorkflowConfigValue(transitionConfig.guard, scope));
   }
 
   return typeof transitionConfig.guard === 'function'
@@ -1829,7 +1847,7 @@ function lowerWorkflowTransitionResult(
           context: Object.fromEntries(
             Object.entries(transitionConfig.assign).map(([key, value]) => [
               key,
-              evaluateExpressionValue(value, scope),
+              evaluateWorkflowConfigValue(value, scope),
             ])
           ),
         }
@@ -1887,7 +1905,7 @@ function lowerWorkflowInvoke(
     ...(invokeConfig.input !== undefined
       ? {
           input: ({ context, event }: { context: unknown; event: unknown }) =>
-            evaluateExpressionValue(invokeConfig.input, { context, event }),
+            evaluateWorkflowConfigValue(invokeConfig.input, { context, event }),
         }
       : {}),
     ...(invokeConfig.onDone !== undefined
@@ -1960,7 +1978,7 @@ function lowerWorkflowState(stateConfig: AgentWorkflowStateConfig): Record<strin
     ...(stateConfig.output !== undefined
       ? {
           output: ({ context, event }: { context: unknown; event: unknown }) =>
-            evaluateExpressionValue(stateConfig.output, { context, event }),
+            evaluateWorkflowConfigValue(stateConfig.output, { context, event }),
         }
       : {}),
     ...(stateConfig.meta !== undefined ? { meta: stateConfig.meta } : {}),
@@ -1988,7 +2006,7 @@ function setupAgentFromConfig(config: AgentWorkflowConfig): AnyStateMachine {
           context: ({ input }: { input: unknown }) =>
             validateSchemaSync(
               schemas.context,
-              evaluateExpressionValue(config.context, { input })
+              evaluateWorkflowConfigValue(config.context, { input })
             ),
         }
       : {}),

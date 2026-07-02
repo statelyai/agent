@@ -1,7 +1,7 @@
 import { z } from 'zod';
-import { createActor, setup, toPromise, type AnyActorLogic } from 'xstate';
-import { createAgentSchemas, createTextLogic } from '../../src/index.js';
-import { createAiSdkTextActor } from '../ai-sdk-host/index.js';
+import { setup } from 'xstate';
+import { createAgentSchemas, createTextLogic, runAgent } from '../../src/index.js';
+import { createAiSdkTextExecutor } from '../ai-sdk-host/index.js';
 
 const translationEvaluationSchema = z.object({
   qualityScore: z.number().min(1).max(10),
@@ -168,24 +168,14 @@ export const aiSdkEvaluatorOptimizerMachine = agent.createMachine({
 });
 
 export async function runAiSdkEvaluatorOptimizerExample() {
-  const actor = createActor(
-    aiSdkEvaluatorOptimizerMachine.provide({
-      actorSources: {
-        translateText: createAiSdkTextActor(translateText),
-        evaluateTranslation: createAiSdkTextActor(evaluateTranslation),
-        improveTranslation: createAiSdkTextActor(improveTranslation),
-      },
-    }) as unknown as AnyActorLogic,
-    {
-      input: {
-        text: 'Hello friend',
-        targetLanguage: 'Spanish',
-        maxIterations: 3,
-      },
+  return await runAgent(aiSdkEvaluatorOptimizerMachine, {
+    input: {
+      text: 'Hello friend',
+      targetLanguage: 'Spanish',
+      maxIterations: 3,
     },
-  );
-  actor.start();
-  return await toPromise(actor);
+    generateText: createAiSdkTextExecutor(),
+  });
 }
 
 if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {

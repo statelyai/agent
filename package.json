@@ -27,26 +27,6 @@
         "default": "./dist/ai-sdk.cjs"
       }
     },
-    "./graph": {
-      "import": {
-        "types": "./dist/graph.d.mts",
-        "default": "./dist/graph.mjs"
-      },
-      "require": {
-        "types": "./dist/graph.d.cts",
-        "default": "./dist/graph.cjs"
-      }
-    },
-    "./xstate": {
-      "import": {
-        "types": "./dist/xstate.d.mts",
-        "default": "./dist/xstate.mjs"
-      },
-      "require": {
-        "types": "./dist/xstate.d.cts",
-        "default": "./dist/xstate.cjs"
-      }
-    },
     "./agent-workflow.json": "./schemas/agent-workflow.json"
   },
   "files": [
@@ -54,7 +34,6 @@
     "schemas"
   ],
   "scripts": {
-    "agent:convert": "tsx scripts/agent-convert.ts",
     "build": "tsdown",
     "lint": "pnpm run lint:src && pnpm run lint:examples",
     "lint:src": "tsc --noEmit",
@@ -82,21 +61,27 @@
     "@changesets/changelog-github": "^0.5.0",
     "@changesets/cli": "^2.27.9",
     "@types/node": "^20.16.10",
+    "ai": "^6.0.67",
     "agents": "0.11.5",
     "dotenv": "^16.4.5",
     "tsdown": "^0.21.7",
     "tsx": "^4.21.0",
+    "typescript": "^5.6.2",
     "vitest": "^2.1.2",
+    "xstate": "6.0.0-alpha.16",
     "zod": "^4.3.6"
   },
   "publishConfig": {
     "access": "public"
   },
-  "dependencies": {
-    "@statelyai/graph": "^0.11.0",
+  "peerDependencies": {
     "ai": "^6.0.67",
-    "typescript": "^5.6.2",
     "xstate": "6.0.0-alpha.16"
+  },
+  "peerDependenciesMeta": {
+    "ai": {
+      "optional": true
+    }
   },
   "packageManager": "pnpm@10.28.2"
 }

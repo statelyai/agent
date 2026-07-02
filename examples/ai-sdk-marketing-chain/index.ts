@@ -1,7 +1,7 @@
 import { z } from 'zod';
-import { createActor, setup, toPromise, type AnyActorLogic } from 'xstate';
-import { createAgentSchemas, createTextLogic } from '../../src/index.js';
-import { createAiSdkTextActor } from '../ai-sdk-host/index.js';
+import { setup } from 'xstate';
+import { createAgentSchemas, createTextLogic, runAgent } from '../../src/index.js';
+import { createAiSdkTextExecutor } from '../ai-sdk-host/index.js';
 
 const qualitySchema = z.object({
   hasCallToAction: z.boolean(),
@@ -137,18 +137,10 @@ export const aiSdkMarketingChainMachine = agent.createMachine({
 });
 
 export async function runAiSdkMarketingChainExample() {
-  const actor = createActor(
-    aiSdkMarketingChainMachine.provide({
-      actorSources: {
-        writeMarketingCopy: createAiSdkTextActor(writeMarketingCopy),
-        evaluateMarketingCopy: createAiSdkTextActor(evaluateMarketingCopy),
-        improveMarketingCopy: createAiSdkTextActor(improveMarketingCopy),
-      },
-    }) as unknown as AnyActorLogic,
-    { input: { product: 'state machines' } },
-  );
-  actor.start();
-  return await toPromise(actor);
+  return await runAgent(aiSdkMarketingChainMachine, {
+    input: { product: 'state machines' },
+    generateText: createAiSdkTextExecutor(),
+  });
 }
 
 if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {

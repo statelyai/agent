@@ -6,10 +6,16 @@
  *
  * Then run with an OpenAI-compatible TanStack adapter.
  */
-import { initialTransition, transition, type AnyStateMachine } from 'xstate';
-import { type AgentRequest } from '../../src/index.js';
-import { getAgentRequests, transitionResult } from '../../src/index.js';
+import {
+  initialAgentStep,
+  resolveAgentStep,
+  transitionAgentStep,
+  type AgentRequest,
+  type EventUnion,
+} from '../../src/index.js';
 import { gameActors, gameMachine, gameSchemas } from '../game-agent/index.js';
+
+type GameEvent = EventUnion<typeof gameSchemas.events>;
 
 type TanStackChat = (options: {
   adapter: unknown;
@@ -56,22 +62,39 @@ async function runTanStackRequest(args: {
   return { kind: 'output' as const, output: result };
 }
 
+function parseGameEvent(value: unknown): GameEvent {
+  if (!value || typeof value !== 'object' || !('type' in value)) {
+    throw new Error('Host returned an invalid game event.');
+  }
+
+  const type = String(value.type);
+  const schema = gameSchemas.events[type as keyof typeof gameSchemas.events];
+  if (!schema) {
+    throw new Error(`Host returned unsupported game event: ${type}`);
+  }
+
+  return {
+    type,
+    ...schema.parse(value),
+  } as GameEvent;
+}
+
 export async function runTanStackGameTurn(args: {
   chat: TanStackChat;
   adapter: unknown;
   input?: { playerHp: number; enemyHp: number };
 }) {
-  let [snapshot, actions]: [any, any[]] = initialTransition(
+  let step = initialAgentStep(
     gameMachine,
-    args.input ?? { playerHp: 20, enemyHp: 15 }
-  );
-
-  while (snapshot.status !== 'done') {
-    const [request] = getAgentRequests(actions, {
-      snapshot,
+    args.input ?? { playerHp: 20, enemyHp: 15 },
+    {
       schemas: gameSchemas,
       actors: gameActors,
-    });
+    },
+  );
+
+  while (!step.done) {
+    const [request] = step.requests;
     if (!request) {
       throw new Error('Machine is waiting without an agent request.');
     }
@@ -83,16 +106,23 @@ export async function runTanStackGameTurn(args: {
     });
 
     if (result.kind === 'event') {
-      [snapshot, actions] = transition(gameMachine, snapshot, result.event as never);
+      step = transitionAgentStep(gameMachine, step, parseGameEvent(result.event), {
+        schemas: gameSchemas,
+        actors: gameActors,
+      });
     } else {
-      [snapshot, actions] = transitionResult(
-        gameMachine as unknown as AnyStateMachine,
-        snapshot,
+      step = resolveAgentStep(
+        gameMachine,
+        step,
         request,
-        result.output
+        result.output,
+        {
+          schemas: gameSchemas,
+          actors: gameActors,
+        }
       );
     }
   }
 
-  return snapshot.output;
+  return step.snapshot.output;
 }

@@ -10,8 +10,11 @@ import {
   resolveAgentStep,
   transitionAgentStep,
   type AgentRequest,
+  type EventUnion,
 } from '../../src/index.js';
-import { gameMachine } from '../game-agent/index.js';
+import { gameActors, gameMachine, gameSchemas } from '../game-agent/index.js';
+
+type GameEvent = EventUnion<typeof gameSchemas.events>;
 
 interface Env {
   AI: {
@@ -64,11 +67,31 @@ async function runWorkersAiRequest(env: Env, request: AgentRequest) {
   return { kind: 'output' as const, output: text };
 }
 
+function parseGameEvent(value: unknown): GameEvent {
+  if (!value || typeof value !== 'object' || !('type' in value)) {
+    throw new Error('Workers AI returned an invalid game event.');
+  }
+
+  const type = String(value.type);
+  const schema = gameSchemas.events[type as keyof typeof gameSchemas.events];
+  if (!schema) {
+    throw new Error(`Workers AI returned unsupported game event: ${type}`);
+  }
+
+  return {
+    type,
+    ...schema.parse(value),
+  } as GameEvent;
+}
+
 export async function runCloudflareGameTurn(
   env: Env,
   input = { playerHp: 20, enemyHp: 15 },
 ) {
-  let step = initialAgentStep(gameMachine, input);
+  let step = initialAgentStep(gameMachine, input, {
+    schemas: gameSchemas,
+    actors: gameActors,
+  });
 
   while (!step.done) {
     const [request] = step.requests;
@@ -79,9 +102,15 @@ export async function runCloudflareGameTurn(
     const result = await runWorkersAiRequest(env, request);
 
     if (result.kind === 'event') {
-      step = transitionAgentStep(gameMachine, step, result.event as never);
+      step = transitionAgentStep(gameMachine, step, parseGameEvent(result.event), {
+        schemas: gameSchemas,
+        actors: gameActors,
+      });
     } else {
-      step = resolveAgentStep(gameMachine, step, request, result.output);
+      step = resolveAgentStep(gameMachine, step, request, result.output, {
+        schemas: gameSchemas,
+        actors: gameActors,
+      });
     }
   }
 

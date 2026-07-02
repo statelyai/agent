@@ -1300,6 +1300,9 @@ describe('setupAgent', () => {
     if (typeof attackTool === 'function') {
       throw new Error('Expected event tool descriptor.');
     }
+    expect(attackTool.description).toBe(
+      "Send the 'ATTACK' event. Available from the current state."
+    );
     await expect(attackTool.execute?.({ target: 'orc' })).resolves.toEqual({
       type: 'ATTACK',
       target: 'orc',
@@ -1403,6 +1406,16 @@ describe('setupAgent', () => {
         }),
       }),
     ]);
+    expect(step.requests[0]!.input.outputSchema?.['~standard'].jsonSchema?.input?.())
+      .toEqual(expect.objectContaining({ type: 'object' }));
+
+    await expect(
+      executeAgentRequest(step.requests[0]!, {
+        generateText: async () => ({
+          output: { answer: 42 },
+        }),
+      })
+    ).rejects.toThrow();
 
     const output = await executeAgentRequest(step.requests[0]!, {
       generateText: async () => ({

@@ -1,26 +1,18 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
-import { createActor, toPromise, type AnyActorLogic } from 'xstate';
-import {
-  aiSdkParallelReviewMachine,
-  summarizeCodeReviews,
-} from './index.js';
+import { runAgent } from '../../src/index.js';
+import { aiSdkParallelReviewMachine } from './index.js';
 
 test('AI SDK parallel review maps to an explicit machine', async () => {
-  const actor = createActor(
-    aiSdkParallelReviewMachine.provide({
-      actorSources: {
-        summarizeCodeReviews: summarizeCodeReviews.withExecutor(async ({ input }) =>
-          input.reviews.map((review) => review.type).join(','),
-        ),
-      },
-    }) as unknown as AnyActorLogic,
-    { input: { code: 'const x = eval(input);' } },
-  );
-  actor.start();
-  await toPromise(actor);
+  const output = await runAgent(aiSdkParallelReviewMachine, {
+    input: { code: 'const x = eval(input);' },
+    generateText: async (request) =>
+      JSON.parse(request.prompt ?? '[]')
+        .map((review: { type: string }) => review.type)
+        .join(','),
+  });
   assert.equal(
-    actor.getSnapshot().output.summary,
+    output.summary,
     'security,performance,maintainability',
   );
 });

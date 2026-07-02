@@ -35,8 +35,8 @@ The strongest reason to choose `@statelyai/agent` over LangGraph is that the wor
 - no hidden graph runtime is required
 - every transition, guard, actor, snapshot, and event is inspectable
 - TypeScript checks the machine boundary, external events, and typed host actors
-- visualization comes from the authored machine, not a separate reconstruction
 - model and tool execution stay in host code, so Vercel AI SDK, LangChain, Workers AI, SQL clients, and local functions remain swappable
+- visualization stays in Stately Studio and the upcoming VS Code extension, not this package
 
 The strongest reason to choose it over handrolling is that agent control flow is usually the product. Once a workflow needs branching, review gates, retries, persistence, subflows, or multi-agent routing, plain async functions become implicit state machines. `createTextLogic(...)` makes model steps individually testable, and plain XState `setup(...)` makes the state machine explicit without taking over the runtime.
 
@@ -66,7 +66,6 @@ Remaining gaps are tracked in [`langgraph-gaps.md`](/Users/davidkpiano/Code/agen
 | Message-centric chatbot state | Covered | `messagesSchema`, `appendMessages(...)`, and plain XState context in [`src/setup-agent.ts`](/Users/davidkpiano/Code/agent/src/setup-agent.ts) |
 | Retrieval-augmented generation | Covered | Retrieval is a typed host actor; generation is named text logic invoked as `src: 'answerQuestion'` |
 | HTTP / framework transport | Adapter example | Host XState actors behind HTTP, WebSocket, Cloudflare Agents, or any framework runtime |
-| Graph export / visualization support | Covered | Authored machines are normal XState machines and can use the XState/Stately visualization path directly |
 
 ## XState coverage
 

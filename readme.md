@@ -13,11 +13,13 @@ The package owns these first-class authoring surfaces:
 - `runAgent(...)`: host-owned execution loop for request-driven machines.
 - `initialAgentStep(...)`, `transitionAgentStep(...)`, `resolveAgentStep(...)`, `executeAgentRequest(...)`: lower-level helpers for custom host loops.
 
-Use `setupAgent(...)` for the fastest text-agent path. Use normal XState `setup(...)` when you want the thinnest possible XState surface. Use normal host code for runtime execution. Stately Agent adds the batteries: built-in text actors, reusable text logic, message helpers, examples, retained schemas, and visualization/export affordances.
+Use `setupAgent(...)` for the fastest text-agent path. Use normal XState `setup(...)` when you want the thinnest possible XState surface. Use normal host code for runtime execution. Stately Agent adds the batteries: built-in text actors, reusable text logic, message helpers, examples, and retained schemas.
 
-You can still call the Vercel AI SDK, LangChain, Workers AI, or any other model/tool runtime yourself. The machine only declares behavior; hosts can either execute requests from pure XState transitions or provide actors with `machine.provide({ actorSources })`. That keeps runtime transparency while making the workflow typed, inspectable, and visualizable.
+You can still call the Vercel AI SDK, LangChain, Workers AI, or any other model/tool runtime yourself. The machine only declares behavior; hosts can either execute requests from pure XState transitions or provide actors with `machine.provide({ actorSources })`. That keeps runtime transparency while making the workflow typed and inspectable.
 
-Choose this over LangGraph when you want agent workflows to be explicit state machines instead of framework-owned graphs: same workflow shapes, strong TypeScript for machine context/events/actors, first-class XState snapshots/guards, visualization by default, and no required runtime backend. Choose it over handrolled workflows when the control flow is important enough to inspect, persist, replay, test, and diagram.
+Choose this over LangGraph when you want agent workflows to be explicit state machines instead of framework-owned graphs: same workflow shapes, strong TypeScript for machine context/events/actors, first-class XState snapshots/guards, and no required runtime backend. Choose it over handrolled workflows when the control flow is important enough to inspect, persist, replay, and test.
+
+Visualization is intentionally outside this package. Stately Studio, and the upcoming VS Code extension, own rendering, inspection, and diagramming for authored machines. `@statelyai/agent` focuses on authoring and execution seams.
 
 For SDK integration, your host reads returned requests and calls Vercel AI SDK, Cloudflare Workers AI, LangChain, local models, or custom code. Start with inline `agent.generateText`; move to reusable `createTextLogic(...)` actors when the model-call shape should be named, shared, or tested standalone. See [`docs/host-actors.md`](/Users/davidkpiano/Code/agent/docs/host-actors.md).
 
@@ -111,7 +113,7 @@ The package also publishes a JSON Schema for static, declarative agent workflow 
 import workflowSchema from '@statelyai/agent/agent-workflow.json';
 ```
 
-Use `setupAgent.fromConfig(...)` to lower static definitions to a normal XState machine with retained agent request metadata. Static definitions separate model requests from XState-like control flow:
+Use `setupAgent.fromConfig(...)` to lower static JSON/YAML definitions to a normal XState machine with retained agent request metadata. JS authoring should pass Standard Schema-compatible schemas, such as Zod, directly to `setupAgent(...)`; static configs use JSON Schema and are adapted at the boundary.
 
 ```yaml
 requests:
@@ -183,7 +185,7 @@ Examples are flat directories under [`examples/`](/Users/davidkpiano/Code/agent/
 
 Run them with `node --import tsx examples/<name>/index.ts`.
 
-Convert a machine file to diagram output with `pnpm agent:convert <file> --format mermaid` or `pnpm agent:convert <file> --format xstate`. Static analysis warnings are printed to stderr. For programmatic access, use `analyzeGraph(...)` from `@statelyai/agent/graph`; warnings are returned explicitly instead of being hidden in graph metadata.
+Visualize these machines in Stately Studio or the upcoming VS Code extension. This package does not ship diagram converters or graph-export APIs.
 
 Start here:
 

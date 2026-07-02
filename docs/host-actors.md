@@ -279,4 +279,4 @@ const output = await draftText.execute(
 
 ## Why This Shape
 
-The machine stays portable and visualizable. The host keeps full runtime control. You can use existing SDK code directly, but the workflow still gets typed transitions, XState snapshots, inspection, testing, and graph export.
+The machine stays portable. The host keeps full runtime control. You can use existing SDK code directly, but the workflow still gets typed transitions, XState snapshots, inspection, and testing. Visualization belongs in Stately Studio and the upcoming VS Code extension, not this package.

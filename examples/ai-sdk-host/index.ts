@@ -20,19 +20,18 @@ import { openai } from '@ai-sdk/openai';
 import {
   createActor,
   createAsyncLogic,
-  initialTransition,
   toPromise,
-  type AnyActorLogic,
-  type AnyStateMachine,
 } from 'xstate';
 import {
-  getAgentRequests,
+  initialAgentStep,
   isStructuredOutputSchema,
+  resolveAgentStep,
+  runAgent,
   type AgentTextRequest,
   type AgentTools,
   type StandardSchemaV1,
   type TextLogic,
-  transitionResult,
+  type TextLogicOutput,
   validateSchemaSync,
 } from '../../src/index.js';
 import { toAiSdkTools } from '../../src/ai-sdk/index.js';
@@ -138,8 +137,13 @@ export function createAiSdkTextActor<
   options: AiSdkTextHostOptions = {}
 ): TextLogic<TInputSchema, TOutputSchema, TMetadata> {
   return logic.withExecutor(async ({ request, signal }) =>
-    await generateWithAiSdk(request, undefined, options, signal) as never
+    await generateWithAiSdk(request, undefined, options, signal) as TextLogicOutput<typeof logic>
   );
+}
+
+export function createAiSdkTextExecutor(options: AiSdkTextHostOptions = {}) {
+  return (request: AgentTextRequest & { tools: AgentTools }) =>
+    generateWithAiSdk(request, request.tools, options);
 }
 
 export function createAiSdkStreamingTextActor<
@@ -151,55 +155,49 @@ export function createAiSdkStreamingTextActor<
   options: AiSdkTextHostOptions = {}
 ): TextLogic<TInputSchema, TOutputSchema, TMetadata> {
   return logic.withExecutor(async ({ request, signal }) =>
-    await streamWithAiSdk(request, options, signal) as never
+    await streamWithAiSdk(request, options, signal) as TextLogicOutput<typeof logic>
   );
 }
 
 export async function runTriageDemo(ticket: string) {
-  const actor = createActor(
-    triageMachine.provide({
-      actorSources: {
-        triageTicket: createAiSdkTextActor(triageTicket) as never,
-      },
-    }) as unknown as AnyActorLogic,
-    { input: { ticket } }
-  );
-  actor.start();
-  const output = await toPromise(actor);
-  return output; // machine output, typed by the output schema
+  return await runAgent(triageMachine, {
+    input: { ticket },
+    generateText: createAiSdkTextExecutor(),
+    schemas: triageSchemas,
+    actors: triageActors,
+  });
 }
 
 export async function runTriageStepDemo(ticket: string) {
-  let [snapshot, actions]: [any, any[]] = initialTransition(
-    triageMachine as unknown as AnyStateMachine,
-    { ticket }
-  );
+  let step = initialAgentStep(triageMachine, { ticket }, {
+    schemas: triageSchemas,
+    actors: triageActors,
+  });
 
-  while (snapshot.status !== 'done') {
-    const requests = getAgentRequests(actions, {
-      snapshot,
-      schemas: triageSchemas,
-      actors: triageActors,
-    });
-    if (requests.length === 0) {
+  while (!step.done) {
+    if (step.requests.length === 0) {
       throw new Error('Machine is waiting without an agent request.');
     }
 
-    for (const request of requests) {
+    for (const request of step.requests) {
       const output = await generateWithAiSdk(
         request.input,
         request.tools
       );
-      [snapshot, actions] = transitionResult(
-        triageMachine as unknown as AnyStateMachine,
-        snapshot,
+      step = resolveAgentStep(
+        triageMachine,
+        step,
         request,
-        output
+        output,
+        {
+          schemas: triageSchemas,
+          actors: triageActors,
+        }
       );
     }
   }
 
-  return snapshot.output;
+  return step.snapshot.output;
 }
 
 export async function runStreamingDemo(topic: string) {
@@ -210,12 +208,12 @@ export async function runStreamingDemo(topic: string) {
           // The side channel: chunks go to stdout as they arrive. In a server
           // this is a UIMessageStream writer or Response stream instead.
           onChunk: (chunk) => process.stdout.write(chunk),
-        }) as never,
+        }),
         'agent.userInput': createAsyncLogic({
           run: async () => ({ feedback: 'ok, done' }),
         }),
       },
-    }) as unknown as AnyActorLogic,
+    }),
     { input: { topic } }
   );
   actor.start();

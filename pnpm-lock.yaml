@@ -7,19 +7,6 @@ settings:
 importers:
 
   .:
-    dependencies:
-      '@statelyai/graph':
-        specifier: ^0.11.0
-        version: 0.11.0(zod@4.3.6)
-      ai:
-        specifier: ^6.0.67
-        version: 6.0.67(zod@4.3.6)
-      typescript:
-        specifier: ^5.6.2
-        version: 5.9.3
-      xstate:
-        specifier: 6.0.0-alpha.16
-        version: 6.0.0-alpha.16
     devDependencies:
       '@ai-sdk/openai':
         specifier: ^3.0.25
@@ -36,6 +23,9 @@ importers:
       agents:
         specifier: 0.11.5
         version: 0.11.5(@babel/core@7.29.0)(@babel/runtime@7.28.6)(@cloudflare/workers-types@4.20260424.1)(ai@6.0.67(zod@4.3.6))(react@19.2.5)(rolldown@1.0.0-rc.12(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1))(vite@5.4.21(@types/node@20.19.30))(zod@4.3.6)
+      ai:
+        specifier: ^6.0.67
+        version: 6.0.67(zod@4.3.6)
       dotenv:
         specifier: ^16.4.5
         version: 16.6.1
@@ -45,9 +35,15 @@ importers:
       tsx:
         specifier: ^4.21.0
         version: 4.21.0
+      typescript:
+        specifier: ^5.6.2
+        version: 5.9.3
       vitest:
         specifier: ^2.1.2
         version: 2.1.9(@types/node@20.19.30)
+      xstate:
+        specifier: 6.0.0-alpha.16
+        version: 6.0.0-alpha.16
       zod:
         specifier: ^4.3.6
         version: 4.3.6
@@ -916,29 +912,6 @@ packages:
 
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==, tarball: https://registry.npmjs.org/@standard-schema/spec/-/spec-1.1.0.tgz}
-
-  '@statelyai/graph@0.11.0':
-    resolution: {integrity: sha512-qm1AmeXTQu6wrA5o4bXIlic4BDWLJCnNisHoqDan7Qa/UWi3yGg10W8xobItql+qvnVcoghJN1ZmR3cUFeHV7A==, tarball: https://registry.npmjs.org/@statelyai/graph/-/graph-0.11.0.tgz}
-    peerDependencies:
-      cytoscape: ^3.0.0
-      d3-force: ^3.0.0
-      dotparser: ^1.0.0
-      elkjs: ^0.9.0 || ^0.10.0 || ^0.11.0
-      fast-xml-parser: ^5.0.0
-      zod: ^4.0.0
-    peerDependenciesMeta:
-      cytoscape:
-        optional: true
-      d3-force:
-        optional: true
-      dotparser:
-        optional: true
-      elkjs:
-        optional: true
-      fast-xml-parser:
-        optional: true
-      zod:
-        optional: true
 
   '@tybys/wasm-util@0.10.1':
     resolution: {integrity: sha512-9tTaPJLSiejZKx+Bmog4uSubteqTvFrVrURwkmHixBo0G4seD0zUxp98E1DzUBJxLQ3NPwXrGKDiVjwx/DpPsg==, tarball: https://registry.npmjs.org/@tybys/wasm-util/-/wasm-util-0.10.1.tgz}
@@ -2924,10 +2897,6 @@ snapshots:
     optional: true
 
   '@standard-schema/spec@1.1.0': {}
-
-  '@statelyai/graph@0.11.0(zod@4.3.6)':
-    optionalDependencies:
-      zod: 4.3.6
 
   '@tybys/wasm-util@0.10.1':
     dependencies:
