@@ -1,10 +1,10 @@
 import { z } from 'zod';
-import { setup } from 'xstate';
 import {
   createAgentSchemas,
   createDecisionLogic,
   createTextLogic,
   sendDecision,
+  setupAgent,
 } from '../../src/index.js';
 
 export const turnSummarySchema = z.object({
@@ -93,9 +93,9 @@ export const gameActors = {
   summarizeTurn,
 };
 
-const gameAgent = setup({
+const gameAgent = setupAgent({
   schemas: gameSchemas,
-  actorSources: gameActors,
+  actors: gameActors,
 });
 
 export const gameMachine = gameAgent.createMachine({

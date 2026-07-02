@@ -84,4 +84,4 @@ dinavinter/agents:
 - [`../docs/crewai-parity.md`](/Users/davidkpiano/Code/agent/docs/crewai-parity.md)
 - [`../docs/burr-parity.md`](/Users/davidkpiano/Code/agent/docs/burr-parity.md)
 
-The parity docs track end-result coverage and remaining gaps. New examples should use `createTextLogic(...)` for reusable LLM work and normal XState `setup({ schemas, actorSources })` for schema-first machine authoring.
+The parity docs track end-result coverage and remaining gaps. New examples should use `createTextLogic(...)` for reusable LLM work and `setupAgent({ schemas, actors })` for schema-first machine authoring.

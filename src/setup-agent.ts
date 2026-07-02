@@ -2334,6 +2334,32 @@ type AgentAllActors<
   TRequestSchemas extends AgentRequestSchemaMap,
 > = TActors & RequestActors<TRequestSchemas>;
 
+// Emit the `events` schema key ONLY when there are event schemas. When
+// `TEventSchemas` is empty (`{}`), the key is omitted entirely so xstate falls
+// back to its `createMachine`-level event inference. Passing a present-but-
+// empty `events: {}` makes `SetupEvents` compute `InferEvents<{}>` → `never`,
+// which sets the machine's `TEvent` to `never` and cascades into `context`
+// collapsing to `never` too (this reproduces with *raw* `setup({ schemas: {
+// context, events: {} } })`, so it is an xstate-alpha behavior we route
+// around by matching how hand-written setup omits an empty `events`).
+type AgentSetupEventsSchema<
+  TEventSchemas extends Record<string, StandardSchemaV1>,
+> = [keyof TEventSchemas] extends [never]
+  ? {}
+  : { events: TEventSchemas };
+
+// NOTE: this is a *plain object* config type, NOT `SetupConfig<...>`.
+//
+// `SetupConfig<TSchemas, ...>` declares `schemas?: TSchemas & SetupSchemas`.
+// When `TSchemas.events` (a concrete `{ GO: … }` map) is intersected with
+// `SetupSchemas['events']` (`Record<string, StandardSchemaV1> | undefined`),
+// the event map gains a string index signature (`{ GO: … } & Record<string,
+// StandardSchemaV1>`). xstate's `InferEvents` has a `string extends keyof O`
+// branch that then collapses every event to bare `{ type: K }`, discarding
+// the schema-derived payload. Feeding `SetupReturnFromConfig` a plain object
+// (no `& SetupSchemas` intersection) keeps `keyof events` as the literal key
+// union, so payloads survive and `on:` transition fns narrow correctly.
+// (Repro: a state's `({ event }) => event.n` lost `n` under the old alias.)
 type AgentSetupXStateConfig<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
   TEventSchemas extends Record<string, StandardSchemaV1>,
@@ -2342,20 +2368,18 @@ type AgentSetupXStateConfig<
   TInputSchema extends StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1,
   TMetaSchema extends StandardSchemaV1,
-> = SetupConfig<
-  {
+> = {
+  schemas: {
     context: TContextSchema;
-    events: TEventSchemas;
     input: TInputSchema;
     output: TOutputSchema;
     meta: TMetaSchema;
-  },
-  Record<string, never>,
-  NonNullable<AnySetupConfig['actions']>,
-  SetupActors<AgentSetupActors<AgentAllActors<TActors, TRequestSchemas>>>,
-  NonNullable<AnySetupConfig['guards']>,
-  NonNullable<AnySetupConfig['delays']>
->;
+  } & AgentSetupEventsSchema<TEventSchemas>;
+  actorSources: SetupActors<AgentSetupActors<AgentAllActors<TActors, TRequestSchemas>>>;
+  actions?: NonNullable<AnySetupConfig['actions']>;
+  guards?: NonNullable<AnySetupConfig['guards']>;
+  delays?: NonNullable<AnySetupConfig['delays']>;
+};
 
 type SetupAgentBaseConfig<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,

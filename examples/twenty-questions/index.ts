@@ -18,7 +18,6 @@
  * Run: OPENAI_API_KEY=... node --import tsx examples/twenty-questions/index.ts
  */
 import { z } from 'zod';
-import { setup } from 'xstate';
 import { generateText, stepCountIs, tool, type LanguageModel } from 'ai';
 import { openai } from '@ai-sdk/openai';
 import {
@@ -27,6 +26,7 @@ import {
   getAcceptedEvents,
   runAgent,
   sendDecision,
+  setupAgent,
   type AgentDecisionExecutor,
 } from '../../src/index.js';
 
@@ -87,9 +87,9 @@ export const twentyQuestionsActors = {
   chooseAction,
 };
 
-const agent = setup({
+const agent = setupAgent({
   schemas: twentyQuestionsSchemas,
-  actorSources: twentyQuestionsActors,
+  actors: twentyQuestionsActors,
 });
 
 export const twentyQuestionsMachine = agent.createMachine({

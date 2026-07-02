@@ -609,6 +609,52 @@ describe('setupAgent', () => {
     });
   });
 
+  test('setupAgent narrows event payloads in `on:` fns even with a co-located invoke', () => {
+    // Regression: a state with BOTH `invoke` and `on:` used to widen the
+    // transition-fn `event` to `{ type: string }`, so schema-derived payload
+    // fields (e.g. `event.n`) were lost. The machine event union collapsed
+    // because setupAgent fed xstate's `SetupReturnFromConfig` a
+    // `SetupConfig<TSchemas & SetupSchemas>` whose intersected `events` map
+    // gained a string index signature, tripping `InferEvents`'
+    // `string extends keyof O` branch.
+    const schemas = createAgentSchemas({
+      context: z.object({ count: z.number() }),
+      events: { GO: z.object({ n: z.number() }) },
+    });
+    const child = createAsyncLogic<number, unknown>({ run: async () => 42 });
+    const agent = setupAgent({ schemas, actors: { child } });
+
+    agent.createMachine({
+      context: { count: 0 },
+      initial: 'a',
+      states: {
+        a: {
+          invoke: {
+            id: 'child',
+            src: 'child',
+            // (c) `onDone` output stays typed from the actor logic.
+            onDone: ({ event }) => {
+              const output: number = event.output;
+              void output;
+              return undefined;
+            },
+          },
+          on: {
+            GO: ({ event }) => {
+              // (a) schema-derived payload narrows.
+              const n: number = event.n;
+              void n;
+              // (b) accessing a field not on the event is a type error.
+              // @ts-expect-error `missing` is not part of the GO payload
+              void event.missing;
+              return undefined;
+            },
+          },
+        },
+      },
+    });
+  });
+
   test('appendMessages creates a typed action for message context', async () => {
     const schemas = createAgentSchemas({
       context: z.object({
@@ -1327,6 +1373,7 @@ describe('setupAgent', () => {
     const initialStep = initialAgentStep(machine, { prompt: 'Choose the next move.' });
     const attackStep = transitionAgentStep(machine, initialStep, {
       type: 'ATTACK',
+      target: 'goblin',
     });
 
     expect(attackStep.done).toBe(true);
