@@ -64,7 +64,6 @@ const machine = agent.createMachine({
           prompt: context.prompt,
           outputSchema: resultSchema,
           temperature: 0.2,
-          eventTypes: ['APPROVE', 'REVISE'],
         }),
         onDone: ({ output }) => ({
           target: 'done',
@@ -130,7 +129,7 @@ invoke:
 
 ## Allowed Event Tools
 
-Use request `agentEvents` to expose specific state transitions as tools. `getAgentRequests(...)` validates that those events are legal from the current snapshot and returns event tools separately from the model-call input.
+Use a decision's `allowedEvents` to narrow which state transitions a model may choose from. `getAgentRequests(...)` intersects `allowedEvents` with the events legal from the current snapshot (via `getAcceptedEvents(...)`) and returns the surviving candidates on the decision request's `events` field, separate from the model-call input.
 
 ```ts
 const requests = getAgentRequests(actions, {
@@ -140,20 +139,18 @@ const requests = getAgentRequests(actions, {
 });
 
 const request = requests[0];
-Object.keys(request.tools);
-// ['send_event_ATTACK', 'send_event_DEFEND']
+request.events.map((event) => event.type);
+// ['ATTACK', 'DEFEND']
 ```
 
-Each event tool returns the event object:
+Resolve the decision to get the chosen event:
 
 ```ts
-await request.tools.send_event_ATTACK.execute({ target: 'orc' });
+const event = await resolveDecision(request, decide);
 // { type: 'ATTACK', target: 'orc' }
 ```
 
-Only events listed in request `agentEvents` are exposed. If an event is listed but is not legal from the current state, it is omitted.
-
-Use `eventTypes` for direct `agent.generateText` / `agent.streamText` invokes. Use `agentEvents` when authoring reusable `createTextLogic(...)`.
+Only events listed in `allowedEvents` are candidates. If an event is listed but is not legal from the current state, it is omitted.
 
 ## Actor Runtime
 

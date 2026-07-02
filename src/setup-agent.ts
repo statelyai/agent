@@ -54,8 +54,6 @@ export interface AgentTextRequest<TMetadata = Record<string, unknown>> {
   /** Host/model tools that are always available to this text call. */
   tools?: AgentTools;
   toolChoice?: AgentToolChoice;
-  /** Machine event types to expose as model-call tools for this state. */
-  eventTypes?: readonly string[];
   outputSchema?: StandardSchemaV1;
   temperature?: number;
   maxTokens?: number;
@@ -147,7 +145,7 @@ function createBuiltinTextActor(
   src: typeof GENERATE_TEXT_ACTOR | typeof STREAM_TEXT_ACTOR,
   mode: AgentRequestMode,
   outputSchema: StandardSchemaV1
-): AgentRequestLogic<StandardSchemaV1<AgentTextRequest>, StandardSchemaV1> {
+): TextLogic<StandardSchemaV1<AgentTextRequest>, StandardSchemaV1> {
   const logic = createAsyncLogic<unknown, AgentTextRequest>({
     run: async () => {
       throw new Error(
@@ -169,7 +167,7 @@ function createBuiltinTextActor(
       return validateSchemaSync(agentTextInputSchema, input);
     },
     async execute(input: AgentTextRequest, executors: AgentRequestExecutors) {
-      const output = await executeAgentTextRequest(
+      const { output } = await executeAgentTextRequest(
         mode,
         src,
         validateSchemaSync(agentTextInputSchema, input),
@@ -197,7 +195,6 @@ function createBuiltinTextActor(
         messages: ({ input }) => input.messages,
         tools: ({ input }) => input.tools,
         toolChoice: ({ input }) => input.toolChoice,
-        agentEvents: ({ input }) => input.eventTypes,
         temperature: ({ input }) => input.temperature,
         maxTokens: ({ input }) => input.maxTokens,
         topP: ({ input }) => input.topP,
@@ -207,7 +204,7 @@ function createBuiltinTextActor(
         metadata: ({ input }) => input.metadata,
       }, execute));
     },
-  }) as AgentRequestLogic<
+  }) as TextLogic<
     StandardSchemaV1<AgentTextRequest>,
     StandardSchemaV1
   >;
@@ -707,11 +704,6 @@ export interface TextLogicConfig<
     AgentToolChoice | undefined,
     InferOutput<TInputSchema>
   >;
-  /** Machine event types to expose to the model as event tools. */
-  agentEvents?: ResolveTextLogicValue<
-    readonly string[] | undefined,
-    InferOutput<TInputSchema>
-  >;
   temperature?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
   maxTokens?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
   topP?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
@@ -765,13 +757,6 @@ export interface TextLogic<
   ): TextLogic<TInputSchema, TOutputSchema, TMetadata>;
 }
 
-export interface AgentRequestLogic<
-  TInputSchema extends StandardSchemaV1 = StandardSchemaV1,
-  TOutputSchema extends StandardSchemaV1 = StandardSchemaV1,
-  TMetadata = Record<string, unknown>,
-> extends TextLogic<TInputSchema, TOutputSchema, TMetadata> {
-}
-
 export type TextLogicInput<TLogic extends TextLogic> =
   TLogic extends TextLogic<infer TInputSchema, StandardSchemaV1, infer _TMetadata>
     ? InferOutput<TInputSchema>
@@ -806,7 +791,6 @@ export function createTextLogic<
       messages: resolveTextLogicValue(config.messages, args),
       tools: resolveTextLogicValue(config.tools, args),
       toolChoice: resolveTextLogicValue(config.toolChoice, args),
-      eventTypes: resolveTextLogicValue(config.agentEvents, args),
       outputSchema: config.schemas.output,
       temperature: resolveTextLogicValue(config.temperature, args),
       maxTokens: resolveTextLogicValue(config.maxTokens, args),
@@ -851,7 +835,7 @@ export function createTextLogic<
     schemas: config.schemas,
     request,
     async execute(input: TInput, executors: AgentRequestExecutors) {
-      const output = await executeAgentTextRequest(
+      const { output } = await executeAgentTextRequest(
         config.mode ?? 'generate',
         'textLogic',
         request(input),
@@ -884,10 +868,6 @@ function isTextLogic(value: unknown): value is TextLogic {
     && (value as TextLogic).kind === 'statelyai.textLogic'
     && typeof (value as TextLogic).request === 'function'
   );
-}
-
-function isAgentRequestLogic(value: unknown): value is AgentRequestLogic {
-  return isTextLogic(value);
 }
 
 // ─── Decision logic ───
@@ -1258,7 +1238,7 @@ export interface AgentRequestOptions {
   eventToolName?: AgentEventToolNameResolver;
 }
 
-export function getAvailableEvents(
+export function getAcceptedEvents(
   snapshot: AnyMachineSnapshot,
   options: Pick<AgentRequestOptions, 'events' | 'schemas' | 'eventToolName'> & {
     eventTypes?: readonly string[];
@@ -1300,27 +1280,6 @@ export function getAvailableEvents(
   });
 }
 
-export function getEventTools(
-  snapshot: AnyMachineSnapshot,
-  options: Pick<AgentRequestOptions, 'events' | 'schemas' | 'eventToolName'> & {
-    eventTypes?: readonly string[];
-  } = {}
-): AgentTools {
-  return Object.fromEntries(
-    getAvailableEvents(snapshot, options).map((event) => [
-      event.toolName,
-      {
-        description: `Send the '${event.type}' event. Available from the current state.`,
-        ...(event.inputSchema ? { inputSchema: event.inputSchema } : {}),
-        execute: async (input: unknown = {}) => ({
-          ...(input && typeof input === 'object' ? input : {}),
-          type: event.type,
-        }),
-      },
-    ])
-  );
-}
-
 export function getAgentRequests(
   actions: readonly { type?: string; params?: unknown; id?: unknown; src?: unknown; input?: unknown; logic?: unknown }[],
   options: AgentRequestOptions = {}
@@ -1352,7 +1311,7 @@ export function getAgentRequests(
     if (isDecisionLogic(registeredLogic)) {
       const decisionRequest = registeredLogic.request(params.input as never);
       // `undefined` (allowedEvents omitted) means "all legal events" — do
-      // not default it to `[]` here or getAvailableEvents will filter
+      // not default it to `[]` here or getAcceptedEvents will filter
       // everything out.
       const allowedEventTypes = (
         registeredLogic as unknown as {
@@ -1360,7 +1319,7 @@ export function getAgentRequests(
         }
       ).allowedEventTypes?.(params.input);
       const events = options.snapshot
-        ? getAvailableEvents(options.snapshot, {
+        ? getAcceptedEvents(options.snapshot, {
           events: options.events,
           schemas: options.schemas,
           eventTypes: allowedEventTypes,
@@ -1384,39 +1343,14 @@ export function getAgentRequests(
       return [];
     }
 
-    const events = options.snapshot
-      ? getAvailableEvents(options.snapshot, {
-        events: options.events,
-        schemas: options.schemas,
-        eventTypes: input.eventTypes,
-        eventToolName: options.eventToolName,
-      })
-      : [];
-    const eventTools = Object.fromEntries(
-      events.map((event) => [
-        event.toolName,
-        {
-          description: `Send the '${event.type}' event. Available from the current state.`,
-          ...(event.inputSchema ? { inputSchema: event.inputSchema } : {}),
-          execute: async (toolInput: unknown = {}) => ({
-            ...(toolInput && typeof toolInput === 'object' ? toolInput : {}),
-            type: event.type,
-          }),
-        },
-      ])
-    );
-
     return [{
       kind: 'text',
       id: params.id,
       src: params.src,
-      ...(isAgentRequestLogic(textLogic) ? { mode: textLogic.mode } : {}),
+      ...(textLogic ? { mode: textLogic.mode } : {}),
       input,
-      tools: {
-        ...(input.tools ?? {}),
-        ...eventTools,
-      },
-      events,
+      tools: input.tools ?? {},
+      events: [],
     }];
   });
 }
@@ -1445,7 +1379,6 @@ export type AgentRequestExecutorResult =
   | { output: unknown }
   | { object: unknown }
   | { text: string }
-  | { toolResults: Array<{ output?: unknown }> }
   | unknown;
 
 /**
@@ -1758,7 +1691,7 @@ function wrapTextLogicForRunAgent(
         ? (chunk: string) => runCtx.onChunk!(chunk, { request: agentRequest })
         : undefined,
     });
-    const output = await normalizeGeneratorResultForRunAgent(raw);
+    const output = await normalizeGeneratorResult(raw);
 
     runCtx.onResult?.(agentRequest, { output, raw });
 
@@ -1766,7 +1699,7 @@ function wrapTextLogicForRunAgent(
   });
 }
 
-async function normalizeGeneratorResultForRunAgent(result: unknown): Promise<unknown> {
+async function normalizeGeneratorResult(result: unknown): Promise<unknown> {
   const resolved = await result;
   if (!resolved || typeof resolved !== 'object') {
     return resolved;
@@ -2058,41 +1991,6 @@ function isIdleSnapshot(snapshot: AnyMachineSnapshot): boolean {
   return !hasPendingWork;
 }
 
-async function normalizeRequestExecutionResult(result: unknown): Promise<unknown> {
-  const resolved = await result;
-
-  if (!resolved || typeof resolved !== 'object') {
-    return resolved;
-  }
-
-  if ('toolResults' in resolved && Array.isArray(resolved.toolResults)) {
-    const toolOutput = resolved.toolResults.find(
-      (toolResult) =>
-        toolResult
-        && typeof toolResult === 'object'
-        && 'output' in toolResult
-    )?.output;
-
-    if (toolOutput !== undefined) {
-      return toolOutput;
-    }
-  }
-
-  if ('object' in resolved) {
-    return await resolved.object;
-  }
-
-  if ('output' in resolved) {
-    return await resolved.output;
-  }
-
-  if ('text' in resolved) {
-    return await resolved.text;
-  }
-
-  return resolved;
-}
-
 async function executeAgentTextRequest(
   mode: AgentRequestMode,
   id: string,
@@ -2100,7 +1998,7 @@ async function executeAgentTextRequest(
   executors: AgentRequestExecutors,
   tools: AgentTools = {},
   info?: AgentRequestExecutorInfo
-): Promise<unknown> {
+): Promise<{ output: unknown; raw: unknown }> {
   const request = {
     ...input,
     tools: {
@@ -2119,7 +2017,8 @@ async function executeAgentTextRequest(
     );
   }
 
-  return normalizeRequestExecutionResult(await executor(request, info));
+  const raw = await executor(request, info);
+  return { output: await normalizeGeneratorResult(raw), raw };
 }
 
 function getRegisteredAgentExecutionOptions(
@@ -2180,9 +2079,19 @@ export function getMachineAgentRequests(
   });
 }
 
-export async function executeAgentRequest(
+export function executeAgentRequest(
   request: AgentRequest,
   executors: AgentRequestExecutors
+): Promise<unknown>;
+export function executeAgentRequest(
+  request: AgentRequest,
+  executors: AgentRequestExecutors,
+  options: { verbose: true }
+): Promise<{ output: unknown; raw: unknown }>;
+export async function executeAgentRequest(
+  request: AgentRequest,
+  executors: AgentRequestExecutors,
+  options?: { verbose?: boolean }
 ): Promise<unknown> {
   if ((request as AgentStepRequest).kind === 'decision') {
     throw new Error(
@@ -2191,7 +2100,7 @@ export async function executeAgentRequest(
     );
   }
 
-  const output = await executeAgentTextRequest(
+  const { output, raw } = await executeAgentTextRequest(
     request.mode ?? 'generate',
     request.id,
     request.input,
@@ -2199,9 +2108,13 @@ export async function executeAgentRequest(
     request.tools
   );
 
-  return request.input.outputSchema
+  const normalizedOutput = request.input.outputSchema
     ? validateSchemaSync(request.input.outputSchema, output)
     : output;
+
+  return options?.verbose
+    ? { output: normalizedOutput, raw }
+    : normalizedOutput;
 }
 
 function createAgentStep<TMachine extends AnyActorLogic>(
@@ -2382,29 +2295,12 @@ export function createAgentSchemas<
   };
 }
 
-type AgentRequestEvents<
-  TEventSchemas extends Record<string, StandardSchemaV1>,
-  TSchemas extends AgentSchemaPack<any, TEventSchemas, any, any, any>,
-  TInputSchema extends StandardSchemaV1,
-> =
-  | readonly (keyof TEventSchemas & string)[]
-  | ((args: {
-      input: InferOutput<TInputSchema>;
-      schemas: TSchemas;
-    }) => readonly (keyof TEventSchemas & string)[]);
-
 type AgentRequestConfig<
-  TEventSchemas extends Record<string, StandardSchemaV1>,
-  TSchemas extends AgentSchemaPack<any, TEventSchemas, any, any, any>,
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1 = StandardSchemaV1,
   TMetadata = Record<string, unknown>,
-> = Omit<
-  TextLogicConfig<TInputSchema, TOutputSchema, TMetadata>,
-  'agentEvents'
-> & {
+> = TextLogicConfig<TInputSchema, TOutputSchema, TMetadata> & {
   mode?: AgentRequestMode;
-  agentEvents?: AgentRequestEvents<TEventSchemas, TSchemas, TInputSchema>;
 };
 
 type AgentRequestSchemaMap = Record<
@@ -2417,22 +2313,17 @@ type AgentRequestSchemaMap = Record<
 
 type AgentRequestInput<
   TRequestSchemas extends AgentRequestSchemaMap,
-  TEventSchemas extends Record<string, StandardSchemaV1>,
-  TSchemas extends AgentSchemaPack<any, TEventSchemas, any, any, any>,
 > = {
   [K in keyof TRequestSchemas]: AgentRequestConfig<
-    TEventSchemas,
-    TSchemas,
     TRequestSchemas[K]['input'],
     TRequestSchemas[K]['output']
   > & {
     schemas: TRequestSchemas[K];
-    eventTypes?: never;
   };
 };
 
 type RequestActors<TRequestSchemas extends AgentRequestSchemaMap> = {
-  [K in keyof TRequestSchemas]: AgentRequestLogic<
+  [K in keyof TRequestSchemas]: TextLogic<
     TRequestSchemas[K]['input'],
     TRequestSchemas[K]['output']
   >;
@@ -2493,17 +2384,7 @@ type SetupAgentBaseConfig<
     >
 ) & {
   actors?: TActors;
-  requests?: AgentRequestInput<
-    TRequestSchemas,
-    TEventSchemas,
-    AgentSchemaPack<
-      TContextSchema,
-      TEventSchemas,
-      TInputSchema,
-      TOutputSchema,
-      TMetaSchema
-    >
-  >;
+  requests?: AgentRequestInput<TRequestSchemas>;
   actions?: NonNullable<AnySetupConfig['actions']>;
   guards?: NonNullable<AnySetupConfig['guards']>;
   delays?: NonNullable<AnySetupConfig['delays']>;
@@ -2670,7 +2551,6 @@ export interface AgentWorkflowRequestConfig {
   messages?: unknown;
   input: JsonSchemaObject;
   output: JsonSchemaObject;
-  agentEvents?: unknown;
   tools?: AgentTools;
   toolChoice?: AgentToolChoice | unknown;
   temperature?: unknown;
@@ -2760,9 +2640,7 @@ function createSchemasFromWorkflowConfig(
 function createRequestsFromWorkflowConfig(
   config: AgentWorkflowConfig
 ): AgentRequestInput<
-  Record<string, { input: StandardSchemaV1; output: StandardSchemaV1 }>,
-  Record<string, StandardSchemaV1>,
-  AgentSchemaPack<any, Record<string, StandardSchemaV1>, any, any, any>
+  Record<string, { input: StandardSchemaV1; output: StandardSchemaV1 }>
 > {
   return Object.fromEntries(
     Object.entries(config.requests ?? {}).map(([key, request]) => [
@@ -2792,14 +2670,6 @@ function createRequestsFromWorkflowConfig(
                 | undefined,
         tools: request.tools,
         toolChoice: request.toolChoice as AgentToolChoice | undefined,
-        agentEvents: request.agentEvents === undefined
-          ? undefined
-          : ({ input }) => {
-              const events = evaluateWorkflowConfigValue(request.agentEvents, { input });
-              return Array.isArray(events)
-                ? events.filter((event): event is string => typeof event === 'string')
-                : [];
-            },
         temperature: request.temperature === undefined
           ? undefined
           : ({ input }) =>
@@ -2834,9 +2704,7 @@ function createRequestsFromWorkflowConfig(
       },
     ])
   ) as AgentRequestInput<
-    Record<string, { input: StandardSchemaV1; output: StandardSchemaV1 }>,
-    Record<string, StandardSchemaV1>,
-    AgentSchemaPack<any, Record<string, StandardSchemaV1>, any, any, any>
+    Record<string, { input: StandardSchemaV1; output: StandardSchemaV1 }>
   >;
 }
 
@@ -3047,7 +2915,7 @@ function lowerWorkflowState(stateConfig: AgentWorkflowStateConfig): Record<strin
 function setupAgentFromConfig(config: AgentWorkflowConfig): AnyStateMachine {
   const schemas = createSchemasFromWorkflowConfig(config);
   const requests = createRequestsFromWorkflowConfig(config);
-  const requestActors = createRequestActors(schemas, requests);
+  const requestActors = createRequestActors(requests);
   const actors = createActorPlaceholdersFromWorkflowConfig(config);
   const agent = setupAgent({
     schemas,
@@ -3120,22 +2988,13 @@ export namespace setupAgent {
 }
 
 function createRequestActors<
-  TEventSchemas extends Record<string, StandardSchemaV1>,
-  TSchemas extends AgentSchemaPack<any, TEventSchemas, any, any, any>,
   TRequestSchemas extends AgentRequestSchemaMap,
->(schemas: TSchemas, requests: AgentRequestInput<TRequestSchemas, TEventSchemas, TSchemas>): RequestActors<TRequestSchemas> {
+>(requests: AgentRequestInput<TRequestSchemas>): RequestActors<TRequestSchemas> {
   return Object.fromEntries(
     Object.entries(requests).map(([key, request]) => {
       const logic = createTextLogic({
         ...request,
         mode: request.mode ?? 'generate',
-        agentEvents: request.agentEvents
-          ? ({ input }) => {
-              return typeof request.agentEvents === 'function'
-                ? request.agentEvents({ input, schemas })
-                : request.agentEvents;
-            }
-          : undefined,
       } as TextLogicConfig<StandardSchemaV1, StandardSchemaV1>);
 
       return [
@@ -3184,12 +3043,10 @@ function normalizeAgentSchemas<
 
 function normalizeAgentRequestInput<
   TRequestSchemas extends AgentRequestSchemaMap,
-  TEventSchemas extends Record<string, StandardSchemaV1>,
-  TSchemas extends AgentSchemaPack<any, TEventSchemas, any, any, any>,
 >(
-  requests: AgentRequestInput<TRequestSchemas, TEventSchemas, TSchemas> | undefined
-): AgentRequestInput<TRequestSchemas, TEventSchemas, TSchemas> {
-  return requests ?? ({} as AgentRequestInput<TRequestSchemas, TEventSchemas, TSchemas>);
+  requests: AgentRequestInput<TRequestSchemas> | undefined
+): AgentRequestInput<TRequestSchemas> {
+  return requests ?? ({} as AgentRequestInput<TRequestSchemas>);
 }
 
 function createAgentActorSources<
@@ -3289,15 +3146,8 @@ function createSetupAgent<
   TMetaSchema
 > {
   const schemas = normalizeAgentSchemas(config);
-  const requests = normalizeAgentRequestInput<
-    TRequestSchemas,
-    TEventSchemas,
-    typeof schemas
-  >(config.requests);
-  const requestActors = createRequestActors(
-    schemas,
-    requests
-  );
+  const requests = normalizeAgentRequestInput<TRequestSchemas>(config.requests);
+  const requestActors = createRequestActors(requests);
   const actorSources = createAgentActorSources(config.actors, requestActors);
   const setupConfig = createAgentSetupConfig<
       TContextSchema,

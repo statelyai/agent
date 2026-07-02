@@ -27,6 +27,12 @@ export {
   triageTicket,
 } from './triage/index.js';
 export {
+  chooseAction,
+  twentyQuestionsActors,
+  twentyQuestionsMachine,
+  twentyQuestionsSchemas,
+} from './twenty-questions/index.js';
+export {
   runLangGraphConditionalRoutingExample,
 } from './langgraph-conditional-routing/index.js';
 export {

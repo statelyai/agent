@@ -1,6 +1,6 @@
 # @statelyai/agent — Alpha P0 Design
 
-Status: **draft for review**. This specifies the exact type shapes and behavior for the P0 (foundational + breaking) work before any code lands. Annotate inline. Nothing here is built yet.
+Status: **implemented** (branch `p0-alpha`, 2026-07-02 — four commits: messages, decisions, runAgent, sweep + fixtures; 39 test files / 88 tests green). This document specified the exact type shapes and behavior before code landed; it is now the reference for what shipped. One naming refinement vs the spec: `RunAgentOptions.userInput` is typed via the named `AgentUserInputExecutor` alias (identical signature).
 
 Scope (P0 only):
 

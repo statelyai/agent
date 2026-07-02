@@ -21,9 +21,9 @@ import {
 import { z } from 'zod';
 import {
   setupAgent,
-  type AgentRequestLogic,
   type AgentTool,
   type AgentToolExecute,
+  type TextLogic,
   runAgent,
 } from '../../src/index.js';
 import { toAiSdkTools } from '../../src/ai-sdk/index.js';
@@ -33,7 +33,7 @@ const taskInputSchema = z.object({ task: z.string() });
 
 type SubAgentName = 'researcher' | 'writer';
 type SubAgents = Record<SubAgentName, Agent>;
-type SuperviseLogic = AgentRequestLogic<typeof taskInputSchema, typeof answerSchema>;
+type SuperviseLogic = TextLogic<typeof taskInputSchema, typeof answerSchema>;
 
 export function createAiSdkSubAgents(model: LanguageModel): SubAgents {
   return {

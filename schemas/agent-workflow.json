@@ -214,18 +214,6 @@
         "output": {
           "$ref": "#/$defs/JsonSchema"
         },
-        "agentEvents": {
-          "description": "Machine event types this request may expose as host/model tools.",
-          "anyOf": [
-            { "$ref": "#/$defs/ExpressionString" },
-            {
-              "type": "array",
-              "items": {
-                "$ref": "#/$defs/Identifier"
-              }
-            }
-          ]
-        },
         "tools": {
           "type": "object",
           "propertyNames": {

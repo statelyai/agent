@@ -1,6 +1,11 @@
 import { z } from 'zod';
 import { setup } from 'xstate';
-import { createAgentSchemas, createTextLogic } from '../../src/index.js';
+import {
+  createAgentSchemas,
+  createDecisionLogic,
+  createTextLogic,
+  sendDecision,
+} from '../../src/index.js';
 
 export const turnSummarySchema = z.object({
   summary: z.string(),
@@ -43,24 +48,23 @@ const lowHpMoveEvents = [
   'FLEE',
 ] satisfies GameEventType[];
 
-export const chooseMove = createTextLogic({
+export const chooseMove = createDecisionLogic({
   schemas: {
     input: z.object({
       playerHp: z.number(),
       enemyHp: z.number(),
     }),
-    output: z.string(),
   },
   model: 'openai/gpt-4.1-mini',
-  system: 'You are playing a turn-based game. Choose exactly one legal event tool.',
+  system: 'You are playing a turn-based game. Choose exactly one legal move.',
   prompt: ({ input }) =>
     [
       `Player HP: ${input.playerHp}`,
       `Enemy HP: ${input.enemyHp}`,
       'Pick the best legal move.',
     ].join('\n'),
-  agentEvents: ({ input }) =>
-    input.playerHp <= 6
+  allowedEvents: ({ input }) =>
+    (input as { playerHp: number }).playerHp <= 6
       ? lowHpMoveEvents
       : defaultMoveEvents,
 });
@@ -112,7 +116,8 @@ export const gameMachine = gameAgent.createMachine({
           playerHp: context.playerHp,
           enemyHp: context.enemyHp,
         }),
-        onDone: { target: 'summarizing' },
+        onDone: sendDecision(),
+        onError: { target: 'fumbled' },
       },
       on: {
         ATTACK: ({ context }) => ({
@@ -208,6 +213,8 @@ export const gameMachine = gameAgent.createMachine({
         enemyHp: context.enemyHp,
       }),
     },
+    // Reached when chooseMove exhausts its retries (DecisionExhaustedError).
+    fumbled: {},
   },
 });
 

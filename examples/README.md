@@ -17,6 +17,7 @@ These use normal XState `setup(...)` plus `createTextLogic(...)` from `@statelya
 
 - [`email-drafter/index.ts`](/Users/davidkpiano/Code/agent/examples/email-drafter/index.ts): typed email workflow with independently testable text logic
 - [`game-agent/index.ts`](/Users/davidkpiano/Code/agent/examples/game-agent/index.ts): turn-based game workflow with whitelisted event tools
+- [`twenty-questions/index.ts`](/Users/davidkpiano/Code/agent/examples/twenty-questions/index.ts): decision loop with guard-enforced legality and idle-first human-in-the-loop resume
 - [`joke/index.ts`](/Users/davidkpiano/Code/agent/examples/joke/index.ts): minimal streaming text workflow
 - [`triage/index.ts`](/Users/davidkpiano/Code/agent/examples/triage/index.ts): structured-output support ticket triage
 - [`langgraph-conditional-routing/index.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-conditional-routing/index.ts): LangGraph-style conditional edge

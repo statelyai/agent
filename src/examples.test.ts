@@ -14,10 +14,12 @@ import {
 } from '../examples/index.js';
 import {
   getAgentRequests,
+  resolveAgentStep,
+  resolveDecision,
+  transitionAgentStep,
   type AgentTextRequest,
-  transitionResult,
 } from './index.js';
-import { initialTransition, transition } from 'xstate';
+import { initialTransition } from 'xstate';
 
 describe('curated XState setup examples', () => {
   test('email drafter follows prompt, revise, send loop with normal XState runtime', async () => {
@@ -129,8 +131,8 @@ describe('curated XState setup examples', () => {
     });
   });
 
-  test('game workflow exposes only whitelisted moves as event tools', async () => {
-    let [snapshot, actions] = initialTransition(gameMachine, {
+  test('game workflow exposes only whitelisted moves as decision candidates', async () => {
+    const [snapshot, actions] = initialTransition(gameMachine, {
       playerHp: 20,
       enemyHp: 15,
     });
@@ -141,38 +143,41 @@ describe('curated XState setup examples', () => {
       actors: { chooseMove: chooseMoveLogic, summarizeTurn },
     });
 
-    expect(chooseMove?.events.map((event) => event.type)).toEqual([
+    if (chooseMove?.kind !== 'decision') {
+      throw new Error('Expected a decision request.');
+    }
+    expect(chooseMove.events.map((event) => event.type)).toEqual([
       'ATTACK',
       'DEFEND',
       'FLEE',
     ]);
 
-    if (chooseMove?.kind !== 'text') {
-      throw new Error('Expected a text request.');
-    }
-    const attackTool = chooseMove.tools.send_event_ATTACK!;
-    if (typeof attackTool === 'function') {
-      throw new Error('Expected event tool descriptor.');
-    }
-    const attackEvent = await attackTool.execute?.({ target: 'goblin' });
+    const attackEvent = await resolveDecision(chooseMove, async () => ({
+      event: { type: 'ATTACK', target: 'goblin' },
+    }));
 
-    [snapshot, actions] = transition(gameMachine, snapshot, attackEvent as never);
-    const [summarize] = getAgentRequests(actions, {
-      snapshot,
+    const attackStep = transitionAgentStep(gameMachine, snapshot, attackEvent as never, {
       schemas: gameSchemas,
       actors: { chooseMove: chooseMoveLogic, summarizeTurn },
     });
 
-    expect(summarize?.events).toEqual([]);
+    const [summarize] = attackStep.requests;
+    if (summarize?.kind !== 'text') {
+      throw new Error('Expected a text request.');
+    }
+    expect(summarize.events).toEqual([]);
 
-    [snapshot] = transitionResult(gameMachine, snapshot, summarize!, {
+    const finalStep = resolveAgentStep(gameMachine, attackStep, summarize, {
       summary: 'You strike the goblin.',
       playerHp: 20,
       enemyHp: 9,
+    }, {
+      schemas: gameSchemas,
+      actors: { chooseMove: chooseMoveLogic, summarizeTurn },
     });
 
-    expect(snapshot.status).toBe('done');
-    expect(snapshot.output).toEqual({
+    expect(finalStep.done).toBe(true);
+    expect(finalStep.snapshot.output).toEqual({
       outcome: 'continue',
       summary: 'You strike the goblin.',
       playerHp: 20,

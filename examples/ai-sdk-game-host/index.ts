@@ -6,12 +6,14 @@
  * Run:
  *   OPENAI_API_KEY=... node --import tsx examples/ai-sdk-game-host/index.ts
  */
-import { generateText, Output, stepCountIs, type LanguageModel } from 'ai';
+import { generateText, Output, stepCountIs, tool, type LanguageModel } from 'ai';
 import { openai } from '@ai-sdk/openai';
 import { z } from 'zod';
 import { toAiSdkTools } from '../../src/ai-sdk/index.js';
 import {
   initialAgentStep,
+  resolveDecision,
+  type AgentDecisionExecutor,
   type AgentRequest,
   type AgentTextRequest,
   type EventUnion,
@@ -25,6 +27,50 @@ type GameEvent = EventUnion<typeof gameSchemas.events>;
 function resolveModel(modelRef: string): LanguageModel {
   return openai(modelRef.replace(/^openai\//, ''));
 }
+
+// Adapter `decide` executor: forces a tool call, one tool per candidate
+// event, and reads the chosen event off the tool call. This is the
+// "tool-per-event + toolChoice: 'required'" recipe from docs/p0-design.md
+// §2.6 — how the model is coerced into choosing is adapter business, not
+// core's.
+const decide: AgentDecisionExecutor = async (request) => {
+  const model = resolveModel(request.model);
+  const tools = Object.fromEntries(
+    request.events.map((event) => [
+      event.toolName,
+      tool({
+        description: `Choose the '${event.type}' move.`,
+        inputSchema: (event.inputSchema as z.ZodType) ?? z.object({}),
+      }),
+    ]),
+  );
+
+  const result = await generateText({
+    model,
+    system: request.system,
+    prompt: request.prompt ?? '',
+    tools,
+    toolChoice: 'required',
+    stopWhen: stepCountIs(1),
+    temperature: request.temperature,
+  });
+
+  const toolCall = result.toolCalls[0];
+  if (!toolCall) {
+    throw new Error('Model did not call an event tool.');
+  }
+  const chosenEvent = request.events.find((event) => event.toolName === toolCall.toolName);
+  if (!chosenEvent) {
+    throw new Error(`Model called unknown tool '${toolCall.toolName}'.`);
+  }
+
+  return {
+    event: {
+      ...(toolCall.input && typeof toolCall.input === 'object' ? toolCall.input : {}),
+      type: chosenEvent.type,
+    },
+  };
+};
 
 async function runGenerateRequest(request: AgentRequest) {
   const input = request.input as AgentTextRequest;
@@ -101,8 +147,14 @@ export async function runAiSdkGameTurn(input = { playerHp: 20, enemyHp: 15 }) {
     if (!request) {
       throw new Error('Machine is waiting without an agent request.');
     }
-    if (request.kind !== 'text') {
-      throw new Error('Decision requests are not supported in this demo.');
+
+    if (request.kind === 'decision') {
+      const chosenEvent = await resolveDecision(request, decide);
+      step = transitionAgentStep(gameMachine, step, parseGameEvent(chosenEvent), {
+        schemas: gameSchemas,
+        actors: gameActors,
+      });
+      continue;
     }
 
     const result = await runGenerateRequest(request);

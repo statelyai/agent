@@ -12,10 +12,9 @@ import {
   createTextLogic,
   DecisionExhaustedError,
   executeAgentRequest,
-  getAvailableEvents,
+  getAcceptedEvents,
   getAgentOutputMode,
   getAgentRequests,
-  getEventTools,
   getMachineAgentRequests,
   initialAgentStep,
   isStructuredOutputSchema,
@@ -35,7 +34,6 @@ import {
   type AgentStepRequest,
   type AgentTextRequest,
   type AgentTools,
-  type AgentEventDescriptor,
   type ChosenEvent,
   type DecisionAttempt,
 } from './index.js';
@@ -74,13 +72,6 @@ describe('setupAgent', () => {
           },
           model: 'test-model',
           prompt: ({ input }) => input.prompt,
-          agentEvents: ({ input, schemas }) => {
-            const prompt: string = input.prompt;
-            schemas.events.READY_TO_DRAFT;
-            // @ts-expect-error request agentEvents input is typed from schemas.input
-            input.body;
-            return prompt.length > 0 ? ['READY_TO_DRAFT'] : [];
-          },
         },
         streamRevision: {
           mode: 'stream',
@@ -106,54 +97,6 @@ describe('setupAgent', () => {
           },
           model: 'test-model',
           prompt: ({ input }) => input.prompt,
-        },
-      },
-    });
-
-    setupAgent({
-      schemas,
-      requests: {
-        badEvent: {
-          schemas: {
-            input: z.object({ prompt: z.string() }),
-            output: z.object({ body: z.string() }),
-          },
-          model: 'test-model',
-          prompt: ({ input }) => input.prompt,
-          // @ts-expect-error agentEvents are keyed by machine event schemas
-          agentEvents: ['DRAT_EMAIL_TYPO'],
-        },
-      },
-    });
-
-    setupAgent({
-      schemas,
-      requests: {
-        legacyEvents: {
-          schemas: {
-            input: z.object({ prompt: z.string() }),
-            output: z.object({ body: z.string() }),
-          },
-          model: 'test-model',
-          prompt: ({ input }) => input.prompt,
-          // @ts-expect-error use agentEvents for request-level machine event tools
-          events: ['READY_TO_DRAFT'],
-        },
-      },
-    });
-
-    setupAgent({
-      schemas,
-      requests: {
-        badEventTypes: {
-          schemas: {
-            input: z.object({ prompt: z.string() }),
-            output: z.object({ body: z.string() }),
-          },
-          model: 'test-model',
-          prompt: ({ input }) => input.prompt,
-          // @ts-expect-error use request events, not raw text logic eventTypes
-          eventTypes: ['READY_TO_DRAFT'],
         },
       },
     });
@@ -218,14 +161,13 @@ describe('setupAgent', () => {
       expect.objectContaining({
         model: 'test-model',
         prompt: 'Draft it.',
-        eventTypes: ['READY_TO_DRAFT'],
       }),
     );
 
     expect(request).toEqual(
       expect.objectContaining({
         mode: 'generate',
-        input: expect.objectContaining({ eventTypes: ['READY_TO_DRAFT'] }),
+        input: expect.objectContaining({ prompt: 'Draft it.' }),
       }),
     );
 
@@ -237,7 +179,6 @@ describe('setupAgent', () => {
         {
           generateText: async (request) => {
             expect(request.prompt).toBe('Draft it.');
-            expect(request.eventTypes).toEqual(['READY_TO_DRAFT']);
             return { output: { body: 'Standalone body.' } };
           },
         },
@@ -466,6 +407,54 @@ describe('setupAgent', () => {
     expect(step.snapshot.output).toEqual({
       answer: 'Answered Why machines?',
       streamed: 'Streamed Expand Answered Why machines?',
+    });
+  });
+
+  test('executeAgentRequest returns the normalized value by default and { output, raw } when verbose', async () => {
+    const schemas = createAgentSchemas({
+      context: z.object({ prompt: z.string(), answer: z.string().nullable() }),
+      input: z.object({ prompt: z.string() }),
+      output: z.object({ answer: z.string() }),
+    });
+    const answerSchema = z.object({ answer: z.string() });
+    const agent = setupAgent({ schemas });
+    const machine = agent.createMachine({
+      context: ({ input }) => ({ prompt: input.prompt, answer: null }),
+      initial: 'answering',
+      states: {
+        answering: {
+          invoke: {
+            id: 'answer',
+            src: 'agent.generateText',
+            input: ({ context }) => ({
+              model: 'test-model',
+              prompt: context.prompt,
+              outputSchema: answerSchema,
+            }),
+            onDone: { target: 'done' },
+          },
+        },
+        done: { type: 'final' },
+      },
+    });
+
+    const step = initialAgentStep(machine, { prompt: 'Why machines?' });
+    const request = asTextRequest(step.requests[0]);
+    const rawResult = { object: { answer: 'Because state.' } };
+
+    const defaultResult = await executeAgentRequest(request, {
+      generateText: async () => rawResult,
+    });
+    expect(defaultResult).toEqual({ answer: 'Because state.' });
+
+    const verboseResult = await executeAgentRequest(
+      request,
+      { generateText: async () => rawResult },
+      { verbose: true },
+    );
+    expect(verboseResult).toEqual({
+      output: { answer: 'Because state.' },
+      raw: rawResult,
     });
   });
 
@@ -1286,7 +1275,16 @@ describe('setupAgent', () => {
     expect(isStructuredOutputSchema(stringSchema)).toBe(false);
   });
 
-  test('agent requests expose only selected state events as tools', async () => {
+  test('decision requests expose only allowed events as candidates', async () => {
+    const chooseMove = createDecisionLogic({
+      schemas: {
+        input: z.object({ prompt: z.string() }),
+      },
+      model: 'test-model',
+      prompt: ({ input }) => input.prompt,
+      allowedEvents: ['ATTACK', 'DEFEND'],
+    });
+
     const agent = setupAgent({
       context: z.object({ prompt: z.string() }),
       input: z.object({ prompt: z.string() }),
@@ -1295,17 +1293,7 @@ describe('setupAgent', () => {
         DEFEND: z.object({}),
         PAUSE: z.object({}),
       },
-      requests: {
-        chooseMove: {
-          schemas: {
-            input: z.object({ prompt: z.string() }),
-            output: z.string(),
-          },
-          model: 'test-model',
-          prompt: ({ input }) => input.prompt,
-          agentEvents: ['ATTACK', 'DEFEND'],
-        },
-      },
+      actors: { chooseMove },
     });
 
     const machine = agent.createMachine({
@@ -1318,7 +1306,8 @@ describe('setupAgent', () => {
             id: 'chooseMove',
             src: 'chooseMove',
             input: ({ context }) => ({ prompt: context.prompt }),
-            onDone: { target: 'done' },
+            onDone: sendDecision(),
+            onError: { target: 'fumbled' },
           },
           on: {
             ATTACK: { target: 'done' },
@@ -1327,6 +1316,7 @@ describe('setupAgent', () => {
           },
         },
         paused: {},
+        fumbled: {},
         done: { type: 'final' },
       },
     });
@@ -1342,7 +1332,7 @@ describe('setupAgent', () => {
     expect(attackStep.done).toBe(true);
 
     expect(
-      getAvailableEvents(snapshot, {
+      getAcceptedEvents(snapshot, {
         schemas: agent.schemas,
         eventTypes: ['ATTACK', 'DEFEND', 'HEAL'],
       }),
@@ -1352,7 +1342,7 @@ describe('setupAgent', () => {
     ]);
 
     expect(
-      getAvailableEvents(snapshot, {
+      getAcceptedEvents(snapshot, {
         schemas: agent.schemas,
         eventTypes: ['ATTACK'],
         eventToolName: ({ eventType }) => `machine_${eventType.toLowerCase()}`,
@@ -1361,49 +1351,35 @@ describe('setupAgent', () => {
       expect.objectContaining({ type: 'ATTACK', toolName: 'machine_attack' }),
     ]);
 
-    const request = asTextRequest(getMachineAgentRequests(machine, actions, snapshot)[0]);
-    const customNamedRequest = asTextRequest(
-      getMachineAgentRequests(machine, actions, snapshot, {
-        eventToolName: ({ eventType }: { eventType: string }) =>
-          `machine_${eventType.toLowerCase()}`,
-      })[0],
-    );
+    const request = getMachineAgentRequests(machine, actions, snapshot)[0];
+    if (request?.kind !== 'decision') {
+      throw new Error('Expected a decision request.');
+    }
+    const customNamedRequest = getMachineAgentRequests(machine, actions, snapshot, {
+      eventToolName: ({ eventType }: { eventType: string }) =>
+        `machine_${eventType.toLowerCase()}`,
+    })[0];
+    if (customNamedRequest?.kind !== 'decision') {
+      throw new Error('Expected a decision request.');
+    }
 
-    expect(
-      request.events.map((event: AgentEventDescriptor) => event.type),
-    ).toEqual([
+    expect(request.events.map((event) => event.type)).toEqual([
       'ATTACK',
       'DEFEND',
     ]);
-    expect(Object.keys(request.tools)).toEqual([
+    expect(request.events.map((event) => event.toolName)).toEqual([
       'send_event_ATTACK',
       'send_event_DEFEND',
     ]);
-    expect(Object.keys(customNamedRequest.tools)).toEqual([
+    expect(customNamedRequest.events.map((event) => event.toolName)).toEqual([
       'machine_attack',
       'machine_defend',
     ]);
 
-    const attackTool = request.tools['send_event_ATTACK']!;
-    if (typeof attackTool === 'function') {
-      throw new Error('Expected event tool descriptor.');
-    }
-    expect(attackTool.description).toBe(
-      "Send the 'ATTACK' event. Available from the current state."
-    );
-    await expect(attackTool.execute?.({ target: 'orc' })).resolves.toEqual({
-      type: 'ATTACK',
-      target: 'orc',
-    });
-
-    expect(
-      Object.keys(
-        getEventTools(snapshot, {
-          schemas: agent.schemas,
-          eventTypes: ['ATTACK', 'DEFEND', 'HEAL'],
-        }),
-      ),
-    ).toEqual(['send_event_ATTACK', 'send_event_DEFEND']);
+    const chosenEvent = await resolveDecision(request, async () => ({
+      event: { type: 'ATTACK', target: 'orc' },
+    }));
+    expect(chosenEvent).toEqual({ type: 'ATTACK', target: 'orc' });
   });
 
   test('fromConfig lowers static request workflows to agent machine steps', async () => {

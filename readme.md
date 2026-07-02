@@ -104,7 +104,7 @@ await answerQuestion.execute({ prompt: 'Why XState?' }, { generateText });
 
 This is normal XState. Use `runAgent(...)` for request-driven local execution; use `initialAgentStep(...)`, `transitionAgentStep(...)`, `resolveAgentStep(...)`, and `executeAgentRequest(...)` for custom host loops; drop down to pure `initialTransition(...)` / `transitionResult(...)`; or use `createActor(...)`, snapshots, persistence, guards, actions, and host-provided actor sources. Stately Agent adds schema bundles, reusable text actors, message helpers, and request extraction.
 
-When a request declares `agentEvents`, `getAgentRequests(...)` returns `send_event_<TYPE>` tools for those events only if they are currently legal from the snapshot. That lets a model choose legal machine events, such as moves in a game, without exposing every transition.
+Use `createDecisionLogic(...)` to let a model choose exactly one legal machine event, such as a move in a game, without exposing every transition. `allowedEvents` narrows the candidates; `getAgentRequests(...)` intersects them with the events currently legal from the snapshot (via `getAcceptedEvents(...)`) and returns the surviving candidates on the decision request's `events` field.
 
 ## Static Workflow Definitions
 
