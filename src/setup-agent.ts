@@ -1388,6 +1388,7 @@ export type AgentRequestExecutorResult =
  */
 export interface AgentRequestExecutorInfo {
   onChunk?: (chunk: string) => void;
+  signal?: AbortSignal;
 }
 
 export type AgentRequestExecutor<TResult = AgentRequestExecutorResult> = (
@@ -1661,7 +1662,7 @@ function wrapTextLogicForRunAgent(
   logic: TextLogic,
   runCtx: RunAgentBindContext
 ): TextLogic {
-  return logic.withExecutor(async ({ request, self }) => {
+  return logic.withExecutor(async ({ request, self, signal }) => {
     const { id, src } = selfIdAndSrc(self);
     const executor = logic.mode === 'stream' ? runCtx.streamText : runCtx.generateText;
     if (!executor) {
@@ -1690,6 +1691,7 @@ function wrapTextLogicForRunAgent(
       onChunk: runCtx.onChunk
         ? (chunk: string) => runCtx.onChunk!(chunk, { request: agentRequest })
         : undefined,
+      signal,
     });
     const output = await normalizeGeneratorResult(raw);
 

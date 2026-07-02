@@ -8,14 +8,7 @@
  *
  * Run: OPENAI_API_KEY=... node --import tsx examples/ai-sdk-host/index.ts
  */
-import {
-  generateText as aiGenerateText,
-  Output,
-  streamText as aiStreamText,
-  type FlexibleSchema,
-  type LanguageModel,
-  type ModelMessage,
-} from 'ai';
+import { type LanguageModel } from 'ai';
 import { openai } from '@ai-sdk/openai';
 import {
   createActor,
@@ -24,17 +17,16 @@ import {
 } from 'xstate';
 import {
   initialAgentStep,
-  isStructuredOutputSchema,
   resolveAgentStep,
   runAgent,
+  validateSchemaSync,
   type AgentTextRequest,
   type AgentTools,
   type StandardSchemaV1,
   type TextLogic,
   type TextLogicOutput,
-  validateSchemaSync,
 } from '../../src/index.js';
-import { toAiSdkTools } from '../../src/ai-sdk/index.js';
+import { createAiSdkExecutors } from '../../src/ai-sdk/index.js';
 import { jokeActors, jokeMachine, tellJoke } from '../joke/index.js';
 import { triageActors, triageMachine, triageSchemas, triageTicket } from '../triage/index.js';
 
@@ -45,17 +37,8 @@ interface AiSdkTextHostOptions {
   onChunk?: (chunk: string) => void;
 }
 
-function resolveAiSdkModel(
-  modelRef: string,
-  options: AiSdkTextHostOptions
-): LanguageModel {
-  return options.resolveModel
-    ? options.resolveModel(modelRef)
-    : openai(modelRef.replace(/^openai\//, ''));
-}
-
-function toModelMessages(input: AgentTextRequest): ModelMessage[] | undefined {
-  return input.messages as ModelMessage[] | undefined;
+function defaultResolveModel(modelRef: string): LanguageModel {
+  return openai(modelRef.replace(/^openai\//, ''));
 }
 
 async function generateWithAiSdk(
@@ -64,38 +47,14 @@ async function generateWithAiSdk(
   options: AiSdkTextHostOptions = {},
   signal?: AbortSignal
 ) {
-  const model = resolveAiSdkModel(input.model, options);
-  const messages = toModelMessages(input);
-  const common = {
-    model,
-    system: input.system,
-    ...(messages ? { messages } : { prompt: input.prompt ?? '' }),
-    abortSignal: signal,
-    temperature: input.temperature,
-    maxOutputTokens: input.maxTokens,
-    topP: input.topP,
-    seed: input.seed,
-    stopSequences: input.stopSequences,
-    tools: tools ? toAiSdkTools(tools) : undefined,
-    toolChoice: typeof input.toolChoice === 'object'
-      ? { type: 'tool' as const, toolName: input.toolChoice.name }
-      : input.toolChoice,
-  };
-
-  if (isStructuredOutputSchema(input.outputSchema)) {
-    const { output } = await aiGenerateText({
-      ...common,
-      output: Output.object({
-        schema: input.outputSchema as FlexibleSchema<unknown>,
-      }),
-    });
-    return output;
-  }
-
-  const { text } = await aiGenerateText(common);
-  return input.outputSchema
-    ? validateSchemaSync(input.outputSchema, text)
-    : text;
+  const { generateText } = createAiSdkExecutors({
+    resolveModel: options.resolveModel ?? defaultResolveModel,
+  });
+  const raw = await generateText({ ...input, tools: tools ?? {} }, { signal });
+  const output = 'output' in raw ? raw.output : raw.text;
+  return input.outputSchema && typeof output === 'string'
+    ? validateSchemaSync(input.outputSchema, output)
+    : output;
 }
 
 async function streamWithAiSdk(
@@ -103,26 +62,14 @@ async function streamWithAiSdk(
   options: AiSdkTextHostOptions = {},
   signal?: AbortSignal
 ) {
-  const model = resolveAiSdkModel(input.model, options);
-  const messages = toModelMessages(input);
-
-  const result = aiStreamText({
-    model,
-    system: input.system,
-    ...(messages ? { messages } : { prompt: input.prompt ?? '' }),
-    abortSignal: signal,
-    temperature: input.temperature,
-    maxOutputTokens: input.maxTokens,
-    topP: input.topP,
-    seed: input.seed,
-    stopSequences: input.stopSequences,
+  const { streamText } = createAiSdkExecutors({
+    resolveModel: options.resolveModel ?? defaultResolveModel,
   });
-
-  for await (const chunk of result.textStream) {
-    options.onChunk?.(chunk);
-  }
-
-  return await result.text;
+  const { text } = await streamText(
+    { ...input, tools: input.tools ?? {} },
+    { onChunk: options.onChunk, signal }
+  );
+  return text;
 }
 
 export function createAiSdkTextActor<
