@@ -10,7 +10,6 @@ import {
   type EventObject,
 } from 'xstate';
 import {
-  type AgentRequest,
   assistantMessage,
   createAgentSchemas,
   executeAgentRequest,
@@ -114,7 +113,7 @@ export async function runDinavinterParallelAgentExample() {
   });
 
   assert.deepEqual(
-    requests.map((request: AgentRequest) => [request.id, request.mode]),
+    requests.map((request) => [request.id, request.kind === 'text' ? request.mode : undefined]),
     [
       ['think', 'stream'],
       ['findDoodle', 'generate'],
@@ -122,6 +121,9 @@ export async function runDinavinterParallelAgentExample() {
   );
 
   for (const request of requests) {
+    if (request.kind !== 'text') {
+      throw new Error('Decision requests are not supported in this demo.');
+    }
     const output = await executeAgentRequest(request, {
       generateText: async () => ({ output: { query: 'statechart sketch' } }),
       streamText: async () => ({ text: 'State machines make flow visible.' }),

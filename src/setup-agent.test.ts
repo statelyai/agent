@@ -8,7 +8,9 @@ import {
 } from 'xstate';
 import {
   createAgentSchemas,
+  createDecisionLogic,
   createTextLogic,
+  DecisionExhaustedError,
   executeAgentRequest,
   getAvailableEvents,
   getAgentOutputMode,
@@ -20,16 +22,31 @@ import {
   messagesSchema,
   parseOutput,
   resolveAgentStep,
+  resolveDecision,
   runAgent,
+  sendDecision,
   setupAgent,
   toolMessage,
   transitionAgentStep,
   transitionResult,
   userMessage,
+  type AgentDecisionRequest,
+  type AgentRequest,
+  type AgentStepRequest,
   type AgentTextRequest,
   type AgentTools,
   type AgentEventDescriptor,
+  type ChosenEvent,
+  type DecisionAttempt,
 } from './index.js';
+
+/** Narrows an `AgentStepRequest` to a text request; fails the test otherwise. */
+function asTextRequest(request: AgentStepRequest | undefined): AgentRequest {
+  if (request?.kind !== 'text') {
+    throw new Error('Expected a text request.');
+  }
+  return request;
+}
 
 describe('setupAgent', () => {
   test('setupAgent accepts schema-bound request configs', async () => {
@@ -277,7 +294,7 @@ describe('setupAgent', () => {
     const [generateTask] = getMachineAgentRequests(generateMachine, generateActions);
 
     await expect(
-      executeAgentRequest(generateTask!, {
+      executeAgentRequest(asTextRequest(generateTask), {
         generateText: async (
           request: AgentTextRequest & { tools: AgentTools },
         ) => {
@@ -313,7 +330,7 @@ describe('setupAgent', () => {
     const [streamTask] = getMachineAgentRequests(streamMachine, streamActions);
 
     await expect(
-      executeAgentRequest(streamTask!, {
+      executeAgentRequest(asTextRequest(streamTask), {
         generateText: async () => {
           throw new Error('streamText should be used for stream requests');
         },
@@ -411,7 +428,7 @@ describe('setupAgent', () => {
       }),
     ]);
 
-    const answer = await executeAgentRequest(step.requests[0]!, {
+    const answer = await executeAgentRequest(asTextRequest(step.requests[0]), {
       generateText: async (
         request: AgentTextRequest & { tools: AgentTools },
       ) => {
@@ -433,7 +450,7 @@ describe('setupAgent', () => {
       }),
     ]);
 
-    const streamed = await executeAgentRequest(step.requests[0]!, {
+    const streamed = await executeAgentRequest(asTextRequest(step.requests[0]), {
       generateText: async () => {
         throw new Error('generateText should not be used for stream requests');
       },
@@ -521,7 +538,7 @@ describe('setupAgent', () => {
     const step = initialAgentStep(machine, { prompt: 'hello' });
 
     await expect(
-      executeAgentRequest(step.requests[0]!, {
+      executeAgentRequest(asTextRequest(step.requests[0]), {
         generateText: () => ({ answer: 123 }),
       }),
     ).rejects.toThrow('expected string');
@@ -799,6 +816,7 @@ describe('setupAgent', () => {
     });
 
     expect(request).toEqual({
+      kind: 'text',
       id: 'getSummary',
       src: 'getSummary',
       mode: 'generate',
@@ -872,7 +890,7 @@ describe('setupAgent', () => {
       }),
     );
     await expect(
-      executeAgentRequest(step.requests[0]!, {
+      executeAgentRequest(asTextRequest(step.requests[0]), {
         generateText: async () => {
           throw new Error('generateText should not be used');
         },
@@ -1194,6 +1212,7 @@ describe('setupAgent', () => {
     const [request] = getMachineAgentRequests(machine, actions);
 
     expect(request).toEqual({
+      kind: 'text',
       id: 'answer',
       src: 'answerQuestion',
       mode: 'generate',
@@ -1229,7 +1248,7 @@ describe('setupAgent', () => {
       }),
     );
 
-    const output = await executeAgentRequest(step.requests[0]!, {
+    const output = await executeAgentRequest(asTextRequest(step.requests[0]), {
       generateText: (request: AgentTextRequest & { tools: AgentTools }) => ({
         object: {
           answer: `Answered: ${request.prompt}`,
@@ -1339,28 +1358,30 @@ describe('setupAgent', () => {
       expect.objectContaining({ type: 'ATTACK', toolName: 'machine_attack' }),
     ]);
 
-    const [request] = getMachineAgentRequests(machine, actions, snapshot);
-    const [customNamedRequest] = getMachineAgentRequests(machine, actions, snapshot, {
-      eventToolName: ({ eventType }: { eventType: string }) =>
-        `machine_${eventType.toLowerCase()}`,
-    });
+    const request = asTextRequest(getMachineAgentRequests(machine, actions, snapshot)[0]);
+    const customNamedRequest = asTextRequest(
+      getMachineAgentRequests(machine, actions, snapshot, {
+        eventToolName: ({ eventType }: { eventType: string }) =>
+          `machine_${eventType.toLowerCase()}`,
+      })[0],
+    );
 
     expect(
-      request!.events.map((event: AgentEventDescriptor) => event.type),
+      request.events.map((event: AgentEventDescriptor) => event.type),
     ).toEqual([
       'ATTACK',
       'DEFEND',
     ]);
-    expect(Object.keys(request!.tools)).toEqual([
+    expect(Object.keys(request.tools)).toEqual([
       'send_event_ATTACK',
       'send_event_DEFEND',
     ]);
-    expect(Object.keys(customNamedRequest!.tools)).toEqual([
+    expect(Object.keys(customNamedRequest.tools)).toEqual([
       'machine_attack',
       'machine_defend',
     ]);
 
-    const attackTool = request!.tools['send_event_ATTACK']!;
+    const attackTool = request.tools['send_event_ATTACK']!;
     if (typeof attackTool === 'function') {
       throw new Error('Expected event tool descriptor.');
     }
@@ -1470,18 +1491,18 @@ describe('setupAgent', () => {
         }),
       }),
     ]);
-    expect(step.requests[0]!.input.outputSchema?.['~standard'].jsonSchema?.input?.())
+    expect(asTextRequest(step.requests[0]).input.outputSchema?.['~standard'].jsonSchema?.input?.())
       .toEqual(expect.objectContaining({ type: 'object' }));
 
     await expect(
-      executeAgentRequest(step.requests[0]!, {
+      executeAgentRequest(asTextRequest(step.requests[0]), {
         generateText: async () => ({
           output: { answer: 42 },
         }),
       })
     ).rejects.toThrow();
 
-    const output = await executeAgentRequest(step.requests[0]!, {
+    const output = await executeAgentRequest(asTextRequest(step.requests[0]), {
       generateText: async () => ({
         output: { answer: 'Because logic matters.' },
       }),
@@ -1610,5 +1631,319 @@ describe('setupAgent', () => {
     await waitFor(actor, (snapshot) => snapshot.status === 'done');
 
     expect(actor.getSnapshot().output).toEqual({ draft: 'Hello Ada.' });
+  });
+});
+
+describe('resolveDecision', () => {
+  function makeRequest(
+    overrides: Partial<AgentDecisionRequest> = {},
+  ): AgentDecisionRequest {
+    return {
+      kind: 'decision',
+      id: 'decide',
+      model: 'test-model',
+      prompt: 'Choose a move.',
+      events: [
+        { type: 'ATTACK', toolName: 'send_event_ATTACK', inputSchema: z.object({ target: z.string() }) },
+        { type: 'DEFEND', toolName: 'send_event_DEFEND' },
+      ],
+      attempts: [],
+      ...overrides,
+    };
+  }
+
+  test('resolves on the first attempt', async () => {
+    const request = makeRequest();
+    const event = await resolveDecision(request, async () => ({
+      event: { type: 'ATTACK', target: 'goblin' },
+    }));
+
+    expect(event).toEqual({ type: 'ATTACK', target: 'goblin' });
+  });
+
+  test('retries after an unknown-event failure and reports prior attempts', async () => {
+    const request = makeRequest();
+    const calls: AgentDecisionRequest[] = [];
+
+    const event = await resolveDecision(
+      request,
+      async (req) => {
+        calls.push(req);
+        return calls.length === 1
+          ? { event: { type: 'HEAL' } }
+          : { event: { type: 'DEFEND' } };
+      },
+    );
+
+    expect(event).toEqual({ type: 'DEFEND' });
+    expect(calls).toHaveLength(2);
+    expect(calls[0]!.attempts).toEqual([]);
+    expect(calls[1]!.attempts).toHaveLength(1);
+    expect(calls[1]!.attempts[0]).toEqual(
+      expect.objectContaining({
+        event: { type: 'HEAL' },
+        failure: 'unknown-event',
+      }),
+    );
+  });
+
+  test('fails with invalid-payload when the event payload fails its inputSchema', async () => {
+    const request = makeRequest();
+
+    await expect(
+      resolveDecision(
+        request,
+        async () => ({ event: { type: 'ATTACK' } }), // missing required `target`
+        { maxRetries: 0 },
+      ),
+    ).rejects.toThrow(DecisionExhaustedError);
+
+    try {
+      await resolveDecision(
+        request,
+        async () => ({ event: { type: 'ATTACK' } }),
+        { maxRetries: 0 },
+      );
+      expect.fail('expected DecisionExhaustedError');
+    } catch (error) {
+      expect(error).toBeInstanceOf(DecisionExhaustedError);
+      const attempts = (error as DecisionExhaustedError).attempts;
+      expect(attempts).toHaveLength(1);
+      expect(attempts[0]!.failure).toBe('invalid-payload');
+    }
+  });
+
+  test('fails with rejected-by-guard when canTake rejects the event', async () => {
+    const request = makeRequest();
+
+    try {
+      await resolveDecision(
+        request,
+        async () => ({ event: { type: 'DEFEND' } }),
+        { maxRetries: 0, canTake: () => false },
+      );
+      expect.fail('expected DecisionExhaustedError');
+    } catch (error) {
+      expect(error).toBeInstanceOf(DecisionExhaustedError);
+      const attempts = (error as DecisionExhaustedError).attempts;
+      expect(attempts).toHaveLength(1);
+      expect(attempts[0]).toEqual(
+        expect.objectContaining({
+          event: { type: 'DEFEND' },
+          failure: 'rejected-by-guard',
+        }),
+      );
+    }
+  });
+
+  test('throws DecisionExhaustedError with the full attempts array once the budget is exhausted', async () => {
+    const request = makeRequest();
+
+    try {
+      await resolveDecision(
+        request,
+        async () => ({ event: { type: 'UNKNOWN' } }),
+        { maxRetries: 2 },
+      );
+      expect.fail('expected DecisionExhaustedError');
+    } catch (error) {
+      expect(error).toBeInstanceOf(DecisionExhaustedError);
+      const attempts: DecisionAttempt[] = (error as DecisionExhaustedError).attempts;
+      expect(attempts).toHaveLength(3);
+      expect(attempts.every((attempt) => attempt.failure === 'unknown-event')).toBe(true);
+    }
+  });
+});
+
+describe('decision step discovery', () => {
+  const attackSchema = z.object({ target: z.string() });
+  const defendSchema = z.object({});
+
+  const decisionSchemas = createAgentSchemas({
+    context: z.object({}),
+    input: z.object({}),
+    events: {
+      ATTACK: attackSchema,
+      DEFEND: defendSchema,
+    },
+  });
+
+  function buildMachine() {
+    const chooseMove = createDecisionLogic({
+      model: 'test-model',
+      prompt: 'Choose a move.',
+      allowedEvents: ['ATTACK', 'DEFEND'] as const,
+    });
+    const agent = setupAgent({ schemas: decisionSchemas, actors: { chooseMove } });
+
+    const machine = agent.createMachine({
+      context: {},
+      initial: 'choosingMove',
+      states: {
+        choosingMove: {
+          invoke: {
+            id: 'choosingMove',
+            src: 'chooseMove',
+            input: {},
+            onDone: sendDecision(),
+            onError: { target: 'fumbled' },
+          },
+          on: {
+            ATTACK: { target: 'attacked' },
+            DEFEND: { target: 'defended' },
+          },
+        },
+        attacked: {},
+        defended: {},
+        fumbled: {},
+      },
+    });
+
+    return { agent, machine, chooseMove };
+  }
+
+  test('emits an AgentDecisionRequest with machine event schemas intersected in', () => {
+    const { machine } = buildMachine();
+    const step = initialAgentStep(machine, {}, { schemas: decisionSchemas });
+
+    expect(step.requests).toHaveLength(1);
+    const [request] = step.requests;
+    expect(request!.kind).toBe('decision');
+
+    const decisionRequest = request as AgentDecisionRequest;
+    expect(decisionRequest.id).toBe('choosingMove');
+    expect(decisionRequest.attempts).toEqual([]);
+    expect(decisionRequest.events.map((event) => event.type).sort()).toEqual([
+      'ATTACK',
+      'DEFEND',
+    ]);
+    const attackEvent = decisionRequest.events.find((event) => event.type === 'ATTACK');
+    expect(attackEvent?.inputSchema).toBe(attackSchema);
+  });
+
+  test('omitted allowedEvents offers every snapshot-legal event', () => {
+    const chooseMove = createDecisionLogic({ model: 'test-model' });
+    const agent = setupAgent({ schemas: decisionSchemas, actors: { chooseMove } });
+    const machine = agent.createMachine({
+      context: {},
+      initial: 'choosingMove',
+      states: {
+        choosingMove: {
+          invoke: {
+            id: 'choosingMove',
+            src: 'chooseMove',
+            input: {},
+            onDone: sendDecision(),
+          },
+          on: {
+            ATTACK: { target: 'attacked' },
+            DEFEND: { target: 'defended' },
+          },
+        },
+        attacked: {},
+        defended: {},
+      },
+    });
+
+    const step = initialAgentStep(machine, {}, { schemas: decisionSchemas });
+    const decisionRequest = step.requests[0] as AgentDecisionRequest;
+    expect(decisionRequest.events.map((event) => event.type).sort()).toEqual([
+      'ATTACK',
+      'DEFEND',
+    ]);
+  });
+});
+
+describe('decision live path (createActor)', () => {
+  const attackSchema = z.object({ target: z.string() });
+
+  const decisionSchemas = createAgentSchemas({
+    context: z.object({}),
+    input: z.object({}),
+    events: {
+      ATTACK: attackSchema,
+      DEFEND: z.object({}),
+    },
+  });
+
+  function buildMachine() {
+    const chooseMove = createDecisionLogic({
+      model: 'test-model',
+      allowedEvents: ['ATTACK', 'DEFEND'] as const,
+    });
+    const agent = setupAgent({ schemas: decisionSchemas, actors: { chooseMove } });
+
+    const machine = agent.createMachine({
+      context: {},
+      initial: 'choosingMove',
+      states: {
+        choosingMove: {
+          invoke: {
+            id: 'choosingMove',
+            src: 'chooseMove',
+            input: {},
+            onDone: sendDecision(),
+            onError: { target: 'fumbled' },
+          },
+          on: {
+            ATTACK: { target: 'done-state' },
+            DEFEND: { target: 'defended' },
+          },
+        },
+        'done-state': { type: 'final' },
+        defended: {},
+        fumbled: {},
+      },
+    });
+
+    return { agent, machine, chooseMove };
+  }
+
+  test('delivers the chosen event via sendTo(self) and passes modes 1-2 validation', async () => {
+    const { machine, chooseMove } = buildMachine();
+
+    const actor = createActor(
+      machine.provide({
+        actorSources: {
+          chooseMove: chooseMove.withExecutor(async (): Promise<{ event: ChosenEvent }> => ({
+            event: { type: 'ATTACK', target: 'goblin' },
+          })),
+        },
+      }),
+      { input: {} },
+    ).start();
+
+    await waitFor(actor, (snapshot) => snapshot.status === 'done');
+
+    expect(actor.getSnapshot().value).toBe('done-state');
+  });
+
+  test('surfaces a DecisionExhaustedError via onError when the executor returns a disallowed event', async () => {
+    const { machine, chooseMove } = buildMachine();
+
+    const actor = createActor(
+      machine.provide({
+        actorSources: {
+          chooseMove: chooseMove.withExecutor(async (): Promise<{ event: ChosenEvent }> => ({
+            event: { type: 'FLEE' },
+          })),
+        },
+        states: {
+          choosingMove: {
+            onError: {
+              target: 'fumbled',
+              actions: ({ event }: { event: { error: unknown } }) => {
+                expect(event.error).toBeInstanceOf(DecisionExhaustedError);
+              },
+            },
+          },
+        },
+      } as never),
+      { input: {} },
+    ).start();
+
+    await waitFor(actor, (snapshot) => snapshot.matches('fumbled'));
+
+    expect(actor.getSnapshot().value).toBe('fumbled');
   });
 });

@@ -122,3 +122,11 @@ export type AgentToolChoice =
   | 'none'
   | 'required'
   | { type: 'tool'; name: string };
+
+/** The event chosen and raised by a decision. */
+export type ChosenEvent = { type: string; [key: string]: unknown };
+
+/** Candidate event types for a decision. Declared ∩ snapshot-legal events. */
+export type AllowedEvents<TEvent extends string = string> =
+  | readonly TEvent[]
+  | ((args: { input: unknown }) => readonly TEvent[]);

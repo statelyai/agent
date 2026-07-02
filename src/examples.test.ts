@@ -147,7 +147,10 @@ describe('curated XState setup examples', () => {
       'FLEE',
     ]);
 
-    const attackTool = chooseMove!.tools.send_event_ATTACK!;
+    if (chooseMove?.kind !== 'text') {
+      throw new Error('Expected a text request.');
+    }
+    const attackTool = chooseMove.tools.send_event_ATTACK!;
     if (typeof attackTool === 'function') {
       throw new Error('Expected event tool descriptor.');
     }

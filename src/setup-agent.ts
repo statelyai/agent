@@ -5,10 +5,12 @@ import {
   setup,
   transition,
   type AnyActorLogic,
+  type AnyActorRef,
   type AnyMachineSnapshot,
   type AnySetupConfig,
   type AnyStateMachine,
   type AsyncActorLogic,
+  type EnqueueObject,
   type EventObject,
   type EventFromLogic,
   type ExecutableActionObjectFromLogic,
@@ -24,6 +26,8 @@ import type {
   AgentMessage,
   AgentToolChoice,
   AgentTools,
+  AllowedEvents,
+  ChosenEvent,
   EventUnion,
   InferOutput,
   StandardSchemaV1,
@@ -33,6 +37,7 @@ import { validateSchemaSync } from './utils.js';
 const USER_INPUT_ACTOR = 'agent.userInput' as const;
 const GENERATE_TEXT_ACTOR = 'agent.generateText' as const;
 const STREAM_TEXT_ACTOR = 'agent.streamText' as const;
+const DECIDE_ACTOR = 'agent.decide' as const;
 
 export type AgentRequestMode = 'generate' | 'stream';
 
@@ -68,10 +73,28 @@ export interface AgentUserInput<TMetadata = Record<string, unknown>> {
   metadata?: TMetadata;
 }
 
+/** Inline input for the `agent.decide` builtin actor. */
+export interface AgentDecisionInput<TMetadata = Record<string, unknown>> {
+  model: string;
+  system?: string;
+  prompt?: string;
+  messages?: AgentMessage[];
+  allowedEvents?: AllowedEvents;
+  maxRetries?: number;
+  temperature?: number;
+  maxTokens?: number;
+  topP?: number;
+  topK?: number;
+  seed?: number;
+  stopSequences?: string[];
+  metadata?: TMetadata;
+}
+
 type BuiltinAgentActors = {
   [GENERATE_TEXT_ACTOR]: AsyncActorLogic<unknown, AgentTextRequest>;
   [STREAM_TEXT_ACTOR]: AsyncActorLogic<unknown, AgentTextRequest>;
   [USER_INPUT_ACTOR]: AsyncActorLogic<unknown, AgentUserInput>;
+  [DECIDE_ACTOR]: AsyncActorLogic<ChosenEvent, AgentDecisionInput>;
 };
 
 type AgentExecutionOptions = Pick<AgentRequestOptions, 'schemas' | 'actors'>;
@@ -210,6 +233,87 @@ const userInputActor = createAsyncLogic<unknown, AgentUserInput>({
     );
   },
 });
+
+const agentDecisionInputSchema: StandardSchemaV1<AgentDecisionInput> = {
+  '~standard': {
+    version: 1,
+    vendor: 'statelyai-agent',
+    validate(value: unknown) {
+      const ok =
+        !!value
+        && typeof value === 'object'
+        && typeof (value as AgentDecisionInput).model === 'string';
+
+      return ok
+        ? { value: value as AgentDecisionInput }
+        : { issues: [{ message: 'Expected agent decision input with a model' }] };
+    },
+  },
+};
+
+function decideRequestFromInput(input: AgentDecisionInput): AgentDecisionRequest {
+  const allowedEventTypes = resolveAllowedEventTypes(input.allowedEvents, input) ?? [];
+
+  return {
+    kind: 'decision',
+    id: '',
+    model: input.model,
+    system: input.system,
+    prompt: input.prompt,
+    messages: input.messages,
+    events: allowedEventTypes.map((type) => ({
+      type,
+      toolName: sanitizeEventToolName(type),
+    })),
+    attempts: [],
+    temperature: input.temperature,
+    maxTokens: input.maxTokens,
+    topP: input.topP,
+    topK: input.topK,
+    seed: input.seed,
+    stopSequences: input.stopSequences,
+    metadata: input.metadata,
+  };
+}
+
+// Placeholder DecisionLogic for the `agent.decide` builtin. Bespoke (not
+// createDecisionLogic) because `maxRetries` is per-invoke inline input here,
+// not a static config value.
+function decideActorWithExecutor(
+  execute?: AgentDecisionExecutor
+): DecisionLogic<StandardSchemaV1<AgentDecisionInput>> {
+  const logic = createAsyncLogic<ChosenEvent, AgentDecisionInput>({
+    run: async ({ input, signal }) => {
+      if (!execute) {
+        throw new Error(
+          `'${DECIDE_ACTOR}' has no host execution. Provide an implementation with ` +
+            `machine.provide({ actorSources: { '${DECIDE_ACTOR}': ... } }) or resolve ` +
+            `the returned agent request with resolveDecision(...).`
+        );
+      }
+
+      return resolveDecision(decideRequestFromInput(input), execute, {
+        maxRetries: input.maxRetries ?? 2,
+        signal,
+      });
+    },
+  });
+
+  return Object.assign(logic, {
+    kind: 'statelyai.decisionLogic' as const,
+    maxRetries: 2,
+    request: decideRequestFromInput,
+    // Internal: see the analogous field in createDecisionLogic's return.
+    allowedEventTypes: (input: AgentDecisionInput) =>
+      resolveAllowedEventTypes(input.allowedEvents, input),
+    withExecutor: (nextExecute: AgentDecisionExecutor) =>
+      decideActorWithExecutor(nextExecute),
+  }) as DecisionLogic<StandardSchemaV1<AgentDecisionInput>>;
+}
+
+function createDecideActor(): DecisionLogic<StandardSchemaV1<AgentDecisionInput>> {
+  return decideActorWithExecutor();
+}
 
 function missingActor(src: string): AsyncActorLogic<unknown, unknown> {
   return createAsyncLogic<unknown, unknown>({
@@ -763,6 +867,145 @@ function isAgentRequestLogic(value: unknown): value is AgentRequestLogic {
   return isTextLogic(value);
 }
 
+// ─── Decision logic ───
+
+export interface DecisionLogicConfig<
+  TInputSchema extends StandardSchemaV1 = StandardSchemaV1,
+  TEvent extends string = string,
+  TMetadata extends Record<string, unknown> = Record<string, unknown>,
+> {
+  schemas?: { input: TInputSchema };
+  model: ResolveTextLogicValue<string, InferOutput<TInputSchema>>;
+  system?: ResolveTextLogicValue<string | undefined, InferOutput<TInputSchema>>;
+  prompt?: ResolveTextLogicValue<string | undefined, InferOutput<TInputSchema>>;
+  messages?: ResolveTextLogicValue<
+    AgentMessage[] | undefined,
+    InferOutput<TInputSchema>
+  >;
+  allowedEvents?: AllowedEvents<TEvent>;
+  maxRetries?: number; // default 2
+  temperature?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
+  maxTokens?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
+  topP?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
+  topK?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
+  seed?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
+  stopSequences?: ResolveTextLogicValue<
+    string[] | undefined,
+    InferOutput<TInputSchema>
+  >;
+  metadata?: ResolveTextLogicValue<TMetadata | undefined, InferOutput<TInputSchema>>;
+}
+
+export interface DecisionLogic<
+  TInputSchema extends StandardSchemaV1 = StandardSchemaV1,
+  TMetadata extends Record<string, unknown> = Record<string, unknown>,
+> extends AsyncActorLogic<ChosenEvent, InferOutput<TInputSchema>> {
+  readonly kind: 'statelyai.decisionLogic';
+  readonly maxRetries: number;
+  request(input: InferOutput<TInputSchema>): AgentDecisionRequest;
+  withExecutor(execute: AgentDecisionExecutor): DecisionLogic<TInputSchema, TMetadata>;
+}
+
+function resolveAllowedEventTypes(
+  allowedEvents: AllowedEvents | undefined,
+  input: unknown
+): readonly string[] | undefined {
+  if (allowedEvents === undefined) {
+    return undefined;
+  }
+  return typeof allowedEvents === 'function'
+    ? allowedEvents({ input })
+    : allowedEvents;
+}
+
+export function createDecisionLogic<
+  TInputSchema extends StandardSchemaV1,
+  TEvent extends string = string,
+  TMetadata extends Record<string, unknown> = Record<string, unknown>,
+>(
+  config: DecisionLogicConfig<TInputSchema, TEvent, TMetadata>,
+  execute?: AgentDecisionExecutor
+): DecisionLogic<TInputSchema, TMetadata> {
+  type TInput = InferOutput<TInputSchema>;
+  const maxRetries = config.maxRetries ?? 2;
+
+  const request = (input: TInput): AgentDecisionRequest => {
+    const parsedInput = config.schemas
+      ? validateSchemaSync<TInput>(
+        config.schemas.input as StandardSchemaV1<TInput>,
+        input
+      )
+      : input;
+    const args = { input: parsedInput };
+
+    const allowedEventTypes = resolveAllowedEventTypes(
+      config.allowedEvents as AllowedEvents | undefined,
+      parsedInput
+    );
+
+    return {
+      kind: 'decision',
+      id: '',
+      model: resolveTextLogicValue(config.model, args)!,
+      system: resolveTextLogicValue(config.system, args),
+      prompt: resolveTextLogicValue(config.prompt, args),
+      messages: resolveTextLogicValue(config.messages, args),
+      events: (allowedEventTypes ?? []).map((type) => ({
+        type,
+        toolName: sanitizeEventToolName(type),
+      })),
+      attempts: [],
+      temperature: resolveTextLogicValue(config.temperature, args),
+      maxTokens: resolveTextLogicValue(config.maxTokens, args),
+      topP: resolveTextLogicValue(config.topP, args),
+      topK: resolveTextLogicValue(config.topK, args),
+      seed: resolveTextLogicValue(config.seed, args),
+      stopSequences: resolveTextLogicValue(config.stopSequences, args),
+      metadata: resolveTextLogicValue(config.metadata, args),
+    };
+  };
+
+  const logic = createAsyncLogic<ChosenEvent, TInput>({
+    run: async ({ input, signal }) => {
+      if (!execute) {
+        throw new Error(
+          'Decision logic has no host execution. Pass an executor as the second ' +
+            'argument to createDecisionLogic(...), provide a runtime adapter, or ' +
+            'extract it with getAgentRequests(..., { actors }) and resolveDecision(...).'
+        );
+      }
+
+      // Bare createActor path: no snapshot to intersect with, so only
+      // modes 1-2 (type + payload validation) apply here — no canTake.
+      return resolveDecision(request(input), execute, { maxRetries, signal });
+    },
+  });
+
+  return Object.assign(logic, {
+    kind: 'statelyai.decisionLogic' as const,
+    maxRetries,
+    request,
+    // Internal: the raw declared `allowedEvents`, resolved but NOT yet
+    // defaulted to `[]` — `undefined` here means "all legal events" and is
+    // used by getAgentRequests to intersect with the snapshot correctly.
+    // Not part of the public DecisionLogic type.
+    allowedEventTypes: (input: TInput) =>
+      resolveAllowedEventTypes(config.allowedEvents as AllowedEvents | undefined, input),
+    withExecutor(nextExecute: AgentDecisionExecutor) {
+      return createDecisionLogic(config, nextExecute);
+    },
+  }) as DecisionLogic<TInputSchema, TMetadata>;
+}
+
+function isDecisionLogic(value: unknown): value is DecisionLogic {
+  return (
+    !!value
+    && typeof value === 'object'
+    && (value as DecisionLogic).kind === 'statelyai.decisionLogic'
+    && typeof (value as DecisionLogic).request === 'function'
+  );
+}
+
 export type AgentRequestSource = string & {};
 
 export const EVENT_TOOL_PREFIX = 'send_event_' as const;
@@ -811,6 +1054,7 @@ function disambiguateEventToolName(
 }
 
 export interface AgentRequest<TInput extends AgentTextRequest = AgentTextRequest> {
+  kind: 'text';
   id: string;
   src: AgentRequestSource;
   mode?: AgentRequestMode;
@@ -823,6 +1067,153 @@ export interface AgentEventDescriptor {
   type: string;
   toolName: string;
   inputSchema?: StandardSchemaV1;
+}
+
+/**
+ * A decision request: resolves to exactly one currently-legal event. See
+ * `resolveDecision`.
+ */
+export interface AgentDecisionRequest {
+  kind: 'decision';
+  /** Durable invoke id. */
+  id: string;
+  model: string;
+  system?: string;
+  prompt?: string;
+  messages?: AgentMessage[];
+  /** Candidate events: declared `allowedEvents` ∩ snapshot-legal events. */
+  events: AgentEventDescriptor[];
+  /**
+   * Prior failed attempts for THIS decision. Empty on the first attempt.
+   * Adapters render these into the provider request so retries converge.
+   * Core never rewrites prompts/messages — attempts are data on the request.
+   */
+  attempts: DecisionAttempt[];
+  temperature?: number;
+  maxTokens?: number;
+  topP?: number;
+  topK?: number;
+  seed?: number;
+  stopSequences?: string[];
+  metadata?: Record<string, unknown>;
+}
+
+/** `AgentStep.requests` element: a text request or a decision request. */
+export type AgentStepRequest = AgentRequest | AgentDecisionRequest;
+
+export interface DecisionAttempt {
+  event?: ChosenEvent;
+  failure: 'unknown-event' | 'invalid-payload' | 'rejected-by-guard';
+  reason: string;
+}
+
+export class DecisionExhaustedError extends Error {
+  attempts: DecisionAttempt[];
+
+  constructor(attempts: DecisionAttempt[]) {
+    super(
+      `Decision exhausted after ${attempts.length} attempt${attempts.length === 1 ? '' : 's'}: ` +
+        attempts.map((attempt) => attempt.reason).join('; ')
+    );
+    this.name = 'DecisionExhaustedError';
+    this.attempts = attempts;
+  }
+}
+
+/** Third executor slot, symmetric with generateText/streamText. */
+export type AgentDecisionExecutor = (
+  request: AgentDecisionRequest
+) => PromiseLike<{ event: ChosenEvent; reason?: string }>;
+
+export interface ResolveDecisionOptions {
+  maxRetries?: number; // default 2 (⇒ up to 3 attempts)
+  signal?: AbortSignal;
+  /** Mode-3 guard check. Omit ⇒ mode-3 skipped (modes 1–2 only). */
+  canTake?: (event: ChosenEvent) => boolean;
+}
+
+/**
+ * Validation + retry core for decisions. No provider mechanics — the
+ * `executor` is responsible for making the model choose an event; this
+ * function only validates the choice and retries on failure.
+ */
+export async function resolveDecision(
+  request: AgentDecisionRequest,
+  executor: AgentDecisionExecutor,
+  options: ResolveDecisionOptions = {}
+): Promise<ChosenEvent> {
+  const maxRetries = options.maxRetries ?? 2;
+  const attempts: DecisionAttempt[] = [];
+  const eventsByType = new Map(request.events.map((event) => [event.type, event]));
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    options.signal?.throwIfAborted();
+    const { event } = await executor({ ...request, attempts: [...attempts] });
+
+    const descriptor = eventsByType.get(event.type);
+    if (!descriptor) {
+      attempts.push({
+        event,
+        failure: 'unknown-event',
+        reason: `'${event.type}' is not among the currently allowed events: ${
+          request.events.map((candidate) => candidate.type).join(', ') || '(none)'
+        }.`,
+      });
+      continue;
+    }
+
+    let validatedEvent = event;
+    if (descriptor.inputSchema) {
+      const { type, ...payload } = event;
+      try {
+        const validatedPayload = validateSchemaSync(descriptor.inputSchema, payload);
+        validatedEvent = { ...(validatedPayload as Record<string, unknown>), type };
+      } catch (error) {
+        attempts.push({
+          event,
+          failure: 'invalid-payload',
+          reason: `'${event.type}' payload failed validation: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        });
+        continue;
+      }
+    }
+
+    if (options.canTake?.(validatedEvent) === false) {
+      attempts.push({
+        event: validatedEvent,
+        failure: 'rejected-by-guard',
+        reason: `'${validatedEvent.type}' is not currently takeable (guard rejected it).`,
+      });
+      continue;
+    }
+
+    return validatedEvent;
+  }
+
+  throw new DecisionExhaustedError(attempts);
+}
+
+/**
+ * Transition-function factory for an `agent.decide` invoke's `onDone`.
+ * Delivers the chosen event via `enq.sendTo(self, …)` — external and
+ * observable (event-sourcing, §4.3) — rather than `enq.raise` (internal).
+ *
+ * v6 alpha transition functions are re-evaluated multiple times per
+ * transition (spike S3: 8x) — purity is load-bearing here. This function
+ * only calls `enq`, never side-effects directly, so re-evaluation is safe.
+ */
+export function sendDecision<
+  TEvent extends EventObject = EventObject,
+  TEmitted extends EventObject = EventObject,
+>(): (
+  args: { output: ChosenEvent; self: AnyActorRef },
+  enq: EnqueueObject<TEvent, TEmitted>
+) => void {
+  return ({ output, self }, enq) => {
+    enq.sendTo(self, output as TEvent);
+  };
 }
 
 export interface AgentSchemas {
@@ -904,8 +1295,8 @@ export function getEventTools(
 export function getAgentRequests(
   actions: readonly { type?: string; params?: unknown; id?: unknown; src?: unknown; input?: unknown; logic?: unknown }[],
   options: AgentRequestOptions = {}
-): AgentRequest[] {
-  return actions.flatMap((action) => {
+): AgentStepRequest[] {
+  return actions.flatMap((action): AgentStepRequest[] => {
     if (action.type !== 'xstate.spawnChild' && action.type !== '@xstate.start') {
       return [];
     }
@@ -925,10 +1316,38 @@ export function getAgentRequests(
       );
     }
 
-    const textLogic = isTextLogic(action.logic)
+    const registeredLogic = isTextLogic(action.logic) || isDecisionLogic(action.logic)
       ? action.logic
       : options.actors?.[params.src];
-    const input = isTextLogic(textLogic)
+
+    if (isDecisionLogic(registeredLogic)) {
+      const decisionRequest = registeredLogic.request(params.input as never);
+      // `undefined` (allowedEvents omitted) means "all legal events" — do
+      // not default it to `[]` here or getAvailableEvents will filter
+      // everything out.
+      const allowedEventTypes = (
+        registeredLogic as unknown as {
+          allowedEventTypes?: (input: unknown) => readonly string[] | undefined;
+        }
+      ).allowedEventTypes?.(params.input);
+      const events = options.snapshot
+        ? getAvailableEvents(options.snapshot, {
+          events: options.events,
+          schemas: options.schemas,
+          eventTypes: allowedEventTypes,
+          eventToolName: options.eventToolName,
+        })
+        : [];
+
+      return [{
+        ...decisionRequest,
+        id: params.id,
+        events,
+      }];
+    }
+
+    const textLogic = isTextLogic(registeredLogic) ? registeredLogic : undefined;
+    const input = textLogic
       ? textLogic.request(params.input as never)
       : undefined;
 
@@ -959,6 +1378,7 @@ export function getAgentRequests(
     );
 
     return [{
+      kind: 'text',
       id: params.id,
       src: params.src,
       ...(isAgentRequestLogic(textLogic) ? { mode: textLogic.mode } : {}),
@@ -1009,12 +1429,13 @@ export interface AgentRequestExecutors<
 > {
   generateText: AgentRequestExecutor<TGenerateResult>;
   streamText?: AgentRequestExecutor<TStreamResult>;
+  decide?: AgentDecisionExecutor;
 }
 
 export interface AgentStep<TSnapshot extends AnyMachineSnapshot = AnyMachineSnapshot> {
   snapshot: TSnapshot;
   actions: readonly { type?: string; params?: unknown }[];
-  requests: AgentRequest[];
+  requests: AgentStepRequest[];
   done: boolean;
 }
 
@@ -1066,10 +1487,19 @@ export async function runAgent<TMachine extends AnyActorLogic>(
     }
 
     const results = await Promise.all(
-      requests.map(async (request) => ({
-        request,
-        output: await executeAgentRequest(request, options),
-      }))
+      requests.map(async (request) => {
+        if (request.kind === 'decision') {
+          throw new Error(
+            "runAgent(...) does not yet resolve 'decision' requests. Use " +
+              'resolveDecision(request, executors.decide, ...) directly, or ' +
+              'the step helpers (initialAgentStep/transitionAgentStep).'
+          );
+        }
+        return {
+          request,
+          output: await executeAgentRequest(request, options),
+        };
+      })
     );
 
     for (const { request, output } of results) {
@@ -1194,7 +1624,7 @@ export function getMachineAgentRequests(
   actions: readonly { type?: string; params?: unknown }[],
   snapshot?: AnyMachineSnapshot,
   options: Pick<AgentRequestOptions, 'eventToolName'> & Partial<AgentExecutionOptions> = {}
-): AgentRequest[] {
+): AgentStepRequest[] {
   const machineOptions = getRegisteredAgentExecutionOptions(machine, options);
 
   return getAgentRequests(actions, {
@@ -1208,6 +1638,13 @@ export async function executeAgentRequest(
   request: AgentRequest,
   executors: AgentRequestExecutors
 ): Promise<unknown> {
+  if ((request as AgentStepRequest).kind === 'decision') {
+    throw new Error(
+      "executeAgentRequest(...) is text-only. Resolve a 'decision' request with " +
+        'resolveDecision(request, executors.decide, ...) instead.'
+    );
+  }
+
   const output = await executeAgentTextRequest(
     request.mode ?? 'generate',
     request.id,
@@ -1603,7 +2040,7 @@ type SetupAgentResult<
     actions: readonly { type?: string; params?: unknown }[],
     snapshot?: AnyMachineSnapshot,
     options?: Pick<AgentRequestOptions, 'eventToolName'>
-  ): AgentRequest[];
+  ): AgentStepRequest[];
   execute(request: AgentRequest, executors: AgentRequestExecutors): Promise<unknown>;
   appendMessages(
     resolve:
@@ -2219,6 +2656,7 @@ function createAgentActorSources<
   return {
     ...builtinTextActors,
     [USER_INPUT_ACTOR]: userInputActor,
+    [DECIDE_ACTOR]: createDecideActor(),
     ...actors,
     ...requestActors,
   } as SetupActors<AgentSetupActors<AgentAllActors<TActors, TRequestSchemas>>>;

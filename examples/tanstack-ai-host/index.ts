@@ -98,6 +98,9 @@ export async function runTanStackGameTurn(args: {
     if (!request) {
       throw new Error('Machine is waiting without an agent request.');
     }
+    if (request.kind !== 'text') {
+      throw new Error('Decision requests are not supported in this demo.');
+    }
 
     const result = await runTanStackRequest({
       chat: args.chat,

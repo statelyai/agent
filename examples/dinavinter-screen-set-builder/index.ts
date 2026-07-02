@@ -85,8 +85,11 @@ export async function runDinavinterScreenSetBuilderExample() {
     schemas,
     actors: agent.requests,
   });
+  if (request?.kind !== 'text') {
+    throw new Error('Expected a text request.');
+  }
 
-  const output = await executeAgentRequest(request!, {
+  const output = await executeAgentRequest(request, {
     generateText: async (
       request: AgentTextRequest & { tools: AgentTools },
     ) => {

@@ -177,6 +177,9 @@ export async function runTriageStepDemo(ticket: string) {
     }
 
     for (const request of step.requests) {
+      if (request.kind !== 'text') {
+        throw new Error('Decision requests are not supported in this demo.');
+      }
       const output = await generateWithAiSdk(
         request.input,
         request.tools
