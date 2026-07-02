@@ -137,10 +137,14 @@ export const aiSdkMarketingChainMachine = agent.createMachine({
 });
 
 export async function runAiSdkMarketingChainExample() {
-  return await runAgent(aiSdkMarketingChainMachine, {
+  const result = await runAgent(aiSdkMarketingChainMachine, {
     input: { product: 'state machines' },
     generateText: createAiSdkTextExecutor(),
   });
+  if (result.status !== 'done') {
+    throw new Error(`Marketing chain example did not complete: ${result.status}`);
+  }
+  return result.output;
 }
 
 if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {

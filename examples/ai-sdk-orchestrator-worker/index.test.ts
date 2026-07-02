@@ -12,7 +12,7 @@ const fileChangeSchema = z.object({
 });
 
 test('AI SDK orchestrator-worker maps to an explicit machine', async () => {
-  const output = await runAgent(aiSdkOrchestratorWorkerMachine, {
+  const result = await runAgent(aiSdkOrchestratorWorkerMachine, {
     input: { featureRequest: 'Add settings page' },
     generateText: async () => ({
       files: [
@@ -30,10 +30,13 @@ test('AI SDK orchestrator-worker maps to an explicit machine', async () => {
       estimatedComplexity: 'medium',
     }),
   });
+  assert.equal(result.status, 'done');
   assert.deepEqual(
-    output.changes.map((change: z.infer<typeof fileChangeSchema>) =>
-      change.filePath,
-    ),
+    result.status === 'done'
+      ? result.output.changes.map((change: z.infer<typeof fileChangeSchema>) =>
+        change.filePath,
+      )
+      : [],
     ['app/page.tsx', 'app/page.test.tsx'],
   );
 });

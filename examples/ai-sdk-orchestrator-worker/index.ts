@@ -101,10 +101,14 @@ export const aiSdkOrchestratorWorkerMachine = agent.createMachine({
 });
 
 export async function runAiSdkOrchestratorWorkerExample() {
-  return await runAgent(aiSdkOrchestratorWorkerMachine, {
+  const result = await runAgent(aiSdkOrchestratorWorkerMachine, {
     input: { featureRequest: 'Add settings page' },
     generateText: createAiSdkTextExecutor(),
   });
+  if (result.status !== 'done') {
+    throw new Error(`Orchestrator-worker example did not complete: ${result.status}`);
+  }
+  return result.output;
 }
 
 if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {

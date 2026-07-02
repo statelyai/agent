@@ -139,7 +139,7 @@ export async function runAiSdkSubAgentsDemo(task: string) {
     createAiSdkSubAgents(model),
   );
 
-  return await runAgent(machine, {
+  const result = await runAgent(machine, {
     input: { task },
     generateText: async (request) => {
       const { output } = await generateText({
@@ -153,6 +153,10 @@ export async function runAiSdkSubAgentsDemo(task: string) {
       return output;
     },
   });
+  if (result.status !== 'done') {
+    throw new Error(`Sub-agents demo did not complete: ${result.status}`);
+  }
+  return result.output;
 }
 
 export async function runAiSdkSubAgentsDeterministicExample() {
@@ -181,7 +185,7 @@ export async function runAiSdkSubAgentsDeterministicExample() {
   };
   const { machine } = createAiSdkSubAgentWorkflow(fakeSubAgents);
 
-  const output = await runAgent(machine, {
+  const result = await runAgent(machine, {
     input: { task: 'compose agent note' },
     generateText: async (request) => {
       const notes = await executeTool(request.tools?.askResearcher, {
@@ -198,7 +202,8 @@ export async function runAiSdkSubAgentsDeterministicExample() {
     'researcher:compose agent note',
     'writer:notes:compose agent note',
   ]);
-  assert.deepEqual(output, {
+  assert.equal(result.status, 'done');
+  assert.deepEqual(result.status === 'done' ? result.output : undefined, {
     answer: 'final:notes:compose agent note',
   });
 }

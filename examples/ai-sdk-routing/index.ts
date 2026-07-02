@@ -103,10 +103,14 @@ export const aiSdkRoutingMachine = agent.createMachine({
 });
 
 export async function runAiSdkRoutingExample() {
-  return await runAgent(aiSdkRoutingMachine, {
+  const result = await runAgent(aiSdkRoutingMachine, {
     input: { query: 'The app crashes on launch.' },
     generateText: createAiSdkTextExecutor(),
   });
+  if (result.status !== 'done') {
+    throw new Error(`Routing example did not complete: ${result.status}`);
+  }
+  return result.output;
 }
 
 if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {

@@ -157,12 +157,14 @@ export function createAiSdkStreamingTextActor<
 }
 
 export async function runTriageDemo(ticket: string) {
-  return await runAgent(triageMachine, {
+  const result = await runAgent(triageMachine, {
     input: { ticket },
     generateText: createAiSdkTextExecutor(),
-    schemas: triageSchemas,
-    actors: triageActors,
   });
+  if (result.status !== 'done') {
+    throw new Error(`Triage demo did not complete: ${result.status}`);
+  }
+  return result.output;
 }
 
 export async function runTriageStepDemo(ticket: string) {

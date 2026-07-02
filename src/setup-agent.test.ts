@@ -1262,7 +1262,7 @@ describe('setupAgent', () => {
       answer: 'Answered: why agent machines?',
     });
 
-    const runOutput = await runAgent(machine, {
+    const runResult = await runAgent(machine, {
       input: { prompt: 'why run agents?' },
       generateText: (request: AgentTextRequest & { tools: AgentTools }) => ({
         object: {
@@ -1270,7 +1270,10 @@ describe('setupAgent', () => {
         },
       }),
     });
-    expect(runOutput).toEqual({ answer: 'Ran: why run agents?' });
+    expect(runResult.status).toBe('done');
+    expect(runResult.status === 'done' ? runResult.output : undefined).toEqual({
+      answer: 'Ran: why run agents?',
+    });
   });
 
   test('detects structured output schemas separately from validation-only schemas', () => {

@@ -5,7 +5,7 @@ import { aiSdkRoutingMachine } from './index.js';
 
 test('AI SDK routing maps to an explicit machine', async () => {
   const routedModels: string[] = [];
-  const output = await runAgent(aiSdkRoutingMachine, {
+  const result = await runAgent(aiSdkRoutingMachine, {
     input: { query: 'The app crashes on launch.' },
     generateText: async (request) => {
       if (request.prompt?.startsWith('Classify this customer query:')) {
@@ -20,8 +20,9 @@ test('AI SDK routing maps to an explicit machine', async () => {
     },
   });
   assert.deepEqual(routedModels, ['openai/o4-mini']);
+  assert.equal(result.status, 'done');
   assert.equal(
-    output.response,
+    result.status === 'done' ? result.output.response : undefined,
     'technical:The app crashes on launch.',
   );
 });

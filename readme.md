@@ -75,11 +75,14 @@ const machine = agent.createMachine({
   },
 });
 
-const output = await runAgent(machine, {
+const result = await runAgent(machine, {
   input: { prompt: 'Why XState?' },
   generateText: (request) => generateText(request), // any SDK/framework
   streamText: (request) => streamText(request),
 });
+if (result.status === 'done') {
+  console.log(result.output);
+}
 ```
 
 When a request becomes reusable, extract it:

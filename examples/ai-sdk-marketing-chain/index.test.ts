@@ -5,7 +5,7 @@ import { aiSdkMarketingChainMachine } from './index.js';
 
 test('AI SDK marketing chain maps to an explicit machine', async () => {
   let calls = 0;
-  const output = await runAgent(aiSdkMarketingChainMachine, {
+  const result = await runAgent(aiSdkMarketingChainMachine, {
     input: { product: 'state machines' },
     generateText: async (request) => {
       calls += 1;
@@ -22,5 +22,9 @@ test('AI SDK marketing chain maps to an explicit machine', async () => {
       return 'Buy state machines. Start today.';
     },
   });
-  assert.equal(output.copy, 'Buy state machines. Start today.');
+  assert.equal(result.status, 'done');
+  assert.equal(
+    result.status === 'done' ? result.output.copy : undefined,
+    'Buy state machines. Start today.',
+  );
 });
