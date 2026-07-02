@@ -138,7 +138,10 @@ export async function runDinavinterTestAgentExample() {
             context: {
               messages: [
                 ...context.messages,
-                assistantMessage((event as unknown as { url: string }).url),
+                assistantMessage((event as unknown as { url: string }).url) as {
+                  role: string;
+                  content: string;
+                },
               ],
             },
           }),

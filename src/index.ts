@@ -24,6 +24,7 @@ export {
 export {
   assistantMessage,
   systemMessage,
+  toolMessage,
   userMessage,
 } from './utils.js';
 
@@ -65,8 +66,20 @@ export type {
   AgentToolDescriptor,
   AgentToolExecute,
   AgentTools,
+  AssistantMessage,
+  DataContent,
   EventPayload,
   EventUnion,
+  FilePart,
+  ImagePart,
   InferOutput,
+  ProviderOptions,
   StandardSchemaV1,
+  SystemMessage,
+  TextPart,
+  ToolCallPart,
+  ToolMessage,
+  ToolResultOutput,
+  ToolResultPart,
+  UserMessage,
 } from './types.js';

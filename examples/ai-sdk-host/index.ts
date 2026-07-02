@@ -55,10 +55,7 @@ function resolveAiSdkModel(
 }
 
 function toModelMessages(input: AgentTextRequest): ModelMessage[] | undefined {
-  return input.messages?.map((message) => ({
-    role: message.role as 'user' | 'assistant' | 'system',
-    content: message.content,
-  }));
+  return input.messages as ModelMessage[] | undefined;
 }
 
 async function generateWithAiSdk(

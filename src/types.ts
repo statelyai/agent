@@ -19,11 +19,89 @@ export type EventUnion<T extends Record<string, StandardSchemaV1>> = {
   [K in keyof T & string]: { type: K } & EventPayload<InferOutput<T[K]>>;
 }[keyof T & string];
 
-export type AgentMessage = {
-  role: string;
+export type DataContent = string | Uint8Array | ArrayBuffer;
+export type ProviderOptions = Record<string, Record<string, unknown>>;
+
+export interface TextPart {
+  type: 'text';
+  text: string;
+  providerOptions?: ProviderOptions;
+}
+
+/**
+ * Binary (`Uint8Array`/`ArrayBuffer`) and `URL` values are not
+ * JSON-serializable. Machines that persist snapshots/event logs should use
+ * URL strings or base64-encoded strings in `image` instead.
+ */
+export interface ImagePart {
+  type: 'image';
+  image: DataContent | URL;
+  mediaType?: string;
+  providerOptions?: ProviderOptions;
+}
+
+/**
+ * Binary (`Uint8Array`/`ArrayBuffer`) and `URL` values are not
+ * JSON-serializable. Machines that persist snapshots/event logs should use
+ * URL strings or base64-encoded strings in `data` instead.
+ */
+export interface FilePart {
+  type: 'file';
+  data: DataContent | URL;
+  mediaType: string;
+  filename?: string;
+  providerOptions?: ProviderOptions;
+}
+
+export interface ToolCallPart {
+  type: 'tool-call';
+  toolCallId: string;
+  toolName: string;
+  input: unknown;
+  providerOptions?: ProviderOptions;
+}
+
+export type ToolResultOutput =
+  | { type: 'text'; value: string }
+  | { type: 'json'; value: unknown }
+  | { type: 'error-text'; value: string }
+  | { type: 'error-json'; value: unknown }
+  | { type: 'content'; value: Array<TextPart | ImagePart> };
+
+export interface ToolResultPart {
+  type: 'tool-result';
+  toolCallId: string;
+  toolName: string;
+  output: ToolResultOutput;
+  providerOptions?: ProviderOptions;
+}
+
+export type SystemMessage = {
+  role: 'system';
   content: string;
-  [key: string]: unknown;
+  providerOptions?: ProviderOptions;
 };
+export type UserMessage = {
+  role: 'user';
+  content: string | Array<TextPart | ImagePart | FilePart>;
+  providerOptions?: ProviderOptions;
+};
+export type AssistantMessage = {
+  role: 'assistant';
+  content: string | Array<TextPart | FilePart | ToolCallPart | ToolResultPart>;
+  providerOptions?: ProviderOptions;
+};
+export type ToolMessage = {
+  role: 'tool';
+  content: Array<ToolResultPart>;
+  providerOptions?: ProviderOptions;
+};
+
+export type AgentMessage =
+  | SystemMessage
+  | UserMessage
+  | AssistantMessage
+  | ToolMessage;
 
 export interface AgentToolDescriptor {
   description?: string;

@@ -1,15 +1,34 @@
-import type { AgentMessage, StandardSchemaV1 } from './types.js';
+import type {
+  AssistantMessage,
+  FilePart,
+  ImagePart,
+  StandardSchemaV1,
+  SystemMessage,
+  TextPart,
+  ToolCallPart,
+  ToolMessage,
+  ToolResultPart,
+  UserMessage,
+} from './types.js';
 
-export function userMessage(content: string): AgentMessage {
+export function userMessage(
+  content: string | Array<TextPart | ImagePart | FilePart>
+): UserMessage {
   return { role: 'user', content };
 }
 
-export function assistantMessage(content: string): AgentMessage {
+export function assistantMessage(
+  content: string | Array<TextPart | FilePart | ToolCallPart | ToolResultPart>
+): AssistantMessage {
   return { role: 'assistant', content };
 }
 
-export function systemMessage(content: string): AgentMessage {
+export function systemMessage(content: string): SystemMessage {
   return { role: 'system', content };
+}
+
+export function toolMessage(content: Array<ToolResultPart>): ToolMessage {
+  return { role: 'tool', content };
 }
 
 export function validateSchemaSync<T>(

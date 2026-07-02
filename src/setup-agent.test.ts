@@ -22,6 +22,7 @@ import {
   resolveAgentStep,
   runAgent,
   setupAgent,
+  toolMessage,
   transitionAgentStep,
   transitionResult,
   userMessage,
@@ -635,6 +636,69 @@ describe('setupAgent', () => {
     expect(actor.getSnapshot().context.messages).toEqual([
       { role: 'user', content: 'hello' },
     ]);
+  });
+
+  test('toolMessage builds a tool-role message from tool-result parts', () => {
+    const message = toolMessage([
+      {
+        type: 'tool-result',
+        toolCallId: 'call_1',
+        toolName: 'lookup',
+        output: { type: 'text', value: 'found it' },
+      },
+    ]);
+
+    expect(message).toEqual({
+      role: 'tool',
+      content: [
+        {
+          type: 'tool-result',
+          toolCallId: 'call_1',
+          toolName: 'lookup',
+          output: { type: 'text', value: 'found it' },
+        },
+      ],
+    });
+  });
+
+  test('messagesSchema accepts a valid tool message and a parts-array user message', () => {
+    const result = messagesSchema['~standard'].validate([
+      {
+        role: 'user',
+        content: [{ type: 'text', text: 'hello' }],
+      },
+      toolMessage([
+        {
+          type: 'tool-result',
+          toolCallId: 'call_1',
+          toolName: 'lookup',
+          output: { type: 'json', value: { ok: true } },
+        },
+      ]),
+    ]);
+
+    expect(result.issues).toBeUndefined();
+  });
+
+  test('messagesSchema rejects an unknown role', () => {
+    const result = messagesSchema['~standard'].validate([
+      { role: 'developer', content: 'hi' },
+    ]);
+
+    expect(result.issues).toBeDefined();
+    expect(result.issues![0]!.message).toMatch(/unknown message role/i);
+  });
+
+  test('messagesSchema rejects an unknown part type', () => {
+    const result = messagesSchema['~standard'].validate([
+      {
+        role: 'user',
+        content: [{ type: 'video', url: 'https://example.com/clip.mp4' }],
+      },
+    ]);
+
+    expect(result.issues).toBeDefined();
+    expect(result.issues![0]!.message).toMatch(/unknown message part type/i);
   });
 
   test('authors reusable text actors with typed input and output', async () => {
