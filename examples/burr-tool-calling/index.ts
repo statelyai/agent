@@ -1,7 +1,22 @@
+/**
+ * Burr Tool Calling — tool selection, execution, and final formatting as
+ * separate, independently testable steps.
+ *
+ * Burr's `tool-calling` example has the model choose a tool and args, then
+ * runs it and formats the result. This is structured-output classification
+ * (`selectTool` returns one of a discriminated union), not an event-choice
+ * decision: there is exactly one live path forward from `dispatch`, chosen
+ * by inspecting the request's typed output — not a model picking among
+ * several legal machine *events* from a waiting state (the pattern
+ * `decisions:`/`sendDecision()` targets; see twenty-questions). So this
+ * stays a co-located `requests:` + guarded `always` routing, the same shape
+ * as burr-multi-agent-collaboration's supervisor — hosted with `runAgent`
+ * instead of manual `createActor`/`toPromise` choreography.
+ */
 import assert from 'node:assert/strict';
 import { z } from 'zod';
-import { createActor, createAsyncLogic, toPromise, waitFor } from 'xstate';
-import { setupAgent } from '../../src/index.js';
+import { createAsyncLogic } from 'xstate';
+import { runAgent, setupAgent, type AgentTextRequest, type AgentTools } from '../../src/index.js';
 
 export async function runBurrToolCallingExample() {
   const selectedToolSchema = z.discriminatedUnion('tool', [
@@ -134,24 +149,32 @@ export async function runBurrToolCallingExample() {
     },
   });
 
-  const actor = createActor(
-    machine.provide({
-      actorSources: {
-        selectTool: agent.requests.selectTool.withExecutor(async () => ({
+  const generateText = async (request: AgentTextRequest & { tools: AgentTools }) => {
+    if (request.model === 'tool-router') {
+      return {
+        object: {
           tool: 'queryWeather',
           parameters: { latitude: 37.77, longitude: -122.42 },
-        })),
-        formatResult: agent.requests.formatResult.withExecutor(
-          async ({ input }) => `formatted:${input.rawResponse.forecast}`,
-        ),
-      },
-    }),
-    { input: { query: 'weather in San Francisco' } },
-  );
-  actor.start();
-  await toPromise(actor);
+        },
+      };
+    }
+    // request.model === 'formatter'; prompt's second line is `Data: ${JSON}`.
+    const dataLine = (request.prompt ?? '').split('\n')[1] ?? 'Data: {}';
+    const rawResponse = JSON.parse(dataLine.replace('Data: ', '')) as {
+      forecast: string;
+    };
+    return `formatted:${rawResponse.forecast}`;
+  };
 
-  assert.deepEqual(actor.getSnapshot().output, {
+  const result = await runAgent(machine, {
+    input: { query: 'weather in San Francisco' },
+    generateText,
+  });
+
+  if (result.status !== 'done') {
+    throw new Error(`Tool-calling example did not complete: ${result.status}`);
+  }
+  assert.deepEqual(result.output, {
     finalOutput: 'formatted:sunny',
   });
 }

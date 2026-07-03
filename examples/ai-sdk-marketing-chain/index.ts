@@ -1,6 +1,13 @@
+/**
+ * Vercel AI SDK marketing chain — sequential processing, ported to
+ * `setupAgent` with co-located `requests:`.
+ *
+ * Compare: https://ai-sdk.dev/docs/agents/workflows#sequential-processing-chains
+ *
+ * Run: OPENAI_API_KEY=... node --import tsx examples/ai-sdk-marketing-chain/index.ts
+ */
 import { z } from 'zod';
-import { setup } from 'xstate';
-import { createAgentSchemas, createTextLogic, runAgent } from '../../src/index.js';
+import { setupAgent, runAgent } from '../../src/index.js';
 import { createAiSdkTextExecutor } from '../ai-sdk-host/index.js';
 
 const qualitySchema = z.object({
@@ -8,13 +15,6 @@ const qualitySchema = z.object({
   emotionalAppeal: z.number().min(1).max(10),
   clarity: z.number().min(1).max(10),
 });
-const contextSchema = z.object({
-  product: z.string(),
-  copy: z.string().nullable(),
-  quality: qualitySchema.nullable(),
-  finalCopy: z.string().nullable(),
-});
-type MarketingChainContext = z.infer<typeof contextSchema>;
 
 function qualityPasses(quality: z.infer<typeof qualitySchema> | null) {
   return !!quality
@@ -23,52 +23,53 @@ function qualityPasses(quality: z.infer<typeof qualitySchema> | null) {
     && quality.clarity >= 7;
 }
 
-export const writeMarketingCopy = createTextLogic({
-  schemas: {
-    input: z.object({ product: z.string() }),
-    output: z.string(),
-  },
-  model: 'openai/gpt-4.1-mini',
-  prompt: ({ input }) =>
-    `Write persuasive marketing copy for: ${input.product}. Focus on benefits and emotional appeal.`,
-});
-
-export const evaluateMarketingCopy = createTextLogic({
-  schemas: {
-    input: z.object({ copy: z.string() }),
-    output: qualitySchema,
-  },
-  model: 'openai/gpt-4.1-mini',
-  system: 'Evaluate marketing copy for CTA, emotional appeal, and clarity.',
-  prompt: ({ input }) => input.copy,
-});
-
-export const improveMarketingCopy = createTextLogic({
-  schemas: {
-    input: z.object({ copy: z.string(), quality: qualitySchema }),
-    output: z.string(),
-  },
-  model: 'openai/gpt-4.1-mini',
-  prompt: ({ input }) => [
-    !input.quality.hasCallToAction ? 'Add a clear call to action.' : '',
-    input.quality.emotionalAppeal < 7 ? 'Strengthen emotional appeal.' : '',
-    input.quality.clarity < 7 ? 'Improve clarity and directness.' : '',
-    `Original copy: ${input.copy}`,
-  ].filter(Boolean).join('\n'),
-});
-
-const agent = setup({
-  schemas: createAgentSchemas({
-    context: contextSchema,
-    input: z.object({ product: z.string() }),
-    output: z.object({ copy: z.string(), quality: qualitySchema }),
+const agent = setupAgent({
+  context: z.object({
+    product: z.string(),
+    copy: z.string().nullable(),
+    quality: qualitySchema.nullable(),
+    finalCopy: z.string().nullable(),
   }),
-  actorSources: {
-    writeMarketingCopy,
-    evaluateMarketingCopy,
-    improveMarketingCopy,
+  input: z.object({ product: z.string() }),
+  output: z.object({ copy: z.string(), quality: qualitySchema }),
+  requests: {
+    writeMarketingCopy: {
+      schemas: {
+        input: z.object({ product: z.string() }),
+        output: z.string(),
+      },
+      model: 'openai/gpt-4.1-mini',
+      prompt: ({ input }) =>
+        `Write persuasive marketing copy for: ${input.product}. Focus on benefits and emotional appeal.`,
+    },
+    evaluateMarketingCopy: {
+      schemas: {
+        input: z.object({ copy: z.string() }),
+        output: qualitySchema,
+      },
+      model: 'openai/gpt-4.1-mini',
+      system: 'Evaluate marketing copy for CTA, emotional appeal, and clarity.',
+      prompt: ({ input }) => input.copy,
+    },
+    improveMarketingCopy: {
+      schemas: {
+        input: z.object({ copy: z.string(), quality: qualitySchema }),
+        output: z.string(),
+      },
+      model: 'openai/gpt-4.1-mini',
+      prompt: ({ input }) => [
+        !input.quality.hasCallToAction ? 'Add a clear call to action.' : '',
+        input.quality.emotionalAppeal < 7 ? 'Strengthen emotional appeal.' : '',
+        input.quality.clarity < 7 ? 'Improve clarity and directness.' : '',
+        `Original copy: ${input.copy}`,
+      ].filter(Boolean).join('\n'),
+    },
   },
 });
+
+export const writeMarketingCopy = agent.requests.writeMarketingCopy;
+export const evaluateMarketingCopy = agent.requests.evaluateMarketingCopy;
+export const improveMarketingCopy = agent.requests.improveMarketingCopy;
 
 export const aiSdkMarketingChainMachine = agent.createMachine({
   id: 'ai-sdk-marketing-chain',
@@ -90,6 +91,7 @@ export const aiSdkMarketingChainMachine = agent.createMachine({
   states: {
     writing: {
       invoke: {
+        id: 'writeMarketingCopy',
         src: 'writeMarketingCopy',
         input: ({ context }) => ({ product: context.product }),
         onDone: ({ output }) => ({
@@ -100,6 +102,7 @@ export const aiSdkMarketingChainMachine = agent.createMachine({
     },
     evaluating: {
       invoke: {
+        id: 'evaluateMarketingCopy',
         src: 'evaluateMarketingCopy',
         input: ({ context }) => ({ copy: context.copy ?? '' }),
         onDone: ({ output }) => ({
@@ -109,14 +112,14 @@ export const aiSdkMarketingChainMachine = agent.createMachine({
       },
     },
     checking: {
-      type: 'choice',
-      choice: ({ context }: { context: MarketingChainContext }) =>
+      always: ({ context }) =>
         qualityPasses(context.quality)
           ? { target: 'done' }
           : { target: 'improving' },
     },
     improving: {
       invoke: {
+        id: 'improveMarketingCopy',
         src: 'improveMarketingCopy',
         input: ({ context }) => ({
           copy: context.copy ?? '',

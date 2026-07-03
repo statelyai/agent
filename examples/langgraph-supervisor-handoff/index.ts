@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { z } from 'zod';
-import { createActor, createAsyncLogic, toPromise, waitFor } from 'xstate';
-import { setupAgent } from '../../src/index.js';
+import { createAsyncLogic } from 'xstate';
+import { runAgent, setupAgent } from '../../src/index.js';
 
 export async function runLangGraphSupervisorHandoffExample() {
   const agent = setupAgent({
@@ -84,20 +84,13 @@ export async function runLangGraphSupervisorHandoffExample() {
     },
   });
 
-  const actor = createActor(
-    machine.provide({
-      actorSources: {
-        routeRequest: agent.requests.routeRequest.withExecutor(async () => ({
-          route: 'research',
-        })),
-      },
-    }),
-    { input: { request: 'compare frameworks' } },
-  );
-  actor.start();
-  await toPromise(actor);
+  const result = await runAgent(machine, {
+    input: { request: 'compare frameworks' },
+    generateText: async () => ({ route: 'research' }),
+  });
 
-  assert.deepEqual(actor.getSnapshot().output, {
+  assert.equal(result.status, 'done');
+  assert.deepEqual(result.status === 'done' ? result.output : undefined, {
     result: 'research:compare frameworks',
   });
 }

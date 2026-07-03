@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { z } from 'zod';
-import { createActor, createAsyncLogic, toPromise, waitFor } from 'xstate';
-import { setupAgent } from '../../src/index.js';
+import { createAsyncLogic } from 'xstate';
+import { runAgent, setupAgent } from '../../src/index.js';
 
 export async function runLangGraphPersistentMultiAgentNetworkExample() {
   const agent = setupAgent({
@@ -64,21 +64,26 @@ export async function runLangGraphPersistentMultiAgentNetworkExample() {
     },
   });
 
-  const first = createActor(machine, { input: { topic: 'xstate' } });
-  first.start();
-  await waitFor(first, (snapshot) => snapshot.matches('waitingToWrite'));
-  const persisted = first.getPersistedSnapshot();
-  first.stop();
-
-  const restored = createActor(machine, {
+  // No invoke in `waitingToWrite`, nothing in flight: runAgent settles idle
+  // instead of blocking. Persist the snapshot (host's choice of store) —
+  // JSON round-trip it here to prove it survives a real persistence layer.
+  const first = await runAgent(machine, {
     input: { topic: 'xstate' },
-    snapshot: persisted,
+    generateText: async () => ({}),
   });
-  restored.start();
-  restored.send({ type: 'CONTINUE' });
-  await toPromise(restored);
 
-  assert.deepEqual(restored.getSnapshot().output, {
+  assert.equal(first.status, 'idle');
+  const persisted = JSON.parse(JSON.stringify(first.snapshot));
+
+  // ...later, new process, the network continues...
+  const second = await runAgent(machine, {
+    snapshot: persisted,
+    event: { type: 'CONTINUE' },
+    generateText: async () => ({}),
+  });
+
+  assert.equal(second.status, 'done');
+  assert.deepEqual(second.status === 'done' ? second.output : undefined, {
     draft: 'draft:research:xstate',
   });
 }

@@ -1,7 +1,22 @@
+/**
+ * Burr Streaming Overview — safety check, mode routing, streamed answer.
+ *
+ * Burr's `streaming-overview` example checks input safety, routes to a
+ * response mode, then streams the answer back token by token. Here
+ * `answerPrompt` is a co-located request in `mode: 'stream'`; the host
+ * supplies a `streamText` executor and observes chunks via `runAgent`'s
+ * `onChunk(chunk, { request })` callback instead of the executor collecting
+ * chunks into a closure array by hand.
+ */
 import assert from 'node:assert/strict';
 import { z } from 'zod';
-import { createActor, createAsyncLogic, toPromise, waitFor } from 'xstate';
-import { setupAgent } from '../../src/index.js';
+import {
+  runAgent,
+  setupAgent,
+  type AgentRequestExecutorInfo,
+  type AgentTextRequest,
+  type AgentTools,
+} from '../../src/index.js';
 
 export async function runBurrStreamingOverviewExample() {
   const modeSchema = z.object({
@@ -109,29 +124,31 @@ export async function runBurrStreamingOverviewExample() {
     },
   });
 
-  const chunks: string[] = [];
-  const actor = createActor(
-    machine.provide({
-      actorSources: {
-        chooseMode: agent.requests.chooseMode.withExecutor(async () => ({
-          mode: 'generate_code',
-        })),
-        answerPrompt: agent.requests.answerPrompt.withExecutor(
-          async ({ input }) => {
-            chunks.push('chunk:1');
-            chunks.push('chunk:2');
-            return `response:${input.mode}:${input.prompt}`;
-          },
-        ),
-      },
-    }),
-    { input: { prompt: 'write a TypeScript function' } },
-  );
-  actor.start();
-  await toPromise(actor);
+  const generateText = async () => ({ object: { mode: 'generate_code' } });
 
+  // answerPrompt's prompt is `${mode}:${prompt}` (see requests.answerPrompt above).
+  const streamText = async (
+    request: AgentTextRequest & { tools: AgentTools },
+    info?: AgentRequestExecutorInfo
+  ) => {
+    info?.onChunk?.('chunk:1');
+    info?.onChunk?.('chunk:2');
+    return { text: `response:${request.prompt}` };
+  };
+
+  const chunks: string[] = [];
+  const result = await runAgent(machine, {
+    input: { prompt: 'write a TypeScript function' },
+    generateText,
+    streamText,
+    onChunk: (chunk) => chunks.push(chunk),
+  });
+
+  if (result.status !== 'done') {
+    throw new Error(`Streaming overview example did not complete: ${result.status}`);
+  }
   assert.deepEqual(chunks, ['chunk:1', 'chunk:2']);
-  assert.deepEqual(actor.getSnapshot().output, {
+  assert.deepEqual(result.output, {
     response: 'response:generate_code:write a TypeScript function',
   });
 }

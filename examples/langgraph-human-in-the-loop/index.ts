@@ -66,7 +66,7 @@ export async function runLangGraphHumanInTheLoopExample() {
           REJECT: ({ context, event }) => ({
             target: 'drafting',
             context: {
-              topic: `${context.topic}\nRevision: ${(event as unknown as { reason: string }).reason}`,
+              topic: `${context.topic}\nRevision: ${event.reason}`,
             },
           }),
         },

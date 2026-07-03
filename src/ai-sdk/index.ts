@@ -150,6 +150,12 @@ export function createAiSdkExecutors(
       model,
       abortSignal: info?.signal,
       ...toAiSdkCallSettings(request),
+      // Multi-step tool loops: `metadata` is the host-owned per-call channel
+      // (see AgentTextRequest.metadata). `metadata.maxSteps` bounds the AI
+      // SDK tool-call loop for this request; default stays single-step.
+      ...(typeof request.metadata?.maxSteps === 'number'
+        ? { stopWhen: stepCountIs(request.metadata.maxSteps) }
+        : {}),
     };
 
     if (isStructuredOutputRequest(request)) {

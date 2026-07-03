@@ -128,20 +128,14 @@ export async function runDinavinterTestAgentExample() {
         on: {
           TEXT_DELTA: ({ context, event }) => ({
             context: {
-              chunks: [
-                ...context.chunks,
-                (event as unknown as { text: string }).text,
-              ],
+              chunks: [...context.chunks, event.text],
             },
           }),
           IMAGE_URL: ({ context, event }) => ({
             context: {
               messages: [
                 ...context.messages,
-                assistantMessage((event as unknown as { url: string }).url) as {
-                  role: string;
-                  content: string;
-                },
+                assistantMessage(event.url) as { role: string; content: string },
               ],
             },
           }),

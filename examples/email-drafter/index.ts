@@ -1,9 +1,11 @@
 import { z } from 'zod';
-import { createAsyncLogic, setup } from 'xstate';
+import { createAsyncLogic } from 'xstate';
 import {
   type AgentMessage,
   assistantMessage,
+  createAgentSchemas,
   createTextLogic,
+  setupAgent,
   userMessage,
 } from '../../src/index.js';
 
@@ -115,12 +117,12 @@ export const streamDraft = createTextLogic({
   prompt: ({ input }) => input.prompt,
 });
 
-export const emailDrafterSchemas = {
+export const emailDrafterSchemas = createAgentSchemas({
   context: contextSchema,
   events: eventSchemas,
   output: outputSchema,
   meta: metaSchema,
-};
+});
 
 export const emailDrafterActors = {
   sendEmail: createAsyncLogic<{ sent: boolean }, { draft: EmailDraft }>({
@@ -134,9 +136,9 @@ export const emailDrafterActors = {
   streamDraft,
 };
 
-const agent = setup({
+const agent = setupAgent({
   schemas: emailDrafterSchemas,
-  actorSources: emailDrafterActors,
+  actors: emailDrafterActors,
 });
 
 export const emailDrafter = agent.createMachine({

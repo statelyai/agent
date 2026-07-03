@@ -1,7 +1,17 @@
+/**
+ * Burr Conversational RAG — retrieval + memory as explicit machine context.
+ *
+ * Burr's `conversational-rag` example threads chat history and retrieved
+ * documents through its application state between actions. Here that's
+ * plain XState context: `retrieve` is a typed host actor, `memory`
+ * accumulates in context across turns, and `answerWithDocuments` is a
+ * co-located request — hosted with `runAgent` instead of manual
+ * `createActor`/`toPromise` choreography.
+ */
 import assert from 'node:assert/strict';
 import { z } from 'zod';
-import { createActor, createAsyncLogic, toPromise, waitFor } from 'xstate';
-import { setupAgent } from '../../src/index.js';
+import { createAsyncLogic } from 'xstate';
+import { runAgent, setupAgent, type AgentTextRequest, type AgentTools } from '../../src/index.js';
 
 export async function runBurrConversationalRAGExample() {
   const agent = setupAgent({
@@ -96,21 +106,22 @@ export async function runBurrConversationalRAGExample() {
     },
   });
 
-  const actor = createActor(
-    machine.provide({
-      actorSources: {
-        answerWithDocuments: agent.requests.answerWithDocuments.withExecutor(
-          async ({ input }) =>
-            `answer:${input.documents.join(',')}:memory=${input.memory.length}`,
-        ),
-      },
-    }),
-    { input: { question: 'why burr?', memory: ['prior turn'] } },
-  );
-  actor.start();
-  await toPromise(actor);
+  const generateText = async (request: AgentTextRequest & { tools: AgentTools }) => {
+    const lines = (request.prompt ?? '').split('\n');
+    const memoryCount = lines[1]!.replace('Memory: ', '').split(' | ').filter(Boolean).length;
+    const documents = lines[2]!.replace('Docs: ', '').split(' | ').join(',');
+    return `answer:${documents}:memory=${memoryCount}`;
+  };
 
-  assert.deepEqual(actor.getSnapshot().output, {
+  const result = await runAgent(machine, {
+    input: { question: 'why burr?', memory: ['prior turn'] },
+    generateText,
+  });
+
+  if (result.status !== 'done') {
+    throw new Error(`Conversational RAG example did not complete: ${result.status}`);
+  }
+  assert.deepEqual(result.output, {
     answer: 'answer:doc:why burr?,doc:remembered-state:memory=1',
     memory: [
       'prior turn',

@@ -1,6 +1,16 @@
+/**
+ * Vercel AI SDK orchestrator-worker — ported to `setupAgent` with a
+ * co-located `requests:` entry for the planning step. Applying the plan
+ * into file changes is deterministic (no model call) in the source AI SDK
+ * example, so it stays as a pure `always` transition rather than becoming
+ * a request call.
+ *
+ * Compare: https://ai-sdk.dev/docs/agents/workflows#orchestrator-worker
+ *
+ * Run: OPENAI_API_KEY=... node --import tsx examples/ai-sdk-orchestrator-worker/index.ts
+ */
 import { z } from 'zod';
-import { setup } from 'xstate';
-import { createAgentSchemas, createTextLogic, runAgent } from '../../src/index.js';
+import { setupAgent, runAgent } from '../../src/index.js';
 import { createAiSdkTextExecutor } from '../ai-sdk-host/index.js';
 
 const implementationPlanSchema = z.object({
@@ -18,22 +28,6 @@ const fileChangeSchema = z.object({
   explanation: z.string(),
   code: z.string(),
 });
-const contextSchema = z.object({
-  featureRequest: z.string(),
-  plan: implementationPlanSchema.nullable(),
-  changes: z.array(fileChangeSchema),
-});
-type OrchestratorWorkerContext = z.infer<typeof contextSchema>;
-
-export const planImplementation = createTextLogic({
-  schemas: {
-    input: z.object({ featureRequest: z.string() }),
-    output: implementationPlanSchema,
-  },
-  model: 'openai/gpt-4.1-mini',
-  system: 'Plan feature implementations as file-level work.',
-  prompt: ({ input }) => input.featureRequest,
-});
 
 function createPlannedFileChanges(
   featureRequest: string,
@@ -47,19 +41,31 @@ function createPlannedFileChanges(
   }));
 }
 
-const agent = setup({
-  schemas: createAgentSchemas({
-    context: contextSchema,
-    input: z.object({ featureRequest: z.string() }),
-    output: z.object({
-      plan: implementationPlanSchema,
-      changes: z.array(fileChangeSchema),
-    }),
+const agent = setupAgent({
+  context: z.object({
+    featureRequest: z.string(),
+    plan: implementationPlanSchema.nullable(),
+    changes: z.array(fileChangeSchema),
   }),
-  actorSources: {
-    planImplementation,
+  input: z.object({ featureRequest: z.string() }),
+  output: z.object({
+    plan: implementationPlanSchema,
+    changes: z.array(fileChangeSchema),
+  }),
+  requests: {
+    planImplementation: {
+      schemas: {
+        input: z.object({ featureRequest: z.string() }),
+        output: implementationPlanSchema,
+      },
+      model: 'openai/gpt-4.1-mini',
+      system: 'Plan feature implementations as file-level work.',
+      prompt: ({ input }) => input.featureRequest,
+    },
   },
 });
+
+export const planImplementation = agent.requests.planImplementation;
 
 export const aiSdkOrchestratorWorkerMachine = agent.createMachine({
   id: 'ai-sdk-orchestrator-worker',
@@ -76,6 +82,7 @@ export const aiSdkOrchestratorWorkerMachine = agent.createMachine({
   states: {
     planning: {
       invoke: {
+        id: 'planImplementation',
         src: 'planImplementation',
         input: ({ context }) => ({ featureRequest: context.featureRequest }),
         onDone: ({ output }) => ({
@@ -85,8 +92,7 @@ export const aiSdkOrchestratorWorkerMachine = agent.createMachine({
       },
     },
     implementing: {
-      type: 'choice',
-      choice: ({ context }: { context: OrchestratorWorkerContext }) => ({
+      always: ({ context }) => ({
         target: 'done',
         context: {
           changes: createPlannedFileChanges(

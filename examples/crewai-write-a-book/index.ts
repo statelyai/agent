@@ -1,7 +1,16 @@
+/**
+ * CrewAI Write a Book with Flows — outline, then fan out chapter workers.
+ *
+ * CrewAI's Write a Book with Flows example outlines a book, then generates
+ * each chapter and compiles a manuscript. Here `outlineBook` is a co-located
+ * request and `writeChapters` is a typed host actor that fans out over the
+ * outlined chapters — hosted with `runAgent` instead of manual
+ * `createActor`/`toPromise` choreography.
+ */
 import assert from 'node:assert/strict';
 import { z } from 'zod';
-import { createActor, createAsyncLogic, toPromise } from 'xstate';
-import { setupAgent } from '../../src/index.js';
+import { createAsyncLogic } from 'xstate';
+import { runAgent, setupAgent } from '../../src/index.js';
 
 export async function runCrewAIWriteABookExample() {
   const agent = setupAgent({
@@ -77,21 +86,17 @@ export async function runCrewAIWriteABookExample() {
     },
   });
 
-  const actor = createActor(
-    machine.provide({
-      actorSources: {
-        outlineBook: agent.requests.outlineBook.withExecutor(async () => ({
-          title: 'The Workflow Book',
-          chapters: ['Intro', 'Runtime'],
-        })),
-      },
+  const result = await runAgent(machine, {
+    input: { brief: 'state machines for agents' },
+    generateText: async () => ({
+      object: { title: 'The Workflow Book', chapters: ['Intro', 'Runtime'] },
     }),
-    { input: { brief: 'state machines for agents' } },
-  );
-  actor.start();
-  await toPromise(actor);
+  });
 
-  assert.deepEqual(actor.getSnapshot().output, {
+  if (result.status !== 'done') {
+    throw new Error(`Write-a-book example did not complete: ${result.status}`);
+  }
+  assert.deepEqual(result.output, {
     title: 'The Workflow Book',
     manuscript: 'Intro: body\nRuntime: body',
   });

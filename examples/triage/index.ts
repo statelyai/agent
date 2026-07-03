@@ -1,6 +1,5 @@
 import { z } from 'zod';
-import { setup } from 'xstate';
-import { createAgentSchemas, createTextLogic } from '../../src/index.js';
+import { createAgentSchemas, createTextLogic, setupAgent } from '../../src/index.js';
 
 export const triageSchema = z.object({
   sentiment: z.enum(['positive', 'neutral', 'negative']),
@@ -32,9 +31,9 @@ export const triageActors = {
   triageTicket,
 };
 
-const triageAgent = setup({
+const triageAgent = setupAgent({
   schemas,
-  actorSources: triageActors,
+  actors: triageActors,
 });
 
 export const triageSchemas = schemas;

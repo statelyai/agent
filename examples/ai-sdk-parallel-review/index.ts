@@ -1,28 +1,21 @@
+/**
+ * Vercel AI SDK parallel review — ported to `setupAgent` with a co-located
+ * `requests:` entry for the summarize step. The three per-aspect reviews
+ * are deterministic (no model call) in the source AI SDK example, so they
+ * stay as a pure `always` transition rather than becoming request calls.
+ *
+ * Compare: https://ai-sdk.dev/docs/agents/workflows#parallel-processing
+ *
+ * Run: OPENAI_API_KEY=... node --import tsx examples/ai-sdk-parallel-review/index.ts
+ */
 import { z } from 'zod';
-import { setup } from 'xstate';
-import { createAgentSchemas, createTextLogic, runAgent } from '../../src/index.js';
+import { setupAgent, runAgent } from '../../src/index.js';
 import { createAiSdkTextExecutor } from '../ai-sdk-host/index.js';
 
 const reviewSchema = z.object({
   type: z.enum(['security', 'performance', 'maintainability']),
   findings: z.array(z.string()),
   severity: z.enum(['low', 'medium', 'high']),
-});
-const contextSchema = z.object({
-  code: z.string(),
-  reviews: z.array(reviewSchema),
-  summary: z.string().nullable(),
-});
-type ParallelReviewContext = z.infer<typeof contextSchema>;
-
-export const summarizeCodeReviews = createTextLogic({
-  schemas: {
-    input: z.object({ reviews: z.array(reviewSchema) }),
-    output: z.string(),
-  },
-  model: 'openai/gpt-4.1-mini',
-  system: 'Summarize multiple code reviews into key actions.',
-  prompt: ({ input }) => JSON.stringify(input.reviews, null, 2),
 });
 
 function createCodeReviews(code: string): Array<z.infer<typeof reviewSchema>> {
@@ -45,19 +38,31 @@ function createCodeReviews(code: string): Array<z.infer<typeof reviewSchema>> {
   ];
 }
 
-const agent = setup({
-  schemas: createAgentSchemas({
-    context: contextSchema,
-    input: z.object({ code: z.string() }),
-    output: z.object({
-      reviews: z.array(reviewSchema),
-      summary: z.string(),
-    }),
+const agent = setupAgent({
+  context: z.object({
+    code: z.string(),
+    reviews: z.array(reviewSchema),
+    summary: z.string().nullable(),
   }),
-  actorSources: {
-    summarizeCodeReviews,
+  input: z.object({ code: z.string() }),
+  output: z.object({
+    reviews: z.array(reviewSchema),
+    summary: z.string(),
+  }),
+  requests: {
+    summarizeCodeReviews: {
+      schemas: {
+        input: z.object({ reviews: z.array(reviewSchema) }),
+        output: z.string(),
+      },
+      model: 'openai/gpt-4.1-mini',
+      system: 'Summarize multiple code reviews into key actions.',
+      prompt: ({ input }) => JSON.stringify(input.reviews, null, 2),
+    },
   },
 });
+
+export const summarizeCodeReviews = agent.requests.summarizeCodeReviews;
 
 export const aiSdkParallelReviewMachine = agent.createMachine({
   id: 'ai-sdk-parallel-review',
@@ -73,14 +78,14 @@ export const aiSdkParallelReviewMachine = agent.createMachine({
   initial: 'reviewing',
   states: {
     reviewing: {
-      type: 'choice',
-      choice: ({ context }: { context: ParallelReviewContext }) => ({
+      always: ({ context }) => ({
         target: 'summarizing',
         context: { reviews: createCodeReviews(context.code) },
       }),
     },
     summarizing: {
       invoke: {
+        id: 'summarizeCodeReviews',
         src: 'summarizeCodeReviews',
         input: ({ context }) => ({ reviews: context.reviews }),
         onDone: ({ output }) => ({

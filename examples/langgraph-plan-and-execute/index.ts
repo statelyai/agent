@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { z } from 'zod';
-import { createActor, createAsyncLogic, toPromise, waitFor } from 'xstate';
-import { setupAgent } from '../../src/index.js';
+import { createAsyncLogic } from 'xstate';
+import { runAgent, setupAgent } from '../../src/index.js';
 
 export async function runLangGraphPlanAndExecuteExample() {
   const planSchema = z.object({
@@ -75,21 +75,13 @@ export async function runLangGraphPlanAndExecuteExample() {
     },
   });
 
-  const actor = createActor(
-    machine.provide({
-      actorSources: {
-        planTask: agent.requests.planTask.withExecutor(async () => ({
-          steps: ['research', 'write'],
-        })),
-      },
-    }),
-    { input: { request: 'make a brief' } },
-  );
+  const result = await runAgent(machine, {
+    input: { request: 'make a brief' },
+    generateText: async () => ({ steps: ['research', 'write'] }),
+  });
 
-  actor.start();
-  await waitFor(actor, (snapshot) => snapshot.status === 'done');
-
-  assert.deepEqual(actor.getSnapshot().output, {
+  assert.equal(result.status, 'done');
+  assert.deepEqual(result.status === 'done' ? result.output : undefined, {
     results: ['done:research', 'done:write'],
   });
 }

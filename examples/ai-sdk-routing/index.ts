@@ -1,6 +1,14 @@
+/**
+ * Vercel AI SDK routing — ported to `setupAgent` with co-located
+ * `requests:`. `answerCustomerQuery` picks its model/system per
+ * classification, showcasing per-call model/system as functions of input.
+ *
+ * Compare: https://ai-sdk.dev/docs/agents/workflows#routing
+ *
+ * Run: OPENAI_API_KEY=... node --import tsx examples/ai-sdk-routing/index.ts
+ */
 import { z } from 'zod';
-import { setup } from 'xstate';
-import { createAgentSchemas, createTextLogic, runAgent } from '../../src/index.js';
+import { setupAgent, runAgent } from '../../src/index.js';
 import { createAiSdkTextExecutor } from '../ai-sdk-host/index.js';
 
 const classificationSchema = z.object({
@@ -9,50 +17,50 @@ const classificationSchema = z.object({
   complexity: z.enum(['simple', 'complex']),
 });
 
-export const classifyCustomerQuery = createTextLogic({
-  schemas: {
-    input: z.object({ query: z.string() }),
-    output: classificationSchema,
-  },
-  model: 'openai/gpt-4.1-mini',
-  prompt: ({ input }) => `Classify this customer query:\n${input.query}`,
-});
-
-export const answerCustomerQuery = createTextLogic({
-  schemas: {
-    input: z.object({
-      query: z.string(),
-      classification: classificationSchema,
-    }),
-    output: z.string(),
-  },
-  model: ({ input }) =>
-    input.classification.complexity === 'simple'
-      ? 'openai/gpt-4o-mini'
-      : 'openai/o4-mini',
-  system: ({ input }) => ({
-    general: 'You handle general customer inquiries.',
-    refund: 'You specialize in refund requests.',
-    technical: 'You provide technical troubleshooting.',
-  })[input.classification.type],
-  prompt: ({ input }) => input.query,
-});
-
-const agent = setup({
-  schemas: createAgentSchemas({
-    context: z.object({
-      query: z.string(),
-      classification: classificationSchema.nullable(),
-      response: z.string().nullable(),
-    }),
-    input: z.object({ query: z.string() }),
-    output: z.object({
-      classification: classificationSchema,
-      response: z.string(),
-    }),
+const agent = setupAgent({
+  context: z.object({
+    query: z.string(),
+    classification: classificationSchema.nullable(),
+    response: z.string().nullable(),
   }),
-  actorSources: { classifyCustomerQuery, answerCustomerQuery },
+  input: z.object({ query: z.string() }),
+  output: z.object({
+    classification: classificationSchema,
+    response: z.string(),
+  }),
+  requests: {
+    classifyCustomerQuery: {
+      schemas: {
+        input: z.object({ query: z.string() }),
+        output: classificationSchema,
+      },
+      model: 'openai/gpt-4.1-mini',
+      prompt: ({ input }) => `Classify this customer query:\n${input.query}`,
+    },
+    answerCustomerQuery: {
+      schemas: {
+        input: z.object({
+          query: z.string(),
+          classification: classificationSchema,
+        }),
+        output: z.string(),
+      },
+      model: ({ input }) =>
+        input.classification.complexity === 'simple'
+          ? 'openai/gpt-4o-mini'
+          : 'openai/o4-mini',
+      system: ({ input }) => ({
+        general: 'You handle general customer inquiries.',
+        refund: 'You specialize in refund requests.',
+        technical: 'You provide technical troubleshooting.',
+      })[input.classification.type],
+      prompt: ({ input }) => input.query,
+    },
+  },
 });
+
+export const classifyCustomerQuery = agent.requests.classifyCustomerQuery;
+export const answerCustomerQuery = agent.requests.answerCustomerQuery;
 
 export const aiSdkRoutingMachine = agent.createMachine({
   id: 'ai-sdk-routing',
@@ -73,6 +81,7 @@ export const aiSdkRoutingMachine = agent.createMachine({
   states: {
     classifying: {
       invoke: {
+        id: 'classifyCustomerQuery',
         src: 'classifyCustomerQuery',
         input: ({ context }) => ({ query: context.query }),
         onDone: ({ output }) => ({
@@ -83,6 +92,7 @@ export const aiSdkRoutingMachine = agent.createMachine({
     },
     responding: {
       invoke: {
+        id: 'answerCustomerQuery',
         src: 'answerCustomerQuery',
         input: ({ context }) => ({
           query: context.query,

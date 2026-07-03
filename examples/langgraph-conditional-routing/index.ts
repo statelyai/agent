@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { z } from 'zod';
-import { createActor, createAsyncLogic, toPromise, waitFor } from 'xstate';
-import { setupAgent } from '../../src/index.js';
+import { runAgent, setupAgent } from '../../src/index.js';
 
 export async function runLangGraphConditionalRoutingExample() {
   const agent = setupAgent({
@@ -56,21 +55,15 @@ export async function runLangGraphConditionalRoutingExample() {
     },
   });
 
-  const actor = createActor(
-    machine.provide({
-      actorSources: {
-        routeRequest: agent.requests.routeRequest.withExecutor(async () => ({
-          route: 'escalate',
-        })),
-      },
-    }),
-    { input: { request: 'billing is broken' } },
-  );
+  const result = await runAgent(machine, {
+    input: { request: 'billing is broken' },
+    generateText: async () => ({ route: 'escalate' }),
+  });
 
-  actor.start();
-  await waitFor(actor, (snapshot) => snapshot.status === 'done');
-
-  assert.deepEqual(actor.getSnapshot().output, { route: 'escalate' });
+  assert.equal(result.status, 'done');
+  assert.deepEqual(result.status === 'done' ? result.output : undefined, {
+    route: 'escalate',
+  });
 }
 
 if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { z } from 'zod';
-import { createActor, createAsyncLogic, toPromise, waitFor } from 'xstate';
-import { setupAgent } from '../../src/index.js';
+import { createAsyncLogic } from 'xstate';
+import { runAgent, setupAgent } from '../../src/index.js';
 
 export async function runLangGraphSQLAgentExample() {
   const querySchema = z.object({ sql: z.string() });
@@ -94,23 +94,20 @@ export async function runLangGraphSQLAgentExample() {
     },
   });
 
-  const actor = createActor(
-    machine.provide({
-      actorSources: {
-        writeQuery: agent.requests.writeQuery.withExecutor(async () => ({
-          sql: 'select count(*) as total from users',
-        })),
-        answerRows: agent.requests.answerRows.withExecutor(
-          async ({ input }) => `final:${JSON.stringify(input.rows)}`,
-        ),
-      },
-    }),
-    { input: { question: 'how many users?' } },
-  );
-  actor.start();
-  await toPromise(actor);
+  const generateText = async (request: { model: string; prompt?: string }) => {
+    if (request.model === 'sql-writer') {
+      return { sql: 'select count(*) as total from users' };
+    }
+    return `final:${request.prompt ?? ''}`;
+  };
 
-  assert.deepEqual(actor.getSnapshot().output, {
+  const result = await runAgent(machine, {
+    input: { question: 'how many users?' },
+    generateText,
+  });
+
+  assert.equal(result.status, 'done');
+  assert.deepEqual(result.status === 'done' ? result.output : undefined, {
     sql: 'select count(*) as total from users',
     answer:
       'final:[{"total":"42","sql":"select count(*) as total from users"}]',

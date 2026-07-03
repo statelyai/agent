@@ -1,7 +1,14 @@
+/**
+ * CrewAI Content Creator — route-and-generate flow.
+ *
+ * CrewAI's Content Creator Flow routes a request to a format-specific
+ * writer (LinkedIn vs. blog) and generates the content. Here that's two
+ * co-located requests — `routeContent` then `createContent` — hosted with
+ * `runAgent` instead of manual `createActor`/`toPromise` choreography.
+ */
 import assert from 'node:assert/strict';
 import { z } from 'zod';
-import { createActor, createAsyncLogic, toPromise } from 'xstate';
-import { setupAgent } from '../../src/index.js';
+import { runAgent, setupAgent, type AgentTextRequest, type AgentTools } from '../../src/index.js';
 
 export async function runCrewAIContentCreatorExample() {
   const agent = setupAgent({
@@ -80,23 +87,23 @@ export async function runCrewAIContentCreatorExample() {
     },
   });
 
-  const actor = createActor(
-    machine.provide({
-      actorSources: {
-        routeContent: agent.requests.routeContent.withExecutor(async () => ({
-          route: 'linkedin',
-        })),
-        createContent: agent.requests.createContent.withExecutor(
-          async ({ input }) => `Post for ${input.route}:${input.request}`,
-        ),
-      },
-    }),
-    { input: { request: 'launch update' } },
-  );
-  actor.start();
-  await toPromise(actor);
+  const generateText = async (request: AgentTextRequest & { tools: AgentTools }) => {
+    if (request.model === 'router') {
+      return { object: { route: 'linkedin' } };
+    }
+    // request.model === 'writer'; prompt is `${route}:${request}`.
+    return `Post for ${request.prompt}`;
+  };
 
-  assert.deepEqual(actor.getSnapshot().output, {
+  const result = await runAgent(machine, {
+    input: { request: 'launch update' },
+    generateText,
+  });
+
+  if (result.status !== 'done') {
+    throw new Error(`Content creator example did not complete: ${result.status}`);
+  }
+  assert.deepEqual(result.output, {
     route: 'linkedin',
     content: 'Post for linkedin:launch update',
   });

@@ -1,7 +1,16 @@
+/**
+ * Burr Counter — hello-world-counter's explicit state + guarded loop.
+ *
+ * Burr's `hello-world-counter` example loops an `@action` node, re-entering
+ * it until a condition halts the application. Here that's a plain XState
+ * actor (`increment`, no model call) invoked from a state that loops back to
+ * itself via a guarded `always` transition — same shape, hosted with
+ * `runAgent` instead of manual `createActor`/`toPromise` choreography.
+ */
 import assert from 'node:assert/strict';
 import { z } from 'zod';
-import { createActor, createAsyncLogic, toPromise, waitFor } from 'xstate';
-import { setupAgent } from '../../src/index.js';
+import { createAsyncLogic } from 'xstate';
+import { runAgent, setupAgent } from '../../src/index.js';
 
 export async function runBurrCounterExample() {
   const agent = setupAgent({
@@ -43,11 +52,15 @@ export async function runBurrCounterExample() {
     },
   });
 
-  const actor = createActor(machine, { input: { countUpTo: 3 } });
-  actor.start();
-  await toPromise(actor);
+  const result = await runAgent(machine, {
+    input: { countUpTo: 3 },
+    generateText: async () => ({}),
+  });
 
-  assert.deepEqual(actor.getSnapshot().output, { counter: 3 });
+  if (result.status !== 'done') {
+    throw new Error(`Counter did not complete: ${result.status}`);
+  }
+  assert.deepEqual(result.output, { counter: 3 });
 }
 
 if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {

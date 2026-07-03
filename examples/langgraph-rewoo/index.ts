@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { z } from 'zod';
-import { createActor, createAsyncLogic, toPromise, waitFor } from 'xstate';
-import { setupAgent } from '../../src/index.js';
+import { createAsyncLogic } from 'xstate';
+import { runAgent, setupAgent } from '../../src/index.js';
 
 export async function runLangGraphReWOOExample() {
   const planSchema = z.object({
@@ -108,23 +108,20 @@ export async function runLangGraphReWOOExample() {
     },
   });
 
-  const actor = createActor(
-    machine.provide({
-      actorSources: {
-        planWork: agent.requests.planWork.withExecutor(async ({ input }) => ({
-          steps: [{ id: 'E1', request: input.goal }],
-        })),
-        solveWork: agent.requests.solveWork.withExecutor(
-          async ({ input }) => `answer:${JSON.stringify(input.evidence)}`,
-        ),
-      },
-    }),
-    { input: { goal: 'compare tools' } },
-  );
-  actor.start();
-  await toPromise(actor);
+  const generateText = async (request: { model: string; prompt?: string }) => {
+    if (request.model === 'planner') {
+      return { steps: [{ id: 'E1', request: request.prompt ?? '' }] };
+    }
+    return `answer:${request.prompt ?? ''}`;
+  };
 
-  assert.deepEqual(actor.getSnapshot().output, {
+  const result = await runAgent(machine, {
+    input: { goal: 'compare tools' },
+    generateText,
+  });
+
+  assert.equal(result.status, 'done');
+  assert.deepEqual(result.status === 'done' ? result.output : undefined, {
     answer: 'answer:{"E1":"result:compare tools"}',
     evidence: { E1: 'result:compare tools' },
   });

@@ -1,7 +1,16 @@
+/**
+ * Burr Multi-Agent Collaboration — supervisor routing to typed workers.
+ *
+ * Burr's `multi-agent-collaboration` example dispatches work between a
+ * researcher and a chart-generator agent. Here a `routeWork` request picks
+ * the worker, and a guarded `always` transition dispatches to whichever
+ * typed host actor (`researcher`/`chartGenerator`) was chosen — hosted with
+ * `runAgent` instead of manual `createActor`/`toPromise` choreography.
+ */
 import assert from 'node:assert/strict';
 import { z } from 'zod';
-import { createActor, createAsyncLogic, toPromise, waitFor } from 'xstate';
-import { setupAgent } from '../../src/index.js';
+import { createAsyncLogic } from 'xstate';
+import { runAgent, setupAgent } from '../../src/index.js';
 
 export async function runBurrMultiAgentCollaborationExample() {
   const routeSchema = z.object({
@@ -87,20 +96,15 @@ export async function runBurrMultiAgentCollaborationExample() {
     },
   });
 
-  const actor = createActor(
-    machine.provide({
-      actorSources: {
-        routeWork: agent.requests.routeWork.withExecutor(async () => ({
-          route: 'chartGenerator',
-        })),
-      },
-    }),
-    { input: { request: 'plot revenue' } },
-  );
-  actor.start();
-  await toPromise(actor);
+  const result = await runAgent(machine, {
+    input: { request: 'plot revenue' },
+    generateText: async () => ({ object: { route: 'chartGenerator' } }),
+  });
 
-  assert.deepEqual(actor.getSnapshot().output, {
+  if (result.status !== 'done') {
+    throw new Error(`Multi-agent collaboration example did not complete: ${result.status}`);
+  }
+  assert.deepEqual(result.output, {
     result: 'chart:plot revenue',
   });
 }

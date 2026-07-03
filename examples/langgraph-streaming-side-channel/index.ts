@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { z } from 'zod';
-import { createActor, createAsyncLogic, toPromise, waitFor } from 'xstate';
-import { setupAgent } from '../../src/index.js';
+import { runAgent, setupAgent } from '../../src/index.js';
 
 export async function runLangGraphStreamingSideChannelExample() {
   const chunks: string[] = [];
@@ -44,25 +43,29 @@ export async function runLangGraphStreamingSideChannelExample() {
     },
   });
 
-  const actor = createActor(
-    machine.provide({
-      actorSources: {
-        streamTopic: agent.requests.streamTopic.withExecutor(
-          async ({ input }) => {
-            chunks.push('hello');
-            chunks.push(input.topic);
-            return chunks.join(' ');
-          },
-        ),
-      },
-    }),
-    { input: { topic: 'agents' } },
-  );
-  actor.start();
-  await toPromise(actor);
+  // A `mode: 'stream'` request is executed by runAgent's `streamText`
+  // executor instead of `generateText`. The executor streams chunks by
+  // calling `info.onChunk`; runAgent forwards each one to the host's
+  // `onChunk(chunk, { request })` — the "side channel" — instead of the
+  // machine collecting chunks itself.
+  const result = await runAgent(machine, {
+    input: { topic: 'agents' },
+    generateText: async () => ({}),
+    streamText: async (request, info) => {
+      info?.onChunk?.('hello');
+      info?.onChunk?.(request.prompt ?? '');
+      return `hello ${request.prompt ?? ''}`;
+    },
+    onChunk: (chunk) => {
+      chunks.push(chunk);
+    },
+  });
 
+  assert.equal(result.status, 'done');
   assert.deepEqual(chunks, ['hello', 'agents']);
-  assert.deepEqual(actor.getSnapshot().output, { text: 'hello agents' });
+  assert.deepEqual(result.status === 'done' ? result.output : undefined, {
+    text: 'hello agents',
+  });
 }
 
 if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {

@@ -1,6 +1,15 @@
+/**
+ * Vercel AI SDK evaluator-optimizer — ported to `setupAgent` with
+ * co-located `requests:`. Keeps the translate → evaluate → (improve →
+ * evaluate)* loop, gated by a pure `always` transition that checks quality
+ * and iteration budget.
+ *
+ * Compare: https://ai-sdk.dev/docs/agents/workflows#evaluator-optimizer
+ *
+ * Run: OPENAI_API_KEY=... node --import tsx examples/ai-sdk-evaluator-optimizer/index.ts
+ */
 import { z } from 'zod';
-import { setup } from 'xstate';
-import { createAgentSchemas, createTextLogic, runAgent } from '../../src/index.js';
+import { setupAgent, runAgent } from '../../src/index.js';
 import { createAiSdkTextExecutor } from '../ai-sdk-host/index.js';
 
 const translationEvaluationSchema = z.object({
@@ -11,15 +20,6 @@ const translationEvaluationSchema = z.object({
   specificIssues: z.array(z.string()),
   improvementSuggestions: z.array(z.string()),
 });
-const contextSchema = z.object({
-  text: z.string(),
-  targetLanguage: z.string(),
-  translation: z.string().nullable(),
-  evaluation: translationEvaluationSchema.nullable(),
-  iterations: z.number(),
-  maxIterations: z.number(),
-});
-type EvaluatorOptimizerContext = z.infer<typeof contextSchema>;
 
 function translationPasses(
   evaluation: z.infer<typeof translationEvaluationSchema> | null,
@@ -31,62 +31,69 @@ function translationPasses(
     && evaluation.culturallyAccurate;
 }
 
-export const translateText = createTextLogic({
-  schemas: {
-    input: z.object({ text: z.string(), targetLanguage: z.string() }),
-    output: z.string(),
-  },
-  model: 'openai/gpt-4.1-mini',
-  system: 'Translate while preserving tone and cultural nuance.',
-  prompt: ({ input }) =>
-    `Translate this text to ${input.targetLanguage}:\n${input.text}`,
-});
-
-export const evaluateTranslation = createTextLogic({
-  schemas: {
-    input: z.object({ original: z.string(), translation: z.string() }),
-    output: translationEvaluationSchema,
-  },
-  model: 'openai/gpt-4.1-mini',
-  system: 'Evaluate translation quality.',
-  prompt: ({ input }) =>
-    `Original: ${input.original}\nTranslation: ${input.translation}`,
-});
-
-export const improveTranslation = createTextLogic({
-  schemas: {
-    input: z.object({
-      original: z.string(),
-      translation: z.string(),
-      evaluation: translationEvaluationSchema,
-    }),
-    output: z.string(),
-  },
-  model: 'openai/gpt-4.1-mini',
-  prompt: ({ input }) => [
-    `Original: ${input.original}`,
-    `Translation: ${input.translation}`,
-    `Issues: ${input.evaluation.specificIssues.join(', ')}`,
-    `Suggestions: ${input.evaluation.improvementSuggestions.join(', ')}`,
-  ].join('\n'),
-});
-
-const agent = setup({
-  schemas: createAgentSchemas({
-    context: contextSchema,
-    input: z.object({
-      text: z.string(),
-      targetLanguage: z.string(),
-      maxIterations: z.number().default(3),
-    }),
-    output: z.object({
-      translation: z.string(),
-      evaluation: translationEvaluationSchema.nullable(),
-      iterations: z.number(),
-    }),
+const agent = setupAgent({
+  context: z.object({
+    text: z.string(),
+    targetLanguage: z.string(),
+    translation: z.string().nullable(),
+    evaluation: translationEvaluationSchema.nullable(),
+    iterations: z.number(),
+    maxIterations: z.number(),
   }),
-  actorSources: { translateText, evaluateTranslation, improveTranslation },
+  input: z.object({
+    text: z.string(),
+    targetLanguage: z.string(),
+    maxIterations: z.number().default(3),
+  }),
+  output: z.object({
+    translation: z.string(),
+    evaluation: translationEvaluationSchema.nullable(),
+    iterations: z.number(),
+  }),
+  requests: {
+    translateText: {
+      schemas: {
+        input: z.object({ text: z.string(), targetLanguage: z.string() }),
+        output: z.string(),
+      },
+      model: 'openai/gpt-4.1-mini',
+      system: 'Translate while preserving tone and cultural nuance.',
+      prompt: ({ input }) =>
+        `Translate this text to ${input.targetLanguage}:\n${input.text}`,
+    },
+    evaluateTranslation: {
+      schemas: {
+        input: z.object({ original: z.string(), translation: z.string() }),
+        output: translationEvaluationSchema,
+      },
+      model: 'openai/gpt-4.1-mini',
+      system: 'Evaluate translation quality.',
+      prompt: ({ input }) =>
+        `Original: ${input.original}\nTranslation: ${input.translation}`,
+    },
+    improveTranslation: {
+      schemas: {
+        input: z.object({
+          original: z.string(),
+          translation: z.string(),
+          evaluation: translationEvaluationSchema,
+        }),
+        output: z.string(),
+      },
+      model: 'openai/gpt-4.1-mini',
+      prompt: ({ input }) => [
+        `Original: ${input.original}`,
+        `Translation: ${input.translation}`,
+        `Issues: ${input.evaluation.specificIssues.join(', ')}`,
+        `Suggestions: ${input.evaluation.improvementSuggestions.join(', ')}`,
+      ].join('\n'),
+    },
+  },
 });
+
+export const translateText = agent.requests.translateText;
+export const evaluateTranslation = agent.requests.evaluateTranslation;
+export const improveTranslation = agent.requests.improveTranslation;
 
 export const aiSdkEvaluatorOptimizerMachine = agent.createMachine({
   id: 'ai-sdk-evaluator-optimizer',
@@ -107,6 +114,7 @@ export const aiSdkEvaluatorOptimizerMachine = agent.createMachine({
   states: {
     translating: {
       invoke: {
+        id: 'translateText',
         src: 'translateText',
         input: ({ context }) => ({
           text: context.text,
@@ -120,6 +128,7 @@ export const aiSdkEvaluatorOptimizerMachine = agent.createMachine({
     },
     evaluating: {
       invoke: {
+        id: 'evaluateTranslation',
         src: 'evaluateTranslation',
         input: ({ context }) => ({
           original: context.text,
@@ -135,8 +144,7 @@ export const aiSdkEvaluatorOptimizerMachine = agent.createMachine({
       },
     },
     checking: {
-      type: 'choice',
-      choice: ({ context }: { context: EvaluatorOptimizerContext }) =>
+      always: ({ context }) =>
         translationPasses(context.evaluation)
         || context.iterations >= context.maxIterations
           ? { target: 'done' }
@@ -144,6 +152,7 @@ export const aiSdkEvaluatorOptimizerMachine = agent.createMachine({
     },
     improving: {
       invoke: {
+        id: 'improveTranslation',
         src: 'improveTranslation',
         input: ({ context }) => ({
           original: context.text,

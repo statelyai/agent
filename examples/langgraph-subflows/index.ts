@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { z } from 'zod';
-import { createActor, createAsyncLogic, toPromise, waitFor } from 'xstate';
-import { setupAgent } from '../../src/index.js';
+import { runAgent, setupAgent } from '../../src/index.js';
 
 export async function runLangGraphSubflowsExample() {
   const childAgent = setupAgent({
@@ -71,24 +70,27 @@ export async function runLangGraphSubflowsExample() {
     },
   });
 
-  const actor = createActor(
-    parentMachine.provide({
-      actorSources: {
-        child: childMachine.provide({
-          actorSources: {
-            researchTopic: childAgent.requests.researchTopic.withExecutor(
-              async ({ input }) => `Research: ${input.topic}`,
-            ),
-          },
-        }),
-      },
-    }),
-    { input: { topic: 'agents' } },
-  );
-  actor.start();
-  await toPromise(actor);
+  // The child is a nested machine invoked by name, not a top-level agent
+  // request — runAgent only wraps the parent's own text/decision sources, so
+  // the child's request keeps its own `.withExecutor()` binding (same as
+  // giving the child machine to any other actor system) before being
+  // registered as the parent's `child` actor source.
+  const result = await runAgent(parentMachine, {
+    input: { topic: 'agents' },
+    generateText: async () => ({}),
+    actorSources: {
+      child: childMachine.provide({
+        actorSources: {
+          researchTopic: childAgent.requests.researchTopic.withExecutor(
+            async ({ input }) => `Research: ${input.topic}`,
+          ),
+        },
+      }),
+    },
+  });
 
-  assert.deepEqual(actor.getSnapshot().output, {
+  assert.equal(result.status, 'done');
+  assert.deepEqual(result.status === 'done' ? result.output : undefined, {
     research: 'Research: agents',
   });
 }

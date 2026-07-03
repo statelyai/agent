@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { z } from 'zod';
-import { createActor, createAsyncLogic, toPromise, waitFor } from 'xstate';
-import { setupAgent } from '../../src/index.js';
+import { runAgent, setupAgent } from '../../src/index.js';
 
 export async function runLangGraphSnapshotPersistenceExample() {
   const agent = setupAgent({
@@ -53,29 +52,28 @@ export async function runLangGraphSnapshotPersistenceExample() {
     },
   });
 
-  const actors = {
-    writeDraft: agent.requests.writeDraft.withExecutor(
-      async ({ input }) => `Draft: ${input.topic}`,
-    ),
-  };
-  const first = createActor(machine.provide({ actorSources: actors }), {
+  const generateText = async (request: { prompt?: string }) => `Draft: ${request.prompt ?? ''}`;
+
+  // No invoke in `reviewing`, nothing in flight: runAgent settles idle
+  // instead of blocking. Persist the snapshot (host's choice of store) —
+  // JSON round-trip it here to prove it survives a real persistence layer.
+  const first = await runAgent(machine, {
     input: { topic: 'incident update' },
+    generateText,
   });
-  first.start();
-  await waitFor(first, (snapshot) => snapshot.matches('reviewing'));
 
-  const persisted = first.getPersistedSnapshot();
-  first.stop();
+  assert.equal(first.status, 'idle');
+  const persisted = JSON.parse(JSON.stringify(first.snapshot));
 
-  const restored = createActor(machine.provide({ actorSources: actors }), {
-    input: { topic: 'incident update' },
+  // ...later, new process, human approved...
+  const second = await runAgent(machine, {
     snapshot: persisted,
+    event: { type: 'APPROVE' },
+    generateText,
   });
-  restored.start();
-  restored.send({ type: 'APPROVE' });
-  await toPromise(restored);
 
-  assert.deepEqual(restored.getSnapshot().output, {
+  assert.equal(second.status, 'done');
+  assert.deepEqual(second.status === 'done' ? second.output : undefined, {
     draft: 'Draft: incident update',
   });
 }

@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { z } from 'zod';
-import { createActor, createAsyncLogic, toPromise, waitFor } from 'xstate';
-import { setupAgent } from '../../src/index.js';
+import { runAgent, setupAgent } from '../../src/index.js';
 
 export async function runLangGraphReflectionLoopExample() {
   const critiqueSchema = z.object({
@@ -91,32 +90,24 @@ export async function runLangGraphReflectionLoopExample() {
     },
   });
 
-  const actor = createActor(
-    machine.provide({
-      actorSources: {
-        writeDraft: agent.requests.writeDraft.withExecutor(
-          async ({ input }) =>
-            `draft:${
-              input.feedback
-                ? `${input.prompt}\nRevise: ${input.feedback}`
-                : input.prompt
-            }`,
-        ),
-        critiqueDraft: agent.requests.critiqueDraft.withExecutor(async () => {
-          critiqueCount += 1;
-          return {
-            approved: critiqueCount > 1,
-            feedback: critiqueCount > 1 ? 'ship' : 'add evidence',
-          };
-        }),
-      },
-    }),
-    { input: { prompt: 'make the case' } },
-  );
-  actor.start();
-  await toPromise(actor);
+  const generateText = async (request: { model: string; prompt?: string }) => {
+    if (request.model === 'writer') {
+      return `draft:${request.prompt ?? ''}`;
+    }
+    critiqueCount += 1;
+    return {
+      approved: critiqueCount > 1,
+      feedback: critiqueCount > 1 ? 'ship' : 'add evidence',
+    };
+  };
 
-  assert.deepEqual(actor.getSnapshot().output, {
+  const result = await runAgent(machine, {
+    input: { prompt: 'make the case' },
+    generateText,
+  });
+
+  assert.equal(result.status, 'done');
+  assert.deepEqual(result.status === 'done' ? result.output : undefined, {
     draft: 'draft:make the case\nRevise: add evidence',
   });
 }

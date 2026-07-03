@@ -85,21 +85,14 @@ function createDebaterAgent() {
     states: {
       idle: {
         on: {
-          'DEBATE.ARGUMENT_REQUESTED': ({ event }) => {
-            const request = event as unknown as {
-              question: string;
-              round: number;
-              transcript: z.infer<typeof transcriptSchema>;
-            };
-            return {
-              target: 'composing',
-              context: {
-                question: request.question,
-                round: request.round,
-                transcript: request.transcript,
-              },
-            };
-          },
+          'DEBATE.ARGUMENT_REQUESTED': ({ event }) => ({
+            target: 'composing',
+            context: {
+              question: event.question,
+              round: event.round,
+              transcript: event.transcript,
+            },
+          }),
         },
       },
       composing: {
@@ -118,7 +111,7 @@ function createDebaterAgent() {
                 stance: context.stance,
                 round: context.round ?? 0,
                 text: output,
-              } as never);
+              });
             }
             return { target: 'idle' };
           },
@@ -204,23 +197,22 @@ export function createDebateSubAgentsWorkflow(): DebateSubAgentsWorkflow {
       requestingArgument: {
         always: ({ context, children }, enq) => {
           const turn = nextTurn(context.transcript.length);
-          enq.sendTo(children[turn.actorId] as never, {
+          enq.sendTo(children[turn.actorId], {
             type: 'DEBATE.ARGUMENT_REQUESTED',
             round: turn.round,
             question: context.question,
             transcript: context.transcript,
-          } as never);
+          });
           return { target: 'waitingForArgument' };
         },
       },
       waitingForArgument: {
         on: {
           'DEBATE.ARGUMENT_SUBMITTED': ({ context, event }) => {
-            const argument = event as unknown as z.infer<typeof transcriptEntrySchema>;
             const transcript = [...context.transcript, {
-              stance: argument.stance,
-              round: argument.round,
-              text: argument.text,
+              stance: event.stance,
+              round: event.round,
+              text: event.text,
             }];
 
             return transcript.length >= totalTurns
