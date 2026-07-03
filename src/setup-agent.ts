@@ -44,6 +44,9 @@ const STREAM_TEXT_ACTOR = 'agent.streamText' as const;
 const DECIDE_ACTOR = 'agent.decide' as const;
 
 export type AgentRequestMode = 'generate' | 'stream';
+export type AgentModelMap = Record<string, unknown>;
+export type AgentModelRef<TModels extends AgentModelMap = {}> =
+  [keyof TModels] extends [never] ? string : keyof TModels & string;
 
 /** Portable LCD input text requests pass to host executors. */
 export interface AgentTextRequest<TMetadata = Record<string, unknown>> {
@@ -79,8 +82,9 @@ export interface AgentUserInput<TMetadata = Record<string, unknown>> {
 export interface AgentDecisionInput<
   TEvent extends string = string,
   TMetadata = Record<string, unknown>,
+  TModel extends string = string,
 > {
-  model: string;
+  model: TModel;
   system?: string;
   prompt?: string;
   messages?: AgentMessage[];
@@ -95,11 +99,17 @@ export interface AgentDecisionInput<
   metadata?: TMetadata;
 }
 
-type BuiltinAgentActors<TEvent extends string = string> = {
+type BuiltinAgentActors<
+  TEvent extends string = string,
+  TModel extends string = string,
+> = {
   [GENERATE_TEXT_ACTOR]: AsyncActorLogic<unknown, AgentTextRequest>;
   [STREAM_TEXT_ACTOR]: AsyncActorLogic<unknown, AgentTextRequest>;
   [USER_INPUT_ACTOR]: AsyncActorLogic<unknown, AgentUserInput>;
-  [DECIDE_ACTOR]: AsyncActorLogic<ChosenEvent, AgentDecisionInput<TEvent>>;
+  [DECIDE_ACTOR]: AsyncActorLogic<
+    ChosenEvent,
+    AgentDecisionInput<TEvent, Record<string, unknown>, TModel>
+  >;
 };
 
 type AgentExecutionOptions = Pick<AgentRequestOptions, 'schemas' | 'actors'>;
@@ -366,11 +376,43 @@ type JsonSchemaObject = {
   [key: string]: unknown;
 };
 
-function jsonSchemaToStandardSchema<T = unknown>(
-  schema: JsonSchemaObject | undefined,
+/**
+ * Compiles a JSON Schema object (from an `AgentWorkflowConfig`) into a
+ * runtime `StandardSchemaV1` validator. `setupAgent.fromConfig(...)` calls
+ * this once per schema in the config (context/events/input/output/meta,
+ * request input/output) — bring your own engine (Ajv, @cfworker/json-schema,
+ * a compiled-Zod-from-JSON-Schema pipeline, ...) or pass the exported
+ * `minimalSchemaCompiler` to explicitly opt into the built-in subset
+ * validator.
+ */
+export type SchemaCompiler = (
+  jsonSchema: Record<string, unknown>,
+  name: string
+) => StandardSchemaV1;
+
+/**
+ * Built-in, zero-dependency `SchemaCompiler`. Honors ONLY this JSON Schema
+ * keyword subset:
+ *
+ *   - `type` (single string; if an array, only the first entry is checked)
+ *   - `properties` / `required` (for `type: 'object'`)
+ *   - `items` (for `type: 'array'`)
+ *   - `enum`
+ *   - `const`
+ *
+ * Everything else — `anyOf`/`oneOf`/`allOf`/`not`, `pattern`, `format`,
+ * `minLength`/`maxLength`, `minimum`/`maximum`, `multipleOf`,
+ * `additionalProperties`, `$ref`, and every other JSON Schema keyword — is
+ * IGNORED. A value can silently pass validation despite violating a keyword
+ * outside this subset. This exists for zero-dependency, low-stakes config
+ * boundaries; pass a real JSON Schema engine (e.g. Ajv) as `compileSchema`
+ * for anything that needs full JSON Schema semantics.
+ */
+export const minimalSchemaCompiler: SchemaCompiler = function minimalSchemaCompiler(
+  schema: Record<string, unknown> | undefined,
   name = 'schema'
-): StandardSchemaV1<T> {
-  const resolvedSchema = schema ?? {};
+): StandardSchemaV1 {
+  const resolvedSchema = (schema ?? {}) as JsonSchemaObject;
 
   return {
     '~standard': {
@@ -379,19 +421,19 @@ function jsonSchemaToStandardSchema<T = unknown>(
       validate(value: unknown) {
         const issues: { message: string }[] = [];
         validateJsonSchemaValue(resolvedSchema, value, name, issues);
-        return issues.length > 0 ? { issues } : { value: value as T };
+        return issues.length > 0 ? { issues } : { value };
       },
       jsonSchema: {
         input: () => resolvedSchema,
       },
     },
   };
-}
+};
 
-// Only used by setupAgent.fromConfig(...) for static JSON/YAML workflow
-// configs. JS callers should pass a real Standard Schema validator such as Zod
-// to setupAgent(...); this intentionally covers the small JSON Schema subset we
-// need for config boundary validation and provider structured-output metadata.
+// Backs `minimalSchemaCompiler`, the built-in opt-in `SchemaCompiler`. JS
+// callers should pass a real Standard Schema validator such as Zod to
+// setupAgent(...); this intentionally covers only the small JSON Schema
+// subset documented on `minimalSchemaCompiler`.
 function validateJsonSchemaValue(
   schema: JsonSchemaObject,
   value: unknown,
@@ -701,13 +743,14 @@ export interface TextLogicConfig<
   TInputSchema extends StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1,
   TMetadata = Record<string, unknown>,
+  TModel extends string = string,
 > {
   mode?: AgentRequestMode;
   schemas: {
     input: TInputSchema;
     output: TOutputSchema;
   };
-  model: ResolveTextLogicValue<string, InferOutput<TInputSchema>>;
+  model: ResolveTextLogicValue<TModel, InferOutput<TInputSchema>>;
   system?: ResolveTextLogicValue<string | undefined, InferOutput<TInputSchema>>;
   prompt?: ResolveTextLogicValue<string | undefined, InferOutput<TInputSchema>>;
   messages?: ResolveTextLogicValue<
@@ -786,8 +829,9 @@ export function createTextLogic<
   TInputSchema extends StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1,
   TMetadata = Record<string, unknown>,
+  TModel extends string = string,
 >(
-  config: TextLogicConfig<TInputSchema, TOutputSchema, TMetadata>,
+  config: TextLogicConfig<TInputSchema, TOutputSchema, TMetadata, TModel>,
   execute?: TextLogicExecutor<TInputSchema, TOutputSchema, TMetadata>
 ): TextLogic<TInputSchema, TOutputSchema, TMetadata> {
   type TInput = InferOutput<TInputSchema>;
@@ -891,9 +935,10 @@ export interface DecisionLogicConfig<
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1,
   TEvent extends string = string,
   TMetadata extends Record<string, unknown> = Record<string, unknown>,
+  TModel extends string = string,
 > {
   schemas?: { input: TInputSchema };
-  model: ResolveTextLogicValue<string, InferOutput<TInputSchema>>;
+  model: ResolveTextLogicValue<TModel, InferOutput<TInputSchema>>;
   system?: ResolveTextLogicValue<string | undefined, InferOutput<TInputSchema>>;
   prompt?: ResolveTextLogicValue<string | undefined, InferOutput<TInputSchema>>;
   messages?: ResolveTextLogicValue<
@@ -940,8 +985,9 @@ export function createDecisionLogic<
   TInputSchema extends StandardSchemaV1,
   TEvent extends string = string,
   TMetadata extends Record<string, unknown> = Record<string, unknown>,
+  TModel extends string = string,
 >(
-  config: DecisionLogicConfig<TInputSchema, TEvent, TMetadata>,
+  config: DecisionLogicConfig<TInputSchema, TEvent, TMetadata, TModel>,
   execute?: AgentDecisionExecutor
 ): DecisionLogic<TInputSchema, TMetadata> {
   type TInput = InferOutput<TInputSchema>;
@@ -2298,7 +2344,8 @@ type SetupActors<TActors extends { [K in keyof TActors]: AnyActorLogic }> = {
 type AgentSetupActors<
   TActors extends { [K in keyof TActors]: AnyActorLogic },
   TEvent extends string = string,
-> = TActors & BuiltinAgentActors<TEvent>;
+  TModel extends string = string,
+> = TActors & BuiltinAgentActors<TEvent, TModel>;
 
 export interface AgentSchemaPack<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>> = StandardSchemaV1<Record<string, unknown>>,
@@ -2362,7 +2409,8 @@ type AgentRequestConfig<
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1 = StandardSchemaV1,
   TMetadata = Record<string, unknown>,
-> = TextLogicConfig<TInputSchema, TOutputSchema, TMetadata> & {
+  TModel extends string = string,
+> = TextLogicConfig<TInputSchema, TOutputSchema, TMetadata, TModel> & {
   mode?: AgentRequestMode;
 };
 
@@ -2376,10 +2424,13 @@ type AgentRequestSchemaMap = Record<
 
 type AgentRequestInput<
   TRequestSchemas extends AgentRequestSchemaMap,
+  TModel extends string = string,
 > = {
   [K in keyof TRequestSchemas]: AgentRequestConfig<
     TRequestSchemas[K]['input'],
-    TRequestSchemas[K]['output']
+    TRequestSchemas[K]['output'],
+    Record<string, unknown>,
+    TModel
   > & {
     schemas: TRequestSchemas[K];
   };
@@ -2431,6 +2482,7 @@ type AgentSetupXStateConfig<
   TInputSchema extends StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1,
   TMetaSchema extends StandardSchemaV1,
+  TModels extends AgentModelMap,
 > = {
   schemas: {
     context: TContextSchema;
@@ -2439,7 +2491,11 @@ type AgentSetupXStateConfig<
     meta: TMetaSchema;
   } & AgentSetupEventsSchema<TEventSchemas>;
   actorSources: SetupActors<
-    AgentSetupActors<AgentAllActors<TActors, TRequestSchemas>, keyof TEventSchemas & string>
+    AgentSetupActors<
+      AgentAllActors<TActors, TRequestSchemas>,
+      keyof TEventSchemas & string,
+      AgentModelRef<TModels>
+    >
   >;
   actions?: NonNullable<AnySetupConfig['actions']>;
   guards?: NonNullable<AnySetupConfig['guards']>;
@@ -2454,6 +2510,7 @@ type SetupAgentBaseConfig<
   TOutputSchema extends StandardSchemaV1,
   TMetaSchema extends StandardSchemaV1,
   TRequestSchemas extends AgentRequestSchemaMap,
+  TModels extends AgentModelMap,
 > = (
   | {
       schemas: AgentSchemaPack<
@@ -2472,8 +2529,9 @@ type SetupAgentBaseConfig<
       TMetaSchema
     >
 ) & {
+  models?: TModels;
   actors?: TActors;
-  requests?: AgentRequestInput<TRequestSchemas>;
+  requests?: AgentRequestInput<TRequestSchemas, AgentModelRef<TModels>>;
   actions?: NonNullable<AnySetupConfig['actions']>;
   guards?: NonNullable<AnySetupConfig['guards']>;
   delays?: NonNullable<AnySetupConfig['delays']>;
@@ -2487,6 +2545,7 @@ type SetupAgentXStateResult<
   TInputSchema extends StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1,
   TMetaSchema extends StandardSchemaV1,
+  TModels extends AgentModelMap,
 > = SetupReturnFromConfig<
   AgentSetupXStateConfig<
     TContextSchema,
@@ -2495,7 +2554,8 @@ type SetupAgentXStateResult<
     TRequestSchemas,
     TInputSchema,
     TOutputSchema,
-    TMetaSchema
+    TMetaSchema,
+    TModels
   >
 >;
 
@@ -2507,6 +2567,7 @@ type SetupAgentResult<
   TInputSchema extends StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1,
   TMetaSchema extends StandardSchemaV1,
+  TModels extends AgentModelMap,
 > = Omit<
   SetupAgentXStateResult<
     TContextSchema,
@@ -2515,8 +2576,9 @@ type SetupAgentResult<
     TRequestSchemas,
     TInputSchema,
     TOutputSchema,
-    TMetaSchema
->,
+    TMetaSchema,
+    TModels
+  >,
   'createMachine'
 > & {
   createMachine: SetupAgentXStateResult<
@@ -2526,7 +2588,8 @@ type SetupAgentResult<
     TRequestSchemas,
     TInputSchema,
     TOutputSchema,
-    TMetaSchema
+    TMetaSchema,
+    TModels
   >['createMachine'];
   schemas: AgentSchemaPack<
     TContextSchema,
@@ -2535,6 +2598,7 @@ type SetupAgentResult<
     TOutputSchema,
     TMetaSchema
   >;
+  readonly models: TModels;
   readonly requests: RequestActors<TRequestSchemas>;
   initial<TMachine extends AnyActorLogic>(
     machine: TMachine,
@@ -2588,6 +2652,7 @@ export function setupAgent<
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
   TOutputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
   TMetaSchema extends StandardSchemaV1 = StandardSchemaV1<MetaObject>,
+  TModels extends AgentModelMap = {},
 >(
   config: SetupAgentBaseConfig<
     TContextSchema,
@@ -2596,7 +2661,8 @@ export function setupAgent<
     TInputSchema,
     TOutputSchema,
     TMetaSchema,
-    TRequestSchemas
+    TRequestSchemas,
+    TModels
   >
 ): SetupAgentResult<
   TContextSchema,
@@ -2605,7 +2671,8 @@ export function setupAgent<
   TRequestSchemas,
   TInputSchema,
   TOutputSchema,
-  TMetaSchema
+  TMetaSchema,
+  TModels
 > {
   return createSetupAgent(config);
 }
@@ -2701,7 +2768,8 @@ export interface AgentWorkflowActionConfig {
 }
 
 function createSchemasFromWorkflowConfig(
-  config: AgentWorkflowConfig
+  config: AgentWorkflowConfig,
+  compileSchema: SchemaCompiler
 ): AgentSchemaPack<
   StandardSchemaV1<Record<string, unknown>>,
   Record<string, StandardSchemaV1>,
@@ -2710,24 +2778,28 @@ function createSchemasFromWorkflowConfig(
   StandardSchemaV1<MetaObject>
 > {
   return createAgentSchemas({
-    context: jsonSchemaToStandardSchema<Record<string, unknown>>(
-      config.schemas?.context ?? { type: 'object' },
+    context: compileSchema(
+      (config.schemas?.context ?? { type: 'object' }) as Record<string, unknown>,
       'context'
-    ),
+    ) as StandardSchemaV1<Record<string, unknown>>,
     events: Object.fromEntries(
       Object.entries(config.schemas?.events ?? {}).map(([key, schema]) => [
         key,
-        jsonSchemaToStandardSchema(schema, `event.${key}`),
+        compileSchema(schema as Record<string, unknown>, `event.${key}`),
       ])
     ),
-    input: jsonSchemaToStandardSchema(config.schemas?.input, 'input'),
-    output: jsonSchemaToStandardSchema(config.schemas?.output, 'output'),
-    meta: jsonSchemaToStandardSchema<MetaObject>(config.schemas?.meta, 'meta'),
+    input: compileSchema((config.schemas?.input ?? {}) as Record<string, unknown>, 'input'),
+    output: compileSchema((config.schemas?.output ?? {}) as Record<string, unknown>, 'output'),
+    meta: compileSchema(
+      (config.schemas?.meta ?? {}) as Record<string, unknown>,
+      'meta'
+    ) as StandardSchemaV1<MetaObject>,
   });
 }
 
 function createRequestsFromWorkflowConfig(
-  config: AgentWorkflowConfig
+  config: AgentWorkflowConfig,
+  compileSchema: SchemaCompiler
 ): AgentRequestInput<
   Record<string, { input: StandardSchemaV1; output: StandardSchemaV1 }>
 > {
@@ -2738,8 +2810,8 @@ function createRequestsFromWorkflowConfig(
         mode: request.mode,
         description: request.description,
         schemas: {
-          input: jsonSchemaToStandardSchema(request.input, `${key}.input`),
-          output: jsonSchemaToStandardSchema(request.output, `${key}.output`),
+          input: compileSchema(request.input as Record<string, unknown>, `${key}.input`),
+          output: compileSchema(request.output as Record<string, unknown>, `${key}.output`),
         },
         model: ({ input }) =>
           String(evaluateWorkflowConfigValue(request.model, { input }) ?? ''),
@@ -3015,9 +3087,23 @@ function lowerWorkflowState(stateConfig: AgentWorkflowStateConfig): Record<strin
   };
 }
 
-function setupAgentFromConfig(config: AgentWorkflowConfig): AnyStateMachine {
-  const schemas = createSchemasFromWorkflowConfig(config);
-  const requests = createRequestsFromWorkflowConfig(config);
+function setupAgentFromConfig(
+  config: AgentWorkflowConfig,
+  options: FromConfigOptions
+): AnyStateMachine {
+  if (!options || typeof options.compileSchema !== 'function') {
+    throw new Error(
+      "setupAgent.fromConfig(...) requires a 'compileSchema' option: " +
+        '{ compileSchema: (jsonSchema, name) => StandardSchemaV1 }. Bring your own JSON ' +
+        'Schema engine (Ajv, @cfworker/json-schema, ...), or pass the exported ' +
+        '`minimalSchemaCompiler` to explicitly opt into the built-in subset validator ' +
+        '(type/properties/required/items/enum/const only — everything else is ignored).'
+    );
+  }
+
+  const { compileSchema } = options;
+  const schemas = createSchemasFromWorkflowConfig(config, compileSchema);
+  const requests = createRequestsFromWorkflowConfig(config, compileSchema);
   const requestActors = createRequestActors(requests);
   const actors = createActorPlaceholdersFromWorkflowConfig(config);
   const agent = setupAgent({
@@ -3084,15 +3170,30 @@ function withRootOutputFromSingleFinal<TConfig>(config: TConfig): TConfig {
     : config;
 }
 
+/** Options for `setupAgent.fromConfig(...)`. */
+export interface FromConfigOptions {
+  /**
+   * Compile a JSON Schema from the config into a runtime validator. Bring
+   * your own engine (Ajv, @cfworker/json-schema, ...) or pass the exported
+   * `minimalSchemaCompiler` to explicitly opt into the built-in subset
+   * validator (type/properties/required/items/enum/const only).
+   */
+  compileSchema: SchemaCompiler;
+}
+
 export namespace setupAgent {
-  export function fromConfig(config: AgentWorkflowConfig): AnyStateMachine {
-    return setupAgentFromConfig(config);
+  export function fromConfig(
+    config: AgentWorkflowConfig,
+    options: FromConfigOptions
+  ): AnyStateMachine {
+    return setupAgentFromConfig(config, options);
   }
 }
 
 function createRequestActors<
   TRequestSchemas extends AgentRequestSchemaMap,
->(requests: AgentRequestInput<TRequestSchemas>): RequestActors<TRequestSchemas> {
+  TModel extends string = string,
+>(requests: AgentRequestInput<TRequestSchemas, TModel>): RequestActors<TRequestSchemas> {
   return Object.fromEntries(
     Object.entries(requests).map(([key, request]) => {
       const logic = createTextLogic({
@@ -3146,10 +3247,11 @@ function normalizeAgentSchemas<
 
 function normalizeAgentRequestInput<
   TRequestSchemas extends AgentRequestSchemaMap,
+  TModel extends string = string,
 >(
-  requests: AgentRequestInput<TRequestSchemas> | undefined
-): AgentRequestInput<TRequestSchemas> {
-  return requests ?? ({} as AgentRequestInput<TRequestSchemas>);
+  requests: AgentRequestInput<TRequestSchemas, TModel> | undefined
+): AgentRequestInput<TRequestSchemas, TModel> {
+  return requests ?? ({} as AgentRequestInput<TRequestSchemas, TModel>);
 }
 
 /**
@@ -3212,6 +3314,7 @@ function createAgentSetupConfig<
   TInputSchema extends StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1,
   TMetaSchema extends StandardSchemaV1,
+  TModels extends AgentModelMap,
 >(
   schemas: AgentSchemaPack<
     TContextSchema,
@@ -3221,7 +3324,11 @@ function createAgentSetupConfig<
     TMetaSchema
   >,
   actorSources: SetupActors<
-    AgentSetupActors<AgentAllActors<TActors, TRequestSchemas>, keyof TEventSchemas & string>
+    AgentSetupActors<
+      AgentAllActors<TActors, TRequestSchemas>,
+      keyof TEventSchemas & string,
+      AgentModelRef<TModels>
+    >
   >,
   config: Pick<
     SetupAgentBaseConfig<
@@ -3231,7 +3338,8 @@ function createAgentSetupConfig<
       TInputSchema,
       TOutputSchema,
       TMetaSchema,
-      TRequestSchemas
+      TRequestSchemas,
+      TModels
     >,
     'actions' | 'guards' | 'delays'
   >
@@ -3242,7 +3350,8 @@ function createAgentSetupConfig<
   TRequestSchemas,
   TInputSchema,
   TOutputSchema,
-  TMetaSchema
+  TMetaSchema,
+  TModels
 > {
   return {
     schemas: {
@@ -3267,6 +3376,7 @@ function createSetupAgent<
   TInputSchema extends StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1,
   TMetaSchema extends StandardSchemaV1,
+  TModels extends AgentModelMap,
 >(
   config: SetupAgentBaseConfig<
     TContextSchema,
@@ -3275,7 +3385,8 @@ function createSetupAgent<
     TInputSchema,
     TOutputSchema,
     TMetaSchema,
-    TRequestSchemas
+    TRequestSchemas,
+    TModels
   >
 ): SetupAgentResult<
   TContextSchema,
@@ -3284,11 +3395,15 @@ function createSetupAgent<
   TRequestSchemas,
   TInputSchema,
   TOutputSchema,
-  TMetaSchema
+  TMetaSchema,
+  TModels
 > {
   const schemas = normalizeAgentSchemas(config);
-  const requests = normalizeAgentRequestInput<TRequestSchemas>(config.requests);
-  const requestActors = createRequestActors(requests);
+  const requests = normalizeAgentRequestInput<
+    TRequestSchemas,
+    AgentModelRef<TModels>
+  >(config.requests);
+  const requestActors = createRequestActors<TRequestSchemas, AgentModelRef<TModels>>(requests);
   const actorSources = createAgentActorSources(config.actors, requestActors);
   const setupConfig = createAgentSetupConfig<
       TContextSchema,
@@ -3297,7 +3412,8 @@ function createSetupAgent<
       TRequestSchemas,
       TInputSchema,
       TOutputSchema,
-      TMetaSchema
+      TMetaSchema,
+      TModels
     >(schemas, actorSources, config);
   const base = setup(setupConfig);
   const createBaseMachine = base.createMachine.bind(base);
@@ -3305,6 +3421,7 @@ function createSetupAgent<
     schemas,
     actors: actorSources,
   };
+  const models = (config.models ?? {}) as TModels;
 
   return Object.assign(base, {
     createMachine(machineConfig: Parameters<typeof base.createMachine>[0]) {
@@ -3315,6 +3432,7 @@ function createSetupAgent<
       return machine;
     },
     schemas,
+    models,
     requests: requestActors,
     initial(machine: AnyActorLogic, input?: unknown) {
       return initialAgentStep(machine, input, machineOptions);
@@ -3363,6 +3481,7 @@ function createSetupAgent<
     TRequestSchemas,
     TInputSchema,
     TOutputSchema,
-    TMetaSchema
+    TMetaSchema,
+    TModels
   >;
 }

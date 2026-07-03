@@ -97,13 +97,15 @@ const result = await runAgent(machine, {
 ```ts
 import { createAsyncLogic } from 'xstate';
 
-const machine = setupAgent.fromConfig(config).provide({
-  actorSources: {
-    'agent.userInput': createAsyncLogic({
-      run: async ({ input }) => showFormAndWaitForSubmit(input),
-    }),
-  },
-});
+const machine = setupAgent
+  .fromConfig(config, { compileSchema })
+  .provide({
+    actorSources: {
+      'agent.userInput': createAsyncLogic({
+        run: async ({ input }) => showFormAndWaitForSubmit(input),
+      }),
+    },
+  });
 ```
 
 If a machine invokes `agent.userInput` and neither is supplied, `runAgent` fails at bind time — before any model call — naming the actor and recommending the idle-state pattern instead.

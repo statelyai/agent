@@ -1,3 +1,4 @@
+import Ajv from 'ajv';
 import { describe, expect, test } from 'vitest';
 import { z } from 'zod';
 import {
@@ -19,6 +20,7 @@ import {
   initialAgentStep,
   isStructuredOutputSchema,
   messagesSchema,
+  minimalSchemaCompiler,
   parseOutput,
   resolveAgentStep,
   resolveDecision,
@@ -36,7 +38,41 @@ import {
   type AgentTools,
   type ChosenEvent,
   type DecisionAttempt,
+  type SchemaCompiler,
+  type StandardSchemaV1,
 } from './index.js';
+
+/**
+ * ~15-line Ajv-to-StandardSchema adapter — the recipe for a real
+ * `SchemaCompiler`. Compiles the JSON Schema with Ajv (full JSON Schema
+ * semantics: pattern, minLength, anyOf, format, ...) and maps Ajv's
+ * validation errors onto Standard Schema issues.
+ */
+function ajvCompiler(): SchemaCompiler {
+  const ajv = new Ajv({ strict: false });
+
+  return (jsonSchema, name): StandardSchemaV1 => {
+    const validateFn = ajv.compile(jsonSchema);
+
+    return {
+      '~standard': {
+        version: 1,
+        vendor: 'ajv',
+        validate(value: unknown) {
+          if (validateFn(value)) {
+            return { value };
+          }
+          return {
+            issues: (validateFn.errors ?? []).map((error) => ({
+              message: `${name}${error.instancePath} ${error.message}`,
+            })),
+          };
+        },
+        jsonSchema: { input: () => jsonSchema },
+      },
+    };
+  };
+}
 
 /** Narrows an `AgentStepRequest` to a text request; fails the test otherwise. */
 function asTextRequest(request: AgentStepRequest | undefined): AgentRequest {
@@ -1429,6 +1465,132 @@ describe('setupAgent', () => {
     expect(chosenEvent).toEqual({ type: 'ATTACK', target: 'orc' });
   });
 
+  test('fromConfig requires a compileSchema option and names it in the error', () => {
+    expect(() =>
+      // @ts-expect-error — compileSchema is required, this is the point of the test
+      setupAgent.fromConfig({
+        id: 'missing-compiler',
+        context: {},
+        initial: 'done',
+        states: { done: { type: 'final' } },
+      })
+    ).toThrow(/compileSchema/);
+    expect(() =>
+      // @ts-expect-error — compileSchema is required, this is the point of the test
+      setupAgent.fromConfig({
+        id: 'missing-compiler',
+        context: {},
+        initial: 'done',
+        states: { done: { type: 'final' } },
+      })
+    ).toThrow(/minimalSchemaCompiler/);
+  });
+
+  test('fromConfig + Ajv compileSchema: real JSON Schema validation runs end to end', async () => {
+    const machine = setupAgent.fromConfig(
+      {
+        id: 'ajv-answer',
+        schemas: {
+          input: {
+            type: 'object',
+            properties: { question: { type: 'string' } },
+            required: ['question'],
+          },
+          context: {
+            type: 'object',
+            properties: { question: { type: 'string' }, answer: { type: 'string' } },
+            required: ['question'],
+          },
+          output: {
+            type: 'object',
+            properties: { answer: { type: 'string' } },
+            required: ['answer'],
+          },
+        },
+        context: { question: '{{ input.question }}' },
+        requests: {
+          answerQuestion: {
+            model: 'test-model',
+            prompt: 'Question: {{ input.question }}',
+            input: {
+              type: 'object',
+              properties: { question: { type: 'string' } },
+              required: ['question'],
+            },
+            output: {
+              type: 'object',
+              properties: { answer: { type: 'string' } },
+              required: ['answer'],
+            },
+          },
+        },
+        initial: 'answering',
+        states: {
+          answering: {
+            invoke: {
+              id: 'answer',
+              src: 'answerQuestion',
+              input: { question: '{{ context.question }}' },
+              onDone: { target: 'done', assign: { answer: '{{ event.output.answer }}' } },
+            },
+          },
+          done: { type: 'final', output: { answer: '{{ context.answer }}' } },
+        },
+      },
+      { compileSchema: ajvCompiler() }
+    );
+
+    const result = await runAgent(machine, {
+      input: { question: 'Why statecharts?' },
+      generateText: async () => ({ output: { answer: 'Because logic matters.' } }),
+    });
+
+    expect(result.status).toBe('done');
+    expect(result.status === 'done' && result.output).toEqual({
+      answer: 'Because logic matters.',
+    });
+  });
+
+  test('fromConfig + Ajv compileSchema: rejects a `pattern`/`minLength` violation the minimal validator would silently pass', () => {
+    // `context` is validated eagerly via `validateSchemaSync` when the
+    // machine takes its initial transition, so a `pattern`/`minLength`
+    // violation on it is where the two compilers' behavior diverges
+    // observably.
+    const configWithPattern = {
+      id: 'ajv-teeth-proof',
+      schemas: {
+        context: {
+          type: 'object',
+          properties: {
+            email: { type: 'string', pattern: '^[^@]+@[^@]+\\.[^@]+$', minLength: 6 },
+          },
+          required: ['email'],
+        },
+      },
+      context: { email: '{{ input.email }}' },
+      initial: 'done',
+      states: { done: { type: 'final' as const, output: { email: '{{ context.email }}' } } },
+    };
+
+    // The minimal built-in validator only checks `type` for strings — it has
+    // no idea what `pattern` or `minLength` mean, so an invalid email
+    // silently passes.
+    const minimalMachine = setupAgent.fromConfig(configWithPattern, {
+      compileSchema: minimalSchemaCompiler,
+    });
+    const minimalStep = initialAgentStep(minimalMachine, { email: 'not-an-email' });
+    expect(minimalStep.done).toBe(true);
+    expect(minimalStep.snapshot.output).toEqual({ email: 'not-an-email' });
+
+    // A real JSON Schema engine (Ajv) honors `pattern`/`minLength` and
+    // rejects the same input — this is the proof the compileSchema
+    // requirement has teeth.
+    const ajvMachine = setupAgent.fromConfig(configWithPattern, {
+      compileSchema: ajvCompiler(),
+    });
+    expect(() => initialAgentStep(ajvMachine, { email: 'not-an-email' })).toThrow();
+  });
+
   test('fromConfig lowers static request workflows to agent machine steps', async () => {
     const machine = setupAgent.fromConfig({
       id: 'static-answer',
@@ -1503,7 +1665,7 @@ describe('setupAgent', () => {
           },
         },
       },
-    });
+    }, { compileSchema: minimalSchemaCompiler });
 
     let step = initialAgentStep(machine, { question: 'Why statecharts?' });
 
@@ -1599,7 +1761,7 @@ describe('setupAgent', () => {
           output: { answer: '{{ context.answer }}' },
         },
       },
-    });
+    }, { compileSchema: minimalSchemaCompiler });
 
     const result = await runAgent(machine, {
       input: { question: 'Why statecharts?' },
@@ -1660,7 +1822,7 @@ describe('setupAgent', () => {
         },
         fumbled: {},
       },
-    });
+    }, { compileSchema: minimalSchemaCompiler });
 
     const result = await runAgent(machine, {
       input: {},
@@ -1732,7 +1894,7 @@ describe('setupAgent', () => {
           output: { draft: '{{ context.draft }}' },
         },
       },
-    });
+    }, { compileSchema: minimalSchemaCompiler });
 
     const generateText = async () => ({ output: { draft: 'Hello world.' } });
 
@@ -1775,7 +1937,7 @@ describe('setupAgent', () => {
           },
           asked: {},
         },
-      })
+      }, { compileSchema: minimalSchemaCompiler })
     ).toThrow(/decision delivery is automatic/i);
   });
 
@@ -1870,7 +2032,7 @@ describe('setupAgent', () => {
             },
           },
         },
-      })
+      }, { compileSchema: minimalSchemaCompiler })
       .provide({
         actorSources: {
           'agent.userInput': createAsyncLogic({

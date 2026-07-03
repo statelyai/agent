@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { createActor, createAsyncLogic, waitFor } from 'xstate';
-import { initialAgentStep, setupAgent } from '../index.js';
+import { initialAgentStep, minimalSchemaCompiler, setupAgent } from '../index.js';
 
 describe('Oracle Agent Spec-style static workflows', () => {
   test('adapts branching and data-flow edges to state guards and assignments', () => {
@@ -104,7 +104,7 @@ describe('Oracle Agent Spec-style static workflows', () => {
           },
         },
       },
-    });
+    }, { compileSchema: minimalSchemaCompiler });
 
     const yesStep = initialAgentStep(machine, {
       input1: 'yes',
@@ -258,7 +258,7 @@ describe('Oracle Agent Spec-style static workflows', () => {
           },
         },
       },
-    }).provide({
+    }, { compileSchema: minimalSchemaCompiler }).provide({
       actorSources: {
         node12: createAsyncLogic({
           run: async () => ({

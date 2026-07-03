@@ -18,21 +18,64 @@
  *     `{ status: 'idle', snapshot }`; the host persists that snapshot and
  *     resumes with `runAgent(machine, { snapshot, event, ...executors })`.
  *
+ * `fromConfig(...)` requires a `compileSchema` option — the library does not
+ * bundle a JSON Schema engine, so the config's JSON Schemas (context/events/
+ * input/output, request input/output) are only as strict as whatever
+ * validator you bring. This example wires up Ajv, a real JSON Schema engine,
+ * as the showcase recipe: it honors the full JSON Schema spec (pattern,
+ * minLength, anyOf, format, ...), unlike the built-in `minimalSchemaCompiler`
+ * export, which only checks type/properties/required/items/enum/const.
+ *
  * Run: OPENAI_API_KEY=... node --import tsx examples/json-agent/index.ts
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { type LanguageModel } from 'ai';
 import { openai } from '@ai-sdk/openai';
-import { runAgent, setupAgent, type AgentWorkflowConfig } from '../../src/index.js';
+import Ajv from 'ajv';
+import {
+  runAgent,
+  setupAgent,
+  type AgentWorkflowConfig,
+  type SchemaCompiler,
+  type StandardSchemaV1,
+} from '../../src/index.js';
 import { createAiSdkExecutors } from '../../src/ai-sdk/index.js';
+
+// The Ajv-to-StandardSchema recipe: compile the JSON Schema with Ajv, then
+// wrap the compiled validator as a `StandardSchemaV1`, mapping Ajv's
+// validation errors onto Standard Schema issues.
+const ajv = new Ajv({ strict: false });
+const ajvCompiler: SchemaCompiler = (jsonSchema, name): StandardSchemaV1 => {
+  const validateFn = ajv.compile(jsonSchema);
+
+  return {
+    '~standard': {
+      version: 1,
+      vendor: 'ajv',
+      validate(value: unknown) {
+        if (validateFn(value)) {
+          return { value };
+        }
+        return {
+          issues: (validateFn.errors ?? []).map((error) => ({
+            message: `${name}${error.instancePath} ${error.message}`,
+          })),
+        };
+      },
+      jsonSchema: { input: () => jsonSchema },
+    },
+  };
+};
 
 const workflowPath = fileURLToPath(new URL('./workflow.json', import.meta.url));
 export const workflowConfig: AgentWorkflowConfig = JSON.parse(
   readFileSync(workflowPath, 'utf-8')
 );
 
-export const jsonAgentMachine = setupAgent.fromConfig(workflowConfig);
+export const jsonAgentMachine = setupAgent.fromConfig(workflowConfig, {
+  compileSchema: ajvCompiler,
+});
 
 function resolveModel(modelRef: string): LanguageModel {
   return openai(modelRef.replace(/^openai\//, ''));
