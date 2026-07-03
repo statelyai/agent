@@ -7,8 +7,10 @@
  * Run: OPENAI_API_KEY=... node --import tsx examples/ai-sdk-marketing-chain/index.ts
  */
 import { z } from 'zod';
+import { openai } from '@ai-sdk/openai';
 import { setupAgent, runAgent } from '../../src/index.js';
 import { createAiSdkTextExecutor } from '../ai-sdk-host/index.js';
+import { type LanguageModel } from 'ai';
 
 const qualitySchema = z.object({
   hasCallToAction: z.boolean(),
@@ -23,7 +25,14 @@ function qualityPasses(quality: z.infer<typeof qualitySchema> | null) {
     && quality.clarity >= 7;
 }
 
+export const models: Record<'copywriter' | 'evaluator' | 'improver', LanguageModel> = {
+  copywriter: openai('gpt-4.1-mini'),
+  evaluator: openai('gpt-4.1-mini'),
+  improver: openai('gpt-4.1-mini'),
+} as const;
+
 const agent = setupAgent({
+  models,
   context: z.object({
     product: z.string(),
     copy: z.string().nullable(),
@@ -38,7 +47,7 @@ const agent = setupAgent({
         input: z.object({ product: z.string() }),
         output: z.string(),
       },
-      model: 'openai/gpt-4.1-mini',
+      model: 'copywriter',
       prompt: ({ input }) =>
         `Write persuasive marketing copy for: ${input.product}. Focus on benefits and emotional appeal.`,
     },
@@ -47,7 +56,7 @@ const agent = setupAgent({
         input: z.object({ copy: z.string() }),
         output: qualitySchema,
       },
-      model: 'openai/gpt-4.1-mini',
+      model: 'evaluator',
       system: 'Evaluate marketing copy for CTA, emotional appeal, and clarity.',
       prompt: ({ input }) => input.copy,
     },
@@ -56,7 +65,7 @@ const agent = setupAgent({
         input: z.object({ copy: z.string(), quality: qualitySchema }),
         output: z.string(),
       },
-      model: 'openai/gpt-4.1-mini',
+      model: 'improver',
       prompt: ({ input }) => [
         !input.quality.hasCallToAction ? 'Add a clear call to action.' : '',
         input.quality.emotionalAppeal < 7 ? 'Strengthen emotional appeal.' : '',
@@ -142,7 +151,7 @@ export const aiSdkMarketingChainMachine = agent.createMachine({
 export async function runAiSdkMarketingChainExample() {
   const result = await runAgent(aiSdkMarketingChainMachine, {
     input: { product: 'state machines' },
-    generateText: createAiSdkTextExecutor(),
+    generateText: createAiSdkTextExecutor({ models }),
   });
   if (result.status !== 'done') {
     throw new Error(`Marketing chain example did not complete: ${result.status}`);

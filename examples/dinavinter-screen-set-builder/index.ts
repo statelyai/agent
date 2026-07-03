@@ -39,15 +39,19 @@ export async function runDinavinterScreenSetBuilderExample() {
     input: z.object({ request: z.string() }),
     output: screenDraftSchema,
   });
+  const models = {
+    screenDrafter: 'openai/gpt-5.4-nano',
+  } as const;
   const agent = setupAgent({
     schemas,
+    models,
     requests: {
       draftScreen: {
         schemas: {
           input: z.object({ request: z.string() }),
           output: screenDraftSchema,
         },
-        model: 'openai/gpt-5.4-nano',
+        model: 'screenDrafter',
         system: 'Create a form screen draft from the user request.',
         prompt: ({ input }) => input.request,
       },

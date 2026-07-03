@@ -19,7 +19,7 @@ test('AI SDK routing maps to an explicit machine', async () => {
       return `technical:${request.prompt}`;
     },
   });
-  assert.deepEqual(routedModels, ['openai/o4-mini']);
+  assert.deepEqual(routedModels, ['complexAnswerer']);
   assert.equal(result.status, 'done');
   assert.equal(
     result.status === 'done' ? result.output.response : undefined,

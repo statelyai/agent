@@ -2,9 +2,14 @@ import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { createAsyncLogic } from 'xstate';
 import { runAgent, setupAgent } from '../../src/index.js';
+const models = {
+  "router": "router",
+} as const;
+
 
 export async function runLangGraphSupervisorHandoffExample() {
   const agent = setupAgent({
+    models,
     context: z.object({
       request: z.string(),
       route: z.enum(['research', 'write']).nullable(),

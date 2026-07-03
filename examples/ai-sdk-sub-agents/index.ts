@@ -35,6 +35,10 @@ type SubAgentName = 'researcher' | 'writer';
 type SubAgents = Record<SubAgentName, Agent>;
 type SuperviseLogic = TextLogic<typeof taskInputSchema, typeof answerSchema>;
 
+export const models: Record<'supervisor', LanguageModel> = {
+  supervisor: openai('gpt-4.1-mini'),
+} as const;
+
 export function createAiSdkSubAgents(model: LanguageModel): SubAgents {
   return {
     researcher: new ToolLoopAgent({
@@ -71,6 +75,7 @@ function createAiSdkSubAgentWorkflow(
   subAgents: SubAgents,
 ) {
   const agent = setupAgent({
+    models,
     context: z.object({
       task: z.string(),
       answer: z.string().nullable(),
@@ -83,7 +88,7 @@ function createAiSdkSubAgentWorkflow(
           input: taskInputSchema,
           output: answerSchema,
         },
-        model: 'openai/gpt-4.1-mini',
+        model: 'supervisor',
         system: [
           'You are a supervisor.',
           'Use askResearcher for facts and askWriter for the final wording.',
@@ -134,7 +139,7 @@ function createAiSdkSubAgentWorkflow(
 }
 
 export async function runAiSdkSubAgentsDemo(task: string) {
-  const model = openai('gpt-4.1-mini');
+  const model = models.supervisor;
   const { agent, machine } = createAiSdkSubAgentWorkflow(
     createAiSdkSubAgents(model),
   );

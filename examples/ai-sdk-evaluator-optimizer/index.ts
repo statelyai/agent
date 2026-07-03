@@ -9,8 +9,10 @@
  * Run: OPENAI_API_KEY=... node --import tsx examples/ai-sdk-evaluator-optimizer/index.ts
  */
 import { z } from 'zod';
+import { openai } from '@ai-sdk/openai';
 import { setupAgent, runAgent } from '../../src/index.js';
 import { createAiSdkTextExecutor } from '../ai-sdk-host/index.js';
+import { type LanguageModel } from 'ai';
 
 const translationEvaluationSchema = z.object({
   qualityScore: z.number().min(1).max(10),
@@ -31,7 +33,14 @@ function translationPasses(
     && evaluation.culturallyAccurate;
 }
 
+export const models: Record<'translator' | 'evaluator' | 'improver', LanguageModel> = {
+  translator: openai('gpt-4.1-mini'),
+  evaluator: openai('gpt-4.1-mini'),
+  improver: openai('gpt-4.1-mini'),
+} as const;
+
 const agent = setupAgent({
+  models,
   context: z.object({
     text: z.string(),
     targetLanguage: z.string(),
@@ -56,7 +65,7 @@ const agent = setupAgent({
         input: z.object({ text: z.string(), targetLanguage: z.string() }),
         output: z.string(),
       },
-      model: 'openai/gpt-4.1-mini',
+      model: 'translator',
       system: 'Translate while preserving tone and cultural nuance.',
       prompt: ({ input }) =>
         `Translate this text to ${input.targetLanguage}:\n${input.text}`,
@@ -66,7 +75,7 @@ const agent = setupAgent({
         input: z.object({ original: z.string(), translation: z.string() }),
         output: translationEvaluationSchema,
       },
-      model: 'openai/gpt-4.1-mini',
+      model: 'evaluator',
       system: 'Evaluate translation quality.',
       prompt: ({ input }) =>
         `Original: ${input.original}\nTranslation: ${input.translation}`,
@@ -80,7 +89,7 @@ const agent = setupAgent({
         }),
         output: z.string(),
       },
-      model: 'openai/gpt-4.1-mini',
+      model: 'improver',
       prompt: ({ input }) => [
         `Original: ${input.original}`,
         `Translation: ${input.translation}`,
@@ -183,7 +192,7 @@ export async function runAiSdkEvaluatorOptimizerExample() {
       targetLanguage: 'Spanish',
       maxIterations: 3,
     },
-    generateText: createAiSdkTextExecutor(),
+    generateText: createAiSdkTextExecutor({ models }),
   });
   if (result.status !== 'done') {
     throw new Error(`Evaluator-optimizer example did not complete: ${result.status}`);

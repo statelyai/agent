@@ -11,12 +11,17 @@ import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { createAsyncLogic } from 'xstate';
 import { runAgent, setupAgent } from '../../src/index.js';
+const models = {
+  "supervisor": "supervisor",
+} as const;
+
 
 export async function runBurrMultiAgentCollaborationExample() {
   const routeSchema = z.object({
     route: z.enum(['researcher', 'chartGenerator']),
   });
   const agent = setupAgent({
+    models,
     context: z.object({
       request: z.string(),
       route: z.enum(['researcher', 'chartGenerator']).nullable(),

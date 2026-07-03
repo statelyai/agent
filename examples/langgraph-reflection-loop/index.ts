@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { runAgent, setupAgent } from '../../src/index.js';
+const models = {
+  "writer": "writer",
+  "critic": "critic",
+} as const;
+
 
 export async function runLangGraphReflectionLoopExample() {
   const critiqueSchema = z.object({
@@ -9,6 +14,7 @@ export async function runLangGraphReflectionLoopExample() {
   });
   let critiqueCount = 0;
   const agent = setupAgent({
+    models,
     context: z.object({
       prompt: z.string(),
       draft: z.string().nullable(),

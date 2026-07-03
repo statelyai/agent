@@ -2,6 +2,11 @@ import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { createAsyncLogic } from 'xstate';
 import { runAgent, setupAgent } from '../../src/index.js';
+const models = {
+  "planner": "planner",
+  "solver": "solver",
+} as const;
+
 
 export async function runLangGraphReWOOExample() {
   const planSchema = z.object({
@@ -13,6 +18,7 @@ export async function runLangGraphReWOOExample() {
     ),
   });
   const agent = setupAgent({
+    models,
     context: z.object({
       goal: z.string(),
       steps: z.array(z.object({ id: z.string(), request: z.string() })),

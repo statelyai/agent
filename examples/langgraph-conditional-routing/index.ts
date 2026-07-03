@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { runAgent, setupAgent } from '../../src/index.js';
+const models = {
+  "classifier": "classifier",
+} as const;
+
 
 export async function runLangGraphConditionalRoutingExample() {
   const agent = setupAgent({
+    models,
     context: z.object({
       request: z.string(),
       route: z.enum(['answer', 'escalate']).nullable(),

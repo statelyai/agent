@@ -12,9 +12,14 @@ import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { createAsyncLogic } from 'xstate';
 import { runAgent, setupAgent, type AgentTextRequest, type AgentTools } from '../../src/index.js';
+const models = {
+  "rag-answerer": "rag-answerer",
+} as const;
+
 
 export async function runBurrConversationalRAGExample() {
   const agent = setupAgent({
+    models,
     context: z.object({
       question: z.string(),
       memory: z.array(z.string()),

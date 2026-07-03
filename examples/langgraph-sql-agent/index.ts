@@ -2,10 +2,16 @@ import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { createAsyncLogic } from 'xstate';
 import { runAgent, setupAgent } from '../../src/index.js';
+const models = {
+  "sql-writer": "sql-writer",
+  "answerer": "answerer",
+} as const;
+
 
 export async function runLangGraphSQLAgentExample() {
   const querySchema = z.object({ sql: z.string() });
   const agent = setupAgent({
+    models,
     context: z.object({
       question: z.string(),
       sql: z.string().nullable(),

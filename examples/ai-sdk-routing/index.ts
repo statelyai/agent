@@ -8,8 +8,10 @@
  * Run: OPENAI_API_KEY=... node --import tsx examples/ai-sdk-routing/index.ts
  */
 import { z } from 'zod';
+import { openai } from '@ai-sdk/openai';
 import { setupAgent, runAgent } from '../../src/index.js';
 import { createAiSdkTextExecutor } from '../ai-sdk-host/index.js';
+import { type LanguageModel } from 'ai';
 
 const classificationSchema = z.object({
   reasoning: z.string(),
@@ -17,7 +19,14 @@ const classificationSchema = z.object({
   complexity: z.enum(['simple', 'complex']),
 });
 
+export const models: Record<'classifier' | 'simpleAnswerer' | 'complexAnswerer', LanguageModel> = {
+  classifier: openai('gpt-4.1-mini'),
+  simpleAnswerer: openai('gpt-4o-mini'),
+  complexAnswerer: openai('o4-mini'),
+} as const;
+
 const agent = setupAgent({
+  models,
   context: z.object({
     query: z.string(),
     classification: classificationSchema.nullable(),
@@ -34,7 +43,7 @@ const agent = setupAgent({
         input: z.object({ query: z.string() }),
         output: classificationSchema,
       },
-      model: 'openai/gpt-4.1-mini',
+      model: 'classifier',
       prompt: ({ input }) => `Classify this customer query:\n${input.query}`,
     },
     answerCustomerQuery: {
@@ -47,8 +56,8 @@ const agent = setupAgent({
       },
       model: ({ input }) =>
         input.classification.complexity === 'simple'
-          ? 'openai/gpt-4o-mini'
-          : 'openai/o4-mini',
+          ? 'simpleAnswerer'
+          : 'complexAnswerer',
       system: ({ input }) => ({
         general: 'You handle general customer inquiries.',
         refund: 'You specialize in refund requests.',
@@ -115,7 +124,7 @@ export const aiSdkRoutingMachine = agent.createMachine({
 export async function runAiSdkRoutingExample() {
   const result = await runAgent(aiSdkRoutingMachine, {
     input: { query: 'The app crashes on launch.' },
-    generateText: createAiSdkTextExecutor(),
+    generateText: createAiSdkTextExecutor({ models }),
   });
   if (result.status !== 'done') {
     throw new Error(`Routing example did not complete: ${result.status}`);

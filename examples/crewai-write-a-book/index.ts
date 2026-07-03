@@ -11,9 +11,14 @@ import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { createAsyncLogic } from 'xstate';
 import { runAgent, setupAgent } from '../../src/index.js';
+const models = {
+  "outliner": "outliner",
+} as const;
+
 
 export async function runCrewAIWriteABookExample() {
   const agent = setupAgent({
+    models,
     context: z.object({
       brief: z.string(),
       title: z.string().nullable(),

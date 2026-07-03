@@ -1,5 +1,7 @@
 import { z } from 'zod';
+import { openai } from '@ai-sdk/openai';
 import { createAgentSchemas, createTextLogic, setupAgent } from '../../src/index.js';
+import { type LanguageModel } from 'ai';
 
 const jokeSchema = z.object({
   joke: z.string(),
@@ -15,13 +17,17 @@ const schemas = createAgentSchemas({
   output: jokeSchema,
 });
 
+export const models: Record<'jokeWriter', LanguageModel> = {
+  jokeWriter: openai('gpt-4.1-mini'),
+} as const;
+
 export const tellJoke = createTextLogic({
   mode: 'stream',
   schemas: {
     input: z.object({ topic: z.string() }),
     output: z.string(),
   },
-  model: 'openai/gpt-4.1-mini',
+  model: 'jokeWriter',
   system: 'You tell short, punchy jokes.',
   prompt: ({ input }) => `Tell a joke about ${input.topic}.`,
 });
@@ -32,6 +38,7 @@ export const jokeActors = {
 
 const jokeAgent = setupAgent({
   schemas,
+  models,
   actors: jokeActors,
 });
 

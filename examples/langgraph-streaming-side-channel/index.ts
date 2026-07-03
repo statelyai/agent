@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { runAgent, setupAgent } from '../../src/index.js';
+const models = {
+  "writer": "writer",
+} as const;
+
 
 export async function runLangGraphStreamingSideChannelExample() {
   const chunks: string[] = [];
   const agent = setupAgent({
+    models,
     context: z.object({ topic: z.string(), text: z.string().nullable() }),
     input: z.object({ topic: z.string() }),
     output: z.object({ text: z.string() }),

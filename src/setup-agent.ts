@@ -665,10 +665,11 @@ function assertNoActorKeyCollisions(
 function createAgentActorSources<
   TActors extends { [K in keyof TActors]: AnyActorLogic },
   TRequestSchemas extends AgentRequestSchemaMap,
+  TModel extends string = string,
 >(
   actors: TActors | undefined,
   requestActors: RequestActors<TRequestSchemas>
-): SetupActors<AgentSetupActors<AgentAllActors<TActors, TRequestSchemas>>> {
+): SetupActors<AgentSetupActors<AgentAllActors<TActors, TRequestSchemas>, string, TModel>> {
   assertNoActorKeyCollisions(
     actors as Record<string, unknown> | undefined,
     requestActors as Record<string, unknown>
@@ -680,7 +681,7 @@ function createAgentActorSources<
     [DECIDE_ACTOR]: createDecideActor(),
     ...actors,
     ...requestActors,
-  } as SetupActors<AgentSetupActors<AgentAllActors<TActors, TRequestSchemas>>>;
+  } as SetupActors<AgentSetupActors<AgentAllActors<TActors, TRequestSchemas>, string, TModel>>;
 }
 
 // Assembles the plain-object config passed to xstate's setup(...) (see AgentSetupXStateConfig's note on why it's not SetupConfig<...>).
@@ -783,7 +784,11 @@ function createSetupAgent<
     AgentModelRef<TModels>
   >(config.requests);
   const requestActors = createRequestActors<TRequestSchemas, AgentModelRef<TModels>>(requests);
-  const actorSources = createAgentActorSources(config.actors, requestActors);
+  const actorSources = createAgentActorSources<
+    TActors,
+    TRequestSchemas,
+    AgentModelRef<TModels>
+  >(config.actors, requestActors);
   const setupConfig = createAgentSetupConfig<
       TContextSchema,
       TEventSchemas,

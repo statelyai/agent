@@ -2,9 +2,14 @@ import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { createAsyncLogic } from 'xstate';
 import { runAgent, setupAgent } from '../../src/index.js';
+const models = {
+  "answerer": "answerer",
+} as const;
+
 
 export async function runLangGraphRAGExample() {
   const agent = setupAgent({
+    models,
     context: z.object({
       question: z.string(),
       documents: z.array(z.string()),

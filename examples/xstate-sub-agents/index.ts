@@ -2,6 +2,12 @@ import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { createActor, toPromise } from 'xstate';
 import { setupAgent } from '../../src/index.js';
+const models = {
+  "researcher": "researcher",
+  "writer": "writer",
+  "editor": "editor",
+} as const;
+
 
 const sourcesOutputSchema = z.object({ sources: z.array(z.string()) });
 const researchOutputSchema = z.object({ notes: z.string() });
@@ -15,6 +21,7 @@ const finalOutputSchema = z.object({ final: z.string() });
 
 function createResearchAgent() {
   const agent = setupAgent({
+    models,
     context: z.object({
       topic: z.string(),
       sources: z.array(z.string()),
@@ -86,6 +93,7 @@ function createResearchAgent() {
 
 function createWriterAgent() {
   const agent = setupAgent({
+    models,
     context: z.object({
       notes: z.string(),
       outline: z.array(z.string()),
@@ -216,6 +224,7 @@ export function createXStateSubAgentWorkflow() {
   const research = createResearchAgent();
   const writer = createWriterAgent();
   const agent = setupAgent({
+    models,
     context: z.object({
       topic: z.string(),
       notes: z.string().nullable(),

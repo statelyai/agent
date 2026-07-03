@@ -2,12 +2,17 @@ import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { createAsyncLogic } from 'xstate';
 import { runAgent, setupAgent } from '../../src/index.js';
+const models = {
+  "planner": "planner",
+} as const;
+
 
 export async function runLangGraphPlanAndExecuteExample() {
   const planSchema = z.object({
     steps: z.array(z.string()),
   });
   const agent = setupAgent({
+    models,
     context: z.object({
       request: z.string(),
       steps: z.array(z.string()),

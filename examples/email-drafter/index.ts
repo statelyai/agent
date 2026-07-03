@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { openai } from '@ai-sdk/openai';
 import { createAsyncLogic } from 'xstate';
 import {
   type AgentMessage,
@@ -8,6 +9,7 @@ import {
   setupAgent,
   userMessage,
 } from '../../src/index.js';
+import { type LanguageModel } from 'ai';
 
 const promptAssessmentSchema = z.object({
   satisfied: z.boolean(),
@@ -79,12 +81,18 @@ const eventSchemas = {
 
 const outputSchema = z.object({ sentEmails: z.array(emailDraftSchema) });
 
+export const models: Record<'promptEvaluator' | 'emailDrafter' | 'draftStreamer', LanguageModel> = {
+  promptEvaluator: openai('gpt-4.1-mini'),
+  emailDrafter: openai('gpt-4.1-mini'),
+  draftStreamer: openai('gpt-4.1-mini'),
+} as const;
+
 export const evaluatePrompt = createTextLogic({
   schemas: {
     input: z.object({ prompt: z.string() }),
     output: promptAssessmentSchema,
   },
-  model: 'openai/gpt-4.1-mini',
+  model: 'promptEvaluator',
   system:
     'Evaluate an email drafting request. Require recipient, subject, and body details. Return missing fields and one question per gap.',
   prompt: ({ input }) => input.prompt,
@@ -98,7 +106,7 @@ export const draftEmail = createTextLogic({
     }),
     output: emailDraftSchema,
   },
-  model: 'openai/gpt-4.1-mini',
+  model: 'emailDrafter',
   system:
     'Draft a polished email from the request. Use the provided details without inventing missing essentials unless the user explicitly asked to draft anyway.',
   messages: ({ input }) => [
@@ -113,7 +121,7 @@ export const streamDraft = createTextLogic({
     input: z.object({ prompt: z.string() }),
     output: z.string(),
   },
-  model: 'openai/gpt-4.1-mini',
+  model: 'draftStreamer',
   prompt: ({ input }) => input.prompt,
 });
 
@@ -138,6 +146,7 @@ export const emailDrafterActors = {
 
 const agent = setupAgent({
   schemas: emailDrafterSchemas,
+  models,
   actors: emailDrafterActors,
 });
 

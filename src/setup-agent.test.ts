@@ -83,6 +83,71 @@ function asTextRequest(request: AgentStepRequest | undefined): AgentRequest {
 }
 
 describe('setupAgent', () => {
+  test('setupAgent accepts typed model aliases', () => {
+    const schemas = createAgentSchemas({
+      context: z.object({ prompt: z.string() }),
+      input: z.object({ prompt: z.string() }),
+      events: {
+        ASK: z.object({ question: z.string() }),
+        GUESS: z.object({ guess: z.string() }),
+      },
+    });
+    const models = {
+      quick: { provider: 'quick' },
+      careful: { provider: 'careful' },
+    } as const;
+
+    const agent = setupAgent({
+      schemas,
+      models,
+      requests: {
+        answer: {
+          schemas: {
+            input: z.object({ prompt: z.string() }),
+            output: z.object({ answer: z.string() }),
+          },
+          model: 'quick',
+          prompt: ({ input }) => input.prompt,
+        },
+      },
+    });
+
+    expect(agent.models).toBe(models);
+
+    setupAgent({
+      schemas,
+      models,
+      requests: {
+        answer: {
+          schemas: {
+            input: z.object({ prompt: z.string() }),
+            output: z.object({ answer: z.string() }),
+          },
+          // @ts-expect-error request model must be one of the registered model aliases
+          model: 'missing',
+          prompt: ({ input }) => input.prompt,
+        },
+      },
+    });
+
+    agent.createMachine({
+      context: ({ input }) => ({ prompt: input.prompt }),
+      initial: 'deciding',
+      states: {
+        deciding: {
+          // @ts-expect-error inline decision model must be one of the registered model aliases
+          invoke: {
+            src: 'agent.decide',
+            input: {
+              model: 'missing',
+              allowedEvents: ['ASK'] as const,
+            },
+          },
+        },
+      },
+    });
+  });
+
   test('setupAgent accepts schema-bound request configs', async () => {
     const schemas = createAgentSchemas({
       context: z.object({

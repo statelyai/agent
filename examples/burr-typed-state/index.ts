@@ -11,6 +11,10 @@ import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { createAsyncLogic } from 'xstate';
 import { runAgent, setupAgent, type AgentTextRequest, type AgentTools } from '../../src/index.js';
+const models = {
+  "post-writer": "post-writer",
+} as const;
+
 
 export async function runBurrTypedStateExample() {
   const conceptSchema = z.object({
@@ -26,6 +30,7 @@ export async function runBurrTypedStateExample() {
     keyTakeaways: z.array(z.string()),
   });
   const agent = setupAgent({
+    models,
     context: z.object({
       youtubeUrl: z.string(),
       transcript: z.string().nullable(),

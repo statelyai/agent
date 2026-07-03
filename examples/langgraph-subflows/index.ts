@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { runAgent, setupAgent } from '../../src/index.js';
+const models = {
+  "researcher": "researcher",
+} as const;
+
 
 export async function runLangGraphSubflowsExample() {
   const childAgent = setupAgent({
+    models,
     context: z.object({ topic: z.string(), research: z.string().nullable() }),
     input: z.object({ topic: z.string() }),
     output: z.object({ research: z.string() }),
@@ -41,6 +46,7 @@ export async function runLangGraphSubflowsExample() {
   });
 
   const parentAgent = setupAgent({
+    models,
     context: z.object({ topic: z.string(), research: z.string().nullable() }),
     input: z.object({ topic: z.string() }),
     output: z.object({ research: z.string() }),

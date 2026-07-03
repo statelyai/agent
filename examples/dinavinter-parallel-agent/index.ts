@@ -34,8 +34,13 @@ export async function runDinavinterParallelAgentExample() {
     input: z.object({ topic: z.string() }),
     output: resultSchema,
   });
+  const models = {
+    thinker: 'openai/gpt-5.4-nano',
+    doodleFinder: 'openai/gpt-5.4-nano',
+  } as const;
   const agent = setupAgent({
     schemas,
+    models,
     requests: {
       think: {
         mode: 'stream',
@@ -43,7 +48,7 @@ export async function runDinavinterParallelAgentExample() {
           input: z.object({ topic: z.string() }),
           output: z.string(),
         },
-        model: 'openai/gpt-5.4-nano',
+        model: 'thinker',
         prompt: ({ input }) => `Think about ${input.topic}.`,
       },
       findDoodle: {
@@ -51,7 +56,7 @@ export async function runDinavinterParallelAgentExample() {
           input: z.object({ topic: z.string() }),
           output: z.object({ query: z.string() }),
         },
-        model: 'openai/gpt-5.4-nano',
+        model: 'doodleFinder',
         prompt: ({ input }) => `Find a doodle for ${input.topic}.`,
       },
     },

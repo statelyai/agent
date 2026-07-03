@@ -9,8 +9,10 @@
  * Run: OPENAI_API_KEY=... node --import tsx examples/ai-sdk-parallel-review/index.ts
  */
 import { z } from 'zod';
+import { openai } from '@ai-sdk/openai';
 import { setupAgent, runAgent } from '../../src/index.js';
 import { createAiSdkTextExecutor } from '../ai-sdk-host/index.js';
+import { type LanguageModel } from 'ai';
 
 const reviewSchema = z.object({
   type: z.enum(['security', 'performance', 'maintainability']),
@@ -38,7 +40,12 @@ function createCodeReviews(code: string): Array<z.infer<typeof reviewSchema>> {
   ];
 }
 
+export const models: Record<'summarizer', LanguageModel> = {
+  summarizer: openai('gpt-4.1-mini'),
+} as const;
+
 const agent = setupAgent({
+  models,
   context: z.object({
     code: z.string(),
     reviews: z.array(reviewSchema),
@@ -55,7 +62,7 @@ const agent = setupAgent({
         input: z.object({ reviews: z.array(reviewSchema) }),
         output: z.string(),
       },
-      model: 'openai/gpt-4.1-mini',
+      model: 'summarizer',
       system: 'Summarize multiple code reviews into key actions.',
       prompt: ({ input }) => JSON.stringify(input.reviews, null, 2),
     },
@@ -101,7 +108,7 @@ export const aiSdkParallelReviewMachine = agent.createMachine({
 export async function runAiSdkParallelReviewExample() {
   const result = await runAgent(aiSdkParallelReviewMachine, {
     input: { code: 'const x = eval(input);' },
-    generateText: createAiSdkTextExecutor(),
+    generateText: createAiSdkTextExecutor({ models }),
   });
   if (result.status !== 'done') {
     throw new Error(`Parallel review example did not complete: ${result.status}`);

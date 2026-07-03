@@ -17,6 +17,11 @@ import {
   type AgentTextRequest,
   type AgentTools,
 } from '../../src/index.js';
+const models = {
+  "mode-router": "mode-router",
+  "streaming-writer": "streaming-writer",
+} as const;
+
 
 export async function runBurrStreamingOverviewExample() {
   const modeSchema = z.object({
@@ -28,6 +33,7 @@ export async function runBurrStreamingOverviewExample() {
     ]),
   });
   const agent = setupAgent({
+    models,
     context: z.object({
       prompt: z.string(),
       safe: z.boolean(),

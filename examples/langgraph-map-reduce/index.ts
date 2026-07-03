@@ -2,9 +2,14 @@ import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { createAsyncLogic } from 'xstate';
 import { runAgent, setupAgent } from '../../src/index.js';
+const models = {
+  "reducer": "reducer",
+} as const;
+
 
 export async function runLangGraphMapReduceExample() {
   const agent = setupAgent({
+    models,
     context: z.object({
       sections: z.array(z.string()),
       summaries: z.array(z.string()),

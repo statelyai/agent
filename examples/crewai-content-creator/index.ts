@@ -9,9 +9,15 @@
 import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { runAgent, setupAgent, type AgentTextRequest, type AgentTools } from '../../src/index.js';
+const models = {
+  "router": "router",
+  "writer": "writer",
+} as const;
+
 
 export async function runCrewAIContentCreatorExample() {
   const agent = setupAgent({
+    models,
     context: z.object({
       request: z.string(),
       route: z.enum(['linkedin', 'blog']).nullable(),

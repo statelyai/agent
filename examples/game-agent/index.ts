@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { openai } from '@ai-sdk/openai';
 import {
   createAgentSchemas,
   createDecisionLogic,
@@ -6,6 +7,7 @@ import {
   sendDecision,
   setupAgent,
 } from '../../src/index.js';
+import { type LanguageModel } from 'ai';
 
 export const turnSummarySchema = z.object({
   summary: z.string(),
@@ -40,6 +42,11 @@ export const gameSchemas = createAgentSchemas({
 
 type GameEventType = keyof typeof gameSchemas.events;
 
+export const models: Record<'moveChooser' | 'turnSummarizer', LanguageModel> = {
+  moveChooser: openai('gpt-4.1-mini'),
+  turnSummarizer: openai('gpt-4.1-mini'),
+} as const;
+
 const defaultMoveEvents = ['ATTACK', 'DEFEND', 'FLEE'] satisfies GameEventType[];
 const lowHpMoveEvents = [
   'ATTACK',
@@ -55,7 +62,7 @@ export const chooseMove = createDecisionLogic({
       enemyHp: z.number(),
     }),
   },
-  model: 'openai/gpt-4.1-mini',
+  model: 'moveChooser',
   system: 'You are playing a turn-based game. Choose exactly one legal move.',
   prompt: ({ input }) =>
     [
@@ -78,7 +85,7 @@ export const summarizeTurn = createTextLogic({
     }),
     output: turnSummarySchema,
   },
-  model: 'openai/gpt-4.1-mini',
+  model: 'turnSummarizer',
   system: 'Narrate the turn and return updated HP totals.',
   prompt: ({ input }) =>
     [
@@ -95,6 +102,7 @@ export const gameActors = {
 
 const gameAgent = setupAgent({
   schemas: gameSchemas,
+  models,
   actors: gameActors,
 });
 

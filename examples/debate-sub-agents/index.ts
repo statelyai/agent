@@ -2,6 +2,11 @@ import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { createActor, toPromise, type AnyStateMachine } from 'xstate';
 import { setupAgent } from '../../src/index.js';
+const models = {
+  "debater": "debater",
+  "facilitator": "facilitator",
+} as const;
+
 
 const stanceSchema = z.enum(['affirmative', 'negative']);
 const transcriptEntrySchema = z.object({
@@ -32,6 +37,7 @@ function nextTurn(index: number) {
 
 function createDebaterAgent() {
   const agent = setupAgent({
+    models,
     context: z.object({
       stance: stanceSchema,
       question: z.string(),
@@ -126,6 +132,7 @@ function createDebaterAgent() {
 export function createDebateSubAgentsWorkflow(): DebateSubAgentsWorkflow {
   const debater = createDebaterAgent();
   const agent = setupAgent({
+    models,
     context: z.object({
       question: z.string(),
       transcript: transcriptSchema,

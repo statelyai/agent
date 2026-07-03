@@ -10,8 +10,10 @@
  * Run: OPENAI_API_KEY=... node --import tsx examples/ai-sdk-orchestrator-worker/index.ts
  */
 import { z } from 'zod';
+import { openai } from '@ai-sdk/openai';
 import { setupAgent, runAgent } from '../../src/index.js';
 import { createAiSdkTextExecutor } from '../ai-sdk-host/index.js';
+import { type LanguageModel } from 'ai';
 
 const implementationPlanSchema = z.object({
   files: z.array(z.object({
@@ -41,7 +43,12 @@ function createPlannedFileChanges(
   }));
 }
 
+export const models: Record<'planner', LanguageModel> = {
+  planner: openai('gpt-4.1-mini'),
+} as const;
+
 const agent = setupAgent({
+  models,
   context: z.object({
     featureRequest: z.string(),
     plan: implementationPlanSchema.nullable(),
@@ -58,7 +65,7 @@ const agent = setupAgent({
         input: z.object({ featureRequest: z.string() }),
         output: implementationPlanSchema,
       },
-      model: 'openai/gpt-4.1-mini',
+      model: 'planner',
       system: 'Plan feature implementations as file-level work.',
       prompt: ({ input }) => input.featureRequest,
     },
@@ -109,7 +116,7 @@ export const aiSdkOrchestratorWorkerMachine = agent.createMachine({
 export async function runAiSdkOrchestratorWorkerExample() {
   const result = await runAgent(aiSdkOrchestratorWorkerMachine, {
     input: { featureRequest: 'Add settings page' },
-    generateText: createAiSdkTextExecutor(),
+    generateText: createAiSdkTextExecutor({ models }),
   });
   if (result.status !== 'done') {
     throw new Error(`Orchestrator-worker example did not complete: ${result.status}`);

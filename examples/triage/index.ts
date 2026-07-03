@@ -1,5 +1,7 @@
 import { z } from 'zod';
+import { openai } from '@ai-sdk/openai';
 import { createAgentSchemas, createTextLogic, setupAgent } from '../../src/index.js';
+import { type LanguageModel } from 'ai';
 
 export const triageSchema = z.object({
   sentiment: z.enum(['positive', 'neutral', 'negative']),
@@ -16,12 +18,16 @@ const schemas = createAgentSchemas({
   output: triageSchema,
 });
 
+export const models: Record<'ticketTriage', LanguageModel> = {
+  ticketTriage: openai('gpt-4.1-mini'),
+} as const;
+
 export const triageTicket = createTextLogic({
   schemas: {
     input: z.object({ ticket: z.string() }),
     output: triageSchema,
   },
-  model: 'openai/gpt-4.1-mini',
+  model: 'ticketTriage',
   system:
     'Triage the support ticket: sentiment, category, and a short suggested reply.',
   prompt: ({ input }) => input.ticket,
@@ -33,6 +39,7 @@ export const triageActors = {
 
 const triageAgent = setupAgent({
   schemas,
+  models,
   actors: triageActors,
 });
 

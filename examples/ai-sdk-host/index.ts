@@ -27,12 +27,13 @@ import {
   type TextLogicOutput,
 } from '../../src/index.js';
 import { createAiSdkExecutors } from '../../src/ai-sdk/index.js';
-import { jokeActors, jokeMachine, tellJoke } from '../joke/index.js';
-import { triageActors, triageMachine, triageSchemas, triageTicket } from '../triage/index.js';
+import { jokeActors, jokeMachine, models as jokeModels, tellJoke } from '../joke/index.js';
+import { models as triageModels, triageActors, triageMachine, triageSchemas, triageTicket } from '../triage/index.js';
 
 // ─── Host Adapter: AI SDK execution ───
 
 interface AiSdkTextHostOptions {
+  models?: Record<string, LanguageModel>;
   resolveModel?: (modelRef: string) => LanguageModel;
   onChunk?: (chunk: string) => void;
 }
@@ -47,9 +48,11 @@ async function generateWithAiSdk(
   options: AiSdkTextHostOptions = {},
   signal?: AbortSignal
 ) {
-  const { generateText } = createAiSdkExecutors({
-    resolveModel: options.resolveModel ?? defaultResolveModel,
-  });
+  const { generateText } = options.models
+    ? createAiSdkExecutors({ models: options.models })
+    : createAiSdkExecutors({
+        resolveModel: options.resolveModel ?? defaultResolveModel,
+      });
   const raw = await generateText({ ...input, tools: tools ?? {} }, { signal });
   const output = 'output' in raw ? raw.output : raw.text;
   return input.outputSchema && typeof output === 'string'
@@ -62,9 +65,11 @@ async function streamWithAiSdk(
   options: AiSdkTextHostOptions = {},
   signal?: AbortSignal
 ) {
-  const { streamText } = createAiSdkExecutors({
-    resolveModel: options.resolveModel ?? defaultResolveModel,
-  });
+  const { streamText } = options.models
+    ? createAiSdkExecutors({ models: options.models })
+    : createAiSdkExecutors({
+        resolveModel: options.resolveModel ?? defaultResolveModel,
+      });
   const { text } = await streamText(
     { ...input, tools: input.tools ?? {} },
     { onChunk: options.onChunk, signal }
@@ -106,7 +111,7 @@ export function createAiSdkStreamingTextActor<
 export async function runTriageDemo(ticket: string) {
   const result = await runAgent(triageMachine, {
     input: { ticket },
-    generateText: createAiSdkTextExecutor(),
+    generateText: createAiSdkTextExecutor({ models: triageModels }),
   });
   if (result.status !== 'done') {
     throw new Error(`Triage demo did not complete: ${result.status}`);
@@ -131,7 +136,8 @@ export async function runTriageStepDemo(ticket: string) {
       }
       const output = await generateWithAiSdk(
         request.input,
-        request.tools
+        request.tools,
+        { models: triageModels }
       );
       step = resolveAgentStep(
         triageMachine,
@@ -154,6 +160,7 @@ export async function runStreamingDemo(topic: string) {
     jokeMachine.provide({
       actorSources: {
         tellJoke: createAiSdkStreamingTextActor(tellJoke, {
+          models: jokeModels,
           // The side channel: chunks go to stdout as they arrive. In a server
           // this is a UIMessageStream writer or Response stream instead.
           onChunk: (chunk) => process.stdout.write(chunk),

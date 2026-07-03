@@ -18,9 +18,14 @@
 import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { runAgent, setupAgent } from '../../src/index.js';
+const models = {
+  "writer": "writer",
+} as const;
+
 
 export async function runLangGraphHumanInTheLoopExample() {
   const agent = setupAgent({
+    models,
     context: z.object({
       topic: z.string(),
       draft: z.string().nullable(),
