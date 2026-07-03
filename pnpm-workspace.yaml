@@ -1,2 +1,5 @@
+allowBuilds:
+  core-js-pure: false
+  esbuild: false
 minimumReleaseAgeExclude:
-  - xstate@6.0.0-alpha.16
+  - xstate

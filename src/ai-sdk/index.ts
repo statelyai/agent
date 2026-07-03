@@ -75,8 +75,40 @@ const unknownSchema = {
 
 // ─── createAiSdkExecutors ───
 
-export interface CreateAiSdkExecutorsOptions {
-  resolveModel: (modelRef: string) => LanguageModel;
+export type AiSdkModelMap = Record<string, LanguageModel>;
+
+export type CreateAiSdkExecutorsOptions<
+  TModels extends AiSdkModelMap = AiSdkModelMap,
+> =
+  | {
+      models: TModels;
+      resolveModel?: (modelRef: keyof TModels & string) => LanguageModel;
+    }
+  | {
+      models?: TModels;
+      resolveModel: (modelRef: string) => LanguageModel;
+    };
+
+function resolveAiSdkModel<TModels extends AiSdkModelMap>(
+  options: CreateAiSdkExecutorsOptions<TModels>,
+  modelRef: string
+): LanguageModel {
+  if (options.resolveModel) {
+    return options.resolveModel(modelRef as keyof TModels & string);
+  }
+
+  const models = options.models;
+  if (!models) {
+    throw new Error(
+      `createAiSdkExecutors: no model resolver configured for '${modelRef}'.`
+    );
+  }
+
+  const model = models[modelRef as keyof TModels & string];
+  if (!model) {
+    throw new Error(`createAiSdkExecutors: unknown model '${modelRef}'.`);
+  }
+  return model;
 }
 
 /**
@@ -136,16 +168,14 @@ export interface AiSdkExecutors
  * concrete provider package (e.g. `@ai-sdk/openai`) becomes a dependency here
  * either.
  */
-export function createAiSdkExecutors(
-  options: CreateAiSdkExecutorsOptions
+export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
+  options: CreateAiSdkExecutorsOptions<TModels>
 ): AiSdkExecutors {
-  const { resolveModel } = options;
-
   const generateText = async (
     request: AgentTextRequest & { tools: AgentTools },
     info?: AgentRequestExecutorInfo
   ) => {
-    const model = resolveModel(request.model);
+    const model = resolveAiSdkModel(options, request.model);
     const common = {
       model,
       abortSignal: info?.signal,
@@ -176,7 +206,7 @@ export function createAiSdkExecutors(
     request: AgentTextRequest & { tools: AgentTools },
     info?: AgentRequestExecutorInfo
   ) => {
-    const model = resolveModel(request.model);
+    const model = resolveAiSdkModel(options, request.model);
     const result = aiStreamText({
       model,
       abortSignal: info?.signal,
@@ -191,7 +221,7 @@ export function createAiSdkExecutors(
   };
 
   const decide: AgentDecisionExecutor = async (request) => {
-    const model = resolveModel(request.model);
+    const model = resolveAiSdkModel(options, request.model);
     const tools = toAiSdkEventTools(request.events);
     const messages = toDecisionMessages(request);
 

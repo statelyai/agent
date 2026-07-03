@@ -3,18 +3,21 @@
  *
  * Run with Wrangler in a Worker that has an `AI` binding. Workers AI does not
  * expose the same tool-calling shape as the Vercel AI SDK binding path, so this
- * host serializes allowed event tools into the prompt and accepts JSON output.
+ * host serializes allowed event tools into the prompt and accepts JSON output
+ * for both text requests (structured output) and decision requests (event
+ * choice) — see `resolveDecision` in `../../src/index.js` for the retry/
+ * validation core this uses for the latter.
  */
 import {
+  getAgentOutputMode,
   initialAgentStep,
   resolveAgentStep,
-  transitionAgentStep,
+  resolveDecision,
+  type AgentDecisionRequest,
   type AgentRequest,
-  type EventUnion,
+  type ChosenEvent,
 } from '../../src/index.js';
 import { gameActors, gameMachine, gameSchemas } from '../game-agent/index.js';
-
-type GameEvent = EventUnion<typeof gameSchemas.events>;
 
 interface Env {
   AI: {
@@ -22,66 +25,77 @@ interface Env {
   };
 }
 
-function promptWithAllowedEvents(request: AgentRequest): string {
-  const legalEvents = request.events
-    .map((event) => `- ${event.type}`)
-    .join('\n');
-
-  if (!legalEvents) {
-    return request.input.prompt ?? '';
-  }
-
-  return [
-    request.input.prompt ?? '',
-    '',
-    'Choose exactly one legal event and respond as JSON.',
-    'Legal events:',
-    legalEvents,
-    'Example: {"type":"ATTACK","target":"goblin"}',
-  ].join('\n');
-}
-
-async function runWorkersAiRequest(env: Env, request: AgentRequest) {
-  const response = (await env.AI.run(request.input.model, {
-    system: request.input.system,
-    prompt: promptWithAllowedEvents(request),
-    temperature: request.input.temperature,
-    max_tokens: request.input.maxTokens,
+async function runWorkersAiPrompt(
+  env: Env,
+  args: { model: string; system?: string; prompt: string; temperature?: number; maxTokens?: number }
+): Promise<string> {
+  const response = (await env.AI.run(args.model, {
+    system: args.system,
+    prompt: args.prompt,
+    temperature: args.temperature,
+    max_tokens: args.maxTokens,
   })) as { response?: string } | string | Record<string, unknown>;
 
-  const text =
-    typeof response === 'string'
-      ? response
-      : typeof response.response === 'string'
-        ? response.response
-        : JSON.stringify(response);
-
-  if (request.events.length > 0) {
-    return { kind: 'event' as const, event: JSON.parse(text) };
-  }
-
-  if (request.input.outputSchema) {
-    return { kind: 'output' as const, output: JSON.parse(text) };
-  }
-
-  return { kind: 'output' as const, output: text };
+  return typeof response === 'string'
+    ? response
+    : typeof response.response === 'string'
+      ? response.response
+      : JSON.stringify(response);
 }
 
-function parseGameEvent(value: unknown): GameEvent {
-  if (!value || typeof value !== 'object' || !('type' in value)) {
-    throw new Error('Workers AI returned an invalid game event.');
-  }
+/** Text request: structured output serialized into the prompt, JSON parsed back out. */
+async function runWorkersAiTextRequest(env: Env, request: AgentRequest) {
+  const structured = getAgentOutputMode(request.input.outputSchema) === 'structured';
+  const prompt = structured
+    ? [request.input.prompt ?? '', '', 'Respond with JSON only, matching the requested shape.'].join('\n')
+    : request.input.prompt ?? '';
 
-  const type = String(value.type);
-  const schema = gameSchemas.events[type as keyof typeof gameSchemas.events];
-  if (!schema) {
-    throw new Error(`Workers AI returned unsupported game event: ${type}`);
-  }
+  const text = await runWorkersAiPrompt(env, {
+    model: request.input.model,
+    system: request.input.system,
+    prompt,
+    temperature: request.input.temperature,
+    maxTokens: request.input.maxTokens,
+  });
 
-  return {
-    type,
-    ...schema.parse(value),
-  } as GameEvent;
+  return structured ? JSON.parse(text) : text;
+}
+
+/** Decision request: legal events serialized into the prompt, JSON-parsed
+ * choice validated and retried via `resolveDecision`. */
+async function runWorkersAiDecision(env: Env, request: AgentDecisionRequest): Promise<ChosenEvent> {
+  return resolveDecision(
+    request,
+    async (attemptRequest) => {
+      const legalEvents = attemptRequest.events.map((event) => `- ${event.type}`).join('\n');
+      const attemptFeedback = attemptRequest.attempts
+        .map((attempt) => `Your previous choice failed: ${attempt.reason}`)
+        .join('\n');
+
+      const prompt = [
+        attemptRequest.prompt ?? '',
+        attemptFeedback,
+        '',
+        'Choose exactly one legal event and respond as JSON.',
+        'Legal events:',
+        legalEvents,
+        'Example: {"type":"ATTACK","target":"goblin"}',
+      ]
+        .filter(Boolean)
+        .join('\n');
+
+      const text = await runWorkersAiPrompt(env, {
+        model: attemptRequest.model,
+        system: attemptRequest.system,
+        prompt,
+        temperature: attemptRequest.temperature,
+        maxTokens: attemptRequest.maxTokens,
+      });
+
+      return { event: JSON.parse(text) as ChosenEvent };
+    },
+    { maxRetries: 2 }
+  );
 }
 
 export async function runCloudflareGameTurn(
@@ -99,15 +113,15 @@ export async function runCloudflareGameTurn(
       throw new Error('Machine is waiting without an agent request.');
     }
 
-    const result = await runWorkersAiRequest(env, request);
-
-    if (result.kind === 'event') {
-      step = transitionAgentStep(gameMachine, step, parseGameEvent(result.event), {
+    if (request.kind === 'decision') {
+      const event = await runWorkersAiDecision(env, request);
+      step = resolveAgentStep(gameMachine, step, request, event, {
         schemas: gameSchemas,
         actors: gameActors,
       });
     } else {
-      step = resolveAgentStep(gameMachine, step, request, result.output, {
+      const output = await runWorkersAiTextRequest(env, request);
+      step = resolveAgentStep(gameMachine, step, request, output, {
         schemas: gameSchemas,
         actors: gameActors,
       });

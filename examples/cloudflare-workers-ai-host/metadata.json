@@ -4,7 +4,7 @@
   "kind": "host-adapter",
   "origin": {
     "type": "platform-adapter",
-    "source": "Cloudflare Workers AI integration sketch",
+    "source": "Cloudflare Workers AI integration, typechecked against @cloudflare/workers-types",
     "url": "https://developers.cloudflare.com/workers-ai/"
   },
   "comparison": {

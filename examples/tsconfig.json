@@ -4,8 +4,5 @@
     "declaration": false
   },
   "include": ["."],
-  "exclude": [
-    "cloudflare-agent-host/index.ts",
-    "cloudflare-workers-ai-host/index.ts"
-  ]
+  "exclude": []
 }

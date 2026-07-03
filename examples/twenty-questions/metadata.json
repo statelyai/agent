@@ -9,6 +9,6 @@
   },
   "comparison": {
     "targets": ["LangGraph", "Burr", "Flowise"],
-    "purpose": "Shows the decision loop with guard-enforced legality (ASK only while questions remain) and idle-first human-in-the-loop resume for answers."
+    "purpose": "Shows the decision loop with machine-held context, guard-enforced legality, typed model aliases, answer/guess feedback classification, scoring, play-again reset, and machine-owned user prompts."
   }
 }

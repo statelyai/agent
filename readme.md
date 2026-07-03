@@ -88,8 +88,8 @@ deciding: {
     id: 'chooseAction',
     src: 'agent.decide',
     input: ({ context }) => ({
-      model: 'openai/gpt-4.1-mini',
-      system: 'Ask one yes/no question at a time, or guess once confident.',
+      model: 'quick',
+      system: 'Ask one yes/no question at a time, but guess on the final turn.',
       prompt: `Questions remaining: ${context.questionsRemaining}`,
       // Typed against the machine's event-schema keys — a typo here is a
       // compile error, not a runtime surprise.
@@ -99,13 +99,13 @@ deciding: {
     onError: { target: 'stumped' },  // retries exhausted
   },
   on: {
-    // ASK is only legal while questions remain — returning `undefined`
+    // ASK is only legal before the final turn — returning `undefined`
     // makes the transition illegal for a guard-rejected choice.
     ASK: ({ context, event }) =>
-      context.questionsRemaining > 0
+      context.questionsRemaining > 1
         ? { target: 'awaitingAnswer', context: { /* ... */ } }
         : undefined,
-    GUESS: ({ context, event }) => ({ target: 'revealing', context: { guess: event.answer } }),
+    GUESS: ({ context, event }) => ({ target: 'revealing', context: { guess: event.guess } }),
   },
 },
 ```
@@ -122,7 +122,7 @@ Exhausting retries throws `DecisionExhaustedError`, caught by the invoke's `onEr
 
 When a decision's logic is reusable, exported, or worth testing standalone (independent of any one machine), pull it out with `createDecisionLogic(...)` and register it under `actors:` instead of inlining it — see [`examples/game-agent/index.ts`](examples/game-agent/index.ts), which exports `chooseMove` and narrows `allowedEvents` as a function of input (HP-gated moves).
 
-See [`examples/twenty-questions/index.ts`](examples/twenty-questions/index.ts) (decision loop + guard rejection + idle HITL) and [`examples/game-agent/index.ts`](examples/game-agent/index.ts) (`allowedEvents` as a function of input, narrowing move options by HP).
+See [`examples/twenty-questions/index.ts`](examples/twenty-questions/index.ts) (decision loop + guard rejection + machine-owned user prompts) and [`examples/game-agent/index.ts`](examples/game-agent/index.ts) (`allowedEvents` as a function of input, narrowing move options by HP).
 
 ## Human-in-the-loop & persistence
 
@@ -175,7 +175,41 @@ Caveat: `ImagePart`/`FilePart` can carry binary data (`Uint8Array`/`ArrayBuffer`
 
 <!-- createAiSdkExecutors and the raw executor contract, from src/ai-sdk/index.ts -->
 
-`createAiSdkExecutors({ resolveModel })` from `@statelyai/agent/ai-sdk` is the one adapter this package ships. It builds the `{ generateText, streamText, decide }` executor set `runAgent` needs, mapping requests onto `generateText`/`streamText`/tool-forced `generateText` calls from the Vercel AI SDK. For multi-step tool loops, set `metadata.maxSteps` on a request — the adapter forwards it as `stopWhen: stepCountIs(maxSteps)`; a request with no `maxSteps` stays single-step.
+`createAiSdkExecutors(...)` from `@statelyai/agent/ai-sdk` is the one adapter this package ships. It builds the `{ generateText, streamText, decide }` executor set `runAgent` needs, mapping requests onto `generateText`/`streamText`/tool-forced `generateText` calls from the Vercel AI SDK. For multi-step tool loops, set `metadata.maxSteps` on a request — the adapter forwards it as `stopWhen: stepCountIs(maxSteps)`; a request with no `maxSteps` stays single-step.
+
+For app code, prefer model aliases shared between `setupAgent(...)` and the host adapter. When `models` is present, request `model:` values are checked against its keys:
+
+```ts
+const models = {
+  quick: openai('gpt-4.1-mini'),
+  careful: openai('gpt-4.1'),
+} as const;
+
+const agent = setupAgent({
+  schemas,
+  models,
+  requests: {
+    answerQuestion: {
+      schemas: { input: z.object({ prompt: z.string() }), output: answerSchema },
+      model: 'quick', // typed as "quick" | "careful"
+      prompt: ({ input }) => input.prompt,
+    },
+  },
+});
+
+await runAgent(machine, {
+  input,
+  ...createAiSdkExecutors({ models }),
+});
+```
+
+For fully dynamic or externally configured hosts, keep using `resolveModel`:
+
+```ts
+createAiSdkExecutors({
+  resolveModel: (modelRef) => openai(modelRef.replace(/^openai\//, '')),
+});
+```
 
 `ai` is an optional peer dependency — core `src/` has zero runtime dependencies besides `xstate` (also a peer). Nothing stops you from writing your own executor set; the contract is just three functions taking plain request objects and returning plain results:
 
@@ -195,7 +229,14 @@ const executors: AgentRequestExecutors = {
 await runAgent(machine, { input, ...executors });
 ```
 
-Any SDK, or raw `fetch`, works — the machine has no idea which one you used.
+Any SDK, or raw `fetch`, works — the machine has no idea which one you used. That claim is backed by real implementations, not just the one sketch above:
+
+- [`createAiSdkExecutors`](src/ai-sdk/index.ts) — the Vercel AI SDK adapter shipped in-package (`@statelyai/agent/ai-sdk`, above).
+- [`examples/openai-sdk-host/index.ts`](examples/openai-sdk-host/index.ts) — the same `{ generateText, streamText, decide }` contract against the raw `openai` package (Chat Completions API), with structured output via `response_format` and decisions forced with `tool_choice: 'required'`.
+- [`examples/anthropic-sdk-host/index.ts`](examples/anthropic-sdk-host/index.ts) — the same contract against the raw `@anthropic-ai/sdk` package (Messages API), with structured output via a forced tool call and decisions forced with `tool_choice: { type: 'any' }`.
+- [`examples/cloudflare-agent-host/index.ts`](examples/cloudflare-agent-host/index.ts) and [`examples/cloudflare-workers-ai-host/index.ts`](examples/cloudflare-workers-ai-host/index.ts) — the contract inside a Cloudflare Durable Object (`agents`) and against Workers AI's binding, respectively.
+
+Four runtimes, one executor contract: three plain functions.
 
 ## The step path (durable hosts)
 
@@ -270,8 +311,36 @@ states:
     type: final
 ```
 
+`fromConfig(...)` requires a `compileSchema` option — the library does not bundle a JSON Schema engine, so it does not silently guess how strictly to validate the config's JSON Schemas (context/events/input/output, request input/output). Bring your own engine:
+
 ```ts
-const machine = setupAgent.fromConfig(config);
+import Ajv from 'ajv';
+import { setupAgent, type SchemaCompiler, type StandardSchemaV1 } from '@statelyai/agent';
+
+const ajv = new Ajv({ strict: false });
+const ajvCompileSchema: SchemaCompiler = (jsonSchema, name): StandardSchemaV1 => {
+  const validate = ajv.compile(jsonSchema);
+  return {
+    '~standard': {
+      version: 1,
+      vendor: 'ajv',
+      validate: (value) =>
+        validate(value)
+          ? { value }
+          : { issues: (validate.errors ?? []).map((e) => ({ message: `${name} ${e.message}` })) },
+    },
+  };
+};
+
+const machine = setupAgent.fromConfig(config, { compileSchema: ajvCompileSchema });
+```
+
+...or, for zero-dependency/low-stakes cases, opt into the built-in subset validator (`type`/`properties`/`required`/`items`/`enum`/`const` only — everything else, like `pattern` or `minLength`, is silently ignored):
+
+```ts
+import { minimalSchemaCompiler, setupAgent } from '@statelyai/agent';
+
+const machine = setupAgent.fromConfig(config, { compileSchema: minimalSchemaCompiler });
 ```
 
 Decisions work from JSON too — invoke `src: agent.decide` and the lowering wires up delivery of the chosen event automatically (JSON can't express `onDone: sendDecision()`, a function, so it's the default and only behavior; `onError` for retries-exhausted is still configurable):
@@ -296,7 +365,7 @@ The config is pure data: values are JSON literals or whole-string `"{{ }}"` expr
 
 See [`examples/json-agent/index.ts`](examples/json-agent/index.ts) for a full support-ticket workflow — decision, text request, idle human-approval step — authored as a real `.json` file and run with `runAgent(...)`.
 
-**Honest limits:** the lowering supports simple dot-path expressions only (`{{ context.foo.bar }}`, not arbitrary JS); guard expressions are truthy-only (no `!=`, comparisons, or boolean operators); the JS resolver-function forms available to TypeScript authoring (e.g. a function for `allowedEvents`, `guard`, or `input`) are inherently unavailable in JSON. JS authoring should use `setupAgent(...)` directly with Zod (or any Standard Schema) when you need those.
+**Honest limits:** the lowering supports simple dot-path expressions only (`{{ context.foo.bar }}`, not arbitrary JS); guard expressions are truthy-only (no `!=`, comparisons, or boolean operators); the JS resolver-function forms available to TypeScript authoring (e.g. a function for `allowedEvents`, `guard`, or `input`) are inherently unavailable in JSON. JS authoring should use `setupAgent(...)` directly with Zod (or any Standard Schema) when you need those. And: the library does not bundle a JSON Schema engine, so `fromConfig(...)` always requires an explicit `compileSchema` — `minimalSchemaCompiler` exists for zero-dependency cases and honors only `type`/`properties`/`required`/`items`/`enum`/`const`, silently ignoring everything else.
 
 ## Alpha status — what's not here yet
 
@@ -319,7 +388,7 @@ Examples live under [`examples/`](examples), one flat directory per example, run
 
 Start here:
 
-- [`examples/twenty-questions/index.ts`](examples/twenty-questions/index.ts) — decisions, guard-enforced legality, idle-first HITL
+- [`examples/twenty-questions/index.ts`](examples/twenty-questions/index.ts) — decisions, machine-held context, scoring, play-again reset, machine-owned user prompts
 - [`examples/joke/index.ts`](examples/joke/index.ts) — minimal streaming text workflow
 - [`examples/email-drafter/index.ts`](examples/email-drafter/index.ts) — parts-based messages, reusable text logic, typed state/transition meta
 - [`examples/game-agent/index.ts`](examples/game-agent/index.ts) — `allowedEvents` narrowed as a function of input
@@ -333,6 +402,7 @@ Human-in-the-loop and persistence:
 Host adapters and the step path:
 
 - [`examples/ai-sdk-host/index.ts`](examples/ai-sdk-host/index.ts), [`examples/ai-sdk-game-host/index.ts`](examples/ai-sdk-game-host/index.ts)
+- [`examples/openai-sdk-host/index.ts`](examples/openai-sdk-host/index.ts), [`examples/anthropic-sdk-host/index.ts`](examples/anthropic-sdk-host/index.ts) — the same executor contract against the raw OpenAI and Anthropic SDKs, no Vercel AI SDK in between
 - [`examples/tanstack-ai-host/index.ts`](examples/tanstack-ai-host/index.ts), [`examples/cloudflare-workers-ai-host/index.ts`](examples/cloudflare-workers-ai-host/index.ts), [`examples/cloudflare-agent-host/index.ts`](examples/cloudflare-agent-host/index.ts)
 
 Sub-agents and multi-machine composition:

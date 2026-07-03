@@ -1,9 +1,6 @@
+/// <reference types="@cloudflare/workers-types" />
 /**
- * Cloudflare Agents host for XState setup machines — PREVIEW CODE.
- *
- * Like the other platform host sketches in this repo, this file is
- * illustrative and excluded from typechecking (the `agents` package
- * requires `@cloudflare/workers-types` ambients).
+ * Cloudflare Agents host for XState setup machines.
  *
  * The shape:
  * - The Agent (a Durable Object) hosts the XState actor.
@@ -11,9 +8,17 @@
  *   hibernation/eviction and resumes exactly where it left off.
  * - Clients send machine events over WebSocket; provider/runtime details stay
  *   in the host actor implementations.
+ *
+ * Model resolution is injected via `resolveModel` (an AI SDK `LanguageModel`
+ * resolver — same shape as `../ai-sdk-host/index.ts`) rather than hardcoded
+ * to a specific provider package, since this repo does not depend on any one
+ * Cloudflare AI binding provider. In a real deployment, wire the
+ * `workers-ai-provider` package's `createWorkersAI({ binding: this.env.AI })`
+ * here for Workers AI, or any other AI SDK provider for an external model.
  */
 import { Agent, type Connection } from 'agents';
-import { createActor, type AnyActorRef, type Snapshot } from 'xstate';
+import { createActor, type Actor, type Snapshot } from 'xstate';
+import type { LanguageModel } from 'ai';
 import {
   draftEmail,
   emailDrafter,
@@ -21,7 +26,6 @@ import {
   evaluatePrompt,
 } from '../email-drafter/index.js';
 import { createAiSdkTextActor } from '../ai-sdk-host/index.js';
-import { createWorkersAI } from 'workers-ai-provider';
 
 interface Env {
   AI: Ai;
@@ -33,18 +37,29 @@ interface EmailDrafterState {
 
 export class EmailDrafterAgent extends Agent<Env, EmailDrafterState> {
   initialState: EmailDrafterState = {};
-  #actor: AnyActorRef | undefined;
+  #actor: Actor<typeof emailDrafter> | undefined;
+
+  /**
+   * Resolves a machine's `model` string to an AI SDK `LanguageModel`.
+   * Override (or set before `onStart` runs) to wire a real provider, e.g.:
+   *   this.resolveModel = (modelRef) =>
+   *     createWorkersAI({ binding: this.env.AI })(modelRef as Parameters<typeof workersai>[0]);
+   */
+  resolveModel: (modelRef: string) => LanguageModel = () => {
+    throw new Error(
+      'EmailDrafterAgent.resolveModel is unset — assign an AI SDK model resolver ' +
+        '(e.g. via workers-ai-provider\'s createWorkersAI) before onStart runs.'
+    );
+  };
 
   onStart() {
-    const workersai = createWorkersAI({ binding: this.env.AI });
-
     const machine = emailDrafter.provide({
       actorSources: {
         evaluatePrompt: createAiSdkTextActor(evaluatePrompt, {
-          resolveModel: (modelRef) => workersai(modelRef as never),
+          resolveModel: this.resolveModel,
         }),
         draftEmail: createAiSdkTextActor(draftEmail, {
-          resolveModel: (modelRef) => workersai(modelRef as never),
+          resolveModel: this.resolveModel,
         }),
       },
     });
@@ -75,13 +90,16 @@ export class EmailDrafterAgent extends Agent<Env, EmailDrafterState> {
   onMessage(connection: Connection, message: string) {
     // Client messages are machine events (PROMPT_SUBMITTED, SEND, ...).
     // The machine's event schemas validate them before they hit the actor.
-    const event = JSON.parse(message);
-    const schema = emailDrafterSchemas.events[event.type];
+    const event = JSON.parse(message) as { type: string; [key: string]: unknown };
+    const schema =
+      emailDrafterSchemas.events[event.type as keyof typeof emailDrafterSchemas.events];
     const result = schema?.['~standard'].validate(event);
-    if (result?.issues) {
+    // Event schemas here are synchronous (Zod) — a Promise result would mean
+    // an async validator, which this simple example doesn't support.
+    if (result && !(result instanceof Promise) && result.issues) {
       connection.send(JSON.stringify({ type: 'error', issues: result.issues }));
       return;
     }
-    this.#actor?.send(event);
+    this.#actor?.send(event as never);
   }
 }

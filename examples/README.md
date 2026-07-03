@@ -19,7 +19,7 @@ Each example lives in a flat `examples/*` directory with an `index.ts` or `index
 
 These use `setupAgent(...)` (or plain XState `setup(...)` plus `createTextLogic(...)`/`createDecisionLogic(...)`) from `@statelyai/agent`. The runtime is flexible: use `runAgent(...)`/`createActor(...)` locally, provide different host actors in apps, or persist XState snapshots in a platform adapter.
 
-- [`twenty-questions/index.ts`](/Users/davidkpiano/Code/agent/examples/twenty-questions/index.ts): decision loop with guard-enforced legality and idle-first human-in-the-loop resume
+- [`twenty-questions/index.ts`](/Users/davidkpiano/Code/agent/examples/twenty-questions/index.ts): decision loop with machine-held context, typed model aliases, final-turn guess enforcement, scoring, play-again reset, and machine-owned user prompts
 - [`email-drafter/index.ts`](/Users/davidkpiano/Code/agent/examples/email-drafter/index.ts): typed email workflow with independently testable requests
 - [`game-agent/index.ts`](/Users/davidkpiano/Code/agent/examples/game-agent/index.ts): turn-based game workflow with `allowedEvents` narrowed as a function of input
 - [`joke/index.ts`](/Users/davidkpiano/Code/agent/examples/joke/index.ts): minimal streaming text workflow
@@ -38,9 +38,11 @@ These use `setupAgent(...)` (or plain XState `setup(...)` plus `createTextLogic(
 - [`ai-sdk-evaluator-optimizer/index.ts`](/Users/davidkpiano/Code/agent/examples/ai-sdk-evaluator-optimizer/index.ts): Vercel AI SDK evaluator-optimizer as an explicit XState machine
 - [`debate-sub-agents/index.ts`](/Users/davidkpiano/Code/agent/examples/debate-sub-agents/index.ts): facilitator schedules two event-based debater sub-agents
 - [`ai-sdk-game-host/index.ts`](/Users/davidkpiano/Code/agent/examples/ai-sdk-game-host/index.ts): Vercel AI SDK step runner
+- [`openai-sdk-host/index.ts`](/Users/davidkpiano/Code/agent/examples/openai-sdk-host/index.ts): the executor contract implemented directly against the raw `openai` package (Chat Completions API), no Vercel AI SDK in between
+- [`anthropic-sdk-host/index.ts`](/Users/davidkpiano/Code/agent/examples/anthropic-sdk-host/index.ts): the executor contract implemented directly against the raw `@anthropic-ai/sdk` package (Messages API), no Vercel AI SDK in between
 - [`cloudflare-workers-ai-host/index.ts`](/Users/davidkpiano/Code/agent/examples/cloudflare-workers-ai-host/index.ts): Cloudflare Workers AI step runner
-- [`tanstack-ai-host/index.ts`](/Users/davidkpiano/Code/agent/examples/tanstack-ai-host/index.ts): TanStack AI step runner sketch
-- [`cloudflare-agent-host/index.ts`](/Users/davidkpiano/Code/agent/examples/cloudflare-agent-host/index.ts): Cloudflare Agents host sketch
+- [`tanstack-ai-host/index.ts`](/Users/davidkpiano/Code/agent/examples/tanstack-ai-host/index.ts): sketch against TanStack AI's chat interface (the real package isn't installed here)
+- [`cloudflare-agent-host/index.ts`](/Users/davidkpiano/Code/agent/examples/cloudflare-agent-host/index.ts): Cloudflare Agents host, persisting XState snapshots in Durable Object state
 - [`xstate-sub-agents/index.ts`](/Users/davidkpiano/Code/agent/examples/xstate-sub-agents/index.ts): multi-step agent machines invoking other agent machines as XState child actors
 
 ## Comparison Examples

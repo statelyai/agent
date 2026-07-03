@@ -4,11 +4,11 @@
   "kind": "host-adapter",
   "origin": {
     "type": "sdk-adapter",
-    "source": "TanStack AI integration sketch",
+    "source": "Sketch against TanStack AI's chat interface — @tanstack/ai is not installed in this repo, so this typechecks against a local interface shaped after it, not the real package",
     "url": "https://tanstack.com/ai"
   },
   "comparison": {
     "targets": ["TanStack AI", "SDK-neutral host adapters"],
-    "purpose": "Shows the same XState agent request shape mapped to a different chat/tool SDK."
+    "purpose": "Shows the same XState agent request shape mapped to a different chat/tool SDK's interface."
   }
 }

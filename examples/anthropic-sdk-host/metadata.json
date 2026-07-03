@@ -1,0 +1,14 @@
+{
+  "name": "anthropic-sdk-host",
+  "title": "Anthropic SDK Host",
+  "kind": "host-adapter",
+  "origin": {
+    "type": "sdk-adapter",
+    "source": "Anthropic TypeScript SDK integration sketch",
+    "url": "https://github.com/anthropics/anthropic-sdk-typescript"
+  },
+  "comparison": {
+    "targets": ["Anthropic SDK", "Vercel AI SDK", "OpenAI SDK"],
+    "purpose": "Shows the same XState agent request/decision contract mapped directly onto the raw Anthropic Messages API, with no Vercel AI SDK in between."
+  }
+}

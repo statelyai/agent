@@ -1,21 +1,27 @@
 /**
- * TanStack AI step host for the game workflow.
+ * Sketch against TanStack AI's chat interface — the real `@tanstack/ai`
+ * package is not a dependency of this repo (it isn't installed here), so
+ * this file typechecks against a small local `TanStackChat` interface
+ * shaped after TanStack AI's chat call instead of the real package's types.
+ * Treat this as an honest sketch, not a verified integration.
  *
- * Install peer SDKs in an app:
+ * Install the real peer SDKs in an app:
  *   pnpm add @tanstack/ai @tanstack/ai-openai
  *
- * Then run with an OpenAI-compatible TanStack adapter.
+ * Then run with an OpenAI-compatible TanStack adapter and swap this file's
+ * `TanStackChat` type for the real one exported by `@tanstack/ai`.
+ *
+ * Drives the triage workflow (text-only: structured-output classification,
+ * no decisions) since TanStack AI's chat call shape maps naturally onto a
+ * single request/response, not the tool-forced-choice decision recipe used
+ * by `../openai-sdk-host/index.ts` / `../anthropic-sdk-host/index.ts`.
  */
 import {
   initialAgentStep,
   resolveAgentStep,
-  transitionAgentStep,
   type AgentRequest,
-  type EventUnion,
 } from '../../src/index.js';
-import { gameActors, gameMachine, gameSchemas } from '../game-agent/index.js';
-
-type GameEvent = EventUnion<typeof gameSchemas.events>;
+import { triageActors, triageMachine, triageSchemas } from '../triage/index.js';
 
 type TanStackChat = (options: {
   adapter: unknown;
@@ -25,24 +31,12 @@ type TanStackChat = (options: {
   stream?: false;
 }) => Promise<unknown>;
 
-function toTanStackTools(request: AgentRequest) {
-  return request.events.map((event) => ({
-    name: event.toolName,
-    description: `Transition with event '${event.type}'.`,
-    inputSchema: event.inputSchema,
-    execute: async (input: unknown = {}) => ({
-      ...(input && typeof input === 'object' ? input : {}),
-      type: event.type,
-    }),
-  }));
-}
-
 async function runTanStackRequest(args: {
   chat: TanStackChat;
   adapter: unknown;
   request: AgentRequest;
 }) {
-  const result = await args.chat({
+  return args.chat({
     adapter: args.adapter,
     stream: false,
     messages: [
@@ -51,47 +45,19 @@ async function runTanStackRequest(args: {
         : []),
       { role: 'user', content: args.request.input.prompt ?? '' },
     ],
-    tools: toTanStackTools(args.request),
     outputSchema: args.request.input.outputSchema,
   });
-
-  if (result && typeof result === 'object' && 'type' in result) {
-    return { kind: 'event' as const, event: result };
-  }
-
-  return { kind: 'output' as const, output: result };
 }
 
-function parseGameEvent(value: unknown): GameEvent {
-  if (!value || typeof value !== 'object' || !('type' in value)) {
-    throw new Error('Host returned an invalid game event.');
-  }
-
-  const type = String(value.type);
-  const schema = gameSchemas.events[type as keyof typeof gameSchemas.events];
-  if (!schema) {
-    throw new Error(`Host returned unsupported game event: ${type}`);
-  }
-
-  return {
-    type,
-    ...schema.parse(value),
-  } as GameEvent;
-}
-
-export async function runTanStackGameTurn(args: {
+export async function runTanStackTriageDemo(args: {
   chat: TanStackChat;
   adapter: unknown;
-  input?: { playerHp: number; enemyHp: number };
+  ticket: string;
 }) {
-  let step = initialAgentStep(
-    gameMachine,
-    args.input ?? { playerHp: 20, enemyHp: 15 },
-    {
-      schemas: gameSchemas,
-      actors: gameActors,
-    },
-  );
+  let step = initialAgentStep(triageMachine, { ticket: args.ticket }, {
+    schemas: triageSchemas,
+    actors: triageActors,
+  });
 
   while (!step.done) {
     const [request] = step.requests;
@@ -102,29 +68,16 @@ export async function runTanStackGameTurn(args: {
       throw new Error('Decision requests are not supported in this demo.');
     }
 
-    const result = await runTanStackRequest({
+    const output = await runTanStackRequest({
       chat: args.chat,
       adapter: args.adapter,
       request,
     });
 
-    if (result.kind === 'event') {
-      step = transitionAgentStep(gameMachine, step, parseGameEvent(result.event), {
-        schemas: gameSchemas,
-        actors: gameActors,
-      });
-    } else {
-      step = resolveAgentStep(
-        gameMachine,
-        step,
-        request,
-        result.output,
-        {
-          schemas: gameSchemas,
-          actors: gameActors,
-        }
-      );
-    }
+    step = resolveAgentStep(triageMachine, step, request, output, {
+      schemas: triageSchemas,
+      actors: triageActors,
+    });
   }
 
   return step.snapshot.output;

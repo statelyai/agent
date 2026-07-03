@@ -1,6 +1,6 @@
 /**
- * Twenty Questions — decision loop + guard-enforced legality + idle-first
- * human-in-the-loop.
+ * Twenty Questions — decision loop + guard-enforced legality + machine-owned
+ * human input.
  *
  * The agent asks yes/no questions to narrow down a secret, then guesses.
  * Showcases:
@@ -8,36 +8,66 @@
  *     exactly one currently-legal event (ASK or GUESS) each turn. The
  *     decision is authored state-local — it lives in the `deciding` state
  *     that invokes it, typed against the machine's own event schemas.
- *   - Guard-enforced legality: ASK is only legal while `questionsRemaining
- *     > 0` (a v6 function-transition returning `undefined` when illegal).
- *     If the model chooses ASK at 0 remaining, `resolveDecision`'s mode-3
- *     `canTake` check rejects it (`failure: 'rejected-by-guard'`) and
- *     retries — this is the guard showcase.
- *   - Idle-first HITL: `awaitingAnswer` has no invoke; under `runAgent` it
- *     settles `{ status: 'idle' }` and the host resumes with the human's
- *     ANSWER_YES/ANSWER_NO once they've answered.
+ *   - Guard-enforced legality: the final turn must be GUESS, so ASK is
+ *     only legal while `questionsRemaining > 1` (a v6 function-transition
+ *     returning `undefined` when illegal). If the model chooses ASK on the
+ *     final turn, `resolveDecision`'s mode-3 `canTake` check rejects it
+ *     (`failure: 'rejected-by-guard'`) and retries.
+ *   - Machine-owned input prompts: states that need the user invoke
+ *     `agent.userInput` with prompt data derived from context, so the host can
+ *     just insert the machine and press play.
  *
  * Run: OPENAI_API_KEY=... node --import tsx examples/twenty-questions/index.ts
  */
 import { z } from 'zod';
-import { generateText, stepCountIs, tool, type LanguageModel } from 'ai';
 import { openai } from '@ai-sdk/openai';
+import { createAiSdkExecutors } from '../../src/ai-sdk/index.js';
 import {
+  type AgentMessage,
+  assistantMessage,
   createAgentSchemas,
-  getAcceptedEvents,
   runAgent,
   sendDecision,
   setupAgent,
-  type AgentDecisionExecutor,
+  userMessage,
 } from '../../src/index.js';
+
+const transcriptTurnSchema = z.object({
+  question: z.string(),
+  answer: z.enum(['yes', 'no']),
+  rawAnswer: z.string(),
+});
+
+const answerClassificationSchema = z.object({
+  answer: z.enum(['yes', 'no']),
+  reasoning: z.string(),
+});
+
+const guessFeedbackClassificationSchema = z.object({
+  correct: z.boolean(),
+  reasoning: z.string(),
+});
+
+const playAgainClassificationSchema = z.object({
+  playAgain: z.boolean(),
+  reasoning: z.string(),
+});
+
+const models = {
+  quick: openai('gpt-4.1-mini'),
+} as const;
 
 export const twentyQuestionsSchemas = createAgentSchemas({
   context: z.object({
+    maxQuestions: z.number(),
     questionsRemaining: z.number(),
-    transcript: z.array(
-      z.object({ question: z.string(), answer: z.enum(['yes', 'no']) })
-    ),
+    transcript: z.array(transcriptTurnSchema),
+    messages: z.custom<AgentMessage[]>((value) => Array.isArray(value)),
+    pendingRawAnswer: z.string().nullable(),
     guess: z.string().nullable(),
+    userScore: z.number(),
+    agentScore: z.number(),
+    round: z.number(),
   }),
   input: z.object({
     questionsRemaining: z.number().default(20),
@@ -45,17 +75,96 @@ export const twentyQuestionsSchemas = createAgentSchemas({
   output: z.object({
     guess: z.string(),
     questionsUsed: z.number(),
+    userScore: z.number(),
+    agentScore: z.number(),
+    roundsPlayed: z.number(),
   }),
   events: {
     ASK: z.object({ question: z.string() }),
-    GUESS: z.object({ answer: z.string() }),
-    ANSWER_YES: z.object({}),
-    ANSWER_NO: z.object({}),
+    GUESS: z.object({ guess: z.string() }),
+    ANSWER: z.object({ rawAnswer: z.string() }),
+    GUESS_FEEDBACK: z.object({ rawAnswer: z.string() }),
+    PLAY_AGAIN: z.object({ rawAnswer: z.string() }),
   },
 });
 
 const agent = setupAgent({
   schemas: twentyQuestionsSchemas,
+  models,
+  requests: {
+    classifyAnswer: {
+      schemas: {
+        input: z.object({
+          question: z.string(),
+          rawAnswer: z.string(),
+          messages: z.custom<AgentMessage[]>((value) => Array.isArray(value)),
+          transcript: z.array(transcriptTurnSchema),
+        }),
+        output: answerClassificationSchema,
+      },
+      model: 'quick',
+      system:
+        'Classify a natural-language answer to a Twenty Questions yes/no question. ' +
+        'Return answer=yes for affirmations like "mhm", "for sure", "correct", or indirect confirmations. ' +
+        'Return answer=no for denials, corrections, or contradictions. Keep reasoning short.',
+      messages: ({ input }) => [
+        ...input.messages,
+        userMessage(
+          [
+            `Question: ${input.question}`,
+            `Raw answer: ${input.rawAnswer}`,
+            'Classify the raw answer as yes or no.',
+          ].join('\n')
+        ),
+      ],
+    },
+    classifyGuessFeedback: {
+      schemas: {
+        input: z.object({
+          guess: z.string(),
+          rawAnswer: z.string(),
+          messages: z.custom<AgentMessage[]>((value) => Array.isArray(value)),
+        }),
+        output: guessFeedbackClassificationSchema,
+      },
+      model: 'quick',
+      system:
+        'Classify whether the user says the Twenty Questions guess was correct. ' +
+        'Return correct=true for yes/correct/right. Return correct=false for no/wrong/incorrect.',
+      messages: ({ input }) => [
+        ...input.messages,
+        userMessage(
+          [
+            `Guess: ${input.guess}`,
+            `Raw answer: ${input.rawAnswer}`,
+            'Classify whether the guess was correct.',
+          ].join('\n')
+        ),
+      ],
+    },
+    classifyPlayAgain: {
+      schemas: {
+        input: z.object({
+          rawAnswer: z.string(),
+          messages: z.custom<AgentMessage[]>((value) => Array.isArray(value)),
+        }),
+        output: playAgainClassificationSchema,
+      },
+      model: 'quick',
+      system:
+        'Classify whether the user wants to play another round. Return playAgain=true for yes; false for no.',
+      messages: ({ input }) => [
+        ...input.messages,
+        userMessage(
+          [
+            'Question: Do you want to play another round?',
+            `Raw answer: ${input.rawAnswer}`,
+            'Classify whether the user wants another round.',
+          ].join('\n')
+        ),
+      ],
+    },
+  },
 });
 
 const DECIDE_SYSTEM_PROMPT =
@@ -65,32 +174,49 @@ const DECIDE_SYSTEM_PROMPT =
 
 function renderTranscriptPrompt(context: {
   questionsRemaining: number;
-  transcript: { question: string; answer: 'yes' | 'no' }[];
+  transcript: { question: string; answer: 'yes' | 'no'; rawAnswer: string }[];
+  messages: AgentMessage[];
 }): string {
   return [
     `Questions remaining: ${context.questionsRemaining}`,
+    `Messages so far: ${JSON.stringify(context.messages)}`,
     'Transcript so far:',
     context.transcript.length === 0
       ? '(none yet)'
       : context.transcript
-          .map((turn) => `Q: ${turn.question}\nA: ${turn.answer}`)
+          .map(
+            (turn) =>
+              `Q: ${turn.question}\nA: ${turn.answer}` +
+              (turn.rawAnswer ? ` (raw: ${turn.rawAnswer})` : '')
+          )
           .join('\n'),
-    context.questionsRemaining > 0
+    'If the player reveals the secret or gives extra information in a raw answer, use it and guess immediately.',
+    'Avoid repeating categories already answered. If something is an animal, do not ask if it is a plant, fungus, or microorganism.',
+    context.questionsRemaining > 1
       ? 'Ask a yes/no question (ASK) or make your guess (GUESS).'
-      : 'You are out of questions — you must guess now (GUESS).',
+      : 'This is the final turn. You must make your guess now (GUESS).',
   ].join('\n');
 }
 
 export const twentyQuestionsMachine = agent.createMachine({
   id: 'twenty-questions',
   context: ({ input }) => ({
+    maxQuestions: input.questionsRemaining,
     questionsRemaining: input.questionsRemaining,
     transcript: [],
+    messages: [],
+    pendingRawAnswer: null,
     guess: null,
+    userScore: 0,
+    agentScore: 0,
+    round: 1,
   }),
   output: ({ context }) => ({
     guess: context.guess ?? '',
     questionsUsed: context.transcript.length,
+    userScore: context.userScore,
+    agentScore: context.agentScore,
+    roundsPlayed: context.round,
   }),
   initial: 'deciding',
   states: {
@@ -99,11 +225,11 @@ export const twentyQuestionsMachine = agent.createMachine({
         id: 'chooseAction',
         src: 'agent.decide',
         input: ({ context }) => ({
-          model: 'openai/gpt-4.1-mini',
+          model: 'quick',
           system: DECIDE_SYSTEM_PROMPT,
           prompt: renderTranscriptPrompt(context),
           // Typo'd event names are caught at compile time — allowedEvents is
-          // typed against the machine's event-schema keys (ASK | GUESS | ANSWER_YES | ANSWER_NO).
+          // typed against the machine's event-schema keys (ASK | GUESS | ANSWER).
           allowedEvents: ['ASK', 'GUESS'] as const,
           maxRetries: 2,
         }),
@@ -111,160 +237,220 @@ export const twentyQuestionsMachine = agent.createMachine({
         onError: { target: 'stumped' },
       },
       on: {
-        // Guard: ASK is only legal while questions remain. Returning
+        // Guard: ASK is only legal before the final turn. Returning
         // `undefined` makes the transition illegal — `snapshot.can(event)`
-        // (resolveDecision's mode-3 check) will reject an ASK chosen at 0
-        // remaining, recording `failure: 'rejected-by-guard'` and retrying.
+        // (resolveDecision's mode-3 check) will reject an ASK chosen with
+        // one turn remaining, recording `failure: 'rejected-by-guard'` and
+        // retrying. The model must GUESS on the final turn.
         ASK: ({ context, event }) =>
-          context.questionsRemaining > 0
+          context.questionsRemaining > 1
             ? {
                 target: 'awaitingAnswer',
                 context: {
                   transcript: [
                     ...context.transcript,
-                    { question: event.question, answer: 'yes' as const },
+                    {
+                      question: event.question,
+                      answer: 'yes' as const,
+                      rawAnswer: '',
+                    },
                   ],
+                  messages: [...context.messages, assistantMessage(event.question)],
                   questionsRemaining: context.questionsRemaining - 1,
                 },
               }
             : undefined,
         GUESS: ({ context, event }) => ({
-          target: 'revealing',
-          context: { guess: event.answer },
+          target: 'awaitingGuessFeedback',
+          context: {
+            guess: event.guess,
+            messages: [
+              ...context.messages,
+              assistantMessage(`My guess is ${event.guess}. Was I right?`),
+            ],
+          },
         }),
       },
     },
 
-    // No invoke — waits for the human's answer. Under runAgent this settles
-    // { status: 'idle' }; the host asks the human, then resumes with
-    // { snapshot, event: { type: 'ANSWER_YES' | 'ANSWER_NO' } }.
     awaitingAnswer: {
-      on: {
-        ANSWER_YES: ({ context }) => ({
-          target: 'deciding',
-          context: {
-            transcript: [
-              ...context.transcript.slice(0, -1),
-              { ...context.transcript.at(-1)!, answer: 'yes' as const },
-            ],
-          },
+      tags: ['awaiting-user'],
+      invoke: {
+        src: 'agent.userInput',
+        input: ({ context }) => ({
+          prompt: context.transcript.at(-1)?.question ?? 'Answer yes or no.',
         }),
-        ANSWER_NO: ({ context }) => ({
-          target: 'deciding',
+        onDone: ({ event }) => ({
+          target: 'classifyingAnswer',
           context: {
-            transcript: [
-              ...context.transcript.slice(0, -1),
-              { ...context.transcript.at(-1)!, answer: 'no' as const },
-            ],
+            pendingRawAnswer: String(event.output ?? ''),
           },
         }),
       },
     },
 
-    revealing: {
+    classifyingAnswer: {
+      invoke: {
+        src: 'classifyAnswer',
+        input: ({ context }) => ({
+          question: context.transcript.at(-1)?.question ?? '',
+          rawAnswer: context.pendingRawAnswer ?? '',
+          messages: context.messages,
+          transcript: context.transcript,
+        }),
+        onDone: ({ context, output }) => ({
+          target: 'deciding',
+          context: {
+            transcript: [
+              ...context.transcript.slice(0, -1),
+              {
+                ...context.transcript.at(-1)!,
+                answer: output.answer,
+                rawAnswer: context.pendingRawAnswer ?? '',
+              },
+            ],
+            messages: [
+              ...context.messages,
+              userMessage(context.pendingRawAnswer ?? ''),
+            ],
+            pendingRawAnswer: null,
+          },
+        }),
+        onError: { target: 'stumped' },
+      },
+    },
+
+    awaitingGuessFeedback: {
+      tags: ['awaiting-user'],
+      invoke: {
+        src: 'agent.userInput',
+        input: ({ context }) => ({
+          prompt: `My guess is ${context.guess}. Was I right?`,
+        }),
+        onDone: ({ event }) => ({
+          target: 'classifyingGuessFeedback',
+          context: { pendingRawAnswer: String(event.output ?? '') },
+        }),
+      },
+    },
+
+    classifyingGuessFeedback: {
+      invoke: {
+        src: 'classifyGuessFeedback',
+        input: ({ context }) => ({
+          guess: context.guess ?? '',
+          rawAnswer: context.pendingRawAnswer ?? '',
+          messages: context.messages,
+        }),
+        onDone: ({ context, output }) => ({
+          target: 'awaitingPlayAgain',
+          context: {
+            agentScore: context.agentScore + (output.correct ? 1 : 0),
+            userScore: context.userScore + (output.correct ? 0 : 1),
+            messages: [
+              ...context.messages,
+              userMessage(context.pendingRawAnswer ?? ''),
+              assistantMessage('Do you want to play another round?'),
+            ],
+            pendingRawAnswer: null,
+          },
+        }),
+        onError: { target: 'awaitingPlayAgain' },
+      },
+    },
+
+    awaitingPlayAgain: {
+      tags: ['awaiting-user'],
+      invoke: {
+        src: 'agent.userInput',
+        input: {
+          prompt: 'Do you want to play another round?',
+        },
+        onDone: ({ event }) => ({
+          target: 'classifyingPlayAgain',
+          context: { pendingRawAnswer: String(event.output ?? '') },
+        }),
+      },
+    },
+
+    classifyingPlayAgain: {
+      invoke: {
+        src: 'classifyPlayAgain',
+        input: ({ context }) => ({
+          rawAnswer: context.pendingRawAnswer ?? '',
+          messages: context.messages,
+        }),
+        onDone: ({ context, output }) =>
+          output.playAgain
+            ? {
+                target: 'deciding',
+                context: {
+                  questionsRemaining: context.maxQuestions,
+                  transcript: [],
+                  messages: [],
+                  pendingRawAnswer: null,
+                  guess: null,
+                  round: context.round + 1,
+                },
+              }
+            : {
+                target: 'gameOver',
+                context: {
+                  messages: [
+                    ...context.messages,
+                    userMessage(context.pendingRawAnswer ?? ''),
+                  ],
+                  pendingRawAnswer: null,
+                },
+              },
+        onError: { target: 'gameOver' },
+      },
+    },
+
+    gameOver: {
       type: 'final',
-      output: ({ context }) => ({
-        guess: context.guess ?? '',
-        questionsUsed: context.transcript.length,
-      }),
     },
 
     // Reached when chooseAction exhausts its retries (DecisionExhaustedError).
     stumped: {
       type: 'final',
-      output: ({ context }) => ({ guess: '', questionsUsed: context.transcript.length }),
+      output: ({ context }) => ({
+        guess: '',
+        questionsUsed: context.transcript.length,
+        userScore: context.userScore,
+        agentScore: context.agentScore,
+        roundsPlayed: context.round,
+      }),
     },
   },
 });
 
-// ─── AI SDK demo host ───
+const executors = createAiSdkExecutors({ models });
 
-function resolveModel(modelRef: string): LanguageModel {
-  return openai(modelRef.replace(/^openai\//, ''));
-}
-
-// decide executor: tool-per-event + toolChoice 'required', reads the chosen
-// event off the tool call (docs/p0-design.md §2.6 recipe).
-const decide: AgentDecisionExecutor = async (request) => {
-  const model = resolveModel(request.model);
-  const tools = Object.fromEntries(
-    request.events.map((event) => [
-      event.toolName,
-      tool({
-        description: `Choose the '${event.type}' action.`,
-        inputSchema: (event.inputSchema as z.ZodType) ?? z.object({}),
-      }),
-    ])
-  );
-
-  const result = await generateText({
-    model,
-    system: request.system,
-    prompt: request.prompt ?? '',
-    tools,
-    toolChoice: 'required',
-    stopWhen: stepCountIs(1),
-    temperature: request.temperature,
-  });
-
-  const toolCall = result.toolCalls[0];
-  if (!toolCall) {
-    throw new Error('Model did not call an event tool.');
-  }
-  const chosenEvent = request.events.find(
-    (event) => event.toolName === toolCall.toolName
-  );
-  if (!chosenEvent) {
-    throw new Error(`Model called unknown tool '${toolCall.toolName}'.`);
-  }
-
-  return {
-    event: {
-      ...(toolCall.input && typeof toolCall.input === 'object' ? toolCall.input : {}),
-      type: chosenEvent.type,
-    },
-  };
-};
-
-async function promptYesNo(question: string): Promise<'yes' | 'no'> {
+async function promptAnswer(question: string): Promise<string> {
   const { createInterface } = await import('node:readline/promises');
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
-    const answer = await rl.question(`${question} (y/n) `);
-    return /^y/i.test(answer.trim()) ? 'yes' : 'no';
+    return await rl.question(`${question} `);
   } finally {
     rl.close();
   }
 }
 
 export async function main() {
-  let result = await runAgent(twentyQuestionsMachine, {
+  const result = await runAgent(twentyQuestionsMachine, {
     input: { questionsRemaining: 20 },
-    generateText: async () => ({}),
-    decide,
+    ...executors,
+    userInput: async ({ prompt }) => promptAnswer(prompt ?? '>'),
   });
-
-  while (result.status === 'idle') {
-    const lastQuestion = result.snapshot.context.transcript.at(-1)?.question;
-    const accepted = getAcceptedEvents(result.snapshot);
-    if (!lastQuestion || !accepted.some((e) => e.type.startsWith('ANSWER_'))) {
-      throw new Error('Unexpected idle state waiting for an answer.');
-    }
-
-    const answer = await promptYesNo(lastQuestion);
-    result = await runAgent(twentyQuestionsMachine, {
-      snapshot: result.snapshot,
-      event: { type: answer === 'yes' ? 'ANSWER_YES' : 'ANSWER_NO' },
-      generateText: async () => ({}),
-      decide,
-    });
-  }
 
   if (result.status !== 'done') {
     throw new Error(`Twenty questions did not complete: ${result.status}`);
   }
 
-  console.log(`Guess: ${result.output.guess} (used ${result.output.questionsUsed} questions)`);
+  console.log(
+    `Final score — user: ${result.output.userScore}, agent: ${result.output.agentScore}`
+  );
 }
 
 if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
