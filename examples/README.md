@@ -6,18 +6,21 @@ Each example lives in a flat `examples/*` directory with an `index.ts` or `index
 
 ## Start Here
 
-- Authoring reusable text logic and XState agent machines: [`email-drafter/index.ts`](/Users/davidkpiano/Code/agent/examples/email-drafter/index.ts)
+- Decisions — the model choosing exactly one legal machine event: [`twenty-questions/index.ts`](/Users/davidkpiano/Code/agent/examples/twenty-questions/index.ts)
+- Minimal streaming text workflow: [`joke/index.ts`](/Users/davidkpiano/Code/agent/examples/joke/index.ts)
+- Authoring reusable requests, parts-based messages, and schema-typed state meta: [`email-drafter/index.ts`](/Users/davidkpiano/Code/agent/examples/email-drafter/index.ts)
+- Human-in-the-loop, the idle-first way: [`langgraph-human-in-the-loop/index.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-human-in-the-loop/index.ts)
 - Running with host actors: [`ai-sdk-host/index.ts`](/Users/davidkpiano/Code/agent/examples/ai-sdk-host/index.ts)
 - Host actor guide: [`../docs/host-actors.md`](/Users/davidkpiano/Code/agent/docs/host-actors.md)
 - Framework comparison examples: [`langgraph-conditional-routing/index.test.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-conditional-routing/index.test.ts), [`burr-counter/index.test.ts`](/Users/davidkpiano/Code/agent/examples/burr-counter/index.test.ts), [`crewai-content-creator/index.test.ts`](/Users/davidkpiano/Code/agent/examples/crewai-content-creator/index.test.ts), [`dinavinter-test-agent/index.test.ts`](/Users/davidkpiano/Code/agent/examples/dinavinter-test-agent/index.test.ts)
 
 ## XState Examples
 
-These use normal XState `setup(...)` plus `createTextLogic(...)` from `@statelyai/agent`. The runtime is flexible: use `createActor(...)` locally, provide different host actors in apps, or persist XState snapshots in a platform adapter.
+These use `setupAgent(...)` (or plain XState `setup(...)` plus `createTextLogic(...)`/`createDecisionLogic(...)`) from `@statelyai/agent`. The runtime is flexible: use `runAgent(...)`/`createActor(...)` locally, provide different host actors in apps, or persist XState snapshots in a platform adapter.
 
-- [`email-drafter/index.ts`](/Users/davidkpiano/Code/agent/examples/email-drafter/index.ts): typed email workflow with independently testable text logic
-- [`game-agent/index.ts`](/Users/davidkpiano/Code/agent/examples/game-agent/index.ts): turn-based game workflow with whitelisted event tools
 - [`twenty-questions/index.ts`](/Users/davidkpiano/Code/agent/examples/twenty-questions/index.ts): decision loop with guard-enforced legality and idle-first human-in-the-loop resume
+- [`email-drafter/index.ts`](/Users/davidkpiano/Code/agent/examples/email-drafter/index.ts): typed email workflow with independently testable requests
+- [`game-agent/index.ts`](/Users/davidkpiano/Code/agent/examples/game-agent/index.ts): turn-based game workflow with `allowedEvents` narrowed as a function of input
 - [`joke/index.ts`](/Users/davidkpiano/Code/agent/examples/joke/index.ts): minimal streaming text workflow
 - [`triage/index.ts`](/Users/davidkpiano/Code/agent/examples/triage/index.ts): structured-output support ticket triage
 - [`langgraph-conditional-routing/index.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-conditional-routing/index.ts): LangGraph-style conditional edge
@@ -84,4 +87,4 @@ dinavinter/agents:
 - [`../docs/crewai-parity.md`](/Users/davidkpiano/Code/agent/docs/crewai-parity.md)
 - [`../docs/burr-parity.md`](/Users/davidkpiano/Code/agent/docs/burr-parity.md)
 
-The parity docs track end-result coverage and remaining gaps. New examples should use `createTextLogic(...)` for reusable LLM work and `setupAgent({ schemas, actors })` for schema-first machine authoring.
+The parity docs track end-result coverage and remaining gaps, honestly — "possible but manual" and "not yet" are used where that's the true state, not "Covered". New examples should use `createTextLogic(...)`/`createDecisionLogic(...)` for reusable LLM work and `setupAgent({ schemas, actors, requests, decisions })` for schema-first machine authoring.
