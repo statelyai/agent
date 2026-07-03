@@ -201,7 +201,8 @@ export type ChosenEvent = { type: string; [key: string]: unknown };
 - No `output` schema (a decision has no output value; its output *is* the event).
 - Decisions are **generate-only** — there is no streaming decision.
 - How the model is coerced into choosing (tool-per-event + `toolChoice: 'required'`, structured output over an event union, …) is **adapter business**, not core's (§2.6). `toolChoice` is therefore not configurable on decisions.
-- Standalone `createDecisionLogic` types `allowedEvents` only as `string[]` (it doesn't know the machine's events). The co-located form (inside `setupAgent`, P1) will type it against event-schema keys.
+- Standalone `createDecisionLogic` types `allowedEvents` only as `string[]` (it doesn't know the machine's events). The inline `agent.decide` builtin (§2.4) types it against the machine's event-schema keys instead.
+- **Superseded:** this section originally promised a co-located `setupAgent({ decisions: {...} })` form (P1) as the answer to `allowedEvents` typing. That form was built and then removed — decisions are **state-local by design** (a global decision registry duplicates the invoking state's `on:` handlers and invites drift). The typed answer is the inline `agent.decide` invoke (§2.4), whose `input` is typed against the machine's event-schema keys directly. `createDecisionLogic` remains for reusable/exported/standalone-testable decision logic registered under `actors:`.
 
 ### 2.4 Builtin `agent.decide` (v6-alpha-correct syntax)
 

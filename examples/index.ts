@@ -27,7 +27,6 @@ export {
   triageTicket,
 } from './triage/index.js';
 export {
-  chooseAction,
   twentyQuestionsMachine,
   twentyQuestionsSchemas,
 } from './twenty-questions/index.js';

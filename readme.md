@@ -76,32 +76,25 @@ In published form: `import ... from '@statelyai/agent'` for authoring, `import {
 
 ## Decisions
 
-<!-- decision primitive, based on src/setup-agent.ts (createDecisionLogic, resolveDecision) and examples/twenty-questions/index.ts -->
+<!-- decision primitive, based on src/setup-agent.ts (agent.decide builtin, createDecisionLogic, resolveDecision) and examples/twenty-questions/index.ts -->
 
 This is the headline feature. A **decision** is the model choosing exactly one **currently-legal** machine event — not free text, not an arbitrary tool call. The machine declares which events are candidates; XState's guards decide which of those are actually legal from the current state; the model picks among the survivors.
 
-```ts
-const agent = setupAgent({
-  schemas: twentyQuestionsSchemas,
-  decisions: {
-    chooseAction: {
-      schemas: { input: z.object({ questionsRemaining: z.number(), /* ... */ }) },
-      model: 'openai/gpt-4.1-mini',
-      system: 'Ask one yes/no question at a time, or guess once confident.',
-      prompt: ({ input }) => `Questions remaining: ${input.questionsRemaining}`,
-      // Typed against the machine's event-schema keys — a typo here is a
-      // compile error, not a runtime surprise.
-      allowedEvents: ['ASK', 'GUESS'] as const,
-    },
-  },
-});
+Decisions are **local to the state that makes them** — authored inline with the built-in `agent.decide` actor source, right on the invoke that needs one. Candidates default to that state's own legal events, or narrow them with `allowedEvents`, typed against the machine's event-schema keys so a typo'd event name is a compile error, not a runtime surprise:
 
-// ...
+```ts
 deciding: {
   invoke: {
     id: 'chooseAction',
-    src: 'chooseAction',
-    input: ({ context }) => ({ questionsRemaining: context.questionsRemaining }),
+    src: 'agent.decide',
+    input: ({ context }) => ({
+      model: 'openai/gpt-4.1-mini',
+      system: 'Ask one yes/no question at a time, or guess once confident.',
+      prompt: `Questions remaining: ${context.questionsRemaining}`,
+      // Typed against the machine's event-schema keys — a typo here is a
+      // compile error, not a runtime surprise.
+      allowedEvents: ['ASK', 'GUESS'] as const,
+    }),
     onDone: sendDecision(),          // delivers the chosen event into this state's `on:`
     onError: { target: 'stumped' },  // retries exhausted
   },
@@ -126,6 +119,8 @@ Validation runs three checks, each producing a typed failure that's fed back to 
 - `rejected-by-guard` — the type and payload are fine, but the state's guard says no right now
 
 Exhausting retries throws `DecisionExhaustedError`, caught by the invoke's `onError`. How the model is actually coerced into choosing one option (tool-per-event with forced tool choice, structured output over an event union, etc.) is host/adapter business — see `createAiSdkExecutors`'s `decide` executor below. Core only validates and retries; it never talks to a model.
+
+When a decision's logic is reusable, exported, or worth testing standalone (independent of any one machine), pull it out with `createDecisionLogic(...)` and register it under `actors:` instead of inlining it — see [`examples/game-agent/index.ts`](examples/game-agent/index.ts), which exports `chooseMove` and narrows `allowedEvents` as a function of input (HP-gated moves).
 
 See [`examples/twenty-questions/index.ts`](examples/twenty-questions/index.ts) (decision loop + guard rejection + idle HITL) and [`examples/game-agent/index.ts`](examples/game-agent/index.ts) (`allowedEvents` as a function of input, narrowing move options by HP).
 

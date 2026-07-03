@@ -1,11 +1,11 @@
 # Host Actors
 
-`setupAgent(...)` gives a machine typed, built-in actor sources for model work — `agent.generateText` / `agent.streamText` for inline text requests, `agent.decide` for decisions, `agent.userInput` for human input — plus co-located `requests:`/`decisions:` when a call deserves a reusable name. In every case, the machine only *declares* the request; the host executes it by supplying executors to `runAgent(...)` (or the step helpers) or by providing actor implementations directly.
+`setupAgent(...)` gives a machine typed, built-in actor sources for model work — `agent.generateText` / `agent.streamText` for inline text requests, `agent.decide` for decisions, `agent.userInput` for human input — plus co-located `requests:` when a call deserves a reusable name. Decisions are state-local: author them inline on the invoke with `src: 'agent.decide'`, or pull reusable decision logic into `createDecisionLogic(...)` under `actors:`. In every case, the machine only *declares* the request; the host executes it by supplying executors to `runAgent(...)` (or the step helpers) or by providing actor implementations directly.
 
 The machine declares:
 
 - state flow
-- `invoke.src` naming a registered actor (a builtin like `agent.generateText`, or a name from `requests:`/`decisions:`/`actors:`)
+- `invoke.src` naming a registered actor (a builtin like `agent.generateText`/`agent.decide`, or a name from `requests:`/`actors:`)
 - typed invoke `input`
 - typed `onDone.event.output`
 

@@ -4,8 +4,10 @@
  *
  * The agent asks yes/no questions to narrow down a secret, then guesses.
  * Showcases:
- *   - `createDecisionLogic`/`sendDecision()`: the model picks exactly one
- *     currently-legal event (ASK or GUESS) each turn.
+ *   - Inline `agent.decide` invoke + `sendDecision()`: the model picks
+ *     exactly one currently-legal event (ASK or GUESS) each turn. The
+ *     decision is authored state-local — it lives in the `deciding` state
+ *     that invokes it, typed against the machine's own event schemas.
  *   - Guard-enforced legality: ASK is only legal while `questionsRemaining
  *     > 0` (a v6 function-transition returning `undefined` when illegal).
  *     If the model chooses ASK at 0 remaining, `resolveDecision`'s mode-3
@@ -54,42 +56,30 @@ export const twentyQuestionsSchemas = createAgentSchemas({
 
 const agent = setupAgent({
   schemas: twentyQuestionsSchemas,
-  decisions: {
-    chooseAction: {
-      schemas: {
-        input: z.object({
-          questionsRemaining: z.number(),
-          transcript: z.array(
-            z.object({ question: z.string(), answer: z.enum(['yes', 'no']) })
-          ),
-        }),
-      },
-      model: 'openai/gpt-4.1-mini',
-      system:
-        'You are playing twenty questions. Ask one yes/no question at a time to ' +
-        'narrow down the secret, or guess once you are confident. You have a ' +
-        'limited number of questions remaining.',
-      prompt: ({ input }) =>
-        [
-          `Questions remaining: ${input.questionsRemaining}`,
-          'Transcript so far:',
-          input.transcript.length === 0
-            ? '(none yet)'
-            : input.transcript
-                .map((turn) => `Q: ${turn.question}\nA: ${turn.answer}`)
-                .join('\n'),
-          input.questionsRemaining > 0
-            ? 'Ask a yes/no question (ASK) or make your guess (GUESS).'
-            : 'You are out of questions — you must guess now (GUESS).',
-        ].join('\n'),
-      // Typo'd event names are caught at compile time — allowedEvents is
-      // typed against the machine's event-schema keys (ASK | GUESS | ANSWER_YES | ANSWER_NO).
-      allowedEvents: ['ASK', 'GUESS'] as const,
-    },
-  },
 });
 
-export const chooseAction = agent.decisions.chooseAction;
+const DECIDE_SYSTEM_PROMPT =
+  'You are playing twenty questions. Ask one yes/no question at a time to ' +
+  'narrow down the secret, or guess once you are confident. You have a ' +
+  'limited number of questions remaining.';
+
+function renderTranscriptPrompt(context: {
+  questionsRemaining: number;
+  transcript: { question: string; answer: 'yes' | 'no' }[];
+}): string {
+  return [
+    `Questions remaining: ${context.questionsRemaining}`,
+    'Transcript so far:',
+    context.transcript.length === 0
+      ? '(none yet)'
+      : context.transcript
+          .map((turn) => `Q: ${turn.question}\nA: ${turn.answer}`)
+          .join('\n'),
+    context.questionsRemaining > 0
+      ? 'Ask a yes/no question (ASK) or make your guess (GUESS).'
+      : 'You are out of questions — you must guess now (GUESS).',
+  ].join('\n');
+}
 
 export const twentyQuestionsMachine = agent.createMachine({
   id: 'twenty-questions',
@@ -107,10 +97,15 @@ export const twentyQuestionsMachine = agent.createMachine({
     deciding: {
       invoke: {
         id: 'chooseAction',
-        src: 'chooseAction',
+        src: 'agent.decide',
         input: ({ context }) => ({
-          questionsRemaining: context.questionsRemaining,
-          transcript: context.transcript,
+          model: 'openai/gpt-4.1-mini',
+          system: DECIDE_SYSTEM_PROMPT,
+          prompt: renderTranscriptPrompt(context),
+          // Typo'd event names are caught at compile time — allowedEvents is
+          // typed against the machine's event-schema keys (ASK | GUESS | ANSWER_YES | ANSWER_NO).
+          allowedEvents: ['ASK', 'GUESS'] as const,
+          maxRetries: 2,
         }),
         onDone: sendDecision(),
         onError: { target: 'stumped' },

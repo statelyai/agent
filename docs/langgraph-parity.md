@@ -51,7 +51,7 @@ Each row links the migrated example and states the mechanism in one line — not
 | LangGraphJS concept | Agent example | Mechanism |
 | --- | --- | --- |
 | Graph/state-machine authoring with typed state/events | [`examples/email-drafter/index.ts`](/Users/davidkpiano/Code/agent/examples/email-drafter/index.ts) | XState `setup(...)`/`setupAgent(...)` with schema-typed context, events, and named `requests:` |
-| Decisions (model picks one legal event) | [`examples/twenty-questions/index.ts`](/Users/davidkpiano/Code/agent/examples/twenty-questions/index.ts) | `decisions:` + `allowedEvents`, validated and retried by `resolveDecision` against guard-legal events |
+| Decisions (model picks one legal event) | [`examples/twenty-questions/index.ts`](/Users/davidkpiano/Code/agent/examples/twenty-questions/index.ts) | inline `agent.decide` invoke + `allowedEvents`, validated and retried by `resolveDecision` against guard-legal events |
 | Branching / conditional routing | [`examples/langgraph-conditional-routing/index.test.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-conditional-routing/index.test.ts) | Guarded transitions / function-form `on:` handlers |
 | Subgraphs / nested flows | [`examples/langgraph-subflows/index.test.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-subflows/index.test.ts) | A child machine invoked as a nested actor; the parent binds only its own request sources via `runAgent`, the child's sources are bound separately with `.provide(...)` |
 | Human-in-the-loop / approval gate | [`examples/langgraph-human-in-the-loop/index.test.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-human-in-the-loop/index.test.ts) | Idle-first: a no-invoke state settles `runAgent` to `{ status: 'idle' }`; resume with `{ snapshot, event }` |
