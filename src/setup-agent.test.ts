@@ -1539,6 +1539,246 @@ describe('setupAgent', () => {
     expect(step.snapshot.output).toEqual({ answer: 'Because logic matters.' });
   });
 
+  test('fromConfig + runAgent: pure-JSON text request workflow runs end to end', async () => {
+    const machine = setupAgent.fromConfig({
+      id: 'static-answer-run-agent',
+      schemas: {
+        input: {
+          type: 'object',
+          properties: { question: { type: 'string' } },
+          required: ['question'],
+        },
+        context: {
+          type: 'object',
+          properties: {
+            question: { type: 'string' },
+            answer: { type: 'string' },
+          },
+          required: ['question'],
+        },
+        output: {
+          type: 'object',
+          properties: { answer: { type: 'string' } },
+          required: ['answer'],
+        },
+      },
+      context: {
+        question: '{{ input.question }}',
+      },
+      requests: {
+        answerQuestion: {
+          model: 'test-model',
+          prompt: 'Question: {{ input.question }}',
+          input: {
+            type: 'object',
+            properties: { question: { type: 'string' } },
+            required: ['question'],
+          },
+          output: {
+            type: 'object',
+            properties: { answer: { type: 'string' } },
+            required: ['answer'],
+          },
+        },
+      },
+      initial: 'answering',
+      states: {
+        answering: {
+          invoke: {
+            id: 'answer',
+            src: 'answerQuestion',
+            input: { question: '{{ context.question }}' },
+            onDone: {
+              target: 'done',
+              assign: { answer: '{{ event.output.answer }}' },
+            },
+          },
+        },
+        done: {
+          type: 'final',
+          output: { answer: '{{ context.answer }}' },
+        },
+      },
+    });
+
+    const result = await runAgent(machine, {
+      input: { question: 'Why statecharts?' },
+      generateText: async () => ({ output: { answer: 'Because logic matters.' } }),
+    });
+
+    expect(result.status).toBe('done');
+    expect(result.status === 'done' && result.output).toEqual({
+      answer: 'Because logic matters.',
+    });
+  });
+
+  test('fromConfig + runAgent: JSON agent.decide invoke completes via the decided event', async () => {
+    const receivedInputs: unknown[] = [];
+
+    const machine = setupAgent.fromConfig({
+      id: 'static-decide-run-agent',
+      schemas: {
+        input: { type: 'object', properties: {} },
+        context: {
+          type: 'object',
+          properties: { mode: { type: 'string' } },
+        },
+        events: {
+          ASK: { type: 'object', properties: { question: { type: 'string' } } },
+          GUESS: { type: 'object', properties: { answer: { type: 'string' } } },
+        },
+        output: {
+          type: 'object',
+          properties: { mode: { type: 'string' } },
+          required: ['mode'],
+        },
+      },
+      context: {},
+      initial: 'choosing',
+      states: {
+        choosing: {
+          invoke: {
+            id: 'choosing',
+            src: 'agent.decide',
+            input: {
+              model: 'test-model',
+              system: 'Pick a move.',
+              prompt: '{{ context.x }}',
+              allowedEvents: ['ASK', 'GUESS'],
+              maxRetries: 2,
+            },
+            onError: { target: 'fumbled' },
+          },
+          on: {
+            ASK: { target: 'done', assign: { mode: 'asked' } },
+            GUESS: { target: 'done', assign: { mode: 'guessed' } },
+          },
+        },
+        done: {
+          type: 'final',
+          output: { mode: '{{ context.mode }}' },
+        },
+        fumbled: {},
+      },
+    });
+
+    const result = await runAgent(machine, {
+      input: {},
+      generateText: async () => ({}),
+      decide: async (input) => {
+        receivedInputs.push(input);
+        return { event: { type: 'GUESS', answer: '42' } };
+      },
+    });
+
+    expect(result.status).toBe('done');
+    expect(result.status === 'done' && result.output).toEqual({ mode: 'guessed' });
+    expect(receivedInputs).toHaveLength(1);
+    const decisionInput = receivedInputs[0] as { events?: Array<{ type: string }> };
+    expect(decisionInput.events?.map((event) => event.type).sort()).toEqual(['ASK', 'GUESS']);
+  });
+
+  test('fromConfig + runAgent: JSON event-waiting state settles idle, resumes with { snapshot, event }', async () => {
+    const machine = setupAgent.fromConfig({
+      id: 'static-idle-run-agent',
+      schemas: {
+        input: { type: 'object', properties: {} },
+        context: {
+          type: 'object',
+          properties: { draft: { type: 'string' } },
+        },
+        events: {
+          APPROVE: { type: 'object', properties: {} },
+        },
+        output: {
+          type: 'object',
+          properties: { draft: { type: 'string' } },
+          required: ['draft'],
+        },
+      },
+      context: {},
+      requests: {
+        writeDraft: {
+          model: 'test-model',
+          prompt: 'Draft it.',
+          input: { type: 'object', properties: {} },
+          output: {
+            type: 'object',
+            properties: { draft: { type: 'string' } },
+            required: ['draft'],
+          },
+        },
+      },
+      initial: 'drafting',
+      states: {
+        drafting: {
+          invoke: {
+            id: 'draft',
+            src: 'writeDraft',
+            input: {},
+            onDone: {
+              target: 'reviewing',
+              assign: { draft: '{{ event.output.draft }}' },
+            },
+          },
+        },
+        reviewing: {
+          on: {
+            APPROVE: { target: 'done' },
+          },
+        },
+        done: {
+          type: 'final',
+          output: { draft: '{{ context.draft }}' },
+        },
+      },
+    });
+
+    const generateText = async () => ({ output: { draft: 'Hello world.' } });
+
+    const first = await runAgent(machine, { input: {}, generateText });
+    expect(first.status).toBe('idle');
+
+    const persisted = JSON.parse(JSON.stringify(first.status === 'idle' ? first.snapshot : null));
+
+    const second = await runAgent(machine, {
+      snapshot: persisted,
+      event: { type: 'APPROVE' },
+      generateText,
+    });
+
+    expect(second.status).toBe('done');
+    expect(second.status === 'done' && second.output).toEqual({ draft: 'Hello world.' });
+  });
+
+  test('fromConfig: explicit onDone on an agent.decide invoke throws a clear error', () => {
+    expect(() =>
+      setupAgent.fromConfig({
+        id: 'static-decide-explicit-ondone',
+        schemas: {
+          input: { type: 'object', properties: {} },
+          context: { type: 'object', properties: {} },
+          events: {
+            ASK: { type: 'object', properties: {} },
+          },
+        },
+        context: {},
+        initial: 'choosing',
+        states: {
+          choosing: {
+            invoke: {
+              id: 'choosing',
+              src: 'agent.decide',
+              input: { model: 'test-model', allowedEvents: ['ASK'] },
+              onDone: { target: 'asked' },
+            },
+          },
+          asked: {},
+        },
+      })
+    ).toThrow(/decision delivery is automatic/i);
+  });
+
   test('agent.userInput is a blessed host-provided actor for static workflows', async () => {
     const machine = setupAgent
       .fromConfig({

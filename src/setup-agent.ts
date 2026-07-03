@@ -2915,6 +2915,18 @@ function lowerWorkflowTransitionOrArray(
 function lowerWorkflowInvoke(
   invokeConfig: AgentWorkflowInvokeConfig
 ) {
+  const isDecideInvoke = invokeConfig.src === DECIDE_ACTOR;
+
+  if (isDecideInvoke && invokeConfig.onDone !== undefined) {
+    throw new Error(
+      `setupAgent.fromConfig: invoke '${invokeConfig.id ?? invokeConfig.src}' targets ` +
+        `'${DECIDE_ACTOR}' and declares an 'onDone'. Decision delivery is automatic — a ` +
+        `decision has no output value of its own, its output IS the chosen event, which ` +
+        `is delivered via 'sendDecision()' — so 'onDone' cannot be configured from JSON. ` +
+        `Only 'onError' (retries-exhausted) is configurable here.`
+    );
+  }
+
   return {
     ...(invokeConfig.id !== undefined ? { id: invokeConfig.id } : {}),
     src: invokeConfig.src,
@@ -2924,9 +2936,11 @@ function lowerWorkflowInvoke(
             evaluateWorkflowConfigValue(invokeConfig.input, { context, event }),
         }
       : {}),
-    ...(invokeConfig.onDone !== undefined
-      ? { onDone: lowerWorkflowTransitionOrArray(invokeConfig.onDone) }
-      : {}),
+    ...(isDecideInvoke
+      ? { onDone: sendDecision() }
+      : invokeConfig.onDone !== undefined
+        ? { onDone: lowerWorkflowTransitionOrArray(invokeConfig.onDone) }
+        : {}),
     ...(invokeConfig.onError !== undefined
       ? { onError: lowerWorkflowTransitionOrArray(invokeConfig.onError) }
       : {}),

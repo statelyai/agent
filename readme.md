@@ -232,11 +232,11 @@ See [`examples/ai-sdk-game-host/index.ts`](examples/ai-sdk-game-host/index.ts) (
 
 Thought of as event sourcing: each step applies exactly one event (a machine transition, a resolved model result, or a decision's chosen event). Persisting the ordered event log — not just the latest snapshot — is what makes replay and audit possible; a snapshot is a compaction checkpoint, not the source of truth.
 
-## Static workflow configs
+## Machines as data
 
 <!-- setupAgent.fromConfig + JSON Schema export, from src/setup-agent.ts and schemas/agent-workflow.json -->
 
-The package also publishes a JSON Schema for static, declarative agent workflow definitions, for cases where the workflow itself is data (a visual editor, a stored config) rather than authored TypeScript:
+An agent machine can be pure JSON, not just authored TypeScript. `setupAgent.fromConfig(...)` lowers a config validated against the published JSON Schema into the same kind of runnable XState machine `setupAgent(...)` builds — states, transitions with guard expressions, text requests, decisions, and human/idle steps included:
 
 ```ts
 import workflowSchema from '@statelyai/agent/agent-workflow.json';
@@ -274,7 +274,29 @@ states:
 const machine = setupAgent.fromConfig(config);
 ```
 
-Values wrapped as a whole string, like `"{{ context.question }}"`, are typed expressions. The current lowering supports simple dot-path expressions over `input`, `context`, and `event`. JS authoring should use `setupAgent(...)` directly with Zod (or any Standard Schema) rather than this JSON Schema path.
+Decisions work from JSON too — invoke `src: agent.decide` and the lowering wires up delivery of the chosen event automatically (JSON can't express `onDone: sendDecision()`, a function, so it's the default and only behavior; `onError` for retries-exhausted is still configurable):
+
+```yaml
+states:
+  choosing:
+    invoke:
+      src: agent.decide
+      input:
+        model: openai/gpt-4.1
+        prompt: "{{ context.ticket }}"
+        allowedEvents: [ESCALATE, REPLY]
+      onError:
+        target: escalated
+    on:
+      ESCALATE: { target: escalated }
+      REPLY: { target: drafting }
+```
+
+The config is pure data: values are JSON literals or whole-string `"{{ }}"` expressions, evaluated by a dot-path resolver over `input`, `context`, and `event` — there is no code and no `eval`. This is what makes the config safe to generate from an LLM, store in a database, or edit in a visual builder, and still run exactly like hand-authored TypeScript.
+
+See [`examples/json-agent/index.ts`](examples/json-agent/index.ts) for a full support-ticket workflow — decision, text request, idle human-approval step — authored as a real `.json` file and run with `runAgent(...)`.
+
+**Honest limits:** the lowering supports simple dot-path expressions only (`{{ context.foo.bar }}`, not arbitrary JS); guard expressions are truthy-only (no `!=`, comparisons, or boolean operators); the JS resolver-function forms available to TypeScript authoring (e.g. a function for `allowedEvents`, `guard`, or `input`) are inherently unavailable in JSON. JS authoring should use `setupAgent(...)` directly with Zod (or any Standard Schema) when you need those.
 
 ## Alpha status — what's not here yet
 
@@ -301,6 +323,7 @@ Start here:
 - [`examples/joke/index.ts`](examples/joke/index.ts) — minimal streaming text workflow
 - [`examples/email-drafter/index.ts`](examples/email-drafter/index.ts) — parts-based messages, reusable text logic, typed state/transition meta
 - [`examples/game-agent/index.ts`](examples/game-agent/index.ts) — `allowedEvents` narrowed as a function of input
+- [`examples/json-agent/index.ts`](examples/json-agent/index.ts) — a full workflow (decision, text request, idle human step) authored as a real `.json` file
 
 Human-in-the-loop and persistence:
 

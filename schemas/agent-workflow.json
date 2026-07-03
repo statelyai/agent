@@ -395,12 +395,14 @@
           "type": "string"
         },
         "src": {
+          "description": "Actor source name. 'agent.decide' invokes are special: decision delivery is automatic (the chosen event is sent as soon as the model decides) and 'onDone' must be omitted — see the 'onDone' description.",
           "$ref": "#/$defs/Identifier"
         },
         "input": {
           "$ref": "#/$defs/ExpressionValue"
         },
         "onDone": {
+          "description": "Not valid on an 'agent.decide' invoke — the built-in lowering rejects it at setupAgent.fromConfig(...) time. A decision has no output value of its own (its output IS the chosen event), so delivery is automatic and not configurable from JSON. 'onError' (retries exhausted) still applies to 'agent.decide' invokes.",
           "$ref": "#/$defs/TransitionOrArray"
         },
         "onError": {

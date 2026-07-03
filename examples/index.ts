@@ -82,3 +82,8 @@ export {
   createDebateSubAgentsWorkflow,
   runDebateSubAgentsExample,
 } from './debate-sub-agents/index.js';
+export {
+  jsonAgentMachine,
+  runJsonAgentDemo,
+  workflowConfig as jsonAgentWorkflowConfig,
+} from './json-agent/index.js';
