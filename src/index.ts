@@ -1,30 +1,29 @@
+export { appendMessages, messagesSchema } from './messages.js';
 export {
-  appendMessages,
   createAgentSchemas,
-  createDecisionLogic,
+  setupAgent,
+} from './setup-agent.js';
+export { createDecisionLogic, DecisionExhaustedError, resolveDecision, sendDecision } from './decision.js';
+export { EVENT_TOOL_PREFIX, getAcceptedEvents } from './events.js';
+export {
   createTextLogic,
-  DecisionExhaustedError,
-  doneEvent,
-  EVENT_TOOL_PREFIX,
-  executeAgentRequest,
-  getAcceptedEvents,
   getAgentOutputMode,
+  isStructuredOutputSchema,
+  parseOutput,
+} from './text-logic.js';
+export {
+  doneEvent,
+  executeAgentRequest,
   getAgentRequests,
   getMachineAgentRequests,
   initialAgentStep,
-  isStructuredOutputSchema,
-  messagesSchema,
-  minimalSchemaCompiler,
-  parseOutput,
   resolveAgentStep,
-  resolveDecision,
-  runAgent,
-  sendDecision,
-  setupAgent,
   transitionAgentStep,
   transitionResult,
-  validateSchemaSync,
-} from './setup-agent.js';
+} from './steps.js';
+export { runAgent } from './run-agent.js';
+export { minimalSchemaCompiler } from './workflow-config.js';
+export { validateSchemaSync } from './utils.js';
 export {
   assistantMessage,
   systemMessage,
@@ -32,20 +31,33 @@ export {
   userMessage,
 } from './utils.js';
 
+export type { AgentDecisionInput, AgentDecisionRequest, AgentDecisionExecutor } from './decision.js';
 export type {
-  AgentDecisionInput,
-  AgentDecisionRequest,
-  AgentDecisionExecutor,
   AgentModelMap,
   AgentModelRef,
-  AgentRequest,
+  AgentTextRequest,
+  AgentRequestExecutor,
+  AgentRequestExecutorInfo,
+  AgentRequestExecutors,
+  AgentRequestMode,
+  AgentOutputMode,
+  AgentUserInput,
+  TextLogic,
+  TextLogicConfig,
+  TextLogicExecuteArgs,
+  TextLogicExecutor,
+  TextLogicInput,
+  TextLogicOutput,
+} from './text-logic.js';
+export type {
   AgentRequestOptions,
   AgentEventDescriptor,
   AgentEventToolNameResolver,
   AgentRequestSource,
-  AgentStepRequest,
-  AgentUserInput,
-  AgentUserInputExecutor,
+} from './events.js';
+export type { AgentRequest, AgentStep, AgentStepRequest } from './steps.js';
+export type { AgentUserInputExecutor, RunAgentOptions, RunAgentResult } from './run-agent.js';
+export type {
   AgentWorkflowActionConfig,
   AgentWorkflowActorConfig,
   AgentWorkflowConfig,
@@ -53,29 +65,11 @@ export type {
   AgentWorkflowStateConfig,
   AgentWorkflowRequestConfig,
   AgentWorkflowTransitionConfig,
-  AgentTextRequest,
-  AgentSchemaPack,
-  AgentStep,
-  AgentRequestExecutor,
-  AgentRequestExecutorInfo,
-  AgentRequestExecutors,
-  AgentRequestMode,
-  AgentOutputMode,
-  DecisionAttempt,
-  DecisionLogic,
-  DecisionLogicConfig,
   FromConfigOptions,
-  ResolveDecisionOptions,
-  RunAgentOptions,
-  RunAgentResult,
   SchemaCompiler,
-  TextLogic,
-  TextLogicConfig,
-  TextLogicExecuteArgs,
-  TextLogicExecutor,
-  TextLogicInput,
-  TextLogicOutput,
-} from './setup-agent.js';
+} from './workflow-config.js';
+export type { AgentSchemaPack } from './setup-agent.js';
+export type { DecisionAttempt, DecisionLogic, DecisionLogicConfig, ResolveDecisionOptions } from './decision.js';
 
 export type {
   AgentMessage,

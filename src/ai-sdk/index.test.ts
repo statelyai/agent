@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { z } from 'zod';
-import type { AgentDecisionRequest, AgentEventDescriptor } from '../setup-agent.js';
+import type { AgentDecisionRequest } from '../decision.js';
+import type { AgentEventDescriptor } from '../events.js';
 import {
   isStructuredOutputRequest,
   toAiSdkCallSettings,

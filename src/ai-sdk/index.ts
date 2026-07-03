@@ -11,15 +11,13 @@ import {
 } from 'ai';
 import {
   getAgentOutputMode,
-  type AgentDecisionExecutor,
-  type AgentDecisionRequest,
-  type AgentEventDescriptor,
   type AgentRequestExecutor,
   type AgentRequestExecutorInfo,
   type AgentRequestExecutors,
   type AgentTextRequest,
-  type DecisionAttempt,
-} from '../setup-agent.js';
+} from '../text-logic.js';
+import type { AgentDecisionExecutor, AgentDecisionRequest, DecisionAttempt } from '../decision.js';
+import type { AgentEventDescriptor } from '../events.js';
 import type { AgentTools, ChosenEvent, StandardSchemaV1 } from '../types.js';
 
 export function toAiSdkTools(tools: AgentTools) {
