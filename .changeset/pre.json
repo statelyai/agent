@@ -1,0 +1,10 @@
+{
+  "mode": "pre",
+  "tag": "alpha",
+  "initialVersions": {
+    "@statelyai/agent": "1.1.6"
+  },
+  "changesets": [
+    "setup-agent-xstate-cutover"
+  ]
+}
