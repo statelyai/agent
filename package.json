@@ -76,7 +76,7 @@
   },
   "peerDependencies": {
     "ai": "^6.0.67",
-    "xstate": "6.0.0-alpha.16"
+    "xstate": ">=6.0.0-alpha.16 <6.0.0"
   },
   "peerDependenciesMeta": {
     "ai": {
