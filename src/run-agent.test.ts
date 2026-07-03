@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { z } from 'zod';
-import { setup } from 'xstate';
+import { createActor, setup, toPromise } from 'xstate';
 import {
   createAgentSchemas,
   createDecisionLogic,
@@ -473,6 +473,65 @@ describe('runAgent', () => {
         runAgent(machine, { input: undefined, generateText: async () => ({}) })
       ).rejects.toThrow(/notRegistered/);
     });
+
+    test('a STREAM-mode TextLogic invoke with no streamText option throws naming the source', async () => {
+      const streamSummary = createTextLogic({
+        mode: 'stream',
+        schemas: { input: z.object({}), output: z.string() },
+        model: 'test-model',
+      });
+      const agent = setupAgent({
+        schemas: createAgentSchemas({ context: z.object({}), input: z.object({}) }),
+        actors: { streamSummary },
+      });
+      const machine = agent.createMachine({
+        context: {},
+        initial: 'streaming',
+        states: {
+          streaming: {
+            invoke: {
+              id: 'streamSummary',
+              src: 'streamSummary',
+              input: {},
+              onDone: { target: 'done' },
+            },
+          },
+          done: { type: 'final' },
+        },
+      });
+
+      await expect(
+        runAgent(machine, { input: {}, generateText: async () => ({}) })
+      ).rejects.toThrow(/streamSummary/);
+    });
+
+    test('a direct-object invoke src that is an agent logic WITHOUT its own executor throws', async () => {
+      const summarize = createTextLogic({
+        schemas: { input: z.object({ topic: z.string() }), output: z.string() },
+        model: 'test-model',
+        prompt: ({ input }) => input.topic,
+      });
+
+      const machine = setup({}).createMachine({
+        id: 'direct-object-no-executor',
+        initial: 'working',
+        states: {
+          working: {
+            invoke: {
+              id: 'summarize',
+              src: summarize,
+              input: { topic: 'state machines' },
+              onDone: { target: 'done' },
+            },
+          },
+          done: { type: 'final' },
+        },
+      });
+
+      await expect(
+        runAgent(machine, { generateText: async () => ({}) })
+      ).rejects.toThrow(/direct-object/);
+    });
   });
 
   test('after-timer: a pending after transition is not idle; runAgent resolves done', async () => {
@@ -566,5 +625,240 @@ describe('runAgent', () => {
     expect(result.status === 'done' ? result.output : undefined).toEqual({
       feedback: 'great',
     });
+  });
+
+  describe('omitted allowedEvents: "all currently-legal events"', () => {
+    const attackSchema = z.object({ target: z.string() });
+    const healSchema = z.object({});
+
+    const schemas = createAgentSchemas({
+      context: z.object({ hp: z.number() }),
+      input: z.object({}),
+      events: { ATTACK: attackSchema, HEAL: healSchema },
+    });
+
+    test('runAgent + inline agent.decide with allowedEvents omitted: candidates are exactly the legal events, with inputSchema attached', async () => {
+      const agent = setupAgent({ schemas });
+      const machine = agent.createMachine({
+        context: { hp: 10 },
+        initial: 'choosingMove',
+        states: {
+          choosingMove: {
+            invoke: {
+              id: 'choosingMove',
+              // No allowedEvents — omitted means "all currently-legal events."
+              src: 'agent.decide',
+              input: { model: 'test-model', prompt: 'Choose a move.' },
+              onDone: sendDecision(),
+              onError: { target: 'fumbled' },
+            },
+            on: {
+              // HEAL only legal when hp < 5 — type-legal but guard-narrowed here.
+              HEAL: ({ context }) => (context.hp < 5 ? { target: 'healed' } : undefined),
+              ATTACK: { target: 'attacked' },
+            },
+          },
+          attacked: { type: 'final' },
+          healed: {},
+          fumbled: {},
+        },
+      });
+
+      let seenEvents: readonly { type: string; inputSchema?: unknown }[] = [];
+      const decide = async (request: AgentDecisionRequest): Promise<{ event: ChosenEvent }> => {
+        seenEvents = request.events;
+        return { event: { type: 'ATTACK', target: 'goblin' } };
+      };
+
+      const result = await runAgent(machine, {
+        input: {},
+        generateText: async () => ({}),
+        decide,
+      });
+
+      expect(result.status).toBe('done');
+      expect(seenEvents.map((event) => event.type).sort()).toEqual(['ATTACK', 'HEAL']);
+      expect(seenEvents.find((event) => event.type === 'ATTACK')?.inputSchema).toBe(
+        attackSchema
+      );
+      expect(seenEvents.find((event) => event.type === 'HEAL')?.inputSchema).toBe(healSchema);
+    });
+
+    test('runAgent + createDecisionLogic actor with allowedEvents omitted: candidates are exactly the legal events', async () => {
+      const chooseMove = createDecisionLogic({
+        model: 'test-model',
+        prompt: 'Choose a move.',
+        // allowedEvents omitted.
+      });
+
+      const agent = setupAgent({ schemas, actors: { chooseMove } });
+      const machine = agent.createMachine({
+        context: { hp: 10 },
+        initial: 'choosingMove',
+        states: {
+          choosingMove: {
+            invoke: {
+              id: 'choosingMove',
+              src: 'chooseMove',
+              input: {},
+              onDone: sendDecision(),
+              onError: { target: 'fumbled' },
+            },
+            on: {
+              HEAL: ({ context }) => (context.hp < 5 ? { target: 'healed' } : undefined),
+              ATTACK: { target: 'attacked' },
+            },
+          },
+          attacked: { type: 'final' },
+          healed: {},
+          fumbled: {},
+        },
+      });
+
+      let seenEvents: readonly { type: string }[] = [];
+      const decide = async (request: AgentDecisionRequest): Promise<{ event: ChosenEvent }> => {
+        seenEvents = request.events;
+        return { event: { type: 'ATTACK', target: 'goblin' } };
+      };
+
+      const result = await runAgent(machine, {
+        input: {},
+        generateText: async () => ({}),
+        decide,
+      });
+
+      expect(result.status).toBe('done');
+      expect(seenEvents.map((event) => event.type).sort()).toEqual(['ATTACK', 'HEAL']);
+    });
+
+    test('guard-narrowing still intact: a type-legal event offered as a candidate can still be canTake-rejected', async () => {
+      const agent = setupAgent({ schemas });
+      const machine = agent.createMachine({
+        context: { hp: 10 },
+        initial: 'choosingMove',
+        states: {
+          choosingMove: {
+            invoke: {
+              id: 'choosingMove',
+              src: 'agent.decide',
+              input: { model: 'test-model', prompt: 'Choose a move.' },
+              onDone: sendDecision(),
+              onError: { target: 'fumbled' },
+            },
+            on: {
+              // HEAL is type-legal (a declared event) but guard-narrowed:
+              // illegal at hp = 10, so the function-transition returns
+              // undefined. It must still appear as a candidate (§2.7
+              // type-only filter) even though canTake later rejects it
+              // (mode-3).
+              HEAL: ({ context }) => (context.hp < 5 ? { target: 'healed' } : undefined),
+              ATTACK: { target: 'attacked' },
+            },
+          },
+          attacked: { type: 'final' },
+          healed: {},
+          fumbled: {},
+        },
+      });
+
+      let callCount = 0;
+      const requestsSeen: AgentDecisionRequest[] = [];
+      const decide = async (request: AgentDecisionRequest): Promise<{ event: ChosenEvent }> => {
+        requestsSeen.push(request);
+        callCount += 1;
+        if (callCount === 1) {
+          return { event: { type: 'HEAL' } };
+        }
+        return { event: { type: 'ATTACK', target: 'goblin' } };
+      };
+
+      const result = await runAgent(machine, {
+        input: {},
+        generateText: async () => ({}),
+        decide,
+      });
+
+      expect(result.status).toBe('done');
+      expect(requestsSeen[0]!.events.map((event) => event.type).sort()).toEqual([
+        'ATTACK',
+        'HEAL',
+      ]);
+      expect(requestsSeen[1]!.attempts[0]!.failure).toBe('rejected-by-guard');
+    });
+
+    test('bare createActor + .withExecutor + allowedEvents omitted: rejects immediately with guidance, not DecisionExhaustedError', async () => {
+      const chooseMove = createDecisionLogic(
+        {
+          model: 'test-model',
+          prompt: 'Choose a move.',
+          // allowedEvents omitted — unresolvable without a snapshot-aware host.
+        },
+        async () => ({ event: { type: 'ATTACK', target: 'goblin' } })
+      );
+
+      const actor = createActor(chooseMove, { input: {} });
+      actor.subscribe({ error: () => {} });
+      actor.start();
+
+      await expect(toPromise(actor)).rejects.toThrow(
+        /omitted `allowedEvents`.*snapshot-aware host/s
+      );
+    });
+  });
+
+  test('sendDecision: the decided event is delivered exactly once despite transition-fn re-evaluation', async () => {
+    const schemas = createAgentSchemas({
+      context: z.object({ attackCount: z.number() }),
+      input: z.object({}),
+      events: { ATTACK: z.object({}) },
+    });
+
+    const chooseMove = createDecisionLogic({
+      model: 'test-model',
+      prompt: 'Choose a move.',
+      allowedEvents: ['ATTACK'] as const,
+    });
+
+    const agent = setupAgent({ schemas, actors: { chooseMove } });
+    const machine = agent.createMachine({
+      context: { attackCount: 0 },
+      initial: 'choosingMove',
+      states: {
+        choosingMove: {
+          invoke: {
+            id: 'choosingMove',
+            src: 'chooseMove',
+            input: {},
+            onDone: sendDecision(),
+          },
+          on: {
+            // Counts how many times ATTACK is actually processed as an
+            // event by the machine — re-evaluating the transition function
+            // (spike S3: 8x) must not multiply delivery.
+            ATTACK: ({ context }) => ({
+              target: 'attacked',
+              context: { attackCount: context.attackCount + 1 },
+            }),
+          },
+        },
+        attacked: { type: 'final' },
+      },
+    });
+
+    let attackEventsObserved = 0;
+    const result = await runAgent(machine, {
+      input: {},
+      generateText: async () => ({}),
+      decide: async () => ({ event: { type: 'ATTACK' } }),
+      onTransition: (_snapshot, event) => {
+        if (event.type === 'ATTACK') {
+          attackEventsObserved += 1;
+        }
+      },
+    });
+
+    expect(result.status).toBe('done');
+    expect(result.status === 'done' ? result.snapshot.context.attackCount : undefined).toBe(1);
+    expect(attackEventsObserved).toBe(1);
   });
 });

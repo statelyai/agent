@@ -1,13 +1,13 @@
 # @statelyai/agent — Alpha P0 Design
 
-Status: **implemented** (branch `p0-alpha`, 2026-07-02 — four commits: messages, decisions, runAgent, sweep + fixtures; 39 test files / 88 tests green). This document specified the exact type shapes and behavior before code landed; it is now the reference for what shipped. One naming refinement vs the spec: `RunAgentOptions.userInput` is typed via the named `AgentUserInputExecutor` alias (identical signature).
+Status: **implemented** (branch `p0-alpha`, 2026-07-02). P0 landed as four commits — messages, decisions, runAgent, sweep + fixtures — and the branch has since carried follow-on P1 work: the AI SDK adapter, a `setupAgent` event-payload narrowing fix, example migration to the blessed authoring path, a docs rewrite, and a co-located-decisions detour (`setupAgent({ decisions })`) that was added and then reverted in favor of state-local decisions. Verified green at every commit. This document specified the exact type shapes and behavior before code landed; it is now the reference for what shipped. One naming refinement vs the spec: `RunAgentOptions.userInput` is typed via the named `AgentUserInputExecutor` alias (identical signature).
 
 Scope (P0 only):
 
 1. `AgentMessage` parts model + `messagesSchema` (breaking)
 2. Decision primitive: `agent.decide` + `createDecisionLogic` + `allowedEvents` + `resolveDecision`
 3. `runAgent` as a `createActor` wrapper (return union `done|idle|error`, resume, `onTransition`, `maxModelCalls`)
-4. Step-helper separation + `normalizeRequestExecutionResult` simplification
+4. Step-helper separation + `normalizeGeneratorResult` simplification
 
 Deferred to P1+ (not in this doc): `createAiSdkExecutors`, `setupAgent` surface consolidation, example rewrites, the `decide`-block sugar, docs.
 
@@ -128,7 +128,7 @@ Widening `content` params is backward-compatible for existing `userMessage('...'
 
 ### 1.4 `messagesSchema`
 
-Rewrite the validator (`setup-agent.ts`) to accept the union: `role ∈ {system,user,assistant,tool}`, and `content` either a string (where allowed) or an array of parts each with a known `type`. Reject unknown roles/part types.
+Rewrite the validator (`setup-agent.ts`) to accept the union: `role ∈ {system,user,assistant,tool}`, and `content` either a string (where allowed) or an array of parts each with a known `type`. Rejects unknown roles and unknown part types.
 
 ### 1.5 Migration impact
 
@@ -163,6 +163,8 @@ export type AllowedEvents<TEvent extends string = string> =
 
 Semantics: declared candidates **∩ snapshot-legal events**. Omitted ⇒ all legal events. Resolver form allowed (runtime narrowing, e.g. HP-gated moves). Because it's intersected with legal events, a resolver can only ever *narrow* the real surface.
 
+On the `runAgent` (live) path, this intersection is not computed once at bind time — candidate events are rebuilt from the **live snapshot at decision time** (declared `allowedEvents` ∩ currently-legal events, via `getAcceptedEvents`, with machine event schemas attached), identical in shape to step discovery's `getAgentRequests`. This is now fixed: an earlier version trusted a stale/defaulted event list instead of re-deriving it per decision.
+
 ### 2.3 `createDecisionLogic`
 
 ```ts
@@ -171,23 +173,23 @@ export interface DecisionLogicConfig<
   TEvent extends string = string,
 > {
   schemas?: { input: TInputSchema };
-  model: Resolve<string, InferOutput<TInputSchema>>;
-  system?: Resolve<string | undefined, InferOutput<TInputSchema>>;
-  prompt?: Resolve<string | undefined, InferOutput<TInputSchema>>;
-  messages?: Resolve<AgentMessage[] | undefined, InferOutput<TInputSchema>>;
+  model: ResolveTextLogicValue<string, InferOutput<TInputSchema>>;
+  system?: ResolveTextLogicValue<string | undefined, InferOutput<TInputSchema>>;
+  prompt?: ResolveTextLogicValue<string | undefined, InferOutput<TInputSchema>>;
+  messages?: ResolveTextLogicValue<AgentMessage[] | undefined, InferOutput<TInputSchema>>;
   allowedEvents?:
     | readonly TEvent[]
     | ((args: { input: InferOutput<TInputSchema> }) => readonly TEvent[]);
   maxRetries?: number; // default 2
-  temperature?: Resolve<number | undefined, InferOutput<TInputSchema>>;
-  maxTokens?: Resolve<number | undefined, InferOutput<TInputSchema>>;
+  temperature?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
+  maxTokens?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
   // ...same model params as TextLogic
-  metadata?: Resolve<Record<string, unknown> | undefined, InferOutput<TInputSchema>>;
+  metadata?: ResolveTextLogicValue<Record<string, unknown> | undefined, InferOutput<TInputSchema>>;
 }
 
 export interface DecisionLogic<...> extends AsyncActorLogic<
   ChosenEvent,          // output = the raised event object
-  DecisionInput
+  InferOutput<TInputSchema>
 > {
   readonly kind: 'statelyai.decisionLogic';
   readonly maxRetries: number;
@@ -251,6 +253,16 @@ Delivered via `sendTo(self, …)` (external event) rather than `enq.raise(…)` 
 Core does **no provider mechanics**. The decision path is symmetric with the `generateText` path: the host receives an `AgentDecisionRequest`, and its **`decide` executor** returns `{ event, reason? }`. *How* the model is made to choose — tool-per-event + `toolChoice: 'required'`, structured output over an event union, anything — lives in the adapter. `/ai-sdk` ships the default `decide` executor (P1); a structured-output variant is a documented recipe for providers without forced tool choice.
 
 ```ts
+export interface AgentRequestExecutorInfo {
+  onChunk?: (chunk: string) => void;
+  signal?: AbortSignal;
+}
+
+export type AgentRequestExecutor<TResult = AgentRequestExecutorResult> = (
+  request: AgentTextRequest & { tools: AgentTools },
+  info?: AgentRequestExecutorInfo
+) => PromiseLike<TResult> | TResult;
+
 /** Third executor slot, symmetric with generateText/streamText. */
 export interface AgentRequestExecutors<
   TGenerateResult = AgentRequestExecutorResult,
@@ -316,6 +328,8 @@ export async function resolveDecision(
 ): Promise<ChosenEvent>;
 ```
 
+`AgentRequestExecutorInfo` is populated on the live `runAgent` path only; the step path's `executeAgentRequest` never passes it. Sync returns (`TResult`, not just `PromiseLike<TResult>`) are allowed from an executor.
+
 Mode-3 guard-legality uses **`snapshot.can(event)`** (v6's preflight predicate — "whether sending the event will cause a non-forbidden transition"; `State.d.ts:63-71`), which is cleaner than dry-run-and-compare (there is no `.changed` flag on snapshots in v6). The core takes a `canTake` probe so the caller supplies snapshot access.
 
 Per attempt:
@@ -334,14 +348,14 @@ Each executor call counts against `runAgent`'s `maxModelCalls` (a decision that 
 **Call sites — who supplies `canTake` (two-tier; the `self._parent` escape hatch is deleted):**
 
 - **`runAgent` (live) — supported API, no internals.** `runAgent` creates the actor, so it provides its *own* `agent.decide` source that closes over an `actorRef` holder (assigned right after `createActor`, before any decision runs): `canTake: (e) => actorRef.getSnapshot().can(e)`. The actor sits in the deciding state while the executor runs, so `.can()` reflects that state's guards. **Full modes 1–3.**
-- **Step path (durable host) — supported API.** The host has the snapshot: `canTake: (e) => snapshot.can(e)`, then `transitionAgentStep(...)`. **Full modes 1–3.**
-- **Bare `createActor` with `agent.decide` — modes 1–2 only** (type + payload validation, no guard check). Documented limitation; no untyped-internals traversal in a v1 alpha.
+- **Step path (durable host) — supported API.** The host has the snapshot: `canTake: (e) => snapshot.can(e)`, then `transitionAgentStep(...)`. **Full modes 1–3.** The shipped `twenty-questions` example wires this directly off the step object: `canTake: (e) => step.snapshot.can(e)`.
+- **Bare `createActor` with `agent.decide` — modes 1–2 only** (type + payload validation, no guard check). Documented limitation; no untyped-internals traversal in a v1 alpha. A new constraint on this tier: an **omitted `allowedEvents` under bare `createActor` is a fail-fast error** — with no snapshot to enumerate legal events against, "all legal events" can't be resolved, so it must be declared explicitly. `runAgent` and the step path both support omitted `allowedEvents` (⇒ all legal events) fully, since both have a snapshot to intersect against.
 
 On success the `agent.decide` actor completes with `output = chosenEvent` (→ `sendDecision()` sends it via `enq.sendTo(self, …)`); on `DecisionExhaustedError` it rejects (→ invoke `onError`, error carries `attempts`).
 
 ### 2.7 `getAcceptedEvents` guard note
 
-`getAcceptedEvents` (renamed from `getAvailableEvents`, §3.1) filters by event *type* only ([setup-agent.ts:768]) — it does not evaluate guards. So the mode-3 `snapshot.can()` check is load-bearing: it's the only thing catching a type-legal-but-guard-rejected choice. Keep the candidate-*type* list as-is (over-exposes); `resolveDecision` closes the gap at apply time.
+`getAcceptedEvents` (renamed from `getAvailableEvents`, §3.1) filters by event *type* only (see `getAcceptedEvents` in `setup-agent.ts`) — it does not evaluate guards. So the mode-3 `snapshot.can()` check is load-bearing: it's the only thing catching a type-legal-but-guard-rejected choice. Keep the candidate-*type* list as-is (over-exposes); `resolveDecision` closes the gap at apply time.
 
 ### 2.8 Removals
 
@@ -445,7 +459,7 @@ Typing is load-bearing: `input`/`event`/`onTransition` are machine-typed (`Input
    - increments a shared model-call counter; on exceeding `maxModelCalls`, settles the run `{ status: 'error', cause: 'max-model-calls' }`,
    - invokes `onResult(request, { output, raw })` with the raw executor result (§4.4).
 
-   **Fail fast at bind time** (throw, not an `'error'` result), naming the offending source: a `TextLogic` with no `generateText`/`streamText`, a decision with no `decide`, `agent.userInput` with neither `options.userInput` nor a provided actor source (error text recommends the idle-state HITL pattern), any other placeholder actor with no implementation, or a direct-object `src` that needs execution but can't be rebound. Detection is by logic `kind`, so machines built with raw `setup()` (no `setupAgent` registration) bind identically.
+   **Fail fast at bind time** (throw, not an `'error'` result), naming the offending source: a `TextLogic` in `STREAM` mode with no `streamText` executor (the runtime bind-time throw — `generateText` itself can never be missing, since it's a required field on `RunAgentOptions`/`AgentRequestExecutors` and its absence is a compile-time TypeScript error), a decision with no `decide`, `agent.userInput` with neither `options.userInput` nor a provided actor source (error text recommends the idle-state HITL pattern), any other placeholder actor with no implementation, or a direct-object `src` that needs execution but can't be rebound. Detection is by logic `kind`, so machines built with raw `setup()` (no `setupAgent` registration) bind identically.
 3. `actor = createActor(provided, { input, snapshot })`.
 4. `actor.start()`; if `options.event`, `actor.send(event)`.
 5. **Settle loop.** Subscribe; on each snapshot:
@@ -499,9 +513,9 @@ No per-model-call durable checkpoint — whole-machine snapshots at `done`/`idle
 
 ### 4.1 Positioning
 
-`initialAgentStep` / `transitionAgentStep` / `resolveAgentStep` / `executeAgentRequest` / `getAgentRequests` remain **first-class**, documented as the **durable / inspectable** path (per-model-call checkpoints for Cloudflare Workflows, Temporal, Inngest, DBOS). API change: `AgentStep.requests` is now `Array<AgentRequest | AgentDecisionRequest>`, discriminated by `kind` (§2.6), plus §4.2. Not deprecated; a peer of `runAgent`, chosen by use case.
+`initialAgentStep` / `transitionAgentStep` / `resolveAgentStep` / `executeAgentRequest` / `getAgentRequests` remain **first-class**, documented as the **durable / inspectable** path (per-model-call checkpoints for Cloudflare Workflows, Temporal, Inngest, DBOS). API change: `AgentStep.requests` is now `Array<AgentRequest | AgentDecisionRequest>`, discriminated by `kind` (§2.6), plus §4.2. Not deprecated; a peer of `runAgent`, chosen by use case. `transitionAgentStep` accepts either a raw snapshot or a previous `AgentStep` as its second argument, unwrapping `.snapshot` when given the latter — callers can thread the whole step object through without manually plucking the snapshot out.
 
-### 4.2 `normalizeRequestExecutionResult` simplification
+### 4.2 `normalizeGeneratorResult` simplification
 
 Old normalizer duck-typed `toolResults` first (the legacy path where a decision event arrived inside `toolResults`) then `object`→`output`→`text`. With decisions now handled explicitly by `resolveDecision` (which extracts the chosen event from tool calls itself), the generic normalizer only unwraps **generator** output:
 
@@ -555,12 +569,14 @@ export function executeAgentRequest(
 
 *(Spike S1 verified: `transition()`/`initialTransition()` emit `{ type: '@xstate.raise', event, delay, id }` executable actions — event + delay + id, everything a host needs to schedule and de-duplicate.)*
 
+Timers surface only in `step.actions`; `step.requests` never contains them — a durable host scanning for model/decision work can ignore `actions` entirely, and a host scheduling timers can ignore `requests` entirely.
+
 ---
 
 ## 5. Breaking-change summary (for the alpha changeset)
 
 1. `AgentMessage` is now a discriminated union; `content` is `string | Part[]`; the open index signature is gone.
-2. `messagesSchema` now **rejects at runtime** messages that previously passed (unknown roles, arbitrary extra fields). Persisted contexts holding old-shape messages have no migration path in the alpha — documented: wipe or migrate manually.
+2. `messagesSchema` now **rejects at runtime** messages that previously passed (unknown roles, unknown part types). Persisted contexts holding old-shape messages have no migration path in the alpha — documented: wipe or migrate manually.
 3. `agentEvents` (config) and `eventTypes` (request) removed → decisions + `allowedEvents`.
 4. `runAgent` return type changes from `OutputFrom<TMachine>` to `RunAgentResult<TMachine>` (`done | idle | error`); it no longer throws on a waiting machine. There is no continuation callback (`onPause`/`onIdle` do not exist) — idle settles and the caller resumes by snapshot. `onChunk` gains `{ request }`; `onTransition` added (observation-only).
 5. `runAgent` now runs *all* invokes (was: model-only) — machines with side-effecting actors that previously errored now execute. It stops its actor on every settle; resume is snapshot-only.
@@ -568,7 +584,7 @@ export function executeAgentRequest(
 7. `AgentRequest` gains `kind: 'text'`; `AgentStep.requests` becomes a `kind`-discriminated union including `AgentDecisionRequest`.
 8. `getAvailableEvents` renamed `getAcceptedEvents`; `getEventTools` removed (descriptors only — adapters build tools).
 9. `AgentRequestLogic` alias removed.
-10. `normalizeRequestExecutionResult` no longer inspects `toolResults`.
+10. `normalizeGeneratorResult` no longer inspects `toolResults`.
 
 ---
 
@@ -596,7 +612,7 @@ export function executeAgentRequest(
 - **O2** — missing `decide` executor is a **bind-time error only**. No core fallback synthesizing decisions from `generateText` — that would put prompt construction + output parsing (provider mechanics) back in core, exactly what §2.6 removed. If a convenience ever ships, it's an adapter helper (e.g. `createStructuredDecide(generateText)` in `/ai-sdk`), not core.
 - **O3** — **idle-first HITL**, with an optional inline handler: `RunAgentOptions.userInput` (§3.1) lets the executor gather human input without settling (CLI prompt, form, Slack). Machine uses `agent.userInput` with no handler/source ⇒ bind-time error recommending the idle-state pattern.
 - **O4** — **superseded: `onIdle` is deleted entirely** (2026-07-02 review). Idle always settles; the caller owns the resume loop (§3.1 "No continuation callback"). Replaced by observation-only `onTransition(snapshot, event)`. The runaway-idle hazard class this question managed no longer exists.
-- **O5** — single changeset covering all §5 breaks; publish under changesets prerelease mode (`changeset pre enter alpha` → `2.0.0-alpha.x`) with the `alpha` npm dist-tag.
+- **O5** — decided, pending release mechanics: single changeset covering all §5 breaks; publish under changesets prerelease mode (`changeset pre enter alpha` → `2.0.0-alpha.x`) with the `alpha` npm dist-tag. Not yet executed — `changeset pre enter alpha` has not been run (no `.changeset/pre.json`), and `package.json` still reads `2.0.0`.
 
 **Implementation logistics (resolved):**
 

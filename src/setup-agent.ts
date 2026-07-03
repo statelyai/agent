@@ -307,6 +307,18 @@ function decideActorWithExecutor(
         );
       }
 
+      // See the analogous check in createDecisionLogic's run: omitted
+      // allowedEvents means "all currently-legal events," unknowable
+      // without a snapshot-aware host.
+      if (resolveAllowedEventTypes(input.allowedEvents, input) === undefined) {
+        throw new Error(
+          `'${DECIDE_ACTOR}' input has omitted \`allowedEvents\`, which means "all ` +
+            'currently-legal events" — but that requires a snapshot-aware host (runAgent ' +
+            'or the step path) to resolve. Under a bare createActor(...), declare ' +
+            '`allowedEvents` explicitly to use this actor here.'
+        );
+      }
+
       return resolveDecision(decideRequestFromInput(input), execute, {
         maxRetries: input.maxRetries ?? 2,
         signal,
@@ -983,6 +995,19 @@ export function createDecisionLogic<
 
       // Bare createActor path: no snapshot to intersect with, so only
       // modes 1-2 (type + payload validation) apply here — no canTake.
+      // Omitted allowedEvents means "all currently-legal events," but with
+      // no snapshot that set is unknowable here — fail fast instead of
+      // silently resolving to an empty candidate list (guaranteed
+      // DecisionExhaustedError).
+      if (resolveAllowedEventTypes(config.allowedEvents as AllowedEvents | undefined, input) === undefined) {
+        throw new Error(
+          'Decision logic has omitted `allowedEvents`, which means "all currently-legal ' +
+            'events" — but that requires a snapshot-aware host (runAgent or the step ' +
+            'path) to resolve. Under a bare createActor(...), declare `allowedEvents` ' +
+            'explicitly on this logic to use it here.'
+        );
+      }
+
       return resolveDecision(request(input), execute, { maxRetries, signal });
     },
   });
@@ -1650,6 +1675,8 @@ interface RunAgentBindContext {
   consumeModelCall: () => void;
   /** Assigned right after createActor (§2.6); read lazily by decision wraps. */
   actorHolder: { actorRef: AnyActorRef | undefined };
+  /** Registered `setupAgent` schemas (for event `inputSchema`s), if any. */
+  schemas?: AgentSchemas;
 }
 
 /** Reads the durable invoke id/src off the async actor's own ref (`self`). */
@@ -1740,7 +1767,35 @@ function createRunAgentDecisionLogic(
         throw new Error("runAgent: no 'decide' executor provided.");
       }
       const { id, src } = selfIdAndSrc(self);
-      const request: AgentDecisionRequest = { ...logic.request(input as never), id };
+
+      // Rebuild the candidate events from the live snapshot (mirrors the
+      // STEP path's getAgentRequests, §2.7): `undefined` declared
+      // allowedEvents means "all currently-legal events," not "none" — do
+      // not trust logic.request(...).events here, it defaults omitted to [].
+      const declaredEventTypes = (
+        logic as unknown as {
+          allowedEventTypes?: (input: unknown) => readonly string[] | undefined;
+        }
+      ).allowedEventTypes?.(input);
+
+      // xstate's actor `_process` executes an invoke's spawn effect (which
+      // starts this async logic's `run`, synchronously through its first
+      // `await`) BEFORE calling `update()` to commit the new snapshot — so
+      // `actorRef.getSnapshot()` read at the very top of `run` observes the
+      // PRE-transition snapshot (e.g. still `awaitingAnswer` instead of the
+      // `deciding` state that invoked this decision). Yielding one microtask
+      // lets `update()` finish first, so the read below sees the committed,
+      // current snapshot.
+      await Promise.resolve();
+      const actorRef = runCtx.actorHolder.actorRef;
+      const events = actorRef
+        ? getAcceptedEvents(actorRef.getSnapshot() as AnyMachineSnapshot, {
+          schemas: runCtx.schemas,
+          eventTypes: declaredEventTypes,
+        })
+        : [];
+
+      const request: AgentDecisionRequest = { ...logic.request(input as never), id, events };
 
       const countingDecide: AgentDecisionExecutor = async (attemptRequest) => {
         runCtx.consumeModelCall();
@@ -1815,6 +1870,7 @@ export async function runAgent<TMachine extends AnyStateMachine>(
     onResult: options.onResult,
     consumeModelCall,
     actorHolder,
+    schemas: getRegisteredAgentExecutionOptions(machine).schemas,
   };
 
   // §3.2 step 2: wrap every effective TextLogic/DecisionLogic (and the

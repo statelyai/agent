@@ -87,4 +87,4 @@ dinavinter/agents:
 - [`../docs/crewai-parity.md`](/Users/davidkpiano/Code/agent/docs/crewai-parity.md)
 - [`../docs/burr-parity.md`](/Users/davidkpiano/Code/agent/docs/burr-parity.md)
 
-The parity docs track end-result coverage and remaining gaps, honestly — "possible but manual" and "not yet" are used where that's the true state, not "Covered". New examples should use `createTextLogic(...)`/`createDecisionLogic(...)` for reusable LLM work and `setupAgent({ schemas, actors, requests, decisions })` for schema-first machine authoring.
+The parity docs track end-result coverage and remaining gaps, honestly — "possible but manual" and "not yet" are used where that's the true state, not "Covered". New examples should use `createTextLogic(...)`/`createDecisionLogic(...)` for reusable LLM work and `setupAgent({ schemas, actors, requests })` for schema-first machine authoring. Decisions are authored inline in states via `agent.decide` (state-local), or with `createDecisionLogic` under `actors:` when reusable — there is no `decisions:` key on `setupAgent`.

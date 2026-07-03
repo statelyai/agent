@@ -7,8 +7,9 @@
  * (`selectTool` returns one of a discriminated union), not an event-choice
  * decision: there is exactly one live path forward from `dispatch`, chosen
  * by inspecting the request's typed output — not a model picking among
- * several legal machine *events* from a waiting state (the pattern
- * `decisions:`/`sendDecision()` targets; see twenty-questions). So this
+ * several legal machine *events* from a waiting state (the pattern the
+ * decision primitive — `agent.decide`/`sendDecision()` — targets; see
+ * twenty-questions). So this
  * stays a co-located `requests:` + guarded `always` routing, the same shape
  * as burr-multi-agent-collaboration's supervisor — hosted with `runAgent`
  * instead of manual `createActor`/`toPromise` choreography.

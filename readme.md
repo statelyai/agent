@@ -210,7 +210,9 @@ while (!step.done) {
   const [request] = step.requests;
 
   if (request.kind === 'decision') {
-    const chosenEvent = await resolveDecision(request, decide);
+    const chosenEvent = await resolveDecision(request, decide, {
+      canTake: (event) => step.snapshot.can(event),
+    });
     step = transitionAgentStep(machine, step, chosenEvent, { schemas, actors });
     continue;
   }

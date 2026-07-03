@@ -63,7 +63,9 @@ export async function runAiSdkGameTurn(input = { playerHp: 20, enemyHp: 15 }) {
     }
 
     if (request.kind === 'decision') {
-      const chosenEvent = await resolveDecision(request, decide);
+      const chosenEvent = await resolveDecision(request, decide, {
+        canTake: (event) => step.snapshot.can(event as GameEvent),
+      });
       step = transitionAgentStep(gameMachine, step, parseGameEvent(chosenEvent), {
         schemas: gameSchemas,
         actors: gameActors,
