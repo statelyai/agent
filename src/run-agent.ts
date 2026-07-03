@@ -48,19 +48,30 @@ import {
 // `done | idle | error` result. There is no continuation callback — idle
 // always settles and the caller resumes by snapshot (§3.4).
 
+/** Handler for `agent.userInput` invokes passed as {@link RunAgentOptions.userInput}. */
 export interface AgentUserInputExecutor {
   (input: AgentUserInput): PromiseLike<unknown>;
 }
 
+/**
+ * Options for {@link runAgent}. Extends {@link AgentRequestExecutors}
+ * (`generateText` required; `streamText`/`decide` required only if the
+ * machine actually uses streaming text / decisions — checked at bind time,
+ * before any actor runs).
+ */
 export interface RunAgentOptions<TMachine extends AnyStateMachine>
   extends AgentRequestExecutors {
+  /** Machine input, passed straight to `createActor(machine, { input })`. Omit when resuming via `snapshot`. */
   input?: InputFrom<TMachine>;
 
   // resume
+  /** A previously-settled run's `result.snapshot`, to resume from instead of starting fresh. Pair with `event` to deliver the event that unblocks the resumed idle state. */
   snapshot?: Snapshot<unknown>;
+  /** An event to send immediately after starting/resuming the actor (e.g. the human's answer to an idle-state prompt). */
   event?: EventFromLogic<TMachine>;
 
   // implementations — sugar for machine.provide({ actorSources }) before the run
+  /** Actor source implementations, merged onto the machine before binding — sugar for `machine.provide({ actorSources })` ahead of the run. */
   actorSources?: Record<string, AnyActorLogic>;
 
   /**
@@ -75,7 +86,9 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine>
   userInput?: AgentUserInputExecutor;
 
   // observation — all void; no callback controls the run
+  /** Fires for each streamed chunk of a `mode: 'stream'` text request, alongside the {@link AgentRequest} that produced it (parallel states can interleave multiple streams). Purely observational. */
   onChunk?: (chunk: string, info: { request: AgentRequest }) => void;
+  /** Fires once per resolved text/decision request with its normalized output and the raw executor result (tool calls, usage, …) — the seam for tracing/observability and event-sourced replay logging. */
   onResult?: (
     request: AgentStepRequest,
     result: { output: unknown; raw: unknown }
@@ -90,10 +103,25 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine>
   ) => void;
 
   // control
+  /** Caps the number of model/decision calls this run may make (each retry of a decision counts separately); exceeding it settles `{ status: 'error', cause: 'max-model-calls' }`. Default 100. */
   maxModelCalls?: number; // default 100
+  /** Aborts the run; settles `{ status: 'error', cause: 'aborted' }` with `signal.reason` as the error. */
   signal?: AbortSignal;
 }
 
+/**
+ * The outcome of a {@link runAgent} call — always exactly one of three
+ * variants, never a throw for a waiting or failed machine (programmer
+ * errors like a missing executor still throw, at bind time before any actor
+ * runs). `done`: a final state was reached (`output` is the machine's
+ * `OutputFrom`). `idle`: the run settled with no in-flight work — resume by
+ * calling `runAgent` again with `{ snapshot, event }`. `error`: a run-level
+ * failure, discriminated by `cause` (`'aborted'`, `'max-model-calls'`, or
+ * `'machine'` for a machine error state / decision-exhausted / external
+ * stop). Every variant carries the final `snapshot`, and the underlying
+ * actor is stopped on every settle path — there is no live actor to resume;
+ * resume is always by snapshot.
+ */
 export type RunAgentResult<TMachine extends AnyStateMachine> =
   | { status: 'done'; output: OutputFrom<TMachine>; snapshot: SnapshotFrom<TMachine> }
   | { status: 'idle'; snapshot: SnapshotFrom<TMachine> }
@@ -104,6 +132,7 @@ export type RunAgentResult<TMachine extends AnyStateMachine> =
       snapshot: SnapshotFrom<TMachine>;
     };
 
+// Thrown internally by consumeModelCall() past the budget; caught by runAgent's settle loop to produce a 'max-model-calls' error result.
 class MaxModelCallsExceededError extends Error {
   constructor() {
     super('runAgent exceeded maxModelCalls.');
@@ -235,6 +264,7 @@ function assertBindable(
   }
 }
 
+// Shared state closed over by every wrapped actor source in one runAgent call: executors, observation callbacks, and the shared model-call budget/actor ref.
 interface RunAgentBindContext {
   generateText: AgentRequestExecutor;
   streamText?: AgentRequestExecutor;
@@ -379,6 +409,37 @@ function createRunAgentDecisionLogic(
   }) as DecisionLogic;
 }
 
+/**
+ * Runs an agent machine to completion or idle: a `createActor` host that
+ * binds `options`' host executors onto the machine's `agent.*`/`TextLogic`/
+ * `DecisionLogic` actor sources, starts (or resumes) the actor, and drives
+ * it until it settles — {@link RunAgentResult} `done | idle | error`. Unlike
+ * the step helpers ({@link initialAgentStep} etc — a pure
+ * transition-at-a-time path for durable hosts), `runAgent` owns a live actor
+ * internally; there is no continuation callback, so **idle always settles**
+ * and the caller resumes explicitly by passing the settled `{ snapshot,
+ * event }` back in. The actor is stopped on every settle path (`done`,
+ * `idle`, and `error` alike) — resume is always by snapshot, never by
+ * holding a reference to a live actor.
+ *
+ * Binding happens **before** the actor starts: every invoke the machine
+ * could reach is walked and checked against the effective actor sources
+ * (`options.actorSources` merged onto the machine), so a missing
+ * `streamText`/`decide` executor, an unhandled `agent.userInput`, or any
+ * other unbound actor source throws immediately — a bind-time error, not a
+ * mid-run failure.
+ *
+ * @example
+ * ```ts
+ * let r = await runAgent(machine, { input, ...executors });
+ * while (r.status === 'idle') {
+ *   const event = await promptUser(getAcceptedEvents(r.snapshot));
+ *   r = await runAgent(machine, { snapshot: r.snapshot, event, ...executors });
+ * }
+ * if (r.status !== 'done') throw new Error(`Run did not complete: ${r.status}`);
+ * console.log(r.output);
+ * ```
+ */
 export async function runAgent<TMachine extends AnyStateMachine>(
   machine: TMachine,
   options: RunAgentOptions<TMachine>
@@ -589,6 +650,7 @@ export async function runAgent<TMachine extends AnyStateMachine>(
   });
 }
 
+// True when a snapshot is active but has no in-flight children and no pending eventless/after work — see §3.3 in docs/p0-design.md for the approximation this makes.
 function isIdleSnapshot(snapshot: AnyMachineSnapshot): boolean {
   if (snapshot.status !== 'active') {
     return false;

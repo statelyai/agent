@@ -11,7 +11,12 @@ import { DECIDE_ACTOR, resolveTextLogicValue, type ResolveTextLogicValue } from 
 import { sanitizeEventToolName, type AgentEventDescriptor } from './events.js';
 import { executorBoundLogics } from './internal/registry.js';
 
-/** Inline input for the `agent.decide` builtin actor. */
+/**
+ * Inline input for the `agent.decide` builtin actor — the zero-config
+ * counterpart to {@link createDecisionLogic}, invoked directly from a
+ * state's `invoke.input` (typed against the machine's own event schemas).
+ * See {@link AgentDecisionRequest} for the request shape this lowers to.
+ */
 export interface AgentDecisionInput<
   TEvent extends string = string,
   TMetadata = Record<string, unknown>,
@@ -49,6 +54,7 @@ const agentDecisionInputSchema: StandardSchemaV1<AgentDecisionInput> = {
   },
 };
 
+// Lowers `agent.decide` inline input into an AgentDecisionRequest (id filled in by the caller).
 function decideRequestFromInput(input: AgentDecisionInput): AgentDecisionRequest {
   const allowedEventTypes = resolveAllowedEventTypes(input.allowedEvents, input) ?? [];
 
@@ -121,12 +127,20 @@ function decideActorWithExecutor(
   }) as DecisionLogic<StandardSchemaV1<AgentDecisionInput>>;
 }
 
+// Builds the unbound `agent.decide` builtin actor logic registered by setupAgent.
 export function createDecideActor(): DecisionLogic<StandardSchemaV1<AgentDecisionInput>> {
   return decideActorWithExecutor();
 }
 
 // ─── Decision logic ───
 
+/**
+ * Config for {@link createDecisionLogic}: how to build an
+ * {@link AgentDecisionRequest} from typed input. Each field mirrors
+ * {@link TextLogicConfig} (static value or a `({ input }) => value`
+ * resolver), plus `allowedEvents` to narrow the candidate event set (see
+ * {@link AllowedEvents}) and `maxRetries` for {@link resolveDecision}.
+ */
 export interface DecisionLogicConfig<
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1,
   TEvent extends string = string,
@@ -155,6 +169,14 @@ export interface DecisionLogicConfig<
   metadata?: ResolveTextLogicValue<TMetadata | undefined, InferOutput<TInputSchema>>;
 }
 
+/**
+ * Actor logic for a decision: an async effect that resolves to exactly one
+ * currently-legal {@link ChosenEvent} (never a plain value) and is meant to
+ * be raised into the machine — see {@link sendDecision}. Built by
+ * {@link createDecisionLogic}. Register it under `actors:` to reuse/export/
+ * test it standalone; for a state-local, zero-config decision, use the
+ * `agent.decide` builtin invoke instead.
+ */
 export interface DecisionLogic<
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1,
   TMetadata extends Record<string, unknown> = Record<string, unknown>,
@@ -165,6 +187,7 @@ export interface DecisionLogic<
   withExecutor(execute: AgentDecisionExecutor): DecisionLogic<TInputSchema, TMetadata>;
 }
 
+// Resolves a declared `AllowedEvents` (static or resolver) to a concrete list; undefined means "all legal events."
 function resolveAllowedEventTypes(
   allowedEvents: AllowedEvents | undefined,
   input: unknown
@@ -177,6 +200,30 @@ function resolveAllowedEventTypes(
     : allowedEvents;
 }
 
+/**
+ * Creates reusable, standalone {@link DecisionLogic}: an actor that, when
+ * run, resolves to exactly one currently-legal {@link ChosenEvent} by
+ * calling the host `decide` executor (passed here as `execute`, or supplied
+ * later via {@link DecisionLogic.withExecutor}, `machine.provide(...)`, or
+ * `runAgent`'s `decide` option). Register the result under `actors:` and
+ * invoke it by name; for a one-off, state-local decision, prefer the
+ * `agent.decide` builtin invoke instead — it needs no separate declaration
+ * and types `allowedEvents` against the machine's own event schemas.
+ *
+ * @example
+ * ```ts
+ * export const chooseMove = createDecisionLogic({
+ *   schemas: { input: z.object({ playerHp: z.number(), enemyHp: z.number() }) },
+ *   model: 'openai/gpt-4.1-mini',
+ *   system: 'You are playing a turn-based game. Choose exactly one legal move.',
+ *   prompt: ({ input }) => `Player HP: ${input.playerHp}\nEnemy HP: ${input.enemyHp}`,
+ *   allowedEvents: ({ input }) =>
+ *     (input as { playerHp: number }).playerHp <= 6
+ *       ? ['ATTACK', 'DEFEND', 'HEAL', 'FLEE']
+ *       : ['ATTACK', 'DEFEND', 'FLEE'],
+ * });
+ * ```
+ */
 export function createDecisionLogic<
   TInputSchema extends StandardSchemaV1,
   TEvent extends string = string,
@@ -276,6 +323,7 @@ export function createDecisionLogic<
   return decisionLogic;
 }
 
+// Type guard: true for any actor logic built by createDecisionLogic/createDecideActor (checks the `kind` marker).
 export function isDecisionLogic(value: unknown): value is DecisionLogic {
   return (
     !!value
@@ -314,12 +362,28 @@ export interface AgentDecisionRequest {
   metadata?: Record<string, unknown>;
 }
 
+/**
+ * A single failed decision attempt, recorded by {@link resolveDecision} and
+ * fed back to the executor on the next attempt via
+ * `request.attempts`. `failure` names which of the three checks rejected the
+ * choice: `'unknown-event'` (not among the candidate `events`),
+ * `'invalid-payload'` (failed the event's schema), or `'rejected-by-guard'`
+ * (failed the `canTake` check — type/payload were legal, but the machine's
+ * guard rejected it at apply time).
+ */
 export interface DecisionAttempt {
   event?: ChosenEvent;
   failure: 'unknown-event' | 'invalid-payload' | 'rejected-by-guard';
   reason: string;
 }
 
+/**
+ * Thrown by {@link resolveDecision} when every attempt (up to
+ * `maxRetries + 1` of them) fails one of the three checks recorded in
+ * {@link DecisionAttempt.failure}. Carries the full `attempts` list for
+ * diagnostics; a machine typically routes this via the decision invoke's
+ * `onError`.
+ */
 export class DecisionExhaustedError extends Error {
   attempts: DecisionAttempt[];
 
@@ -333,22 +397,59 @@ export class DecisionExhaustedError extends Error {
   }
 }
 
-/** Third executor slot, symmetric with generateText/streamText. */
+/**
+ * Host implementation of "make the model choose one of `request.events`."
+ * Third executor slot on {@link AgentRequestExecutors}, symmetric with
+ * `generateText`/`streamText` — how the model is coerced into choosing
+ * (tool-per-event + forced tool choice, structured output, …) is entirely
+ * adapter business; core only validates and retries the returned choice (see
+ * {@link resolveDecision}). The optional `reason` is carried through to
+ * `onResult`/event-sourcing but never affects validation.
+ */
 export type AgentDecisionExecutor = (
   request: AgentDecisionRequest
 ) => PromiseLike<{ event: ChosenEvent; reason?: string }>;
 
+/** Options for {@link resolveDecision}. */
 export interface ResolveDecisionOptions {
-  maxRetries?: number; // default 2 (⇒ up to 3 attempts)
+  /** Retries after a failed attempt. Default `2`, so up to 3 attempts total. */
+  maxRetries?: number;
+  /** Checked before each attempt; aborting rejects the pending decision. */
   signal?: AbortSignal;
-  /** Mode-3 guard check. Omit ⇒ mode-3 skipped (modes 1–2 only). */
+  /**
+   * Guard-legality check (mode 3), typically `(e) => snapshot.can(e)`. A
+   * type-and-payload-valid event that this rejects records a
+   * `'rejected-by-guard'` attempt and retries. Omit to skip guard checking
+   * (type + payload validation only — e.g. under bare `createActor`, where
+   * no snapshot is reachable).
+   */
   canTake?: (event: ChosenEvent) => boolean;
 }
 
 /**
  * Validation + retry core for decisions. No provider mechanics — the
  * `executor` is responsible for making the model choose an event; this
- * function only validates the choice and retries on failure.
+ * function only validates the choice and retries on failure, up to
+ * `options.maxRetries` (default 2, i.e. up to 3 attempts total).
+ *
+ * Each attempt is checked in order and can fail one of three ways (recorded
+ * as a {@link DecisionAttempt}): `'unknown-event'` (the chosen `type` is not
+ * among `request.events`), `'invalid-payload'` (the payload fails that
+ * event's schema), or `'rejected-by-guard'` (passes both checks but
+ * `options.canTake` returns `false` — a type/payload-legal event the
+ * machine's guard rejects right now; omit `canTake` to skip this check).
+ * Every prior failed attempt for this call is fed back to the executor on
+ * the next attempt via `request.attempts`, so an adapter can render "your
+ * last choice failed because X — try again" into the next model call; core
+ * never rewrites the request itself. Exhausting all attempts throws
+ * {@link DecisionExhaustedError} with the full attempts list.
+ *
+ * @example
+ * ```ts
+ * const event = await resolveDecision(request, decide, {
+ *   canTake: (e) => snapshot.can(e),
+ * });
+ * ```
  */
 export async function resolveDecision(
   request: AgentDecisionRequest,
@@ -416,6 +517,22 @@ export async function resolveDecision(
  * v6 alpha transition functions are re-evaluated multiple times per
  * transition (spike S3: 8x) — purity is load-bearing here. This function
  * only calls `enq`, never side-effects directly, so re-evaluation is safe.
+ *
+ * @example
+ * ```ts
+ * deciding: {
+ *   invoke: {
+ *     src: 'agent.decide',
+ *     input: ({ context }) => ({ model: 'quick', allowedEvents: ['ASK', 'GUESS'] }),
+ *     onDone: sendDecision(),
+ *     onError: { target: 'stumped' },
+ *   },
+ *   on: {
+ *     ASK: ({ event }) => ({ target: 'awaitingAnswer' }),
+ *     GUESS: ({ event }) => ({ target: 'awaitingGuessFeedback' }),
+ *   },
+ * }
+ * ```
  */
 export function sendDecision<
   TEvent extends EventObject = EventObject,

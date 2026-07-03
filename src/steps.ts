@@ -29,6 +29,13 @@ import {
   type AgentExecutionOptions,
 } from './internal/registry.js';
 
+/**
+ * A pending text request surfaced by step discovery ({@link getAgentRequests}
+ * / {@link AgentStep.requests}): the machine has spawned a
+ * `TextLogic`-backed invoke and is waiting on its result. Resolve it with
+ * {@link executeAgentRequest} (or by hand, then feed the output into
+ * {@link resolveAgentStep} via `xstate.done.actor.<id>`).
+ */
 export interface AgentRequest<TInput extends AgentTextRequest = AgentTextRequest> {
   kind: 'text';
   id: string;
@@ -42,6 +49,18 @@ export interface AgentRequest<TInput extends AgentTextRequest = AgentTextRequest
 /** `AgentStep.requests` element: a text request or a decision request. */
 export type AgentStepRequest = AgentRequest | AgentDecisionRequest;
 
+/**
+ * Scans a set of executable actions (as returned by xstate's `transition`/
+ * `initialTransition`) for spawned `TextLogic`/`DecisionLogic` invokes and
+ * lowers each into an {@link AgentStepRequest}. This is the step path's
+ * discovery primitive — {@link initialAgentStep}/{@link transitionAgentStep}/
+ * {@link resolveAgentStep} call it internally to populate
+ * `AgentStep.requests`; call it directly only when working with raw
+ * `transition(...)` output instead of the step helpers. `options.snapshot`
+ * is required to resolve a decision's candidate events (intersecting
+ * declared `allowedEvents` with what's currently legal) — omit it and
+ * decision requests report an empty `events` list.
+ */
 export function getAgentRequests(
   actions: readonly { type?: string; params?: unknown; id?: unknown; src?: unknown; input?: unknown; logic?: unknown }[],
   options: AgentRequestOptions = {}
@@ -117,6 +136,7 @@ export function getAgentRequests(
   });
 }
 
+/** Builds the synthetic `xstate.done.actor.<id>` event xstate's `transition()` expects to resolve a spawned invoke — the event {@link resolveAgentStep} applies internally. */
 export function doneEvent(
   request: Pick<AgentRequest, 'id'> | string,
   output: unknown
@@ -125,6 +145,7 @@ export function doneEvent(
   return { type: `xstate.done.actor.${id}`, output };
 }
 
+/** Applies a request's `output` as a done event via `transition(...)`, returning the raw `[snapshot, actions]` tuple. Lower-level than {@link resolveAgentStep} — that helper wraps this and also runs {@link getAgentRequests} to produce the next {@link AgentStep}. */
 export function transitionResult<TLogic extends AnyActorLogic>(
   logic: TLogic,
   snapshot: SnapshotFrom<TLogic>,
@@ -137,6 +158,15 @@ export function transitionResult<TLogic extends AnyActorLogic>(
   return result;
 }
 
+/**
+ * One durable checkpoint on the step path: the machine's current snapshot,
+ * the executable actions that produced it, the pending
+ * {@link AgentStepRequest}s (text/decision work still to resolve), and
+ * whether the machine has reached a final state. This is the
+ * per-model-call-checkpoint path for durable hosts (Workflows, Temporal,
+ * queues, …) — a peer of `runAgent`, not a lesser version of it. Produced by
+ * {@link initialAgentStep}/{@link transitionAgentStep}/{@link resolveAgentStep}.
+ */
 export interface AgentStep<TSnapshot extends AnyMachineSnapshot = AnyMachineSnapshot> {
   snapshot: TSnapshot;
   actions: readonly { type?: string; params?: unknown }[];
@@ -144,6 +174,14 @@ export interface AgentStep<TSnapshot extends AnyMachineSnapshot = AnyMachineSnap
   done: boolean;
 }
 
+/**
+ * Starts a machine and returns its first {@link AgentStep} — the step-path
+ * equivalent of `initialTransition` plus request discovery. Begins the
+ * durable/per-model-call-checkpoint loop: resolve each `step.requests` entry
+ * (via {@link executeAgentRequest} for `kind: 'text'`, or
+ * {@link resolveDecision} for `kind: 'decision'`), then advance with
+ * {@link resolveAgentStep} or {@link transitionAgentStep}.
+ */
 export function initialAgentStep<TMachine extends AnyActorLogic>(
   machine: TMachine,
   input?: unknown,
@@ -153,6 +191,13 @@ export function initialAgentStep<TMachine extends AnyActorLogic>(
   return createAgentStep(machine, snapshot, actions, getRegisteredAgentExecutionOptions(machine, options));
 }
 
+/**
+ * Applies an externally-sent event (e.g. a decision's chosen event, or a
+ * human's reply) and returns the next {@link AgentStep}. Accepts **either**
+ * a raw snapshot **or** a prior `AgentStep` as the second argument —
+ * `.snapshot` is unwrapped automatically, so callers can thread the whole
+ * step object through without manually plucking the snapshot out.
+ */
 export function transitionAgentStep<TMachine extends AnyActorLogic>(
   machine: TMachine,
   snapshotOrStep: SnapshotFrom<TMachine> | AgentStep<SnapshotFrom<TMachine>>,
@@ -166,6 +211,14 @@ export function transitionAgentStep<TMachine extends AnyActorLogic>(
   return createAgentStep(machine, nextSnapshot, actions, getRegisteredAgentExecutionOptions(machine, options));
 }
 
+/**
+ * Applies a resolved text request's output (a `kind: 'text'`
+ * {@link AgentRequest} — not a decision) as a done event and returns the
+ * next {@link AgentStep}. For decisions, resolve with `resolveDecision`
+ * (which returns a {@link ChosenEvent}) and apply it with
+ * {@link transitionAgentStep} instead — a decision has no output value of
+ * its own to feed here.
+ */
 export function resolveAgentStep<TMachine extends AnyActorLogic>(
   machine: TMachine,
   step: AgentStep<SnapshotFrom<TMachine>>,
@@ -177,6 +230,12 @@ export function resolveAgentStep<TMachine extends AnyActorLogic>(
   return createAgentStep(machine, snapshot, actions, getRegisteredAgentExecutionOptions(machine, options));
 }
 
+/**
+ * {@link getAgentRequests}, but pre-filled with a machine's registered
+ * `setupAgent` schemas/actors (so callers don't have to pass them by hand
+ * every call) — merged with any `options` passed here, which take
+ * precedence.
+ */
 export function getMachineAgentRequests(
   machine: AnyActorLogic,
   actions: readonly { type?: string; params?: unknown }[],
@@ -192,6 +251,17 @@ export function getMachineAgentRequests(
   });
 }
 
+/**
+ * Resolves one **text** {@link AgentRequest} against a host's
+ * {@link AgentRequestExecutors} — merges the request's tools, dispatches to
+ * `generateText`/`streamText` per `request.mode`, and validates the result
+ * against `request.input.outputSchema` if present. **Text-only**: passing a
+ * `kind: 'decision'` request throws, directing the caller to
+ * `resolveDecision(request, executors.decide, ...)` instead. By default
+ * returns the normalized output; pass `{ verbose: true }` to also get the
+ * raw executor result (tool calls, usage, finish reason — needed for
+ * observability and event-sourced replay).
+ */
 export function executeAgentRequest(
   request: AgentRequest,
   executors: AgentRequestExecutors
@@ -230,6 +300,7 @@ export async function executeAgentRequest(
     : normalizedOutput;
 }
 
+// Assembles an AgentStep from a snapshot + actions: applies single-final-state output, then discovers pending requests.
 function createAgentStep<TMachine extends AnyActorLogic>(
   machine: TMachine,
   snapshot: SnapshotFrom<TMachine>,
@@ -249,6 +320,7 @@ function createAgentStep<TMachine extends AnyActorLogic>(
   };
 }
 
+// Walks a machine config by the snapshot's state `value` to find the reached final-state's config node.
 function resolveStateValueConfig(
   config: { states?: Record<string, any> },
   value: unknown
@@ -280,6 +352,7 @@ function resolveStateValueConfig(
   return undefined;
 }
 
+// Backfills `snapshot.output` from the reached final state's `output` config when xstate didn't already set one (single-final-state root-output sugar — see setup-agent.ts's withRootOutputFromSingleFinal).
 function applyFinalStateOutput(
   logic: AnyActorLogic,
   snapshot: unknown,
@@ -316,6 +389,7 @@ function applyFinalStateOutput(
       : output;
 }
 
+// Duck-types an AgentStep vs a raw snapshot, for transitionAgentStep's dual-argument overload.
 function isAgentStep<TSnapshot extends AnyMachineSnapshot>(
   value: unknown
 ): value is AgentStep<TSnapshot> {

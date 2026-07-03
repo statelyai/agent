@@ -15,17 +15,31 @@ import type { AgentDecisionExecutor, AgentDecisionInput } from './decision.js';
 import type { ChosenEvent } from './types.js';
 import { executorBoundLogics, unboundPlaceholderLogics } from './internal/registry.js';
 
+// Well-known invoke `src` for the builtin human-input actor.
 export const USER_INPUT_ACTOR = 'agent.userInput' as const;
+// Well-known invoke `src` for the builtin one-shot text-generation actor.
 export const GENERATE_TEXT_ACTOR = 'agent.generateText' as const;
+// Well-known invoke `src` for the builtin streaming text-generation actor.
 export const STREAM_TEXT_ACTOR = 'agent.streamText' as const;
+// Well-known invoke `src` for the builtin decision actor.
 export const DECIDE_ACTOR = 'agent.decide' as const;
 
+/** Whether a text request should be resolved with `generateText` (one-shot) or `streamText` (chunked, via `onChunk`). */
 export type AgentRequestMode = 'generate' | 'stream';
+/** A `setupAgent({ models })` model registry, mapping short model refs to provider-specific model values. */
 export type AgentModelMap = Record<string, unknown>;
+/** A model reference: narrowed to `keyof TModels` when a model map is registered, otherwise a plain `string`. */
 export type AgentModelRef<TModels extends AgentModelMap = {}> =
   [keyof TModels] extends [never] ? string : keyof TModels & string;
 
-/** Portable LCD input text requests pass to host executors. */
+/**
+ * Portable, provider-agnostic input a text request passes to a host
+ * executor (`generateText`/`streamText` on {@link AgentRequestExecutors}).
+ * Built by {@link TextLogic.request} / `DecisionLogic.request` from a
+ * `TextLogicConfig`/`DecisionLogicConfig`; adapters (e.g.
+ * `createAiSdkExecutors`) map this shape onto their provider's call
+ * settings.
+ */
 export interface AgentTextRequest<TMetadata = Record<string, unknown>> {
   model: string;
   system?: string;
@@ -44,17 +58,21 @@ export interface AgentTextRequest<TMetadata = Record<string, unknown>> {
   /**
    * Host-owned per-call options. Use this for provider/runtime details such
    * as Cloudflare bindings, tracing IDs, SDK provider options, or transport
-   * hints. The machine carries it; the host decides what it means.
+   * hints. The machine carries it; the host decides what it means — e.g.
+   * the AI SDK adapter (`createAiSdkExecutors`) reads `metadata.maxSteps` to
+   * bound its multi-step tool-call loop for that request.
    */
   metadata?: TMetadata;
 }
 
+/** Inline input for the `agent.userInput` builtin actor — a human-input request (CLI prompt, form, chat reply, …). See {@link RunAgentOptions.userInput}. */
 export interface AgentUserInput<TMetadata = Record<string, unknown>> {
   prompt?: string;
   schema?: StandardSchemaV1;
   metadata?: TMetadata;
 }
 
+// The four `agent.*` builtin actor logics every setupAgent-built machine registers.
 export type BuiltinAgentActors<
   TEvent extends string = string,
   TModel extends string = string,
@@ -68,6 +86,7 @@ export type BuiltinAgentActors<
   >;
 };
 
+// Minimal input schema for the `agent.generateText`/`agent.streamText` builtins: any object with a string `model`.
 const agentTextInputSchema: StandardSchemaV1<AgentTextRequest> = {
   '~standard': {
     version: 1,
@@ -85,6 +104,7 @@ const agentTextInputSchema: StandardSchemaV1<AgentTextRequest> = {
   },
 };
 
+// Pass-through output schema (`agent.generateText`'s builtin output type) — accepts anything.
 const unknownOutputSchema: StandardSchemaV1<unknown> = {
   '~standard': {
     version: 1,
@@ -95,6 +115,7 @@ const unknownOutputSchema: StandardSchemaV1<unknown> = {
   },
 };
 
+// String output schema (`agent.streamText`'s builtin output type).
 const stringOutputSchema: StandardSchemaV1<string> = {
   '~standard': {
     version: 1,
@@ -107,6 +128,7 @@ const stringOutputSchema: StandardSchemaV1<string> = {
   },
 };
 
+// Builds the unbound `agent.generateText`/`agent.streamText` builtin actor logic registered by setupAgent.
 function createBuiltinTextActor(
   src: typeof GENERATE_TEXT_ACTOR | typeof STREAM_TEXT_ACTOR,
   mode: AgentRequestMode,
@@ -176,6 +198,7 @@ function createBuiltinTextActor(
   >;
 }
 
+// The unbound `agent.generateText`/`agent.streamText` builtins registered by setupAgent.
 export const builtinTextActors = {
   [GENERATE_TEXT_ACTOR]: createBuiltinTextActor(
     GENERATE_TEXT_ACTOR,
@@ -192,6 +215,7 @@ export const builtinTextActors = {
   typeof GENERATE_TEXT_ACTOR | typeof STREAM_TEXT_ACTOR
 >;
 
+// The unbound `agent.userInput` builtin registered by setupAgent (an unbound-placeholder logic — see internal/registry.ts).
 export const userInputActor = createAsyncLogic<unknown, AgentUserInput>({
   run: async () => {
     throw new Error(
@@ -202,6 +226,12 @@ export const userInputActor = createAsyncLogic<unknown, AgentUserInput>({
 });
 unboundPlaceholderLogics.add(userInputActor);
 
+/**
+ * Validates a raw model/executor output against `schema`, returning the
+ * parsed value. Thin wrapper over {@link validateSchemaSync} for parsing a
+ * text request's structured output outside of `TextLogic.execute`/
+ * `executeAgentRequest` (e.g. a custom host loop).
+ */
 export function parseOutput<TSchema extends StandardSchemaV1>(
   schema: TSchema,
   output: unknown
@@ -212,10 +242,12 @@ export function parseOutput<TSchema extends StandardSchemaV1>(
   );
 }
 
+// A TextLogicConfig/DecisionLogicConfig field value: either static, or a `({ input }) => value` resolver.
 export type ResolveTextLogicValue<TValue, TInput> =
   | TValue
   | ((args: { input: TInput }) => TValue);
 
+// Resolves a `ResolveTextLogicValue` (calls it if it's a function, else returns it as-is).
 export function resolveTextLogicValue<TValue, TInput>(
   value: ResolveTextLogicValue<TValue, TInput> | undefined,
   args: { input: TInput }
@@ -225,6 +257,12 @@ export function resolveTextLogicValue<TValue, TInput>(
     : value;
 }
 
+/**
+ * Config for {@link createTextLogic}: how to build an
+ * {@link AgentTextRequest} from typed input, plus the input/output schemas
+ * that validate it. Each request-shaping field (`model`, `system`, `prompt`,
+ * …) is either a static value or a `({ input }) => value` resolver.
+ */
 export interface TextLogicConfig<
   TInputSchema extends StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1,
@@ -260,6 +298,7 @@ export interface TextLogicConfig<
   metadata?: ResolveTextLogicValue<TMetadata | undefined, InferOutput<TInputSchema>>;
 }
 
+/** Arguments passed to a {@link TextLogicExecutor}: the typed input, the lowered {@link AgentTextRequest}, and the actor's own `signal`/`system`/`self`/`emit`. */
 export interface TextLogicExecuteArgs<TInput, TMetadata = Record<string, unknown>> {
   input: TInput;
   request: AgentTextRequest<TMetadata>;
@@ -269,6 +308,7 @@ export interface TextLogicExecuteArgs<TInput, TMetadata = Record<string, unknown
   emit: (emitted: EventObject) => void;
 }
 
+/** Host implementation bound to a specific {@link TextLogic} via `withExecutor`/`createTextLogic`'s second argument — resolves one text request to typed output. */
 export type TextLogicExecutor<
   TInputSchema extends StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1,
@@ -277,6 +317,14 @@ export type TextLogicExecutor<
   args: TextLogicExecuteArgs<InferOutput<TInputSchema>, TMetadata>
 ) => PromiseLike<InferOutput<TOutputSchema>>;
 
+/**
+ * Actor logic for a text request: an async effect that resolves typed input
+ * to typed, schema-validated output via a model call. Built by
+ * {@link createTextLogic}; register under `actors:` and invoke by name, or
+ * bind an executor later with `withExecutor`. The `agent.generateText`/
+ * `agent.streamText` builtins and `setupAgent({ requests })` entries are
+ * both `TextLogic` under the hood.
+ */
 export interface TextLogic<
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1 = StandardSchemaV1,
@@ -301,16 +349,38 @@ export interface TextLogic<
   ): TextLogic<TInputSchema, TOutputSchema, TMetadata>;
 }
 
+/** Extracts a {@link TextLogic}'s validated input type. */
 export type TextLogicInput<TLogic extends TextLogic> =
   TLogic extends TextLogic<infer TInputSchema, StandardSchemaV1, infer _TMetadata>
     ? InferOutput<TInputSchema>
     : never;
 
+/** Extracts a {@link TextLogic}'s validated output type. */
 export type TextLogicOutput<TLogic extends TextLogic> =
   TLogic extends TextLogic<StandardSchemaV1, infer TOutputSchema, infer _TMetadata>
     ? InferOutput<TOutputSchema>
     : never;
 
+/**
+ * Creates reusable, standalone {@link TextLogic}: an actor that, when run,
+ * resolves typed input to typed output via a model call. Register the
+ * result under `actors:` and invoke it by name (equivalent to what
+ * `setupAgent({ requests })` builds internally for each request entry). Pass
+ * `execute` here, or bind it later with `.withExecutor(...)`, a runtime
+ * adapter's `machine.provide(...)`, or `runAgent`'s `generateText`/
+ * `streamText` options.
+ *
+ * @example
+ * ```ts
+ * export const tellJoke = createTextLogic({
+ *   mode: 'stream',
+ *   schemas: { input: z.object({ topic: z.string() }), output: z.string() },
+ *   model: 'openai/gpt-4.1-mini',
+ *   system: 'You tell short, punchy jokes.',
+ *   prompt: ({ input }) => `Tell a joke about ${input.topic}.`,
+ * });
+ * ```
+ */
 export function createTextLogic<
   TInputSchema extends StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1,
@@ -406,6 +476,7 @@ export function createTextLogic<
   return textLogic;
 }
 
+// Type guard: true for any actor logic built by createTextLogic (checks the `kind` marker).
 export function isTextLogic(value: unknown): value is TextLogic {
   return (
     !!value
@@ -415,6 +486,7 @@ export function isTextLogic(value: unknown): value is TextLogic {
   );
 }
 
+/** Raw shape an {@link AgentRequestExecutor} may return; {@link normalizeGeneratorResult} unwraps whichever of `object`/`text`/`output` is present (checked in that order), or passes through any other value as-is. */
 export type AgentRequestExecutorResult =
   | { output: unknown }
   | { object: unknown }
@@ -431,11 +503,20 @@ export interface AgentRequestExecutorInfo {
   signal?: AbortSignal;
 }
 
+/** Host implementation of one text call (`generateText` or `streamText`) — resolves a lowered {@link AgentTextRequest} to a raw result, normalized by {@link normalizeGeneratorResult}. */
 export type AgentRequestExecutor<TResult = AgentRequestExecutorResult> = (
   request: AgentTextRequest & { tools: AgentTools },
   info?: AgentRequestExecutorInfo
 ) => PromiseLike<TResult> | TResult;
 
+/**
+ * The full set of host executors a machine's agent actors are resolved
+ * with — passed to `runAgent`, `executeAgentRequest`, and
+ * `TextLogic.execute`. `generateText` is required; `streamText` is only
+ * needed if the machine has a `mode: 'stream'` text request, and `decide`
+ * only if it uses a decision — omitting either is a bind-time error when the
+ * machine actually needs it (see `runAgent`).
+ */
 export interface AgentRequestExecutors<
   TGenerateResult = AgentRequestExecutorResult,
   TStreamResult = AgentRequestExecutorResult,
@@ -445,17 +526,26 @@ export interface AgentRequestExecutors<
   decide?: AgentDecisionExecutor;
 }
 
+/** Whether a text request's output is a validated structured object (`'structured'`) or plain text (`'text'`) — derived from the output schema's JSON Schema `type`. */
 export type AgentOutputMode = 'structured' | 'text';
 
+/**
+ * Classifies a text request's output schema as `'structured'` (its JSON
+ * Schema `type` is `'object'`) or `'text'` (anything else, including no
+ * schema). Reads the schema's `~standard.jsonSchema.input()` extension —
+ * schemas without it are treated as `'text'`.
+ */
 export function getAgentOutputMode(schema?: StandardSchemaV1): AgentOutputMode {
   const type = getStandardSchemaJsonType(schema);
   return type === 'object' ? 'structured' : 'text';
 }
 
+/** True when {@link getAgentOutputMode} classifies `schema` as `'structured'`. */
 export function isStructuredOutputSchema(schema?: StandardSchemaV1): boolean {
   return getAgentOutputMode(schema) === 'structured';
 }
 
+// Reads a schema's synchronous `~standard.jsonSchema.input().type`, if the vendor implements that extension.
 function getStandardSchemaJsonType(schema?: StandardSchemaV1) {
   const jsonSchema = (
     schema?.['~standard'] as {
@@ -468,6 +558,14 @@ function getStandardSchemaJsonType(schema?: StandardSchemaV1) {
     : undefined;
 }
 
+/**
+ * Merges request-declared and call-site `tools`, dispatches to the
+ * `mode`-appropriate executor (`generateText`/`streamText`), and normalizes
+ * the raw result via {@link normalizeGeneratorResult}. Shared by
+ * `TextLogic.execute`, `executeAgentRequest`, and the `agent.generateText`/
+ * `agent.streamText` builtins. Throws if no executor is registered for
+ * `mode`.
+ */
 export async function executeAgentTextRequest(
   mode: AgentRequestMode,
   id: string,
@@ -498,6 +596,13 @@ export async function executeAgentTextRequest(
   return { output: await normalizeGeneratorResult(raw), raw };
 }
 
+/**
+ * Unwraps a raw executor result to its normalized value: awaits `result`,
+ * then — if it's an object — returns (and awaits) whichever of `object`,
+ * `text`, or `output` is present, checked in that order; any other value
+ * passes through unchanged. This is generator-result unwrapping only —
+ * decision results are extracted separately by `resolveDecision`.
+ */
 export async function normalizeGeneratorResult(result: unknown): Promise<unknown> {
   const resolved = await result;
   if (!resolved || typeof resolved !== 'object') {

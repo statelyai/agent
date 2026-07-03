@@ -20,6 +20,14 @@ import type { AgentDecisionExecutor, AgentDecisionRequest, DecisionAttempt } fro
 import type { AgentEventDescriptor } from '../events.js';
 import type { AgentTools, ChosenEvent, StandardSchemaV1 } from '../types.js';
 
+/**
+ * Maps an {@link AgentTools} map onto AI SDK `tool()` definitions — a bare
+ * `AgentToolExecute` function becomes a tool with an unconstrained input
+ * schema; an {@link AgentToolDescriptor} carries its `description`/
+ * `inputSchema`/`execute` through directly. Used internally by
+ * {@link toAiSdkCallSettings}; exported for callers building AI SDK calls by
+ * hand outside `createAiSdkExecutors`.
+ */
 export function toAiSdkTools(tools: AgentTools) {
   const entries: Array<[string, Tool<unknown, unknown> | Tool<unknown, never>]> = [];
 
@@ -60,6 +68,7 @@ export function toAiSdkTools(tools: AgentTools) {
   return Object.fromEntries(entries);
 }
 
+// Permissive fallback StandardSchemaV1/FlexibleSchema used for tools/events with no declared input schema.
 const unknownSchema = {
   '~standard': {
     version: 1,
@@ -73,8 +82,15 @@ const unknownSchema = {
 
 // ─── createAiSdkExecutors ───
 
+/** AI SDK model registry: maps model refs (as used in `setupAgent({ models })`/`AgentTextRequest.model`) to AI SDK `LanguageModel` values. */
 export type AiSdkModelMap = Record<string, LanguageModel>;
 
+/**
+ * Options for {@link createAiSdkExecutors}: either a static `models` map
+ * (model refs resolved by lookup), a `resolveModel` function (refs resolved
+ * dynamically, e.g. `"openai/gpt-4.1-mini"` → `openai('gpt-4.1-mini')`), or
+ * both — `resolveModel` takes precedence when both are supplied.
+ */
 export type CreateAiSdkExecutorsOptions<
   TModels extends AiSdkModelMap = AiSdkModelMap,
 > =
@@ -87,6 +103,7 @@ export type CreateAiSdkExecutorsOptions<
       resolveModel: (modelRef: string) => LanguageModel;
     };
 
+// Resolves a text/decision request's `model` ref to an AI SDK LanguageModel via `resolveModel` (if given) or a `models` lookup.
 function resolveAiSdkModel<TModels extends AiSdkModelMap>(
   options: CreateAiSdkExecutorsOptions<TModels>,
   modelRef: string
@@ -133,6 +150,7 @@ export function toAiSdkCallSettings(
   };
 }
 
+/** Maps an {@link AgentToolChoice} to AI SDK's tool-choice shape — `{ type: 'tool'; name }` becomes `{ type: 'tool'; toolName }`; `'auto'`/`'none'`/`'required'`/`undefined` pass through unchanged. */
 export function toAiSdkToolChoice(toolChoice: AgentTextRequest['toolChoice']) {
   return typeof toolChoice === 'object'
     ? { type: 'tool' as const, toolName: toolChoice.name }
@@ -146,7 +164,9 @@ export function isStructuredOutputRequest(
   return getAgentOutputMode(request.outputSchema) === 'structured';
 }
 
+/** Raw result shape from {@link AiSdkExecutors.generateText} — `{ output }` for structured-output requests (validated against `outputSchema`), `{ text }` otherwise. Normalized by {@link normalizeGeneratorResult}. */
 export type AiSdkGenerateResult = { output: unknown } | { text: string };
+/** Raw result shape from {@link AiSdkExecutors.streamText} — the fully-accumulated text once the stream finishes (chunks are delivered separately via `onChunk`). */
 export type AiSdkStreamResult = { text: string };
 
 /** `createAiSdkExecutors` always populates all three slots (unlike the
@@ -165,6 +185,12 @@ export interface AiSdkExecutors
  * place it's imported, and callers must supply their own model resolver so no
  * concrete provider package (e.g. `@ai-sdk/openai`) becomes a dependency here
  * either.
+ *
+ * @example
+ * ```ts
+ * const executors = createAiSdkExecutors({ models: { quick: openai('gpt-4.1-mini') } });
+ * const result = await runAgent(machine, { input, ...executors });
+ * ```
  */
 export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
   options: CreateAiSdkExecutorsOptions<TModels>
@@ -305,6 +331,7 @@ export function toDecisionMessages(
   return messages;
 }
 
+// Renders one failed DecisionAttempt into a user-facing retry-feedback string naming the failure and the remaining candidate events.
 function attemptFeedback(attempt: DecisionAttempt, events: AgentEventDescriptor[]): string {
   const types = events.map((event) => event.type).join(', ') || '(none)';
   return `Your previous choice failed: ${attempt.reason}. Choose again from: ${types}`;

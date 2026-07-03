@@ -17,6 +17,7 @@ import {
   type AgentSchemaPack,
 } from './setup-agent.js';
 
+// Minimal JSON Schema shape recognized by `minimalSchemaCompiler`; other compilers may accept the full spec.
 type JsonSchemaObject = {
   type?: string | string[];
   properties?: Record<string, JsonSchemaObject>;
@@ -171,6 +172,7 @@ type ExpressionScope = {
 
 // Static workflow configs cannot carry functions, so this tiny expression
 // layer lowers JSON/YAML values into normal JS values before machine creation.
+// Resolves a dotted path (e.g. "context.foo.bar") against the scope object.
 function evaluateWorkflowConfigPath(expression: string, scope: ExpressionScope): unknown {
   const parts = expression.trim().split('.').filter(Boolean);
   let current: unknown = scope;
@@ -185,6 +187,7 @@ function evaluateWorkflowConfigPath(expression: string, scope: ExpressionScope):
   return current;
 }
 
+// Recursively lowers a config value: whole/partial `{{ expr }}` template strings, arrays, and objects are all resolved against `scope`.
 function evaluateWorkflowConfigValue(value: unknown, scope: ExpressionScope): unknown {
   if (typeof value === 'string') {
     const wholeMatch = value.match(workflowConfigWholeExpressionPattern);
@@ -214,11 +217,22 @@ function evaluateWorkflowConfigValue(value: unknown, scope: ExpressionScope): un
   return value;
 }
 
+// Type guard for a plain (non-array) JSON object.
 function isJsonObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
-/** Serializable JSON/YAML workflow config. JS authoring should use setupAgent(...). */
+/**
+ * Serializable JSON/YAML machine definition — the config a database, visual
+ * editor, or LLM could produce and hand to `setupAgent.fromConfig(config, {
+ * compileSchema })` to get back the same kind of `AnyStateMachine`
+ * TypeScript `setupAgent(...)` authoring would build. JS/TS authoring should
+ * use `setupAgent(...)` directly instead of this JSON form. Any `unknown`-
+ * typed field here (`model`, `guard`, action `params`, …) accepts either a
+ * literal JSON value or a `"{{ path.to.value }}"` template-expression string
+ * resolved against `{ context, event, input, output }` at machine-build/
+ * transition time — see the sibling `evaluateWorkflowConfigValue` lowering.
+ */
 export interface AgentWorkflowConfig {
   key?: string;
   id?: string;
@@ -239,6 +253,7 @@ export interface AgentWorkflowConfig {
   meta?: Record<string, unknown>;
 }
 
+/** A `requests` entry in {@link AgentWorkflowConfig} — the JSON equivalent of a `setupAgent({ requests })` `TextLogicConfig`. Fields beyond `input`/`output`/`tools`/`mode`/`description` are `unknown` because they accept template-expression strings (see {@link AgentWorkflowConfig}). */
 export interface AgentWorkflowRequestConfig {
   mode?: AgentRequestMode;
   description?: string;
@@ -259,12 +274,14 @@ export interface AgentWorkflowRequestConfig {
   metadata?: unknown;
 }
 
+/** An `actors` entry in {@link AgentWorkflowConfig} — declares a placeholder actor source (by key) with no host execution wired from JSON; provide it via `machine.provide({ actorSources })` after `setupAgent.fromConfig(...)`. */
 export interface AgentWorkflowActorConfig {
   input?: JsonSchemaObject;
   output?: JsonSchemaObject;
   description?: string;
 }
 
+/** A `states` entry in {@link AgentWorkflowConfig} — the JSON equivalent of an XState state node config. */
 export interface AgentWorkflowStateConfig {
   description?: string;
   type?: 'parallel' | 'history' | 'final';
@@ -282,6 +299,13 @@ export interface AgentWorkflowStateConfig {
   meta?: Record<string, unknown>;
 }
 
+/**
+ * An `invoke` entry in {@link AgentWorkflowStateConfig}. For `src:
+ * 'agent.decide'`, `onDone` must be omitted — decision delivery is automatic
+ * (equivalent to `onDone: sendDecision()` in TS authoring), since a
+ * decision's output *is* the chosen event and there is no function value to
+ * express in JSON; only `onError` (retries exhausted) is configurable here.
+ */
 export interface AgentWorkflowInvokeConfig {
   id?: string;
   src: string;
@@ -291,6 +315,7 @@ export interface AgentWorkflowInvokeConfig {
   meta?: Record<string, unknown>;
 }
 
+/** A transition target in {@link AgentWorkflowConfig} (`on`/`always`/`onDone`/`after`/invoke `onDone`/`onError`) — the JSON equivalent of an XState transition config. `guard`, when a string, is a template expression evaluated as truthy/falsy. */
 export interface AgentWorkflowTransitionConfig {
   target?: string | string[];
   guard?: unknown;
@@ -301,6 +326,7 @@ export interface AgentWorkflowTransitionConfig {
   meta?: Record<string, unknown>;
 }
 
+/** An `entry`/`exit`/transition `actions` entry in {@link AgentWorkflowConfig} — either a named action `type` (with template-expression `params`) or a bare context `assign`. */
 export interface AgentWorkflowActionConfig {
   type: string;
   params?: unknown;
@@ -308,6 +334,7 @@ export interface AgentWorkflowActionConfig {
   [key: string]: unknown;
 }
 
+// Compiles a config's JSON Schemas (context/events/input/output/meta) into an AgentSchemaPack via the caller's SchemaCompiler.
 function createSchemasFromWorkflowConfig(
   config: AgentWorkflowConfig,
   compileSchema: SchemaCompiler
@@ -338,6 +365,7 @@ function createSchemasFromWorkflowConfig(
   });
 }
 
+// Lowers a config's `requests` map into an AgentRequestInput, compiling schemas and turning each unknown-typed field into a template-expression resolver.
 function createRequestsFromWorkflowConfig(
   config: AgentWorkflowConfig,
   compileSchema: SchemaCompiler
@@ -410,12 +438,14 @@ function createRequestsFromWorkflowConfig(
   >;
 }
 
+// Builds one `missingActor(...)` placeholder per key in config.actors, to be replaced via machine.provide(...) by the caller.
 function createActorPlaceholdersFromWorkflowConfig(config: AgentWorkflowConfig) {
   return Object.fromEntries(
     Object.keys(config.actors ?? {}).map((key) => [key, missingActor(key)])
   ) as Record<string, AsyncActorLogic<unknown, unknown>>;
 }
 
+// Lowers an action config's `assign` map into an xstate assign-style transition function.
 function createAssignAction(assignConfig: Record<string, unknown>) {
   return ({ context, event }: { context: Record<string, unknown>; event: unknown }) => ({
     context: Object.fromEntries(
@@ -427,6 +457,7 @@ function createAssignAction(assignConfig: Record<string, unknown>) {
   });
 }
 
+// Lowers an entry/exit `actions` config (single or array) into xstate action entries.
 function lowerWorkflowActions(
   actionConfig: AgentWorkflowActionConfig | AgentWorkflowActionConfig[] | undefined
 ) {
@@ -446,6 +477,7 @@ function lowerWorkflowActions(
   );
 }
 
+// Evaluates a transition config's `guard` (string template expression, guard function, or omitted ⇒ always matches).
 function workflowTransitionMatches(
   transitionConfig: AgentWorkflowTransitionConfig,
   scope: { context: unknown; event: unknown }
@@ -463,6 +495,7 @@ function workflowTransitionMatches(
     : false;
 }
 
+// Lowers a matched transition config into an xstate transition result object (target/context/description/reenter/meta).
 function lowerWorkflowTransitionResult(
   transitionConfig: AgentWorkflowTransitionConfig,
   scope: { context: unknown; event: unknown }
@@ -491,6 +524,7 @@ function lowerWorkflowTransitionResult(
   };
 }
 
+// Lowers a single transition config into an xstate transition function.
 function lowerWorkflowTransition(
   transitionConfig: AgentWorkflowTransitionConfig
 ) {
@@ -502,6 +536,7 @@ function lowerWorkflowTransition(
   };
 }
 
+// Lowers a single transition config or a first-match array of them into one xstate transition function.
 function lowerWorkflowTransitionOrArray(
   transitionConfig:
     | AgentWorkflowTransitionConfig
@@ -525,6 +560,7 @@ function lowerWorkflowTransitionOrArray(
     : lowerWorkflowTransition(transitionConfig);
 }
 
+// Lowers an invoke config into an xstate invoke config; special-cases `agent.decide` to auto-wire `sendDecision()` as onDone.
 function lowerWorkflowInvoke(
   invokeConfig: AgentWorkflowInvokeConfig
 ) {
@@ -561,6 +597,7 @@ function lowerWorkflowInvoke(
   };
 }
 
+// Recursively lowers one AgentWorkflowStateConfig into an xstate state node config.
 function lowerWorkflowState(stateConfig: AgentWorkflowStateConfig): Record<string, unknown> {
   return {
     ...(stateConfig.description !== undefined
@@ -628,6 +665,7 @@ function lowerWorkflowState(stateConfig: AgentWorkflowStateConfig): Record<strin
   };
 }
 
+// Implementation backing the public `setupAgent.fromConfig(...)` namespace member (see setup-agent.ts) — lowers an AgentWorkflowConfig into a real state machine.
 export function setupAgentFromConfig(
   config: AgentWorkflowConfig,
   options: FromConfigOptions

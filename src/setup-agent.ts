@@ -55,18 +55,23 @@ import {
 
 // ─── setupAgent ───
 
+// Narrows T to TConstraint, falling back to TConstraint itself when T doesn't already satisfy it (keeps xstate's setup() constraints happy).
 type Constrain<T, TConstraint> = T extends TConstraint ? T : TConstraint;
 
+// A context schema's validated output type, constrained to MachineContext.
 type ContextOf<TContextSchema extends StandardSchemaV1> = Constrain<
   InferOutput<TContextSchema>,
   MachineContext
 >;
+// An event schema map's discriminated event union, constrained to EventObject.
 type EventsOf<TEventSchemas extends Record<string, StandardSchemaV1>> =
   Constrain<EventUnion<TEventSchemas>, EventObject>;
+// A meta schema's validated output type, constrained to MetaObject.
 type MetaOf<TMetaSchema extends StandardSchemaV1> = Constrain<
   InferOutput<TMetaSchema>,
   MetaObject
 >;
+// Identity mapping over an actor map, preserving each entry's AsyncActorLogic input/output types.
 type SetupActors<TActors extends { [K in keyof TActors]: AnyActorLogic }> = {
   [K in keyof TActors]: TActors[K] extends AsyncActorLogic<infer TOutput, infer TInput>
     ? AsyncActorLogic<TOutput, TInput>
@@ -78,6 +83,16 @@ type AgentSetupActors<
   TModel extends string = string,
 > = TActors & BuiltinAgentActors<TEvent, TModel>;
 
+/**
+ * A machine's full schema set — context, event payloads, machine input/
+ * output, and state/transition meta — as returned by {@link createAgentSchemas}
+ * and retained on `setupAgent(...)`'s `result.schemas` for runtime
+ * validation (e.g. by the step path to validate `initialAgentStep` input, or
+ * by `getAcceptedEvents` to attach event payload schemas). Unlike
+ * `AgentSchemaConfig` (the input to `createAgentSchemas`), every field here
+ * is required — `events`/`input`/`output`/`meta` default to empty/unknown
+ * schemas when not supplied.
+ */
 export interface AgentSchemaPack<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>> = StandardSchemaV1<Record<string, unknown>>,
   TEventSchemas extends Record<string, StandardSchemaV1> = Record<string, StandardSchemaV1>,
@@ -92,6 +107,7 @@ export interface AgentSchemaPack<
   meta: TMetaSchema;
 }
 
+// Input to createAgentSchemas: only `context` is required, everything else defaults.
 type AgentSchemaConfig<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
   TEventSchemas extends Record<string, StandardSchemaV1>,
@@ -106,6 +122,14 @@ type AgentSchemaConfig<
   meta?: TMetaSchema;
 };
 
+/**
+ * Builds a machine's {@link AgentSchemaPack} from a partial schema
+ * declaration — only `context` is required; `events`/`input`/`output`/`meta`
+ * default to empty/unknown schemas when omitted. Pass the result as
+ * `setupAgent({ schemas })`'s `schemas` (or spread the individual fields
+ * directly into `setupAgent({ context, events, ... })` — both forms are
+ * accepted).
+ */
 export function createAgentSchemas<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
   TEventSchemas extends Record<string, StandardSchemaV1> = {},
@@ -136,6 +160,7 @@ export function createAgentSchemas<
   };
 }
 
+// One `setupAgent({ requests })` entry's config — a TextLogicConfig plus the generate/stream `mode`.
 export type AgentRequestConfig<
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1 = StandardSchemaV1,
@@ -145,6 +170,7 @@ export type AgentRequestConfig<
   mode?: AgentRequestMode;
 };
 
+// Maps request keys to their input/output schema pair — the shape `setupAgent({ requests })` and `AgentRequestInput` are keyed by.
 export type AgentRequestSchemaMap = Record<
   string,
   {
@@ -153,6 +179,7 @@ export type AgentRequestSchemaMap = Record<
   }
 >;
 
+// The full `setupAgent({ requests })` map: one AgentRequestConfig per schema-map entry, each carrying its own schemas.
 export type AgentRequestInput<
   TRequestSchemas extends AgentRequestSchemaMap,
   TModel extends string = string,
@@ -167,6 +194,7 @@ export type AgentRequestInput<
   };
 };
 
+// The TextLogic actors createRequestActors builds from an AgentRequestInput — one per request key.
 type RequestActors<TRequestSchemas extends AgentRequestSchemaMap> = {
   [K in keyof TRequestSchemas]: TextLogic<
     TRequestSchemas[K]['input'],
@@ -174,6 +202,7 @@ type RequestActors<TRequestSchemas extends AgentRequestSchemaMap> = {
   >;
 };
 
+// User-declared `actors` merged with the TextLogic actors generated from `requests`.
 type AgentAllActors<
   TActors extends { [K in keyof TActors]: AnyActorLogic },
   TRequestSchemas extends AgentRequestSchemaMap,
@@ -233,6 +262,7 @@ type AgentSetupXStateConfig<
   delays?: NonNullable<AnySetupConfig['delays']>;
 };
 
+// The public `setupAgent(config)` parameter type: schemas (packed or loose) plus models/actors/requests/actions/guards/delays.
 type SetupAgentBaseConfig<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
   TEventSchemas extends Record<string, StandardSchemaV1>,
@@ -268,6 +298,7 @@ type SetupAgentBaseConfig<
   delays?: NonNullable<AnySetupConfig['delays']>;
 };
 
+// The raw xstate `setup(...)` result type for an agent config, before setupAgent's own extensions (initial/transition/resolve/etc) are added.
 type SetupAgentXStateResult<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
   TEventSchemas extends Record<string, StandardSchemaV1>,
@@ -290,6 +321,15 @@ type SetupAgentXStateResult<
   >
 >;
 
+/**
+ * The object returned by {@link setupAgent}: an xstate `setup(...)` result
+ * (`createMachine`, `assign`, …) extended with `schemas` (the resolved
+ * {@link AgentSchemaPack}), `models`, `requests` (the built request actors),
+ * and machine-bound convenience wrappers around the step-path/execute
+ * helpers (`initial`/`transition`/`resolve`/`getRequests`/`execute`/
+ * `appendMessages`) that pre-fill the registered schemas/actors so callers
+ * don't have to pass them by hand each call.
+ */
 type SetupAgentResult<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
   TEventSchemas extends Record<string, StandardSchemaV1>,
@@ -312,6 +352,12 @@ type SetupAgentResult<
   >,
   'createMachine'
 > & {
+  /**
+   * Creates the agent machine — XState's own `createMachine`, plus: the
+   * machine is registered so step helpers and {@link runAgent} can resolve
+   * its schemas/actors without re-passing them, and a single final state's
+   * `output` is copied to the machine root when the root declares none.
+   */
   createMachine: SetupAgentXStateResult<
     TContextSchema,
     TEventSchemas,
@@ -322,6 +368,7 @@ type SetupAgentResult<
     TMetaSchema,
     TModels
   >['createMachine'];
+  /** The retained schema pack ({@link AgentSchemaPack}) for host-side validation and tooling. */
   schemas: AgentSchemaPack<
     TContextSchema,
     TEventSchemas,
@@ -329,30 +376,38 @@ type SetupAgentResult<
     TOutputSchema,
     TMetaSchema
   >;
+  /** The `models` registry passed to `setupAgent(...)`, if any (used to type-narrow `AgentModelRef`). */
   readonly models: TModels;
+  /** The {@link TextLogic} actors built from `setupAgent({ requests })`, keyed the same way. */
   readonly requests: RequestActors<TRequestSchemas>;
+  /** {@link initialAgentStep}, pre-bound to this agent's registered schemas/actors. */
   initial<TMachine extends AnyActorLogic>(
     machine: TMachine,
     input?: unknown
   ): AgentStep<SnapshotFrom<TMachine>>;
+  /** {@link transitionAgentStep}, pre-bound to this agent's registered schemas/actors. */
   transition<TMachine extends AnyActorLogic>(
     machine: TMachine,
     snapshotOrStep: SnapshotFrom<TMachine> | AgentStep<SnapshotFrom<TMachine>>,
     event: EventFromLogic<TMachine>
   ): AgentStep<SnapshotFrom<TMachine>>;
+  /** {@link resolveAgentStep}, pre-bound to this agent's registered schemas/actors. */
   resolve<TMachine extends AnyActorLogic>(
     machine: TMachine,
     step: AgentStep<SnapshotFrom<TMachine>>,
     request: Pick<AgentRequest, 'id'> | string,
     output: unknown
   ): AgentStep<SnapshotFrom<TMachine>>;
+  /** {@link getMachineAgentRequests}, pre-bound to this agent's registered schemas/actors. */
   getRequests(
     machine: AnyActorLogic,
     actions: readonly { type?: string; params?: unknown }[],
     snapshot?: AnyMachineSnapshot,
     options?: Pick<AgentRequestOptions, 'eventToolName'>
   ): AgentStepRequest[];
+  /** {@link executeAgentRequest}, re-exposed on the agent for convenience (no pre-binding needed — it only needs the request and executors). */
   execute(request: AgentRequest, executors: AgentRequestExecutors): Promise<unknown>;
+  /** {@link appendMessages}, typed against this agent's context/event schemas. */
   appendMessages(
     resolve:
       | AgentMessage
@@ -370,10 +425,49 @@ type SetupAgentResult<
 };
 
 /**
- * Schema-first `setup(...)` for agent machines. Context, events, machine
- * input, machine output, and state/transition meta are all standard
- * schemas — no `{} as Type` casts — and are retained on `result.schemas`
- * for runtime validation.
+ * Schema-first `setup(...)` for agent machines — the standard entry point
+ * for authoring a machine (the blueprint) that this library then runs (via
+ * {@link runAgent} or the step helpers) against host-supplied model/decision
+ * executors. Context, events, machine input, machine output, and
+ * state/transition meta are all standard schemas — no `{} as Type` casts —
+ * and are retained on `result.schemas` for runtime validation. Also
+ * registers the `agent.generateText`/`agent.streamText`/`agent.userInput`/
+ * `agent.decide` builtin actors, lowers `requests`/`actors` into the
+ * machine's actor sources, and returns machine-bound convenience wrappers
+ * (`result.initial`/`transition`/`resolve`/`getRequests`/`execute`/
+ * `appendMessages`) around the step-path helpers. Also has a
+ * `setupAgent.fromConfig(...)` namespace member for building a machine from
+ * a serializable {@link AgentWorkflowConfig} instead of this TS API.
+ *
+ * @example
+ * ```ts
+ * const schemas = createAgentSchemas({
+ *   context: z.object({ topic: z.string(), joke: z.string().nullable() }),
+ *   input: z.object({ topic: z.string() }),
+ *   output: z.object({ joke: z.string() }),
+ * });
+ *
+ * const agent = setupAgent({
+ *   schemas,
+ *   actors: { tellJoke },
+ * });
+ *
+ * const jokeMachine = agent.createMachine({
+ *   context: ({ input }) => ({ topic: input.topic, joke: null }),
+ *   initial: 'telling',
+ *   states: {
+ *     telling: {
+ *       invoke: {
+ *         id: 'joke',
+ *         src: 'tellJoke',
+ *         input: ({ context }) => ({ topic: context.topic }),
+ *         onDone: ({ output }) => ({ target: 'done', context: { joke: output } }),
+ *       },
+ *     },
+ *     done: { type: 'final', output: ({ context }) => ({ joke: context.joke ?? '' }) },
+ *   },
+ * });
+ * ```
  */
 export function setupAgent<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
@@ -408,6 +502,7 @@ export function setupAgent<
   return createSetupAgent(config);
 }
 
+// Recursively collects every reached-final-state's `output` config in a machine config.
 function collectFinalStateOutputs(
   states: Record<string, any> | undefined,
   outputs: unknown[] = []
@@ -422,6 +517,7 @@ function collectFinalStateOutputs(
   return outputs;
 }
 
+// Sugar: when a machine config has no root `output` but exactly one final state declares one, promotes it to the root `output` (so `snapshot.output` is set without repeating the same output on every final state).
 function withRootOutputFromSingleFinal<TConfig>(config: TConfig): TConfig {
   if (
     !config
@@ -442,6 +538,23 @@ function withRootOutputFromSingleFinal<TConfig>(config: TConfig): TConfig {
 }
 
 export namespace setupAgent {
+  /**
+   * Builds a state machine from a serializable {@link AgentWorkflowConfig}
+   * (JSON/YAML) instead of the TypeScript `setupAgent(...)` API — the same
+   * kind of machine a database, visual editor, or LLM could produce and hand
+   * back. Requires a `compileSchema` (see {@link FromConfigOptions}) since
+   * the library bundles no JSON Schema engine itself; pass the exported
+   * {@link minimalSchemaCompiler} to opt into its small built-in subset, or
+   * bring a real engine (Ajv, …) for full JSON Schema semantics.
+   *
+   * @example
+   * ```ts
+   * const machine = setupAgent.fromConfig(workflowConfig, {
+   *   compileSchema: minimalSchemaCompiler,
+   * });
+   * const result = await runAgent(machine, { input: { ticket }, generateText, decide });
+   * ```
+   */
   export function fromConfig(
     config: AgentWorkflowConfig,
     options: FromConfigOptions
@@ -450,6 +563,7 @@ export namespace setupAgent {
   }
 }
 
+// Builds one TextLogic actor per `setupAgent({ requests })` entry.
 export function createRequestActors<
   TRequestSchemas extends AgentRequestSchemaMap,
   TModel extends string = string,
@@ -469,6 +583,7 @@ export function createRequestActors<
   ) as RequestActors<TRequestSchemas>;
 }
 
+// Accepts either form of setupAgent's schema config (`{ schemas: pack }` or a loose AgentSchemaConfig) and returns a resolved AgentSchemaPack.
 function normalizeAgentSchemas<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
   TEventSchemas extends Record<string, StandardSchemaV1>,
@@ -505,6 +620,7 @@ function normalizeAgentSchemas<
     : createAgentSchemas(config);
 }
 
+// Defaults an omitted `setupAgent({ requests })` to an empty object.
 function normalizeAgentRequestInput<
   TRequestSchemas extends AgentRequestSchemaMap,
   TModel extends string = string,
@@ -545,6 +661,7 @@ function assertNoActorKeyCollisions(
   }
 }
 
+// Merges the four builtin `agent.*` actors with user `actors` and generated request actors, after checking for key collisions.
 function createAgentActorSources<
   TActors extends { [K in keyof TActors]: AnyActorLogic },
   TRequestSchemas extends AgentRequestSchemaMap,
@@ -566,6 +683,7 @@ function createAgentActorSources<
   } as SetupActors<AgentSetupActors<AgentAllActors<TActors, TRequestSchemas>>>;
 }
 
+// Assembles the plain-object config passed to xstate's setup(...) (see AgentSetupXStateConfig's note on why it's not SetupConfig<...>).
 function createAgentSetupConfig<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
   TEventSchemas extends Record<string, StandardSchemaV1>,
@@ -628,6 +746,7 @@ function createAgentSetupConfig<
   };
 }
 
+// Implementation backing the public setupAgent(...) function: normalizes schemas/requests, builds actor sources, calls xstate's setup(...), and layers on the agent-specific result extensions (schemas/models/requests/initial/transition/resolve/getRequests/execute/appendMessages).
 function createSetupAgent<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
   TEventSchemas extends Record<string, StandardSchemaV1>,

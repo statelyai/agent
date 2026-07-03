@@ -16,6 +16,7 @@ export {
   validateSchemaSync,
 } from './utils.js';
 
+// Resolves `resolve` and returns the full new `messages` array (existing + appended).
 function addMessages<
   TContext extends { messages: AgentMessage[] },
   TEvent extends EventObject,
@@ -35,6 +36,23 @@ function addMessages<
   };
 }
 
+/**
+ * Builds a transition-function result that appends one or more
+ * {@link AgentMessage}s to a context's `messages` array. `resolve` is either
+ * a message (or array of messages) or a function of `{ context, event }`
+ * returning them; the returned function is meant to be used directly as (or
+ * composed into) a transition's result, e.g. `on: { USER_REPLIED:
+ * agent.appendMessages(({ event }) => userMessage(event.text)) }`. Requires
+ * `messages: AgentMessage[]` on context — see {@link messagesSchema} for a
+ * ready-made schema for that field.
+ *
+ * @example
+ * ```ts
+ * on: {
+ *   USER_REPLIED: appendMessages(({ event }) => userMessage(event.text)),
+ * }
+ * ```
+ */
 export function appendMessages<
   TContext extends { messages: AgentMessage[] },
   TEvent extends EventObject,
@@ -53,6 +71,7 @@ export function appendMessages<
   });
 }
 
+// Recognized `AgentMessage` content part type tags.
 const KNOWN_PART_TYPES = new Set([
   'text',
   'image',
@@ -61,6 +80,7 @@ const KNOWN_PART_TYPES = new Set([
   'tool-result',
 ]);
 
+// True if `part` is an object with a recognized part `type`.
 function isKnownPart(part: unknown): part is { type: string } {
   return (
     !!part
@@ -69,6 +89,7 @@ function isKnownPart(part: unknown): part is { type: string } {
   );
 }
 
+// Validates a message `content` array of parts; returns an error message, or undefined if valid.
 function validatePartsArray(content: unknown): string | undefined {
   if (!Array.isArray(content)) {
     return 'Expected content to be a string or an array of parts';
@@ -83,7 +104,13 @@ function validatePartsArray(content: unknown): string | undefined {
   return undefined;
 }
 
-/** Standard schema for an `AgentMessage[]` context field. */
+/**
+ * A {@link StandardSchemaV1} validating an `AgentMessage[]` context field —
+ * checks that every message has a known `role` (`system`/`user`/`assistant`/
+ * `tool`) and that `content` is either a string (where the role allows it) or
+ * an array of parts with a known `type`. Use it directly as a context
+ * schema's `messages` field when authoring with `createAgentSchemas`.
+ */
 export const messagesSchema: StandardSchemaV1<AgentMessage[]> = {
   '~standard': {
     version: 1,
