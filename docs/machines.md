@@ -1,0 +1,298 @@
+---
+title: Agent machines
+description: Author an agent machine as a typed XState state machine that decides what your agent can do, while the host executes model calls.
+---
+
+## Overview
+
+An **agent machine** is a typed XState state machine describing what your agent can do: which states exist, which transitions are legal, which model calls happen, and which events the model may choose right now. It is a blueprint; it never talks to a model directly.
+
+You author a machine in three steps:
+
+1. Declare schemas with `createAgentSchemas`.
+2. Wire up models, requests, and actors with `setupAgent`.
+3. Build the machine with `agentSetup.createMachine`.
+
+## Declare schemas
+
+<!-- createAgentSchemas surface from src/setup-agent.ts -->
+
+`createAgentSchemas` builds the schema pack that types your machine's context, event payloads, input, output, and state meta. Only `context` is required; `events`, `input`, `output`, and `meta` default to empty or unknown schemas.
+
+```ts
+import { z } from 'zod';
+import { createAgentSchemas } from '@statelyai/agent';
+
+const schemas = createAgentSchemas({
+  context: z.object({ prompt: z.string(), answer: z.string().nullable() }),
+  input: z.object({ prompt: z.string() }),
+  output: z.object({ answer: z.string() }),
+});
+```
+
+Every schema is a [Standard Schema](https://standardschema.dev), so Zod, Valibot, ArkType, or a hand-written validator all work. The pack is retained on the agent for runtime validation, so you get typed context and events without `{} as Type` casts.
+
+**Event schemas** make event payloads typed. Declare one schema per event type:
+
+```ts
+const schemas = createAgentSchemas({
+  context: z.object({ playerHp: z.number(), enemyHp: z.number() }),
+  input: z.object({ playerHp: z.number(), enemyHp: z.number() }),
+  output: z.object({ outcome: z.string() }),
+  events: {
+    ATTACK: z.object({ target: z.string().default('goblin') }),
+    HEAL: z.object({ amount: z.number().min(1).max(8).default(4) }),
+    FLEE: z.object({}),
+  },
+});
+```
+
+In a `HEAL` transition, `event.amount` is a `number`. Reading a field the event does not carry is a compile error.
+
+## Set up the agent
+
+<!-- setupAgent config surface (models, requests, actors, builtins) from src/setup-agent.ts -->
+
+`setupAgent` takes the schemas plus optional `models`, `requests`, and `actors`, and returns a **setup** whose `createMachine` builds the machine. Like XState's `setup()`, the return value is not a running agent; it is the typed foundation machines are authored from, so name it accordingly (`agentSetup`, `gameSetup`).
+
+```ts
+import { setupAgent } from '@statelyai/agent';
+
+const agentSetup = setupAgent({
+  schemas,
+  models,
+  requests,
+  actors,
+});
+```
+
+- The builtins `agent.generateText`, `agent.streamText`, `agent.userInput`, and `agent.decide` are registered automatically; invoke them by name.
+- You can skip `createAgentSchemas` and pass schema fields directly: `setupAgent({ context, input, output, events, ... })`. The two forms are equivalent; the standalone pack is useful when you share schemas across machines or the step helpers.
+
+### Models
+
+`models` maps a short alias to a resolved model. With `models` present, request and decision `model:` values are typed against its keys, so a typo is a compile error, and app code shares one alias map between `setupAgent` and the host adapter.
+
+```ts
+import { openai } from '@ai-sdk/openai';
+
+const models = {
+  quick: openai('gpt-5.4-mini'),
+  careful: openai('gpt-5.4'),
+} as const;
+
+const agentSetup = setupAgent({
+  schemas,
+  models,
+  requests: {
+    answerQuestion: {
+      schemas: { input: z.object({ prompt: z.string() }), output: answerSchema },
+      model: 'quick', // typed as "quick" | "careful"
+      prompt: ({ input }) => input.prompt,
+    },
+  },
+});
+```
+
+Aliases are optional. A request can carry any `model:` string (like `'openai/gpt-5.4-mini'`) that the host resolves at run time. See [Hosts](hosts.md).
+
+### Requests
+
+`requests` declares named text requests inline. Each entry carries its own input and output schemas, a model, and a `prompt` (or `messages`) built from typed input. Each becomes an actor you invoke by its key.
+
+```ts
+const agentSetup = setupAgent({
+  schemas,
+  models,
+  requests: {
+    classifyAnswer: {
+      schemas: {
+        input: z.object({ question: z.string(), rawAnswer: z.string() }),
+        output: z.object({ answer: z.enum(['yes', 'no']) }),
+      },
+      model: 'quick',
+      system: 'Classify a natural-language answer as yes or no.',
+      prompt: ({ input }) => `Q: ${input.question}\nA: ${input.rawAnswer}`,
+    },
+  },
+});
+```
+
+See [Text requests](text-requests.md) for the full request surface, including streaming and structured output.
+
+### Actors
+
+`actors` registers reusable actor logic: text logic from `createTextLogic`, decision logic from `createDecisionLogic`, or any XState actor. Register logic here when it is reusable, exported, or worth testing standalone.
+
+```ts
+const gameSetup = setupAgent({
+  schemas: gameSchemas,
+  models,
+  actors: { chooseMove, summarizeTurn },
+});
+```
+
+> **Warning:** Actor source keys must be unique across `actors` and `requests`. `setupAgent` throws at setup time on a collision rather than letting one silently shadow the other.
+
+## Create the machine
+
+`agentSetup.createMachine` is XState's `createMachine` with the agent's schemas and actors already bound. It registers the machine so the step helpers and [`runAgent`](hosts.md) can resolve its schemas and actors without re-passing them.
+
+```ts
+const machine = agentSetup.createMachine({
+  context: ({ input }) => ({ prompt: input.prompt, answer: null }),
+  initial: 'answering',
+  states: {
+    answering: {
+      invoke: {
+        id: 'answer',
+        src: 'answerQuestion',
+        input: ({ context }) => ({ prompt: context.prompt }),
+        onDone: ({ output }) => ({
+          target: 'done',
+          context: { answer: output.answer },
+        }),
+      },
+    },
+    done: {
+      type: 'final',
+      output: ({ context }) => ({ answer: context.answer ?? '' }),
+    },
+  },
+});
+```
+
+## Transitions
+
+<!-- transition-function authoring style from src/setup-agent.ts and examples/twenty-questions -->
+
+A **transition** is a function of `{ context, event }` that returns the next `target` and a `context` update. You return updates rather than assigning them with `assign()`.
+
+```ts
+on: {
+  ATTACK: ({ context, event }) => ({
+    target: 'summarizing',
+    context: {
+      enemyHp: Math.max(0, context.enemyHp - 6),
+      defended: false,
+    },
+  }),
+}
+```
+
+- The returned `context` is a **partial update**: omitted fields keep their values.
+- The `event` is typed from the event schema.
+- Returning `undefined` makes the transition **illegal**. This is how guards work here.
+
+```ts
+on: {
+  // ASK is only legal before the final turn.
+  ASK: ({ context, event }) =>
+    context.questionsRemaining > 1
+      ? {
+          target: 'awaitingAnswer',
+          context: { questionsRemaining: context.questionsRemaining - 1 },
+        }
+      : undefined,
+}
+```
+
+This matters for [decisions](decisions.md): a model choosing an event whose transition returns `undefined` is rejected before the transition is taken. Guards make illegal choices impossible, not just discouraged.
+
+A transition can also be a plain object. Its `context` is a static patch or a mapper function receiving the same args (including `output` on `onDone`):
+
+```ts
+on: {
+  SEND: { target: 'sending' },
+  DEFEND: { target: 'summarizing', context: { defended: true } },
+}
+
+// object form with a context mapper:
+onDone: {
+  target: 'revising',
+  context: ({ output }) => ({ feedback: output.feedback }),
+}
+```
+
+Use the full function form when the `target` itself is conditional (guards) or you need `enq` to enqueue effects; use the object form otherwise.
+
+## Invoke a request or actor
+
+A state invokes an actor by `src`, passing typed `input` and handling `onDone`/`onError`. `src` names a request key, a registered actor, or a builtin like `agent.decide` or `agent.userInput`.
+
+```ts
+drafting: {
+  invoke: {
+    src: 'draftEmail',
+    input: ({ context }) => ({ prompt: context.prompt, messages: context.messages }),
+    onDone: ({ output }) => ({
+      target: 'reviewing',
+      context: { draft: output },
+    }),
+    onError: { target: 'failed' },
+  },
+}
+```
+
+`onDone` receives the actor's `output`, typed from its output schema. `onDone` and `onError` are transition functions too, returning `target` and `context` the same way.
+
+## Final states and output
+
+A final state ends the machine (or a region of it). Its `output` is typed against the machine's output schema:
+
+```ts
+done: {
+  type: 'final',
+  output: ({ context }) => ({ answer: context.answer ?? '' }),
+}
+```
+
+When the root declares no `output` and exactly one final state does, `agentSetup.createMachine` promotes that output to the root, so `snapshot.output` is set without repeating it on every final state.
+
+## State and transition meta
+
+<!-- typed meta protocol from examples/email-drafter/index.ts -->
+
+`meta` attaches typed data to a state or transition. With a `meta` schema in `createAgentSchemas`, hosts read a typed interaction protocol instead of `Record<string, unknown>`:
+
+```ts
+prompting: {
+  meta: {
+    interaction: {
+      type: 'text',
+      label: 'Email draft request',
+      eventType: 'PROMPT_SUBMITTED',
+      field: 'prompt',
+    },
+  },
+  on: {
+    PROMPT_SUBMITTED: ({ event }) => ({
+      target: 'evaluating',
+      context: { prompt: event.prompt },
+    }),
+  },
+}
+```
+
+A `meta` value that does not match the schema is a compile error. See [examples/email-drafter/index.ts](../examples/email-drafter/index.ts).
+
+## Delayed transitions
+
+A delayed transition (`after`) fires after a delay with no external event, keyed by milliseconds or by a named delay from `setupAgent`'s `delays`:
+
+```ts
+waiting: {
+  after: { 20: { target: 'done' } },
+}
+```
+
+How `after` runs depends on the host:
+
+- Under [`runAgent`](hosts.md), the timer runs **live**: a pending `after` is not idle, so `runAgent` waits for it and continues.
+- On the [step path](steps.md), it surfaces in `step.actions` as a **schedulable raise action**: the durable host owns the clock (a workflow sleep, a Temporal timer, a queue delay) and applies the event when it fires.
+
+## Where to go next
+
+- [Decisions](decisions.md): let the model choose exactly one currently-legal event.
+- [Text requests](text-requests.md): the full request surface, streaming, and structured output.
+- [Human in the loop](human-in-the-loop.md): idle states, resuming from a snapshot, and inline user input.

@@ -1,0 +1,17 @@
+{
+  "title": "Agents",
+  "pages": [
+    "index",
+    "quickstart",
+    "machines",
+    "decisions",
+    "text-requests",
+    "messages",
+    "human-in-the-loop",
+    "hosts",
+    "steps",
+    "machines-as-data",
+    "multi-agent",
+    "examples"
+  ]
+}
