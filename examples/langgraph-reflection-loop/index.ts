@@ -86,7 +86,8 @@ export async function runLangGraphReflectionLoopExample() {
         },
       },
       checking: {
-        always: ({ context }) =>
+      type: 'choice',
+      choice: ({ context }) =>
           context.approved ? { target: 'done' } : { target: 'drafting' },
       },
       done: {

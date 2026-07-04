@@ -20,7 +20,7 @@ const classificationSchema = z.object({
 });
 
 export const models: Record<'classifier' | 'simpleAnswerer' | 'complexAnswerer', LanguageModel> = {
-  classifier: openai('gpt-4.1-mini'),
+  classifier: openai('gpt-5.4-mini'),
   simpleAnswerer: openai('gpt-4o-mini'),
   complexAnswerer: openai('o4-mini'),
 } as const;

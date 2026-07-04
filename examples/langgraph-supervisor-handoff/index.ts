@@ -57,7 +57,8 @@ export async function runLangGraphSupervisorHandoffExample() {
         },
       },
       dispatch: {
-        always: ({ context }) =>
+      type: 'choice',
+      choice: ({ context }) =>
           context.route === 'research'
             ? { target: 'researching' }
             : { target: 'writing' },

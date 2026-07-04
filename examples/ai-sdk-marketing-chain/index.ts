@@ -26,9 +26,9 @@ function qualityPasses(quality: z.infer<typeof qualitySchema> | null) {
 }
 
 export const models: Record<'copywriter' | 'evaluator' | 'improver', LanguageModel> = {
-  copywriter: openai('gpt-4.1-mini'),
-  evaluator: openai('gpt-4.1-mini'),
-  improver: openai('gpt-4.1-mini'),
+  copywriter: openai('gpt-5.4-mini'),
+  evaluator: openai('gpt-5.4-mini'),
+  improver: openai('gpt-5.4-mini'),
 } as const;
 
 const agent = setupAgent({
@@ -121,7 +121,8 @@ export const aiSdkMarketingChainMachine = agent.createMachine({
       },
     },
     checking: {
-      always: ({ context }) =>
+      type: 'choice',
+      choice: ({ context }) =>
         qualityPasses(context.quality)
           ? { target: 'done' }
           : { target: 'improving' },

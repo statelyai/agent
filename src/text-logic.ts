@@ -375,7 +375,7 @@ export type TextLogicOutput<TLogic extends TextLogic> =
  * export const tellJoke = createTextLogic({
  *   mode: 'stream',
  *   schemas: { input: z.object({ topic: z.string() }), output: z.string() },
- *   model: 'openai/gpt-4.1-mini',
+ *   model: 'openai/gpt-5.4-mini',
  *   system: 'You tell short, punchy jokes.',
  *   prompt: ({ input }) => `Tell a joke about ${input.topic}.`,
  * });

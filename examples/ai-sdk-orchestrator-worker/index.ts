@@ -44,7 +44,7 @@ function createPlannedFileChanges(
 }
 
 export const models: Record<'planner', LanguageModel> = {
-  planner: openai('gpt-4.1-mini'),
+  planner: openai('gpt-5.4-mini'),
 } as const;
 
 const agent = setupAgent({
@@ -99,7 +99,8 @@ export const aiSdkOrchestratorWorkerMachine = agent.createMachine({
       },
     },
     implementing: {
-      always: ({ context }) => ({
+      type: 'choice',
+      choice: ({ context }) => ({
         target: 'done',
         context: {
           changes: createPlannedFileChanges(

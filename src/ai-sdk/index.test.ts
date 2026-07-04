@@ -63,20 +63,20 @@ describe('toAiSdkToolChoice', () => {
 describe('toAiSdkCallSettings', () => {
   test('uses messages when present (identity mapping)', () => {
     const messages = [{ role: 'user' as const, content: 'hi' }];
-    const settings: Record<string, unknown> = toAiSdkCallSettings({ model: 'openai/gpt-4.1-mini', messages });
+    const settings: Record<string, unknown> = toAiSdkCallSettings({ model: 'openai/gpt-5.4-mini', messages });
     expect(settings.messages).toBe(messages as never);
     expect(settings).not.toHaveProperty('prompt');
   });
 
   test('falls back to prompt when messages are absent', () => {
-    const settings: Record<string, unknown> = toAiSdkCallSettings({ model: 'openai/gpt-4.1-mini', prompt: 'hello' });
+    const settings: Record<string, unknown> = toAiSdkCallSettings({ model: 'openai/gpt-5.4-mini', prompt: 'hello' });
     expect(settings.prompt).toBe('hello');
     expect(settings).not.toHaveProperty('messages');
   });
 
   test('maps model params and toolChoice', () => {
     const settings = toAiSdkCallSettings({
-      model: 'openai/gpt-4.1-mini',
+      model: 'openai/gpt-5.4-mini',
       prompt: 'hi',
       temperature: 0.2,
       maxTokens: 100,
@@ -98,7 +98,7 @@ describe('toAiSdkCallSettings', () => {
 
   test('builds AI SDK tools when request tools are present', () => {
     const settings = toAiSdkCallSettings({
-      model: 'openai/gpt-4.1-mini',
+      model: 'openai/gpt-5.4-mini',
       prompt: 'hi',
       tools: { lookup: { description: 'Look something up.' } },
     });
@@ -106,7 +106,7 @@ describe('toAiSdkCallSettings', () => {
   });
 
   test('omits tools when request has none', () => {
-    const settings = toAiSdkCallSettings({ model: 'openai/gpt-4.1-mini', prompt: 'hi' });
+    const settings = toAiSdkCallSettings({ model: 'openai/gpt-5.4-mini', prompt: 'hi' });
     expect(settings.tools).toBeUndefined();
   });
 });

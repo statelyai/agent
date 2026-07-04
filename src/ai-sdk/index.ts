@@ -88,7 +88,7 @@ export type AiSdkModelMap = Record<string, LanguageModel>;
 /**
  * Options for {@link createAiSdkExecutors}: either a static `models` map
  * (model refs resolved by lookup), a `resolveModel` function (refs resolved
- * dynamically, e.g. `"openai/gpt-4.1-mini"` → `openai('gpt-4.1-mini')`), or
+ * dynamically, e.g. `"openai/gpt-5.4-mini"` → `openai('gpt-5.4-mini')`), or
  * both — `resolveModel` takes precedence when both are supplied.
  */
 export type CreateAiSdkExecutorsOptions<
@@ -188,7 +188,7 @@ export interface AiSdkExecutors
  *
  * @example
  * ```ts
- * const executors = createAiSdkExecutors({ models: { quick: openai('gpt-4.1-mini') } });
+ * const executors = createAiSdkExecutors({ models: { quick: openai('gpt-5.4-mini') } });
  * const result = await runAgent(machine, { input, ...executors });
  * ```
  */

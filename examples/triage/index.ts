@@ -19,7 +19,7 @@ const schemas = createAgentSchemas({
 });
 
 export const models: Record<'ticketTriage', LanguageModel> = {
-  ticketTriage: openai('gpt-4.1-mini'),
+  ticketTriage: openai('gpt-5.4-mini'),
 } as const;
 
 export const triageTicket = createTextLogic({

@@ -78,13 +78,11 @@ export async function runBurrStreamingOverviewExample() {
     initial: 'checkSafety',
     states: {
       checkSafety: {
-        entry: ({ context }) => ({
-          context: { safe: !context.prompt.includes('unsafe') },
-        }),
-        always: ({ context }) =>
-          context.safe
-            ? { target: 'decideMode' }
-            : { target: 'unsafeResponse' },
+        type: 'choice',
+        choice: ({ context }) =>
+          !context.prompt.includes('unsafe')
+            ? { target: 'decideMode', context: { safe: true } }
+            : { target: 'unsafeResponse', context: { safe: false } },
       },
       decideMode: {
         invoke: {
@@ -97,7 +95,8 @@ export async function runBurrStreamingOverviewExample() {
         },
       },
       route: {
-        always: ({ context }) =>
+        type: 'choice',
+        choice: ({ context }) =>
           context.mode === 'unknown'
             ? { target: 'promptForMore' }
             : { target: 'answering' },
@@ -116,12 +115,18 @@ export async function runBurrStreamingOverviewExample() {
         },
       },
       promptForMore: {
-        entry: () => ({ context: { response: 'Please clarify.' } }),
-        always: { target: 'done' },
+        type: 'choice',
+        choice: () => ({
+          target: 'done',
+          context: { response: 'Please clarify.' },
+        }),
       },
       unsafeResponse: {
-        entry: () => ({ context: { response: 'I cannot respond to that.' } }),
-        always: { target: 'done' },
+        type: 'choice',
+        choice: () => ({
+          target: 'done',
+          context: { response: 'I cannot respond to that.' },
+        }),
       },
       done: {
         type: 'final',

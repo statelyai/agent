@@ -44,7 +44,8 @@ export async function runLangGraphConditionalRoutingExample() {
         },
       },
       routing: {
-        always: ({ context }) =>
+      type: 'choice',
+      choice: ({ context }) =>
           context.route === 'escalate'
             ? { target: 'escalated' }
             : { target: 'answered' },

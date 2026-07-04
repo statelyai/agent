@@ -26,17 +26,22 @@ const translationEvaluationSchema = z.object({
 function translationPasses(
   evaluation: z.infer<typeof translationEvaluationSchema> | null,
 ) {
-  return !!evaluation
-    && evaluation.qualityScore >= 8
-    && evaluation.preservesTone
-    && evaluation.preservesNuance
-    && evaluation.culturallyAccurate;
+  return (
+    !!evaluation &&
+    evaluation.qualityScore >= 8 &&
+    evaluation.preservesTone &&
+    evaluation.preservesNuance &&
+    evaluation.culturallyAccurate
+  );
 }
 
-export const models: Record<'translator' | 'evaluator' | 'improver', LanguageModel> = {
-  translator: openai('gpt-4.1-mini'),
-  evaluator: openai('gpt-4.1-mini'),
-  improver: openai('gpt-4.1-mini'),
+export const models: Record<
+  'translator' | 'evaluator' | 'improver',
+  LanguageModel
+> = {
+  translator: openai('gpt-5.4-mini'),
+  evaluator: openai('gpt-5.4-mini'),
+  improver: openai('gpt-5.4-mini'),
 } as const;
 
 const agent = setupAgent({
@@ -90,12 +95,13 @@ const agent = setupAgent({
         output: z.string(),
       },
       model: 'improver',
-      prompt: ({ input }) => [
-        `Original: ${input.original}`,
-        `Translation: ${input.translation}`,
-        `Issues: ${input.evaluation.specificIssues.join(', ')}`,
-        `Suggestions: ${input.evaluation.improvementSuggestions.join(', ')}`,
-      ].join('\n'),
+      prompt: ({ input }) =>
+        [
+          `Original: ${input.original}`,
+          `Translation: ${input.translation}`,
+          `Issues: ${input.evaluation.specificIssues.join(', ')}`,
+          `Suggestions: ${input.evaluation.improvementSuggestions.join(', ')}`,
+        ].join('\n'),
     },
   },
 });
@@ -153,9 +159,10 @@ export const aiSdkEvaluatorOptimizerMachine = agent.createMachine({
       },
     },
     checking: {
-      always: ({ context }) =>
-        translationPasses(context.evaluation)
-        || context.iterations >= context.maxIterations
+      type: 'choice',
+      choice: ({ context }) =>
+        translationPasses(context.evaluation) ||
+        context.iterations >= context.maxIterations
           ? { target: 'done' }
           : { target: 'improving' },
     },
@@ -195,7 +202,9 @@ export async function runAiSdkEvaluatorOptimizerExample() {
     generateText: createAiSdkTextExecutor({ models }),
   });
   if (result.status !== 'done') {
-    throw new Error(`Evaluator-optimizer example did not complete: ${result.status}`);
+    throw new Error(
+      `Evaluator-optimizer example did not complete: ${result.status}`,
+    );
   }
   return result.output;
 }

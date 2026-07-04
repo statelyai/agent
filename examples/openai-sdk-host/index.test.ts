@@ -41,7 +41,7 @@ describe('request -> OpenAI param mapping (pure helpers)', () => {
 
   test('toOpenAiCallSettings maps to max_completion_tokens, not max_tokens', () => {
     const settings = toOpenAiCallSettings({
-      model: 'gpt-4.1-mini',
+      model: 'gpt-5.4-mini',
       temperature: 0.5,
       maxTokens: 100,
       topP: 0.9,

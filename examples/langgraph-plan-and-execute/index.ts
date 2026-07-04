@@ -70,7 +70,8 @@ export async function runLangGraphPlanAndExecuteExample() {
         },
       },
       checking: {
-        always: ({ context }) =>
+      type: 'choice',
+      choice: ({ context }) =>
           context.steps.length > 0 ? { target: 'running' } : { target: 'done' },
       },
       done: {

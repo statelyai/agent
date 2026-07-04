@@ -40,7 +40,8 @@ export async function runBurrCounterExample() {
         },
       },
       checking: {
-        always: ({ context }) =>
+      type: 'choice',
+      choice: ({ context }) =>
           context.counter < context.countUpTo
             ? { target: 'counter' }
             : { target: 'result' },

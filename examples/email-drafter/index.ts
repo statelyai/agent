@@ -82,9 +82,9 @@ const eventSchemas = {
 const outputSchema = z.object({ sentEmails: z.array(emailDraftSchema) });
 
 export const models: Record<'promptEvaluator' | 'emailDrafter' | 'draftStreamer', LanguageModel> = {
-  promptEvaluator: openai('gpt-4.1-mini'),
-  emailDrafter: openai('gpt-4.1-mini'),
-  draftStreamer: openai('gpt-4.1-mini'),
+  promptEvaluator: openai('gpt-5.4-mini'),
+  emailDrafter: openai('gpt-5.4-mini'),
+  draftStreamer: openai('gpt-5.4-mini'),
 } as const;
 
 export const evaluatePrompt = createTextLogic({

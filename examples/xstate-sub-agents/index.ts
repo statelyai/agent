@@ -192,7 +192,8 @@ function createWriterAgent() {
         },
       },
       routingReview: {
-        always: ({ context }) =>
+      type: 'choice',
+      choice: ({ context }) =>
           context.review?.approved
             ? { target: 'done', context: { final: context.draft } }
             : { target: 'revising' },

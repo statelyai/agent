@@ -46,7 +46,7 @@ const machine = agent.createMachine({
         id: 'draft',
         src: 'agent.generateText',
         input: ({ context }) => ({
-          model: 'openai/gpt-4.1-mini',
+          model: 'openai/gpt-5.4-mini',
           prompt: context.prompt,
           outputSchema: resultSchema,
           temperature: 0.2,
@@ -195,7 +195,7 @@ Use `metadata` for host-specific details. It's intentionally uninterpreted by `@
 ```ts
 const draftText = createTextLogic({
   schemas: { input: draftInputSchema, output: resultSchema },
-  model: 'openai/gpt-4.1-mini',
+  model: 'openai/gpt-5.4-mini',
   prompt: ({ input }) => input.prompt,
   metadata: ({ input }) => ({ traceId: input.requestId }),
 });

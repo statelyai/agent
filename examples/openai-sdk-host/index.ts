@@ -330,7 +330,7 @@ export async function runStreamingDemo(client: OpenAI) {
   let text = '';
   await streamText(
     {
-      model: 'gpt-4.1-mini',
+      model: 'gpt-5.4-mini',
       system: 'You tell short, punchy jokes.',
       prompt: 'Tell a joke about state machines.',
       tools: {},

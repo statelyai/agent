@@ -215,7 +215,7 @@ choosingMove: {
   invoke: {
     src: 'agent.decide',
     input: ({ context }) => ({
-      model: 'openai/gpt-4.1-mini',
+      model: 'openai/gpt-5.4-mini',
       system: 'Choose exactly one legal move.',
       prompt: `Player ${context.playerHp} / Enemy ${context.enemyHp}`,
       allowedEvents: context.playerHp <= 6 ? lowHpMoves : defaultMoves, // optional

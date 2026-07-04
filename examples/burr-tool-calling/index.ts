@@ -105,7 +105,8 @@ export async function runBurrToolCallingExample() {
         },
       },
       dispatch: {
-        always: ({ context }) =>
+      type: 'choice',
+      choice: ({ context }) =>
           context.selected?.tool === 'queryWeather'
             ? { target: 'queryingWeather' }
             : { target: 'fallingBack' },

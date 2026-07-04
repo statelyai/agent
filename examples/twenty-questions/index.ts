@@ -54,7 +54,7 @@ const playAgainClassificationSchema = z.object({
 });
 
 const models = {
-  quick: openai('gpt-4.1-mini'),
+  quick: openai('gpt-5.4-mini'),
 } as const;
 
 export const twentyQuestionsSchemas = createAgentSchemas({

@@ -18,7 +18,7 @@ const schemas = createAgentSchemas({
 });
 
 export const models: Record<'jokeWriter', LanguageModel> = {
-  jokeWriter: openai('gpt-4.1-mini'),
+  jokeWriter: openai('gpt-5.4-mini'),
 } as const;
 
 export const tellJoke = createTextLogic({
@@ -78,7 +78,8 @@ export const jokeMachine = jokeAgent.createMachine({
       },
     },
     checkingFeedback: {
-      always: ({ context }) =>
+      type: 'choice',
+      choice: ({ context }) =>
         /\b(done|stop|enough|no more|finished|quit|ok(?:ay)?\b.*\bdone)\b/i
           .test(context.feedback ?? '')
           ? { target: 'done' }

@@ -36,7 +36,7 @@ type SubAgents = Record<SubAgentName, Agent>;
 type SuperviseLogic = TextLogic<typeof taskInputSchema, typeof answerSchema>;
 
 export const models: Record<'supervisor', LanguageModel> = {
-  supervisor: openai('gpt-4.1-mini'),
+  supervisor: openai('gpt-5.4-mini'),
 } as const;
 
 export function createAiSdkSubAgents(model: LanguageModel): SubAgents {

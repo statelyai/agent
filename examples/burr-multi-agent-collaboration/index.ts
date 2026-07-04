@@ -69,7 +69,8 @@ export async function runBurrMultiAgentCollaborationExample() {
         },
       },
       dispatch: {
-        always: ({ context }) =>
+      type: 'choice',
+      choice: ({ context }) =>
           context.route === 'chartGenerator'
             ? { target: 'charting' }
             : { target: 'researching' },

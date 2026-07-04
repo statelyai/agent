@@ -41,7 +41,7 @@ function createCodeReviews(code: string): Array<z.infer<typeof reviewSchema>> {
 }
 
 export const models: Record<'summarizer', LanguageModel> = {
-  summarizer: openai('gpt-4.1-mini'),
+  summarizer: openai('gpt-5.4-mini'),
 } as const;
 
 const agent = setupAgent({
@@ -85,7 +85,8 @@ export const aiSdkParallelReviewMachine = agent.createMachine({
   initial: 'reviewing',
   states: {
     reviewing: {
-      always: ({ context }) => ({
+      type: 'choice',
+      choice: ({ context }) => ({
         target: 'summarizing',
         context: { reviews: createCodeReviews(context.code) },
       }),
