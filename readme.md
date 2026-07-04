@@ -33,7 +33,7 @@ const agent = setupAgent({
   requests: {
     answerQuestion: {
       schemas: { input: z.object({ prompt: z.string() }), output: answerSchema },
-      model: 'openai/gpt-4.1-mini',
+      model: 'openai/gpt-5.4-mini',
       prompt: ({ input }) => input.prompt,
     },
   },
@@ -145,7 +145,7 @@ if (result.status === 'done') {
 
 Between iterations you're free to persist `result.snapshot` anywhere — a database row, a queue message, `localStorage` — and resume in a different process later. `runAgent` stops its actor on every settle (`done`/`idle`/`error`); resuming is always by snapshot, never by holding a live actor around.
 
-For inline human input without settling (a CLI prompt mid-run, say), invoke the builtin `agent.userInput` actor and supply `RunAgentOptions.userInput`. If a machine uses `agent.userInput` with neither that option nor a provided actor source, `runAgent` fails at bind time recommending the idle-state pattern instead.
+For inline human input without settling (a CLI prompt mid-run, say), invoke the builtin `agent.userInput` actor and supply `RunAgentOptions.userInput`. Without that option, an `agent.userInput` invoke becomes a pending placeholder: it never blocks idle detection (sibling parallel regions keep working), and the run settles `{ status: 'idle', pendingUserInputs, persistedSnapshot }` — persist `persistedSnapshot` and resume with a `userInput` handler to answer the pending prompt.
 
 See [`examples/langgraph-human-in-the-loop/index.ts`](examples/langgraph-human-in-the-loop/index.ts) and [`examples/langgraph-snapshot-persistence/index.ts`](examples/langgraph-snapshot-persistence/index.ts).
 
@@ -181,7 +181,7 @@ For app code, prefer model aliases shared between `setupAgent(...)` and the host
 
 ```ts
 const models = {
-  quick: openai('gpt-4.1-mini'),
+  quick: openai('gpt-5.4-mini'),
   careful: openai('gpt-4.1'),
 } as const;
 

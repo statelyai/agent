@@ -76,12 +76,12 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine>
 
   /**
    * Optional human-input handler for `agent.userInput` invokes (CLI prompt,
-   * web form, Slack, …). Idle-first HITL stays the default: model human input
-   * as event-waiting states and `runAgent` settles `idle`. Provide this only
-   * when input should be gathered inline without settling. If the machine
-   * uses `agent.userInput` and neither this nor a provided actor source
-   * handles it, binding fails fast (message recommends the idle-state
-   * pattern).
+   * web form, Slack, …). With a handler, input is gathered inline without
+   * settling. Without one, an `agent.userInput` invoke becomes a *pending
+   * placeholder*: it waits indefinitely, does not block idle detection, and
+   * the run settles `{ status: 'idle', pendingUserInputs, persistedSnapshot }`
+   * once no other work is in flight — resume by passing `persistedSnapshot`
+   * back as `snapshot` together with a `userInput` handler that answers it.
    */
   userInput?: AgentUserInputExecutor;
 
@@ -122,9 +122,27 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine>
  * actor is stopped on every settle path — there is no live actor to resume;
  * resume is always by snapshot.
  */
+/** A pending unhandled `agent.userInput` invoke surfaced on an idle settle — `id` is the invoke's id, `input` its resolved invoke input (prompt, schema, …). Answer it by resuming with a `userInput` handler. */
+export interface PendingUserInput {
+  id: string;
+  input: AgentUserInput | undefined;
+}
+
 export type RunAgentResult<TMachine extends AnyStateMachine> =
   | { status: 'done'; output: OutputFrom<TMachine>; snapshot: SnapshotFrom<TMachine> }
-  | { status: 'idle'; snapshot: SnapshotFrom<TMachine> }
+  | {
+      status: 'idle';
+      snapshot: SnapshotFrom<TMachine>;
+      /** Present when the machine is waiting on unhandled `agent.userInput` invokes: one entry per pending invoke. */
+      pendingUserInputs?: PendingUserInput[];
+      /**
+       * Present alongside `pendingUserInputs`: the JSON-serializable persisted
+       * snapshot (in-flight children included). Persist THIS one and resume
+       * with `runAgent(machine, { snapshot: persistedSnapshot, userInput })` —
+       * the live `snapshot` above cannot round-trip active children.
+       */
+      persistedSnapshot?: Snapshot<unknown>;
+    }
   | {
       status: 'error';
       cause: 'aborted' | 'max-model-calls' | 'machine';
@@ -183,7 +201,7 @@ function collectConfiguredInvokeSrcs(
 function assertBindable(
   machine: AnyStateMachine,
   effectiveSources: Record<string, AnyActorLogic>,
-  options: { hasDecide: boolean; hasStreamText: boolean; hasUserInput: boolean }
+  options: { hasDecide: boolean; hasStreamText: boolean }
 ): void {
   const invokes: Array<{ stateName: string; src: string | AnyActorLogic }> = [];
   collectConfiguredInvokeSrcs(machine.config as never, machine.config.id ?? '(root)', invokes);
@@ -220,15 +238,9 @@ function assertBindable(
     }
 
     if (src === USER_INPUT_ACTOR) {
-      if (!options.hasUserInput && isUnboundPlaceholder(logic)) {
-        throw new Error(
-          `runAgent: state '${stateName}' invokes '${USER_INPUT_ACTOR}' but no ` +
-            `'userInput' option or actor source was provided. Either pass ` +
-            `{ userInput: async (input) => ... } to runAgent, provide an actor ` +
-            `source for '${USER_INPUT_ACTOR}', or model this as an idle state ` +
-            `that waits for an externally-sent event instead.`
-        );
-      }
+      // Handled or not, `agent.userInput` is always bindable: without a
+      // `userInput` option or actor source it is bound as a pending
+      // placeholder that settles the run idle (see the binding step below).
       continue;
     }
 
@@ -425,9 +437,10 @@ function createRunAgentDecisionLogic(
  * Binding happens **before** the actor starts: every invoke the machine
  * could reach is walked and checked against the effective actor sources
  * (`options.actorSources` merged onto the machine), so a missing
- * `streamText`/`decide` executor, an unhandled `agent.userInput`, or any
- * other unbound actor source throws immediately — a bind-time error, not a
- * mid-run failure.
+ * `streamText`/`decide` executor or any other unbound actor source throws
+ * immediately — a bind-time error, not a mid-run failure. The one exception
+ * is `agent.userInput`: unhandled, it binds as a pending placeholder that
+ * settles the run idle (with `pendingUserInputs`) instead of erroring.
  *
  * @example
  * ```ts
@@ -474,7 +487,6 @@ export async function runAgent<TMachine extends AnyStateMachine>(
   assertBindable(provided, effectiveSources, {
     hasDecide: !!options.decide,
     hasStreamText: !!options.streamText,
-    hasUserInput: !!options.userInput,
   });
 
   const actorHolder: { actorRef: AnyActorRef | undefined } = { actorRef: undefined };
@@ -492,6 +504,10 @@ export async function runAgent<TMachine extends AnyStateMachine>(
   // §3.2 step 2: wrap every effective TextLogic/DecisionLogic (and the
   // agent.* builtins) with a host-backed executor. Every other source (plain
   // actors, non-agent logic) passes through untouched.
+  // True when unhandled `agent.userInput` invokes are bound as pending
+  // placeholders: they wait indefinitely and must not block idle detection.
+  let userInputIsPlaceholder = false;
+
   const wrappedSources: Record<string, AnyActorLogic> = {};
   for (const [key, logic] of Object.entries(effectiveSources)) {
     if (key === USER_INPUT_ACTOR) {
@@ -499,6 +515,17 @@ export async function runAgent<TMachine extends AnyStateMachine>(
         const userInput = options.userInput;
         wrappedSources[key] = createAsyncLogic<unknown, AgentUserInput>({
           run: async ({ input }) => await userInput(input),
+        });
+      } else if (isUnboundPlaceholder(logic)) {
+        // The blessed HITL placeholder: with no handler, an `agent.userInput`
+        // invoke waits forever. Idle detection ignores it, so the run settles
+        // `{ status: 'idle', pendingUserInputs, persistedSnapshot }` once no
+        // OTHER work is in flight (a sibling parallel region keeps running).
+        // Resume with the persisted snapshot plus a `userInput` handler; the
+        // restored invoke re-runs against the handler and completes.
+        userInputIsPlaceholder = true;
+        wrappedSources[key] = createAsyncLogic<unknown, AgentUserInput>({
+          run: () => new Promise<never>(() => {}),
         });
       }
       continue;
@@ -560,10 +587,19 @@ export async function runAgent<TMachine extends AnyStateMachine>(
           return;
         }
         const current = actor.getSnapshot() as AnyMachineSnapshot;
-        if (isIdleSnapshot(current)) {
+        if (isIdleSnapshot(current, { ignoreUserInputChildren: userInputIsPlaceholder })) {
+          const pendingUserInputs = userInputIsPlaceholder
+            ? collectPendingUserInputs(current)
+            : [];
           settle({
             status: 'idle',
             snapshot: current as SnapshotFrom<TMachine>,
+            ...(pendingUserInputs.length > 0
+              ? {
+                  pendingUserInputs,
+                  persistedSnapshot: actor.getPersistedSnapshot() as Snapshot<unknown>,
+                }
+              : {}),
           });
         }
       }, 0);
@@ -650,14 +686,24 @@ export async function runAgent<TMachine extends AnyStateMachine>(
   });
 }
 
-// True when a snapshot is active but has no in-flight children and no pending eventless/after work — see §3.3 in docs/p0-design.md for the approximation this makes.
-function isIdleSnapshot(snapshot: AnyMachineSnapshot): boolean {
+// True when a snapshot is active but has no in-flight children and no pending eventless/after work — see §3.3 in docs/p0-design.md for the approximation this makes. `ignoreUserInputChildren` exempts pending `agent.userInput` placeholder children (they wait for a human indefinitely and must not block an idle settle).
+function isIdleSnapshot(
+  snapshot: AnyMachineSnapshot,
+  { ignoreUserInputChildren }: { ignoreUserInputChildren: boolean }
+): boolean {
   if (snapshot.status !== 'active') {
     return false;
   }
-  const childrenBusy = Object.values(snapshot.children ?? {}).some(
-    (child) => (child as AnyActorRef | undefined)?.getSnapshot?.()?.status === 'active'
-  );
+  const childrenBusy = Object.values(snapshot.children ?? {}).some((child) => {
+    const ref = child as AnyActorRef | undefined;
+    if (
+      ignoreUserInputChildren
+      && (ref as { src?: unknown } | undefined)?.src === USER_INPUT_ACTOR
+    ) {
+      return false;
+    }
+    return ref?.getSnapshot?.()?.status === 'active';
+  });
   if (childrenBusy) {
     return false;
   }
@@ -667,4 +713,25 @@ function isIdleSnapshot(snapshot: AnyMachineSnapshot): boolean {
       || transitionDef.eventType.startsWith('xstate.after')
   );
   return !hasPendingWork;
+}
+
+// Gathers the still-active `agent.userInput` placeholder children off an idle snapshot: one {@link PendingUserInput} per pending invoke, with the invoke's resolved input (prompt, schema, …) read off the child's own snapshot.
+function collectPendingUserInputs(snapshot: AnyMachineSnapshot): PendingUserInput[] {
+  const pending: PendingUserInput[] = [];
+  for (const [id, child] of Object.entries(snapshot.children ?? {})) {
+    const ref = child as
+      | (AnyActorRef & { src?: unknown })
+      | undefined;
+    if (ref?.src !== USER_INPUT_ACTOR) {
+      continue;
+    }
+    const childSnapshot = ref.getSnapshot?.() as
+      | { status?: unknown; input?: unknown }
+      | undefined;
+    if (childSnapshot?.status !== 'active') {
+      continue;
+    }
+    pending.push({ id, input: childSnapshot.input as AgentUserInput | undefined });
+  }
+  return pending;
 }

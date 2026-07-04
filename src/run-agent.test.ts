@@ -425,7 +425,7 @@ describe('runAgent', () => {
       ).rejects.toThrow(/chooseMove/);
     });
 
-    test('a machine invoking agent.userInput with no userInput option throws naming the actor', async () => {
+    test('a machine invoking agent.userInput with no userInput option settles idle with pendingUserInputs (blessed placeholder, not a bind error)', async () => {
       const schemas = createAgentSchemas({
         context: z.object({ feedback: z.string().nullable() }),
         input: z.object({}),
@@ -448,9 +448,17 @@ describe('runAgent', () => {
         },
       });
 
-      await expect(
-        runAgent(machine, { input: {}, generateText: async () => ({}) })
-      ).rejects.toThrow(/agent\.userInput/);
+      const result = await runAgent(machine, {
+        input: {},
+        generateText: async () => ({}),
+      });
+
+      expect(result.status).toBe('idle');
+      if (result.status !== 'idle') throw new Error('expected idle');
+      expect(result.pendingUserInputs).toEqual([
+        { id: 'ask', input: { prompt: 'How was it?' } },
+      ]);
+      expect(result.persistedSnapshot).toBeDefined();
     });
 
     test('a machine invoking an unregistered string src throws naming the source', async () => {
@@ -860,5 +868,138 @@ describe('runAgent', () => {
     expect(result.status).toBe('done');
     expect(result.status === 'done' ? result.snapshot.context.attackCount : undefined).toBe(1);
     expect(attackEventsObserved).toBe(1);
+  });
+});
+
+describe('agent.userInput as a pending placeholder (durable parallel HITL)', () => {
+  const schemas = createAgentSchemas({
+    context: z.object({
+      summary: z.string().nullable(),
+      feedback: z.string().nullable(),
+    }),
+    input: z.object({}),
+    output: z.object({ summary: z.string(), feedback: z.string() }),
+  });
+
+  const agent = setupAgent({
+    schemas,
+    requests: {
+      summarize: {
+        schemas: { input: z.object({}), output: z.string() },
+        model: 'm',
+        prompt: () => 'summarize',
+      },
+    },
+  });
+
+  const machine = agent.createMachine({
+    context: { summary: null, feedback: null },
+    type: 'parallel',
+    output: ({ context }) => ({
+      summary: context.summary ?? '',
+      feedback: context.feedback ?? '',
+    }),
+    states: {
+      working: {
+        initial: 'summarizing',
+        states: {
+          summarizing: {
+            invoke: {
+              id: 'sum',
+              src: 'summarize',
+              input: {},
+              onDone: ({ output }) => ({
+                target: 'summarized',
+                context: { summary: output },
+              }),
+            },
+          },
+          summarized: { type: 'final' },
+        },
+      },
+      reviewing: {
+        initial: 'asking',
+        states: {
+          asking: {
+            invoke: {
+              id: 'askHuman',
+              src: 'agent.userInput',
+              input: { prompt: 'Feedback?' },
+              onDone: ({ output }) => ({
+                target: 'received',
+                context: { feedback: (output as { feedback: string }).feedback },
+              }),
+            },
+          },
+          received: { type: 'final' },
+        },
+      },
+    },
+  });
+
+  test('a sibling region finishes its model call, then the run settles idle with the pending user input', async () => {
+    const result = await runAgent(machine, {
+      input: {},
+      generateText: async () => ({ text: 'a summary' }),
+    });
+
+    expect(result.status).toBe('idle');
+    if (result.status !== 'idle') throw new Error('expected idle');
+    // The sibling region's work ran to completion before settling.
+    expect((result.snapshot.context as { summary: string | null }).summary).toBe(
+      'a summary'
+    );
+    expect(result.pendingUserInputs).toEqual([
+      { id: 'askHuman', input: { prompt: 'Feedback?' } },
+    ]);
+    expect(result.persistedSnapshot).toBeDefined();
+  });
+
+  test('the persisted snapshot JSON round-trips and resumes with a userInput handler to done', async () => {
+    const first = await runAgent(machine, {
+      input: {},
+      generateText: async () => ({ text: 'a summary' }),
+    });
+    if (first.status !== 'idle' || !first.persistedSnapshot) {
+      throw new Error('expected idle with persistedSnapshot');
+    }
+
+    const stored = JSON.parse(JSON.stringify(first.persistedSnapshot));
+
+    const second = await runAgent(machine, {
+      snapshot: stored,
+      generateText: async () => {
+        throw new Error('no model call expected on resume');
+      },
+      userInput: async (input) => {
+        expect(input).toEqual({ prompt: 'Feedback?' });
+        return { feedback: 'ship it' };
+      },
+    });
+
+    expect(second.status).toBe('done');
+    if (second.status !== 'done') throw new Error('expected done');
+    expect(second.output).toEqual({ summary: 'a summary', feedback: 'ship it' });
+  });
+
+  test('resuming without a handler settles idle again with the same pending input', async () => {
+    const first = await runAgent(machine, {
+      input: {},
+      generateText: async () => ({ text: 'a summary' }),
+    });
+    if (first.status !== 'idle' || !first.persistedSnapshot) {
+      throw new Error('expected idle with persistedSnapshot');
+    }
+
+    const again = await runAgent(machine, {
+      snapshot: JSON.parse(JSON.stringify(first.persistedSnapshot)),
+      generateText: async () => ({ text: 'unused' }),
+    });
+
+    expect(again.status).toBe('idle');
+    if (again.status !== 'idle') throw new Error('expected idle');
+    expect(again.pendingUserInputs).toEqual([
+      { id: 'askHuman', input: { prompt: 'Feedback?' } },
+    ]);
   });
 });

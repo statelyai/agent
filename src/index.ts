@@ -56,7 +56,7 @@ export type {
   AgentRequestSource,
 } from './events.js';
 export type { AgentRequest, AgentStep, AgentStepRequest } from './steps.js';
-export type { AgentUserInputExecutor, RunAgentOptions, RunAgentResult } from './run-agent.js';
+export type { AgentUserInputExecutor, PendingUserInput, RunAgentOptions, RunAgentResult } from './run-agent.js';
 export type {
   AgentWorkflowActionConfig,
   AgentWorkflowActorConfig,
