@@ -4,16 +4,18 @@
 
 Each example lives in a flat `examples/*` directory with an `index.ts` or `index.mts` entrypoint and a `metadata.json` file describing its origin and comparison purpose.
 
+Every example is dual-mode: run it directly against a real model with `OPENAI_API_KEY=... npx tsx examples/<name>/index.ts`, while its tests use injected mocks.
+
 ## Start Here
 
 - Decisions — the model choosing exactly one legal machine event: [`twenty-questions/index.ts`](/Users/davidkpiano/Code/agent/examples/twenty-questions/index.ts)
 - Minimal streaming text workflow: [`joke/index.ts`](/Users/davidkpiano/Code/agent/examples/joke/index.ts)
 - Authoring reusable requests, parts-based messages, and schema-typed state meta: [`email-drafter/index.ts`](/Users/davidkpiano/Code/agent/examples/email-drafter/index.ts)
-- Human-in-the-loop, the idle-first way: [`langgraph-human-in-the-loop/index.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-human-in-the-loop/index.ts)
+- Human-in-the-loop, the idle-first way: [`human-in-the-loop/index.ts`](/Users/davidkpiano/Code/agent/examples/human-in-the-loop/index.ts)
 - Running with host actors: [`ai-sdk-host/index.ts`](/Users/davidkpiano/Code/agent/examples/ai-sdk-host/index.ts)
 - Machines as data — a full workflow (decision, text request, idle human step) authored as a real `.json` file: [`json-agent/index.ts`](/Users/davidkpiano/Code/agent/examples/json-agent/index.ts)
 - Host actor guide: [`../docs/host-actors.md`](/Users/davidkpiano/Code/agent/docs/host-actors.md)
-- Framework comparison examples: [`langgraph-conditional-routing/index.test.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-conditional-routing/index.test.ts), [`burr-counter/index.test.ts`](/Users/davidkpiano/Code/agent/examples/burr-counter/index.test.ts), [`crewai-content-creator/index.test.ts`](/Users/davidkpiano/Code/agent/examples/crewai-content-creator/index.test.ts), [`dinavinter-test-agent/index.test.ts`](/Users/davidkpiano/Code/agent/examples/dinavinter-test-agent/index.test.ts)
+- Framework comparison examples: [`supervisor/index.test.ts`](/Users/davidkpiano/Code/agent/examples/supervisor/index.test.ts), [`plan-and-execute/index.test.ts`](/Users/davidkpiano/Code/agent/examples/plan-and-execute/index.test.ts), [`rag/index.test.ts`](/Users/davidkpiano/Code/agent/examples/rag/index.test.ts), [`tool-calling/index.test.ts`](/Users/davidkpiano/Code/agent/examples/tool-calling/index.test.ts)
 
 ## XState Examples
 
@@ -25,10 +27,12 @@ These use `setupAgent(...)` (or plain XState `setup(...)` plus `createTextLogic(
 - [`joke/index.ts`](/Users/davidkpiano/Code/agent/examples/joke/index.ts): minimal streaming text workflow
 - [`triage/index.ts`](/Users/davidkpiano/Code/agent/examples/triage/index.ts): structured-output support ticket triage
 - [`json-agent/index.ts`](/Users/davidkpiano/Code/agent/examples/json-agent/index.ts): `setupAgent.fromConfig(...)` lowering a support-ticket workflow authored as a real `.json` file (decision, text request, idle human approval step)
-- [`langgraph-conditional-routing/index.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-conditional-routing/index.ts): LangGraph-style conditional edge
-- [`burr-conversational-rag/index.ts`](/Users/davidkpiano/Code/agent/examples/burr-conversational-rag/index.ts): Burr-style RAG with memory in context
-- [`crewai-content-creator/index.ts`](/Users/davidkpiano/Code/agent/examples/crewai-content-creator/index.ts): CrewAI Flow-style route-and-generate workflow
-- [`email-drafter-smoke/index.mts`](/Users/davidkpiano/Code/agent/examples/email-drafter-smoke/index.mts): deterministic local XState runtime smoke test
+- [`supervisor/index.ts`](/Users/davidkpiano/Code/agent/examples/supervisor/index.ts): a routing request's structured output hands off to a format-specific worker
+- [`human-in-the-loop/index.ts`](/Users/davidkpiano/Code/agent/examples/human-in-the-loop/index.ts): draft → idle review (typed `meta.interaction`) → APPROVE/REJECT redraft, with a JSON snapshot round-trip
+- [`rag/index.ts`](/Users/davidkpiano/Code/agent/examples/rag/index.ts): retrieve (typed plain actor, keyword scoring over a sample corpus) → grounded answer, with conversational memory in context
+- [`tool-calling/index.ts`](/Users/davidkpiano/Code/agent/examples/tool-calling/index.ts): model selects a tool (structured output), typed tool actors execute, progress via `onTransition`
+- [`plan-and-execute/index.ts`](/Users/davidkpiano/Code/agent/examples/plan-and-execute/index.ts): planner structured output, execution states iterate the plan (keeps the ReWOO evidence-map idea)
+- [`sql-agent/index.ts`](/Users/davidkpiano/Code/agent/examples/sql-agent/index.ts): query generation, DB execution, and answer synthesis as separate typed states
 - [`ai-sdk-host/index.ts`](/Users/davidkpiano/Code/agent/examples/ai-sdk-host/index.ts): Vercel AI SDK host actors
 - [`ai-sdk-sub-agents/index.ts`](/Users/davidkpiano/Code/agent/examples/ai-sdk-sub-agents/index.ts): Vercel AI SDK ToolLoopAgent workers exposed as host-owned tools
 - [`ai-sdk-marketing-chain/index.ts`](/Users/davidkpiano/Code/agent/examples/ai-sdk-marketing-chain/index.ts): Vercel AI SDK sequential chain as an explicit XState machine
@@ -41,48 +45,33 @@ These use `setupAgent(...)` (or plain XState `setup(...)` plus `createTextLogic(
 - [`openai-sdk-host/index.ts`](/Users/davidkpiano/Code/agent/examples/openai-sdk-host/index.ts): the executor contract implemented directly against the raw `openai` package (Chat Completions API), no Vercel AI SDK in between
 - [`anthropic-sdk-host/index.ts`](/Users/davidkpiano/Code/agent/examples/anthropic-sdk-host/index.ts): the executor contract implemented directly against the raw `@anthropic-ai/sdk` package (Messages API), no Vercel AI SDK in between
 - [`cloudflare-workers-ai-host/index.ts`](/Users/davidkpiano/Code/agent/examples/cloudflare-workers-ai-host/index.ts): Cloudflare Workers AI step runner
-- [`tanstack-ai-host/index.ts`](/Users/davidkpiano/Code/agent/examples/tanstack-ai-host/index.ts): sketch against TanStack AI's chat interface (the real package isn't installed here)
 - [`cloudflare-agent-host/index.ts`](/Users/davidkpiano/Code/agent/examples/cloudflare-agent-host/index.ts): Cloudflare Agents host, persisting XState snapshots in Durable Object state
-- [`xstate-sub-agents/index.ts`](/Users/davidkpiano/Code/agent/examples/xstate-sub-agents/index.ts): multi-step agent machines invoking other agent machines as XState child actors
+- [`subflows/index.ts`](/Users/davidkpiano/Code/agent/examples/subflows/index.ts): multi-step agent machines invoking other agent machines as XState child actors, each keeping its own executor binding
 
 ## Comparison Examples
 
-LangGraph:
+These map LangGraph, Burr, and CrewAI Flow patterns onto XState. The dedicated per-framework ports were consolidated into pattern examples; the parity docs below carry the framework-by-framework mapping.
 
-- [`langgraph-conditional-routing/index.test.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-conditional-routing/index.test.ts)
-- [`langgraph-human-in-the-loop/index.test.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-human-in-the-loop/index.test.ts)
-- [`langgraph-plan-and-execute/index.test.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-plan-and-execute/index.test.ts)
-- [`langgraph-tool-calling-progress/index.test.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-tool-calling-progress/index.test.ts)
-- [`langgraph-snapshot-persistence/index.test.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-snapshot-persistence/index.test.ts)
-- [`langgraph-subflows/index.test.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-subflows/index.test.ts)
-- [`langgraph-supervisor-handoff/index.test.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-supervisor-handoff/index.test.ts)
-- [`langgraph-map-reduce/index.test.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-map-reduce/index.test.ts)
-- [`langgraph-rag/index.test.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-rag/index.test.ts)
-- [`langgraph-reflection-loop/index.test.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-reflection-loop/index.test.ts)
-- [`langgraph-rewoo/index.test.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-rewoo/index.test.ts)
-- [`langgraph-sql-agent/index.test.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-sql-agent/index.test.ts)
-- [`langgraph-persistent-multi-agent-network/index.test.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-persistent-multi-agent-network/index.test.ts)
-- [`langgraph-streaming-side-channel/index.test.ts`](/Users/davidkpiano/Code/agent/examples/langgraph-streaming-side-channel/index.test.ts)
+Multi-step agent patterns:
 
-Burr:
+- [`supervisor/index.test.ts`](/Users/davidkpiano/Code/agent/examples/supervisor/index.test.ts): supervisor routing / handoff (LangGraph supervisor-handoff, Burr multi-agent collaboration, CrewAI content creator)
+- [`swarm-handoff/index.test.ts`](/Users/davidkpiano/Code/agent/examples/swarm-handoff/index.test.ts): persistent multi-agent network handing off across turns
+- [`plan-and-execute/index.test.ts`](/Users/davidkpiano/Code/agent/examples/plan-and-execute/index.test.ts): plan-and-execute, keeping the ReWOO evidence-map idea
+- [`subflows/index.test.ts`](/Users/davidkpiano/Code/agent/examples/subflows/index.test.ts): nested subgraphs / child flows
+- [`rag/index.test.ts`](/Users/davidkpiano/Code/agent/examples/rag/index.test.ts): retrieval-augmented generation (LangGraph RAG, Burr conversational RAG)
+- [`tool-calling/index.test.ts`](/Users/davidkpiano/Code/agent/examples/tool-calling/index.test.ts): tool calling with intermediate progress (Burr tool calling, LangGraph tool-calling-progress)
+- [`sql-agent/index.test.ts`](/Users/davidkpiano/Code/agent/examples/sql-agent/index.test.ts): SQL / tool-heavy agent workflow
+- [`human-in-the-loop/index.test.ts`](/Users/davidkpiano/Code/agent/examples/human-in-the-loop/index.test.ts): human-in-the-loop plus snapshot persistence
+- [`parallel-streams/index.test.ts`](/Users/davidkpiano/Code/agent/examples/parallel-streams/index.test.ts): parallel worker streams over a side channel
+- [`sse-transport/index.test.ts`](/Users/davidkpiano/Code/agent/examples/sse-transport/index.test.ts): relaying provider stream chunks over SSE
 
-- [`burr-counter/index.test.ts`](/Users/davidkpiano/Code/agent/examples/burr-counter/index.test.ts)
-- [`burr-conversational-rag/index.test.ts`](/Users/davidkpiano/Code/agent/examples/burr-conversational-rag/index.test.ts)
-- [`burr-streaming-overview/index.test.ts`](/Users/davidkpiano/Code/agent/examples/burr-streaming-overview/index.test.ts)
-- [`burr-tool-calling/index.test.ts`](/Users/davidkpiano/Code/agent/examples/burr-tool-calling/index.test.ts)
-- [`burr-typed-state/index.test.ts`](/Users/davidkpiano/Code/agent/examples/burr-typed-state/index.test.ts)
-- [`burr-multi-agent-collaboration/index.test.ts`](/Users/davidkpiano/Code/agent/examples/burr-multi-agent-collaboration/index.test.ts)
+AI SDK pattern set (fan-out, routing, reflection, map-reduce shapes):
 
-CrewAI Flow:
-
-- [`crewai-content-creator/index.test.ts`](/Users/davidkpiano/Code/agent/examples/crewai-content-creator/index.test.ts)
-- [`crewai-write-a-book/index.test.ts`](/Users/davidkpiano/Code/agent/examples/crewai-write-a-book/index.test.ts)
-
-dinavinter/agents:
-
-- [`dinavinter-test-agent/index.test.ts`](/Users/davidkpiano/Code/agent/examples/dinavinter-test-agent/index.test.ts)
-- [`dinavinter-screen-set-builder/index.test.ts`](/Users/davidkpiano/Code/agent/examples/dinavinter-screen-set-builder/index.test.ts)
-- [`dinavinter-parallel-agent/index.test.ts`](/Users/davidkpiano/Code/agent/examples/dinavinter-parallel-agent/index.test.ts)
+- [`ai-sdk-orchestrator-worker/index.test.ts`](/Users/davidkpiano/Code/agent/examples/ai-sdk-orchestrator-worker/index.test.ts)
+- [`ai-sdk-parallel-review/index.test.ts`](/Users/davidkpiano/Code/agent/examples/ai-sdk-parallel-review/index.test.ts)
+- [`ai-sdk-routing/index.test.ts`](/Users/davidkpiano/Code/agent/examples/ai-sdk-routing/index.test.ts)
+- [`ai-sdk-evaluator-optimizer/index.test.ts`](/Users/davidkpiano/Code/agent/examples/ai-sdk-evaluator-optimizer/index.test.ts)
+- [`ai-sdk-marketing-chain/index.test.ts`](/Users/davidkpiano/Code/agent/examples/ai-sdk-marketing-chain/index.test.ts)
 
 ## Parity Tracking
 

@@ -1,10 +1,25 @@
+/**
+ * Turn-based combat agent: each turn the model decides one legal move
+ * (`agent.decide` + `sendDecision()`), the move updates HP, and a text
+ * request narrates the result. `allowedEvents` widens to include HEAL only
+ * when the player is low on HP — the legal move set is computed from context.
+ *
+ * This file runs ONE turn end-to-end via `runAgent` (the machine resolves to
+ * a single outcome). For the multi-turn, host-driven step loop — where the
+ * host re-enters the machine each turn and owns the encounter — see
+ * examples/ai-sdk-game-host, which drives this same agent with real models.
+ *
+ * Run: OPENAI_API_KEY=... npx tsx examples/game-agent/index.ts
+ */
 import { z } from 'zod';
 import { openai } from '@ai-sdk/openai';
 import { type LanguageModel } from 'ai';
+import { createAiSdkExecutors } from '../../src/ai-sdk/index.js';
 import {
   createAgentSchemas,
   createDecisionLogic,
   createTextLogic,
+  runAgent,
   sendDecision,
   setupAgent,
 } from '../../src/index.js';
@@ -235,6 +250,33 @@ export const gameMachine = gameAgent.createMachine({
     },
   },
 });
+
+export async function main() {
+  const executors = createAiSdkExecutors({ models });
+
+  const result = await runAgent(gameMachine, {
+    input: { playerHp: 20, enemyHp: 15 },
+    ...executors,
+  });
+
+  if (result.status !== 'done') {
+    throw new Error(`Game turn did not complete: ${result.status}`);
+  }
+  const { outcome, summary, playerHp, enemyHp } = result.output;
+  console.log(`Outcome: ${outcome}`);
+  console.log(`Player HP: ${playerHp}  Enemy HP: ${enemyHp}`);
+  console.log(summary);
+}
+
+if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error('Set OPENAI_API_KEY to run this example.');
+    process.exit(1);
+  }
+  void main();
+}
+
+// ─── Type probe: compilation fails if the root/final output stops being typed ───
 
 gameAgent.createMachine({
   context: {

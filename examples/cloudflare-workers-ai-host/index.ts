@@ -1,12 +1,30 @@
 /**
  * Cloudflare Workers AI step host for the game workflow.
  *
- * Run with Wrangler in a Worker that has an `AI` binding. Workers AI does not
- * expose the same tool-calling shape as the Vercel AI SDK binding path, so this
- * host serializes allowed event tools into the prompt and accepts JSON output
- * for both text requests (structured output) and decision requests (event
- * choice) — see `resolveDecision` in `../../src/index.js` for the retry/
+ * Unlike `../ai-sdk-game-host/index.ts` (same explicit step loop, AI SDK
+ * models), this drives the loop against a raw Workers AI `AI` binding. Workers
+ * AI does not expose the same tool-calling shape as the Vercel AI SDK binding
+ * path, so this host serializes allowed event tools into the prompt and accepts
+ * JSON output for both text requests (structured output) and decision requests
+ * (event choice) — see `resolveDecision` in `../../src/index.js` for the retry/
  * validation core this uses for the latter.
+ *
+ * Running this
+ * -------------
+ * The `default { fetch }` export below is a complete Worker (it runs one game
+ * turn per request), but it needs the Workers runtime and an `AI` binding, so
+ * it cannot run under `tsx`. Add a `wrangler.toml` next to a Worker entry that
+ * imports this file, with the AI binding:
+ *
+ *   name = "workers-ai-game-host"
+ *   main = "examples/cloudflare-workers-ai-host/index.ts"
+ *   compatibility_date = "2025-01-01"
+ *   [ai]
+ *   binding = "AI"
+ *
+ * Then: `npx wrangler dev` and `curl localhost:8787`. `model` on the game
+ * machine's requests must name a Workers AI model id (e.g.
+ * `@cf/meta/llama-3.1-8b-instruct`). Requires the `wrangler` dev dependency.
  */
 import {
   getAgentOutputMode,

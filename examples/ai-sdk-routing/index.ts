@@ -5,7 +5,7 @@
  *
  * Compare: https://ai-sdk.dev/docs/agents/workflows#routing
  *
- * Run: OPENAI_API_KEY=... node --import tsx examples/ai-sdk-routing/index.ts
+ * Run: OPENAI_API_KEY=... npx tsx examples/ai-sdk-routing/index.ts
  */
 import { z } from 'zod';
 import { openai } from '@ai-sdk/openai';
@@ -44,6 +44,8 @@ const agent = setupAgent({
         output: classificationSchema,
       },
       model: 'classifier',
+      system:
+        'You route customer support queries. Classify each into a type — general, refund, or technical — and a complexity — simple (answerable directly) or complex (needs deeper reasoning). Explain your reasoning briefly.',
       prompt: ({ input }) => `Classify this customer query:\n${input.query}`,
     },
     answerCustomerQuery: {
@@ -59,9 +61,12 @@ const agent = setupAgent({
           ? 'simpleAnswerer'
           : 'complexAnswerer',
       system: ({ input }) => ({
-        general: 'You handle general customer inquiries.',
-        refund: 'You specialize in refund requests.',
-        technical: 'You provide technical troubleshooting.',
+        general:
+          'You are a friendly support generalist. Answer the customer directly and concisely, and point them to the right next step.',
+        refund:
+          'You are a refunds specialist. State whether the request qualifies, explain the policy plainly, and give the exact steps to get the refund.',
+        technical:
+          'You are a technical support engineer. Diagnose the likely cause and give numbered troubleshooting steps the customer can follow.',
       })[input.classification.type],
       prompt: ({ input }) => input.query,
     },
@@ -134,7 +139,8 @@ export async function runAiSdkRoutingExample() {
 
 if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
   if (!process.env.OPENAI_API_KEY) {
-    throw new Error('Set OPENAI_API_KEY to run this example.');
+    console.error('Set OPENAI_API_KEY to run this example.');
+    process.exit(1);
   }
   console.log(await runAiSdkRoutingExample());
 }

@@ -1,10 +1,21 @@
 /**
- * Vercel AI SDK step host for a non-trivial game workflow.
+ * Vercel AI SDK step host for a non-trivial game workflow — the explicit
+ * step-path wiring.
+ *
+ * Wiring demonstrated: the host owns the loop. It advances the machine one
+ * step at a time with `initialAgentStep` → `resolveAgentStep` (text requests)
+ * and `resolveDecision` → `transitionAgentStep` (decision requests), instead
+ * of handing everything to `runAgent`. This is the wiring for hosts that need
+ * to interleave their own work between steps — decisions, per-turn
+ * persistence, or one serverless invocation per turn.
+ *
+ * Compare `../ai-sdk-host/index.ts` for the `runAgent`-based wiring, where
+ * `runAgent` drives the loop end to end and the host only supplies executors.
  *
  * State machine: ../game-agent/index.ts
  *
  * Run:
- *   OPENAI_API_KEY=... node --import tsx examples/ai-sdk-game-host/index.ts
+ *   OPENAI_API_KEY=... npx tsx examples/ai-sdk-game-host/index.ts
  */
 import { type LanguageModel } from 'ai';
 import { openai } from '@ai-sdk/openai';
@@ -83,7 +94,8 @@ async function main() {
 
 if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
   if (!process.env.OPENAI_API_KEY) {
-    throw new Error('Set OPENAI_API_KEY to run this example.');
+    console.error('Set OPENAI_API_KEY to run this example.');
+    process.exit(1);
   }
   void main();
 }

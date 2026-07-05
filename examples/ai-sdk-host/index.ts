@@ -1,12 +1,20 @@
 /**
- * Vercel AI SDK host for XState agent machines.
+ * Vercel AI SDK host for XState agent machines — the `runAgent`-based wiring.
  *
- * The machine declares named text logic calls; this host provides their
- * execution with the AI SDK. Streaming chunks flow through the host side
- * channel (`onChunk` → stdout, HTTP stream, etc.) — the machine itself only
- * transitions on the final text.
+ * Wiring demonstrated: hand the machine and an executor set to `runAgent`,
+ * which drives the whole run to completion for you (`runTriageDemo`,
+ * `runStreamingDemo`). The machine declares named text logic calls; this host
+ * provides their execution with the AI SDK. Streaming chunks flow through the
+ * host side channel (`onChunk` → stdout, HTTP stream, etc.) — the machine
+ * itself only transitions on the final text. `runTriageStepDemo` also shows
+ * the manual step loop against the same triage machine for comparison.
  *
- * Run: OPENAI_API_KEY=... node --import tsx examples/ai-sdk-host/index.ts
+ * Compare `../ai-sdk-game-host/index.ts` for the explicit step-path wiring
+ * (`initialAgentStep`/`resolveAgentStep`/`transitionAgentStep`), which is what
+ * you reach for when the host — not `runAgent` — owns the loop (e.g. decisions,
+ * persistence between steps, a serverless request per turn).
+ *
+ * Run: OPENAI_API_KEY=... npx tsx examples/ai-sdk-host/index.ts
  */
 import { type LanguageModel } from 'ai';
 import { openai } from '@ai-sdk/openai';
@@ -191,7 +199,8 @@ async function main() {
 
 if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
   if (!process.env.OPENAI_API_KEY) {
-    throw new Error('Set OPENAI_API_KEY to run this example.');
+    console.error('Set OPENAI_API_KEY to run this example.');
+    process.exit(1);
   }
   void main();
 }

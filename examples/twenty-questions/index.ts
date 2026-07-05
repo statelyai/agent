@@ -17,7 +17,7 @@
  *     `agent.userInput` with prompt data derived from context, so the host can
  *     just insert the machine and press play.
  *
- * Run: OPENAI_API_KEY=... node --import tsx examples/twenty-questions/index.ts
+ * Run: OPENAI_API_KEY=... npx tsx examples/twenty-questions/index.ts
  */
 import { z } from 'zod';
 import { openai } from '@ai-sdk/openai';
@@ -455,7 +455,8 @@ export async function main() {
 
 if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
   if (!process.env.OPENAI_API_KEY) {
-    throw new Error('Set OPENAI_API_KEY to run this example.');
+    console.error('Set OPENAI_API_KEY to run this example.');
+    process.exit(1);
   }
   void main();
 }

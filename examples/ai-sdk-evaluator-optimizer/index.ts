@@ -6,7 +6,7 @@
  *
  * Compare: https://ai-sdk.dev/docs/agents/workflows#evaluator-optimizer
  *
- * Run: OPENAI_API_KEY=... node --import tsx examples/ai-sdk-evaluator-optimizer/index.ts
+ * Run: OPENAI_API_KEY=... npx tsx examples/ai-sdk-evaluator-optimizer/index.ts
  */
 import { z } from 'zod';
 import { openai } from '@ai-sdk/openai';
@@ -71,7 +71,8 @@ const agent = setupAgent({
         output: z.string(),
       },
       model: 'translator',
-      system: 'Translate while preserving tone and cultural nuance.',
+      system:
+        'You are an expert literary translator. Translate faithfully into the target language, preserving register, tone, idiom, and cultural nuance rather than translating word for word. Return only the translation.',
       prompt: ({ input }) =>
         `Translate this text to ${input.targetLanguage}:\n${input.text}`,
     },
@@ -81,7 +82,8 @@ const agent = setupAgent({
         output: translationEvaluationSchema,
       },
       model: 'evaluator',
-      system: 'Evaluate translation quality.',
+      system:
+        'You are a bilingual translation reviewer. Score the translation 1-10 for overall quality and judge whether it preserves tone, preserves nuance, and is culturally accurate. List specific issues and concrete improvement suggestions. Be strict: reserve scores of 8+ for translations that read naturally to a native speaker.',
       prompt: ({ input }) =>
         `Original: ${input.original}\nTranslation: ${input.translation}`,
     },
@@ -95,6 +97,8 @@ const agent = setupAgent({
         output: z.string(),
       },
       model: 'improver',
+      system:
+        'You are an expert literary translator revising a draft. Apply the reviewer feedback to fix the listed issues while keeping everything that already works. Return only the improved translation.',
       prompt: ({ input }) =>
         [
           `Original: ${input.original}`,
@@ -211,7 +215,8 @@ export async function runAiSdkEvaluatorOptimizerExample() {
 
 if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
   if (!process.env.OPENAI_API_KEY) {
-    throw new Error('Set OPENAI_API_KEY to run this example.');
+    console.error('Set OPENAI_API_KEY to run this example.');
+    process.exit(1);
   }
   console.log(await runAiSdkEvaluatorOptimizerExample());
 }

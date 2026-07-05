@@ -17,13 +17,17 @@
  *   load: (id) => JSON.parse(
  *     db.prepare('SELECT snapshot FROM snapshots WHERE session_id = ?').get(id).snapshot
  *   );
+ *
+ * Run: OPENAI_API_KEY=... npx tsx examples/file-snapshot-store/index.ts
  */
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { openai } from '@ai-sdk/openai';
 import { runAgent, setupAgent } from '../../src/index.js';
+import { createAiSdkExecutors } from '../../src/ai-sdk/index.js';
 import type { Snapshot } from 'xstate';
 
 const agent = setupAgent({
@@ -38,6 +42,9 @@ const agent = setupAgent({
     writeDraft: {
       schemas: { input: z.object({ topic: z.string() }), output: z.string() },
       model: 'writer',
+      system:
+        'You draft short, concrete announcement copy. Two or three sentences. ' +
+        'If the topic includes a "Revision:" note, apply it. Return only the draft text.',
       prompt: ({ input }) => input.topic,
     },
   },
@@ -130,6 +137,53 @@ export async function runFileSnapshotStoreExample() {
   });
 }
 
+// Direct run: the same idle → persist-to-disk → fresh-process resume dance,
+// but with a real model writing the draft and a real snapshot file on disk.
+export async function main() {
+  const { generateText } = createAiSdkExecutors({
+    models: { writer: openai('gpt-5.4-mini') },
+  });
+  const dir = mkdtempSync(join(tmpdir(), 'agent-snap-'));
+  const store = createFileSnapshotStore(dir);
+  const sessionId = 'release-123';
+  const snapshotPath = join(dir, `${sessionId}.json`);
+
+  // Process 1: draft, settle idle at review, checkpoint to disk.
+  const first = await runAgent(draftMachine, {
+    input: { topic: 'Launch of our new snapshot store' },
+    generateText,
+  });
+  assert.equal(first.status, 'idle');
+  store.save(sessionId, first.snapshot);
+  console.log(`Draft checkpointed to ${snapshotPath}`);
+  console.log(`Draft: ${first.snapshot.context.draft}\n`);
+
+  // Process 2 (fresh runAgent): load, request a revision, checkpoint again.
+  const second = await runAgent(draftMachine, {
+    snapshot: store.load(sessionId),
+    event: { type: 'REJECT', reason: 'make it punchier' },
+    generateText,
+  });
+  assert.equal(second.status, 'idle');
+  store.save(sessionId, second.snapshot);
+  console.log(`Revised draft: ${second.snapshot.context.draft}\n`);
+
+  // Process 3 (fresh runAgent): load, approve, run to done.
+  const third = await runAgent(draftMachine, {
+    snapshot: store.load(sessionId),
+    event: { type: 'APPROVE' },
+    generateText,
+  });
+  if (third.status !== 'done') {
+    throw new Error(`Draft did not publish: ${third.status}`);
+  }
+  console.log('Published:', third.output.draft);
+}
+
 if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
-  await runFileSnapshotStoreExample();
+  if (!process.env.OPENAI_API_KEY) {
+    console.error('Set OPENAI_API_KEY to run this example.');
+    process.exit(1);
+  }
+  void main();
 }

@@ -32,7 +32,7 @@
  * candidate-event tools are ever sent, `{ type: 'any' }` is equivalent to
  * "pick one of the candidates").
  *
- * Run: ANTHROPIC_API_KEY=... node --import tsx examples/anthropic-sdk-host/index.ts
+ * Run: ANTHROPIC_API_KEY=... npx tsx examples/anthropic-sdk-host/index.ts
  */
 import type Anthropic from '@anthropic-ai/sdk';
 import type {
@@ -401,7 +401,8 @@ async function main() {
 
 if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
   if (!process.env.ANTHROPIC_API_KEY) {
-    throw new Error('Set ANTHROPIC_API_KEY to run this example.');
+    console.error('Set ANTHROPIC_API_KEY to run this example.');
+    process.exit(1);
   }
   void main();
 }

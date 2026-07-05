@@ -616,7 +616,7 @@ Timers surface only in `step.actions`; `step.requests` never contains them — a
 
 **Implementation logistics (resolved):**
 
-- Acceptance fixtures gating P0: a **twenty-questions-style decision game** (new example replacing/extending `game-agent` as the decisions showcase — richer decision loop than one combat turn), `email-drafter` (parts messages), `langgraph-human-in-the-loop` (idle → persist → resume). Tests for these three are written first, TDD-style; remaining examples migrate in P1.
+- Acceptance fixtures gating P0: a **twenty-questions-style decision game** (new example replacing/extending `game-agent` as the decisions showcase — richer decision loop than one combat turn), `email-drafter` (parts messages), `langgraph-human-in-the-loop` (idle → persist → resume) (example since consolidated into `examples/human-in-the-loop`). Tests for these three are written first, TDD-style; remaining examples migrate in P1.
 - Old tests encoding old semantics (`setup-agent.test.ts`, `examples.test.ts` sections on `agentEvents`/`getEventTools`/old `runAgent`) are **deleted and rewritten** against the new surface, not migrated in place.
 - Landing: **one branch, four commits**, in dependency order: (1) message types + `messagesSchema`, (2) decision primitive + step discovery, (3) `runAgent` rewrite, (4) removals/renames sweep.
 

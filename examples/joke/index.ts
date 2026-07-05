@@ -1,7 +1,23 @@
+/**
+ * Streaming joke agent with a machine-owned feedback loop.
+ *
+ * Demonstrates:
+ *   - `mode: 'stream'` text logic: the joke streams token-by-token.
+ *   - `agent.userInput`: the machine asks the human for feedback, and loops
+ *     back to tell another joke until the feedback reads as "done".
+ *
+ * Run: OPENAI_API_KEY=... npx tsx examples/joke/index.ts
+ */
 import { z } from 'zod';
 import { openai } from '@ai-sdk/openai';
 import { type LanguageModel } from 'ai';
-import { createAgentSchemas, createTextLogic, setupAgent } from '../../src/index.js';
+import { createAiSdkExecutors } from '../../src/ai-sdk/index.js';
+import {
+  createAgentSchemas,
+  createTextLogic,
+  runAgent,
+  setupAgent,
+} from '../../src/index.js';
 
 const jokeSchema = z.object({
   joke: z.string(),
@@ -95,3 +111,40 @@ export const jokeMachine = jokeAgent.createMachine({
     done: { type: 'final' },
   },
 });
+
+const executors = createAiSdkExecutors({ models });
+
+async function promptFeedback(question: string): Promise<string> {
+  const { createInterface } = await import('node:readline/promises');
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return await rl.question(`\n${question}\n(reply, or say "done" to stop) > `);
+  } finally {
+    rl.close();
+  }
+}
+
+export async function main() {
+  const result = await runAgent(jokeMachine, {
+    input: { topic: 'state machines' },
+    ...executors,
+    // The machine drives the loop; the host only answers `agent.userInput`.
+    userInput: async ({ prompt }) => ({
+      feedback: await promptFeedback(prompt ?? 'How was that?'),
+    }),
+    onChunk: (chunk) => process.stdout.write(chunk),
+  });
+
+  if (result.status !== 'done') {
+    throw new Error(`Joke agent did not complete: ${result.status}`);
+  }
+  console.log(`\n\nFinal joke: ${result.output.joke}`);
+}
+
+if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error('Set OPENAI_API_KEY to run this example.');
+    process.exit(1);
+  }
+  void main();
+}

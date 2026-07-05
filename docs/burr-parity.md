@@ -21,18 +21,18 @@ As of June 18, 2026, the upstream Burr examples directory includes examples such
 
 ## Matrix
 
-<!-- parity matrix derived from examples/burr-*/metadata.json and docs/burr-parity.md scope -->
+<!-- parity matrix derived from the consolidated pattern examples and docs/burr-parity.md scope -->
 
 Each row links the migrated example and states the mechanism, not a bare "Covered".
 
 | Burr example pattern | Agent example | Mechanism |
 | --- | --- | --- |
-| Hello world counter / guarded loop | [`examples/burr-counter/index.test.ts`](/Users/davidkpiano/Code/agent/examples/burr-counter/index.test.ts) | Explicit XState state, guarded re-entrant loop, final-state output |
-| Conversational RAG with memory in state | [`examples/burr-conversational-rag/index.test.ts`](/Users/davidkpiano/Code/agent/examples/burr-conversational-rag/index.test.ts) | Retrieval as a typed host actor, memory in machine context, answer as a named request |
-| Streaming overview router | [`examples/burr-streaming-overview/index.test.ts`](/Users/davidkpiano/Code/agent/examples/burr-streaming-overview/index.test.ts) | Safety check, mode routing, `runAgent`'s `onChunk` streaming side channel, final text transition |
-| Tool calling | [`examples/burr-tool-calling/index.test.ts`](/Users/davidkpiano/Code/agent/examples/burr-tool-calling/index.test.ts) | Tool selection as structured request output, local tool actors, a final formatter request |
-| Typed state / structured output | [`examples/burr-typed-state/index.test.ts`](/Users/davidkpiano/Code/agent/examples/burr-typed-state/index.test.ts) | Schema-derived context/output plus a named request with a structured `output` schema |
-| Multi-agent collaboration | [`examples/burr-multi-agent-collaboration/index.test.ts`](/Users/davidkpiano/Code/agent/examples/burr-multi-agent-collaboration/index.test.ts) | A routing request's structured output selects among typed worker actors |
+| Hello world counter / guarded loop | [`examples/twenty-questions/index.test.ts`](/Users/davidkpiano/Code/agent/examples/twenty-questions/index.test.ts) | Explicit XState state, guarded re-entrant loop, final-state output (the dedicated counter port was dropped; the same guarded-loop shape appears in twenty-questions) |
+| Conversational RAG with memory in state | [`examples/rag/index.test.ts`](/Users/davidkpiano/Code/agent/examples/rag/index.test.ts) | Retrieval as a typed host actor, memory in machine context, answer as a named request |
+| Streaming overview router | [`examples/sse-transport/index.test.ts`](/Users/davidkpiano/Code/agent/examples/sse-transport/index.test.ts) | Safety check, mode routing, `runAgent`'s `onChunk` streaming side channel, final text transition (the dedicated streaming-overview port was consolidated into the SSE transport example) |
+| Tool calling | [`examples/tool-calling/index.test.ts`](/Users/davidkpiano/Code/agent/examples/tool-calling/index.test.ts) | Tool selection as structured request output, local tool actors, a final formatter request |
+| Typed state / structured output | [`examples/json-agent/index.test.ts`](/Users/davidkpiano/Code/agent/examples/json-agent/index.test.ts), [`examples/triage/index.ts`](/Users/davidkpiano/Code/agent/examples/triage/index.ts) | Schema-derived context/output plus a named request with a structured `output` schema (the dedicated typed-state port was dropped; typed context/schemas appear in every example) |
+| Multi-agent collaboration | [`examples/supervisor/index.test.ts`](/Users/davidkpiano/Code/agent/examples/supervisor/index.test.ts) | A routing request's structured output selects among typed worker actors (the dedicated multi-agent-collaboration port was consolidated into supervisor) |
 
 Burr-style decision points (an action choosing among a fixed set of next actions) map onto this library's decision primitive — see [`examples/twenty-questions/index.ts`](/Users/davidkpiano/Code/agent/examples/twenty-questions/index.ts) and the readme's Decisions section — though no Burr example in the current upstream set is decision-shaped enough to warrant its own parity row yet.
 

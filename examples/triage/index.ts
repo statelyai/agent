@@ -1,7 +1,20 @@
+/**
+ * Support-ticket triage: one text request classifies a ticket into
+ * sentiment + category and drafts a short reply, then the machine finishes.
+ * The simplest, cheapest end-to-end agent in this set.
+ *
+ * Run: OPENAI_API_KEY=... npx tsx examples/triage/index.ts
+ */
 import { z } from 'zod';
 import { openai } from '@ai-sdk/openai';
 import { type LanguageModel } from 'ai';
-import { createAgentSchemas, createTextLogic, setupAgent } from '../../src/index.js';
+import { createAiSdkExecutors } from '../../src/ai-sdk/index.js';
+import {
+  createAgentSchemas,
+  createTextLogic,
+  runAgent,
+  setupAgent,
+} from '../../src/index.js';
 
 export const triageSchema = z.object({
   sentiment: z.enum(['positive', 'neutral', 'negative']),
@@ -30,8 +43,13 @@ export const triageTicket = createTextLogic({
     output: triageSchema,
   },
   model: 'ticketTriage',
-  system:
-    'Triage the support ticket: sentiment, category, and a short suggested reply.',
+  system: [
+    'You triage inbound support tickets. For each ticket, return:',
+    '- sentiment: the customer\'s tone (positive, neutral, or negative).',
+    '- category: billing, technical, or other.',
+    '- reply: two or three sentences, addressed to the customer, that',
+    '  acknowledge the issue and state the next step. No greeting boilerplate.',
+  ].join('\n'),
   prompt: ({ input }) => input.ticket,
 });
 
@@ -70,3 +88,31 @@ export const triageMachine = triageAgent.createMachine({
     },
   },
 });
+
+// Sample data — a stand-in for a ticket pulled from your support inbox.
+const SAMPLE_TICKET =
+  'I was charged twice for my March subscription and the second charge never ' +
+  'showed up as a plan on my account. Can you refund the duplicate? This is ' +
+  'the third time billing has gone wrong this year.';
+
+export async function main() {
+  const executors = createAiSdkExecutors({ models });
+
+  const result = await runAgent(triageMachine, {
+    input: { ticket: SAMPLE_TICKET },
+    ...executors,
+  });
+
+  if (result.status !== 'done') {
+    throw new Error(`Triage did not complete: ${result.status}`);
+  }
+  console.log(JSON.stringify(result.output, null, 2));
+}
+
+if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error('Set OPENAI_API_KEY to run this example.');
+    process.exit(1);
+  }
+  void main();
+}

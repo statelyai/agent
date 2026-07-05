@@ -126,7 +126,7 @@ await runAgent(machine, {
 
 ## Testing with deterministic executors
 
-<!-- withExecutor test binding from src/text-logic.ts and examples/email-drafter-smoke -->
+<!-- withExecutor test binding from src/text-logic.ts and examples/email-drafter -->
 
 Because executors are plain functions, a test can supply scripted ones and never touch the network. Bind them with `withExecutor`:
 
@@ -140,7 +140,7 @@ const machine = emailDrafter.provide({
 });
 ```
 
-[examples/email-drafter-smoke/index.mts](../examples/email-drafter-smoke/index.mts) drives a full run this way: fixed values, deterministic, no model called.
+[examples/email-drafter/index.ts](../examples/email-drafter/index.ts) drives a full run this way in its tests: fixed values, deterministic, no model called.
 
 ## Related
 

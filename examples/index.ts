@@ -31,14 +31,58 @@ export {
   twentyQuestionsSchemas,
 } from './twenty-questions/index.js';
 export {
-  runLangGraphConditionalRoutingExample,
-} from './langgraph-conditional-routing/index.js';
+  humanInTheLoopMachine,
+  runHumanInTheLoopExample,
+} from './human-in-the-loop/index.js';
 export {
-  runBurrConversationalRAGExample,
-} from './burr-conversational-rag/index.js';
+  ragMachine,
+  runRAGExample,
+} from './rag/index.js';
 export {
-  runCrewAIContentCreatorExample,
-} from './crewai-content-creator/index.js';
+  toolCallingMachine,
+  runToolCallingExample,
+} from './tool-calling/index.js';
+export {
+  supervisorMachine,
+  runSupervisorExample,
+} from './supervisor/index.js';
+export {
+  swarmHandoffMachine,
+  runSwarmHandoffExample,
+} from './swarm-handoff/index.js';
+export {
+  planAndExecuteMachine,
+  runPlanAndExecuteExample,
+} from './plan-and-execute/index.js';
+export {
+  childMachine as subflowsChildMachine,
+  subflowsMachine,
+  runSubflowsExample,
+} from './subflows/index.js';
+export {
+  sqlAgentMachine,
+  runSqlAgentExample,
+} from './sql-agent/index.js';
+export {
+  parallelStreamsMachine,
+  runParallelStreamsExample,
+} from './parallel-streams/index.js';
+export {
+  refundMachine,
+  runMachineAsToolExample,
+  startTool,
+  resumeTool,
+} from './machine-as-tool/index.js';
+export {
+  draftMachine as fileSnapshotDraftMachine,
+  createFileSnapshotStore,
+  runFileSnapshotStoreExample,
+} from './file-snapshot-store/index.js';
+export {
+  createSseMachine,
+  createSseServer,
+  runMachineStream,
+} from './sse-transport/index.js';
 export {
   createAiSdkSubAgents,
   runAiSdkSubAgentsDemo,
@@ -74,10 +118,6 @@ export {
   runAiSdkEvaluatorOptimizerExample,
   translateText,
 } from './ai-sdk-evaluator-optimizer/index.js';
-export {
-  createXStateSubAgentWorkflow,
-  runXStateSubAgentsExample,
-} from './xstate-sub-agents/index.js';
 export {
   createDebateSubAgentsWorkflow,
   runDebateSubAgentsExample,

@@ -14,11 +14,19 @@
 //     onTransition: (s) => ws.send(JSON.stringify({ type: 'transition', value: s.value })),
 //   }).then((out) => ws.send(JSON.stringify({ type: 'done', output: out }))));
 // (frames become JSON messages instead of `event:`/`data:` lines.)
+//
+// Run: OPENAI_API_KEY=... npx tsx examples/sse-transport/index.ts
 
 import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { z } from 'zod';
+import { openai } from '@ai-sdk/openai';
 import type { AnyStateMachine } from 'xstate';
 import { runAgent, setupAgent } from '../../src/index.js';
+import {
+  createAiSdkExecutors,
+  type AiSdkExecutors,
+} from '../../src/ai-sdk/index.js';
 
 /**
  * A minimal streaming machine: one `mode: 'stream'` text request, then done.
@@ -81,11 +89,12 @@ export function runMachineStream(
   handlers: {
     onChunk: (chunk: string) => void;
     onTransition: (value: unknown) => void;
-  }
+  },
+  streamText: AiSdkExecutors['streamText'] = mockStreamText,
 ) {
   return runAgent(machine, {
     input: { topic: 'agents' },
-    streamText: mockStreamText,
+    streamText,
     onChunk: (chunk) => handlers.onChunk(chunk),
     onTransition: (snapshot) => handlers.onTransition(snapshot.value),
   });
@@ -108,7 +117,9 @@ function writeSseFrame(
  * streaming seams as Server-Sent Events. Host-owned: the machine knows
  * nothing about SSE.
  */
-export function createSseServer(): Server {
+export function createSseServer(
+  streamText: AiSdkExecutors['streamText'] = mockStreamText,
+): Server {
   return createServer(async (_req, res) => {
     res.writeHead(200, {
       'content-type': 'text/event-stream',
@@ -117,13 +128,48 @@ export function createSseServer(): Server {
     });
 
     const machine = createSseMachine();
-    const result = await runMachineStream(machine, {
-      onChunk: (chunk) => writeSseFrame(res, { chunk }),
-      onTransition: (value) => writeSseFrame(res, { value }, 'transition'),
-    });
+    const result = await runMachineStream(
+      machine,
+      {
+        onChunk: (chunk) => writeSseFrame(res, { chunk }),
+        onTransition: (value) => writeSseFrame(res, { value }, 'transition'),
+      },
+      streamText,
+    );
 
     const output = result.status === 'done' ? result.output : { error: result.status };
     writeSseFrame(res, output, 'done');
     res.end();
   });
+}
+
+// Direct run: start the server with a real streaming model, print a curl
+// command, and shut down after the first request completes (or Ctrl-C).
+export async function main() {
+  const { streamText } = createAiSdkExecutors({
+    models: { writer: openai('gpt-5.4-mini') },
+  });
+  const server = createSseServer(streamText);
+
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address() as AddressInfo;
+  const url = `http://127.0.0.1:${port}/`;
+
+  console.log(`SSE server listening. Stream a real generation with:\n`);
+  console.log(`  curl -N ${url}\n`);
+  console.log('Shutting down after the first request. Ctrl-C to exit early.');
+
+  // Close once the first client disconnects (request fully streamed).
+  server.once('request', (_req, res) => {
+    res.on('close', () => server.close(() => process.exit(0)));
+  });
+  process.on('SIGINT', () => server.close(() => process.exit(0)));
+}
+
+if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error('Set OPENAI_API_KEY to run this example.');
+    process.exit(1);
+  }
+  void main();
 }

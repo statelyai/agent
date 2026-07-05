@@ -144,7 +144,7 @@ See [`examples/twenty-questions/index.ts`](examples/twenty-questions/index.ts) (
 
 ## Human-in-the-loop & persistence
 
-<!-- idle-first HITL, based on src/setup-agent.ts (runAgent) and examples/langgraph-human-in-the-loop/index.ts -->
+<!-- idle-first HITL, based on src/setup-agent.ts (runAgent) and examples/human-in-the-loop/index.ts -->
 
 There's no `interrupt()` call to learn. A state that's waiting on a human is just a state with no invoke and an `on:` handler for the human's event. When `runAgent` reaches a point where nothing is in flight, it settles `{ status: 'idle', snapshot }` instead of hanging — the snapshot is a plain, JSON-serializable object. Resume by handing that snapshot back with the event:
 
@@ -165,7 +165,7 @@ Between iterations you're free to persist `result.snapshot` anywhere — a datab
 
 For inline human input without settling (a CLI prompt mid-run, say), invoke the builtin `agent.userInput` actor and supply `RunAgentOptions.userInput`. Without that option, an `agent.userInput` invoke becomes a pending placeholder: it never blocks idle detection (sibling parallel regions keep working), and the run settles `{ status: 'idle', pendingUserInputs, persistedSnapshot }` — persist `persistedSnapshot` and resume with a `userInput` handler to answer the pending prompt.
 
-See [`examples/langgraph-human-in-the-loop/index.ts`](examples/langgraph-human-in-the-loop/index.ts) and [`examples/langgraph-snapshot-persistence/index.ts`](examples/langgraph-snapshot-persistence/index.ts).
+See [`examples/human-in-the-loop/index.ts`](examples/human-in-the-loop/index.ts) and [`examples/file-snapshot-store/index.ts`](examples/file-snapshot-store/index.ts).
 
 ## Messages
 
@@ -287,7 +287,7 @@ Each `step` is a plain, inspectable object — `{ snapshot, actions, requests, d
 
 Delayed transitions (`after`) surface in `step.actions` as schedulable raise actions rather than running on a live timer — the host owns the clock (a Workflow sleep, a Temporal timer, a queue delay) and applies the event via `transitionAgentStep` when it fires.
 
-See [`examples/ai-sdk-game-host/index.ts`](examples/ai-sdk-game-host/index.ts) (Vercel AI SDK step loop), [`examples/tanstack-ai-host/index.ts`](examples/tanstack-ai-host/index.ts) (TanStack AI step loop sketch), and [`examples/cloudflare-workers-ai-host/index.ts`](examples/cloudflare-workers-ai-host/index.ts) / [`examples/cloudflare-agent-host/index.ts`](examples/cloudflare-agent-host/index.ts) (Cloudflare sketches — illustrative, excluded from typechecking pending the `agents`/Workers AI package surface settling).
+See [`examples/ai-sdk-game-host/index.ts`](examples/ai-sdk-game-host/index.ts) (Vercel AI SDK step loop) and [`examples/cloudflare-workers-ai-host/index.ts`](examples/cloudflare-workers-ai-host/index.ts) / [`examples/cloudflare-agent-host/index.ts`](examples/cloudflare-agent-host/index.ts) (Cloudflare sketches — illustrative, excluded from typechecking pending the `agents`/Workers AI package surface settling).
 
 Thought of as event sourcing: each step applies exactly one event (a machine transition, a resolved model result, or a decision's chosen event). Persisting the ordered event log — not just the latest snapshot — is what makes replay and audit possible; a snapshot is a compaction checkpoint, not the source of truth.
 
@@ -394,7 +394,7 @@ This is a pre-release. Some pieces are **example-shipped but not yet packaged** 
 - **Tracing/OTel exporter.** No built-in exporter. Use the `onResult`/`onTransition` observation seams on `runAgent` to build your own.
 - **SSE/WebSocket transport.** No shipped transport helper package, but an SSE transport example is shipped (see [examples/sse-transport](examples/sse-transport)), streaming over whatever `onChunk` gives you.
 - **Dynamic-parallelism (Send-style) helpers.** Fan-out/map-reduce is expressed with plain `Promise.all(...)` over host actors today, not a dedicated primitive.
-- **Nested-machine executor binding.** `runAgent` only binds executors for the top-level machine's own text/decision sources. A child machine invoked as a nested actor keeps its own `.provide({ actorSources })` binding — see [`examples/langgraph-subflows/index.ts`](examples/langgraph-subflows/index.ts).
+- **Nested-machine executor binding.** `runAgent` only binds executors for the top-level machine's own text/decision sources. A child machine invoked as a nested actor keeps its own `.provide({ actorSources })` binding — see [`examples/subflows/index.ts`](examples/subflows/index.ts).
 - **Visualization tooling.** Out of package scope; Stately Studio and an in-progress VS Code extension own diagramming and inspection.
 
 If something here blocks you, or the API surface feels wrong, open an issue — this alpha is explicitly for finding that out before 2.0 stable.
@@ -415,18 +415,18 @@ Start here:
 
 Human-in-the-loop and persistence:
 
-- [`examples/langgraph-human-in-the-loop/index.ts`](examples/langgraph-human-in-the-loop/index.ts)
-- [`examples/langgraph-snapshot-persistence/index.ts`](examples/langgraph-snapshot-persistence/index.ts)
+- [`examples/human-in-the-loop/index.ts`](examples/human-in-the-loop/index.ts)
+- [`examples/file-snapshot-store/index.ts`](examples/file-snapshot-store/index.ts)
 
 Host adapters and the step path:
 
 - [`examples/ai-sdk-host/index.ts`](examples/ai-sdk-host/index.ts), [`examples/ai-sdk-game-host/index.ts`](examples/ai-sdk-game-host/index.ts)
 - [`examples/openai-sdk-host/index.ts`](examples/openai-sdk-host/index.ts), [`examples/anthropic-sdk-host/index.ts`](examples/anthropic-sdk-host/index.ts) — the same executor contract against the raw OpenAI and Anthropic SDKs, no Vercel AI SDK in between
-- [`examples/tanstack-ai-host/index.ts`](examples/tanstack-ai-host/index.ts), [`examples/cloudflare-workers-ai-host/index.ts`](examples/cloudflare-workers-ai-host/index.ts), [`examples/cloudflare-agent-host/index.ts`](examples/cloudflare-agent-host/index.ts)
+- [`examples/cloudflare-workers-ai-host/index.ts`](examples/cloudflare-workers-ai-host/index.ts), [`examples/cloudflare-agent-host/index.ts`](examples/cloudflare-agent-host/index.ts)
 
 Sub-agents and multi-machine composition:
 
-- [`examples/xstate-sub-agents/index.ts`](examples/xstate-sub-agents/index.ts), [`examples/ai-sdk-sub-agents/index.ts`](examples/ai-sdk-sub-agents/index.ts), [`examples/debate-sub-agents/index.ts`](examples/debate-sub-agents/index.ts), [`examples/langgraph-subflows/index.ts`](examples/langgraph-subflows/index.ts)
+- [`examples/subflows/index.ts`](examples/subflows/index.ts), [`examples/ai-sdk-sub-agents/index.ts`](examples/ai-sdk-sub-agents/index.ts), [`examples/debate-sub-agents/index.ts`](examples/debate-sub-agents/index.ts), [`examples/supervisor/index.ts`](examples/supervisor/index.ts), [`examples/swarm-handoff/index.ts`](examples/swarm-handoff/index.ts)
 
 Framework comparisons and parity tracking: [`docs/langgraph-parity.md`](docs/langgraph-parity.md), [`docs/langgraph-gaps.md`](docs/langgraph-gaps.md), [`docs/burr-parity.md`](docs/burr-parity.md), [`docs/crewai-parity.md`](docs/crewai-parity.md), and the full index in [`examples/README.md`](examples/README.md).
 

@@ -1,0 +1,14 @@
+{
+  "name": "supervisor",
+  "title": "Supervisor",
+  "kind": "pattern",
+  "origin": {
+    "type": "pattern",
+    "source": "Supervisor / router-worker multi-agent pattern",
+    "url": "https://github.com/langchain-ai/langgraphjs/tree/main/examples"
+  },
+  "comparison": {
+    "targets": ["supervisor", "router-worker"],
+    "purpose": "A router model dispatches one request to one of several typed specialist workers; the parent composes the result."
+  }
+}

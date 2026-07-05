@@ -4,7 +4,7 @@
  * The XState machine only sees tools on one request. The host decides those
  * tools delegate to AI SDK ToolLoopAgent workers.
  *
- * Run: OPENAI_API_KEY=... node --import tsx examples/ai-sdk-sub-agents/index.ts
+ * Run: OPENAI_API_KEY=... npx tsx examples/ai-sdk-sub-agents/index.ts
  */
 import assert from 'node:assert/strict';
 import { openai } from '@ai-sdk/openai';
@@ -215,7 +215,8 @@ export async function runAiSdkSubAgentsDeterministicExample() {
 
 if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
   if (!process.env.OPENAI_API_KEY) {
-    throw new Error('Set OPENAI_API_KEY to run this example.');
+    console.error('Set OPENAI_API_KEY to run this example.');
+    process.exit(1);
   }
   console.log(await runAiSdkSubAgentsDemo('Explain composable agents.'));
 }

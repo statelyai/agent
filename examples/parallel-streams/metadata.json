@@ -1,0 +1,14 @@
+{
+  "name": "parallel-streams",
+  "title": "Parallel Streams",
+  "kind": "pattern",
+  "origin": {
+    "type": "pattern",
+    "source": "Parallel streaming agent pattern",
+    "url": "https://github.com/dinavinter/agents"
+  },
+  "comparison": {
+    "targets": ["parallel", "streaming"],
+    "purpose": "Two parallel states each run a streaming request concurrently; onChunk's request.id disambiguates the interleaved chunk streams."
+  }
+}

@@ -1,7 +1,26 @@
+/**
+ * Two debater sub-agents (affirmative + negative) plus a neutral facilitator,
+ * modeled as actors. The parent machine invokes both debaters as child
+ * actors, requests one argument per turn via events, and collects the
+ * transcript; after `totalTurns` the facilitator concludes.
+ *
+ * `runDebateSubAgentsExample` runs deterministically (mock executors) for the
+ * test. `main` (direct run) wires real models: each debater's
+ * `composeArgument` and the facilitator's `concludeDebate` are bound to the
+ * AI SDK adapter — the request already carries its own model ref.
+ *
+ * Run: OPENAI_API_KEY=... npx tsx examples/debate-sub-agents/index.ts
+ */
 import assert from 'node:assert/strict';
 import { z } from 'zod';
+import { openai } from '@ai-sdk/openai';
 import { createActor, toPromise, type AnyStateMachine } from 'xstate';
-import { setupAgent, type TextLogic } from '../../src/index.js';
+import {
+  setupAgent,
+  type TextLogic,
+  type TextLogicExecutor,
+} from '../../src/index.js';
+import { createAiSdkExecutors } from '../../src/ai-sdk/index.js';
 
 const stanceSchema = z.enum(['affirmative', 'negative']);
 const transcriptEntrySchema = z.object({
@@ -20,6 +39,21 @@ const concludeInputSchema = z.object({
   question: z.string(),
   transcript: transcriptSchema,
 });
+
+const composeInputSchema = z.object({
+  stance: stanceSchema,
+  question: z.string(),
+  round: z.number(),
+  transcript: transcriptSchema,
+});
+
+// A debater's `composeArgument` executor, typed straight from the request
+// schemas (not `ReturnType<typeof createDebaterAgent>`, whose full inferred
+// agent type is not serializable — TS7056).
+type ComposeExecutor = TextLogicExecutor<
+  typeof composeInputSchema,
+  z.ZodString
+>;
 
 // Precisely-typed workflow shape: `requests.concludeDebate` carries its real
 // input/output schemas (no `Record<string, any>` leak), so a host's
@@ -67,12 +101,7 @@ function createDebaterAgent() {
     requests: {
       composeArgument: {
         schemas: {
-          input: z.object({
-            stance: stanceSchema,
-            question: z.string(),
-            round: z.number(),
-            transcript: transcriptSchema,
-          }),
+          input: composeInputSchema,
           output: z.string(),
         },
         model: 'debater',
@@ -138,7 +167,15 @@ function createDebaterAgent() {
   return { agent, machine };
 }
 
-export function createDebateSubAgentsWorkflow(): DebateSubAgentsWorkflow {
+// The deterministic default keeps the example/test reproducible; the direct
+// run swaps in a real model.
+const deterministicCompose: ComposeExecutor = async ({ input }) => ({
+  output: `${input.stance}:round-${input.round}:after-${input.transcript.length}`,
+});
+
+export function createDebateSubAgentsWorkflow(
+  composeExecutor: ComposeExecutor = deterministicCompose,
+): DebateSubAgentsWorkflow {
   const debater = createDebaterAgent();
   const agent = setupAgent({
     context: z.object({
@@ -154,11 +191,8 @@ export function createDebateSubAgentsWorkflow(): DebateSubAgentsWorkflow {
     actorSources: {
       debater: debater.machine.provide({
         actorSources: {
-          composeArgument: debater.agent.requests.composeArgument.withExecutor(
-            async ({ input }) => ({
-              output: `${input.stance}:round-${input.round}:after-${input.transcript.length}`,
-            }),
-          ),
+          composeArgument:
+            debater.agent.requests.composeArgument.withExecutor(composeExecutor),
         },
       }),
     },
@@ -293,6 +327,59 @@ export async function runDebateSubAgentsExample() {
   });
 }
 
+// Direct run: real models for both debaters and the facilitator. Each request
+// already carries its model ref ('debater' / 'facilitator'), so binding
+// `generateText` from the AI SDK adapter is all the wiring needed.
+export async function main() {
+  const { generateText } = createAiSdkExecutors({
+    models: {
+      debater: openai('gpt-5.4-mini'),
+      facilitator: openai('gpt-5.4-mini'),
+    },
+  });
+
+  // Bridge a bound-logic executor (`{ request }`) to the AI SDK adapter. The
+  // adapter reads `request.outputSchema` for structured requests, so the typed
+  // `{ output }` envelope each logic expects is produced at runtime; the cast
+  // narrows the adapter's `unknown` output back to that logic's output type.
+  type AiSdkRequest = Parameters<typeof generateText>[0];
+  const run = <T>(request: { model: string }) =>
+    generateText({ tools: {}, ...request } as AiSdkRequest) as Promise<{
+      output: T;
+    }>;
+
+  const { agent, machine } = createDebateSubAgentsWorkflow(
+    ({ request }) => run<string>(request),
+  );
+
+  const actor = createActor(
+    machine.provide({
+      actorSources: {
+        concludeDebate: agent.requests.concludeDebate.withExecutor(({ request }) =>
+          run<{ conclusion: string }>(request),
+        ),
+      },
+    }),
+    { input: { question: 'Should agents be modeled as actors?' } },
+  );
+
+  actor.start();
+  await toPromise(actor);
+
+  const output = actor.getSnapshot().output as {
+    conclusion: string;
+    transcript: { stance: string; round: number; text: string }[];
+  };
+  for (const turn of output.transcript) {
+    console.log(`[R${turn.round} ${turn.stance}] ${turn.text}`);
+  }
+  console.log(`\n--- Facilitator ---\n${output.conclusion}`);
+}
+
 if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
-  await runDebateSubAgentsExample();
+  if (!process.env.OPENAI_API_KEY) {
+    console.error('Set OPENAI_API_KEY to run this example.');
+    process.exit(1);
+  }
+  void main();
 }

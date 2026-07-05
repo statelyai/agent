@@ -17,9 +17,12 @@
  * This file simulates the harness side with plain functions; no real harness
  * dependency. The refund flow has a no-invoke HITL state (`awaitingApproval`)
  * that settles idle with a typed `meta.interaction`.
+ *
+ * Run: OPENAI_API_KEY=... npx tsx examples/machine-as-tool/index.ts
  */
 import assert from 'node:assert/strict';
 import { z } from 'zod';
+import { openai } from '@ai-sdk/openai';
 import {
   createActor,
   createAsyncLogic,
@@ -34,6 +37,7 @@ import {
   type RunAgentOptions,
   type RunAgentResult,
 } from '../../src/index.js';
+import { createAiSdkExecutors } from '../../src/ai-sdk/index.js';
 
 // Typed interaction protocol handed to the harness. Schema-typed meta means
 // the host gets a real contract, not Record<string, unknown>. This is a
@@ -86,7 +90,12 @@ const agent = setupAgent({
         output: z.object({ valid: z.boolean() }),
       },
       model: 'validator',
-      prompt: ({ input }) => `Validate refund ${input.orderId} for ${input.amount}`,
+      system:
+        'You are a refund policy checker. A refund is valid when it has a ' +
+        'plausible order id and an amount at or below the $500 auto-approval ' +
+        'limit. Return valid=false for anything above the limit or clearly malformed.',
+      prompt: ({ input }) =>
+        `Order ${input.orderId}, refund amount $${input.amount}. Is this refund valid?`,
     },
   },
 });
@@ -270,6 +279,36 @@ export async function runMachineAsToolExample() {
   );
 }
 
+// Direct run: drive the harness bridge with a real validation model. Prints
+// the interaction the harness would show a human, then auto-approves — exactly
+// the round-trip a real tool-calling loop performs, minus the human.
+export async function main() {
+  const realExecutors = createAiSdkExecutors({
+    models: { validator: openai('gpt-5.4-mini') },
+  });
+
+  const started = await startTool({ amount: 42, orderId: 'ord-1' }, realExecutors);
+  if (started.status !== 'pending') {
+    console.log('Refund resolved without approval:', started);
+    return;
+  }
+
+  // What a human operator would see rendered from the typed interaction.
+  console.log(`\n${started.interaction?.label}`);
+  for (const choice of started.interaction?.choices ?? []) {
+    console.log(`  - ${choice.label} (${choice.eventType})`);
+  }
+  console.log('\n[harness auto-approves]\n');
+
+  assertEventLegal(started.handle, { type: 'APPROVE' });
+  const finished = await resumeTool(started.handle, { type: 'APPROVE' }, realExecutors);
+  console.log('Result:', finished);
+}
+
 if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
-  await runMachineAsToolExample();
+  if (!process.env.OPENAI_API_KEY) {
+    console.error('Set OPENAI_API_KEY to run this example.');
+    process.exit(1);
+  }
+  void main();
 }

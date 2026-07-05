@@ -26,7 +26,7 @@
  * minLength, anyOf, format, ...), unlike the built-in `minimalSchemaCompiler`
  * export, which only checks type/properties/required/items/enum/const.
  *
- * Run: OPENAI_API_KEY=... node --import tsx examples/json-agent/index.ts
+ * Run: OPENAI_API_KEY=... npx tsx examples/json-agent/index.ts
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -110,7 +110,8 @@ export async function runJsonAgentDemo(ticket: string) {
 
 if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
   if (!process.env.OPENAI_API_KEY) {
-    throw new Error('Set OPENAI_API_KEY to run this example.');
+    console.error('Set OPENAI_API_KEY to run this example.');
+    process.exit(1);
   }
   console.log(await runJsonAgentDemo('My invoice total looks wrong, please help.'));
 }

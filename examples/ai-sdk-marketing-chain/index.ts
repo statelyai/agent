@@ -4,7 +4,7 @@
  *
  * Compare: https://ai-sdk.dev/docs/agents/workflows#sequential-processing-chains
  *
- * Run: OPENAI_API_KEY=... node --import tsx examples/ai-sdk-marketing-chain/index.ts
+ * Run: OPENAI_API_KEY=... npx tsx examples/ai-sdk-marketing-chain/index.ts
  */
 import { z } from 'zod';
 import { openai } from '@ai-sdk/openai';
@@ -48,6 +48,8 @@ const agent = setupAgent({
         output: z.string(),
       },
       model: 'copywriter',
+      system:
+        'You are a direct-response copywriter. Lead with the customer benefit, build emotional appeal, and end on one clear call to action. Keep it tight — a short paragraph, no headings.',
       prompt: ({ input }) =>
         `Write persuasive marketing copy for: ${input.product}. Focus on benefits and emotional appeal.`,
     },
@@ -57,7 +59,8 @@ const agent = setupAgent({
         output: qualitySchema,
       },
       model: 'evaluator',
-      system: 'Evaluate marketing copy for CTA, emotional appeal, and clarity.',
+      system:
+        'You review marketing copy. Report whether it has a clear call to action, then score emotional appeal (1-10) and clarity (1-10). Score strictly against direct-response standards.',
       prompt: ({ input }) => input.copy,
     },
     improveMarketingCopy: {
@@ -66,6 +69,8 @@ const agent = setupAgent({
         output: z.string(),
       },
       model: 'improver',
+      system:
+        'You are a copy editor. Revise the copy to address the notes below while preserving its voice. Return only the improved copy.',
       prompt: ({ input }) => [
         !input.quality.hasCallToAction ? 'Add a clear call to action.' : '',
         input.quality.emotionalAppeal < 7 ? 'Strengthen emotional appeal.' : '',
@@ -162,7 +167,8 @@ export async function runAiSdkMarketingChainExample() {
 
 if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
   if (!process.env.OPENAI_API_KEY) {
-    throw new Error('Set OPENAI_API_KEY to run this example.');
+    console.error('Set OPENAI_API_KEY to run this example.');
+    process.exit(1);
   }
   console.log(await runAiSdkMarketingChainExample());
 }

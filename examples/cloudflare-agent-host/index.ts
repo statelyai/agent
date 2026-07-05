@@ -15,6 +15,43 @@
  * Cloudflare AI binding provider. In a real deployment, wire the
  * `workers-ai-provider` package's `createWorkersAI({ binding: this.env.AI })`
  * here for Workers AI, or any other AI SDK provider for an external model.
+ *
+ * Running this
+ * -------------
+ * This file is a *drop-in Durable Object class*, not a complete Worker — it
+ * cannot run under `tsx` (it needs the Workers runtime + DO storage). To run
+ * it, drop it into a Worker project and provide three things:
+ *
+ * 1. A concrete subclass that supplies `resolveModel` with a real binding.
+ *    With the `workers-ai-provider` package and an `AI` binding:
+ *
+ *      import { createWorkersAI } from 'workers-ai-provider';
+ *      export class EmailDrafter extends EmailDrafterAgent {
+ *        resolveModel = (modelRef: string) =>
+ *          createWorkersAI({ binding: this.env.AI })(
+ *            modelRef as Parameters<ReturnType<typeof createWorkersAI>>[0],
+ *          );
+ *      }
+ *
+ * 2. A `wrangler.toml` binding that class as a Durable Object and adds the AI
+ *    binding (fill in `main` with your Worker entry that routes to the Agent):
+ *
+ *      name = "email-drafter"
+ *      main = "src/index.ts"
+ *      compatibility_date = "2025-01-01"
+ *      [ai]
+ *      binding = "AI"
+ *      [[durable_objects.bindings]]
+ *      name = "EmailDrafter"
+ *      class_name = "EmailDrafter"
+ *      [[migrations]]
+ *      tag = "v1"
+ *      new_sqlite_classes = ["EmailDrafter"]
+ *
+ * 3. Dependencies the host app must add: `agents`, `wrangler`,
+ *    `workers-ai-provider` (only `agents` is a dependency of this repo).
+ *
+ * Then: `npx wrangler dev` (local) or `npx wrangler deploy`.
  */
 import { Agent, type Connection } from 'agents';
 import { createActor, type Actor, type Snapshot } from 'xstate';
