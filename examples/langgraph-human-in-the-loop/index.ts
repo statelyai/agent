@@ -56,7 +56,7 @@ export async function runLangGraphHumanInTheLoopExample() {
       drafting: {
         invoke: {
           src: 'writeDraft',
-          input: ({ context }: { context: { topic: string } }) => ({
+          input: ({ context }) => ({
             topic: context.topic,
           }),
           onDone: ({ output }) => ({
@@ -86,7 +86,7 @@ export async function runLangGraphHumanInTheLoopExample() {
     },
   });
 
-  const generateText = async ({ prompt }: { prompt?: string }) => `Draft: ${prompt ?? ''}`;
+  const generateText = async ({ prompt }: { prompt?: string }) => ({ output: `Draft: ${prompt ?? ''}` });
 
   const first = await runAgent(machine, {
     input: { topic: 'release notes' },

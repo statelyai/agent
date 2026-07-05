@@ -28,4 +28,4 @@ Rewrite `@statelyai/agent` as a typed, host-agnostic authoring layer for agent s
 - `getAvailableEvents` → `getAcceptedEvents`; `getEventTools` and `AgentRequestLogic` removed.
 - `runAgent` returns the `done | idle | error` status union instead of the machine output, and never throws on a waiting machine.
 - `AgentMessage` is the new union shape; the open index signature is gone. Persisted contexts holding old-shape messages need manual migration.
-- Executor results are unwrapped as `object → text → output`; `toolResults` inspection removed.
+- Executors return the `{ output }` envelope (see the dedicated changeset); `toolResults` inspection removed.

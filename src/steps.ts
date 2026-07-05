@@ -87,7 +87,7 @@ export function getAgentRequests(
 
     const registeredLogic = isTextLogic(action.logic) || isDecisionLogic(action.logic)
       ? action.logic
-      : options.actors?.[params.src];
+      : options.actorSources?.[params.src];
 
     if (isDecisionLogic(registeredLogic)) {
       const decisionRequest = registeredLogic.request(params.input as never);
@@ -232,7 +232,7 @@ export function resolveAgentStep<TMachine extends AnyActorLogic>(
 
 /**
  * {@link getAgentRequests}, but pre-filled with a machine's registered
- * `setupAgent` schemas/actors (so callers don't have to pass them by hand
+ * `setupAgent` schemas/actorSources (so callers don't have to pass them by hand
  * every call) — merged with any `options` passed here, which take
  * precedence.
  */

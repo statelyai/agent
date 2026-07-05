@@ -17,11 +17,6 @@ import {
   type AgentTextRequest,
   type AgentTools,
 } from '../../src/index.js';
-const models = {
-  "mode-router": "mode-router",
-  "streaming-writer": "streaming-writer",
-} as const;
-
 
 export async function runBurrStreamingOverviewExample() {
   const modeSchema = z.object({
@@ -33,7 +28,6 @@ export async function runBurrStreamingOverviewExample() {
     ]),
   });
   const agent = setupAgent({
-    models,
     context: z.object({
       prompt: z.string(),
       safe: z.boolean(),
@@ -135,7 +129,7 @@ export async function runBurrStreamingOverviewExample() {
     },
   });
 
-  const generateText = async () => ({ object: { mode: 'generate_code' } });
+  const generateText = async () => ({ output: { mode: 'generate_code' } });
 
   // answerPrompt's prompt is `${mode}:${prompt}` (see requests.answerPrompt above).
   const streamText = async (
@@ -144,7 +138,7 @@ export async function runBurrStreamingOverviewExample() {
   ) => {
     info?.onChunk?.('chunk:1');
     info?.onChunk?.('chunk:2');
-    return { text: `response:${request.prompt}` };
+    return { output: `response:${request.prompt}` };
   };
 
   const chunks: string[] = [];

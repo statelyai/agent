@@ -35,7 +35,7 @@ import { models as triageModels, triageActors, triageMachine, triageSchemas, tri
 interface AiSdkTextHostOptions {
   models?: Record<string, LanguageModel>;
   resolveModel?: (modelRef: string) => LanguageModel;
-  onChunk?: (chunk: string) => void;
+  onChunk?: (chunk: string, info: { request: AgentTextRequest }) => void;
 }
 
 function defaultResolveModel(modelRef: string): LanguageModel {
@@ -53,8 +53,7 @@ async function generateWithAiSdk(
     : createAiSdkExecutors({
         resolveModel: options.resolveModel ?? defaultResolveModel,
       });
-  const raw = await generateText({ ...input, tools: tools ?? {} }, { signal });
-  const output = 'output' in raw ? raw.output : raw.text;
+  const { output } = await generateText({ ...input, tools: tools ?? {} }, { signal });
   return input.outputSchema && typeof output === 'string'
     ? validateSchemaSync(input.outputSchema, output)
     : output;
@@ -70,11 +69,16 @@ async function streamWithAiSdk(
     : createAiSdkExecutors({
         resolveModel: options.resolveModel ?? defaultResolveModel,
       });
-  const { text } = await streamText(
+  const { output } = await streamText(
     { ...input, tools: input.tools ?? {} },
-    { onChunk: options.onChunk, signal }
+    {
+      onChunk: options.onChunk
+        ? (chunk: string) => options.onChunk!(chunk, { request: input })
+        : undefined,
+      signal,
+    }
   );
-  return text;
+  return output;
 }
 
 export function createAiSdkTextActor<
@@ -85,14 +89,15 @@ export function createAiSdkTextActor<
   logic: TextLogic<TInputSchema, TOutputSchema, TMetadata>,
   options: AiSdkTextHostOptions = {}
 ): TextLogic<TInputSchema, TOutputSchema, TMetadata> {
-  return logic.withExecutor(async ({ request, signal }) =>
-    await generateWithAiSdk(request, undefined, options, signal) as TextLogicOutput<typeof logic>
-  );
+  return logic.withExecutor(async ({ request, signal }) => ({
+    output: await generateWithAiSdk(request, undefined, options, signal) as TextLogicOutput<typeof logic>,
+  }));
 }
 
 export function createAiSdkTextExecutor(options: AiSdkTextHostOptions = {}) {
-  return (request: AgentTextRequest & { tools: AgentTools }) =>
-    generateWithAiSdk(request, request.tools, options);
+  return async (request: AgentTextRequest & { tools: AgentTools }) => ({
+    output: await generateWithAiSdk(request, request.tools, options),
+  });
 }
 
 export function createAiSdkStreamingTextActor<
@@ -103,9 +108,9 @@ export function createAiSdkStreamingTextActor<
   logic: TextLogic<TInputSchema, TOutputSchema, TMetadata>,
   options: AiSdkTextHostOptions = {}
 ): TextLogic<TInputSchema, TOutputSchema, TMetadata> {
-  return logic.withExecutor(async ({ request, signal }) =>
-    await streamWithAiSdk(request, options, signal) as TextLogicOutput<typeof logic>
-  );
+  return logic.withExecutor(async ({ request, signal }) => ({
+    output: await streamWithAiSdk(request, options, signal) as TextLogicOutput<typeof logic>,
+  }));
 }
 
 export async function runTriageDemo(ticket: string) {
@@ -122,7 +127,7 @@ export async function runTriageDemo(ticket: string) {
 export async function runTriageStepDemo(ticket: string) {
   let step = initialAgentStep(triageMachine, { ticket }, {
     schemas: triageSchemas,
-    actors: triageActors,
+    actorSources: triageActors,
   });
 
   while (!step.done) {
@@ -146,7 +151,7 @@ export async function runTriageStepDemo(ticket: string) {
         output,
         {
           schemas: triageSchemas,
-          actors: triageActors,
+          actorSources: triageActors,
         }
       );
     }

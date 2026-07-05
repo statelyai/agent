@@ -33,27 +33,10 @@ function resolveModel(modelRef: string): LanguageModel {
 const executors = createAiSdkExecutors({ resolveModel });
 const { decide } = executors;
 
-function parseGameEvent(value: unknown): GameEvent {
-  if (!value || typeof value !== 'object' || !('type' in value)) {
-    throw new Error('Model returned an invalid game event.');
-  }
-
-  const type = String(value.type);
-  const schema = gameSchemas.events[type as keyof typeof gameSchemas.events];
-  if (!schema) {
-    throw new Error(`Model returned unsupported game event: ${type}`);
-  }
-
-  return {
-    type,
-    ...schema.parse(value),
-  } as GameEvent;
-}
-
 export async function runAiSdkGameTurn(input = { playerHp: 20, enemyHp: 15 }) {
   let step = initialAgentStep(gameMachine, input, {
     schemas: gameSchemas,
-    actors: gameActors,
+    actorSources: gameActors,
   });
 
   while (!step.done) {
@@ -63,12 +46,16 @@ export async function runAiSdkGameTurn(input = { playerHp: 20, enemyHp: 15 }) {
     }
 
     if (request.kind === 'decision') {
+      // `resolveDecision` validates the chosen event's payload against the
+      // machine's event schemas (attached to `request.events`) and, typed
+      // against `GameEvent` via `canTake`, returns a machine-typed event —
+      // no re-narrowing needed before `transitionAgentStep`.
       const chosenEvent = await resolveDecision(request, decide, {
-        canTake: (event) => step.snapshot.can(event as GameEvent),
+        canTake: (event: GameEvent) => step.snapshot.can(event),
       });
-      step = transitionAgentStep(gameMachine, step, parseGameEvent(chosenEvent), {
+      step = transitionAgentStep(gameMachine, step, chosenEvent, {
         schemas: gameSchemas,
-        actors: gameActors,
+        actorSources: gameActors,
       });
       continue;
     }
@@ -81,7 +68,7 @@ export async function runAiSdkGameTurn(input = { playerHp: 20, enemyHp: 15 }) {
       output,
       {
         schemas: gameSchemas,
-        actors: gameActors,
+        actorSources: gameActors,
       }
     );
   }

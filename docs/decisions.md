@@ -91,7 +91,7 @@ Core validates and retries; it never talks to a model. How the model is coerced 
 
 <!-- createDecisionLogic from src/decision.ts and examples/game-agent -->
 
-When a decision is reusable, exported, or worth testing standalone, pull it out with `createDecisionLogic` and register it under `actors:`. The game-agent example exports `chooseMove` and computes `allowedEvents` as a function of input, gating `HEAL` on the player's HP:
+When a decision is reusable, exported, or worth testing standalone, pull it out with `createDecisionLogic` and register it under `actorSources:`. The game-agent example exports `chooseMove` and computes `allowedEvents` as a function of input, gating `HEAL` on the player's HP:
 
 ```ts
 import { createDecisionLogic } from '@statelyai/agent';
@@ -109,7 +109,7 @@ export const chooseMove = createDecisionLogic({
 ```
 
 ```ts
-const gameSetup = setupAgent({ schemas: gameSchemas, models, actors: { chooseMove } });
+const gameSetup = setupAgent({ schemas: gameSchemas, models, actorSources: { chooseMove } });
 
 // ...in the machine:
 choosingMove: {

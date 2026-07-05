@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { openai } from '@ai-sdk/openai';
-import { createAgentSchemas, createTextLogic, setupAgent } from '../../src/index.js';
 import { type LanguageModel } from 'ai';
+import { createAgentSchemas, createTextLogic, setupAgent } from '../../src/index.js';
 
 const jokeSchema = z.object({
   joke: z.string(),
@@ -17,6 +17,8 @@ const schemas = createAgentSchemas({
   output: jokeSchema,
 });
 
+// Annotated with LanguageModel so the exported const has a portable, nameable
+// type (TS2742); model-ref keys are inferred from this map regardless.
 export const models: Record<'jokeWriter', LanguageModel> = {
   jokeWriter: openai('gpt-5.4-mini'),
 } as const;
@@ -39,7 +41,7 @@ export const jokeActors = {
 const jokeAgent = setupAgent({
   schemas,
   models,
-  actors: jokeActors,
+  actorSources: jokeActors,
 });
 
 export const jokeSchemas = schemas;
@@ -71,6 +73,11 @@ export const jokeMachine = jokeAgent.createMachine({
         }),
         onDone: ({ event }) => ({
           target: 'checkingFeedback',
+          // `agent.userInput`'s output is `unknown`: xstate derives a named
+          // invoke's onDone output from the *registered* actor's output type
+          // (`OutputFrom<TActorMap['agent.userInput']>`), which can't depend on
+          // this invoke's per-call `input.schema`. So the schema still validates
+          // the answer at runtime, but the type needs a cast here.
           context: {
             feedback: (event.output as { feedback?: string }).feedback ?? '',
           },

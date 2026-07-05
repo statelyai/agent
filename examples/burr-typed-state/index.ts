@@ -11,10 +11,6 @@ import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { createAsyncLogic } from 'xstate';
 import { runAgent, setupAgent, type AgentTextRequest, type AgentTools } from '../../src/index.js';
-const models = {
-  "post-writer": "post-writer",
-} as const;
-
 
 export async function runBurrTypedStateExample() {
   const conceptSchema = z.object({
@@ -30,7 +26,6 @@ export async function runBurrTypedStateExample() {
     keyTakeaways: z.array(z.string()),
   });
   const agent = setupAgent({
-    models,
     context: z.object({
       youtubeUrl: z.string(),
       transcript: z.string().nullable(),
@@ -38,7 +33,7 @@ export async function runBurrTypedStateExample() {
     }),
     input: z.object({ youtubeUrl: z.string() }),
     output: z.object({ post: postSchema }),
-    actors: {
+    actorSources: {
       getTranscript: createAsyncLogic<string, { youtubeUrl: string }>({
         run: async ({ input }) => `transcript:${input.youtubeUrl}`,
       }),
@@ -101,7 +96,7 @@ export async function runBurrTypedStateExample() {
   });
 
   const generateText = async (request: AgentTextRequest & { tools: AgentTools }) => ({
-    object: {
+    output: {
       topic: 'Burr',
       hook: 'Stateful AI apps need structure.',
       body: request.prompt ?? '',

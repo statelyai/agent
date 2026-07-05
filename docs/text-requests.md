@@ -186,7 +186,7 @@ export const research = createTextLogic({
 
 <!-- createTextLogic from src/text-logic.ts and examples/email-drafter -->
 
-`createTextLogic` builds a standalone text request you can export, test on its own, and register under `actors`. A `requests` entry is exactly what `setupAgent` builds internally from `createTextLogic`, so the two are interchangeable.
+`createTextLogic` builds a standalone text request you can export, test on its own, and register under `actorSources`. A `requests` entry is exactly what `setupAgent` builds internally from `createTextLogic`, so the two are interchangeable.
 
 ```ts
 import { createTextLogic, setupAgent } from '@statelyai/agent';
@@ -204,7 +204,7 @@ export const draftEmail = createTextLogic({
 const agentSetup = setupAgent({
   schemas,
   models,
-  actors: { draftEmail },
+  actorSources: { draftEmail },
 });
 ```
 

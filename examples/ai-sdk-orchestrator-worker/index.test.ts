@@ -15,19 +15,21 @@ test('AI SDK orchestrator-worker maps to an explicit machine', async () => {
   const result = await runAgent(aiSdkOrchestratorWorkerMachine, {
     input: { featureRequest: 'Add settings page' },
     generateText: async () => ({
-      files: [
-        {
-          purpose: 'Add UI',
-              filePath: 'app/page.tsx',
-              changeType: 'modify',
-            },
-            {
-              purpose: 'Add test',
-              filePath: 'app/page.test.tsx',
-              changeType: 'create',
-            },
-      ],
-      estimatedComplexity: 'medium',
+      output: {
+        files: [
+          {
+            purpose: 'Add UI',
+            filePath: 'app/page.tsx',
+            changeType: 'modify',
+          },
+          {
+            purpose: 'Add test',
+            filePath: 'app/page.test.tsx',
+            changeType: 'create',
+          },
+        ],
+        estimatedComplexity: 'medium',
+      },
     }),
   });
   assert.equal(result.status, 'done');

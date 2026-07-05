@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { openai } from '@ai-sdk/openai';
+import { type LanguageModel } from 'ai';
 import {
   createAgentSchemas,
   createDecisionLogic,
@@ -7,7 +8,6 @@ import {
   sendDecision,
   setupAgent,
 } from '../../src/index.js';
-import { type LanguageModel } from 'ai';
 
 export const turnSummarySchema = z.object({
   summary: z.string(),
@@ -42,6 +42,8 @@ export const gameSchemas = createAgentSchemas({
 
 type GameEventType = keyof typeof gameSchemas.events;
 
+// Annotated with LanguageModel so the exported const has a portable, nameable
+// type (TS2742); model-ref keys are inferred from this map regardless.
 export const models: Record<'moveChooser' | 'turnSummarizer', LanguageModel> = {
   moveChooser: openai('gpt-5.4-mini'),
   turnSummarizer: openai('gpt-5.4-mini'),
@@ -71,9 +73,7 @@ export const chooseMove = createDecisionLogic({
       'Pick the best legal move.',
     ].join('\n'),
   allowedEvents: ({ input }) =>
-    (input as { playerHp: number }).playerHp <= 6
-      ? lowHpMoveEvents
-      : defaultMoveEvents,
+    input.playerHp <= 6 ? lowHpMoveEvents : defaultMoveEvents,
 });
 
 export const summarizeTurn = createTextLogic({
@@ -103,7 +103,7 @@ export const gameActors = {
 const gameAgent = setupAgent({
   schemas: gameSchemas,
   models,
-  actors: gameActors,
+  actorSources: gameActors,
 });
 
 export const gameMachine = gameAgent.createMachine({
@@ -221,8 +221,18 @@ export const gameMachine = gameAgent.createMachine({
         enemyHp: context.enemyHp,
       }),
     },
-    // Reached when chooseMove exhausts its retries (DecisionExhaustedError).
-    fumbled: {},
+    // Reached when chooseMove exhausts its retries (DecisionExhaustedError):
+    // the decision loop stalled, so the encounter ends unresolved
+    // (outcome 'continue') rather than as a win/loss/flee.
+    fumbled: {
+      type: 'final',
+      output: ({ context }) => ({
+        outcome: 'continue' as const,
+        summary: context.lastSummary ?? 'The hero fumbled and the moment passed.',
+        playerHp: context.playerHp,
+        enemyHp: context.enemyHp,
+      }),
+    },
   },
 });
 

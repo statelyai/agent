@@ -60,7 +60,8 @@ export interface AgentUserInputExecutor {
  * before any actor runs).
  */
 export interface RunAgentOptions<TMachine extends AnyStateMachine>
-  extends AgentRequestExecutors {
+  extends Partial<Pick<AgentRequestExecutors, 'generateText'>>,
+    Omit<AgentRequestExecutors, 'generateText'> {
   /** Machine input, passed straight to `createActor(machine, { input })`. Omit when resuming via `snapshot`. */
   input?: InputFrom<TMachine>;
 
@@ -195,28 +196,91 @@ function collectConfiguredInvokeSrcs(
 }
 
 /**
+ * Duck-types a state machine actor logic (an invoked child machine) vs. any
+ * other actor logic. xstate's `StateMachine` carries `.config`, `.root`, and
+ * a `.provide(...)` method plus an `implementations.actorSources` map — this
+ * combination is unique to machines and survives the dual-package/version
+ * boundary an `instanceof` check would not. Used to descend the bind-time
+ * walk into invoked child machines (their internal agent requests are opaque
+ * to the parent-level source walk otherwise).
+ */
+function isStateMachine(logic: unknown): logic is AnyStateMachine {
+  return (
+    !!logic
+    && typeof logic === 'object'
+    && 'config' in logic
+    && 'root' in logic
+    && typeof (logic as { provide?: unknown }).provide === 'function'
+    && typeof (logic as { implementations?: unknown }).implementations === 'object'
+    && !!(logic as { implementations?: { actorSources?: unknown } }).implementations
+      ?.actorSources
+  );
+}
+
+/**
  * Fails fast (throws) at bind time — before any actor runs — when the
  * machine invokes an agent actor `runAgent` cannot execute. See §3.2 point 2.
+ *
+ * Recurses into invoked child state machines (arbitrarily deep), because a
+ * child machine's own agent requests do NOT inherit the parent runAgent's
+ * `generateText`/`streamText`/`decide` executors at runtime — the runtime
+ * only wraps the parent machine's own sources, treating an invoked child as
+ * one opaque actor. So a child request must carry its own executor
+ * (`.withExecutor(...)`, tracked in `executorBoundLogics`) or be bound as a
+ * string-keyed source inside the child (via nested `.provide`). Anything
+ * unbound would silently settle the parent in its invoking state at runtime;
+ * this walk turns that into a loud bind-time error naming the child and the
+ * request, with the nested-`.provide` fix.
  */
 function assertBindable(
   machine: AnyStateMachine,
   effectiveSources: Record<string, AnyActorLogic>,
-  options: { hasDecide: boolean; hasStreamText: boolean }
+  options: { hasGenerateText: boolean; hasDecide: boolean; hasStreamText: boolean }
+): void {
+  assertMachineBindable(machine, effectiveSources, options, {
+    isChild: false,
+    childPath: '',
+    visited: new Set([machine]),
+  });
+}
+
+/** Recursion frame for {@link assertBindable}. `isChild` flips the error
+ * messages to the nested-`.provide` remedy (child requests can't inherit
+ * parent executors); `childPath` names the invoke chain (`parent > child`);
+ * `visited` guards against a machine invoking itself recursively. */
+interface BindWalkContext {
+  isChild: boolean;
+  childPath: string;
+  visited: Set<AnyStateMachine>;
+}
+
+function assertMachineBindable(
+  machine: AnyStateMachine,
+  effectiveSources: Record<string, AnyActorLogic>,
+  options: { hasGenerateText: boolean; hasDecide: boolean; hasStreamText: boolean },
+  ctx: BindWalkContext
 ): void {
   const invokes: Array<{ stateName: string; src: string | AnyActorLogic }> = [];
   collectConfiguredInvokeSrcs(machine.config as never, machine.config.id ?? '(root)', invokes);
 
+  const where = ctx.isChild ? `child machine '${ctx.childPath}' state` : 'state';
+
   for (const { stateName, src } of invokes) {
     if (typeof src !== 'string') {
-      // Direct-object src: string-keyed sources can be rebound by runAgent;
-      // direct objects cannot. Only a problem if it's an agent logic that
-      // still needs execution (no executor of its own).
+      // Direct-object src.
+      if (isStateMachine(src)) {
+        assertChildMachineBindable(src, src, stateName, options, ctx);
+        continue;
+      }
+      // string-keyed sources can be rebound by runAgent; direct objects
+      // cannot. Only a problem if it's an agent logic that still needs
+      // execution (no executor of its own).
       if (
         (isTextLogic(src) || isDecisionLogic(src))
         && !executorBoundLogics.has(src as object)
       ) {
         throw new Error(
-          `runAgent: state '${stateName}' invokes a direct-object actor logic ` +
+          `runAgent: ${where} '${stateName}' invokes a direct-object actor logic ` +
             `(kind: '${(src as TextLogic | DecisionLogic).kind}'). Direct-object invoke ` +
             `srcs cannot be rebound by runAgent — either call '.withExecutor(...)' on ` +
             `the logic before invoking it, or register it as a string-keyed actor ` +
@@ -231,20 +295,34 @@ function assertBindable(
 
     if (logic === undefined) {
       throw new Error(
-        `runAgent: state '${stateName}' invokes unregistered actor source '${src}'. ` +
+        `runAgent: ${where} '${stateName}' invokes unregistered actor source '${src}'. ` +
           `Provide it via machine.provide({ actorSources: { '${src}': ... } }) or ` +
           `runAgent(machine, { actorSources: { '${src}': ... } }).`
       );
+    }
+
+    if (isStateMachine(logic)) {
+      assertChildMachineBindable(logic, src, stateName, options, ctx);
+      continue;
     }
 
     if (src === USER_INPUT_ACTOR) {
       // Handled or not, `agent.userInput` is always bindable: without a
       // `userInput` option or actor source it is bound as a pending
       // placeholder that settles the run idle (see the binding step below).
+      // (Only meaningful for the top-level machine — a child machine's own
+      // userInput placeholder still binds harmlessly.)
       continue;
     }
 
     if (isDecisionLogic(logic)) {
+      // A decision source with its own bound executor runs itself.
+      if (executorBoundLogics.has(logic as object)) {
+        continue;
+      }
+      if (ctx.isChild) {
+        throw unboundChildRequestError(ctx.childPath, stateName, src, 'decision');
+      }
       if (!options.hasDecide) {
         throw new Error(
           `runAgent: state '${stateName}' invokes decision source '${src}' but no ` +
@@ -255,10 +333,31 @@ function assertBindable(
     }
 
     if (isTextLogic(logic)) {
+      // A text source with its own bound executor (`.withExecutor(...)`) needs
+      // no runAgent executor — it runs itself.
+      if (executorBoundLogics.has(logic as object)) {
+        continue;
+      }
+      if (ctx.isChild) {
+        // Child requests never inherit parent executors — the only fix is to
+        // bind the child's request with its own executor.
+        throw unboundChildRequestError(
+          ctx.childPath,
+          stateName,
+          src,
+          logic.mode === 'stream' ? 'streaming text' : 'text'
+        );
+      }
       if (logic.mode === 'stream' && !options.hasStreamText) {
         throw new Error(
           `runAgent: state '${stateName}' invokes streaming text source '${src}' but ` +
             `no 'streamText' executor was provided to runAgent(...).`
+        );
+      }
+      if (logic.mode !== 'stream' && !options.hasGenerateText) {
+        throw new Error(
+          `runAgent: state '${stateName}' invokes text source '${src}' but ` +
+            `no 'generateText' executor was provided to runAgent(...).`
         );
       }
       continue;
@@ -266,7 +365,7 @@ function assertBindable(
 
     if (isUnboundPlaceholder(logic)) {
       throw new Error(
-        `runAgent: state '${stateName}' invokes actor source '${src}', which has no ` +
+        `runAgent: ${where} '${stateName}' invokes actor source '${src}', which has no ` +
           `host execution. Provide it via machine.provide({ actorSources: { '${src}': ... } }) ` +
           `or runAgent(machine, { actorSources: { '${src}': ... } }).`
       );
@@ -276,9 +375,66 @@ function assertBindable(
   }
 }
 
+/** Descends the bind-time walk into an invoked child state machine, guarding
+ * against a machine that (transitively) invokes itself. */
+function assertChildMachineBindable(
+  childMachine: AnyStateMachine,
+  childSrc: string | AnyActorLogic,
+  stateName: string,
+  options: { hasGenerateText: boolean; hasDecide: boolean; hasStreamText: boolean },
+  ctx: BindWalkContext
+): void {
+  // Cycle guard: a machine invoked (transitively) within itself is walked
+  // once. Its own bind check already covered its invokes; re-descending would
+  // loop forever.
+  if (ctx.visited.has(childMachine)) {
+    return;
+  }
+
+  const childName =
+    typeof childSrc === 'string'
+      ? childSrc
+      : (childMachine.config.id ?? '(child machine)');
+  const childPath = ctx.childPath ? `${ctx.childPath} > ${childName}` : childName;
+
+  const childSources = childMachine.implementations.actorSources as Record<
+    string,
+    AnyActorLogic
+  >;
+
+  assertMachineBindable(childMachine, childSources, options, {
+    isChild: true,
+    childPath,
+    visited: new Set([...ctx.visited, childMachine]),
+  });
+}
+
+/** The loud bind-time error for an unbound agent request reached inside an
+ * invoked child machine. Names the child invoke chain AND the request src,
+ * and spells out the nested-`.provide`/`.withExecutor` remedy — child machine
+ * requests do NOT inherit the parent runAgent's executors. */
+function unboundChildRequestError(
+  childPath: string,
+  stateName: string,
+  requestSrc: string,
+  kind: 'text' | 'streaming text' | 'decision'
+): Error {
+  return new Error(
+    `runAgent: child machine '${childPath}' (state '${stateName}') invokes ${kind} ` +
+      `source '${requestSrc}', which has no host execution. Child machine requests do ` +
+      `NOT inherit the parent runAgent's generateText/streamText/decide executors — the ` +
+      `child must be bound before it is invoked. Bind it via ` +
+      `parentMachine.provide({ actorSources: { <child>: childMachine.provide({ ` +
+      `actorSources: { '${requestSrc}': requestLogic.withExecutor(...) } }) } }), or pass ` +
+      `that same nested-provided child as runAgent(parentMachine, { actorSources: { ` +
+      `<child>: childMachine.provide({ actorSources: { '${requestSrc}': ` +
+      `requestLogic.withExecutor(...) } }) } }).`
+  );
+}
+
 // Shared state closed over by every wrapped actor source in one runAgent call: executors, observation callbacks, and the shared model-call budget/actor ref.
 interface RunAgentBindContext {
-  generateText: AgentRequestExecutor;
+  generateText?: AgentRequestExecutor;
   streamText?: AgentRequestExecutor;
   decide?: AgentDecisionExecutor;
   onChunk?: (chunk: string, info: { request: AgentRequest }) => void;
@@ -337,11 +493,11 @@ function wrapTextLogicForRunAgent(
         : undefined,
       signal,
     });
-    const output = await normalizeGeneratorResult(raw);
+    const output = await normalizeGeneratorResult(raw, id);
 
     runCtx.onResult?.(agentRequest, { output, raw });
 
-    return output;
+    return { output };
   });
 }
 
@@ -485,6 +641,7 @@ export async function runAgent<TMachine extends AnyStateMachine>(
   >;
 
   assertBindable(provided, effectiveSources, {
+    hasGenerateText: !!options.generateText,
     hasDecide: !!options.decide,
     hasStreamText: !!options.streamText,
   });
@@ -537,7 +694,12 @@ export async function runAgent<TMachine extends AnyStateMachine>(
     }
 
     if (isTextLogic(logic)) {
-      wrappedSources[key] = wrapTextLogicForRunAgent(logic, runCtx);
+      // A text logic that already carries its own executor (`.withExecutor`)
+      // runs itself — leave it untouched. Only unbound builtins/logics get a
+      // host-backed executor from runAgent's `generateText`/`streamText`.
+      if (!executorBoundLogics.has(logic as object)) {
+        wrappedSources[key] = wrapTextLogicForRunAgent(logic, runCtx);
+      }
       continue;
     }
     // Non-agent actors and already-unreachable placeholders pass through

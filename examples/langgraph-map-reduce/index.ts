@@ -2,14 +2,10 @@ import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { createAsyncLogic } from 'xstate';
 import { runAgent, setupAgent } from '../../src/index.js';
-const models = {
-  "reducer": "reducer",
-} as const;
 
 
 export async function runLangGraphMapReduceExample() {
   const agent = setupAgent({
-    models,
     context: z.object({
       sections: z.array(z.string()),
       summaries: z.array(z.string()),
@@ -17,7 +13,7 @@ export async function runLangGraphMapReduceExample() {
     }),
     input: z.object({ sections: z.array(z.string()) }),
     output: z.object({ final: z.string() }),
-    actors: {
+    actorSources: {
       summarizeAll: createAsyncLogic<string[], { sections: string[] }>({
         run: async ({ input }) =>
           Promise.all(
@@ -77,7 +73,7 @@ export async function runLangGraphMapReduceExample() {
 
   const result = await runAgent(machine, {
     input: { sections: ['a', 'b'] },
-    generateText: async (request) => `reduced:${request.prompt ?? ''}`,
+    generateText: async (request) => ({ output: `reduced:${request.prompt ?? ''}` }),
   });
 
   assert.equal(result.status, 'done');

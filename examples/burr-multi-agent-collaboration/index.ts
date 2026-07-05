@@ -11,17 +11,12 @@ import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { createAsyncLogic } from 'xstate';
 import { runAgent, setupAgent } from '../../src/index.js';
-const models = {
-  "supervisor": "supervisor",
-} as const;
-
 
 export async function runBurrMultiAgentCollaborationExample() {
   const routeSchema = z.object({
     route: z.enum(['researcher', 'chartGenerator']),
   });
   const agent = setupAgent({
-    models,
     context: z.object({
       request: z.string(),
       route: z.enum(['researcher', 'chartGenerator']).nullable(),
@@ -29,7 +24,7 @@ export async function runBurrMultiAgentCollaborationExample() {
     }),
     input: z.object({ request: z.string() }),
     output: z.object({ result: z.string() }),
-    actors: {
+    actorSources: {
       researcher: createAsyncLogic<string, { request: string }>({
         run: async ({ input }) => `research:${input.request}`,
       }),
@@ -104,7 +99,7 @@ export async function runBurrMultiAgentCollaborationExample() {
 
   const result = await runAgent(machine, {
     input: { request: 'plot revenue' },
-    generateText: async () => ({ object: { route: 'chartGenerator' } }),
+    generateText: async () => ({ output: { route: 'chartGenerator' } }),
   });
 
   if (result.status !== 'done') {

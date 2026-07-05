@@ -1,7 +1,7 @@
 import { createAsyncLogic, type AnyActorLogic, type AsyncActorLogic } from 'xstate';
 import type { AgentRequestOptions } from '../events.js';
 
-export type AgentExecutionOptions = Pick<AgentRequestOptions, 'schemas' | 'actors'>;
+export type AgentExecutionOptions = Pick<AgentRequestOptions, 'schemas' | 'actorSources'>;
 export const agentExecutionOptions = new WeakMap<object, AgentExecutionOptions>();
 
 // Actor logic objects that are unbound placeholders (no host execution) and

@@ -55,11 +55,10 @@ export async function runLangGraphStreamingSideChannelExample() {
   // machine collecting chunks itself.
   const result = await runAgent(machine, {
     input: { topic: 'agents' },
-    generateText: async () => ({}),
     streamText: async (request, info) => {
       info?.onChunk?.('hello');
       info?.onChunk?.(request.prompt ?? '');
-      return `hello ${request.prompt ?? ''}`;
+      return { output: `hello ${request.prompt ?? ''}` };
     },
     onChunk: (chunk) => {
       chunks.push(chunk);

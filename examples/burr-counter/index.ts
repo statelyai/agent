@@ -17,7 +17,7 @@ export async function runBurrCounterExample() {
     context: z.object({ counter: z.number(), countUpTo: z.number() }),
     input: z.object({ countUpTo: z.number() }),
     output: z.object({ counter: z.number() }),
-    actors: {
+    actorSources: {
       increment: createAsyncLogic<number, { counter: number }>({
         run: async ({ input }) => input.counter + 1,
       }),
@@ -55,7 +55,6 @@ export async function runBurrCounterExample() {
 
   const result = await runAgent(machine, {
     input: { countUpTo: 3 },
-    generateText: async () => ({}),
   });
 
   if (result.status !== 'done') {

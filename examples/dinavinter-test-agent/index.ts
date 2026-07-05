@@ -4,22 +4,14 @@ import {
   createActor,
   createAsyncLogic,
   createCallbackLogic,
-  initialTransition,
-  transition,
   waitFor,
   type EventObject,
 } from 'xstate';
 import {
-  type AgentRequest,
   assistantMessage,
   createAgentSchemas,
-  executeAgentRequest,
-  getAgentRequests,
-  transitionResult,
-  type AgentTextRequest,
-  type AgentTools,
+  setupAgent,
 } from '../../src/index.js';
-import { setupAgent } from '../../src/index.js';
 
 export async function runDinavinterTestAgentExample() {
   const calls: unknown[] = [];
@@ -45,7 +37,7 @@ export async function runDinavinterTestAgentExample() {
 
   const agent = setupAgent({
     schemas,
-    actors: {
+    actorSources: {
       createThread: createAsyncLogic<string, { request: string }>({
         run: async ({ input }) => {
           calls.push({ actor: 'createThread', request: input.request });
@@ -90,7 +82,7 @@ export async function runDinavinterTestAgentExample() {
         invoke: {
           id: 'createThread',
           src: 'createThread',
-          input: ({ context }: { context: { request: string } }) => ({
+          input: ({ context }) => ({
             request: context.request,
           }),
           onDone: ({ output }) => ({
@@ -103,11 +95,7 @@ export async function runDinavinterTestAgentExample() {
         invoke: {
           id: 'sendMessage',
           src: 'sendMessage',
-          input: ({
-            context,
-          }: {
-            context: { threadId: string | null; request: string };
-          }) => ({
+          input: ({ context }) => ({
             threadId: context.threadId!,
             message: context.request,
           }),
@@ -121,7 +109,7 @@ export async function runDinavinterTestAgentExample() {
         invoke: {
           id: 'streamThread',
           src: 'streamThread',
-          input: ({ context }: { context: { threadId: string | null } }) => ({
+          input: ({ context }) => ({
             threadId: context.threadId!,
           }),
         },

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { openai } from '@ai-sdk/openai';
-import { createAgentSchemas, createTextLogic, setupAgent } from '../../src/index.js';
 import { type LanguageModel } from 'ai';
+import { createAgentSchemas, createTextLogic, setupAgent } from '../../src/index.js';
 
 export const triageSchema = z.object({
   sentiment: z.enum(['positive', 'neutral', 'negative']),
@@ -18,6 +18,8 @@ const schemas = createAgentSchemas({
   output: triageSchema,
 });
 
+// Annotated with LanguageModel so the exported const has a portable, nameable
+// type (TS2742); model-ref keys are inferred from this map regardless.
 export const models: Record<'ticketTriage', LanguageModel> = {
   ticketTriage: openai('gpt-5.4-mini'),
 } as const;
@@ -40,7 +42,7 @@ export const triageActors = {
 const triageAgent = setupAgent({
   schemas,
   models,
-  actors: triageActors,
+  actorSources: triageActors,
 });
 
 export const triageSchemas = schemas;

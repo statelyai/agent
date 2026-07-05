@@ -6,10 +6,11 @@ import { aiSdkParallelReviewMachine } from './index.js';
 test('AI SDK parallel review maps to an explicit machine', async () => {
   const result = await runAgent(aiSdkParallelReviewMachine, {
     input: { code: 'const x = eval(input);' },
-    generateText: async (request) =>
-      JSON.parse(request.prompt ?? '[]')
+    generateText: async (request) => ({
+      output: JSON.parse(request.prompt ?? '[]')
         .map((review: { type: string }) => review.type)
         .join(','),
+    }),
   });
   assert.equal(result.status, 'done');
   assert.equal(

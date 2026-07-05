@@ -23,7 +23,7 @@ export {
 } from './steps.js';
 export { runAgent } from './run-agent.js';
 export { minimalSchemaCompiler } from './workflow-config.js';
-export { validateSchemaSync } from './utils.js';
+export { getStateMeta, validateSchemaSync } from './utils.js';
 export {
   assistantMessage,
   systemMessage,

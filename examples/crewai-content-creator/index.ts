@@ -9,6 +9,7 @@
 import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { runAgent, setupAgent, type AgentTextRequest, type AgentTools } from '../../src/index.js';
+// Model refs are opaque routing keys resolved by the executor.
 const models = {
   "router": "router",
   "writer": "writer",
@@ -95,10 +96,10 @@ export async function runCrewAIContentCreatorExample() {
 
   const generateText = async (request: AgentTextRequest & { tools: AgentTools }) => {
     if (request.model === 'router') {
-      return { object: { route: 'linkedin' } };
+      return { output: { route: 'linkedin' } };
     }
     // request.model === 'writer'; prompt is `${route}:${request}`.
-    return `Post for ${request.prompt}`;
+    return { output: `Post for ${request.prompt}` };
   };
 
   const result = await runAgent(machine, {

@@ -2,14 +2,10 @@ import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { createAsyncLogic } from 'xstate';
 import { runAgent, setupAgent } from '../../src/index.js';
-const models = {
-  "router": "router",
-} as const;
 
 
 export async function runLangGraphSupervisorHandoffExample() {
   const agent = setupAgent({
-    models,
     context: z.object({
       request: z.string(),
       route: z.enum(['research', 'write']).nullable(),
@@ -17,7 +13,7 @@ export async function runLangGraphSupervisorHandoffExample() {
     }),
     input: z.object({ request: z.string() }),
     output: z.object({ result: z.string() }),
-    actors: {
+    actorSources: {
       research: createAsyncLogic<string, { request: string }>({
         run: async ({ input }) => `research:${input.request}`,
       }),
@@ -92,7 +88,7 @@ export async function runLangGraphSupervisorHandoffExample() {
 
   const result = await runAgent(machine, {
     input: { request: 'compare frameworks' },
-    generateText: async () => ({ route: 'research' }),
+    generateText: async () => ({ output: { route: 'research' } }),
   });
 
   assert.equal(result.status, 'done');

@@ -155,7 +155,7 @@ export interface DecisionLogicConfig<
     AgentMessage[] | undefined,
     InferOutput<TInputSchema>
   >;
-  allowedEvents?: AllowedEvents<TEvent>;
+  allowedEvents?: AllowedEvents<TEvent, InferOutput<TInputSchema>>;
   maxRetries?: number; // default 2
   temperature?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
   maxTokens?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
@@ -173,7 +173,7 @@ export interface DecisionLogicConfig<
  * Actor logic for a decision: an async effect that resolves to exactly one
  * currently-legal {@link ChosenEvent} (never a plain value) and is meant to
  * be raised into the machine — see {@link sendDecision}. Built by
- * {@link createDecisionLogic}. Register it under `actors:` to reuse/export/
+ * {@link createDecisionLogic}. Register it under `actorSources:` to reuse/export/
  * test it standalone; for a state-local, zero-config decision, use the
  * `agent.decide` builtin invoke instead.
  */
@@ -205,7 +205,7 @@ function resolveAllowedEventTypes(
  * run, resolves to exactly one currently-legal {@link ChosenEvent} by
  * calling the host `decide` executor (passed here as `execute`, or supplied
  * later via {@link DecisionLogic.withExecutor}, `machine.provide(...)`, or
- * `runAgent`'s `decide` option). Register the result under `actors:` and
+ * `runAgent`'s `decide` option). Register the result under `actorSources:` and
  * invoke it by name; for a one-off, state-local decision, prefer the
  * `agent.decide` builtin invoke instead — it needs no separate declaration
  * and types `allowedEvents` against the machine's own event schemas.
@@ -218,7 +218,7 @@ function resolveAllowedEventTypes(
  *   system: 'You are playing a turn-based game. Choose exactly one legal move.',
  *   prompt: ({ input }) => `Player HP: ${input.playerHp}\nEnemy HP: ${input.enemyHp}`,
  *   allowedEvents: ({ input }) =>
- *     (input as { playerHp: number }).playerHp <= 6
+ *     input.playerHp <= 6
  *       ? ['ATTACK', 'DEFEND', 'HEAL', 'FLEE']
  *       : ['ATTACK', 'DEFEND', 'FLEE'],
  * });
@@ -278,7 +278,7 @@ export function createDecisionLogic<
         throw new Error(
           'Decision logic has no host execution. Pass an executor as the second ' +
             'argument to createDecisionLogic(...), provide a runtime adapter, or ' +
-            'extract it with getAgentRequests(..., { actors }) and resolveDecision(...).'
+            'extract it with getAgentRequests(..., { actorSources }) and resolveDecision(...).'
         );
       }
 
@@ -410,8 +410,14 @@ export type AgentDecisionExecutor = (
   request: AgentDecisionRequest
 ) => PromiseLike<{ event: ChosenEvent; reason?: string }>;
 
-/** Options for {@link resolveDecision}. */
-export interface ResolveDecisionOptions {
+/**
+ * Options for {@link resolveDecision}. The `TEvent` parameter (the machine's
+ * event union, defaulting to the loose {@link ChosenEvent}) types both
+ * `canTake`'s argument and {@link resolveDecision}'s return — pass it (or let
+ * it infer from `canTake`) to get a machine-typed chosen event out without a
+ * downstream cast.
+ */
+export interface ResolveDecisionOptions<TEvent extends ChosenEvent = ChosenEvent> {
   /** Retries after a failed attempt. Default `2`, so up to 3 attempts total. */
   maxRetries?: number;
   /** Checked before each attempt; aborting rejects the pending decision. */
@@ -421,9 +427,11 @@ export interface ResolveDecisionOptions {
    * type-and-payload-valid event that this rejects records a
    * `'rejected-by-guard'` attempt and retries. Omit to skip guard checking
    * (type + payload validation only — e.g. under bare `createActor`, where
-   * no snapshot is reachable).
+   * no snapshot is reachable). Typing its argument as the machine's event
+   * union (e.g. `(e: GameEvent) => snapshot.can(e)`) makes
+   * {@link resolveDecision} return that union.
    */
-  canTake?: (event: ChosenEvent) => boolean;
+  canTake?: (event: TEvent) => boolean;
 }
 
 /**
@@ -451,11 +459,11 @@ export interface ResolveDecisionOptions {
  * });
  * ```
  */
-export async function resolveDecision(
+export async function resolveDecision<TEvent extends ChosenEvent = ChosenEvent>(
   request: AgentDecisionRequest,
   executor: AgentDecisionExecutor,
-  options: ResolveDecisionOptions = {}
-): Promise<ChosenEvent> {
+  options: ResolveDecisionOptions<TEvent> = {}
+): Promise<TEvent> {
   const maxRetries = options.maxRetries ?? 2;
   const attempts: DecisionAttempt[] = [];
   const eventsByType = new Map(request.events.map((event) => [event.type, event]));
@@ -494,7 +502,7 @@ export async function resolveDecision(
       }
     }
 
-    if (options.canTake?.(validatedEvent) === false) {
+    if (options.canTake?.(validatedEvent as TEvent) === false) {
       attempts.push({
         event: validatedEvent,
         failure: 'rejected-by-guard',
@@ -503,7 +511,7 @@ export async function resolveDecision(
       continue;
     }
 
-    return validatedEvent;
+    return validatedEvent as TEvent;
   }
 
   throw new DecisionExhaustedError(attempts);

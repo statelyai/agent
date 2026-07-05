@@ -31,7 +31,7 @@ describe('runAgent', () => {
       prompt: ({ input }) => input.prompt,
     });
 
-    const agent = setupAgent({ schemas, actors: { answerQuestion } });
+    const agent = setupAgent({ schemas, actorSources: { answerQuestion } });
     const machine = agent.createMachine({
       context: ({ input }) => ({ prompt: input.prompt, answer: null }),
       initial: 'answering',
@@ -55,7 +55,7 @@ describe('runAgent', () => {
     });
 
     const generateText = async (request: AgentTextRequest & { tools: AgentTools }) => ({
-      object: { answer: `Answered: ${request.prompt}` },
+      output: { answer: `Answered: ${request.prompt}` },
     });
 
     const result = await runAgent(machine, {
@@ -86,7 +86,7 @@ describe('runAgent', () => {
       prompt: ({ input }) => input.prompt,
     });
 
-    const agent = setupAgent({ schemas, actors: { draftText } });
+    const agent = setupAgent({ schemas, actorSources: { draftText } });
     const machine = agent.createMachine({
       context: ({ input }) => ({ prompt: input.prompt, draft: null }),
       initial: 'drafting',
@@ -112,8 +112,9 @@ describe('runAgent', () => {
       },
     });
 
-    const generateText = async (request: AgentTextRequest & { tools: AgentTools }) =>
-      `Draft: ${request.prompt}`;
+    const generateText = async (request: AgentTextRequest & { tools: AgentTools }) => ({
+      output: `Draft: ${request.prompt}`,
+    });
 
     const first = await runAgent(machine, {
       input: { prompt: 'release notes' },
@@ -154,7 +155,7 @@ describe('runAgent', () => {
       allowedEvents: ['ATTACK', 'HEAL'] as const,
     });
 
-    const agent = setupAgent({ schemas, actors: { chooseMove } });
+    const agent = setupAgent({ schemas, actorSources: { chooseMove } });
     const machine = agent.createMachine({
       context: { hp: 10 },
       initial: 'choosingMove',
@@ -195,7 +196,7 @@ describe('runAgent', () => {
 
     const result = await runAgent(machine, {
       input: {},
-      generateText: async () => ({}),
+      generateText: async () => ({ output: {} }),
       decide,
     });
 
@@ -219,7 +220,7 @@ describe('runAgent', () => {
       model: 'test-model',
     });
 
-    const agent = setupAgent({ schemas, actors: { step } });
+    const agent = setupAgent({ schemas, actorSources: { step } });
     const machine = agent.createMachine({
       context: { count: 0 },
       initial: 'looping',
@@ -245,7 +246,7 @@ describe('runAgent', () => {
       maxModelCalls: 3,
       generateText: async () => {
         calls += 1;
-        return calls;
+        return { output: calls };
       },
     });
 
@@ -263,7 +264,7 @@ describe('runAgent', () => {
       schemas: { input: z.object({}), output: z.object({}) },
       model: 'test-model',
     });
-    const agent = setupAgent({ schemas, actors: { step } });
+    const agent = setupAgent({ schemas, actorSources: { step } });
     const machine = agent.createMachine({
       context: {},
       initial: 'working',
@@ -281,7 +282,7 @@ describe('runAgent', () => {
     const result = await runAgent(machine, {
       input: {},
       signal: controller.signal,
-      generateText: async () => ({}),
+      generateText: async () => ({ output: {} }),
     });
 
     expect(result.status).toBe('error');
@@ -298,7 +299,7 @@ describe('runAgent', () => {
       schemas: { input: z.object({}), output: z.object({}) },
       model: 'test-model',
     });
-    const agent = setupAgent({ schemas, actors: { step } });
+    const agent = setupAgent({ schemas, actorSources: { step } });
     const machine = agent.createMachine({
       context: {},
       initial: 'working',
@@ -316,7 +317,7 @@ describe('runAgent', () => {
       signal: controller.signal,
       generateText: () =>
         new Promise((resolveExec) => {
-          setTimeout(() => resolveExec({}), 50);
+          setTimeout(() => resolveExec({ output: {} }), 50);
         }),
     });
     setTimeout(() => controller.abort(), 5);
@@ -336,7 +337,7 @@ describe('runAgent', () => {
       schemas: { input: z.object({}), output: z.object({}) },
       model: 'test-model',
     });
-    const agent = setupAgent({ schemas, actors: { step } });
+    const agent = setupAgent({ schemas, actorSources: { step } });
     const machine = agent.createMachine({
       context: {},
       initial: 'working',
@@ -375,7 +376,7 @@ describe('runAgent', () => {
           model: 'test-model',
           prompt: ({ input }) => input.topic,
         },
-        async () => 'a summary'
+        async () => ({ output: 'a summary' })
       );
 
       const machine = setup({}).createMachine({
@@ -395,7 +396,7 @@ describe('runAgent', () => {
       });
 
       const result = await runAgent(machine, {
-        generateText: async () => ({}),
+        generateText: async () => ({ output: {} }),
       });
       expect(result.status).toBe('done');
     });
@@ -407,7 +408,7 @@ describe('runAgent', () => {
         events: { ATTACK: z.object({}) },
       });
       const chooseMove = createDecisionLogic({ model: 'test-model' });
-      const agent = setupAgent({ schemas, actors: { chooseMove } });
+      const agent = setupAgent({ schemas, actorSources: { chooseMove } });
       const machine = agent.createMachine({
         context: {},
         initial: 'choosingMove',
@@ -421,7 +422,7 @@ describe('runAgent', () => {
       });
 
       await expect(
-        runAgent(machine, { input: {}, generateText: async () => ({}) })
+        runAgent(machine, { input: {}, generateText: async () => ({ output: {} }) })
       ).rejects.toThrow(/chooseMove/);
     });
 
@@ -450,7 +451,7 @@ describe('runAgent', () => {
 
       const result = await runAgent(machine, {
         input: {},
-        generateText: async () => ({}),
+        generateText: async () => ({ output: {} }),
       });
 
       expect(result.status).toBe('idle');
@@ -478,7 +479,7 @@ describe('runAgent', () => {
       });
 
       await expect(
-        runAgent(machine, { input: undefined, generateText: async () => ({}) })
+        runAgent(machine, { input: undefined, generateText: async () => ({ output: {} }) })
       ).rejects.toThrow(/notRegistered/);
     });
 
@@ -490,7 +491,7 @@ describe('runAgent', () => {
       });
       const agent = setupAgent({
         schemas: createAgentSchemas({ context: z.object({}), input: z.object({}) }),
-        actors: { streamSummary },
+        actorSources: { streamSummary },
       });
       const machine = agent.createMachine({
         context: {},
@@ -509,7 +510,7 @@ describe('runAgent', () => {
       });
 
       await expect(
-        runAgent(machine, { input: {}, generateText: async () => ({}) })
+        runAgent(machine, { input: {}, generateText: async () => ({ output: {} }) })
       ).rejects.toThrow(/streamSummary/);
     });
 
@@ -537,8 +538,222 @@ describe('runAgent', () => {
       });
 
       await expect(
-        runAgent(machine, { generateText: async () => ({}) })
+        runAgent(machine, { generateText: async () => ({ output: {} }) })
       ).rejects.toThrow(/direct-object/);
+    });
+
+    // A child machine whose states invoke agent requests is opaque to the
+    // parent-level source walk. Child requests do NOT inherit the parent
+    // runAgent's executors at runtime (verified by probe: an unbound child
+    // request settles the run 'error'/parks it), so the bind walk must
+    // descend into invoked child machines and fail fast when a child request
+    // has no host execution of its own.
+    describe('child-machine recursion', () => {
+      // Builds a child machine that invokes `researchTopic` by name. When
+      // `bindChildRequest` is true, the request carries its own executor
+      // (via nested `.provide` + `.withExecutor`) so it runs itself.
+      const makeChildMachine = (bindChildRequest: boolean, depth = 1) => {
+        const researchTopic = createTextLogic({
+          schemas: { input: z.object({ topic: z.string() }), output: z.string() },
+          model: 'test-model',
+          prompt: ({ input }) => input.topic,
+        });
+        const childAgent = setupAgent({
+          context: z.object({ topic: z.string(), research: z.string().nullable() }),
+          input: z.object({ topic: z.string() }),
+          output: z.object({ research: z.string() }),
+          actorSources: { researchTopic },
+        });
+        let childMachine = childAgent.createMachine({
+          id: `child-${depth}`,
+          context: ({ input }) => ({ topic: input.topic, research: null }),
+          initial: 'researching',
+          states: {
+            researching: {
+              invoke: {
+                src: 'researchTopic',
+                input: ({ context }) => ({ topic: context.topic }),
+                onDone: ({ output }) => ({
+                  target: 'done',
+                  context: { research: output },
+                }),
+              },
+            },
+            done: {
+              type: 'final',
+              output: ({ context }) => ({ research: context.research ?? '' }),
+            },
+          },
+        });
+        if (bindChildRequest) {
+          childMachine = childMachine.provide({
+            actorSources: {
+              researchTopic: researchTopic.withExecutor(async ({ input }) => ({
+                output: `Research: ${input.topic}`,
+              })),
+            },
+          });
+        }
+        return childMachine;
+      };
+
+      const makeParentMachine = (childMachine: ReturnType<typeof makeChildMachine>) => {
+        const parentAgent = setupAgent({
+          context: z.object({ topic: z.string(), research: z.string().nullable() }),
+          input: z.object({ topic: z.string() }),
+          output: z.object({ research: z.string() }),
+          actorSources: { child: childMachine },
+        });
+        return parentAgent.createMachine({
+          id: 'parent',
+          context: ({ input }) => ({ topic: input.topic, research: null }),
+          initial: 'delegating',
+          states: {
+            delegating: {
+              invoke: {
+                src: 'child',
+                input: ({ context }: { context: { topic: string } }) => ({
+                  topic: context.topic,
+                }),
+                onDone: ({ output }) => ({
+                  target: 'done',
+                  context: { research: (output as { research: string }).research },
+                }),
+              },
+            },
+            done: {
+              type: 'final',
+              output: ({ context }) => ({ research: context.research ?? '' }),
+            },
+          },
+        });
+      };
+
+      test('(1) an UNBOUND child request throws at bind time naming the child + request', async () => {
+        const parentMachine = makeParentMachine(makeChildMachine(false));
+
+        await expect(
+          runAgent(parentMachine, {
+            input: { topic: 'agents' },
+            generateText: async () => ({ output: 'x' }),
+          })
+        ).rejects.toThrow(/child machine.*child.*researchTopic/s);
+
+        // Message must point at the nested-.provide remedy and say executors
+        // are not inherited.
+        await expect(
+          runAgent(parentMachine, {
+            input: { topic: 'agents' },
+            generateText: async () => ({ output: 'x' }),
+          })
+        ).rejects.toThrow(/do NOT inherit|withExecutor/);
+      });
+
+      test('(2) a properly-bound child (nested .provide + .withExecutor) runs to done', async () => {
+        const parentMachine = makeParentMachine(makeChildMachine(true));
+
+        const result = await runAgent(parentMachine, {
+          input: { topic: 'agents' },
+          // No decide/streamText; parent generateText is NOT what runs the
+          // child request — the child's own bound executor does.
+          generateText: async () => ({ output: 'unused' }),
+        });
+
+        expect(result.status).toBe('done');
+        expect(result.status === 'done' ? result.output : undefined).toEqual({
+          research: 'Research: agents',
+        });
+      });
+
+      test('(3) grandchild depth: an unbound request in a child-of-child throws', async () => {
+        // Grandchild (depth 2) has an unbound request; child (depth 1)
+        // invokes the grandchild; parent invokes the child.
+        const grandchild = makeChildMachine(false, 2);
+
+        const midAgent = setupAgent({
+          context: z.object({ topic: z.string(), research: z.string().nullable() }),
+          input: z.object({ topic: z.string() }),
+          output: z.object({ research: z.string() }),
+          actorSources: { grandchild },
+        });
+        const midMachine = midAgent.createMachine({
+          id: 'mid',
+          context: ({ input }) => ({ topic: input.topic, research: null }),
+          initial: 'delegating',
+          states: {
+            delegating: {
+              invoke: {
+                src: 'grandchild',
+                input: ({ context }: { context: { topic: string } }) => ({
+                  topic: context.topic,
+                }),
+                onDone: ({ output }) => ({
+                  target: 'done',
+                  context: { research: (output as { research: string }).research },
+                }),
+              },
+            },
+            done: {
+              type: 'final',
+              output: ({ context }) => ({ research: context.research ?? '' }),
+            },
+          },
+        });
+
+        const parentMachine = makeParentMachine(
+          midMachine as unknown as ReturnType<typeof makeChildMachine>
+        );
+
+        await expect(
+          runAgent(parentMachine, {
+            input: { topic: 'agents' },
+            generateText: async () => ({ output: 'x' }),
+          })
+        ).rejects.toThrow(/researchTopic/);
+      });
+
+      test('(4) a recursively self-invoking machine does not infinite-loop the bind walk', async () => {
+        // A machine that invokes itself by name (cycle). The bind walk must
+        // terminate via the visited-set guard rather than recurse forever.
+        const selfAgent = setupAgent({
+          context: z.object({ n: z.number() }),
+          input: z.object({ n: z.number() }),
+          output: z.object({}),
+        });
+        const selfMachine = selfAgent.createMachine({
+          id: 'self',
+          context: ({ input }) => ({ n: input.n }),
+          initial: 'looping',
+          states: {
+            looping: {
+              invoke: {
+                src: 'self',
+                input: ({ context }: { context: { n: number } }) => ({ n: context.n - 1 }),
+                onDone: { target: 'done' },
+              } as never,
+            },
+            done: { type: 'final', output: {} },
+          },
+        });
+        // Make the 'self' source resolve to the machine itself, creating a
+        // genuine identity cycle for the bind walk to guard against. Mutating
+        // implementations in place (rather than .provide, which returns a new
+        // object) keeps the invoked source === the machine being walked.
+        (selfMachine.implementations.actorSources as Record<string, unknown>).self =
+          selfMachine;
+
+        // The point under test is the BIND walk (the visited-set guard): it
+        // must return rather than recurse forever on the identity cycle. A
+        // pre-aborted signal settles the run right after binding, so reaching
+        // any settled result at all proves the bind walk terminated (an
+        // infinite bind loop would throw a RangeError / hang before this).
+        const result = await runAgent(selfMachine, {
+          input: { n: 0 },
+          signal: AbortSignal.abort(),
+          generateText: async () => ({ output: 'x' }),
+        });
+        expect(['done', 'idle', 'error']).toContain(result.status);
+      });
     });
   });
 
@@ -556,7 +771,7 @@ describe('runAgent', () => {
 
     const result = await runAgent(machine, {
       input: undefined,
-      generateText: async () => ({}),
+      generateText: async () => ({ output: {} }),
     });
 
     expect(result.status).toBe('done');
@@ -576,7 +791,7 @@ describe('runAgent', () => {
     const result = await runAgent(machine, {
       input: undefined,
       event: { type: 'GO' },
-      generateText: async () => ({}),
+      generateText: async () => ({ output: {} }),
       onTransition: (_snapshot, event) => {
         seenEventTypes.push(event.type);
       },
@@ -622,7 +837,7 @@ describe('runAgent', () => {
 
     const result = await runAgent(machine, {
       input: {},
-      generateText: async () => ({}),
+      generateText: async () => ({ output: {} }),
       userInput: async (input) => {
         expect(input).toEqual(expect.objectContaining({ prompt: 'How was it?' }));
         return { feedback: 'great' };
@@ -680,7 +895,7 @@ describe('runAgent', () => {
 
       const result = await runAgent(machine, {
         input: {},
-        generateText: async () => ({}),
+        generateText: async () => ({ output: {} }),
         decide,
       });
 
@@ -699,7 +914,7 @@ describe('runAgent', () => {
         // allowedEvents omitted.
       });
 
-      const agent = setupAgent({ schemas, actors: { chooseMove } });
+      const agent = setupAgent({ schemas, actorSources: { chooseMove } });
       const machine = agent.createMachine({
         context: { hp: 10 },
         initial: 'choosingMove',
@@ -731,7 +946,7 @@ describe('runAgent', () => {
 
       const result = await runAgent(machine, {
         input: {},
-        generateText: async () => ({}),
+        generateText: async () => ({ output: {} }),
         decide,
       });
 
@@ -782,7 +997,7 @@ describe('runAgent', () => {
 
       const result = await runAgent(machine, {
         input: {},
-        generateText: async () => ({}),
+        generateText: async () => ({ output: {} }),
         decide,
       });
 
@@ -827,7 +1042,7 @@ describe('runAgent', () => {
       allowedEvents: ['ATTACK'] as const,
     });
 
-    const agent = setupAgent({ schemas, actors: { chooseMove } });
+    const agent = setupAgent({ schemas, actorSources: { chooseMove } });
     const machine = agent.createMachine({
       context: { attackCount: 0 },
       initial: 'choosingMove',
@@ -856,7 +1071,7 @@ describe('runAgent', () => {
     let attackEventsObserved = 0;
     const result = await runAgent(machine, {
       input: {},
-      generateText: async () => ({}),
+      generateText: async () => ({ output: {} }),
       decide: async () => ({ event: { type: 'ATTACK' } }),
       onTransition: (_snapshot, event) => {
         if (event.type === 'ATTACK') {
@@ -940,7 +1155,7 @@ describe('agent.userInput as a pending placeholder (durable parallel HITL)', () 
   test('a sibling region finishes its model call, then the run settles idle with the pending user input', async () => {
     const result = await runAgent(machine, {
       input: {},
-      generateText: async () => ({ text: 'a summary' }),
+      generateText: async () => ({ output: 'a summary' }),
     });
 
     expect(result.status).toBe('idle');
@@ -958,7 +1173,7 @@ describe('agent.userInput as a pending placeholder (durable parallel HITL)', () 
   test('the persisted snapshot JSON round-trips and resumes with a userInput handler to done', async () => {
     const first = await runAgent(machine, {
       input: {},
-      generateText: async () => ({ text: 'a summary' }),
+      generateText: async () => ({ output: 'a summary' }),
     });
     if (first.status !== 'idle' || !first.persistedSnapshot) {
       throw new Error('expected idle with persistedSnapshot');
@@ -985,7 +1200,7 @@ describe('agent.userInput as a pending placeholder (durable parallel HITL)', () 
   test('resuming without a handler settles idle again with the same pending input', async () => {
     const first = await runAgent(machine, {
       input: {},
-      generateText: async () => ({ text: 'a summary' }),
+      generateText: async () => ({ output: 'a summary' }),
     });
     if (first.status !== 'idle' || !first.persistedSnapshot) {
       throw new Error('expected idle with persistedSnapshot');
@@ -993,7 +1208,7 @@ describe('agent.userInput as a pending placeholder (durable parallel HITL)', () 
 
     const again = await runAgent(machine, {
       snapshot: JSON.parse(JSON.stringify(first.persistedSnapshot)),
-      generateText: async () => ({ text: 'unused' }),
+      generateText: async () => ({ output: 'unused' }),
     });
 
     expect(again.status).toBe('idle');

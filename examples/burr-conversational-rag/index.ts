@@ -12,14 +12,9 @@ import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { createAsyncLogic } from 'xstate';
 import { runAgent, setupAgent, type AgentTextRequest, type AgentTools } from '../../src/index.js';
-const models = {
-  "rag-answerer": "rag-answerer",
-} as const;
-
 
 export async function runBurrConversationalRAGExample() {
   const agent = setupAgent({
-    models,
     context: z.object({
       question: z.string(),
       memory: z.array(z.string()),
@@ -31,7 +26,7 @@ export async function runBurrConversationalRAGExample() {
       memory: z.array(z.string()).default([]),
     }),
     output: z.object({ answer: z.string(), memory: z.array(z.string()) }),
-    actors: {
+    actorSources: {
       retrieve: createAsyncLogic<string[], { question: string }>({
         run: async ({ input }) => [
           `doc:${input.question}`,
@@ -115,7 +110,7 @@ export async function runBurrConversationalRAGExample() {
     const lines = (request.prompt ?? '').split('\n');
     const memoryCount = lines[1]!.replace('Memory: ', '').split(' | ').filter(Boolean).length;
     const documents = lines[2]!.replace('Docs: ', '').split(' | ').join(',');
-    return `answer:${documents}:memory=${memoryCount}`;
+    return { output: `answer:${documents}:memory=${memoryCount}` };
   };
 
   const result = await runAgent(machine, {

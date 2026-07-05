@@ -1,12 +1,7 @@
 import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { createActor, toPromise, type AnyStateMachine } from 'xstate';
-import { setupAgent } from '../../src/index.js';
-const models = {
-  "debater": "debater",
-  "facilitator": "facilitator",
-} as const;
-
+import { setupAgent, type TextLogic } from '../../src/index.js';
 
 const stanceSchema = z.enum(['affirmative', 'negative']);
 const transcriptEntrySchema = z.object({
@@ -21,8 +16,23 @@ const conclusionSchema = z.object({
 
 const totalTurns = 10;
 
+const concludeInputSchema = z.object({
+  question: z.string(),
+  transcript: transcriptSchema,
+});
+
+// Precisely-typed workflow shape: `requests.concludeDebate` carries its real
+// input/output schemas (no `Record<string, any>` leak), so a host's
+// `.withExecutor(({ input }) => ...)` gets a typed `input` — which is why the
+// executor no longer needs a hand-written input annotation. The full inferred
+// agent type is too large to serialize (TS7056), so it is narrowed to just the
+// members this workflow's consumers touch.
 type DebateSubAgentsWorkflow = {
-  agent: { requests: Record<string, any> };
+  agent: {
+    requests: {
+      concludeDebate: TextLogic<typeof concludeInputSchema, typeof conclusionSchema>;
+    };
+  };
   machine: AnyStateMachine;
 };
 
@@ -37,7 +47,6 @@ function nextTurn(index: number) {
 
 function createDebaterAgent() {
   const agent = setupAgent({
-    models,
     context: z.object({
       stance: stanceSchema,
       question: z.string(),
@@ -132,7 +141,6 @@ function createDebaterAgent() {
 export function createDebateSubAgentsWorkflow(): DebateSubAgentsWorkflow {
   const debater = createDebaterAgent();
   const agent = setupAgent({
-    models,
     context: z.object({
       question: z.string(),
       transcript: transcriptSchema,
@@ -143,12 +151,13 @@ export function createDebateSubAgentsWorkflow(): DebateSubAgentsWorkflow {
     events: {
       'DEBATE.ARGUMENT_SUBMITTED': transcriptEntrySchema,
     },
-    actors: {
+    actorSources: {
       debater: debater.machine.provide({
         actorSources: {
           composeArgument: debater.agent.requests.composeArgument.withExecutor(
-            async ({ input }) =>
-              `${input.stance}:round-${input.round}:after-${input.transcript.length}`,
+            async ({ input }) => ({
+              output: `${input.stance}:round-${input.round}:after-${input.transcript.length}`,
+            }),
           ),
         },
       }),
@@ -156,10 +165,7 @@ export function createDebateSubAgentsWorkflow(): DebateSubAgentsWorkflow {
     requests: {
       concludeDebate: {
         schemas: {
-          input: z.object({
-            question: z.string(),
-            transcript: transcriptSchema,
-          }),
+          input: concludeInputSchema,
           output: conclusionSchema,
         },
         model: 'facilitator',
@@ -260,12 +266,10 @@ export async function runDebateSubAgentsExample() {
     machine.provide({
       actorSources: {
         concludeDebate: agent.requests.concludeDebate.withExecutor(
-          async ({
-            input,
-          }: {
-            input: { transcript: string[]; question: string };
-          }) => ({
-            conclusion: `conclusion:${input.transcript.length}:${input.question}`,
+          async ({ input }) => ({
+            output: {
+              conclusion: `conclusion:${input.transcript.length}:${input.question}`,
+            },
           }),
         ),
       },

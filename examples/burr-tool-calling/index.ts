@@ -18,6 +18,7 @@ import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { createAsyncLogic } from 'xstate';
 import { runAgent, setupAgent, type AgentTextRequest, type AgentTools } from '../../src/index.js';
+// Model refs are opaque routing keys resolved by the executor.
 const models = {
   "tool-router": "tool-router",
   "formatter": "formatter",
@@ -45,7 +46,7 @@ export async function runBurrToolCallingExample() {
     }),
     input: z.object({ query: z.string() }),
     output: z.object({ finalOutput: z.string() }),
-    actors: {
+    actorSources: {
       queryWeather: createAsyncLogic<
         Record<string, unknown>,
         { latitude: number; longitude: number }
@@ -160,7 +161,7 @@ export async function runBurrToolCallingExample() {
   const generateText = async (request: AgentTextRequest & { tools: AgentTools }) => {
     if (request.model === 'tool-router') {
       return {
-        object: {
+        output: {
           tool: 'queryWeather',
           parameters: { latitude: 37.77, longitude: -122.42 },
         },
@@ -171,7 +172,7 @@ export async function runBurrToolCallingExample() {
     const rawResponse = JSON.parse(dataLine.replace('Data: ', '')) as {
       forecast: string;
     };
-    return `formatted:${rawResponse.forecast}`;
+    return { output: `formatted:${rawResponse.forecast}` };
   };
 
   const result = await runAgent(machine, {

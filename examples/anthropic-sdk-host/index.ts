@@ -217,13 +217,8 @@ export interface CreateAnthropicExecutorsOptions {
   client: Anthropic;
 }
 
-export interface AnthropicGenerateResult {
-  output?: unknown;
-  text?: string;
-}
-export interface AnthropicStreamResult {
-  text: string;
-}
+export type AnthropicGenerateResult = { output: unknown; [key: string]: unknown };
+export type AnthropicStreamResult = { output: string; [key: string]: unknown };
 
 export interface AnthropicExecutors
   extends AgentRequestExecutors<AnthropicGenerateResult, AnthropicStreamResult> {
@@ -281,7 +276,7 @@ export function createAnthropicExecutors(options: CreateAnthropicExecutorsOption
       { ...common, ...(tools.length > 0 ? { tools } : {}) },
       { signal: info?.signal }
     );
-    return { text: extractText(response) };
+    return { output: extractText(response) };
   };
 
   const streamText = async (
@@ -303,7 +298,7 @@ export function createAnthropicExecutors(options: CreateAnthropicExecutorsOption
       { signal: info?.signal }
     );
     stream.on('text', (delta) => info?.onChunk?.(delta));
-    return { text: await stream.finalText() };
+    return { output: await stream.finalText() };
   };
 
   const decide: AgentDecisionExecutor = async (request) => {

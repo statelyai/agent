@@ -66,12 +66,12 @@ export interface AgentSchemas {
   events?: Record<string, StandardSchemaV1>;
 }
 
-/** Shared options threaded through step discovery ({@link getAgentRequests}/{@link getAcceptedEvents}) — snapshot for event legality, event schemas for payload validation/tool schemas, and registered actor logics. */
+/** Shared options threaded through step discovery ({@link getAgentRequests}/{@link getAcceptedEvents}) — snapshot for event legality, event schemas for payload validation/tool schemas, and registered actor source logics. */
 export interface AgentRequestOptions {
   snapshot?: AnyMachineSnapshot;
   events?: Record<string, StandardSchemaV1>;
   schemas?: AgentSchemas;
-  actors?: Record<string, unknown>;
+  actorSources?: Record<string, unknown>;
   /** Customize machine-event tool names. Defaults to send_event_<TYPE>. */
   eventToolName?: AgentEventToolNameResolver;
 }

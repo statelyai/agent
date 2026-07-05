@@ -1,11 +1,11 @@
 # Host Actors
 
-`setupAgent(...)` gives a machine typed, built-in actor sources for model work — `agent.generateText` / `agent.streamText` for inline text requests, `agent.decide` for decisions, `agent.userInput` for human input — plus co-located `requests:` when a call deserves a reusable name. Decisions are state-local: author them inline on the invoke with `src: 'agent.decide'`, or pull reusable decision logic into `createDecisionLogic(...)` under `actors:`. In every case, the machine only *declares* the request; the host executes it by supplying executors to `runAgent(...)` (or the step helpers) or by providing actor implementations directly.
+`setupAgent(...)` gives a machine typed, built-in actor sources for model work: `agent.generateText` / `agent.streamText` for inline text requests, `agent.decide` for decisions, `agent.userInput` for human input, plus co-located `requests:` when a call deserves a reusable name. Decisions are state-local: author them inline on the invoke with `src: 'agent.decide'`, or pull reusable decision logic into `createDecisionLogic(...)` under `actorSources:`. In every case, the machine only *declares* the request; the host executes it by supplying executors to `runAgent(...)` (or the step helpers) or by providing actor implementations directly.
 
 The machine declares:
 
 - state flow
-- `invoke.src` naming a registered actor (a builtin like `agent.generateText`/`agent.decide`, or a name from `requests:`/`actors:`)
+- `invoke.src` naming a registered actor (a builtin like `agent.generateText`/`agent.decide`, or a name from `requests:`/`actorSources:`)
 - typed invoke `input`
 - typed `onDone.event.output`
 
@@ -132,7 +132,7 @@ invoke:
 A decision's `allowedEvents` declares which machine events are candidates for the model to choose from; XState's guards then decide which of those are actually legal from the current snapshot. `getAgentRequests(...)` (used internally by the step helpers) intersects the two and puts the survivors on the decision request's `events` field — separate from the model-call input, so the model sees only options it could actually take:
 
 ```ts
-const requests = getAgentRequests(actions, { snapshot, schemas, actors: { chooseMove } });
+const requests = getAgentRequests(actions, { snapshot, schemas, actorSources: { chooseMove } });
 const request = requests[0]; // kind: 'decision'
 request.events.map((event) => event.type);
 // ['ATTACK', 'DEFEND'] — HEAL and FLEE excluded, whether by allowedEvents or by guard
@@ -202,6 +202,48 @@ const draftText = createTextLogic({
 ```
 
 This is different from XState `meta`, which describes state nodes/transitions for tooling (see [`../examples/email-drafter/index.ts`](../examples/email-drafter/index.ts) for a schema-typed `meta` example). Text/decision logic `metadata` is runtime input passed to the host executor.
+
+## Threading host context into actors and requests
+
+Agents often need host-owned values (a session handle, a db client, auth or billing ids) reaching the code that makes a model call. There is no dedicated `hostContext` option today. Three sanctioned patterns cover the need, and which one to reach for depends on whether the value is serializable and whether the executor needs it per call.
+
+**(a) Through machine `input` into context, then into actor `input`.** Pass ids and plain values as machine `input`, land them in `context`, and map them into each actor's `input`. Good for serializable identifiers that the machine should carry across transitions and persist in snapshots.
+
+```ts
+const machine = agent.createMachine({
+  context: ({ input }) => ({ tenantId: input.tenantId, prompt: input.prompt }),
+  states: {
+    answering: {
+      invoke: {
+        src: 'answerQuestion',
+        input: ({ context }) => ({ prompt: context.prompt, tenantId: context.tenantId }),
+        // ...
+      },
+    },
+  },
+});
+```
+
+**(b) Close over host objects when defining actors at host level.** For non-serializable handles (a live session, a db client, an open socket), close over them where you define the actor via `.provide({ actorSources })` or `.withExecutor(...)`. The handle lives in the closure, never in `context`.
+
+```ts
+function buildMachine(session: Session, db: DbClient) {
+  return baseMachine.provide({
+    actorSources: {
+      draftEmail: draftEmail.withExecutor(async ({ request }) => {
+        const history = await db.loadThread(request.threadId);
+        return session.prompt(request.prompt, { history });
+      }),
+    },
+  });
+}
+```
+
+Non-serializable handles must **not** live in `context` if you persist snapshots: they won't survive serialization and will break resume. Keep sessions, clients, and sockets in the closure; keep only their serializable ids in `context`.
+
+**(c) Per-call reference ids belong in request input schemas.** When the executor needs a value on every call (an auth token, a billing id, a per-request trace or reference id), put it in the request's input schema so it's typed and validated at the call site rather than smuggled through `metadata`. Use `metadata` only for host-specific hints the machine should not type (see above).
+
+A dedicated `hostContext` option is under consideration to make (a) less repetitive, but it is **not shipped**. Until then, these three patterns are the supported approach.
 
 ## Streaming
 

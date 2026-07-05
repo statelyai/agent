@@ -11,14 +11,9 @@ import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { createAsyncLogic } from 'xstate';
 import { runAgent, setupAgent } from '../../src/index.js';
-const models = {
-  "outliner": "outliner",
-} as const;
-
 
 export async function runCrewAIWriteABookExample() {
   const agent = setupAgent({
-    models,
     context: z.object({
       brief: z.string(),
       title: z.string().nullable(),
@@ -27,7 +22,7 @@ export async function runCrewAIWriteABookExample() {
     }),
     input: z.object({ brief: z.string() }),
     output: z.object({ title: z.string(), manuscript: z.string() }),
-    actors: {
+    actorSources: {
       writeChapters: createAsyncLogic<string[], { chapters: string[] }>({
         run: async ({ input }) =>
           input.chapters.map((chapter: string) => `${chapter}: body`),
@@ -94,7 +89,7 @@ export async function runCrewAIWriteABookExample() {
   const result = await runAgent(machine, {
     input: { brief: 'state machines for agents' },
     generateText: async () => ({
-      object: { title: 'The Workflow Book', chapters: ['Intro', 'Runtime'] },
+      output: { title: 'The Workflow Book', chapters: ['Intro', 'Runtime'] },
     }),
   });
 

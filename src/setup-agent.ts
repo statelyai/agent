@@ -291,7 +291,7 @@ type SetupAgentBaseConfig<
     >
 ) & {
   models?: TModels;
-  actors?: TActors;
+  actorSources?: TActors;
   requests?: AgentRequestInput<TRequestSchemas, AgentModelRef<TModels>>;
   actions?: NonNullable<AnySetupConfig['actions']>;
   guards?: NonNullable<AnySetupConfig['guards']>;
@@ -432,7 +432,7 @@ type SetupAgentResult<
  * state/transition meta are all standard schemas — no `{} as Type` casts —
  * and are retained on `result.schemas` for runtime validation. Also
  * registers the `agent.generateText`/`agent.streamText`/`agent.userInput`/
- * `agent.decide` builtin actors, lowers `requests`/`actors` into the
+ * `agent.decide` builtin actors, lowers `requests`/`actorSources` into the
  * machine's actor sources, and returns machine-bound convenience wrappers
  * (`result.initial`/`transition`/`resolve`/`getRequests`/`execute`/
  * `appendMessages`) around the step-path helpers. Also has a
@@ -449,7 +449,7 @@ type SetupAgentResult<
  *
  * const agent = setupAgent({
  *   schemas,
- *   actors: { tellJoke },
+ *   actorSources: { tellJoke },
  * });
  *
  * const jokeMachine = agent.createMachine({
@@ -631,18 +631,18 @@ function normalizeAgentRequestInput<
 }
 
 /**
- * Runtime guard: a key appearing in both `actors`/`requests` is almost
+ * Runtime guard: a key appearing in both `actorSources`/`requests` is almost
  * certainly a mistake (whichever spread applies last would silently win) —
  * fail fast with a clear message rather than let one implementation shadow
  * another.
  */
 function assertNoActorKeyCollisions(
-  actors: Record<string, unknown> | undefined,
+  actorSources: Record<string, unknown> | undefined,
   requests: Record<string, unknown>
 ): void {
   const seenIn = new Map<string, string>();
   const groups: [string, Record<string, unknown> | undefined][] = [
-    ['actors', actors],
+    ['actorSources', actorSources],
     ['requests', requests],
   ];
 
@@ -653,7 +653,7 @@ function assertNoActorKeyCollisions(
         throw new Error(
           `setupAgent: key '${key}' is defined in both '${existingGroup}' and ` +
             `'${groupName}'. Each actor source key must be unique across ` +
-            `'actors' and 'requests'.`
+            `'actorSources' and 'requests'.`
         );
       }
       seenIn.set(key, groupName);
@@ -667,11 +667,11 @@ function createAgentActorSources<
   TRequestSchemas extends AgentRequestSchemaMap,
   TModel extends string = string,
 >(
-  actors: TActors | undefined,
+  actorSources: TActors | undefined,
   requestActors: RequestActors<TRequestSchemas>
 ): SetupActors<AgentSetupActors<AgentAllActors<TActors, TRequestSchemas>, string, TModel>> {
   assertNoActorKeyCollisions(
-    actors as Record<string, unknown> | undefined,
+    actorSources as Record<string, unknown> | undefined,
     requestActors as Record<string, unknown>
   );
 
@@ -679,7 +679,7 @@ function createAgentActorSources<
     ...builtinTextActors,
     [USER_INPUT_ACTOR]: userInputActor,
     [DECIDE_ACTOR]: createDecideActor(),
-    ...actors,
+    ...actorSources,
     ...requestActors,
   } as SetupActors<AgentSetupActors<AgentAllActors<TActors, TRequestSchemas>, string, TModel>>;
 }
@@ -788,7 +788,7 @@ function createSetupAgent<
     TActors,
     TRequestSchemas,
     AgentModelRef<TModels>
-  >(config.actors, requestActors);
+  >(config.actorSources, requestActors);
   const setupConfig = createAgentSetupConfig<
       TContextSchema,
       TEventSchemas,
@@ -803,7 +803,7 @@ function createSetupAgent<
   const createBaseMachine = base.createMachine.bind(base);
   const machineOptions = {
     schemas,
-    actors: actorSources,
+    actorSources,
   };
   const models = (config.models ?? {}) as TModels;
 

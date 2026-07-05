@@ -155,7 +155,7 @@ export async function runAiSdkSubAgentsDemo(task: string) {
         output: Output.object({ schema: answerSchema }),
         stopWhen: stepCountIs(8),
       });
-      return output;
+      return { output };
     },
   });
   if (result.status !== 'done') {
@@ -199,7 +199,7 @@ export async function runAiSdkSubAgentsDeterministicExample() {
       const answer = await executeTool(request.tools?.askWriter, {
         prompt: String(notes),
       });
-      return { answer: String(answer) };
+      return { output: { answer: String(answer) } };
     },
   });
 

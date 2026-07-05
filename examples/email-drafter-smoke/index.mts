@@ -4,7 +4,7 @@ import {
   emailDrafter,
   evaluatePrompt,
 } from '../email-drafter/index.js';
-import type { AgentTextRequest } from '../../src/index.js';
+import { getStateMeta, type AgentTextRequest } from '../../src/index.js';
 
 const calls: AgentTextRequest[] = [];
 
@@ -14,11 +14,11 @@ const machine = emailDrafter.provide({
       calls.push(request);
       // first evaluation: unsatisfied; second: satisfied
       const satisfied = calls.filter((c) => c.system?.includes('Evaluate')).length > 1;
-      return { satisfied, missing: satisfied ? [] : ['recipient'], questions: satisfied ? [] : ['Who?'] };
+      return { output: { satisfied, missing: satisfied ? [] : ['recipient'], questions: satisfied ? [] : ['Who?'] } };
     }),
     draftEmail: draftEmail.withExecutor(async ({ request }) => {
       calls.push(request);
-      return { to: 'sam@example.com', subject: 'Hello', body: 'Hi Sam!' };
+      return { output: { to: 'sam@example.com', subject: 'Hello', body: 'Hi Sam!' } };
     }),
     sendEmail: createAsyncLogic({ run: async () => ({ sent: true }) }),
   },
@@ -29,7 +29,7 @@ actor.start();
 
 actor.send({ type: 'PROMPT_SUBMITTED', prompt: 'email sam' });
 await waitFor(actor, (s) => s.matches('needsMoreInfo'));
-console.log('1. needsMoreInfo meta:', JSON.stringify(actor.getSnapshot().getMeta(), null, 0).slice(0, 80), '…');
+console.log('1. needsMoreInfo interaction:', getStateMeta(actor.getSnapshot()).interaction);
 
 actor.send({ type: 'MORE_INFO', details: 'sam@example.com, say hello' });
 await waitFor(actor, (s) => s.matches('reviewing'));

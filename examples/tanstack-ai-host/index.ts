@@ -56,7 +56,7 @@ export async function runTanStackTriageDemo(args: {
 }) {
   let step = initialAgentStep(triageMachine, { ticket: args.ticket }, {
     schemas: triageSchemas,
-    actors: triageActors,
+    actorSources: triageActors,
   });
 
   while (!step.done) {
@@ -76,7 +76,7 @@ export async function runTanStackTriageDemo(args: {
 
     step = resolveAgentStep(triageMachine, step, request, output, {
       schemas: triageSchemas,
-      actors: triageActors,
+      actorSources: triageActors,
     });
   }
 

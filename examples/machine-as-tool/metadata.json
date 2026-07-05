@@ -1,0 +1,14 @@
+{
+  "name": "machine-as-tool",
+  "title": "Machine as Tool",
+  "kind": "agent-workflow",
+  "origin": {
+    "type": "stately-agent",
+    "source": "Created in this repository",
+    "url": null
+  },
+  "comparison": {
+    "targets": [],
+    "purpose": "Embed a whole agent machine inside one tool call of a host harness: start/resume tools bridge a JSON-safe snapshot handle and read the typed interaction meta."
+  }
+}

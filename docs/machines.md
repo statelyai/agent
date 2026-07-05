@@ -10,7 +10,7 @@ An **agent machine** is a typed XState state machine describing what your agent 
 You author a machine in three steps:
 
 1. Declare schemas with `createAgentSchemas`.
-2. Wire up models, requests, and actors with `setupAgent`.
+2. Wire up models, requests, and actor sources with `setupAgent`.
 3. Build the machine with `agentSetup.createMachine`.
 
 ## Declare schemas
@@ -51,9 +51,9 @@ In a `HEAL` transition, `event.amount` is a `number`. Reading a field the event 
 
 ## Set up the agent
 
-<!-- setupAgent config surface (models, requests, actors, builtins) from src/setup-agent.ts -->
+<!-- setupAgent config surface (models, requests, actorSources, builtins) from src/setup-agent.ts -->
 
-`setupAgent` takes the schemas plus optional `models`, `requests`, and `actors`, and returns a **setup** whose `createMachine` builds the machine. Like XState's `setup()`, the return value is not a running agent; it is the typed foundation machines are authored from, so name it accordingly (`agentSetup`, `gameSetup`).
+`setupAgent` takes the schemas plus optional `models`, `requests`, and `actorSources`, and returns a **setup** whose `createMachine` builds the machine. Like XState's `setup()`, the return value is not a running agent; it is the typed foundation machines are authored from, so name it accordingly (`agentSetup`, `gameSetup`).
 
 ```ts
 import { setupAgent } from '@statelyai/agent';
@@ -62,7 +62,7 @@ const agentSetup = setupAgent({
   schemas,
   models,
   requests,
-  actors,
+  actorSources,
 });
 ```
 
@@ -122,17 +122,17 @@ See [Text requests](text-requests.md) for the full request surface, including st
 
 ### Actors
 
-`actors` registers reusable actor logic: text logic from `createTextLogic`, decision logic from `createDecisionLogic`, or any XState actor. Register logic here when it is reusable, exported, or worth testing standalone.
+`actorSources` registers reusable actor logic: text logic from `createTextLogic`, decision logic from `createDecisionLogic`, or any XState actor. Register logic here when it is reusable, exported, or worth testing standalone.
 
 ```ts
 const gameSetup = setupAgent({
   schemas: gameSchemas,
   models,
-  actors: { chooseMove, summarizeTurn },
+  actorSources: { chooseMove, summarizeTurn },
 });
 ```
 
-> **Warning:** Actor source keys must be unique across `actors` and `requests`. `setupAgent` throws at setup time on a collision rather than letting one silently shadow the other.
+> **Warning:** Actor source keys must be unique across `actorSources` and `requests`. `setupAgent` throws at setup time on a collision rather than letting one silently shadow the other.
 
 ## Create the machine
 

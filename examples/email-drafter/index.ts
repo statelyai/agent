@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { openai } from '@ai-sdk/openai';
+import { type LanguageModel } from 'ai';
 import { createAsyncLogic } from 'xstate';
 import {
   type AgentMessage,
@@ -9,7 +10,6 @@ import {
   setupAgent,
   userMessage,
 } from '../../src/index.js';
-import { type LanguageModel } from 'ai';
 
 const promptAssessmentSchema = z.object({
   satisfied: z.boolean(),
@@ -81,7 +81,12 @@ const eventSchemas = {
 
 const outputSchema = z.object({ sentEmails: z.array(emailDraftSchema) });
 
-export const models: Record<'promptEvaluator' | 'emailDrafter' | 'draftStreamer', LanguageModel> = {
+// Annotated with LanguageModel so the exported const has a portable, nameable
+// type (TS2742); model-ref keys are inferred from this map regardless.
+export const models: Record<
+  'promptEvaluator' | 'emailDrafter' | 'draftStreamer',
+  LanguageModel
+> = {
   promptEvaluator: openai('gpt-5.4-mini'),
   emailDrafter: openai('gpt-5.4-mini'),
   draftStreamer: openai('gpt-5.4-mini'),
@@ -147,7 +152,7 @@ export const emailDrafterActors = {
 const agent = setupAgent({
   schemas: emailDrafterSchemas,
   models,
-  actors: emailDrafterActors,
+  actorSources: emailDrafterActors,
 });
 
 export const emailDrafter = agent.createMachine({

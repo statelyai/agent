@@ -171,6 +171,6 @@ export type ChosenEvent = { type: string; [key: string]: unknown };
  * (via `getAcceptedEvents`) — omitting `allowedEvents` means "all currently-legal events."
  * A resolver function can therefore only ever narrow, never widen, the real surface.
  */
-export type AllowedEvents<TEvent extends string = string> =
+export type AllowedEvents<TEvent extends string = string, TInput = unknown> =
   | readonly TEvent[]
-  | ((args: { input: unknown }) => readonly TEvent[]);
+  | ((args: { input: TInput }) => readonly TEvent[]);

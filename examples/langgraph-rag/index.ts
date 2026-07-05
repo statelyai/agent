@@ -2,14 +2,10 @@ import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { createAsyncLogic } from 'xstate';
 import { runAgent, setupAgent } from '../../src/index.js';
-const models = {
-  "answerer": "answerer",
-} as const;
 
 
 export async function runLangGraphRAGExample() {
   const agent = setupAgent({
-    models,
     context: z.object({
       question: z.string(),
       documents: z.array(z.string()),
@@ -17,7 +13,7 @@ export async function runLangGraphRAGExample() {
     }),
     input: z.object({ question: z.string() }),
     output: z.object({ answer: z.string() }),
-    actors: {
+    actorSources: {
       retrieve: createAsyncLogic<string[], { question: string }>({
         run: async ({ input }) => [`doc:${input.question}`, 'doc:typed state'],
       }),
@@ -79,7 +75,7 @@ export async function runLangGraphRAGExample() {
 
   const result = await runAgent(machine, {
     input: { question: 'why xstate agents?' },
-    generateText: async (request) => `answer from ${request.prompt ?? ''}`,
+    generateText: async (request) => ({ output: `answer from ${request.prompt ?? ''}` }),
   });
 
   assert.equal(result.status, 'done');

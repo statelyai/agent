@@ -15,7 +15,7 @@ export async function runLangGraphPersistentMultiAgentNetworkExample() {
     events: {
       CONTINUE: z.object({}),
     },
-    actors: {
+    actorSources: {
       research: createAsyncLogic<string, { topic: string }>({
         run: async ({ input }) => `research:${input.topic}`,
       }),
@@ -69,7 +69,6 @@ export async function runLangGraphPersistentMultiAgentNetworkExample() {
   // JSON round-trip it here to prove it survives a real persistence layer.
   const first = await runAgent(machine, {
     input: { topic: 'xstate' },
-    generateText: async () => ({}),
   });
 
   assert.equal(first.status, 'idle');
@@ -79,7 +78,6 @@ export async function runLangGraphPersistentMultiAgentNetworkExample() {
   const second = await runAgent(machine, {
     snapshot: persisted,
     event: { type: 'CONTINUE' },
-    generateText: async () => ({}),
   });
 
   assert.equal(second.status, 'done');

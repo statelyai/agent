@@ -104,7 +104,7 @@ export async function runCloudflareGameTurn(
 ) {
   let step = initialAgentStep(gameMachine, input, {
     schemas: gameSchemas,
-    actors: gameActors,
+    actorSources: gameActors,
   });
 
   while (!step.done) {
@@ -117,13 +117,13 @@ export async function runCloudflareGameTurn(
       const event = await runWorkersAiDecision(env, request);
       step = resolveAgentStep(gameMachine, step, request, event, {
         schemas: gameSchemas,
-        actors: gameActors,
+        actorSources: gameActors,
       });
     } else {
       const output = await runWorkersAiTextRequest(env, request);
       step = resolveAgentStep(gameMachine, step, request, output, {
         schemas: gameSchemas,
-        actors: gameActors,
+        actorSources: gameActors,
       });
     }
   }

@@ -12,7 +12,7 @@ export async function runLangGraphToolCallingProgressExample() {
     }),
     input: z.object({ city: z.string() }),
     output: z.object({ forecast: z.string() }),
-    actors: {
+    actorSources: {
       getWeather: createAsyncLogic<string, { city: string }>({
         run: async ({ input }) => {
           emitted.push(`call:${input.city}`);
@@ -53,7 +53,6 @@ export async function runLangGraphToolCallingProgressExample() {
   const transitions: string[] = [];
   const result = await runAgent(machine, {
     input: { city: 'Boston' },
-    generateText: async () => ({}),
     onTransition: (snapshot) => {
       transitions.push(String(snapshot.value));
     },

@@ -121,6 +121,38 @@ Between iterations, persist `result.snapshot` anywhere: a database row, a queue 
 
 For a checkpoint after every model call, not only at settle, see [Steps](steps.md).
 
+> **Context must be JSON-serializable.** Persisted snapshots round-trip through `JSON.stringify`/`JSON.parse`, so anything in `context` that is not plain JSON silently corrupts on resume: `Date` becomes a string, `Map`/`Set` become `{}`, and class instances lose their prototype. Keep non-serializable handles (sessions, db clients, sockets) in closures and store only their serializable ids in `context`; see [host actors](host-actors.md#threading-host-context-into-actors-and-requests).
+
+## Idle handles and resuming from storage
+
+The persist-and-resume loop has one recurring shape: **run to idle → serialize the snapshot to a handle → store the handle → later, load it and resume with an event**. The handle is just the JSON-serialized snapshot; nothing else needs to travel with it, because the snapshot is the whole process state.
+
+- [file-snapshot-store](../examples/file-snapshot-store/index.ts): a `node:fs` store keyed by session id, resumed across several fresh `runAgent` calls (with a SQLite variant sketched inline).
+- [machine-as-tool](../examples/machine-as-tool/index.ts): the same handle passed through a host harness's tool call. `startTool` runs to idle and returns the handle; `resumeTool` revives it and delivers the event.
+
+To reject an event the current state can't take before resuming, rehydrate the handle and check `getAcceptedEvents`:
+
+```ts
+import { createActor } from 'xstate';
+import { getAcceptedEvents } from '@statelyai/agent';
+
+const snapshot = createActor(machine, { snapshot: JSON.parse(handle) }).getSnapshot();
+const legal = getAcceptedEvents(snapshot).map((e) => e.type);
+if (!legal.includes(event.type)) throw new Error(`Event '${event.type}' is not legal here.`);
+```
+
+### Reading interaction meta
+
+Schema-typed state `meta` gives the host a typed interaction protocol (a label, choices, and their event types) to render for the human. It lives keyed by state id, so pull it off an idle snapshot with `getStateMeta`:
+
+```ts
+import { getStateMeta } from '@statelyai/agent';
+
+const interaction = getStateMeta(snapshot).interaction ?? null;
+```
+
+`getStateMeta` merges the active state(s)' meta into one typed object (later/deeper wins for nested or parallel machines, `{}` when none declare meta), typed from the machine's meta schema. It replaces the older `Object.values(snapshot.getMeta())[0]` cast. See `readInteraction` in [machine-as-tool](../examples/machine-as-tool/index.ts).
+
 ## Inline input without settling
 
 <!-- agent.userInput builtin and RunAgentOptions.userInput from src/run-agent.ts -->

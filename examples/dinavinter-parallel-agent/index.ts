@@ -1,24 +1,13 @@
 import assert from 'node:assert/strict';
 import { z } from 'zod';
+import { initialTransition } from 'xstate';
 import {
-  createActor,
-  createAsyncLogic,
-  createCallbackLogic,
-  initialTransition,
-  transition,
-  waitFor,
-  type EventObject,
-} from 'xstate';
-import {
-  assistantMessage,
   createAgentSchemas,
   executeAgentRequest,
   getAgentRequests,
+  setupAgent,
   transitionResult,
-  type AgentTextRequest,
-  type AgentTools,
 } from '../../src/index.js';
-import { setupAgent } from '../../src/index.js';
 
 export async function runDinavinterParallelAgentExample() {
   const resultSchema = z.object({
@@ -34,13 +23,8 @@ export async function runDinavinterParallelAgentExample() {
     input: z.object({ topic: z.string() }),
     output: resultSchema,
   });
-  const models = {
-    thinker: 'openai/gpt-5.4-nano',
-    doodleFinder: 'openai/gpt-5.4-nano',
-  } as const;
   const agent = setupAgent({
     schemas,
-    models,
     requests: {
       think: {
         mode: 'stream',
@@ -114,7 +98,7 @@ export async function runDinavinterParallelAgentExample() {
   const requests = getAgentRequests(actions, {
     snapshot,
     schemas,
-    actors: agent.requests,
+    actorSources: agent.requests,
   });
 
   assert.deepEqual(
@@ -131,7 +115,7 @@ export async function runDinavinterParallelAgentExample() {
     }
     const output = await executeAgentRequest(request, {
       generateText: async () => ({ output: { query: 'statechart sketch' } }),
-      streamText: async () => ({ text: 'State machines make flow visible.' }),
+      streamText: async () => ({ output: 'State machines make flow visible.' }),
     });
     [snapshot, actions] = transitionResult(
       machine,

@@ -2,7 +2,25 @@
 
 **Alpha.** The API changed completely in this release and is still settling. Expect breaking changes before 2.0 stable. Feedback and issues welcome.
 
-Author AI agents as typed XState state machines — a portable blueprint of what your agent can do. The machine decides: what states exist, which transitions are legal, which model calls happen, and which events the model may choose *right now*. Your host executes: call the Vercel AI SDK, Cloudflare Workers AI, a raw provider fetch, or anything else — the machine never talks to a model directly.
+A **rigor layer** for AI agents, not another agent framework or harness. You author an agent as a typed XState state machine: a **portable blueprint** that runs identically under your own host loop, or embedded inside a harness (eve, Flue, MCP tools, LangGraph-style backends) as a tool or workflow step.
+
+The split is the whole idea:
+
+- **The machine owns legality.** It declares which states exist, which transitions and events are legal *right now*, and validates every model output against a schema. Guards make illegal choices impossible, not just discouraged by a prompt.
+- **The host owns execution.** Your code makes the model calls: Vercel AI SDK, Cloudflare Workers AI, a raw provider fetch, anything. The machine never talks to a model directly.
+
+Same blueprint, any host. The machine has no idea whether it's driven by your own `runAgent` loop or embedded as one call inside someone else's harness.
+
+**Who this is for:** primary users own their loop (custom backends, AI SDK hosts, voice pipelines) and get the full decision seam. Harness users embed a machine as a tool or workflow step to add legal, resumable, typed state to a loop the harness owns; see [examples/machine-as-tool](examples/machine-as-tool).
+
+## Install
+
+- **Runtime:** Node >= 22.18.
+- **Peers:** requires the XState v6 alpha (`xstate@6.0.0-alpha.x`). `ai` (Vercel AI SDK) is an optional peer, needed only for the `@statelyai/agent/ai-sdk` adapter.
+
+```sh
+pnpm add @statelyai/agent xstate@6.0.0-alpha.16
+```
 
 ## Quickstart
 
@@ -120,7 +138,7 @@ Validation runs three checks, each producing a typed failure that's fed back to 
 
 Exhausting retries throws `DecisionExhaustedError`, caught by the invoke's `onError`. How the model is actually coerced into choosing one option (tool-per-event with forced tool choice, structured output over an event union, etc.) is host/adapter business — see `createAiSdkExecutors`'s `decide` executor below. Core only validates and retries; it never talks to a model.
 
-When a decision's logic is reusable, exported, or worth testing standalone (independent of any one machine), pull it out with `createDecisionLogic(...)` and register it under `actors:` instead of inlining it — see [`examples/game-agent/index.ts`](examples/game-agent/index.ts), which exports `chooseMove` and narrows `allowedEvents` as a function of input (HP-gated moves).
+When a decision's logic is reusable, exported, or worth testing standalone (independent of any one machine), pull it out with `createDecisionLogic(...)` and register it under `actorSources:` instead of inlining it; see [`examples/game-agent/index.ts`](examples/game-agent/index.ts), which exports `chooseMove` and narrows `allowedEvents` as a function of input (HP-gated moves).
 
 See [`examples/twenty-questions/index.ts`](examples/twenty-questions/index.ts) (decision loop + guard rejection + machine-owned user prompts) and [`examples/game-agent/index.ts`](examples/game-agent/index.ts) (`allowedEvents` as a function of input, narrowing move options by HP).
 
@@ -222,7 +240,7 @@ const executors: AgentRequestExecutors = {
       method: 'POST',
       body: JSON.stringify({ model: request.model, prompt: request.prompt }),
     });
-    return { text: await res.text() };
+    return { output: await res.text() };
   },
 };
 
@@ -369,11 +387,12 @@ See [`examples/json-agent/index.ts`](examples/json-agent/index.ts) for a full su
 
 ## Alpha status — what's not here yet
 
-This is a pre-release. The following are explicitly **not** shipped, and the API around them may still change:
+This is a pre-release. Some pieces are **example-shipped but not yet packaged** (a runnable example exists, no adapter package does); others are **not shipped** at all. The API around all of them may still change:
 
-- **Storage/checkpointer adapters.** No published SQLite/Postgres/Redis packages. Persisting snapshots or event logs is a documented recipe (see the human-in-the-loop section), not a package.
+- **Storage/checkpointer adapters.** No published SQLite/Postgres/Redis packages, but a file-backed snapshot store example is shipped; see [examples/file-snapshot-store](examples/file-snapshot-store). Persisting snapshots or event logs is a documented recipe (see the human-in-the-loop section), not a package.
+- **Machine-as-tool.** Embedding a machine as a single host tool is shipped as an example (see [examples/machine-as-tool](examples/machine-as-tool)), but there's no dedicated adapter package.
 - **Tracing/OTel exporter.** No built-in exporter. Use the `onResult`/`onTransition` observation seams on `runAgent` to build your own.
-- **SSE/WebSocket transport.** No shipped transport helpers — host your own stream over whatever `onChunk` gives you.
+- **SSE/WebSocket transport.** No shipped transport helper package, but an SSE transport example is shipped (see [examples/sse-transport](examples/sse-transport)), streaming over whatever `onChunk` gives you.
 - **Dynamic-parallelism (Send-style) helpers.** Fan-out/map-reduce is expressed with plain `Promise.all(...)` over host actors today, not a dedicated primitive.
 - **Nested-machine executor binding.** `runAgent` only binds executors for the top-level machine's own text/decision sources. A child machine invoked as a nested actor keeps its own `.provide({ actorSources })` binding — see [`examples/langgraph-subflows/index.ts`](examples/langgraph-subflows/index.ts).
 - **Visualization tooling.** Out of package scope; Stately Studio and an in-progress VS Code extension own diagramming and inspection.

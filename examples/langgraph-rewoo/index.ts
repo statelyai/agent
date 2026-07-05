@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { createAsyncLogic } from 'xstate';
 import { runAgent, setupAgent } from '../../src/index.js';
+// Model refs are opaque routing keys resolved by the executor.
 const models = {
   "planner": "planner",
   "solver": "solver",
@@ -30,7 +31,7 @@ export async function runLangGraphReWOOExample() {
       answer: z.string(),
       evidence: z.record(z.string(), z.string()),
     }),
-    actors: {
+    actorSources: {
       executePlan: createAsyncLogic<
         Record<string, string>,
         { steps: Array<{ id: string; request: string }> }
@@ -116,9 +117,9 @@ export async function runLangGraphReWOOExample() {
 
   const generateText = async (request: { model: string; prompt?: string }) => {
     if (request.model === 'planner') {
-      return { steps: [{ id: 'E1', request: request.prompt ?? '' }] };
+      return { output: { steps: [{ id: 'E1', request: request.prompt ?? '' }] } };
     }
-    return `answer:${request.prompt ?? ''}`;
+    return { output: `answer:${request.prompt ?? ''}` };
   };
 
   const result = await runAgent(machine, {

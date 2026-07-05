@@ -35,22 +35,22 @@ interface EmailDrafterState {
   snapshot?: Snapshot<unknown>;
 }
 
-export class EmailDrafterAgent extends Agent<Env, EmailDrafterState> {
+export abstract class EmailDrafterAgent extends Agent<Env, EmailDrafterState> {
   initialState: EmailDrafterState = {};
   #actor: Actor<typeof emailDrafter> | undefined;
 
   /**
    * Resolves a machine's `model` string to an AI SDK `LanguageModel`.
-   * Override (or set before `onStart` runs) to wire a real provider, e.g.:
-   *   this.resolveModel = (modelRef) =>
+   *
+   * Declared `abstract` so a concrete deployment subclass *must* supply it —
+   * a compile-time requirement rather than a runtime throw. The Durable Object
+   * constructor is fixed by the runtime `(ctx, env)`, so the resolver can't be
+   * a constructor parameter; making it abstract is how the requirement is
+   * enforced at the type level. Wire a real provider in the subclass, e.g.:
+   *   resolveModel = (modelRef: string) =>
    *     createWorkersAI({ binding: this.env.AI })(modelRef as Parameters<typeof workersai>[0]);
    */
-  resolveModel: (modelRef: string) => LanguageModel = () => {
-    throw new Error(
-      'EmailDrafterAgent.resolveModel is unset — assign an AI SDK model resolver ' +
-        '(e.g. via workers-ai-provider\'s createWorkersAI) before onStart runs.'
-    );
-  };
+  abstract resolveModel(modelRef: string): LanguageModel;
 
   onStart() {
     const machine = emailDrafter.provide({

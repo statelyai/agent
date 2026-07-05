@@ -32,17 +32,21 @@ describe('curated XState setup examples', () => {
           const satisfied =
             calls.filter((call) => call.system?.includes('Evaluate')).length > 1;
           return {
-            satisfied,
-            missing: satisfied ? [] : ['recipient'],
-            questions: satisfied ? [] : ['Who should receive it?'],
+            output: {
+              satisfied,
+              missing: satisfied ? [] : ['recipient'],
+              questions: satisfied ? [] : ['Who should receive it?'],
+            },
           };
         }),
         draftEmail: draftEmail.withExecutor(async ({ request }) => {
           calls.push(request);
           return {
-            to: 'riley@example.com',
-            subject: 'Thanks for meeting',
-            body: 'Hi Riley, thanks for meeting today.',
+            output: {
+              to: 'riley@example.com',
+              subject: 'Thanks for meeting',
+              body: 'Hi Riley, thanks for meeting today.',
+            },
           };
         }),
         sendEmail: createAsyncLogic<
@@ -140,7 +144,7 @@ describe('curated XState setup examples', () => {
     const [chooseMove] = getAgentRequests(actions, {
       snapshot,
       schemas: gameSchemas,
-      actors: { chooseMove: chooseMoveLogic, summarizeTurn },
+      actorSources: { chooseMove: chooseMoveLogic, summarizeTurn },
     });
 
     if (chooseMove?.kind !== 'decision') {
@@ -158,7 +162,7 @@ describe('curated XState setup examples', () => {
 
     const attackStep = transitionAgentStep(gameMachine, snapshot, attackEvent as never, {
       schemas: gameSchemas,
-      actors: { chooseMove: chooseMoveLogic, summarizeTurn },
+      actorSources: { chooseMove: chooseMoveLogic, summarizeTurn },
     });
 
     const [summarize] = attackStep.requests;
@@ -173,7 +177,7 @@ describe('curated XState setup examples', () => {
       enemyHp: 9,
     }, {
       schemas: gameSchemas,
-      actors: { chooseMove: chooseMoveLogic, summarizeTurn },
+      actorSources: { chooseMove: chooseMoveLogic, summarizeTurn },
     });
 
     expect(finalStep.done).toBe(true);
@@ -192,7 +196,7 @@ describe('curated XState setup examples', () => {
       actorSources: {
         tellJoke: tellJokeLogic.withExecutor(async ({ input }) => {
           jokes += 1;
-          return `joke ${jokes} about ${input.topic}`;
+          return { output: `joke ${jokes} about ${input.topic}` };
         }),
         'agent.userInput': createAsyncLogic({
           run: async () => ({ feedback: feedback.shift() ?? 'done' }),

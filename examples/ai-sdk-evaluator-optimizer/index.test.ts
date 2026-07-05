@@ -13,28 +13,32 @@ test('AI SDK evaluator-optimizer maps to an explicit machine', async () => {
     },
     generateText: async (request) => {
       if (request.prompt?.startsWith('Translate this text to Spanish:')) {
-        return 'Spanish:Hello friend';
+        return { output: 'Spanish:Hello friend' };
       }
       if (request.prompt?.includes('Suggestions:')) {
-        return 'Spanish:Hello friend improved';
+        return { output: 'Spanish:Hello friend improved' };
       }
       evaluations += 1;
       return evaluations === 1
         ? {
-          qualityScore: 6,
-          preservesTone: true,
-          preservesNuance: false,
-          culturallyAccurate: true,
-          specificIssues: ['missing nuance'],
-          improvementSuggestions: ['add idiom'],
+          output: {
+            qualityScore: 6,
+            preservesTone: true,
+            preservesNuance: false,
+            culturallyAccurate: true,
+            specificIssues: ['missing nuance'],
+            improvementSuggestions: ['add idiom'],
+          },
         }
         : {
-          qualityScore: 9,
-          preservesTone: true,
-          preservesNuance: true,
-          culturallyAccurate: true,
-          specificIssues: [],
-          improvementSuggestions: [],
+          output: {
+            qualityScore: 9,
+            preservesTone: true,
+            preservesNuance: true,
+            culturallyAccurate: true,
+            specificIssues: [],
+            improvementSuggestions: [],
+          },
         };
     },
   });

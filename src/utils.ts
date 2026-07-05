@@ -1,3 +1,4 @@
+import type { AnyMachineSnapshot } from 'xstate';
 import type {
   AssistantMessage,
   FilePart,
@@ -33,6 +34,47 @@ export function systemMessage(content: string): SystemMessage {
 /** Builds a {@link ToolMessage} from one or more tool-result parts. */
 export function toolMessage(content: Array<ToolResultPart>): ToolMessage {
   return { role: 'tool', content };
+}
+
+// A snapshot's meta value type, recovered from its `getMeta()` return type
+// (`Record<StateId, TMeta | undefined>`). For a schema-typed machine (e.g.
+// `setupAgent({ meta })`), this resolves to the meta schema's output type; for
+// an untyped snapshot it falls back to `MetaObject`.
+type MetaOfSnapshot<TSnapshot extends { getMeta(): Record<string, unknown> }> =
+  NonNullable<
+    ReturnType<TSnapshot['getMeta']>[keyof ReturnType<TSnapshot['getMeta']>]
+  >;
+
+/**
+ * Returns the merged `meta` of a snapshot's active state(s) — the typed
+ * replacement for the `Object.values(snapshot.getMeta())[0]` dance.
+ *
+ * `snapshot.getMeta()` is keyed by state id; a leaf machine has one active
+ * state, but parallel/nested machines can have several. This shallow-merges
+ * every active state's meta into one object (later/deeper entries win) and
+ * returns `{}` when no active state declares meta.
+ *
+ * The return type is recovered from the snapshot's own `getMeta()` type, so a
+ * schema-typed machine (`setupAgent({ meta })`) yields the meta schema's
+ * output type. Pass an explicit `TMeta` to override when the snapshot is
+ * untyped (e.g. `AnyMachineSnapshot`).
+ *
+ * @example HITL: read the current state's interaction protocol off an idle
+ * snapshot to render for a human.
+ * ```ts
+ * const { interaction } = getStateMeta(result.snapshot);
+ * ```
+ */
+export function getStateMeta<
+  TSnapshot extends { getMeta(): Record<string, unknown> } = AnyMachineSnapshot,
+  TMeta = MetaOfSnapshot<TSnapshot>,
+>(snapshot: TSnapshot): Partial<TMeta> {
+  return Object.assign(
+    {},
+    ...Object.values(snapshot.getMeta()).filter(
+      (meta): meta is Record<string, unknown> => meta != null
+    )
+  );
 }
 
 /**

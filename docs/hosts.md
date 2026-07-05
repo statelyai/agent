@@ -11,11 +11,11 @@ A **host** is the code that runs an agent machine and supplies the functions tha
 
 Those functions are the **executors**, typed as `AgentRequestExecutors`:
 
-- `generateText(request)` returns `{ text }` or `{ output }` (structured output). Required.
-- `streamText(request, info)` streams chunks through `info.onChunk` and returns the accumulated `{ text }`. Required only when the machine has a streaming request.
+- `generateText(request)` returns `{ output }`, where `output` is the text string or the structured object. Optional passthrough fields (usage, tool calls, and so on) are allowed alongside `output`. Required only when the machine has a generate-mode text request.
+- `streamText(request, info)` streams chunks through `info.onChunk` and returns the accumulated `{ output }`. Required only when the machine has a streaming request.
 - `decide(request)` returns `{ event }`, the one event the model chose. Required only when the machine has a decision.
 
-`runAgent` checks these at bind time, before any actor runs, so a machine that needs `decide` without one fails immediately rather than mid-run. Each executor is a plain async function taking a plain request object, so any SDK or a raw `fetch` can back it. The machine has no idea which one you used.
+`runAgent` checks these at bind time, before any actor runs, so a machine that needs `decide` without one fails immediately rather than mid-run. A machine with only plain actors needs no executors at all. Each executor is a plain async function taking a plain request object, so any SDK or a raw `fetch` can back it. The machine has no idea which one you used.
 
 ## The shipped AI SDK adapter
 
@@ -69,6 +69,8 @@ await runAgent(machine, {
 
 For a fully dynamic or externally configured host, use `resolveModel` instead: it takes the raw ref string and returns a model, so refs like `"openai/gpt-5.4-mini"` resolve without a static map. You can pass both; `resolveModel` wins. With `models` alone, an unknown ref throws.
 
+Model refs are opaque strings, so any string is a legal `model:` value. A `models` map is optional: it gives you key autocomplete on request `model:` fields and a place for the executor to resolve those refs. The AI SDK adapter resolves a ref through its `models` map, or through `resolveModel` when the map has no match.
+
 ## Multi-step tool loops
 
 A text request runs a single model call by default. Set `metadata.maxSteps` on the request to allow a bounded tool-call loop; the adapter forwards it as `stopWhen: stepCountIs(maxSteps)`. This is adapter behavior, not core behavior: `metadata` is the host-owned per-call channel.
@@ -86,7 +88,7 @@ const executors: AgentRequestExecutors = {
       method: 'POST',
       body: JSON.stringify({ model: request.model, prompt: request.prompt }),
     });
-    return { text: await res.text() };
+    return { output: await res.text() };
   },
 };
 
@@ -132,7 +134,7 @@ Because executors are plain functions, a test can supply scripted ones and never
 const machine = emailDrafter.provide({
   actorSources: {
     draftEmail: draftEmail.withExecutor(async ({ request }) => {
-      return { to: 'sam@example.com', subject: 'Hello', body: 'Hi Sam!' };
+      return { output: { to: 'sam@example.com', subject: 'Hello', body: 'Hi Sam!' } };
     }),
   },
 });

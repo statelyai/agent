@@ -123,7 +123,7 @@ describe('setupAgent', () => {
             input: z.object({ prompt: z.string() }),
             output: z.object({ answer: z.string() }),
           },
-          // @ts-expect-error request model must be one of the registered model aliases
+          // Registered aliases autocomplete, but any string is a legal model ref.
           model: 'missing',
           prompt: ({ input }) => input.prompt,
         },
@@ -135,7 +135,7 @@ describe('setupAgent', () => {
       initial: 'deciding',
       states: {
         deciding: {
-          // @ts-expect-error inline decision model must be one of the registered model aliases
+          // A bare (unregistered) model ref is accepted on inline decisions too.
           invoke: {
             src: 'agent.decide',
             input: {
@@ -380,7 +380,7 @@ describe('setupAgent', () => {
           request: AgentTextRequest & { tools: AgentTools },
         ) => {
           expect(request.prompt).toBe('Draft body.');
-          return { text: Promise.resolve('Streamed final text.') };
+          return { output: Promise.resolve('Streamed final text.') };
         },
       }),
     ).resolves.toBe('Streamed final text.');
@@ -499,7 +499,7 @@ describe('setupAgent', () => {
       streamText: async (
         request: AgentTextRequest & { tools: AgentTools },
       ) => ({
-        text: `Streamed ${request.prompt}`,
+        output: `Streamed ${request.prompt}`,
       }),
     });
     step = resolveAgentStep(machine, step, step.requests[0]!, streamed);
@@ -541,7 +541,7 @@ describe('setupAgent', () => {
 
     const step = initialAgentStep(machine, { prompt: 'Why machines?' });
     const request = asTextRequest(step.requests[0]);
-    const rawResult = { object: { answer: 'Because state.' } };
+    const rawResult = { output: { answer: 'Because state.' } };
 
     const defaultResult = await executeAgentRequest(request, {
       generateText: async () => rawResult,
@@ -629,7 +629,7 @@ describe('setupAgent', () => {
 
     await expect(
       executeAgentRequest(asTextRequest(step.requests[0]), {
-        generateText: () => ({ answer: 123 }),
+        generateText: () => ({ output: { answer: 123 } }),
       }),
     ).rejects.toThrow('expected string');
   });
@@ -723,7 +723,7 @@ describe('setupAgent', () => {
       events: { GO: z.object({ n: z.number() }) },
     });
     const child = createAsyncLogic<number, unknown>({ run: async () => 42 });
-    const agent = setupAgent({ schemas, actors: { child } });
+    const agent = setupAgent({ schemas, actorSources: { child } });
 
     agent.createMachine({
       context: { count: 0 },
@@ -873,7 +873,7 @@ describe('setupAgent', () => {
       }),
       input: z.object({ article: z.string() }),
       output: z.object({ summary: z.string() }),
-      actors: {
+      actorSources: {
         getSummary,
       },
     });
@@ -948,7 +948,7 @@ describe('setupAgent', () => {
       article: 'State machines make agents inspectable.',
     });
     const [request] = getAgentRequests(actions, {
-      actors: { getSummary },
+      actorSources: { getSummary },
     });
 
     expect(request).toEqual({
@@ -1002,7 +1002,7 @@ describe('setupAgent', () => {
     const agent = setupAgent({
       context: z.object({ article: z.string() }),
       input: z.object({ article: z.string() }),
-      actors: { streamSummary },
+      actorSources: { streamSummary },
     });
     const machine = agent.createMachine({
       context: ({ input }) => ({ article: input.article }),
@@ -1034,7 +1034,7 @@ describe('setupAgent', () => {
           request: AgentTextRequest & { tools: AgentTools },
         ) => {
           expect(request.prompt).toBe('Stream:\nState machines.');
-          return { text: 'streamed summary' };
+          return { output: 'streamed summary' };
         },
       }),
     ).resolves.toBe('streamed summary');
@@ -1051,7 +1051,7 @@ describe('setupAgent', () => {
           ) => {
             expect(request.prompt).toBe('Stream:\nState machines.');
             expect(request.tools).toEqual({});
-            return { text: 'standalone stream' };
+            return { output: 'standalone stream' };
           },
         },
       ),
@@ -1071,7 +1071,9 @@ describe('setupAgent', () => {
       async ({ input, request, signal }) => {
         expect(signal).toBeInstanceOf(AbortSignal);
         return {
-          answer: `${request.model}:${input.question}`,
+          output: {
+            answer: `${request.model}:${input.question}`,
+          },
         };
       },
     );
@@ -1083,7 +1085,7 @@ describe('setupAgent', () => {
       }),
       input: z.object({ question: z.string() }),
       output: z.object({ answer: z.string() }),
-      actors: { answerQuestion },
+      actorSources: { answerQuestion },
     });
 
     const machine = agent.createMachine({
@@ -1128,7 +1130,10 @@ describe('setupAgent', () => {
         model: 'test-model',
         prompt: ({ input }) => input.question,
       },
-      async () => ({ nope: true }) as unknown as { answer: string },
+      async () =>
+        ({ output: { nope: true } }) as unknown as {
+          output: { answer: string };
+        },
     );
 
     const agent = setupAgent({
@@ -1137,7 +1142,7 @@ describe('setupAgent', () => {
         error: z.string().nullable(),
       }),
       input: z.object({ question: z.string() }),
-      actors: { answerQuestion },
+      actorSources: { answerQuestion },
     });
 
     const machine = agent.createMachine({
@@ -1269,8 +1274,10 @@ describe('setupAgent', () => {
               }>,
             );
             return {
-              subject: `Re: ${request.prompt}`,
-              body: 'Typed raw XState machine body.',
+              output: {
+                subject: `Re: ${request.prompt}`,
+                body: 'Typed raw XState machine body.',
+              },
             };
           }),
         },
@@ -1386,7 +1393,7 @@ describe('setupAgent', () => {
 
     const output = await executeAgentRequest(asTextRequest(step.requests[0]), {
       generateText: (request: AgentTextRequest & { tools: AgentTools }) => ({
-        object: {
+        output: {
           answer: `Answered: ${request.prompt}`,
         },
       }),
@@ -1401,7 +1408,7 @@ describe('setupAgent', () => {
     const runResult = await runAgent(machine, {
       input: { prompt: 'why run agents?' },
       generateText: (request: AgentTextRequest & { tools: AgentTools }) => ({
-        object: {
+        output: {
           answer: `Ran: ${request.prompt}`,
         },
       }),
@@ -1440,7 +1447,7 @@ describe('setupAgent', () => {
         DEFEND: z.object({}),
         PAUSE: z.object({}),
       },
-      actors: { chooseMove },
+      actorSources: { chooseMove },
     });
 
     const machine = agent.createMachine({
@@ -1891,7 +1898,7 @@ describe('setupAgent', () => {
 
     const result = await runAgent(machine, {
       input: {},
-      generateText: async () => ({}),
+      generateText: async () => ({ output: {} }),
       decide: async (input) => {
         receivedInputs.push(input);
         return { event: { type: 'GUESS', answer: '42' } };
@@ -2267,7 +2274,7 @@ describe('decision step discovery', () => {
       prompt: 'Choose a move.',
       allowedEvents: ['ATTACK', 'DEFEND'] as const,
     });
-    const agent = setupAgent({ schemas: decisionSchemas, actors: { chooseMove } });
+    const agent = setupAgent({ schemas: decisionSchemas, actorSources: { chooseMove } });
 
     const machine = agent.createMachine({
       context: {},
@@ -2316,7 +2323,7 @@ describe('decision step discovery', () => {
 
   test('omitted allowedEvents offers every snapshot-legal event', () => {
     const chooseMove = createDecisionLogic({ model: 'test-model' });
-    const agent = setupAgent({ schemas: decisionSchemas, actors: { chooseMove } });
+    const agent = setupAgent({ schemas: decisionSchemas, actorSources: { chooseMove } });
     const machine = agent.createMachine({
       context: {},
       initial: 'choosingMove',
@@ -2364,7 +2371,7 @@ describe('decision live path (createActor)', () => {
       model: 'test-model',
       allowedEvents: ['ATTACK', 'DEFEND'] as const,
     });
-    const agent = setupAgent({ schemas: decisionSchemas, actors: { chooseMove } });
+    const agent = setupAgent({ schemas: decisionSchemas, actorSources: { chooseMove } });
 
     const machine = agent.createMachine({
       context: {},
@@ -2492,7 +2499,7 @@ describe('inline agent.decide invoke (state-local decisions)', () => {
 
     const result = await runAgent(machine, {
       input: {},
-      generateText: async () => ({}),
+      generateText: async () => ({ output: {} }),
       decide: async () => ({ event: { type: 'ATTACK', target: 'goblin' } }),
     });
 

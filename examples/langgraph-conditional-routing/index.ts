@@ -63,7 +63,7 @@ export async function runLangGraphConditionalRoutingExample() {
 
   const result = await runAgent(machine, {
     input: { request: 'billing is broken' },
-    generateText: async () => ({ route: 'escalate' }),
+    generateText: async () => ({ output: { route: 'escalate' } }),
   });
 
   assert.equal(result.status, 'done');

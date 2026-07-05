@@ -2,13 +2,17 @@
   "name": "ai-sdk-game-host",
   "title": "Vercel AI SDK Game Host",
   "kind": "host-adapter",
+  "manual": true,
   "origin": {
     "type": "sdk-adapter",
     "source": "Vercel AI SDK integration sketch",
     "url": "https://ai-sdk.dev"
   },
   "comparison": {
-    "targets": ["Vercel AI SDK tool calling", "LangGraph tool nodes"],
+    "targets": [
+      "Vercel AI SDK tool calling",
+      "LangGraph tool nodes"
+    ],
     "purpose": "Shows AI SDK tool calls mapped to legal XState events for a game workflow."
   }
 }

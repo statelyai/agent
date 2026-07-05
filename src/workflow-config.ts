@@ -687,7 +687,7 @@ export function setupAgentFromConfig(
   const actors = createActorPlaceholdersFromWorkflowConfig(config);
   const agent = setupAgent({
     schemas,
-    actors: {
+    actorSources: {
       ...actors,
       ...requestActors,
     },

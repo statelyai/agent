@@ -1,14 +1,10 @@
 import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { runAgent, setupAgent } from '../../src/index.js';
-const models = {
-  "researcher": "researcher",
-} as const;
 
 
 export async function runLangGraphSubflowsExample() {
   const childAgent = setupAgent({
-    models,
     context: z.object({ topic: z.string(), research: z.string().nullable() }),
     input: z.object({ topic: z.string() }),
     output: z.object({ research: z.string() }),
@@ -46,11 +42,10 @@ export async function runLangGraphSubflowsExample() {
   });
 
   const parentAgent = setupAgent({
-    models,
     context: z.object({ topic: z.string(), research: z.string().nullable() }),
     input: z.object({ topic: z.string() }),
     output: z.object({ research: z.string() }),
-    actors: { child: childMachine },
+    actorSources: { child: childMachine },
   });
   const parentMachine = parentAgent.createMachine({
     id: 'raw-xstate-parent-subflow',
@@ -60,12 +55,12 @@ export async function runLangGraphSubflowsExample() {
       delegating: {
         invoke: {
           src: 'child',
-          input: ({ context }: { context: { topic: string } }) => ({
+          input: ({ context }) => ({
             topic: context.topic,
           }),
           onDone: ({ output }) => ({
             target: 'done',
-            context: { research: (output as { research: string }).research },
+            context: { research: output.research },
           }),
         },
       },
@@ -83,12 +78,11 @@ export async function runLangGraphSubflowsExample() {
   // registered as the parent's `child` actor source.
   const result = await runAgent(parentMachine, {
     input: { topic: 'agents' },
-    generateText: async () => ({}),
     actorSources: {
       child: childMachine.provide({
         actorSources: {
           researchTopic: childAgent.requests.researchTopic.withExecutor(
-            async ({ input }) => `Research: ${input.topic}`,
+            async ({ input }) => ({ output: `Research: ${input.topic}` }),
           ),
         },
       }),

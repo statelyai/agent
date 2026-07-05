@@ -164,10 +164,10 @@ export function isStructuredOutputRequest(
   return getAgentOutputMode(request.outputSchema) === 'structured';
 }
 
-/** Raw result shape from {@link AiSdkExecutors.generateText} — `{ output }` for structured-output requests (validated against `outputSchema`), `{ text }` otherwise. Normalized by {@link normalizeGeneratorResult}. */
-export type AiSdkGenerateResult = { output: unknown } | { text: string };
-/** Raw result shape from {@link AiSdkExecutors.streamText} — the fully-accumulated text once the stream finishes (chunks are delivered separately via `onChunk`). */
-export type AiSdkStreamResult = { text: string };
+/** Raw result shape from {@link AiSdkExecutors.generateText} — the `{ output }` envelope: the validated structured object for structured-output requests, or the accumulated text string otherwise. Unwrapped by {@link normalizeGeneratorResult}. */
+export type AiSdkGenerateResult = { output: unknown };
+/** Raw result shape from {@link AiSdkExecutors.streamText} — the `{ output }` envelope carrying the fully-accumulated text once the stream finishes (chunks are delivered separately via `onChunk`). */
+export type AiSdkStreamResult = { output: string };
 
 /** `createAiSdkExecutors` always populates all three slots (unlike the
  * general `AgentRequestExecutors`, where `streamText`/`decide` are optional),
@@ -223,7 +223,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
     }
 
     const { text } = await aiGenerateText(common);
-    return { text };
+    return { output: text };
   };
 
   const streamText = async (
@@ -241,7 +241,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
       info?.onChunk?.(chunk);
     }
 
-    return { text: await result.text };
+    return { output: await result.text };
   };
 
   const decide: AgentDecisionExecutor = async (request) => {

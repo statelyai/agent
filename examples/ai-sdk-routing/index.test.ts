@@ -10,13 +10,15 @@ test('AI SDK routing maps to an explicit machine', async () => {
     generateText: async (request) => {
       if (request.prompt?.startsWith('Classify this customer query:')) {
         return {
-          reasoning: 'needs troubleshooting',
-          type: 'technical',
-          complexity: 'complex',
+          output: {
+            reasoning: 'needs troubleshooting',
+            type: 'technical',
+            complexity: 'complex',
+          },
         };
       }
       routedModels.push(request.model);
-      return `technical:${request.prompt}`;
+      return { output: `technical:${request.prompt}` };
     },
   });
   assert.deepEqual(routedModels, ['complexAnswerer']);

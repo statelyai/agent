@@ -38,7 +38,7 @@ export async function runLangGraphSnapshotPersistenceExample() {
       drafting: {
         invoke: {
           src: 'writeDraft',
-          input: ({ context }: { context: { topic: string } }) => ({
+          input: ({ context }) => ({
             topic: context.topic,
           }),
           onDone: ({ output }) => ({
@@ -57,7 +57,7 @@ export async function runLangGraphSnapshotPersistenceExample() {
     },
   });
 
-  const generateText = async (request: { prompt?: string }) => `Draft: ${request.prompt ?? ''}`;
+  const generateText = async (request: { prompt?: string }) => ({ output: `Draft: ${request.prompt ?? ''}` });
 
   // No invoke in `reviewing`, nothing in flight: runAgent settles idle
   // instead of blocking. Persist the snapshot (host's choice of store) —

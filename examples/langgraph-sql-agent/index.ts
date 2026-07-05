@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { createAsyncLogic } from 'xstate';
 import { runAgent, setupAgent } from '../../src/index.js';
+// Model refs are opaque routing keys resolved by the executor.
 const models = {
   "sql-writer": "sql-writer",
   "answerer": "answerer",
@@ -20,7 +21,7 @@ export async function runLangGraphSQLAgentExample() {
     }),
     input: z.object({ question: z.string() }),
     output: z.object({ sql: z.string(), answer: z.string() }),
-    actors: {
+    actorSources: {
       queryDatabase: createAsyncLogic<
         Array<Record<string, string>>,
         { sql: string }
@@ -102,9 +103,9 @@ export async function runLangGraphSQLAgentExample() {
 
   const generateText = async (request: { model: string; prompt?: string }) => {
     if (request.model === 'sql-writer') {
-      return { sql: 'select count(*) as total from users' };
+      return { output: { sql: 'select count(*) as total from users' } };
     }
-    return `final:${request.prompt ?? ''}`;
+    return { output: `final:${request.prompt ?? ''}` };
   };
 
   const result = await runAgent(machine, {

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { runAgent, setupAgent } from '../../src/index.js';
+// Model refs are opaque routing keys resolved by the executor.
 const models = {
   "writer": "writer",
   "critic": "critic",
@@ -99,12 +100,14 @@ export async function runLangGraphReflectionLoopExample() {
 
   const generateText = async (request: { model: string; prompt?: string }) => {
     if (request.model === 'writer') {
-      return `draft:${request.prompt ?? ''}`;
+      return { output: `draft:${request.prompt ?? ''}` };
     }
     critiqueCount += 1;
     return {
-      approved: critiqueCount > 1,
-      feedback: critiqueCount > 1 ? 'ship' : 'add evidence',
+      output: {
+        approved: critiqueCount > 1,
+        feedback: critiqueCount > 1 ? 'ship' : 'add evidence',
+      },
     };
   };
 

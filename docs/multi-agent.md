@@ -17,7 +17,7 @@ The framing stays the same: the machine decides, the [host](hosts.md) executes. 
 
 <!-- child-actor composition from examples/xstate-sub-agents/index.ts -->
 
-Register a child machine under `actors:` on the parent's `setupAgent(...)`, then invoke it by name. The parent treats the child like any other invoked actor: typed `input`, final output in `onDone`.
+Register a child machine under `actorSources:` on the parent's `setupAgent(...)`, then invoke it by name. The parent treats the child like any other invoked actor: typed `input`, final output in `onDone`.
 
 [examples/xstate-sub-agents/index.ts](../examples/xstate-sub-agents/index.ts) builds a research-then-write pipeline this way:
 
@@ -27,7 +27,7 @@ const agentSetup = setupAgent({
   context: z.object({ topic: z.string(), notes: z.string().nullable(), final: z.string().nullable() }),
   input: z.object({ topic: z.string() }),
   output: finalOutputSchema,
-  actors: {
+  actorSources: {
     researchAgent: research.machine.provide({ actorSources: { /* ... */ } }),
     writerAgent: writer.machine.provide({ actorSources: { /* ... */ } }),
   },
@@ -126,7 +126,9 @@ Each debater sits idle until it receives `DEBATE.ARGUMENT_REQUESTED`, composes a
 
 <!-- nested executor binding caveat from src/run-agent.ts and examples/langgraph-subflows -->
 
-> **Warning:** `runAgent` binds executors only for the **top-level** machine's own text and decision sources. A child machine keeps its own `.provide({ actorSources })` binding; `runAgent` does not reach into it. Bind the child's request executors yourself before registering it.
+> **Warning:** `runAgent` binds executors only for the **top-level** machine's own text and decision sources. A child machine keeps its own `.provide({ actorSources })` binding; `runAgent` does not reach into it; child requests do **not** inherit the parent's `generateText`/`streamText`/`decide`. Bind the child's request executors yourself before registering it.
+>
+> `runAgent` validates this at **bind time**: it recurses into invoked child machines (arbitrarily deep) and throws a loud error naming the child and the unbound request `src` before any actor runs, rather than settling the parent in a wrong idle-looking state.
 
 [examples/langgraph-subflows/index.ts](../examples/langgraph-subflows/index.ts) shows the pattern:
 

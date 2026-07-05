@@ -28,9 +28,15 @@ export const DECIDE_ACTOR = 'agent.decide' as const;
 export type AgentRequestMode = 'generate' | 'stream';
 /** A `setupAgent({ models })` model registry, mapping short model refs to provider-specific model values. */
 export type AgentModelMap = Record<string, unknown>;
-/** A model reference: narrowed to `keyof TModels` when a model map is registered, otherwise a plain `string`. */
+/**
+ * A model reference: any string is legal, but a registered `models` map's keys
+ * autocomplete. Refs are opaque routing keys — the host/executor (or the AI SDK
+ * adapter's models map / `resolveModel`) resolves them to a real model.
+ */
 export type AgentModelRef<TModels extends AgentModelMap = {}> =
-  [keyof TModels] extends [never] ? string : keyof TModels & string;
+  [keyof TModels] extends [never]
+    ? string
+    : (keyof TModels & string) | (string & {});
 
 /**
  * Portable, provider-agnostic input a text request passes to a host
@@ -308,19 +314,20 @@ export interface TextLogicExecuteArgs<TInput, TMetadata = Record<string, unknown
   emit: (emitted: EventObject) => void;
 }
 
-/** Host implementation bound to a specific {@link TextLogic} via `withExecutor`/`createTextLogic`'s second argument — resolves one text request to typed output. */
+/** Host implementation bound to a specific {@link TextLogic} via `withExecutor`/`createTextLogic`'s second argument — resolves one text request to an `{ output }` envelope typed from the logic's output schema (`{ output: T }`). Passthrough fields (usage, raw, …) are allowed alongside `output`. */
 export type TextLogicExecutor<
   TInputSchema extends StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1,
   TMetadata = unknown,
 > = (
   args: TextLogicExecuteArgs<InferOutput<TInputSchema>, TMetadata>
-) => PromiseLike<InferOutput<TOutputSchema>>;
+) => PromiseLike<AgentRequestExecutorResult<InferOutput<TOutputSchema>>>
+  | AgentRequestExecutorResult<InferOutput<TOutputSchema>>;
 
 /**
  * Actor logic for a text request: an async effect that resolves typed input
  * to typed, schema-validated output via a model call. Built by
- * {@link createTextLogic}; register under `actors:` and invoke by name, or
+ * {@link createTextLogic}; register under `actorSources:` and invoke by name, or
  * bind an executor later with `withExecutor`. The `agent.generateText`/
  * `agent.streamText` builtins and `setupAgent({ requests })` entries are
  * both `TextLogic` under the hood.
@@ -364,7 +371,7 @@ export type TextLogicOutput<TLogic extends TextLogic> =
 /**
  * Creates reusable, standalone {@link TextLogic}: an actor that, when run,
  * resolves typed input to typed output via a model call. Register the
- * result under `actors:` and invoke it by name (equivalent to what
+ * result under `actorSources:` and invoke it by name (equivalent to what
  * `setupAgent({ requests })` builds internally for each request entry). Pass
  * `execute` here, or bind it later with `.withExecutor(...)`, a runtime
  * adapter's `machine.provide(...)`, or `runAgent`'s `generateText`/
@@ -424,11 +431,11 @@ export function createTextLogic<
         throw new Error(
           'Text logic has no host execution. Pass an executor as the second ' +
             'argument to createTextLogic(...), provide a runtime adapter, or ' +
-            'extract it with getAgentRequests(..., { actors }).'
+            'extract it with getAgentRequests(..., { actorSources }).'
         );
       }
 
-      const output = await execute({
+      const result = await execute({
         input,
         request: resolvedRequest,
         signal,
@@ -436,6 +443,12 @@ export function createTextLogic<
         self,
         emit: enq.emit as (emitted: EventObject) => void,
       });
+
+      const selfId = (self as { id?: unknown } | undefined)?.id;
+      const output = await normalizeGeneratorResult(
+        result,
+        typeof selfId === 'string' ? selfId : 'text logic'
+      );
 
       return validateSchemaSync<TOutput>(
         config.schemas.output as StandardSchemaV1<TOutput>,
@@ -486,12 +499,17 @@ export function isTextLogic(value: unknown): value is TextLogic {
   );
 }
 
-/** Raw shape an {@link AgentRequestExecutor} may return; {@link normalizeGeneratorResult} unwraps whichever of `object`/`text`/`output` is present (checked in that order), or passes through any other value as-is. */
-export type AgentRequestExecutorResult =
-  | { output: unknown }
-  | { object: unknown }
-  | { text: string }
-  | unknown;
+/**
+ * The envelope an {@link AgentRequestExecutor} must return: `{ output }` where
+ * `output` is the request's value (a text string or a structured object).
+ * Passthrough fields (usage, toolCalls, finishReason, raw, …) are allowed
+ * alongside `output` and preserved on the raw result. {@link normalizeGeneratorResult}
+ * unwraps `output`; a non-envelope return is a runtime error.
+ */
+export type AgentRequestExecutorResult<TOutput = unknown> = {
+  output: TOutput;
+  [key: string]: unknown;
+};
 
 /**
  * Optional second argument passed to executors by `runAgent`. The step path
@@ -503,8 +521,8 @@ export interface AgentRequestExecutorInfo {
   signal?: AbortSignal;
 }
 
-/** Host implementation of one text call (`generateText` or `streamText`) — resolves a lowered {@link AgentTextRequest} to a raw result, normalized by {@link normalizeGeneratorResult}. */
-export type AgentRequestExecutor<TResult = AgentRequestExecutorResult> = (
+/** Host implementation of one text call (`generateText` or `streamText`) — resolves a lowered {@link AgentTextRequest} to an `{ output }` envelope (see {@link AgentRequestExecutorResult}), unwrapped by {@link normalizeGeneratorResult}. */
+export type AgentRequestExecutor<TResult extends AgentRequestExecutorResult = AgentRequestExecutorResult> = (
   request: AgentTextRequest & { tools: AgentTools },
   info?: AgentRequestExecutorInfo
 ) => PromiseLike<TResult> | TResult;
@@ -518,8 +536,8 @@ export type AgentRequestExecutor<TResult = AgentRequestExecutorResult> = (
  * machine actually needs it (see `runAgent`).
  */
 export interface AgentRequestExecutors<
-  TGenerateResult = AgentRequestExecutorResult,
-  TStreamResult = AgentRequestExecutorResult,
+  TGenerateResult extends AgentRequestExecutorResult = AgentRequestExecutorResult,
+  TStreamResult extends AgentRequestExecutorResult = AgentRequestExecutorResult,
 > {
   generateText: AgentRequestExecutor<TGenerateResult>;
   streamText?: AgentRequestExecutor<TStreamResult>;
@@ -593,29 +611,32 @@ export async function executeAgentTextRequest(
   }
 
   const raw = await executor(request, info);
-  return { output: await normalizeGeneratorResult(raw), raw };
+  return { output: await normalizeGeneratorResult(raw, id), raw };
 }
 
 /**
- * Unwraps a raw executor result to its normalized value: awaits `result`,
- * then — if it's an object — returns (and awaits) whichever of `object`,
- * `text`, or `output` is present, checked in that order; any other value
- * passes through unchanged. This is generator-result unwrapping only —
- * decision results are extracted separately by `resolveDecision`.
+ * Unwraps an executor's `{ output }` envelope (see
+ * {@link AgentRequestExecutorResult}): awaits `result`, then returns (and
+ * awaits) its `output` field. Executors MUST return `{ output }` — a bare
+ * value or an object without `output` is a runtime error naming `id`. This is
+ * generator-result unwrapping only — decision results are extracted
+ * separately by `resolveDecision`.
  */
-export async function normalizeGeneratorResult(result: unknown): Promise<unknown> {
+export async function normalizeGeneratorResult(
+  result: unknown,
+  id = 'text request'
+): Promise<unknown> {
   const resolved = await result;
-  if (!resolved || typeof resolved !== 'object') {
-    return resolved;
+  if (
+    !resolved
+    || typeof resolved !== 'object'
+    || !('output' in resolved)
+  ) {
+    throw new Error(
+      `Executor for '${id}' returned an invalid result: executors must return ` +
+        `{ output } (an envelope with the text string or structured object as ` +
+        `\`output\`, plus optional passthrough fields).`
+    );
   }
-  if ('object' in resolved) {
-    return await (resolved as { object: unknown }).object;
-  }
-  if ('text' in resolved) {
-    return await (resolved as { text: string }).text;
-  }
-  if ('output' in resolved) {
-    return await (resolved as { output: unknown }).output;
-  }
-  return resolved;
+  return await (resolved as { output: unknown }).output;
 }

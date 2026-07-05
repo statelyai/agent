@@ -9,6 +9,24 @@ The **step path** is a set of helpers that advance an agent machine one transiti
 
 `runAgent` checkpoints only when the run settles (`done`, `idle`, `error`). That is enough for most hosts, but not for Cloudflare Workflows, Temporal, or anything that must resume from the last model call rather than the last settle. For those hosts, drive the loop yourself.
 
+## Why this runs anywhere
+
+The step path works in any host (Temporal, Workflows, serverless, a queue consumer, a plain server) because of one property: **every step helper is a pure, synchronous function.** `initialAgentStep`, `transitionAgentStep`, and `resolveAgentStep` never await, never do IO, and always return the same step for the same inputs. All asynchrony lives in your code, between steps.
+
+That split is the whole durability story:
+
+- The host journals each async result (model output, actor result, timer firing) in its own runtime as its own activity.
+- Replay is deterministic: re-applying the journaled events through the pure transitions reconstructs the exact snapshot, so a crashed run resumes without re-billing model calls.
+- Nothing async hides inside a transition, so there is nothing the host cannot checkpoint around.
+
+The flip side: because transitions are pure, **the host must execute everything async itself.** There are exactly three kinds:
+
+1. **Model requests** (`step.requests`): text requests via `executeAgentRequest`, decisions via `resolveDecision`. The loop below.
+2. **Plain actors** (a non-model `invoke`, like a send-email side effect): these do **not** appear in `step.requests`. They surface in `step.actions` as spawn actions carrying `id`, `src`, and `input`. The host runs the effect in its own runtime, then feeds the result back with `resolveAgentStep(machine, step, id, output)` (or builds the event by hand with `doneEvent`).
+3. **Delayed transitions** (`after`): schedulable raise actions in `step.actions`; the host owns the clock (see below).
+
+A step with `requests: []` and `done: false` therefore means one of two things: the machine is **idle** waiting for an external event (a human reply: persist the snapshot and resume later with `transitionAgentStep`), or a **plain actor or timer is pending** in `step.actions` and the host must execute it. Check `step.actions` to tell them apart; do not treat empty requests as done or as an error.
+
 ## The step loop
 
 <!-- step helpers (initialAgentStep, resolveAgentStep, transitionAgentStep, executeAgentRequest) from src/steps.ts; running example examples/ai-sdk-game-host -->
@@ -29,13 +47,16 @@ import {
 
 let step = initialAgentStep(gameMachine, input, {
   schemas: gameSchemas,
-  actors: gameActors,
+  actorSources: gameActors,
 });
 
 while (!step.done) {
   const [request] = step.requests;
   if (!request) {
-    throw new Error('Machine is waiting without an agent request.');
+    // Idle (waiting for an external event) or a plain actor/timer is
+    // pending in step.actions. Persist the snapshot and leave the loop;
+    // resume later with transitionAgentStep (see "Why this runs anywhere").
+    break;
   }
 
   if (request.kind === 'decision') {
@@ -44,7 +65,7 @@ while (!step.done) {
     });
     step = transitionAgentStep(gameMachine, step, chosenEvent, {
       schemas: gameSchemas,
-      actors: gameActors,
+      actorSources: gameActors,
     });
     continue;
   }
@@ -52,7 +73,7 @@ while (!step.done) {
   const output = await executeAgentRequest(request, executors);
   step = resolveAgentStep(gameMachine, step, request, output, {
     schemas: gameSchemas,
-    actors: gameActors,
+    actorSources: gameActors,
   });
 }
 

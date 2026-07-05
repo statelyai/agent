@@ -232,7 +232,7 @@ export function createOpenAiExecutors({ client }: { client: OpenAI }): OpenAiExe
     }
 
     const response = await client.chat.completions.create(common, { signal: info?.signal });
-    return { text: response.choices[0]?.message.content ?? '' };
+    return { output: response.choices[0]?.message.content ?? '' };
   };
 
   const streamText = async (
@@ -257,7 +257,7 @@ export function createOpenAiExecutors({ client }: { client: OpenAI }): OpenAiExe
         info?.onChunk?.(delta);
       }
     }
-    return { text };
+    return { output: text };
   };
 
   const decide: AgentDecisionExecutor = async (request) => {

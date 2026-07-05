@@ -1,25 +1,15 @@
 import assert from 'node:assert/strict';
 import { z } from 'zod';
+import { initialTransition } from 'xstate';
 import {
-  createActor,
-  createAsyncLogic,
-  createCallbackLogic,
-  initialTransition,
-  transition,
-  waitFor,
-  type EventObject,
-} from 'xstate';
-import {
-  type AgentRequest,
-  assistantMessage,
   createAgentSchemas,
   executeAgentRequest,
   getAgentRequests,
+  setupAgent,
   transitionResult,
   type AgentTextRequest,
   type AgentTools,
 } from '../../src/index.js';
-import { setupAgent } from '../../src/index.js';
 
 export async function runDinavinterScreenSetBuilderExample() {
   const fieldSchema = z.object({
@@ -39,12 +29,8 @@ export async function runDinavinterScreenSetBuilderExample() {
     input: z.object({ request: z.string() }),
     output: screenDraftSchema,
   });
-  const models = {
-    screenDrafter: 'openai/gpt-5.4-nano',
-  } as const;
   const agent = setupAgent({
     schemas,
-    models,
     requests: {
       draftScreen: {
         schemas: {
@@ -87,7 +73,7 @@ export async function runDinavinterScreenSetBuilderExample() {
   const [request] = getAgentRequests(actions, {
     snapshot,
     schemas,
-    actors: agent.requests,
+    actorSources: agent.requests,
   });
   if (request?.kind !== 'text') {
     throw new Error('Expected a text request.');
@@ -117,7 +103,7 @@ export async function runDinavinterScreenSetBuilderExample() {
   assert.deepEqual(getAgentRequests(actions, {
     snapshot,
     schemas,
-    actors: agent.requests,
+    actorSources: agent.requests,
   }), []);
   assert.deepEqual(snapshot.output, {
     title: 'Signup',
