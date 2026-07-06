@@ -13,6 +13,7 @@ Everything here is **additive**: none of it blocks the alpha, and all of it bene
 - **`kind: 'actor'` step requests.** Plain (non-model) actors surface only in `step.actions` today (documented in [the step path](steps.md)). Promoting them to first-class step requests would make the step loop uniform; deferred until step-path hosts confirm the need.
 - **Provider executor scaffolding.** Hand-rolling a raw-SDK executor is ~400 lines (see `examples/openai-sdk-host`, `examples/anthropic-sdk-host`). A `createExecutorsFromChat(...)` scaffold could cut that to ~60; deferred until a third provider example exposes the right seams. A shared `getJsonSchema(schema)` export (the `~standard.jsonSchema` extraction every adapter reimplements) rides along.
 - **`ajvSchemaCompiler` export.** The Ajv `SchemaCompiler` recipe for `setupAgent.fromConfig` is ~22 lines every JSON-config user copies (see `examples/json-agent`).
+- **Machine-as-tool helper.** `runAgent` inside a `tool({ execute })` already covers run-to-done machines in one line; a `toAiSdkTool(machine, executors)` helper would add the idle-handle persist/resume dance for pausing machines (see `examples/machine-as-tool`). Ships if embedders keep hand-rolling it.
 
 ## Runtime options
 
