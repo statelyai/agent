@@ -265,6 +265,7 @@ export async function main() {
       topic: "geography",
     },
     ...executors,
+    onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
   });
 
   if (result.status !== "done") {

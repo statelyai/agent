@@ -62,7 +62,6 @@ export const triageSchemas = schemas;
 
 export const triageMachine = triageAgent.createMachine({
   id: "ticket-triage",
-  output: ({ context }) => context.triage ?? { sentiment: "neutral", category: "other", reply: "" },
   context: ({ input }) => ({ ticket: input.ticket, triage: null }),
   initial: "triaging",
   states: {
@@ -79,6 +78,8 @@ export const triageMachine = triageAgent.createMachine({
     },
     done: {
       type: "final",
+      output: ({ context }) =>
+        context.triage ?? { sentiment: "neutral", category: "other", reply: "" },
     },
   },
 });
@@ -95,6 +96,7 @@ export async function main() {
   const result = await runAgent(triageMachine, {
     input: { ticket: SAMPLE_TICKET },
     ...executors,
+    onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
   });
 
   if (result.status !== "done") {

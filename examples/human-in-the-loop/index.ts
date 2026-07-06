@@ -106,6 +106,8 @@ export interface RunHumanInTheLoopOptions {
   topic?: string;
   /** Injected for tests; direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
+  /** Direct run passes this to narrate state; tests leave it undefined (quiet). */
+  onTransition?: (snapshot: { value: unknown }) => void;
 }
 
 export interface HumanInTheLoopResult {
@@ -123,12 +125,13 @@ export interface HumanInTheLoopResult {
 export async function runHumanInTheLoopExample(
   options: RunHumanInTheLoopOptions = {},
 ): Promise<HumanInTheLoopResult> {
-  const { topic = "the new deploy pipeline", generateText } = options;
+  const { topic = "the new deploy pipeline", generateText, onTransition } = options;
 
   // Phase 1: draft, then settle idle at `reviewing`.
   const first = await runAgent(humanInTheLoopMachine, {
     input: { topic },
     ...(generateText ? { generateText } : {}),
+    ...(onTransition ? { onTransition } : {}),
   });
 
   if (first.status !== "idle") {
@@ -146,6 +149,7 @@ export async function runHumanInTheLoopExample(
     snapshot: persisted,
     event: { type: "APPROVE" },
     ...(generateText ? { generateText } : {}),
+    ...(onTransition ? { onTransition } : {}),
   });
 
   if (second.status !== "done") {
@@ -169,7 +173,10 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   const { createAiSdkExecutors } = await import("../../src/ai-sdk/index.js");
   const { generateText } = createAiSdkExecutors({ models });
 
-  const result = await runHumanInTheLoopExample({ generateText });
+  const result = await runHumanInTheLoopExample({
+    generateText,
+    onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
+  });
 
   console.log("--- Phase 1: idle review ---");
   console.log("Draft:", result.draft);

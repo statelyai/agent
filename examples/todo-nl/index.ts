@@ -140,10 +140,6 @@ export const todoMachine = agent.createMachine({
     appliedEvents: [],
     log: [],
   }),
-  output: ({ context }) => ({
-    todos: context.todos,
-    log: context.log,
-  }),
   initial: "awaitingCommand",
   states: {
     awaitingCommand: {
@@ -283,6 +279,10 @@ export const todoMachine = agent.createMachine({
 
     done: {
       type: "final",
+      output: ({ context }) => ({
+        todos: context.todos,
+        log: context.log,
+      }),
     },
   },
 });
@@ -304,6 +304,7 @@ export async function main() {
     input: { todos: [] },
     ...executors,
     userInput: async ({ prompt }) => promptCommand(prompt ?? ">"),
+    onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
   });
 
   if (result.status !== "done") {

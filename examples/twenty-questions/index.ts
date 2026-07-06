@@ -211,13 +211,6 @@ export const twentyQuestionsMachine = agent.createMachine({
     agentScore: 0,
     round: 1,
   }),
-  output: ({ context }) => ({
-    guess: context.guess ?? "",
-    questionsUsed: context.transcript.length,
-    userScore: context.userScore,
-    agentScore: context.agentScore,
-    roundsPlayed: context.round,
-  }),
   initial: "deciding",
   states: {
     deciding: {
@@ -403,6 +396,13 @@ export const twentyQuestionsMachine = agent.createMachine({
 
     gameOver: {
       type: "final",
+      output: ({ context }) => ({
+        guess: context.guess ?? "",
+        questionsUsed: context.transcript.length,
+        userScore: context.userScore,
+        agentScore: context.agentScore,
+        roundsPlayed: context.round,
+      }),
     },
 
     // Reached when chooseAction exhausts its retries (DecisionExhaustedError).
@@ -436,6 +436,7 @@ export async function main() {
     input: { questionsRemaining: 20 },
     ...executors,
     userInput: async ({ prompt }) => promptAnswer(prompt ?? ">"),
+    onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
   });
 
   if (result.status !== "done") {

@@ -60,9 +60,6 @@ const agent = setupAgent({
   },
 });
 
-export const thinker = agent.requests.thinker;
-export const poet = agent.requests.poet;
-
 export const parallelStreamsSchemas = agent.schemas;
 
 export const parallelStreamsMachine = agent.createMachine({
@@ -113,6 +110,7 @@ export const parallelStreamsMachine = agent.createMachine({
 
 export async function runParallelStreamsExample(
   options?: RunAgentOptions<typeof parallelStreamsMachine>,
+  observe?: RunAgentOptions<typeof parallelStreamsMachine>["onTransition"],
 ) {
   // Buffer chunks per stream, keyed by the invoke id — the disambiguator.
   const buffers: Record<string, string> = { thinker: "", poet: "" };
@@ -122,6 +120,7 @@ export async function runParallelStreamsExample(
     onChunk: (chunk, { request }) => {
       buffers[request.id] = (buffers[request.id] ?? "") + chunk;
     },
+    onTransition: observe,
     ...(options ?? { ...createAiSdkExecutors({ models }) }),
   });
 
@@ -136,7 +135,9 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     console.error("Set OPENAI_API_KEY to run this example.");
     process.exit(1);
   }
-  const { buffers } = await runParallelStreamsExample();
+  const { buffers } = await runParallelStreamsExample(undefined, (snapshot) =>
+    console.log("[state]", JSON.stringify(snapshot.value)),
+  );
   console.log("[thinker]\n" + buffers.thinker);
   console.log("\n[poet]\n" + buffers.poet);
 }

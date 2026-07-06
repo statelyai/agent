@@ -276,9 +276,10 @@ export async function runMachineAsToolExample() {
 // the interaction the harness would show a human, then auto-approves — exactly
 // the round-trip a real tool-calling loop performs, minus the human.
 export async function main() {
-  const realExecutors = createAiSdkExecutors({
-    models: { validator: openai("gpt-5.4-mini") },
-  });
+  const realExecutors: RunAgentOptions<typeof refundMachine> = {
+    ...createAiSdkExecutors({ models: { validator: openai("gpt-5.4-mini") } }),
+    onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
+  };
 
   const started = await startTool({ amount: 42, orderId: "ord-1" }, realExecutors);
   if (started.status !== "pending") {

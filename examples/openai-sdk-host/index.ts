@@ -190,8 +190,19 @@ export interface OpenAiExecutors extends AgentRequestExecutors {
  * Builds the `{ generateText, streamText, decide }` executor set for the raw
  * `openai` package's Chat Completions API. Compare `createAiSdkExecutors` in
  * `src/ai-sdk/index.ts` — same shape, different SDK underneath.
+ *
+ * `resolveModel` maps a machine's model *ref* (e.g. 'ticketTriage') to a real
+ * OpenAI model id. A machine's requests carry model refs, not ids, so a raw-SDK
+ * host must resolve them (the AI SDK adapter does this via its `models` map).
+ * Defaults to identity for machines that already use real ids.
  */
-export function createOpenAiExecutors({ client }: { client: OpenAI }): OpenAiExecutors {
+export function createOpenAiExecutors({
+  client,
+  resolveModel = (modelRef: string) => modelRef,
+}: {
+  client: OpenAI;
+  resolveModel?: (modelRef: string) => string;
+}): OpenAiExecutors {
   const generateText = async (
     request: AgentTextRequest & { tools: AgentTools },
     info?: AgentRequestExecutorInfo,
@@ -199,7 +210,7 @@ export function createOpenAiExecutors({ client }: { client: OpenAI }): OpenAiExe
     const messages = toOpenAiMessages(request);
     const tools = toOpenAiTools(request.tools);
     const common = {
-      model: request.model,
+      model: resolveModel(request.model),
       messages,
       ...toOpenAiCallSettings(request),
       ...(tools.length > 0 ? { tools } : {}),
@@ -243,7 +254,7 @@ export function createOpenAiExecutors({ client }: { client: OpenAI }): OpenAiExe
   ) => {
     const stream = await client.chat.completions.create(
       {
-        model: request.model,
+        model: resolveModel(request.model),
         messages: toOpenAiMessages(request),
         ...toOpenAiCallSettings(request),
         stream: true,
@@ -266,7 +277,7 @@ export function createOpenAiExecutors({ client }: { client: OpenAI }): OpenAiExe
     const tools = toOpenAiEventTools(request.events);
 
     const response = await client.chat.completions.create({
-      model: request.model,
+      model: resolveModel(request.model),
       messages: toDecisionMessages(request),
       tools,
       tool_choice: "required" as ChatCompletionToolChoiceOption,
@@ -315,11 +326,16 @@ async function promptAnswer(question: string): Promise<string> {
   }
 }
 
+// The demo machines (triage, twenty-questions) carry model refs that both map
+// to one real OpenAI id — a raw-SDK host resolves them itself.
+const resolveDemoModel = () => "gpt-5.4-mini";
+
 export async function runTriageDemo(client: OpenAI, ticket: string) {
-  const { generateText } = createOpenAiExecutors({ client });
+  const { generateText } = createOpenAiExecutors({ client, resolveModel: resolveDemoModel });
   const result = await runAgent(triageMachine, {
     input: { ticket },
     generateText,
+    onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
   });
   if (result.status !== "done") {
     throw new Error(`Triage demo did not complete: ${result.status}`);
@@ -347,13 +363,17 @@ export async function runStreamingDemo(client: OpenAI) {
 // twenty-questions/index.ts's own main() uses (no host-side idle/event loop
 // or fabricated events; `runAgent` gathers input inline via `userInput`).
 export async function runTwentyQuestionsDemo(client: OpenAI) {
-  const { generateText, decide } = createOpenAiExecutors({ client });
+  const { generateText, decide } = createOpenAiExecutors({
+    client,
+    resolveModel: resolveDemoModel,
+  });
 
   const result = await runAgent(twentyQuestionsMachine, {
     input: { questionsRemaining: 20 },
     generateText,
     decide,
     userInput: async ({ prompt }) => promptAnswer(prompt ?? ">"),
+    onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
   });
 
   if (result.status !== "done") {

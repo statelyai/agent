@@ -86,10 +86,6 @@ const agent = setupAgent({
   },
 });
 
-export const planTask = agent.requests.planTask;
-export const gatherEvidence = agent.requests.gatherEvidence;
-export const solveTask = agent.requests.solveTask;
-
 export const planAndExecuteSchemas = agent.schemas;
 
 export const planAndExecuteMachine = agent.createMachine({
@@ -100,11 +96,6 @@ export const planAndExecuteMachine = agent.createMachine({
     stepIndex: 0,
     evidence: {},
     answer: null,
-  }),
-  output: ({ context }) => ({
-    steps: context.steps,
-    answer: context.answer ?? "",
-    evidence: context.evidence,
   }),
   initial: "planning",
   states: {
@@ -150,11 +141,24 @@ export const planAndExecuteMachine = agent.createMachine({
       invoke: {
         id: "solveTask",
         src: "solveTask",
-        input: ({ context }) => ({ goal: context.goal, evidence: context.evidence }),
-        onDone: ({ output }) => ({ target: "done", context: { answer: output } }),
+        input: ({ context }) => ({
+          goal: context.goal,
+          evidence: context.evidence,
+        }),
+        onDone: ({ output }) => ({
+          target: "done",
+          context: { answer: output },
+        }),
       },
     },
-    done: { type: "final" },
+    done: {
+      type: "final",
+      output: ({ context }) => ({
+        steps: context.steps,
+        answer: context.answer ?? "",
+        evidence: context.evidence,
+      }),
+    },
   },
 });
 
@@ -178,7 +182,15 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     console.error("Set OPENAI_API_KEY to run this example.");
     process.exit(1);
   }
-  const output = await runPlanAndExecuteExample();
+  const output = await runPlanAndExecuteExample({
+    ...createAiSdkExecutors({ models }),
+    onTransition: (snapshot) =>
+      console.log(
+        "[state]",
+        JSON.stringify(snapshot.value),
+        `step ${snapshot.context.stepIndex}/${snapshot.context.steps.length}`,
+      ),
+  });
   console.log("Plan:");
   for (const step of output.steps) {
     console.log(`  ${step.id}: ${step.question}`);

@@ -131,7 +131,7 @@ async function promptInteraction(interaction: Interaction): Promise<DrafterEvent
 
 export async function main() {
   const inspectPort = Number(process.env.STATELY_INSPECT_PORT ?? 8080);
-  const inspectUrl = process.env.STATELY_INSPECT_URL ?? "https://viz.localhost";
+  const inspectUrl = process.env.STATELY_INSPECT_URL ?? "https://editor.stately.ai";
   const server = createInspectorServer({
     port: inspectPort,
     url: inspectUrl,

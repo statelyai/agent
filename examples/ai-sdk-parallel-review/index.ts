@@ -13,7 +13,7 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { setupAgent, runAgent } from "../../src/index.js";
-import { createAiSdkTextExecutor } from "../ai-sdk-host/index.js";
+import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
 import { type LanguageModel } from "ai";
 
 const reviewSchema = z.object({
@@ -91,11 +91,6 @@ const agent = setupAgent({
   },
 });
 
-export const reviewSecurity = agent.requests.reviewSecurity;
-export const reviewPerformance = agent.requests.reviewPerformance;
-export const reviewMaintainability = agent.requests.reviewMaintainability;
-export const summarizeCodeReviews = agent.requests.summarizeCodeReviews;
-
 function collectReviews(context: {
   security: Review | null;
   performance: Review | null;
@@ -114,10 +109,6 @@ export const aiSdkParallelReviewMachine = agent.createMachine({
     performance: null,
     maintainability: null,
     summary: null,
-  }),
-  output: ({ context }) => ({
-    reviews: collectReviews(context),
-    summary: context.summary ?? "",
   }),
   initial: "reviewing",
   states: {
@@ -197,14 +188,23 @@ export const aiSdkParallelReviewMachine = agent.createMachine({
         }),
       },
     },
-    done: { type: "final" },
+    done: {
+      type: "final",
+      output: ({ context }) => ({
+        reviews: collectReviews(context),
+        summary: context.summary ?? "",
+      }),
+    },
   },
 });
 
-export async function runAiSdkParallelReviewExample() {
+export async function runAiSdkParallelReviewExample(
+  observe?: Parameters<typeof runAgent>[1]["onTransition"],
+) {
   const result = await runAgent(aiSdkParallelReviewMachine, {
     input: { code: "const x = eval(input);" },
-    generateText: createAiSdkTextExecutor({ models }),
+    ...createAiSdkExecutors({ models }),
+    onTransition: observe,
   });
   if (result.status !== "done") {
     throw new Error(`Parallel review example did not complete: ${result.status}`);
@@ -217,5 +217,9 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     console.error("Set OPENAI_API_KEY to run this example.");
     process.exit(1);
   }
-  console.log(await runAiSdkParallelReviewExample());
+  console.log(
+    await runAiSdkParallelReviewExample((snapshot) =>
+      console.log("[state]", JSON.stringify(snapshot.value)),
+    ),
+  );
 }

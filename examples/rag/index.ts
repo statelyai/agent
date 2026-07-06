@@ -215,6 +215,8 @@ export interface RunRAGOptions {
   memory?: string[];
   /** Injected for tests; direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
+  /** Direct run passes this to narrate state; tests leave it undefined (quiet). */
+  onTransition?: (snapshot: { value: unknown }) => void;
 }
 
 export interface RAGResult {
@@ -225,11 +227,17 @@ export interface RAGResult {
 
 /** Retrieves against the sample corpus and answers grounded on the results. */
 export async function runRAGExample(options: RunRAGOptions = {}): Promise<RAGResult> {
-  const { question = "What is context in a state machine?", memory = [], generateText } = options;
+  const {
+    question = "What is context in a state machine?",
+    memory = [],
+    generateText,
+    onTransition,
+  } = options;
 
   const result = await runAgent(ragMachine, {
     input: { question, memory },
     ...(generateText ? { generateText } : {}),
+    ...(onTransition ? { onTransition } : {}),
   });
 
   if (result.status !== "done") {
@@ -247,7 +255,11 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   const { generateText } = createAiSdkExecutors({ models });
 
   const question = "What is context in a state machine?";
-  const result = await runRAGExample({ question, generateText });
+  const result = await runRAGExample({
+    question,
+    generateText,
+    onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
+  });
 
   console.log("Question:", question);
   console.log("\nRetrieved documents:");

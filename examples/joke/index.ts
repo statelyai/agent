@@ -60,7 +60,6 @@ export const jokeSchemas = schemas;
 export const jokeMachine = jokeAgent.createMachine({
   id: "joke-streamer",
   context: ({ input }) => ({ topic: input.topic, joke: null, feedback: null }),
-  output: ({ context }) => ({ joke: context.joke ?? "" }),
   initial: "streaming",
   states: {
     streaming: {
@@ -104,7 +103,10 @@ export const jokeMachine = jokeAgent.createMachine({
           ? { target: "done" }
           : { target: "streaming" },
     },
-    done: { type: "final" },
+    done: {
+      type: "final",
+      output: ({ context }) => ({ joke: context.joke ?? "" }),
+    },
   },
 });
 
@@ -129,6 +131,7 @@ export async function main() {
       feedback: await promptFeedback(prompt ?? "How was that?"),
     }),
     onChunk: (chunk) => process.stdout.write(chunk),
+    onTransition: (snapshot) => console.log("\n[state]", JSON.stringify(snapshot.value)),
   });
 
   if (result.status !== "done") {

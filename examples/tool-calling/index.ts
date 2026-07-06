@@ -38,7 +38,7 @@ export const SAMPLE_RATES: Record<string, number> = {
   "GBP->USD": 1.27,
 };
 
-const selectedToolSchema = z.discriminatedUnion("tool", [
+const selectedToolUnion = z.union([
   z.object({
     tool: z.literal("calculate"),
     parameters: z.object({
@@ -64,6 +64,14 @@ const selectedToolSchema = z.discriminatedUnion("tool", [
   }),
 ]);
 
+// The request output is object-wrapped for two reasons: a bare union serializes
+// to a JSON Schema with no top-level `type: "object"`, so the executor's
+// structured-output detection would misclassify it as plain text; and OpenAI's
+// structured output rejects `oneOf` (what `z.discriminatedUnion` emits) but
+// accepts the `anyOf` a plain `z.union` emits. The wrapper gives the schema a
+// top-level object type; the machine unwraps `.selected` back into a union.
+const selectedToolSchema = z.object({ selected: selectedToolUnion });
+
 const toolResultSchema = z.object({
   summary: z.string(),
   value: z.number().nullable(),
@@ -74,7 +82,7 @@ const agent = setupAgent({
   models,
   context: z.object({
     query: z.string(),
-    selected: selectedToolSchema.nullable(),
+    selected: selectedToolUnion.nullable(),
     result: toolResultSchema.nullable(),
     finalAnswer: z.string().nullable(),
   }),
@@ -88,7 +96,11 @@ const agent = setupAgent({
     // Real calculator — actually computes.
     calculate: createAsyncLogic<
       ToolResult,
-      { operation: "add" | "subtract" | "multiply" | "divide"; a: number; b: number }
+      {
+        operation: "add" | "subtract" | "multiply" | "divide";
+        a: number;
+        b: number;
+      }
     >({
       run: async ({ input }) => {
         const { operation, a, b } = input;
@@ -145,9 +157,9 @@ const agent = setupAgent({
       },
       model: "router",
       system:
-        "Select exactly one tool to answer the user query, with its parameters. " +
-        "Use calculate for arithmetic, convertUnits for km/mi distances, " +
-        "lookupRate for currency exchange rates.",
+        "Select exactly one tool to answer the user query, with its parameters, " +
+        "in the `selected` field. Use calculate for arithmetic, convertUnits " +
+        "for km/mi distances, lookupRate for currency exchange rates.",
       prompt: ({ input }) => input.query,
     },
     formatResult: {
@@ -181,7 +193,7 @@ export const toolCallingMachine = agent.createMachine({
         input: ({ context }) => ({ query: context.query }),
         onDone: ({ output }) => ({
           target: "dispatch",
-          context: { selected: output },
+          context: { selected: output.selected },
         }),
       },
     },

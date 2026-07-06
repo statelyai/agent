@@ -335,10 +335,10 @@ export async function main() {
   // `{ output }` envelope each logic expects is produced at runtime; the cast
   // narrows the adapter's `unknown` output back to that logic's output type.
   type AiSdkRequest = Parameters<typeof generateText>[0];
-  const run = <T>(request: { model: string }) =>
-    generateText({ tools: {}, ...request } as AiSdkRequest) as Promise<{
-      output: T;
-    }>;
+  const run = async <T>(request: { model: string }) => {
+    const result = await generateText({ tools: {}, ...request } as AiSdkRequest);
+    return { output: result.output as T };
+  };
 
   const { agent, machine } = createDebateSubAgentsWorkflow(({ request }) => run<string>(request));
 
@@ -353,6 +353,7 @@ export async function main() {
     { input: { question: "Should agents be modeled as actors?" } },
   );
 
+  actor.subscribe((snapshot) => console.log("[state]", JSON.stringify(snapshot.value)));
   actor.start();
   await toPromise(actor);
 

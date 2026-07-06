@@ -94,11 +94,6 @@ const agent = setupAgent({
   },
 });
 
-export const routeRequest = agent.requests.routeRequest;
-export const researcher = agent.requests.researcher;
-export const coder = agent.requests.coder;
-export const writer = agent.requests.writer;
-
 export const supervisorSchemas = agent.schemas;
 
 export const supervisorMachine = agent.createMachine({
@@ -136,7 +131,10 @@ export const supervisorMachine = agent.createMachine({
         id: "researcher",
         src: "researcher",
         input: ({ context }) => ({ request: context.request }),
-        onDone: ({ output }) => ({ target: "done", context: { answer: output } }),
+        onDone: ({ output }) => ({
+          target: "done",
+          context: { answer: output },
+        }),
       },
     },
     coder: {
@@ -144,7 +142,10 @@ export const supervisorMachine = agent.createMachine({
         id: "coder",
         src: "coder",
         input: ({ context }) => ({ request: context.request }),
-        onDone: ({ output }) => ({ target: "done", context: { answer: output } }),
+        onDone: ({ output }) => ({
+          target: "done",
+          context: { answer: output },
+        }),
       },
     },
     writer: {
@@ -152,7 +153,10 @@ export const supervisorMachine = agent.createMachine({
         id: "writer",
         src: "writer",
         input: ({ context }) => ({ request: context.request }),
-        onDone: ({ output }) => ({ target: "done", context: { answer: output } }),
+        onDone: ({ output }) => ({
+          target: "done",
+          context: { answer: output },
+        }),
       },
     },
     done: { type: "final" },
@@ -161,7 +165,9 @@ export const supervisorMachine = agent.createMachine({
 
 export async function runSupervisorExample(options?: RunAgentOptions<typeof supervisorMachine>) {
   const result = await runAgent(supervisorMachine, {
-    input: { request: "Write a friendly release announcement for our new SDK." },
+    input: {
+      request: "Write a friendly release announcement for our new SDK.",
+    },
     ...(options ?? { ...createAiSdkExecutors({ models }) }),
   });
   if (result.status !== "done") {
@@ -170,12 +176,47 @@ export async function runSupervisorExample(options?: RunAgentOptions<typeof supe
   return result.output;
 }
 
+// The specialist state names the router can dispatch to — used to narrate which
+// branch each request actually flows through.
+const SPECIALIST_STATES = ["researcher", "coder", "writer"] as const;
+
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   if (!process.env.OPENAI_API_KEY) {
     console.error("Set OPENAI_API_KEY to run this example.");
     process.exit(1);
   }
-  const output = await runSupervisorExample();
-  console.log(`Route: ${output.specialist} (${output.reason})`);
-  console.log(`\n${output.answer}`);
+  const executors = createAiSdkExecutors({ models });
+
+  // Three requests that clearly belong to three different specialists — the
+  // point is to see the router genuinely dispatch to researcher, coder, AND
+  // writer, not collapse everything into one branch.
+  const requests = [
+    "What year was the TCP protocol first standardized, and by whom?",
+    "Write a TypeScript function that debounces an async function.",
+    "Draft a warm two-sentence thank-you note to a conference organizer.",
+  ];
+
+  for (const request of requests) {
+    // Record which specialist state this request transitions through.
+    const specialistsHit: string[] = [];
+    const result = await runAgent(supervisorMachine, {
+      input: { request },
+      ...executors,
+      onTransition: ({ value }) => {
+        const state = String(value);
+        if ((SPECIALIST_STATES as readonly string[]).includes(state)) {
+          specialistsHit.push(state);
+        }
+        console.log(`  [state] ${state}`);
+      },
+    });
+    if (result.status !== "done") {
+      throw new Error(`Supervisor example did not complete: ${result.status}`);
+    }
+    const { specialist, reason, answer } = result.output;
+    console.log(`Request: ${request}`);
+    console.log(`Routed through: ${specialistsHit.join(" → ") || "(none)"}`);
+    console.log(`Route decision: ${specialist} (${reason})`);
+    console.log(`Answer: ${answer}\n`);
+  }
 }

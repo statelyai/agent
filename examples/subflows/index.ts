@@ -21,6 +21,7 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { type LanguageModel } from "ai";
+import { type InspectionEvent } from "xstate";
 import {
   runAgent,
   setupAgent,
@@ -63,7 +64,10 @@ export const childMachine = childAgent.createMachine({
         id: "researchTopic",
         src: "researchTopic",
         input: ({ context }) => ({ topic: context.topic }),
-        onDone: ({ output }) => ({ target: "done", context: { research: output } }),
+        onDone: ({ output }) => ({
+          target: "done",
+          context: { research: output },
+        }),
       },
     },
     done: { type: "final" },
@@ -104,6 +108,10 @@ export const subflowsSchemas = parentAgent.schemas;
 export async function runSubflowsExample(options?: {
   input?: { topic: string };
   generateText?: AgentRequestExecutor;
+  /** Root-machine transitions (parent only). */
+  onTransition?: (snapshot: { value: unknown }) => void;
+  /** Raw system-wide inspection passthrough (parent AND invoked child). */
+  inspect?: (event: InspectionEvent) => void;
 }) {
   const generateText = options?.generateText ?? createAiSdkExecutors({ models }).generateText;
 
@@ -126,6 +134,12 @@ export async function runSubflowsExample(options?: {
         },
       }),
     },
+    // onTransition sees ONLY the root (parent) machine's transitions.
+    ...(options?.onTransition ? { onTransition: options.onTransition } : {}),
+    // inspect is the system-wide passthrough: it fires for every actor in the
+    // root system, including the invoked child machine, each attributable via
+    // `event.actorRef.id`. This is what `onTransition` alone cannot give.
+    ...(options?.inspect ? { inspect: options.inspect } : {}),
   });
 
   if (result.status !== "done") {
@@ -139,6 +153,19 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     console.error("Set OPENAI_API_KEY to run this example.");
     process.exit(1);
   }
-  const output = await runSubflowsExample();
-  console.log(output.research);
+  // Contrast the two observation channels:
+  //   - onTransition: root machine only (`subflows-parent`).
+  //   - inspect: the WHOLE actor system, so the invoked child machine
+  //     (`subflows-child`) shows up too, attributed by actor id.
+  const output = await runSubflowsExample({
+    onTransition: ({ value }) => console.log(`[onTransition] parent: ${JSON.stringify(value)}`),
+    inspect: (event) => {
+      if (event.type !== "@xstate.transition") return;
+      const snapshot = event.snapshot as { value?: unknown };
+      if (snapshot.value === undefined) return;
+      const actorId = (event.actorRef as { id?: string }).id ?? "(unknown)";
+      console.log(`[inspect] [${actorId}] ${JSON.stringify(snapshot.value)}`);
+    },
+  });
+  console.log(`\n${output.research}`);
 }

@@ -251,6 +251,7 @@ export async function main() {
   const result = await runAgent(gameMachine, {
     input: { playerHp: 20, enemyHp: 15 },
     ...executors,
+    onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
   });
 
   if (result.status !== "done") {

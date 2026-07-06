@@ -82,10 +82,14 @@ function resolveModel(modelRef: string): LanguageModel {
 export async function runJsonAgentDemo(ticket: string) {
   const { generateText, decide } = createAiSdkExecutors({ resolveModel });
 
+  const onTransition = (snapshot: { value: unknown }) =>
+    console.log("[state]", JSON.stringify(snapshot.value));
+
   let result = await runAgent(jsonAgentMachine, {
     input: { ticket },
     generateText,
     decide,
+    onTransition,
   });
 
   if (result.status === "idle") {
@@ -96,6 +100,7 @@ export async function runJsonAgentDemo(ticket: string) {
       event: { type: "APPROVE" },
       generateText,
       decide,
+      onTransition,
     });
   }
 

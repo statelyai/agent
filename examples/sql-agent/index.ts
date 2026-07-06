@@ -127,9 +127,6 @@ const agent = setupAgent({
   },
 });
 
-export const planQuery = agent.requests.planQuery;
-export const summarize = agent.requests.summarize;
-
 export const sqlAgentSchemas = agent.schemas;
 
 export const sqlAgentMachine = agent.createMachine({
@@ -219,6 +216,7 @@ export async function runSqlAgentExample(
   options?: RunAgentOptions<typeof sqlAgentMachine> & {
     approval?: "APPROVE" | "REJECT";
   },
+  observe?: RunAgentOptions<typeof sqlAgentMachine>["onTransition"],
 ) {
   const { approval = "APPROVE", ...runOptions } = options ?? {};
   const executors: RunAgentOptions<typeof sqlAgentMachine> =
@@ -226,6 +224,8 @@ export async function runSqlAgentExample(
 
   const first = await runAgent(sqlAgentMachine, {
     input: { question: "What is the total amount spent on electronics?" },
+    // Direct-run narrator; a caller's own `onTransition` in `executors` wins.
+    onTransition: observe,
     ...executors,
   });
   if (first.status !== "idle") {
@@ -236,6 +236,7 @@ export async function runSqlAgentExample(
   const second = await runAgent(sqlAgentMachine, {
     snapshot: JSON.parse(JSON.stringify(first.snapshot)),
     event: { type: approval },
+    onTransition: observe,
     ...executors,
   });
   if (second.status !== "done") {
@@ -250,7 +251,9 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     console.error("Set OPENAI_API_KEY to run this example.");
     process.exit(1);
   }
-  const { interaction, output } = await runSqlAgentExample();
+  const { interaction, output } = await runSqlAgentExample(undefined, (snapshot) =>
+    console.log("[state]", JSON.stringify(snapshot.value)),
+  );
   console.log(`Approval prompt: ${interaction?.label}`);
   console.log(`Plan: ${JSON.stringify(output.plan)}`);
   console.log(`Result: ${output.result}`);

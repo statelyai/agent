@@ -136,11 +136,6 @@ export const contextCompactionMachine = agent.createMachine({
     keepRecent: input.keepRecent,
     pendingInput: null,
   }),
-  output: ({ context }) => ({
-    summary: context.summary,
-    messages: context.messages,
-    turns: context.turns,
-  }),
   initial: "awaitingUser",
   states: {
     awaitingUser: {
@@ -220,6 +215,11 @@ export const contextCompactionMachine = agent.createMachine({
 
     done: {
       type: "final",
+      output: ({ context }) => ({
+        summary: context.summary,
+        messages: context.messages,
+        turns: context.turns,
+      }),
     },
   },
 });
@@ -242,6 +242,7 @@ export async function main() {
     ...executors,
     userInput: async ({ prompt }) => promptLine(prompt ?? "You:"),
     onTransition: (snapshot) => {
+      console.log("[state]", JSON.stringify(snapshot.value));
       if (snapshot.value === "compacting") {
         console.log("\n[compacting context...]");
       }

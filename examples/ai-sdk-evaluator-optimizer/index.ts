@@ -11,7 +11,7 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { setupAgent, runAgent } from "../../src/index.js";
-import { createAiSdkTextExecutor } from "../ai-sdk-host/index.js";
+import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
 import { type LanguageModel } from "ai";
 
 const translationEvaluationSchema = z.object({
@@ -59,6 +59,11 @@ const agent = setupAgent({
     evaluation: translationEvaluationSchema.nullable(),
     iterations: z.number(),
   }),
+  emitted: {
+    TRANSLATED: z.object({ translation: z.string() }),
+    EVALUATED: z.object({ qualityScore: z.number(), iteration: z.number() }),
+    IMPROVED: z.object({ translation: z.string() }),
+  },
   requests: {
     translateText: {
       schemas: {
@@ -103,10 +108,6 @@ const agent = setupAgent({
   },
 });
 
-export const translateText = agent.requests.translateText;
-export const evaluateTranslation = agent.requests.evaluateTranslation;
-export const improveTranslation = agent.requests.improveTranslation;
-
 export const aiSdkEvaluatorOptimizerMachine = agent.createMachine({
   id: "ai-sdk-evaluator-optimizer",
   context: ({ input }) => ({
@@ -116,11 +117,6 @@ export const aiSdkEvaluatorOptimizerMachine = agent.createMachine({
     evaluation: null,
     iterations: 0,
     maxIterations: input.maxIterations,
-  }),
-  output: ({ context }) => ({
-    translation: context.translation ?? "",
-    evaluation: context.evaluation,
-    iterations: context.iterations,
   }),
   initial: "translating",
   states: {
@@ -132,10 +128,13 @@ export const aiSdkEvaluatorOptimizerMachine = agent.createMachine({
           text: context.text,
           targetLanguage: context.targetLanguage,
         }),
-        onDone: ({ output }) => ({
-          target: "evaluating",
-          context: { translation: output },
-        }),
+        onDone: ({ output }, enq) => {
+          enq.emit({ type: "TRANSLATED", translation: output });
+          return {
+            target: "evaluating",
+            context: { translation: output },
+          };
+        },
       },
     },
     evaluating: {
@@ -146,13 +145,20 @@ export const aiSdkEvaluatorOptimizerMachine = agent.createMachine({
           original: context.text,
           translation: context.translation ?? "",
         }),
-        onDone: ({ context, output }) => ({
-          target: "checking",
-          context: {
-            evaluation: output,
-            iterations: context.iterations + 1,
-          },
-        }),
+        onDone: ({ context, output }, enq) => {
+          enq.emit({
+            type: "EVALUATED",
+            qualityScore: output.qualityScore,
+            iteration: context.iterations + 1,
+          });
+          return {
+            target: "checking",
+            context: {
+              evaluation: output,
+              iterations: context.iterations + 1,
+            },
+          };
+        },
       },
     },
     checking: {
@@ -178,13 +184,23 @@ export const aiSdkEvaluatorOptimizerMachine = agent.createMachine({
             improvementSuggestions: [],
           },
         }),
-        onDone: ({ output }) => ({
-          target: "evaluating",
-          context: { translation: output },
-        }),
+        onDone: ({ output }, enq) => {
+          enq.emit({ type: "IMPROVED", translation: output });
+          return {
+            target: "evaluating",
+            context: { translation: output },
+          };
+        },
       },
     },
-    done: { type: "final" },
+    done: {
+      type: "final",
+      output: ({ context }) => ({
+        translation: context.translation ?? "",
+        evaluation: context.evaluation,
+        iterations: context.iterations,
+      }),
+    },
   },
 });
 
@@ -195,7 +211,19 @@ export async function runAiSdkEvaluatorOptimizerExample() {
       targetLanguage: "Spanish",
       maxIterations: 3,
     },
-    generateText: createAiSdkTextExecutor({ models }),
+    ...createAiSdkExecutors({ models }),
+    onTransition: (snapshot) =>
+      console.log(
+        "[state]",
+        JSON.stringify(snapshot.value),
+        `iteration ${snapshot.context.iterations}`,
+      ),
+    on: {
+      TRANSLATED: () => console.log("[translated] first draft ready"),
+      EVALUATED: (e) =>
+        console.log(`[evaluated] iteration ${e.iteration}: score ${e.qualityScore}/10`),
+      IMPROVED: () => console.log("[improved] applied reviewer feedback"),
+    },
   });
   if (result.status !== "done") {
     throw new Error(`Evaluator-optimizer example did not complete: ${result.status}`);

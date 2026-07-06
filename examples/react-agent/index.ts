@@ -64,9 +64,9 @@ type ToolResult = z.infer<typeof toolResultSchema>;
 
 // "Reason or act": the model returns exactly one branch each iteration.
 // A tool name that isn't in the union can't validate — a hallucinated tool
-// never reaches an actor (the schema is the guard). Discriminated on `tool`,
-// where `answer` is the "I'm done" branch.
-const reasonOrActSchema = z.discriminatedUnion("tool", [
+// never reaches an actor (the schema is the guard). Each branch carries a
+// `tool` literal; the `answer` branch is the "I'm done" branch.
+const reasonOrActUnion = z.union([
   z.object({
     type: z.literal("tool"),
     thought: z.string(),
@@ -90,7 +90,14 @@ const reasonOrActSchema = z.discriminatedUnion("tool", [
     answer: z.string(),
   }),
 ]);
-type ReasonOrAct = z.infer<typeof reasonOrActSchema>;
+type ReasonOrAct = z.infer<typeof reasonOrActUnion>;
+
+// The request output is object-wrapped: a bare union serializes to a JSON
+// Schema with no top-level `type: "object"` (so the structured-output detector
+// would treat it as plain text), and OpenAI structured output rejects the
+// `oneOf` that `z.discriminatedUnion` emits while accepting a plain `z.union`'s
+// `anyOf`. The machine unwraps `.action` back into a union value.
+const reasonOrActSchema = z.object({ action: reasonOrActUnion });
 
 const agent = setupAgent({
   models,
@@ -115,7 +122,11 @@ const agent = setupAgent({
     // Real calculator — actually computes.
     calculate: createAsyncLogic<
       ToolResult,
-      { operation: "add" | "subtract" | "multiply" | "divide"; a: number; b: number }
+      {
+        operation: "add" | "subtract" | "multiply" | "divide";
+        a: number;
+        b: number;
+      }
     >({
       run: async ({ input }) => {
         const { operation, a, b } = input;
@@ -163,7 +174,8 @@ const agent = setupAgent({
         "tool to gather what you need, or give the final answer once you have " +
         "enough. Tools: calculate (arithmetic: add/subtract/multiply/divide), " +
         'lookup (retrieve a fact by key, e.g. "speed of light", "seconds per day"). ' +
-        "Prefer answering as soon as you can; you have a limited step budget.",
+        "Prefer answering as soon as you can; you have a limited step budget. " +
+        "Put your decision in the `action` field.",
       messages: ({ input }) => [
         ...input.messages,
         userMessage(
@@ -174,7 +186,6 @@ const agent = setupAgent({
   },
 });
 
-export const reasonOrAct = agent.requests.reasonOrAct;
 export const reactAgentSchemas = agent.schemas;
 
 export const reactAgentMachine = agent.createMachine({
@@ -227,16 +238,16 @@ export const reactAgentMachine = agent.createMachine({
         onDone: ({ context, output }) => ({
           target: "dispatch",
           context: {
-            next: output,
+            next: output.action,
             // Commit the final answer to context when the model is done.
-            answer: output.type === "answer" ? output.answer : context.answer,
+            answer: output.action.type === "answer" ? output.action.answer : context.answer,
             // Record the model's move in the transcript.
             messages: [
               ...context.messages,
               assistantMessage(
-                output.type === "answer"
-                  ? output.answer
-                  : `${output.thought}\n[calling ${output.tool}]`,
+                output.action.type === "answer"
+                  ? output.action.answer
+                  : `${output.action.thought}\n[calling ${output.action.tool}]`,
               ),
             ],
             // Decrement the budget once per model turn.

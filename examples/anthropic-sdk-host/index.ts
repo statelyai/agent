@@ -220,6 +220,13 @@ const STRUCTURED_OUTPUT_TOOL_NAME = "respond_with_output";
 
 export interface CreateAnthropicExecutorsOptions {
   client: Anthropic;
+  /**
+   * Maps a machine's model *ref* (e.g. 'ticketTriage') to a real Anthropic
+   * model id. A machine's requests carry model refs, not ids, so a raw-SDK host
+   * must resolve them (the AI SDK adapter does this via its `models` map).
+   * Defaults to identity for machines that already use real ids.
+   */
+  resolveModel?: (modelRef: string) => string;
 }
 
 export type AnthropicGenerateResult = { output: unknown; [key: string]: unknown };
@@ -243,7 +250,7 @@ export interface AnthropicExecutors extends AgentRequestExecutors<
 export function createAnthropicExecutors(
   options: CreateAnthropicExecutorsOptions,
 ): AnthropicExecutors {
-  const { client } = options;
+  const { client, resolveModel = (modelRef: string) => modelRef } = options;
 
   const generateText = async (
     request: AgentTextRequest & { tools: AgentTools },
@@ -253,7 +260,7 @@ export function createAnthropicExecutors(
       ? toAnthropicMessages(request.messages)
       : [{ role: "user" as const, content: request.prompt ?? "" }];
     const common = {
-      model: request.model,
+      model: resolveModel(request.model),
       system: request.system,
       messages,
       ...toAnthropicCallSettings(request),
@@ -300,7 +307,7 @@ export function createAnthropicExecutors(
     const tools = toAnthropicTools(request.tools);
     const stream = client.messages.stream(
       {
-        model: request.model,
+        model: resolveModel(request.model),
         system: request.system,
         messages,
         ...toAnthropicCallSettings(request),
@@ -316,7 +323,7 @@ export function createAnthropicExecutors(
     const tools = toAnthropicEventTools(request.events);
 
     const response = await client.messages.create({
-      model: request.model,
+      model: resolveModel(request.model),
       system: request.system,
       messages: toDecisionMessages(request),
       tools,
@@ -362,14 +369,20 @@ function extractText(message: Message): string {
 
 // ─── Demo host ───
 
+// The demo machines (triage, twenty-questions) carry model refs that both map
+// to one real Anthropic id — a raw-SDK host resolves them itself.
+const resolveDemoModel = () => "claude-haiku-4-5";
+
 export async function runTriageDemo(client: Anthropic, ticket: string) {
-  const { generateText } = createAnthropicExecutors({ client });
+  const { generateText } = createAnthropicExecutors({ client, resolveModel: resolveDemoModel });
   const result = await runAgent(triageMachine, {
     input: { ticket },
     generateText,
+    onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
   });
   if (result.status !== "done") {
-    throw new Error(`Triage demo did not complete: ${result.status}`);
+    if (result.status === "error") console.error(result.error);
+    throw new Error(`Triage demo did not complete: `);
   }
   return result.output;
 }
@@ -385,12 +398,16 @@ async function promptAnswer(question: string): Promise<string> {
 }
 
 export async function runTwentyQuestionsDemo(client: Anthropic) {
-  const { generateText, decide } = createAnthropicExecutors({ client });
+  const { generateText, decide } = createAnthropicExecutors({
+    client,
+    resolveModel: resolveDemoModel,
+  });
   const result = await runAgent(twentyQuestionsMachine, {
     input: { questionsRemaining: 20 },
     generateText,
     decide,
     userInput: async ({ prompt }) => promptAnswer(prompt ?? ">"),
+    onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
   });
   if (result.status !== "done") {
     throw new Error(`Twenty questions demo did not complete: ${result.status}`);

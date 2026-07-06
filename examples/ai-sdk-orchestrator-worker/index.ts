@@ -19,7 +19,7 @@ import { openai } from "@ai-sdk/openai";
 import { generateText, Output, type LanguageModel } from "ai";
 import { createAsyncLogic } from "xstate";
 import { setupAgent, runAgent } from "../../src/index.js";
-import { createAiSdkTextExecutor } from "../ai-sdk-host/index.js";
+import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
 
 const implementationPlanSchema = z.object({
   files: z.array(
@@ -124,18 +124,12 @@ const agent = setupAgent({
   },
 });
 
-export const planImplementation = agent.requests.planImplementation;
-
 export const aiSdkOrchestratorWorkerMachine = agent.createMachine({
   id: "ai-sdk-orchestrator-worker",
   context: ({ input }) => ({
     featureRequest: input.featureRequest,
     plan: null,
     changes: [],
-  }),
-  output: ({ context }) => ({
-    plan: context.plan ?? { files: [], estimatedComplexity: "low" },
-    changes: context.changes,
   }),
   initial: "planning",
   states: {
@@ -164,14 +158,23 @@ export const aiSdkOrchestratorWorkerMachine = agent.createMachine({
         }),
       },
     },
-    done: { type: "final" },
+    done: {
+      type: "final",
+      output: ({ context }) => ({
+        plan: context.plan ?? { files: [], estimatedComplexity: "low" },
+        changes: context.changes,
+      }),
+    },
   },
 });
 
-export async function runAiSdkOrchestratorWorkerExample() {
+export async function runAiSdkOrchestratorWorkerExample(
+  observe?: Parameters<typeof runAgent>[1]["onTransition"],
+) {
   const result = await runAgent(aiSdkOrchestratorWorkerMachine, {
     input: { featureRequest: "Add settings page" },
-    generateText: createAiSdkTextExecutor({ models }),
+    ...createAiSdkExecutors({ models }),
+    onTransition: observe,
   });
   if (result.status !== "done") {
     throw new Error(`Orchestrator-worker example did not complete: ${result.status}`);
@@ -184,5 +187,9 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     console.error("Set OPENAI_API_KEY to run this example.");
     process.exit(1);
   }
-  console.log(await runAiSdkOrchestratorWorkerExample());
+  console.log(
+    await runAiSdkOrchestratorWorkerExample((snapshot) =>
+      console.log("[state]", JSON.stringify(snapshot.value)),
+    ),
+  );
 }

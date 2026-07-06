@@ -7,9 +7,10 @@ import { reactAgentMachine, runReactAgentExample } from "./index.js";
 function scriptedGenerateText(script: unknown[]) {
   let i = 0;
   return async (_request: { model: string }) => {
-    const output = script[i] ?? script[script.length - 1];
+    const action = script[i] ?? script[script.length - 1];
     i++;
-    return { output };
+    // The reasonOrAct request's output is object-wrapped ({ action: <union> }).
+    return { output: { action } };
   };
 }
 

@@ -18,7 +18,12 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { type LanguageModel } from "ai";
-import { runAgent, setupAgent, type RunAgentOptions } from "../../src/index.js";
+import {
+  runAgent,
+  setupAgent,
+  type RunAgentOptions,
+  type RunAgentResult,
+} from "../../src/index.js";
 import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
 
 const agentName = z.enum(["travel", "food"]);
@@ -92,7 +97,10 @@ export const swarmHandoffMachine = agent.createMachine({
         id: "travelReply",
         src: "travelReply",
         input: ({ context }) => ({ message: context.message }),
-        onDone: ({ output }) => ({ target: "waiting", context: { reply: output } }),
+        onDone: ({ output }) => ({
+          target: "waiting",
+          context: { reply: output },
+        }),
       },
     },
     foodTurn: {
@@ -100,7 +108,10 @@ export const swarmHandoffMachine = agent.createMachine({
         id: "foodReply",
         src: "foodReply",
         input: ({ context }) => ({ message: context.message }),
-        onDone: ({ output }) => ({ target: "waiting", context: { reply: output } }),
+        onDone: ({ output }) => ({
+          target: "waiting",
+          context: { reply: output },
+        }),
       },
     },
     // No invoke: runAgent settles idle here. A HANDOFF switches the active
@@ -158,13 +169,102 @@ export async function runSwarmHandoffExample(
   };
 }
 
+/**
+ * Interactive REPL: the user talks to whichever agent holds the mic, and can
+ * hand off with `/travel <message>` or `/food <message>`. Each turn runs the
+ * machine from the persisted idle snapshot; a handoff is a real HANDOFF event
+ * that switches `activeAgent` and re-routes.
+ */
+async function runInteractive() {
+  const executors = createAiSdkExecutors({ models });
+  const { createInterface } = await import("node:readline/promises");
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+
+  let active: "travel" | "food" = "travel";
+  console.log("Swarm handoff — two concierges share one conversation.");
+  console.log(
+    "Type a message for the current agent, or hand off with " +
+      "`/travel <msg>` or `/food <msg>`. Ctrl-D or empty line to quit.\n",
+  );
+
+  // Turn 1 seeds the conversation from a fresh run; later turns resume the
+  // persisted snapshot with a HANDOFF event.
+  type Snapshot = ReturnType<typeof swarmHandoffMachine.resolveState>;
+  let snapshot: Snapshot | null = null;
+
+  const onTransition = (snap: Snapshot) => {
+    // Surface the turn's routing (which agent's turn state runs).
+    if (snap.value === "travelTurn" || snap.value === "foodTurn") {
+      console.log(`  [state] ${snap.value}`);
+    }
+  };
+
+  // One turn: resume from the persisted snapshot with a HANDOFF, or seed a
+  // fresh run on the very first turn.
+  async function runTurn(
+    to: "travel" | "food",
+    message: string,
+  ): Promise<RunAgentResult<typeof swarmHandoffMachine>> {
+    if (snapshot) {
+      return runAgent(swarmHandoffMachine, {
+        snapshot,
+        event: { type: "HANDOFF" as const, to, message },
+        ...executors,
+        onTransition,
+      });
+    }
+    return runAgent(swarmHandoffMachine, {
+      input: { message, activeAgent: to },
+      ...executors,
+      onTransition,
+    });
+  }
+
+  while (true) {
+    const line: string = (await rl.question(`[${active}] you> `)).trim();
+    if (!line) break;
+
+    let to: "travel" | "food" = active;
+    let message = line;
+    const match = /^\/(travel|food)\s+(.*)$/s.exec(line);
+    if (match) {
+      to = match[1] as "travel" | "food";
+      message = match[2] ?? "";
+    }
+    if (to !== active) {
+      console.log(`--- handoff: ${active} → ${to} ---`);
+    }
+
+    const result = await runTurn(to, message);
+    if (result.status !== "idle") {
+      console.error(`Conversation ended unexpectedly: ${result.status}`);
+      break;
+    }
+    active = result.snapshot.context.activeAgent;
+    snapshot = JSON.parse(JSON.stringify(result.snapshot));
+    console.log(`[${active}] ${result.snapshot.context.reply ?? ""}\n`);
+  }
+
+  rl.close();
+}
+
+// Non-interactive fallback: the scripted two-turn demo (CI / non-TTY).
+async function runDemo() {
+  const { travel, food } = await runSwarmHandoffExample();
+  console.log(`[${travel.activeAgent}] ${travel.reply}`);
+  console.log(`\n--- handoff ---\n`);
+  console.log(`[${food.activeAgent}] ${food.reply}`);
+}
+
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   if (!process.env.OPENAI_API_KEY) {
     console.error("Set OPENAI_API_KEY to run this example.");
     process.exit(1);
   }
-  const { travel, food } = await runSwarmHandoffExample();
-  console.log(`[${travel.activeAgent}] ${travel.reply}`);
-  console.log(`\n--- handoff ---\n`);
-  console.log(`[${food.activeAgent}] ${food.reply}`);
+  const forceDemo = process.argv.includes("--demo");
+  if (forceDemo || !process.stdout.isTTY) {
+    await runDemo();
+  } else {
+    await runInteractive();
+  }
 }

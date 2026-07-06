@@ -6,7 +6,8 @@ import { runToolCallingExample } from "./index.js";
 function mockGenerateText(selection: unknown) {
   return async ({ model, prompt }: { model: string; prompt?: string }) => {
     if (model === "router") {
-      return { output: selection };
+      // The router request's output is object-wrapped ({ selected: <union> }).
+      return { output: { selected: selection } };
     }
     // formatter: prompt's second line is `Tool result: ...`
     const summary = (prompt ?? "").split("\n")[1]?.replace("Tool result: ", "") ?? "";

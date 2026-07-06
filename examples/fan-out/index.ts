@@ -111,10 +111,6 @@ const agent = setupAgent({
   },
 });
 
-export const planSubtopics = agent.requests.planSubtopics;
-export const summarizeSubtopic = agent.requests.summarizeSubtopic;
-export const composeDigest = agent.requests.composeDigest;
-
 export const fanOutSchemas = agent.schemas;
 
 const BRANCH_PREFIX = "branch-";
@@ -126,7 +122,7 @@ const BRANCH_PREFIX = "branch-";
  * the reducer share ONE executor set.
  */
 export function createFanOutMachine(generateText: AgentRequestExecutor) {
-  const branchLogic = summarizeSubtopic.withExecutor(async ({ request, signal }) => {
+  const branchLogic = agent.requests.summarizeSubtopic.withExecutor(async ({ request, signal }) => {
     const { output } = await generateText({ ...request, tools: {} }, { signal });
     return { output: output as string };
   });
@@ -139,11 +135,6 @@ export function createFanOutMachine(generateText: AgentRequestExecutor) {
       summaries: {},
       expected: 0,
       digest: null,
-    }),
-    output: ({ context }) => ({
-      subtopics: context.subtopics,
-      summaries: context.summaries,
-      digest: context.digest ?? "",
     }),
     initial: "planning",
     states: {
@@ -204,13 +195,21 @@ export function createFanOutMachine(generateText: AgentRequestExecutor) {
           onDone: ({ output }) => ({ target: "done", context: { digest: output } }),
         },
       },
-      done: { type: "final" },
+      done: {
+        type: "final",
+        output: ({ context }) => ({
+          subtopics: context.subtopics,
+          summaries: context.summaries,
+          digest: context.digest ?? "",
+        }),
+      },
     },
   });
 }
 
 export async function runFanOutExample(
   options?: RunAgentOptions<ReturnType<typeof createFanOutMachine>>,
+  observe?: RunAgentOptions<ReturnType<typeof createFanOutMachine>>["onTransition"],
 ) {
   const executors = options ?? createAiSdkExecutors({ models });
   const generateText = executors.generateText;
@@ -221,6 +220,9 @@ export async function runFanOutExample(
   const machine = createFanOutMachine(generateText);
   const result = await runAgent(machine, {
     input: { topic: "How does an LLM agent framework stay durable?" },
+    // `observe` is the direct-run narrator; a caller's own `onTransition`
+    // (e.g. the test's mid-flight capture) in `executors` takes precedence.
+    onTransition: observe,
     ...executors,
   });
   if (result.status !== "done") {
@@ -234,7 +236,13 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     console.error("Set OPENAI_API_KEY to run this example.");
     process.exit(1);
   }
-  const output = await runFanOutExample();
+  const output = await runFanOutExample(undefined, (snapshot) =>
+    console.log(
+      "[state]",
+      JSON.stringify(snapshot.value),
+      `${Object.keys(snapshot.context.summaries).length}/${snapshot.context.expected} branches done`,
+    ),
+  );
   console.log("Subtopics:");
   for (const subtopic of output.subtopics) {
     console.log(`  - ${subtopic}`);

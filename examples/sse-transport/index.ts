@@ -22,8 +22,8 @@ import type { AddressInfo } from "node:net";
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import type { AnyStateMachine } from "xstate";
-import { runAgent, setupAgent } from "../../src/index.js";
-import { createAiSdkExecutors, type AiSdkExecutors } from "../../src/ai-sdk/index.js";
+import { runAgent, setupAgent, type AgentRequestExecutor } from "../../src/index.js";
+import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
 
 /**
  * A minimal streaming machine: one `mode: 'stream'` text request, then done.
@@ -87,7 +87,7 @@ export function runMachineStream(
     onChunk: (chunk: string) => void;
     onTransition: (value: unknown) => void;
   },
-  streamText: AiSdkExecutors["streamText"] = mockStreamText,
+  streamText: AgentRequestExecutor = mockStreamText,
 ) {
   return runAgent(machine, {
     input: { topic: "agents" },
@@ -114,7 +114,7 @@ function writeSseFrame(
  * streaming seams as Server-Sent Events. Host-owned: the machine knows
  * nothing about SSE.
  */
-export function createSseServer(streamText: AiSdkExecutors["streamText"] = mockStreamText): Server {
+export function createSseServer(streamText: AgentRequestExecutor = mockStreamText): Server {
   return createServer(async (_req, res) => {
     res.writeHead(200, {
       "content-type": "text/event-stream",

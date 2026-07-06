@@ -28,10 +28,13 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
+import { createMachine } from "xstate";
+import { getShortestPaths } from "xstate/graph";
 import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
 import {
   createAgentSchemas,
   runAgent,
+  type AgentTools,
   type RunAgentOptions,
   sendDecision,
   setupAgent,
@@ -120,6 +123,91 @@ function moveLabel(item: Items | null, from: Bank): string {
   return `Farmer crosses ${from} → ${opposite(from)} with ${carried}`;
 }
 
+// ─── Pure machine + shortest-path tool (machine introspection) ───
+
+const MOVE_EVENTS = ["TAKE_WOLF", "TAKE_GOAT", "TAKE_CABBAGE", "CROSS_ALONE"] as const;
+type MoveEvent = (typeof MOVE_EVENTS)[number];
+
+const EVENT_ITEM: Record<MoveEvent, Items | null> = {
+  TAKE_WOLF: "wolf",
+  TAKE_GOAT: "goat",
+  TAKE_CABBAGE: "cabbage",
+  CROSS_ALONE: null,
+};
+
+/**
+ * A dependency-free PURE copy of the puzzle as a plain XState machine: the same
+ * physics as the agent machine, but with no LLM invoke — just the world in
+ * context and one guarded self-transition per move. `xstate/graph`'s
+ * `getShortestPaths` traverses this to compute the optimal remaining move
+ * sequence, which the `findShortestPath` tool exposes to the model.
+ *
+ * Each move is a v6 function-transition (same style as the agent machine):
+ * it returns the next world state, or `undefined` when the move is illegal so
+ * the traversal never enters an unsafe state.
+ */
+const pureMachine = createMachine({
+  types: {} as {
+    context: WorldState;
+    events: { type: MoveEvent };
+  },
+  id: "river-crossing-pure",
+  context: {
+    farmer: "left" as Bank,
+    wolf: "left" as Bank,
+    goat: "left" as Bank,
+    cabbage: "left" as Bank,
+  },
+  initial: "crossing",
+  states: {
+    crossing: {
+      // Inlined so each function-transition is contextually typed by the
+      // machine. Returning `void` (no next) makes an illegal move a no-op, so
+      // the traversal never enters an unsafe state.
+      on: {
+        TAKE_WOLF: ({ context }) => {
+          const next = applyMove(context as WorldState, "wolf");
+          if (next) return { context: next };
+        },
+        TAKE_GOAT: ({ context }) => {
+          const next = applyMove(context as WorldState, "goat");
+          if (next) return { context: next };
+        },
+        TAKE_CABBAGE: ({ context }) => {
+          const next = applyMove(context as WorldState, "cabbage");
+          if (next) return { context: next };
+        },
+        CROSS_ALONE: ({ context }) => {
+          const next = applyMove(context as WorldState, null);
+          if (next) return { context: next };
+        },
+      },
+    },
+  },
+});
+
+/**
+ * Computes the optimal remaining move sequence from a given world state by
+ * running `getShortestPaths` on the pure machine. Returns the ordered event
+ * names, or `null` if the state is unsolvable within the search.
+ */
+export function shortestMoveSequence(from: WorldState): MoveEvent[] | null {
+  const paths = getShortestPaths(pureMachine, {
+    events: MOVE_EVENTS.map((type) => ({ type })),
+    fromState: pureMachine.resolveState({ value: "crossing", context: from }),
+    toState: (snapshot) =>
+      snapshot.context.farmer === "right" &&
+      snapshot.context.wolf === "right" &&
+      snapshot.context.goat === "right" &&
+      snapshot.context.cabbage === "right",
+  });
+  const best = paths[0];
+  if (!best) return null;
+  return best.steps
+    .map((step) => step.event.type)
+    .filter((type): type is MoveEvent => (MOVE_EVENTS as readonly string[]).includes(type));
+}
+
 // ─── describeMachine: render the machine's rules into the model's context ───
 
 /**
@@ -142,7 +230,13 @@ function moveLabel(item: Items | null, from: Bank): string {
  * local and honest about the split.
  */
 export function describeMachine(
-  machine: { config: { id?: string; initial?: unknown; states?: Record<string, unknown> } },
+  machine: {
+    config: {
+      id?: string;
+      initial?: unknown;
+      states?: Record<string, unknown>;
+    };
+  },
   schemas: { events: Record<string, unknown> },
   extra?: { title?: string; rules?: string[] },
 ): string {
@@ -370,6 +464,176 @@ export const riverCrossingMachine = agent.createMachine({
   },
 });
 
+// ─── Tool-assisted variant: the model may consult a shortest-path tool ───
+
+const moveEventEnum = z.enum(MOVE_EVENTS);
+
+// The findShortestPath tool: the model hands it the current world, and it runs
+// getShortestPaths on the PURE machine to return the optimal remaining move
+// sequence. This is genuine machine introspection — the tool computes over the
+// same physics the agent machine enforces.
+const findShortestPath: AgentTools[string] = {
+  description:
+    "Given the current banks of the farmer, wolf, goat, and cabbage, return " +
+    "the optimal remaining sequence of move events to solve the puzzle.",
+  inputSchema: z.object({
+    farmer: bankSchema,
+    wolf: bankSchema,
+    goat: bankSchema,
+    cabbage: bankSchema,
+  }),
+  execute: (input?: unknown) => {
+    const sequence = shortestMoveSequence(input as WorldState);
+    // Surface the genuine tool call so the direct run shows the model actually
+    // consulting the machine (not recalling the answer).
+    console.log(`  [tool] findShortestPath → ${sequence ? sequence.join(", ") : "unsolvable"}`);
+    return sequence
+      ? { solvable: true, sequence, moves: sequence.length }
+      : { solvable: false, sequence: [], moves: 0 };
+  },
+};
+
+const assistedAgent = setupAgent({
+  schemas: createAgentSchemas({
+    context: riverCrossingSchemas.context,
+    input: riverCrossingSchemas.input,
+    output: riverCrossingSchemas.output,
+    events: riverCrossingSchemas.events,
+  }),
+  models,
+  requests: {
+    // The model calls findShortestPath, reads the returned sequence, and
+    // commits to the next move. Structured output ({ event }) with the tool in
+    // scope and a small multi-step budget so the tool call + answer both land.
+    recommendMove: {
+      schemas: {
+        input: z.object({
+          farmer: bankSchema,
+          wolf: bankSchema,
+          goat: bankSchema,
+          cabbage: bankSchema,
+          world: z.string(),
+        }),
+        output: z.object({ event: moveEventEnum }),
+      },
+      model: "planner",
+      system:
+        "You solve a river-crossing puzzle by driving a state machine. Call " +
+        "the findShortestPath tool with the current banks to get the optimal " +
+        "remaining move sequence, then return the FIRST event of that sequence " +
+        "as your next move.",
+      prompt: ({ input }) =>
+        `${input.world}\n\nCall findShortestPath with farmer=${input.farmer}, ` +
+        `wolf=${input.wolf}, goat=${input.goat}, cabbage=${input.cabbage}, ` +
+        `then return the first recommended event.`,
+      tools: { findShortestPath },
+      // Allow the tool call and the structured answer in one request.
+      metadata: { maxSteps: 4 },
+    },
+  },
+});
+
+export const riverCrossingAssistedMachine = assistedAgent.createMachine({
+  id: "river-crossing-assisted",
+  context: ({ input }) => ({
+    farmer: "left" as Bank,
+    wolf: "left" as Bank,
+    goat: "left" as Bank,
+    cabbage: "left" as Bank,
+    moves: 0,
+    maxMoves: input.maxMoves,
+    log: [],
+  }),
+  output: ({ context }) => ({
+    solved:
+      context.farmer === "right" &&
+      context.wolf === "right" &&
+      context.goat === "right" &&
+      context.cabbage === "right",
+    moves: context.moves,
+    log: context.log,
+  }),
+  initial: "deciding",
+  states: {
+    deciding: {
+      invoke: {
+        id: "recommendMove",
+        src: "recommendMove",
+        input: ({ context }) => ({
+          farmer: context.farmer,
+          wolf: context.wolf,
+          goat: context.goat,
+          cabbage: context.cabbage,
+          world: renderWorld(context),
+        }),
+        // The tool-derived recommendation feeds the applied move directly: the
+        // machine still owns the physics (applyMove), so an illegal suggestion
+        // is a no-op that burns a move rather than cheating the rules.
+        onDone: ({ context, output }) => {
+          const item = EVENT_ITEM[output.event];
+          const next = applyMove(worldOf(context), item);
+          if (!next) {
+            // Illegal recommendation: record the wasted attempt, keep going.
+            return {
+              target: "checkWin",
+              context: {
+                moves: context.moves + 1,
+                log: [...context.log, `(rejected illegal ${output.event})`],
+              },
+            };
+          }
+          return {
+            target: "checkWin",
+            context: {
+              farmer: next.farmer,
+              wolf: next.wolf,
+              goat: next.goat,
+              cabbage: next.cabbage,
+              moves: context.moves + 1,
+              log: [...context.log, moveLabel(item, context.farmer)],
+            },
+          };
+        },
+        onError: { target: "failed" },
+      },
+    },
+    checkWin: {
+      always: ({ context }) => {
+        const allRight =
+          context.farmer === "right" &&
+          context.wolf === "right" &&
+          context.goat === "right" &&
+          context.cabbage === "right";
+        if (allRight) return { target: "solved" };
+        if (context.moves >= context.maxMoves) return { target: "failed" };
+        return { target: "deciding" };
+      },
+    },
+    solved: { type: "final" },
+    failed: {
+      type: "final",
+      output: ({ context }) => ({
+        solved: false,
+        moves: context.moves,
+        log: context.log,
+      }),
+    },
+  },
+});
+
+export async function runAssistedRiverCrossingExample(
+  options?: RunAgentOptions<typeof riverCrossingAssistedMachine>,
+) {
+  const result = await runAgent(riverCrossingAssistedMachine, {
+    input: { maxMoves: 12 },
+    ...(options ?? { ...createAiSdkExecutors({ models }) }),
+  });
+  if (result.status !== "done") {
+    throw new Error(`Assisted river crossing did not complete: ${result.status}`);
+  }
+  return result.output;
+}
+
 // ─── Dual-mode entrypoint ───
 
 export async function runRiverCrossingExample(
@@ -385,14 +649,37 @@ export async function runRiverCrossingExample(
   return result.output;
 }
 
-export async function main() {
-  const output = await runRiverCrossingExample();
+function printOutcome(label: string, output: { solved: boolean; moves: number; log: string[] }) {
   console.log(
-    output.solved ? `Solved in ${output.moves} moves:` : `Failed after ${output.moves} moves:`,
+    output.solved
+      ? `${label}: solved in ${output.moves} moves:`
+      : `${label}: failed after ${output.moves} moves:`,
   );
   for (const [i, entry] of output.log.entries()) {
     console.log(`  ${i + 1}. ${entry}`);
   }
+}
+
+// Two contrasting runs:
+//   1. Unaided — the model must plan from the machine description alone. It
+//      often stumbles (illegal moves, extra shuttles) or fails outright.
+//   2. Tool-assisted — the model may call findShortestPath, which introspects
+//      the pure machine via xstate/graph's getShortestPaths and hands back the
+//      optimal remaining sequence. The tool result feeds each move.
+export async function main() {
+  console.log("=== Unaided attempt (planning from the description) ===");
+  const unaided = await runRiverCrossingExample();
+  printOutcome("Unaided", unaided);
+
+  console.log("\n=== Tool-assisted attempt (findShortestPath via xstate/graph) ===");
+  const assisted = await runAssistedRiverCrossingExample();
+  printOutcome("Assisted", assisted);
+
+  console.log(
+    `\nMove counts — unaided: ${unaided.moves}` +
+      `${unaided.solved ? "" : " (failed)"}, assisted: ${assisted.moves}` +
+      `${assisted.solved ? "" : " (failed)"}.`,
+  );
 }
 
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {

@@ -105,7 +105,10 @@ export function createAiSdkTextActor<
   }));
 }
 
-export function createAiSdkTextExecutor(options: AiSdkTextHostOptions = {}) {
+// Module-local: the core `createAiSdkExecutors` is what examples use; this
+// hand-rolled variant stays here to keep the file's host-adapter demos
+// self-contained.
+function createAiSdkTextExecutor(options: AiSdkTextHostOptions = {}) {
   return async (request: AgentTextRequest & { tools: AgentTools }) => ({
     output: await generateWithAiSdk(request, request.tools, options),
   });
@@ -128,6 +131,8 @@ export async function runTriageDemo(ticket: string) {
   const result = await runAgent(triageMachine, {
     input: { ticket },
     generateText: createAiSdkTextExecutor({ models: triageModels }),
+    // The host-side observability hook: log each machine transition as it runs.
+    onTransition: (snapshot) => console.log(`  state -> ${String(snapshot.value)}`),
   });
   if (result.status !== "done") {
     throw new Error(`Triage demo did not complete: ${result.status}`);
@@ -184,16 +189,29 @@ export async function runStreamingDemo(topic: string) {
     }),
     { input: { topic } },
   );
+  actor.subscribe((snapshot) => console.log("\n  state ->", JSON.stringify(snapshot.value)));
   actor.start();
-  await toPromise(actor);
+  const output = await toPromise(actor);
   process.stdout.write("\n");
+  return output.joke;
 }
 
 async function main() {
-  console.log("— generateText (object output) —");
-  console.log(await runTriageDemo("My invoice is wrong and I am furious."));
-  console.log("— streamText (live chunks) —");
-  await runStreamingDemo("state machines");
+  // Demo 1: runAgent drives the triage machine to completion. It classifies a
+  // support ticket and returns a structured { sentiment, category, reply }.
+  // onTransition (wired in runTriageDemo) narrates the machine's states.
+  console.log("Demo 1: runAgent + generateText (structured triage)");
+  console.log("  Classifies a support ticket into { sentiment, category, reply }.");
+  const triage = await runTriageDemo("My invoice is wrong and I am furious.");
+  console.log("  result:", triage);
+
+  // Demo 2: streaming a joke about state machines, chunks printed live as they
+  // arrive (via the onChunk side channel), then the settled final state.
+  console.log("\nDemo 2: streamText (live chunks)");
+  console.log("  Streaming a joke about state machines, chunks printed live as they arrive:");
+  process.stdout.write("  ");
+  const joke = await runStreamingDemo("state machines");
+  console.log(`  final joke: ${joke}`);
 }
 
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {

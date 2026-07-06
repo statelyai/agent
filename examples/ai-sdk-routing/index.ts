@@ -10,7 +10,7 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { setupAgent, runAgent } from "../../src/index.js";
-import { createAiSdkTextExecutor } from "../ai-sdk-host/index.js";
+import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
 import { type LanguageModel } from "ai";
 
 const classificationSchema = z.object({
@@ -72,23 +72,12 @@ const agent = setupAgent({
   },
 });
 
-export const classifyCustomerQuery = agent.requests.classifyCustomerQuery;
-export const answerCustomerQuery = agent.requests.answerCustomerQuery;
-
 export const aiSdkRoutingMachine = agent.createMachine({
   id: "ai-sdk-routing",
   context: ({ input }) => ({
     query: input.query,
     classification: null,
     response: null,
-  }),
-  output: ({ context }) => ({
-    classification: context.classification ?? {
-      reasoning: "",
-      type: "general",
-      complexity: "simple",
-    },
-    response: context.response ?? "",
   }),
   initial: "classifying",
   states: {
@@ -121,14 +110,27 @@ export const aiSdkRoutingMachine = agent.createMachine({
         }),
       },
     },
-    done: { type: "final" },
+    done: {
+      type: "final",
+      output: ({ context }) => ({
+        classification: context.classification ?? {
+          reasoning: "",
+          type: "general",
+          complexity: "simple",
+        },
+        response: context.response ?? "",
+      }),
+    },
   },
 });
 
-export async function runAiSdkRoutingExample() {
+export async function runAiSdkRoutingExample(
+  observe?: Parameters<typeof runAgent>[1]["onTransition"],
+) {
   const result = await runAgent(aiSdkRoutingMachine, {
     input: { query: "The app crashes on launch." },
-    generateText: createAiSdkTextExecutor({ models }),
+    ...createAiSdkExecutors({ models }),
+    onTransition: observe,
   });
   if (result.status !== "done") {
     throw new Error(`Routing example did not complete: ${result.status}`);
@@ -141,5 +143,9 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     console.error("Set OPENAI_API_KEY to run this example.");
     process.exit(1);
   }
-  console.log(await runAiSdkRoutingExample());
+  console.log(
+    await runAiSdkRoutingExample((snapshot) =>
+      console.log("[state]", JSON.stringify(snapshot.value)),
+    ),
+  );
 }

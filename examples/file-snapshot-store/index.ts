@@ -154,6 +154,7 @@ export async function main() {
   const first = await runAgent(draftMachine, {
     input: { topic: "Launch of our new snapshot store" },
     generateText,
+    onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
   });
   assert.equal(first.status, "idle");
   store.save(sessionId, first.snapshot);
@@ -165,6 +166,7 @@ export async function main() {
     snapshot: store.load(sessionId),
     event: { type: "REJECT", reason: "make it punchier" },
     generateText,
+    onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
   });
   assert.equal(second.status, "idle");
   store.save(sessionId, second.snapshot);
@@ -175,6 +177,7 @@ export async function main() {
     snapshot: store.load(sessionId),
     event: { type: "APPROVE" },
     generateText,
+    onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
   });
   if (third.status !== "done") {
     throw new Error(`Draft did not publish: ${third.status}`);

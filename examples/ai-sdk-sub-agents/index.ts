@@ -132,6 +132,7 @@ export async function runAiSdkSubAgentsDemo(task: string) {
 
   const result = await runAgent(machine, {
     input: { task },
+    onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
     generateText: async (request) => {
       const { output } = await generateText({
         model,

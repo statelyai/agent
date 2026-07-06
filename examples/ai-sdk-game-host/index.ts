@@ -17,8 +17,6 @@
  * Run:
  *   OPENAI_API_KEY=... npx tsx examples/ai-sdk-game-host/index.ts
  */
-import { type LanguageModel } from "ai";
-import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
 import {
   executeAgentRequest,
@@ -28,27 +26,33 @@ import {
   resolveAgentStep,
   transitionAgentStep,
 } from "../../src/index.js";
-import { gameActors, gameMachine, gameSchemas, turnSummarySchema } from "../game-agent/index.js";
+import {
+  gameActors,
+  gameMachine,
+  gameSchemas,
+  models,
+  turnSummarySchema,
+} from "../game-agent/index.js";
 
 type GameEvent = EventUnion<typeof gameSchemas.events>;
-
-function resolveModel(modelRef: string): LanguageModel {
-  return openai(modelRef.replace(/^openai\//, ""));
-}
 
 // Adapter-provided executors: `decide` forces a tool call, one tool per
 // candidate event, and reads the chosen event off the tool call — the
 // "tool-per-event + toolChoice: 'required'" recipe from docs/p0-design.md
 // §2.6 — how the model is coerced into choosing is adapter business, not
 // core's.
-const executors = createAiSdkExecutors({ resolveModel });
+const executors = createAiSdkExecutors({ models });
 const { decide } = executors;
 
-export async function runAiSdkGameTurn(input = { playerHp: 20, enemyHp: 15 }) {
+export async function runAiSdkGameTurn(
+  input = { playerHp: 20, enemyHp: 15 },
+  onStep?: (value: unknown) => void,
+) {
   let step = initialAgentStep(gameMachine, input, {
     schemas: gameSchemas,
     actorSources: gameActors,
   });
+  onStep?.(step.snapshot.value);
 
   while (!step.done) {
     const [request] = step.requests;
@@ -68,6 +72,7 @@ export async function runAiSdkGameTurn(input = { playerHp: 20, enemyHp: 15 }) {
         schemas: gameSchemas,
         actorSources: gameActors,
       });
+      onStep?.(step.snapshot.value);
       continue;
     }
 
@@ -76,13 +81,16 @@ export async function runAiSdkGameTurn(input = { playerHp: 20, enemyHp: 15 }) {
       schemas: gameSchemas,
       actorSources: gameActors,
     });
+    onStep?.(step.snapshot.value);
   }
 
   return step.snapshot.output;
 }
 
 async function main() {
-  const output = await runAiSdkGameTurn();
+  const output = await runAiSdkGameTurn({ playerHp: 20, enemyHp: 15 }, (value) =>
+    console.log("[state]", JSON.stringify(value)),
+  );
   console.log(output);
 }
 

@@ -9,7 +9,7 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { setupAgent, runAgent } from "../../src/index.js";
-import { createAiSdkTextExecutor } from "../ai-sdk-host/index.js";
+import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
 import { type LanguageModel } from "ai";
 
 const qualitySchema = z.object({
@@ -40,6 +40,13 @@ const agent = setupAgent({
   }),
   input: z.object({ product: z.string() }),
   output: z.object({ copy: z.string(), quality: qualitySchema }),
+  emitted: {
+    EVALUATED: z.object({
+      hasCallToAction: z.boolean(),
+      emotionalAppeal: z.number(),
+      clarity: z.number(),
+    }),
+  },
   requests: {
     writeMarketingCopy: {
       schemas: {
@@ -83,10 +90,6 @@ const agent = setupAgent({
   },
 });
 
-export const writeMarketingCopy = agent.requests.writeMarketingCopy;
-export const evaluateMarketingCopy = agent.requests.evaluateMarketingCopy;
-export const improveMarketingCopy = agent.requests.improveMarketingCopy;
-
 export const aiSdkMarketingChainMachine = agent.createMachine({
   id: "ai-sdk-marketing-chain",
   context: ({ input }) => ({
@@ -94,14 +97,6 @@ export const aiSdkMarketingChainMachine = agent.createMachine({
     copy: null,
     quality: null,
     finalCopy: null,
-  }),
-  output: ({ context }) => ({
-    copy: context.finalCopy ?? context.copy ?? "",
-    quality: context.quality ?? {
-      hasCallToAction: false,
-      emotionalAppeal: 0,
-      clarity: 0,
-    },
   }),
   initial: "writing",
   states: {
@@ -121,10 +116,13 @@ export const aiSdkMarketingChainMachine = agent.createMachine({
         id: "evaluateMarketingCopy",
         src: "evaluateMarketingCopy",
         input: ({ context }) => ({ copy: context.copy ?? "" }),
-        onDone: ({ output }) => ({
-          target: "checking",
-          context: { quality: output },
-        }),
+        onDone: ({ output }, enq) => {
+          enq.emit({ type: "EVALUATED", ...output });
+          return {
+            target: "checking",
+            context: { quality: output },
+          };
+        },
       },
     },
     checking: {
@@ -150,14 +148,31 @@ export const aiSdkMarketingChainMachine = agent.createMachine({
         }),
       },
     },
-    done: { type: "final" },
+    done: {
+      type: "final",
+      output: ({ context }) => ({
+        copy: context.finalCopy ?? context.copy ?? "",
+        quality: context.quality ?? {
+          hasCallToAction: false,
+          emotionalAppeal: 0,
+          clarity: 0,
+        },
+      }),
+    },
   },
 });
 
 export async function runAiSdkMarketingChainExample() {
   const result = await runAgent(aiSdkMarketingChainMachine, {
     input: { product: "state machines" },
-    generateText: createAiSdkTextExecutor({ models }),
+    ...createAiSdkExecutors({ models }),
+    onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
+    on: {
+      EVALUATED: (e) =>
+        console.log(
+          `[evaluated] CTA ${e.hasCallToAction ? "yes" : "no"}, appeal ${e.emotionalAppeal}/10, clarity ${e.clarity}/10`,
+        ),
+    },
   });
   if (result.status !== "done") {
     throw new Error(`Marketing chain example did not complete: ${result.status}`);
