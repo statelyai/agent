@@ -104,13 +104,15 @@ This is backed by real implementations against four runtimes:
 
 ## Observation seams
 
-<!-- onChunk/onResult/onTransition signatures from src/run-agent.ts -->
+<!-- onChunk/onResult/onTransition/on signatures from src/run-agent.ts -->
 
-`runAgent` exposes three purely observational callbacks; they return `void` and cannot control the run:
+`runAgent` exposes purely observational callbacks; they return `void` and cannot control the run:
 
 - **`onChunk(chunk, info)`**: each streamed chunk of a `mode: 'stream'` request, with the `AgentRequest` that produced it (parallel streams stay distinguishable).
-- **`onResult(request, result)`**: once per resolved text or decision request, with the normalized `result.output` and the raw executor result (`result.raw`: tool calls, usage, and so on).
+- **`onResult(request, result)`**: once per resolved text or decision request (decision retries fire per attempt), with the normalized `result.output` and the raw executor result. `result.raw` is whatever your executor returned, verbatim: return `usage` alongside `output` and `onResult` becomes your token meter. The shipped adapter already does this (`raw as AiSdkGenerateResult` carries `usage`, `finishReason`, `toolCalls`, `toolResults`).
 - **`onTransition(snapshot, event)`**: every machine transition, with the new snapshot and the causing event.
+- **`on: { EVENT: handler, '*': handler }`**: events the machine emits with `enq.emit(...)`, keyed by emitted event type (`'*'` catches all).
+- **`inspect(inspectionEvent)`**: raw xstate inspection passthrough for the whole actor system. `onTransition` covers the root machine only; when a state invokes a child machine (see [multi-agent](multi-agent.md)), filter `inspectionEvent.type === '@xstate.transition'` and read `inspectionEvent.actorRef` to watch the child's states too, attributed to the child.
 
 ```ts
 await runAgent(machine, {
@@ -119,10 +121,31 @@ await runAgent(machine, {
   onChunk: (chunk, info) => process.stdout.write(chunk),
   onResult: (request, result) => log(request.id, result.raw),
   onTransition: (snapshot, event) => trace(snapshot.value, event.type),
+  on: { EVALUATED: (e) => console.log(`score ${e.qualityScore}/10`) },
 });
 ```
 
-> **Note:** Tracing and OpenTelemetry are bring-your-own; no exporter ships. Build one on these seams: `onResult` for model calls, `onTransition` for state changes.
+The split: `onTransition` narrates the machine in xstate's vocabulary (state values, events), for tracing and debugging. `on` narrates in *your* vocabulary: the machine emits domain progress events at moments the author chose, and the host renders them (a progress UI, an SSE stream, a log line). Declare their schemas in `setupAgent` and both `enq.emit(...)` and the `on` handlers are fully typed:
+
+```ts
+const agent = setupAgent({
+  context: z.object({ /* ... */ }),
+  emitted: {
+    EVALUATED: z.object({ qualityScore: z.number(), iteration: z.number() }),
+  },
+  // ...
+});
+
+// In the machine, from any transition or entry function:
+onDone: ({ context, output }, enq) => {
+  enq.emit({ type: 'EVALUATED', qualityScore: output.score, iteration: context.iteration });
+  return { target: 'checking', context: { evaluation: output } };
+},
+```
+
+Emitted events are fire-and-forget observation, not control flow: they never target states, and a run behaves identically with no handlers attached.
+
+> **Note:** Tracing and OpenTelemetry are bring-your-own; no exporter ships. Build one on these seams: `onResult` for model calls, `onTransition` for state changes, `on` for domain progress.
 
 ## Testing with deterministic executors
 

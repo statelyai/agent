@@ -4,10 +4,15 @@ import {
   streamText as aiStreamText,
   stepCountIs,
   tool,
+  type FinishReason,
   type FlexibleSchema,
   type LanguageModel,
+  type LanguageModelUsage,
   type ModelMessage,
   type Tool,
+  type ToolSet,
+  type TypedToolCall,
+  type TypedToolResult,
 } from "ai";
 import {
   getAgentOutputMode,
@@ -162,10 +167,34 @@ export function isStructuredOutputRequest(
   return getAgentOutputMode(request.outputSchema) === "structured";
 }
 
-/** Raw result shape from {@link AiSdkExecutors.generateText} — the `{ output }` envelope: the validated structured object for structured-output requests, or the accumulated text string otherwise. Unwrapped by {@link normalizeGeneratorResult}. */
-export type AiSdkGenerateResult = { output: unknown };
-/** Raw result shape from {@link AiSdkExecutors.streamText} — the `{ output }` envelope carrying the fully-accumulated text once the stream finishes (chunks are delivered separately via `onChunk`). */
-export type AiSdkStreamResult = { output: string };
+/**
+ * Raw result shape from {@link AiSdkExecutors.generateText} — the `{ output }`
+ * envelope (the validated structured object for structured-output requests,
+ * or the accumulated text string otherwise; unwrapped by
+ * `normalizeGeneratorResult`) plus the AI SDK call metadata. Core only reads
+ * `output`; everything else flows verbatim to `runAgent`'s
+ * `onResult(request, { raw })`, so `raw as AiSdkGenerateResult` is the
+ * supported cast for token accounting and tracing.
+ */
+export type AiSdkGenerateResult = {
+  output: unknown;
+  usage: LanguageModelUsage;
+  finishReason: FinishReason;
+  toolCalls: TypedToolCall<ToolSet>[];
+  toolResults: TypedToolResult<ToolSet>[];
+};
+/** Raw result shape from {@link AiSdkExecutors.streamText} — the `{ output }` envelope carrying the fully-accumulated text once the stream finishes (chunks are delivered separately via `onChunk`), plus the stream's final usage/finish metadata for `onResult`. */
+export type AiSdkStreamResult = {
+  output: string;
+  usage: LanguageModelUsage;
+  finishReason: FinishReason;
+};
+/** Raw result shape from {@link AiSdkExecutors.decide} — the chosen event plus the AI SDK call metadata, delivered per decision attempt to `onResult`. */
+export type AiSdkDecideResult = {
+  event: ChosenEvent;
+  usage: LanguageModelUsage;
+  finishReason: FinishReason;
+};
 
 /** `createAiSdkExecutors` always populates all three slots (unlike the
  * general `AgentRequestExecutors`, where `streamText`/`decide` are optional),
@@ -213,17 +242,29 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
     };
 
     if (isStructuredOutputRequest(request)) {
-      const { output } = await aiGenerateText({
+      const result = await aiGenerateText({
         ...common,
         output: Output.object({
           schema: request.outputSchema as FlexibleSchema<unknown>,
         }),
       });
-      return { output };
+      return {
+        output: result.output,
+        usage: result.usage,
+        finishReason: result.finishReason,
+        toolCalls: result.toolCalls,
+        toolResults: result.toolResults,
+      } satisfies AiSdkGenerateResult;
     }
 
-    const { text } = await aiGenerateText(common);
-    return { output: text };
+    const result = await aiGenerateText(common);
+    return {
+      output: result.text,
+      usage: result.usage,
+      finishReason: result.finishReason,
+      toolCalls: result.toolCalls,
+      toolResults: result.toolResults,
+    } satisfies AiSdkGenerateResult;
   };
 
   const streamText = async (
@@ -241,7 +282,11 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
       info?.onChunk?.(chunk);
     }
 
-    return { output: await result.text };
+    return {
+      output: await result.text,
+      usage: await result.usage,
+      finishReason: await result.finishReason,
+    } satisfies AiSdkStreamResult;
   };
 
   const decide: AgentDecisionExecutor = async (request) => {
@@ -280,7 +325,9 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
         ...(toolCall.input && typeof toolCall.input === "object" ? toolCall.input : {}),
         type: chosenEvent.type,
       } as ChosenEvent,
-    };
+      usage: result.usage,
+      finishReason: result.finishReason,
+    } satisfies AiSdkDecideResult;
   };
 
   return { generateText, streamText, decide };

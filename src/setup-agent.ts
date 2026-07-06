@@ -93,12 +93,15 @@ export interface AgentSchemaPack<
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
   TOutputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
   TMetaSchema extends StandardSchemaV1 = StandardSchemaV1<MetaObject>,
+  TEmittedSchemas extends Record<string, StandardSchemaV1> = Record<string, StandardSchemaV1>,
 > {
   context: TContextSchema;
   events: TEventSchemas;
   input: TInputSchema;
   output: TOutputSchema;
   meta: TMetaSchema;
+  /** Schemas for events the machine emits (`enq.emit(...)`), keyed by event type — they type `enq.emit` in the machine and the `on` handlers of {@link runAgent}. Optional: omitted means emitted events stay untyped. */
+  emitted?: TEmittedSchemas;
 }
 
 // Input to createAgentSchemas: only `context` is required, everything else defaults.
@@ -108,12 +111,14 @@ type AgentSchemaConfig<
   TInputSchema extends StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1,
   TMetaSchema extends StandardSchemaV1,
+  TEmittedSchemas extends Record<string, StandardSchemaV1> = Record<string, StandardSchemaV1>,
 > = {
   context: TContextSchema;
   events?: TEventSchemas;
   input?: TInputSchema;
   output?: TOutputSchema;
   meta?: TMetaSchema;
+  emitted?: TEmittedSchemas;
 };
 
 /**
@@ -130,21 +135,31 @@ export function createAgentSchemas<
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
   TOutputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
   TMetaSchema extends StandardSchemaV1 = StandardSchemaV1<MetaObject>,
+  TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
 >(
   schemas: AgentSchemaConfig<
     TContextSchema,
     TEventSchemas,
     TInputSchema,
     TOutputSchema,
-    TMetaSchema
+    TMetaSchema,
+    TEmittedSchemas
   >,
-): AgentSchemaPack<TContextSchema, TEventSchemas, TInputSchema, TOutputSchema, TMetaSchema> {
+): AgentSchemaPack<
+  TContextSchema,
+  TEventSchemas,
+  TInputSchema,
+  TOutputSchema,
+  TMetaSchema,
+  TEmittedSchemas
+> {
   return {
     context: schemas.context,
     events: (schemas.events ?? {}) as TEventSchemas,
     input: schemas.input as TInputSchema,
     output: schemas.output as TOutputSchema,
     meta: schemas.meta as TMetaSchema,
+    emitted: schemas.emitted as TEmittedSchemas,
   };
 }
 
@@ -210,6 +225,15 @@ type AgentSetupEventsSchema<TEventSchemas extends Record<string, StandardSchemaV
   ? {}
   : { events: TEventSchemas };
 
+// Same omit-when-empty routing as AgentSetupEventsSchema, for `emitted`
+// schemas: only a non-empty declared map reaches xstate's setup schemas, so
+// an agent that emits nothing keeps xstate's AnyEventObject default.
+type AgentSetupEmittedSchema<TEmittedSchemas extends Record<string, StandardSchemaV1>> = [
+  keyof TEmittedSchemas,
+] extends [never]
+  ? {}
+  : { emitted: TEmittedSchemas };
+
 // NOTE: this is a *plain object* config type, NOT `SetupConfig<...>`.
 //
 // `SetupConfig<TSchemas, ...>` declares `schemas?: TSchemas & SetupSchemas`.
@@ -231,13 +255,15 @@ type AgentSetupXStateConfig<
   TOutputSchema extends StandardSchemaV1,
   TMetaSchema extends StandardSchemaV1,
   TModels extends AgentModelMap,
+  TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
 > = {
   schemas: {
     context: TContextSchema;
     input: TInputSchema;
     output: TOutputSchema;
     meta: TMetaSchema;
-  } & AgentSetupEventsSchema<TEventSchemas>;
+  } & AgentSetupEventsSchema<TEventSchemas> &
+    AgentSetupEmittedSchema<TEmittedSchemas>;
   actorSources: SetupActors<
     AgentSetupActors<
       AgentAllActors<TActors, TRequestSchemas>,
@@ -260,6 +286,7 @@ type SetupAgentBaseConfig<
   TMetaSchema extends StandardSchemaV1,
   TRequestSchemas extends AgentRequestSchemaMap,
   TModels extends AgentModelMap,
+  TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
 > = (
   | {
       schemas: AgentSchemaPack<
@@ -267,10 +294,18 @@ type SetupAgentBaseConfig<
         TEventSchemas,
         TInputSchema,
         TOutputSchema,
-        TMetaSchema
+        TMetaSchema,
+        TEmittedSchemas
       >;
     }
-  | AgentSchemaConfig<TContextSchema, TEventSchemas, TInputSchema, TOutputSchema, TMetaSchema>
+  | AgentSchemaConfig<
+      TContextSchema,
+      TEventSchemas,
+      TInputSchema,
+      TOutputSchema,
+      TMetaSchema,
+      TEmittedSchemas
+    >
 ) & {
   models?: TModels;
   actorSources?: TActors;
@@ -290,6 +325,7 @@ type SetupAgentXStateResult<
   TOutputSchema extends StandardSchemaV1,
   TMetaSchema extends StandardSchemaV1,
   TModels extends AgentModelMap,
+  TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
 > = SetupReturnFromConfig<
   AgentSetupXStateConfig<
     TContextSchema,
@@ -299,7 +335,8 @@ type SetupAgentXStateResult<
     TInputSchema,
     TOutputSchema,
     TMetaSchema,
-    TModels
+    TModels,
+    TEmittedSchemas
   >
 >;
 
@@ -321,6 +358,7 @@ type SetupAgentResult<
   TOutputSchema extends StandardSchemaV1,
   TMetaSchema extends StandardSchemaV1,
   TModels extends AgentModelMap,
+  TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
 > = Omit<
   SetupAgentXStateResult<
     TContextSchema,
@@ -330,7 +368,8 @@ type SetupAgentResult<
     TInputSchema,
     TOutputSchema,
     TMetaSchema,
-    TModels
+    TModels,
+    TEmittedSchemas
   >,
   "createMachine"
 > & {
@@ -348,10 +387,18 @@ type SetupAgentResult<
     TInputSchema,
     TOutputSchema,
     TMetaSchema,
-    TModels
+    TModels,
+    TEmittedSchemas
   >["createMachine"];
   /** The retained schema pack ({@link AgentSchemaPack}) for host-side validation and tooling. */
-  schemas: AgentSchemaPack<TContextSchema, TEventSchemas, TInputSchema, TOutputSchema, TMetaSchema>;
+  schemas: AgentSchemaPack<
+    TContextSchema,
+    TEventSchemas,
+    TInputSchema,
+    TOutputSchema,
+    TMetaSchema,
+    TEmittedSchemas
+  >;
   /** The `models` registry passed to `setupAgent(...)`, if any (used to type-narrow `AgentModelRef`). */
   readonly models: TModels;
   /** The {@link TextLogic} actors built from `setupAgent({ requests })`, keyed the same way. */
@@ -454,6 +501,7 @@ export function setupAgent<
   TOutputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
   TMetaSchema extends StandardSchemaV1 = StandardSchemaV1<MetaObject>,
   TModels extends AgentModelMap = {},
+  TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
 >(
   config: SetupAgentBaseConfig<
     TContextSchema,
@@ -463,7 +511,8 @@ export function setupAgent<
     TOutputSchema,
     TMetaSchema,
     TRequestSchemas,
-    TModels
+    TModels,
+    TEmittedSchemas
   >,
 ): SetupAgentResult<
   TContextSchema,
@@ -473,7 +522,8 @@ export function setupAgent<
   TInputSchema,
   TOutputSchema,
   TMetaSchema,
-  TModels
+  TModels,
+  TEmittedSchemas
 > {
   return createSetupAgent(config);
 }
@@ -557,6 +607,7 @@ function normalizeAgentSchemas<
   TInputSchema extends StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1,
   TMetaSchema extends StandardSchemaV1,
+  TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
 >(
   config:
     | {
@@ -565,11 +616,26 @@ function normalizeAgentSchemas<
           TEventSchemas,
           TInputSchema,
           TOutputSchema,
-          TMetaSchema
+          TMetaSchema,
+          TEmittedSchemas
         >;
       }
-    | AgentSchemaConfig<TContextSchema, TEventSchemas, TInputSchema, TOutputSchema, TMetaSchema>,
-): AgentSchemaPack<TContextSchema, TEventSchemas, TInputSchema, TOutputSchema, TMetaSchema> {
+    | AgentSchemaConfig<
+        TContextSchema,
+        TEventSchemas,
+        TInputSchema,
+        TOutputSchema,
+        TMetaSchema,
+        TEmittedSchemas
+      >,
+): AgentSchemaPack<
+  TContextSchema,
+  TEventSchemas,
+  TInputSchema,
+  TOutputSchema,
+  TMetaSchema,
+  TEmittedSchemas
+> {
   return "schemas" in config ? config.schemas : createAgentSchemas(config);
 }
 
@@ -647,8 +713,16 @@ function createAgentSetupConfig<
   TOutputSchema extends StandardSchemaV1,
   TMetaSchema extends StandardSchemaV1,
   TModels extends AgentModelMap,
+  TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
 >(
-  schemas: AgentSchemaPack<TContextSchema, TEventSchemas, TInputSchema, TOutputSchema, TMetaSchema>,
+  schemas: AgentSchemaPack<
+    TContextSchema,
+    TEventSchemas,
+    TInputSchema,
+    TOutputSchema,
+    TMetaSchema,
+    TEmittedSchemas
+  >,
   actorSources: SetupActors<
     AgentSetupActors<
       AgentAllActors<TActors, TRequestSchemas>,
@@ -665,7 +739,8 @@ function createAgentSetupConfig<
       TOutputSchema,
       TMetaSchema,
       TRequestSchemas,
-      TModels
+      TModels,
+      TEmittedSchemas
     >,
     "actions" | "guards" | "delays"
   >,
@@ -677,7 +752,8 @@ function createAgentSetupConfig<
   TInputSchema,
   TOutputSchema,
   TMetaSchema,
-  TModels
+  TModels,
+  TEmittedSchemas
 > {
   return {
     schemas: {
@@ -686,7 +762,23 @@ function createAgentSetupConfig<
       input: schemas.input,
       output: schemas.output,
       meta: schemas.meta,
-    },
+      // Runtime pass-through mirrors AgentSetupEmittedSchema: only a
+      // non-empty declared map reaches xstate's setup schemas.
+      ...(schemas.emitted && Object.keys(schemas.emitted).length > 0
+        ? { emitted: schemas.emitted }
+        : {}),
+      // The conditional AgentSetup*Schema keys can't be proven from a spread.
+    } as AgentSetupXStateConfig<
+      TContextSchema,
+      TEventSchemas,
+      TActors,
+      TRequestSchemas,
+      TInputSchema,
+      TOutputSchema,
+      TMetaSchema,
+      TModels,
+      TEmittedSchemas
+    >["schemas"],
     actorSources,
     actions: config.actions,
     guards: config.guards,
@@ -704,6 +796,7 @@ function createSetupAgent<
   TOutputSchema extends StandardSchemaV1,
   TMetaSchema extends StandardSchemaV1,
   TModels extends AgentModelMap,
+  TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
 >(
   config: SetupAgentBaseConfig<
     TContextSchema,
@@ -713,7 +806,8 @@ function createSetupAgent<
     TOutputSchema,
     TMetaSchema,
     TRequestSchemas,
-    TModels
+    TModels,
+    TEmittedSchemas
   >,
 ): SetupAgentResult<
   TContextSchema,
@@ -723,7 +817,8 @@ function createSetupAgent<
   TInputSchema,
   TOutputSchema,
   TMetaSchema,
-  TModels
+  TModels,
+  TEmittedSchemas
 > {
   const schemas = normalizeAgentSchemas(config);
   const requests = normalizeAgentRequestInput<TRequestSchemas, AgentModelRef<TModels>>(
@@ -742,7 +837,8 @@ function createSetupAgent<
     TInputSchema,
     TOutputSchema,
     TMetaSchema,
-    TModels
+    TModels,
+    TEmittedSchemas
   >(schemas, actorSources, config);
   const base = setup(setupConfig);
   const createBaseMachine = base.createMachine.bind(base);
@@ -804,6 +900,7 @@ function createSetupAgent<
     TInputSchema,
     TOutputSchema,
     TMetaSchema,
-    TModels
+    TModels,
+    TEmittedSchemas
   >;
 }

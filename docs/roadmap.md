@@ -24,7 +24,8 @@ Everything here is **additive**: none of it blocks the alpha, and all of it bene
 ## Ecosystem
 
 - **Storage/checkpointer adapter packages** (SQLite/Postgres/Redis) over XState persisted snapshots. Example shipped (`examples/file-snapshot-store`); packages follow demand.
-- **Tracing/OTel exporter** plugging into `onResult`/`onTransition`.
+- **Tracing/OTel exporter** plugging into `onResult`/`onTransition`/`inspect`.
+- **Typed system-wide `onTransition`.** `runAgent`'s `inspect` passthrough already exposes every actor's transitions with their `actorRef`; a typed sugar (`onTransition` receiving `{ actorRef, path }` for child machines too) ships if hosts keep writing the same `@xstate.transition` filter.
 - **Transport helpers.** SSE example shipped (`examples/sse-transport`); WebSocket and AI SDK UI stream variants next.
 - **Host-loop signposting doc.** Three ways to drive a machine (`runAgent`, `createActor` + `waitFor`, the step loop) need a "pick by host type" guide.
 - **Framework migration recipes.** Parity trackers exist for selected frameworks; codemods only if demand shows.

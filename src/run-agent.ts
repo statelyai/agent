@@ -6,6 +6,7 @@ import {
   type AnyActorRef,
   type AnyMachineSnapshot,
   type AnyStateMachine,
+  type EmittedFrom,
   type EventFromLogic,
   type InputFrom,
   type InspectionEvent,
@@ -97,6 +98,31 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine>
    * observation — progress UIs, logging, tracing. Cannot send events.
    */
   onTransition?: (snapshot: SnapshotFrom<TMachine>, event: EventFromLogic<TMachine>) => void;
+  /**
+   * Handlers for events the machine emits (`enq.emit(...)`), keyed by emitted
+   * event type — `'*'` catches all. Typed from the machine's `emitted`
+   * schemas (`setupAgent({ emitted: { ... } })`). Purely observational, like
+   * {@link onTransition}: the machine narrates progress on its own vocabulary
+   * (not xstate internals) and the host renders it — a progress UI, an SSE
+   * stream, a log line.
+   */
+  on?: {
+    [TType in EmittedFrom<TMachine>["type"] | "*"]?: (
+      emitted: EmittedFrom<TMachine> & (TType extends "*" ? unknown : { type: TType }),
+    ) => void;
+  };
+  /**
+   * Raw xstate inspection passthrough: fires for every inspection event in
+   * the whole actor system — root machine, invoked child machines, spawned
+   * actors — each carrying its `actorRef` (`event.actorRef.id`/`.src`). This
+   * is the system-wide seam {@link onTransition} (root transitions only)
+   * cannot give you: filter `event.type === '@xstate.transition'` and read
+   * `event.actorRef` to attribute a child machine's states to the child.
+   * Purely observational, like the other callbacks. Unlike them it also
+   * fires during the final settle (a child's last transition and stop events
+   * arrive while the run is tearing down).
+   */
+  inspect?: (inspectionEvent: InspectionEvent) => void;
 
   // control
   /** Caps the number of model/decision calls this run may make (each retry of a decision counts separately); exceeding it settles `{ status: 'error', cause: 'max-model-calls' }`. Default 100. */
@@ -747,6 +773,10 @@ export async function runAgent<TMachine extends AnyStateMachine>(
       input: options.input as never,
       snapshot: options.snapshot,
       inspect: (event: InspectionEvent) => {
+        // System-wide passthrough (children included) before runAgent's own
+        // root-transition filtering below.
+        options.inspect?.(event);
+
         if (
           settled ||
           event.type !== "@xstate.transition" ||
@@ -803,6 +833,14 @@ export async function runAgent<TMachine extends AnyStateMachine>(
     // machine errors as unhandled exceptions (Actor#_error) even though this
     // run already handles them — subscribe with a no-op to suppress that.
     actor.subscribe({ error: () => {} });
+
+    // Emitted-event handlers (`options.on`), registered before start so
+    // events emitted during the initial transition are not missed.
+    for (const [type, handler] of Object.entries(options.on ?? {})) {
+      if (typeof handler === "function") {
+        actor.on(type as never, handler as never);
+      }
+    }
 
     if (options.signal) {
       if (options.signal.aborted) {

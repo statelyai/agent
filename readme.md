@@ -140,6 +140,7 @@ For machines that pause for approval across tool calls, persist the idle snapsho
 - **Human-in-the-loop.** No interrupt call to learn: a waiting state is just a state. `runAgent` settles `{ status: 'idle', snapshot }`; persist the JSON snapshot anywhere and resume with an event, in another process, days later. Work done before the pause can never re-run on resume. See [examples/human-in-the-loop](examples/human-in-the-loop).
 - **Durable execution.** The step path advances the machine with pure, synchronous transition functions, so hosts like Temporal or Cloudflare Workflows can checkpoint after every model call and replay deterministically. See [examples/ai-sdk-game-host](examples/ai-sdk-game-host).
 - **Dynamic fan-out.** Spawn N branches at runtime with per-branch state visible in the snapshot, then reduce. See [examples/fan-out](examples/fan-out).
+- **Typed progress events.** The machine narrates progress in your vocabulary, not xstate's: `enq.emit(...)` from any transition, schema-typed end to end, received on the host via `runAgent`'s `on` handlers (with `onTransition`/`onChunk`/`onResult` alongside for tracing and streaming). See [examples/ai-sdk-evaluator-optimizer](examples/ai-sdk-evaluator-optimizer).
 - **Machines as data.** A whole agent as validated JSON, safe to generate, store, or edit visually, run identically to hand-authored TypeScript. See [examples/json-agent](examples/json-agent).
 
 **Full documentation: [stately.ai/docs/agents](https://stately.ai/docs/agents)** · [What's not here yet](docs/roadmap.md)

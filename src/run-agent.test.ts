@@ -1315,3 +1315,190 @@ describe("agent.userInput as a pending placeholder (durable parallel HITL)", () 
     expect(again.pendingUserInputs).toEqual([{ id: "askHuman", input: { prompt: "Feedback?" } }]);
   });
 });
+
+describe("emitted events (runAgent `on`)", () => {
+  const agent = setupAgent({
+    context: z.object({ topic: z.string(), draft: z.string().nullable() }),
+    input: z.object({ topic: z.string() }),
+    output: z.object({ draft: z.string() }),
+    emitted: {
+      DRAFTING_STARTED: z.object({ topic: z.string() }),
+      DRAFTED: z.object({ length: z.number() }),
+    },
+    requests: {
+      draft: {
+        schemas: { input: z.object({ topic: z.string() }), output: z.string() },
+        model: "writer",
+        prompt: ({ input }) => `Draft: ${input.topic}`,
+      },
+    },
+  });
+
+  const machine = agent.createMachine({
+    context: ({ input }) => ({ topic: input.topic, draft: null }),
+    initial: "drafting",
+    states: {
+      drafting: {
+        entry: ({ context }, enq) => {
+          enq.emit({ type: "DRAFTING_STARTED", topic: context.topic });
+        },
+        invoke: {
+          src: "draft",
+          input: ({ context }) => ({ topic: context.topic }),
+          onDone: ({ output }, enq) => {
+            enq.emit({ type: "DRAFTED", length: output.length });
+            return { target: "done", context: { draft: output } };
+          },
+        },
+      },
+      done: { type: "final", output: ({ context }) => ({ draft: context.draft ?? "" }) },
+    },
+  });
+
+  test("`on` handlers fire per type, including events emitted during the initial transition", async () => {
+    const started: string[] = [];
+    const drafted: number[] = [];
+
+    const result = await runAgent(machine, {
+      input: { topic: "rivers" },
+      generateText: async () => ({ output: "a draft" }),
+      on: {
+        DRAFTING_STARTED: (emitted) => started.push(emitted.topic),
+        DRAFTED: (emitted) => drafted.push(emitted.length),
+      },
+    });
+
+    expect(result.status).toBe("done");
+    expect(started).toEqual(["rivers"]);
+    expect(drafted).toEqual(["a draft".length]);
+  });
+
+  test("'*' catches every emitted event", async () => {
+    const seen: string[] = [];
+
+    await runAgent(machine, {
+      input: { topic: "rivers" },
+      generateText: async () => ({ output: "a draft" }),
+      on: { "*": (emitted) => seen.push(emitted.type) },
+    });
+
+    expect(seen).toEqual(["DRAFTING_STARTED", "DRAFTED"]);
+  });
+});
+
+describe("onResult raw pass-through", () => {
+  test("extra executor-envelope keys (usage, ...) reach onResult.raw verbatim", async () => {
+    const agent = setupAgent({
+      context: z.object({ answer: z.string().nullable() }),
+      output: z.object({ answer: z.string() }),
+      requests: {
+        ask: {
+          schemas: { input: z.object({}), output: z.string() },
+          model: "m",
+          prompt: () => "q",
+        },
+      },
+    });
+
+    const machine = agent.createMachine({
+      context: { answer: null },
+      initial: "asking",
+      states: {
+        asking: {
+          invoke: {
+            src: "ask",
+            input: () => ({}),
+            onDone: ({ output }) => ({ target: "done", context: { answer: output } }),
+          },
+        },
+        done: { type: "final", output: ({ context }) => ({ answer: context.answer ?? "" }) },
+      },
+    });
+
+    const raws: unknown[] = [];
+    const result = await runAgent(machine, {
+      generateText: async () => ({
+        output: "42",
+        usage: { inputTokens: 7, outputTokens: 3 },
+        finishReason: "stop",
+      }),
+      onResult: (_request, { raw }) => raws.push(raw),
+    });
+
+    expect(result.status).toBe("done");
+    expect(raws).toEqual([
+      { output: "42", usage: { inputTokens: 7, outputTokens: 3 }, finishReason: "stop" },
+    ]);
+  });
+});
+
+describe("inspect passthrough (system-wide visibility)", () => {
+  test("child machine transitions are observable with their actorRef, unlike onTransition", async () => {
+    const child = setupAgent({
+      context: z.object({}),
+      output: z.object({ ok: z.boolean() }),
+    }).createMachine({
+      id: "child",
+      context: {},
+      initial: "working",
+      states: {
+        working: {
+          invoke: {
+            src: createAsyncLogic({ run: async () => "done" }),
+            onDone: { target: "finished" },
+          },
+        },
+        finished: { type: "final", output: () => ({ ok: true }) },
+      },
+    });
+
+    const parent = setupAgent({
+      context: z.object({}),
+      output: z.object({ ok: z.boolean() }),
+      actorSources: { child },
+    }).createMachine({
+      id: "parent",
+      context: {},
+      initial: "delegating",
+      states: {
+        delegating: {
+          invoke: {
+            src: "child",
+            onDone: { target: "done" },
+          },
+        },
+        done: { type: "final", output: () => ({ ok: true }) },
+      },
+    });
+
+    const rootTransitions: string[] = [];
+    const inspected: Array<{ actorId: string; value: unknown }> = [];
+
+    const result = await runAgent(parent, {
+      generateText: async () => ({ output: "" }),
+      onTransition: (snapshot) => rootTransitions.push(JSON.stringify(snapshot.value)),
+      inspect: (event) => {
+        if (event.type !== "@xstate.transition") return;
+        const snapshot = event.snapshot as { value?: unknown };
+        if (snapshot.value === undefined) return;
+        inspected.push({
+          actorId: (event.actorRef as { id?: string }).id ?? "",
+          value: snapshot.value,
+        });
+      },
+    });
+
+    expect(result.status).toBe("done");
+    // onTransition saw only the root machine's states...
+    expect(rootTransitions).toEqual(['"delegating"', '"done"']);
+    // ...while inspect saw the invoked child machine's states too, attributed
+    // to the child's actorRef.
+    const childValues = inspected
+      .filter(
+        (entry) => entry.actorId !== "parent" && !rootTransitions.includes(`"${entry.value}"`),
+      )
+      .map((entry) => entry.value);
+    expect(childValues).toContain("working");
+    expect(childValues).toContain("finished");
+  });
+});

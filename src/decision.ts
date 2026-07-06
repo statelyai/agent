@@ -384,11 +384,13 @@ export class DecisionExhaustedError extends Error {
  * (tool-per-event + forced tool choice, structured output, …) is entirely
  * adapter business; core only validates and retries the returned choice (see
  * {@link resolveDecision}). The optional `reason` is carried through to
- * `onResult`/event-sourcing but never affects validation.
+ * `onResult`/event-sourcing but never affects validation. Like text
+ * executors' `{ output, ...extras }` envelope, any extra keys (usage, finish
+ * reason, …) flow untouched to `onResult`'s `raw`.
  */
 export type AgentDecisionExecutor = (
   request: AgentDecisionRequest,
-) => PromiseLike<{ event: ChosenEvent; reason?: string }>;
+) => PromiseLike<{ event: ChosenEvent; reason?: string; [key: string]: unknown }>;
 
 /**
  * Options for {@link resolveDecision}. The `TEvent` parameter (the machine's

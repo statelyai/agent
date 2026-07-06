@@ -534,13 +534,28 @@ export type AgentOutputMode = "structured" | "text";
 
 /**
  * Classifies a text request's output schema as `'structured'` (its JSON
- * Schema `type` is `'object'`) or `'text'` (anything else, including no
- * schema). Reads the schema's `~standard.jsonSchema.input()` extension —
- * schemas without it are treated as `'text'`.
+ * Schema is `type: 'object'`, `type: 'array'`, or a top-level union/
+ * composition — `anyOf`/`oneOf`/`allOf`, which a bare `z.union`/
+ * `z.discriminatedUnion` emits with no top-level `type`) or `'text'`
+ * (anything else, including no schema). Reads the schema's
+ * `~standard.jsonSchema.input()` extension — schemas without it are treated
+ * as `'text'`.
  */
 export function getAgentOutputMode(schema?: StandardSchemaV1): AgentOutputMode {
-  const type = getStandardSchemaJsonType(schema);
-  return type === "object" ? "structured" : "text";
+  const jsonSchema = getStandardSchemaJson(schema);
+  if (!jsonSchema) {
+    return "text";
+  }
+  if (jsonSchema.type === "object" || jsonSchema.type === "array") {
+    return "structured";
+  }
+  if (
+    jsonSchema.type === undefined &&
+    ("anyOf" in jsonSchema || "oneOf" in jsonSchema || "allOf" in jsonSchema)
+  ) {
+    return "structured";
+  }
+  return "text";
 }
 
 /** True when {@link getAgentOutputMode} classifies `schema` as `'structured'`. */
@@ -548,8 +563,10 @@ export function isStructuredOutputSchema(schema?: StandardSchemaV1): boolean {
   return getAgentOutputMode(schema) === "structured";
 }
 
-// Reads a schema's synchronous `~standard.jsonSchema.input().type`, if the vendor implements that extension.
-function getStandardSchemaJsonType(schema?: StandardSchemaV1) {
+// Reads a schema's synchronous `~standard.jsonSchema.input()` JSON Schema, if the vendor implements that extension.
+function getStandardSchemaJson(
+  schema?: StandardSchemaV1,
+): { type?: unknown; [key: string]: unknown } | undefined {
   const jsonSchema = (
     schema?.["~standard"] as
       | {
@@ -558,7 +575,9 @@ function getStandardSchemaJsonType(schema?: StandardSchemaV1) {
       | undefined
   )?.jsonSchema?.input?.();
 
-  return jsonSchema && !(jsonSchema instanceof Promise) ? jsonSchema.type : undefined;
+  return jsonSchema && !(jsonSchema instanceof Promise)
+    ? (jsonSchema as { type?: unknown; [key: string]: unknown })
+    : undefined;
 }
 
 /**

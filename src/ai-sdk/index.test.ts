@@ -44,6 +44,19 @@ describe("isStructuredOutputRequest", () => {
   test("is false for a non-object outputSchema", () => {
     expect(isStructuredOutputRequest({ outputSchema: z.string() })).toBe(false);
   });
+
+  test("is true for union and array outputSchemas (no top-level type)", () => {
+    const union = z.union([z.object({ a: z.string() }), z.object({ b: z.number() })]);
+    const discriminated = z.discriminatedUnion("tool", [
+      z.object({ tool: z.literal("x"), n: z.number() }),
+      z.object({ tool: z.literal("y"), s: z.string() }),
+    ]);
+    expect(isStructuredOutputRequest({ outputSchema: union })).toBe(true);
+    expect(isStructuredOutputRequest({ outputSchema: discriminated })).toBe(true);
+    expect(isStructuredOutputRequest({ outputSchema: z.array(z.object({ a: z.string() })) })).toBe(
+      true,
+    );
+  });
 });
 
 describe("toAiSdkToolChoice", () => {
@@ -211,5 +224,71 @@ describe("toDecisionMessages", () => {
     expect(messages).toHaveLength(3);
     expect(messages![1]!.content).toContain("first failure");
     expect(messages![2]!.content).toContain("second failure");
+  });
+});
+
+describe("onResult metadata enrichment", () => {
+  test("generateText returns usage/finishReason/toolCalls alongside output", async () => {
+    const { MockLanguageModelV3 } = await import("ai/test");
+    const { createAiSdkExecutors } = await import("./index.js");
+
+    const model = new MockLanguageModelV3({
+      doGenerate: {
+        content: [{ type: "text", text: "hello" }],
+        finishReason: { unified: "stop", raw: "stop" },
+        usage: {
+          inputTokens: { total: 7, noCache: 7, cacheRead: 0, cacheWrite: 0 },
+          outputTokens: { total: 3, text: 3, reasoning: 0 },
+        },
+        warnings: [],
+      },
+    });
+
+    const executors = createAiSdkExecutors({ models: { m: model } });
+    const result = await executors.generateText({ model: "m", prompt: "hi", tools: {} });
+
+    expect(result.output).toBe("hello");
+    expect(result.usage).toMatchObject({ inputTokens: 7, outputTokens: 3 });
+    expect(result.finishReason).toBe("stop");
+    expect(result.toolCalls).toEqual([]);
+    expect(result.toolResults).toEqual([]);
+  });
+
+  test("decide returns usage/finishReason alongside the chosen event", async () => {
+    const { MockLanguageModelV3 } = await import("ai/test");
+    const { createAiSdkExecutors } = await import("./index.js");
+
+    const model = new MockLanguageModelV3({
+      doGenerate: {
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call-1",
+            toolName: "choose_GO",
+            input: JSON.stringify({}),
+          },
+        ],
+        finishReason: { unified: "tool-calls", raw: "tool_calls" },
+        usage: {
+          inputTokens: { total: 5, noCache: 5, cacheRead: 0, cacheWrite: 0 },
+          outputTokens: { total: 2, text: 2, reasoning: 0 },
+        },
+        warnings: [],
+      },
+    });
+
+    const executors = createAiSdkExecutors({ models: { m: model } });
+    const result = await executors.decide({
+      kind: "decision",
+      id: "d1",
+      model: "m",
+      prompt: "choose",
+      events: [{ type: "GO", toolName: "choose_GO" }],
+      attempts: [],
+    });
+
+    expect(result.event).toEqual({ type: "GO" });
+    expect(result.usage).toMatchObject({ inputTokens: 5, outputTokens: 2 });
+    expect(result.finishReason).toBe("tool-calls");
   });
 });

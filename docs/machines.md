@@ -49,6 +49,19 @@ const schemas = createAgentSchemas({
 
 In a `HEAL` transition, `event.amount` is a `number`. Reading a field the event does not carry is a compile error.
 
+**Emitted event schemas** type the progress events a machine narrates outward with `enq.emit(...)` (received by hosts via [`runAgent`'s `on` handlers](hosts.md#observation-seams)):
+
+```ts
+const schemas = createAgentSchemas({
+  context: z.object({ /* ... */ }),
+  emitted: {
+    EVALUATED: z.object({ qualityScore: z.number(), iteration: z.number() }),
+  },
+});
+```
+
+With this declared, `enq.emit({ type: 'EVALUATED', ... })` and the host-side `on: { EVALUATED: handler }` are both fully typed; emitting an undeclared type or a wrong payload is a compile error.
+
 ## Set up the agent
 
 <!-- setupAgent config surface (models, requests, actorSources, builtins) from src/setup-agent.ts -->

@@ -102,7 +102,9 @@ const machine = agentSetup.createMachine({
 
 <!-- output-mode derivation from src/text-logic.ts (getAgentOutputMode) -->
 
-Output is **structured** when the output schema describes an object, and plain text otherwise: `output: z.object({ ... })` returns a validated object, `output: z.string()` returns the model's text.
+Output is **structured** when the output schema describes an object, an array, or a top-level union of them (`z.union`/`z.discriminatedUnion`), and plain text otherwise: `output: z.object({ ... })` returns a validated object, `output: z.string()` returns the model's text.
+
+> **Provider caveat:** some providers reject certain top-level union encodings in structured-output mode (OpenAI rejects the `oneOf` that `z.discriminatedUnion` emits, while accepting `z.union`'s `anyOf`). The portable pattern is wrapping the union in an object field: `output: z.object({ action: z.union([...]) })`. See [examples/react-agent](../examples/react-agent).
 
 ```ts
 export const triageTicket = createTextLogic({
