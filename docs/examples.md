@@ -55,8 +55,9 @@ These compose agent machines as sub-agents or child actors. See [Multi-agent](mu
 
 ## Multi-step agent patterns
 
-Common agent workflows expressed as explicit XState machines. See the [parity docs](#parity-tracking) for how these map to LangGraph, Burr, and CrewAI Flow patterns.
+Common agent workflows expressed as explicit XState machines.
 
+- [react-agent](../examples/react-agent/index.ts): ReAct as an explicit loop — one reason-or-act request per iteration (discriminated union: call a tool or answer), typed tool actors execute, a step-budget guard breaks the loop with a best-effort answer.
 - [tool-calling](../examples/tool-calling/index.ts): the model selects a tool (structured output), typed tool actors execute, progress reported via transitions.
 - [rag](../examples/rag/index.ts): retrieve (typed plain actor over a sample corpus) then a grounded answer, with conversational memory in context.
 - [plan-and-execute](../examples/plan-and-execute/index.ts): a planner request produces structured output, execution states iterate the plan (keeps the ReWOO evidence-map idea).
@@ -75,4 +76,4 @@ The [Vercel AI SDK agent patterns](https://sdk.vercel.ai/docs/foundations/agents
 - [ai-sdk-orchestrator-worker](../examples/ai-sdk-orchestrator-worker/index.ts): an orchestrator-worker fan-out.
 - [ai-sdk-evaluator-optimizer](../examples/ai-sdk-evaluator-optimizer/index.ts): an evaluator-optimizer loop.
 
-> **Note:** The full example index, including framework-comparison notes for LangGraph, Burr, and CrewAI Flow, lives in [examples/README.md](../examples/README.md).
+> **Note:** The full example index, including framework-comparison notes, lives in [examples/README.md](../examples/README.md).

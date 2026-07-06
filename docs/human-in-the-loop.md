@@ -121,6 +121,8 @@ Between iterations, persist `result.snapshot` anywhere: a database row, a queue 
 
 For a checkpoint after every model call, not only at settle, see [Steps](steps.md).
 
+**Resume cannot re-run earlier work.** A resumed snapshot starts *at* the waiting state, so the states before it never re-enter: side effects and model calls that ran before the pause run exactly once, no matter how many times you resume. There is nothing to isolate and no discipline to remember. (Contrast with inline-interrupt designs, where code before the interrupt call re-executes on resume unless the author manually isolates it in its own node.) Re-running work is always an explicit, authored transition, such as a `REJECT` that targets the drafting state again. This guarantee is pinned by a test in `src/run-agent.test.ts` ("pre-idle side effects and model calls run exactly once").
+
 > **Context must be JSON-serializable.** Persisted snapshots round-trip through `JSON.stringify`/`JSON.parse`, so anything in `context` that is not plain JSON silently corrupts on resume: `Date` becomes a string, `Map`/`Set` become `{}`, and class instances lose their prototype. Keep non-serializable handles (sessions, db clients, sockets) in closures and store only their serializable ids in `context`; see [host actors](host-actors.md#threading-host-context-into-actors-and-requests).
 
 ## Idle handles and resuming from storage

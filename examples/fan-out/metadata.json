@@ -1,0 +1,14 @@
+{
+  "name": "fan-out",
+  "title": "Fan-out (Map-Reduce)",
+  "kind": "pattern",
+  "origin": {
+    "type": "pattern",
+    "source": "LangGraph Send-style dynamic fan-out / map-reduce",
+    "url": "https://langchain-ai.github.io/langgraphjs/how-tos/map-reduce/"
+  },
+  "comparison": {
+    "targets": ["LangGraph Send", "map-reduce"],
+    "purpose": "A planner generates N subtopics at runtime; the machine spawns one branch per subtopic via XState dynamic spawn (N not known until runtime), each branch is a live child visible in the snapshot, and a reducer composes the summaries into one digest."
+  }
+}

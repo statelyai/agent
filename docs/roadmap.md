@@ -18,7 +18,7 @@ Everything here is **additive**: none of it blocks the alpha, and all of it bene
 
 - **`hostContext` on `runAgent`.** Host-owned values (sessions, auth/billing ids) threaded to executors and actors without touching machine context. The documented patterns (see [host actors](host-actors.md)) cover this today via closures and input mapping; the option ships only if those prove insufficient in practice.
 - **Automatic nested-machine executor binding.** `runAgent` binds the top-level machine's sources; a child machine's requests must be bound via `.provide(...)`. The alpha adds a loud bind-time error when a child request is unbound; transitive auto-binding is the follow-up.
-- **Dynamic fan-out helper.** LangGraph `Send`-style declarative parallelism. Today: `Promise.all` over host actors inside one invoke (see `examples/ai-sdk-orchestrator-worker`). A `fanOut(...)` helper plus per-branch progress events ships if the manual pattern proves too repetitive.
+- **Dynamic fan-out helper.** Declarative dynamic parallelism. Today: `Promise.all` over host actors inside one invoke (see `examples/ai-sdk-orchestrator-worker`). A `fanOut(...)` helper plus per-branch progress events ships if the manual pattern proves too repetitive.
 
 ## Ecosystem
 
@@ -26,7 +26,7 @@ Everything here is **additive**: none of it blocks the alpha, and all of it bene
 - **Tracing/OTel exporter** plugging into `onResult`/`onTransition`.
 - **Transport helpers.** SSE example shipped (`examples/sse-transport`); WebSocket and AI SDK UI stream variants next.
 - **Host-loop signposting doc.** Three ways to drive a machine (`runAgent`, `createActor` + `waitFor`, the step loop) need a "pick by host type" guide.
-- **Framework migration recipes.** Parity trackers exist (langgraph/burr/crewai); codemods only if demand shows.
+- **Framework migration recipes.** Parity trackers exist for selected frameworks; codemods only if demand shows.
 
 ## Ideas (no commitment)
 

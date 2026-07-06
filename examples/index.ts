@@ -6,6 +6,10 @@ export {
   evaluatePrompt,
 } from './email-drafter/index.js';
 export {
+  inspectedEmailDrafter,
+  main as runEmailDrafterInspectorExample,
+} from './email-drafter-inspector/index.js';
+export {
   chooseMove,
   gameActors,
   gameMachine,
@@ -42,6 +46,10 @@ export {
   toolCallingMachine,
   runToolCallingExample,
 } from './tool-calling/index.js';
+export {
+  reactAgentMachine,
+  runReactAgentExample,
+} from './react-agent/index.js';
 export {
   supervisorMachine,
   runSupervisorExample,
@@ -127,3 +135,7 @@ export {
   runJsonAgentDemo,
   workflowConfig as jsonAgentWorkflowConfig,
 } from './json-agent/index.js';
+export {
+  createFanOutMachine,
+  runFanOutExample,
+} from './fan-out/index.js';

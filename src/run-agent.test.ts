@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { z } from 'zod';
-import { createActor, setup, toPromise } from 'xstate';
+import { createActor, createAsyncLogic, setup, toPromise } from 'xstate';
 import {
   createAgentSchemas,
   createDecisionLogic,
@@ -137,6 +137,121 @@ describe('runAgent', () => {
     expect(second.status === 'done' ? second.output : undefined).toEqual({
       draft: 'Draft: release notes',
     });
+  });
+
+  test('idle + resume: pre-idle side effects and model calls run exactly once, never re-executed on resume', async () => {
+    // LangGraph's documented HITL gotcha: code before an inline interrupt()
+    // re-executes when the node resumes, so side effects must be manually
+    // isolated. Idle-first HITL cannot have this failure mode: the resumed
+    // snapshot starts AT the idle state, so states before it never re-enter.
+    // This test pins that guarantee.
+    let sideEffectRuns = 0;
+    let modelCalls = 0;
+
+    const schemas = createAgentSchemas({
+      context: z.object({ topic: z.string(), draft: z.string().nullable() }),
+      input: z.object({ topic: z.string() }),
+      output: z.object({ draft: z.string() }),
+      events: { APPROVE: z.object({}), REJECT: z.object({}) },
+    });
+
+    const draftText = createTextLogic({
+      schemas: {
+        input: z.object({ topic: z.string() }),
+        output: z.string(),
+      },
+      model: 'test-model',
+      prompt: ({ input }) => input.topic,
+    });
+
+    const agent = setupAgent({
+      schemas,
+      actorSources: {
+        draftText,
+        recordAudit: createAsyncLogic<{ recorded: boolean }, unknown>({
+          run: async () => {
+            sideEffectRuns += 1;
+            return { recorded: true };
+          },
+        }),
+      },
+    });
+
+    const machine = agent.createMachine({
+      context: ({ input }) => ({ topic: input.topic, draft: null }),
+      initial: 'auditing',
+      states: {
+        auditing: {
+          invoke: {
+            id: 'audit',
+            src: 'recordAudit',
+            onDone: { target: 'drafting' },
+          },
+        },
+        drafting: {
+          invoke: {
+            id: 'draft',
+            src: 'draftText',
+            input: ({ context }) => ({ topic: context.topic }),
+            onDone: ({ output }) => ({
+              target: 'awaitingApproval',
+              context: { draft: output },
+            }),
+          },
+        },
+        awaitingApproval: {
+          on: {
+            APPROVE: { target: 'done' },
+            REJECT: { target: 'drafting' },
+          },
+        },
+        done: {
+          type: 'final',
+          output: ({ context }) => ({ draft: context.draft ?? '' }),
+        },
+      },
+    });
+
+    const generateText = async (request: AgentTextRequest & { tools: AgentTools }) => {
+      modelCalls += 1;
+      return { output: `Draft about ${request.prompt}` };
+    };
+
+    const first = await runAgent(machine, {
+      input: { topic: 'incident recap' },
+      generateText,
+    });
+    expect(first.status).toBe('idle');
+    if (first.status !== 'idle') throw new Error('expected idle');
+    expect(sideEffectRuns).toBe(1);
+    expect(modelCalls).toBe(1);
+
+    // Full JSON round-trip: the resume must not depend on live actor state.
+    const persisted = JSON.parse(JSON.stringify(first.snapshot));
+
+    const second = await runAgent(machine, {
+      snapshot: persisted,
+      event: { type: 'APPROVE' },
+      generateText,
+    });
+
+    expect(second.status).toBe('done');
+    expect(sideEffectRuns).toBe(1); // audit never re-ran
+    expect(modelCalls).toBe(1); // draft never re-billed
+    expect(second.status === 'done' ? second.output : undefined).toEqual({
+      draft: 'Draft about incident recap',
+    });
+
+    // The loop is still real: an explicit REJECT deliberately re-enters
+    // drafting, so the model runs again by AUTHORED choice, not by accident.
+    const third = await runAgent(machine, {
+      snapshot: persisted,
+      event: { type: 'REJECT' },
+      generateText,
+    });
+    expect(third.status).toBe('idle');
+    expect(sideEffectRuns).toBe(1); // audit STILL exactly once
+    expect(modelCalls).toBe(2); // redraft was an explicit transition
   });
 
   test('decision path: guard-rejected event retried, then completes; canTake wired through the live actor', async () => {

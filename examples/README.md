@@ -50,7 +50,7 @@ These use `setupAgent(...)` (or plain XState `setup(...)` plus `createTextLogic(
 
 ## Comparison Examples
 
-These map LangGraph, Burr, and CrewAI Flow patterns onto XState. The dedicated per-framework ports were consolidated into pattern examples; the parity docs below carry the framework-by-framework mapping.
+These map LangGraph, Burr, and CrewAI Flow patterns onto XState. The dedicated per-framework ports were consolidated into pattern examples.
 
 Multi-step agent patterns:
 
@@ -73,11 +73,4 @@ AI SDK pattern set (fan-out, routing, reflection, map-reduce shapes):
 - [`ai-sdk-evaluator-optimizer/index.test.ts`](/Users/davidkpiano/Code/agent/examples/ai-sdk-evaluator-optimizer/index.test.ts)
 - [`ai-sdk-marketing-chain/index.test.ts`](/Users/davidkpiano/Code/agent/examples/ai-sdk-marketing-chain/index.test.ts)
 
-## Parity Tracking
-
-- [`../docs/langgraph-parity.md`](/Users/davidkpiano/Code/agent/docs/langgraph-parity.md)
-- [`../docs/langgraph-gaps.md`](/Users/davidkpiano/Code/agent/docs/langgraph-gaps.md)
-- [`../docs/crewai-parity.md`](/Users/davidkpiano/Code/agent/docs/crewai-parity.md)
-- [`../docs/burr-parity.md`](/Users/davidkpiano/Code/agent/docs/burr-parity.md)
-
-The parity docs track end-result coverage and remaining gaps, honestly — "possible but manual" and "not yet" are used where that's the true state, not "Covered". New examples should use `createTextLogic(...)`/`createDecisionLogic(...)` for reusable LLM work and `setupAgent({ schemas, actors, requests })` for schema-first machine authoring. Decisions are authored inline in states via `agent.decide` (state-local), or with `createDecisionLogic` under `actors:` when reusable — there is no `decisions:` key on `setupAgent`.
+New examples should use `createTextLogic(...)`/`createDecisionLogic(...)` for reusable LLM work and `setupAgent({ schemas, actors, requests })` for schema-first machine authoring. Decisions are authored inline in states via `agent.decide` (state-local), or with `createDecisionLogic` under `actors:` when reusable — there is no `decisions:` key on `setupAgent`.

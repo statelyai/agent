@@ -2,7 +2,7 @@
 
 **Alpha.** The API changed completely in this release and is still settling. Expect breaking changes before 2.0 stable. Feedback and issues welcome.
 
-A **rigor layer** for AI agents, not another agent framework or harness. You author an agent as a typed XState state machine: a **portable blueprint** that runs identically under your own host loop, or embedded inside a harness (eve, Flue, MCP tools, LangGraph-style backends) as a tool or workflow step.
+A **rigor layer** for AI agents, not another agent framework or harness. You author an agent as a typed XState state machine: a **portable blueprint** that runs identically under your own host loop, or embedded inside a harness (eve, Flue, MCP tools, external runtimes) as a tool or workflow step.
 
 The split is the whole idea:
 
@@ -428,6 +428,6 @@ Sub-agents and multi-machine composition:
 
 - [`examples/subflows/index.ts`](examples/subflows/index.ts), [`examples/ai-sdk-sub-agents/index.ts`](examples/ai-sdk-sub-agents/index.ts), [`examples/debate-sub-agents/index.ts`](examples/debate-sub-agents/index.ts), [`examples/supervisor/index.ts`](examples/supervisor/index.ts), [`examples/swarm-handoff/index.ts`](examples/swarm-handoff/index.ts)
 
-Framework comparisons and parity tracking: [`docs/langgraph-parity.md`](docs/langgraph-parity.md), [`docs/langgraph-gaps.md`](docs/langgraph-gaps.md), [`docs/burr-parity.md`](docs/burr-parity.md), [`docs/crewai-parity.md`](docs/crewai-parity.md), and the full index in [`examples/README.md`](examples/README.md).
+The full example index lives in [`examples/README.md`](examples/README.md).
 
 **Read the documentation: [stately.ai/docs/agents](https://stately.ai/docs/agents)**

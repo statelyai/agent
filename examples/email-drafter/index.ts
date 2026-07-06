@@ -43,7 +43,7 @@ type EmailDraft = z.infer<typeof emailDraftSchema>;
 
 // State/transition meta is schema-typed: hosts get a typed interaction
 // protocol instead of Record<string, unknown>.
-const metaSchema = z.object({
+export const metaSchema = z.object({
   display: z.array(z.string()).optional(),
   interaction: z
     .discriminatedUnion('type', [
@@ -61,9 +61,13 @@ const metaSchema = z.object({
             label: z.string(),
             eventType: z.string(),
             input: z
-              .object({ type: z.literal('text'), label: z.string(), field: z.string() })
+              .object({
+                type: z.literal('text'),
+                label: z.string(),
+                field: z.string(),
+              })
               .optional(),
-          })
+          }),
         ),
       }),
       z.object({
@@ -130,10 +134,7 @@ export const draftEmail = createTextLogic({
   model: 'emailDrafter',
   system:
     'Draft a polished email from the request. Use the provided details without inventing missing essentials unless the user explicitly asked to draft anyway.',
-  messages: ({ input }) => [
-    ...input.messages,
-    userMessage(input.prompt),
-  ],
+  messages: ({ input }) => [...input.messages, userMessage(input.prompt)],
 });
 
 export const streamDraft = createTextLogic({
@@ -278,7 +279,7 @@ export const emailDrafter = agent.createMachine({
               messages: [
                 ...context.messages,
                 assistantMessage(
-                  `To: ${draft.to}\nSubject: ${draft.subject}\n\n${draft.body}`
+                  `To: ${draft.to}\nSubject: ${draft.subject}\n\n${draft.body}`,
                 ),
               ],
             },
@@ -297,7 +298,11 @@ export const emailDrafter = agent.createMachine({
             {
               label: 'Request changes',
               eventType: 'REQUEST_CHANGES',
-              input: { type: 'text', label: 'Requested changes', field: 'changes' },
+              input: {
+                type: 'text',
+                label: 'Requested changes',
+                field: 'changes',
+              },
             },
             { label: 'Send', eventType: 'SEND' },
           ],
@@ -378,22 +383,25 @@ export const emailDrafter = agent.createMachine({
 // from that meta — no state name is ever hardcoded. Swap this loop for a web
 // form or Slack modal and the same machine drives it unchanged.
 
-type Interaction = NonNullable<
+export type Interaction = NonNullable<
   z.infer<typeof metaSchema>['interaction']
 >;
-type DrafterEvent = { type: string; [field: string]: unknown };
+export type DrafterEvent = { type: string; [field: string]: unknown };
 
-async function ask(rl: {
-  question: (q: string) => Promise<string>;
-}, q: string): Promise<string> {
+async function ask(
+  rl: {
+    question: (q: string) => Promise<string>;
+  },
+  q: string,
+): Promise<string> {
   return (await rl.question(q)).trim();
 }
 
 /** Render one interaction and return the event the human chose. */
-async function promptInteraction(
+export async function promptInteraction(
   rl: { question: (q: string) => Promise<string> },
   interaction: Interaction,
-  display: string[] | undefined
+  display: string[] | undefined,
 ): Promise<DrafterEvent> {
   for (const line of display ?? []) {
     console.log(line);
@@ -407,7 +415,9 @@ async function promptInteraction(
     case 'confirm': {
       const answer = await ask(rl, `${interaction.label} [y/N]: `);
       const yes = /^y(es)?$/i.test(answer);
-      return { type: yes ? interaction.trueEventType : interaction.falseEventType };
+      return {
+        type: yes ? interaction.trueEventType : interaction.falseEventType,
+      };
     }
     case 'select': {
       console.log(interaction.label);
@@ -440,12 +450,16 @@ export async function main() {
 
   try {
     // Start the machine; it settles idle at the first interaction state.
-    let result = await runAgent(emailDrafter, { input: undefined, ...executors });
+    let result = await runAgent(emailDrafter, {
+      input: undefined,
+      ...executors,
+    });
 
     while (result.status === 'idle') {
-      const meta = getStateMeta<typeof result.snapshot, z.infer<typeof metaSchema>>(
-        result.snapshot
-      );
+      const meta = getStateMeta<
+        typeof result.snapshot,
+        z.infer<typeof metaSchema>
+      >(result.snapshot);
       if (!meta.interaction) {
         // Idle with no interaction to render: nothing the human can do.
         console.error('Machine is idle with no interaction. Stopping.');
@@ -456,7 +470,7 @@ export async function main() {
       const draft = result.snapshot.context.draft;
       if (draft && meta.interaction.type !== 'text') {
         console.log(
-          `\n--- Draft ---\nTo: ${draft.to}\nSubject: ${draft.subject}\n\n${draft.body}\n-------------`
+          `\n--- Draft ---\nTo: ${draft.to}\nSubject: ${draft.subject}\n\n${draft.body}\n-------------`,
         );
       }
 

@@ -1,0 +1,14 @@
+{
+  "name": "email-drafter-inspector",
+  "title": "Email Drafter (Stately Inspector)",
+  "kind": "host-adapter",
+  "origin": {
+    "type": "stately-agent",
+    "source": "Ported from the standalone ai-xstate-email-example CLI",
+    "url": null
+  },
+  "comparison": {
+    "targets": [],
+    "purpose": "Runs the email-drafter machine as one live createActor session wired to createWebSocketInspector, so the whole agent flow is visible in the Stately Inspector."
+  }
+}
