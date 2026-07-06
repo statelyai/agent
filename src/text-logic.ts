@@ -42,6 +42,15 @@ export type AgentModelRef<TModels extends AgentModelMap = {}> = [keyof TModels] 
  * settings.
  */
 export interface AgentTextRequest<TMetadata = Record<string, unknown>> {
+  /**
+   * The registered name of the request that produced this call — the
+   * `setupAgent({ requests })` key (also set by `setupAgent.fromConfig`), or
+   * `TextLogicConfig.name` for standalone `createTextLogic` actors. Hosts and
+   * test mocks can route on it instead of sniffing `system`/`prompt` text.
+   * Absent for ad-hoc `agent.generateText`/`agent.streamText` invokes unless
+   * the caller sets it on the inline input.
+   */
+  name?: string;
   model: string;
   system?: string;
   prompt?: string;
@@ -177,6 +186,7 @@ function createBuiltinTextActor(
               input: agentTextInputSchema,
               output: outputSchema,
             },
+            name: ({ input }) => input.name,
             model: ({ input }) => input.model,
             system: ({ input }) => input.system,
             prompt: ({ input }) => input.prompt,
@@ -259,6 +269,8 @@ export interface TextLogicConfig<
   TModel extends string = string,
 > {
   mode?: AgentRequestMode;
+  /** Stamped onto every lowered request as {@link AgentTextRequest.name}. `setupAgent({ requests })` sets this to the request's key. */
+  name?: ResolveTextLogicValue<string | undefined, InferOutput<TInputSchema>>;
   schemas: {
     input: TInputSchema;
     output: TOutputSchema;
@@ -379,6 +391,7 @@ export function createTextLogic<
     const args = { input: parsedInput };
 
     return {
+      name: resolveTextLogicValue(config.name, args),
       model: resolveTextLogicValue(config.model, args)!,
       system: resolveTextLogicValue(config.system, args),
       prompt: resolveTextLogicValue(config.prompt, args),

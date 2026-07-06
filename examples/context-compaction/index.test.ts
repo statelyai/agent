@@ -24,7 +24,8 @@ function scriptedUserInput(answers: string[]): (input: AgentUserInput) => Promis
 function createModel() {
   const respondCalls: AgentMessage[][] = [];
   const generateText: AgentRequestExecutor = async (request) => {
-    if (request.system?.includes("compact conversation history")) {
+    // Requests carry their setupAgent({ requests }) key as `name`.
+    if (request.name === "summarize") {
       // summarize request → structured { summary }
       return { output: { summary: "SUMMARY: prior facts folded in." } };
     }

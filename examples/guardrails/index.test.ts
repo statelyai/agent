@@ -5,14 +5,20 @@ import { guardrailsMachine } from "./index.js";
 
 type Step = "validate" | "answer" | "verify" | "revise" | "unknown";
 
-/** Routes a request to a step by a distinctive substring in its system prompt. */
-function classify(system: string | undefined): Step {
-  const s = system ?? "";
-  if (s.includes("INPUT GUARDRAIL")) return "validate";
-  if (s.includes("ANSWER STEP")) return "answer";
-  if (s.includes("OUTPUT GUARDRAIL")) return "verify";
-  if (s.includes("REVISION STEP")) return "revise";
-  return "unknown";
+/** Routes a request to a step by its `name` — the setupAgent({ requests }) key. */
+function classify(name: string | undefined): Step {
+  switch (name) {
+    case "validateQuestion":
+      return "validate";
+    case "answer":
+      return "answer";
+    case "verifyAnswer":
+      return "verify";
+    case "revise":
+      return "revise";
+    default:
+      return "unknown";
+  }
 }
 
 /**
@@ -26,7 +32,7 @@ function createModel(opts: {
   const calls: Step[] = [];
   let verifyIndex = 0;
   const generateText: AgentRequestExecutor = async (request) => {
-    const step = classify(request.system);
+    const step = classify(request.name);
     calls.push(step);
     switch (step) {
       case "validate":
@@ -40,7 +46,7 @@ function createModel(opts: {
       case "revise":
         return { output: { answer: "Paris is the capital of France." } };
       default:
-        throw new Error(`unexpected request: ${request.system}`);
+        throw new Error(`unexpected request: ${request.name}`);
     }
   };
   return { generateText, calls };

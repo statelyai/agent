@@ -127,7 +127,7 @@ Executors are injected, so the tests in [examples/context-compaction/index.test.
 - The first `respond` after compaction receives the summary as a system message.
 - `exit` settles `done` with `{ summary, messages, turns }`.
 
-> **Note: system prompts double as the executor's routing key.** A host executor sees the *rendered* request (`model`, `system`, `messages`/`prompt`), not the request's name or raw input. A mock (or a router picking providers per request) can only tell `respond` from `summarize` by inspecting those fields, usually `system`. Keep each request's system prompt distinguishable: an early draft of this example used the phrase "running summary" in both prompts, and the mock routed `respond` calls to the summarize branch, failing output validation.
+> **Note: route on `request.name`.** Every lowered request carries its `setupAgent({ requests })` key as `name`, so a mock (or a router picking providers per request) tells `respond` from `summarize` with `request.name === 'summarize'` (see the tests above). Do not sniff `system`/`prompt` text for routing.
 
 ## Extending
 

@@ -255,6 +255,8 @@ describe("setupAgent", () => {
     expect(agent.requests.draftEmail.mode).toBe("generate");
     expect(agent.requests.draftEmail.request({ prompt: "Draft it." })).toEqual(
       expect.objectContaining({
+        // Request key stamped as the name — hosts/mocks route on it.
+        name: "draftEmail",
         model: "test-model",
         prompt: "Draft it.",
       }),
@@ -274,6 +276,7 @@ describe("setupAgent", () => {
         { prompt: "Draft it." },
         {
           generateText: async (request) => {
+            expect(request.name).toBe("draftEmail");
             expect(request.prompt).toBe("Draft it.");
             return { output: { body: "Standalone body." } };
           },

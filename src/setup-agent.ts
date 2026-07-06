@@ -539,6 +539,9 @@ export function createRequestActors<
     Object.entries(requests).map(([key, request]) => {
       const logic = createTextLogic({
         ...request,
+        // The request's key is its name — stamped onto every lowered
+        // AgentTextRequest so hosts/mocks can route without sniffing prompts.
+        name: key,
         mode: request.mode ?? "generate",
       } as TextLogicConfig<StandardSchemaV1, StandardSchemaV1>);
 
