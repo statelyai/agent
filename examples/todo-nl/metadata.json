@@ -1,0 +1,14 @@
+{
+  "name": "todo-nl",
+  "title": "Natural-Language Todo Manager",
+  "kind": "agent-workflow",
+  "origin": {
+    "type": "stately-agent",
+    "source": "Ported in spirit from v1 todo.ts (next branch)",
+    "url": null
+  },
+  "comparison": {
+    "targets": ["LangGraph", "Burr"],
+    "purpose": "The model maps free-text commands onto a real app's machine events (ADD/TOGGLE/DELETE/NOTHING/QUIT), with an explicit doNothing escape hatch and guard-enforced honesty on nonexistent ids. Ships a with/without-machine A/B pair (index.ts vs imperative.ts) so the machine's typed events, guard rejection+retry, and resumable snapshot can be compared against a raw generateObject loop."
+  }
+}

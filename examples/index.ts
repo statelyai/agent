@@ -97,3 +97,20 @@ export {
   workflowConfig as jsonAgentWorkflowConfig,
 } from "./json-agent/index.js";
 export { createFanOutMachine, runFanOutExample } from "./fan-out/index.js";
+export {
+  describeMachine,
+  riverCrossingMachine,
+  riverCrossingSchemas,
+  runRiverCrossingExample,
+} from "./river-crossing/index.js";
+export { todoMachine, todoSchemas, main as runTodoNlExample } from "./todo-nl/index.js";
+export {
+  contextCompactionMachine,
+  contextCompactionSchemas,
+  main as runContextCompactionExample,
+} from "./context-compaction/index.js";
+export {
+  guardrailsMachine,
+  guardrailsSchemas,
+  main as runGuardrailsExample,
+} from "./guardrails/index.js";

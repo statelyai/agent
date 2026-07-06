@@ -1,0 +1,14 @@
+{
+  "name": "river-crossing",
+  "title": "River Crossing",
+  "kind": "agent-workflow",
+  "origin": {
+    "type": "stately-agent",
+    "source": "Ported in spirit from the v1 examples (river-crossing.ts on the next branch)",
+    "url": null
+  },
+  "comparison": {
+    "targets": ["LangGraph", "Burr"],
+    "purpose": "Shows the machine as a ground-truth environment for constraint solving: the model only proposes moves, guards enforce legality (illegal choices are rejected-by-guard and retried), and a describeMachine helper renders the machine's rules/states/events into the decide context."
+  }
+}

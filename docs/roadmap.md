@@ -29,6 +29,10 @@ Everything here is **additive**: none of it blocks the alpha, and all of it bene
 - **Host-loop signposting doc.** Three ways to drive a machine (`runAgent`, `createActor` + `waitFor`, the step loop) need a "pick by host type" guide.
 - **Framework migration recipes.** Parity trackers exist for selected frameworks; codemods only if demand shows.
 
+## Next up
+
+- **`agent.plan` + plan executor.** `decide` stays one event; `plan` returns `{ rationale, steps: [{ event, expect? }] }` (empty steps = "no action needed"). Proposed plans are validated by simulating the event path against the machine before execution; at runtime each step's actual snapshot is diffed against the simulated one, and divergence triggers a replan from the actual state under a budget. Plan executor ships as a documented pattern first (see `examples/todo-nl`, whose `applying` ceremony motivates this), then promotes to core. Full design notes: `.scratch/agent-plan.md`. Related: promoting `examples/river-crossing`'s `describeMachine` prototype to core, and a graph-search "solver mode" for pure machines via `xstate/graph`.
+
 ## Ideas (no commitment)
 
-See the ideas parked in the repo: trajectory/experience memory over the step envelope, and graph-based planning to goal states (plans as legal event paths). Both extend the decision primitive; neither is scheduled.
+See the ideas parked in the repo: trajectory/experience memory over the step envelope (the world-model/ledger architecture covers this as a separate future project; keep the step envelope's per-step prediction/actual data intact so it can feed a ledger later).
