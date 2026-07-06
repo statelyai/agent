@@ -38,7 +38,6 @@ jobs:
         run: pnpm format:check
       - name: knip
         run: pnpm knip
-        continue-on-error: true # advisory until dead-code baseline is triaged
       - name: test
         run: pnpm test:ci
       - name: build

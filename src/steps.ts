@@ -8,7 +8,7 @@ import {
   type EventObject,
   type SnapshotFrom,
 } from "xstate";
-import type { AgentTools, StandardSchemaV1 } from "./types.js";
+import type { AgentTools } from "./types.js";
 import { validateSchemaSync } from "./utils.js";
 import {
   executeAgentTextRequest,

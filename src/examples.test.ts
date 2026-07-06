@@ -27,7 +27,7 @@ describe("curated XState setup examples", () => {
     const sent: unknown[] = [];
     const machine = emailDrafter.provide({
       actorSources: {
-        evaluatePrompt: evaluatePrompt.withExecutor(async ({ input, request }) => {
+        evaluatePrompt: evaluatePrompt.withExecutor(async ({ request }) => {
           calls.push(request);
           const satisfied = calls.filter((call) => call.system?.includes("Evaluate")).length > 1;
           return {

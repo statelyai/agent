@@ -31,13 +31,12 @@ import {
   type TextLogicOutput,
 } from "../../src/index.js";
 import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
-import { jokeActors, jokeMachine, models as jokeModels, tellJoke } from "../joke/index.js";
+import { jokeMachine, models as jokeModels, tellJoke } from "../joke/index.js";
 import {
   models as triageModels,
   triageActors,
   triageMachine,
   triageSchemas,
-  triageTicket,
 } from "../triage/index.js";
 
 // ─── Host Adapter: AI SDK execution ───

@@ -19,13 +19,7 @@ import {
   type LanguageModel,
 } from "ai";
 import { z } from "zod";
-import {
-  setupAgent,
-  type AgentTool,
-  type AgentToolExecute,
-  type TextLogic,
-  runAgent,
-} from "../../src/index.js";
+import { setupAgent, type AgentTool, type AgentToolExecute, runAgent } from "../../src/index.js";
 import { toAiSdkTools } from "../../src/ai-sdk/index.js";
 
 const answerSchema = z.object({ answer: z.string() });
@@ -33,7 +27,6 @@ const taskInputSchema = z.object({ task: z.string() });
 
 type SubAgentName = "researcher" | "writer";
 type SubAgents = Record<SubAgentName, Agent>;
-type SuperviseLogic = TextLogic<typeof taskInputSchema, typeof answerSchema>;
 
 export const models: Record<"supervisor", LanguageModel> = {
   supervisor: openai("gpt-5.4-mini"),
@@ -135,7 +128,7 @@ function createAiSdkSubAgentWorkflow(subAgents: SubAgents) {
 
 export async function runAiSdkSubAgentsDemo(task: string) {
   const model = models.supervisor;
-  const { agent, machine } = createAiSdkSubAgentWorkflow(createAiSdkSubAgents(model));
+  const { machine } = createAiSdkSubAgentWorkflow(createAiSdkSubAgents(model));
 
   const result = await runAgent(machine, {
     input: { task },

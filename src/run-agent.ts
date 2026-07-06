@@ -500,7 +500,7 @@ function createRunAgentDecisionLogic(
       if (!runCtx.decide) {
         throw new Error("runAgent: no 'decide' executor provided.");
       }
-      const { id, src } = selfIdAndSrc(self);
+      const { id } = selfIdAndSrc(self);
 
       // Rebuild the candidate events from the live snapshot (mirrors the
       // STEP path's getAgentRequests, §2.7): `undefined` declared

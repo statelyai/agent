@@ -204,11 +204,6 @@ function evaluateWorkflowConfigValue(value: unknown, scope: ExpressionScope): un
   return value;
 }
 
-// Type guard for a plain (non-array) JSON object.
-function isJsonObject(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
 /**
  * Serializable JSON/YAML machine definition — the config a database, visual
  * editor, or LLM could produce and hand to `setupAgent.fromConfig(config, {

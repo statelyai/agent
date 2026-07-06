@@ -37,7 +37,7 @@ export function sanitizeEventToolName(eventType: string): `${typeof EVENT_TOOL_P
 }
 
 // Resolves a tool-name collision by appending a hash suffix, so two distinct event types never share a tool name.
-export function disambiguateEventToolName(
+function disambiguateEventToolName(
   toolName: string,
   eventType: string,
   usedToolNames: Set<string>,
@@ -115,13 +115,13 @@ export function getAcceptedEvents(
       ? options.eventToolName({ eventType, defaultToolName })
       : disambiguateEventToolName(defaultToolName, eventType, usedToolNames);
 
+    const inputSchema = (options.events ?? options.schemas?.events)?.[eventType];
+
     return [
       {
         type: eventType,
         toolName,
-        ...((options.events ?? options.schemas?.events)?.[eventType]
-          ? { inputSchema: (options.events ?? options.schemas?.events)![eventType] }
-          : {}),
+        ...(inputSchema ? { inputSchema } : {}),
       },
     ];
   });

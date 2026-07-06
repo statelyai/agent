@@ -39,6 +39,7 @@ export type {
   AgentTextRequest,
   AgentRequestExecutor,
   AgentRequestExecutorInfo,
+  AgentRequestExecutorResult,
   AgentRequestExecutors,
   AgentRequestMode,
   AgentOutputMode,
@@ -74,7 +75,7 @@ export type {
   FromConfigOptions,
   SchemaCompiler,
 } from "./workflow-config.js";
-export type { AgentSchemaPack } from "./setup-agent.js";
+export type { AgentRequestConfig, AgentSchemaPack } from "./setup-agent.js";
 export type {
   DecisionAttempt,
   DecisionLogic,

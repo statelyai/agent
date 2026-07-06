@@ -43,23 +43,6 @@ export interface AgentDecisionInput<
   metadata?: TMetadata;
 }
 
-const agentDecisionInputSchema: StandardSchemaV1<AgentDecisionInput> = {
-  "~standard": {
-    version: 1,
-    vendor: "statelyai-agent",
-    validate(value: unknown) {
-      const ok =
-        !!value &&
-        typeof value === "object" &&
-        typeof (value as AgentDecisionInput).model === "string";
-
-      return ok
-        ? { value: value as AgentDecisionInput }
-        : { issues: [{ message: "Expected agent decision input with a model" }] };
-    },
-  },
-};
-
 // Lowers `agent.decide` inline input into an AgentDecisionRequest (id filled in by the caller).
 function decideRequestFromInput(input: AgentDecisionInput): AgentDecisionRequest {
   const allowedEventTypes = resolveAllowedEventTypes(input.allowedEvents, input) ?? [];

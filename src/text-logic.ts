@@ -567,7 +567,7 @@ export async function executeAgentTextRequest(
   const request = {
     ...input,
     tools: {
-      ...(input.tools ?? {}),
+      ...input.tools,
       ...tools,
     },
   };

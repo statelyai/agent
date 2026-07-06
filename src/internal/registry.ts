@@ -36,7 +36,7 @@ export function getRegisteredAgentExecutionOptions(
   options?: Partial<AgentExecutionOptions>,
 ): AgentExecutionOptions {
   return {
-    ...(agentExecutionOptions.get(machine as object) ?? {}),
+    ...agentExecutionOptions.get(machine as object),
     ...options,
   };
 }

@@ -63,8 +63,6 @@ type EventsOf<TEventSchemas extends Record<string, StandardSchemaV1>> = Constrai
   EventUnion<TEventSchemas>,
   EventObject
 >;
-// A meta schema's validated output type, constrained to MetaObject.
-type MetaOf<TMetaSchema extends StandardSchemaV1> = Constrain<InferOutput<TMetaSchema>, MetaObject>;
 // Identity mapping over an actor map, preserving each entry's AsyncActorLogic input/output types.
 type SetupActors<TActors extends { [K in keyof TActors]: AnyActorLogic }> = {
   [K in keyof TActors]: TActors[K] extends AsyncActorLogic<infer TOutput, infer TInput>
