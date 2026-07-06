@@ -6,8 +6,8 @@
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/ai-sdk-sub-agents/index.ts
  */
-import assert from 'node:assert/strict';
-import { openai } from '@ai-sdk/openai';
+import assert from "node:assert/strict";
+import { openai } from "@ai-sdk/openai";
 import {
   generateText,
   type GenerateTextResult,
@@ -17,49 +17,46 @@ import {
   ToolLoopAgent,
   type Agent,
   type LanguageModel,
-} from 'ai';
-import { z } from 'zod';
+} from "ai";
+import { z } from "zod";
 import {
   setupAgent,
   type AgentTool,
   type AgentToolExecute,
   type TextLogic,
   runAgent,
-} from '../../src/index.js';
-import { toAiSdkTools } from '../../src/ai-sdk/index.js';
+} from "../../src/index.js";
+import { toAiSdkTools } from "../../src/ai-sdk/index.js";
 
 const answerSchema = z.object({ answer: z.string() });
 const taskInputSchema = z.object({ task: z.string() });
 
-type SubAgentName = 'researcher' | 'writer';
+type SubAgentName = "researcher" | "writer";
 type SubAgents = Record<SubAgentName, Agent>;
 type SuperviseLogic = TextLogic<typeof taskInputSchema, typeof answerSchema>;
 
-export const models: Record<'supervisor', LanguageModel> = {
-  supervisor: openai('gpt-5.4-mini'),
+export const models: Record<"supervisor", LanguageModel> = {
+  supervisor: openai("gpt-5.4-mini"),
 } as const;
 
 export function createAiSdkSubAgents(model: LanguageModel): SubAgents {
   return {
     researcher: new ToolLoopAgent({
-      id: 'researcher',
+      id: "researcher",
       model,
-      instructions: 'Research the topic. Return concise notes.',
+      instructions: "Research the topic. Return concise notes.",
       stopWhen: stepCountIs(3),
     }),
     writer: new ToolLoopAgent({
-      id: 'writer',
+      id: "writer",
       model,
-      instructions: 'Turn notes into a short final answer.',
+      instructions: "Turn notes into a short final answer.",
       stopWhen: stepCountIs(3),
     }),
   };
 }
 
-function createSubAgentExecute(
-  subAgents: SubAgents,
-  name: SubAgentName,
-): AgentToolExecute {
+function createSubAgentExecute(subAgents: SubAgents, name: SubAgentName): AgentToolExecute {
   return async (input) => {
     const prompt = z.object({ prompt: z.string() }).parse(input).prompt;
     const result = await subAgents[name].generate({ prompt });
@@ -68,12 +65,10 @@ function createSubAgentExecute(
 }
 
 function executeTool(tool: AgentTool | undefined, input: unknown) {
-  return typeof tool === 'function' ? tool(input) : tool?.execute?.(input);
+  return typeof tool === "function" ? tool(input) : tool?.execute?.(input);
 }
 
-function createAiSdkSubAgentWorkflow(
-  subAgents: SubAgents,
-) {
+function createAiSdkSubAgentWorkflow(subAgents: SubAgents) {
   const agent = setupAgent({
     models,
     context: z.object({
@@ -88,22 +83,22 @@ function createAiSdkSubAgentWorkflow(
           input: taskInputSchema,
           output: answerSchema,
         },
-        model: 'supervisor',
+        model: "supervisor",
         system: [
-          'You are a supervisor.',
-          'Use askResearcher for facts and askWriter for the final wording.',
-        ].join(' '),
+          "You are a supervisor.",
+          "Use askResearcher for facts and askWriter for the final wording.",
+        ].join(" "),
         prompt: ({ input }) => input.task,
         tools: {
           askResearcher: {
-            description: 'Ask the researcher sub-agent for notes.',
+            description: "Ask the researcher sub-agent for notes.",
             inputSchema: z.object({ prompt: z.string() }),
-            execute: createSubAgentExecute(subAgents, 'researcher'),
+            execute: createSubAgentExecute(subAgents, "researcher"),
           },
           askWriter: {
-            description: 'Ask the writer sub-agent for final wording.',
+            description: "Ask the writer sub-agent for final wording.",
             inputSchema: z.object({ prompt: z.string() }),
-            execute: createSubAgentExecute(subAgents, 'writer'),
+            execute: createSubAgentExecute(subAgents, "writer"),
           },
         },
       },
@@ -111,23 +106,23 @@ function createAiSdkSubAgentWorkflow(
   });
 
   const machine = agent.createMachine({
-    id: 'ai-sdk-sub-agents',
+    id: "ai-sdk-sub-agents",
     context: ({ input }) => ({ task: input.task, answer: null }),
-    initial: 'supervising',
+    initial: "supervising",
     states: {
       supervising: {
         invoke: {
-          src: 'supervise',
+          src: "supervise",
           input: ({ context }) => ({ task: context.task }),
           onDone: ({ output }) => ({
-            target: 'done',
+            target: "done",
             context: { answer: output.answer },
           }),
         },
       },
       done: {
-        type: 'final',
-        output: ({ context }) => ({ answer: context.answer ?? '' }),
+        type: "final",
+        output: ({ context }) => ({ answer: context.answer ?? "" }),
       },
     },
   });
@@ -140,9 +135,7 @@ function createAiSdkSubAgentWorkflow(
 
 export async function runAiSdkSubAgentsDemo(task: string) {
   const model = models.supervisor;
-  const { agent, machine } = createAiSdkSubAgentWorkflow(
-    createAiSdkSubAgents(model),
-  );
+  const { agent, machine } = createAiSdkSubAgentWorkflow(createAiSdkSubAgents(model));
 
   const result = await runAgent(machine, {
     input: { task },
@@ -150,7 +143,7 @@ export async function runAiSdkSubAgentsDemo(task: string) {
       const { output } = await generateText({
         model,
         system: request.system,
-        prompt: request.prompt ?? '',
+        prompt: request.prompt ?? "",
         tools: toAiSdkTools(request.tools ?? {}),
         output: Output.object({ schema: answerSchema }),
         stopWhen: stepCountIs(8),
@@ -158,7 +151,7 @@ export async function runAiSdkSubAgentsDemo(task: string) {
       return { output };
     },
   });
-  if (result.status !== 'done') {
+  if (result.status !== "done") {
     throw new Error(`Sub-agents demo did not complete: ${result.status}`);
   }
   return result.output;
@@ -168,8 +161,8 @@ export async function runAiSdkSubAgentsDeterministicExample() {
   const calls: string[] = [];
   const fakeSubAgents: SubAgents = {
     researcher: {
-      version: 'agent-v1',
-      id: 'researcher',
+      version: "agent-v1",
+      id: "researcher",
       tools: {},
       generate: async ({ prompt }) => {
         calls.push(`researcher:${prompt}`);
@@ -178,8 +171,8 @@ export async function runAiSdkSubAgentsDeterministicExample() {
       stream: async () => ({}) as StreamTextResult<{}, never>,
     },
     writer: {
-      version: 'agent-v1',
-      id: 'writer',
+      version: "agent-v1",
+      id: "writer",
       tools: {},
       generate: async ({ prompt }) => {
         calls.push(`writer:${prompt}`);
@@ -191,7 +184,7 @@ export async function runAiSdkSubAgentsDeterministicExample() {
   const { machine } = createAiSdkSubAgentWorkflow(fakeSubAgents);
 
   const result = await runAgent(machine, {
-    input: { task: 'compose agent note' },
+    input: { task: "compose agent note" },
     generateText: async (request) => {
       const notes = await executeTool(request.tools?.askResearcher, {
         prompt: request.prompt,
@@ -203,20 +196,17 @@ export async function runAiSdkSubAgentsDeterministicExample() {
     },
   });
 
-  assert.deepEqual(calls, [
-    'researcher:compose agent note',
-    'writer:notes:compose agent note',
-  ]);
-  assert.equal(result.status, 'done');
-  assert.deepEqual(result.status === 'done' ? result.output : undefined, {
-    answer: 'final:notes:compose agent note',
+  assert.deepEqual(calls, ["researcher:compose agent note", "writer:notes:compose agent note"]);
+  assert.equal(result.status, "done");
+  assert.deepEqual(result.status === "done" ? result.output : undefined, {
+    answer: "final:notes:compose agent note",
   });
 }
 
-if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   if (!process.env.OPENAI_API_KEY) {
-    console.error('Set OPENAI_API_KEY to run this example.');
+    console.error("Set OPENAI_API_KEY to run this example.");
     process.exit(1);
   }
-  console.log(await runAiSdkSubAgentsDemo('Explain composable agents.'));
+  console.log(await runAiSdkSubAgentsDemo("Explain composable agents."));
 }

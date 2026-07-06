@@ -1,7 +1,7 @@
-import { createAsyncLogic, type AnyActorLogic, type AsyncActorLogic } from 'xstate';
-import type { AgentRequestOptions } from '../events.js';
+import { createAsyncLogic, type AnyActorLogic, type AsyncActorLogic } from "xstate";
+import type { AgentRequestOptions } from "../events.js";
 
-export type AgentExecutionOptions = Pick<AgentRequestOptions, 'schemas' | 'actorSources'>;
+export type AgentExecutionOptions = Pick<AgentRequestOptions, "schemas" | "actorSources">;
 export const agentExecutionOptions = new WeakMap<object, AgentExecutionOptions>();
 
 // Actor logic objects that are unbound placeholders (no host execution) and
@@ -19,7 +19,7 @@ export function missingActor(src: string): AsyncActorLogic<unknown, unknown> {
     run: async () => {
       throw new Error(
         `'${src}' has no host execution. Provide an implementation with ` +
-          `machine.provide({ actorSources: { '${src}': ... } }).`
+          `machine.provide({ actorSources: { '${src}': ... } }).`,
       );
     },
   });
@@ -28,12 +28,12 @@ export function missingActor(src: string): AsyncActorLogic<unknown, unknown> {
 }
 
 export function isUnboundPlaceholder(logic: unknown): boolean {
-  return !!logic && typeof logic === 'object' && unboundPlaceholderLogics.has(logic as object);
+  return !!logic && typeof logic === "object" && unboundPlaceholderLogics.has(logic as object);
 }
 
 export function getRegisteredAgentExecutionOptions(
   machine: AnyActorLogic,
-  options?: Partial<AgentExecutionOptions>
+  options?: Partial<AgentExecutionOptions>,
 ): AgentExecutionOptions {
   return {
     ...(agentExecutionOptions.get(machine as object) ?? {}),

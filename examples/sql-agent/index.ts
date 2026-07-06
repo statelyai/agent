@@ -19,46 +19,39 @@
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/sql-agent/index.ts
  */
-import { z } from 'zod';
-import { openai } from '@ai-sdk/openai';
-import { type LanguageModel } from 'ai';
-import { createAsyncLogic, type AnyMachineSnapshot } from 'xstate';
-import {
-  getStateMeta,
-  runAgent,
-  setupAgent,
-  type RunAgentOptions,
-} from '../../src/index.js';
-import { createAiSdkExecutors } from '../../src/ai-sdk/index.js';
+import { z } from "zod";
+import { openai } from "@ai-sdk/openai";
+import { type LanguageModel } from "ai";
+import { createAsyncLogic, type AnyMachineSnapshot } from "xstate";
+import { getStateMeta, runAgent, setupAgent, type RunAgentOptions } from "../../src/index.js";
+import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
 
 // ─── In-memory sample table (the whole "database") ───
 type Order = { id: number; category: string; amount: number };
 
 export const orders: Order[] = [
-  { id: 1, category: 'books', amount: 12 },
-  { id: 2, category: 'books', amount: 30 },
-  { id: 3, category: 'electronics', amount: 250 },
-  { id: 4, category: 'electronics', amount: 90 },
-  { id: 5, category: 'toys', amount: 15 },
+  { id: 1, category: "books", amount: 12 },
+  { id: 2, category: "books", amount: 30 },
+  { id: 3, category: "electronics", amount: 250 },
+  { id: 4, category: "electronics", amount: 90 },
+  { id: 5, category: "toys", amount: 15 },
 ];
 
 const queryPlanSchema = z.object({
-  operation: z.enum(['count', 'sum', 'average']),
-  column: z.literal('amount'),
+  operation: z.enum(["count", "sum", "average"]),
+  column: z.literal("amount"),
   category: z.string().nullable(),
 });
 type QueryPlan = z.infer<typeof queryPlanSchema>;
 
 // The real, genuinely-executing query engine over the in-memory array.
 export function executeQuery(plan: QueryPlan, table: Order[] = orders): number {
-  const rows = plan.category
-    ? table.filter((row) => row.category === plan.category)
-    : table;
-  if (plan.operation === 'count') {
+  const rows = plan.category ? table.filter((row) => row.category === plan.category) : table;
+  if (plan.operation === "count") {
     return rows.length;
   }
   const total = rows.reduce((sum, row) => sum + row.amount, 0);
-  if (plan.operation === 'sum') {
+  if (plan.operation === "sum") {
     return total;
   }
   return rows.length ? total / rows.length : 0;
@@ -68,16 +61,16 @@ export function executeQuery(plan: QueryPlan, table: Order[] = orders): number {
 const metaSchema = z.object({
   interaction: z
     .object({
-      type: z.literal('select'),
+      type: z.literal("select"),
       label: z.string(),
       choices: z.array(z.object({ label: z.string(), eventType: z.string() })),
     })
     .optional(),
 });
 
-export const models: Record<'planner' | 'summarizer', LanguageModel> = {
-  planner: openai('gpt-5.4-mini'),
-  summarizer: openai('gpt-5.4-mini'),
+export const models: Record<"planner" | "summarizer", LanguageModel> = {
+  planner: openai("gpt-5.4-mini"),
+  summarizer: openai("gpt-5.4-mini"),
 } as const;
 
 const agent = setupAgent({
@@ -110,10 +103,10 @@ const agent = setupAgent({
         input: z.object({ question: z.string() }),
         output: queryPlanSchema,
       },
-      model: 'planner',
+      model: "planner",
       system:
-        'You translate a question into a query plan over an orders table with ' +
-        'columns (id, category, amount). Choose an operation (count/sum/average) ' +
+        "You translate a question into a query plan over an orders table with " +
+        "columns (id, category, amount). Choose an operation (count/sum/average) " +
         'over "amount", optionally filtered to one category (or null for all).',
       prompt: ({ input }) => input.question,
     },
@@ -126,8 +119,8 @@ const agent = setupAgent({
         }),
         output: z.string(),
       },
-      model: 'summarizer',
-      system: 'You explain a query result in one plain-English sentence.',
+      model: "summarizer",
+      system: "You explain a query result in one plain-English sentence.",
       prompt: ({ input }) =>
         `Question: ${input.question}\nPlan: ${JSON.stringify(input.plan)}\nResult: ${input.result}`,
     },
@@ -140,7 +133,7 @@ export const summarize = agent.requests.summarize;
 export const sqlAgentSchemas = agent.schemas;
 
 export const sqlAgentMachine = agent.createMachine({
-  id: 'sql-agent',
+  id: "sql-agent",
   context: ({ input }) => ({
     question: input.question,
     plan: null,
@@ -148,19 +141,19 @@ export const sqlAgentMachine = agent.createMachine({
     answer: null,
   }),
   output: ({ context }) => ({
-    plan: context.plan ?? { operation: 'count', column: 'amount', category: null },
+    plan: context.plan ?? { operation: "count", column: "amount", category: null },
     result: context.result ?? 0,
-    answer: context.answer ?? '',
+    answer: context.answer ?? "",
   }),
-  initial: 'planning',
+  initial: "planning",
   states: {
     planning: {
       invoke: {
-        id: 'planQuery',
-        src: 'planQuery',
+        id: "planQuery",
+        src: "planQuery",
         input: ({ context }) => ({ question: context.question }),
         onDone: ({ output }) => ({
-          target: 'awaitingApproval',
+          target: "awaitingApproval",
           context: { plan: output },
         }),
       },
@@ -170,49 +163,49 @@ export const sqlAgentMachine = agent.createMachine({
     awaitingApproval: {
       meta: {
         interaction: {
-          type: 'select',
-          label: 'Run this query against the orders table?',
+          type: "select",
+          label: "Run this query against the orders table?",
           choices: [
-            { label: 'Approve', eventType: 'APPROVE' },
-            { label: 'Reject', eventType: 'REJECT' },
+            { label: "Approve", eventType: "APPROVE" },
+            { label: "Reject", eventType: "REJECT" },
           ],
         },
       },
       on: {
-        APPROVE: { target: 'executing' },
+        APPROVE: { target: "executing" },
         REJECT: {
-          target: 'rejected',
-          context: { answer: 'Query rejected by the reviewer.' },
+          target: "rejected",
+          context: { answer: "Query rejected by the reviewer." },
         },
       },
     },
     executing: {
       invoke: {
-        id: 'runQuery',
-        src: 'runQuery',
+        id: "runQuery",
+        src: "runQuery",
         input: ({ context }) => ({
-          plan: context.plan ?? { operation: 'count', column: 'amount', category: null },
+          plan: context.plan ?? { operation: "count", column: "amount", category: null },
         }),
         onDone: ({ output }) => ({
-          target: 'summarizing',
+          target: "summarizing",
           context: { result: output },
         }),
       },
     },
     summarizing: {
       invoke: {
-        id: 'summarize',
-        src: 'summarize',
+        id: "summarize",
+        src: "summarize",
         input: ({ context }) => ({
           question: context.question,
-          plan: context.plan ?? { operation: 'count', column: 'amount', category: null },
+          plan: context.plan ?? { operation: "count", column: "amount", category: null },
           result: context.result ?? 0,
         }),
-        onDone: ({ output }) => ({ target: 'done', context: { answer: output } }),
+        onDone: ({ output }) => ({ target: "done", context: { answer: output } }),
       },
     },
-    rejected: { type: 'final' },
-    done: { type: 'final' },
+    rejected: { type: "final" },
+    done: { type: "final" },
   },
 });
 
@@ -224,20 +217,18 @@ export function readInteraction(snapshot: AnyMachineSnapshot) {
 
 export async function runSqlAgentExample(
   options?: RunAgentOptions<typeof sqlAgentMachine> & {
-    approval?: 'APPROVE' | 'REJECT';
+    approval?: "APPROVE" | "REJECT";
   },
 ) {
-  const { approval = 'APPROVE', ...runOptions } = options ?? {};
+  const { approval = "APPROVE", ...runOptions } = options ?? {};
   const executors: RunAgentOptions<typeof sqlAgentMachine> =
-    Object.keys(runOptions).length > 0
-      ? runOptions
-      : { ...createAiSdkExecutors({ models }) };
+    Object.keys(runOptions).length > 0 ? runOptions : { ...createAiSdkExecutors({ models }) };
 
   const first = await runAgent(sqlAgentMachine, {
-    input: { question: 'What is the total amount spent on electronics?' },
+    input: { question: "What is the total amount spent on electronics?" },
     ...executors,
   });
-  if (first.status !== 'idle') {
+  if (first.status !== "idle") {
     throw new Error(`SQL agent did not settle idle for approval: ${first.status}`);
   }
   const interaction = readInteraction(first.snapshot as AnyMachineSnapshot);
@@ -247,16 +238,16 @@ export async function runSqlAgentExample(
     event: { type: approval },
     ...executors,
   });
-  if (second.status !== 'done') {
+  if (second.status !== "done") {
     throw new Error(`SQL agent did not complete: ${second.status}`);
   }
 
   return { interaction, output: second.output };
 }
 
-if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   if (!process.env.OPENAI_API_KEY) {
-    console.error('Set OPENAI_API_KEY to run this example.');
+    console.error("Set OPENAI_API_KEY to run this example.");
     process.exit(1);
   }
   const { interaction, output } = await runSqlAgentExample();

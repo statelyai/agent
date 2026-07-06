@@ -15,17 +15,17 @@
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/swarm-handoff/index.ts
  */
-import { z } from 'zod';
-import { openai } from '@ai-sdk/openai';
-import { type LanguageModel } from 'ai';
-import { runAgent, setupAgent, type RunAgentOptions } from '../../src/index.js';
-import { createAiSdkExecutors } from '../../src/ai-sdk/index.js';
+import { z } from "zod";
+import { openai } from "@ai-sdk/openai";
+import { type LanguageModel } from "ai";
+import { runAgent, setupAgent, type RunAgentOptions } from "../../src/index.js";
+import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
 
-const agentName = z.enum(['travel', 'food']);
+const agentName = z.enum(["travel", "food"]);
 
-export const models: Record<'travel' | 'food', LanguageModel> = {
-  travel: openai('gpt-5.4-mini'),
-  food: openai('gpt-5.4-mini'),
+export const models: Record<"travel" | "food", LanguageModel> = {
+  travel: openai("gpt-5.4-mini"),
+  food: openai("gpt-5.4-mini"),
 } as const;
 
 const agent = setupAgent({
@@ -50,8 +50,8 @@ const agent = setupAgent({
         input: z.object({ message: z.string() }),
         output: z.string(),
       },
-      model: 'travel',
-      system: 'You are a travel concierge. Help with destinations, flights, and itineraries.',
+      model: "travel",
+      system: "You are a travel concierge. Help with destinations, flights, and itineraries.",
       prompt: ({ input }) => input.message,
     },
     foodReply: {
@@ -59,8 +59,8 @@ const agent = setupAgent({
         input: z.object({ message: z.string() }),
         output: z.string(),
       },
-      model: 'food',
-      system: 'You are a food concierge. Help with restaurants, dishes, and dietary needs.',
+      model: "food",
+      system: "You are a food concierge. Help with restaurants, dishes, and dietary needs.",
       prompt: ({ input }) => input.message,
     },
   },
@@ -69,40 +69,38 @@ const agent = setupAgent({
 export const swarmHandoffSchemas = agent.schemas;
 
 export const swarmHandoffMachine = agent.createMachine({
-  id: 'swarm-handoff',
+  id: "swarm-handoff",
   context: ({ input }) => ({
     message: input.message,
-    activeAgent: input.activeAgent ?? 'travel',
+    activeAgent: input.activeAgent ?? "travel",
     reply: null,
   }),
   output: ({ context }) => ({
     activeAgent: context.activeAgent,
-    reply: context.reply ?? '',
+    reply: context.reply ?? "",
   }),
-  initial: 'routing',
+  initial: "routing",
   states: {
     // Dispatch to whichever agent currently holds the mic.
     routing: {
-      type: 'choice',
+      type: "choice",
       choice: ({ context }) =>
-        context.activeAgent === 'food'
-          ? { target: 'foodTurn' }
-          : { target: 'travelTurn' },
+        context.activeAgent === "food" ? { target: "foodTurn" } : { target: "travelTurn" },
     },
     travelTurn: {
       invoke: {
-        id: 'travelReply',
-        src: 'travelReply',
+        id: "travelReply",
+        src: "travelReply",
         input: ({ context }) => ({ message: context.message }),
-        onDone: ({ output }) => ({ target: 'waiting', context: { reply: output } }),
+        onDone: ({ output }) => ({ target: "waiting", context: { reply: output } }),
       },
     },
     foodTurn: {
       invoke: {
-        id: 'foodReply',
-        src: 'foodReply',
+        id: "foodReply",
+        src: "foodReply",
         input: ({ context }) => ({ message: context.message }),
-        onDone: ({ output }) => ({ target: 'waiting', context: { reply: output } }),
+        onDone: ({ output }) => ({ target: "waiting", context: { reply: output } }),
       },
     },
     // No invoke: runAgent settles idle here. A HANDOFF switches the active
@@ -110,7 +108,7 @@ export const swarmHandoffMachine = agent.createMachine({
     waiting: {
       on: {
         HANDOFF: ({ event }) => ({
-          target: 'routing',
+          target: "routing",
           context: { activeAgent: event.to, message: event.message },
         }),
       },
@@ -125,13 +123,13 @@ export async function runSwarmHandoffExample(
 
   // Turn 1: the travel agent holds the mic and answers.
   const first = await runAgent(swarmHandoffMachine, {
-    input: { message: 'I want a 3-day trip to Lisbon.', activeAgent: 'travel' },
+    input: { message: "I want a 3-day trip to Lisbon.", activeAgent: "travel" },
     ...executors,
   });
-  if (first.status !== 'idle') {
+  if (first.status !== "idle") {
     throw new Error(`Swarm handoff did not settle idle after turn 1: ${first.status}`);
   }
-  const firstReply = first.snapshot.context.reply ?? '';
+  const firstReply = first.snapshot.context.reply ?? "";
 
   // Persist the snapshot (host's choice of store) — JSON round-trip it to
   // prove `activeAgent` survives a real persistence layer.
@@ -141,28 +139,28 @@ export async function runSwarmHandoffExample(
   const second = await runAgent(swarmHandoffMachine, {
     snapshot: persisted,
     event: {
-      type: 'HANDOFF',
-      to: 'food',
-      message: 'What are the must-try dishes there?',
+      type: "HANDOFF",
+      to: "food",
+      message: "What are the must-try dishes there?",
     },
     ...executors,
   });
-  if (second.status !== 'idle') {
+  if (second.status !== "idle") {
     throw new Error(`Swarm handoff did not settle idle after turn 2: ${second.status}`);
   }
 
   return {
-    travel: { activeAgent: 'travel' as const, reply: firstReply },
+    travel: { activeAgent: "travel" as const, reply: firstReply },
     food: {
       activeAgent: second.snapshot.context.activeAgent,
-      reply: second.snapshot.context.reply ?? '',
+      reply: second.snapshot.context.reply ?? "",
     },
   };
 }
 
-if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   if (!process.env.OPENAI_API_KEY) {
-    console.error('Set OPENAI_API_KEY to run this example.');
+    console.error("Set OPENAI_API_KEY to run this example.");
     process.exit(1);
   }
   const { travel, food } = await runSwarmHandoffExample();

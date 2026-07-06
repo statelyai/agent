@@ -8,17 +8,17 @@ import {
   type LanguageModel,
   type ModelMessage,
   type Tool,
-} from 'ai';
+} from "ai";
 import {
   getAgentOutputMode,
   type AgentRequestExecutor,
   type AgentRequestExecutorInfo,
   type AgentRequestExecutors,
   type AgentTextRequest,
-} from '../text-logic.js';
-import type { AgentDecisionExecutor, AgentDecisionRequest, DecisionAttempt } from '../decision.js';
-import type { AgentEventDescriptor } from '../events.js';
-import type { AgentTools, ChosenEvent, StandardSchemaV1 } from '../types.js';
+} from "../text-logic.js";
+import type { AgentDecisionExecutor, AgentDecisionRequest, DecisionAttempt } from "../decision.js";
+import type { AgentEventDescriptor } from "../events.js";
+import type { AgentTools, ChosenEvent, StandardSchemaV1 } from "../types.js";
 
 /**
  * Maps an {@link AgentTools} map onto AI SDK `tool()` definitions — a bare
@@ -36,29 +36,33 @@ export function toAiSdkTools(tools: AgentTools) {
       continue;
     }
 
-    if (typeof descriptor === 'function') {
-      entries.push([name, tool({
-        inputSchema: unknownSchema,
-        execute: (input) => descriptor(input),
-      })]);
+    if (typeof descriptor === "function") {
+      entries.push([
+        name,
+        tool({
+          inputSchema: unknownSchema,
+          execute: (input) => descriptor(input),
+        }),
+      ]);
       continue;
     }
 
     const inputSchema =
-      descriptor.inputSchema
-      ?? (descriptor.schemas as { input?: StandardSchemaV1 } | undefined)?.input;
+      descriptor.inputSchema ??
+      (descriptor.schemas as { input?: StandardSchemaV1 } | undefined)?.input;
     const toolOptions = {
       description: descriptor.description,
-      inputSchema: inputSchema
-        ? inputSchema as FlexibleSchema<unknown>
-        : unknownSchema,
+      inputSchema: inputSchema ? (inputSchema as FlexibleSchema<unknown>) : unknownSchema,
     };
 
     if (descriptor.execute) {
-      entries.push([name, tool({
-        ...toolOptions,
-        execute: (input) => descriptor.execute?.(input),
-      })]);
+      entries.push([
+        name,
+        tool({
+          ...toolOptions,
+          execute: (input) => descriptor.execute?.(input),
+        }),
+      ]);
       continue;
     }
 
@@ -70,9 +74,9 @@ export function toAiSdkTools(tools: AgentTools) {
 
 // Permissive fallback StandardSchemaV1/FlexibleSchema used for tools/events with no declared input schema.
 const unknownSchema = {
-  '~standard': {
+  "~standard": {
     version: 1,
-    vendor: 'statelyai-agent',
+    vendor: "statelyai-agent",
     validate: (value: unknown) => ({ value }),
     jsonSchema: {
       input: () => ({}),
@@ -91,9 +95,7 @@ export type AiSdkModelMap = Record<string, LanguageModel>;
  * dynamically, e.g. `"openai/gpt-5.4-mini"` → `openai('gpt-5.4-mini')`), or
  * both — `resolveModel` takes precedence when both are supplied.
  */
-export type CreateAiSdkExecutorsOptions<
-  TModels extends AiSdkModelMap = AiSdkModelMap,
-> =
+export type CreateAiSdkExecutorsOptions<TModels extends AiSdkModelMap = AiSdkModelMap> =
   | {
       models: TModels;
       resolveModel?: (modelRef: keyof TModels & string) => LanguageModel;
@@ -106,7 +108,7 @@ export type CreateAiSdkExecutorsOptions<
 // Resolves a text/decision request's `model` ref to an AI SDK LanguageModel via `resolveModel` (if given) or a `models` lookup.
 function resolveAiSdkModel<TModels extends AiSdkModelMap>(
   options: CreateAiSdkExecutorsOptions<TModels>,
-  modelRef: string
+  modelRef: string,
 ): LanguageModel {
   if (options.resolveModel) {
     return options.resolveModel(modelRef as keyof TModels & string);
@@ -114,9 +116,7 @@ function resolveAiSdkModel<TModels extends AiSdkModelMap>(
 
   const models = options.models;
   if (!models) {
-    throw new Error(
-      `createAiSdkExecutors: no model resolver configured for '${modelRef}'.`
-    );
+    throw new Error(`createAiSdkExecutors: no model resolver configured for '${modelRef}'.`);
   }
 
   const model = models[modelRef as keyof TModels & string];
@@ -132,13 +132,11 @@ function resolveAiSdkModel<TModels extends AiSdkModelMap>(
  * are structurally compatible by design (§1 of docs/p0-design.md) — the cast
  * below is a typed identity mapping, not a semantic conversion.
  */
-export function toAiSdkCallSettings(
-  request: AgentTextRequest & { tools?: AgentTools }
-) {
+export function toAiSdkCallSettings(request: AgentTextRequest & { tools?: AgentTools }) {
   const messages = request.messages as ModelMessage[] | undefined;
   return {
     system: request.system,
-    ...(messages ? { messages } : { prompt: request.prompt ?? '' }),
+    ...(messages ? { messages } : { prompt: request.prompt ?? "" }),
     temperature: request.temperature,
     maxOutputTokens: request.maxTokens,
     topP: request.topP,
@@ -151,17 +149,17 @@ export function toAiSdkCallSettings(
 }
 
 /** Maps an {@link AgentToolChoice} to AI SDK's tool-choice shape — `{ type: 'tool'; name }` becomes `{ type: 'tool'; toolName }`; `'auto'`/`'none'`/`'required'`/`undefined` pass through unchanged. */
-export function toAiSdkToolChoice(toolChoice: AgentTextRequest['toolChoice']) {
-  return typeof toolChoice === 'object'
-    ? { type: 'tool' as const, toolName: toolChoice.name }
+export function toAiSdkToolChoice(toolChoice: AgentTextRequest["toolChoice"]) {
+  return typeof toolChoice === "object"
+    ? { type: "tool" as const, toolName: toolChoice.name }
     : toolChoice;
 }
 
 /** `true` when the request should use AI SDK structured `Output.object`. */
 export function isStructuredOutputRequest(
-  request: Pick<AgentTextRequest, 'outputSchema'>
+  request: Pick<AgentTextRequest, "outputSchema">,
 ): boolean {
-  return getAgentOutputMode(request.outputSchema) === 'structured';
+  return getAgentOutputMode(request.outputSchema) === "structured";
 }
 
 /** Raw result shape from {@link AiSdkExecutors.generateText} — the `{ output }` envelope: the validated structured object for structured-output requests, or the accumulated text string otherwise. Unwrapped by {@link normalizeGeneratorResult}. */
@@ -172,8 +170,10 @@ export type AiSdkStreamResult = { output: string };
 /** `createAiSdkExecutors` always populates all three slots (unlike the
  * general `AgentRequestExecutors`, where `streamText`/`decide` are optional),
  * and its `generateText`/`streamText` results are concretely typed. */
-export interface AiSdkExecutors
-  extends AgentRequestExecutors<AiSdkGenerateResult, AiSdkStreamResult> {
+export interface AiSdkExecutors extends AgentRequestExecutors<
+  AiSdkGenerateResult,
+  AiSdkStreamResult
+> {
   streamText: AgentRequestExecutor<AiSdkStreamResult>;
   decide: AgentDecisionExecutor;
 }
@@ -193,11 +193,11 @@ export interface AiSdkExecutors
  * ```
  */
 export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
-  options: CreateAiSdkExecutorsOptions<TModels>
+  options: CreateAiSdkExecutorsOptions<TModels>,
 ): AiSdkExecutors {
   const generateText = async (
     request: AgentTextRequest & { tools: AgentTools },
-    info?: AgentRequestExecutorInfo
+    info?: AgentRequestExecutorInfo,
   ) => {
     const model = resolveAiSdkModel(options, request.model);
     const common = {
@@ -207,7 +207,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
       // Multi-step tool loops: `metadata` is the host-owned per-call channel
       // (see AgentTextRequest.metadata). `metadata.maxSteps` bounds the AI
       // SDK tool-call loop for this request; default stays single-step.
-      ...(typeof request.metadata?.maxSteps === 'number'
+      ...(typeof request.metadata?.maxSteps === "number"
         ? { stopWhen: stepCountIs(request.metadata.maxSteps) }
         : {}),
     };
@@ -228,7 +228,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
 
   const streamText = async (
     request: AgentTextRequest & { tools: AgentTools },
-    info?: AgentRequestExecutorInfo
+    info?: AgentRequestExecutorInfo,
   ) => {
     const model = resolveAiSdkModel(options, request.model);
     const result = aiStreamText({
@@ -252,9 +252,9 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
     const result = await aiGenerateText({
       model,
       system: request.system,
-      ...(messages ? { messages } : { prompt: request.prompt ?? '' }),
+      ...(messages ? { messages } : { prompt: request.prompt ?? "" }),
       tools,
-      toolChoice: 'required',
+      toolChoice: "required",
       stopWhen: stepCountIs(1),
       temperature: request.temperature,
       maxOutputTokens: request.maxTokens,
@@ -266,18 +266,18 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
 
     const toolCall = result.toolCalls[0];
     if (!toolCall) {
-      throw new Error('createAiSdkExecutors: decide — model did not call an event tool.');
+      throw new Error("createAiSdkExecutors: decide — model did not call an event tool.");
     }
     const chosenEvent = request.events.find((event) => event.toolName === toolCall.toolName);
     if (!chosenEvent) {
       throw new Error(
-        `createAiSdkExecutors: decide — model called unknown tool '${toolCall.toolName}'.`
+        `createAiSdkExecutors: decide — model called unknown tool '${toolCall.toolName}'.`,
       );
     }
 
     return {
       event: {
-        ...(toolCall.input && typeof toolCall.input === 'object' ? toolCall.input : {}),
+        ...(toolCall.input && typeof toolCall.input === "object" ? toolCall.input : {}),
         type: chosenEvent.type,
       } as ChosenEvent,
     };
@@ -295,10 +295,10 @@ export function toAiSdkEventTools(events: AgentEventDescriptor[]) {
       tool({
         description: `Choose the '${event.type}' move.`,
         inputSchema: event.inputSchema
-          ? event.inputSchema as FlexibleSchema<unknown>
+          ? (event.inputSchema as FlexibleSchema<unknown>)
           : unknownSchema,
       }),
-    ])
+    ]),
   );
 }
 
@@ -308,7 +308,7 @@ export function toAiSdkEventTools(events: AgentEventDescriptor[]) {
  * rewrites prompts — this is adapter business.
  */
 export function toDecisionMessages(
-  request: Pick<AgentDecisionRequest, 'messages' | 'prompt' | 'events' | 'attempts'>
+  request: Pick<AgentDecisionRequest, "messages" | "prompt" | "events" | "attempts">,
 ): ModelMessage[] | undefined {
   if (!request.messages && request.attempts.length === 0) {
     return undefined;
@@ -317,14 +317,12 @@ export function toDecisionMessages(
   // A prompt-authored decision that is retrying must not lose its original
   // prompt when the request is lowered to messages for attempt feedback.
   const messages: ModelMessage[] = [
-    ...(request.messages as ModelMessage[] | undefined
-      ?? (request.prompt !== undefined
-        ? [{ role: 'user' as const, content: request.prompt }]
-        : [])),
+    ...((request.messages as ModelMessage[] | undefined) ??
+      (request.prompt !== undefined ? [{ role: "user" as const, content: request.prompt }] : [])),
   ];
   for (const attempt of request.attempts) {
     messages.push({
-      role: 'user',
+      role: "user",
       content: attemptFeedback(attempt, request.events),
     });
   }
@@ -333,6 +331,6 @@ export function toDecisionMessages(
 
 // Renders one failed DecisionAttempt into a user-facing retry-feedback string naming the failure and the remaining candidate events.
 function attemptFeedback(attempt: DecisionAttempt, events: AgentEventDescriptor[]): string {
-  const types = events.map((event) => event.type).join(', ') || '(none)';
+  const types = events.map((event) => event.type).join(", ") || "(none)";
   return `Your previous choice failed: ${attempt.reason}. Choose again from: ${types}`;
 }

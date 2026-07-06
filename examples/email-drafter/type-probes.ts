@@ -7,12 +7,8 @@
  * `email-drafter/index.ts` so that file reads as a clean example. Typechecked
  * via `examples/tsconfig.json` (`include: ["."]`).
  */
-import { assistantMessage, setupAgent } from '../../src/index.js';
-import {
-  emailDrafterActors,
-  emailDrafterSchemas,
-  models,
-} from './index.js';
+import { assistantMessage, setupAgent } from "../../src/index.js";
+import { emailDrafterActors, emailDrafterSchemas, models } from "./index.js";
 
 // Rebuild the same agent the runnable machine uses. Rebuilt (not imported) so
 // index.ts need not export the agent — exporting its full inferred type trips
@@ -26,18 +22,18 @@ const agent = setupAgent({
 // meta is schema-typed, and event payloads are inferred per event type.
 agent.createMachine({
   context: {
-    prompt: '',
+    prompt: "",
     assessment: null,
     draft: null,
     sentEmails: [],
     messages: [],
   },
-  initial: 'probe',
+  initial: "probe",
   states: {
     probe: {
       meta: {
         // @ts-expect-error meta is schema-typed: 'banner' is not a valid interaction type
-        interaction: { type: 'banner' },
+        interaction: { type: "banner" },
       },
       on: {
         MORE_INFO: ({ event }) => ({
@@ -49,7 +45,7 @@ agent.createMachine({
       },
     },
     probeFinal: {
-      type: 'final',
+      type: "final",
       output: ({ context }) => ({ sentEmails: context.sentEmails }),
     },
   },
@@ -58,7 +54,7 @@ agent.createMachine({
 // Root-level `output` is natively typed by XState against the output schema.
 agent.createMachine({
   context: {
-    prompt: '',
+    prompt: "",
     assessment: null,
     draft: null,
     sentEmails: [],
@@ -66,10 +62,10 @@ agent.createMachine({
   },
   // @ts-expect-error machine output is { sentEmails: EmailDraft[] }
   output: () => ({ wrong: true }),
-  initial: 'probe',
+  initial: "probe",
   states: {
     probe: {
-      type: 'final',
+      type: "final",
       // @ts-expect-error top-level final state output is { sentEmails: EmailDraft[] }
       output: () => ({ wrong: true }),
     },
@@ -79,18 +75,18 @@ agent.createMachine({
 // Named text logic: onDone output is typed from the logic output schema.
 agent.createMachine({
   context: {
-    prompt: '',
+    prompt: "",
     assessment: null,
     draft: null,
     sentEmails: [],
     messages: [],
   },
-  initial: 'streaming',
+  initial: "streaming",
   states: {
     streaming: {
       invoke: {
-        id: 'streamDraft',
-        src: 'streamDraft',
+        id: "streamDraft",
+        src: "streamDraft",
         input: ({ context }) => ({ prompt: context.prompt }),
         onDone: ({ context, output }) => ({
           context: {

@@ -20,13 +20,13 @@
  * to embed, default https://viz.localhost), STATELY_INSPECT_NO_OPEN=1 to
  * skip auto-opening the browser.
  */
-import { z } from 'zod';
-import { createActor, createAsyncLogic, waitFor } from 'xstate';
-import { createWebSocketInspector } from '@statelyai/inspect';
-import { createInspectorServer } from '@statelyai/inspect/server';
-import { confirm, input as textInput, select } from '@inquirer/prompts';
-import { createAiSdkExecutors } from '../../src/ai-sdk/index.js';
-import { getStateMeta } from '../../src/index.js';
+import { z } from "zod";
+import { createActor, createAsyncLogic, waitFor } from "xstate";
+import { createWebSocketInspector } from "@statelyai/inspect";
+import { createInspectorServer } from "@statelyai/inspect/server";
+import { confirm, input as textInput, select } from "@inquirer/prompts";
+import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
+import { getStateMeta } from "../../src/index.js";
 import {
   draftEmail,
   emailDrafter,
@@ -35,13 +35,13 @@ import {
   models,
   type Interaction,
   type DrafterEvent,
-} from '../email-drafter/index.js';
+} from "../email-drafter/index.js";
 import {
   assessPromptFallback,
   draftEmailFallback,
   formatError,
   type EmailDraft,
-} from './fallback.js';
+} from "./fallback.js";
 
 // Bind implementations onto the machine's actor sources up front, so a plain
 // `createActor` can run it. Each text logic tries the AI SDK executor when a
@@ -57,9 +57,7 @@ export const inspectedEmailDrafter = emailDrafter.provide({
         try {
           return { output: await evaluatePrompt.execute(input, executors) };
         } catch (error) {
-          console.warn(
-            `AI assessment failed; using fallback. ${formatError(error)}`,
-          );
+          console.warn(`AI assessment failed; using fallback. ${formatError(error)}`);
         }
       }
       return { output: assessPromptFallback(input.prompt) };
@@ -69,9 +67,7 @@ export const inspectedEmailDrafter = emailDrafter.provide({
         try {
           return { output: await draftEmail.execute(input, executors) };
         } catch (error) {
-          console.warn(
-            `AI draft failed; using fallback. ${formatError(error)}`,
-          );
+          console.warn(`AI draft failed; using fallback. ${formatError(error)}`);
         }
       }
       return { output: draftEmailFallback(input.prompt) };
@@ -79,7 +75,7 @@ export const inspectedEmailDrafter = emailDrafter.provide({
     sendEmail: createAsyncLogic<{ sent: boolean }, { draft: EmailDraft }>({
       run: async ({ input }) => {
         void input.draft;
-        console.log('\nEmail sending...');
+        console.log("\nEmail sending...");
         await new Promise((resolve) => setTimeout(resolve, 1200));
         return { sent: true };
       },
@@ -88,28 +84,26 @@ export const inspectedEmailDrafter = emailDrafter.provide({
 });
 
 function printDraft(draft: EmailDraft) {
-  console.log('\n--- Draft ---');
+  console.log("\n--- Draft ---");
   console.log(`To: ${draft.to}`);
   console.log(`Subject: ${draft.subject}`);
-  console.log('');
+  console.log("");
   console.log(draft.body);
-  console.log('-------------\n');
+  console.log("-------------\n");
 }
 
 /** Render one `meta.interaction` with @inquirer/prompts (as the original CLI
  * did) and return the event the human chose. */
-async function promptInteraction(
-  interaction: Interaction,
-): Promise<DrafterEvent> {
+async function promptInteraction(interaction: Interaction): Promise<DrafterEvent> {
   switch (interaction.type) {
-    case 'text': {
+    case "text": {
       const value = await textInput({
         message: `${interaction.label}:`,
         required: true,
       });
       return { type: interaction.eventType, [interaction.field]: value };
     }
-    case 'confirm': {
+    case "confirm": {
       const yes = await confirm({
         message: interaction.label,
         default: interaction.default ?? false,
@@ -118,7 +112,7 @@ async function promptInteraction(
         type: yes ? interaction.trueEventType : interaction.falseEventType,
       };
     }
-    case 'select': {
+    case "select": {
       const choice = await select({
         message: `${interaction.label}:`,
         choices: interaction.choices.map((c) => ({ name: c.label, value: c })),
@@ -137,7 +131,7 @@ async function promptInteraction(
 
 export async function main() {
   const inspectPort = Number(process.env.STATELY_INSPECT_PORT ?? 8080);
-  const inspectUrl = process.env.STATELY_INSPECT_URL ?? 'https://viz.localhost';
+  const inspectUrl = process.env.STATELY_INSPECT_URL ?? "https://viz.localhost";
   const server = createInspectorServer({
     port: inspectPort,
     url: inspectUrl,
@@ -159,28 +153,26 @@ export async function main() {
       // event the human chose.
       const snapshot = await waitFor(
         actor,
-        (s) => s.status !== 'active' || getStateMeta(s).interaction != null,
+        (s) => s.status !== "active" || getStateMeta(s).interaction != null,
         { timeout: Infinity },
       );
-      if (snapshot.status !== 'active') {
+      if (snapshot.status !== "active") {
         break;
       }
 
-      const meta = getStateMeta<typeof snapshot, z.infer<typeof metaSchema>>(
-        snapshot,
-      );
+      const meta = getStateMeta<typeof snapshot, z.infer<typeof metaSchema>>(snapshot);
       if (!meta.interaction) {
         break;
       }
 
       // Mirror the original CLI's state-specific output: the assessment gaps
       // before the needsMoreInfo choice, the draft before review.
-      if (snapshot.matches('needsMoreInfo') && snapshot.context.assessment) {
+      if (snapshot.matches("needsMoreInfo") && snapshot.context.assessment) {
         const { missing, questions } = snapshot.context.assessment;
-        console.log(`Missing: ${missing.join(', ')}`);
+        console.log(`Missing: ${missing.join(", ")}`);
         for (const question of questions) console.log(`- ${question}`);
       }
-      if (snapshot.matches('reviewing') && snapshot.context.draft) {
+      if (snapshot.matches("reviewing") && snapshot.context.draft) {
         printDraft(snapshot.context.draft);
       }
       for (const line of meta.display ?? []) {
@@ -191,10 +183,10 @@ export async function main() {
       actor.send(event as never);
     }
 
-    if (actor.getSnapshot().status === 'done') {
-      console.log('Done.');
-    } else if (actor.getSnapshot().status === 'error') {
-      console.error('Run failed:', actor.getSnapshot().error);
+    if (actor.getSnapshot().status === "done") {
+      console.log("Done.");
+    } else if (actor.getSnapshot().status === "error") {
+      console.error("Run failed:", actor.getSnapshot().error);
     }
   } finally {
     actor.stop();
@@ -205,6 +197,6 @@ export async function main() {
   }
 }
 
-if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   void main();
 }

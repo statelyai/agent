@@ -20,12 +20,12 @@
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/openai-sdk-host/index.ts
  */
-import type OpenAI from 'openai';
+import type OpenAI from "openai";
 import type {
   ChatCompletionFunctionTool,
   ChatCompletionMessageParam,
   ChatCompletionToolChoiceOption,
-} from 'openai/resources/chat/completions/completions.js';
+} from "openai/resources/chat/completions/completions.js";
 import {
   getAgentOutputMode,
   runAgent,
@@ -39,9 +39,9 @@ import {
   type ChosenEvent,
   type DecisionAttempt,
   type StandardSchemaV1,
-} from '../../src/index.js';
-import { triageMachine } from '../triage/index.js';
-import { twentyQuestionsMachine } from '../twenty-questions/index.js';
+} from "../../src/index.js";
+import { triageMachine } from "../triage/index.js";
+import { twentyQuestionsMachine } from "../twenty-questions/index.js";
 
 // ─── Request → OpenAI param mapping (pure, unit-testable) ───
 
@@ -53,9 +53,9 @@ import { twentyQuestionsMachine } from '../twenty-questions/index.js';
  * `undefined` when the schema doesn't expose the extension at all.
  */
 export async function extractJsonSchema(
-  schema?: StandardSchemaV1
+  schema?: StandardSchemaV1,
 ): Promise<Record<string, unknown> | undefined> {
-  const jsonSchemaFn = schema?.['~standard'].jsonSchema?.input;
+  const jsonSchemaFn = schema?.["~standard"].jsonSchema?.input;
   if (!jsonSchemaFn) {
     return undefined;
   }
@@ -73,7 +73,7 @@ export async function extractJsonSchema(
  * across these examples (e.g. Zod's `z.toJSONSchema`) resolve synchronously.
  */
 function extractJsonSchemaSync(schema?: StandardSchemaV1): Record<string, unknown> | undefined {
-  const jsonSchemaFn = schema?.['~standard'].jsonSchema?.input;
+  const jsonSchemaFn = schema?.["~standard"].jsonSchema?.input;
   if (!jsonSchemaFn) {
     return undefined;
   }
@@ -83,7 +83,7 @@ function extractJsonSchemaSync(schema?: StandardSchemaV1): Record<string, unknow
 
 /** Maps `AgentTextRequest.messages`/`system`/`prompt` to OpenAI chat messages. */
 export function toOpenAiMessages(
-  request: Pick<AgentTextRequest, 'system' | 'prompt' | 'messages'>
+  request: Pick<AgentTextRequest, "system" | "prompt" | "messages">,
 ): ChatCompletionMessageParam[] {
   if (request.messages) {
     // AgentMessage's `system|user|assistant|tool` roles map 1:1 onto
@@ -91,25 +91,25 @@ export function toOpenAiMessages(
     // these examples, which is directly compatible with OpenAI's content
     // union for each role.
     return request.messages.map((message): ChatCompletionMessageParam => {
-      const content = typeof message.content === 'string' ? message.content : '';
+      const content = typeof message.content === "string" ? message.content : "";
       switch (message.role) {
-        case 'system':
-          return { role: 'system', content };
-        case 'user':
-          return { role: 'user', content };
-        case 'assistant':
-          return { role: 'assistant', content };
-        case 'tool':
-          return { role: 'tool', content, tool_call_id: 'unknown' };
+        case "system":
+          return { role: "system", content };
+        case "user":
+          return { role: "user", content };
+        case "assistant":
+          return { role: "assistant", content };
+        case "tool":
+          return { role: "tool", content, tool_call_id: "unknown" };
       }
     });
   }
 
   const messages: ChatCompletionMessageParam[] = [];
   if (request.system) {
-    messages.push({ role: 'system', content: request.system });
+    messages.push({ role: "system", content: request.system });
   }
-  messages.push({ role: 'user', content: request.prompt ?? '' });
+  messages.push({ role: "user", content: request.prompt ?? "" });
   return messages;
 }
 
@@ -132,15 +132,17 @@ export function toOpenAiTools(tools: AgentTools): ChatCompletionFunctionTool[] {
     if (!descriptor) {
       return [];
     }
-    const inputSchema = typeof descriptor === 'function' ? undefined : descriptor.inputSchema;
-    return [{
-      type: 'function' as const,
-      function: {
-        name,
-        description: typeof descriptor === 'function' ? undefined : descriptor.description,
-        parameters: extractJsonSchemaSync(inputSchema) ?? {},
+    const inputSchema = typeof descriptor === "function" ? undefined : descriptor.inputSchema;
+    return [
+      {
+        type: "function" as const,
+        function: {
+          name,
+          description: typeof descriptor === "function" ? undefined : descriptor.description,
+          parameters: extractJsonSchemaSync(inputSchema) ?? {},
+        },
       },
-    }];
+    ];
   });
 }
 
@@ -148,7 +150,7 @@ export function toOpenAiTools(tools: AgentTools): ChatCompletionFunctionTool[] {
  * + tool_choice: 'required'" recipe, mirroring `toAiSdkEventTools`. */
 export function toOpenAiEventTools(events: AgentEventDescriptor[]): ChatCompletionFunctionTool[] {
   return events.map((event) => ({
-    type: 'function' as const,
+    type: "function" as const,
     function: {
       name: event.toolName,
       description: `Choose the '${event.type}' move.`,
@@ -163,24 +165,24 @@ export function toOpenAiEventTools(events: AgentEventDescriptor[]): ChatCompleti
  * in `src/ai-sdk/index.ts`.
  */
 export function toDecisionMessages(
-  request: Pick<AgentDecisionRequest, 'messages' | 'prompt' | 'events' | 'attempts'>
+  request: Pick<AgentDecisionRequest, "messages" | "prompt" | "events" | "attempts">,
 ): ChatCompletionMessageParam[] {
   const messages = toOpenAiMessages(request);
   for (const attempt of request.attempts) {
-    messages.push({ role: 'user', content: attemptFeedback(attempt, request.events) });
+    messages.push({ role: "user", content: attemptFeedback(attempt, request.events) });
   }
   return messages;
 }
 
 function attemptFeedback(attempt: DecisionAttempt, events: AgentEventDescriptor[]): string {
-  const types = events.map((event) => event.type).join(', ') || '(none)';
+  const types = events.map((event) => event.type).join(", ") || "(none)";
   return `Your previous choice failed: ${attempt.reason}. Choose again from: ${types}`;
 }
 
 // ─── createOpenAiExecutors ───
 
 export interface OpenAiExecutors extends AgentRequestExecutors {
-  streamText: NonNullable<AgentRequestExecutors['streamText']>;
+  streamText: NonNullable<AgentRequestExecutors["streamText"]>;
   decide: AgentDecisionExecutor;
 }
 
@@ -192,7 +194,7 @@ export interface OpenAiExecutors extends AgentRequestExecutors {
 export function createOpenAiExecutors({ client }: { client: OpenAI }): OpenAiExecutors {
   const generateText = async (
     request: AgentTextRequest & { tools: AgentTools },
-    info?: AgentRequestExecutorInfo
+    info?: AgentRequestExecutorInfo,
   ) => {
     const messages = toOpenAiMessages(request);
     const tools = toOpenAiTools(request.tools);
@@ -203,16 +205,16 @@ export function createOpenAiExecutors({ client }: { client: OpenAI }): OpenAiExe
       ...(tools.length > 0 ? { tools } : {}),
     };
 
-    if (getAgentOutputMode(request.outputSchema) === 'structured') {
+    if (getAgentOutputMode(request.outputSchema) === "structured") {
       const jsonSchema = await extractJsonSchema(request.outputSchema);
       if (jsonSchema) {
         const response = await client.chat.completions.create(
           {
             ...common,
             response_format: {
-              type: 'json_schema',
+              type: "json_schema",
               json_schema: {
-                name: 'output',
+                name: "output",
                 schema: jsonSchema,
                 // Arbitrary JSON Schema (e.g. from Zod) may use features
                 // outside OpenAI's strict-mode subset (defaults, unions,
@@ -222,7 +224,7 @@ export function createOpenAiExecutors({ client }: { client: OpenAI }): OpenAiExe
               },
             },
           },
-          { signal: info?.signal }
+          { signal: info?.signal },
         );
         const content = response.choices[0]?.message.content;
         return { output: content ? JSON.parse(content) : undefined };
@@ -232,12 +234,12 @@ export function createOpenAiExecutors({ client }: { client: OpenAI }): OpenAiExe
     }
 
     const response = await client.chat.completions.create(common, { signal: info?.signal });
-    return { output: response.choices[0]?.message.content ?? '' };
+    return { output: response.choices[0]?.message.content ?? "" };
   };
 
   const streamText = async (
     request: AgentTextRequest & { tools: AgentTools },
-    info?: AgentRequestExecutorInfo
+    info?: AgentRequestExecutorInfo,
   ) => {
     const stream = await client.chat.completions.create(
       {
@@ -246,10 +248,10 @@ export function createOpenAiExecutors({ client }: { client: OpenAI }): OpenAiExe
         ...toOpenAiCallSettings(request),
         stream: true,
       },
-      { signal: info?.signal }
+      { signal: info?.signal },
     );
 
-    let text = '';
+    let text = "";
     for await (const chunk of stream) {
       const delta = chunk.choices[0]?.delta.content;
       if (delta) {
@@ -267,7 +269,7 @@ export function createOpenAiExecutors({ client }: { client: OpenAI }): OpenAiExe
       model: request.model,
       messages: toDecisionMessages(request),
       tools,
-      tool_choice: 'required' as ChatCompletionToolChoiceOption,
+      tool_choice: "required" as ChatCompletionToolChoiceOption,
       temperature: request.temperature,
       max_completion_tokens: request.maxTokens,
       top_p: request.topP,
@@ -276,13 +278,13 @@ export function createOpenAiExecutors({ client }: { client: OpenAI }): OpenAiExe
     });
 
     const toolCall = response.choices[0]?.message.tool_calls?.[0];
-    if (!toolCall || toolCall.type !== 'function') {
-      throw new Error('createOpenAiExecutors: decide — model did not call an event tool.');
+    if (!toolCall || toolCall.type !== "function") {
+      throw new Error("createOpenAiExecutors: decide — model did not call an event tool.");
     }
     const chosenEvent = request.events.find((event) => event.toolName === toolCall.function.name);
     if (!chosenEvent) {
       throw new Error(
-        `createOpenAiExecutors: decide — model called unknown tool '${toolCall.function.name}'.`
+        `createOpenAiExecutors: decide — model called unknown tool '${toolCall.function.name}'.`,
       );
     }
 
@@ -292,7 +294,7 @@ export function createOpenAiExecutors({ client }: { client: OpenAI }): OpenAiExe
 
     return {
       event: {
-        ...(args && typeof args === 'object' ? args : {}),
+        ...(args && typeof args === "object" ? args : {}),
         type: chosenEvent.type,
       } as ChosenEvent,
     };
@@ -304,7 +306,7 @@ export function createOpenAiExecutors({ client }: { client: OpenAI }): OpenAiExe
 // ─── Demo host ───
 
 async function promptAnswer(question: string): Promise<string> {
-  const { createInterface } = await import('node:readline/promises');
+  const { createInterface } = await import("node:readline/promises");
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     return await rl.question(`${question} `);
@@ -319,7 +321,7 @@ export async function runTriageDemo(client: OpenAI, ticket: string) {
     input: { ticket },
     generateText,
   });
-  if (result.status !== 'done') {
+  if (result.status !== "done") {
     throw new Error(`Triage demo did not complete: ${result.status}`);
   }
   return result.output;
@@ -327,15 +329,15 @@ export async function runTriageDemo(client: OpenAI, ticket: string) {
 
 export async function runStreamingDemo(client: OpenAI) {
   const { streamText } = createOpenAiExecutors({ client });
-  let text = '';
+  let text = "";
   await streamText(
     {
-      model: 'gpt-5.4-mini',
-      system: 'You tell short, punchy jokes.',
-      prompt: 'Tell a joke about state machines.',
+      model: "gpt-5.4-mini",
+      system: "You tell short, punchy jokes.",
+      prompt: "Tell a joke about state machines.",
       tools: {},
     },
-    { onChunk: (chunk) => (text += chunk) }
+    { onChunk: (chunk) => (text += chunk) },
   );
   return text;
 }
@@ -351,33 +353,33 @@ export async function runTwentyQuestionsDemo(client: OpenAI) {
     input: { questionsRemaining: 20 },
     generateText,
     decide,
-    userInput: async ({ prompt }) => promptAnswer(prompt ?? '>'),
+    userInput: async ({ prompt }) => promptAnswer(prompt ?? ">"),
   });
 
-  if (result.status !== 'done') {
+  if (result.status !== "done") {
     throw new Error(`Twenty questions demo did not complete: ${result.status}`);
   }
   return result.output;
 }
 
 async function main() {
-  const { default: OpenAIClient } = await import('openai');
+  const { default: OpenAIClient } = await import("openai");
   const client = new OpenAIClient();
 
-  console.log('— generateText (structured output via response_format) —');
-  console.log(await runTriageDemo(client, 'My invoice is wrong and I am furious.'));
+  console.log("— generateText (structured output via response_format) —");
+  console.log(await runTriageDemo(client, "My invoice is wrong and I am furious."));
 
-  console.log('— streamText (live chunks) —');
+  console.log("— streamText (live chunks) —");
   console.log(await runStreamingDemo(client));
 
-  console.log('— decide (tool_choice: required) —');
+  console.log("— decide (tool_choice: required) —");
   const result = await runTwentyQuestionsDemo(client);
   console.log(`Final score — user: ${result.userScore}, agent: ${result.agentScore}`);
 }
 
-if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   if (!process.env.OPENAI_API_KEY) {
-    console.error('Set OPENAI_API_KEY to run this example.');
+    console.error("Set OPENAI_API_KEY to run this example.");
     process.exit(1);
   }
   void main();

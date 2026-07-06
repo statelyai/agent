@@ -17,16 +17,13 @@
 //
 // Run: OPENAI_API_KEY=... npx tsx examples/sse-transport/index.ts
 
-import { createServer, type Server } from 'node:http';
-import type { AddressInfo } from 'node:net';
-import { z } from 'zod';
-import { openai } from '@ai-sdk/openai';
-import type { AnyStateMachine } from 'xstate';
-import { runAgent, setupAgent } from '../../src/index.js';
-import {
-  createAiSdkExecutors,
-  type AiSdkExecutors,
-} from '../../src/ai-sdk/index.js';
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { z } from "zod";
+import { openai } from "@ai-sdk/openai";
+import type { AnyStateMachine } from "xstate";
+import { runAgent, setupAgent } from "../../src/index.js";
+import { createAiSdkExecutors, type AiSdkExecutors } from "../../src/ai-sdk/index.js";
 
 /**
  * A minimal streaming machine: one `mode: 'stream'` text request, then done.
@@ -39,29 +36,29 @@ export function createSseMachine(): AnyStateMachine {
     output: z.object({ text: z.string() }),
     requests: {
       streamTopic: {
-        mode: 'stream',
+        mode: "stream",
         schemas: { input: z.object({ topic: z.string() }), output: z.string() },
-        model: 'writer',
+        model: "writer",
         prompt: ({ input }) => input.topic,
       },
     },
   });
 
   return agent.createMachine({
-    id: 'sse-streamer',
+    id: "sse-streamer",
     context: ({ input }) => ({ topic: input.topic, text: null }),
-    initial: 'streaming',
+    initial: "streaming",
     states: {
       streaming: {
         invoke: {
-          src: 'streamTopic',
+          src: "streamTopic",
           input: ({ context }) => ({ topic: context.topic }),
-          onDone: ({ output }) => ({ target: 'done', context: { text: output } }),
+          onDone: ({ output }) => ({ target: "done", context: { text: output } }),
         },
       },
       done: {
-        type: 'final',
-        output: ({ context }) => ({ text: context.text ?? '' }),
+        type: "final",
+        output: ({ context }) => ({ text: context.text ?? "" }),
       },
     },
   }) as AnyStateMachine;
@@ -73,14 +70,14 @@ export function createSseMachine(): AnyStateMachine {
  */
 async function mockStreamText(
   request: { prompt?: string },
-  info?: { onChunk?: (chunk: string) => void }
+  info?: { onChunk?: (chunk: string) => void },
 ): Promise<{ output: string }> {
-  const chunks = ['Once ', 'upon ', `a topic: ${request.prompt ?? ''}`];
+  const chunks = ["Once ", "upon ", `a topic: ${request.prompt ?? ""}`];
   for (const chunk of chunks) {
     await new Promise((resolve) => setTimeout(resolve, 5));
     info?.onChunk?.(chunk);
   }
-  return { output: chunks.join('') };
+  return { output: chunks.join("") };
 }
 
 /** Runs the machine, plumbing the streaming seams to the supplied handlers. */
@@ -90,10 +87,10 @@ export function runMachineStream(
     onChunk: (chunk: string) => void;
     onTransition: (value: unknown) => void;
   },
-  streamText: AiSdkExecutors['streamText'] = mockStreamText,
+  streamText: AiSdkExecutors["streamText"] = mockStreamText,
 ) {
   return runAgent(machine, {
-    input: { topic: 'agents' },
+    input: { topic: "agents" },
     streamText,
     onChunk: (chunk) => handlers.onChunk(chunk),
     onTransition: (snapshot) => handlers.onTransition(snapshot.value),
@@ -102,9 +99,9 @@ export function runMachineStream(
 
 /** Writes one SSE frame (optional `event:` line + `data:` line). */
 function writeSseFrame(
-  res: import('node:http').ServerResponse,
+  res: import("node:http").ServerResponse,
   data: unknown,
-  event?: string
+  event?: string,
 ): void {
   if (event) {
     res.write(`event: ${event}\n`);
@@ -117,14 +114,12 @@ function writeSseFrame(
  * streaming seams as Server-Sent Events. Host-owned: the machine knows
  * nothing about SSE.
  */
-export function createSseServer(
-  streamText: AiSdkExecutors['streamText'] = mockStreamText,
-): Server {
+export function createSseServer(streamText: AiSdkExecutors["streamText"] = mockStreamText): Server {
   return createServer(async (_req, res) => {
     res.writeHead(200, {
-      'content-type': 'text/event-stream',
-      'cache-control': 'no-cache',
-      connection: 'keep-alive',
+      "content-type": "text/event-stream",
+      "cache-control": "no-cache",
+      connection: "keep-alive",
     });
 
     const machine = createSseMachine();
@@ -132,13 +127,13 @@ export function createSseServer(
       machine,
       {
         onChunk: (chunk) => writeSseFrame(res, { chunk }),
-        onTransition: (value) => writeSseFrame(res, { value }, 'transition'),
+        onTransition: (value) => writeSseFrame(res, { value }, "transition"),
       },
       streamText,
     );
 
-    const output = result.status === 'done' ? result.output : { error: result.status };
-    writeSseFrame(res, output, 'done');
+    const output = result.status === "done" ? result.output : { error: result.status };
+    writeSseFrame(res, output, "done");
     res.end();
   });
 }
@@ -147,28 +142,28 @@ export function createSseServer(
 // command, and shut down after the first request completes (or Ctrl-C).
 export async function main() {
   const { streamText } = createAiSdkExecutors({
-    models: { writer: openai('gpt-5.4-mini') },
+    models: { writer: openai("gpt-5.4-mini") },
   });
   const server = createSseServer(streamText);
 
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
   const url = `http://127.0.0.1:${port}/`;
 
   console.log(`SSE server listening. Stream a real generation with:\n`);
   console.log(`  curl -N ${url}\n`);
-  console.log('Shutting down after the first request. Ctrl-C to exit early.');
+  console.log("Shutting down after the first request. Ctrl-C to exit early.");
 
   // Close once the first client disconnects (request fully streamed).
-  server.once('request', (_req, res) => {
-    res.on('close', () => server.close(() => process.exit(0)));
+  server.once("request", (_req, res) => {
+    res.on("close", () => server.close(() => process.exit(0)));
   });
-  process.on('SIGINT', () => server.close(() => process.exit(0)));
+  process.on("SIGINT", () => server.close(() => process.exit(0)));
 }
 
-if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   if (!process.env.OPENAI_API_KEY) {
-    console.error('Set OPENAI_API_KEY to run this example.');
+    console.error("Set OPENAI_API_KEY to run this example.");
     process.exit(1);
   }
   void main();

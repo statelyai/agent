@@ -21,43 +21,43 @@ export function assessPromptFallback(prompt: string): PromptAssessment {
   const questions: string[] = [];
 
   if (!extractRecipient(prompt)) {
-    missing.push('to');
-    questions.push('Who should receive it?');
+    missing.push("to");
+    questions.push("Who should receive it?");
   }
   if (!extractSubject(prompt)) {
-    missing.push('subject');
-    questions.push('What subject or purpose should it have?');
+    missing.push("subject");
+    questions.push("What subject or purpose should it have?");
   }
   if (!hasBodyDetails(prompt)) {
-    missing.push('body details');
-    questions.push('What key points should the body include?');
+    missing.push("body details");
+    questions.push("What key points should the body include?");
   }
 
   return { satisfied: missing.length === 0, missing, questions };
 }
 
 export function draftEmailFallback(prompt: string): EmailDraft {
-  const to = extractRecipient(prompt) ?? 'recipient@example.com';
-  const subject = extractSubject(prompt) ?? 'Following up';
+  const to = extractRecipient(prompt) ?? "recipient@example.com";
+  const subject = extractSubject(prompt) ?? "Following up";
   const bodyDetails = prompt
-    .replace(/\s+/g, ' ')
-    .replace(/\b(to|subject|about|regarding)\b/gi, '')
+    .replace(/\s+/g, " ")
+    .replace(/\b(to|subject|about|regarding)\b/gi, "")
     .trim();
 
   return {
     to,
     subject,
     body: [
-      'Hi,',
-      '',
+      "Hi,",
+      "",
       bodyDetails
         ? `I wanted to reach out about ${bodyDetails}.`
-        : 'I wanted to reach out with a quick update.',
-      '',
-      'Please let me know what you think.',
-      '',
-      'Best,',
-    ].join('\n'),
+        : "I wanted to reach out with a quick update.",
+      "",
+      "Please let me know what you think.",
+      "",
+      "Best,",
+    ].join("\n"),
   };
 }
 
@@ -78,8 +78,7 @@ function extractSubject(prompt: string): string | undefined {
 function hasBodyDetails(prompt: string): boolean {
   const words = prompt.trim().split(/\s+/).filter(Boolean);
   return (
-    words.length >= 14 ||
-    /because|include|mention|tell|ask|thanks|deadline|meeting/i.test(prompt)
+    words.length >= 14 || /because|include|mention|tell|ask|thanks|deadline|meeting/i.test(prompt)
   );
 }
 
@@ -87,7 +86,7 @@ function titleCase(value: string): string {
   return value
     .split(/\s+/)
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
+    .join(" ");
 }
 
 export function formatError(error: unknown): string {

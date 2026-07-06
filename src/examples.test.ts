@@ -1,5 +1,5 @@
-import { describe, expect, test } from 'vitest';
-import { createActor, createAsyncLogic, toPromise, waitFor } from 'xstate';
+import { describe, expect, test } from "vitest";
+import { createActor, createAsyncLogic, toPromise, waitFor } from "xstate";
 import {
   emailDrafter,
   emailDrafterSchemas,
@@ -11,31 +11,30 @@ import {
   jokeMachine,
   summarizeTurn,
   tellJoke as tellJokeLogic,
-} from '../examples/index.js';
+} from "../examples/index.js";
 import {
   getAgentRequests,
   resolveAgentStep,
   resolveDecision,
   transitionAgentStep,
   type AgentTextRequest,
-} from './index.js';
-import { initialTransition } from 'xstate';
+} from "./index.js";
+import { initialTransition } from "xstate";
 
-describe('curated XState setup examples', () => {
-  test('email drafter follows prompt, revise, send loop with normal XState runtime', async () => {
+describe("curated XState setup examples", () => {
+  test("email drafter follows prompt, revise, send loop with normal XState runtime", async () => {
     const calls: AgentTextRequest[] = [];
     const sent: unknown[] = [];
     const machine = emailDrafter.provide({
       actorSources: {
         evaluatePrompt: evaluatePrompt.withExecutor(async ({ input, request }) => {
           calls.push(request);
-          const satisfied =
-            calls.filter((call) => call.system?.includes('Evaluate')).length > 1;
+          const satisfied = calls.filter((call) => call.system?.includes("Evaluate")).length > 1;
           return {
             output: {
               satisfied,
-              missing: satisfied ? [] : ['recipient'],
-              questions: satisfied ? [] : ['Who should receive it?'],
+              missing: satisfied ? [] : ["recipient"],
+              questions: satisfied ? [] : ["Who should receive it?"],
             },
           };
         }),
@@ -43,9 +42,9 @@ describe('curated XState setup examples', () => {
           calls.push(request);
           return {
             output: {
-              to: 'riley@example.com',
-              subject: 'Thanks for meeting',
-              body: 'Hi Riley, thanks for meeting today.',
+              to: "riley@example.com",
+              subject: "Thanks for meeting",
+              body: "Hi Riley, thanks for meeting today.",
             },
           };
         }),
@@ -65,77 +64,77 @@ describe('curated XState setup examples', () => {
     actor.start();
 
     actor.send({
-      type: 'PROMPT_SUBMITTED',
-      prompt: 'Write a thank you email after the meeting.',
+      type: "PROMPT_SUBMITTED",
+      prompt: "Write a thank you email after the meeting.",
     });
-    await waitFor(actor, (snapshot) => snapshot.matches('needsMoreInfo'));
+    await waitFor(actor, (snapshot) => snapshot.matches("needsMoreInfo"));
 
     actor.send({
-      type: 'MORE_INFO',
-      details: 'Send it to riley@example.com.',
+      type: "MORE_INFO",
+      details: "Send it to riley@example.com.",
     });
-    await waitFor(actor, (snapshot) => snapshot.matches('reviewing'));
+    await waitFor(actor, (snapshot) => snapshot.matches("reviewing"));
 
     expect(actor.getSnapshot().context.draft).toEqual({
-      to: 'riley@example.com',
-      subject: 'Thanks for meeting',
-      body: 'Hi Riley, thanks for meeting today.',
+      to: "riley@example.com",
+      subject: "Thanks for meeting",
+      body: "Hi Riley, thanks for meeting today.",
     });
     expect(calls.at(-1)).toEqual(
       expect.objectContaining({
         prompt: undefined,
         messages: expect.arrayContaining([
           expect.objectContaining({
-            role: 'user',
-            content: 'Write a thank you email after the meeting.',
+            role: "user",
+            content: "Write a thank you email after the meeting.",
           }),
           expect.objectContaining({
-            role: 'user',
-            content: expect.stringContaining('Send it to riley@example.com.'),
+            role: "user",
+            content: expect.stringContaining("Send it to riley@example.com."),
           }),
         ]),
-      })
+      }),
     );
 
-    actor.send({ type: 'SEND' });
-    await waitFor(actor, (snapshot) => snapshot.matches('sent'));
-    actor.send({ type: 'END' });
+    actor.send({ type: "SEND" });
+    await waitFor(actor, (snapshot) => snapshot.matches("sent"));
+    actor.send({ type: "END" });
     await toPromise(actor);
 
     expect(sent).toEqual([
       {
         draft: {
-          to: 'riley@example.com',
-          subject: 'Thanks for meeting',
-          body: 'Hi Riley, thanks for meeting today.',
+          to: "riley@example.com",
+          subject: "Thanks for meeting",
+          body: "Hi Riley, thanks for meeting today.",
         },
       },
     ]);
     expect(actor.getSnapshot().output).toEqual({
       sentEmails: [
         {
-          to: 'riley@example.com',
-          subject: 'Thanks for meeting',
-          body: 'Hi Riley, thanks for meeting today.',
+          to: "riley@example.com",
+          subject: "Thanks for meeting",
+          body: "Hi Riley, thanks for meeting today.",
         },
       ],
     });
   });
 
-  test('email drafter exports schemas for host-side event validation', () => {
-    const result = emailDrafterSchemas.events.PROMPT_SUBMITTED['~standard'].validate({
-      type: 'PROMPT_SUBMITTED',
-      prompt: 'Draft an email',
+  test("email drafter exports schemas for host-side event validation", () => {
+    const result = emailDrafterSchemas.events.PROMPT_SUBMITTED["~standard"].validate({
+      type: "PROMPT_SUBMITTED",
+      prompt: "Draft an email",
     });
 
     expect(result).toEqual({
       value: {
-        prompt: 'Draft an email',
+        prompt: "Draft an email",
       },
     });
   });
 
-  test('game workflow exposes only whitelisted moves as decision candidates', async () => {
+  test("game workflow exposes only whitelisted moves as decision candidates", async () => {
     const [snapshot, actions] = initialTransition(gameMachine, {
       playerHp: 20,
       enemyHp: 15,
@@ -147,17 +146,13 @@ describe('curated XState setup examples', () => {
       actorSources: { chooseMove: chooseMoveLogic, summarizeTurn },
     });
 
-    if (chooseMove?.kind !== 'decision') {
-      throw new Error('Expected a decision request.');
+    if (chooseMove?.kind !== "decision") {
+      throw new Error("Expected a decision request.");
     }
-    expect(chooseMove.events.map((event) => event.type)).toEqual([
-      'ATTACK',
-      'DEFEND',
-      'FLEE',
-    ]);
+    expect(chooseMove.events.map((event) => event.type)).toEqual(["ATTACK", "DEFEND", "FLEE"]);
 
     const attackEvent = await resolveDecision(chooseMove, async () => ({
-      event: { type: 'ATTACK', target: 'goblin' },
+      event: { type: "ATTACK", target: "goblin" },
     }));
 
     const attackStep = transitionAgentStep(gameMachine, snapshot, attackEvent as never, {
@@ -166,31 +161,37 @@ describe('curated XState setup examples', () => {
     });
 
     const [summarize] = attackStep.requests;
-    if (summarize?.kind !== 'text') {
-      throw new Error('Expected a text request.');
+    if (summarize?.kind !== "text") {
+      throw new Error("Expected a text request.");
     }
     expect(summarize.events).toEqual([]);
 
-    const finalStep = resolveAgentStep(gameMachine, attackStep, summarize, {
-      summary: 'You strike the goblin.',
-      playerHp: 20,
-      enemyHp: 9,
-    }, {
-      schemas: gameSchemas,
-      actorSources: { chooseMove: chooseMoveLogic, summarizeTurn },
-    });
+    const finalStep = resolveAgentStep(
+      gameMachine,
+      attackStep,
+      summarize,
+      {
+        summary: "You strike the goblin.",
+        playerHp: 20,
+        enemyHp: 9,
+      },
+      {
+        schemas: gameSchemas,
+        actorSources: { chooseMove: chooseMoveLogic, summarizeTurn },
+      },
+    );
 
     expect(finalStep.done).toBe(true);
     expect(finalStep.snapshot.output).toEqual({
-      outcome: 'continue',
-      summary: 'You strike the goblin.',
+      outcome: "continue",
+      summary: "You strike the goblin.",
       playerHp: 20,
       enemyHp: 9,
     });
   });
 
-  test('joke workflow loops until user feedback is done', async () => {
-    const feedback = ['try another one', 'ok done'];
+  test("joke workflow loops until user feedback is done", async () => {
+    const feedback = ["try another one", "ok done"];
     let jokes = 0;
     const machine = jokeMachine.provide({
       actorSources: {
@@ -198,19 +199,19 @@ describe('curated XState setup examples', () => {
           jokes += 1;
           return { output: `joke ${jokes} about ${input.topic}` };
         }),
-        'agent.userInput': createAsyncLogic({
-          run: async () => ({ feedback: feedback.shift() ?? 'done' }),
+        "agent.userInput": createAsyncLogic({
+          run: async () => ({ feedback: feedback.shift() ?? "done" }),
         }),
       },
     });
 
-    const actor = createActor(machine, { input: { topic: 'state machines' } });
+    const actor = createActor(machine, { input: { topic: "state machines" } });
     actor.start();
     await toPromise(actor);
 
     expect(jokes).toBe(2);
     expect(actor.getSnapshot().output).toEqual({
-      joke: 'joke 2 about state machines',
+      joke: "joke 2 about state machines",
     });
   });
 });

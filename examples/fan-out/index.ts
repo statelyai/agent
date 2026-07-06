@@ -35,23 +35,23 @@
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/fan-out/index.ts
  */
-import { z } from 'zod';
-import { openai } from '@ai-sdk/openai';
-import { type LanguageModel } from 'ai';
+import { z } from "zod";
+import { openai } from "@ai-sdk/openai";
+import { type LanguageModel } from "ai";
 import {
   runAgent,
   setupAgent,
   type AgentRequestExecutor,
   type RunAgentOptions,
-} from '../../src/index.js';
-import { createAiSdkExecutors } from '../../src/ai-sdk/index.js';
+} from "../../src/index.js";
+import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
 
 const planSchema = z.object({ subtopics: z.array(z.string()) });
 
-export const models: Record<'planner' | 'worker' | 'reducer', LanguageModel> = {
-  planner: openai('gpt-5.4-mini'),
-  worker: openai('gpt-5.4-mini'),
-  reducer: openai('gpt-5.4-mini'),
+export const models: Record<"planner" | "worker" | "reducer", LanguageModel> = {
+  planner: openai("gpt-5.4-mini"),
+  worker: openai("gpt-5.4-mini"),
+  reducer: openai("gpt-5.4-mini"),
 } as const;
 
 const agent = setupAgent({
@@ -76,10 +76,10 @@ const agent = setupAgent({
         input: z.object({ topic: z.string() }),
         output: planSchema,
       },
-      model: 'planner',
+      model: "planner",
       system:
-        'You are a planner. Break the topic into 3-5 distinct subtopics worth ' +
-        'summarizing. Return just the subtopic titles.',
+        "You are a planner. Break the topic into 3-5 distinct subtopics worth " +
+        "summarizing. Return just the subtopic titles.",
       prompt: ({ input }) => input.topic,
     },
     // The fan-out branch: one summary per subtopic. Spawned dynamically, so it
@@ -89,8 +89,8 @@ const agent = setupAgent({
         input: z.object({ topic: z.string(), subtopic: z.string() }),
         output: z.string(),
       },
-      model: 'worker',
-      system: 'You are a research worker. Summarize the subtopic in 2-3 sentences.',
+      model: "worker",
+      system: "You are a research worker. Summarize the subtopic in 2-3 sentences.",
       prompt: ({ input }) => `Topic: ${input.topic}\nSubtopic: ${input.subtopic}`,
     },
     composeDigest: {
@@ -101,12 +101,12 @@ const agent = setupAgent({
         }),
         output: z.string(),
       },
-      model: 'reducer',
-      system: 'You are an editor. Compose one cohesive digest from the subtopic summaries.',
+      model: "reducer",
+      system: "You are an editor. Compose one cohesive digest from the subtopic summaries.",
       prompt: ({ input }) =>
         `Topic: ${input.topic}\n\nSummaries:\n${Object.values(input.summaries)
           .map((text, i) => `${i + 1}. ${text}`)
-          .join('\n')}`,
+          .join("\n")}`,
     },
   },
 });
@@ -117,7 +117,7 @@ export const composeDigest = agent.requests.composeDigest;
 
 export const fanOutSchemas = agent.schemas;
 
-const BRANCH_PREFIX = 'branch-';
+const BRANCH_PREFIX = "branch-";
 
 /**
  * Builds the fan-out machine, closing over the pre-bound branch logic. The
@@ -132,7 +132,7 @@ export function createFanOutMachine(generateText: AgentRequestExecutor) {
   });
 
   return agent.createMachine({
-    id: 'fan-out',
+    id: "fan-out",
     context: ({ input }) => ({
       topic: input.topic,
       subtopics: [],
@@ -143,17 +143,17 @@ export function createFanOutMachine(generateText: AgentRequestExecutor) {
     output: ({ context }) => ({
       subtopics: context.subtopics,
       summaries: context.summaries,
-      digest: context.digest ?? '',
+      digest: context.digest ?? "",
     }),
-    initial: 'planning',
+    initial: "planning",
     states: {
       planning: {
         invoke: {
-          id: 'planSubtopics',
-          src: 'planSubtopics',
+          id: "planSubtopics",
+          src: "planSubtopics",
           input: ({ context }) => ({ topic: context.topic }),
           onDone: ({ output }) => ({
-            target: 'fanningOut',
+            target: "fanningOut",
             context: {
               subtopics: output.subtopics,
               expected: output.subtopics.length,
@@ -173,38 +173,38 @@ export function createFanOutMachine(generateText: AgentRequestExecutor) {
             });
           });
         },
-        always: { target: 'collecting' },
+        always: { target: "collecting" },
       },
       // REDUCE: count every branch completion, keying its summary by branch id.
       // A wildcard handler is how the parent observes N dynamic children whose
       // ids are only known at runtime (no static `onDone` per branch).
       collecting: {
         on: {
-          '*': ({ context, event }) => {
+          "*": ({ context, event }) => {
             const type = event.type as string;
             if (!type.startsWith(`xstate.done.actor.${BRANCH_PREFIX}`)) {
               return undefined;
             }
-            const id = type.slice('xstate.done.actor.'.length);
+            const id = type.slice("xstate.done.actor.".length);
             const summaries = {
               ...context.summaries,
               [id]: (event as unknown as { output: string }).output,
             };
             return Object.keys(summaries).length >= context.expected
-              ? { target: 'reducing', context: { summaries } }
+              ? { target: "reducing", context: { summaries } }
               : { context: { summaries } };
           },
         },
       },
       reducing: {
         invoke: {
-          id: 'composeDigest',
-          src: 'composeDigest',
+          id: "composeDigest",
+          src: "composeDigest",
           input: ({ context }) => ({ topic: context.topic, summaries: context.summaries }),
-          onDone: ({ output }) => ({ target: 'done', context: { digest: output } }),
+          onDone: ({ output }) => ({ target: "done", context: { digest: output } }),
         },
       },
-      done: { type: 'final' },
+      done: { type: "final" },
     },
   });
 }
@@ -215,31 +215,31 @@ export async function runFanOutExample(
   const executors = options ?? createAiSdkExecutors({ models });
   const generateText = executors.generateText;
   if (!generateText) {
-    throw new Error('runFanOutExample requires a generateText executor.');
+    throw new Error("runFanOutExample requires a generateText executor.");
   }
 
   const machine = createFanOutMachine(generateText);
   const result = await runAgent(machine, {
-    input: { topic: 'How does an LLM agent framework stay durable?' },
+    input: { topic: "How does an LLM agent framework stay durable?" },
     ...executors,
   });
-  if (result.status !== 'done') {
+  if (result.status !== "done") {
     throw new Error(`Fan-out example did not complete: ${result.status}`);
   }
   return result.output;
 }
 
-if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   if (!process.env.OPENAI_API_KEY) {
-    console.error('Set OPENAI_API_KEY to run this example.');
+    console.error("Set OPENAI_API_KEY to run this example.");
     process.exit(1);
   }
   const output = await runFanOutExample();
-  console.log('Subtopics:');
+  console.log("Subtopics:");
   for (const subtopic of output.subtopics) {
     console.log(`  - ${subtopic}`);
   }
-  console.log('\nSummaries:');
+  console.log("\nSummaries:");
   for (const [id, text] of Object.entries(output.summaries)) {
     console.log(`  ${id}: ${text}`);
   }

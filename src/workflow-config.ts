@@ -1,21 +1,16 @@
-import type { AnyStateMachine, AsyncActorLogic, MetaObject } from 'xstate';
-import type {
-  AgentMessage,
-  AgentToolChoice,
-  AgentTools,
-  StandardSchemaV1,
-} from './types.js';
-import { validateSchemaSync } from './utils.js';
-import { DECIDE_ACTOR, type AgentRequestMode } from './text-logic.js';
-import { sendDecision } from './decision.js';
-import { missingActor } from './internal/registry.js';
+import type { AnyStateMachine, AsyncActorLogic, MetaObject } from "xstate";
+import type { AgentMessage, AgentToolChoice, AgentTools, StandardSchemaV1 } from "./types.js";
+import { validateSchemaSync } from "./utils.js";
+import { DECIDE_ACTOR, type AgentRequestMode } from "./text-logic.js";
+import { sendDecision } from "./decision.js";
+import { missingActor } from "./internal/registry.js";
 import {
   createAgentSchemas,
   createRequestActors,
   setupAgent,
   type AgentRequestInput,
   type AgentSchemaPack,
-} from './setup-agent.js';
+} from "./setup-agent.js";
 
 // Minimal JSON Schema shape recognized by `minimalSchemaCompiler`; other compilers may accept the full spec.
 type JsonSchemaObject = {
@@ -40,7 +35,7 @@ type JsonSchemaObject = {
  */
 export type SchemaCompiler = (
   jsonSchema: Record<string, unknown>,
-  name: string
+  name: string,
 ) => StandardSchemaV1;
 
 /**
@@ -63,14 +58,14 @@ export type SchemaCompiler = (
  */
 export const minimalSchemaCompiler: SchemaCompiler = function minimalSchemaCompiler(
   schema: Record<string, unknown> | undefined,
-  name = 'schema'
+  name = "schema",
 ): StandardSchemaV1 {
   const resolvedSchema = (schema ?? {}) as JsonSchemaObject;
 
   return {
-    '~standard': {
+    "~standard": {
       version: 1,
-      vendor: 'statelyai-agent-json-schema',
+      vendor: "statelyai-agent-json-schema",
       validate(value: unknown) {
         const issues: { message: string }[] = [];
         validateJsonSchemaValue(resolvedSchema, value, name, issues);
@@ -91,7 +86,7 @@ function validateJsonSchemaValue(
   schema: JsonSchemaObject,
   value: unknown,
   path: string,
-  issues: { message: string }[]
+  issues: { message: string }[],
 ) {
   if (schema.const !== undefined && value !== schema.const) {
     issues.push({ message: `${path} must equal ${JSON.stringify(schema.const)}` });
@@ -99,7 +94,7 @@ function validateJsonSchemaValue(
   }
 
   if (schema.enum && !schema.enum.some((item) => item === value)) {
-    issues.push({ message: `${path} must be one of ${schema.enum.join(', ')}` });
+    issues.push({ message: `${path} must be one of ${schema.enum.join(", ")}` });
     return;
   }
 
@@ -108,8 +103,8 @@ function validateJsonSchemaValue(
     return;
   }
 
-  if (type === 'object') {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+  if (type === "object") {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
       issues.push({ message: `${path} must be an object` });
       return;
     }
@@ -123,18 +118,13 @@ function validateJsonSchemaValue(
 
     for (const [key, propertySchema] of Object.entries(schema.properties ?? {})) {
       if (key in objectValue) {
-        validateJsonSchemaValue(
-          propertySchema,
-          objectValue[key],
-          `${path}.${key}`,
-          issues
-        );
+        validateJsonSchemaValue(propertySchema, objectValue[key], `${path}.${key}`, issues);
       }
     }
     return;
   }
 
-  if (type === 'array') {
+  if (type === "array") {
     if (!Array.isArray(value)) {
       issues.push({ message: `${path} must be an array` });
       return;
@@ -142,18 +132,18 @@ function validateJsonSchemaValue(
 
     if (schema.items) {
       value.forEach((item, index) =>
-        validateJsonSchemaValue(schema.items!, item, `${path}[${index}]`, issues)
+        validateJsonSchemaValue(schema.items!, item, `${path}[${index}]`, issues),
       );
     }
     return;
   }
 
   const ok =
-    (type === 'string' && typeof value === 'string')
-    || (type === 'number' && typeof value === 'number')
-    || (type === 'integer' && Number.isInteger(value))
-    || (type === 'boolean' && typeof value === 'boolean')
-    || (type === 'null' && value === null);
+    (type === "string" && typeof value === "string") ||
+    (type === "number" && typeof value === "number") ||
+    (type === "integer" && Number.isInteger(value)) ||
+    (type === "boolean" && typeof value === "boolean") ||
+    (type === "null" && value === null);
 
   if (!ok) {
     issues.push({ message: `${path} must be ${type}` });
@@ -174,11 +164,11 @@ type ExpressionScope = {
 // layer lowers JSON/YAML values into normal JS values before machine creation.
 // Resolves a dotted path (e.g. "context.foo.bar") against the scope object.
 function evaluateWorkflowConfigPath(expression: string, scope: ExpressionScope): unknown {
-  const parts = expression.trim().split('.').filter(Boolean);
+  const parts = expression.trim().split(".").filter(Boolean);
   let current: unknown = scope;
 
   for (const part of parts) {
-    if (!current || typeof current !== 'object') {
+    if (!current || typeof current !== "object") {
       return undefined;
     }
     current = (current as Record<string, unknown>)[part];
@@ -189,7 +179,7 @@ function evaluateWorkflowConfigPath(expression: string, scope: ExpressionScope):
 
 // Recursively lowers a config value: whole/partial `{{ expr }}` template strings, arrays, and objects are all resolved against `scope`.
 function evaluateWorkflowConfigValue(value: unknown, scope: ExpressionScope): unknown {
-  if (typeof value === 'string') {
+  if (typeof value === "string") {
     const wholeMatch = value.match(workflowConfigWholeExpressionPattern);
     if (wholeMatch?.[1]) {
       return evaluateWorkflowConfigPath(wholeMatch[1], scope);
@@ -197,7 +187,7 @@ function evaluateWorkflowConfigValue(value: unknown, scope: ExpressionScope): un
 
     return value.replace(workflowConfigTemplateExpressionPattern, (_match, expression: string) => {
       const resolved = evaluateWorkflowConfigPath(expression, scope);
-      return resolved === undefined || resolved === null ? '' : String(resolved);
+      return resolved === undefined || resolved === null ? "" : String(resolved);
     });
   }
 
@@ -205,12 +195,9 @@ function evaluateWorkflowConfigValue(value: unknown, scope: ExpressionScope): un
     return value.map((item) => evaluateWorkflowConfigValue(item, scope));
   }
 
-  if (value && typeof value === 'object') {
+  if (value && typeof value === "object") {
     return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [
-        key,
-        evaluateWorkflowConfigValue(item, scope),
-      ])
+      Object.entries(value).map(([key, item]) => [key, evaluateWorkflowConfigValue(item, scope)]),
     );
   }
 
@@ -219,7 +206,7 @@ function evaluateWorkflowConfigValue(value: unknown, scope: ExpressionScope): un
 
 // Type guard for a plain (non-array) JSON object.
 function isJsonObject(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
+  return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
 /**
@@ -284,7 +271,7 @@ export interface AgentWorkflowActorConfig {
 /** A `states` entry in {@link AgentWorkflowConfig} — the JSON equivalent of an XState state node config. */
 export interface AgentWorkflowStateConfig {
   description?: string;
-  type?: 'parallel' | 'history' | 'final';
+  type?: "parallel" | "history" | "final";
   initial?: string;
   states?: Record<string, AgentWorkflowStateConfig>;
   invoke?: AgentWorkflowInvokeConfig | AgentWorkflowInvokeConfig[];
@@ -337,7 +324,7 @@ export interface AgentWorkflowActionConfig {
 // Compiles a config's JSON Schemas (context/events/input/output/meta) into an AgentSchemaPack via the caller's SchemaCompiler.
 function createSchemasFromWorkflowConfig(
   config: AgentWorkflowConfig,
-  compileSchema: SchemaCompiler
+  compileSchema: SchemaCompiler,
 ): AgentSchemaPack<
   StandardSchemaV1<Record<string, unknown>>,
   Record<string, StandardSchemaV1>,
@@ -347,20 +334,20 @@ function createSchemasFromWorkflowConfig(
 > {
   return createAgentSchemas({
     context: compileSchema(
-      (config.schemas?.context ?? { type: 'object' }) as Record<string, unknown>,
-      'context'
+      (config.schemas?.context ?? { type: "object" }) as Record<string, unknown>,
+      "context",
     ) as StandardSchemaV1<Record<string, unknown>>,
     events: Object.fromEntries(
       Object.entries(config.schemas?.events ?? {}).map(([key, schema]) => [
         key,
         compileSchema(schema as Record<string, unknown>, `event.${key}`),
-      ])
+      ]),
     ),
-    input: compileSchema((config.schemas?.input ?? {}) as Record<string, unknown>, 'input'),
-    output: compileSchema((config.schemas?.output ?? {}) as Record<string, unknown>, 'output'),
+    input: compileSchema((config.schemas?.input ?? {}) as Record<string, unknown>, "input"),
+    output: compileSchema((config.schemas?.output ?? {}) as Record<string, unknown>, "output"),
     meta: compileSchema(
       (config.schemas?.meta ?? {}) as Record<string, unknown>,
-      'meta'
+      "meta",
     ) as StandardSchemaV1<MetaObject>,
   });
 }
@@ -368,10 +355,8 @@ function createSchemasFromWorkflowConfig(
 // Lowers a config's `requests` map into an AgentRequestInput, compiling schemas and turning each unknown-typed field into a template-expression resolver.
 function createRequestsFromWorkflowConfig(
   config: AgentWorkflowConfig,
-  compileSchema: SchemaCompiler
-): AgentRequestInput<
-  Record<string, { input: StandardSchemaV1; output: StandardSchemaV1 }>
-> {
+  compileSchema: SchemaCompiler,
+): AgentRequestInput<Record<string, { input: StandardSchemaV1; output: StandardSchemaV1 }>> {
   return Object.fromEntries(
     Object.entries(config.requests ?? {}).map(([key, request]) => [
       key,
@@ -382,66 +367,71 @@ function createRequestsFromWorkflowConfig(
           input: compileSchema(request.input as Record<string, unknown>, `${key}.input`),
           output: compileSchema(request.output as Record<string, unknown>, `${key}.output`),
         },
-        model: ({ input }) =>
-          String(evaluateWorkflowConfigValue(request.model, { input }) ?? ''),
-        system: request.system === undefined
-          ? undefined
-          : ({ input }) =>
-              evaluateWorkflowConfigValue(request.system, { input }) as string | undefined,
-        prompt: request.prompt === undefined
-          ? undefined
-          : ({ input }) =>
-              evaluateWorkflowConfigValue(request.prompt, { input }) as string | undefined,
-        messages: request.messages === undefined
-          ? undefined
-          : ({ input }) =>
-              evaluateWorkflowConfigValue(request.messages, { input }) as
-                | AgentMessage[]
-                | undefined,
+        model: ({ input }) => String(evaluateWorkflowConfigValue(request.model, { input }) ?? ""),
+        system:
+          request.system === undefined
+            ? undefined
+            : ({ input }) =>
+                evaluateWorkflowConfigValue(request.system, { input }) as string | undefined,
+        prompt:
+          request.prompt === undefined
+            ? undefined
+            : ({ input }) =>
+                evaluateWorkflowConfigValue(request.prompt, { input }) as string | undefined,
+        messages:
+          request.messages === undefined
+            ? undefined
+            : ({ input }) =>
+                evaluateWorkflowConfigValue(request.messages, { input }) as
+                  | AgentMessage[]
+                  | undefined,
         tools: request.tools,
         toolChoice: request.toolChoice as AgentToolChoice | undefined,
-        temperature: request.temperature === undefined
-          ? undefined
-          : ({ input }) =>
-              evaluateWorkflowConfigValue(request.temperature, { input }) as
-                | number
-                | undefined,
-        maxTokens: request.maxTokens === undefined
-          ? undefined
-          : ({ input }) =>
-              evaluateWorkflowConfigValue(request.maxTokens, { input }) as number | undefined,
-        topP: request.topP === undefined
-          ? undefined
-          : ({ input }) =>
-              evaluateWorkflowConfigValue(request.topP, { input }) as number | undefined,
-        topK: request.topK === undefined
-          ? undefined
-          : ({ input }) =>
-              evaluateWorkflowConfigValue(request.topK, { input }) as number | undefined,
-        seed: request.seed === undefined
-          ? undefined
-          : ({ input }) =>
-              evaluateWorkflowConfigValue(request.seed, { input }) as number | undefined,
-        stopSequences: request.stopSequences === undefined
-          ? undefined
-          : ({ input }) =>
-              evaluateWorkflowConfigValue(request.stopSequences, { input }) as
-                | string[]
-                | undefined,
-        metadata: request.metadata === undefined
-          ? undefined
-          : ({ input }) => evaluateWorkflowConfigValue(request.metadata, { input }),
+        temperature:
+          request.temperature === undefined
+            ? undefined
+            : ({ input }) =>
+                evaluateWorkflowConfigValue(request.temperature, { input }) as number | undefined,
+        maxTokens:
+          request.maxTokens === undefined
+            ? undefined
+            : ({ input }) =>
+                evaluateWorkflowConfigValue(request.maxTokens, { input }) as number | undefined,
+        topP:
+          request.topP === undefined
+            ? undefined
+            : ({ input }) =>
+                evaluateWorkflowConfigValue(request.topP, { input }) as number | undefined,
+        topK:
+          request.topK === undefined
+            ? undefined
+            : ({ input }) =>
+                evaluateWorkflowConfigValue(request.topK, { input }) as number | undefined,
+        seed:
+          request.seed === undefined
+            ? undefined
+            : ({ input }) =>
+                evaluateWorkflowConfigValue(request.seed, { input }) as number | undefined,
+        stopSequences:
+          request.stopSequences === undefined
+            ? undefined
+            : ({ input }) =>
+                evaluateWorkflowConfigValue(request.stopSequences, { input }) as
+                  | string[]
+                  | undefined,
+        metadata:
+          request.metadata === undefined
+            ? undefined
+            : ({ input }) => evaluateWorkflowConfigValue(request.metadata, { input }),
       },
-    ])
-  ) as AgentRequestInput<
-    Record<string, { input: StandardSchemaV1; output: StandardSchemaV1 }>
-  >;
+    ]),
+  ) as AgentRequestInput<Record<string, { input: StandardSchemaV1; output: StandardSchemaV1 }>>;
 }
 
 // Builds one `missingActor(...)` placeholder per key in config.actors, to be replaced via machine.provide(...) by the caller.
 function createActorPlaceholdersFromWorkflowConfig(config: AgentWorkflowConfig) {
   return Object.fromEntries(
-    Object.keys(config.actors ?? {}).map((key) => [key, missingActor(key)])
+    Object.keys(config.actors ?? {}).map((key) => [key, missingActor(key)]),
   ) as Record<string, AsyncActorLogic<unknown, unknown>>;
 }
 
@@ -452,14 +442,14 @@ function createAssignAction(assignConfig: Record<string, unknown>) {
       Object.entries(assignConfig).map(([key, value]) => [
         key,
         evaluateWorkflowConfigValue(value, { context, event }),
-      ])
+      ]),
     ),
   });
 }
 
 // Lowers an entry/exit `actions` config (single or array) into xstate action entries.
 function lowerWorkflowActions(
-  actionConfig: AgentWorkflowActionConfig | AgentWorkflowActionConfig[] | undefined
+  actionConfig: AgentWorkflowActionConfig | AgentWorkflowActionConfig[] | undefined,
 ) {
   if (!actionConfig) {
     return undefined;
@@ -473,24 +463,24 @@ function lowerWorkflowActions(
           type: action.type,
           params: ({ context, event }: { context: unknown; event: unknown }) =>
             evaluateWorkflowConfigValue(action.params, { context, event }),
-        }
+        },
   );
 }
 
 // Evaluates a transition config's `guard` (string template expression, guard function, or omitted ⇒ always matches).
 function workflowTransitionMatches(
   transitionConfig: AgentWorkflowTransitionConfig,
-  scope: { context: unknown; event: unknown }
+  scope: { context: unknown; event: unknown },
 ) {
   if (transitionConfig.guard === undefined) {
     return true;
   }
 
-  if (typeof transitionConfig.guard === 'string') {
+  if (typeof transitionConfig.guard === "string") {
     return Boolean(evaluateWorkflowConfigValue(transitionConfig.guard, scope));
   }
 
-  return typeof transitionConfig.guard === 'function'
+  return typeof transitionConfig.guard === "function"
     ? transitionConfig.guard(scope as never)
     : false;
 }
@@ -498,36 +488,30 @@ function workflowTransitionMatches(
 // Lowers a matched transition config into an xstate transition result object (target/context/description/reenter/meta).
 function lowerWorkflowTransitionResult(
   transitionConfig: AgentWorkflowTransitionConfig,
-  scope: { context: unknown; event: unknown }
+  scope: { context: unknown; event: unknown },
 ) {
   return {
-    ...(transitionConfig.target !== undefined
-      ? { target: transitionConfig.target }
-      : {}),
+    ...(transitionConfig.target !== undefined ? { target: transitionConfig.target } : {}),
     ...(transitionConfig.assign
       ? {
           context: Object.fromEntries(
             Object.entries(transitionConfig.assign).map(([key, value]) => [
               key,
               evaluateWorkflowConfigValue(value, scope),
-            ])
+            ]),
           ),
         }
       : {}),
     ...(transitionConfig.description !== undefined
       ? { description: transitionConfig.description }
       : {}),
-    ...(transitionConfig.reenter !== undefined
-      ? { reenter: transitionConfig.reenter }
-      : {}),
+    ...(transitionConfig.reenter !== undefined ? { reenter: transitionConfig.reenter } : {}),
     ...(transitionConfig.meta !== undefined ? { meta: transitionConfig.meta } : {}),
   };
 }
 
 // Lowers a single transition config into an xstate transition function.
-function lowerWorkflowTransition(
-  transitionConfig: AgentWorkflowTransitionConfig
-) {
+function lowerWorkflowTransition(transitionConfig: AgentWorkflowTransitionConfig) {
   return ({ context, event }: { context: unknown; event: unknown }) => {
     const scope = { context, event };
     return workflowTransitionMatches(transitionConfig, scope)
@@ -538,10 +522,7 @@ function lowerWorkflowTransition(
 
 // Lowers a single transition config or a first-match array of them into one xstate transition function.
 function lowerWorkflowTransitionOrArray(
-  transitionConfig:
-    | AgentWorkflowTransitionConfig
-    | AgentWorkflowTransitionConfig[]
-    | undefined
+  transitionConfig: AgentWorkflowTransitionConfig | AgentWorkflowTransitionConfig[] | undefined,
 ) {
   if (!transitionConfig) {
     return undefined;
@@ -551,19 +532,15 @@ function lowerWorkflowTransitionOrArray(
     ? ({ context, event }: { context: unknown; event: unknown }) => {
         const scope = { context, event };
         const transition = transitionConfig.find((candidate) =>
-          workflowTransitionMatches(candidate, scope)
+          workflowTransitionMatches(candidate, scope),
         );
-        return transition
-          ? lowerWorkflowTransitionResult(transition, scope)
-          : undefined;
+        return transition ? lowerWorkflowTransitionResult(transition, scope) : undefined;
       }
     : lowerWorkflowTransition(transitionConfig);
 }
 
 // Lowers an invoke config into an xstate invoke config; special-cases `agent.decide` to auto-wire `sendDecision()` as onDone.
-function lowerWorkflowInvoke(
-  invokeConfig: AgentWorkflowInvokeConfig
-) {
+function lowerWorkflowInvoke(invokeConfig: AgentWorkflowInvokeConfig) {
   const isDecideInvoke = invokeConfig.src === DECIDE_ACTOR;
 
   if (isDecideInvoke && invokeConfig.onDone !== undefined) {
@@ -572,7 +549,7 @@ function lowerWorkflowInvoke(
         `'${DECIDE_ACTOR}' and declares an 'onDone'. Decision delivery is automatic — a ` +
         `decision has no output value of its own, its output IS the chosen event, which ` +
         `is delivered via 'sendDecision()' — so 'onDone' cannot be configured from JSON. ` +
-        `Only 'onError' (retries-exhausted) is configurable here.`
+        `Only 'onError' (retries-exhausted) is configurable here.`,
     );
   }
 
@@ -600,9 +577,7 @@ function lowerWorkflowInvoke(
 // Recursively lowers one AgentWorkflowStateConfig into an xstate state node config.
 function lowerWorkflowState(stateConfig: AgentWorkflowStateConfig): Record<string, unknown> {
   return {
-    ...(stateConfig.description !== undefined
-      ? { description: stateConfig.description }
-      : {}),
+    ...(stateConfig.description !== undefined ? { description: stateConfig.description } : {}),
     ...(stateConfig.type !== undefined ? { type: stateConfig.type } : {}),
     ...(stateConfig.initial !== undefined ? { initial: stateConfig.initial } : {}),
     ...(stateConfig.states !== undefined
@@ -611,7 +586,7 @@ function lowerWorkflowState(stateConfig: AgentWorkflowStateConfig): Record<strin
             Object.entries(stateConfig.states).map(([key, child]) => [
               key,
               lowerWorkflowState(child),
-            ])
+            ]),
           ),
         }
       : {}),
@@ -628,7 +603,7 @@ function lowerWorkflowState(stateConfig: AgentWorkflowStateConfig): Record<strin
             Object.entries(stateConfig.on).map(([eventType, transitionConfig]) => [
               eventType,
               lowerWorkflowTransitionOrArray(transitionConfig),
-            ])
+            ]),
           ),
         }
       : {}),
@@ -644,16 +619,12 @@ function lowerWorkflowState(stateConfig: AgentWorkflowStateConfig): Record<strin
             Object.entries(stateConfig.after).map(([delay, transitionConfig]) => [
               delay,
               lowerWorkflowTransitionOrArray(transitionConfig),
-            ])
+            ]),
           ),
         }
       : {}),
-    ...(stateConfig.entry !== undefined
-      ? { entry: lowerWorkflowActions(stateConfig.entry) }
-      : {}),
-    ...(stateConfig.exit !== undefined
-      ? { exit: lowerWorkflowActions(stateConfig.exit) }
-      : {}),
+    ...(stateConfig.entry !== undefined ? { entry: lowerWorkflowActions(stateConfig.entry) } : {}),
+    ...(stateConfig.exit !== undefined ? { exit: lowerWorkflowActions(stateConfig.exit) } : {}),
     ...(stateConfig.tags !== undefined ? { tags: stateConfig.tags } : {}),
     ...(stateConfig.output !== undefined
       ? {
@@ -668,15 +639,15 @@ function lowerWorkflowState(stateConfig: AgentWorkflowStateConfig): Record<strin
 // Implementation backing the public `setupAgent.fromConfig(...)` namespace member (see setup-agent.ts) — lowers an AgentWorkflowConfig into a real state machine.
 export function setupAgentFromConfig(
   config: AgentWorkflowConfig,
-  options: FromConfigOptions
+  options: FromConfigOptions,
 ): AnyStateMachine {
-  if (!options || typeof options.compileSchema !== 'function') {
+  if (!options || typeof options.compileSchema !== "function") {
     throw new Error(
       "setupAgent.fromConfig(...) requires a 'compileSchema' option: " +
-        '{ compileSchema: (jsonSchema, name) => StandardSchemaV1 }. Bring your own JSON ' +
-        'Schema engine (Ajv, @cfworker/json-schema, ...), or pass the exported ' +
-        '`minimalSchemaCompiler` to explicitly opt into the built-in subset validator ' +
-        '(type/properties/required/items/enum/const only — everything else is ignored).'
+        "{ compileSchema: (jsonSchema, name) => StandardSchemaV1 }. Bring your own JSON " +
+        "Schema engine (Ajv, @cfworker/json-schema, ...), or pass the exported " +
+        "`minimalSchemaCompiler` to explicitly opt into the built-in subset validator " +
+        "(type/properties/required/items/enum/const only — everything else is ignored).",
     );
   }
 
@@ -701,16 +672,13 @@ export function setupAgentFromConfig(
           context: ({ input }: { input: unknown }) =>
             validateSchemaSync(
               schemas.context,
-              evaluateWorkflowConfigValue(config.context, { input })
+              evaluateWorkflowConfigValue(config.context, { input }),
             ),
         }
       : {}),
     initial: config.initial,
     states: Object.fromEntries(
-      Object.entries(config.states).map(([key, state]) => [
-        key,
-        lowerWorkflowState(state),
-      ])
+      Object.entries(config.states).map(([key, state]) => [key, lowerWorkflowState(state)]),
     ),
     ...(config.meta !== undefined ? { meta: config.meta } : {}),
   } as never);

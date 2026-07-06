@@ -1,4 +1,4 @@
-import type { AnyMachineSnapshot } from 'xstate';
+import type { AnyMachineSnapshot } from "xstate";
 import type {
   AssistantMessage,
   FilePart,
@@ -10,40 +10,37 @@ import type {
   ToolMessage,
   ToolResultPart,
   UserMessage,
-} from './types.js';
+} from "./types.js";
 
 /** Builds a {@link UserMessage} from a string or multimodal content parts. */
-export function userMessage(
-  content: string | Array<TextPart | ImagePart | FilePart>
-): UserMessage {
-  return { role: 'user', content };
+export function userMessage(content: string | Array<TextPart | ImagePart | FilePart>): UserMessage {
+  return { role: "user", content };
 }
 
 /** Builds an {@link AssistantMessage} from a string or content parts (text, files, tool calls/results). */
 export function assistantMessage(
-  content: string | Array<TextPart | FilePart | ToolCallPart | ToolResultPart>
+  content: string | Array<TextPart | FilePart | ToolCallPart | ToolResultPart>,
 ): AssistantMessage {
-  return { role: 'assistant', content };
+  return { role: "assistant", content };
 }
 
 /** Builds a {@link SystemMessage}. */
 export function systemMessage(content: string): SystemMessage {
-  return { role: 'system', content };
+  return { role: "system", content };
 }
 
 /** Builds a {@link ToolMessage} from one or more tool-result parts. */
 export function toolMessage(content: Array<ToolResultPart>): ToolMessage {
-  return { role: 'tool', content };
+  return { role: "tool", content };
 }
 
 // A snapshot's meta value type, recovered from its `getMeta()` return type
 // (`Record<StateId, TMeta | undefined>`). For a schema-typed machine (e.g.
 // `setupAgent({ meta })`), this resolves to the meta schema's output type; for
 // an untyped snapshot it falls back to `MetaObject`.
-type MetaOfSnapshot<TSnapshot extends { getMeta(): Record<string, unknown> }> =
-  NonNullable<
-    ReturnType<TSnapshot['getMeta']>[keyof ReturnType<TSnapshot['getMeta']>]
-  >;
+type MetaOfSnapshot<TSnapshot extends { getMeta(): Record<string, unknown> }> = NonNullable<
+  ReturnType<TSnapshot["getMeta"]>[keyof ReturnType<TSnapshot["getMeta"]>]
+>;
 
 /**
  * Returns the merged `meta` of a snapshot's active state(s) — the typed
@@ -72,8 +69,8 @@ export function getStateMeta<
   return Object.assign(
     {},
     ...Object.values(snapshot.getMeta()).filter(
-      (meta): meta is Record<string, unknown> => meta != null
-    )
+      (meta): meta is Record<string, unknown> => meta != null,
+    ),
   );
 }
 
@@ -84,19 +81,14 @@ export function getStateMeta<
  * in which case the thrown `Error.message` joins every issue message with
  * `', '`.
  */
-export function validateSchemaSync<T>(
-  schema: StandardSchemaV1<T>,
-  value: unknown
-): T {
-  const result = schema['~standard'].validate(value);
+export function validateSchemaSync<T>(schema: StandardSchemaV1<T>, value: unknown): T {
+  const result = schema["~standard"].validate(value);
   if (result instanceof Promise) {
-    throw new Error('Async schema validation is not supported.');
+    throw new Error("Async schema validation is not supported.");
   }
 
   if (result.issues) {
-    throw new Error(
-      result.issues.map((issue: { message: string }) => issue.message).join(', ')
-    );
+    throw new Error(result.issues.map((issue: { message: string }) => issue.message).join(", "));
   }
 
   return result.value as T;

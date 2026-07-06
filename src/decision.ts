@@ -4,12 +4,18 @@ import {
   type AsyncActorLogic,
   type EnqueueObject,
   type EventObject,
-} from 'xstate';
-import type { AgentMessage, AllowedEvents, ChosenEvent, InferOutput, StandardSchemaV1 } from './types.js';
-import { validateSchemaSync } from './utils.js';
-import { DECIDE_ACTOR, resolveTextLogicValue, type ResolveTextLogicValue } from './text-logic.js';
-import { sanitizeEventToolName, type AgentEventDescriptor } from './events.js';
-import { executorBoundLogics } from './internal/registry.js';
+} from "xstate";
+import type {
+  AgentMessage,
+  AllowedEvents,
+  ChosenEvent,
+  InferOutput,
+  StandardSchemaV1,
+} from "./types.js";
+import { validateSchemaSync } from "./utils.js";
+import { DECIDE_ACTOR, resolveTextLogicValue, type ResolveTextLogicValue } from "./text-logic.js";
+import { sanitizeEventToolName, type AgentEventDescriptor } from "./events.js";
+import { executorBoundLogics } from "./internal/registry.js";
 
 /**
  * Inline input for the `agent.decide` builtin actor — the zero-config
@@ -38,18 +44,18 @@ export interface AgentDecisionInput<
 }
 
 const agentDecisionInputSchema: StandardSchemaV1<AgentDecisionInput> = {
-  '~standard': {
+  "~standard": {
     version: 1,
-    vendor: 'statelyai-agent',
+    vendor: "statelyai-agent",
     validate(value: unknown) {
       const ok =
-        !!value
-        && typeof value === 'object'
-        && typeof (value as AgentDecisionInput).model === 'string';
+        !!value &&
+        typeof value === "object" &&
+        typeof (value as AgentDecisionInput).model === "string";
 
       return ok
         ? { value: value as AgentDecisionInput }
-        : { issues: [{ message: 'Expected agent decision input with a model' }] };
+        : { issues: [{ message: "Expected agent decision input with a model" }] };
     },
   },
 };
@@ -59,8 +65,8 @@ function decideRequestFromInput(input: AgentDecisionInput): AgentDecisionRequest
   const allowedEventTypes = resolveAllowedEventTypes(input.allowedEvents, input) ?? [];
 
   return {
-    kind: 'decision',
-    id: '',
+    kind: "decision",
+    id: "",
     model: input.model,
     system: input.system,
     prompt: input.prompt,
@@ -84,7 +90,7 @@ function decideRequestFromInput(input: AgentDecisionInput): AgentDecisionRequest
 // createDecisionLogic) because `maxRetries` is per-invoke inline input here,
 // not a static config value.
 function decideActorWithExecutor(
-  execute?: AgentDecisionExecutor
+  execute?: AgentDecisionExecutor,
 ): DecisionLogic<StandardSchemaV1<AgentDecisionInput>> {
   const logic = createAsyncLogic<ChosenEvent, AgentDecisionInput>({
     run: async ({ input, signal }) => {
@@ -92,7 +98,7 @@ function decideActorWithExecutor(
         throw new Error(
           `'${DECIDE_ACTOR}' has no host execution. Provide an implementation with ` +
             `machine.provide({ actorSources: { '${DECIDE_ACTOR}': ... } }) or resolve ` +
-            `the returned agent request with resolveDecision(...).`
+            `the returned agent request with resolveDecision(...).`,
         );
       }
 
@@ -103,8 +109,8 @@ function decideActorWithExecutor(
         throw new Error(
           `'${DECIDE_ACTOR}' input has omitted \`allowedEvents\`, which means "all ` +
             'currently-legal events" — but that requires a snapshot-aware host (runAgent ' +
-            'or the step path) to resolve. Under a bare createActor(...), declare ' +
-            '`allowedEvents` explicitly to use this actor here.'
+            "or the step path) to resolve. Under a bare createActor(...), declare " +
+            "`allowedEvents` explicitly to use this actor here.",
         );
       }
 
@@ -116,14 +122,13 @@ function decideActorWithExecutor(
   });
 
   return Object.assign(logic, {
-    kind: 'statelyai.decisionLogic' as const,
+    kind: "statelyai.decisionLogic" as const,
     maxRetries: 2,
     request: decideRequestFromInput,
     // Internal: see the analogous field in createDecisionLogic's return.
     allowedEventTypes: (input: AgentDecisionInput) =>
       resolveAllowedEventTypes(input.allowedEvents, input),
-    withExecutor: (nextExecute: AgentDecisionExecutor) =>
-      decideActorWithExecutor(nextExecute),
+    withExecutor: (nextExecute: AgentDecisionExecutor) => decideActorWithExecutor(nextExecute),
   }) as DecisionLogic<StandardSchemaV1<AgentDecisionInput>>;
 }
 
@@ -151,10 +156,7 @@ export interface DecisionLogicConfig<
   model: ResolveTextLogicValue<TModel, InferOutput<TInputSchema>>;
   system?: ResolveTextLogicValue<string | undefined, InferOutput<TInputSchema>>;
   prompt?: ResolveTextLogicValue<string | undefined, InferOutput<TInputSchema>>;
-  messages?: ResolveTextLogicValue<
-    AgentMessage[] | undefined,
-    InferOutput<TInputSchema>
-  >;
+  messages?: ResolveTextLogicValue<AgentMessage[] | undefined, InferOutput<TInputSchema>>;
   allowedEvents?: AllowedEvents<TEvent, InferOutput<TInputSchema>>;
   maxRetries?: number; // default 2
   temperature?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
@@ -162,10 +164,7 @@ export interface DecisionLogicConfig<
   topP?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
   topK?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
   seed?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
-  stopSequences?: ResolveTextLogicValue<
-    string[] | undefined,
-    InferOutput<TInputSchema>
-  >;
+  stopSequences?: ResolveTextLogicValue<string[] | undefined, InferOutput<TInputSchema>>;
   metadata?: ResolveTextLogicValue<TMetadata | undefined, InferOutput<TInputSchema>>;
 }
 
@@ -181,7 +180,7 @@ export interface DecisionLogic<
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1,
   TMetadata extends Record<string, unknown> = Record<string, unknown>,
 > extends AsyncActorLogic<ChosenEvent, InferOutput<TInputSchema>> {
-  readonly kind: 'statelyai.decisionLogic';
+  readonly kind: "statelyai.decisionLogic";
   readonly maxRetries: number;
   request(input: InferOutput<TInputSchema>): AgentDecisionRequest;
   withExecutor(execute: AgentDecisionExecutor): DecisionLogic<TInputSchema, TMetadata>;
@@ -190,14 +189,12 @@ export interface DecisionLogic<
 // Resolves a declared `AllowedEvents` (static or resolver) to a concrete list; undefined means "all legal events."
 function resolveAllowedEventTypes(
   allowedEvents: AllowedEvents | undefined,
-  input: unknown
+  input: unknown,
 ): readonly string[] | undefined {
   if (allowedEvents === undefined) {
     return undefined;
   }
-  return typeof allowedEvents === 'function'
-    ? allowedEvents({ input })
-    : allowedEvents;
+  return typeof allowedEvents === "function" ? allowedEvents({ input }) : allowedEvents;
 }
 
 /**
@@ -231,28 +228,25 @@ export function createDecisionLogic<
   TModel extends string = string,
 >(
   config: DecisionLogicConfig<TInputSchema, TEvent, TMetadata, TModel>,
-  execute?: AgentDecisionExecutor
+  execute?: AgentDecisionExecutor,
 ): DecisionLogic<TInputSchema, TMetadata> {
   type TInput = InferOutput<TInputSchema>;
   const maxRetries = config.maxRetries ?? 2;
 
   const request = (input: TInput): AgentDecisionRequest => {
     const parsedInput = config.schemas
-      ? validateSchemaSync<TInput>(
-        config.schemas.input as StandardSchemaV1<TInput>,
-        input
-      )
+      ? validateSchemaSync<TInput>(config.schemas.input as StandardSchemaV1<TInput>, input)
       : input;
     const args = { input: parsedInput };
 
     const allowedEventTypes = resolveAllowedEventTypes(
       config.allowedEvents as AllowedEvents | undefined,
-      parsedInput
+      parsedInput,
     );
 
     return {
-      kind: 'decision',
-      id: '',
+      kind: "decision",
+      id: "",
       model: resolveTextLogicValue(config.model, args)!,
       system: resolveTextLogicValue(config.system, args),
       prompt: resolveTextLogicValue(config.prompt, args),
@@ -276,9 +270,9 @@ export function createDecisionLogic<
     run: async ({ input, signal }) => {
       if (!execute) {
         throw new Error(
-          'Decision logic has no host execution. Pass an executor as the second ' +
-            'argument to createDecisionLogic(...), provide a runtime adapter, or ' +
-            'extract it with getAgentRequests(..., { actorSources }) and resolveDecision(...).'
+          "Decision logic has no host execution. Pass an executor as the second " +
+            "argument to createDecisionLogic(...), provide a runtime adapter, or " +
+            "extract it with getAgentRequests(..., { actorSources }) and resolveDecision(...).",
         );
       }
 
@@ -288,12 +282,15 @@ export function createDecisionLogic<
       // no snapshot that set is unknowable here — fail fast instead of
       // silently resolving to an empty candidate list (guaranteed
       // DecisionExhaustedError).
-      if (resolveAllowedEventTypes(config.allowedEvents as AllowedEvents | undefined, input) === undefined) {
+      if (
+        resolveAllowedEventTypes(config.allowedEvents as AllowedEvents | undefined, input) ===
+        undefined
+      ) {
         throw new Error(
           'Decision logic has omitted `allowedEvents`, which means "all currently-legal ' +
             'events" — but that requires a snapshot-aware host (runAgent or the step ' +
-            'path) to resolve. Under a bare createActor(...), declare `allowedEvents` ' +
-            'explicitly on this logic to use it here.'
+            "path) to resolve. Under a bare createActor(...), declare `allowedEvents` " +
+            "explicitly on this logic to use it here.",
         );
       }
 
@@ -302,7 +299,7 @@ export function createDecisionLogic<
   });
 
   const decisionLogic = Object.assign(logic, {
-    kind: 'statelyai.decisionLogic' as const,
+    kind: "statelyai.decisionLogic" as const,
     maxRetries,
     request,
     // Internal: the raw declared `allowedEvents`, resolved but NOT yet
@@ -326,10 +323,10 @@ export function createDecisionLogic<
 // Type guard: true for any actor logic built by createDecisionLogic/createDecideActor (checks the `kind` marker).
 export function isDecisionLogic(value: unknown): value is DecisionLogic {
   return (
-    !!value
-    && typeof value === 'object'
-    && (value as DecisionLogic).kind === 'statelyai.decisionLogic'
-    && typeof (value as DecisionLogic).request === 'function'
+    !!value &&
+    typeof value === "object" &&
+    (value as DecisionLogic).kind === "statelyai.decisionLogic" &&
+    typeof (value as DecisionLogic).request === "function"
   );
 }
 
@@ -338,7 +335,7 @@ export function isDecisionLogic(value: unknown): value is DecisionLogic {
  * `resolveDecision`.
  */
 export interface AgentDecisionRequest {
-  kind: 'decision';
+  kind: "decision";
   /** Durable invoke id. */
   id: string;
   model: string;
@@ -373,7 +370,7 @@ export interface AgentDecisionRequest {
  */
 export interface DecisionAttempt {
   event?: ChosenEvent;
-  failure: 'unknown-event' | 'invalid-payload' | 'rejected-by-guard';
+  failure: "unknown-event" | "invalid-payload" | "rejected-by-guard";
   reason: string;
 }
 
@@ -389,10 +386,10 @@ export class DecisionExhaustedError extends Error {
 
   constructor(attempts: DecisionAttempt[]) {
     super(
-      `Decision exhausted after ${attempts.length} attempt${attempts.length === 1 ? '' : 's'}: ` +
-        attempts.map((attempt) => attempt.reason).join('; ')
+      `Decision exhausted after ${attempts.length} attempt${attempts.length === 1 ? "" : "s"}: ` +
+        attempts.map((attempt) => attempt.reason).join("; "),
     );
-    this.name = 'DecisionExhaustedError';
+    this.name = "DecisionExhaustedError";
     this.attempts = attempts;
   }
 }
@@ -407,7 +404,7 @@ export class DecisionExhaustedError extends Error {
  * `onResult`/event-sourcing but never affects validation.
  */
 export type AgentDecisionExecutor = (
-  request: AgentDecisionRequest
+  request: AgentDecisionRequest,
 ) => PromiseLike<{ event: ChosenEvent; reason?: string }>;
 
 /**
@@ -462,7 +459,7 @@ export interface ResolveDecisionOptions<TEvent extends ChosenEvent = ChosenEvent
 export async function resolveDecision<TEvent extends ChosenEvent = ChosenEvent>(
   request: AgentDecisionRequest,
   executor: AgentDecisionExecutor,
-  options: ResolveDecisionOptions<TEvent> = {}
+  options: ResolveDecisionOptions<TEvent> = {},
 ): Promise<TEvent> {
   const maxRetries = options.maxRetries ?? 2;
   const attempts: DecisionAttempt[] = [];
@@ -476,9 +473,9 @@ export async function resolveDecision<TEvent extends ChosenEvent = ChosenEvent>(
     if (!descriptor) {
       attempts.push({
         event,
-        failure: 'unknown-event',
+        failure: "unknown-event",
         reason: `'${event.type}' is not among the currently allowed events: ${
-          request.events.map((candidate) => candidate.type).join(', ') || '(none)'
+          request.events.map((candidate) => candidate.type).join(", ") || "(none)"
         }.`,
       });
       continue;
@@ -493,7 +490,7 @@ export async function resolveDecision<TEvent extends ChosenEvent = ChosenEvent>(
       } catch (error) {
         attempts.push({
           event,
-          failure: 'invalid-payload',
+          failure: "invalid-payload",
           reason: `'${event.type}' payload failed validation: ${
             error instanceof Error ? error.message : String(error)
           }`,
@@ -505,7 +502,7 @@ export async function resolveDecision<TEvent extends ChosenEvent = ChosenEvent>(
     if (options.canTake?.(validatedEvent as TEvent) === false) {
       attempts.push({
         event: validatedEvent,
-        failure: 'rejected-by-guard',
+        failure: "rejected-by-guard",
         reason: `'${validatedEvent.type}' is not currently takeable (guard rejected it).`,
       });
       continue;
@@ -547,7 +544,7 @@ export function sendDecision<
   TEmitted extends EventObject = EventObject,
 >(): (
   args: { output: ChosenEvent; self: AnyActorRef },
-  enq: EnqueueObject<TEvent, TEmitted>
+  enq: EnqueueObject<TEvent, TEmitted>,
 ) => void {
   return ({ output, self }, enq) => {
     enq.sendTo(self, output as TEvent);

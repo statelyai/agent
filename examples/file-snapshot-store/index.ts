@@ -20,15 +20,15 @@
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/file-snapshot-store/index.ts
  */
-import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { z } from 'zod';
-import { openai } from '@ai-sdk/openai';
-import { runAgent, setupAgent } from '../../src/index.js';
-import { createAiSdkExecutors } from '../../src/ai-sdk/index.js';
-import type { Snapshot } from 'xstate';
+import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { z } from "zod";
+import { openai } from "@ai-sdk/openai";
+import { runAgent, setupAgent } from "../../src/index.js";
+import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
+import type { Snapshot } from "xstate";
 
 const agent = setupAgent({
   context: z.object({ topic: z.string(), draft: z.string().nullable() }),
@@ -41,9 +41,9 @@ const agent = setupAgent({
   requests: {
     writeDraft: {
       schemas: { input: z.object({ topic: z.string() }), output: z.string() },
-      model: 'writer',
+      model: "writer",
       system:
-        'You draft short, concrete announcement copy. Two or three sentences. ' +
+        "You draft short, concrete announcement copy. Two or three sentences. " +
         'If the topic includes a "Revision:" note, apply it. Return only the draft text.',
       prompt: ({ input }) => input.topic,
     },
@@ -53,29 +53,29 @@ const agent = setupAgent({
 // drafting → reviewing (idle HITL) → published, with a REJECT loop back to
 // drafting. Each REJECT is one idle/resume cycle through the store.
 export const draftMachine = agent.createMachine({
-  id: 'file-snapshot-drafter',
+  id: "file-snapshot-drafter",
   context: ({ input }) => ({ topic: input.topic, draft: null }),
-  initial: 'drafting',
+  initial: "drafting",
   states: {
     drafting: {
       invoke: {
-        src: 'writeDraft',
+        src: "writeDraft",
         input: ({ context }) => ({ topic: context.topic }),
-        onDone: ({ output }) => ({ target: 'reviewing', context: { draft: output } }),
+        onDone: ({ output }) => ({ target: "reviewing", context: { draft: output } }),
       },
     },
     reviewing: {
       on: {
-        APPROVE: { target: 'published' },
+        APPROVE: { target: "published" },
         REJECT: ({ context, event }) => ({
-          target: 'drafting',
+          target: "drafting",
           context: { topic: `${context.topic}\nRevision: ${event.reason}` },
         }),
       },
     },
     published: {
-      type: 'final',
-      output: ({ context }) => ({ draft: context.draft ?? '' }),
+      type: "final",
+      output: ({ context }) => ({ draft: context.draft ?? "" }),
     },
   },
 });
@@ -93,47 +93,49 @@ export function createFileSnapshotStore(dir: string): SnapshotStore {
   const pathFor = (sessionId: string) => join(dir, `${sessionId}.json`);
   return {
     save(sessionId, snapshot) {
-      writeFileSync(pathFor(sessionId), JSON.stringify(snapshot), 'utf8');
+      writeFileSync(pathFor(sessionId), JSON.stringify(snapshot), "utf8");
     },
     load(sessionId) {
-      return JSON.parse(readFileSync(pathFor(sessionId), 'utf8')) as Snapshot<unknown>;
+      return JSON.parse(readFileSync(pathFor(sessionId), "utf8")) as Snapshot<unknown>;
     },
   };
 }
 
-const generateText = async ({ prompt }: { prompt?: string }) => ({ output: `Draft: ${prompt ?? ''}` });
+const generateText = async ({ prompt }: { prompt?: string }) => ({
+  output: `Draft: ${prompt ?? ""}`,
+});
 
 export async function runFileSnapshotStoreExample() {
-  const store = createFileSnapshotStore(mkdtempSync(join(tmpdir(), 'agent-snap-')));
-  const sessionId = 'refund-123';
+  const store = createFileSnapshotStore(mkdtempSync(join(tmpdir(), "agent-snap-")));
+  const sessionId = "refund-123";
 
   // ── Process 1: run to the first idle, checkpoint to disk. ──
   const first = await runAgent(draftMachine, {
-    input: { topic: 'release notes' },
+    input: { topic: "release notes" },
     generateText,
   });
-  assert.equal(first.status, 'idle');
+  assert.equal(first.status, "idle");
   store.save(sessionId, first.snapshot);
 
   // ── Process 2 (fresh runAgent): load, reject once, checkpoint again. ──
   const second = await runAgent(draftMachine, {
     snapshot: store.load(sessionId),
-    event: { type: 'REJECT', reason: 'too terse' },
+    event: { type: "REJECT", reason: "too terse" },
     generateText,
   });
   // REJECT loops back through drafting to reviewing → idle again.
-  assert.equal(second.status, 'idle');
+  assert.equal(second.status, "idle");
   store.save(sessionId, second.snapshot);
 
   // ── Process 3 (fresh runAgent): load, approve, run to done. ──
   const third = await runAgent(draftMachine, {
     snapshot: store.load(sessionId),
-    event: { type: 'APPROVE' },
+    event: { type: "APPROVE" },
     generateText,
   });
-  assert.equal(third.status, 'done');
-  assert.deepEqual(third.status === 'done' ? third.output : undefined, {
-    draft: 'Draft: release notes\nRevision: too terse',
+  assert.equal(third.status, "done");
+  assert.deepEqual(third.status === "done" ? third.output : undefined, {
+    draft: "Draft: release notes\nRevision: too terse",
   });
 }
 
@@ -141,19 +143,19 @@ export async function runFileSnapshotStoreExample() {
 // but with a real model writing the draft and a real snapshot file on disk.
 export async function main() {
   const { generateText } = createAiSdkExecutors({
-    models: { writer: openai('gpt-5.4-mini') },
+    models: { writer: openai("gpt-5.4-mini") },
   });
-  const dir = mkdtempSync(join(tmpdir(), 'agent-snap-'));
+  const dir = mkdtempSync(join(tmpdir(), "agent-snap-"));
   const store = createFileSnapshotStore(dir);
-  const sessionId = 'release-123';
+  const sessionId = "release-123";
   const snapshotPath = join(dir, `${sessionId}.json`);
 
   // Process 1: draft, settle idle at review, checkpoint to disk.
   const first = await runAgent(draftMachine, {
-    input: { topic: 'Launch of our new snapshot store' },
+    input: { topic: "Launch of our new snapshot store" },
     generateText,
   });
-  assert.equal(first.status, 'idle');
+  assert.equal(first.status, "idle");
   store.save(sessionId, first.snapshot);
   console.log(`Draft checkpointed to ${snapshotPath}`);
   console.log(`Draft: ${first.snapshot.context.draft}\n`);
@@ -161,28 +163,28 @@ export async function main() {
   // Process 2 (fresh runAgent): load, request a revision, checkpoint again.
   const second = await runAgent(draftMachine, {
     snapshot: store.load(sessionId),
-    event: { type: 'REJECT', reason: 'make it punchier' },
+    event: { type: "REJECT", reason: "make it punchier" },
     generateText,
   });
-  assert.equal(second.status, 'idle');
+  assert.equal(second.status, "idle");
   store.save(sessionId, second.snapshot);
   console.log(`Revised draft: ${second.snapshot.context.draft}\n`);
 
   // Process 3 (fresh runAgent): load, approve, run to done.
   const third = await runAgent(draftMachine, {
     snapshot: store.load(sessionId),
-    event: { type: 'APPROVE' },
+    event: { type: "APPROVE" },
     generateText,
   });
-  if (third.status !== 'done') {
+  if (third.status !== "done") {
     throw new Error(`Draft did not publish: ${third.status}`);
   }
-  console.log('Published:', third.output.draft);
+  console.log("Published:", third.output.draft);
 }
 
-if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   if (!process.env.OPENAI_API_KEY) {
-    console.error('Set OPENAI_API_KEY to run this example.');
+    console.error("Set OPENAI_API_KEY to run this example.");
     process.exit(1);
   }
   void main();

@@ -6,11 +6,11 @@
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/ai-sdk-marketing-chain/index.ts
  */
-import { z } from 'zod';
-import { openai } from '@ai-sdk/openai';
-import { setupAgent, runAgent } from '../../src/index.js';
-import { createAiSdkTextExecutor } from '../ai-sdk-host/index.js';
-import { type LanguageModel } from 'ai';
+import { z } from "zod";
+import { openai } from "@ai-sdk/openai";
+import { setupAgent, runAgent } from "../../src/index.js";
+import { createAiSdkTextExecutor } from "../ai-sdk-host/index.js";
+import { type LanguageModel } from "ai";
 
 const qualitySchema = z.object({
   hasCallToAction: z.boolean(),
@@ -19,16 +19,15 @@ const qualitySchema = z.object({
 });
 
 function qualityPasses(quality: z.infer<typeof qualitySchema> | null) {
-  return !!quality
-    && quality.hasCallToAction
-    && quality.emotionalAppeal >= 7
-    && quality.clarity >= 7;
+  return (
+    !!quality && quality.hasCallToAction && quality.emotionalAppeal >= 7 && quality.clarity >= 7
+  );
 }
 
-export const models: Record<'copywriter' | 'evaluator' | 'improver', LanguageModel> = {
-  copywriter: openai('gpt-5.4-mini'),
-  evaluator: openai('gpt-5.4-mini'),
-  improver: openai('gpt-5.4-mini'),
+export const models: Record<"copywriter" | "evaluator" | "improver", LanguageModel> = {
+  copywriter: openai("gpt-5.4-mini"),
+  evaluator: openai("gpt-5.4-mini"),
+  improver: openai("gpt-5.4-mini"),
 } as const;
 
 const agent = setupAgent({
@@ -47,9 +46,9 @@ const agent = setupAgent({
         input: z.object({ product: z.string() }),
         output: z.string(),
       },
-      model: 'copywriter',
+      model: "copywriter",
       system:
-        'You are a direct-response copywriter. Lead with the customer benefit, build emotional appeal, and end on one clear call to action. Keep it tight — a short paragraph, no headings.',
+        "You are a direct-response copywriter. Lead with the customer benefit, build emotional appeal, and end on one clear call to action. Keep it tight — a short paragraph, no headings.",
       prompt: ({ input }) =>
         `Write persuasive marketing copy for: ${input.product}. Focus on benefits and emotional appeal.`,
     },
@@ -58,9 +57,9 @@ const agent = setupAgent({
         input: z.object({ copy: z.string() }),
         output: qualitySchema,
       },
-      model: 'evaluator',
+      model: "evaluator",
       system:
-        'You review marketing copy. Report whether it has a clear call to action, then score emotional appeal (1-10) and clarity (1-10). Score strictly against direct-response standards.',
+        "You review marketing copy. Report whether it has a clear call to action, then score emotional appeal (1-10) and clarity (1-10). Score strictly against direct-response standards.",
       prompt: ({ input }) => input.copy,
     },
     improveMarketingCopy: {
@@ -68,15 +67,18 @@ const agent = setupAgent({
         input: z.object({ copy: z.string(), quality: qualitySchema }),
         output: z.string(),
       },
-      model: 'improver',
+      model: "improver",
       system:
-        'You are a copy editor. Revise the copy to address the notes below while preserving its voice. Return only the improved copy.',
-      prompt: ({ input }) => [
-        !input.quality.hasCallToAction ? 'Add a clear call to action.' : '',
-        input.quality.emotionalAppeal < 7 ? 'Strengthen emotional appeal.' : '',
-        input.quality.clarity < 7 ? 'Improve clarity and directness.' : '',
-        `Original copy: ${input.copy}`,
-      ].filter(Boolean).join('\n'),
+        "You are a copy editor. Revise the copy to address the notes below while preserving its voice. Return only the improved copy.",
+      prompt: ({ input }) =>
+        [
+          !input.quality.hasCallToAction ? "Add a clear call to action." : "",
+          input.quality.emotionalAppeal < 7 ? "Strengthen emotional appeal." : "",
+          input.quality.clarity < 7 ? "Improve clarity and directness." : "",
+          `Original copy: ${input.copy}`,
+        ]
+          .filter(Boolean)
+          .join("\n"),
     },
   },
 });
@@ -86,7 +88,7 @@ export const evaluateMarketingCopy = agent.requests.evaluateMarketingCopy;
 export const improveMarketingCopy = agent.requests.improveMarketingCopy;
 
 export const aiSdkMarketingChainMachine = agent.createMachine({
-  id: 'ai-sdk-marketing-chain',
+  id: "ai-sdk-marketing-chain",
   context: ({ input }) => ({
     product: input.product,
     copy: null,
@@ -94,50 +96,48 @@ export const aiSdkMarketingChainMachine = agent.createMachine({
     finalCopy: null,
   }),
   output: ({ context }) => ({
-    copy: context.finalCopy ?? context.copy ?? '',
+    copy: context.finalCopy ?? context.copy ?? "",
     quality: context.quality ?? {
       hasCallToAction: false,
       emotionalAppeal: 0,
       clarity: 0,
     },
   }),
-  initial: 'writing',
+  initial: "writing",
   states: {
     writing: {
       invoke: {
-        id: 'writeMarketingCopy',
-        src: 'writeMarketingCopy',
+        id: "writeMarketingCopy",
+        src: "writeMarketingCopy",
         input: ({ context }) => ({ product: context.product }),
         onDone: ({ output }) => ({
-          target: 'evaluating',
+          target: "evaluating",
           context: { copy: output },
         }),
       },
     },
     evaluating: {
       invoke: {
-        id: 'evaluateMarketingCopy',
-        src: 'evaluateMarketingCopy',
-        input: ({ context }) => ({ copy: context.copy ?? '' }),
+        id: "evaluateMarketingCopy",
+        src: "evaluateMarketingCopy",
+        input: ({ context }) => ({ copy: context.copy ?? "" }),
         onDone: ({ output }) => ({
-          target: 'checking',
+          target: "checking",
           context: { quality: output },
         }),
       },
     },
     checking: {
-      type: 'choice',
+      type: "choice",
       choice: ({ context }) =>
-        qualityPasses(context.quality)
-          ? { target: 'done' }
-          : { target: 'improving' },
+        qualityPasses(context.quality) ? { target: "done" } : { target: "improving" },
     },
     improving: {
       invoke: {
-        id: 'improveMarketingCopy',
-        src: 'improveMarketingCopy',
+        id: "improveMarketingCopy",
+        src: "improveMarketingCopy",
         input: ({ context }) => ({
-          copy: context.copy ?? '',
+          copy: context.copy ?? "",
           quality: context.quality ?? {
             hasCallToAction: false,
             emotionalAppeal: 0,
@@ -145,29 +145,29 @@ export const aiSdkMarketingChainMachine = agent.createMachine({
           },
         }),
         onDone: ({ output }) => ({
-          target: 'done',
+          target: "done",
           context: { finalCopy: output },
         }),
       },
     },
-    done: { type: 'final' },
+    done: { type: "final" },
   },
 });
 
 export async function runAiSdkMarketingChainExample() {
   const result = await runAgent(aiSdkMarketingChainMachine, {
-    input: { product: 'state machines' },
+    input: { product: "state machines" },
     generateText: createAiSdkTextExecutor({ models }),
   });
-  if (result.status !== 'done') {
+  if (result.status !== "done") {
     throw new Error(`Marketing chain example did not complete: ${result.status}`);
   }
   return result.output;
 }
 
-if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   if (!process.env.OPENAI_API_KEY) {
-    console.error('Set OPENAI_API_KEY to run this example.');
+    console.error("Set OPENAI_API_KEY to run this example.");
     process.exit(1);
   }
   console.log(await runAiSdkMarketingChainExample());

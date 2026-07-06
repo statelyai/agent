@@ -7,27 +7,27 @@ import {
   type ExecutableActionObjectFromLogic,
   type EventObject,
   type SnapshotFrom,
-} from 'xstate';
-import type { AgentTools, StandardSchemaV1 } from './types.js';
-import { validateSchemaSync } from './utils.js';
+} from "xstate";
+import type { AgentTools, StandardSchemaV1 } from "./types.js";
+import { validateSchemaSync } from "./utils.js";
 import {
   executeAgentTextRequest,
   isTextLogic,
   type AgentRequestExecutors,
   type AgentRequestMode,
   type AgentTextRequest,
-} from './text-logic.js';
-import { isDecisionLogic, type AgentDecisionRequest } from './decision.js';
+} from "./text-logic.js";
+import { isDecisionLogic, type AgentDecisionRequest } from "./decision.js";
 import {
   getAcceptedEvents,
   type AgentEventDescriptor,
   type AgentRequestOptions,
   type AgentRequestSource,
-} from './events.js';
+} from "./events.js";
 import {
   getRegisteredAgentExecutionOptions,
   type AgentExecutionOptions,
-} from './internal/registry.js';
+} from "./internal/registry.js";
 
 /**
  * A pending text request surfaced by step discovery ({@link getAgentRequests}
@@ -37,7 +37,7 @@ import {
  * {@link resolveAgentStep} via `xstate.done.actor.<id>`).
  */
 export interface AgentRequest<TInput extends AgentTextRequest = AgentTextRequest> {
-  kind: 'text';
+  kind: "text";
   id: string;
   src: AgentRequestSource;
   mode?: AgentRequestMode;
@@ -62,32 +62,37 @@ export type AgentStepRequest = AgentRequest | AgentDecisionRequest;
  * decision requests report an empty `events` list.
  */
 export function getAgentRequests(
-  actions: readonly { type?: string; params?: unknown; id?: unknown; src?: unknown; input?: unknown; logic?: unknown }[],
-  options: AgentRequestOptions = {}
+  actions: readonly {
+    type?: string;
+    params?: unknown;
+    id?: unknown;
+    src?: unknown;
+    input?: unknown;
+    logic?: unknown;
+  }[],
+  options: AgentRequestOptions = {},
 ): AgentStepRequest[] {
   return actions.flatMap((action): AgentStepRequest[] => {
-    if (action.type !== 'xstate.spawnChild' && action.type !== '@xstate.start') {
+    if (action.type !== "xstate.spawnChild" && action.type !== "@xstate.start") {
       return [];
     }
 
-    const params = action.type === '@xstate.start'
-      ? action
-      : action.params as
-      | { id?: unknown; src?: unknown; input?: unknown }
-      | undefined;
-    if (!params || typeof params.src !== 'string') {
+    const params =
+      action.type === "@xstate.start"
+        ? action
+        : (action.params as { id?: unknown; src?: unknown; input?: unknown } | undefined);
+    if (!params || typeof params.src !== "string") {
       return [];
     }
 
-    if (typeof params.id !== 'string' || params.id.length === 0) {
-      throw new Error(
-        `Agent invoke '${params.src}' must define a durable string id.`
-      );
+    if (typeof params.id !== "string" || params.id.length === 0) {
+      throw new Error(`Agent invoke '${params.src}' must define a durable string id.`);
     }
 
-    const registeredLogic = isTextLogic(action.logic) || isDecisionLogic(action.logic)
-      ? action.logic
-      : options.actorSources?.[params.src];
+    const registeredLogic =
+      isTextLogic(action.logic) || isDecisionLogic(action.logic)
+        ? action.logic
+        : options.actorSources?.[params.src];
 
     if (isDecisionLogic(registeredLogic)) {
       const decisionRequest = registeredLogic.request(params.input as never);
@@ -101,47 +106,49 @@ export function getAgentRequests(
       ).allowedEventTypes?.(params.input);
       const events = options.snapshot
         ? getAcceptedEvents(options.snapshot, {
-          events: options.events,
-          schemas: options.schemas,
-          eventTypes: allowedEventTypes,
-          eventToolName: options.eventToolName,
-        })
+            events: options.events,
+            schemas: options.schemas,
+            eventTypes: allowedEventTypes,
+            eventToolName: options.eventToolName,
+          })
         : [];
 
-      return [{
-        ...decisionRequest,
-        id: params.id,
-        events,
-      }];
+      return [
+        {
+          ...decisionRequest,
+          id: params.id,
+          events,
+        },
+      ];
     }
 
     const textLogic = isTextLogic(registeredLogic) ? registeredLogic : undefined;
-    const input = textLogic
-      ? textLogic.request(params.input as never)
-      : undefined;
+    const input = textLogic ? textLogic.request(params.input as never) : undefined;
 
     if (!input) {
       return [];
     }
 
-    return [{
-      kind: 'text',
-      id: params.id,
-      src: params.src,
-      ...(textLogic ? { mode: textLogic.mode } : {}),
-      input,
-      tools: input.tools ?? {},
-      events: [],
-    }];
+    return [
+      {
+        kind: "text",
+        id: params.id,
+        src: params.src,
+        ...(textLogic ? { mode: textLogic.mode } : {}),
+        input,
+        tools: input.tools ?? {},
+        events: [],
+      },
+    ];
   });
 }
 
 /** Builds the synthetic `xstate.done.actor.<id>` event xstate's `transition()` expects to resolve a spawned invoke — the event {@link resolveAgentStep} applies internally. */
 export function doneEvent(
-  request: Pick<AgentRequest, 'id'> | string,
-  output: unknown
+  request: Pick<AgentRequest, "id"> | string,
+  output: unknown,
 ): { type: `xstate.done.actor.${string}`; output: unknown } {
-  const id = typeof request === 'string' ? request : request.id;
+  const id = typeof request === "string" ? request : request.id;
   return { type: `xstate.done.actor.${id}`, output };
 }
 
@@ -149,8 +156,8 @@ export function doneEvent(
 export function transitionResult<TLogic extends AnyActorLogic>(
   logic: TLogic,
   snapshot: SnapshotFrom<TLogic>,
-  request: Pick<AgentRequest, 'id'> | string,
-  output: unknown
+  request: Pick<AgentRequest, "id"> | string,
+  output: unknown,
 ): [SnapshotFrom<TLogic>, ExecutableActionObjectFromLogic<TLogic>[]] {
   const event = doneEvent(request, output);
   const result = transition(logic, snapshot, event as never);
@@ -185,10 +192,15 @@ export interface AgentStep<TSnapshot extends AnyMachineSnapshot = AnyMachineSnap
 export function initialAgentStep<TMachine extends AnyActorLogic>(
   machine: TMachine,
   input?: unknown,
-  options?: Partial<AgentExecutionOptions>
+  options?: Partial<AgentExecutionOptions>,
 ): AgentStep<SnapshotFrom<TMachine>> {
   const [snapshot, actions] = initialTransition(machine, input as never);
-  return createAgentStep(machine, snapshot, actions, getRegisteredAgentExecutionOptions(machine, options));
+  return createAgentStep(
+    machine,
+    snapshot,
+    actions,
+    getRegisteredAgentExecutionOptions(machine, options),
+  );
 }
 
 /**
@@ -202,13 +214,16 @@ export function transitionAgentStep<TMachine extends AnyActorLogic>(
   machine: TMachine,
   snapshotOrStep: SnapshotFrom<TMachine> | AgentStep<SnapshotFrom<TMachine>>,
   event: EventFromLogic<TMachine>,
-  options?: Partial<AgentExecutionOptions>
+  options?: Partial<AgentExecutionOptions>,
 ): AgentStep<SnapshotFrom<TMachine>> {
-  const snapshot = isAgentStep(snapshotOrStep)
-    ? snapshotOrStep.snapshot
-    : snapshotOrStep;
+  const snapshot = isAgentStep(snapshotOrStep) ? snapshotOrStep.snapshot : snapshotOrStep;
   const [nextSnapshot, actions] = transition(machine, snapshot, event as never);
-  return createAgentStep(machine, nextSnapshot, actions, getRegisteredAgentExecutionOptions(machine, options));
+  return createAgentStep(
+    machine,
+    nextSnapshot,
+    actions,
+    getRegisteredAgentExecutionOptions(machine, options),
+  );
 }
 
 /**
@@ -222,12 +237,17 @@ export function transitionAgentStep<TMachine extends AnyActorLogic>(
 export function resolveAgentStep<TMachine extends AnyActorLogic>(
   machine: TMachine,
   step: AgentStep<SnapshotFrom<TMachine>>,
-  request: Pick<AgentRequest, 'id'> | string,
+  request: Pick<AgentRequest, "id"> | string,
   output: unknown,
-  options?: Partial<AgentExecutionOptions>
+  options?: Partial<AgentExecutionOptions>,
 ): AgentStep<SnapshotFrom<TMachine>> {
   const [snapshot, actions] = transitionResult(machine, step.snapshot, request, output);
-  return createAgentStep(machine, snapshot, actions, getRegisteredAgentExecutionOptions(machine, options));
+  return createAgentStep(
+    machine,
+    snapshot,
+    actions,
+    getRegisteredAgentExecutionOptions(machine, options),
+  );
 }
 
 /**
@@ -240,7 +260,7 @@ export function getMachineAgentRequests(
   machine: AnyActorLogic,
   actions: readonly { type?: string; params?: unknown }[],
   snapshot?: AnyMachineSnapshot,
-  options: Pick<AgentRequestOptions, 'eventToolName'> & Partial<AgentExecutionOptions> = {}
+  options: Pick<AgentRequestOptions, "eventToolName"> & Partial<AgentExecutionOptions> = {},
 ): AgentStepRequest[] {
   const machineOptions = getRegisteredAgentExecutionOptions(machine, options);
 
@@ -264,40 +284,38 @@ export function getMachineAgentRequests(
  */
 export function executeAgentRequest(
   request: AgentRequest,
-  executors: AgentRequestExecutors
+  executors: AgentRequestExecutors,
 ): Promise<unknown>;
 export function executeAgentRequest(
   request: AgentRequest,
   executors: AgentRequestExecutors,
-  options: { verbose: true }
+  options: { verbose: true },
 ): Promise<{ output: unknown; raw: unknown }>;
 export async function executeAgentRequest(
   request: AgentRequest,
   executors: AgentRequestExecutors,
-  options?: { verbose?: boolean }
+  options?: { verbose?: boolean },
 ): Promise<unknown> {
-  if ((request as AgentStepRequest).kind === 'decision') {
+  if ((request as AgentStepRequest).kind === "decision") {
     throw new Error(
       "executeAgentRequest(...) is text-only. Resolve a 'decision' request with " +
-        'resolveDecision(request, executors.decide, ...) instead.'
+        "resolveDecision(request, executors.decide, ...) instead.",
     );
   }
 
   const { output, raw } = await executeAgentTextRequest(
-    request.mode ?? 'generate',
+    request.mode ?? "generate",
     request.id,
     request.input,
     executors,
-    request.tools
+    request.tools,
   );
 
   const normalizedOutput = request.input.outputSchema
     ? validateSchemaSync(request.input.outputSchema, output)
     : output;
 
-  return options?.verbose
-    ? { output: normalizedOutput, raw }
-    : normalizedOutput;
+  return options?.verbose ? { output: normalizedOutput, raw } : normalizedOutput;
 }
 
 // Assembles an AgentStep from a snapshot + actions: applies single-final-state output, then discovers pending requests.
@@ -305,7 +323,7 @@ function createAgentStep<TMachine extends AnyActorLogic>(
   machine: TMachine,
   snapshot: SnapshotFrom<TMachine>,
   actions: readonly { type?: string; params?: unknown }[],
-  options?: AgentExecutionOptions
+  options?: AgentExecutionOptions,
 ): AgentStep<SnapshotFrom<TMachine>> {
   applyFinalStateOutput(machine, snapshot);
 
@@ -316,20 +334,17 @@ function createAgentStep<TMachine extends AnyActorLogic>(
       ...options,
       snapshot: snapshot as AnyMachineSnapshot,
     }),
-    done: (snapshot as AnyMachineSnapshot).status === 'done',
+    done: (snapshot as AnyMachineSnapshot).status === "done",
   };
 }
 
 // Walks a machine config by the snapshot's state `value` to find the reached final-state's config node.
-function resolveStateValueConfig(
-  config: { states?: Record<string, any> },
-  value: unknown
-): any {
-  if (typeof value === 'string') {
+function resolveStateValueConfig(config: { states?: Record<string, any> }, value: unknown): any {
+  if (typeof value === "string") {
     return config.states?.[value];
   }
 
-  if (!value || typeof value !== 'object') {
+  if (!value || typeof value !== "object") {
     return undefined;
   }
 
@@ -339,7 +354,7 @@ function resolveStateValueConfig(
       continue;
     }
 
-    if (childConfig.type === 'final') {
+    if (childConfig.type === "final") {
       return childConfig;
     }
 
@@ -353,11 +368,7 @@ function resolveStateValueConfig(
 }
 
 // Backfills `snapshot.output` from the reached final state's `output` config when xstate didn't already set one (single-final-state root-output sugar — see setup-agent.ts's withRootOutputFromSingleFinal).
-function applyFinalStateOutput(
-  logic: AnyActorLogic,
-  snapshot: unknown,
-  event?: EventObject
-) {
+function applyFinalStateOutput(logic: AnyActorLogic, snapshot: unknown, event?: EventObject) {
   const machineSnapshot = snapshot as AnyMachineSnapshot & {
     output?: unknown;
     context?: unknown;
@@ -365,9 +376,9 @@ function applyFinalStateOutput(
   };
 
   if (
-    machineSnapshot.status !== 'done'
-    || machineSnapshot.output !== undefined
-    || !('config' in logic)
+    machineSnapshot.status !== "done" ||
+    machineSnapshot.output !== undefined ||
+    !("config" in logic)
   ) {
     return;
   }
@@ -384,20 +395,18 @@ function applyFinalStateOutput(
   }
 
   machineSnapshot.output =
-    typeof output === 'function'
-      ? output({ context: machineSnapshot.context, event })
-      : output;
+    typeof output === "function" ? output({ context: machineSnapshot.context, event }) : output;
 }
 
 // Duck-types an AgentStep vs a raw snapshot, for transitionAgentStep's dual-argument overload.
 function isAgentStep<TSnapshot extends AnyMachineSnapshot>(
-  value: unknown
+  value: unknown,
 ): value is AgentStep<TSnapshot> {
   return (
-    !!value
-    && typeof value === 'object'
-    && 'snapshot' in value
-    && 'actions' in value
-    && 'requests' in value
+    !!value &&
+    typeof value === "object" &&
+    "snapshot" in value &&
+    "actions" in value &&
+    "requests" in value
   );
 }

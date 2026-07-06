@@ -34,8 +34,8 @@ import {
   type AgentDecisionRequest,
   type AgentRequest,
   type ChosenEvent,
-} from '../../src/index.js';
-import { gameActors, gameMachine, gameSchemas } from '../game-agent/index.js';
+} from "../../src/index.js";
+import { gameActors, gameMachine, gameSchemas } from "../game-agent/index.js";
 
 interface Env {
   AI: {
@@ -45,7 +45,13 @@ interface Env {
 
 async function runWorkersAiPrompt(
   env: Env,
-  args: { model: string; system?: string; prompt: string; temperature?: number; maxTokens?: number }
+  args: {
+    model: string;
+    system?: string;
+    prompt: string;
+    temperature?: number;
+    maxTokens?: number;
+  },
 ): Promise<string> {
   const response = (await env.AI.run(args.model, {
     system: args.system,
@@ -54,19 +60,23 @@ async function runWorkersAiPrompt(
     max_tokens: args.maxTokens,
   })) as { response?: string } | string | Record<string, unknown>;
 
-  return typeof response === 'string'
+  return typeof response === "string"
     ? response
-    : typeof response.response === 'string'
+    : typeof response.response === "string"
       ? response.response
       : JSON.stringify(response);
 }
 
 /** Text request: structured output serialized into the prompt, JSON parsed back out. */
 async function runWorkersAiTextRequest(env: Env, request: AgentRequest) {
-  const structured = getAgentOutputMode(request.input.outputSchema) === 'structured';
+  const structured = getAgentOutputMode(request.input.outputSchema) === "structured";
   const prompt = structured
-    ? [request.input.prompt ?? '', '', 'Respond with JSON only, matching the requested shape.'].join('\n')
-    : request.input.prompt ?? '';
+    ? [
+        request.input.prompt ?? "",
+        "",
+        "Respond with JSON only, matching the requested shape.",
+      ].join("\n")
+    : (request.input.prompt ?? "");
 
   const text = await runWorkersAiPrompt(env, {
     model: request.input.model,
@@ -85,22 +95,22 @@ async function runWorkersAiDecision(env: Env, request: AgentDecisionRequest): Pr
   return resolveDecision(
     request,
     async (attemptRequest) => {
-      const legalEvents = attemptRequest.events.map((event) => `- ${event.type}`).join('\n');
+      const legalEvents = attemptRequest.events.map((event) => `- ${event.type}`).join("\n");
       const attemptFeedback = attemptRequest.attempts
         .map((attempt) => `Your previous choice failed: ${attempt.reason}`)
-        .join('\n');
+        .join("\n");
 
       const prompt = [
-        attemptRequest.prompt ?? '',
+        attemptRequest.prompt ?? "",
         attemptFeedback,
-        '',
-        'Choose exactly one legal event and respond as JSON.',
-        'Legal events:',
+        "",
+        "Choose exactly one legal event and respond as JSON.",
+        "Legal events:",
         legalEvents,
         'Example: {"type":"ATTACK","target":"goblin"}',
       ]
         .filter(Boolean)
-        .join('\n');
+        .join("\n");
 
       const text = await runWorkersAiPrompt(env, {
         model: attemptRequest.model,
@@ -112,14 +122,11 @@ async function runWorkersAiDecision(env: Env, request: AgentDecisionRequest): Pr
 
       return { event: JSON.parse(text) as ChosenEvent };
     },
-    { maxRetries: 2 }
+    { maxRetries: 2 },
   );
 }
 
-export async function runCloudflareGameTurn(
-  env: Env,
-  input = { playerHp: 20, enemyHp: 15 },
-) {
+export async function runCloudflareGameTurn(env: Env, input = { playerHp: 20, enemyHp: 15 }) {
   let step = initialAgentStep(gameMachine, input, {
     schemas: gameSchemas,
     actorSources: gameActors,
@@ -128,10 +135,10 @@ export async function runCloudflareGameTurn(
   while (!step.done) {
     const [request] = step.requests;
     if (!request) {
-      throw new Error('Machine is waiting without an agent request.');
+      throw new Error("Machine is waiting without an agent request.");
     }
 
-    if (request.kind === 'decision') {
+    if (request.kind === "decision") {
       const event = await runWorkersAiDecision(env, request);
       step = resolveAgentStep(gameMachine, step, request, event, {
         schemas: gameSchemas,

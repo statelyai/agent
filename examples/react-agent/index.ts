@@ -31,10 +31,10 @@
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/react-agent/index.ts
  */
-import { z } from 'zod';
-import { openai } from '@ai-sdk/openai';
-import { createAsyncLogic } from 'xstate';
-import { type LanguageModel } from 'ai';
+import { z } from "zod";
+import { openai } from "@ai-sdk/openai";
+import { createAsyncLogic } from "xstate";
+import { type LanguageModel } from "ai";
 import {
   type AgentMessage,
   assistantMessage,
@@ -42,18 +42,18 @@ import {
   setupAgent,
   userMessage,
   type AgentRequestExecutors,
-} from '../../src/index.js';
+} from "../../src/index.js";
 
-export const models: Record<'reasoner', LanguageModel> = {
-  reasoner: openai('gpt-5.4-mini'),
+export const models: Record<"reasoner", LanguageModel> = {
+  reasoner: openai("gpt-5.4-mini"),
 } as const;
 
 /** Sample data: a tiny labeled knowledge base (stand-in for a retrieval tool). */
 export const KNOWLEDGE_BASE: Record<string, string> = {
-  'speed of light': '299,792,458 meters per second',
-  'earth radius': '6,371 kilometers (mean)',
-  'seconds per day': '86,400 seconds',
-  'moon distance': '384,400 kilometers (average from Earth)',
+  "speed of light": "299,792,458 meters per second",
+  "earth radius": "6,371 kilometers (mean)",
+  "seconds per day": "86,400 seconds",
+  "moon distance": "384,400 kilometers (average from Earth)",
 };
 
 const toolResultSchema = z.object({
@@ -66,27 +66,27 @@ type ToolResult = z.infer<typeof toolResultSchema>;
 // A tool name that isn't in the union can't validate — a hallucinated tool
 // never reaches an actor (the schema is the guard). Discriminated on `tool`,
 // where `answer` is the "I'm done" branch.
-const reasonOrActSchema = z.discriminatedUnion('tool', [
+const reasonOrActSchema = z.discriminatedUnion("tool", [
   z.object({
-    type: z.literal('tool'),
+    type: z.literal("tool"),
     thought: z.string(),
-    tool: z.literal('calculate'),
+    tool: z.literal("calculate"),
     parameters: z.object({
-      operation: z.enum(['add', 'subtract', 'multiply', 'divide']),
+      operation: z.enum(["add", "subtract", "multiply", "divide"]),
       a: z.number(),
       b: z.number(),
     }),
   }),
   z.object({
-    type: z.literal('tool'),
+    type: z.literal("tool"),
     thought: z.string(),
-    tool: z.literal('lookup'),
+    tool: z.literal("lookup"),
     parameters: z.object({ key: z.string() }),
   }),
   z.object({
-    type: z.literal('answer'),
+    type: z.literal("answer"),
     thought: z.string(),
-    tool: z.literal('answer'),
+    tool: z.literal("answer"),
     answer: z.string(),
   }),
 ]);
@@ -115,16 +115,16 @@ const agent = setupAgent({
     // Real calculator — actually computes.
     calculate: createAsyncLogic<
       ToolResult,
-      { operation: 'add' | 'subtract' | 'multiply' | 'divide'; a: number; b: number }
+      { operation: "add" | "subtract" | "multiply" | "divide"; a: number; b: number }
     >({
       run: async ({ input }) => {
         const { operation, a, b } = input;
         const value =
-          operation === 'add'
+          operation === "add"
             ? a + b
-            : operation === 'subtract'
+            : operation === "subtract"
               ? a - b
-              : operation === 'multiply'
+              : operation === "multiply"
                 ? a * b
                 : b === 0
                   ? NaN
@@ -157,18 +157,17 @@ const agent = setupAgent({
         }),
         output: reasonOrActSchema,
       },
-      model: 'reasoner',
+      model: "reasoner",
       system:
-        'You are a ReAct agent. Reason step by step. Each turn, either call one ' +
-        'tool to gather what you need, or give the final answer once you have ' +
-        'enough. Tools: calculate (arithmetic: add/subtract/multiply/divide), ' +
+        "You are a ReAct agent. Reason step by step. Each turn, either call one " +
+        "tool to gather what you need, or give the final answer once you have " +
+        "enough. Tools: calculate (arithmetic: add/subtract/multiply/divide), " +
         'lookup (retrieve a fact by key, e.g. "speed of light", "seconds per day"). ' +
-        'Prefer answering as soon as you can; you have a limited step budget.',
+        "Prefer answering as soon as you can; you have a limited step budget.",
       messages: ({ input }) => [
         ...input.messages,
         userMessage(
-          `Steps remaining: ${input.stepsRemaining}. ` +
-            'Call a tool or give the final answer.'
+          `Steps remaining: ${input.stepsRemaining}. ` + "Call a tool or give the final answer.",
         ),
       ],
     },
@@ -179,7 +178,7 @@ export const reasonOrAct = agent.requests.reasonOrAct;
 export const reactAgentSchemas = agent.schemas;
 
 export const reactAgentMachine = agent.createMachine({
-  id: 'react-agent',
+  id: "react-agent",
   context: ({ input }) => ({
     question: input.question,
     messages: [userMessage(input.question)],
@@ -194,54 +193,50 @@ export const reactAgentMachine = agent.createMachine({
     if (context.answer !== null) {
       return {
         answer: context.answer,
-        steps: context.messages.filter((m) => m.role === 'assistant').length,
+        steps: context.messages.filter((m) => m.role === "assistant").length,
       };
     }
-    const lastAssistant = [...context.messages]
-      .reverse()
-      .find((m) => m.role === 'assistant');
+    const lastAssistant = [...context.messages].reverse().find((m) => m.role === "assistant");
     return {
       answer:
-        typeof lastAssistant?.content === 'string'
+        typeof lastAssistant?.content === "string"
           ? lastAssistant.content
-          : 'Step budget exhausted before reaching a confident answer.',
-      steps: context.messages.filter((m) => m.role === 'assistant').length,
+          : "Step budget exhausted before reaching a confident answer.",
+      steps: context.messages.filter((m) => m.role === "assistant").length,
     };
   },
-  initial: 'checkingBudget',
+  initial: "checkingBudget",
   states: {
     // The guarded loop-breaker every LangGraph app hand-rolls (recursion_limit /
     // a manual step counter) — here it's a typed guard in an explicit state.
     // Budget exhausted → give up gracefully with a best-effort answer.
     checkingBudget: {
-      type: 'choice',
+      type: "choice",
       choice: ({ context }) =>
-        context.stepsRemaining > 0
-          ? { target: 'reasoning' }
-          : { target: 'exhausted' },
+        context.stepsRemaining > 0 ? { target: "reasoning" } : { target: "exhausted" },
     },
     // One turn of the loop: the model reasons and either acts or answers.
     reasoning: {
       invoke: {
-        id: 'reasonOrAct',
-        src: 'reasonOrAct',
+        id: "reasonOrAct",
+        src: "reasonOrAct",
         input: ({ context }) => ({
           messages: context.messages,
           stepsRemaining: context.stepsRemaining,
         }),
         onDone: ({ context, output }) => ({
-          target: 'dispatch',
+          target: "dispatch",
           context: {
             next: output,
             // Commit the final answer to context when the model is done.
-            answer: output.type === 'answer' ? output.answer : context.answer,
+            answer: output.type === "answer" ? output.answer : context.answer,
             // Record the model's move in the transcript.
             messages: [
               ...context.messages,
               assistantMessage(
-                output.type === 'answer'
+                output.type === "answer"
                   ? output.answer
-                  : `${output.thought}\n[calling ${output.tool}]`
+                  : `${output.thought}\n[calling ${output.tool}]`,
               ),
             ],
             // Decrement the budget once per model turn.
@@ -252,56 +247,50 @@ export const reactAgentMachine = agent.createMachine({
     },
     // Read the typed decision: answer → finish, tool → dispatch to that actor.
     dispatch: {
-      type: 'choice',
+      type: "choice",
       choice: ({ context }) =>
-        context.next?.type === 'answer'
-          ? { target: 'answered' }
-          : context.next?.tool === 'calculate'
-            ? { target: 'calculating' }
-            : { target: 'lookingUp' },
+        context.next?.type === "answer"
+          ? { target: "answered" }
+          : context.next?.tool === "calculate"
+            ? { target: "calculating" }
+            : { target: "lookingUp" },
     },
     calculating: {
       invoke: {
-        src: 'calculate',
+        src: "calculate",
         input: ({ context }) =>
-          context.next?.type === 'tool' && context.next.tool === 'calculate'
+          context.next?.type === "tool" && context.next.tool === "calculate"
             ? context.next.parameters
-            : { operation: 'add' as const, a: 0, b: 0 },
+            : { operation: "add" as const, a: 0, b: 0 },
         onDone: ({ context, output }) => ({
           // Loop edge: observe the tool result, then re-enter the loop.
-          target: 'checkingBudget',
+          target: "checkingBudget",
           context: {
-            messages: [
-              ...context.messages,
-              userMessage(`Observation: ${output.summary}`),
-            ],
+            messages: [...context.messages, userMessage(`Observation: ${output.summary}`)],
           },
         }),
       },
     },
     lookingUp: {
       invoke: {
-        src: 'lookup',
+        src: "lookup",
         input: ({ context }) =>
-          context.next?.type === 'tool' && context.next.tool === 'lookup'
+          context.next?.type === "tool" && context.next.tool === "lookup"
             ? context.next.parameters
-            : { key: '' },
+            : { key: "" },
         onDone: ({ context, output }) => ({
-          target: 'checkingBudget',
+          target: "checkingBudget",
           context: {
-            messages: [
-              ...context.messages,
-              userMessage(`Observation: ${output.summary}`),
-            ],
+            messages: [...context.messages, userMessage(`Observation: ${output.summary}`)],
           },
         }),
       },
     },
     // The model committed to an answer (in context) — done.
-    answered: { type: 'final' },
+    answered: { type: "final" },
     // Budget ran out before the model answered — done with a best-effort
     // answer, resolved by the machine `output` getter above (no throw).
-    exhausted: { type: 'final' },
+    exhausted: { type: "final" },
   },
 });
 
@@ -309,7 +298,7 @@ export interface RunReactAgentOptions {
   question?: string;
   maxSteps?: number;
   /** Injected for tests; direct run supplies a real model executor. */
-  generateText?: AgentRequestExecutors['generateText'];
+  generateText?: AgentRequestExecutors["generateText"];
   /** Observes each machine transition (the visible loop). */
   onProgress?: (state: string) => void;
 }
@@ -322,10 +311,10 @@ export interface ReactAgentResult {
 
 /** Runs the ReAct loop; records state progress so the loop is observable. */
 export async function runReactAgentExample(
-  options: RunReactAgentOptions = {}
+  options: RunReactAgentOptions = {},
 ): Promise<ReactAgentResult> {
   const {
-    question = 'How many seconds are there in 3 days?',
+    question = "How many seconds are there in 3 days?",
     maxSteps = 5,
     generateText,
     onProgress,
@@ -342,28 +331,28 @@ export async function runReactAgentExample(
     },
   });
 
-  if (result.status !== 'done') {
+  if (result.status !== "done") {
     throw new Error(`React-agent example did not complete: ${result.status}`);
   }
   return { ...result.output, progress };
 }
 
-if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   if (!process.env.OPENAI_API_KEY) {
-    console.error('Set OPENAI_API_KEY to run this example.');
+    console.error("Set OPENAI_API_KEY to run this example.");
     process.exit(1);
   }
-  const { createAiSdkExecutors } = await import('../../src/ai-sdk/index.js');
+  const { createAiSdkExecutors } = await import("../../src/ai-sdk/index.js");
   const { generateText } = createAiSdkExecutors({ models });
 
-  const question = 'How many seconds are there in 3 days?';
+  const question = "How many seconds are there in 3 days?";
   const result = await runReactAgentExample({
     question,
     generateText,
     onProgress: (state) => console.log(`  → ${state}`),
   });
 
-  console.log('Question:', question);
-  console.log('Answer:', result.answer);
-  console.log('Steps:', result.steps);
+  console.log("Question:", question);
+  console.log("Answer:", result.answer);
+  console.log("Steps:", result.steps);
 }

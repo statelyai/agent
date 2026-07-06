@@ -12,13 +12,8 @@ import {
   type NonReducibleUnknown,
   type SetupReturnFromConfig,
   type SnapshotFrom,
-} from 'xstate';
-import type {
-  AgentMessage,
-  EventUnion,
-  InferOutput,
-  StandardSchemaV1,
-} from './types.js';
+} from "xstate";
+import type { AgentMessage, EventUnion, InferOutput, StandardSchemaV1 } from "./types.js";
 import {
   builtinTextActors,
   createTextLogic,
@@ -32,9 +27,9 @@ import {
   type BuiltinAgentActors,
   type TextLogic,
   type TextLogicConfig,
-} from './text-logic.js';
-import { createDecideActor } from './decision.js';
-import type { AgentRequestOptions } from './events.js';
+} from "./text-logic.js";
+import { createDecideActor } from "./decision.js";
+import type { AgentRequestOptions } from "./events.js";
 import {
   executeAgentRequest,
   getMachineAgentRequests,
@@ -44,14 +39,14 @@ import {
   type AgentRequest,
   type AgentStep,
   type AgentStepRequest,
-} from './steps.js';
-import { appendMessages } from './messages.js';
-import { agentExecutionOptions } from './internal/registry.js';
+} from "./steps.js";
+import { appendMessages } from "./messages.js";
+import { agentExecutionOptions } from "./internal/registry.js";
 import {
   setupAgentFromConfig,
   type AgentWorkflowConfig,
   type FromConfigOptions,
-} from './workflow-config.js';
+} from "./workflow-config.js";
 
 // ─── setupAgent ───
 
@@ -64,13 +59,12 @@ type ContextOf<TContextSchema extends StandardSchemaV1> = Constrain<
   MachineContext
 >;
 // An event schema map's discriminated event union, constrained to EventObject.
-type EventsOf<TEventSchemas extends Record<string, StandardSchemaV1>> =
-  Constrain<EventUnion<TEventSchemas>, EventObject>;
-// A meta schema's validated output type, constrained to MetaObject.
-type MetaOf<TMetaSchema extends StandardSchemaV1> = Constrain<
-  InferOutput<TMetaSchema>,
-  MetaObject
+type EventsOf<TEventSchemas extends Record<string, StandardSchemaV1>> = Constrain<
+  EventUnion<TEventSchemas>,
+  EventObject
 >;
+// A meta schema's validated output type, constrained to MetaObject.
+type MetaOf<TMetaSchema extends StandardSchemaV1> = Constrain<InferOutput<TMetaSchema>, MetaObject>;
 // Identity mapping over an actor map, preserving each entry's AsyncActorLogic input/output types.
 type SetupActors<TActors extends { [K in keyof TActors]: AnyActorLogic }> = {
   [K in keyof TActors]: TActors[K] extends AsyncActorLogic<infer TOutput, infer TInput>
@@ -94,7 +88,9 @@ type AgentSetupActors<
  * schemas when not supplied.
  */
 export interface AgentSchemaPack<
-  TContextSchema extends StandardSchemaV1<Record<string, unknown>> = StandardSchemaV1<Record<string, unknown>>,
+  TContextSchema extends StandardSchemaV1<Record<string, unknown>> = StandardSchemaV1<
+    Record<string, unknown>
+  >,
   TEventSchemas extends Record<string, StandardSchemaV1> = Record<string, StandardSchemaV1>,
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
   TOutputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
@@ -143,14 +139,8 @@ export function createAgentSchemas<
     TInputSchema,
     TOutputSchema,
     TMetaSchema
-  >
-): AgentSchemaPack<
-  TContextSchema,
-  TEventSchemas,
-  TInputSchema,
-  TOutputSchema,
-  TMetaSchema
-> {
+  >,
+): AgentSchemaPack<TContextSchema, TEventSchemas, TInputSchema, TOutputSchema, TMetaSchema> {
   return {
     context: schemas.context,
     events: (schemas.events ?? {}) as TEventSchemas,
@@ -185,8 +175,8 @@ export type AgentRequestInput<
   TModel extends string = string,
 > = {
   [K in keyof TRequestSchemas]: AgentRequestConfig<
-    TRequestSchemas[K]['input'],
-    TRequestSchemas[K]['output'],
+    TRequestSchemas[K]["input"],
+    TRequestSchemas[K]["output"],
     Record<string, unknown>,
     TModel
   > & {
@@ -197,8 +187,8 @@ export type AgentRequestInput<
 // The TextLogic actors createRequestActors builds from an AgentRequestInput — one per request key.
 type RequestActors<TRequestSchemas extends AgentRequestSchemaMap> = {
   [K in keyof TRequestSchemas]: TextLogic<
-    TRequestSchemas[K]['input'],
-    TRequestSchemas[K]['output']
+    TRequestSchemas[K]["input"],
+    TRequestSchemas[K]["output"]
   >;
 };
 
@@ -216,9 +206,9 @@ type AgentAllActors<
 // collapsing to `never` too (this reproduces with *raw* `setup({ schemas: {
 // context, events: {} } })`, so it is an xstate-alpha behavior we route
 // around by matching how hand-written setup omits an empty `events`).
-type AgentSetupEventsSchema<
-  TEventSchemas extends Record<string, StandardSchemaV1>,
-> = [keyof TEventSchemas] extends [never]
+type AgentSetupEventsSchema<TEventSchemas extends Record<string, StandardSchemaV1>> = [
+  keyof TEventSchemas,
+] extends [never]
   ? {}
   : { events: TEventSchemas };
 
@@ -257,9 +247,9 @@ type AgentSetupXStateConfig<
       AgentModelRef<TModels>
     >
   >;
-  actions?: NonNullable<AnySetupConfig['actions']>;
-  guards?: NonNullable<AnySetupConfig['guards']>;
-  delays?: NonNullable<AnySetupConfig['delays']>;
+  actions?: NonNullable<AnySetupConfig["actions"]>;
+  guards?: NonNullable<AnySetupConfig["guards"]>;
+  delays?: NonNullable<AnySetupConfig["delays"]>;
 };
 
 // The public `setupAgent(config)` parameter type: schemas (packed or loose) plus models/actors/requests/actions/guards/delays.
@@ -282,20 +272,14 @@ type SetupAgentBaseConfig<
         TMetaSchema
       >;
     }
-  | AgentSchemaConfig<
-      TContextSchema,
-      TEventSchemas,
-      TInputSchema,
-      TOutputSchema,
-      TMetaSchema
-    >
+  | AgentSchemaConfig<TContextSchema, TEventSchemas, TInputSchema, TOutputSchema, TMetaSchema>
 ) & {
   models?: TModels;
   actorSources?: TActors;
   requests?: AgentRequestInput<TRequestSchemas, AgentModelRef<TModels>>;
-  actions?: NonNullable<AnySetupConfig['actions']>;
-  guards?: NonNullable<AnySetupConfig['guards']>;
-  delays?: NonNullable<AnySetupConfig['delays']>;
+  actions?: NonNullable<AnySetupConfig["actions"]>;
+  guards?: NonNullable<AnySetupConfig["guards"]>;
+  delays?: NonNullable<AnySetupConfig["delays"]>;
 };
 
 // The raw xstate `setup(...)` result type for an agent config, before setupAgent's own extensions (initial/transition/resolve/etc) are added.
@@ -350,7 +334,7 @@ type SetupAgentResult<
     TMetaSchema,
     TModels
   >,
-  'createMachine'
+  "createMachine"
 > & {
   /**
    * Creates the agent machine — XState's own `createMachine`, plus: the
@@ -367,15 +351,9 @@ type SetupAgentResult<
     TOutputSchema,
     TMetaSchema,
     TModels
-  >['createMachine'];
+  >["createMachine"];
   /** The retained schema pack ({@link AgentSchemaPack}) for host-side validation and tooling. */
-  schemas: AgentSchemaPack<
-    TContextSchema,
-    TEventSchemas,
-    TInputSchema,
-    TOutputSchema,
-    TMetaSchema
-  >;
+  schemas: AgentSchemaPack<TContextSchema, TEventSchemas, TInputSchema, TOutputSchema, TMetaSchema>;
   /** The `models` registry passed to `setupAgent(...)`, if any (used to type-narrow `AgentModelRef`). */
   readonly models: TModels;
   /** The {@link TextLogic} actors built from `setupAgent({ requests })`, keyed the same way. */
@@ -383,27 +361,27 @@ type SetupAgentResult<
   /** {@link initialAgentStep}, pre-bound to this agent's registered schemas/actors. */
   initial<TMachine extends AnyActorLogic>(
     machine: TMachine,
-    input?: unknown
+    input?: unknown,
   ): AgentStep<SnapshotFrom<TMachine>>;
   /** {@link transitionAgentStep}, pre-bound to this agent's registered schemas/actors. */
   transition<TMachine extends AnyActorLogic>(
     machine: TMachine,
     snapshotOrStep: SnapshotFrom<TMachine> | AgentStep<SnapshotFrom<TMachine>>,
-    event: EventFromLogic<TMachine>
+    event: EventFromLogic<TMachine>,
   ): AgentStep<SnapshotFrom<TMachine>>;
   /** {@link resolveAgentStep}, pre-bound to this agent's registered schemas/actors. */
   resolve<TMachine extends AnyActorLogic>(
     machine: TMachine,
     step: AgentStep<SnapshotFrom<TMachine>>,
-    request: Pick<AgentRequest, 'id'> | string,
-    output: unknown
+    request: Pick<AgentRequest, "id"> | string,
+    output: unknown,
   ): AgentStep<SnapshotFrom<TMachine>>;
   /** {@link getMachineAgentRequests}, pre-bound to this agent's registered schemas/actors. */
   getRequests(
     machine: AnyActorLogic,
     actions: readonly { type?: string; params?: unknown }[],
     snapshot?: AnyMachineSnapshot,
-    options?: Pick<AgentRequestOptions, 'eventToolName'>
+    options?: Pick<AgentRequestOptions, "eventToolName">,
   ): AgentStepRequest[];
   /** {@link executeAgentRequest}, re-exposed on the agent for convenience (no pre-binding needed — it only needs the request and executors). */
   execute(request: AgentRequest, executors: AgentRequestExecutors): Promise<unknown>;
@@ -415,7 +393,7 @@ type SetupAgentResult<
       | ((args: {
           context: ContextOf<TContextSchema> & { messages: AgentMessage[] };
           event: any;
-        }) => AgentMessage | AgentMessage[])
+        }) => AgentMessage | AgentMessage[]),
   ): ReturnType<
     typeof appendMessages<
       ContextOf<TContextSchema> & { messages: AgentMessage[] },
@@ -488,7 +466,7 @@ export function setupAgent<
     TMetaSchema,
     TRequestSchemas,
     TModels
-  >
+  >,
 ): SetupAgentResult<
   TContextSchema,
   TEventSchemas,
@@ -505,10 +483,10 @@ export function setupAgent<
 // Recursively collects every reached-final-state's `output` config in a machine config.
 function collectFinalStateOutputs(
   states: Record<string, any> | undefined,
-  outputs: unknown[] = []
+  outputs: unknown[] = [],
 ) {
   for (const state of Object.values(states ?? {})) {
-    if (state?.type === 'final' && state.output !== undefined) {
+    if (state?.type === "final" && state.output !== undefined) {
       outputs.push(state.output);
     }
     collectFinalStateOutputs(state?.states, outputs);
@@ -519,22 +497,13 @@ function collectFinalStateOutputs(
 
 // Sugar: when a machine config has no root `output` but exactly one final state declares one, promotes it to the root `output` (so `snapshot.output` is set without repeating the same output on every final state).
 function withRootOutputFromSingleFinal<TConfig>(config: TConfig): TConfig {
-  if (
-    !config
-    || typeof config !== 'object'
-    || 'output' in config
-    || !('states' in config)
-  ) {
+  if (!config || typeof config !== "object" || "output" in config || !("states" in config)) {
     return config;
   }
 
-  const outputs = collectFinalStateOutputs(
-    (config as { states?: Record<string, any> }).states
-  );
+  const outputs = collectFinalStateOutputs((config as { states?: Record<string, any> }).states);
 
-  return outputs.length === 1
-    ? ({ ...config, output: outputs[0] } as TConfig)
-    : config;
+  return outputs.length === 1 ? ({ ...config, output: outputs[0] } as TConfig) : config;
 }
 
 export namespace setupAgent {
@@ -557,7 +526,7 @@ export namespace setupAgent {
    */
   export function fromConfig(
     config: AgentWorkflowConfig,
-    options: FromConfigOptions
+    options: FromConfigOptions,
   ): AnyStateMachine {
     return setupAgentFromConfig(config, options);
   }
@@ -572,14 +541,11 @@ export function createRequestActors<
     Object.entries(requests).map(([key, request]) => {
       const logic = createTextLogic({
         ...request,
-        mode: request.mode ?? 'generate',
+        mode: request.mode ?? "generate",
       } as TextLogicConfig<StandardSchemaV1, StandardSchemaV1>);
 
-      return [
-        key,
-        logic,
-      ];
-    })
+      return [key, logic];
+    }),
   ) as RequestActors<TRequestSchemas>;
 }
 
@@ -601,23 +567,9 @@ function normalizeAgentSchemas<
           TMetaSchema
         >;
       }
-    | AgentSchemaConfig<
-        TContextSchema,
-        TEventSchemas,
-        TInputSchema,
-        TOutputSchema,
-        TMetaSchema
-      >
-): AgentSchemaPack<
-  TContextSchema,
-  TEventSchemas,
-  TInputSchema,
-  TOutputSchema,
-  TMetaSchema
-> {
-  return 'schemas' in config
-    ? config.schemas
-    : createAgentSchemas(config);
+    | AgentSchemaConfig<TContextSchema, TEventSchemas, TInputSchema, TOutputSchema, TMetaSchema>,
+): AgentSchemaPack<TContextSchema, TEventSchemas, TInputSchema, TOutputSchema, TMetaSchema> {
+  return "schemas" in config ? config.schemas : createAgentSchemas(config);
 }
 
 // Defaults an omitted `setupAgent({ requests })` to an empty object.
@@ -625,7 +577,7 @@ function normalizeAgentRequestInput<
   TRequestSchemas extends AgentRequestSchemaMap,
   TModel extends string = string,
 >(
-  requests: AgentRequestInput<TRequestSchemas, TModel> | undefined
+  requests: AgentRequestInput<TRequestSchemas, TModel> | undefined,
 ): AgentRequestInput<TRequestSchemas, TModel> {
   return requests ?? ({} as AgentRequestInput<TRequestSchemas, TModel>);
 }
@@ -638,12 +590,12 @@ function normalizeAgentRequestInput<
  */
 function assertNoActorKeyCollisions(
   actorSources: Record<string, unknown> | undefined,
-  requests: Record<string, unknown>
+  requests: Record<string, unknown>,
 ): void {
   const seenIn = new Map<string, string>();
   const groups: [string, Record<string, unknown> | undefined][] = [
-    ['actorSources', actorSources],
-    ['requests', requests],
+    ["actorSources", actorSources],
+    ["requests", requests],
   ];
 
   for (const [groupName, group] of groups) {
@@ -653,7 +605,7 @@ function assertNoActorKeyCollisions(
         throw new Error(
           `setupAgent: key '${key}' is defined in both '${existingGroup}' and ` +
             `'${groupName}'. Each actor source key must be unique across ` +
-            `'actorSources' and 'requests'.`
+            `'actorSources' and 'requests'.`,
         );
       }
       seenIn.set(key, groupName);
@@ -668,11 +620,11 @@ function createAgentActorSources<
   TModel extends string = string,
 >(
   actorSources: TActors | undefined,
-  requestActors: RequestActors<TRequestSchemas>
+  requestActors: RequestActors<TRequestSchemas>,
 ): SetupActors<AgentSetupActors<AgentAllActors<TActors, TRequestSchemas>, string, TModel>> {
   assertNoActorKeyCollisions(
     actorSources as Record<string, unknown> | undefined,
-    requestActors as Record<string, unknown>
+    requestActors as Record<string, unknown>,
   );
 
   return {
@@ -695,13 +647,7 @@ function createAgentSetupConfig<
   TMetaSchema extends StandardSchemaV1,
   TModels extends AgentModelMap,
 >(
-  schemas: AgentSchemaPack<
-    TContextSchema,
-    TEventSchemas,
-    TInputSchema,
-    TOutputSchema,
-    TMetaSchema
-  >,
+  schemas: AgentSchemaPack<TContextSchema, TEventSchemas, TInputSchema, TOutputSchema, TMetaSchema>,
   actorSources: SetupActors<
     AgentSetupActors<
       AgentAllActors<TActors, TRequestSchemas>,
@@ -720,8 +666,8 @@ function createAgentSetupConfig<
       TRequestSchemas,
       TModels
     >,
-    'actions' | 'guards' | 'delays'
-  >
+    "actions" | "guards" | "delays"
+  >,
 ): AgentSetupXStateConfig<
   TContextSchema,
   TEventSchemas,
@@ -767,7 +713,7 @@ function createSetupAgent<
     TMetaSchema,
     TRequestSchemas,
     TModels
-  >
+  >,
 ): SetupAgentResult<
   TContextSchema,
   TEventSchemas,
@@ -779,26 +725,24 @@ function createSetupAgent<
   TModels
 > {
   const schemas = normalizeAgentSchemas(config);
-  const requests = normalizeAgentRequestInput<
-    TRequestSchemas,
-    AgentModelRef<TModels>
-  >(config.requests);
+  const requests = normalizeAgentRequestInput<TRequestSchemas, AgentModelRef<TModels>>(
+    config.requests,
+  );
   const requestActors = createRequestActors<TRequestSchemas, AgentModelRef<TModels>>(requests);
-  const actorSources = createAgentActorSources<
+  const actorSources = createAgentActorSources<TActors, TRequestSchemas, AgentModelRef<TModels>>(
+    config.actorSources,
+    requestActors,
+  );
+  const setupConfig = createAgentSetupConfig<
+    TContextSchema,
+    TEventSchemas,
     TActors,
     TRequestSchemas,
-    AgentModelRef<TModels>
-  >(config.actorSources, requestActors);
-  const setupConfig = createAgentSetupConfig<
-      TContextSchema,
-      TEventSchemas,
-      TActors,
-      TRequestSchemas,
-      TInputSchema,
-      TOutputSchema,
-      TMetaSchema,
-      TModels
-    >(schemas, actorSources, config);
+    TInputSchema,
+    TOutputSchema,
+    TMetaSchema,
+    TModels
+  >(schemas, actorSources, config);
   const base = setup(setupConfig);
   const createBaseMachine = base.createMachine.bind(base);
   const machineOptions = {
@@ -809,9 +753,7 @@ function createSetupAgent<
 
   return Object.assign(base, {
     createMachine(machineConfig: Parameters<typeof base.createMachine>[0]) {
-      const machine = createBaseMachine(
-        withRootOutputFromSingleFinal(machineConfig) as never
-      );
+      const machine = createBaseMachine(withRootOutputFromSingleFinal(machineConfig) as never);
       agentExecutionOptions.set(machine as object, machineOptions);
       return machine;
     },
@@ -824,20 +766,15 @@ function createSetupAgent<
     transition(
       machine: AnyActorLogic,
       snapshotOrStep: AnyMachineSnapshot | AgentStep,
-      event: EventObject
+      event: EventObject,
     ) {
-      return transitionAgentStep(
-        machine,
-        snapshotOrStep as never,
-        event as never,
-        machineOptions
-      );
+      return transitionAgentStep(machine, snapshotOrStep as never, event as never, machineOptions);
     },
     resolve(
       machine: AnyActorLogic,
       step: AgentStep,
-      request: Pick<AgentRequest, 'id'> | string,
-      output: unknown
+      request: Pick<AgentRequest, "id"> | string,
+      output: unknown,
     ) {
       return resolveAgentStep(machine, step as never, request, output, machineOptions);
     },
@@ -845,7 +782,7 @@ function createSetupAgent<
       machine: AnyActorLogic,
       actions: readonly { type?: string; params?: unknown }[],
       snapshot?: AnyMachineSnapshot,
-      requestOptions: Pick<AgentRequestOptions, 'eventToolName'> = {}
+      requestOptions: Pick<AgentRequestOptions, "eventToolName"> = {},
     ) {
       return getMachineAgentRequests(machine, actions, snapshot, {
         ...machineOptions,

@@ -34,14 +34,14 @@
  *
  * Run: ANTHROPIC_API_KEY=... npx tsx examples/anthropic-sdk-host/index.ts
  */
-import type Anthropic from '@anthropic-ai/sdk';
+import type Anthropic from "@anthropic-ai/sdk";
 import type {
   ContentBlockParam,
   Message,
   MessageParam,
   Tool,
   ToolChoice,
-} from '@anthropic-ai/sdk/resources/messages.js';
+} from "@anthropic-ai/sdk/resources/messages.js";
 import {
   getAgentOutputMode,
   runAgent,
@@ -56,9 +56,9 @@ import {
   type ChosenEvent,
   type DecisionAttempt,
   type StandardSchemaV1,
-} from '../../src/index.js';
-import { triageMachine } from '../triage/index.js';
-import { twentyQuestionsMachine } from '../twenty-questions/index.js';
+} from "../../src/index.js";
+import { triageMachine } from "../triage/index.js";
+import { twentyQuestionsMachine } from "../twenty-questions/index.js";
 
 // ─── Request → Anthropic param mapping (pure, unit-testable) ───
 
@@ -73,9 +73,11 @@ import { twentyQuestionsMachine } from '../twenty-questions/index.js';
  */
 export function extractJsonSchema(schema?: StandardSchemaV1): Record<string, unknown> | undefined {
   const jsonSchema = (
-    schema?.['~standard'] as {
-      jsonSchema?: { input?: () => unknown };
-    } | undefined
+    schema?.["~standard"] as
+      | {
+          jsonSchema?: { input?: () => unknown };
+        }
+      | undefined
   )?.jsonSchema?.input?.();
 
   return jsonSchema && !(jsonSchema instanceof Promise)
@@ -101,37 +103,39 @@ export function toAnthropicMessages(messages: AgentMessage[]): MessageParam[] {
   const result: MessageParam[] = [];
 
   for (const message of messages) {
-    if (message.role === 'system') {
+    if (message.role === "system") {
       continue;
     }
 
-    if (message.role === 'tool') {
+    if (message.role === "tool") {
       result.push({
-        role: 'user',
-        content: message.content.map((part): ContentBlockParam => ({
-          type: 'tool_result',
-          tool_use_id: part.toolCallId,
-          content:
-            part.output.type === 'text' || part.output.type === 'error-text'
-              ? part.output.value
-              : JSON.stringify(part.output.value),
-          ...(part.output.type === 'error-text' || part.output.type === 'error-json'
-            ? { is_error: true }
-            : {}),
-        })),
+        role: "user",
+        content: message.content.map(
+          (part): ContentBlockParam => ({
+            type: "tool_result",
+            tool_use_id: part.toolCallId,
+            content:
+              part.output.type === "text" || part.output.type === "error-text"
+                ? part.output.value
+                : JSON.stringify(part.output.value),
+            ...(part.output.type === "error-text" || part.output.type === "error-json"
+              ? { is_error: true }
+              : {}),
+          }),
+        ),
       });
       continue;
     }
 
-    if (typeof message.content === 'string') {
+    if (typeof message.content === "string") {
       result.push({ role: message.role, content: message.content });
       continue;
     }
 
     const text = message.content
-      .filter((part): part is Extract<typeof part, { type: 'text' }> => part.type === 'text')
+      .filter((part): part is Extract<typeof part, { type: "text" }> => part.type === "text")
       .map((part) => part.text)
-      .join('\n');
+      .join("\n");
     result.push({ role: message.role, content: text });
   }
 
@@ -160,14 +164,15 @@ export function toAnthropicTools(tools: AgentTools): Tool[] {
     if (!descriptor) {
       return [];
     }
-    const inputSchema =
-      typeof descriptor === 'function' ? undefined : descriptor.inputSchema;
+    const inputSchema = typeof descriptor === "function" ? undefined : descriptor.inputSchema;
     const jsonSchema = extractJsonSchema(inputSchema);
-    return [{
-      name,
-      description: typeof descriptor === 'function' ? undefined : descriptor.description,
-      input_schema: { type: 'object' as const, ...jsonSchema },
-    }];
+    return [
+      {
+        name,
+        description: typeof descriptor === "function" ? undefined : descriptor.description,
+        input_schema: { type: "object" as const, ...jsonSchema },
+      },
+    ];
   });
 }
 
@@ -178,7 +183,7 @@ export function toAnthropicEventTools(events: AgentEventDescriptor[]): Tool[] {
     return {
       name: event.toolName,
       description: `Choose the '${event.type}' move.`,
-      input_schema: { type: 'object' as const, ...jsonSchema },
+      input_schema: { type: "object" as const, ...jsonSchema },
     };
   });
 }
@@ -189,27 +194,27 @@ export function toAnthropicEventTools(events: AgentEventDescriptor[]): Tool[] {
  * in `src/ai-sdk/index.ts` and `examples/openai-sdk-host/index.ts`.
  */
 export function toDecisionMessages(
-  request: Pick<AgentDecisionRequest, 'messages' | 'prompt' | 'events' | 'attempts'>
+  request: Pick<AgentDecisionRequest, "messages" | "prompt" | "events" | "attempts">,
 ): MessageParam[] {
   const messages: MessageParam[] = request.messages
     ? toAnthropicMessages(request.messages)
     : request.prompt !== undefined
-      ? [{ role: 'user', content: request.prompt }]
+      ? [{ role: "user", content: request.prompt }]
       : [];
 
   for (const attempt of request.attempts) {
-    messages.push({ role: 'user', content: attemptFeedback(attempt, request.events) });
+    messages.push({ role: "user", content: attemptFeedback(attempt, request.events) });
   }
   return messages;
 }
 
 function attemptFeedback(attempt: DecisionAttempt, events: AgentEventDescriptor[]): string {
-  const types = events.map((event) => event.type).join(', ') || '(none)';
+  const types = events.map((event) => event.type).join(", ") || "(none)";
   return `Your previous choice failed: ${attempt.reason}. Choose again from: ${types}`;
 }
 
 /** The synthetic tool used to force structured output via a tool call. */
-const STRUCTURED_OUTPUT_TOOL_NAME = 'respond_with_output';
+const STRUCTURED_OUTPUT_TOOL_NAME = "respond_with_output";
 
 // ─── createAnthropicExecutors ───
 
@@ -220,9 +225,13 @@ export interface CreateAnthropicExecutorsOptions {
 export type AnthropicGenerateResult = { output: unknown; [key: string]: unknown };
 export type AnthropicStreamResult = { output: string; [key: string]: unknown };
 
-export interface AnthropicExecutors
-  extends AgentRequestExecutors<AnthropicGenerateResult, AnthropicStreamResult> {
-  streamText: NonNullable<AgentRequestExecutors<AnthropicGenerateResult, AnthropicStreamResult>['streamText']>;
+export interface AnthropicExecutors extends AgentRequestExecutors<
+  AnthropicGenerateResult,
+  AnthropicStreamResult
+> {
+  streamText: NonNullable<
+    AgentRequestExecutors<AnthropicGenerateResult, AnthropicStreamResult>["streamText"]
+  >;
   decide: AgentDecisionExecutor;
 }
 
@@ -231,16 +240,18 @@ export interface AnthropicExecutors
  * `@anthropic-ai/sdk` package's Messages API. Compare `createAiSdkExecutors`
  * in `src/ai-sdk/index.ts` — same shape, different SDK underneath.
  */
-export function createAnthropicExecutors(options: CreateAnthropicExecutorsOptions): AnthropicExecutors {
+export function createAnthropicExecutors(
+  options: CreateAnthropicExecutorsOptions,
+): AnthropicExecutors {
   const { client } = options;
 
   const generateText = async (
     request: AgentTextRequest & { tools: AgentTools },
-    info?: AgentRequestExecutorInfo
+    info?: AgentRequestExecutorInfo,
   ): Promise<AnthropicGenerateResult> => {
     const messages = request.messages
       ? toAnthropicMessages(request.messages)
-      : [{ role: 'user' as const, content: request.prompt ?? '' }];
+      : [{ role: "user" as const, content: request.prompt ?? "" }];
     const common = {
       model: request.model,
       system: request.system,
@@ -248,22 +259,22 @@ export function createAnthropicExecutors(options: CreateAnthropicExecutorsOption
       ...toAnthropicCallSettings(request),
     };
 
-    if (getAgentOutputMode(request.outputSchema) === 'structured') {
+    if (getAgentOutputMode(request.outputSchema) === "structured") {
       const jsonSchema = extractJsonSchema(request.outputSchema);
       if (jsonSchema) {
         const tool: Tool = {
           name: STRUCTURED_OUTPUT_TOOL_NAME,
-          description: 'Provide the final structured output.',
-          input_schema: { type: 'object', ...jsonSchema },
+          description: "Provide the final structured output.",
+          input_schema: { type: "object", ...jsonSchema },
         };
-        const toolChoice: ToolChoice = { type: 'tool', name: STRUCTURED_OUTPUT_TOOL_NAME };
+        const toolChoice: ToolChoice = { type: "tool", name: STRUCTURED_OUTPUT_TOOL_NAME };
         const response = await client.messages.create(
           { ...common, tools: [tool], tool_choice: toolChoice },
-          { signal: info?.signal }
+          { signal: info?.signal },
         );
         const toolUse = response.content.find(
-          (block): block is Extract<typeof block, { type: 'tool_use' }> =>
-            block.type === 'tool_use' && block.name === STRUCTURED_OUTPUT_TOOL_NAME
+          (block): block is Extract<typeof block, { type: "tool_use" }> =>
+            block.type === "tool_use" && block.name === STRUCTURED_OUTPUT_TOOL_NAME,
         );
         return { output: toolUse?.input };
       }
@@ -274,18 +285,18 @@ export function createAnthropicExecutors(options: CreateAnthropicExecutorsOption
     const tools = toAnthropicTools(request.tools);
     const response = await client.messages.create(
       { ...common, ...(tools.length > 0 ? { tools } : {}) },
-      { signal: info?.signal }
+      { signal: info?.signal },
     );
     return { output: extractText(response) };
   };
 
   const streamText = async (
     request: AgentTextRequest & { tools: AgentTools },
-    info?: AgentRequestExecutorInfo
+    info?: AgentRequestExecutorInfo,
   ): Promise<AnthropicStreamResult> => {
     const messages = request.messages
       ? toAnthropicMessages(request.messages)
-      : [{ role: 'user' as const, content: request.prompt ?? '' }];
+      : [{ role: "user" as const, content: request.prompt ?? "" }];
     const tools = toAnthropicTools(request.tools);
     const stream = client.messages.stream(
       {
@@ -295,9 +306,9 @@ export function createAnthropicExecutors(options: CreateAnthropicExecutorsOption
         ...toAnthropicCallSettings(request),
         ...(tools.length > 0 ? { tools } : {}),
       },
-      { signal: info?.signal }
+      { signal: info?.signal },
     );
-    stream.on('text', (delta) => info?.onChunk?.(delta));
+    stream.on("text", (delta) => info?.onChunk?.(delta));
     return { output: await stream.finalText() };
   };
 
@@ -313,27 +324,27 @@ export function createAnthropicExecutors(options: CreateAnthropicExecutorsOption
       // than sending only those N tools with `{ type: 'any' }` ("use any
       // available tool") — since `tools` here is exactly the candidate-event
       // set, `{ type: 'any' }` is equivalent to "pick one of the candidates".
-      tool_choice: { type: 'any' },
+      tool_choice: { type: "any" },
       ...toAnthropicCallSettings(request),
     });
 
     const toolUse = response.content.find(
-      (block): block is Extract<typeof block, { type: 'tool_use' }> => block.type === 'tool_use'
+      (block): block is Extract<typeof block, { type: "tool_use" }> => block.type === "tool_use",
     );
     if (!toolUse) {
-      throw new Error('createAnthropicExecutors: decide — model did not call an event tool.');
+      throw new Error("createAnthropicExecutors: decide — model did not call an event tool.");
     }
     const chosenEvent = request.events.find((event) => event.toolName === toolUse.name);
     if (!chosenEvent) {
       throw new Error(
-        `createAnthropicExecutors: decide — model called unknown tool '${toolUse.name}'.`
+        `createAnthropicExecutors: decide — model called unknown tool '${toolUse.name}'.`,
       );
     }
 
     const input = toolUse.input;
     return {
       event: {
-        ...(input && typeof input === 'object' ? input : {}),
+        ...(input && typeof input === "object" ? input : {}),
         type: chosenEvent.type,
       } as ChosenEvent,
     };
@@ -344,9 +355,9 @@ export function createAnthropicExecutors(options: CreateAnthropicExecutorsOption
 
 function extractText(message: Message): string {
   return message.content
-    .filter((block): block is Extract<typeof block, { type: 'text' }> => block.type === 'text')
+    .filter((block): block is Extract<typeof block, { type: "text" }> => block.type === "text")
     .map((block) => block.text)
-    .join('');
+    .join("");
 }
 
 // ─── Demo host ───
@@ -357,14 +368,14 @@ export async function runTriageDemo(client: Anthropic, ticket: string) {
     input: { ticket },
     generateText,
   });
-  if (result.status !== 'done') {
+  if (result.status !== "done") {
     throw new Error(`Triage demo did not complete: ${result.status}`);
   }
   return result.output;
 }
 
 async function promptAnswer(question: string): Promise<string> {
-  const { createInterface } = await import('node:readline/promises');
+  const { createInterface } = await import("node:readline/promises");
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     return await rl.question(`${question} `);
@@ -379,29 +390,29 @@ export async function runTwentyQuestionsDemo(client: Anthropic) {
     input: { questionsRemaining: 20 },
     generateText,
     decide,
-    userInput: async ({ prompt }) => promptAnswer(prompt ?? '>'),
+    userInput: async ({ prompt }) => promptAnswer(prompt ?? ">"),
   });
-  if (result.status !== 'done') {
+  if (result.status !== "done") {
     throw new Error(`Twenty questions demo did not complete: ${result.status}`);
   }
   return result.output;
 }
 
 async function main() {
-  const { default: AnthropicClient } = await import('@anthropic-ai/sdk');
+  const { default: AnthropicClient } = await import("@anthropic-ai/sdk");
   const client = new AnthropicClient();
 
-  console.log('— generateText (structured output via forced tool call) —');
-  console.log(await runTriageDemo(client, 'My invoice is wrong and I am furious.'));
+  console.log("— generateText (structured output via forced tool call) —");
+  console.log(await runTriageDemo(client, "My invoice is wrong and I am furious."));
 
   console.log('— decide (tool_choice: { type: "any" }) —');
   const result = await runTwentyQuestionsDemo(client);
   console.log(`Final score — user: ${result.userScore}, agent: ${result.agentScore}`);
 }
 
-if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   if (!process.env.ANTHROPIC_API_KEY) {
-    console.error('Set ANTHROPIC_API_KEY to run this example.');
+    console.error("Set ANTHROPIC_API_KEY to run this example.");
     process.exit(1);
   }
   void main();

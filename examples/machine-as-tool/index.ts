@@ -20,15 +20,15 @@
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/machine-as-tool/index.ts
  */
-import assert from 'node:assert/strict';
-import { z } from 'zod';
-import { openai } from '@ai-sdk/openai';
+import assert from "node:assert/strict";
+import { z } from "zod";
+import { openai } from "@ai-sdk/openai";
 import {
   createActor,
   createAsyncLogic,
   type AnyMachineSnapshot,
   type AnyStateMachine,
-} from 'xstate';
+} from "xstate";
 import {
   getAcceptedEvents,
   getStateMeta,
@@ -36,8 +36,8 @@ import {
   setupAgent,
   type RunAgentOptions,
   type RunAgentResult,
-} from '../../src/index.js';
-import { createAiSdkExecutors } from '../../src/ai-sdk/index.js';
+} from "../../src/index.js";
+import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
 
 // Typed interaction protocol handed to the harness. Schema-typed meta means
 // the host gets a real contract, not Record<string, unknown>. This is a
@@ -47,16 +47,16 @@ import { createAiSdkExecutors } from '../../src/ai-sdk/index.js';
 const metaSchema = z.object({
   interaction: z
     .object({
-      type: z.literal('select'),
+      type: z.literal("select"),
       label: z.string(),
       choices: z.array(
         z.object({
           label: z.string(),
           eventType: z.string(),
           input: z
-            .object({ type: z.literal('text'), label: z.string(), field: z.string() })
+            .object({ type: z.literal("text"), label: z.string(), field: z.string() })
             .optional(),
-        })
+        }),
       ),
     })
     .optional(),
@@ -89,11 +89,11 @@ const agent = setupAgent({
         input: z.object({ amount: z.number(), orderId: z.string() }),
         output: z.object({ valid: z.boolean() }),
       },
-      model: 'validator',
+      model: "validator",
       system:
-        'You are a refund policy checker. A refund is valid when it has a ' +
-        'plausible order id and an amount at or below the $500 auto-approval ' +
-        'limit. Return valid=false for anything above the limit or clearly malformed.',
+        "You are a refund policy checker. A refund is valid when it has a " +
+        "plausible order id and an amount at or below the $500 auto-approval " +
+        "limit. Return valid=false for anything above the limit or clearly malformed.",
       prompt: ({ input }) =>
         `Order ${input.orderId}, refund amount $${input.amount}. Is this refund valid?`,
     },
@@ -105,21 +105,21 @@ const agent = setupAgent({
 // idle there; the harness presents its `meta.interaction` and resumes with the
 // human's event.
 export const refundMachine = agent.createMachine({
-  id: 'refund',
+  id: "refund",
   context: ({ input }) => ({
     amount: input.amount,
     orderId: input.orderId,
     reason: null,
     valid: false,
   }),
-  initial: 'validating',
+  initial: "validating",
   states: {
     validating: {
       invoke: {
-        src: 'validateRefund',
+        src: "validateRefund",
         input: ({ context }) => ({ amount: context.amount, orderId: context.orderId }),
         onDone: ({ output }) => ({
-          target: 'awaitingApproval',
+          target: "awaitingApproval",
           context: { valid: output.valid },
         }),
       },
@@ -129,40 +129,40 @@ export const refundMachine = agent.createMachine({
       // typed contract the harness renders as a tool result.
       meta: {
         interaction: {
-          type: 'select',
-          label: 'Approve this refund?',
+          type: "select",
+          label: "Approve this refund?",
           choices: [
-            { label: 'Approve', eventType: 'APPROVE' },
+            { label: "Approve", eventType: "APPROVE" },
             {
-              label: 'Reject',
-              eventType: 'REJECT',
-              input: { type: 'text', label: 'Reason', field: 'reason' },
+              label: "Reject",
+              eventType: "REJECT",
+              input: { type: "text", label: "Reason", field: "reason" },
             },
           ],
         },
       },
       on: {
-        APPROVE: { target: 'executing' },
+        APPROVE: { target: "executing" },
         REJECT: ({ event }) => ({
-          target: 'rejected',
+          target: "rejected",
           context: { reason: event.reason },
         }),
       },
     },
     executing: {
       invoke: {
-        src: 'processRefund',
-        onDone: { target: 'done' },
+        src: "processRefund",
+        onDone: { target: "done" },
       },
     },
     // One final state per outcome, each with its own typed output
     // (requires xstate >= 6.0.0-alpha.17).
     rejected: {
-      type: 'final',
+      type: "final",
       output: ({ context }) => ({ refunded: false, reason: context.reason }),
     },
     done: {
-      type: 'final',
+      type: "final",
       output: () => ({ refunded: true, reason: null }),
     },
   },
@@ -183,12 +183,12 @@ function readInteraction(snapshot: AnyMachineSnapshot) {
 type Handle = string;
 
 type PendingResult = {
-  status: 'pending';
+  status: "pending";
   handle: Handle;
   interaction: ReturnType<typeof readInteraction>;
 };
 type DoneResult = {
-  status: 'done';
+  status: "done";
   output: { refunded: boolean; reason: string | null };
 };
 type ToolResult = PendingResult | DoneResult;
@@ -200,17 +200,17 @@ const executors: RunAgentOptions<typeof refundMachine> = {
 };
 
 function toToolResult(result: RunAgentResult<typeof refundMachine>): ToolResult {
-  if (result.status === 'error') {
+  if (result.status === "error") {
     throw result.error;
   }
-  if (result.status === 'done') {
-    return { status: 'done', output: result.output };
+  if (result.status === "done") {
+    return { status: "done", output: result.output };
   }
   // idle → serialize the snapshot to a JSON-safe handle. JSON round-trip it
   // here to prove it survives any store (DB row, queue message, file).
   const handle: Handle = JSON.stringify(result.snapshot);
   return {
-    status: 'pending',
+    status: "pending",
     handle,
     interaction: readInteraction(result.snapshot as AnyMachineSnapshot),
   };
@@ -219,7 +219,7 @@ function toToolResult(result: RunAgentResult<typeof refundMachine>): ToolResult 
 /** Harness tool #1: start the workflow, run to first idle, return a handle. */
 export async function startTool(
   input: { amount: number; orderId: string },
-  runOptions: RunAgentOptions<typeof refundMachine> = executors
+  runOptions: RunAgentOptions<typeof refundMachine> = executors,
 ): Promise<ToolResult> {
   const result = await runAgent(refundMachine, { ...runOptions, input });
   return toToolResult(result);
@@ -228,8 +228,8 @@ export async function startTool(
 /** Harness tool #2: revive the handle, deliver the event, run to next idle/done. */
 export async function resumeTool(
   handle: Handle,
-  event: { type: 'APPROVE' } | { type: 'REJECT'; reason: string },
-  runOptions: RunAgentOptions<typeof refundMachine> = executors
+  event: { type: "APPROVE" } | { type: "REJECT"; reason: string },
+  runOptions: RunAgentOptions<typeof refundMachine> = executors,
 ): Promise<ToolResult> {
   const snapshot = JSON.parse(handle);
   const result = await runAgent(refundMachine, { ...runOptions, snapshot, event });
@@ -241,10 +241,7 @@ export async function resumeTool(
  * calls this before `resumeTool` so an illegal event is refused up front
  * instead of being silently dropped by the machine.
  */
-export function assertEventLegal(
-  handle: Handle,
-  event: { type: string }
-): void {
+export function assertEventLegal(handle: Handle, event: { type: string }): void {
   // Rehydrate the persisted handle into a live snapshot so `getAcceptedEvents`
   // can read the machine's legal transitions from it.
   const actor = createActor(refundMachine as AnyStateMachine, {
@@ -253,30 +250,26 @@ export function assertEventLegal(
   const snapshot = actor.getSnapshot() as AnyMachineSnapshot;
   const legal = getAcceptedEvents(snapshot).map((e) => e.type);
   if (!legal.includes(event.type)) {
-    throw new Error(
-      `Event '${event.type}' is not legal here. Legal events: ${legal.join(', ')}`
-    );
+    throw new Error(`Event '${event.type}' is not legal here. Legal events: ${legal.join(", ")}`);
   }
 }
 
 // Demo: happy path through the harness bridge.
 export async function runMachineAsToolExample() {
-  const started = await startTool({ amount: 42, orderId: 'ord-1' });
-  assert.equal(started.status, 'pending');
+  const started = await startTool({ amount: 42, orderId: "ord-1" });
+  assert.equal(started.status, "pending");
   assert.deepEqual(
-    started.status === 'pending' ? started.interaction?.label : undefined,
-    'Approve this refund?'
+    started.status === "pending" ? started.interaction?.label : undefined,
+    "Approve this refund?",
   );
 
   const finished =
-    started.status === 'pending'
-      ? await resumeTool(started.handle, { type: 'APPROVE' })
-      : started;
-  assert.equal(finished.status, 'done');
-  assert.deepEqual(
-    finished.status === 'done' ? finished.output : undefined,
-    { refunded: true, reason: null }
-  );
+    started.status === "pending" ? await resumeTool(started.handle, { type: "APPROVE" }) : started;
+  assert.equal(finished.status, "done");
+  assert.deepEqual(finished.status === "done" ? finished.output : undefined, {
+    refunded: true,
+    reason: null,
+  });
 }
 
 // Direct run: drive the harness bridge with a real validation model. Prints
@@ -284,12 +277,12 @@ export async function runMachineAsToolExample() {
 // the round-trip a real tool-calling loop performs, minus the human.
 export async function main() {
   const realExecutors = createAiSdkExecutors({
-    models: { validator: openai('gpt-5.4-mini') },
+    models: { validator: openai("gpt-5.4-mini") },
   });
 
-  const started = await startTool({ amount: 42, orderId: 'ord-1' }, realExecutors);
-  if (started.status !== 'pending') {
-    console.log('Refund resolved without approval:', started);
+  const started = await startTool({ amount: 42, orderId: "ord-1" }, realExecutors);
+  if (started.status !== "pending") {
+    console.log("Refund resolved without approval:", started);
     return;
   }
 
@@ -298,16 +291,16 @@ export async function main() {
   for (const choice of started.interaction?.choices ?? []) {
     console.log(`  - ${choice.label} (${choice.eventType})`);
   }
-  console.log('\n[harness auto-approves]\n');
+  console.log("\n[harness auto-approves]\n");
 
-  assertEventLegal(started.handle, { type: 'APPROVE' });
-  const finished = await resumeTool(started.handle, { type: 'APPROVE' }, realExecutors);
-  console.log('Result:', finished);
+  assertEventLegal(started.handle, { type: "APPROVE" });
+  const finished = await resumeTool(started.handle, { type: "APPROVE" }, realExecutors);
+  console.log("Result:", finished);
 }
 
-if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   if (!process.env.OPENAI_API_KEY) {
-    console.error('Set OPENAI_API_KEY to run this example.');
+    console.error("Set OPENAI_API_KEY to run this example.");
     process.exit(1);
   }
   void main();

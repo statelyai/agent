@@ -5,20 +5,15 @@
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/triage/index.ts
  */
-import { z } from 'zod';
-import { openai } from '@ai-sdk/openai';
-import { type LanguageModel } from 'ai';
-import { createAiSdkExecutors } from '../../src/ai-sdk/index.js';
-import {
-  createAgentSchemas,
-  createTextLogic,
-  runAgent,
-  setupAgent,
-} from '../../src/index.js';
+import { z } from "zod";
+import { openai } from "@ai-sdk/openai";
+import { type LanguageModel } from "ai";
+import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
+import { createAgentSchemas, createTextLogic, runAgent, setupAgent } from "../../src/index.js";
 
 export const triageSchema = z.object({
-  sentiment: z.enum(['positive', 'neutral', 'negative']),
-  category: z.enum(['billing', 'technical', 'other']),
+  sentiment: z.enum(["positive", "neutral", "negative"]),
+  category: z.enum(["billing", "technical", "other"]),
   reply: z.string(),
 });
 
@@ -33,8 +28,8 @@ const schemas = createAgentSchemas({
 
 // Annotated with LanguageModel so the exported const has a portable, nameable
 // type (TS2742); model-ref keys are inferred from this map regardless.
-export const models: Record<'ticketTriage', LanguageModel> = {
-  ticketTriage: openai('gpt-5.4-mini'),
+export const models: Record<"ticketTriage", LanguageModel> = {
+  ticketTriage: openai("gpt-5.4-mini"),
 } as const;
 
 export const triageTicket = createTextLogic({
@@ -42,14 +37,14 @@ export const triageTicket = createTextLogic({
     input: z.object({ ticket: z.string() }),
     output: triageSchema,
   },
-  model: 'ticketTriage',
+  model: "ticketTriage",
   system: [
-    'You triage inbound support tickets. For each ticket, return:',
-    '- sentiment: the customer\'s tone (positive, neutral, or negative).',
-    '- category: billing, technical, or other.',
-    '- reply: two or three sentences, addressed to the customer, that',
-    '  acknowledge the issue and state the next step. No greeting boilerplate.',
-  ].join('\n'),
+    "You triage inbound support tickets. For each ticket, return:",
+    "- sentiment: the customer's tone (positive, neutral, or negative).",
+    "- category: billing, technical, or other.",
+    "- reply: two or three sentences, addressed to the customer, that",
+    "  acknowledge the issue and state the next step. No greeting boilerplate.",
+  ].join("\n"),
   prompt: ({ input }) => input.ticket,
 });
 
@@ -66,34 +61,33 @@ const triageAgent = setupAgent({
 export const triageSchemas = schemas;
 
 export const triageMachine = triageAgent.createMachine({
-  id: 'ticket-triage',
-  output: ({ context }) =>
-    context.triage ?? { sentiment: 'neutral', category: 'other', reply: '' },
+  id: "ticket-triage",
+  output: ({ context }) => context.triage ?? { sentiment: "neutral", category: "other", reply: "" },
   context: ({ input }) => ({ ticket: input.ticket, triage: null }),
-  initial: 'triaging',
+  initial: "triaging",
   states: {
     triaging: {
       invoke: {
-        id: 'triage',
-        src: 'triageTicket',
+        id: "triage",
+        src: "triageTicket",
         input: ({ context }) => ({ ticket: context.ticket }),
         onDone: ({ output }) => ({
-          target: 'done',
+          target: "done",
           context: { triage: output },
         }),
       },
     },
     done: {
-      type: 'final',
+      type: "final",
     },
   },
 });
 
 // Sample data — a stand-in for a ticket pulled from your support inbox.
 const SAMPLE_TICKET =
-  'I was charged twice for my March subscription and the second charge never ' +
-  'showed up as a plan on my account. Can you refund the duplicate? This is ' +
-  'the third time billing has gone wrong this year.';
+  "I was charged twice for my March subscription and the second charge never " +
+  "showed up as a plan on my account. Can you refund the duplicate? This is " +
+  "the third time billing has gone wrong this year.";
 
 export async function main() {
   const executors = createAiSdkExecutors({ models });
@@ -103,15 +97,15 @@ export async function main() {
     ...executors,
   });
 
-  if (result.status !== 'done') {
+  if (result.status !== "done") {
     throw new Error(`Triage did not complete: ${result.status}`);
   }
   console.log(JSON.stringify(result.output, null, 2));
 }
 
-if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   if (!process.env.OPENAI_API_KEY) {
-    console.error('Set OPENAI_API_KEY to run this example.');
+    console.error("Set OPENAI_API_KEY to run this example.");
     process.exit(1);
   }
   void main();

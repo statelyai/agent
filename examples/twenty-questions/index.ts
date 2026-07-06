@@ -19,9 +19,9 @@
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/twenty-questions/index.ts
  */
-import { z } from 'zod';
-import { openai } from '@ai-sdk/openai';
-import { createAiSdkExecutors } from '../../src/ai-sdk/index.js';
+import { z } from "zod";
+import { openai } from "@ai-sdk/openai";
+import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
 import {
   type AgentMessage,
   assistantMessage,
@@ -30,16 +30,16 @@ import {
   sendDecision,
   setupAgent,
   userMessage,
-} from '../../src/index.js';
+} from "../../src/index.js";
 
 const transcriptTurnSchema = z.object({
   question: z.string(),
-  answer: z.enum(['yes', 'no']),
+  answer: z.enum(["yes", "no"]),
   rawAnswer: z.string(),
 });
 
 const answerClassificationSchema = z.object({
-  answer: z.enum(['yes', 'no']),
+  answer: z.enum(["yes", "no"]),
   reasoning: z.string(),
 });
 
@@ -54,7 +54,7 @@ const playAgainClassificationSchema = z.object({
 });
 
 const models = {
-  quick: openai('gpt-5.4-mini'),
+  quick: openai("gpt-5.4-mini"),
 } as const;
 
 export const twentyQuestionsSchemas = createAgentSchemas({
@@ -102,19 +102,19 @@ const agent = setupAgent({
         }),
         output: answerClassificationSchema,
       },
-      model: 'quick',
+      model: "quick",
       system:
-        'Classify a natural-language answer to a Twenty Questions yes/no question. ' +
+        "Classify a natural-language answer to a Twenty Questions yes/no question. " +
         'Return answer=yes for affirmations like "mhm", "for sure", "correct", or indirect confirmations. ' +
-        'Return answer=no for denials, corrections, or contradictions. Keep reasoning short.',
+        "Return answer=no for denials, corrections, or contradictions. Keep reasoning short.",
       messages: ({ input }) => [
         ...input.messages,
         userMessage(
           [
             `Question: ${input.question}`,
             `Raw answer: ${input.rawAnswer}`,
-            'Classify the raw answer as yes or no.',
-          ].join('\n')
+            "Classify the raw answer as yes or no.",
+          ].join("\n"),
         ),
       ],
     },
@@ -127,18 +127,18 @@ const agent = setupAgent({
         }),
         output: guessFeedbackClassificationSchema,
       },
-      model: 'quick',
+      model: "quick",
       system:
-        'Classify whether the user says the Twenty Questions guess was correct. ' +
-        'Return correct=true for yes/correct/right. Return correct=false for no/wrong/incorrect.',
+        "Classify whether the user says the Twenty Questions guess was correct. " +
+        "Return correct=true for yes/correct/right. Return correct=false for no/wrong/incorrect.",
       messages: ({ input }) => [
         ...input.messages,
         userMessage(
           [
             `Guess: ${input.guess}`,
             `Raw answer: ${input.rawAnswer}`,
-            'Classify whether the guess was correct.',
-          ].join('\n')
+            "Classify whether the guess was correct.",
+          ].join("\n"),
         ),
       ],
     },
@@ -150,17 +150,17 @@ const agent = setupAgent({
         }),
         output: playAgainClassificationSchema,
       },
-      model: 'quick',
+      model: "quick",
       system:
-        'Classify whether the user wants to play another round. Return playAgain=true for yes; false for no.',
+        "Classify whether the user wants to play another round. Return playAgain=true for yes; false for no.",
       messages: ({ input }) => [
         ...input.messages,
         userMessage(
           [
-            'Question: Do you want to play another round?',
+            "Question: Do you want to play another round?",
             `Raw answer: ${input.rawAnswer}`,
-            'Classify whether the user wants another round.',
-          ].join('\n')
+            "Classify whether the user wants another round.",
+          ].join("\n"),
         ),
       ],
     },
@@ -168,38 +168,38 @@ const agent = setupAgent({
 });
 
 const DECIDE_SYSTEM_PROMPT =
-  'You are playing twenty questions. Ask one yes/no question at a time to ' +
-  'narrow down the secret, or guess once you are confident. You have a ' +
-  'limited number of questions remaining.';
+  "You are playing twenty questions. Ask one yes/no question at a time to " +
+  "narrow down the secret, or guess once you are confident. You have a " +
+  "limited number of questions remaining.";
 
 function renderTranscriptPrompt(context: {
   questionsRemaining: number;
-  transcript: { question: string; answer: 'yes' | 'no'; rawAnswer: string }[];
+  transcript: { question: string; answer: "yes" | "no"; rawAnswer: string }[];
   messages: AgentMessage[];
 }): string {
   return [
     `Questions remaining: ${context.questionsRemaining}`,
     `Messages so far: ${JSON.stringify(context.messages)}`,
-    'Transcript so far:',
+    "Transcript so far:",
     context.transcript.length === 0
-      ? '(none yet)'
+      ? "(none yet)"
       : context.transcript
           .map(
             (turn) =>
               `Q: ${turn.question}\nA: ${turn.answer}` +
-              (turn.rawAnswer ? ` (raw: ${turn.rawAnswer})` : '')
+              (turn.rawAnswer ? ` (raw: ${turn.rawAnswer})` : ""),
           )
-          .join('\n'),
-    'If the player reveals the secret or gives extra information in a raw answer, use it and guess immediately.',
-    'Avoid repeating categories already answered. If something is an animal, do not ask if it is a plant, fungus, or microorganism.',
+          .join("\n"),
+    "If the player reveals the secret or gives extra information in a raw answer, use it and guess immediately.",
+    "Avoid repeating categories already answered. If something is an animal, do not ask if it is a plant, fungus, or microorganism.",
     context.questionsRemaining > 1
-      ? 'Ask a yes/no question (ASK) or make your guess (GUESS).'
-      : 'This is the final turn. You must make your guess now (GUESS).',
-  ].join('\n');
+      ? "Ask a yes/no question (ASK) or make your guess (GUESS)."
+      : "This is the final turn. You must make your guess now (GUESS).",
+  ].join("\n");
 }
 
 export const twentyQuestionsMachine = agent.createMachine({
-  id: 'twenty-questions',
+  id: "twenty-questions",
   context: ({ input }) => ({
     maxQuestions: input.questionsRemaining,
     questionsRemaining: input.questionsRemaining,
@@ -212,29 +212,29 @@ export const twentyQuestionsMachine = agent.createMachine({
     round: 1,
   }),
   output: ({ context }) => ({
-    guess: context.guess ?? '',
+    guess: context.guess ?? "",
     questionsUsed: context.transcript.length,
     userScore: context.userScore,
     agentScore: context.agentScore,
     roundsPlayed: context.round,
   }),
-  initial: 'deciding',
+  initial: "deciding",
   states: {
     deciding: {
       invoke: {
-        id: 'chooseAction',
-        src: 'agent.decide',
+        id: "chooseAction",
+        src: "agent.decide",
         input: ({ context }) => ({
-          model: 'quick',
+          model: "quick",
           system: DECIDE_SYSTEM_PROMPT,
           prompt: renderTranscriptPrompt(context),
           // Typo'd event names are caught at compile time — allowedEvents is
           // typed against the machine's event-schema keys (ASK | GUESS | ANSWER).
-          allowedEvents: ['ASK', 'GUESS'] as const,
+          allowedEvents: ["ASK", "GUESS"] as const,
           maxRetries: 2,
         }),
         onDone: sendDecision(),
-        onError: { target: 'stumped' },
+        onError: { target: "stumped" },
       },
       on: {
         // Guard: ASK is only legal before the final turn. Returning
@@ -245,14 +245,14 @@ export const twentyQuestionsMachine = agent.createMachine({
         ASK: ({ context, event }) =>
           context.questionsRemaining > 1
             ? {
-                target: 'awaitingAnswer',
+                target: "awaitingAnswer",
                 context: {
                   transcript: [
                     ...context.transcript,
                     {
                       question: event.question,
-                      answer: 'yes' as const,
-                      rawAnswer: '',
+                      answer: "yes" as const,
+                      rawAnswer: "",
                     },
                   ],
                   messages: [...context.messages, assistantMessage(event.question)],
@@ -261,7 +261,7 @@ export const twentyQuestionsMachine = agent.createMachine({
               }
             : undefined,
         GUESS: ({ context, event }) => ({
-          target: 'awaitingGuessFeedback',
+          target: "awaitingGuessFeedback",
           context: {
             guess: event.guess,
             messages: [
@@ -274,16 +274,16 @@ export const twentyQuestionsMachine = agent.createMachine({
     },
 
     awaitingAnswer: {
-      tags: ['awaiting-user'],
+      tags: ["awaiting-user"],
       invoke: {
-        src: 'agent.userInput',
+        src: "agent.userInput",
         input: ({ context }) => ({
-          prompt: context.transcript.at(-1)?.question ?? 'Answer yes or no.',
+          prompt: context.transcript.at(-1)?.question ?? "Answer yes or no.",
         }),
         onDone: ({ event }) => ({
-          target: 'classifyingAnswer',
+          target: "classifyingAnswer",
           context: {
-            pendingRawAnswer: String(event.output ?? ''),
+            pendingRawAnswer: String(event.output ?? ""),
           },
         }),
       },
@@ -291,99 +291,96 @@ export const twentyQuestionsMachine = agent.createMachine({
 
     classifyingAnswer: {
       invoke: {
-        src: 'classifyAnswer',
+        src: "classifyAnswer",
         input: ({ context }) => ({
-          question: context.transcript.at(-1)?.question ?? '',
-          rawAnswer: context.pendingRawAnswer ?? '',
+          question: context.transcript.at(-1)?.question ?? "",
+          rawAnswer: context.pendingRawAnswer ?? "",
           messages: context.messages,
           transcript: context.transcript,
         }),
         onDone: ({ context, output }) => ({
-          target: 'deciding',
+          target: "deciding",
           context: {
             transcript: [
               ...context.transcript.slice(0, -1),
               {
                 ...context.transcript.at(-1)!,
                 answer: output.answer,
-                rawAnswer: context.pendingRawAnswer ?? '',
+                rawAnswer: context.pendingRawAnswer ?? "",
               },
             ],
-            messages: [
-              ...context.messages,
-              userMessage(context.pendingRawAnswer ?? ''),
-            ],
+            messages: [...context.messages, userMessage(context.pendingRawAnswer ?? "")],
             pendingRawAnswer: null,
           },
         }),
-        onError: { target: 'stumped' },
+        onError: { target: "stumped" },
       },
     },
 
     awaitingGuessFeedback: {
-      tags: ['awaiting-user'],
+      tags: ["awaiting-user"],
       invoke: {
-        src: 'agent.userInput',
+        src: "agent.userInput",
         input: ({ context }) => ({
           prompt: `My guess is ${context.guess}. Was I right?`,
         }),
         onDone: ({ event }) => ({
-          target: 'classifyingGuessFeedback',
-          context: { pendingRawAnswer: String(event.output ?? '') },
+          target: "classifyingGuessFeedback",
+          context: { pendingRawAnswer: String(event.output ?? "") },
         }),
       },
     },
 
     classifyingGuessFeedback: {
       invoke: {
-        src: 'classifyGuessFeedback',
+        src: "classifyGuessFeedback",
         input: ({ context }) => ({
-          guess: context.guess ?? '',
-          rawAnswer: context.pendingRawAnswer ?? '',
+          guess: context.guess ?? "",
+          rawAnswer: context.pendingRawAnswer ?? "",
           messages: context.messages,
         }),
         onDone: ({ context, output }) => ({
-          target: 'awaitingPlayAgain',
+          target: "awaitingPlayAgain",
           context: {
             agentScore: context.agentScore + (output.correct ? 1 : 0),
             userScore: context.userScore + (output.correct ? 0 : 1),
             messages: [
               ...context.messages,
-              userMessage(context.pendingRawAnswer ?? ''),
-              assistantMessage('Do you want to play another round?'),
+              userMessage(context.pendingRawAnswer ?? ""),
+              assistantMessage("Do you want to play another round?"),
             ],
             pendingRawAnswer: null,
           },
         }),
-        onError: { target: 'awaitingPlayAgain' },
+        onError: { target: "awaitingPlayAgain" },
       },
     },
 
     awaitingPlayAgain: {
-      tags: ['awaiting-user'],
+      tags: ["awaiting-user"],
       invoke: {
-        src: 'agent.userInput',
+        src: "agent.userInput",
         input: {
-          prompt: 'Do you want to play another round?',
+          prompt: "Do you want to play another round?",
         },
         onDone: ({ event }) => ({
-          target: 'classifyingPlayAgain',
-          context: { pendingRawAnswer: String(event.output ?? '') },
+          target: "classifyingPlayAgain",
+          context: { pendingRawAnswer: String(event.output ?? "") },
         }),
       },
     },
 
     classifyingPlayAgain: {
       invoke: {
-        src: 'classifyPlayAgain',
+        src: "classifyPlayAgain",
         input: ({ context }) => ({
-          rawAnswer: context.pendingRawAnswer ?? '',
+          rawAnswer: context.pendingRawAnswer ?? "",
           messages: context.messages,
         }),
         onDone: ({ context, output }) =>
           output.playAgain
             ? {
-                target: 'deciding',
+                target: "deciding",
                 context: {
                   questionsRemaining: context.maxQuestions,
                   transcript: [],
@@ -394,28 +391,25 @@ export const twentyQuestionsMachine = agent.createMachine({
                 },
               }
             : {
-                target: 'gameOver',
+                target: "gameOver",
                 context: {
-                  messages: [
-                    ...context.messages,
-                    userMessage(context.pendingRawAnswer ?? ''),
-                  ],
+                  messages: [...context.messages, userMessage(context.pendingRawAnswer ?? "")],
                   pendingRawAnswer: null,
                 },
               },
-        onError: { target: 'gameOver' },
+        onError: { target: "gameOver" },
       },
     },
 
     gameOver: {
-      type: 'final',
+      type: "final",
     },
 
     // Reached when chooseAction exhausts its retries (DecisionExhaustedError).
     stumped: {
-      type: 'final',
+      type: "final",
       output: ({ context }) => ({
-        guess: '',
+        guess: "",
         questionsUsed: context.transcript.length,
         userScore: context.userScore,
         agentScore: context.agentScore,
@@ -428,7 +422,7 @@ export const twentyQuestionsMachine = agent.createMachine({
 const executors = createAiSdkExecutors({ models });
 
 async function promptAnswer(question: string): Promise<string> {
-  const { createInterface } = await import('node:readline/promises');
+  const { createInterface } = await import("node:readline/promises");
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     return await rl.question(`${question} `);
@@ -441,21 +435,19 @@ export async function main() {
   const result = await runAgent(twentyQuestionsMachine, {
     input: { questionsRemaining: 20 },
     ...executors,
-    userInput: async ({ prompt }) => promptAnswer(prompt ?? '>'),
+    userInput: async ({ prompt }) => promptAnswer(prompt ?? ">"),
   });
 
-  if (result.status !== 'done') {
+  if (result.status !== "done") {
     throw new Error(`Twenty questions did not complete: ${result.status}`);
   }
 
-  console.log(
-    `Final score — user: ${result.output.userScore}, agent: ${result.output.agentScore}`
-  );
+  console.log(`Final score — user: ${result.output.userScore}, agent: ${result.output.agentScore}`);
 }
 
-if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   if (!process.env.OPENAI_API_KEY) {
-    console.error('Set OPENAI_API_KEY to run this example.');
+    console.error("Set OPENAI_API_KEY to run this example.");
     process.exit(1);
   }
   void main();

@@ -11,18 +11,14 @@
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/debate-sub-agents/index.ts
  */
-import assert from 'node:assert/strict';
-import { z } from 'zod';
-import { openai } from '@ai-sdk/openai';
-import { createActor, toPromise, type AnyStateMachine } from 'xstate';
-import {
-  setupAgent,
-  type TextLogic,
-  type TextLogicExecutor,
-} from '../../src/index.js';
-import { createAiSdkExecutors } from '../../src/ai-sdk/index.js';
+import assert from "node:assert/strict";
+import { z } from "zod";
+import { openai } from "@ai-sdk/openai";
+import { createActor, toPromise, type AnyStateMachine } from "xstate";
+import { setupAgent, type TextLogic, type TextLogicExecutor } from "../../src/index.js";
+import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
 
-const stanceSchema = z.enum(['affirmative', 'negative']);
+const stanceSchema = z.enum(["affirmative", "negative"]);
 const transcriptEntrySchema = z.object({
   stance: stanceSchema,
   round: z.number(),
@@ -50,10 +46,7 @@ const composeInputSchema = z.object({
 // A debater's `composeArgument` executor, typed straight from the request
 // schemas (not `ReturnType<typeof createDebaterAgent>`, whose full inferred
 // agent type is not serializable — TS7056).
-type ComposeExecutor = TextLogicExecutor<
-  typeof composeInputSchema,
-  z.ZodString
->;
+type ComposeExecutor = TextLogicExecutor<typeof composeInputSchema, z.ZodString>;
 
 // Precisely-typed workflow shape: `requests.concludeDebate` carries its real
 // input/output schemas (no `Record<string, any>` leak), so a host's
@@ -71,7 +64,7 @@ type DebateSubAgentsWorkflow = {
 };
 
 function nextTurn(index: number) {
-  const stance = index % 2 === 0 ? 'affirmative' : 'negative';
+  const stance = index % 2 === 0 ? "affirmative" : "negative";
   return {
     stance,
     actorId: `${stance}Debater`,
@@ -92,7 +85,7 @@ function createDebaterAgent() {
       question: z.string(),
     }),
     events: {
-      'DEBATE.ARGUMENT_REQUESTED': z.object({
+      "DEBATE.ARGUMENT_REQUESTED": z.object({
         round: z.number(),
         question: z.string(),
         transcript: transcriptSchema,
@@ -104,7 +97,7 @@ function createDebaterAgent() {
           input: composeInputSchema,
           output: z.string(),
         },
-        model: 'debater',
+        model: "debater",
         system: ({ input }) =>
           `You argue the ${input.stance} side. Be concise and respond to the debate so far.`,
         prompt: ({ input }) =>
@@ -112,25 +105,25 @@ function createDebaterAgent() {
             `Question: ${input.question}`,
             `Round: ${input.round}`,
             `Transcript: ${JSON.stringify(input.transcript)}`,
-          ].join('\n'),
+          ].join("\n"),
       },
     },
   });
 
   const machine = agent.createMachine({
-    id: 'debater-agent',
+    id: "debater-agent",
     context: ({ input }) => ({
       stance: input.stance,
       question: input.question,
       round: null,
       transcript: [],
     }),
-    initial: 'idle',
+    initial: "idle",
     states: {
       idle: {
         on: {
-          'DEBATE.ARGUMENT_REQUESTED': ({ event }) => ({
-            target: 'composing',
+          "DEBATE.ARGUMENT_REQUESTED": ({ event }) => ({
+            target: "composing",
             context: {
               question: event.question,
               round: event.round,
@@ -141,7 +134,7 @@ function createDebaterAgent() {
       },
       composing: {
         invoke: {
-          src: 'composeArgument',
+          src: "composeArgument",
           input: ({ context }) => ({
             stance: context.stance,
             question: context.question,
@@ -151,13 +144,13 @@ function createDebaterAgent() {
           onDone: ({ context, output, parent }, enq) => {
             if (parent) {
               enq.sendTo(parent, {
-                type: 'DEBATE.ARGUMENT_SUBMITTED',
+                type: "DEBATE.ARGUMENT_SUBMITTED",
                 stance: context.stance,
                 round: context.round ?? 0,
                 text: output,
               });
             }
-            return { target: 'idle' };
+            return { target: "idle" };
           },
         },
       },
@@ -186,13 +179,12 @@ export function createDebateSubAgentsWorkflow(
     input: z.object({ question: z.string() }),
     output: conclusionSchema.extend({ transcript: transcriptSchema }),
     events: {
-      'DEBATE.ARGUMENT_SUBMITTED': transcriptEntrySchema,
+      "DEBATE.ARGUMENT_SUBMITTED": transcriptEntrySchema,
     },
     actorSources: {
       debater: debater.machine.provide({
         actorSources: {
-          composeArgument:
-            debater.agent.requests.composeArgument.withExecutor(composeExecutor),
+          composeArgument: debater.agent.requests.composeArgument.withExecutor(composeExecutor),
         },
       }),
     },
@@ -202,20 +194,19 @@ export function createDebateSubAgentsWorkflow(
           input: concludeInputSchema,
           output: conclusionSchema,
         },
-        model: 'facilitator',
+        model: "facilitator",
         system:
-          'You are a neutral facilitator. Summarize the strongest arguments and give a conclusion.',
+          "You are a neutral facilitator. Summarize the strongest arguments and give a conclusion.",
         prompt: ({ input }) =>
-          [
-            `Question: ${input.question}`,
-            `Transcript: ${JSON.stringify(input.transcript)}`,
-          ].join('\n'),
+          [`Question: ${input.question}`, `Transcript: ${JSON.stringify(input.transcript)}`].join(
+            "\n",
+          ),
       },
     },
   });
 
   const machine = agent.createMachine({
-    id: 'debate-sub-agents',
+    id: "debate-sub-agents",
     context: ({ input }) => ({
       question: input.question,
       transcript: [],
@@ -223,68 +214,71 @@ export function createDebateSubAgentsWorkflow(
     }),
     invoke: [
       {
-        id: 'affirmativeDebater',
-        src: 'debater',
+        id: "affirmativeDebater",
+        src: "debater",
         input: ({ context }) => ({
-          stance: 'affirmative',
+          stance: "affirmative",
           question: context.question,
         }),
       },
       {
-        id: 'negativeDebater',
-        src: 'debater',
+        id: "negativeDebater",
+        src: "debater",
         input: ({ context }) => ({
-          stance: 'negative',
+          stance: "negative",
           question: context.question,
         }),
       },
     ],
-    initial: 'requestingArgument',
+    initial: "requestingArgument",
     states: {
       requestingArgument: {
         always: ({ context, children }, enq) => {
           const turn = nextTurn(context.transcript.length);
           enq.sendTo(children[turn.actorId], {
-            type: 'DEBATE.ARGUMENT_REQUESTED',
+            type: "DEBATE.ARGUMENT_REQUESTED",
             round: turn.round,
             question: context.question,
             transcript: context.transcript,
           });
-          return { target: 'waitingForArgument' };
+          return { target: "waitingForArgument" };
         },
       },
       waitingForArgument: {
         on: {
-          'DEBATE.ARGUMENT_SUBMITTED': ({ context, event }) => {
-            const transcript = [...context.transcript, {
-              stance: event.stance,
-              round: event.round,
-              text: event.text,
-            }];
+          "DEBATE.ARGUMENT_SUBMITTED": ({ context, event }) => {
+            const transcript = [
+              ...context.transcript,
+              {
+                stance: event.stance,
+                round: event.round,
+                text: event.text,
+              },
+            ];
 
             return transcript.length >= totalTurns
-              ? { target: 'concluding', context: { transcript } }
-              : { target: 'requestingArgument', context: { transcript } };
+              ? { target: "concluding", context: { transcript } }
+              : { target: "requestingArgument", context: { transcript } };
           },
         },
       },
       concluding: {
         invoke: {
-          src: 'concludeDebate',
+          src: "concludeDebate",
           input: ({ context }) => ({
             question: context.question,
             transcript: context.transcript,
           }),
           onDone: ({ output }) => ({
-            target: 'done',
+            target: "done",
             context: { conclusion: output.conclusion },
           }),
         },
       },
       done: {
-        type: 'final',
+        type: "final",
         output: ({ context }) => ({
-          conclusion: context.conclusion ?? '',
+          conclusion: context.conclusion ?? "",
           transcript: context.transcript,
         }),
       },
@@ -299,23 +293,21 @@ export async function runDebateSubAgentsExample() {
   const actor = createActor(
     machine.provide({
       actorSources: {
-        concludeDebate: agent.requests.concludeDebate.withExecutor(
-          async ({ input }) => ({
-            output: {
-              conclusion: `conclusion:${input.transcript.length}:${input.question}`,
-            },
-          }),
-        ),
+        concludeDebate: agent.requests.concludeDebate.withExecutor(async ({ input }) => ({
+          output: {
+            conclusion: `conclusion:${input.transcript.length}:${input.question}`,
+          },
+        })),
       },
     }),
-    { input: { question: 'Should agents be modeled as actors?' } },
+    { input: { question: "Should agents be modeled as actors?" } },
   );
 
   actor.start();
   await toPromise(actor);
 
   assert.deepEqual(actor.getSnapshot().output, {
-    conclusion: 'conclusion:10:Should agents be modeled as actors?',
+    conclusion: "conclusion:10:Should agents be modeled as actors?",
     transcript: Array.from({ length: totalTurns }, (_, index) => {
       const turn = nextTurn(index);
       return {
@@ -333,8 +325,8 @@ export async function runDebateSubAgentsExample() {
 export async function main() {
   const { generateText } = createAiSdkExecutors({
     models: {
-      debater: openai('gpt-5.4-mini'),
-      facilitator: openai('gpt-5.4-mini'),
+      debater: openai("gpt-5.4-mini"),
+      facilitator: openai("gpt-5.4-mini"),
     },
   });
 
@@ -348,9 +340,7 @@ export async function main() {
       output: T;
     }>;
 
-  const { agent, machine } = createDebateSubAgentsWorkflow(
-    ({ request }) => run<string>(request),
-  );
+  const { agent, machine } = createDebateSubAgentsWorkflow(({ request }) => run<string>(request));
 
   const actor = createActor(
     machine.provide({
@@ -360,7 +350,7 @@ export async function main() {
         ),
       },
     }),
-    { input: { question: 'Should agents be modeled as actors?' } },
+    { input: { question: "Should agents be modeled as actors?" } },
   );
 
   actor.start();
@@ -376,9 +366,9 @@ export async function main() {
   console.log(`\n--- Facilitator ---\n${output.conclusion}`);
 }
 
-if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   if (!process.env.OPENAI_API_KEY) {
-    console.error('Set OPENAI_API_KEY to run this example.');
+    console.error("Set OPENAI_API_KEY to run this example.");
     process.exit(1);
   }
   void main();

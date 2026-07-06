@@ -11,11 +11,11 @@
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/email-drafter/index.ts
  */
-import { z } from 'zod';
-import { openai } from '@ai-sdk/openai';
-import { type LanguageModel } from 'ai';
-import { createAsyncLogic } from 'xstate';
-import { createAiSdkExecutors } from '../../src/ai-sdk/index.js';
+import { z } from "zod";
+import { openai } from "@ai-sdk/openai";
+import { type LanguageModel } from "ai";
+import { createAsyncLogic } from "xstate";
+import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
 import {
   type AgentMessage,
   assistantMessage,
@@ -25,7 +25,7 @@ import {
   runAgent,
   setupAgent,
   userMessage,
-} from '../../src/index.js';
+} from "../../src/index.js";
 
 const promptAssessmentSchema = z.object({
   satisfied: z.boolean(),
@@ -46,15 +46,15 @@ type EmailDraft = z.infer<typeof emailDraftSchema>;
 export const metaSchema = z.object({
   display: z.array(z.string()).optional(),
   interaction: z
-    .discriminatedUnion('type', [
+    .discriminatedUnion("type", [
       z.object({
-        type: z.literal('text'),
+        type: z.literal("text"),
         label: z.string(),
         eventType: z.string(),
         field: z.string(),
       }),
       z.object({
-        type: z.literal('select'),
+        type: z.literal("select"),
         label: z.string(),
         choices: z.array(
           z.object({
@@ -62,7 +62,7 @@ export const metaSchema = z.object({
             eventType: z.string(),
             input: z
               .object({
-                type: z.literal('text'),
+                type: z.literal("text"),
                 label: z.string(),
                 field: z.string(),
               })
@@ -71,7 +71,7 @@ export const metaSchema = z.object({
         ),
       }),
       z.object({
-        type: z.literal('confirm'),
+        type: z.literal("confirm"),
         label: z.string(),
         default: z.boolean().optional(),
         trueEventType: z.string(),
@@ -103,13 +103,10 @@ const outputSchema = z.object({ sentEmails: z.array(emailDraftSchema) });
 
 // Annotated with LanguageModel so the exported const has a portable, nameable
 // type (TS2742); model-ref keys are inferred from this map regardless.
-export const models: Record<
-  'promptEvaluator' | 'emailDrafter' | 'draftStreamer',
-  LanguageModel
-> = {
-  promptEvaluator: openai('gpt-5.4-mini'),
-  emailDrafter: openai('gpt-5.4-mini'),
-  draftStreamer: openai('gpt-5.4-mini'),
+export const models: Record<"promptEvaluator" | "emailDrafter" | "draftStreamer", LanguageModel> = {
+  promptEvaluator: openai("gpt-5.4-mini"),
+  emailDrafter: openai("gpt-5.4-mini"),
+  draftStreamer: openai("gpt-5.4-mini"),
 } as const;
 
 export const evaluatePrompt = createTextLogic({
@@ -117,9 +114,9 @@ export const evaluatePrompt = createTextLogic({
     input: z.object({ prompt: z.string() }),
     output: promptAssessmentSchema,
   },
-  model: 'promptEvaluator',
+  model: "promptEvaluator",
   system:
-    'Evaluate an email drafting request. Require recipient, subject, and body details. Return missing fields and one question per gap.',
+    "Evaluate an email drafting request. Require recipient, subject, and body details. Return missing fields and one question per gap.",
   prompt: ({ input }) => input.prompt,
 });
 
@@ -131,19 +128,19 @@ export const draftEmail = createTextLogic({
     }),
     output: emailDraftSchema,
   },
-  model: 'emailDrafter',
+  model: "emailDrafter",
   system:
-    'Draft a polished email from the request. Use the provided details without inventing missing essentials unless the user explicitly asked to draft anyway.',
+    "Draft a polished email from the request. Use the provided details without inventing missing essentials unless the user explicitly asked to draft anyway.",
   messages: ({ input }) => [...input.messages, userMessage(input.prompt)],
 });
 
 export const streamDraft = createTextLogic({
-  mode: 'stream',
+  mode: "stream",
   schemas: {
     input: z.object({ prompt: z.string() }),
     output: z.string(),
   },
-  model: 'draftStreamer',
+  model: "draftStreamer",
   prompt: ({ input }) => input.prompt,
 });
 
@@ -173,29 +170,29 @@ const agent = setupAgent({
 });
 
 export const emailDrafter = agent.createMachine({
-  id: 'email-drafter',
+  id: "email-drafter",
   output: ({ context }) => ({ sentEmails: context.sentEmails }),
   context: {
-    prompt: '',
+    prompt: "",
     assessment: null,
     draft: null,
     sentEmails: [],
     messages: [],
   },
-  initial: 'prompting',
+  initial: "prompting",
   states: {
     prompting: {
       meta: {
         interaction: {
-          type: 'text',
-          label: 'Email draft request',
-          eventType: 'PROMPT_SUBMITTED',
-          field: 'prompt',
+          type: "text",
+          label: "Email draft request",
+          eventType: "PROMPT_SUBMITTED",
+          field: "prompt",
         },
       },
       on: {
         PROMPT_SUBMITTED: ({ event }) => ({
-          target: 'evaluating',
+          target: "evaluating",
           context: {
             prompt: event.prompt,
             assessment: null,
@@ -208,55 +205,55 @@ export const emailDrafter = agent.createMachine({
 
     evaluating: {
       invoke: {
-        src: 'evaluatePrompt',
+        src: "evaluatePrompt",
         input: ({ context }) => ({ prompt: context.prompt }),
         onDone: ({ output }) => {
           if (output.satisfied) {
             return {
-              target: 'drafting',
+              target: "drafting",
               context: { assessment: output },
             };
           }
 
           return {
-            target: 'needsMoreInfo',
+            target: "needsMoreInfo",
             context: { assessment: output },
           };
         },
-        onError: { target: 'failed' },
+        onError: { target: "failed" },
       },
     },
 
     needsMoreInfo: {
       meta: {
         interaction: {
-          type: 'select',
-          label: 'Next',
+          type: "select",
+          label: "Next",
           choices: [
             {
-              label: 'Add details',
-              eventType: 'MORE_INFO',
-              input: { type: 'text', label: 'More details', field: 'details' },
+              label: "Add details",
+              eventType: "MORE_INFO",
+              input: { type: "text", label: "More details", field: "details" },
             },
-            { label: 'Draft anyway', eventType: 'DRAFT_ANYWAY' },
+            { label: "Draft anyway", eventType: "DRAFT_ANYWAY" },
           ],
         },
       },
       on: {
         MORE_INFO: ({ context, event }) => ({
-          target: 'evaluating',
+          target: "evaluating",
           context: {
             prompt: `${context.prompt}\n\n${event.details}`,
             messages: [...context.messages, userMessage(event.details)],
           },
         }),
         DRAFT_ANYWAY: ({ context }) => ({
-          target: 'drafting',
+          target: "drafting",
           context: {
             prompt: `${context.prompt}\n\nDraft anyway with reasonable assumptions.`,
             messages: [
               ...context.messages,
-              userMessage('Draft anyway with reasonable assumptions.'),
+              userMessage("Draft anyway with reasonable assumptions."),
             ],
           },
         }),
@@ -265,7 +262,7 @@ export const emailDrafter = agent.createMachine({
 
     drafting: {
       invoke: {
-        src: 'draftEmail',
+        src: "draftEmail",
         input: ({ context }) => ({
           prompt: context.prompt,
           messages: context.messages,
@@ -273,104 +270,97 @@ export const emailDrafter = agent.createMachine({
         onDone: ({ context, output }) => {
           const draft = output;
           return {
-            target: 'reviewing',
+            target: "reviewing",
             context: {
               draft,
               messages: [
                 ...context.messages,
-                assistantMessage(
-                  `To: ${draft.to}\nSubject: ${draft.subject}\n\n${draft.body}`,
-                ),
+                assistantMessage(`To: ${draft.to}\nSubject: ${draft.subject}\n\n${draft.body}`),
               ],
             },
           };
         },
-        onError: { target: 'failed' },
+        onError: { target: "failed" },
       },
     },
 
     reviewing: {
       meta: {
         interaction: {
-          type: 'select',
-          label: 'Next',
+          type: "select",
+          label: "Next",
           choices: [
             {
-              label: 'Request changes',
-              eventType: 'REQUEST_CHANGES',
+              label: "Request changes",
+              eventType: "REQUEST_CHANGES",
               input: {
-                type: 'text',
-                label: 'Requested changes',
-                field: 'changes',
+                type: "text",
+                label: "Requested changes",
+                field: "changes",
               },
             },
-            { label: 'Send', eventType: 'SEND' },
+            { label: "Send", eventType: "SEND" },
           ],
         },
       },
       on: {
         REQUEST_CHANGES: ({ context, event }) => ({
-          target: 'drafting',
+          target: "drafting",
           context: {
             prompt: `${context.prompt}\n\nRevision request: ${event.changes}`,
-            messages: [
-              ...context.messages,
-              userMessage(`Revision request: ${event.changes}`),
-            ],
+            messages: [...context.messages, userMessage(`Revision request: ${event.changes}`)],
           },
         }),
-        SEND: { target: 'sending' },
+        SEND: { target: "sending" },
       },
     },
 
     sending: {
       invoke: {
-        src: 'sendEmail',
+        src: "sendEmail",
         input: ({ context }) => ({ draft: context.draft! }),
         onDone: ({ context }) => ({
-          target: 'sent',
+          target: "sent",
           context: {
-            sentEmails: context.draft
-              ? [...context.sentEmails, context.draft]
-              : context.sentEmails,
+            sentEmails: context.draft ? [...context.sentEmails, context.draft] : context.sentEmails,
           },
         }),
-        onError: { target: 'failed' },
+        onError: { target: "failed" },
       },
     },
 
     sent: {
       meta: {
-        display: ['Email sent.'],
+        display: ["Email sent."],
         interaction: {
-          type: 'confirm',
-          label: 'Send another?',
+          type: "confirm",
+          label: "Send another?",
           default: false,
-          trueEventType: 'ANOTHER',
-          falseEventType: 'END',
+          trueEventType: "ANOTHER",
+          falseEventType: "END",
         },
       },
       on: {
         ANOTHER: {
-          target: 'prompting',
+          target: "prompting",
           context: {
-            prompt: '',
+            prompt: "",
             assessment: null,
             draft: null,
           },
         },
-        END: { target: 'done' },
+        END: { target: "done" },
       },
     },
 
     // Plain final states: `output` is natively typed against the machine's
     // output schema, and becomes the machine output when reached.
     failed: {
-      type: 'final',
+      type: "final",
       output: ({ context }) => ({ sentEmails: context.sentEmails }),
     },
     done: {
-      type: 'final',
+      type: "final",
       output: ({ context }) => ({ sentEmails: context.sentEmails }),
     },
   },
@@ -383,9 +373,7 @@ export const emailDrafter = agent.createMachine({
 // from that meta — no state name is ever hardcoded. Swap this loop for a web
 // form or Slack modal and the same machine drives it unchanged.
 
-export type Interaction = NonNullable<
-  z.infer<typeof metaSchema>['interaction']
->;
+export type Interaction = NonNullable<z.infer<typeof metaSchema>["interaction"]>;
 export type DrafterEvent = { type: string; [field: string]: unknown };
 
 async function ask(
@@ -408,18 +396,18 @@ export async function promptInteraction(
   }
 
   switch (interaction.type) {
-    case 'text': {
+    case "text": {
       const value = await ask(rl, `${interaction.label}: `);
       return { type: interaction.eventType, [interaction.field]: value };
     }
-    case 'confirm': {
+    case "confirm": {
       const answer = await ask(rl, `${interaction.label} [y/N]: `);
       const yes = /^y(es)?$/i.test(answer);
       return {
         type: yes ? interaction.trueEventType : interaction.falseEventType,
       };
     }
-    case 'select': {
+    case "select": {
       console.log(interaction.label);
       interaction.choices.forEach((choice, index) => {
         console.log(`  ${index + 1}. ${choice.label}`);
@@ -432,7 +420,7 @@ export async function promptInteraction(
           choice = picked;
           break;
         }
-        console.log('Please enter a valid number.');
+        console.log("Please enter a valid number.");
       }
       const event: DrafterEvent = { type: choice.eventType };
       if (choice.input) {
@@ -445,7 +433,7 @@ export async function promptInteraction(
 
 export async function main() {
   const executors = createAiSdkExecutors({ models });
-  const { createInterface } = await import('node:readline/promises');
+  const { createInterface } = await import("node:readline/promises");
   const rl = createInterface({ input: process.stdin, output: process.stdout });
 
   try {
@@ -455,20 +443,19 @@ export async function main() {
       ...executors,
     });
 
-    while (result.status === 'idle') {
-      const meta = getStateMeta<
-        typeof result.snapshot,
-        z.infer<typeof metaSchema>
-      >(result.snapshot);
+    while (result.status === "idle") {
+      const meta = getStateMeta<typeof result.snapshot, z.infer<typeof metaSchema>>(
+        result.snapshot,
+      );
       if (!meta.interaction) {
         // Idle with no interaction to render: nothing the human can do.
-        console.error('Machine is idle with no interaction. Stopping.');
+        console.error("Machine is idle with no interaction. Stopping.");
         break;
       }
 
       // Show the current draft whenever one exists, before the prompt.
       const draft = result.snapshot.context.draft;
-      if (draft && meta.interaction.type !== 'text') {
+      if (draft && meta.interaction.type !== "text") {
         console.log(
           `\n--- Draft ---\nTo: ${draft.to}\nSubject: ${draft.subject}\n\n${draft.body}\n-------------`,
         );
@@ -482,19 +469,19 @@ export async function main() {
       });
     }
 
-    if (result.status === 'done') {
+    if (result.status === "done") {
       console.log(`\nSent ${result.output.sentEmails.length} email(s).`);
-    } else if (result.status === 'error') {
-      console.error('Run failed:', result.error);
+    } else if (result.status === "error") {
+      console.error("Run failed:", result.error);
     }
   } finally {
     rl.close();
   }
 }
 
-if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   if (!process.env.OPENAI_API_KEY) {
-    console.error('Set OPENAI_API_KEY to run this example.');
+    console.error("Set OPENAI_API_KEY to run this example.");
     process.exit(1);
   }
   void main();

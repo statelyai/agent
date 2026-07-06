@@ -7,22 +7,22 @@
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/ai-sdk-routing/index.ts
  */
-import { z } from 'zod';
-import { openai } from '@ai-sdk/openai';
-import { setupAgent, runAgent } from '../../src/index.js';
-import { createAiSdkTextExecutor } from '../ai-sdk-host/index.js';
-import { type LanguageModel } from 'ai';
+import { z } from "zod";
+import { openai } from "@ai-sdk/openai";
+import { setupAgent, runAgent } from "../../src/index.js";
+import { createAiSdkTextExecutor } from "../ai-sdk-host/index.js";
+import { type LanguageModel } from "ai";
 
 const classificationSchema = z.object({
   reasoning: z.string(),
-  type: z.enum(['general', 'refund', 'technical']),
-  complexity: z.enum(['simple', 'complex']),
+  type: z.enum(["general", "refund", "technical"]),
+  complexity: z.enum(["simple", "complex"]),
 });
 
-export const models: Record<'classifier' | 'simpleAnswerer' | 'complexAnswerer', LanguageModel> = {
-  classifier: openai('gpt-5.4-mini'),
-  simpleAnswerer: openai('gpt-4o-mini'),
-  complexAnswerer: openai('o4-mini'),
+export const models: Record<"classifier" | "simpleAnswerer" | "complexAnswerer", LanguageModel> = {
+  classifier: openai("gpt-5.4-mini"),
+  simpleAnswerer: openai("gpt-4o-mini"),
+  complexAnswerer: openai("o4-mini"),
 } as const;
 
 const agent = setupAgent({
@@ -43,9 +43,9 @@ const agent = setupAgent({
         input: z.object({ query: z.string() }),
         output: classificationSchema,
       },
-      model: 'classifier',
+      model: "classifier",
       system:
-        'You route customer support queries. Classify each into a type — general, refund, or technical — and a complexity — simple (answerable directly) or complex (needs deeper reasoning). Explain your reasoning briefly.',
+        "You route customer support queries. Classify each into a type — general, refund, or technical — and a complexity — simple (answerable directly) or complex (needs deeper reasoning). Explain your reasoning briefly.",
       prompt: ({ input }) => `Classify this customer query:\n${input.query}`,
     },
     answerCustomerQuery: {
@@ -57,17 +57,16 @@ const agent = setupAgent({
         output: z.string(),
       },
       model: ({ input }) =>
-        input.classification.complexity === 'simple'
-          ? 'simpleAnswerer'
-          : 'complexAnswerer',
-      system: ({ input }) => ({
-        general:
-          'You are a friendly support generalist. Answer the customer directly and concisely, and point them to the right next step.',
-        refund:
-          'You are a refunds specialist. State whether the request qualifies, explain the policy plainly, and give the exact steps to get the refund.',
-        technical:
-          'You are a technical support engineer. Diagnose the likely cause and give numbered troubleshooting steps the customer can follow.',
-      })[input.classification.type],
+        input.classification.complexity === "simple" ? "simpleAnswerer" : "complexAnswerer",
+      system: ({ input }) =>
+        ({
+          general:
+            "You are a friendly support generalist. Answer the customer directly and concisely, and point them to the right next step.",
+          refund:
+            "You are a refunds specialist. State whether the request qualifies, explain the policy plainly, and give the exact steps to get the refund.",
+          technical:
+            "You are a technical support engineer. Diagnose the likely cause and give numbered troubleshooting steps the customer can follow.",
+        })[input.classification.type],
       prompt: ({ input }) => input.query,
     },
   },
@@ -77,7 +76,7 @@ export const classifyCustomerQuery = agent.requests.classifyCustomerQuery;
 export const answerCustomerQuery = agent.requests.answerCustomerQuery;
 
 export const aiSdkRoutingMachine = agent.createMachine({
-  id: 'ai-sdk-routing',
+  id: "ai-sdk-routing",
   context: ({ input }) => ({
     query: input.query,
     classification: null,
@@ -85,61 +84,61 @@ export const aiSdkRoutingMachine = agent.createMachine({
   }),
   output: ({ context }) => ({
     classification: context.classification ?? {
-      reasoning: '',
-      type: 'general',
-      complexity: 'simple',
+      reasoning: "",
+      type: "general",
+      complexity: "simple",
     },
-    response: context.response ?? '',
+    response: context.response ?? "",
   }),
-  initial: 'classifying',
+  initial: "classifying",
   states: {
     classifying: {
       invoke: {
-        id: 'classifyCustomerQuery',
-        src: 'classifyCustomerQuery',
+        id: "classifyCustomerQuery",
+        src: "classifyCustomerQuery",
         input: ({ context }) => ({ query: context.query }),
         onDone: ({ output }) => ({
-          target: 'responding',
+          target: "responding",
           context: { classification: output },
         }),
       },
     },
     responding: {
       invoke: {
-        id: 'answerCustomerQuery',
-        src: 'answerCustomerQuery',
+        id: "answerCustomerQuery",
+        src: "answerCustomerQuery",
         input: ({ context }) => ({
           query: context.query,
           classification: context.classification ?? {
-            reasoning: '',
-            type: 'general',
-            complexity: 'simple',
+            reasoning: "",
+            type: "general",
+            complexity: "simple",
           },
         }),
         onDone: ({ output }) => ({
-          target: 'done',
+          target: "done",
           context: { response: output },
         }),
       },
     },
-    done: { type: 'final' },
+    done: { type: "final" },
   },
 });
 
 export async function runAiSdkRoutingExample() {
   const result = await runAgent(aiSdkRoutingMachine, {
-    input: { query: 'The app crashes on launch.' },
+    input: { query: "The app crashes on launch." },
     generateText: createAiSdkTextExecutor({ models }),
   });
-  if (result.status !== 'done') {
+  if (result.status !== "done") {
     throw new Error(`Routing example did not complete: ${result.status}`);
   }
   return result.output;
 }
 
-if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   if (!process.env.OPENAI_API_KEY) {
-    console.error('Set OPENAI_API_KEY to run this example.');
+    console.error("Set OPENAI_API_KEY to run this example.");
     process.exit(1);
   }
   console.log(await runAiSdkRoutingExample());

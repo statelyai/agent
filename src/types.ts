@@ -7,7 +7,7 @@
  * {@link SchemaCompiler} when authoring from `AgentWorkflowConfig` JSON.
  */
 export interface StandardSchemaV1<Input = unknown, Output = Input> {
-  readonly '~standard': {
+  readonly "~standard": {
     readonly version: 1;
     readonly vendor: string;
     readonly validate: (value: unknown) => any;
@@ -42,7 +42,7 @@ export type ProviderOptions = Record<string, Record<string, unknown>>;
 
 /** A plain-text segment of a multi-part {@link AgentMessage} content array. */
 export interface TextPart {
-  type: 'text';
+  type: "text";
   text: string;
   providerOptions?: ProviderOptions;
 }
@@ -53,7 +53,7 @@ export interface TextPart {
  * URL strings or base64-encoded strings in `image` instead.
  */
 export interface ImagePart {
-  type: 'image';
+  type: "image";
   image: DataContent | URL;
   mediaType?: string;
   providerOptions?: ProviderOptions;
@@ -65,7 +65,7 @@ export interface ImagePart {
  * URL strings or base64-encoded strings in `data` instead.
  */
 export interface FilePart {
-  type: 'file';
+  type: "file";
   data: DataContent | URL;
   mediaType: string;
   filename?: string;
@@ -74,7 +74,7 @@ export interface FilePart {
 
 /** A model-issued tool call, as an {@link AssistantMessage} content part. */
 export interface ToolCallPart {
-  type: 'tool-call';
+  type: "tool-call";
   toolCallId: string;
   toolName: string;
   input: unknown;
@@ -83,15 +83,15 @@ export interface ToolCallPart {
 
 /** The result payload of a {@link ToolResultPart}, discriminated by shape (plain text/JSON, or an error variant of either). */
 export type ToolResultOutput =
-  | { type: 'text'; value: string }
-  | { type: 'json'; value: unknown }
-  | { type: 'error-text'; value: string }
-  | { type: 'error-json'; value: unknown }
-  | { type: 'content'; value: Array<TextPart | ImagePart> };
+  | { type: "text"; value: string }
+  | { type: "json"; value: unknown }
+  | { type: "error-text"; value: string }
+  | { type: "error-json"; value: unknown }
+  | { type: "content"; value: Array<TextPart | ImagePart> };
 
 /** A tool's result, as a {@link ToolMessage} content part. */
 export interface ToolResultPart {
-  type: 'tool-result';
+  type: "tool-result";
   toolCallId: string;
   toolName: string;
   output: ToolResultOutput;
@@ -100,25 +100,25 @@ export interface ToolResultPart {
 
 /** A system-role {@link AgentMessage}. Create with {@link systemMessage}. */
 export type SystemMessage = {
-  role: 'system';
+  role: "system";
   content: string;
   providerOptions?: ProviderOptions;
 };
 /** A user-role {@link AgentMessage}, optionally multimodal. Create with {@link userMessage}. */
 export type UserMessage = {
-  role: 'user';
+  role: "user";
   content: string | Array<TextPart | ImagePart | FilePart>;
   providerOptions?: ProviderOptions;
 };
 /** An assistant-role {@link AgentMessage}, which may carry tool calls/results inline. Create with {@link assistantMessage}. */
 export type AssistantMessage = {
-  role: 'assistant';
+  role: "assistant";
   content: string | Array<TextPart | FilePart | ToolCallPart | ToolResultPart>;
   providerOptions?: ProviderOptions;
 };
 /** A tool-role {@link AgentMessage} carrying one or more tool results. Create with {@link toolMessage}. */
 export type ToolMessage = {
-  role: 'tool';
+  role: "tool";
   content: Array<ToolResultPart>;
   providerOptions?: ProviderOptions;
 };
@@ -130,11 +130,7 @@ export type ToolMessage = {
  * decision requests via `messages`. Validate a context field with
  * {@link messagesSchema}.
  */
-export type AgentMessage =
-  | SystemMessage
-  | UserMessage
-  | AssistantMessage
-  | ToolMessage;
+export type AgentMessage = SystemMessage | UserMessage | AssistantMessage | ToolMessage;
 
 /** A tool exposed to a text request, described for both the model and (optionally) host execution. */
 export interface AgentToolDescriptor {
@@ -155,11 +151,7 @@ export type AgentTool = AgentToolDescriptor | AgentToolExecute;
 export type AgentTools = Record<string, AgentTool | undefined>;
 
 /** How a text request's model should select among its `tools`; `{ type: 'tool', name }` forces one specific tool. */
-export type AgentToolChoice =
-  | 'auto'
-  | 'none'
-  | 'required'
-  | { type: 'tool'; name: string };
+export type AgentToolChoice = "auto" | "none" | "required" | { type: "tool"; name: string };
 
 /** The event chosen and raised by a decision. */
 export type ChosenEvent = { type: string; [key: string]: unknown };

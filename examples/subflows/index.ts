@@ -18,19 +18,19 @@
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/subflows/index.ts
  */
-import { z } from 'zod';
-import { openai } from '@ai-sdk/openai';
-import { type LanguageModel } from 'ai';
+import { z } from "zod";
+import { openai } from "@ai-sdk/openai";
+import { type LanguageModel } from "ai";
 import {
   runAgent,
   setupAgent,
   type AgentRequestExecutor,
   type AgentTools,
-} from '../../src/index.js';
-import { createAiSdkExecutors } from '../../src/ai-sdk/index.js';
+} from "../../src/index.js";
+import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
 
-export const models: Record<'researcher', LanguageModel> = {
-  researcher: openai('gpt-5.4-mini'),
+export const models: Record<"researcher", LanguageModel> = {
+  researcher: openai("gpt-5.4-mini"),
 } as const;
 
 // ─── Child agent: research one topic ───
@@ -45,28 +45,28 @@ const childAgent = setupAgent({
         input: z.object({ topic: z.string() }),
         output: z.string(),
       },
-      model: 'researcher',
-      system: 'You are a research assistant. Summarize the topic in 2-3 sentences.',
+      model: "researcher",
+      system: "You are a research assistant. Summarize the topic in 2-3 sentences.",
       prompt: ({ input }) => `Research: ${input.topic}`,
     },
   },
 });
 
 export const childMachine = childAgent.createMachine({
-  id: 'subflows-child',
+  id: "subflows-child",
   context: ({ input }) => ({ topic: input.topic, research: null }),
-  output: ({ context }) => ({ research: context.research ?? '' }),
-  initial: 'researching',
+  output: ({ context }) => ({ research: context.research ?? "" }),
+  initial: "researching",
   states: {
     researching: {
       invoke: {
-        id: 'researchTopic',
-        src: 'researchTopic',
+        id: "researchTopic",
+        src: "researchTopic",
         input: ({ context }) => ({ topic: context.topic }),
-        onDone: ({ output }) => ({ target: 'done', context: { research: output } }),
+        onDone: ({ output }) => ({ target: "done", context: { research: output } }),
       },
     },
-    done: { type: 'final' },
+    done: { type: "final" },
   },
 });
 
@@ -79,23 +79,23 @@ const parentAgent = setupAgent({
 });
 
 export const subflowsMachine = parentAgent.createMachine({
-  id: 'subflows-parent',
+  id: "subflows-parent",
   context: ({ input }) => ({ topic: input.topic, research: null }),
-  output: ({ context }) => ({ research: context.research ?? '' }),
-  initial: 'delegating',
+  output: ({ context }) => ({ research: context.research ?? "" }),
+  initial: "delegating",
   states: {
     delegating: {
       invoke: {
-        id: 'child',
-        src: 'child',
+        id: "child",
+        src: "child",
         input: ({ context }) => ({ topic: context.topic }),
         onDone: ({ output }) => ({
-          target: 'done',
+          target: "done",
           context: { research: output.research },
         }),
       },
     },
-    done: { type: 'final' },
+    done: { type: "final" },
   },
 });
 
@@ -105,11 +105,10 @@ export async function runSubflowsExample(options?: {
   input?: { topic: string };
   generateText?: AgentRequestExecutor;
 }) {
-  const generateText =
-    options?.generateText ?? createAiSdkExecutors({ models }).generateText;
+  const generateText = options?.generateText ?? createAiSdkExecutors({ models }).generateText;
 
   const result = await runAgent(subflowsMachine, {
-    input: options?.input ?? { topic: 'state machines for AI agents' },
+    input: options?.input ?? { topic: "state machines for AI agents" },
     actorSources: {
       // The child is a nested machine invoked by name, not a parent request —
       // runAgent only wraps the parent's own sources, so the child's request
@@ -118,28 +117,26 @@ export async function runSubflowsExample(options?: {
         actorSources: {
           // Adapt the raw `(request, info)` executor to a TextLogic executor,
           // which receives the lowered `request` alongside typed `input`.
-          researchTopic: childAgent.requests.researchTopic.withExecutor(
-            async ({ request }) => {
-              const { output } = await generateText(
-                request as typeof request & { tools: AgentTools },
-              );
-              return { output: output as string };
-            },
-          ),
+          researchTopic: childAgent.requests.researchTopic.withExecutor(async ({ request }) => {
+            const { output } = await generateText(
+              request as typeof request & { tools: AgentTools },
+            );
+            return { output: output as string };
+          }),
         },
       }),
     },
   });
 
-  if (result.status !== 'done') {
+  if (result.status !== "done") {
     throw new Error(`Subflows example did not complete: ${result.status}`);
   }
   return result.output;
 }
 
-if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   if (!process.env.OPENAI_API_KEY) {
-    console.error('Set OPENAI_API_KEY to run this example.');
+    console.error("Set OPENAI_API_KEY to run this example.");
     process.exit(1);
   }
   const output = await runSubflowsExample();

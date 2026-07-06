@@ -19,48 +19,44 @@
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/tool-calling/index.ts
  */
-import { z } from 'zod';
-import { openai } from '@ai-sdk/openai';
-import { createAsyncLogic } from 'xstate';
-import { type LanguageModel } from 'ai';
-import {
-  runAgent,
-  setupAgent,
-  type AgentRequestExecutors,
-} from '../../src/index.js';
+import { z } from "zod";
+import { openai } from "@ai-sdk/openai";
+import { createAsyncLogic } from "xstate";
+import { type LanguageModel } from "ai";
+import { runAgent, setupAgent, type AgentRequestExecutors } from "../../src/index.js";
 
-export const models: Record<'router' | 'formatter', LanguageModel> = {
-  router: openai('gpt-5.4-mini'),
-  formatter: openai('gpt-5.4-mini'),
+export const models: Record<"router" | "formatter", LanguageModel> = {
+  router: openai("gpt-5.4-mini"),
+  formatter: openai("gpt-5.4-mini"),
 } as const;
 
 /** Sample data: a tiny fixed exchange-rate table (stand-in for a rates API). */
 export const SAMPLE_RATES: Record<string, number> = {
-  'USD->EUR': 0.92,
-  'EUR->USD': 1.09,
-  'USD->GBP': 0.79,
-  'GBP->USD': 1.27,
+  "USD->EUR": 0.92,
+  "EUR->USD": 1.09,
+  "USD->GBP": 0.79,
+  "GBP->USD": 1.27,
 };
 
-const selectedToolSchema = z.discriminatedUnion('tool', [
+const selectedToolSchema = z.discriminatedUnion("tool", [
   z.object({
-    tool: z.literal('calculate'),
+    tool: z.literal("calculate"),
     parameters: z.object({
-      operation: z.enum(['add', 'subtract', 'multiply', 'divide']),
+      operation: z.enum(["add", "subtract", "multiply", "divide"]),
       a: z.number(),
       b: z.number(),
     }),
   }),
   z.object({
-    tool: z.literal('convertUnits'),
+    tool: z.literal("convertUnits"),
     parameters: z.object({
       value: z.number(),
-      from: z.enum(['km', 'mi']),
-      to: z.enum(['km', 'mi']),
+      from: z.enum(["km", "mi"]),
+      to: z.enum(["km", "mi"]),
     }),
   }),
   z.object({
-    tool: z.literal('lookupRate'),
+    tool: z.literal("lookupRate"),
     parameters: z.object({
       from: z.string(),
       to: z.string(),
@@ -92,16 +88,16 @@ const agent = setupAgent({
     // Real calculator — actually computes.
     calculate: createAsyncLogic<
       ToolResult,
-      { operation: 'add' | 'subtract' | 'multiply' | 'divide'; a: number; b: number }
+      { operation: "add" | "subtract" | "multiply" | "divide"; a: number; b: number }
     >({
       run: async ({ input }) => {
         const { operation, a, b } = input;
         const value =
-          operation === 'add'
+          operation === "add"
             ? a + b
-            : operation === 'subtract'
+            : operation === "subtract"
               ? a - b
-              : operation === 'multiply'
+              : operation === "multiply"
                 ? a * b
                 : b === 0
                   ? NaN
@@ -115,16 +111,11 @@ const agent = setupAgent({
     // Real unit converter — km <-> mi.
     convertUnits: createAsyncLogic<
       ToolResult,
-      { value: number; from: 'km' | 'mi'; to: 'km' | 'mi' }
+      { value: number; from: "km" | "mi"; to: "km" | "mi" }
     >({
       run: async ({ input }) => {
         const { value, from, to } = input;
-        const converted =
-          from === to
-            ? value
-            : from === 'km'
-              ? value / 1.609344
-              : value * 1.609344;
+        const converted = from === to ? value : from === "km" ? value / 1.609344 : value * 1.609344;
         const rounded = Math.round(converted * 1000) / 1000;
         return {
           summary: `${value} ${from} = ${rounded} ${to}`,
@@ -139,7 +130,10 @@ const agent = setupAgent({
         const rate = SAMPLE_RATES[key];
         return rate === undefined
           ? { summary: `No sample rate for ${key}.`, value: null }
-          : { summary: `1 ${input.from.toUpperCase()} = ${rate} ${input.to.toUpperCase()}`, value: rate };
+          : {
+              summary: `1 ${input.from.toUpperCase()} = ${rate} ${input.to.toUpperCase()}`,
+              value: rate,
+            };
       },
     }),
   },
@@ -149,11 +143,11 @@ const agent = setupAgent({
         input: z.object({ query: z.string() }),
         output: selectedToolSchema,
       },
-      model: 'router',
+      model: "router",
       system:
-        'Select exactly one tool to answer the user query, with its parameters. ' +
-        'Use calculate for arithmetic, convertUnits for km/mi distances, ' +
-        'lookupRate for currency exchange rates.',
+        "Select exactly one tool to answer the user query, with its parameters. " +
+        "Use calculate for arithmetic, convertUnits for km/mi distances, " +
+        "lookupRate for currency exchange rates.",
       prompt: ({ input }) => input.query,
     },
     formatResult: {
@@ -164,101 +158,100 @@ const agent = setupAgent({
         }),
         output: z.string(),
       },
-      model: 'formatter',
-      system: 'Write one friendly sentence answering the user, using the tool result.',
-      prompt: ({ input }) =>
-        `Question: ${input.query}\nTool result: ${input.summary}`,
+      model: "formatter",
+      system: "Write one friendly sentence answering the user, using the tool result.",
+      prompt: ({ input }) => `Question: ${input.query}\nTool result: ${input.summary}`,
     },
   },
 });
 
 export const toolCallingMachine = agent.createMachine({
-  id: 'tool-calling',
+  id: "tool-calling",
   context: ({ input }) => ({
     query: input.query,
     selected: null,
     result: null,
     finalAnswer: null,
   }),
-  initial: 'selectingTool',
+  initial: "selectingTool",
   states: {
     selectingTool: {
       invoke: {
-        src: 'selectTool',
+        src: "selectTool",
         input: ({ context }) => ({ query: context.query }),
         onDone: ({ output }) => ({
-          target: 'dispatch',
+          target: "dispatch",
           context: { selected: output },
         }),
       },
     },
     dispatch: {
-      type: 'choice',
+      type: "choice",
       choice: ({ context }) =>
-        context.selected?.tool === 'calculate'
-          ? { target: 'calculating' }
-          : context.selected?.tool === 'convertUnits'
-            ? { target: 'converting' }
-            : { target: 'lookingUp' },
+        context.selected?.tool === "calculate"
+          ? { target: "calculating" }
+          : context.selected?.tool === "convertUnits"
+            ? { target: "converting" }
+            : { target: "lookingUp" },
     },
     calculating: {
       invoke: {
-        src: 'calculate',
+        src: "calculate",
         input: ({ context }) =>
-          context.selected?.tool === 'calculate'
+          context.selected?.tool === "calculate"
             ? context.selected.parameters
-            : { operation: 'add' as const, a: 0, b: 0 },
+            : { operation: "add" as const, a: 0, b: 0 },
         onDone: ({ output }) => ({
-          target: 'formatting',
+          target: "formatting",
           context: { result: output },
         }),
       },
     },
     converting: {
       invoke: {
-        src: 'convertUnits',
+        src: "convertUnits",
         input: ({ context }) =>
-          context.selected?.tool === 'convertUnits'
+          context.selected?.tool === "convertUnits"
             ? context.selected.parameters
-            : { value: 0, from: 'km' as const, to: 'mi' as const },
+            : { value: 0, from: "km" as const, to: "mi" as const },
         onDone: ({ output }) => ({
-          target: 'formatting',
+          target: "formatting",
           context: { result: output },
         }),
       },
     },
     lookingUp: {
       invoke: {
-        src: 'lookupRate',
+        src: "lookupRate",
         input: ({ context }) =>
-          context.selected?.tool === 'lookupRate'
+          context.selected?.tool === "lookupRate"
             ? context.selected.parameters
-            : { from: 'USD', to: 'EUR' },
+            : { from: "USD", to: "EUR" },
         onDone: ({ output }) => ({
-          target: 'formatting',
+          target: "formatting",
           context: { result: output },
         }),
       },
     },
     formatting: {
       invoke: {
-        src: 'formatResult',
+        src: "formatResult",
         input: ({ context }) => ({
           query: context.query,
-          summary: context.result?.summary ?? '',
+          summary: context.result?.summary ?? "",
         }),
         onDone: ({ output }) => ({
-          target: 'done',
+          target: "done",
           context: { finalAnswer: output },
         }),
       },
     },
     done: {
-      type: 'final',
+      type: "final",
       output: ({ context }) => ({
-        tool: context.selected?.tool ?? '',
-        result: context.result ?? { summary: '', value: null },
-        finalAnswer: context.finalAnswer ?? '',
+        tool: context.selected?.tool ?? "",
+        result: context.result ?? { summary: "", value: null },
+        finalAnswer: context.finalAnswer ?? "",
       }),
     },
   },
@@ -267,7 +260,7 @@ export const toolCallingMachine = agent.createMachine({
 export interface RunToolCallingOptions {
   query?: string;
   /** Injected for tests; direct run supplies a real model executor. */
-  generateText?: AgentRequestExecutors['generateText'];
+  generateText?: AgentRequestExecutors["generateText"];
   /** Observes each machine transition (progress). */
   onProgress?: (state: string) => void;
 }
@@ -281,9 +274,9 @@ export interface ToolCallingResult {
 
 /** Selects a tool, executes it, formats the answer; records state progress. */
 export async function runToolCallingExample(
-  options: RunToolCallingOptions = {}
+  options: RunToolCallingOptions = {},
 ): Promise<ToolCallingResult> {
-  const { query = 'What is 42 times 17?', generateText, onProgress } = options;
+  const { query = "What is 42 times 17?", generateText, onProgress } = options;
 
   const progress: string[] = [];
   const result = await runAgent(toolCallingMachine, {
@@ -296,29 +289,29 @@ export async function runToolCallingExample(
     },
   });
 
-  if (result.status !== 'done') {
+  if (result.status !== "done") {
     throw new Error(`Tool-calling example did not complete: ${result.status}`);
   }
   return { ...result.output, progress };
 }
 
-if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   if (!process.env.OPENAI_API_KEY) {
-    console.error('Set OPENAI_API_KEY to run this example.');
+    console.error("Set OPENAI_API_KEY to run this example.");
     process.exit(1);
   }
-  const { createAiSdkExecutors } = await import('../../src/ai-sdk/index.js');
+  const { createAiSdkExecutors } = await import("../../src/ai-sdk/index.js");
   const { generateText } = createAiSdkExecutors({ models });
 
-  const query = 'How many miles is 10 kilometers?';
+  const query = "How many miles is 10 kilometers?";
   const result = await runToolCallingExample({
     query,
     generateText,
     onProgress: (state) => console.log(`  → ${state}`),
   });
 
-  console.log('Query:', query);
-  console.log('Selected tool:', result.tool);
-  console.log('Tool result:', result.result.summary);
-  console.log('Answer:', result.finalAnswer);
+  console.log("Query:", query);
+  console.log("Selected tool:", result.tool);
+  console.log("Tool result:", result.result.summary);
+  console.log("Answer:", result.finalAnswer);
 }

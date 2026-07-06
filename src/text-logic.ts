@@ -1,31 +1,27 @@
-import {
-  createAsyncLogic,
-  type AsyncActorLogic,
-  type EventObject,
-} from 'xstate';
+import { createAsyncLogic, type AsyncActorLogic, type EventObject } from "xstate";
 import type {
   AgentMessage,
   AgentToolChoice,
   AgentTools,
   InferOutput,
   StandardSchemaV1,
-} from './types.js';
-import { validateSchemaSync } from './utils.js';
-import type { AgentDecisionExecutor, AgentDecisionInput } from './decision.js';
-import type { ChosenEvent } from './types.js';
-import { executorBoundLogics, unboundPlaceholderLogics } from './internal/registry.js';
+} from "./types.js";
+import { validateSchemaSync } from "./utils.js";
+import type { AgentDecisionExecutor, AgentDecisionInput } from "./decision.js";
+import type { ChosenEvent } from "./types.js";
+import { executorBoundLogics, unboundPlaceholderLogics } from "./internal/registry.js";
 
 // Well-known invoke `src` for the builtin human-input actor.
-export const USER_INPUT_ACTOR = 'agent.userInput' as const;
+export const USER_INPUT_ACTOR = "agent.userInput" as const;
 // Well-known invoke `src` for the builtin one-shot text-generation actor.
-export const GENERATE_TEXT_ACTOR = 'agent.generateText' as const;
+export const GENERATE_TEXT_ACTOR = "agent.generateText" as const;
 // Well-known invoke `src` for the builtin streaming text-generation actor.
-export const STREAM_TEXT_ACTOR = 'agent.streamText' as const;
+export const STREAM_TEXT_ACTOR = "agent.streamText" as const;
 // Well-known invoke `src` for the builtin decision actor.
-export const DECIDE_ACTOR = 'agent.decide' as const;
+export const DECIDE_ACTOR = "agent.decide" as const;
 
 /** Whether a text request should be resolved with `generateText` (one-shot) or `streamText` (chunked, via `onChunk`). */
-export type AgentRequestMode = 'generate' | 'stream';
+export type AgentRequestMode = "generate" | "stream";
 /** A `setupAgent({ models })` model registry, mapping short model refs to provider-specific model values. */
 export type AgentModelMap = Record<string, unknown>;
 /**
@@ -33,10 +29,9 @@ export type AgentModelMap = Record<string, unknown>;
  * autocomplete. Refs are opaque routing keys — the host/executor (or the AI SDK
  * adapter's models map / `resolveModel`) resolves them to a real model.
  */
-export type AgentModelRef<TModels extends AgentModelMap = {}> =
-  [keyof TModels] extends [never]
-    ? string
-    : (keyof TModels & string) | (string & {});
+export type AgentModelRef<TModels extends AgentModelMap = {}> = [keyof TModels] extends [never]
+  ? string
+  : (keyof TModels & string) | (string & {});
 
 /**
  * Portable, provider-agnostic input a text request passes to a host
@@ -79,10 +74,7 @@ export interface AgentUserInput<TMetadata = Record<string, unknown>> {
 }
 
 // The four `agent.*` builtin actor logics every setupAgent-built machine registers.
-export type BuiltinAgentActors<
-  TEvent extends string = string,
-  TModel extends string = string,
-> = {
+export type BuiltinAgentActors<TEvent extends string = string, TModel extends string = string> = {
   [GENERATE_TEXT_ACTOR]: AsyncActorLogic<unknown, AgentTextRequest>;
   [STREAM_TEXT_ACTOR]: AsyncActorLogic<unknown, AgentTextRequest>;
   [USER_INPUT_ACTOR]: AsyncActorLogic<unknown, AgentUserInput>;
@@ -94,27 +86,27 @@ export type BuiltinAgentActors<
 
 // Minimal input schema for the `agent.generateText`/`agent.streamText` builtins: any object with a string `model`.
 const agentTextInputSchema: StandardSchemaV1<AgentTextRequest> = {
-  '~standard': {
+  "~standard": {
     version: 1,
-    vendor: 'statelyai-agent',
+    vendor: "statelyai-agent",
     validate(value: unknown) {
       const ok =
-        !!value
-        && typeof value === 'object'
-        && typeof (value as AgentTextRequest).model === 'string';
+        !!value &&
+        typeof value === "object" &&
+        typeof (value as AgentTextRequest).model === "string";
 
       return ok
         ? { value: value as AgentTextRequest }
-        : { issues: [{ message: 'Expected agent text input with a model' }] };
+        : { issues: [{ message: "Expected agent text input with a model" }] };
     },
   },
 };
 
 // Pass-through output schema (`agent.generateText`'s builtin output type) — accepts anything.
 const unknownOutputSchema: StandardSchemaV1<unknown> = {
-  '~standard': {
+  "~standard": {
     version: 1,
-    vendor: 'statelyai-agent',
+    vendor: "statelyai-agent",
     validate(value: unknown) {
       return { value };
     },
@@ -123,13 +115,13 @@ const unknownOutputSchema: StandardSchemaV1<unknown> = {
 
 // String output schema (`agent.streamText`'s builtin output type).
 const stringOutputSchema: StandardSchemaV1<string> = {
-  '~standard': {
+  "~standard": {
     version: 1,
-    vendor: 'statelyai-agent',
+    vendor: "statelyai-agent",
     validate(value: unknown) {
-      return typeof value === 'string'
+      return typeof value === "string"
         ? { value }
-        : { issues: [{ message: 'Expected string output' }] };
+        : { issues: [{ message: "Expected string output" }] };
     },
   },
 };
@@ -138,20 +130,20 @@ const stringOutputSchema: StandardSchemaV1<string> = {
 function createBuiltinTextActor(
   src: typeof GENERATE_TEXT_ACTOR | typeof STREAM_TEXT_ACTOR,
   mode: AgentRequestMode,
-  outputSchema: StandardSchemaV1
+  outputSchema: StandardSchemaV1,
 ): TextLogic<StandardSchemaV1<AgentTextRequest>, StandardSchemaV1> {
   const logic = createAsyncLogic<unknown, AgentTextRequest>({
     run: async () => {
       throw new Error(
         `'${src}' has no host execution. Provide an implementation with ` +
           `machine.provide({ actorSources: { '${src}': ... } }) or execute the ` +
-        `returned agent request with executeAgentRequest(...).`
+          `returned agent request with executeAgentRequest(...).`,
       );
     },
   });
 
   return Object.assign(logic, {
-    kind: 'statelyai.textLogic' as const,
+    kind: "statelyai.textLogic" as const,
     mode,
     schemas: {
       input: agentTextInputSchema,
@@ -165,7 +157,7 @@ function createBuiltinTextActor(
         mode,
         src,
         validateSchemaSync(agentTextInputSchema, input),
-        executors
+        executors,
       );
 
       return validateSchemaSync(outputSchema, output);
@@ -175,58 +167,53 @@ function createBuiltinTextActor(
         StandardSchemaV1<AgentTextRequest>,
         StandardSchemaV1<unknown>,
         Record<string, unknown>
-      >
+      >,
     ) {
-      return Object.assign(createTextLogic({
-        mode,
-        schemas: {
-          input: agentTextInputSchema,
-          output: outputSchema,
-        },
-        model: ({ input }) => input.model,
-        system: ({ input }) => input.system,
-        prompt: ({ input }) => input.prompt,
-        messages: ({ input }) => input.messages,
-        tools: ({ input }) => input.tools,
-        toolChoice: ({ input }) => input.toolChoice,
-        temperature: ({ input }) => input.temperature,
-        maxTokens: ({ input }) => input.maxTokens,
-        topP: ({ input }) => input.topP,
-        topK: ({ input }) => input.topK,
-        seed: ({ input }) => input.seed,
-        stopSequences: ({ input }) => input.stopSequences,
-        metadata: ({ input }) => input.metadata,
-      }, execute));
+      return Object.assign(
+        createTextLogic(
+          {
+            mode,
+            schemas: {
+              input: agentTextInputSchema,
+              output: outputSchema,
+            },
+            model: ({ input }) => input.model,
+            system: ({ input }) => input.system,
+            prompt: ({ input }) => input.prompt,
+            messages: ({ input }) => input.messages,
+            tools: ({ input }) => input.tools,
+            toolChoice: ({ input }) => input.toolChoice,
+            temperature: ({ input }) => input.temperature,
+            maxTokens: ({ input }) => input.maxTokens,
+            topP: ({ input }) => input.topP,
+            topK: ({ input }) => input.topK,
+            seed: ({ input }) => input.seed,
+            stopSequences: ({ input }) => input.stopSequences,
+            metadata: ({ input }) => input.metadata,
+          },
+          execute,
+        ),
+      );
     },
-  }) as TextLogic<
-    StandardSchemaV1<AgentTextRequest>,
-    StandardSchemaV1
-  >;
+  }) as TextLogic<StandardSchemaV1<AgentTextRequest>, StandardSchemaV1>;
 }
 
 // The unbound `agent.generateText`/`agent.streamText` builtins registered by setupAgent.
 export const builtinTextActors = {
   [GENERATE_TEXT_ACTOR]: createBuiltinTextActor(
     GENERATE_TEXT_ACTOR,
-    'generate',
-    unknownOutputSchema
+    "generate",
+    unknownOutputSchema,
   ),
-  [STREAM_TEXT_ACTOR]: createBuiltinTextActor(
-    STREAM_TEXT_ACTOR,
-    'stream',
-    stringOutputSchema
-  ),
-} satisfies Pick<
-  BuiltinAgentActors,
-  typeof GENERATE_TEXT_ACTOR | typeof STREAM_TEXT_ACTOR
->;
+  [STREAM_TEXT_ACTOR]: createBuiltinTextActor(STREAM_TEXT_ACTOR, "stream", stringOutputSchema),
+} satisfies Pick<BuiltinAgentActors, typeof GENERATE_TEXT_ACTOR | typeof STREAM_TEXT_ACTOR>;
 
 // The unbound `agent.userInput` builtin registered by setupAgent (an unbound-placeholder logic — see internal/registry.ts).
 export const userInputActor = createAsyncLogic<unknown, AgentUserInput>({
   run: async () => {
     throw new Error(
       `'${USER_INPUT_ACTOR}' has no host execution. Provide an implementation ` +
-        `with machine.provide({ actorSources: { '${USER_INPUT_ACTOR}': ... } }).`
+        `with machine.provide({ actorSources: { '${USER_INPUT_ACTOR}': ... } }).`,
     );
   },
 });
@@ -240,27 +227,23 @@ unboundPlaceholderLogics.add(userInputActor);
  */
 export function parseOutput<TSchema extends StandardSchemaV1>(
   schema: TSchema,
-  output: unknown
+  output: unknown,
 ): InferOutput<TSchema> {
   return validateSchemaSync<InferOutput<TSchema>>(
     schema as StandardSchemaV1<InferOutput<TSchema>>,
-    output
+    output,
   );
 }
 
 // A TextLogicConfig/DecisionLogicConfig field value: either static, or a `({ input }) => value` resolver.
-export type ResolveTextLogicValue<TValue, TInput> =
-  | TValue
-  | ((args: { input: TInput }) => TValue);
+export type ResolveTextLogicValue<TValue, TInput> = TValue | ((args: { input: TInput }) => TValue);
 
 // Resolves a `ResolveTextLogicValue` (calls it if it's a function, else returns it as-is).
 export function resolveTextLogicValue<TValue, TInput>(
   value: ResolveTextLogicValue<TValue, TInput> | undefined,
-  args: { input: TInput }
+  args: { input: TInput },
 ): TValue | undefined {
-  return typeof value === 'function'
-    ? (value as (args: { input: TInput }) => TValue)(args)
-    : value;
+  return typeof value === "function" ? (value as (args: { input: TInput }) => TValue)(args) : value;
 }
 
 /**
@@ -283,24 +266,15 @@ export interface TextLogicConfig<
   model: ResolveTextLogicValue<TModel, InferOutput<TInputSchema>>;
   system?: ResolveTextLogicValue<string | undefined, InferOutput<TInputSchema>>;
   prompt?: ResolveTextLogicValue<string | undefined, InferOutput<TInputSchema>>;
-  messages?: ResolveTextLogicValue<
-    AgentMessage[] | undefined,
-    InferOutput<TInputSchema>
-  >;
+  messages?: ResolveTextLogicValue<AgentMessage[] | undefined, InferOutput<TInputSchema>>;
   tools?: ResolveTextLogicValue<AgentTools | undefined, InferOutput<TInputSchema>>;
-  toolChoice?: ResolveTextLogicValue<
-    AgentToolChoice | undefined,
-    InferOutput<TInputSchema>
-  >;
+  toolChoice?: ResolveTextLogicValue<AgentToolChoice | undefined, InferOutput<TInputSchema>>;
   temperature?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
   maxTokens?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
   topP?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
   topK?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
   seed?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
-  stopSequences?: ResolveTextLogicValue<
-    string[] | undefined,
-    InferOutput<TInputSchema>
-  >;
+  stopSequences?: ResolveTextLogicValue<string[] | undefined, InferOutput<TInputSchema>>;
   metadata?: ResolveTextLogicValue<TMetadata | undefined, InferOutput<TInputSchema>>;
 }
 
@@ -320,8 +294,9 @@ export type TextLogicExecutor<
   TOutputSchema extends StandardSchemaV1,
   TMetadata = unknown,
 > = (
-  args: TextLogicExecuteArgs<InferOutput<TInputSchema>, TMetadata>
-) => PromiseLike<AgentRequestExecutorResult<InferOutput<TOutputSchema>>>
+  args: TextLogicExecuteArgs<InferOutput<TInputSchema>, TMetadata>,
+) =>
+  | PromiseLike<AgentRequestExecutorResult<InferOutput<TOutputSchema>>>
   | AgentRequestExecutorResult<InferOutput<TOutputSchema>>;
 
 /**
@@ -336,11 +311,8 @@ export interface TextLogic<
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1 = StandardSchemaV1,
   TMetadata = Record<string, unknown>,
-> extends AsyncActorLogic<
-    InferOutput<TOutputSchema>,
-    InferOutput<TInputSchema>
-  > {
-  readonly kind: 'statelyai.textLogic';
+> extends AsyncActorLogic<InferOutput<TOutputSchema>, InferOutput<TInputSchema>> {
+  readonly kind: "statelyai.textLogic";
   readonly mode: AgentRequestMode;
   readonly schemas: {
     readonly input: TInputSchema;
@@ -349,10 +321,10 @@ export interface TextLogic<
   request(input: InferOutput<TInputSchema>): AgentTextRequest<TMetadata>;
   execute(
     input: InferOutput<TInputSchema>,
-    executors: AgentRequestExecutors
+    executors: AgentRequestExecutors,
   ): Promise<InferOutput<TOutputSchema>>;
   withExecutor(
-    execute: TextLogicExecutor<TInputSchema, TOutputSchema, TMetadata>
+    execute: TextLogicExecutor<TInputSchema, TOutputSchema, TMetadata>,
   ): TextLogic<TInputSchema, TOutputSchema, TMetadata>;
 }
 
@@ -395,14 +367,14 @@ export function createTextLogic<
   TModel extends string = string,
 >(
   config: TextLogicConfig<TInputSchema, TOutputSchema, TMetadata, TModel>,
-  execute?: TextLogicExecutor<TInputSchema, TOutputSchema, TMetadata>
+  execute?: TextLogicExecutor<TInputSchema, TOutputSchema, TMetadata>,
 ): TextLogic<TInputSchema, TOutputSchema, TMetadata> {
   type TInput = InferOutput<TInputSchema>;
   type TOutput = InferOutput<TOutputSchema>;
   const request = (input: TInput): AgentTextRequest<TMetadata> => {
     const parsedInput = validateSchemaSync<TInput>(
       config.schemas.input as StandardSchemaV1<TInput>,
-      input
+      input,
     );
     const args = { input: parsedInput };
 
@@ -429,9 +401,9 @@ export function createTextLogic<
 
       if (!execute) {
         throw new Error(
-          'Text logic has no host execution. Pass an executor as the second ' +
-            'argument to createTextLogic(...), provide a runtime adapter, or ' +
-            'extract it with getAgentRequests(..., { actorSources }).'
+          "Text logic has no host execution. Pass an executor as the second " +
+            "argument to createTextLogic(...), provide a runtime adapter, or " +
+            "extract it with getAgentRequests(..., { actorSources }).",
         );
       }
 
@@ -447,37 +419,35 @@ export function createTextLogic<
       const selfId = (self as { id?: unknown } | undefined)?.id;
       const output = await normalizeGeneratorResult(
         result,
-        typeof selfId === 'string' ? selfId : 'text logic'
+        typeof selfId === "string" ? selfId : "text logic",
       );
 
       return validateSchemaSync<TOutput>(
         config.schemas.output as StandardSchemaV1<TOutput>,
-        output
+        output,
       );
     },
   });
 
   const textLogic = Object.assign(logic, {
-    kind: 'statelyai.textLogic' as const,
-    mode: config.mode ?? 'generate',
+    kind: "statelyai.textLogic" as const,
+    mode: config.mode ?? "generate",
     schemas: config.schemas,
     request,
     async execute(input: TInput, executors: AgentRequestExecutors) {
       const { output } = await executeAgentTextRequest(
-        config.mode ?? 'generate',
-        'textLogic',
+        config.mode ?? "generate",
+        "textLogic",
         request(input),
-        executors
+        executors,
       );
 
       return validateSchemaSync<TOutput>(
         config.schemas.output as StandardSchemaV1<TOutput>,
-        output
+        output,
       );
     },
-    withExecutor(
-      nextExecute: TextLogicExecutor<TInputSchema, TOutputSchema, TMetadata>
-    ) {
+    withExecutor(nextExecute: TextLogicExecutor<TInputSchema, TOutputSchema, TMetadata>) {
       return createTextLogic(config, nextExecute);
     },
   }) as TextLogic<TInputSchema, TOutputSchema, TMetadata>;
@@ -492,10 +462,10 @@ export function createTextLogic<
 // Type guard: true for any actor logic built by createTextLogic (checks the `kind` marker).
 export function isTextLogic(value: unknown): value is TextLogic {
   return (
-    !!value
-    && typeof value === 'object'
-    && (value as TextLogic).kind === 'statelyai.textLogic'
-    && typeof (value as TextLogic).request === 'function'
+    !!value &&
+    typeof value === "object" &&
+    (value as TextLogic).kind === "statelyai.textLogic" &&
+    typeof (value as TextLogic).request === "function"
   );
 }
 
@@ -522,9 +492,11 @@ export interface AgentRequestExecutorInfo {
 }
 
 /** Host implementation of one text call (`generateText` or `streamText`) — resolves a lowered {@link AgentTextRequest} to an `{ output }` envelope (see {@link AgentRequestExecutorResult}), unwrapped by {@link normalizeGeneratorResult}. */
-export type AgentRequestExecutor<TResult extends AgentRequestExecutorResult = AgentRequestExecutorResult> = (
+export type AgentRequestExecutor<
+  TResult extends AgentRequestExecutorResult = AgentRequestExecutorResult,
+> = (
   request: AgentTextRequest & { tools: AgentTools },
-  info?: AgentRequestExecutorInfo
+  info?: AgentRequestExecutorInfo,
 ) => PromiseLike<TResult> | TResult;
 
 /**
@@ -545,7 +517,7 @@ export interface AgentRequestExecutors<
 }
 
 /** Whether a text request's output is a validated structured object (`'structured'`) or plain text (`'text'`) — derived from the output schema's JSON Schema `type`. */
-export type AgentOutputMode = 'structured' | 'text';
+export type AgentOutputMode = "structured" | "text";
 
 /**
  * Classifies a text request's output schema as `'structured'` (its JSON
@@ -555,25 +527,25 @@ export type AgentOutputMode = 'structured' | 'text';
  */
 export function getAgentOutputMode(schema?: StandardSchemaV1): AgentOutputMode {
   const type = getStandardSchemaJsonType(schema);
-  return type === 'object' ? 'structured' : 'text';
+  return type === "object" ? "structured" : "text";
 }
 
 /** True when {@link getAgentOutputMode} classifies `schema` as `'structured'`. */
 export function isStructuredOutputSchema(schema?: StandardSchemaV1): boolean {
-  return getAgentOutputMode(schema) === 'structured';
+  return getAgentOutputMode(schema) === "structured";
 }
 
 // Reads a schema's synchronous `~standard.jsonSchema.input().type`, if the vendor implements that extension.
 function getStandardSchemaJsonType(schema?: StandardSchemaV1) {
   const jsonSchema = (
-    schema?.['~standard'] as {
-      jsonSchema?: { input?: () => { type?: unknown } | Promise<{ type?: unknown }> };
-    } | undefined
+    schema?.["~standard"] as
+      | {
+          jsonSchema?: { input?: () => { type?: unknown } | Promise<{ type?: unknown }> };
+        }
+      | undefined
   )?.jsonSchema?.input?.();
 
-  return jsonSchema && !(jsonSchema instanceof Promise)
-    ? jsonSchema.type
-    : undefined;
+  return jsonSchema && !(jsonSchema instanceof Promise) ? jsonSchema.type : undefined;
 }
 
 /**
@@ -590,7 +562,7 @@ export async function executeAgentTextRequest(
   input: AgentTextRequest<any>,
   executors: AgentRequestExecutors,
   tools: AgentTools = {},
-  info?: AgentRequestExecutorInfo
+  info?: AgentRequestExecutorInfo,
 ): Promise<{ output: unknown; raw: unknown }> {
   const request = {
     ...input,
@@ -599,14 +571,11 @@ export async function executeAgentTextRequest(
       ...tools,
     },
   };
-  const executor =
-    mode === 'stream'
-      ? executors.streamText
-      : executors.generateText;
+  const executor = mode === "stream" ? executors.streamText : executors.generateText;
 
   if (!executor) {
     throw new Error(
-      `No executor provided for ${mode === 'stream' ? 'stream' : 'generate'} request '${id}'.`
+      `No executor provided for ${mode === "stream" ? "stream" : "generate"} request '${id}'.`,
     );
   }
 
@@ -624,18 +593,14 @@ export async function executeAgentTextRequest(
  */
 export async function normalizeGeneratorResult(
   result: unknown,
-  id = 'text request'
+  id = "text request",
 ): Promise<unknown> {
   const resolved = await result;
-  if (
-    !resolved
-    || typeof resolved !== 'object'
-    || !('output' in resolved)
-  ) {
+  if (!resolved || typeof resolved !== "object" || !("output" in resolved)) {
     throw new Error(
       `Executor for '${id}' returned an invalid result: executors must return ` +
         `{ output } (an envelope with the text string or structured object as ` +
-        `\`output\`, plus optional passthrough fields).`
+        `\`output\`, plus optional passthrough fields).`,
     );
   }
   return await (resolved as { output: unknown }).output;

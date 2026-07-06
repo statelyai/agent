@@ -31,7 +31,14 @@ jobs:
       - name: install dependencies
         run: pnpm install --frozen-lockfile
       - name: typecheck
+        run: pnpm typecheck
+      - name: lint
         run: pnpm lint
+      - name: format check
+        run: pnpm format:check
+      - name: knip
+        run: pnpm knip
+        continue-on-error: true # advisory until dead-code baseline is triaged
       - name: test
         run: pnpm test:ci
       - name: build

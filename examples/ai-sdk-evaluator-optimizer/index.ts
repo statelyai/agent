@@ -8,11 +8,11 @@
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/ai-sdk-evaluator-optimizer/index.ts
  */
-import { z } from 'zod';
-import { openai } from '@ai-sdk/openai';
-import { setupAgent, runAgent } from '../../src/index.js';
-import { createAiSdkTextExecutor } from '../ai-sdk-host/index.js';
-import { type LanguageModel } from 'ai';
+import { z } from "zod";
+import { openai } from "@ai-sdk/openai";
+import { setupAgent, runAgent } from "../../src/index.js";
+import { createAiSdkTextExecutor } from "../ai-sdk-host/index.js";
+import { type LanguageModel } from "ai";
 
 const translationEvaluationSchema = z.object({
   qualityScore: z.number().min(1).max(10),
@@ -23,9 +23,7 @@ const translationEvaluationSchema = z.object({
   improvementSuggestions: z.array(z.string()),
 });
 
-function translationPasses(
-  evaluation: z.infer<typeof translationEvaluationSchema> | null,
-) {
+function translationPasses(evaluation: z.infer<typeof translationEvaluationSchema> | null) {
   return (
     !!evaluation &&
     evaluation.qualityScore >= 8 &&
@@ -35,13 +33,10 @@ function translationPasses(
   );
 }
 
-export const models: Record<
-  'translator' | 'evaluator' | 'improver',
-  LanguageModel
-> = {
-  translator: openai('gpt-5.4-mini'),
-  evaluator: openai('gpt-5.4-mini'),
-  improver: openai('gpt-5.4-mini'),
+export const models: Record<"translator" | "evaluator" | "improver", LanguageModel> = {
+  translator: openai("gpt-5.4-mini"),
+  evaluator: openai("gpt-5.4-mini"),
+  improver: openai("gpt-5.4-mini"),
 } as const;
 
 const agent = setupAgent({
@@ -70,22 +65,20 @@ const agent = setupAgent({
         input: z.object({ text: z.string(), targetLanguage: z.string() }),
         output: z.string(),
       },
-      model: 'translator',
+      model: "translator",
       system:
-        'You are an expert literary translator. Translate faithfully into the target language, preserving register, tone, idiom, and cultural nuance rather than translating word for word. Return only the translation.',
-      prompt: ({ input }) =>
-        `Translate this text to ${input.targetLanguage}:\n${input.text}`,
+        "You are an expert literary translator. Translate faithfully into the target language, preserving register, tone, idiom, and cultural nuance rather than translating word for word. Return only the translation.",
+      prompt: ({ input }) => `Translate this text to ${input.targetLanguage}:\n${input.text}`,
     },
     evaluateTranslation: {
       schemas: {
         input: z.object({ original: z.string(), translation: z.string() }),
         output: translationEvaluationSchema,
       },
-      model: 'evaluator',
+      model: "evaluator",
       system:
-        'You are a bilingual translation reviewer. Score the translation 1-10 for overall quality and judge whether it preserves tone, preserves nuance, and is culturally accurate. List specific issues and concrete improvement suggestions. Be strict: reserve scores of 8+ for translations that read naturally to a native speaker.',
-      prompt: ({ input }) =>
-        `Original: ${input.original}\nTranslation: ${input.translation}`,
+        "You are a bilingual translation reviewer. Score the translation 1-10 for overall quality and judge whether it preserves tone, preserves nuance, and is culturally accurate. List specific issues and concrete improvement suggestions. Be strict: reserve scores of 8+ for translations that read naturally to a native speaker.",
+      prompt: ({ input }) => `Original: ${input.original}\nTranslation: ${input.translation}`,
     },
     improveTranslation: {
       schemas: {
@@ -96,16 +89,16 @@ const agent = setupAgent({
         }),
         output: z.string(),
       },
-      model: 'improver',
+      model: "improver",
       system:
-        'You are an expert literary translator revising a draft. Apply the reviewer feedback to fix the listed issues while keeping everything that already works. Return only the improved translation.',
+        "You are an expert literary translator revising a draft. Apply the reviewer feedback to fix the listed issues while keeping everything that already works. Return only the improved translation.",
       prompt: ({ input }) =>
         [
           `Original: ${input.original}`,
           `Translation: ${input.translation}`,
-          `Issues: ${input.evaluation.specificIssues.join(', ')}`,
-          `Suggestions: ${input.evaluation.improvementSuggestions.join(', ')}`,
-        ].join('\n'),
+          `Issues: ${input.evaluation.specificIssues.join(", ")}`,
+          `Suggestions: ${input.evaluation.improvementSuggestions.join(", ")}`,
+        ].join("\n"),
     },
   },
 });
@@ -115,7 +108,7 @@ export const evaluateTranslation = agent.requests.evaluateTranslation;
 export const improveTranslation = agent.requests.improveTranslation;
 
 export const aiSdkEvaluatorOptimizerMachine = agent.createMachine({
-  id: 'ai-sdk-evaluator-optimizer',
+  id: "ai-sdk-evaluator-optimizer",
   context: ({ input }) => ({
     text: input.text,
     targetLanguage: input.targetLanguage,
@@ -125,36 +118,36 @@ export const aiSdkEvaluatorOptimizerMachine = agent.createMachine({
     maxIterations: input.maxIterations,
   }),
   output: ({ context }) => ({
-    translation: context.translation ?? '',
+    translation: context.translation ?? "",
     evaluation: context.evaluation,
     iterations: context.iterations,
   }),
-  initial: 'translating',
+  initial: "translating",
   states: {
     translating: {
       invoke: {
-        id: 'translateText',
-        src: 'translateText',
+        id: "translateText",
+        src: "translateText",
         input: ({ context }) => ({
           text: context.text,
           targetLanguage: context.targetLanguage,
         }),
         onDone: ({ output }) => ({
-          target: 'evaluating',
+          target: "evaluating",
           context: { translation: output },
         }),
       },
     },
     evaluating: {
       invoke: {
-        id: 'evaluateTranslation',
-        src: 'evaluateTranslation',
+        id: "evaluateTranslation",
+        src: "evaluateTranslation",
         input: ({ context }) => ({
           original: context.text,
-          translation: context.translation ?? '',
+          translation: context.translation ?? "",
         }),
         onDone: ({ context, output }) => ({
-          target: 'checking',
+          target: "checking",
           context: {
             evaluation: output,
             iterations: context.iterations + 1,
@@ -163,20 +156,19 @@ export const aiSdkEvaluatorOptimizerMachine = agent.createMachine({
       },
     },
     checking: {
-      type: 'choice',
+      type: "choice",
       choice: ({ context }) =>
-        translationPasses(context.evaluation) ||
-        context.iterations >= context.maxIterations
-          ? { target: 'done' }
-          : { target: 'improving' },
+        translationPasses(context.evaluation) || context.iterations >= context.maxIterations
+          ? { target: "done" }
+          : { target: "improving" },
     },
     improving: {
       invoke: {
-        id: 'improveTranslation',
-        src: 'improveTranslation',
+        id: "improveTranslation",
+        src: "improveTranslation",
         input: ({ context }) => ({
           original: context.text,
-          translation: context.translation ?? '',
+          translation: context.translation ?? "",
           evaluation: context.evaluation ?? {
             qualityScore: 0,
             preservesTone: false,
@@ -187,35 +179,33 @@ export const aiSdkEvaluatorOptimizerMachine = agent.createMachine({
           },
         }),
         onDone: ({ output }) => ({
-          target: 'evaluating',
+          target: "evaluating",
           context: { translation: output },
         }),
       },
     },
-    done: { type: 'final' },
+    done: { type: "final" },
   },
 });
 
 export async function runAiSdkEvaluatorOptimizerExample() {
   const result = await runAgent(aiSdkEvaluatorOptimizerMachine, {
     input: {
-      text: 'Hello friend',
-      targetLanguage: 'Spanish',
+      text: "Hello friend",
+      targetLanguage: "Spanish",
       maxIterations: 3,
     },
     generateText: createAiSdkTextExecutor({ models }),
   });
-  if (result.status !== 'done') {
-    throw new Error(
-      `Evaluator-optimizer example did not complete: ${result.status}`,
-    );
+  if (result.status !== "done") {
+    throw new Error(`Evaluator-optimizer example did not complete: ${result.status}`);
   }
   return result.output;
 }
 
-if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   if (!process.env.OPENAI_API_KEY) {
-    console.error('Set OPENAI_API_KEY to run this example.');
+    console.error("Set OPENAI_API_KEY to run this example.");
     process.exit(1);
   }
   console.log(await runAiSdkEvaluatorOptimizerExample());

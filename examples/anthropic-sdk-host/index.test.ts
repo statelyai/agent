@@ -1,8 +1,8 @@
-import { describe, expect, test } from 'vitest';
-import type Anthropic from '@anthropic-ai/sdk';
-import type { Message } from '@anthropic-ai/sdk/resources/messages.js';
-import { runAgent } from '../../src/index.js';
-import type { AgentMessage, ChosenEvent } from '../../src/index.js';
+import { describe, expect, test } from "vitest";
+import type Anthropic from "@anthropic-ai/sdk";
+import type { Message } from "@anthropic-ai/sdk/resources/messages.js";
+import { runAgent } from "../../src/index.js";
+import type { AgentMessage, ChosenEvent } from "../../src/index.js";
 import {
   createAnthropicExecutors,
   extractJsonSchema,
@@ -11,18 +11,18 @@ import {
   toAnthropicMessages,
   toAnthropicTools,
   toDecisionMessages,
-} from './index.js';
-import { triageMachine, triageSchema } from '../triage/index.js';
-import { twentyQuestionsMachine } from '../twenty-questions/index.js';
+} from "./index.js";
+import { triageMachine, triageSchema } from "../triage/index.js";
+import { twentyQuestionsMachine } from "../twenty-questions/index.js";
 
 // A minimal Standard Schema fixture exposing the optional
 // `~standard.jsonSchema` extension, mirroring what Zod v4's `z.toJSONSchema`
 // produces.
 function fakeSchema(jsonSchema: Record<string, unknown>) {
   return {
-    '~standard': {
+    "~standard": {
       version: 1,
-      vendor: 'test',
+      vendor: "test",
       validate: (value: unknown) => ({ value }),
       jsonSchema: {
         input: () => jsonSchema,
@@ -33,15 +33,15 @@ function fakeSchema(jsonSchema: Record<string, unknown>) {
 
 function textMessage(): Message {
   return {
-    id: 'msg_1',
+    id: "msg_1",
     container: null,
-    content: [{ type: 'text', text: 'hi', citations: null }] as Message['content'],
-    model: 'claude-sonnet-4-5' as Message['model'],
-    role: 'assistant',
+    content: [{ type: "text", text: "hi", citations: null }] as Message["content"],
+    model: "claude-sonnet-4-5" as Message["model"],
+    role: "assistant",
     stop_details: null,
-    stop_reason: 'end_turn',
+    stop_reason: "end_turn",
     stop_sequence: null,
-    type: 'message',
+    type: "message",
     usage: {
       cache_creation: null,
       cache_creation_input_tokens: null,
@@ -50,7 +50,7 @@ function textMessage(): Message {
       output_tokens: 1,
       server_tool_use: null,
       service_tier: null,
-    } as Message['usage'],
+    } as Message["usage"],
   };
 }
 
@@ -58,58 +58,58 @@ function toolUseMessage(name: string, input: unknown): Message {
   return {
     ...textMessage(),
     content: [
-      { type: 'tool_use', id: 'toolu_1', name, input, caller: { type: 'direct' } },
-    ] as Message['content'],
-    stop_reason: 'tool_use',
+      { type: "tool_use", id: "toolu_1", name, input, caller: { type: "direct" } },
+    ] as Message["content"],
+    stop_reason: "tool_use",
   };
 }
 
-describe('toAnthropicMessages', () => {
-  test('drops system-role messages', () => {
+describe("toAnthropicMessages", () => {
+  test("drops system-role messages", () => {
     const messages: AgentMessage[] = [
-      { role: 'system', content: 'be nice' },
-      { role: 'user', content: 'hello' },
+      { role: "system", content: "be nice" },
+      { role: "user", content: "hello" },
     ];
-    expect(toAnthropicMessages(messages)).toEqual([{ role: 'user', content: 'hello' }]);
+    expect(toAnthropicMessages(messages)).toEqual([{ role: "user", content: "hello" }]);
   });
 
-  test('passes through string-content user/assistant messages', () => {
+  test("passes through string-content user/assistant messages", () => {
     const messages: AgentMessage[] = [
-      { role: 'user', content: 'hi' },
-      { role: 'assistant', content: 'hello there' },
+      { role: "user", content: "hi" },
+      { role: "assistant", content: "hello there" },
     ];
     expect(toAnthropicMessages(messages)).toEqual([
-      { role: 'user', content: 'hi' },
-      { role: 'assistant', content: 'hello there' },
+      { role: "user", content: "hi" },
+      { role: "assistant", content: "hello there" },
     ]);
   });
 
-  test('flattens parts-array content to text-only, dropping non-text parts', () => {
+  test("flattens parts-array content to text-only, dropping non-text parts", () => {
     const messages: AgentMessage[] = [
       {
-        role: 'user',
+        role: "user",
         content: [
-          { type: 'text', text: 'look at this' },
-          { type: 'image', image: 'data:image/png;base64,abc', mediaType: 'image/png' },
-          { type: 'text', text: 'and this' },
+          { type: "text", text: "look at this" },
+          { type: "image", image: "data:image/png;base64,abc", mediaType: "image/png" },
+          { type: "text", text: "and this" },
         ],
       },
     ];
     expect(toAnthropicMessages(messages)).toEqual([
-      { role: 'user', content: 'look at this\nand this' },
+      { role: "user", content: "look at this\nand this" },
     ]);
   });
 
-  test('maps a tool-role AgentMessage to a user-role message with a tool_result block', () => {
+  test("maps a tool-role AgentMessage to a user-role message with a tool_result block", () => {
     const messages: AgentMessage[] = [
       {
-        role: 'tool',
+        role: "tool",
         content: [
           {
-            type: 'tool-result',
-            toolCallId: 'call_1',
-            toolName: 'lookup',
-            output: { type: 'text', value: 'found it' },
+            type: "tool-result",
+            toolCallId: "call_1",
+            toolName: "lookup",
+            output: { type: "text", value: "found it" },
           },
         ],
       },
@@ -117,28 +117,28 @@ describe('toAnthropicMessages', () => {
 
     expect(toAnthropicMessages(messages)).toEqual([
       {
-        role: 'user',
+        role: "user",
         content: [
           {
-            type: 'tool_result',
-            tool_use_id: 'call_1',
-            content: 'found it',
+            type: "tool_result",
+            tool_use_id: "call_1",
+            content: "found it",
           },
         ],
       },
     ]);
   });
 
-  test('marks tool_result blocks as errors and stringifies json output', () => {
+  test("marks tool_result blocks as errors and stringifies json output", () => {
     const messages: AgentMessage[] = [
       {
-        role: 'tool',
+        role: "tool",
         content: [
           {
-            type: 'tool-result',
-            toolCallId: 'call_2',
-            toolName: 'lookup',
-            output: { type: 'error-json', value: { message: 'boom' } },
+            type: "tool-result",
+            toolCallId: "call_2",
+            toolName: "lookup",
+            output: { type: "error-json", value: { message: "boom" } },
           },
         ],
       },
@@ -146,12 +146,12 @@ describe('toAnthropicMessages', () => {
 
     expect(toAnthropicMessages(messages)).toEqual([
       {
-        role: 'user',
+        role: "user",
         content: [
           {
-            type: 'tool_result',
-            tool_use_id: 'call_2',
-            content: JSON.stringify({ message: 'boom' }),
+            type: "tool_result",
+            tool_use_id: "call_2",
+            content: JSON.stringify({ message: "boom" }),
             is_error: true,
           },
         ],
@@ -160,9 +160,9 @@ describe('toAnthropicMessages', () => {
   });
 });
 
-describe('toAnthropicCallSettings', () => {
-  test('defaults max_tokens and drops seed', () => {
-    expect(toAnthropicCallSettings({ model: 'claude', seed: 42 })).toEqual({
+describe("toAnthropicCallSettings", () => {
+  test("defaults max_tokens and drops seed", () => {
+    expect(toAnthropicCallSettings({ model: "claude", seed: 42 })).toEqual({
       max_tokens: 1024,
       temperature: undefined,
       top_p: undefined,
@@ -171,115 +171,116 @@ describe('toAnthropicCallSettings', () => {
     });
   });
 
-  test('passes through provided settings', () => {
+  test("passes through provided settings", () => {
     expect(
       toAnthropicCallSettings({
-        model: 'claude',
+        model: "claude",
         maxTokens: 500,
         temperature: 0.5,
         topP: 0.9,
         topK: 40,
-        stopSequences: ['STOP'],
-      })
+        stopSequences: ["STOP"],
+      }),
     ).toEqual({
       max_tokens: 500,
       temperature: 0.5,
       top_p: 0.9,
       top_k: 40,
-      stop_sequences: ['STOP'],
+      stop_sequences: ["STOP"],
     });
   });
 });
 
-describe('toAnthropicTools', () => {
-  test('maps AgentTools entries to {name, description, input_schema}', () => {
+describe("toAnthropicTools", () => {
+  test("maps AgentTools entries to {name, description, input_schema}", () => {
     const tools = toAnthropicTools({
       search: {
-        description: 'Search the web',
-        inputSchema: fakeSchema({ type: 'object', properties: { q: { type: 'string' } } }),
+        description: "Search the web",
+        inputSchema: fakeSchema({ type: "object", properties: { q: { type: "string" } } }),
       },
     });
     expect(tools).toEqual([
       {
-        name: 'search',
-        description: 'Search the web',
-        input_schema: { type: 'object', properties: { q: { type: 'string' } } },
+        name: "search",
+        description: "Search the web",
+        input_schema: { type: "object", properties: { q: { type: "string" } } },
       },
     ]);
   });
 });
 
-describe('toAnthropicEventTools / decide shape', () => {
-  test('decision events map to tools with input_schema derived from extractJsonSchema', () => {
+describe("toAnthropicEventTools / decide shape", () => {
+  test("decision events map to tools with input_schema derived from extractJsonSchema", () => {
     const tools = toAnthropicEventTools([
       {
-        type: 'ASK',
-        toolName: 'ask',
-        inputSchema: fakeSchema({ type: 'object', properties: { question: { type: 'string' } } }),
+        type: "ASK",
+        toolName: "ask",
+        inputSchema: fakeSchema({ type: "object", properties: { question: { type: "string" } } }),
       },
-      { type: 'GUESS', toolName: 'guess' },
+      { type: "GUESS", toolName: "guess" },
     ]);
 
     expect(tools).toEqual([
       {
-        name: 'ask',
+        name: "ask",
         description: "Choose the 'ASK' move.",
-        input_schema: { type: 'object', properties: { question: { type: 'string' } } },
+        input_schema: { type: "object", properties: { question: { type: "string" } } },
       },
       {
-        name: 'guess',
+        name: "guess",
         description: "Choose the 'GUESS' move.",
-        input_schema: { type: 'object' },
+        input_schema: { type: "object" },
       },
     ]);
   });
 });
 
-describe('extractJsonSchema', () => {
-  test('extracts the schema from ~standard.jsonSchema.input()', () => {
-    const schema = fakeSchema({ type: 'object', properties: {} });
-    expect(extractJsonSchema(schema)).toEqual({ type: 'object', properties: {} });
+describe("extractJsonSchema", () => {
+  test("extracts the schema from ~standard.jsonSchema.input()", () => {
+    const schema = fakeSchema({ type: "object", properties: {} });
+    expect(extractJsonSchema(schema)).toEqual({ type: "object", properties: {} });
   });
 
-  test('returns undefined when the extension is absent', () => {
+  test("returns undefined when the extension is absent", () => {
     const schema = {
-      '~standard': { version: 1, vendor: 'test', validate: (v: unknown) => ({ value: v }) },
+      "~standard": { version: 1, vendor: "test", validate: (v: unknown) => ({ value: v }) },
     } as const;
     expect(extractJsonSchema(schema)).toBeUndefined();
   });
 
-  test('a structured-output request extracted schema flows into a forced-tool shape', () => {
-    const schema = fakeSchema({ type: 'object', properties: { sentiment: { type: 'string' } } });
+  test("a structured-output request extracted schema flows into a forced-tool shape", () => {
+    const schema = fakeSchema({ type: "object", properties: { sentiment: { type: "string" } } });
     const jsonSchema = extractJsonSchema(schema);
     expect(jsonSchema).toBeDefined();
     const tool = {
-      name: 'respond_with_output',
-      description: 'Provide the final structured output.',
-      input_schema: { type: 'object', ...jsonSchema },
+      name: "respond_with_output",
+      description: "Provide the final structured output.",
+      input_schema: { type: "object", ...jsonSchema },
     };
     expect(tool.input_schema).toEqual({
-      type: 'object',
-      properties: { sentiment: { type: 'string' } },
+      type: "object",
+      properties: { sentiment: { type: "string" } },
     });
   });
 });
 
-describe('toDecisionMessages', () => {
-  test('renders prior failed attempts as appended user-message feedback', () => {
+describe("toDecisionMessages", () => {
+  test("renders prior failed attempts as appended user-message feedback", () => {
     const messages = toDecisionMessages({
-      prompt: 'Pick a move',
+      prompt: "Pick a move",
       events: [
-        { type: 'ASK', toolName: 'ask' },
-        { type: 'GUESS', toolName: 'guess' },
+        { type: "ASK", toolName: "ask" },
+        { type: "GUESS", toolName: "guess" },
       ],
-      attempts: [{ failure: 'unknown-event', reason: 'called an unknown tool' }],
+      attempts: [{ failure: "unknown-event", reason: "called an unknown tool" }],
     });
 
     expect(messages).toEqual([
-      { role: 'user', content: 'Pick a move' },
+      { role: "user", content: "Pick a move" },
       {
-        role: 'user',
-        content: 'Your previous choice failed: called an unknown tool. Choose again from: ASK, GUESS',
+        role: "user",
+        content:
+          "Your previous choice failed: called an unknown tool. Choose again from: ASK, GUESS",
       },
     ]);
   });
@@ -295,32 +296,32 @@ function stubClient(create: (params: unknown) => Promise<Message>): Anthropic {
   return { messages: { create } } as unknown as Anthropic;
 }
 
-describe('createAnthropicExecutors + runAgent', () => {
-  test('generateText: structured output via forced tool call drives the triage machine', async () => {
+describe("createAnthropicExecutors + runAgent", () => {
+  test("generateText: structured output via forced tool call drives the triage machine", async () => {
     const client = stubClient(async () =>
-      toolUseMessage('respond_with_output', {
-        sentiment: 'negative',
-        category: 'billing',
-        reply: 'Sorry about that, we will fix your invoice.',
-      })
+      toolUseMessage("respond_with_output", {
+        sentiment: "negative",
+        category: "billing",
+        reply: "Sorry about that, we will fix your invoice.",
+      }),
     );
 
     const { generateText } = createAnthropicExecutors({ client });
     const result = await runAgent(triageMachine, {
-      input: { ticket: 'My invoice is wrong and I am furious.' },
+      input: { ticket: "My invoice is wrong and I am furious." },
       generateText,
     });
 
-    expect(result.status).toBe('done');
-    if (result.status !== 'done') throw new Error('expected done');
+    expect(result.status).toBe("done");
+    if (result.status !== "done") throw new Error("expected done");
     expect(triageSchema.parse(result.output)).toEqual({
-      sentiment: 'negative',
-      category: 'billing',
-      reply: 'Sorry about that, we will fix your invoice.',
+      sentiment: "negative",
+      category: "billing",
+      reply: "Sorry about that, we will fix your invoice.",
     });
   });
 
-  test('decide: tool_choice any drives the twenty-questions machine to a guess', async () => {
+  test("decide: tool_choice any drives the twenty-questions machine to a guess", async () => {
     let call = 0;
     const client = stubClient(async (params) => {
       call += 1;
@@ -331,8 +332,8 @@ describe('createAnthropicExecutors + runAgent', () => {
       }
       // Decision calls carry one event tool per candidate event, named via
       // the event's `toolName` (e.g. `send_event_GUESS`).
-      const guessTool = tools.find((t) => t.name.includes('GUESS'));
-      return toolUseMessage(guessTool!.name, { guess: 'a cat' });
+      const guessTool = tools.find((t) => t.name.includes("GUESS"));
+      return toolUseMessage(guessTool!.name, { guess: "a cat" });
     });
 
     const { generateText, decide } = createAnthropicExecutors({ client });
@@ -340,12 +341,12 @@ describe('createAnthropicExecutors + runAgent', () => {
       input: { questionsRemaining: 1 },
       generateText,
       decide,
-      userInput: async () => 'correct',
+      userInput: async () => "correct",
     });
 
-    expect(result.status).toBe('done');
-    if (result.status !== 'done') throw new Error('expected done');
-    expect(result.output.guess).toBe('a cat');
+    expect(result.status).toBe("done");
+    if (result.status !== "done") throw new Error("expected done");
+    expect(result.output.guess).toBe("a cat");
     expect(call).toBeGreaterThan(0);
   });
 });

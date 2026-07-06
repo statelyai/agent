@@ -12,9 +12,9 @@ import {
   type OutputFrom,
   type Snapshot,
   type SnapshotFrom,
-} from 'xstate';
-import type { AgentTools, ChosenEvent } from './types.js';
-import { getAcceptedEvents, type AgentSchemas } from './events.js';
+} from "xstate";
+import type { AgentTools, ChosenEvent } from "./types.js";
+import { getAcceptedEvents, type AgentSchemas } from "./events.js";
 import {
   isTextLogic,
   normalizeGeneratorResult,
@@ -24,20 +24,20 @@ import {
   type AgentTextRequest,
   type AgentUserInput,
   type TextLogic,
-} from './text-logic.js';
+} from "./text-logic.js";
 import {
   isDecisionLogic,
   resolveDecision,
   type AgentDecisionExecutor,
   type AgentDecisionRequest,
   type DecisionLogic,
-} from './decision.js';
-import type { AgentRequest, AgentStepRequest } from './steps.js';
+} from "./decision.js";
+import type { AgentRequest, AgentStepRequest } from "./steps.js";
 import {
   executorBoundLogics,
   getRegisteredAgentExecutionOptions,
   isUnboundPlaceholder,
-} from './internal/registry.js';
+} from "./internal/registry.js";
 
 // ─── runAgent (createActor wrapper) ───
 //
@@ -60,8 +60,9 @@ export interface AgentUserInputExecutor {
  * before any actor runs).
  */
 export interface RunAgentOptions<TMachine extends AnyStateMachine>
-  extends Partial<Pick<AgentRequestExecutors, 'generateText'>>,
-    Omit<AgentRequestExecutors, 'generateText'> {
+  extends
+    Partial<Pick<AgentRequestExecutors, "generateText">>,
+    Omit<AgentRequestExecutors, "generateText"> {
   /** Machine input, passed straight to `createActor(machine, { input })`. Omit when resuming via `snapshot`. */
   input?: InputFrom<TMachine>;
 
@@ -90,18 +91,12 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine>
   /** Fires for each streamed chunk of a `mode: 'stream'` text request, alongside the {@link AgentRequest} that produced it (parallel states can interleave multiple streams). Purely observational. */
   onChunk?: (chunk: string, info: { request: AgentRequest }) => void;
   /** Fires once per resolved text/decision request with its normalized output and the raw executor result (tool calls, usage, …) — the seam for tracing/observability and event-sourced replay logging. */
-  onResult?: (
-    request: AgentStepRequest,
-    result: { output: unknown; raw: unknown }
-  ) => void;
+  onResult?: (request: AgentStepRequest, result: { output: unknown; raw: unknown }) => void;
   /**
    * Fires on every machine transition (snapshot + causing event). Pure
    * observation — progress UIs, logging, tracing. Cannot send events.
    */
-  onTransition?: (
-    snapshot: SnapshotFrom<TMachine>,
-    event: EventFromLogic<TMachine>
-  ) => void;
+  onTransition?: (snapshot: SnapshotFrom<TMachine>, event: EventFromLogic<TMachine>) => void;
 
   // control
   /** Caps the number of model/decision calls this run may make (each retry of a decision counts separately); exceeding it settles `{ status: 'error', cause: 'max-model-calls' }`. Default 100. */
@@ -130,9 +125,9 @@ export interface PendingUserInput {
 }
 
 export type RunAgentResult<TMachine extends AnyStateMachine> =
-  | { status: 'done'; output: OutputFrom<TMachine>; snapshot: SnapshotFrom<TMachine> }
+  | { status: "done"; output: OutputFrom<TMachine>; snapshot: SnapshotFrom<TMachine> }
   | {
-      status: 'idle';
+      status: "idle";
       snapshot: SnapshotFrom<TMachine>;
       /** Present when the machine is waiting on unhandled `agent.userInput` invokes: one entry per pending invoke. */
       pendingUserInputs?: PendingUserInput[];
@@ -145,8 +140,8 @@ export type RunAgentResult<TMachine extends AnyStateMachine> =
       persistedSnapshot?: Snapshot<unknown>;
     }
   | {
-      status: 'error';
-      cause: 'aborted' | 'max-model-calls' | 'machine';
+      status: "error";
+      cause: "aborted" | "max-model-calls" | "machine";
       error: unknown;
       snapshot: SnapshotFrom<TMachine>;
     };
@@ -154,8 +149,8 @@ export type RunAgentResult<TMachine extends AnyStateMachine> =
 // Thrown internally by consumeModelCall() past the budget; caught by runAgent's settle loop to produce a 'max-model-calls' error result.
 class MaxModelCallsExceededError extends Error {
   constructor() {
-    super('runAgent exceeded maxModelCalls.');
-    this.name = 'MaxModelCallsExceededError';
+    super("runAgent exceeded maxModelCalls.");
+    this.name = "MaxModelCallsExceededError";
   }
 }
 
@@ -170,21 +165,22 @@ class MaxModelCallsExceededError extends Error {
 function collectConfiguredInvokeSrcs(
   stateConfig: { states?: Record<string, any>; invoke?: unknown } | undefined,
   stateName: string,
-  out: Array<{ stateName: string; src: string | AnyActorLogic }>
+  out: Array<{ stateName: string; src: string | AnyActorLogic }>,
 ): void {
   if (!stateConfig) {
     return;
   }
 
-  const invokes = stateConfig.invoke === undefined
-    ? []
-    : Array.isArray(stateConfig.invoke)
-      ? stateConfig.invoke
-      : [stateConfig.invoke];
+  const invokes =
+    stateConfig.invoke === undefined
+      ? []
+      : Array.isArray(stateConfig.invoke)
+        ? stateConfig.invoke
+        : [stateConfig.invoke];
 
   for (const invokeConfig of invokes) {
     const src = (invokeConfig as { src?: unknown } | undefined)?.src;
-    if (typeof src === 'string' || (src && typeof src === 'object')) {
+    if (typeof src === "string" || (src && typeof src === "object")) {
       out.push({ stateName, src: src as string | AnyActorLogic });
     }
     // Function-valued `src` resolvers are dynamic; not walked (see above).
@@ -206,14 +202,13 @@ function collectConfiguredInvokeSrcs(
  */
 function isStateMachine(logic: unknown): logic is AnyStateMachine {
   return (
-    !!logic
-    && typeof logic === 'object'
-    && 'config' in logic
-    && 'root' in logic
-    && typeof (logic as { provide?: unknown }).provide === 'function'
-    && typeof (logic as { implementations?: unknown }).implementations === 'object'
-    && !!(logic as { implementations?: { actorSources?: unknown } }).implementations
-      ?.actorSources
+    !!logic &&
+    typeof logic === "object" &&
+    "config" in logic &&
+    "root" in logic &&
+    typeof (logic as { provide?: unknown }).provide === "function" &&
+    typeof (logic as { implementations?: unknown }).implementations === "object" &&
+    !!(logic as { implementations?: { actorSources?: unknown } }).implementations?.actorSources
   );
 }
 
@@ -235,11 +230,11 @@ function isStateMachine(logic: unknown): logic is AnyStateMachine {
 function assertBindable(
   machine: AnyStateMachine,
   effectiveSources: Record<string, AnyActorLogic>,
-  options: { hasGenerateText: boolean; hasDecide: boolean; hasStreamText: boolean }
+  options: { hasGenerateText: boolean; hasDecide: boolean; hasStreamText: boolean },
 ): void {
   assertMachineBindable(machine, effectiveSources, options, {
     isChild: false,
-    childPath: '',
+    childPath: "",
     visited: new Set([machine]),
   });
 }
@@ -258,15 +253,15 @@ function assertMachineBindable(
   machine: AnyStateMachine,
   effectiveSources: Record<string, AnyActorLogic>,
   options: { hasGenerateText: boolean; hasDecide: boolean; hasStreamText: boolean },
-  ctx: BindWalkContext
+  ctx: BindWalkContext,
 ): void {
   const invokes: Array<{ stateName: string; src: string | AnyActorLogic }> = [];
-  collectConfiguredInvokeSrcs(machine.config as never, machine.config.id ?? '(root)', invokes);
+  collectConfiguredInvokeSrcs(machine.config as never, machine.config.id ?? "(root)", invokes);
 
-  const where = ctx.isChild ? `child machine '${ctx.childPath}' state` : 'state';
+  const where = ctx.isChild ? `child machine '${ctx.childPath}' state` : "state";
 
   for (const { stateName, src } of invokes) {
-    if (typeof src !== 'string') {
+    if (typeof src !== "string") {
       // Direct-object src.
       if (isStateMachine(src)) {
         assertChildMachineBindable(src, src, stateName, options, ctx);
@@ -275,17 +270,14 @@ function assertMachineBindable(
       // string-keyed sources can be rebound by runAgent; direct objects
       // cannot. Only a problem if it's an agent logic that still needs
       // execution (no executor of its own).
-      if (
-        (isTextLogic(src) || isDecisionLogic(src))
-        && !executorBoundLogics.has(src as object)
-      ) {
+      if ((isTextLogic(src) || isDecisionLogic(src)) && !executorBoundLogics.has(src as object)) {
         throw new Error(
           `runAgent: ${where} '${stateName}' invokes a direct-object actor logic ` +
             `(kind: '${(src as TextLogic | DecisionLogic).kind}'). Direct-object invoke ` +
             `srcs cannot be rebound by runAgent — either call '.withExecutor(...)' on ` +
             `the logic before invoking it, or register it as a string-keyed actor ` +
             `source instead (machine.provide({ actorSources: { name: logic } })) and ` +
-            `invoke it by name.`
+            `invoke it by name.`,
         );
       }
       continue;
@@ -297,7 +289,7 @@ function assertMachineBindable(
       throw new Error(
         `runAgent: ${where} '${stateName}' invokes unregistered actor source '${src}'. ` +
           `Provide it via machine.provide({ actorSources: { '${src}': ... } }) or ` +
-          `runAgent(machine, { actorSources: { '${src}': ... } }).`
+          `runAgent(machine, { actorSources: { '${src}': ... } }).`,
       );
     }
 
@@ -321,12 +313,12 @@ function assertMachineBindable(
         continue;
       }
       if (ctx.isChild) {
-        throw unboundChildRequestError(ctx.childPath, stateName, src, 'decision');
+        throw unboundChildRequestError(ctx.childPath, stateName, src, "decision");
       }
       if (!options.hasDecide) {
         throw new Error(
           `runAgent: state '${stateName}' invokes decision source '${src}' but no ` +
-            `'decide' executor was provided to runAgent(...).`
+            `'decide' executor was provided to runAgent(...).`,
         );
       }
       continue;
@@ -345,19 +337,19 @@ function assertMachineBindable(
           ctx.childPath,
           stateName,
           src,
-          logic.mode === 'stream' ? 'streaming text' : 'text'
+          logic.mode === "stream" ? "streaming text" : "text",
         );
       }
-      if (logic.mode === 'stream' && !options.hasStreamText) {
+      if (logic.mode === "stream" && !options.hasStreamText) {
         throw new Error(
           `runAgent: state '${stateName}' invokes streaming text source '${src}' but ` +
-            `no 'streamText' executor was provided to runAgent(...).`
+            `no 'streamText' executor was provided to runAgent(...).`,
         );
       }
-      if (logic.mode !== 'stream' && !options.hasGenerateText) {
+      if (logic.mode !== "stream" && !options.hasGenerateText) {
         throw new Error(
           `runAgent: state '${stateName}' invokes text source '${src}' but ` +
-            `no 'generateText' executor was provided to runAgent(...).`
+            `no 'generateText' executor was provided to runAgent(...).`,
         );
       }
       continue;
@@ -367,7 +359,7 @@ function assertMachineBindable(
       throw new Error(
         `runAgent: ${where} '${stateName}' invokes actor source '${src}', which has no ` +
           `host execution. Provide it via machine.provide({ actorSources: { '${src}': ... } }) ` +
-          `or runAgent(machine, { actorSources: { '${src}': ... } }).`
+          `or runAgent(machine, { actorSources: { '${src}': ... } }).`,
       );
     }
 
@@ -382,7 +374,7 @@ function assertChildMachineBindable(
   childSrc: string | AnyActorLogic,
   stateName: string,
   options: { hasGenerateText: boolean; hasDecide: boolean; hasStreamText: boolean },
-  ctx: BindWalkContext
+  ctx: BindWalkContext,
 ): void {
   // Cycle guard: a machine invoked (transitively) within itself is walked
   // once. Its own bind check already covered its invokes; re-descending would
@@ -392,15 +384,10 @@ function assertChildMachineBindable(
   }
 
   const childName =
-    typeof childSrc === 'string'
-      ? childSrc
-      : (childMachine.config.id ?? '(child machine)');
+    typeof childSrc === "string" ? childSrc : (childMachine.config.id ?? "(child machine)");
   const childPath = ctx.childPath ? `${ctx.childPath} > ${childName}` : childName;
 
-  const childSources = childMachine.implementations.actorSources as Record<
-    string,
-    AnyActorLogic
-  >;
+  const childSources = childMachine.implementations.actorSources as Record<string, AnyActorLogic>;
 
   assertMachineBindable(childMachine, childSources, options, {
     isChild: true,
@@ -417,7 +404,7 @@ function unboundChildRequestError(
   childPath: string,
   stateName: string,
   requestSrc: string,
-  kind: 'text' | 'streaming text' | 'decision'
+  kind: "text" | "streaming text" | "decision",
 ): Error {
   return new Error(
     `runAgent: child machine '${childPath}' (state '${stateName}') invokes ${kind} ` +
@@ -428,7 +415,7 @@ function unboundChildRequestError(
       `actorSources: { '${requestSrc}': requestLogic.withExecutor(...) } }) } }), or pass ` +
       `that same nested-provided child as runAgent(parentMachine, { actorSources: { ` +
       `<child>: childMachine.provide({ actorSources: { '${requestSrc}': ` +
-      `requestLogic.withExecutor(...) } }) } }).`
+      `requestLogic.withExecutor(...) } }) } }).`,
   );
 }
 
@@ -438,10 +425,7 @@ interface RunAgentBindContext {
   streamText?: AgentRequestExecutor;
   decide?: AgentDecisionExecutor;
   onChunk?: (chunk: string, info: { request: AgentRequest }) => void;
-  onResult?: (
-    request: AgentStepRequest,
-    result: { output: unknown; raw: unknown }
-  ) => void;
+  onResult?: (request: AgentStepRequest, result: { output: unknown; raw: unknown }) => void;
   consumeModelCall: () => void;
   /** Assigned right after createActor (§2.6); read lazily by decision wraps. */
   actorHolder: { actorRef: AnyActorRef | undefined };
@@ -453,22 +437,19 @@ interface RunAgentBindContext {
 function selfIdAndSrc(self: unknown): { id: string; src: string } {
   const ref = self as { id?: unknown; src?: unknown } | undefined;
   return {
-    id: typeof ref?.id === 'string' ? ref.id : '',
-    src: typeof ref?.src === 'string' ? ref.src : '',
+    id: typeof ref?.id === "string" ? ref.id : "",
+    src: typeof ref?.src === "string" ? ref.src : "",
   };
 }
 
-function wrapTextLogicForRunAgent(
-  logic: TextLogic,
-  runCtx: RunAgentBindContext
-): TextLogic {
+function wrapTextLogicForRunAgent(logic: TextLogic, runCtx: RunAgentBindContext): TextLogic {
   return logic.withExecutor(async ({ request, self, signal }) => {
     const { id, src } = selfIdAndSrc(self);
-    const executor = logic.mode === 'stream' ? runCtx.streamText : runCtx.generateText;
+    const executor = logic.mode === "stream" ? runCtx.streamText : runCtx.generateText;
     if (!executor) {
       throw new Error(
-        `runAgent: no '${logic.mode === 'stream' ? 'streamText' : 'generateText'}' ` +
-          'executor provided.'
+        `runAgent: no '${logic.mode === "stream" ? "streamText" : "generateText"}' ` +
+          "executor provided.",
       );
     }
 
@@ -477,7 +458,7 @@ function wrapTextLogicForRunAgent(
       tools: request.tools ?? {},
     };
     const agentRequest: AgentRequest = {
-      kind: 'text',
+      kind: "text",
       id,
       src,
       mode: logic.mode,
@@ -512,7 +493,7 @@ function wrapTextLogicForRunAgent(
  */
 function createRunAgentDecisionLogic(
   logic: DecisionLogic,
-  runCtx: RunAgentBindContext
+  runCtx: RunAgentBindContext,
 ): DecisionLogic {
   const decisionLogic = createAsyncLogic<ChosenEvent, unknown>({
     run: async ({ input, signal, self }) => {
@@ -543,9 +524,9 @@ function createRunAgentDecisionLogic(
       const actorRef = runCtx.actorHolder.actorRef;
       const events = actorRef
         ? getAcceptedEvents(actorRef.getSnapshot() as AnyMachineSnapshot, {
-          schemas: runCtx.schemas,
-          eventTypes: declaredEventTypes,
-        })
+            schemas: runCtx.schemas,
+            eventTypes: declaredEventTypes,
+          })
         : [];
 
       const request: AgentDecisionRequest = { ...logic.request(input as never), id, events };
@@ -569,7 +550,7 @@ function createRunAgentDecisionLogic(
   });
 
   return Object.assign(decisionLogic, {
-    kind: 'statelyai.decisionLogic' as const,
+    kind: "statelyai.decisionLogic" as const,
     maxRetries: logic.maxRetries,
     request: logic.request,
     withExecutor: (nextExecute: AgentDecisionExecutor) =>
@@ -611,7 +592,7 @@ function createRunAgentDecisionLogic(
  */
 export async function runAgent<TMachine extends AnyStateMachine>(
   machine: TMachine,
-  options: RunAgentOptions<TMachine>
+  options: RunAgentOptions<TMachine>,
 ): Promise<RunAgentResult<TMachine>> {
   const maxModelCalls = options.maxModelCalls ?? 100;
   let modelCallCount = 0;
@@ -635,10 +616,7 @@ export async function runAgent<TMachine extends AnyStateMachine>(
     actorSources: options.actorSources as never,
   }) as TMachine;
 
-  const effectiveSources = provided.implementations.actorSources as Record<
-    string,
-    AnyActorLogic
-  >;
+  const effectiveSources = provided.implementations.actorSources as Record<string, AnyActorLogic>;
 
   assertBindable(provided, effectiveSources, {
     hasGenerateText: !!options.generateText,
@@ -724,7 +702,7 @@ export async function runAgent<TMachine extends AnyStateMachine>(
         clearTimeout(idleTimer);
       }
       if (options.signal) {
-        options.signal.removeEventListener('abort', onAbort);
+        options.signal.removeEventListener("abort", onAbort);
       }
       actor.stop();
       resolvePromise(result);
@@ -732,9 +710,9 @@ export async function runAgent<TMachine extends AnyStateMachine>(
 
     const onAbort = () => {
       settle({
-        status: 'error',
-        cause: 'aborted',
-        error: options.signal?.reason ?? new Error('Aborted'),
+        status: "error",
+        cause: "aborted",
+        error: options.signal?.reason ?? new Error("Aborted"),
         snapshot: actor.getSnapshot(),
       });
     };
@@ -750,11 +728,9 @@ export async function runAgent<TMachine extends AnyStateMachine>(
         }
         const current = actor.getSnapshot() as AnyMachineSnapshot;
         if (isIdleSnapshot(current, { ignoreUserInputChildren: userInputIsPlaceholder })) {
-          const pendingUserInputs = userInputIsPlaceholder
-            ? collectPendingUserInputs(current)
-            : [];
+          const pendingUserInputs = userInputIsPlaceholder ? collectPendingUserInputs(current) : [];
           settle({
-            status: 'idle',
+            status: "idle",
             snapshot: current as SnapshotFrom<TMachine>,
             ...(pendingUserInputs.length > 0
               ? {
@@ -772,9 +748,9 @@ export async function runAgent<TMachine extends AnyStateMachine>(
       snapshot: options.snapshot,
       inspect: (event: InspectionEvent) => {
         if (
-          settled
-          || event.type !== '@xstate.transition'
-          || (event.actorRef as unknown) !== (actor.ref as unknown)
+          settled ||
+          event.type !== "@xstate.transition" ||
+          (event.actorRef as unknown) !== (actor.ref as unknown)
         ) {
           return;
         }
@@ -783,33 +759,33 @@ export async function runAgent<TMachine extends AnyStateMachine>(
 
         options.onTransition?.(
           snapshot as SnapshotFrom<TMachine>,
-          event.event as EventFromLogic<TMachine>
+          event.event as EventFromLogic<TMachine>,
         );
 
-        if (snapshot.status === 'done') {
+        if (snapshot.status === "done") {
           settle({
-            status: 'done',
+            status: "done",
             output: snapshot.output as OutputFrom<TMachine>,
             snapshot: snapshot as SnapshotFrom<TMachine>,
           });
           return;
         }
 
-        if (snapshot.status === 'error') {
+        if (snapshot.status === "error") {
           settle({
-            status: 'error',
-            cause: budgetExceeded ? 'max-model-calls' : 'machine',
+            status: "error",
+            cause: budgetExceeded ? "max-model-calls" : "machine",
             error: snapshot.error,
             snapshot: snapshot as SnapshotFrom<TMachine>,
           });
           return;
         }
 
-        if (snapshot.status === 'stopped') {
+        if (snapshot.status === "stopped") {
           settle({
-            status: 'error',
-            cause: 'machine',
-            error: new Error('Actor stopped externally.'),
+            status: "error",
+            cause: "machine",
+            error: new Error("Actor stopped externally."),
             snapshot: snapshot as SnapshotFrom<TMachine>,
           });
           return;
@@ -831,14 +807,14 @@ export async function runAgent<TMachine extends AnyStateMachine>(
     if (options.signal) {
       if (options.signal.aborted) {
         settle({
-          status: 'error',
-          cause: 'aborted',
-          error: options.signal.reason ?? new Error('Aborted'),
+          status: "error",
+          cause: "aborted",
+          error: options.signal.reason ?? new Error("Aborted"),
           snapshot: actor.getSnapshot(),
         });
         return;
       }
-      options.signal.addEventListener('abort', onAbort);
+      options.signal.addEventListener("abort", onAbort);
     }
 
     actor.start();
@@ -851,28 +827,27 @@ export async function runAgent<TMachine extends AnyStateMachine>(
 // True when a snapshot is active but has no in-flight children and no pending eventless/after work — see §3.3 in docs/p0-design.md for the approximation this makes. `ignoreUserInputChildren` exempts pending `agent.userInput` placeholder children (they wait for a human indefinitely and must not block an idle settle).
 function isIdleSnapshot(
   snapshot: AnyMachineSnapshot,
-  { ignoreUserInputChildren }: { ignoreUserInputChildren: boolean }
+  { ignoreUserInputChildren }: { ignoreUserInputChildren: boolean },
 ): boolean {
-  if (snapshot.status !== 'active') {
+  if (snapshot.status !== "active") {
     return false;
   }
   const childrenBusy = Object.values(snapshot.children ?? {}).some((child) => {
     const ref = child as AnyActorRef | undefined;
     if (
-      ignoreUserInputChildren
-      && (ref as { src?: unknown } | undefined)?.src === USER_INPUT_ACTOR
+      ignoreUserInputChildren &&
+      (ref as { src?: unknown } | undefined)?.src === USER_INPUT_ACTOR
     ) {
       return false;
     }
-    return ref?.getSnapshot?.()?.status === 'active';
+    return ref?.getSnapshot?.()?.status === "active";
   });
   if (childrenBusy) {
     return false;
   }
   const hasPendingWork = getNextTransitions(snapshot).some(
     (transitionDef) =>
-      transitionDef.eventType === ''
-      || transitionDef.eventType.startsWith('xstate.after')
+      transitionDef.eventType === "" || transitionDef.eventType.startsWith("xstate.after"),
   );
   return !hasPendingWork;
 }
@@ -881,16 +856,12 @@ function isIdleSnapshot(
 function collectPendingUserInputs(snapshot: AnyMachineSnapshot): PendingUserInput[] {
   const pending: PendingUserInput[] = [];
   for (const [id, child] of Object.entries(snapshot.children ?? {})) {
-    const ref = child as
-      | (AnyActorRef & { src?: unknown })
-      | undefined;
+    const ref = child as (AnyActorRef & { src?: unknown }) | undefined;
     if (ref?.src !== USER_INPUT_ACTOR) {
       continue;
     }
-    const childSnapshot = ref.getSnapshot?.() as
-      | { status?: unknown; input?: unknown }
-      | undefined;
-    if (childSnapshot?.status !== 'active') {
+    const childSnapshot = ref.getSnapshot?.() as { status?: unknown; input?: unknown } | undefined;
+    if (childSnapshot?.status !== "active") {
       continue;
     }
     pending.push({ id, input: childSnapshot.input as AgentUserInput | undefined });

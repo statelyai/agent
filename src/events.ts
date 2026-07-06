@@ -1,11 +1,11 @@
-import { getNextTransitions, type AnyMachineSnapshot } from 'xstate';
-import type { StandardSchemaV1 } from './types.js';
+import { getNextTransitions, type AnyMachineSnapshot } from "xstate";
+import type { StandardSchemaV1 } from "./types.js";
 
 /** The invoke `src` of an {@link AgentRequest}/{@link AgentDecisionRequest} — a plain string, widened so literal `src` values still narrow in editor hints. */
 export type AgentRequestSource = string & {};
 
 /** Default prefix for the synthetic tool name generated per candidate event (e.g. `send_event_ASK`). Override per-request with {@link AgentEventToolNameResolver}. */
-export const EVENT_TOOL_PREFIX = 'send_event_' as const;
+export const EVENT_TOOL_PREFIX = "send_event_" as const;
 
 /** Customizes the tool name generated for a candidate event; see {@link AgentRequestOptions.eventToolName}. */
 export type AgentEventToolNameResolver = (args: {
@@ -24,7 +24,7 @@ function hashString(value: string): string {
 
 // Default `EVENT_TOOL_PREFIX`-based tool name for an event type, truncated+hashed if over 64 chars.
 export function sanitizeEventToolName(eventType: string): `${typeof EVENT_TOOL_PREFIX}${string}` {
-  const sanitizedType = eventType.replace(/[^a-zA-Z0-9_-]/g, '_') || 'event';
+  const sanitizedType = eventType.replace(/[^a-zA-Z0-9_-]/g, "_") || "event";
   const base = `${EVENT_TOOL_PREFIX}${sanitizedType}`;
 
   if (base.length <= 64) {
@@ -40,7 +40,7 @@ export function sanitizeEventToolName(eventType: string): `${typeof EVENT_TOOL_P
 export function disambiguateEventToolName(
   toolName: string,
   eventType: string,
-  usedToolNames: Set<string>
+  usedToolNames: Set<string>,
 ): string {
   if (!usedToolNames.has(toolName)) {
     usedToolNames.add(toolName);
@@ -88,14 +88,11 @@ export interface AgentRequestOptions {
  */
 export function getAcceptedEvents(
   snapshot: AnyMachineSnapshot,
-  options: Pick<AgentRequestOptions, 'events' | 'schemas' | 'eventToolName'> & {
+  options: Pick<AgentRequestOptions, "events" | "schemas" | "eventToolName"> & {
     eventTypes?: readonly string[];
-  } = {}
+  } = {},
 ): AgentEventDescriptor[] {
-  const eventTypes =
-    options.eventTypes === undefined
-      ? undefined
-      : new Set(options.eventTypes);
+  const eventTypes = options.eventTypes === undefined ? undefined : new Set(options.eventTypes);
   const seen = new Set<string>();
   const usedToolNames = new Set<string>();
 
@@ -103,11 +100,11 @@ export function getAcceptedEvents(
     const eventType = transitionDefinition.eventType;
 
     if (
-      !eventType
-      || eventType === '*'
-      || eventType.startsWith('xstate.')
-      || (eventTypes && !eventTypes.has(eventType))
-      || seen.has(eventType)
+      !eventType ||
+      eventType === "*" ||
+      eventType.startsWith("xstate.") ||
+      (eventTypes && !eventTypes.has(eventType)) ||
+      seen.has(eventType)
     ) {
       return [];
     }
@@ -118,12 +115,14 @@ export function getAcceptedEvents(
       ? options.eventToolName({ eventType, defaultToolName })
       : disambiguateEventToolName(defaultToolName, eventType, usedToolNames);
 
-    return [{
-      type: eventType,
-      toolName,
-      ...((options.events ?? options.schemas?.events)?.[eventType]
-        ? { inputSchema: (options.events ?? options.schemas?.events)![eventType] }
-        : {}),
-    }];
+    return [
+      {
+        type: eventType,
+        toolName,
+        ...((options.events ?? options.schemas?.events)?.[eventType]
+          ? { inputSchema: (options.events ?? options.schemas?.events)![eventType] }
+          : {}),
+      },
+    ];
   });
 }

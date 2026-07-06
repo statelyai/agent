@@ -53,16 +53,16 @@
  *
  * Then: `npx wrangler dev` (local) or `npx wrangler deploy`.
  */
-import { Agent, type Connection } from 'agents';
-import { createActor, type Actor, type Snapshot } from 'xstate';
-import type { LanguageModel } from 'ai';
+import { Agent, type Connection } from "agents";
+import { createActor, type Actor, type Snapshot } from "xstate";
+import type { LanguageModel } from "ai";
 import {
   draftEmail,
   emailDrafter,
   emailDrafterSchemas,
   evaluatePrompt,
-} from '../email-drafter/index.js';
-import { createAiSdkTextActor } from '../ai-sdk-host/index.js';
+} from "../email-drafter/index.js";
+import { createAiSdkTextActor } from "../ai-sdk-host/index.js";
 
 interface Env {
   AI: Ai;
@@ -112,12 +112,12 @@ export abstract class EmailDrafterAgent extends Agent<Env, EmailDrafterState> {
       this.setState({ snapshot: this.#actor!.getPersistedSnapshot() });
       this.broadcast(
         JSON.stringify({
-          type: 'state',
+          type: "state",
           value: snapshot.value,
           // meta is schema-typed: clients get the interaction protocol
           // (text / select / confirm) for the current state.
           meta: snapshot.getMeta(),
-        })
+        }),
       );
     });
 
@@ -130,11 +130,11 @@ export abstract class EmailDrafterAgent extends Agent<Env, EmailDrafterState> {
     const event = JSON.parse(message) as { type: string; [key: string]: unknown };
     const schema =
       emailDrafterSchemas.events[event.type as keyof typeof emailDrafterSchemas.events];
-    const result = schema?.['~standard'].validate(event);
+    const result = schema?.["~standard"].validate(event);
     // Event schemas here are synchronous (Zod) — a Promise result would mean
     // an async validator, which this simple example doesn't support.
     if (result && !(result instanceof Promise) && result.issues) {
-      connection.send(JSON.stringify({ type: 'error', issues: result.issues }));
+      connection.send(JSON.stringify({ type: "error", issues: result.issues }));
       return;
     }
     this.#actor?.send(event as never);

@@ -17,9 +17,9 @@
  * Run:
  *   OPENAI_API_KEY=... npx tsx examples/ai-sdk-game-host/index.ts
  */
-import { type LanguageModel } from 'ai';
-import { openai } from '@ai-sdk/openai';
-import { createAiSdkExecutors } from '../../src/ai-sdk/index.js';
+import { type LanguageModel } from "ai";
+import { openai } from "@ai-sdk/openai";
+import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
 import {
   executeAgentRequest,
   initialAgentStep,
@@ -27,13 +27,13 @@ import {
   type EventUnion,
   resolveAgentStep,
   transitionAgentStep,
-} from '../../src/index.js';
-import { gameActors, gameMachine, gameSchemas, turnSummarySchema } from '../game-agent/index.js';
+} from "../../src/index.js";
+import { gameActors, gameMachine, gameSchemas, turnSummarySchema } from "../game-agent/index.js";
 
 type GameEvent = EventUnion<typeof gameSchemas.events>;
 
 function resolveModel(modelRef: string): LanguageModel {
-  return openai(modelRef.replace(/^openai\//, ''));
+  return openai(modelRef.replace(/^openai\//, ""));
 }
 
 // Adapter-provided executors: `decide` forces a tool call, one tool per
@@ -53,10 +53,10 @@ export async function runAiSdkGameTurn(input = { playerHp: 20, enemyHp: 15 }) {
   while (!step.done) {
     const [request] = step.requests;
     if (!request) {
-      throw new Error('Machine is waiting without an agent request.');
+      throw new Error("Machine is waiting without an agent request.");
     }
 
-    if (request.kind === 'decision') {
+    if (request.kind === "decision") {
       // `resolveDecision` validates the chosen event's payload against the
       // machine's event schemas (attached to `request.events`) and, typed
       // against `GameEvent` via `canTake`, returns a machine-typed event —
@@ -72,16 +72,10 @@ export async function runAiSdkGameTurn(input = { playerHp: 20, enemyHp: 15 }) {
     }
 
     const output = await executeAgentRequest(request, executors);
-    step = resolveAgentStep(
-      gameMachine,
-      step,
-      request,
-      output,
-      {
-        schemas: gameSchemas,
-        actorSources: gameActors,
-      }
-    );
+    step = resolveAgentStep(gameMachine, step, request, output, {
+      schemas: gameSchemas,
+      actorSources: gameActors,
+    });
   }
 
   return step.snapshot.output;
@@ -92,9 +86,9 @@ async function main() {
   console.log(output);
 }
 
-if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   if (!process.env.OPENAI_API_KEY) {
-    console.error('Set OPENAI_API_KEY to run this example.');
+    console.error("Set OPENAI_API_KEY to run this example.");
     process.exit(1);
   }
   void main();

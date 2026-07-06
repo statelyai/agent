@@ -10,16 +10,16 @@
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/ai-sdk-parallel-review/index.ts
  */
-import { z } from 'zod';
-import { openai } from '@ai-sdk/openai';
-import { setupAgent, runAgent } from '../../src/index.js';
-import { createAiSdkTextExecutor } from '../ai-sdk-host/index.js';
-import { type LanguageModel } from 'ai';
+import { z } from "zod";
+import { openai } from "@ai-sdk/openai";
+import { setupAgent, runAgent } from "../../src/index.js";
+import { createAiSdkTextExecutor } from "../ai-sdk-host/index.js";
+import { type LanguageModel } from "ai";
 
 const reviewSchema = z.object({
-  type: z.enum(['security', 'performance', 'maintainability']),
+  type: z.enum(["security", "performance", "maintainability"]),
   findings: z.array(z.string()),
-  severity: z.enum(['low', 'medium', 'high']),
+  severity: z.enum(["low", "medium", "high"]),
 });
 type Review = z.infer<typeof reviewSchema>;
 
@@ -27,17 +27,17 @@ type Review = z.infer<typeof reviewSchema>;
 // `type` tag is stamped on in `onDone` so the schema the model fills is small).
 const aspectReviewSchema = z.object({
   findings: z.array(z.string()),
-  severity: z.enum(['low', 'medium', 'high']),
+  severity: z.enum(["low", "medium", "high"]),
 });
 
 export const models: Record<
-  'securityReviewer' | 'performanceReviewer' | 'maintainabilityReviewer' | 'summarizer',
+  "securityReviewer" | "performanceReviewer" | "maintainabilityReviewer" | "summarizer",
   LanguageModel
 > = {
-  securityReviewer: openai('gpt-5.4-mini'),
-  performanceReviewer: openai('gpt-5.4-mini'),
-  maintainabilityReviewer: openai('gpt-5.4-mini'),
-  summarizer: openai('gpt-5.4-mini'),
+  securityReviewer: openai("gpt-5.4-mini"),
+  performanceReviewer: openai("gpt-5.4-mini"),
+  maintainabilityReviewer: openai("gpt-5.4-mini"),
+  summarizer: openai("gpt-5.4-mini"),
 } as const;
 
 const codeInput = z.object({ code: z.string() });
@@ -59,23 +59,23 @@ const agent = setupAgent({
   requests: {
     reviewSecurity: {
       schemas: { input: codeInput, output: aspectReviewSchema },
-      model: 'securityReviewer',
+      model: "securityReviewer",
       system:
-        'You are a security reviewer. Identify injection, auth, secret-handling, and unsafe-eval risks. List concrete findings and rate overall severity.',
+        "You are a security reviewer. Identify injection, auth, secret-handling, and unsafe-eval risks. List concrete findings and rate overall severity.",
       prompt: ({ input }) => `Review this code for security issues:\n${input.code}`,
     },
     reviewPerformance: {
       schemas: { input: codeInput, output: aspectReviewSchema },
-      model: 'performanceReviewer',
+      model: "performanceReviewer",
       system:
-        'You are a performance reviewer. Identify hot-path allocations, redundant work, and complexity issues. List concrete findings and rate overall severity.',
+        "You are a performance reviewer. Identify hot-path allocations, redundant work, and complexity issues. List concrete findings and rate overall severity.",
       prompt: ({ input }) => `Review this code for performance issues:\n${input.code}`,
     },
     reviewMaintainability: {
       schemas: { input: codeInput, output: aspectReviewSchema },
-      model: 'maintainabilityReviewer',
+      model: "maintainabilityReviewer",
       system:
-        'You are a maintainability reviewer. Identify naming, structure, and readability problems. List concrete findings and rate overall severity.',
+        "You are a maintainability reviewer. Identify naming, structure, and readability problems. List concrete findings and rate overall severity.",
       prompt: ({ input }) => `Review this code for maintainability issues:\n${input.code}`,
     },
     summarizeCodeReviews: {
@@ -83,8 +83,9 @@ const agent = setupAgent({
         input: z.object({ reviews: z.array(reviewSchema) }),
         output: z.string(),
       },
-      model: 'summarizer',
-      system: 'Summarize multiple per-aspect code reviews into the key actions to take, highest severity first.',
+      model: "summarizer",
+      system:
+        "Summarize multiple per-aspect code reviews into the key actions to take, highest severity first.",
       prompt: ({ input }) => JSON.stringify(input.reviews, null, 2),
     },
   },
@@ -106,7 +107,7 @@ function collectReviews(context: {
 }
 
 export const aiSdkParallelReviewMachine = agent.createMachine({
-  id: 'ai-sdk-parallel-review',
+  id: "ai-sdk-parallel-review",
   context: ({ input }) => ({
     code: input.code,
     security: null,
@@ -116,104 +117,104 @@ export const aiSdkParallelReviewMachine = agent.createMachine({
   }),
   output: ({ context }) => ({
     reviews: collectReviews(context),
-    summary: context.summary ?? '',
+    summary: context.summary ?? "",
   }),
-  initial: 'reviewing',
+  initial: "reviewing",
   states: {
     // The three aspect reviews are independent model calls; `type: 'parallel'`
     // runs them concurrently and only leaves `reviewing` once all three land.
     reviewing: {
-      type: 'parallel',
-      onDone: { target: 'summarizing' },
+      type: "parallel",
+      onDone: { target: "summarizing" },
       states: {
         security: {
-          initial: 'active',
+          initial: "active",
           states: {
             active: {
               invoke: {
-                id: 'reviewSecurity',
-                src: 'reviewSecurity',
+                id: "reviewSecurity",
+                src: "reviewSecurity",
                 input: ({ context }) => ({ code: context.code }),
                 onDone: ({ output }) => ({
-                  target: 'done',
+                  target: "done",
                   context: {
-                    security: { type: 'security' as const, ...output },
+                    security: { type: "security" as const, ...output },
                   },
                 }),
               },
             },
-            done: { type: 'final' },
+            done: { type: "final" },
           },
         },
         performance: {
-          initial: 'active',
+          initial: "active",
           states: {
             active: {
               invoke: {
-                id: 'reviewPerformance',
-                src: 'reviewPerformance',
+                id: "reviewPerformance",
+                src: "reviewPerformance",
                 input: ({ context }) => ({ code: context.code }),
                 onDone: ({ output }) => ({
-                  target: 'done',
+                  target: "done",
                   context: {
-                    performance: { type: 'performance' as const, ...output },
+                    performance: { type: "performance" as const, ...output },
                   },
                 }),
               },
             },
-            done: { type: 'final' },
+            done: { type: "final" },
           },
         },
         maintainability: {
-          initial: 'active',
+          initial: "active",
           states: {
             active: {
               invoke: {
-                id: 'reviewMaintainability',
-                src: 'reviewMaintainability',
+                id: "reviewMaintainability",
+                src: "reviewMaintainability",
                 input: ({ context }) => ({ code: context.code }),
                 onDone: ({ output }) => ({
-                  target: 'done',
+                  target: "done",
                   context: {
-                    maintainability: { type: 'maintainability' as const, ...output },
+                    maintainability: { type: "maintainability" as const, ...output },
                   },
                 }),
               },
             },
-            done: { type: 'final' },
+            done: { type: "final" },
           },
         },
       },
     },
     summarizing: {
       invoke: {
-        id: 'summarizeCodeReviews',
-        src: 'summarizeCodeReviews',
+        id: "summarizeCodeReviews",
+        src: "summarizeCodeReviews",
         input: ({ context }) => ({ reviews: collectReviews(context) }),
         onDone: ({ output }) => ({
-          target: 'done',
+          target: "done",
           context: { summary: output },
         }),
       },
     },
-    done: { type: 'final' },
+    done: { type: "final" },
   },
 });
 
 export async function runAiSdkParallelReviewExample() {
   const result = await runAgent(aiSdkParallelReviewMachine, {
-    input: { code: 'const x = eval(input);' },
+    input: { code: "const x = eval(input);" },
     generateText: createAiSdkTextExecutor({ models }),
   });
-  if (result.status !== 'done') {
+  if (result.status !== "done") {
     throw new Error(`Parallel review example did not complete: ${result.status}`);
   }
   return result.output;
 }
 
-if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   if (!process.env.OPENAI_API_KEY) {
-    console.error('Set OPENAI_API_KEY to run this example.');
+    console.error("Set OPENAI_API_KEY to run this example.");
     process.exit(1);
   }
   console.log(await runAiSdkParallelReviewExample());

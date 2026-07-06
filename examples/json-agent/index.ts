@@ -28,19 +28,19 @@
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/json-agent/index.ts
  */
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { type LanguageModel } from 'ai';
-import { openai } from '@ai-sdk/openai';
-import Ajv from 'ajv';
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { type LanguageModel } from "ai";
+import { openai } from "@ai-sdk/openai";
+import Ajv from "ajv";
 import {
   runAgent,
   setupAgent,
   type AgentWorkflowConfig,
   type SchemaCompiler,
   type StandardSchemaV1,
-} from '../../src/index.js';
-import { createAiSdkExecutors } from '../../src/ai-sdk/index.js';
+} from "../../src/index.js";
+import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
 
 // The Ajv-to-StandardSchema recipe: compile the JSON Schema with Ajv, then
 // wrap the compiled validator as a `StandardSchemaV1`, mapping Ajv's
@@ -50,9 +50,9 @@ const ajvCompiler: SchemaCompiler = (jsonSchema, name): StandardSchemaV1 => {
   const validateFn = ajv.compile(jsonSchema);
 
   return {
-    '~standard': {
+    "~standard": {
       version: 1,
-      vendor: 'ajv',
+      vendor: "ajv",
       validate(value: unknown) {
         if (validateFn(value)) {
           return { value };
@@ -68,17 +68,15 @@ const ajvCompiler: SchemaCompiler = (jsonSchema, name): StandardSchemaV1 => {
   };
 };
 
-const workflowPath = fileURLToPath(new URL('./workflow.json', import.meta.url));
-export const workflowConfig: AgentWorkflowConfig = JSON.parse(
-  readFileSync(workflowPath, 'utf-8')
-);
+const workflowPath = fileURLToPath(new URL("./workflow.json", import.meta.url));
+export const workflowConfig: AgentWorkflowConfig = JSON.parse(readFileSync(workflowPath, "utf-8"));
 
 export const jsonAgentMachine = setupAgent.fromConfig(workflowConfig, {
   compileSchema: ajvCompiler,
 });
 
 function resolveModel(modelRef: string): LanguageModel {
-  return openai(modelRef.replace(/^openai\//, ''));
+  return openai(modelRef.replace(/^openai\//, ""));
 }
 
 export async function runJsonAgentDemo(ticket: string) {
@@ -90,28 +88,28 @@ export async function runJsonAgentDemo(ticket: string) {
     decide,
   });
 
-  if (result.status === 'idle') {
+  if (result.status === "idle") {
     // A human approves the drafted reply — in a real host this is a
     // separate request/process; here we simulate immediate approval.
     result = await runAgent(jsonAgentMachine, {
       snapshot: result.snapshot,
-      event: { type: 'APPROVE' },
+      event: { type: "APPROVE" },
       generateText,
       decide,
     });
   }
 
-  if (result.status !== 'done') {
+  if (result.status !== "done") {
     throw new Error(`JSON agent demo did not complete: ${result.status}`);
   }
 
   return result.output;
 }
 
-if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   if (!process.env.OPENAI_API_KEY) {
-    console.error('Set OPENAI_API_KEY to run this example.');
+    console.error("Set OPENAI_API_KEY to run this example.");
     process.exit(1);
   }
-  console.log(await runJsonAgentDemo('My invoice total looks wrong, please help.'));
+  console.log(await runJsonAgentDemo("My invoice total looks wrong, please help."));
 }

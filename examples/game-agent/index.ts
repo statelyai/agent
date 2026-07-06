@@ -11,10 +11,10 @@
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/game-agent/index.ts
  */
-import { z } from 'zod';
-import { openai } from '@ai-sdk/openai';
-import { type LanguageModel } from 'ai';
-import { createAiSdkExecutors } from '../../src/ai-sdk/index.js';
+import { z } from "zod";
+import { openai } from "@ai-sdk/openai";
+import { type LanguageModel } from "ai";
+import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
 import {
   createAgentSchemas,
   createDecisionLogic,
@@ -22,7 +22,7 @@ import {
   runAgent,
   sendDecision,
   setupAgent,
-} from '../../src/index.js';
+} from "../../src/index.js";
 
 export const turnSummarySchema = z.object({
   summary: z.string(),
@@ -42,13 +42,13 @@ export const gameSchemas = createAgentSchemas({
     enemyHp: z.number().default(15),
   }),
   output: z.object({
-    outcome: z.enum(['continue', 'won', 'lost', 'fled']),
+    outcome: z.enum(["continue", "won", "lost", "fled"]),
     summary: z.string(),
     playerHp: z.number(),
     enemyHp: z.number(),
   }),
   events: {
-    ATTACK: z.object({ target: z.string().default('goblin') }),
+    ATTACK: z.object({ target: z.string().default("goblin") }),
     DEFEND: z.object({}),
     HEAL: z.object({ amount: z.number().min(1).max(8).default(4) }),
     FLEE: z.object({}),
@@ -59,18 +59,13 @@ type GameEventType = keyof typeof gameSchemas.events;
 
 // Annotated with LanguageModel so the exported const has a portable, nameable
 // type (TS2742); model-ref keys are inferred from this map regardless.
-export const models: Record<'moveChooser' | 'turnSummarizer', LanguageModel> = {
-  moveChooser: openai('gpt-5.4-mini'),
-  turnSummarizer: openai('gpt-5.4-mini'),
+export const models: Record<"moveChooser" | "turnSummarizer", LanguageModel> = {
+  moveChooser: openai("gpt-5.4-mini"),
+  turnSummarizer: openai("gpt-5.4-mini"),
 } as const;
 
-const defaultMoveEvents = ['ATTACK', 'DEFEND', 'FLEE'] satisfies GameEventType[];
-const lowHpMoveEvents = [
-  'ATTACK',
-  'DEFEND',
-  'HEAL',
-  'FLEE',
-] satisfies GameEventType[];
+const defaultMoveEvents = ["ATTACK", "DEFEND", "FLEE"] satisfies GameEventType[];
+const lowHpMoveEvents = ["ATTACK", "DEFEND", "HEAL", "FLEE"] satisfies GameEventType[];
 
 export const chooseMove = createDecisionLogic({
   schemas: {
@@ -79,16 +74,15 @@ export const chooseMove = createDecisionLogic({
       enemyHp: z.number(),
     }),
   },
-  model: 'moveChooser',
-  system: 'You are playing a turn-based game. Choose exactly one legal move.',
+  model: "moveChooser",
+  system: "You are playing a turn-based game. Choose exactly one legal move.",
   prompt: ({ input }) =>
     [
       `Player HP: ${input.playerHp}`,
       `Enemy HP: ${input.enemyHp}`,
-      'Pick the best legal move.',
-    ].join('\n'),
-  allowedEvents: ({ input }) =>
-    input.playerHp <= 6 ? lowHpMoveEvents : defaultMoveEvents,
+      "Pick the best legal move.",
+    ].join("\n"),
+  allowedEvents: ({ input }) => (input.playerHp <= 6 ? lowHpMoveEvents : defaultMoveEvents),
 });
 
 export const summarizeTurn = createTextLogic({
@@ -100,14 +94,14 @@ export const summarizeTurn = createTextLogic({
     }),
     output: turnSummarySchema,
   },
-  model: 'turnSummarizer',
-  system: 'Narrate the turn and return updated HP totals.',
+  model: "turnSummarizer",
+  system: "Narrate the turn and return updated HP totals.",
   prompt: ({ input }) =>
     [
       `Player HP: ${input.playerHp}`,
       `Enemy HP: ${input.enemyHp}`,
       `Defended: ${input.defended}`,
-    ].join('\n'),
+    ].join("\n"),
 });
 
 export const gameActors = {
@@ -122,64 +116,64 @@ const gameAgent = setupAgent({
 });
 
 export const gameMachine = gameAgent.createMachine({
-  id: 'turn-based-game-agent',
+  id: "turn-based-game-agent",
   context: ({ input }) => ({
     playerHp: input.playerHp,
     enemyHp: input.enemyHp,
     defended: false,
     lastSummary: null,
   }),
-  initial: 'choosingMove',
+  initial: "choosingMove",
   states: {
     choosingMove: {
       invoke: {
-        id: 'chooseMove',
-        src: 'chooseMove',
+        id: "chooseMove",
+        src: "chooseMove",
         input: ({ context }) => ({
           playerHp: context.playerHp,
           enemyHp: context.enemyHp,
         }),
         onDone: sendDecision(),
-        onError: { target: 'fumbled' },
+        onError: { target: "fumbled" },
       },
       on: {
         ATTACK: ({ context }) => ({
-          target: 'summarizing',
+          target: "summarizing",
           context: {
             enemyHp: Math.max(0, context.enemyHp - 6),
             defended: false,
           },
         }),
         DEFEND: {
-          target: 'summarizing',
+          target: "summarizing",
           context: { defended: true },
         },
         HEAL: ({ context, event }) => ({
-          target: 'summarizing',
+          target: "summarizing",
           context: {
             playerHp: Math.min(20, context.playerHp + event.amount),
             defended: false,
           },
         }),
         FLEE: {
-          target: 'fled',
+          target: "fled",
           context: {
-            lastSummary: 'You fled the encounter.',
+            lastSummary: "You fled the encounter.",
           },
         },
       },
     },
     summarizing: {
       invoke: {
-        id: 'summarizeTurn',
-        src: 'summarizeTurn',
+        id: "summarizeTurn",
+        src: "summarizeTurn",
         input: ({ context }) => ({
           playerHp: context.playerHp,
           enemyHp: context.enemyHp,
           defended: context.defended,
         }),
         onDone: ({ output }) => ({
-          target: 'checkingOutcome',
+          target: "checkingOutcome",
           context: {
             playerHp: output.playerHp,
             enemyHp: output.enemyHp,
@@ -189,49 +183,49 @@ export const gameMachine = gameAgent.createMachine({
       },
     },
     checkingOutcome: {
-      type: 'choice',
+      type: "choice",
       choice: ({ context }) => {
         if (context.enemyHp <= 0) {
-          return { target: 'won' };
+          return { target: "won" };
         }
         if (context.playerHp <= 0) {
-          return { target: 'lost' };
+          return { target: "lost" };
         }
-        return { target: 'done' };
+        return { target: "done" };
       },
     },
     done: {
-      type: 'final',
+      type: "final",
       output: ({ context }) => ({
-        outcome: 'continue',
-        summary: context.lastSummary ?? '',
+        outcome: "continue",
+        summary: context.lastSummary ?? "",
         playerHp: context.playerHp,
         enemyHp: context.enemyHp,
       }),
     },
     won: {
-      type: 'final',
+      type: "final",
       output: ({ context }) => ({
-        outcome: 'won',
-        summary: context.lastSummary ?? 'You won.',
+        outcome: "won",
+        summary: context.lastSummary ?? "You won.",
         playerHp: context.playerHp,
         enemyHp: context.enemyHp,
       }),
     },
     lost: {
-      type: 'final',
+      type: "final",
       output: ({ context }) => ({
-        outcome: 'lost',
-        summary: context.lastSummary ?? 'You lost.',
+        outcome: "lost",
+        summary: context.lastSummary ?? "You lost.",
         playerHp: context.playerHp,
         enemyHp: context.enemyHp,
       }),
     },
     fled: {
-      type: 'final',
+      type: "final",
       output: ({ context }) => ({
-        outcome: 'fled',
-        summary: context.lastSummary ?? 'You fled the encounter.',
+        outcome: "fled",
+        summary: context.lastSummary ?? "You fled the encounter.",
         playerHp: context.playerHp,
         enemyHp: context.enemyHp,
       }),
@@ -240,10 +234,10 @@ export const gameMachine = gameAgent.createMachine({
     // the decision loop stalled, so the encounter ends unresolved
     // (outcome 'continue') rather than as a win/loss/flee.
     fumbled: {
-      type: 'final',
+      type: "final",
       output: ({ context }) => ({
-        outcome: 'continue' as const,
-        summary: context.lastSummary ?? 'The hero fumbled and the moment passed.',
+        outcome: "continue" as const,
+        summary: context.lastSummary ?? "The hero fumbled and the moment passed.",
         playerHp: context.playerHp,
         enemyHp: context.enemyHp,
       }),
@@ -259,7 +253,7 @@ export async function main() {
     ...executors,
   });
 
-  if (result.status !== 'done') {
+  if (result.status !== "done") {
     throw new Error(`Game turn did not complete: ${result.status}`);
   }
   const { outcome, summary, playerHp, enemyHp } = result.output;
@@ -268,9 +262,9 @@ export async function main() {
   console.log(summary);
 }
 
-if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   if (!process.env.OPENAI_API_KEY) {
-    console.error('Set OPENAI_API_KEY to run this example.');
+    console.error("Set OPENAI_API_KEY to run this example.");
     process.exit(1);
   }
   void main();
@@ -287,10 +281,10 @@ gameAgent.createMachine({
   },
   // @ts-expect-error root machine output must match gameSchemas.output
   output: () => ({ wrong: true }),
-  initial: 'probe',
+  initial: "probe",
   states: {
     probe: {
-      type: 'final',
+      type: "final",
       // @ts-expect-error top-level final state output must match gameSchemas.output
       output: () => ({ wrong: true }),
     },
