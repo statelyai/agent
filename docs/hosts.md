@@ -104,10 +104,11 @@ This is backed by real implementations against four runtimes:
 
 ## Observation seams
 
-<!-- onChunk/onResult/onTransition/on signatures from src/run-agent.ts -->
+<!-- onTrace/onChunk/onResult/onTransition/on signatures from src/run-agent.ts -->
 
 `runAgent` exposes purely observational callbacks; they return `void` and cannot control the run:
 
+- **`onTrace(event)`**: one ordered stream of run/request/chunk/transition/emit/end events, with `runId`, `seq`, and `timestamp`. This is the eval trace / JSONL / telemetry-adapter slot.
 - **`onChunk(chunk, info)`**: each streamed chunk of a `mode: 'stream'` request, with the `AgentRequest` that produced it (parallel streams stay distinguishable).
 - **`onResult(request, result)`**: once per resolved text or decision request (decision retries fire per attempt), with the normalized `result.output` and the raw executor result. `result.raw` is whatever your executor returned, verbatim: return `usage` alongside `output` and `onResult` becomes your token meter. The shipped adapter already does this (`raw as AiSdkGenerateResult` carries `usage`, `finishReason`, `toolCalls`, `toolResults`).
 - **`onTransition(snapshot, event)`**: every machine transition, with the new snapshot and the causing event.
@@ -118,6 +119,7 @@ This is backed by real implementations against four runtimes:
 await runAgent(machine, {
   input,
   ...executors,
+  onTrace: (event) => jsonl.write(event),
   onChunk: (chunk, info) => process.stdout.write(chunk),
   onResult: (request, result) => log(request.id, result.raw),
   onTransition: (snapshot, event) => trace(snapshot.value, event.type),
@@ -125,7 +127,7 @@ await runAgent(machine, {
 });
 ```
 
-The split: `onTransition` narrates the machine in xstate's vocabulary (state values, events), for tracing and debugging. `on` narrates in *your* vocabulary: the machine emits domain progress events at moments the author chose, and the host renders them (a progress UI, an SSE stream, a log line). Declare their schemas in `setupAgent` and both `enq.emit(...)` and the `on` handlers are fully typed:
+The split: `onTrace` is the whole ordered run ledger, useful for evals and exports. `onTransition` narrates the machine in xstate's vocabulary (state values, events), for targeted tracing and debugging. `on` narrates in *your* vocabulary: the machine emits domain progress events at moments the author chose, and the host renders them (a progress UI, an SSE stream, a log line). Declare their schemas in `setupAgent` and both `enq.emit(...)` and the `on` handlers are fully typed:
 
 ```ts
 const agent = setupAgent({
@@ -145,7 +147,7 @@ onDone: ({ context, output }, enq) => {
 
 Emitted events are fire-and-forget observation, not control flow: they never target states, and a run behaves identically with no handlers attached.
 
-> **Note:** Tracing and OpenTelemetry are bring-your-own; no exporter ships. Build one on these seams: `onResult` for model calls, `onTransition` for state changes, `on` for domain progress.
+> **Note:** Tracing and OpenTelemetry are bring-your-own; no exporter ships. Build one on `onTrace`, or keep using the narrower seams (`onResult`, `onTransition`, `on`, `onChunk`) when a host wants separate handlers.
 
 ## Testing with deterministic executors
 

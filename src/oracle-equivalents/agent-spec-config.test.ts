@@ -1,6 +1,38 @@
+import Ajv from "ajv";
 import { describe, expect, test } from "vitest";
 import { createActor, createAsyncLogic, waitFor } from "xstate";
-import { initialAgentStep, minimalSchemaCompiler, setupAgent } from "../index.js";
+import {
+  initialAgentStep,
+  setupAgent,
+  type SchemaCompiler,
+  type StandardSchemaV1,
+} from "../index.js";
+
+function ajvCompiler(): SchemaCompiler {
+  const ajv = new Ajv({ strict: false });
+
+  return (jsonSchema, name): StandardSchemaV1 => {
+    const validateFn = ajv.compile(jsonSchema);
+
+    return {
+      "~standard": {
+        version: 1,
+        vendor: "ajv",
+        validate(value: unknown) {
+          if (validateFn(value)) {
+            return { value };
+          }
+          return {
+            issues: (validateFn.errors ?? []).map((error) => ({
+              message: `${name}${error.instancePath} ${error.message}`,
+            })),
+          };
+        },
+        jsonSchema: { input: () => jsonSchema },
+      },
+    };
+  };
+}
 
 describe("Oracle Agent Spec-style static workflows", () => {
   test("adapts branching and data-flow edges to state guards and assignments", () => {
@@ -106,7 +138,7 @@ describe("Oracle Agent Spec-style static workflows", () => {
           },
         },
       },
-      { compileSchema: minimalSchemaCompiler },
+      { compileSchema: ajvCompiler() },
     );
 
     const yesStep = initialAgentStep(machine, {
@@ -264,7 +296,7 @@ describe("Oracle Agent Spec-style static workflows", () => {
             },
           },
         },
-        { compileSchema: minimalSchemaCompiler },
+        { compileSchema: ajvCompiler() },
       )
       .provide({
         actorSources: {

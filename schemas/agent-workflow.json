@@ -167,6 +167,16 @@
             "$ref": "#/$defs/JsonSchema"
           }
         },
+        "emitted": {
+          "type": "object",
+          "description": "Schemas for events emitted outward by emit actions, keyed by emitted event type.",
+          "propertyNames": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonSchema"
+          }
+        },
         "output": {
           "$ref": "#/$defs/JsonSchema"
         },
@@ -317,7 +327,7 @@
         },
         "type": {
           "type": "string",
-          "enum": ["parallel", "history", "final"]
+          "enum": ["parallel", "history", "final", "choice"]
         },
         "initial": {
           "type": "string"
@@ -341,6 +351,10 @@
               }
             }
           ]
+        },
+        "choice": {
+          "description": "Choice-state routing, equivalent to XState's type: 'choice' + choice transition function.",
+          "$ref": "#/$defs/TransitionOrArray"
         },
         "on": {
           "type": "object",
@@ -489,7 +503,6 @@
     },
     "Action": {
       "type": "object",
-      "required": ["type"],
       "properties": {
         "type": {
           "type": "string"
@@ -499,8 +512,13 @@
         },
         "assign": {
           "$ref": "#/$defs/ExpressionObject"
+        },
+        "emit": {
+          "description": "Event emitted outward through runAgent's on handlers.",
+          "$ref": "#/$defs/ExpressionValue"
         }
       },
+      "anyOf": [{ "required": ["type"] }, { "required": ["assign"] }, { "required": ["emit"] }],
       "additionalProperties": {
         "$ref": "#/$defs/ExpressionValue"
       }

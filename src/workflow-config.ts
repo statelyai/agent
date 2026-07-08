@@ -12,7 +12,7 @@ import {
   type AgentSchemaPack,
 } from "./setup-agent.js";
 
-// Minimal JSON Schema shape recognized by `minimalSchemaCompiler`; other compilers may accept the full spec.
+// JSON Schema shape accepted from serializable workflow configs.
 type JsonSchemaObject = {
   type?: string | string[];
   properties?: Record<string, JsonSchemaObject>;
@@ -29,126 +29,13 @@ type JsonSchemaObject = {
  * runtime `StandardSchemaV1` validator. `setupAgent.fromConfig(...)` calls
  * this once per schema in the config (context/events/input/output/meta,
  * request input/output) — bring your own engine (Ajv, @cfworker/json-schema,
- * a compiled-Zod-from-JSON-Schema pipeline, ...) or pass the exported
- * `minimalSchemaCompiler` to explicitly opt into the built-in subset
- * validator.
+ * a compiled-Zod-from-JSON-Schema pipeline, ...). Core intentionally ships no
+ * JSON Schema engine.
  */
 export type SchemaCompiler = (
   jsonSchema: Record<string, unknown>,
   name: string,
 ) => StandardSchemaV1;
-
-/**
- * Built-in, zero-dependency `SchemaCompiler`. Honors ONLY this JSON Schema
- * keyword subset:
- *
- *   - `type` (single string; if an array, only the first entry is checked)
- *   - `properties` / `required` (for `type: 'object'`)
- *   - `items` (for `type: 'array'`)
- *   - `enum`
- *   - `const`
- *
- * Everything else — `anyOf`/`oneOf`/`allOf`/`not`, `pattern`, `format`,
- * `minLength`/`maxLength`, `minimum`/`maximum`, `multipleOf`,
- * `additionalProperties`, `$ref`, and every other JSON Schema keyword — is
- * IGNORED. A value can silently pass validation despite violating a keyword
- * outside this subset. This exists for zero-dependency, low-stakes config
- * boundaries; pass a real JSON Schema engine (e.g. Ajv) as `compileSchema`
- * for anything that needs full JSON Schema semantics.
- */
-export const minimalSchemaCompiler: SchemaCompiler = function minimalSchemaCompiler(
-  schema: Record<string, unknown> | undefined,
-  name = "schema",
-): StandardSchemaV1 {
-  const resolvedSchema = (schema ?? {}) as JsonSchemaObject;
-
-  return {
-    "~standard": {
-      version: 1,
-      vendor: "statelyai-agent-json-schema",
-      validate(value: unknown) {
-        const issues: { message: string }[] = [];
-        validateJsonSchemaValue(resolvedSchema, value, name, issues);
-        return issues.length > 0 ? { issues } : { value };
-      },
-      jsonSchema: {
-        input: () => resolvedSchema,
-      },
-    },
-  };
-};
-
-// Backs `minimalSchemaCompiler`, the built-in opt-in `SchemaCompiler`. JS
-// callers should pass a real Standard Schema validator such as Zod to
-// setupAgent(...); this intentionally covers only the small JSON Schema
-// subset documented on `minimalSchemaCompiler`.
-function validateJsonSchemaValue(
-  schema: JsonSchemaObject,
-  value: unknown,
-  path: string,
-  issues: { message: string }[],
-) {
-  if (schema.const !== undefined && value !== schema.const) {
-    issues.push({ message: `${path} must equal ${JSON.stringify(schema.const)}` });
-    return;
-  }
-
-  if (schema.enum && !schema.enum.some((item) => item === value)) {
-    issues.push({ message: `${path} must be one of ${schema.enum.join(", ")}` });
-    return;
-  }
-
-  const type = Array.isArray(schema.type) ? schema.type[0] : schema.type;
-  if (!type) {
-    return;
-  }
-
-  if (type === "object") {
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-      issues.push({ message: `${path} must be an object` });
-      return;
-    }
-
-    const objectValue = value as Record<string, unknown>;
-    for (const requiredKey of schema.required ?? []) {
-      if (!(requiredKey in objectValue)) {
-        issues.push({ message: `${path}.${requiredKey} is required` });
-      }
-    }
-
-    for (const [key, propertySchema] of Object.entries(schema.properties ?? {})) {
-      if (key in objectValue) {
-        validateJsonSchemaValue(propertySchema, objectValue[key], `${path}.${key}`, issues);
-      }
-    }
-    return;
-  }
-
-  if (type === "array") {
-    if (!Array.isArray(value)) {
-      issues.push({ message: `${path} must be an array` });
-      return;
-    }
-
-    if (schema.items) {
-      value.forEach((item, index) =>
-        validateJsonSchemaValue(schema.items!, item, `${path}[${index}]`, issues),
-      );
-    }
-    return;
-  }
-
-  const ok =
-    (type === "string" && typeof value === "string") ||
-    (type === "number" && typeof value === "number") ||
-    (type === "integer" && Number.isInteger(value)) ||
-    (type === "boolean" && typeof value === "boolean") ||
-    (type === "null" && value === null);
-
-  if (!ok) {
-    issues.push({ message: `${path} must be ${type}` });
-  }
-}
 
 const workflowConfigWholeExpressionPattern = /^\{\{\s*([\s\S]*?)\s*\}\}$/;
 const workflowConfigTemplateExpressionPattern = /\{\{\s*([\s\S]*?)\s*\}\}/g;
@@ -224,6 +111,7 @@ export interface AgentWorkflowConfig {
     input?: JsonSchemaObject;
     context?: JsonSchemaObject;
     events?: Record<string, JsonSchemaObject>;
+    emitted?: Record<string, JsonSchemaObject>;
     output?: JsonSchemaObject;
     meta?: JsonSchemaObject;
   };
@@ -266,9 +154,10 @@ export interface AgentWorkflowActorConfig {
 /** A `states` entry in {@link AgentWorkflowConfig} — the JSON equivalent of an XState state node config. */
 export interface AgentWorkflowStateConfig {
   description?: string;
-  type?: "parallel" | "history" | "final";
+  type?: "parallel" | "history" | "final" | "choice";
   initial?: string;
   states?: Record<string, AgentWorkflowStateConfig>;
+  choice?: AgentWorkflowTransitionConfig | AgentWorkflowTransitionConfig[];
   invoke?: AgentWorkflowInvokeConfig | AgentWorkflowInvokeConfig[];
   on?: Record<string, AgentWorkflowTransitionConfig | AgentWorkflowTransitionConfig[]>;
   always?: AgentWorkflowTransitionConfig | AgentWorkflowTransitionConfig[];
@@ -310,9 +199,10 @@ export interface AgentWorkflowTransitionConfig {
 
 /** An `entry`/`exit`/transition `actions` entry in {@link AgentWorkflowConfig} — either a named action `type` (with template-expression `params`) or a bare context `assign`. */
 export interface AgentWorkflowActionConfig {
-  type: string;
+  type?: string;
   params?: unknown;
   assign?: Record<string, unknown>;
+  emit?: unknown;
   [key: string]: unknown;
 }
 
@@ -336,6 +226,12 @@ function createSchemasFromWorkflowConfig(
       Object.entries(config.schemas?.events ?? {}).map(([key, schema]) => [
         key,
         compileSchema(schema as Record<string, unknown>, `event.${key}`),
+      ]),
+    ),
+    emitted: Object.fromEntries(
+      Object.entries(config.schemas?.emitted ?? {}).map(([key, schema]) => [
+        key,
+        compileSchema(schema as Record<string, unknown>, `emitted.${key}`),
       ]),
     ),
     input: compileSchema((config.schemas?.input ?? {}) as Record<string, unknown>, "input"),
@@ -451,15 +347,31 @@ function lowerWorkflowActions(
   }
 
   const actions = Array.isArray(actionConfig) ? actionConfig : [actionConfig];
-  return actions.map((action) =>
-    action.assign
-      ? createAssignAction(action.assign)
-      : {
-          type: action.type,
-          params: ({ context, event }: { context: unknown; event: unknown }) =>
-            evaluateWorkflowConfigValue(action.params, { context, event }),
-        },
-  );
+  const lowered = actions.map((action) => {
+    if (action.assign !== undefined) {
+      return createAssignAction(action.assign);
+    }
+
+    if (action.emit !== undefined) {
+      return (
+        { context, event }: { context: unknown; event: unknown },
+        enq: { emit: (event: unknown) => void },
+      ) => {
+        enq.emit(evaluateWorkflowConfigValue(action.emit, { context, event }));
+      };
+    }
+
+    if (!action.type) {
+      throw new Error("setupAgent.fromConfig: action must declare 'type', 'assign', or 'emit'.");
+    }
+
+    return {
+      type: action.type,
+      params: ({ context, event }: { context: unknown; event: unknown }) =>
+        evaluateWorkflowConfigValue(action.params, { context, event }),
+    };
+  });
+  return Array.isArray(actionConfig) ? lowered : lowered[0];
 }
 
 // Evaluates a transition config's `guard` (string template expression, guard function, or omitted ⇒ always matches).
@@ -509,9 +421,10 @@ function lowerWorkflowTransitionResult(
 function lowerWorkflowTransition(transitionConfig: AgentWorkflowTransitionConfig) {
   return ({ context, event }: { context: unknown; event: unknown }) => {
     const scope = { context, event };
-    return workflowTransitionMatches(transitionConfig, scope)
-      ? lowerWorkflowTransitionResult(transitionConfig, scope)
-      : undefined;
+    if (!workflowTransitionMatches(transitionConfig, scope)) {
+      return undefined;
+    }
+    return lowerWorkflowTransitionResult(transitionConfig, scope);
   };
 }
 
@@ -529,7 +442,10 @@ function lowerWorkflowTransitionOrArray(
         const transition = transitionConfig.find((candidate) =>
           workflowTransitionMatches(candidate, scope),
         );
-        return transition ? lowerWorkflowTransitionResult(transition, scope) : undefined;
+        if (!transition) {
+          return undefined;
+        }
+        return lowerWorkflowTransitionResult(transition, scope);
       }
     : lowerWorkflowTransition(transitionConfig);
 }
@@ -584,6 +500,9 @@ function lowerWorkflowState(stateConfig: AgentWorkflowStateConfig): Record<strin
             ]),
           ),
         }
+      : {}),
+    ...(stateConfig.choice !== undefined
+      ? { choice: lowerWorkflowTransitionOrArray(stateConfig.choice) }
       : {}),
     ...(stateConfig.invoke !== undefined
       ? {
@@ -640,9 +559,8 @@ export function setupAgentFromConfig(
     throw new Error(
       "setupAgent.fromConfig(...) requires a 'compileSchema' option: " +
         "{ compileSchema: (jsonSchema, name) => StandardSchemaV1 }. Bring your own JSON " +
-        "Schema engine (Ajv, @cfworker/json-schema, ...), or pass the exported " +
-        "`minimalSchemaCompiler` to explicitly opt into the built-in subset validator " +
-        "(type/properties/required/items/enum/const only — everything else is ignored).",
+        "Schema engine (Ajv, @cfworker/json-schema, a compiled-Zod-from-JSON-Schema " +
+        "pipeline, ...). Core intentionally ships no JSON Schema engine.",
     );
   }
 
@@ -683,9 +601,8 @@ export function setupAgentFromConfig(
 export interface FromConfigOptions {
   /**
    * Compile a JSON Schema from the config into a runtime validator. Bring
-   * your own engine (Ajv, @cfworker/json-schema, ...) or pass the exported
-   * `minimalSchemaCompiler` to explicitly opt into the built-in subset
-   * validator (type/properties/required/items/enum/const only).
+   * your own engine (Ajv, @cfworker/json-schema, a compiled-Zod-from-JSON-Schema
+   * pipeline, ...). Core intentionally ships no JSON Schema engine.
    */
   compileSchema: SchemaCompiler;
 }

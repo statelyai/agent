@@ -24,7 +24,6 @@ export {
   transitionResult,
 } from "./steps.js";
 export { runAgent } from "./run-agent.js";
-export { minimalSchemaCompiler } from "./workflow-config.js";
 export { getStateMeta, validateSchemaSync } from "./utils.js";
 export { assistantMessage, systemMessage, toolMessage, userMessage } from "./utils.js";
 
@@ -59,6 +58,7 @@ export type {
 } from "./events.js";
 export type { AgentRequest, AgentStep, AgentStepRequest } from "./steps.js";
 export type {
+  AgentTraceEvent,
   AgentUserInputExecutor,
   PendingUserInput,
   RunAgentOptions,

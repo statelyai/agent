@@ -54,6 +54,63 @@ export interface AgentUserInputExecutor {
   (input: AgentUserInput): PromiseLike<unknown>;
 }
 
+export type AgentTraceEvent<TMachine extends AnyStateMachine = AnyStateMachine> = {
+  runId: string;
+  seq: number;
+  timestamp: string;
+} & (
+  | {
+      type: "run.start";
+      input?: InputFrom<TMachine>;
+      snapshot?: Snapshot<unknown>;
+      event?: EventFromLogic<TMachine>;
+    }
+  | { type: "request.start"; request: AgentStepRequest }
+  | {
+      type: "request.end";
+      request: AgentStepRequest;
+      output: unknown;
+      raw: unknown;
+    }
+  | { type: "request.error"; request: AgentStepRequest; error: unknown }
+  | { type: "stream.chunk"; request: AgentRequest; chunk: string }
+  | {
+      type: "machine.transition";
+      snapshot: SnapshotFrom<TMachine>;
+      event: EventFromLogic<TMachine>;
+    }
+  | { type: "emit"; event: EmittedFrom<TMachine> }
+  | (
+      | {
+          type: "run.end";
+          status: "done";
+          output: OutputFrom<TMachine>;
+          snapshot: SnapshotFrom<TMachine>;
+        }
+      | {
+          type: "run.end";
+          status: "idle";
+          snapshot: SnapshotFrom<TMachine>;
+          pendingUserInputs?: PendingUserInput[];
+          persistedSnapshot?: Snapshot<unknown>;
+        }
+      | {
+          type: "run.end";
+          status: "error";
+          cause: "aborted" | "max-model-calls" | "machine";
+          error: unknown;
+          snapshot: SnapshotFrom<TMachine>;
+        }
+    )
+);
+
+type AgentTraceEventPayload<TMachine extends AnyStateMachine = AnyStateMachine> =
+  AgentTraceEvent<TMachine> extends infer TEvent
+    ? TEvent extends unknown
+      ? Omit<TEvent, "runId" | "seq" | "timestamp">
+      : never
+    : never;
+
 /**
  * Options for {@link runAgent}. Extends {@link AgentRequestExecutors}
  * (`generateText` required; `streamText`/`decide` required only if the
@@ -93,6 +150,8 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine>
   onChunk?: (chunk: string, info: { request: AgentRequest }) => void;
   /** Fires once per resolved text/decision request with its normalized output and the raw executor result (tool calls, usage, …) — the seam for tracing/observability and event-sourced replay logging. */
   onResult?: (request: AgentStepRequest, result: { output: unknown; raw: unknown }) => void;
+  /** Fires a single ordered stream of run/request/chunk/transition/emit/end events. Intended for eval traces, JSONL logs, and adapter-owned telemetry/exporters. */
+  onTrace?: (event: AgentTraceEvent<TMachine>) => void;
   /**
    * Fires on every machine transition (snapshot + causing event). Pure
    * observation — progress UIs, logging, tracing. Cannot send events.
@@ -173,6 +232,8 @@ export type RunAgentResult<TMachine extends AnyStateMachine> =
     };
 
 // Thrown internally by consumeModelCall() past the budget; caught by runAgent's settle loop to produce a 'max-model-calls' error result.
+let nextRunAgentTraceId = 1;
+
 class MaxModelCallsExceededError extends Error {
   constructor() {
     super("runAgent exceeded maxModelCalls.");
@@ -452,6 +513,7 @@ interface RunAgentBindContext {
   decide?: AgentDecisionExecutor;
   onChunk?: (chunk: string, info: { request: AgentRequest }) => void;
   onResult?: (request: AgentStepRequest, result: { output: unknown; raw: unknown }) => void;
+  onTrace?: (event: AgentTraceEventPayload) => void;
   consumeModelCall: () => void;
   /** Assigned right after createActor (§2.6); read lazily by decision wraps. */
   actorHolder: { actorRef: AnyActorRef | undefined };
@@ -494,17 +556,25 @@ function wrapTextLogicForRunAgent(logic: TextLogic, runCtx: RunAgentBindContext)
     };
 
     runCtx.consumeModelCall();
-    const raw = await executor(requestWithTools, {
-      onChunk: runCtx.onChunk
-        ? (chunk: string) => runCtx.onChunk!(chunk, { request: agentRequest })
-        : undefined,
-      signal,
-    });
-    const output = await normalizeGeneratorResult(raw, id);
+    runCtx.onTrace?.({ type: "request.start", request: agentRequest });
+    try {
+      const raw = await executor(requestWithTools, {
+        onChunk: (chunk: string) => {
+          runCtx.onTrace?.({ type: "stream.chunk", request: agentRequest, chunk });
+          runCtx.onChunk?.(chunk, { request: agentRequest });
+        },
+        signal,
+      });
+      const output = await normalizeGeneratorResult(raw, id);
 
-    runCtx.onResult?.(agentRequest, { output, raw });
+      runCtx.onResult?.(agentRequest, { output, raw });
+      runCtx.onTrace?.({ type: "request.end", request: agentRequest, output, raw });
 
-    return { output };
+      return { output };
+    } catch (error) {
+      runCtx.onTrace?.({ type: "request.error", request: agentRequest, error });
+      throw error;
+    }
   });
 }
 
@@ -559,9 +629,21 @@ function createRunAgentDecisionLogic(
 
       const countingDecide: AgentDecisionExecutor = async (attemptRequest) => {
         runCtx.consumeModelCall();
-        const result = await runCtx.decide!(attemptRequest);
-        runCtx.onResult?.(attemptRequest, { output: result.event, raw: result });
-        return result;
+        runCtx.onTrace?.({ type: "request.start", request: attemptRequest });
+        try {
+          const result = await runCtx.decide!(attemptRequest);
+          runCtx.onResult?.(attemptRequest, { output: result.event, raw: result });
+          runCtx.onTrace?.({
+            type: "request.end",
+            request: attemptRequest,
+            output: result.event,
+            raw: result,
+          });
+          return result;
+        } catch (error) {
+          runCtx.onTrace?.({ type: "request.error", request: attemptRequest, error });
+          throw error;
+        }
       };
 
       return resolveDecision(request, countingDecide, {
@@ -623,6 +705,17 @@ export async function runAgent<TMachine extends AnyStateMachine>(
   const maxModelCalls = options.maxModelCalls ?? 100;
   let modelCallCount = 0;
   let budgetExceeded = false;
+  const runId = `run_${nextRunAgentTraceId++}`;
+  let traceSeq = 0;
+
+  const onTrace = (event: AgentTraceEventPayload<TMachine>) => {
+    options.onTrace?.({
+      runId,
+      seq: ++traceSeq,
+      timestamp: new Date().toISOString(),
+      ...event,
+    } as AgentTraceEvent<TMachine>);
+  };
 
   const consumeModelCall = () => {
     if (budgetExceeded) {
@@ -657,6 +750,7 @@ export async function runAgent<TMachine extends AnyStateMachine>(
     decide: options.decide,
     onChunk: options.onChunk,
     onResult: options.onResult,
+    onTrace: onTrace as RunAgentBindContext["onTrace"],
     consumeModelCall,
     actorHolder,
     schemas: getRegisteredAgentExecutionOptions(machine).schemas,
@@ -730,6 +824,7 @@ export async function runAgent<TMachine extends AnyStateMachine>(
       if (options.signal) {
         options.signal.removeEventListener("abort", onAbort);
       }
+      onTrace({ type: "run.end", ...result } as AgentTraceEventPayload<TMachine>);
       actor.stop();
       resolvePromise(result);
     };
@@ -787,6 +882,12 @@ export async function runAgent<TMachine extends AnyStateMachine>(
 
         const snapshot = event.snapshot as AnyMachineSnapshot;
 
+        onTrace({
+          type: "machine.transition",
+          snapshot: snapshot as SnapshotFrom<TMachine>,
+          event: event.event as EventFromLogic<TMachine>,
+        });
+
         options.onTransition?.(
           snapshot as SnapshotFrom<TMachine>,
           event.event as EventFromLogic<TMachine>,
@@ -836,6 +937,9 @@ export async function runAgent<TMachine extends AnyStateMachine>(
 
     // Emitted-event handlers (`options.on`), registered before start so
     // events emitted during the initial transition are not missed.
+    actor.on("*", (event) => {
+      onTrace({ type: "emit", event: event as EmittedFrom<TMachine> });
+    });
     for (const [type, handler] of Object.entries(options.on ?? {})) {
       if (typeof handler === "function") {
         actor.on(type as never, handler as never);
@@ -854,6 +958,13 @@ export async function runAgent<TMachine extends AnyStateMachine>(
       }
       options.signal.addEventListener("abort", onAbort);
     }
+
+    onTrace({
+      type: "run.start",
+      ...(options.input !== undefined ? { input: options.input } : {}),
+      ...(options.snapshot !== undefined ? { snapshot: options.snapshot } : {}),
+      ...(options.event !== undefined ? { event: options.event } : {}),
+    });
 
     actor.start();
     if (options.event) {

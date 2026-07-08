@@ -11,6 +11,7 @@ import {
   type AgentDecisionRequest,
   type AgentTextRequest,
   type AgentTools,
+  type AgentTraceEvent,
   type ChosenEvent,
 } from "./index.js";
 
@@ -1383,6 +1384,92 @@ describe("emitted events (runAgent `on`)", () => {
     });
 
     expect(seen).toEqual(["DRAFTING_STARTED", "DRAFTED"]);
+  });
+
+  test("onTrace emits an ordered run/request/transition/emit/end stream", async () => {
+    const trace: AgentTraceEvent<typeof machine>[] = [];
+
+    const result = await runAgent(machine, {
+      input: { topic: "rivers" },
+      generateText: async () => ({ output: "a draft", usage: { totalTokens: 3 } }),
+      onTrace: (event) => trace.push(event),
+    });
+
+    expect(result.status).toBe("done");
+    expect(trace.map((event) => event.seq)).toEqual(trace.map((_, index) => index + 1));
+    expect(trace[0]).toEqual(expect.objectContaining({ type: "run.start", seq: 1 }));
+    expect(trace.at(-1)).toEqual(expect.objectContaining({ type: "run.end", status: "done" }));
+    expect(trace.map((event) => event.type)).toEqual(
+      expect.arrayContaining([
+        "emit",
+        "machine.transition",
+        "request.start",
+        "request.end",
+        "run.end",
+      ]),
+    );
+    expect(trace.filter((event) => event.type === "emit").map((event) => event.event.type)).toEqual(
+      ["DRAFTING_STARTED", "DRAFTED"],
+    );
+    expect(trace.find((event) => event.type === "request.end")).toEqual(
+      expect.objectContaining({
+        type: "request.end",
+        output: "a draft",
+        raw: { output: "a draft", usage: { totalTokens: 3 } },
+      }),
+    );
+  });
+});
+
+describe("onTrace stream chunks", () => {
+  test("stream chunks are traced with their request", async () => {
+    const agent = setupAgent({
+      context: z.object({ joke: z.string().nullable() }),
+      output: z.object({ joke: z.string() }),
+      requests: {
+        joke: {
+          schemas: { input: z.object({}), output: z.string() },
+          model: "m",
+          mode: "stream",
+          prompt: () => "joke",
+        },
+      },
+    });
+
+    const machine = agent.createMachine({
+      context: { joke: null },
+      initial: "writing",
+      states: {
+        writing: {
+          invoke: {
+            src: "joke",
+            input: () => ({}),
+            onDone: ({ output }) => ({ target: "done", context: { joke: output } }),
+          },
+        },
+        done: { type: "final", output: ({ context }) => ({ joke: context.joke ?? "" }) },
+      },
+    });
+
+    const trace: AgentTraceEvent<typeof machine>[] = [];
+    const result = await runAgent(machine, {
+      streamText: async (_request, info) => {
+        info?.onChunk?.("a");
+        info?.onChunk?.("b");
+        return { output: "ab" };
+      },
+      onTrace: (event) => trace.push(event),
+    });
+
+    expect(result.status).toBe("done");
+    expect(
+      trace
+        .filter((event) => event.type === "stream.chunk")
+        .map((event) => [event.chunk, event.request.src]),
+    ).toEqual([
+      ["a", "joke"],
+      ["b", "joke"],
+    ]);
   });
 });
 

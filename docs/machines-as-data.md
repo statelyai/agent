@@ -7,7 +7,7 @@ description: Author an agent machine as a JSON or YAML config and lower it into 
 
 <!-- setupAgent.fromConfig lowering from src/workflow-config.ts -->
 
-An agent machine can be pure data. Describe it as a JSON or YAML config and hand it to `setupAgent.fromConfig(...)`. The lowering produces the same kind of runnable XState machine that `setupAgent(...)` builds by hand: states, transitions with guard expressions, text requests, decisions, and human/idle steps included. Only the authoring format changes.
+An agent machine can be pure data. Describe it as a JSON or YAML config and hand it to `setupAgent.fromConfig(...)`. The lowering produces the same kind of runnable XState machine that `setupAgent(...)` builds by hand: states, choice routing, transitions with guard expressions, emitted progress events, text requests, decisions, and human/idle steps included. Only the authoring format changes.
 
 ```ts
 import { setupAgent } from '@statelyai/agent';
@@ -27,7 +27,7 @@ The package ships a JSON Schema for validating and editing configs:
 import workflowSchema from '@statelyai/agent/agent-workflow.json';
 ```
 
-Point an editor, form generator, or validation step at it to catch a malformed config before it reaches `fromConfig(...)`. It describes the whole config surface: `schemas`, `context`, `requests`, `actors`, `initial`, and `states`, down to transitions, invokes, and actions.
+Point an editor, form generator, or validation step at it to catch a malformed config before it reaches `fromConfig(...)`. It describes the whole config surface: `schemas` (including `events` and `emitted`), `context`, `requests`, `actors`, `initial`, and `states`, down to choice states, transitions, invokes, and actions.
 
 ## Running example: a support ticket
 
@@ -61,6 +61,11 @@ schemas:
       resolution: { type: string }
       reply: { type: string }
     required: [resolution]
+  emitted:
+    TRIAGED:
+      type: object
+      properties: { route: { type: string } }
+      required: [route]
 context:
   ticket: "{{ input.ticket }}"
 requests:
@@ -91,8 +96,13 @@ states:
         target: resolved
         assign: { resolution: escalated }
     on:
-      ESCALATE: { target: resolved, assign: { resolution: escalated } }
-      REPLY: { target: drafting }
+      ESCALATE:
+        target: resolved
+        assign: { resolution: escalated }
+        actions: { emit: { type: TRIAGED, route: escalated } }
+      REPLY:
+        target: drafting
+        actions: { emit: { type: TRIAGED, route: reply } }
   drafting:
     invoke:
       id: draft
@@ -118,7 +128,9 @@ states:
 
 A config carries JSON Schemas (context, events, input, output, and each request's input/output), and those need a runtime validator. The library bundles no JSON Schema engine, so it does not guess how strictly to validate: you bring the engine. `compileSchema` takes a JSON Schema object and a name and returns a Standard Schema validator; `fromConfig(...)` calls it once per schema.
 
-Wire up Ajv when correctness matters:
+`fromConfig` requires a `compileSchema` option. Core intentionally ships no
+JSON Schema engine; bring Ajv, @cfworker/json-schema, or another compiler that
+returns Standard Schema. Ajv recipe:
 
 ```ts
 import Ajv from 'ajv';
@@ -142,16 +154,6 @@ const ajvCompileSchema: SchemaCompiler = (jsonSchema, name): StandardSchemaV1 =>
 
 const machine = setupAgent.fromConfig(config, { compileSchema: ajvCompileSchema });
 ```
-
-For a zero-dependency, low-stakes config boundary, opt into the built-in subset validator:
-
-```ts
-import { minimalSchemaCompiler, setupAgent } from '@statelyai/agent';
-
-const machine = setupAgent.fromConfig(config, { compileSchema: minimalSchemaCompiler });
-```
-
-> **Warning:** `minimalSchemaCompiler` honors only `type`, `properties`, `required`, `items`, `enum`, and `const`. Everything else (`pattern`, `format`, `minLength`, `additionalProperties`, `$ref`, `anyOf`, and the rest) is **silently ignored**, so a value can pass while violating those keywords. Use a real engine like Ajv when you need full JSON Schema semantics.
 
 ## Expressions
 
@@ -180,6 +182,28 @@ states:
 ```
 
 Delivery of the chosen event is automatic. TypeScript authoring writes `onDone: sendDecision()`, but JSON cannot express a function, so the lowering wires it up; declaring `onDone` on an `agent.decide` invoke is an error. Only `onError` (retries exhausted) is configurable.
+
+## Choice states and emitted events
+
+Use `type: choice` plus `choice:` for pure routing states, matching TypeScript `type: 'choice'` authoring:
+
+```yaml
+states:
+  checking:
+    type: choice
+    choice:
+      - guard: "{{ context.score }}"
+        target: passed
+      - target: failed
+  passed:
+    entry: { emit: { type: SCORED, value: "{{ context.score }}" } }
+    type: final
+  failed:
+    entry: { emit: { type: SCORED, value: "{{ context.score }}" } }
+    type: final
+```
+
+Declare emitted event payloads under `schemas.emitted`. Hosts receive them through `runAgent(..., { on: { SCORED: handler } })`, the same as hand-authored machines using `enq.emit(...)`.
 
 ## Honest limits
 

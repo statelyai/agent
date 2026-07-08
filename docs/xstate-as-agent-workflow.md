@@ -159,28 +159,36 @@ if (result.status === 'done') console.log(result.output.haiku);
 
 The machine can be a **next-step decider** instead of a runner. You own the loop; the machine only tells you what to do next. This is what durable hosts (Temporal, queues, Workflows) want: one model call per checkpoint, everything resumable.
 
-The step helpers come pre-bound on the `agent` object from `setupAgent`:
+The step helpers are free functions. Machines created by `setupAgent` carry
+their registered schemas/actors, so the helpers do not need extra options in
+normal use:
 
 ```ts
-import { executeAgentRequest, resolveDecision } from '@statelyai/agent';
+import {
+  executeAgentRequest,
+  initialAgentStep,
+  resolveAgentStep,
+  resolveDecision,
+  transitionAgentStep,
+} from '@statelyai/agent';
 
 const executors = createAiSdkExecutors({ models });
 
-let step = agent.initial(haikuMachine, { topic: 'state machines' });
+let step = initialAgentStep(haikuMachine, { topic: 'state machines' });
 
 while (!step.done) {
   for (const request of step.requests) {
     if (request.kind === 'text') {
       // "produce a value" -> apply the output as the invoke's done event
       const output = await executeAgentRequest(request, executors);
-      step = agent.resolve(haikuMachine, step, request, output);
+      step = resolveAgentStep(haikuMachine, step, request, output);
     } else {
       // "choose an event" -> the request already carries the snapshot-legal
       // candidate events; resolveDecision validates + retries the choice.
       const event = await resolveDecision(request, executors.decide, {
         canTake: (e) => step.snapshot.can(e),
       });
-      step = agent.transition(haikuMachine, step, event);
+      step = transitionAgentStep(haikuMachine, step, event);
     }
   }
 }
@@ -280,7 +288,7 @@ Same machine graph as Version 1, but now the machine is pure control flow and th
 
 The strongest form of the claim: the machine need not know about this library **at all**. Any machine whose invokes resolve to values, and whose events you can enumerate, is drivable.
 
-- **`setupAgent` is optional.** It registers the four `agent.*` builtins and the schema pack, and hands you pre-bound step helpers. Without it, use the free functions and bind sources with `machine.provide`.
+- **`setupAgent` is optional.** It registers the four `agent.*` builtins and the schema pack. Without it, use the free functions with explicit options and bind sources with `machine.provide`.
 - For a decision, you don't need `agent.decide` either. Any state that waits on events is a decision point: enumerate the legal events with `getAcceptedEvents(snapshot)`, and let the model choose one with `resolveDecision`, gated by `snapshot.can(event)`.
 
 ```ts
@@ -304,7 +312,7 @@ A rough, hand-written v5 machine works because the contract is minimal: **invoke
 Because the shape carries no LLM assumptions, the same definition round-trips through non-code representations. `setupAgent.fromConfig` builds a machine from serializable JSON — the kind a database, a visual editor, or an LLM could emit:
 
 ```ts
-const machine = setupAgent.fromConfig(workflowJson, { compileSchema: minimalSchemaCompiler });
+const machine = setupAgent.fromConfig(workflowJson, { compileSchema });
 await runAgent(machine, { input, ...executors });
 ```
 
@@ -317,8 +325,8 @@ That closes the loop: **the machine is the portable artifact.** Prompts embedded
 
 ## API reference
 
-- **`setupAgent(config)`** — schema-first `setup()`. Registers `agent.generateText` / `streamText` / `decide` / `userInput` builtins; returns `createMachine` plus pre-bound step helpers (`initial` / `transition` / `resolve` / `getRequests`).
-- **`runAgent(machine, { input, generateText, decide, streamText?, actorSources?, userInput?, signal?, maxModelCalls?, snapshot?, event? })`** — runs to `done | idle | error`. Resume from `idle` by passing `{ snapshot, event }` back in.
+- **`setupAgent(config)`** — schema-first `setup()`. Registers `agent.generateText` / `streamText` / `decide` / `userInput` builtins; returns `createMachine` plus `schemas`, `models`, `requests`, and `appendMessages`.
+- **`runAgent(machine, { input, generateText, decide, streamText?, actorSources?, userInput?, signal?, maxModelCalls?, snapshot?, event?, onTrace? })`** — runs to `done | idle | error`. Resume from `idle` by passing `{ snapshot, event }` back in.
 - **`createTextLogic(config)`** / **`createDecisionLogic(config)`** — reusable "produce a value" / "choose an event" actor sources. `system`/`prompt`/`model`/`allowedEvents` can each be static or `({ input }) => value`.
 - **Step path** — `initialAgentStep` / `transitionAgentStep` / `resolveAgentStep` / `getMachineAgentRequests`, `executeAgentRequest` (text), `resolveDecision` (decision), `getAcceptedEvents` (enumerate legal events), `sendDecision()` (deliver a chosen event from an `agent.decide` `onDone`).
 - **`createAiSdkExecutors({ models })`** — returns `{ generateText, streamText, decide }` from a Vercel AI SDK model map. Spread into `runAgent` or pass to the step helpers.

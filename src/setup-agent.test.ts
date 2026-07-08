@@ -15,7 +15,6 @@ import {
   initialAgentStep,
   isStructuredOutputSchema,
   messagesSchema,
-  minimalSchemaCompiler,
   parseOutput,
   resolveAgentStep,
   resolveDecision,
@@ -548,7 +547,7 @@ describe("setupAgent", () => {
     });
   });
 
-  test("provided agent machines preserve step helpers", () => {
+  test("provided agent machines preserve registered options for free step helpers", () => {
     const agent = setupAgent({
       context: z.object({ prompt: z.string() }),
       input: z.object({ prompt: z.string() }),
@@ -580,9 +579,7 @@ describe("setupAgent", () => {
     const provided = machine.provide({ actorSources: {} });
     const step = initialAgentStep(provided, { prompt: "hello" });
 
-    expect(agent.getRequests(provided, step.actions, step.snapshot)).toHaveLength(1);
-    expect(typeof agent.execute).toBe("function");
-    expect(typeof agent.resolve).toBe("function");
+    expect(getMachineAgentRequests(provided, step.actions, step.snapshot)).toHaveLength(1);
   });
 
   test("agent machine step execution validates request output schemas", async () => {
@@ -1512,15 +1509,6 @@ describe("setupAgent", () => {
         states: { done: { type: "final" } },
       }),
     ).toThrow(/compileSchema/);
-    expect(() =>
-      // @ts-expect-error — compileSchema is required, this is the point of the test
-      setupAgent.fromConfig({
-        id: "missing-compiler",
-        context: {},
-        initial: "done",
-        states: { done: { type: "final" } },
-      }),
-    ).toThrow(/minimalSchemaCompiler/);
   });
 
   test("fromConfig + Ajv compileSchema: real JSON Schema validation runs end to end", async () => {
@@ -1588,11 +1576,9 @@ describe("setupAgent", () => {
     });
   });
 
-  test("fromConfig + Ajv compileSchema: rejects a `pattern`/`minLength` violation the minimal validator would silently pass", () => {
-    // `context` is validated eagerly via `validateSchemaSync` when the
-    // machine takes its initial transition, so a `pattern`/`minLength`
-    // violation on it is where the two compilers' behavior diverges
-    // observably.
+  test("fromConfig + Ajv compileSchema: rejects a `pattern`/`minLength` violation", () => {
+    // `context` is validated eagerly via `validateSchemaSync` when the machine
+    // takes its initial transition, so this proves the supplied compiler is used.
     const configWithPattern = {
       id: "ajv-teeth-proof",
       schemas: {
@@ -1609,19 +1595,6 @@ describe("setupAgent", () => {
       states: { done: { type: "final" as const, output: { email: "{{ context.email }}" } } },
     };
 
-    // The minimal built-in validator only checks `type` for strings — it has
-    // no idea what `pattern` or `minLength` mean, so an invalid email
-    // silently passes.
-    const minimalMachine = setupAgent.fromConfig(configWithPattern, {
-      compileSchema: minimalSchemaCompiler,
-    });
-    const minimalStep = initialAgentStep(minimalMachine, { email: "not-an-email" });
-    expect(minimalStep.done).toBe(true);
-    expect(minimalStep.snapshot.output).toEqual({ email: "not-an-email" });
-
-    // A real JSON Schema engine (Ajv) honors `pattern`/`minLength` and
-    // rejects the same input — this is the proof the compileSchema
-    // requirement has teeth.
     const ajvMachine = setupAgent.fromConfig(configWithPattern, {
       compileSchema: ajvCompiler(),
     });
@@ -1704,7 +1677,7 @@ describe("setupAgent", () => {
           },
         },
       },
-      { compileSchema: minimalSchemaCompiler },
+      { compileSchema: ajvCompiler() },
     );
 
     let step = initialAgentStep(machine, { question: "Why statecharts?" });
@@ -1740,6 +1713,75 @@ describe("setupAgent", () => {
 
     expect(step.done).toBe(true);
     expect(step.snapshot.output).toEqual({ answer: "Because logic matters." });
+  });
+
+  test("fromConfig lowers JSON choice states and emitted events", async () => {
+    const machine = setupAgent.fromConfig(
+      {
+        id: "json-choice-emits",
+        schemas: {
+          input: {
+            type: "object",
+            properties: { score: { type: "number" } },
+            required: ["score"],
+          },
+          context: {
+            type: "object",
+            properties: { score: { type: "number" } },
+            required: ["score"],
+          },
+          output: {
+            type: "object",
+            properties: { passed: { type: "boolean" } },
+            required: ["passed"],
+          },
+          emitted: {
+            SCORED: {
+              type: "object",
+              properties: { value: { type: "number" } },
+              required: ["value"],
+            },
+          },
+        },
+        context: { score: "{{ input.score }}" },
+        initial: "checking",
+        states: {
+          checking: {
+            type: "choice",
+            choice: [
+              {
+                guard: "{{ context.score }}",
+                target: "passed",
+              },
+              {
+                target: "failed",
+              },
+            ],
+          },
+          passed: {
+            entry: { emit: { type: "SCORED", value: "{{ context.score }}" } },
+            type: "final",
+            output: { passed: true },
+          },
+          failed: {
+            entry: { emit: { type: "SCORED", value: "{{ context.score }}" } },
+            type: "final",
+            output: { passed: false },
+          },
+        },
+      },
+      { compileSchema: ajvCompiler() },
+    );
+
+    const emitted: unknown[] = [];
+    const result = await runAgent(machine, {
+      input: { score: 1 },
+      on: { "*": (event) => emitted.push(event) },
+    });
+
+    expect(result.status).toBe("done");
+    expect(result.status === "done" && result.output).toEqual({ passed: true });
+    expect(emitted).toEqual([{ type: "SCORED", value: 1 }]);
   });
 
   test("fromConfig + runAgent: pure-JSON text request workflow runs end to end", async () => {
@@ -1804,7 +1846,7 @@ describe("setupAgent", () => {
           },
         },
       },
-      { compileSchema: minimalSchemaCompiler },
+      { compileSchema: ajvCompiler() },
     );
 
     const result = await runAgent(machine, {
@@ -1868,7 +1910,7 @@ describe("setupAgent", () => {
           fumbled: {},
         },
       },
-      { compileSchema: minimalSchemaCompiler },
+      { compileSchema: ajvCompiler() },
     );
 
     const result = await runAgent(machine, {
@@ -1943,7 +1985,7 @@ describe("setupAgent", () => {
           },
         },
       },
-      { compileSchema: minimalSchemaCompiler },
+      { compileSchema: ajvCompiler() },
     );
 
     const generateText = async () => ({ output: { draft: "Hello world." } });
@@ -1989,7 +2031,7 @@ describe("setupAgent", () => {
             asked: {},
           },
         },
-        { compileSchema: minimalSchemaCompiler },
+        { compileSchema: ajvCompiler() },
       ),
     ).toThrow(/decision delivery is automatic/i);
   });
@@ -2087,7 +2129,7 @@ describe("setupAgent", () => {
             },
           },
         },
-        { compileSchema: minimalSchemaCompiler },
+        { compileSchema: ajvCompiler() },
       )
       .provide({
         actorSources: {

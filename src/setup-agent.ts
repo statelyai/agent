@@ -1,17 +1,14 @@
 import {
   setup,
   type AnyActorLogic,
-  type AnyMachineSnapshot,
   type AnySetupConfig,
   type AnyStateMachine,
   type AsyncActorLogic,
-  type EventFromLogic,
   type EventObject,
   type MachineContext,
   type MetaObject,
   type NonReducibleUnknown,
   type SetupReturnFromConfig,
-  type SnapshotFrom,
 } from "xstate";
 import type { AgentMessage, EventUnion, InferOutput, StandardSchemaV1 } from "./types.js";
 import {
@@ -22,24 +19,12 @@ import {
   USER_INPUT_ACTOR,
   type AgentModelMap,
   type AgentModelRef,
-  type AgentRequestExecutors,
   type AgentRequestMode,
   type BuiltinAgentActors,
   type TextLogic,
   type TextLogicConfig,
 } from "./text-logic.js";
 import { createDecideActor } from "./decision.js";
-import type { AgentRequestOptions } from "./events.js";
-import {
-  executeAgentRequest,
-  getMachineAgentRequests,
-  initialAgentStep,
-  resolveAgentStep,
-  transitionAgentStep,
-  type AgentRequest,
-  type AgentStep,
-  type AgentStepRequest,
-} from "./steps.js";
 import { appendMessages } from "./messages.js";
 import { agentExecutionOptions } from "./internal/registry.js";
 import {
@@ -344,10 +329,9 @@ type SetupAgentXStateResult<
  * The object returned by {@link setupAgent}: an xstate `setup(...)` result
  * (`createMachine`, `assign`, …) extended with `schemas` (the resolved
  * {@link AgentSchemaPack}), `models`, `requests` (the built request actors),
- * and machine-bound convenience wrappers around the step-path/execute
- * helpers (`initial`/`transition`/`resolve`/`getRequests`/`execute`/
- * `appendMessages`) that pre-fill the registered schemas/actors so callers
- * don't have to pass them by hand each call.
+ * and {@link appendMessages}. Machines created here are registered so
+ * `runAgent` and the free step helpers can resolve their schemas/actors
+ * without re-passing them each call.
  */
 type SetupAgentResult<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
@@ -403,33 +387,6 @@ type SetupAgentResult<
   readonly models: TModels;
   /** The {@link TextLogic} actors built from `setupAgent({ requests })`, keyed the same way. */
   readonly requests: RequestActors<TRequestSchemas>;
-  /** {@link initialAgentStep}, pre-bound to this agent's registered schemas/actors. */
-  initial<TMachine extends AnyActorLogic>(
-    machine: TMachine,
-    input?: unknown,
-  ): AgentStep<SnapshotFrom<TMachine>>;
-  /** {@link transitionAgentStep}, pre-bound to this agent's registered schemas/actors. */
-  transition<TMachine extends AnyActorLogic>(
-    machine: TMachine,
-    snapshotOrStep: SnapshotFrom<TMachine> | AgentStep<SnapshotFrom<TMachine>>,
-    event: EventFromLogic<TMachine>,
-  ): AgentStep<SnapshotFrom<TMachine>>;
-  /** {@link resolveAgentStep}, pre-bound to this agent's registered schemas/actors. */
-  resolve<TMachine extends AnyActorLogic>(
-    machine: TMachine,
-    step: AgentStep<SnapshotFrom<TMachine>>,
-    request: Pick<AgentRequest, "id"> | string,
-    output: unknown,
-  ): AgentStep<SnapshotFrom<TMachine>>;
-  /** {@link getMachineAgentRequests}, pre-bound to this agent's registered schemas/actors. */
-  getRequests(
-    machine: AnyActorLogic,
-    actions: readonly { type?: string; params?: unknown }[],
-    snapshot?: AnyMachineSnapshot,
-    options?: Pick<AgentRequestOptions, "eventToolName">,
-  ): AgentStepRequest[];
-  /** {@link executeAgentRequest}, re-exposed on the agent for convenience (no pre-binding needed — it only needs the request and executors). */
-  execute(request: AgentRequest, executors: AgentRequestExecutors): Promise<unknown>;
   /** {@link appendMessages}, typed against this agent's context/event schemas. */
   appendMessages(
     resolve:
@@ -560,14 +517,13 @@ export namespace setupAgent {
    * (JSON/YAML) instead of the TypeScript `setupAgent(...)` API — the same
    * kind of machine a database, visual editor, or LLM could produce and hand
    * back. Requires a `compileSchema` (see {@link FromConfigOptions}) since
-   * the library bundles no JSON Schema engine itself; pass the exported
-   * {@link minimalSchemaCompiler} to opt into its small built-in subset, or
-   * bring a real engine (Ajv, …) for full JSON Schema semantics.
+   * the library bundles no JSON Schema engine itself; bring Ajv,
+   * @cfworker/json-schema, or another compiler that returns Standard Schema.
    *
    * @example
    * ```ts
    * const machine = setupAgent.fromConfig(workflowConfig, {
-   *   compileSchema: minimalSchemaCompiler,
+   *   compileSchema,
    * });
    * const result = await runAgent(machine, { input: { ticket }, generateText, decide });
    * ```
@@ -857,38 +813,6 @@ function createSetupAgent<
     schemas,
     models,
     requests: requestActors,
-    initial(machine: AnyActorLogic, input?: unknown) {
-      return initialAgentStep(machine, input, machineOptions);
-    },
-    transition(
-      machine: AnyActorLogic,
-      snapshotOrStep: AnyMachineSnapshot | AgentStep,
-      event: EventObject,
-    ) {
-      return transitionAgentStep(machine, snapshotOrStep as never, event as never, machineOptions);
-    },
-    resolve(
-      machine: AnyActorLogic,
-      step: AgentStep,
-      request: Pick<AgentRequest, "id"> | string,
-      output: unknown,
-    ) {
-      return resolveAgentStep(machine, step as never, request, output, machineOptions);
-    },
-    getRequests(
-      machine: AnyActorLogic,
-      actions: readonly { type?: string; params?: unknown }[],
-      snapshot?: AnyMachineSnapshot,
-      requestOptions: Pick<AgentRequestOptions, "eventToolName"> = {},
-    ) {
-      return getMachineAgentRequests(machine, actions, snapshot, {
-        ...machineOptions,
-        ...requestOptions,
-      });
-    },
-    execute(request: AgentRequest, executors: AgentRequestExecutors) {
-      return executeAgentRequest(request, executors);
-    },
     appendMessages(resolve: Parameters<typeof appendMessages>[0]) {
       return appendMessages(resolve);
     },

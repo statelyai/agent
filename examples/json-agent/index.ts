@@ -23,8 +23,8 @@
  * input/output, request input/output) are only as strict as whatever
  * validator you bring. This example wires up Ajv, a real JSON Schema engine,
  * as the showcase recipe: it honors the full JSON Schema spec (pattern,
- * minLength, anyOf, format, ...), unlike the built-in `minimalSchemaCompiler`
- * export, which only checks type/properties/required/items/enum/const.
+ * minLength, anyOf, format, ...). Core intentionally ships no JSON Schema
+ * engine.
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/json-agent/index.ts
  */

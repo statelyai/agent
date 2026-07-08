@@ -3,8 +3,7 @@
  * this library accepts (context, events, input/output, tool schemas, …) is a
  * `StandardSchemaV1` — Zod, Valibot, ArkType, and hand-written validators all
  * implement it, so the library never depends on a specific validation
- * library. Compiled by {@link minimalSchemaCompiler} or your own
- * {@link SchemaCompiler} when authoring from `AgentWorkflowConfig` JSON.
+ * library. JSON workflow configs use a caller-provided {@link SchemaCompiler}.
  */
 export interface StandardSchemaV1<Input = unknown, Output = Input> {
   readonly "~standard": {
