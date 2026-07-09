@@ -294,7 +294,7 @@ function zodTypeName(field: unknown): string {
 
 // ─── Agent + machine ───
 
-const agent = setupAgent({
+const agentSetup = setupAgent({
   schemas: riverCrossingSchemas,
   models,
 });
@@ -383,7 +383,7 @@ function moveTransition(item: Items | null) {
   };
 }
 
-export const riverCrossingMachine = agent.createMachine({
+export const riverCrossingMachine = agentSetup.createMachine({
   id: "river-crossing",
   context: ({ input }) => ({
     farmer: "left" as Bank,
@@ -493,7 +493,7 @@ const findShortestPath: AgentTools[string] = {
   },
 };
 
-const assistedAgent = setupAgent({
+const assistedAgentSetup = setupAgent({
   schemas: createAgentSchemas({
     context: riverCrossingSchemas.context,
     input: riverCrossingSchemas.input,
@@ -533,7 +533,7 @@ const assistedAgent = setupAgent({
   },
 });
 
-export const riverCrossingAssistedMachine = assistedAgent.createMachine({
+export const riverCrossingAssistedMachine = assistedAgentSetup.createMachine({
   id: "river-crossing-assisted",
   context: ({ input }) => ({
     farmer: "left" as Bank,

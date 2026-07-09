@@ -155,7 +155,7 @@ Every example runs directly with a real model and ships a keyless mock-driven te
 OPENAI_API_KEY=... npx tsx examples/twenty-questions/index.ts
 ```
 
-Good starting points: [twenty-questions](examples/twenty-questions) (decisions and guards in a game loop), [react-agent](examples/react-agent) (the classic tool-calling loop as visible states), [fan-out](examples/fan-out) (dynamic parallel branches), [supervisor](examples/supervisor) (multi-agent routing). The full index lives in [examples/README.md](examples/README.md).
+Good starting points: [twenty-questions](examples/twenty-questions) (decisions and guards in a game loop), [react-agent](examples/react-agent) (the classic tool-calling loop as visible states), [long-running-onboarding](examples/long-running-onboarding) (durable pause/resume across days), [supervisor](examples/supervisor) (multi-agent routing). The full index lives in [examples/README.md](examples/README.md).
 
 ## Prior art
 

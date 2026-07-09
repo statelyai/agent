@@ -49,7 +49,7 @@ export const jokeActors = {
   tellJoke,
 };
 
-const jokeAgent = setupAgent({
+const jokeAgentSetup = setupAgent({
   schemas,
   models,
   actorSources: jokeActors,
@@ -57,7 +57,7 @@ const jokeAgent = setupAgent({
 
 export const jokeSchemas = schemas;
 
-export const jokeMachine = jokeAgent.createMachine({
+export const jokeMachine = jokeAgentSetup.createMachine({
   id: "joke-streamer",
   context: ({ input }) => ({ topic: input.topic, joke: null, feedback: null }),
   initial: "streaming",

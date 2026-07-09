@@ -35,7 +35,7 @@ export const models: Record<"researcher", LanguageModel> = {
 } as const;
 
 // ─── Child agent: research one topic ───
-const childAgent = setupAgent({
+const childAgentSetup = setupAgent({
   models,
   context: z.object({ topic: z.string(), research: z.string().nullable() }),
   input: z.object({ topic: z.string() }),
@@ -53,7 +53,7 @@ const childAgent = setupAgent({
   },
 });
 
-export const childMachine = childAgent.createMachine({
+export const childMachine = childAgentSetup.createMachine({
   id: "subflows-child",
   context: ({ input }) => ({ topic: input.topic, research: null }),
   output: ({ context }) => ({ research: context.research ?? "" }),
@@ -75,14 +75,14 @@ export const childMachine = childAgent.createMachine({
 });
 
 // ─── Parent agent: delegate to the child, map I/O across the boundary ───
-const parentAgent = setupAgent({
+const parentAgentSetup = setupAgent({
   context: z.object({ topic: z.string(), research: z.string().nullable() }),
   input: z.object({ topic: z.string() }),
   output: z.object({ research: z.string() }),
   actorSources: { child: childMachine },
 });
 
-export const subflowsMachine = parentAgent.createMachine({
+export const subflowsMachine = parentAgentSetup.createMachine({
   id: "subflows-parent",
   context: ({ input }) => ({ topic: input.topic, research: null }),
   output: ({ context }) => ({ research: context.research ?? "" }),
@@ -103,7 +103,7 @@ export const subflowsMachine = parentAgent.createMachine({
   },
 });
 
-export const subflowsSchemas = parentAgent.schemas;
+export const subflowsSchemas = parentAgentSetup.schemas;
 
 export async function runSubflowsExample(options?: {
   input?: { topic: string };
@@ -125,12 +125,14 @@ export async function runSubflowsExample(options?: {
         actorSources: {
           // Adapt the raw `(request, info)` executor to a TextLogic executor,
           // which receives the lowered `request` alongside typed `input`.
-          researchTopic: childAgent.requests.researchTopic.withExecutor(async ({ request }) => {
-            const { output } = await generateText(
-              request as typeof request & { tools: AgentTools },
-            );
-            return { output: output as string };
-          }),
+          researchTopic: childAgentSetup.requests.researchTopic.withExecutor(
+            async ({ request }) => {
+              const { output } = await generateText(
+                request as typeof request & { tools: AgentTools },
+              );
+              return { output: output as string };
+            },
+          ),
         },
       }),
     },

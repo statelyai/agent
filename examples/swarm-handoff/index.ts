@@ -33,7 +33,7 @@ export const models: Record<"travel" | "food", LanguageModel> = {
   food: openai("gpt-5.4-mini"),
 } as const;
 
-const agent = setupAgent({
+const agentSetup = setupAgent({
   models,
   context: z.object({
     message: z.string(),
@@ -71,9 +71,9 @@ const agent = setupAgent({
   },
 });
 
-export const swarmHandoffSchemas = agent.schemas;
+export const swarmHandoffSchemas = agentSetup.schemas;
 
-export const swarmHandoffMachine = agent.createMachine({
+export const swarmHandoffMachine = agentSetup.createMachine({
   id: "swarm-handoff",
   context: ({ input }) => ({
     message: input.message,

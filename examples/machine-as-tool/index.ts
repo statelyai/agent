@@ -62,7 +62,7 @@ const metaSchema = z.object({
     .optional(),
 });
 
-const agent = setupAgent({
+const agentSetup = setupAgent({
   actorSources: {
     // Plain side-effecting actor (a stand-in for the real refund call).
     // This implementation is used as-is by runAgent; a host can override it
@@ -104,7 +104,7 @@ const agent = setupAgent({
 // with a REJECT path. `awaitingApproval` has no invoke, so runAgent settles
 // idle there; the harness presents its `meta.interaction` and resumes with the
 // human's event.
-export const refundMachine = agent.createMachine({
+export const refundMachine = agentSetup.createMachine({
   id: "refund",
   context: ({ input }) => ({
     amount: input.amount,

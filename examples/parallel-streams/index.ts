@@ -27,7 +27,7 @@ export const models: Record<"thinker" | "poet", LanguageModel> = {
   poet: openai("gpt-5.4-mini"),
 } as const;
 
-const agent = setupAgent({
+const agentSetup = setupAgent({
   models,
   context: z.object({
     topic: z.string(),
@@ -60,9 +60,9 @@ const agent = setupAgent({
   },
 });
 
-export const parallelStreamsSchemas = agent.schemas;
+export const parallelStreamsSchemas = agentSetup.schemas;
 
-export const parallelStreamsMachine = agent.createMachine({
+export const parallelStreamsMachine = agentSetup.createMachine({
   id: "parallel-streams",
   context: ({ input }) => ({ topic: input.topic, analysis: null, poem: null }),
   output: ({ context }) => ({

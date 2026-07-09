@@ -109,13 +109,13 @@ export const gameActors = {
   summarizeTurn,
 };
 
-const gameAgent = setupAgent({
+const gameAgentSetup = setupAgent({
   schemas: gameSchemas,
   models,
   actorSources: gameActors,
 });
 
-export const gameMachine = gameAgent.createMachine({
+export const gameMachine = gameAgentSetup.createMachine({
   id: "turn-based-game-agent",
   context: ({ input }) => ({
     playerHp: input.playerHp,
@@ -273,7 +273,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
 
 // ─── Type probe: compilation fails if the root/final output stops being typed ───
 
-gameAgent.createMachine({
+gameAgentSetup.createMachine({
   context: {
     playerHp: 20,
     enemyHp: 15,

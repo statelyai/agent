@@ -6,8 +6,8 @@
  *   - An *idle* review state: `reviewing` has no invoke, so `runAgent` settles
  *     `{ status: 'idle', snapshot }` instead of hanging — the machine is
  *     waiting on a human, not on work.
- *   - Typed `meta.interaction` on the idle state (read with `getStateMeta`) so
- *     the host knows what to render and which events are legal.
+ *   - Typed `meta.interaction` on the idle state for the label; legal events
+ *     are inferred from the idle snapshot with `getAcceptedEvents(...)`.
  *   - REJECT-with-reason redraft loop: rejecting feeds the reason back into the
  *     next draft; APPROVE publishes.
  *   - Snapshot persistence: the idle snapshot survives `JSON.parse(JSON.stringify(...))`
@@ -21,7 +21,13 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { type LanguageModel } from "ai";
-import { getStateMeta, runAgent, setupAgent, type AgentRequestExecutors } from "../../src/index.js";
+import {
+  getAcceptedEvents,
+  getStateMeta,
+  runAgent,
+  setupAgent,
+  type AgentRequestExecutors,
+} from "../../src/index.js";
 
 export const models: Record<"writer", LanguageModel> = {
   writer: openai("gpt-5.4-mini"),
@@ -29,10 +35,9 @@ export const models: Record<"writer", LanguageModel> = {
 
 const interactionSchema = z.object({
   label: z.string(),
-  events: z.array(z.string()),
 });
 
-const agent = setupAgent({
+const agentSetup = setupAgent({
   models,
   context: z.object({
     topic: z.string(),
@@ -58,7 +63,7 @@ const agent = setupAgent({
   },
 });
 
-export const humanInTheLoopMachine = agent.createMachine({
+export const humanInTheLoopMachine = agentSetup.createMachine({
   id: "human-in-the-loop",
   context: ({ input }) => ({ topic: input.topic, draft: null }),
   initial: "drafting",
@@ -74,12 +79,12 @@ export const humanInTheLoopMachine = agent.createMachine({
       },
     },
     // No invoke here: runAgent settles idle and waits for a human event.
-    // `meta.interaction` tells the host what to show and which events are legal.
+    // `meta.interaction` tells the host what to show; legal events come from
+    // `getAcceptedEvents(snapshot)`.
     reviewing: {
       meta: {
         interaction: {
           label: "Review the draft: approve to publish, or reject with a reason.",
-          events: ["APPROVE", "REJECT"],
         },
       },
       on: {
@@ -118,6 +123,10 @@ export interface HumanInTheLoopResult {
   publishedDraft: string;
 }
 
+function persistSnapshot<TSnapshot>(snapshot: TSnapshot): TSnapshot {
+  return JSON.parse(JSON.stringify(snapshot)) as TSnapshot;
+}
+
 /**
  * Drafts, pauses idle for review, persists the snapshot via a JSON round-trip,
  * then resumes with APPROVE in a second `runAgent` call. Returns both phases.
@@ -140,9 +149,10 @@ export async function runHumanInTheLoopExample(
 
   const draft = first.snapshot.context.draft ?? "";
   const { interaction } = getStateMeta(first.snapshot);
+  const legalEvents = getAcceptedEvents(first.snapshot).map((event) => event.type);
 
   // Persist: prove the idle snapshot survives a real JSON persistence layer.
-  const persisted = JSON.parse(JSON.stringify(first.snapshot));
+  const persisted = persistSnapshot(first.snapshot);
 
   // Phase 2: ...later, new process, human approved. Same machine, one event.
   const second = await runAgent(humanInTheLoopMachine, {
@@ -159,7 +169,7 @@ export async function runHumanInTheLoopExample(
   return {
     draft,
     interactionLabel: interaction?.label,
-    legalEvents: interaction?.events ?? [],
+    legalEvents,
     published: second.output.published,
     publishedDraft: second.output.draft,
   };

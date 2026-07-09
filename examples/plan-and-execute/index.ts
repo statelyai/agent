@@ -32,7 +32,7 @@ export const models: Record<"planner" | "worker" | "solver", LanguageModel> = {
   solver: openai("gpt-5.4-mini"),
 } as const;
 
-const agent = setupAgent({
+const agentSetup = setupAgent({
   models,
   context: z.object({
     goal: z.string(),
@@ -86,9 +86,9 @@ const agent = setupAgent({
   },
 });
 
-export const planAndExecuteSchemas = agent.schemas;
+export const planAndExecuteSchemas = agentSetup.schemas;
 
-export const planAndExecuteMachine = agent.createMachine({
+export const planAndExecuteMachine = agentSetup.createMachine({
   id: "plan-and-execute",
   context: ({ input }) => ({
     goal: input.goal,

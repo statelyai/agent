@@ -52,7 +52,7 @@ export const triageActors = {
   triageTicket,
 };
 
-const triageAgent = setupAgent({
+const triageAgentSetup = setupAgent({
   schemas,
   models,
   actorSources: triageActors,
@@ -60,7 +60,7 @@ const triageAgent = setupAgent({
 
 export const triageSchemas = schemas;
 
-export const triageMachine = triageAgent.createMachine({
+export const triageMachine = triageAgentSetup.createMachine({
   id: "ticket-triage",
   context: ({ input }) => ({ ticket: input.ticket, triage: null }),
   initial: "triaging",

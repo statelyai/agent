@@ -30,7 +30,7 @@ export const models: Record<"copywriter" | "evaluator" | "improver", LanguageMod
   improver: openai("gpt-5.4-mini"),
 } as const;
 
-const agent = setupAgent({
+const agentSetup = setupAgent({
   models,
   context: z.object({
     product: z.string(),
@@ -90,7 +90,7 @@ const agent = setupAgent({
   },
 });
 
-export const aiSdkMarketingChainMachine = agent.createMachine({
+export const aiSdkMarketingChainMachine = agentSetup.createMachine({
   id: "ai-sdk-marketing-chain",
   context: ({ input }) => ({
     product: input.product,

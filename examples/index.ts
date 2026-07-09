@@ -101,3 +101,7 @@ export {
   guardrailsSchemas,
   main as runGuardrailsExample,
 } from "./guardrails/index.js";
+export {
+  longRunningOnboardingMachine,
+  runLongRunningOnboardingExample,
+} from "./long-running-onboarding/index.js";

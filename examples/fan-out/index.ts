@@ -54,7 +54,7 @@ export const models: Record<"planner" | "worker" | "reducer", LanguageModel> = {
   reducer: openai("gpt-5.4-mini"),
 } as const;
 
-const agent = setupAgent({
+const agentSetup = setupAgent({
   models,
   context: z.object({
     topic: z.string(),
@@ -111,7 +111,7 @@ const agent = setupAgent({
   },
 });
 
-export const fanOutSchemas = agent.schemas;
+export const fanOutSchemas = agentSetup.schemas;
 
 const BRANCH_PREFIX = "branch-";
 
@@ -122,12 +122,14 @@ const BRANCH_PREFIX = "branch-";
  * the reducer share ONE executor set.
  */
 export function createFanOutMachine(generateText: AgentRequestExecutor) {
-  const branchLogic = agent.requests.summarizeSubtopic.withExecutor(async ({ request, signal }) => {
-    const { output } = await generateText({ ...request, tools: {} }, { signal });
-    return { output: output as string };
-  });
+  const branchLogic = agentSetup.requests.summarizeSubtopic.withExecutor(
+    async ({ request, signal }) => {
+      const { output } = await generateText({ ...request, tools: {} }, { signal });
+      return { output: output as string };
+    },
+  );
 
-  return agent.createMachine({
+  return agentSetup.createMachine({
     id: "fan-out",
     context: ({ input }) => ({
       topic: input.topic,

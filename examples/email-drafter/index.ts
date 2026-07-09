@@ -163,13 +163,13 @@ export const emailDrafterActors = {
   streamDraft,
 };
 
-const agent = setupAgent({
+const agentSetup = setupAgent({
   schemas: emailDrafterSchemas,
   models,
   actorSources: emailDrafterActors,
 });
 
-export const emailDrafter = agent.createMachine({
+export const emailDrafter = agentSetup.createMachine({
   id: "email-drafter",
   output: ({ context }) => ({ sentEmails: context.sentEmails }),
   context: {

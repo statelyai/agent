@@ -12,6 +12,7 @@ Every example is dual-mode: run it directly against a real model with `OPENAI_AP
 - Minimal streaming text workflow: [`joke/index.ts`](/Users/davidkpiano/Code/agent/examples/joke/index.ts)
 - Authoring reusable requests, parts-based messages, and schema-typed state meta: [`email-drafter/index.ts`](/Users/davidkpiano/Code/agent/examples/email-drafter/index.ts)
 - Human-in-the-loop, the idle-first way: [`human-in-the-loop/index.ts`](/Users/davidkpiano/Code/agent/examples/human-in-the-loop/index.ts)
+- Long-running onboarding with durable idle gates: [`long-running-onboarding/index.ts`](/Users/davidkpiano/Code/agent/examples/long-running-onboarding/index.ts)
 - Running with host actors: [`ai-sdk-host/index.ts`](/Users/davidkpiano/Code/agent/examples/ai-sdk-host/index.ts)
 - Machines as data — a full workflow (decision, text request, idle human step) authored as a real `.json` file: [`json-agent/index.ts`](/Users/davidkpiano/Code/agent/examples/json-agent/index.ts)
 - Host actor guide: [`../docs/host-actors.md`](/Users/davidkpiano/Code/agent/docs/host-actors.md)
@@ -29,6 +30,7 @@ These use `setupAgent(...)` (or plain XState `setup(...)` plus `createTextLogic(
 - [`json-agent/index.ts`](/Users/davidkpiano/Code/agent/examples/json-agent/index.ts): `setupAgent.fromConfig(...)` lowering a support-ticket workflow authored as a real `.json` file (decision, text request, idle human approval step)
 - [`supervisor/index.ts`](/Users/davidkpiano/Code/agent/examples/supervisor/index.ts): a routing request's structured output hands off to a format-specific worker
 - [`human-in-the-loop/index.ts`](/Users/davidkpiano/Code/agent/examples/human-in-the-loop/index.ts): draft → idle review (typed `meta.interaction`) → APPROVE/REJECT redraft, with a JSON snapshot round-trip
+- [`long-running-onboarding/index.ts`](/Users/davidkpiano/Code/agent/examples/long-running-onboarding/index.ts): Google ADK-style onboarding coordinator with durable typed state, two idle dormancy gates, JSON snapshot resume across days, and delegated IT provisioning
 - [`rag/index.ts`](/Users/davidkpiano/Code/agent/examples/rag/index.ts): retrieve (typed plain actor, keyword scoring over a sample corpus) → grounded answer, with conversational memory in context
 - [`tool-calling/index.ts`](/Users/davidkpiano/Code/agent/examples/tool-calling/index.ts): model selects a tool (structured output), typed tool actors execute, progress via `onTransition`
 - [`plan-and-execute/index.ts`](/Users/davidkpiano/Code/agent/examples/plan-and-execute/index.ts): planner structured output, execution states iterate the plan (keeps the ReWOO evidence-map idea)
@@ -66,6 +68,7 @@ Multi-step agent patterns:
 - [`tool-calling/index.test.ts`](/Users/davidkpiano/Code/agent/examples/tool-calling/index.test.ts): tool calling with intermediate progress (Burr tool calling, LangGraph tool-calling-progress)
 - [`sql-agent/index.test.ts`](/Users/davidkpiano/Code/agent/examples/sql-agent/index.test.ts): SQL / tool-heavy agent workflow
 - [`human-in-the-loop/index.test.ts`](/Users/davidkpiano/Code/agent/examples/human-in-the-loop/index.test.ts): human-in-the-loop plus snapshot persistence
+- [`long-running-onboarding/index.test.ts`](/Users/davidkpiano/Code/agent/examples/long-running-onboarding/index.test.ts): long-running pause/resume onboarding flow with delegated IT provisioning
 - [`parallel-streams/index.test.ts`](/Users/davidkpiano/Code/agent/examples/parallel-streams/index.test.ts): parallel worker streams over a side channel
 - [`sse-transport/index.test.ts`](/Users/davidkpiano/Code/agent/examples/sse-transport/index.test.ts): relaying provider stream chunks over SSE
 

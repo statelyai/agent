@@ -30,6 +30,7 @@ These five cover the core ideas: text requests, decisions, messages, and JSON au
 These show the idle-first pause for human input and resuming a run by snapshot. See [Human in the loop](human-in-the-loop.md).
 
 - [human-in-the-loop](../examples/human-in-the-loop/index.ts): a machine that settles idle to wait for a human, then resumes with the human's event, persisting a snapshot between iterations and resuming in a later process.
+- [long-running-onboarding](../examples/long-running-onboarding/index.ts): a multi-day onboarding coordinator with durable typed state, two idle dormancy gates, delegated IT provisioning, and JSON snapshot resume.
 - [file-snapshot-store](../examples/file-snapshot-store/index.ts): a file-backed snapshot store for durable threads across processes.
 
 ## Host adapters and the step path
@@ -50,6 +51,7 @@ These compose agent machines as sub-agents or child actors. See [Multi-agent](mu
 - [subflows](../examples/subflows/index.ts): a nested child machine keeping its own executor binding.
 - [ai-sdk-sub-agents](../examples/ai-sdk-sub-agents/index.ts): Vercel AI SDK ToolLoopAgent workers exposed as host-owned tools.
 - [debate-sub-agents](../examples/debate-sub-agents/index.ts): a facilitator scheduling two event-based debater sub-agents.
+- [long-running-onboarding](../examples/long-running-onboarding/index.ts): a coordinator invoking typed IT provisioning between two event-driven waits.
 - [supervisor](../examples/supervisor/index.ts): a routing request whose structured output hands off to a format-specific worker.
 - [swarm-handoff](../examples/swarm-handoff/index.ts): a persistent multi-agent network handing off between typed child actors across turns.
 

@@ -73,7 +73,7 @@ export const models: Record<"planner" | "summarizer", LanguageModel> = {
   summarizer: openai("gpt-5.4-mini"),
 } as const;
 
-const agent = setupAgent({
+const agentSetup = setupAgent({
   models,
   context: z.object({
     question: z.string(),
@@ -127,9 +127,9 @@ const agent = setupAgent({
   },
 });
 
-export const sqlAgentSchemas = agent.schemas;
+export const sqlAgentSchemas = agentSetup.schemas;
 
-export const sqlAgentMachine = agent.createMachine({
+export const sqlAgentMachine = agentSetup.createMachine({
   id: "sql-agent",
   context: ({ input }) => ({
     question: input.question,

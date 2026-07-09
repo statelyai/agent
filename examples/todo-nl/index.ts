@@ -126,12 +126,12 @@ function renderInterpretPrompt(context: {
   ].join("\n");
 }
 
-const agent = setupAgent({
+const agentSetup = setupAgent({
   schemas: todoSchemas,
   models,
 });
 
-export const todoMachine = agent.createMachine({
+export const todoMachine = agentSetup.createMachine({
   id: "todo-nl",
   context: ({ input }) => ({
     todos: input.todos,

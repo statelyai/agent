@@ -39,7 +39,7 @@ export const models: Record<"translator" | "evaluator" | "improver", LanguageMod
   improver: openai("gpt-5.4-mini"),
 } as const;
 
-const agent = setupAgent({
+const agentSetup = setupAgent({
   models,
   context: z.object({
     text: z.string(),
@@ -108,7 +108,7 @@ const agent = setupAgent({
   },
 });
 
-export const aiSdkEvaluatorOptimizerMachine = agent.createMachine({
+export const aiSdkEvaluatorOptimizerMachine = agentSetup.createMachine({
   id: "ai-sdk-evaluator-optimizer",
   context: ({ input }) => ({
     text: input.text,

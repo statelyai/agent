@@ -88,7 +88,7 @@ export const twentyQuestionsSchemas = createAgentSchemas({
   },
 });
 
-const agent = setupAgent({
+const agentSetup = setupAgent({
   schemas: twentyQuestionsSchemas,
   models,
   requests: {
@@ -198,7 +198,7 @@ function renderTranscriptPrompt(context: {
   ].join("\n");
 }
 
-export const twentyQuestionsMachine = agent.createMachine({
+export const twentyQuestionsMachine = agentSetup.createMachine({
   id: "twenty-questions",
   context: ({ input }) => ({
     maxQuestions: input.questionsRemaining,

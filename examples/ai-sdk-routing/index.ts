@@ -25,7 +25,7 @@ export const models: Record<"classifier" | "simpleAnswerer" | "complexAnswerer",
   complexAnswerer: openai("o4-mini"),
 } as const;
 
-const agent = setupAgent({
+const agentSetup = setupAgent({
   models,
   context: z.object({
     query: z.string(),
@@ -72,7 +72,7 @@ const agent = setupAgent({
   },
 });
 
-export const aiSdkRoutingMachine = agent.createMachine({
+export const aiSdkRoutingMachine = agentSetup.createMachine({
   id: "ai-sdk-routing",
   context: ({ input }) => ({
     query: input.query,

@@ -35,7 +35,7 @@ export const models: Record<"supervisor" | "researcher" | "coder" | "writer", La
   writer: openai("gpt-5.4-mini"),
 } as const;
 
-const agent = setupAgent({
+const agentSetup = setupAgent({
   models,
   context: z.object({
     request: z.string(),
@@ -94,9 +94,9 @@ const agent = setupAgent({
   },
 });
 
-export const supervisorSchemas = agent.schemas;
+export const supervisorSchemas = agentSetup.schemas;
 
-export const supervisorMachine = agent.createMachine({
+export const supervisorMachine = agentSetup.createMachine({
   id: "supervisor",
   context: ({ input }) => ({
     request: input.request,

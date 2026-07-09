@@ -99,7 +99,7 @@ type ReasonOrAct = z.infer<typeof reasonOrActUnion>;
 // `anyOf`. The machine unwraps `.action` back into a union value.
 const reasonOrActSchema = z.object({ action: reasonOrActUnion });
 
-const agent = setupAgent({
+const agentSetup = setupAgent({
   models,
   context: z.object({
     question: z.string(),
@@ -186,9 +186,9 @@ const agent = setupAgent({
   },
 });
 
-export const reactAgentSchemas = agent.schemas;
+export const reactAgentSchemas = agentSetup.schemas;
 
-export const reactAgentMachine = agent.createMachine({
+export const reactAgentMachine = agentSetup.createMachine({
   id: "react-agent",
   context: ({ input }) => ({
     question: input.question,

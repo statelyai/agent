@@ -55,7 +55,7 @@ type ComposeExecutor = TextLogicExecutor<typeof composeInputSchema, z.ZodString>
 // agent type is too large to serialize (TS7056), so it is narrowed to just the
 // members this workflow's consumers touch.
 type DebateSubAgentsWorkflow = {
-  agent: {
+  agentSetup: {
     requests: {
       concludeDebate: TextLogic<typeof concludeInputSchema, typeof conclusionSchema>;
     };
@@ -73,7 +73,7 @@ function nextTurn(index: number) {
 }
 
 function createDebaterAgent() {
-  const agent = setupAgent({
+  const agentSetup = setupAgent({
     context: z.object({
       stance: stanceSchema,
       question: z.string(),
@@ -110,7 +110,7 @@ function createDebaterAgent() {
     },
   });
 
-  const machine = agent.createMachine({
+  const machine = agentSetup.createMachine({
     id: "debater-agent",
     context: ({ input }) => ({
       stance: input.stance,
@@ -157,7 +157,7 @@ function createDebaterAgent() {
     },
   });
 
-  return { agent, machine };
+  return { agentSetup, machine };
 }
 
 // The deterministic default keeps the example/test reproducible; the direct
@@ -170,7 +170,7 @@ export function createDebateSubAgentsWorkflow(
   composeExecutor: ComposeExecutor = deterministicCompose,
 ): DebateSubAgentsWorkflow {
   const debater = createDebaterAgent();
-  const agent = setupAgent({
+  const agentSetup = setupAgent({
     context: z.object({
       question: z.string(),
       transcript: transcriptSchema,
@@ -184,7 +184,8 @@ export function createDebateSubAgentsWorkflow(
     actorSources: {
       debater: debater.machine.provide({
         actorSources: {
-          composeArgument: debater.agent.requests.composeArgument.withExecutor(composeExecutor),
+          composeArgument:
+            debater.agentSetup.requests.composeArgument.withExecutor(composeExecutor),
         },
       }),
     },
@@ -205,7 +206,7 @@ export function createDebateSubAgentsWorkflow(
     },
   });
 
-  const machine = agent.createMachine({
+  const machine = agentSetup.createMachine({
     id: "debate-sub-agents",
     context: ({ input }) => ({
       question: input.question,
@@ -285,15 +286,15 @@ export function createDebateSubAgentsWorkflow(
     },
   });
 
-  return { agent, machine };
+  return { agentSetup, machine };
 }
 
 export async function runDebateSubAgentsExample() {
-  const { agent, machine } = createDebateSubAgentsWorkflow();
+  const { agentSetup, machine } = createDebateSubAgentsWorkflow();
   const actor = createActor(
     machine.provide({
       actorSources: {
-        concludeDebate: agent.requests.concludeDebate.withExecutor(async ({ input }) => ({
+        concludeDebate: agentSetup.requests.concludeDebate.withExecutor(async ({ input }) => ({
           output: {
             conclusion: `conclusion:${input.transcript.length}:${input.question}`,
           },
@@ -340,12 +341,14 @@ export async function main() {
     return { output: result.output as T };
   };
 
-  const { agent, machine } = createDebateSubAgentsWorkflow(({ request }) => run<string>(request));
+  const { agentSetup, machine } = createDebateSubAgentsWorkflow(({ request }) =>
+    run<string>(request),
+  );
 
   const actor = createActor(
     machine.provide({
       actorSources: {
-        concludeDebate: agent.requests.concludeDebate.withExecutor(({ request }) =>
+        concludeDebate: agentSetup.requests.concludeDebate.withExecutor(({ request }) =>
           run<{ conclusion: string }>(request),
         ),
       },

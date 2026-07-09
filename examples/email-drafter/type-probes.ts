@@ -1,5 +1,5 @@
 /**
- * Compile-only type probes for the email-drafter agent.
+ * Compile-only type probes for the email-drafter setup.
  *
  * Nothing here runs — the machines exist purely so `tsc` fails if the typed
  * authoring surface regresses (schema-typed meta, event payload inference,
@@ -10,17 +10,17 @@
 import { assistantMessage, setupAgent } from "../../src/index.js";
 import { emailDrafterActors, emailDrafterSchemas, models } from "./index.js";
 
-// Rebuild the same agent the runnable machine uses. Rebuilt (not imported) so
-// index.ts need not export the agent — exporting its full inferred type trips
+// Rebuild the same setup the runnable machine uses. Rebuilt (not imported) so
+// index.ts need not export the setup — exporting its full inferred type trips
 // the declaration serializer (TS7056) under the root tsconfig's `declaration`.
-const agent = setupAgent({
+const agentSetup = setupAgent({
   schemas: emailDrafterSchemas,
   models,
   actorSources: emailDrafterActors,
 });
 
 // meta is schema-typed, and event payloads are inferred per event type.
-agent.createMachine({
+agentSetup.createMachine({
   context: {
     prompt: "",
     assessment: null,
@@ -52,7 +52,7 @@ agent.createMachine({
 });
 
 // Root-level `output` is natively typed by XState against the output schema.
-agent.createMachine({
+agentSetup.createMachine({
   context: {
     prompt: "",
     assessment: null,
@@ -73,7 +73,7 @@ agent.createMachine({
 });
 
 // Named text logic: onDone output is typed from the logic output schema.
-agent.createMachine({
+agentSetup.createMachine({
   context: {
     prompt: "",
     assessment: null,

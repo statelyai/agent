@@ -145,7 +145,7 @@ if (!legal.includes(event.type)) throw new Error(`Event '${event.type}' is not l
 
 ### Reading interaction meta
 
-Schema-typed state `meta` gives the host a typed interaction protocol (a label, choices, and their event types) to render for the human. It lives keyed by state id, so pull it off an idle snapshot with `getStateMeta`:
+Schema-typed state `meta` gives the host a typed interaction label or view hints to render for the human. Legal choices still come from the snapshot via `getAcceptedEvents`. Meta lives keyed by state id, so pull it off an idle snapshot with `getStateMeta`:
 
 ```ts
 import { getStateMeta } from '@statelyai/agent';

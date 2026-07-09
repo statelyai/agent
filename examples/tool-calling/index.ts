@@ -78,7 +78,7 @@ const toolResultSchema = z.object({
 });
 type ToolResult = z.infer<typeof toolResultSchema>;
 
-const agent = setupAgent({
+const agentSetup = setupAgent({
   models,
   context: z.object({
     query: z.string(),
@@ -177,7 +177,7 @@ const agent = setupAgent({
   },
 });
 
-export const toolCallingMachine = agent.createMachine({
+export const toolCallingMachine = agentSetup.createMachine({
   id: "tool-calling",
   context: ({ input }) => ({
     query: input.query,

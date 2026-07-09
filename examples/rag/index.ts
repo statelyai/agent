@@ -106,7 +106,7 @@ function scoreDocument(question: string, text: string): number {
   return score;
 }
 
-const agent = setupAgent({
+const agentSetup = setupAgent({
   models,
   context: z.object({
     question: z.string(),
@@ -161,7 +161,7 @@ const agent = setupAgent({
   },
 });
 
-export const ragMachine = agent.createMachine({
+export const ragMachine = agentSetup.createMachine({
   id: "rag",
   context: ({ input }) => ({
     question: input.question,

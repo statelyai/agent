@@ -30,7 +30,7 @@ import { runAgent, setupAgent } from "../../src/index.js";
 import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
 import type { Snapshot } from "xstate";
 
-const agent = setupAgent({
+const agentSetup = setupAgent({
   context: z.object({ topic: z.string(), draft: z.string().nullable() }),
   input: z.object({ topic: z.string() }),
   output: z.object({ draft: z.string() }),
@@ -52,7 +52,7 @@ const agent = setupAgent({
 
 // drafting → reviewing (idle HITL) → published, with a REJECT loop back to
 // drafting. Each REJECT is one idle/resume cycle through the store.
-export const draftMachine = agent.createMachine({
+export const draftMachine = agentSetup.createMachine({
   id: "file-snapshot-drafter",
   context: ({ input }) => ({ topic: input.topic, draft: null }),
   initial: "drafting",

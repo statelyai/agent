@@ -42,7 +42,7 @@ export const models: Record<
 
 const codeInput = z.object({ code: z.string() });
 
-const agent = setupAgent({
+const agentSetup = setupAgent({
   models,
   context: z.object({
     code: z.string(),
@@ -101,7 +101,7 @@ function collectReviews(context: {
   );
 }
 
-export const aiSdkParallelReviewMachine = agent.createMachine({
+export const aiSdkParallelReviewMachine = agentSetup.createMachine({
   id: "ai-sdk-parallel-review",
   context: ({ input }) => ({
     code: input.code,

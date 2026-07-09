@@ -30,7 +30,7 @@ import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
  * The streamed text becomes the machine output.
  */
 export function createSseMachine(): AnyStateMachine {
-  const agent = setupAgent({
+  const agentSetup = setupAgent({
     context: z.object({ topic: z.string(), text: z.string().nullable() }),
     input: z.object({ topic: z.string() }),
     output: z.object({ text: z.string() }),
@@ -44,7 +44,7 @@ export function createSseMachine(): AnyStateMachine {
     },
   });
 
-  return agent.createMachine({
+  return agentSetup.createMachine({
     id: "sse-streamer",
     context: ({ input }) => ({ topic: input.topic, text: null }),
     initial: "streaming",

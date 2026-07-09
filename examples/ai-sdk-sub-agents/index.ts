@@ -62,7 +62,7 @@ function executeTool(tool: AgentTool | undefined, input: unknown) {
 }
 
 function createAiSdkSubAgentWorkflow(subAgents: SubAgents) {
-  const agent = setupAgent({
+  const agentSetup = setupAgent({
     models,
     context: z.object({
       task: z.string(),
@@ -98,7 +98,7 @@ function createAiSdkSubAgentWorkflow(subAgents: SubAgents) {
     },
   });
 
-  const machine = agent.createMachine({
+  const machine = agentSetup.createMachine({
     id: "ai-sdk-sub-agents",
     context: ({ input }) => ({ task: input.task, answer: null }),
     initial: "supervising",
@@ -121,7 +121,7 @@ function createAiSdkSubAgentWorkflow(subAgents: SubAgents) {
   });
 
   return {
-    agent,
+    agentSetup,
     machine,
   };
 }

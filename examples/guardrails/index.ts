@@ -59,7 +59,7 @@ export const guardrailsSchemas = createAgentSchemas({
   events: {},
 });
 
-const agent = setupAgent({
+const agentSetup = setupAgent({
   schemas: guardrailsSchemas,
   models,
   requests: {
@@ -133,7 +133,7 @@ const agent = setupAgent({
   },
 });
 
-export const guardrailsMachine = agent.createMachine({
+export const guardrailsMachine = agentSetup.createMachine({
   id: "guardrails",
   context: ({ input }) => ({
     question: input.question,

@@ -75,7 +75,7 @@ const SUMMARIZE_SYSTEM =
   "Drop pleasantries and redundant phrasing. Write it as terse notes, not " +
   "prose. Return only the summary text.";
 
-const agent = setupAgent({
+const agentSetup = setupAgent({
   schemas: contextCompactionSchemas,
   models,
   requests: {
@@ -126,7 +126,7 @@ const agent = setupAgent({
   },
 });
 
-export const contextCompactionMachine = agent.createMachine({
+export const contextCompactionMachine = agentSetup.createMachine({
   id: "context-compaction",
   context: ({ input }) => ({
     messages: [],

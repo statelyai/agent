@@ -94,7 +94,7 @@ export function createImplementChangesActor(model: LanguageModel) {
   });
 }
 
-const agent = setupAgent({
+const agentSetup = setupAgent({
   models,
   context: z.object({
     featureRequest: z.string(),
@@ -124,7 +124,7 @@ const agent = setupAgent({
   },
 });
 
-export const aiSdkOrchestratorWorkerMachine = agent.createMachine({
+export const aiSdkOrchestratorWorkerMachine = agentSetup.createMachine({
   id: "ai-sdk-orchestrator-worker",
   context: ({ input }) => ({
     featureRequest: input.featureRequest,
