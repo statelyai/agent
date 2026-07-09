@@ -122,6 +122,48 @@ choosingMove: {
 
 `allowedEvents` declares which machine events the model may choose from; guards then filter to the ones actually legal from the current snapshot.
 
+## Plans (multi-event decisions)
+
+<!-- agent.plan builtin from src/decision.ts and createRunAgentPlanLogic in src/run-agent.ts -->
+
+A **decision** is one event. A **plan** is many: the `agent.plan` builtin iterates a decision against the live snapshot, applying legal events one at a time until it decides to stop. Use it when a single command maps to several events ("add X and Y" → two `ADD_TODO`).
+
+Author it inline with `src: 'agent.plan'`, same shape as `agent.decide` plus `stopOn` and `maxSteps`:
+
+```ts
+planning: {
+  invoke: {
+    src: 'agent.plan',
+    input: ({ context }) => ({
+      model: 'quick',
+      prompt: renderCommand(context),
+      allowedEvents: ['ADD_TODO', 'TOGGLE_TODO', 'NOTHING', 'QUIT'] as const,
+      stopOn: ['NOTHING'] as const,   // sentinel that ends the plan
+      maxSteps: 8,                    // hard cap (default 8)
+    }),
+    onDone: { target: 'awaitingCommand' },  // output: { steps, stopped }
+  },
+  on: {
+    ADD_TODO: ({ context, event }) => ({ context: { /* ... */ } }),
+    NOTHING: {},                 // no-op transition; declare it even as `{}`
+    QUIT: { target: 'done' },    // exiting the state ends the plan (see below)
+  },
+}
+```
+
+How it behaves:
+
+- **Iterated decide.** Each step re-reads the live snapshot, so candidates always reflect everything applied so far. Each step runs the same validation/retry loop a single decision gets — a guard-rejected step retries with `rejected-by-guard` feedback (see [Validation and retries](#validation-and-retries)).
+- **`stopOn` sentinels.** Events listed in `stopOn` end the loop once chosen. They bypass the guard check, so declare the target as a plain no-op transition (`NOTHING: {}`) — this gives the model an explicit "done / no action needed" move.
+- **`maxSteps`** caps the plan (default 8). Also stops when no legal candidate remains.
+- **Applied trail** is appended to the prompt automatically each step, so the model sees plan progress without you threading it through context.
+- **Exiting the state ends the plan.** An applied event that leaves the invoking state (e.g. `QUIT` above) cancels the invoke — xstate moves on and `onDone` never runs.
+- **Partial application, no rollback.** Events are sent to the machine as the plan runs, not staged. If step 3 of 5 stops the plan, steps 1–2 already applied and stay applied. There is no transactional undo.
+- **`onDone` output** is `{ steps, stopped }` — the events applied in order, and why the loop ended (`'stop-event' | 'max-steps' | 'no-legal-events'`).
+- **`runAgent`-only for now.** Applying events mid-invoke needs a live parent actor, which only a snapshot-aware host has. The step-loop path doesn't drive `agent.plan` yet; provide a custom `actorSources['agent.plan']` if you need it elsewhere.
+
+Full example: [examples/todo-nl/index.ts](../examples/todo-nl/index.ts) drives free-text commands through one `agent.plan` invoke.
+
 ## Where to go next
 
 - [Agent machines](machines.md): transitions, guards, and event schemas.

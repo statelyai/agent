@@ -3,7 +3,8 @@ import { runAgent } from "../../src/index.js";
 import type { AgentDecisionRequest, AgentUserInput, ChosenEvent } from "../../src/index.js";
 import { todoMachine } from "./index.js";
 
-// A scripted decide executor: pops one event per call off `events`.
+// A scripted decide executor: pops one event per call off `events`. The
+// `agent.plan` invoke calls it once per plan step (and again per retry).
 function scriptedDecide(events: ChosenEvent[]) {
   const seen: AgentDecisionRequest[] = [];
   const decide = async (request: AgentDecisionRequest): Promise<{ event: ChosenEvent }> => {
@@ -28,33 +29,44 @@ function scriptedUserInput(commands: string[]) {
 }
 
 describe("todo-nl", () => {
-  test("one command → two ADD_TODO events then NOTHING → both todos present", async () => {
-    const { decide } = scriptedDecide([
+  test("one command → several plan steps applied in order → NOTHING ends the plan", async () => {
+    // A single command drives multiple events in one `agent.plan` invoke:
+    // two adds, a toggle, then NOTHING (the stopOn sentinel) to end.
+    const { decide, seen } = scriptedDecide([
       { type: "ADD_TODO", title: "pick up laundry" },
       { type: "ADD_TODO", title: "do groceries" },
+      { type: "TOGGLE_TODO", id: 1 },
       { type: "NOTHING", reason: "command fully handled" },
       { type: "QUIT" },
     ]);
-    const { userInput } = scriptedUserInput(["add pick up laundry and do groceries", "quit"]);
+    const { userInput } = scriptedUserInput([
+      "add pick up laundry and do groceries, then mark laundry done",
+      "quit",
+    ]);
 
     const result = await runAgent(todoMachine, {
       input: { todos: [] },
-      generateText: async () => ({ output: "" }),
       decide,
       userInput,
     });
 
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");
+    // Applied in order: both added, #1 toggled done.
     expect(result.output.todos).toEqual([
-      { id: 1, title: "pick up laundry", done: false },
+      { id: 1, title: "pick up laundry", done: true },
       { id: 2, title: "do groceries", done: false },
     ]);
+    // The first plan step re-reads the live snapshot each iteration; later
+    // steps carry the applied trail appended to the prompt.
+    const planRequests = seen.filter((r) => r.prompt?.includes("User command:"));
+    expect(planRequests[0]!.prompt).toContain("pick up laundry and do groceries");
+    expect(planRequests[1]!.prompt).toContain("Events already applied in this plan");
   });
 
-  test("TOGGLE_TODO with a bad id is rejected by guard, retry with good id toggles it", async () => {
-    // First decide attempt uses a nonexistent id (99) → rejected-by-guard;
-    // resolveDecision retries and the second attempt uses the real id (1).
+  test("a bad id mid-plan is rejected by guard, the plan retries the step with a good id", async () => {
+    // First plan step uses a nonexistent id (99) → rejected-by-guard; the
+    // plan retries the same step and the second attempt uses the real id (1).
     const { decide, seen } = scriptedDecide([
       { type: "TOGGLE_TODO", id: 99 },
       { type: "TOGGLE_TODO", id: 1 },
@@ -65,7 +77,6 @@ describe("todo-nl", () => {
 
     const result = await runAgent(todoMachine, {
       input: { todos: [{ id: 1, title: "write tests", done: false }] },
-      generateText: async () => ({ output: "" }),
       decide,
       userInput,
     });
@@ -74,18 +85,20 @@ describe("todo-nl", () => {
     if (result.status !== "done") throw new Error("expected done");
     expect(result.output.todos).toEqual([{ id: 1, title: "write tests", done: true }]);
 
-    // The retry request carried a 'rejected-by-guard' attempt for id 99.
+    // The retry request carried a 'rejected-by-guard' attempt for id 99, seen
+    // by the mock decide.
     const retryRequest = seen.find((request) => request.attempts.length > 0);
     expect(retryRequest?.attempts.at(-1)?.failure).toBe("rejected-by-guard");
   });
 
-  test("QUIT produces final output with the current todos", async () => {
+  test("QUIT applied mid-plan exits the state and produces final output", async () => {
+    // QUIT exits `planning`, cancelling the plan invoke (its onDone never
+    // runs); the machine moves straight to `done`.
     const { decide } = scriptedDecide([{ type: "QUIT" }]);
     const { userInput } = scriptedUserInput(["I'm done here"]);
 
     const result = await runAgent(todoMachine, {
       input: { todos: [{ id: 1, title: "existing", done: true }] },
-      generateText: async () => ({ output: "" }),
       decide,
       userInput,
     });
