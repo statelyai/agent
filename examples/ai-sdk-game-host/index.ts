@@ -22,6 +22,7 @@ import {
   executeAgentRequest,
   initialAgentStep,
   resolveDecision,
+  type AgentRequestExecutors,
   type EventUnion,
   resolveAgentStep,
   transitionAgentStep,
@@ -41,13 +42,16 @@ type GameEvent = EventUnion<typeof gameSchemas.events>;
 // "tool-per-event + toolChoice: 'required'" recipe from docs/p0-design.md
 // §2.6 — how the model is coerced into choosing is adapter business, not
 // core's.
-const executors = createAiSdkExecutors({ models });
-const { decide } = executors;
+const defaultExecutors = createAiSdkExecutors({ models });
 
 export async function runAiSdkGameTurn(
   input = { playerHp: 20, enemyHp: 15 },
   onStep?: (value: unknown) => void,
+  // Injected so tests drive the turn with mock executors; production uses the
+  // AI SDK set above.
+  executors: AgentRequestExecutors = defaultExecutors,
 ) {
+  const decide = executors.decide!;
   let step = initialAgentStep(gameMachine, input, {
     schemas: gameSchemas,
     actorSources: gameActors,

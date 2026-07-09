@@ -10,14 +10,14 @@ export {
   main as runEmailDrafterInspectorExample,
 } from "./email-drafter-inspector/index.js";
 export {
-  chooseMove,
+  chooseMoveInput,
   gameActors,
   gameMachine,
   gameSchemas,
   summarizeTurn,
   turnSummarySchema,
 } from "./game-agent/index.js";
-export { jokeActors, jokeMachine, jokeSchemas, tellJoke } from "./joke/index.js";
+export { jokeActors, jokeMachine, jokeSchemas, rateJoke, tellJoke } from "./joke/index.js";
 export {
   triageActors,
   triageMachine,
@@ -74,10 +74,7 @@ export {
   aiSdkEvaluatorOptimizerMachine,
   runAiSdkEvaluatorOptimizerExample,
 } from "./ai-sdk-evaluator-optimizer/index.js";
-export {
-  createDebateSubAgentsWorkflow,
-  runDebateSubAgentsExample,
-} from "./debate-sub-agents/index.js";
+export { debateMachine, runDebateSubAgentsExample } from "./debate-sub-agents/index.js";
 export {
   jsonAgentMachine,
   runJsonAgentDemo,

@@ -5,11 +5,9 @@ import {
   emailDrafterSchemas,
   evaluatePrompt,
   draftEmail,
-  chooseMove as chooseMoveLogic,
   gameMachine,
-  gameSchemas,
   jokeMachine,
-  summarizeTurn,
+  rateJoke as rateJokeLogic,
   tellJoke as tellJokeLogic,
 } from "../examples/index.js";
 import {
@@ -140,11 +138,7 @@ describe("curated XState setup examples", () => {
       enemyHp: 15,
     });
 
-    const [chooseMove] = getAgentRequests(actions, {
-      snapshot,
-      schemas: gameSchemas,
-      actorSources: { chooseMove: chooseMoveLogic, summarizeTurn },
-    });
+    const [chooseMove] = getAgentRequests(gameMachine, actions, snapshot);
 
     if (chooseMove?.kind !== "decision") {
       throw new Error("Expected a decision request.");
@@ -155,10 +149,7 @@ describe("curated XState setup examples", () => {
       event: { type: "ATTACK", target: "goblin" },
     }));
 
-    const attackStep = transitionAgentStep(gameMachine, snapshot, attackEvent as never, {
-      schemas: gameSchemas,
-      actorSources: { chooseMove: chooseMoveLogic, summarizeTurn },
-    });
+    const attackStep = transitionAgentStep(gameMachine, snapshot, attackEvent as never);
 
     const [summarize] = attackStep.requests;
     if (summarize?.kind !== "text") {
@@ -166,20 +157,11 @@ describe("curated XState setup examples", () => {
     }
     expect(summarize.events).toEqual([]);
 
-    const finalStep = resolveAgentStep(
-      gameMachine,
-      attackStep,
-      summarize,
-      {
-        summary: "You strike the goblin.",
-        playerHp: 20,
-        enemyHp: 9,
-      },
-      {
-        schemas: gameSchemas,
-        actorSources: { chooseMove: chooseMoveLogic, summarizeTurn },
-      },
-    );
+    const finalStep = resolveAgentStep(gameMachine, attackStep, summarize, {
+      summary: "You strike the goblin.",
+      playerHp: 20,
+      enemyHp: 9,
+    });
 
     expect(finalStep.done).toBe(true);
     expect(finalStep.snapshot.output).toEqual({
@@ -190,17 +172,21 @@ describe("curated XState setup examples", () => {
     });
   });
 
-  test("joke workflow loops until user feedback is done", async () => {
-    const feedback = ["try another one", "ok done"];
+  test("joke workflow loops until the decision ends it", async () => {
+    const decisions = ["TELL_ANOTHER", "END"] as const;
     let jokes = 0;
+    let decisionIndex = 0;
     const machine = jokeMachine.provide({
       actorSources: {
         tellJoke: tellJokeLogic.withExecutor(async ({ input }) => {
           jokes += 1;
           return { output: `joke ${jokes} about ${input.topic}` };
         }),
-        "agent.userInput": createAsyncLogic({
-          run: async () => ({ feedback: feedback.shift() ?? "done" }),
+        rateJoke: rateJokeLogic.withExecutor(async () => ({
+          output: { rating: jokes === 1 ? 3 : 9, explanation: "because" },
+        })),
+        "agent.decide": createAsyncLogic({
+          run: async () => ({ type: decisions[decisionIndex++] ?? "END" }),
         }),
       },
     });
@@ -211,7 +197,9 @@ describe("curated XState setup examples", () => {
 
     expect(jokes).toBe(2);
     expect(actor.getSnapshot().output).toEqual({
-      joke: "joke 2 about state machines",
+      topic: "state machines",
+      jokes: ["joke 1 about state machines", "joke 2 about state machines"],
+      lastRating: 9,
     });
   });
 });

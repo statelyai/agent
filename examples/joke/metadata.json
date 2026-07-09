@@ -1,14 +1,14 @@
 {
   "name": "joke",
-  "title": "Streaming Joke",
+  "title": "Joke Teller",
   "kind": "agent-workflow",
   "origin": {
     "type": "stately-agent",
-    "source": "Extracted from the AI SDK host demo in this repository",
+    "source": "Ported from the v1 joke-teller example in this repository",
     "url": null
   },
   "comparison": {
     "targets": ["Vercel AI SDK", "LangGraph"],
-    "purpose": "Shows a minimal stream-text actor that can be executed by different hosts."
+    "purpose": "Machine-owned tell -> rate -> decide loop: a joke streams, gets rated 1-10, and the model decides (via agent.decide) whether to tell another or stop."
   }
 }

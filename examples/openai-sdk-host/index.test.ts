@@ -246,10 +246,10 @@ describe("createOpenAiExecutors + runAgent (stubbed client, no network)", () => 
 
     const result = await runAgent(jokeMachine, {
       input: { topic: "state machines" },
-      generateText: async () => ({ output: "" }),
+      generateText: async () => ({ output: { rating: 9, explanation: "stub" } }),
       streamText,
+      decide: async () => ({ event: { type: "END" } }),
       onChunk: (chunk) => seen.push(chunk),
-      userInput: async () => ({ feedback: "ok, done" }),
     });
 
     expect(seen.join("")).toBe(chunks.join(""));

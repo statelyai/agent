@@ -9,6 +9,11 @@
  * itself only transitions on the final text. `runTriageStepDemo` also shows
  * the manual step loop against the same triage machine for comparison.
  *
+ * Executors come from the shared `createAiSdkExecutors` adapter (the same one
+ * every other example uses) — this host does not hand-roll AI SDK calls. The
+ * demo entrypoints accept an injected `generateText`/`streamText` so tests can
+ * drive them with mock executors; production wiring supplies the AI SDK set.
+ *
  * Compare `../ai-sdk-game-host/index.ts` for the explicit step-path wiring
  * (`initialAgentStep`/`resolveAgentStep`/`transitionAgentStep`), which is what
  * you reach for when the host — not `runAgent` — owns the loop (e.g. decisions,
@@ -20,12 +25,12 @@ import { type LanguageModel } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { createActor, createAsyncLogic, toPromise } from "xstate";
 import {
+  executeAgentRequest,
   initialAgentStep,
   resolveAgentStep,
   runAgent,
-  validateSchemaSync,
-  type AgentTextRequest,
-  type AgentTools,
+  type AgentRequestExecutor,
+  type AgentRequestExecutors,
   type StandardSchemaV1,
   type TextLogic,
   type TextLogicOutput,
@@ -44,52 +49,30 @@ import {
 interface AiSdkTextHostOptions {
   models?: Record<string, LanguageModel>;
   resolveModel?: (modelRef: string) => LanguageModel;
-  onChunk?: (chunk: string, info: { request: AgentTextRequest }) => void;
+  onChunk?: (chunk: string) => void;
 }
 
 function defaultResolveModel(modelRef: string): LanguageModel {
   return openai(modelRef.replace(/^openai\//, ""));
 }
 
-async function generateWithAiSdk(
-  input: AgentTextRequest,
-  tools: AgentTextRequest["tools"] = input.tools,
-  options: AiSdkTextHostOptions = {},
-  signal?: AbortSignal,
-) {
-  const { generateText } = options.models
+/**
+ * Builds the canonical AI SDK executor set for the given options. A static
+ * `models` map is used directly; otherwise refs resolve through
+ * `resolveModel` (defaulting to the `openai(...)` provider). This is the one
+ * seam between the host and `createAiSdkExecutors` — everything else is
+ * expressed as thin wrappers over the returned executors.
+ */
+function executorsFor(options: AiSdkTextHostOptions = {}): AgentRequestExecutors {
+  return options.models
     ? createAiSdkExecutors({ models: options.models })
-    : createAiSdkExecutors({
-        resolveModel: options.resolveModel ?? defaultResolveModel,
-      });
-  const { output } = await generateText({ ...input, tools: tools ?? {} }, { signal });
-  return input.outputSchema && typeof output === "string"
-    ? validateSchemaSync(input.outputSchema, output)
-    : output;
+    : createAiSdkExecutors({ resolveModel: options.resolveModel ?? defaultResolveModel });
 }
 
-async function streamWithAiSdk(
-  input: AgentTextRequest,
-  options: AiSdkTextHostOptions = {},
-  signal?: AbortSignal,
-) {
-  const { streamText } = options.models
-    ? createAiSdkExecutors({ models: options.models })
-    : createAiSdkExecutors({
-        resolveModel: options.resolveModel ?? defaultResolveModel,
-      });
-  const { output } = await streamText(
-    { ...input, tools: input.tools ?? {} },
-    {
-      onChunk: options.onChunk
-        ? (chunk: string) => options.onChunk!(chunk, { request: input })
-        : undefined,
-      signal,
-    },
-  );
-  return output;
-}
-
+/**
+ * Wraps a text logic in an executor backed by `createAiSdkExecutors.generateText`.
+ * Used by `../cloudflare-agent-host` to provide `emailDrafter`'s actors.
+ */
 export function createAiSdkTextActor<
   TInputSchema extends StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1,
@@ -98,22 +81,17 @@ export function createAiSdkTextActor<
   logic: TextLogic<TInputSchema, TOutputSchema, TMetadata>,
   options: AiSdkTextHostOptions = {},
 ): TextLogic<TInputSchema, TOutputSchema, TMetadata> {
-  return logic.withExecutor(async ({ request, signal }) => ({
-    output: (await generateWithAiSdk(request, undefined, options, signal)) as TextLogicOutput<
-      typeof logic
-    >,
-  }));
-}
-
-// Module-local: the core `createAiSdkExecutors` is what examples use; this
-// hand-rolled variant stays here to keep the file's host-adapter demos
-// self-contained.
-function createAiSdkTextExecutor(options: AiSdkTextHostOptions = {}) {
-  return async (request: AgentTextRequest & { tools: AgentTools }) => ({
-    output: await generateWithAiSdk(request, request.tools, options),
+  const { generateText } = executorsFor(options);
+  return logic.withExecutor(async ({ request, signal }) => {
+    const { output } = await generateText({ ...request, tools: request.tools ?? {} }, { signal });
+    return { output: output as TextLogicOutput<typeof logic> };
   });
 }
 
+/**
+ * Wraps a `mode: 'stream'` text logic in an executor backed by
+ * `createAiSdkExecutors.streamText`, forwarding chunks to `options.onChunk`.
+ */
 export function createAiSdkStreamingTextActor<
   TInputSchema extends StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1,
@@ -122,15 +100,25 @@ export function createAiSdkStreamingTextActor<
   logic: TextLogic<TInputSchema, TOutputSchema, TMetadata>,
   options: AiSdkTextHostOptions = {},
 ): TextLogic<TInputSchema, TOutputSchema, TMetadata> {
-  return logic.withExecutor(async ({ request, signal }) => ({
-    output: (await streamWithAiSdk(request, options, signal)) as TextLogicOutput<typeof logic>,
-  }));
+  const { streamText } = executorsFor(options);
+  return logic.withExecutor(async ({ request, signal }) => {
+    const { output } = await streamText!(
+      { ...request, tools: request.tools ?? {} },
+      { onChunk: options.onChunk, signal },
+    );
+    return { output: output as TextLogicOutput<typeof logic> };
+  });
 }
 
-export async function runTriageDemo(ticket: string) {
+// ─── Demos ───
+
+export async function runTriageDemo(
+  ticket: string,
+  generateText: AgentRequestExecutor = executorsFor({ models: triageModels }).generateText,
+) {
   const result = await runAgent(triageMachine, {
     input: { ticket },
-    generateText: createAiSdkTextExecutor({ models: triageModels }),
+    generateText,
     // The host-side observability hook: log each machine transition as it runs.
     onTransition: (snapshot) => console.log(`  state -> ${String(snapshot.value)}`),
   });
@@ -140,7 +128,10 @@ export async function runTriageDemo(ticket: string) {
   return result.output;
 }
 
-export async function runTriageStepDemo(ticket: string) {
+export async function runTriageStepDemo(
+  ticket: string,
+  generateText: AgentRequestExecutor = executorsFor({ models: triageModels }).generateText,
+) {
   let step = initialAgentStep(
     triageMachine,
     { ticket },
@@ -159,9 +150,7 @@ export async function runTriageStepDemo(ticket: string) {
       if (request.kind !== "text") {
         throw new Error("Decision requests are not supported in this demo.");
       }
-      const output = await generateWithAiSdk(request.input, request.tools, {
-        models: triageModels,
-      });
+      const output = await executeAgentRequest(request, { generateText });
       step = resolveAgentStep(triageMachine, step, request, output, {
         schemas: triageSchemas,
         actorSources: triageActors,
@@ -172,18 +161,28 @@ export async function runTriageStepDemo(ticket: string) {
   return step.snapshot.output;
 }
 
-export async function runStreamingDemo(topic: string) {
+export async function runStreamingDemo(
+  topic: string,
+  streamingTellJoke: TextLogic<
+    typeof tellJoke.schemas.input,
+    typeof tellJoke.schemas.output
+  > = createAiSdkStreamingTextActor(tellJoke, {
+    models: jokeModels,
+    // The side channel: chunks go to stdout as they arrive. In a server
+    // this is a UIMessageStream writer or Response stream instead.
+    onChunk: (chunk) => process.stdout.write(chunk),
+  }),
+) {
   const actor = createActor(
     jokeMachine.provide({
       actorSources: {
-        tellJoke: createAiSdkStreamingTextActor(tellJoke, {
-          models: jokeModels,
-          // The side channel: chunks go to stdout as they arrive. In a server
-          // this is a UIMessageStream writer or Response stream instead.
-          onChunk: (chunk) => process.stdout.write(chunk),
+        tellJoke: streamingTellJoke,
+        // Rate the streamed joke, then end the loop after one joke.
+        rateJoke: createAsyncLogic({
+          run: async () => ({ rating: 9, explanation: "solid pun" }),
         }),
-        "agent.userInput": createAsyncLogic({
-          run: async () => ({ feedback: "ok, done" }),
+        "agent.decide": createAsyncLogic({
+          run: async () => ({ type: "END" as const }),
         }),
       },
     }),
@@ -193,7 +192,7 @@ export async function runStreamingDemo(topic: string) {
   actor.start();
   const output = await toPromise(actor);
   process.stdout.write("\n");
-  return output.joke;
+  return output.jokes.at(-1) ?? "";
 }
 
 async function main() {

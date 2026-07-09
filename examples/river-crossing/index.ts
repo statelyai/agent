@@ -211,8 +211,15 @@ export function shortestMoveSequence(from: WorldState): MoveEvent[] | null {
 // ─── describeMachine: render the machine's rules into the model's context ───
 
 /**
- * PROTOTYPE — a hand-rolled renderer of a machine's shape into compact
- * markdown for injection into an LLM prompt.
+ * ┌─────────────────────────────────────────────────────────────────────┐
+ * │ EXPERIMENTAL PROTOTYPE — not a stable API. Hand-rolled, example-local,│
+ * │ and leans on zod/xstate introspection (`.shape`, `._zod.def.type`,    │
+ * │ `machine.config`) that may break across minor versions. Do not depend │
+ * │ on it outside this example; a real core helper is sketched below.     │
+ * └─────────────────────────────────────────────────────────────────────┘
+ *
+ * A hand-rolled renderer of a machine's shape into compact markdown for
+ * injection into an LLM prompt.
  *
  * Graph utilities live at the `xstate/graph` subpath in v6 (the standalone
  * `@xstate/graph` package is dead), and a self-contained machine's config
@@ -287,9 +294,14 @@ function renderEventFields(schema: unknown): string {
   return fields.length ? ` (${fields.join(", ")})` : "";
 }
 
+// zod v4 exposes the type tag on its internals namespace `._zod.def.type`
+// (e.g. "string", "number", "enum"); the legacy `._def.type` still works via
+// the v3 compat layer. Prefer the newer accessor, fall back to the old one.
+// Still introspection into private-ish shape — see the describeMachine banner.
 function zodTypeName(field: unknown): string {
-  const def = (field as { _def?: { type?: string; typeName?: string } })?._def;
-  return def?.type ?? def?.typeName ?? "value";
+  const zodDef = (field as { _zod?: { def?: { type?: string } } })?._zod?.def;
+  const legacyDef = (field as { _def?: { type?: string; typeName?: string } })?._def;
+  return zodDef?.type ?? legacyDef?.type ?? legacyDef?.typeName ?? "value";
 }
 
 // ─── Agent + machine ───
@@ -383,26 +395,81 @@ function moveTransition(item: Items | null) {
   };
 }
 
+// ─── Shared machine skeleton (both variants) ───
+
+type RiverContext = {
+  farmer: Bank;
+  wolf: Bank;
+  goat: Bank;
+  cabbage: Bank;
+  moves: number;
+  maxMoves: number;
+  log: string[];
+};
+
+// True when the farmer, wolf, goat, and cabbage are all on the right bank.
+function allOnRight(context: Pick<RiverContext, "farmer" | "wolf" | "goat" | "cabbage">): boolean {
+  return (
+    context.farmer === "right" &&
+    context.wolf === "right" &&
+    context.goat === "right" &&
+    context.cabbage === "right"
+  );
+}
+
+// Initial context builder — everything starts on the left bank.
+const initialRiverContext = ({ input }: { input: { maxMoves: number } }): RiverContext => ({
+  farmer: "left",
+  wolf: "left",
+  goat: "left",
+  cabbage: "left",
+  moves: 0,
+  maxMoves: input.maxMoves,
+  log: [],
+});
+
+// Root output builder — reports whether the puzzle was solved.
+const riverOutput = ({ context }: { context: RiverContext }) => ({
+  solved: allOnRight(context),
+  moves: context.moves,
+  log: context.log,
+});
+
+// The non-deciding states are identical across both variants: the checkWin
+// dispatcher and the two final states.
+const sharedStates = {
+  // An always function-transition decides the outcome after each applied
+  // move: solved when everything is on the right bank, failed when the move
+  // budget is spent, otherwise back to deciding.
+  checkWin: {
+    always: ({ context }: { context: RiverContext }) => {
+      if (allOnRight(context)) return { target: "solved" };
+      if (context.moves >= context.maxMoves) return { target: "failed" };
+      return { target: "deciding" };
+    },
+  },
+  solved: { type: "final" },
+  // Reached on move-budget exhaustion or when the decide/recommend request
+  // exhausts retries.
+  failed: {
+    type: "final",
+    output: ({ context }: { context: RiverContext }) => ({
+      solved: false,
+      moves: context.moves,
+      log: context.log,
+    }),
+  },
+} as const;
+
+// Both machines are assembled from the same skeleton — `initialRiverContext`,
+// `riverOutput`, and `...sharedStates` (checkWin/solved/failed) — spread inline
+// so `setup.createMachine` still infers each variant's precise request/tool
+// typing from the config literal. Only the `deciding` state differs.
+
 export const riverCrossingMachine = agentSetup.createMachine({
   id: "river-crossing",
-  context: ({ input }) => ({
-    farmer: "left" as Bank,
-    wolf: "left" as Bank,
-    goat: "left" as Bank,
-    cabbage: "left" as Bank,
-    moves: 0,
-    maxMoves: input.maxMoves,
-    log: [],
-  }),
-  output: ({ context }) => ({
-    solved:
-      context.farmer === "right" &&
-      context.wolf === "right" &&
-      context.goat === "right" &&
-      context.cabbage === "right",
-    moves: context.moves,
-    log: context.log,
-  }),
+  context: initialRiverContext,
+  output: riverOutput,
   initial: "deciding",
   states: {
     deciding: {
@@ -433,34 +500,7 @@ export const riverCrossingMachine = agentSetup.createMachine({
         CROSS_ALONE: moveTransition(null),
       },
     },
-
-    // An always function-transition decides the outcome after each applied
-    // move: solved when everything is on the right bank, failed when the move
-    // budget is spent, otherwise back to deciding.
-    checkWin: {
-      always: ({ context }) => {
-        const allRight =
-          context.farmer === "right" &&
-          context.wolf === "right" &&
-          context.goat === "right" &&
-          context.cabbage === "right";
-        if (allRight) return { target: "solved" };
-        if (context.moves >= context.maxMoves) return { target: "failed" };
-        return { target: "deciding" };
-      },
-    },
-
-    solved: { type: "final" },
-
-    // Reached on move-budget exhaustion or when chooseMove exhausts retries.
-    failed: {
-      type: "final",
-      output: ({ context }) => ({
-        solved: false,
-        moves: context.moves,
-        log: context.log,
-      }),
-    },
+    ...sharedStates,
   },
 });
 
@@ -535,24 +575,8 @@ const assistedAgentSetup = setupAgent({
 
 export const riverCrossingAssistedMachine = assistedAgentSetup.createMachine({
   id: "river-crossing-assisted",
-  context: ({ input }) => ({
-    farmer: "left" as Bank,
-    wolf: "left" as Bank,
-    goat: "left" as Bank,
-    cabbage: "left" as Bank,
-    moves: 0,
-    maxMoves: input.maxMoves,
-    log: [],
-  }),
-  output: ({ context }) => ({
-    solved:
-      context.farmer === "right" &&
-      context.wolf === "right" &&
-      context.goat === "right" &&
-      context.cabbage === "right",
-    moves: context.moves,
-    log: context.log,
-  }),
+  context: initialRiverContext,
+  output: riverOutput,
   initial: "deciding",
   states: {
     deciding: {
@@ -597,27 +621,7 @@ export const riverCrossingAssistedMachine = assistedAgentSetup.createMachine({
         onError: { target: "failed" },
       },
     },
-    checkWin: {
-      always: ({ context }) => {
-        const allRight =
-          context.farmer === "right" &&
-          context.wolf === "right" &&
-          context.goat === "right" &&
-          context.cabbage === "right";
-        if (allRight) return { target: "solved" };
-        if (context.moves >= context.maxMoves) return { target: "failed" };
-        return { target: "deciding" };
-      },
-    },
-    solved: { type: "final" },
-    failed: {
-      type: "final",
-      output: ({ context }) => ({
-        solved: false,
-        moves: context.moves,
-        log: context.log,
-      }),
-    },
+    ...sharedStates,
   },
 });
 
