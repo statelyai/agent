@@ -17,8 +17,9 @@
  *   - The multi-action loop, for free: "add X and Y" needs two events. Here we
  *     hand-write the `while` loop below — call the model, apply, feed back
  *     what was applied, repeat until `nothing`, with a manual `maxSteps` cap.
- *     `index.ts` gets the identical behaviour from one `agent.plan` invoke
- *     (`stopOn: ['NOTHING']`, `maxSteps`, applied trail appended automatically).
+ *     `index.ts` gets the identical behaviour from one `agent.plan` invoke: the
+ *     built-in done move ends it, `maxSteps` caps it, and the applied trail is
+ *     appended automatically.
  *   - Guard rejection + retry: the machine rejects a TOGGLE/DELETE on a
  *     nonexistent id (`rejected-by-guard`) and re-asks the model with that
  *     feedback, mid-plan. Here (see `applyAction`) a bad id is just *silently

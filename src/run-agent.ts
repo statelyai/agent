@@ -15,7 +15,7 @@ import {
   type SnapshotFrom,
 } from "xstate";
 import type { AgentTools, ChosenEvent } from "./types.js";
-import { getAcceptedEvents, type AgentSchemas } from "./events.js";
+import { getAcceptedEvents, sanitizeEventToolName, type AgentSchemas } from "./events.js";
 import {
   isTextLogic,
   normalizeGeneratorResult,
@@ -29,6 +29,7 @@ import {
 import {
   isDecisionLogic,
   isPlanLogic,
+  PLAN_DONE_EVENT_TYPE,
   resolveDecision,
   type AgentDecisionExecutor,
   type AgentDecisionRequest,
@@ -728,13 +729,23 @@ function createRunAgentPlanLogic(logic: PlanLogic, runCtx: RunAgentBindContext):
           break;
         }
         const snapshot = actorRef.getSnapshot() as AnyMachineSnapshot;
-        const events = getAcceptedEvents(snapshot, {
+        const machineEvents = getAcceptedEvents(snapshot, {
           schemas: runCtx.schemas,
           eventTypes: logic.allowedEventTypes(input),
         });
-        if (events.length === 0) {
+        if (machineEvents.length === 0) {
           return { steps, stopped: "no-legal-events" };
         }
+        // Every step also offers the built-in "done" move: an explicit "no
+        // further action needed" the model can choose instead of being forced
+        // to pick some machine event. Never sent to the machine.
+        const doneDescriptor = {
+          type: PLAN_DONE_EVENT_TYPE,
+          toolName: sanitizeEventToolName(PLAN_DONE_EVENT_TYPE),
+        };
+        const events = machineEvents.some((event) => event.type === PLAN_DONE_EVENT_TYPE)
+          ? machineEvents
+          : [...machineEvents, doneDescriptor];
 
         const trail =
           steps.length === 0
@@ -742,11 +753,12 @@ function createRunAgentPlanLogic(logic: PlanLogic, runCtx: RunAgentBindContext):
             : `\n\nEvents already applied in this plan, in order:\n${steps
                 .map((step) => JSON.stringify(step))
                 .join("\n")}\nContinue from here; do not repeat applied events.`;
+        const doneHint = `\n\nWhen the request is fully handled (or no action is needed), choose '${PLAN_DONE_EVENT_TYPE}'.`;
         const request: AgentDecisionRequest = {
           ...base,
           id: `${id}[${steps.length}]`,
           events,
-          prompt: base.prompt === undefined && trail === "" ? undefined : `${base.prompt ?? ""}${trail}`,
+          prompt: `${base.prompt ?? ""}${trail}${doneHint}`,
           attempts: [],
         };
 
@@ -754,16 +766,21 @@ function createRunAgentPlanLogic(logic: PlanLogic, runCtx: RunAgentBindContext):
           maxRetries: input.maxRetries ?? logic.maxRetries,
           signal,
           canTake: (event) => {
-            // A stopOn event terminates the plan rather than driving a
-            // transition — a pure no-op handler (`NOTHING: {}`) makes
-            // `snapshot.can(...)` false, so exempt stop events from the check.
-            if (stopOn.has(event.type)) {
+            // The built-in done move and stopOn events terminate the plan
+            // rather than driving a transition — a pure no-op handler
+            // (`NOTHING: {}`) makes `snapshot.can(...)` false, so exempt
+            // both from the guard check.
+            if (event.type === PLAN_DONE_EVENT_TYPE || stopOn.has(event.type)) {
               return true;
             }
             const ref = runCtx.actorHolder.actorRef;
             return ref ? (ref.getSnapshot() as AnyMachineSnapshot).can(event) : true;
           },
         });
+
+        if (chosen.type === PLAN_DONE_EVENT_TYPE) {
+          return { steps, stopped: "done" };
+        }
 
         steps.push(chosen);
         actorRef.send(chosen as never);

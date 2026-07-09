@@ -29,14 +29,14 @@ function scriptedUserInput(commands: string[]) {
 }
 
 describe("todo-nl", () => {
-  test("one command → several plan steps applied in order → NOTHING ends the plan", async () => {
+  test("one command → several plan steps applied in order → the done move ends the plan", async () => {
     // A single command drives multiple events in one `agent.plan` invoke:
-    // two adds, a toggle, then NOTHING (the stopOn sentinel) to end.
+    // two adds, a toggle, then the built-in done move to end.
     const { decide, seen } = scriptedDecide([
       { type: "ADD_TODO", title: "pick up laundry" },
       { type: "ADD_TODO", title: "do groceries" },
       { type: "TOGGLE_TODO", id: 1 },
-      { type: "NOTHING", reason: "command fully handled" },
+      { type: "agent.plan.done" },
       { type: "QUIT" },
     ]);
     const { userInput } = scriptedUserInput([
@@ -70,7 +70,7 @@ describe("todo-nl", () => {
     const { decide, seen } = scriptedDecide([
       { type: "TOGGLE_TODO", id: 99 },
       { type: "TOGGLE_TODO", id: 1 },
-      { type: "NOTHING", reason: "done" },
+      { type: "agent.plan.done" },
       { type: "QUIT" },
     ]);
     const { userInput } = scriptedUserInput(["mark the first one done", "quit"]);

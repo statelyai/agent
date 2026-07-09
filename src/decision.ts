@@ -19,7 +19,7 @@ import {
   resolveTextLogicValue,
   type ResolveTextLogicValue,
 } from "./text-logic.js";
-import { sanitizeEventToolName, type AgentEventDescriptor } from "./events.js";
+import { isEventPattern, sanitizeEventToolName, type AgentEventDescriptor } from "./events.js";
 import { executorBoundLogics } from "./internal/registry.js";
 
 /**
@@ -49,6 +49,8 @@ export interface AgentDecisionInput<
 }
 
 // Lowers `agent.decide` inline input into an AgentDecisionRequest (id filled in by the caller).
+// Wildcard entries are dropped here: they can only expand against a live snapshot, which
+// snapshot-aware hosts do via getAcceptedEvents (overwriting `events` wholesale).
 function decideRequestFromInput(input: AgentDecisionInput): AgentDecisionRequest {
   const allowedEventTypes = resolveAllowedEventTypes(input.allowedEvents, input) ?? [];
 
@@ -59,10 +61,12 @@ function decideRequestFromInput(input: AgentDecisionInput): AgentDecisionRequest
     system: input.system,
     prompt: input.prompt,
     messages: input.messages,
-    events: allowedEventTypes.map((type) => ({
-      type,
-      toolName: sanitizeEventToolName(type),
-    })),
+    events: allowedEventTypes
+      .filter((type) => !isEventPattern(type))
+      .map((type) => ({
+        type,
+        toolName: sanitizeEventToolName(type),
+      })),
     attempts: [],
     temperature: input.temperature,
     maxTokens: input.maxTokens,
@@ -93,12 +97,20 @@ function decideActorWithExecutor(
       // See the analogous check in createDecisionLogic's run: omitted
       // allowedEvents means "all currently-legal events," unknowable
       // without a snapshot-aware host.
-      if (resolveAllowedEventTypes(input.allowedEvents, input) === undefined) {
+      const resolvedEventTypes = resolveAllowedEventTypes(input.allowedEvents, input);
+      if (resolvedEventTypes === undefined) {
         throw new Error(
           `'${DECIDE_ACTOR}' input has omitted \`allowedEvents\`, which means "all ` +
             'currently-legal events" — but that requires a snapshot-aware host (runAgent ' +
             "or the step path) to resolve. Under a bare createActor(...), declare " +
             "`allowedEvents` explicitly to use this actor here.",
+        );
+      }
+      if (resolvedEventTypes.some(isEventPattern)) {
+        throw new Error(
+          `'${DECIDE_ACTOR}' input uses wildcard \`allowedEvents\` patterns, which expand ` +
+            "against the live snapshot — that requires a snapshot-aware host (runAgent " +
+            "or the step path). Under a bare createActor(...), list event types explicitly.",
         );
       }
 
@@ -148,19 +160,29 @@ export interface AgentPlanInput<
   /** Maximum events applied in one plan. Default 8. */
   maxSteps?: number;
   /**
-   * Events that end the plan once chosen: the event is still validated and
-   * sent, then the loop stops. Declare a no-op event (e.g. `NOTHING`) here
-   * to give the model an explicit "done / no action needed" move.
+   * Machine events that end the plan once chosen: the event is still
+   * validated and sent, then the loop stops. Usually unnecessary — every
+   * plan step already offers the built-in {@link PLAN_DONE_EVENT_TYPE}
+   * "done" option, which ends the plan without touching the machine.
+   * Declare `stopOn` only for "send this real event AND stop" semantics.
    */
   stopOn?: readonly TEvent[];
 }
+
+/**
+ * Reserved event type the `agent.plan` builtin adds to every step's
+ * candidates as the explicit "no further action needed" move. Choosing it
+ * ends the plan (`stopped: 'done'`); it is never sent to the machine, so
+ * machines need no no-op sentinel event of their own.
+ */
+export const PLAN_DONE_EVENT_TYPE = "agent.plan.done" as const;
 
 /** What an `agent.plan` invoke resolves with (its `onDone` output). */
 export interface AgentPlanOutput {
   /** The events applied, in order (possibly empty). */
   steps: ChosenEvent[];
   /** Why the loop ended. */
-  stopped: "stop-event" | "max-steps" | "no-legal-events";
+  stopped: "done" | "stop-event" | "max-steps" | "no-legal-events";
 }
 
 /**
@@ -259,7 +281,8 @@ export interface DecisionLogic<
   withExecutor(execute: AgentDecisionExecutor): DecisionLogic<TInputSchema, TMetadata>;
 }
 
-// Resolves a declared `AllowedEvents` (static or resolver) to a concrete list; undefined means "all legal events."
+// Resolves a declared `AllowedEvents` (single entry, array, or resolver) to a concrete
+// list of types/patterns; undefined means "all legal events."
 function resolveAllowedEventTypes(
   allowedEvents: AllowedEvents | undefined,
   input: unknown,
@@ -267,7 +290,9 @@ function resolveAllowedEventTypes(
   if (allowedEvents === undefined) {
     return undefined;
   }
-  return typeof allowedEvents === "function" ? allowedEvents({ input }) : allowedEvents;
+  const resolved =
+    typeof allowedEvents === "function" ? allowedEvents({ input }) : allowedEvents;
+  return typeof resolved === "string" ? [resolved] : resolved;
 }
 
 /**
@@ -368,6 +393,17 @@ export function createDecisionLogic<
             'events" — but that requires a snapshot-aware host (runAgent or the step ' +
             "path) to resolve. Under a bare createActor(...), declare `allowedEvents` " +
             "explicitly on this logic to use it here.",
+        );
+      }
+      if (
+        resolveAllowedEventTypes(config.allowedEvents as AllowedEvents | undefined, input)?.some(
+          isEventPattern,
+        )
+      ) {
+        throw new Error(
+          "Decision logic uses wildcard `allowedEvents` patterns, which expand against " +
+            "the live snapshot — that requires a snapshot-aware host (runAgent or the " +
+            "step path). Under a bare createActor(...), list event types explicitly.",
         );
       }
 

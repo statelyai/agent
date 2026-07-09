@@ -1,7 +1,12 @@
 export { appendMessages, messagesSchema } from "./messages.js";
 export { createAgentSchemas, setupAgent } from "./setup-agent.js";
-export { DecisionExhaustedError, resolveDecision, sendDecision } from "./decision.js";
-export { EVENT_TOOL_PREFIX, getAcceptedEvents } from "./events.js";
+export {
+  DecisionExhaustedError,
+  PLAN_DONE_EVENT_TYPE,
+  resolveDecision,
+  sendDecision,
+} from "./decision.js";
+export { EVENT_TOOL_PREFIX, getAcceptedEvents, matchesEventPattern } from "./events.js";
 export {
   bindRequestExecutor,
   createTextLogic,
@@ -85,6 +90,7 @@ export type {
   AgentToolDescriptor,
   AgentToolExecute,
   AgentTools,
+  AllowedEventPattern,
   AllowedEvents,
   AssistantMessage,
   ChosenEvent,

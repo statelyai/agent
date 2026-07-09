@@ -9,6 +9,6 @@
   },
   "comparison": {
     "targets": ["LangGraph", "Burr"],
-    "purpose": "One `agent.plan` invoke maps a free-text command onto a sequence of a real app's machine events (ADD/TOGGLE/DELETE/NOTHING/QUIT): a multi-action command drives several plan steps in order, NOTHING (the stopOn sentinel) ends the plan, and guard-enforced honesty rejects nonexistent ids mid-plan with a retry. Ships a with/without-machine A/B pair (index.ts vs imperative.ts) so agent.plan's typed events, mid-plan guard rejection+retry, and resumable snapshot can be compared against a hand-rolled generateObject while-loop."
+    "purpose": "One `agent.plan` invoke maps a free-text command onto a sequence of a real app's machine events (ADD/TOGGLE/DELETE/QUIT): a multi-action command drives several plan steps in order, the built-in done move ends the plan (no machine sentinel), and guard-enforced honesty rejects nonexistent ids mid-plan with a retry. Ships a with/without-machine A/B pair (index.ts vs imperative.ts) so agent.plan's typed events, mid-plan guard rejection+retry, and resumable snapshot can be compared against a hand-rolled generateObject while-loop."
   }
 }

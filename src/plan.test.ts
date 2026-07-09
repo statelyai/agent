@@ -1,7 +1,12 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import { createAgentSchemas, runAgent, setupAgent } from "./index.js";
-import type { AgentDecisionExecutor, AgentDecisionRequest, ChosenEvent } from "./index.js";
+import type {
+  AgentDecisionExecutor,
+  AgentDecisionRequest,
+  AgentPlanInput,
+  ChosenEvent,
+} from "./index.js";
 
 // A todo-list machine managed by one `agent.plan` invoke: the model applies
 // any number of legal events, then chooses NOTHING (stopOn) to end the plan.
@@ -116,7 +121,10 @@ describe("agent.plan (multi-event decision)", () => {
     expect(requests[0]!.events.map((e) => e.type)).toEqual(
       expect.arrayContaining(["ADD_TODO", "TOGGLE_TODO", "NOTHING", "QUIT"]),
     );
-    expect(requests[0]!.prompt).toBe("Manage the todo list.");
+    expect(requests[0]!.prompt).toContain("Manage the todo list.");
+    // Every step offers the built-in done move and says so.
+    expect(requests[0]!.events.map((e) => e.type)).toContain("agent.plan.done");
+    expect(requests[0]!.prompt).toContain("agent.plan.done");
     expect(requests[1]!.prompt).toContain("Events already applied in this plan");
     expect(requests[1]!.prompt).toContain('"buy milk"');
   });
@@ -176,9 +184,153 @@ describe("agent.plan (multi-event decision)", () => {
     expect(result.output.log).toEqual([]);
   });
 
+  test("the built-in done move ends the plan without a machine sentinel event", async () => {
+    const { decide } = createScriptedDecide([
+      { type: "ADD_TODO", title: "only one" },
+      { type: "agent.plan.done" },
+    ]);
+
+    const result = await runAgent(createTodoAgent(), { decide });
+
+    expect(result.status).toBe("done");
+    if (result.status !== "done") throw new Error("expected done");
+    expect(result.output.titles).toEqual(["only one"]);
+    // The done move is not a machine event: not counted as a step, not sent.
+    expect(result.output.log).toEqual(["stopped:done", "steps:1"]);
+  });
+
   test("without a decide executor, binding fails fast", async () => {
     await expect(runAgent(createTodoAgent(), {})).rejects.toThrow(
       /invokes plan source 'agent\.plan' but no 'decide' executor/,
     );
+  });
+});
+
+describe("allowedEvents wildcards", () => {
+  function createNamespacedAgent(allowedEvents: unknown) {
+    const agent = setupAgent({
+      schemas: createAgentSchemas({
+        context: z.object({ log: z.array(z.string()) }),
+        output: z.object({ log: z.array(z.string()) }),
+        events: {
+          "todo.add": z.object({ title: z.string() }),
+          "todo.toggle": z.object({ id: z.string() }),
+          reset: z.object({}),
+          quit: z.object({}),
+        },
+      }),
+    });
+
+    return agent.createMachine({
+      context: () => ({ log: [] }),
+      initial: "planning",
+      states: {
+        planning: {
+          invoke: {
+            src: "agent.plan",
+            input: () => ({ model: "quick", prompt: "go", allowedEvents }) as never,
+            onDone: { target: "done" },
+          },
+          on: {
+            "todo.add": ({ context, event }) => ({
+              context: { log: [...context.log, `add:${event.title}`] },
+            }),
+            "todo.toggle": ({ context, event }) => ({
+              context: { log: [...context.log, `toggle:${event.id}`] },
+            }),
+            reset: ({ context }) => ({ context: { log: [...context.log, "reset"] } }),
+            quit: { target: "done" },
+          },
+        },
+        done: { type: "final", output: ({ context }) => ({ log: context.log }) },
+      },
+    });
+  }
+
+  async function candidateTypes(allowedEvents: unknown) {
+    let captured: string[] = [];
+    const result = await runAgent(createNamespacedAgent(allowedEvents), {
+      decide: async (request) => {
+        captured = request.events.map((event) => event.type);
+        return { event: { type: "agent.plan.done" } };
+      },
+    });
+    expect(result.status).toBe("done");
+    return captured;
+  }
+
+  test("'todo.*' narrows to the namespace (plus the built-in done move)", async () => {
+    expect(await candidateTypes(["todo.*"])).toEqual([
+      "todo.add",
+      "todo.toggle",
+      "agent.plan.done",
+    ]);
+  });
+
+  test("a single string entry works: '*' allows every legal event", async () => {
+    expect(await candidateTypes("*")).toEqual([
+      "todo.add",
+      "todo.toggle",
+      "reset",
+      "quit",
+      "agent.plan.done",
+    ]);
+  });
+
+  test("patterns and exact types mix", async () => {
+    expect(await candidateTypes(["todo.*", "reset"])).toEqual([
+      "todo.add",
+      "todo.toggle",
+      "reset",
+      "agent.plan.done",
+    ]);
+  });
+
+  test("wildcard patterns are typed against the declared events", () => {
+    const agent = setupAgent({
+      schemas: createAgentSchemas({
+        context: z.object({}),
+        events: { "todo.add": z.object({}), reset: z.object({}) },
+      }),
+    });
+
+    agent.createMachine({
+      context: () => ({}),
+      initial: "a",
+      states: {
+        a: {
+          invoke: {
+            src: "agent.plan",
+            input: () => ({
+              model: "m",
+              // Patterns derive from the declared dotted event types.
+              allowedEvents: ["todo.*", "reset", "*"] as const,
+            }),
+            onDone: { target: "b" },
+          },
+        },
+        b: {
+          invoke: {
+            src: "agent.decide",
+            input: () => ({
+              model: "m",
+              // A single string entry is also legal.
+              allowedEvents: "todo.*" as const,
+            }),
+            onDone: { target: "b" },
+          },
+          on: { reset: {}, "todo.add": {} },
+        },
+      },
+    });
+
+    const badPattern: AgentPlanInput<"todo.add" | "reset"> = {
+      model: "m",
+      // @ts-expect-error 'nope.*' matches no declared event namespace
+      allowedEvents: ["nope.*"],
+    };
+    void badPattern;
+
+    expect(true).toBe(true);
   });
 });

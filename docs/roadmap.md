@@ -32,7 +32,7 @@ Everything here is **additive**: none of it blocks the alpha, and all of it bene
 
 ## Next up
 
-- **Plan executor (simulate + divergence replan).** The `agent.plan` builtin has shipped: iterated-decide, applying legal events one at a time against the live snapshot until a `stopOn` sentinel, `maxSteps`, or the invoke exits its state (see [decisions](decisions.md) and `examples/todo-nl`). Next is the executor layer on top: a proposed plan is validated up front by simulating its event path against the machine; at runtime each step's actual snapshot is diffed against the simulated one, and divergence triggers a replan from the actual state under a budget. It ships as a documented pattern first, then promotes to core. Related: promoting `examples/river-crossing`'s `describeMachine` prototype to core, and a graph-search "solver mode" for pure machines via `xstate/graph`.
+- **Plan executor (simulate + divergence replan).** The `agent.plan` builtin has shipped: iterated-decide, applying legal events one at a time against the live snapshot until the built-in done move, `maxSteps`, or the invoke exits its state (see [decisions](decisions.md) and `examples/todo-nl`). Next is the executor layer on top: a proposed plan is validated up front by simulating its event path against the machine; at runtime each step's actual snapshot is diffed against the simulated one, and divergence triggers a replan from the actual state under a budget. It ships as a documented pattern first, then promotes to core. Related: promoting `examples/river-crossing`'s `describeMachine` prototype to core, and a graph-search "solver mode" for pure machines via `xstate/graph`.
 
 ## Ideas (no commitment)
 

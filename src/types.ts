@@ -155,13 +155,32 @@ export type AgentToolChoice = "auto" | "none" | "required" | { type: "tool"; nam
 /** The event chosen and raised by a decision. */
 export type ChosenEvent = { type: string; [key: string]: unknown };
 
+// The wildcard patterns a dotted event-type union admits: 'a.b.c' yields 'a.*' | 'a.b.*'.
+type EventWildcardsOf<TEvent extends string> = TEvent extends `${infer Head}.${infer Rest}`
+  ? `${Head}.*` | `${Head}.${EventWildcardsOf<Rest>}`
+  : never;
+
+/** One `allowedEvents` entry: an exact declared event type, `'*'` (every event), or a `'prefix.*'` wildcard derived from the declared dotted event types. */
+export type AllowedEventPattern<TEvent extends string = string> =
+  | TEvent
+  | "*"
+  | EventWildcardsOf<TEvent>;
+
 /**
- * Candidate event types for a decision (declared on {@link DecisionLogicConfig.allowedEvents}
- * / the `agent.decide` builtin's `allowedEvents` input). The effective candidate set offered
- * to the model is this declaration **intersected with the snapshot's currently-legal events**
- * (via `getAcceptedEvents`) — omitting `allowedEvents` means "all currently-legal events."
- * A resolver function can therefore only ever narrow, never widen, the real surface.
+ * Candidate event types for a decision or plan (declared on the
+ * `agent.decide`/`agent.plan` builtins' `allowedEvents` input). A single
+ * entry or an array; entries are exact event types or wildcard patterns
+ * (`'*'` for every event, `'todo.*'` for a dotted namespace). The effective
+ * candidate set offered to the model is this declaration **intersected with
+ * the snapshot's currently-legal events** (via `getAcceptedEvents`) —
+ * omitting `allowedEvents` means "all currently-legal events." A resolver
+ * function can therefore only ever narrow, never widen, the real surface.
+ * Wildcards expand against the live snapshot, so they need a snapshot-aware
+ * host (`runAgent` or the step path).
  */
 export type AllowedEvents<TEvent extends string = string, TInput = unknown> =
-  | readonly TEvent[]
-  | ((args: { input: TInput }) => readonly TEvent[]);
+  | AllowedEventPattern<TEvent>
+  | readonly AllowedEventPattern<TEvent>[]
+  | ((args: {
+      input: TInput;
+    }) => AllowedEventPattern<TEvent> | readonly AllowedEventPattern<TEvent>[]);

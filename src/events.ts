@@ -55,6 +55,27 @@ function disambiguateEventToolName(
   return uniqueToolName;
 }
 
+/**
+ * True when an event type matches an `allowedEvents` entry: an exact type,
+ * `'*'` (every event), or a `'prefix.*'` wildcard matching any deeper
+ * segment (`'todo.*'` matches `'todo.add'` and `'todo.list.clear'`, not
+ * `'todo'` itself — mirroring xstate's partial wildcard events).
+ */
+export function matchesEventPattern(eventType: string, pattern: string): boolean {
+  if (pattern === "*") {
+    return true;
+  }
+  if (pattern.endsWith(".*")) {
+    return eventType.startsWith(`${pattern.slice(0, -1)}`);
+  }
+  return eventType === pattern;
+}
+
+/** True when an `allowedEvents` entry is a wildcard pattern rather than a concrete event type. @internal */
+export function isEventPattern(entry: string): boolean {
+  return entry === "*" || entry.endsWith(".*");
+}
+
 /** One candidate event a decision (or {@link getAcceptedEvents} caller) may choose: its type, the synthetic tool name a model can call to pick it, and its payload schema if one is registered. */
 export interface AgentEventDescriptor {
   type: string;
@@ -85,7 +106,8 @@ export interface AgentRequestOptions {
  * legality is checked separately, at decision-resolution time, via
  * `snapshot.can(event)` (the `canTake` option of {@link resolveDecision} /
  * {@link ResolveDecisionOptions}). Pass `eventTypes` to further narrow to a
- * declared `allowedEvents` set.
+ * declared `allowedEvents` set — entries may be exact types or wildcard
+ * patterns (`'*'`, `'todo.*'`; see {@link matchesEventPattern}).
  */
 export function getAcceptedEvents(
   snapshot: AnyMachineSnapshot,
@@ -93,7 +115,7 @@ export function getAcceptedEvents(
     eventTypes?: readonly string[];
   } = {},
 ): AgentEventDescriptor[] {
-  const eventTypes = options.eventTypes === undefined ? undefined : new Set(options.eventTypes);
+  const eventTypes = options.eventTypes;
   const seen = new Set<string>();
   const usedToolNames = new Set<string>();
 
@@ -104,7 +126,7 @@ export function getAcceptedEvents(
       !eventType ||
       eventType === "*" ||
       eventType.startsWith("xstate.") ||
-      (eventTypes && !eventTypes.has(eventType)) ||
+      (eventTypes && !eventTypes.some((pattern) => matchesEventPattern(eventType, pattern))) ||
       seen.has(eventType)
     ) {
       return [];
