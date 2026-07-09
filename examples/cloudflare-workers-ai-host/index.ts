@@ -70,7 +70,7 @@ async function runWorkersAiPrompt(
 /** Text request: structured output serialized into the prompt, JSON parsed back out. */
 async function runWorkersAiTextRequest(env: Env, request: AgentRequest) {
   const structured = getAgentOutputMode(request.input.outputSchema) === "structured";
-  const prompt = structured
+  const basePrompt = structured
     ? [
         request.input.prompt ?? "",
         "",
@@ -78,15 +78,40 @@ async function runWorkersAiTextRequest(env: Env, request: AgentRequest) {
       ].join("\n")
     : (request.input.prompt ?? "");
 
-  const text = await runWorkersAiPrompt(env, {
-    model: request.input.model,
-    system: request.input.system,
-    prompt,
-    temperature: request.input.temperature,
-    maxTokens: request.input.maxTokens,
-  });
+  const ask = (prompt: string) =>
+    runWorkersAiPrompt(env, {
+      model: request.input.model,
+      system: request.input.system,
+      prompt,
+      temperature: request.input.temperature,
+      maxTokens: request.input.maxTokens,
+    });
 
-  return structured ? JSON.parse(text) : text;
+  const text = await ask(basePrompt);
+  if (!structured) return text;
+
+  // Mirror the decision path's recover-with-feedback: on a malformed JSON
+  // response, retry once telling the model what went wrong, then surface the
+  // raw text if it still fails to parse.
+  try {
+    return JSON.parse(text);
+  } catch (firstError) {
+    const retryText = await ask(
+      [
+        basePrompt,
+        "",
+        `Your previous response was not valid JSON: ${String(firstError)}`,
+        "Respond with valid JSON only, no prose or code fences.",
+      ].join("\n"),
+    );
+    try {
+      return JSON.parse(retryText);
+    } catch (retryError) {
+      throw new Error(
+        `Workers AI structured response was not valid JSON: ${String(retryError)}\nRaw text: ${retryText}`,
+      );
+    }
+  }
 }
 
 /** Decision request: legal events serialized into the prompt, JSON-parsed

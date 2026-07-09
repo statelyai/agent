@@ -90,17 +90,26 @@ export function toOpenAiMessages(
     // OpenAI's message roles; only plain string content is exercised by
     // these examples, which is directly compatible with OpenAI's content
     // union for each role.
-    return request.messages.map((message): ChatCompletionMessageParam => {
+    return request.messages.flatMap((message): ChatCompletionMessageParam[] => {
       const content = typeof message.content === "string" ? message.content : "";
       switch (message.role) {
         case "system":
-          return { role: "system", content };
+          return [{ role: "system", content }];
         case "user":
-          return { role: "user", content };
+          return [{ role: "user", content }];
         case "assistant":
-          return { role: "assistant", content };
+          return [{ role: "assistant", content }];
         case "tool":
-          return { role: "tool", content, tool_call_id: "unknown" };
+          // A `ToolMessage` carries one or more `ToolResultPart`s, each with
+          // its own `toolCallId`; OpenAI's tool role is one message per result.
+          return message.content.map((part) => ({
+            role: "tool",
+            content:
+              part.output.type === "text" || part.output.type === "error-text"
+                ? part.output.value
+                : JSON.stringify(part.output.value),
+            tool_call_id: part.toolCallId,
+          }));
       }
     });
   }

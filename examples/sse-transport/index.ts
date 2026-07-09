@@ -122,19 +122,24 @@ export function createSseServer(streamText: AgentRequestExecutor = mockStreamTex
       connection: "keep-alive",
     });
 
-    const machine = createSseMachine();
-    const result = await runMachineStream(
-      machine,
-      {
-        onChunk: (chunk) => writeSseFrame(res, { chunk }),
-        onTransition: (value) => writeSseFrame(res, { value }, "transition"),
-      },
-      streamText,
-    );
+    try {
+      const machine = createSseMachine();
+      const result = await runMachineStream(
+        machine,
+        {
+          onChunk: (chunk) => writeSseFrame(res, { chunk }),
+          onTransition: (value) => writeSseFrame(res, { value }, "transition"),
+        },
+        streamText,
+      );
 
-    const output = result.status === "done" ? result.output : { error: result.status };
-    writeSseFrame(res, output, "done");
-    res.end();
+      const output = result.status === "done" ? result.output : { error: result.status };
+      writeSseFrame(res, output, "done");
+    } catch (error) {
+      writeSseFrame(res, { error: error instanceof Error ? error.message : String(error) }, "error");
+    } finally {
+      res.end();
+    }
   });
 }
 

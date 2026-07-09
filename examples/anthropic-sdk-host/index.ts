@@ -382,7 +382,7 @@ export async function runTriageDemo(client: Anthropic, ticket: string) {
   });
   if (result.status !== "done") {
     if (result.status === "error") console.error(result.error);
-    throw new Error(`Triage demo did not complete: `);
+    throw new Error(`Triage demo did not complete: ${result.status}`);
   }
   return result.output;
 }
