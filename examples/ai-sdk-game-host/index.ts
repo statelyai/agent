@@ -19,13 +19,9 @@
  */
 import { createAiSdkExecutors } from '../../src/ai-sdk/index.js';
 import {
-  executeAgentRequest,
   initialAgentStep,
-  resolveDecision,
+  resolveAgentRequests,
   type AgentRequestExecutors,
-  type EventUnion,
-  resolveAgentStep,
-  transitionAgentStep,
 } from '../../src/index.js';
 import {
   gameActors,
@@ -34,8 +30,6 @@ import {
   models,
   turnSummarySchema,
 } from '../game-agent/index.js';
-
-type GameEvent = EventUnion<typeof gameSchemas.events>;
 
 // Adapter-provided executors: `decide` forces a tool call, one tool per
 // candidate event, and reads the chosen event off the tool call — the
@@ -51,40 +45,17 @@ export async function runAiSdkGameTurn(
   // AI SDK set above.
   executors: AgentRequestExecutors = defaultExecutors,
 ) {
-  const decide = executors.decide!;
-  let step = initialAgentStep(gameMachine, input, {
-    schemas: gameSchemas,
-    actorSources: gameActors,
-  });
+  const options = { schemas: gameSchemas, actorSources: gameActors };
+  let step = initialAgentStep(gameMachine, input, options);
   onStep?.(step.snapshot.value);
 
+  // `resolveAgentRequests` collapses the per-turn dispatch: it runs the one
+  // pending request (decision → chosen event, or text → summary) and returns
+  // the next step. The manual dispatch it replaces — `executeAgentRequest` /
+  // `resolveDecision` + `resolveAgentStep` / `transitionAgentStep` — still
+  // lives one level down for hosts that need to interleave their own work.
   while (!step.done) {
-    const [request] = step.requests;
-    if (!request) {
-      throw new Error('Machine is waiting without an agent request.');
-    }
-
-    if (request.kind === 'decision') {
-      // `resolveDecision` validates the chosen event's payload against the
-      // machine's event schemas (attached to `request.events`) and, typed
-      // against `GameEvent` via `canTake`, returns a machine-typed event —
-      // no re-narrowing needed before `transitionAgentStep`.
-      const chosenEvent = await resolveDecision(request, decide, {
-        canTake: (event: GameEvent) => step.snapshot.can(event),
-      });
-      step = transitionAgentStep(gameMachine, step, chosenEvent, {
-        schemas: gameSchemas,
-        actorSources: gameActors,
-      });
-      onStep?.(step.snapshot.value);
-      continue;
-    }
-
-    const output = await executeAgentRequest(request, executors);
-    step = resolveAgentStep(gameMachine, step, request, output, {
-      schemas: gameSchemas,
-      actorSources: gameActors,
-    });
+    step = await resolveAgentRequests(gameMachine, step, executors, options);
     onStep?.(step.snapshot.value);
   }
 

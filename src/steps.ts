@@ -1,7 +1,8 @@
 /**
  * The step path: durable, per-model-call-checkpoint hosting of an agent
  * machine. Public vocabulary — `initialAgentStep`, `transitionAgentStep`,
- * `resolveAgentStep`, `getAgentRequests`, `executeAgentRequest`.
+ * `resolveAgentStep`, `getAgentRequests`, `executeAgentRequest`,
+ * `resolveAgentRequests`.
  * @module
  */
 import {
@@ -23,7 +24,12 @@ import {
   type AgentRequestMode,
   type AgentTextRequest,
 } from "./text-logic.js";
-import { isDecisionLogic, type AgentDecisionRequest } from "./decision.js";
+import {
+  isDecisionLogic,
+  resolveDecision,
+  type AgentDecisionRequest,
+} from "./decision.js";
+import type { ChosenEvent } from "./types.js";
 import {
   getAcceptedEvents,
   type AgentEventDescriptor,
@@ -339,6 +345,81 @@ export async function executeAgentRequest(
     : output;
 
   return options?.verbose ? { output: normalizedOutput, raw } : normalizedOutput;
+}
+
+/**
+ * Options for {@link resolveAgentRequests}.
+ */
+export interface ResolveAgentRequestsOptions extends Partial<AgentExecutionOptions> {
+  /** Retries per decision, passed to `resolveDecision`. Default `2`. */
+  maxRetries?: number;
+}
+
+/**
+ * Resolves the current step's pending requests and returns the next
+ * {@link AgentStep} — one iteration of the durable step loop, collapsing the
+ * manual `request.kind` dispatch a host would otherwise write by hand.
+ *
+ * For each pending request, in order: a `kind: 'text'` request is run with
+ * {@link executeAgentRequest} then fed back via {@link resolveAgentStep}; a
+ * `kind: 'decision'` request is resolved with `resolveDecision` (wiring
+ * `canTake` to `step.snapshot.can` so guard-rejected choices retry) then
+ * applied with {@link transitionAgentStep}. The **current** step is re-read
+ * after each application — the machine may advance and its `requests` change —
+ * so this always resolves against the live step, never a stale list.
+ *
+ * Missing the executor a request needs throws a clear error
+ * (`generateText`/`streamText` for text, `decide` for decisions).
+ *
+ * A complete durable host is two lines:
+ *
+ * ```ts
+ * let step = initialAgentStep(machine, input);
+ * while (!step.done) step = await resolveAgentRequests(machine, step, executors);
+ * ```
+ *
+ * Plan requests are not yet surfaced on the step path (see docs/roadmap.md);
+ * run plans with `runAgent`.
+ */
+export async function resolveAgentRequests<TMachine extends AnyActorLogic>(
+  machine: TMachine,
+  step: AgentStep<SnapshotFrom<TMachine>>,
+  executors: AgentRequestExecutors,
+  options?: ResolveAgentRequestsOptions,
+): Promise<AgentStep<SnapshotFrom<TMachine>>> {
+  const [request] = step.requests;
+  if (!request) {
+    return step;
+  }
+
+  if (request.kind === "decision") {
+    if (!executors.decide) {
+      throw new Error("resolveAgentRequests: no 'decide' executor provided.");
+    }
+    const chosenEvent = await resolveDecision(request, executors.decide, {
+      canTake: (event: ChosenEvent) =>
+        (step.snapshot as AnyMachineSnapshot).can(event as never),
+      maxRetries: options?.maxRetries,
+    });
+    return transitionAgentStep(
+      machine,
+      step,
+      chosenEvent as EventFromLogic<TMachine>,
+      options,
+    );
+  }
+
+  const mode = request.mode ?? "generate";
+  const executor = mode === "stream" ? executors.streamText : executors.generateText;
+  if (!executor) {
+    throw new Error(
+      `resolveAgentRequests: no '${mode === "stream" ? "streamText" : "generateText"}' ` +
+        "executor provided.",
+    );
+  }
+
+  const output = await executeAgentRequest(request, executors);
+  return resolveAgentStep(machine, step, request, output, options);
 }
 
 // Assembles an AgentStep from a snapshot + actions: applies single-final-state output, then discovers pending requests.

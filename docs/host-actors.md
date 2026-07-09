@@ -251,6 +251,23 @@ Streaming chunks stay in the host side channel: HTTP stream, WebSocket, AI SDK U
 
 The same request can run through `generateText(...)` or `streamText(...)` — the host decides, by choosing which executor to supply or which method `createTextLogic`'s `mode` invokes.
 
+## Raw AI SDK functions
+
+The `generateText`/`streamText` executors accept the raw Vercel AI SDK functions directly — no adapter needed:
+
+```ts
+import { generateText, streamText } from 'ai';
+
+await runAgent(machine, { input, generateText, streamText });
+```
+
+An `AgentTextRequest` is spread-compatible with the AI SDK's call options, and their result shapes are unwrapped natively: `generateText`'s `{ text }` and `streamText`'s `{ textStream }` (chunks reach `onChunk`, final text is `await result.text`).
+
+Two caveats:
+
+- **Structured output is best-effort.** For a request with an `outputSchema`, the raw text is `JSON.parse`d and validated; a parse failure throws. For reliable structured output, use `createAiSdkExecutors` from `@statelyai/agent/ai-sdk`.
+- **`decide` needs an adapter.** The tool-per-event mapping lives in `createAiSdkExecutors`; there is no raw AI SDK function for it.
+
 ## Low-level primitive
 
 Use `createTextLogic(...)` for reusable named model calls with typed source names, typed invoke input, typed `event.output`, and a schema-typed request shape.

@@ -449,6 +449,7 @@ export function createTextLogic<
       const output = await normalizeGeneratorResult(
         result,
         typeof selfId === "string" ? selfId : "text logic",
+        { request: resolvedRequest },
       );
 
       return validateSchemaSync<TOutput>(
@@ -664,30 +665,122 @@ export async function executeAgentTextRequest(
   }
 
   const raw = await executor(request, info);
-  return { output: await normalizeGeneratorResult(raw, id), raw };
+  return {
+    output: await normalizeGeneratorResult(raw, id, {
+      request,
+      onChunk: info?.onChunk,
+    }),
+    raw,
+  };
+}
+
+/** Optional extras threaded into {@link normalizeGeneratorResult} so it can also unwrap raw AI SDK `generateText`/`streamText` results (which resolve `{ text }`/`{ textStream }` instead of `{ output }`). @internal */
+export interface NormalizeGeneratorResultInfo {
+  /** The lowered request — its `outputSchema` drives best-effort structured parsing of raw AI SDK text. */
+  request?: AgentTextRequest<any>;
+  /** Chunk sink for a raw `streamText` result's `textStream` (mirrors the `{ output }` path's `info.onChunk`). */
+  onChunk?: (chunk: string) => void;
+}
+
+// True for a value that looks like an AI SDK StreamTextResult: has a `textStream` async iterable.
+function hasTextStream(value: object): value is { textStream: AsyncIterable<string>; text?: unknown } {
+  return (
+    "textStream" in value &&
+    typeof (value as { textStream?: unknown }).textStream === "object" &&
+    !!(value as { textStream?: { [Symbol.asyncIterator]?: unknown } }).textStream?.[
+      Symbol.asyncIterator
+    ]
+  );
+}
+
+// Runs a raw AI SDK final text string through the request's outputSchema (best-effort), throwing a helpful error on parse failure.
+function parseRawAiSdkText(text: string, request: AgentTextRequest<any> | undefined, id: string): unknown {
+  if (!request?.outputSchema) {
+    return text;
+  }
+  let parsed: unknown = text;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    // Leave as the raw string; parseOutput will surface a schema error below.
+  }
+  try {
+    return parseOutput(request.outputSchema, parsed);
+  } catch (error) {
+    throw new Error(
+      `Executor for '${id}' returned a raw AI SDK result whose text could not be ` +
+        `parsed against the request's outputSchema. Structured-output requests through ` +
+        `raw AI SDK generateText/streamText functions are best-effort — for reliable ` +
+        `structured output, use createAiSdkExecutors from '@statelyai/agent/ai-sdk'. ` +
+        `Cause: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
 /**
- * Unwraps an executor's `{ output }` envelope (see
- * {@link AgentRequestExecutorResult}): awaits `result`, then returns (and
- * awaits) its `output` field. Executors MUST return `{ output }` — a bare
- * value or an object without `output` is a runtime error naming `id`. This is
- * generator-result unwrapping only — decision results are extracted
- * separately by `resolveDecision`.
+ * Unwraps an executor result into the request's final output. Accepts three
+ * shapes:
+ * - `{ output }` (the {@link AgentRequestExecutorResult} envelope) — awaits and
+ *   returns `output` (the fast path; unchanged).
+ * - a raw AI SDK `streamText` result (`{ textStream }` async iterable) — iterates
+ *   `textStream`, forwarding each string chunk to `info.onChunk`, then resolves
+ *   the final text from `await result.text` if present else the accumulated chunks.
+ * - a raw AI SDK `generateText` result (`{ text }` string or promise) — awaits `text`.
+ *
+ * For the two raw AI SDK shapes, if `info.request?.outputSchema` is set the final
+ * text is parsed through {@link parseOutput} (best-effort); a parse failure throws
+ * an error recommending `createAiSdkExecutors` from '@statelyai/agent/ai-sdk'.
+ *
+ * A value matching none of these is a runtime error naming `id`. This is
+ * generator-result unwrapping only — decision results are extracted separately
+ * by `resolveDecision`.
  *
  * @internal
  */
 export async function normalizeGeneratorResult(
   result: unknown,
   id = "text request",
+  info?: NormalizeGeneratorResultInfo,
 ): Promise<unknown> {
   const resolved = await result;
-  if (!resolved || typeof resolved !== "object" || !("output" in resolved)) {
-    throw new Error(
-      `Executor for '${id}' returned an invalid result: executors must return ` +
-        `{ output } (an envelope with the text string or structured object as ` +
-        `\`output\`, plus optional passthrough fields).`,
-    );
+  if (!resolved || typeof resolved !== "object") {
+    throw invalidGeneratorResult(id);
   }
-  return await (resolved as { output: unknown }).output;
+
+  // Fast path: our `{ output }` envelope.
+  if ("output" in resolved) {
+    return await (resolved as { output: unknown }).output;
+  }
+
+  // Raw AI SDK streamText result: iterate textStream, forward chunks.
+  if (hasTextStream(resolved)) {
+    let accumulated = "";
+    for await (const chunk of resolved.textStream) {
+      accumulated += chunk;
+      info?.onChunk?.(chunk);
+    }
+    const finalText =
+      "text" in resolved && resolved.text !== undefined
+        ? await (resolved as { text: unknown }).text
+        : accumulated;
+    return parseRawAiSdkText(String(finalText), info?.request, id);
+  }
+
+  // Raw AI SDK generateText result: `text` string or promise.
+  if ("text" in resolved) {
+    const finalText = await (resolved as { text: unknown }).text;
+    return parseRawAiSdkText(String(finalText), info?.request, id);
+  }
+
+  throw invalidGeneratorResult(id);
+}
+
+function invalidGeneratorResult(id: string): Error {
+  return new Error(
+    `Executor for '${id}' returned an invalid result: executors must return ` +
+      `{ output } (an envelope with the text string or structured object as ` +
+      `\`output\`, plus optional passthrough fields). Raw Vercel AI SDK ` +
+      `generateText/streamText results ({ text } or { textStream }) are also ` +
+      `accepted.`,
+  );
 }

@@ -18,6 +18,7 @@ export {
   executeAgentRequest,
   getAgentRequests,
   initialAgentStep,
+  resolveAgentRequests,
   resolveAgentStep,
   transitionAgentStep,
 } from "./steps.js";
@@ -56,7 +57,12 @@ export type {
   AgentEventToolNameResolver,
   AgentRequestSource,
 } from "./events.js";
-export type { AgentRequest, AgentStep, AgentStepRequest } from "./steps.js";
+export type {
+  AgentRequest,
+  AgentStep,
+  AgentStepRequest,
+  ResolveAgentRequestsOptions,
+} from "./steps.js";
 export type {
   AgentTraceEvent,
   AgentUserInputExecutor,

@@ -587,7 +587,13 @@ function wrapTextLogicForRunAgent(logic: TextLogic, runCtx: RunAgentBindContext)
         },
         signal,
       });
-      const output = await normalizeGeneratorResult(raw, id);
+      const output = await normalizeGeneratorResult(raw, id, {
+        request,
+        onChunk: (chunk: string) => {
+          runCtx.onTrace?.({ type: "stream.chunk", request: agentRequest, chunk });
+          runCtx.onChunk?.(chunk, { request: agentRequest });
+        },
+      });
 
       runCtx.onResult?.(agentRequest, { output, raw });
       runCtx.onTrace?.({ type: "request.end", request: agentRequest, output, raw });
@@ -836,6 +842,13 @@ function createRunAgentPlanLogic(logic: PlanLogic, runCtx: RunAgentBindContext):
  * if (r.status !== 'done') throw new Error(`Run did not complete: ${r.status}`);
  * console.log(r.output);
  * ```
+ *
+ * The `generateText`/`streamText` executors accept the raw Vercel AI SDK
+ * functions directly (`runAgent(machine, { generateText, streamText })` with
+ * `generateText`/`streamText` imported from `ai`) — their `{ text }`/
+ * `{ textStream }` results are unwrapped natively. `decide` cannot be a raw AI
+ * SDK function: the tool-per-event mapping lives in an adapter — use
+ * `createAiSdkExecutors` from '@statelyai/agent/ai-sdk'.
  */
 export async function runAgent<TMachine extends AnyStateMachine>(
   machine: TMachine,

@@ -80,6 +80,23 @@ while (!step.done) {
 console.log(step.snapshot.output);
 ```
 
+### One-line loop with `resolveAgentRequests`
+
+The dispatch above — pick the pending request, branch on `kind`, resolve it, advance — is the same every turn. `resolveAgentRequests` collapses it into one call: it resolves the current step's pending request (decision or text) and returns the next step, wiring `canTake` to `step.snapshot.can` for you. A complete durable host is two lines:
+
+```ts
+import { initialAgentStep, resolveAgentRequests } from '@statelyai/agent';
+
+let step = initialAgentStep(gameMachine, input, { schemas: gameSchemas, actorSources: gameActors });
+while (!step.done) {
+  step = await resolveAgentRequests(gameMachine, step, executors, { schemas: gameSchemas, actorSources: gameActors });
+}
+
+console.log(step.snapshot.output);
+```
+
+Reach past it to the manual dispatch (shown above) when a host must interleave its own work between the request and the transition — per-turn persistence, one serverless invocation per turn, or a plain actor/timer pending in `step.actions`. `resolveAgentRequests` throws a clear error if the executor a request needs (`generateText`/`streamText` or `decide`) is missing. It does not surface **plan** requests yet — run plans with `runAgent`.
+
 See [examples/ai-sdk-game-host/index.ts](../examples/ai-sdk-game-host/index.ts) for the full loop, and [Decisions](decisions.md) for the validate-and-retry rules.
 
 > **Note:** `executeAgentRequest` is text-only; passing a `kind: 'decision'` request throws. A decision has no output value to feed into `resolveAgentStep`; it produces a chosen event applied with `transitionAgentStep`.
