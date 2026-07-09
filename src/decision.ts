@@ -203,6 +203,10 @@ function resolveAllowedEventTypes(
  *       : ['ATTACK', 'DEFEND', 'FLEE'],
  * });
  * ```
+ *
+ * @internal Not part of the public API (not exported from the package root).
+ * State-local decisions use the `agent.decide` builtin invoke
+ * (`src: 'agent.decide'`); this backs standalone/reusable decision tests.
  */
 export function createDecisionLogic<
   TInputSchema extends StandardSchemaV1,
@@ -303,7 +307,7 @@ export function createDecisionLogic<
   return decisionLogic;
 }
 
-// Type guard: true for any actor logic built by createDecisionLogic/createDecideActor (checks the `kind` marker).
+/** Type guard: true for any actor logic built by createDecisionLogic/createDecideActor (checks the `kind` marker). @internal */
 export function isDecisionLogic(value: unknown): value is DecisionLogic {
   return (
     !!value &&

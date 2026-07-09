@@ -1,9 +1,9 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import { createActor, createAsyncLogic, setup, toPromise } from "xstate";
+import { createDecisionLogic } from "./decision.js";
 import {
   createAgentSchemas,
-  createDecisionLogic,
   createTextLogic,
   runAgent,
   sendDecision,

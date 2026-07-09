@@ -12,6 +12,17 @@ import type {
   UserMessage,
 } from "./types.js";
 
+/**
+ * Deep-clones a snapshot to a plain-JSON value via a `JSON` round-trip, the
+ * shape you persist and later feed back to `runAgent({ snapshot })`. Asserts
+ * JSON-serializability: functions, `undefined`, and other non-JSON values are
+ * dropped or throw exactly as `JSON.stringify`/`JSON.parse` would. Returns a
+ * plain-JSON deep clone, not a live snapshot.
+ */
+export function persistSnapshot<TSnapshot>(snapshot: TSnapshot): TSnapshot {
+  return JSON.parse(JSON.stringify(snapshot)) as TSnapshot;
+}
+
 /** Builds a {@link UserMessage} from a string or multimodal content parts. */
 export function userMessage(content: string | Array<TextPart | ImagePart | FilePart>): UserMessage {
   return { role: "user", content };

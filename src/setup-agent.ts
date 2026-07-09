@@ -9,6 +9,7 @@ import {
   type MetaObject,
   type NonReducibleUnknown,
   type SetupReturnFromConfig,
+  type SetupStateSchema,
 } from "xstate";
 import type { AgentMessage, EventUnion, InferOutput, StandardSchemaV1 } from "./types.js";
 import {
@@ -241,6 +242,7 @@ type AgentSetupXStateConfig<
   TMetaSchema extends StandardSchemaV1,
   TModels extends AgentModelMap,
   TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
+  TStateSchemas extends Record<string, SetupStateSchema> = Record<string, SetupStateSchema>,
 > = {
   schemas: {
     context: TContextSchema;
@@ -249,6 +251,9 @@ type AgentSetupXStateConfig<
     meta: TMetaSchema;
   } & AgentSetupEventsSchema<TEventSchemas> &
     AgentSetupEmittedSchema<TEmittedSchemas>;
+  // Per-state schemas (xstate `setup({ states })`): narrows `context` inside
+  // the declared states (invoke inputs, transition fns, final outputs).
+  states?: TStateSchemas;
   actorSources: SetupActors<
     AgentSetupActors<
       AgentAllActors<TActors, TRequestSchemas>,
@@ -272,6 +277,7 @@ type SetupAgentBaseConfig<
   TRequestSchemas extends AgentRequestSchemaMap,
   TModels extends AgentModelMap,
   TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
+  TStateSchemas extends Record<string, SetupStateSchema> = Record<string, SetupStateSchema>,
 > = (
   | {
       schemas: AgentSchemaPack<
@@ -294,13 +300,20 @@ type SetupAgentBaseConfig<
 ) & {
   models?: TModels;
   actorSources?: TActors;
+  /**
+   * Per-state schemas, mirroring xstate's `setup({ states })`: declare a
+   * `schemas.context` on a state to narrow `context` inside that state
+   * (invoke `input`, transition fns, final `output`) — e.g. mark a field
+   * non-null in states only reachable after it is set.
+   */
+  states?: TStateSchemas;
   requests?: AgentRequestInput<TRequestSchemas, AgentModelRef<TModels>>;
   actions?: NonNullable<AnySetupConfig["actions"]>;
   guards?: NonNullable<AnySetupConfig["guards"]>;
   delays?: NonNullable<AnySetupConfig["delays"]>;
 };
 
-// The raw xstate `setup(...)` result type for an agent config, before setupAgent's own extensions (initial/transition/resolve/etc) are added.
+// The raw xstate `setup(...)` result type for an agent config, before setupAgent's own extensions (schemas/models/requests/appendMessages, plus the wrapped createMachine) are added.
 type SetupAgentXStateResult<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
   TEventSchemas extends Record<string, StandardSchemaV1>,
@@ -311,6 +324,7 @@ type SetupAgentXStateResult<
   TMetaSchema extends StandardSchemaV1,
   TModels extends AgentModelMap,
   TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
+  TStateSchemas extends Record<string, SetupStateSchema> = Record<string, SetupStateSchema>,
 > = SetupReturnFromConfig<
   AgentSetupXStateConfig<
     TContextSchema,
@@ -321,7 +335,8 @@ type SetupAgentXStateResult<
     TOutputSchema,
     TMetaSchema,
     TModels,
-    TEmittedSchemas
+    TEmittedSchemas,
+    TStateSchemas
   >
 >;
 
@@ -343,6 +358,7 @@ type SetupAgentResult<
   TMetaSchema extends StandardSchemaV1,
   TModels extends AgentModelMap,
   TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
+  TStateSchemas extends Record<string, SetupStateSchema> = Record<string, SetupStateSchema>,
 > = Omit<
   SetupAgentXStateResult<
     TContextSchema,
@@ -353,7 +369,8 @@ type SetupAgentResult<
     TOutputSchema,
     TMetaSchema,
     TModels,
-    TEmittedSchemas
+    TEmittedSchemas,
+    TStateSchemas
   >,
   "createMachine"
 > & {
@@ -372,7 +389,8 @@ type SetupAgentResult<
     TOutputSchema,
     TMetaSchema,
     TModels,
-    TEmittedSchemas
+    TEmittedSchemas,
+    TStateSchemas
   >["createMachine"];
   /** The retained schema pack ({@link AgentSchemaPack}) for host-side validation and tooling. */
   schemas: AgentSchemaPack<
@@ -412,10 +430,10 @@ type SetupAgentResult<
  * state/transition meta are all standard schemas — no `{} as Type` casts —
  * and are retained on `result.schemas` for runtime validation. Also
  * registers the `agent.generateText`/`agent.streamText`/`agent.userInput`/
- * `agent.decide` builtin actors, lowers `requests`/`actorSources` into the
- * machine's actor sources, and returns machine-bound convenience wrappers
- * (`result.initial`/`transition`/`resolve`/`getRequests`/`execute`/
- * `appendMessages`) around the step-path helpers. Also has a
+ * `agent.decide` builtin actors and lowers `requests`/`actorSources` into the
+ * machine's actor sources. The result is the xstate `setup(...)` object with
+ * a wrapped `result.createMachine(...)` plus `result.schemas`/`models`/
+ * `requests`/`appendMessages` attached. Also has a
  * `setupAgent.fromConfig(...)` namespace member for building a machine from
  * a serializable {@link AgentWorkflowConfig} instead of this TS API.
  *
@@ -459,6 +477,7 @@ export function setupAgent<
   TMetaSchema extends StandardSchemaV1 = StandardSchemaV1<MetaObject>,
   TModels extends AgentModelMap = {},
   TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
+  const TStateSchemas extends Record<string, SetupStateSchema> = Record<string, SetupStateSchema>,
 >(
   config: SetupAgentBaseConfig<
     TContextSchema,
@@ -469,7 +488,8 @@ export function setupAgent<
     TMetaSchema,
     TRequestSchemas,
     TModels,
-    TEmittedSchemas
+    TEmittedSchemas,
+    TStateSchemas
   >,
 ): SetupAgentResult<
   TContextSchema,
@@ -480,7 +500,8 @@ export function setupAgent<
   TOutputSchema,
   TMetaSchema,
   TModels,
-  TEmittedSchemas
+  TEmittedSchemas,
+  TStateSchemas
 > {
   return createSetupAgent(config);
 }
@@ -536,7 +557,7 @@ export namespace setupAgent {
   }
 }
 
-// Builds one TextLogic actor per `setupAgent({ requests })` entry.
+/** Builds one TextLogic actor per `setupAgent({ requests })` entry. @internal */
 export function createRequestActors<
   TRequestSchemas extends AgentRequestSchemaMap,
   TModel extends string = string,
@@ -670,6 +691,7 @@ function createAgentSetupConfig<
   TMetaSchema extends StandardSchemaV1,
   TModels extends AgentModelMap,
   TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
+  TStateSchemas extends Record<string, SetupStateSchema> = Record<string, SetupStateSchema>,
 >(
   schemas: AgentSchemaPack<
     TContextSchema,
@@ -696,9 +718,10 @@ function createAgentSetupConfig<
       TMetaSchema,
       TRequestSchemas,
       TModels,
-      TEmittedSchemas
+      TEmittedSchemas,
+      TStateSchemas
     >,
-    "actions" | "guards" | "delays"
+    "actions" | "guards" | "delays" | "states"
   >,
 ): AgentSetupXStateConfig<
   TContextSchema,
@@ -709,7 +732,8 @@ function createAgentSetupConfig<
   TOutputSchema,
   TMetaSchema,
   TModels,
-  TEmittedSchemas
+  TEmittedSchemas,
+  TStateSchemas
 > {
   return {
     schemas: {
@@ -733,8 +757,10 @@ function createAgentSetupConfig<
       TOutputSchema,
       TMetaSchema,
       TModels,
-      TEmittedSchemas
+      TEmittedSchemas,
+      TStateSchemas
     >["schemas"],
+    ...(config.states ? { states: config.states } : {}),
     actorSources,
     actions: config.actions,
     guards: config.guards,
@@ -742,7 +768,7 @@ function createAgentSetupConfig<
   };
 }
 
-// Implementation backing the public setupAgent(...) function: normalizes schemas/requests, builds actor sources, calls xstate's setup(...), and layers on the agent-specific result extensions (schemas/models/requests/initial/transition/resolve/getRequests/execute/appendMessages).
+// Implementation backing the public setupAgent(...) function: normalizes schemas/requests, builds actor sources, calls xstate's setup(...), and layers on the agent-specific result extensions (a wrapped createMachine plus schemas/models/requests/appendMessages).
 function createSetupAgent<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
   TEventSchemas extends Record<string, StandardSchemaV1>,
@@ -753,6 +779,7 @@ function createSetupAgent<
   TMetaSchema extends StandardSchemaV1,
   TModels extends AgentModelMap,
   TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
+  TStateSchemas extends Record<string, SetupStateSchema> = Record<string, SetupStateSchema>,
 >(
   config: SetupAgentBaseConfig<
     TContextSchema,
@@ -763,7 +790,8 @@ function createSetupAgent<
     TMetaSchema,
     TRequestSchemas,
     TModels,
-    TEmittedSchemas
+    TEmittedSchemas,
+    TStateSchemas
   >,
 ): SetupAgentResult<
   TContextSchema,
@@ -774,7 +802,8 @@ function createSetupAgent<
   TOutputSchema,
   TMetaSchema,
   TModels,
-  TEmittedSchemas
+  TEmittedSchemas,
+  TStateSchemas
 > {
   const schemas = normalizeAgentSchemas(config);
   const requests = normalizeAgentRequestInput<TRequestSchemas, AgentModelRef<TModels>>(
@@ -794,7 +823,8 @@ function createSetupAgent<
     TOutputSchema,
     TMetaSchema,
     TModels,
-    TEmittedSchemas
+    TEmittedSchemas,
+    TStateSchemas
   >(schemas, actorSources, config);
   const base = setup(setupConfig);
   const createBaseMachine = base.createMachine.bind(base);
@@ -825,6 +855,7 @@ function createSetupAgent<
     TOutputSchema,
     TMetaSchema,
     TModels,
-    TEmittedSchemas
+    TEmittedSchemas,
+    TStateSchemas
   >;
 }

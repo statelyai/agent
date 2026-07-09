@@ -1,3 +1,9 @@
+/**
+ * The step path: durable, per-model-call-checkpoint hosting of an agent
+ * machine. Public vocabulary — `initialAgentStep`, `transitionAgentStep`,
+ * `resolveAgentStep`, `getAgentRequests`, `executeAgentRequest`.
+ * @module
+ */
 import {
   initialTransition,
   transition,
@@ -52,16 +58,17 @@ export type AgentStepRequest = AgentRequest | AgentDecisionRequest;
 /**
  * Scans a set of executable actions (as returned by xstate's `transition`/
  * `initialTransition`) for spawned `TextLogic`/`DecisionLogic` invokes and
- * lowers each into an {@link AgentStepRequest}. This is the step path's
- * discovery primitive — {@link initialAgentStep}/{@link transitionAgentStep}/
- * {@link resolveAgentStep} call it internally to populate
- * `AgentStep.requests`; call it directly only when working with raw
- * `transition(...)` output instead of the step helpers. `options.snapshot`
- * is required to resolve a decision's candidate events (intersecting
- * declared `allowedEvents` with what's currently legal) — omit it and
- * decision requests report an empty `events` list.
+ * lowers each into an {@link AgentStepRequest}. The hand-passed-schemas
+ * implementation detail behind the public {@link getAgentRequests} — it needs
+ * `schemas`/`actorSources` passed explicitly, whereas `getAgentRequests`
+ * pre-fills them from the machine's registered `setupAgent` options.
+ * `options.snapshot` is required to resolve a decision's candidate events
+ * (intersecting declared `allowedEvents` with what's currently legal) — omit
+ * it and decision requests report an empty `events` list.
+ *
+ * @internal
  */
-export function getAgentRequests(
+export function getAgentRequestsWith(
   actions: readonly {
     type?: string;
     params?: unknown;
@@ -143,7 +150,13 @@ export function getAgentRequests(
   });
 }
 
-/** Builds the synthetic `xstate.done.actor.<id>` event xstate's `transition()` expects to resolve a spawned invoke — the event {@link resolveAgentStep} applies internally. */
+/**
+ * Builds the synthetic `xstate.done.actor.<id>` event xstate's `transition()`
+ * expects to resolve a spawned invoke — the event {@link resolveAgentStep}
+ * applies internally.
+ *
+ * @internal
+ */
 export function doneEvent(
   request: Pick<AgentRequest, "id"> | string,
   output: unknown,
@@ -152,7 +165,14 @@ export function doneEvent(
   return { type: `xstate.done.actor.${id}`, output };
 }
 
-/** Applies a request's `output` as a done event via `transition(...)`, returning the raw `[snapshot, actions]` tuple. Lower-level than {@link resolveAgentStep} — that helper wraps this and also runs {@link getAgentRequests} to produce the next {@link AgentStep}. */
+/**
+ * Applies a request's `output` as a done event via `transition(...)`,
+ * returning the raw `[snapshot, actions]` tuple. Lower-level than
+ * {@link resolveAgentStep} — that helper wraps this and also runs
+ * {@link getAgentRequests} to produce the next {@link AgentStep}.
+ *
+ * @internal
+ */
 export function transitionResult<TLogic extends AnyActorLogic>(
   logic: TLogic,
   snapshot: SnapshotFrom<TLogic>,
@@ -251,12 +271,15 @@ export function resolveAgentStep<TMachine extends AnyActorLogic>(
 }
 
 /**
- * {@link getAgentRequests}, but pre-filled with a machine's registered
- * `setupAgent` schemas/actorSources (so callers don't have to pass them by hand
- * every call) — merged with any `options` passed here, which take
- * precedence.
+ * Snapshot in, requests out: scans executable actions for spawned agent
+ * invokes and lowers each into an {@link AgentStepRequest}, pre-filled with
+ * the machine's registered `setupAgent` schemas/actorSources (so callers
+ * don't pass them by hand each call) — merged with any `options` passed here,
+ * which take precedence. The step path's public discovery primitive;
+ * `initialAgentStep`/`transitionAgentStep`/`resolveAgentStep` call it
+ * internally to populate `AgentStep.requests`.
  */
-export function getMachineAgentRequests(
+export function getAgentRequests(
   machine: AnyActorLogic,
   actions: readonly { type?: string; params?: unknown }[],
   snapshot?: AnyMachineSnapshot,
@@ -264,7 +287,7 @@ export function getMachineAgentRequests(
 ): AgentStepRequest[] {
   const machineOptions = getRegisteredAgentExecutionOptions(machine, options);
 
-  return getAgentRequests(actions, {
+  return getAgentRequestsWith(actions, {
     ...machineOptions,
     ...options,
     snapshot,
@@ -330,7 +353,7 @@ function createAgentStep<TMachine extends AnyActorLogic>(
   return {
     snapshot,
     actions,
-    requests: getAgentRequests(actions, {
+    requests: getAgentRequestsWith(actions, {
       ...options,
       snapshot: snapshot as AnyMachineSnapshot,
     }),

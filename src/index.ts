@@ -1,30 +1,23 @@
 export { appendMessages, messagesSchema } from "./messages.js";
 export { createAgentSchemas, setupAgent } from "./setup-agent.js";
-export {
-  createDecisionLogic,
-  DecisionExhaustedError,
-  resolveDecision,
-  sendDecision,
-} from "./decision.js";
+export { DecisionExhaustedError, resolveDecision, sendDecision } from "./decision.js";
 export { EVENT_TOOL_PREFIX, getAcceptedEvents } from "./events.js";
 export {
+  bindRequestExecutor,
   createTextLogic,
   getAgentOutputMode,
   isStructuredOutputSchema,
   parseOutput,
 } from "./text-logic.js";
 export {
-  doneEvent,
   executeAgentRequest,
   getAgentRequests,
-  getMachineAgentRequests,
   initialAgentStep,
   resolveAgentStep,
   transitionAgentStep,
-  transitionResult,
 } from "./steps.js";
 export { runAgent } from "./run-agent.js";
-export { getStateMeta, validateSchemaSync } from "./utils.js";
+export { getStateMeta, persistSnapshot, validateSchemaSync } from "./utils.js";
 export { assistantMessage, systemMessage, toolMessage, userMessage } from "./utils.js";
 
 export type {

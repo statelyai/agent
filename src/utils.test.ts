@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import { createActor } from "xstate";
-import { getStateMeta, setupAgent } from "./index.js";
+import { getStateMeta, persistSnapshot, setupAgent } from "./index.js";
 
 const metaSchema = z.object({
   interaction: z
@@ -86,5 +86,26 @@ describe("getStateMeta", () => {
     // Type-level: `banner` is a `string | undefined`, not `unknown`.
     const banner: string | undefined = meta.banner;
     expect(banner).toBe("hi");
+  });
+});
+
+describe("persistSnapshot", () => {
+  test("returns a plain-JSON deep clone (equal value, not same reference)", () => {
+    const snapshot = { value: "reviewing", context: { draft: { body: "hi" } } };
+    const persisted = persistSnapshot(snapshot);
+
+    expect(persisted).toEqual(snapshot);
+    expect(persisted).not.toBe(snapshot);
+    expect(persisted.context).not.toBe(snapshot.context);
+  });
+
+  test("drops non-JSON values exactly as JSON round-trip does", () => {
+    const persisted = persistSnapshot({
+      keep: 1,
+      fn: () => 1,
+      undef: undefined,
+    });
+
+    expect(persisted).toEqual({ keep: 1 });
   });
 });

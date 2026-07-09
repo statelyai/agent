@@ -1,17 +1,17 @@
 import Ajv from "ajv";
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
-import { createActor, createAsyncLogic, initialTransition, waitFor } from "xstate";
+import { createActor, createAsyncLogic, initialTransition, toPromise, waitFor } from "xstate";
+import { createDecisionLogic } from "./decision.js";
+import { getAgentRequestsWith, transitionResult } from "./steps.js";
 import {
   createAgentSchemas,
-  createDecisionLogic,
   createTextLogic,
   DecisionExhaustedError,
   executeAgentRequest,
   getAcceptedEvents,
   getAgentOutputMode,
   getAgentRequests,
-  getMachineAgentRequests,
   initialAgentStep,
   isStructuredOutputSchema,
   messagesSchema,
@@ -23,7 +23,6 @@ import {
   setupAgent,
   toolMessage,
   transitionAgentStep,
-  transitionResult,
   userMessage,
   type AgentDecisionRequest,
   type AgentRequest,
@@ -249,7 +248,7 @@ describe("setupAgent", () => {
     const [_snapshot, actions] = initialTransition(machine, {
       prompt: "Draft it.",
     });
-    const [request] = getMachineAgentRequests(machine, actions);
+    const [request] = getAgentRequests(machine, actions);
 
     expect(agent.requests.draftEmail.mode).toBe("generate");
     expect(agent.requests.draftEmail.request({ prompt: "Draft it." })).toEqual(
@@ -268,7 +267,7 @@ describe("setupAgent", () => {
       }),
     );
 
-    expect(getMachineAgentRequests(machine, actions)).toEqual([request]);
+    expect(getAgentRequests(machine, actions)).toEqual([request]);
 
     await expect(
       agent.requests.draftEmail.execute(
@@ -329,7 +328,7 @@ describe("setupAgent", () => {
     const [_generateSnapshot, generateActions] = initialTransition(generateMachine, {
       prompt: "Draft it.",
     });
-    const [generateTask] = getMachineAgentRequests(generateMachine, generateActions);
+    const [generateTask] = getAgentRequests(generateMachine, generateActions);
 
     await expect(
       executeAgentRequest(asTextRequest(generateTask), {
@@ -363,7 +362,7 @@ describe("setupAgent", () => {
     const [_streamSnapshot, streamActions] = initialTransition(streamMachine, {
       prompt: "Revise it.",
     });
-    const [streamTask] = getMachineAgentRequests(streamMachine, streamActions);
+    const [streamTask] = getAgentRequests(streamMachine, streamActions);
 
     await expect(
       executeAgentRequest(asTextRequest(streamTask), {
@@ -579,7 +578,7 @@ describe("setupAgent", () => {
     const provided = machine.provide({ actorSources: {} });
     const step = initialAgentStep(provided, { prompt: "hello" });
 
-    expect(getMachineAgentRequests(provided, step.actions, step.snapshot)).toHaveLength(1);
+    expect(getAgentRequests(provided, step.actions, step.snapshot)).toHaveLength(1);
   });
 
   test("agent machine step execution validates request output schemas", async () => {
@@ -925,7 +924,7 @@ describe("setupAgent", () => {
     let [snapshot, actions] = initialTransition(machine, {
       article: "State machines make agents inspectable.",
     });
-    const [request] = getAgentRequests(actions, {
+    const [request] = getAgentRequestsWith(actions, {
       actorSources: { getSummary },
     });
 
@@ -1320,7 +1319,7 @@ describe("setupAgent", () => {
     let [snapshot, actions] = initialTransition(machine, {
       prompt: "why state machines?",
     });
-    const [request] = getMachineAgentRequests(machine, actions);
+    const [request] = getAgentRequests(machine, actions);
 
     expect(request).toEqual({
       kind: "text",
@@ -1341,7 +1340,7 @@ describe("setupAgent", () => {
       answer: "Because the workflow matters.",
     });
 
-    expect(getAgentRequests(actions)).toEqual([]);
+    expect(getAgentRequestsWith(actions)).toEqual([]);
     expect(snapshot.status).toBe("done");
     expect(snapshot.output).toEqual({
       answer: "Because the workflow matters.",
@@ -1472,11 +1471,11 @@ describe("setupAgent", () => {
       }),
     ).toEqual([expect.objectContaining({ type: "ATTACK", toolName: "machine_attack" })]);
 
-    const request = getMachineAgentRequests(machine, actions, snapshot)[0];
+    const request = getAgentRequests(machine, actions, snapshot)[0];
     if (request?.kind !== "decision") {
       throw new Error("Expected a decision request.");
     }
-    const customNamedRequest = getMachineAgentRequests(machine, actions, snapshot, {
+    const customNamedRequest = getAgentRequests(machine, actions, snapshot, {
       eventToolName: ({ eventType }: { eventType: string }) => `machine_${eventType.toLowerCase()}`,
     })[0];
     if (customNamedRequest?.kind !== "decision") {
@@ -2602,5 +2601,67 @@ describe("inline agent.decide invoke (state-local decisions)", () => {
         attacked: {},
       },
     });
+  });
+});
+
+describe("per-state context schemas (setupAgent({ states }))", () => {
+  test("a state's schemas.context narrows context in invoke input and final output", async () => {
+    const agent = setupAgent({
+      schemas: createAgentSchemas({
+        context: z.object({ topic: z.string(), answer: z.string().nullable() }),
+        input: z.object({ topic: z.string() }),
+        output: z.object({ answer: z.string() }),
+      }),
+      actorSources: {
+        finish: createAsyncLogic({
+          run: async ({ input }: { input: { echo: string } }) => input.echo,
+        }),
+      },
+      // Narrow `answer` to non-null in states reachable only after it is set.
+      states: {
+        working: {},
+        finishing: {
+          schemas: {
+            context: z.object({ topic: z.string(), answer: z.string() }),
+          },
+        },
+        done: {
+          schemas: {
+            context: z.object({ topic: z.string(), answer: z.string() }),
+          },
+        },
+      },
+    });
+
+    const machine = agent.createMachine({
+      context: ({ input }) => ({ topic: input.topic, answer: null }),
+      initial: "working",
+      states: {
+        working: {
+          always: {
+            target: "finishing",
+            context: ({ context }) => ({ ...context, answer: `about ${context.topic}` }),
+          },
+        },
+        finishing: {
+          invoke: {
+            src: "finish",
+            // Narrowed: `context.answer` is `string` here, no `??` fallback.
+            input: ({ context }) => ({ echo: context.answer satisfies string }),
+            onDone: { target: "done" },
+          },
+        },
+        done: {
+          type: "final",
+          output: ({ context }) => ({ answer: context.answer satisfies string }),
+        },
+      },
+    });
+
+    const actor = createActor(machine, { input: { topic: "states" } });
+    actor.start();
+    await toPromise(actor);
+
+    expect(actor.getSnapshot().output).toEqual({ answer: "about states" });
   });
 });

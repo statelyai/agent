@@ -2,11 +2,13 @@ import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import { createActor, toPromise } from "xstate";
 import {
+  bindRequestExecutor,
   createAgentSchemas,
   createTextLogic,
   runAgent,
   setupAgent,
   type AgentRequest,
+  type AgentRequestExecutor,
   type AgentTextRequest,
   type AgentTools,
 } from "./index.js";
@@ -310,5 +312,46 @@ describe('createTextLogic({ mode: "stream" })', () => {
     // chunks are disambiguated by request id even though both streams ran
     expect(chunksById.streamA).toEqual(["A", "A"]);
     expect(chunksById.streamB).toEqual(["B", "B"]);
+  });
+});
+
+describe("bindRequestExecutor", () => {
+  const summarize = createTextLogic({
+    schemas: { input: z.object({ topic: z.string() }), output: z.string() },
+    model: "test-model",
+    prompt: ({ input }) => `Summarize ${input.topic}.`,
+  });
+
+  test("adapts a raw executor: defaults tools to {}, forwards signal, unwraps output", async () => {
+    const seen: { request: AgentTextRequest & { tools: AgentTools }; hasSignal: boolean }[] = [];
+    const executor: AgentRequestExecutor = (request, info) => {
+      seen.push({ request, hasSignal: info?.signal instanceof AbortSignal });
+      return { output: `summary of ${request.prompt}` };
+    };
+
+    const bound = bindRequestExecutor(summarize, executor);
+    const actor = createActor(bound, { input: { topic: "actors" } }).start();
+    const output = await toPromise(actor);
+
+    expect(output).toBe("summary of Summarize actors.");
+    expect(seen[0]?.request.tools).toEqual({});
+    expect(seen[0]?.hasSignal).toBe(true);
+  });
+
+  test("does not clobber tools the lowered request already declares", async () => {
+    const withTools = createTextLogic({
+      schemas: { input: z.object({ topic: z.string() }), output: z.string() },
+      model: "test-model",
+      tools: { search: { description: "search" } } as unknown as AgentTools,
+      prompt: () => "hi",
+    });
+    let capturedTools: AgentTools | undefined;
+    const bound = bindRequestExecutor(withTools, (request) => {
+      capturedTools = request.tools;
+      return { output: "ok" };
+    });
+
+    await toPromise(createActor(bound, { input: { topic: "x" } }).start());
+    expect(capturedTools).toHaveProperty("search");
   });
 });

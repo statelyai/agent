@@ -2,6 +2,7 @@ import { getNextTransitions, type AnyMachineSnapshot } from "xstate";
 import type { StandardSchemaV1 } from "./types.js";
 
 /** The invoke `src` of an {@link AgentRequest}/{@link AgentDecisionRequest} — a plain string, widened so literal `src` values still narrow in editor hints. */
+// `& {}` keeps literal-union autocomplete alive while still allowing any string — a bare `string` in a union would swallow the literals.
 export type AgentRequestSource = string & {};
 
 /** Default prefix for the synthetic tool name generated per candidate event (e.g. `send_event_ASK`). Override per-request with {@link AgentEventToolNameResolver}. */

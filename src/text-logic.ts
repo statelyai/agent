@@ -82,7 +82,7 @@ export interface AgentUserInput<TMetadata = Record<string, unknown>> {
   metadata?: TMetadata;
 }
 
-// The four `agent.*` builtin actor logics every setupAgent-built machine registers.
+/** The four `agent.*` builtin actor logics every setupAgent-built machine registers. @internal */
 export type BuiltinAgentActors<TEvent extends string = string, TModel extends string = string> = {
   [GENERATE_TEXT_ACTOR]: AsyncActorLogic<unknown, AgentTextRequest>;
   [STREAM_TEXT_ACTOR]: AsyncActorLogic<unknown, AgentTextRequest>;
@@ -208,7 +208,7 @@ function createBuiltinTextActor(
   }) as TextLogic<StandardSchemaV1<AgentTextRequest>, StandardSchemaV1>;
 }
 
-// The unbound `agent.generateText`/`agent.streamText` builtins registered by setupAgent.
+/** The unbound `agent.generateText`/`agent.streamText` builtins registered by setupAgent. @internal */
 export const builtinTextActors = {
   [GENERATE_TEXT_ACTOR]: createBuiltinTextActor(
     GENERATE_TEXT_ACTOR,
@@ -218,7 +218,7 @@ export const builtinTextActors = {
   [STREAM_TEXT_ACTOR]: createBuiltinTextActor(STREAM_TEXT_ACTOR, "stream", stringOutputSchema),
 } satisfies Pick<BuiltinAgentActors, typeof GENERATE_TEXT_ACTOR | typeof STREAM_TEXT_ACTOR>;
 
-// The unbound `agent.userInput` builtin registered by setupAgent (an unbound-placeholder logic — see internal/registry.ts).
+/** The unbound `agent.userInput` builtin registered by setupAgent (an unbound-placeholder logic — see internal/registry.ts). @internal */
 export const userInputActor = createAsyncLogic<unknown, AgentUserInput>({
   run: async () => {
     throw new Error(
@@ -245,10 +245,10 @@ export function parseOutput<TSchema extends StandardSchemaV1>(
   );
 }
 
-// A TextLogicConfig/DecisionLogicConfig field value: either static, or a `({ input }) => value` resolver.
+/** A TextLogicConfig/DecisionLogicConfig field value: either static, or a `({ input }) => value` resolver. @internal */
 export type ResolveTextLogicValue<TValue, TInput> = TValue | ((args: { input: TInput }) => TValue);
 
-// Resolves a `ResolveTextLogicValue` (calls it if it's a function, else returns it as-is).
+/** Resolves a `ResolveTextLogicValue` (calls it if it's a function, else returns it as-is). @internal */
 export function resolveTextLogicValue<TValue, TInput>(
   value: ResolveTextLogicValue<TValue, TInput> | undefined,
   args: { input: TInput },
@@ -472,7 +472,41 @@ export function createTextLogic<
   return textLogic;
 }
 
-// Type guard: true for any actor logic built by createTextLogic (checks the `kind` marker).
+/**
+ * Binds a child machine's {@link TextLogic} to a raw
+ * {@link AgentRequestExecutor} (the `generateText`/`streamText` shape hosts
+ * implement). Encapsulates the `withExecutor` idiom child agents repeat:
+ * default the request's `tools` to `{}`, forward the actor `signal`, call the
+ * executor, and return its `{ output }` envelope. Use this to share ONE
+ * executor across a parent and its nested children.
+ *
+ * @example
+ * ```ts
+ * childMachine.provide({
+ *   actorSources: {
+ *     researchTopic: bindRequestExecutor(setup.requests.researchTopic, generateText),
+ *   },
+ * });
+ * ```
+ */
+export function bindRequestExecutor<
+  TInputSchema extends StandardSchemaV1,
+  TOutputSchema extends StandardSchemaV1,
+  TMetadata,
+>(
+  logic: TextLogic<TInputSchema, TOutputSchema, TMetadata>,
+  executor: AgentRequestExecutor,
+): TextLogic<TInputSchema, TOutputSchema, TMetadata> {
+  return logic.withExecutor(async ({ request, signal }) => {
+    const { output } = await executor(
+      { ...request, tools: request.tools ?? {} } as AgentTextRequest & { tools: AgentTools },
+      { signal },
+    );
+    return { output } as AgentRequestExecutorResult<InferOutput<TOutputSchema>>;
+  });
+}
+
+/** Type guard: true for any actor logic built by createTextLogic (checks the `kind` marker). @internal */
 export function isTextLogic(value: unknown): value is TextLogic {
   return (
     !!value &&
@@ -587,6 +621,8 @@ function getStandardSchemaJson(
  * `TextLogic.execute`, `executeAgentRequest`, and the `agent.generateText`/
  * `agent.streamText` builtins. Throws if no executor is registered for
  * `mode`.
+ *
+ * @internal
  */
 export async function executeAgentTextRequest(
   mode: AgentRequestMode,
@@ -622,6 +658,8 @@ export async function executeAgentTextRequest(
  * value or an object without `output` is a runtime error naming `id`. This is
  * generator-result unwrapping only — decision results are extracted
  * separately by `resolveDecision`.
+ *
+ * @internal
  */
 export async function normalizeGeneratorResult(
   result: unknown,
