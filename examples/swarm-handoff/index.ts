@@ -18,7 +18,9 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { type LanguageModel } from "ai";
+import { withReadline } from "../helpers/cli.js";
 import {
+  persistSnapshot,
   runAgent,
   setupAgent,
   type RunAgentOptions,
@@ -144,7 +146,7 @@ export async function runSwarmHandoffExample(
 
   // Persist the snapshot (host's choice of store) — JSON round-trip it to
   // prove `activeAgent` survives a real persistence layer.
-  const persisted = JSON.parse(JSON.stringify(first.snapshot));
+  const persisted = persistSnapshot(first.snapshot);
 
   // ...later, new process: hand off to the food agent for the next turn.
   const second = await runAgent(swarmHandoffMachine, {
@@ -177,8 +179,6 @@ export async function runSwarmHandoffExample(
  */
 async function runInteractive() {
   const executors = createAiSdkExecutors({ models });
-  const { createInterface } = await import("node:readline/promises");
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
 
   let active: "travel" | "food" = "travel";
   console.log("Swarm handoff — two concierges share one conversation.");
@@ -220,32 +220,32 @@ async function runInteractive() {
     });
   }
 
-  while (true) {
-    const line: string = (await rl.question(`[${active}] you> `)).trim();
-    if (!line) break;
+  await withReadline(async (rl) => {
+    while (true) {
+      const line: string = (await rl.question(`[${active}] you> `)).trim();
+      if (!line) break;
 
-    let to: "travel" | "food" = active;
-    let message = line;
-    const match = /^\/(travel|food)\s+(.*)$/s.exec(line);
-    if (match) {
-      to = match[1] as "travel" | "food";
-      message = match[2] ?? "";
-    }
-    if (to !== active) {
-      console.log(`--- handoff: ${active} → ${to} ---`);
-    }
+      let to: "travel" | "food" = active;
+      let message = line;
+      const match = /^\/(travel|food)\s+(.*)$/s.exec(line);
+      if (match) {
+        to = match[1] as "travel" | "food";
+        message = match[2] ?? "";
+      }
+      if (to !== active) {
+        console.log(`--- handoff: ${active} → ${to} ---`);
+      }
 
-    const result = await runTurn(to, message);
-    if (result.status !== "idle") {
-      console.error(`Conversation ended unexpectedly: ${result.status}`);
-      break;
+      const result = await runTurn(to, message);
+      if (result.status !== "idle") {
+        console.error(`Conversation ended unexpectedly: ${result.status}`);
+        break;
+      }
+      active = result.snapshot.context.activeAgent;
+      snapshot = persistSnapshot(result.snapshot);
+      console.log(`[${active}] ${result.snapshot.context.reply ?? ""}\n`);
     }
-    active = result.snapshot.context.activeAgent;
-    snapshot = JSON.parse(JSON.stringify(result.snapshot));
-    console.log(`[${active}] ${result.snapshot.context.reply ?? ""}\n`);
-  }
-
-  rl.close();
+  });
 }
 
 // Non-interactive fallback: the scripted two-turn demo (CI / non-TTY).

@@ -40,6 +40,7 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
+import { promptLine } from "../helpers/cli.js";
 import { createAgentSchemas, runAgent, sendDecision, setupAgent } from "../../src/index.js";
 
 const todoSchema = z.object({
@@ -289,21 +290,11 @@ export const todoMachine = agentSetup.createMachine({
 
 const executors = createAiSdkExecutors({ models });
 
-async function promptCommand(prompt: string): Promise<string> {
-  const { createInterface } = await import("node:readline/promises");
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    return await rl.question(`${prompt}\n> `);
-  } finally {
-    rl.close();
-  }
-}
-
 export async function main() {
   const result = await runAgent(todoMachine, {
     input: { todos: [] },
     ...executors,
-    userInput: async ({ prompt }) => promptCommand(prompt ?? ">"),
+    userInput: async ({ prompt }) => promptLine(`${prompt ?? ">"}\n> `),
     onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
   });
 

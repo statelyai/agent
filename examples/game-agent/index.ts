@@ -17,7 +17,6 @@ import { type LanguageModel } from "ai";
 import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
 import {
   createAgentSchemas,
-  createDecisionLogic,
   createTextLogic,
   runAgent,
   sendDecision,
@@ -67,22 +66,23 @@ export const models: Record<"moveChooser" | "turnSummarizer", LanguageModel> = {
 const defaultMoveEvents = ["ATTACK", "DEFEND", "FLEE"] satisfies GameEventType[];
 const lowHpMoveEvents = ["ATTACK", "DEFEND", "HEAL", "FLEE"] satisfies GameEventType[];
 
-export const chooseMove = createDecisionLogic({
-  schemas: {
-    input: z.object({
-      playerHp: z.number(),
-      enemyHp: z.number(),
-    }),
-  },
+// Reusable decision as a shared *input builder* — a `({ context }) => AgentDecisionInput`
+// function, not an actor. Drop it into any state's `agent.decide` invoke to reuse
+// the same move-choosing decision. `allowedEvents` widens to include HEAL only
+// when the player is low on HP.
+export const chooseMoveInput = ({
+  context,
+}: {
+  context: { playerHp: number; enemyHp: number };
+}) => ({
   model: "moveChooser",
   system: "You are playing a turn-based game. Choose exactly one legal move.",
-  prompt: ({ input }) =>
-    [
-      `Player HP: ${input.playerHp}`,
-      `Enemy HP: ${input.enemyHp}`,
-      "Pick the best legal move.",
-    ].join("\n"),
-  allowedEvents: ({ input }) => (input.playerHp <= 6 ? lowHpMoveEvents : defaultMoveEvents),
+  prompt: [
+    `Player HP: ${context.playerHp}`,
+    `Enemy HP: ${context.enemyHp}`,
+    "Pick the best legal move.",
+  ].join("\n"),
+  allowedEvents: context.playerHp <= 6 ? lowHpMoveEvents : defaultMoveEvents,
 });
 
 export const summarizeTurn = createTextLogic({
@@ -105,7 +105,6 @@ export const summarizeTurn = createTextLogic({
 });
 
 export const gameActors = {
-  chooseMove,
   summarizeTurn,
 };
 
@@ -128,11 +127,8 @@ export const gameMachine = gameAgentSetup.createMachine({
     choosingMove: {
       invoke: {
         id: "chooseMove",
-        src: "chooseMove",
-        input: ({ context }) => ({
-          playerHp: context.playerHp,
-          enemyHp: context.enemyHp,
-        }),
+        src: "agent.decide",
+        input: chooseMoveInput,
         onDone: sendDecision(),
         onError: { target: "fumbled" },
       },

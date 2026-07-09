@@ -39,6 +39,7 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { type LanguageModel } from "ai";
 import {
+  bindRequestExecutor,
   runAgent,
   setupAgent,
   type AgentRequestExecutor,
@@ -122,12 +123,7 @@ const BRANCH_PREFIX = "branch-";
  * the reducer share ONE executor set.
  */
 export function createFanOutMachine(generateText: AgentRequestExecutor) {
-  const branchLogic = agentSetup.requests.summarizeSubtopic.withExecutor(
-    async ({ request, signal }) => {
-      const { output } = await generateText({ ...request, tools: {} }, { signal });
-      return { output: output as string };
-    },
-  );
+  const branchLogic = bindRequestExecutor(agentSetup.requests.summarizeSubtopic, generateText);
 
   return agentSetup.createMachine({
     id: "fan-out",

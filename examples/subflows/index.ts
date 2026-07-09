@@ -23,10 +23,10 @@ import { openai } from "@ai-sdk/openai";
 import { type LanguageModel } from "ai";
 import { type InspectionEvent } from "xstate";
 import {
+  bindRequestExecutor,
   runAgent,
   setupAgent,
   type AgentRequestExecutor,
-  type AgentTools,
 } from "../../src/index.js";
 import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
 
@@ -123,15 +123,11 @@ export async function runSubflowsExample(options?: {
       // keeps its own binding before being registered as the `child` source.
       child: childMachine.provide({
         actorSources: {
-          // Adapt the raw `(request, info)` executor to a TextLogic executor,
-          // which receives the lowered `request` alongside typed `input`.
-          researchTopic: childAgentSetup.requests.researchTopic.withExecutor(
-            async ({ request }) => {
-              const { output } = await generateText(
-                request as typeof request & { tools: AgentTools },
-              );
-              return { output: output as string };
-            },
+          // Adapt the raw `(request, info)` executor to a TextLogic executor
+          // via the shared bridge (defaults `tools`, forwards `signal`).
+          researchTopic: bindRequestExecutor(
+            childAgentSetup.requests.researchTopic,
+            generateText,
           ),
         },
       }),

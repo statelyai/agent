@@ -22,6 +22,7 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
+import { promptLine } from "../helpers/cli.js";
 import {
   type AgentMessage,
   assistantMessage,
@@ -421,21 +422,11 @@ export const twentyQuestionsMachine = agentSetup.createMachine({
 
 const executors = createAiSdkExecutors({ models });
 
-async function promptAnswer(question: string): Promise<string> {
-  const { createInterface } = await import("node:readline/promises");
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    return await rl.question(`${question} `);
-  } finally {
-    rl.close();
-  }
-}
-
 export async function main() {
   const result = await runAgent(twentyQuestionsMachine, {
     input: { questionsRemaining: 20 },
     ...executors,
-    userInput: async ({ prompt }) => promptAnswer(prompt ?? ">"),
+    userInput: async ({ prompt }) => promptLine(`${prompt ?? ">"} `),
     onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
   });
 

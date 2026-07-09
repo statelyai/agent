@@ -37,6 +37,28 @@ const agentSetup = setupAgent({
     classification: classificationSchema,
     response: z.string(),
   }),
+  // After classifying, `classification` is always set — narrow it non-null.
+  states: {
+    classifying: {},
+    responding: {
+      schemas: {
+        context: z.object({
+          query: z.string(),
+          classification: classificationSchema,
+          response: z.string().nullable(),
+        }),
+      },
+    },
+    done: {
+      schemas: {
+        context: z.object({
+          query: z.string(),
+          classification: classificationSchema,
+          response: z.string().nullable(),
+        }),
+      },
+    },
+  },
   requests: {
     classifyCustomerQuery: {
       schemas: {
@@ -98,11 +120,7 @@ export const aiSdkRoutingMachine = agentSetup.createMachine({
         src: "answerCustomerQuery",
         input: ({ context }) => ({
           query: context.query,
-          classification: context.classification ?? {
-            reasoning: "",
-            type: "general",
-            complexity: "simple",
-          },
+          classification: context.classification,
         }),
         onDone: ({ output }) => ({
           target: "done",
@@ -113,11 +131,7 @@ export const aiSdkRoutingMachine = agentSetup.createMachine({
     done: {
       type: "final",
       output: ({ context }) => ({
-        classification: context.classification ?? {
-          reasoning: "",
-          type: "general",
-          complexity: "simple",
-        },
+        classification: context.classification,
         response: context.response ?? "",
       }),
     },

@@ -64,6 +64,47 @@ const agentSetup = setupAgent({
     EVALUATED: z.object({ qualityScore: z.number(), iteration: z.number() }),
     IMPROVED: z.object({ translation: z.string() }),
   },
+  // `improving` runs only after evaluating set translation + evaluation.
+  states: {
+    translating: {},
+    evaluating: {
+      schemas: {
+        context: z.object({
+          text: z.string(),
+          targetLanguage: z.string(),
+          translation: z.string(),
+          evaluation: translationEvaluationSchema.nullable(),
+          iterations: z.number(),
+          maxIterations: z.number(),
+        }),
+      },
+    },
+    checking: {},
+    improving: {
+      schemas: {
+        context: z.object({
+          text: z.string(),
+          targetLanguage: z.string(),
+          translation: z.string(),
+          evaluation: translationEvaluationSchema,
+          iterations: z.number(),
+          maxIterations: z.number(),
+        }),
+      },
+    },
+    done: {
+      schemas: {
+        context: z.object({
+          text: z.string(),
+          targetLanguage: z.string(),
+          translation: z.string(),
+          evaluation: translationEvaluationSchema.nullable(),
+          iterations: z.number(),
+          maxIterations: z.number(),
+        }),
+      },
+    },
+  },
   requests: {
     translateText: {
       schemas: {
@@ -143,7 +184,7 @@ export const aiSdkEvaluatorOptimizerMachine = agentSetup.createMachine({
         src: "evaluateTranslation",
         input: ({ context }) => ({
           original: context.text,
-          translation: context.translation ?? "",
+          translation: context.translation,
         }),
         onDone: ({ context, output }, enq) => {
           enq.emit({
@@ -174,15 +215,8 @@ export const aiSdkEvaluatorOptimizerMachine = agentSetup.createMachine({
         src: "improveTranslation",
         input: ({ context }) => ({
           original: context.text,
-          translation: context.translation ?? "",
-          evaluation: context.evaluation ?? {
-            qualityScore: 0,
-            preservesTone: false,
-            preservesNuance: false,
-            culturallyAccurate: false,
-            specificIssues: [],
-            improvementSuggestions: [],
-          },
+          translation: context.translation,
+          evaluation: context.evaluation,
         }),
         onDone: ({ output }, enq) => {
           enq.emit({ type: "IMPROVED", translation: output });
@@ -196,7 +230,7 @@ export const aiSdkEvaluatorOptimizerMachine = agentSetup.createMachine({
     done: {
       type: "final",
       output: ({ context }) => ({
-        translation: context.translation ?? "",
+        translation: context.translation,
         evaluation: context.evaluation,
         iterations: context.iterations,
       }),

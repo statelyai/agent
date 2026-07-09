@@ -23,6 +23,7 @@ import { createAsyncLogic } from "xstate";
 import {
   getAcceptedEvents,
   getStateMeta,
+  persistSnapshot,
   runAgent,
   setupAgent,
   type AgentRequestExecutors,
@@ -230,10 +231,6 @@ export interface LongRunningOnboardingResult {
     accounts: Accounts;
     schedule: string;
   };
-}
-
-function persistSnapshot<TSnapshot>(snapshot: TSnapshot): TSnapshot {
-  return JSON.parse(JSON.stringify(snapshot)) as TSnapshot;
 }
 
 export async function runLongRunningOnboardingExample(

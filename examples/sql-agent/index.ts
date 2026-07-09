@@ -97,6 +97,42 @@ const agentSetup = setupAgent({
       run: async ({ input }) => executeQuery(input.plan),
     }),
   },
+  // planning sets plan before any state that reads it — narrow it non-null there.
+  states: {
+    planning: {},
+    awaitingApproval: {
+      schemas: {
+        context: z.object({
+          question: z.string(),
+          plan: queryPlanSchema,
+          result: z.number().nullable(),
+          answer: z.string().nullable(),
+        }),
+      },
+    },
+    executing: {
+      schemas: {
+        context: z.object({
+          question: z.string(),
+          plan: queryPlanSchema,
+          result: z.number().nullable(),
+          answer: z.string().nullable(),
+        }),
+      },
+    },
+    summarizing: {
+      schemas: {
+        context: z.object({
+          question: z.string(),
+          plan: queryPlanSchema,
+          result: z.number(),
+          answer: z.string().nullable(),
+        }),
+      },
+    },
+    rejected: {},
+    done: {},
+  },
   requests: {
     planQuery: {
       schemas: {
@@ -181,7 +217,7 @@ export const sqlAgentMachine = agentSetup.createMachine({
         id: "runQuery",
         src: "runQuery",
         input: ({ context }) => ({
-          plan: context.plan ?? { operation: "count", column: "amount", category: null },
+          plan: context.plan,
         }),
         onDone: ({ output }) => ({
           target: "summarizing",
@@ -195,8 +231,8 @@ export const sqlAgentMachine = agentSetup.createMachine({
         src: "summarize",
         input: ({ context }) => ({
           question: context.question,
-          plan: context.plan ?? { operation: "count", column: "amount", category: null },
-          result: context.result ?? 0,
+          plan: context.plan,
+          result: context.result,
         }),
         onDone: ({ output }) => ({ target: "done", context: { answer: output } }),
       },

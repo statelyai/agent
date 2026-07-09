@@ -24,6 +24,7 @@ import { type LanguageModel } from "ai";
 import {
   getAcceptedEvents,
   getStateMeta,
+  persistSnapshot,
   runAgent,
   setupAgent,
   type AgentRequestExecutors,
@@ -121,10 +122,6 @@ export interface HumanInTheLoopResult {
   legalEvents: string[];
   published: boolean;
   publishedDraft: string;
-}
-
-function persistSnapshot<TSnapshot>(snapshot: TSnapshot): TSnapshot {
-  return JSON.parse(JSON.stringify(snapshot)) as TSnapshot;
 }
 
 /**

@@ -16,6 +16,7 @@ import { openai } from "@ai-sdk/openai";
 import { type LanguageModel } from "ai";
 import { createAsyncLogic } from "xstate";
 import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
+import { withReadline } from "../helpers/cli.js";
 import {
   type AgentMessage,
   assistantMessage,
@@ -433,10 +434,8 @@ export async function promptInteraction(
 
 export async function main() {
   const executors = createAiSdkExecutors({ models });
-  const { createInterface } = await import("node:readline/promises");
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
 
-  try {
+  await withReadline(async (rl) => {
     // Start the machine; it settles idle at the first interaction state.
     let result = await runAgent(emailDrafter, {
       input: undefined,
@@ -474,9 +473,7 @@ export async function main() {
     } else if (result.status === "error") {
       console.error("Run failed:", result.error);
     }
-  } finally {
-    rl.close();
-  }
+  });
 }
 
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {

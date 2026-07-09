@@ -1,7 +1,7 @@
 {
   "name": "email-drafter-inspector",
   "title": "Email Drafter (Stately Inspector)",
-  "kind": "host-adapter",
+  "kind": "agent-workflow",
   "origin": {
     "type": "stately-agent",
     "source": "Ported from the standalone ai-xstate-email-example CLI",

@@ -20,10 +20,11 @@ Every example is dual-mode: run it directly against a real model with `OPENAI_AP
 
 ## XState Examples
 
-These use `setupAgent(...)` (or plain XState `setup(...)` plus `createTextLogic(...)`/`createDecisionLogic(...)`) from `@statelyai/agent`. The runtime is flexible: use `runAgent(...)`/`createActor(...)` locally, provide different host actors in apps, or persist XState snapshots in a platform adapter.
+These use `setupAgent(...)` (or plain XState `setup(...)` plus `createTextLogic(...)`) from `@statelyai/agent`. The runtime is flexible: use `runAgent(...)`/`createActor(...)` locally, provide different host actors in apps, or persist XState snapshots in a platform adapter.
 
 - [`twenty-questions/index.ts`](/Users/davidkpiano/Code/agent/examples/twenty-questions/index.ts): decision loop with machine-held context, typed model aliases, final-turn guess enforcement, scoring, play-again reset, and machine-owned user prompts
 - [`email-drafter/index.ts`](/Users/davidkpiano/Code/agent/examples/email-drafter/index.ts): typed email workflow with independently testable requests
+- [`email-drafter-inspector/index.ts`](/Users/davidkpiano/Code/agent/examples/email-drafter-inspector/index.ts): the email-drafter machine run as one live `createActor` session wired to `createWebSocketInspector`, so the whole flow is visible in the Stately Inspector (works without an API key via heuristic fallbacks)
 - [`game-agent/index.ts`](/Users/davidkpiano/Code/agent/examples/game-agent/index.ts): turn-based game workflow with `allowedEvents` narrowed as a function of input
 - [`joke/index.ts`](/Users/davidkpiano/Code/agent/examples/joke/index.ts): minimal streaming text workflow
 - [`triage/index.ts`](/Users/davidkpiano/Code/agent/examples/triage/index.ts): structured-output support ticket triage
@@ -31,8 +32,11 @@ These use `setupAgent(...)` (or plain XState `setup(...)` plus `createTextLogic(
 - [`supervisor/index.ts`](/Users/davidkpiano/Code/agent/examples/supervisor/index.ts): a routing request's structured output hands off to a format-specific worker
 - [`human-in-the-loop/index.ts`](/Users/davidkpiano/Code/agent/examples/human-in-the-loop/index.ts): draft → idle review (typed `meta.interaction`) → APPROVE/REJECT redraft, with a JSON snapshot round-trip
 - [`long-running-onboarding/index.ts`](/Users/davidkpiano/Code/agent/examples/long-running-onboarding/index.ts): Google ADK-style onboarding coordinator with durable typed state, two idle dormancy gates, JSON snapshot resume across days, and delegated IT provisioning
+- [`file-snapshot-store/index.ts`](/Users/davidkpiano/Code/agent/examples/file-snapshot-store/index.ts): durable HITL checkpoints in a file-backed snapshot store — each idle settle writes JSON to disk and a fresh `runAgent` call resumes across turns
+- [`machine-as-tool/index.ts`](/Users/davidkpiano/Code/agent/examples/machine-as-tool/index.ts): a whole agent machine embedded inside one tool call of a host harness — start/resume tools bridge a JSON-safe snapshot handle and read the typed interaction meta
 - [`rag/index.ts`](/Users/davidkpiano/Code/agent/examples/rag/index.ts): retrieve (typed plain actor, keyword scoring over a sample corpus) → grounded answer, with conversational memory in context
 - [`tool-calling/index.ts`](/Users/davidkpiano/Code/agent/examples/tool-calling/index.ts): model selects a tool (structured output), typed tool actors execute, progress via `onTransition`
+- [`react-agent/index.ts`](/Users/davidkpiano/Code/agent/examples/react-agent/index.ts): LangGraph's `createReactAgent` as an explicit visible loop — one `reasonOrAct` request per iteration returns a call-a-tool-or-answer union, typed tool actors execute, and a step-budget guard breaks the loop with a best-effort answer
 - [`plan-and-execute/index.ts`](/Users/davidkpiano/Code/agent/examples/plan-and-execute/index.ts): planner structured output, execution states iterate the plan (keeps the ReWOO evidence-map idea)
 - [`sql-agent/index.ts`](/Users/davidkpiano/Code/agent/examples/sql-agent/index.ts): query generation, DB execution, and answer synthesis as separate typed states
 - [`ai-sdk-host/index.ts`](/Users/davidkpiano/Code/agent/examples/ai-sdk-host/index.ts): Vercel AI SDK host actors
@@ -80,4 +84,4 @@ AI SDK pattern set (fan-out, routing, reflection, map-reduce shapes):
 - [`ai-sdk-evaluator-optimizer/index.test.ts`](/Users/davidkpiano/Code/agent/examples/ai-sdk-evaluator-optimizer/index.test.ts)
 - [`ai-sdk-marketing-chain/index.test.ts`](/Users/davidkpiano/Code/agent/examples/ai-sdk-marketing-chain/index.test.ts)
 
-New examples should use `createTextLogic(...)`/`createDecisionLogic(...)` for reusable LLM work and `setupAgent({ schemas, actors, requests })` for schema-first machine authoring. Decisions are authored inline in states via `agent.decide` (state-local), or with `createDecisionLogic` under `actors:` when reusable — there is no `decisions:` key on `setupAgent`.
+New examples should use `createTextLogic(...)` for reusable LLM work and `setupAgent({ schemas, actors, requests })` for schema-first machine authoring. Decisions are authored inline in states via `src: 'agent.decide'` (state-local); to reuse one across states, share the *input builder* function (a `({ context }) => ({ model, system, prompt, allowedEvents })` fn), not an actor. There is no `decisions:` key on `setupAgent`.
