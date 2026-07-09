@@ -25,13 +25,15 @@ export const models: Record<"classifier" | "simpleAnswerer" | "complexAnswerer",
   complexAnswerer: openai("o4-mini"),
 } as const;
 
+const contextSchema = z.object({
+  query: z.string(),
+  classification: classificationSchema.nullable(),
+  response: z.string().nullable(),
+});
+
 const agentSetup = setupAgent({
   models,
-  context: z.object({
-    query: z.string(),
-    classification: classificationSchema.nullable(),
-    response: z.string().nullable(),
-  }),
+  context: contextSchema,
   input: z.object({ query: z.string() }),
   output: z.object({
     classification: classificationSchema,
@@ -41,22 +43,10 @@ const agentSetup = setupAgent({
   states: {
     classifying: {},
     responding: {
-      schemas: {
-        context: z.object({
-          query: z.string(),
-          classification: classificationSchema,
-          response: z.string().nullable(),
-        }),
-      },
+      schemas: { context: contextSchema.extend({ classification: classificationSchema }) },
     },
     done: {
-      schemas: {
-        context: z.object({
-          query: z.string(),
-          classification: classificationSchema,
-          response: z.string().nullable(),
-        }),
-      },
+      schemas: { context: contextSchema.extend({ classification: classificationSchema }) },
     },
   },
   requests: {

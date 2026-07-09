@@ -73,14 +73,16 @@ export const models: Record<"planner" | "summarizer", LanguageModel> = {
   summarizer: openai("gpt-5.4-mini"),
 } as const;
 
+const contextSchema = z.object({
+  question: z.string(),
+  plan: queryPlanSchema.nullable(),
+  result: z.number().nullable(),
+  answer: z.string().nullable(),
+});
+
 const agentSetup = setupAgent({
   models,
-  context: z.object({
-    question: z.string(),
-    plan: queryPlanSchema.nullable(),
-    result: z.number().nullable(),
-    answer: z.string().nullable(),
-  }),
+  context: contextSchema,
   input: z.object({ question: z.string() }),
   output: z.object({
     plan: queryPlanSchema,
@@ -101,33 +103,14 @@ const agentSetup = setupAgent({
   states: {
     planning: {},
     awaitingApproval: {
-      schemas: {
-        context: z.object({
-          question: z.string(),
-          plan: queryPlanSchema,
-          result: z.number().nullable(),
-          answer: z.string().nullable(),
-        }),
-      },
+      schemas: { context: contextSchema.extend({ plan: queryPlanSchema }) },
     },
     executing: {
-      schemas: {
-        context: z.object({
-          question: z.string(),
-          plan: queryPlanSchema,
-          result: z.number().nullable(),
-          answer: z.string().nullable(),
-        }),
-      },
+      schemas: { context: contextSchema.extend({ plan: queryPlanSchema }) },
     },
     summarizing: {
       schemas: {
-        context: z.object({
-          question: z.string(),
-          plan: queryPlanSchema,
-          result: z.number(),
-          answer: z.string().nullable(),
-        }),
+        context: contextSchema.extend({ plan: queryPlanSchema, result: z.number() }),
       },
     },
     rejected: {},

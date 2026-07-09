@@ -17,7 +17,7 @@
  * Run:
  *   OPENAI_API_KEY=... npx tsx examples/ai-sdk-game-host/index.ts
  */
-import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
+import { createAiSdkExecutors } from '../../src/ai-sdk/index.js';
 import {
   executeAgentRequest,
   initialAgentStep,
@@ -26,14 +26,14 @@ import {
   type EventUnion,
   resolveAgentStep,
   transitionAgentStep,
-} from "../../src/index.js";
+} from '../../src/index.js';
 import {
   gameActors,
   gameMachine,
   gameSchemas,
   models,
   turnSummarySchema,
-} from "../game-agent/index.js";
+} from '../game-agent/index.js';
 
 type GameEvent = EventUnion<typeof gameSchemas.events>;
 
@@ -61,10 +61,10 @@ export async function runAiSdkGameTurn(
   while (!step.done) {
     const [request] = step.requests;
     if (!request) {
-      throw new Error("Machine is waiting without an agent request.");
+      throw new Error('Machine is waiting without an agent request.');
     }
 
-    if (request.kind === "decision") {
+    if (request.kind === 'decision') {
       // `resolveDecision` validates the chosen event's payload against the
       // machine's event schemas (attached to `request.events`) and, typed
       // against `GameEvent` via `canTake`, returns a machine-typed event —
@@ -92,15 +92,16 @@ export async function runAiSdkGameTurn(
 }
 
 async function main() {
-  const output = await runAiSdkGameTurn({ playerHp: 20, enemyHp: 15 }, (value) =>
-    console.log("[state]", JSON.stringify(value)),
+  const output = await runAiSdkGameTurn(
+    { playerHp: 20, enemyHp: 15 },
+    (value) => console.log('[state]', JSON.stringify(value)),
   );
   console.log(output);
 }
 
-if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
   if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
+    console.error('Set OPENAI_API_KEY to run this example.');
     process.exit(1);
   }
   void main();
