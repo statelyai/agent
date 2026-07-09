@@ -67,7 +67,12 @@ export interface AgentTextRequest<TMetadata = Record<string, unknown>> {
   toolChoice?: AgentToolChoice;
   outputSchema?: StandardSchemaV1;
   temperature?: number;
-  maxTokens?: number;
+  /**
+   * Maximum number of output tokens to generate. Named `maxOutputTokens` (not
+   * `maxTokens`) so an `AgentTextRequest` is spread-compatible with the Vercel
+   * AI SDK's `generateText`/`streamText` options.
+   */
+  maxOutputTokens?: number;
   topP?: number;
   topK?: number;
   seed?: number;
@@ -205,7 +210,7 @@ function createBuiltinTextActor(
             tools: ({ input }) => input.tools,
             toolChoice: ({ input }) => input.toolChoice,
             temperature: ({ input }) => input.temperature,
-            maxTokens: ({ input }) => input.maxTokens,
+            maxOutputTokens: ({ input }) => input.maxOutputTokens,
             topP: ({ input }) => input.topP,
             topK: ({ input }) => input.topK,
             seed: ({ input }) => input.seed,
@@ -293,7 +298,7 @@ export interface TextLogicConfig<
   tools?: ResolveTextLogicValue<AgentTools | undefined, InferOutput<TInputSchema>>;
   toolChoice?: ResolveTextLogicValue<AgentToolChoice | undefined, InferOutput<TInputSchema>>;
   temperature?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
-  maxTokens?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
+  maxOutputTokens?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
   topP?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
   topK?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
   seed?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
@@ -411,7 +416,7 @@ export function createTextLogic<
       toolChoice: resolveTextLogicValue(config.toolChoice, args),
       outputSchema: config.schemas.output,
       temperature: resolveTextLogicValue(config.temperature, args),
-      maxTokens: resolveTextLogicValue(config.maxTokens, args),
+      maxOutputTokens: resolveTextLogicValue(config.maxOutputTokens, args),
       topP: resolveTextLogicValue(config.topP, args),
       topK: resolveTextLogicValue(config.topK, args),
       seed: resolveTextLogicValue(config.seed, args),

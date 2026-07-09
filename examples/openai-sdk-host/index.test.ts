@@ -43,7 +43,7 @@ describe("request -> OpenAI param mapping (pure helpers)", () => {
     const settings = toOpenAiCallSettings({
       model: "gpt-5.4-mini",
       temperature: 0.5,
-      maxTokens: 100,
+      maxOutputTokens: 100,
       topP: 0.9,
       seed: 42,
       stopSequences: ["END"],

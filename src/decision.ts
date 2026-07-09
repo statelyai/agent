@@ -40,7 +40,7 @@ export interface AgentDecisionInput<
   allowedEvents?: AllowedEvents<TEvent>;
   maxRetries?: number;
   temperature?: number;
-  maxTokens?: number;
+  maxOutputTokens?: number;
   topP?: number;
   topK?: number;
   seed?: number;
@@ -69,7 +69,7 @@ function decideRequestFromInput(input: AgentDecisionInput): AgentDecisionRequest
       })),
     attempts: [],
     temperature: input.temperature,
-    maxTokens: input.maxTokens,
+    maxOutputTokens: input.maxOutputTokens,
     topP: input.topP,
     topK: input.topK,
     seed: input.seed,
@@ -255,7 +255,7 @@ export interface DecisionLogicConfig<
   allowedEvents?: AllowedEvents<TEvent, InferOutput<TInputSchema>>;
   maxRetries?: number; // default 2
   temperature?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
-  maxTokens?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
+  maxOutputTokens?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
   topP?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
   topK?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
   seed?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
@@ -359,7 +359,7 @@ export function createDecisionLogic<
       })),
       attempts: [],
       temperature: resolveTextLogicValue(config.temperature, args),
-      maxTokens: resolveTextLogicValue(config.maxTokens, args),
+      maxOutputTokens: resolveTextLogicValue(config.maxOutputTokens, args),
       topP: resolveTextLogicValue(config.topP, args),
       topK: resolveTextLogicValue(config.topK, args),
       seed: resolveTextLogicValue(config.seed, args),
@@ -464,7 +464,7 @@ export interface AgentDecisionRequest {
    */
   attempts: DecisionAttempt[];
   temperature?: number;
-  maxTokens?: number;
+  maxOutputTokens?: number;
   topP?: number;
   topK?: number;
   seed?: number;

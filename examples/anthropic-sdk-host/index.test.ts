@@ -175,7 +175,7 @@ describe("toAnthropicCallSettings", () => {
     expect(
       toAnthropicCallSettings({
         model: "claude",
-        maxTokens: 500,
+        maxOutputTokens: 500,
         temperature: 0.5,
         topP: 0.9,
         topK: 40,

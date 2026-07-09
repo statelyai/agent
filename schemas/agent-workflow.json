@@ -258,7 +258,7 @@
         "temperature": {
           "$ref": "#/$defs/ExpressionValue"
         },
-        "maxTokens": {
+        "maxOutputTokens": {
           "$ref": "#/$defs/ExpressionValue"
         },
         "topP": {

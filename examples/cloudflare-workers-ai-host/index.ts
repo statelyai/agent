@@ -50,14 +50,14 @@ async function runWorkersAiPrompt(
     system?: string;
     prompt: string;
     temperature?: number;
-    maxTokens?: number;
+    maxOutputTokens?: number;
   },
 ): Promise<string> {
   const response = (await env.AI.run(args.model, {
     system: args.system,
     prompt: args.prompt,
     temperature: args.temperature,
-    max_tokens: args.maxTokens,
+    max_tokens: args.maxOutputTokens,
   })) as { response?: string } | string | Record<string, unknown>;
 
   return typeof response === "string"
@@ -84,7 +84,7 @@ async function runWorkersAiTextRequest(env: Env, request: AgentRequest) {
       system: request.input.system,
       prompt,
       temperature: request.input.temperature,
-      maxTokens: request.input.maxTokens,
+      maxOutputTokens: request.input.maxOutputTokens,
     });
 
   const text = await ask(basePrompt);
@@ -142,7 +142,7 @@ async function runWorkersAiDecision(env: Env, request: AgentDecisionRequest): Pr
         system: attemptRequest.system,
         prompt,
         temperature: attemptRequest.temperature,
-        maxTokens: attemptRequest.maxTokens,
+        maxOutputTokens: attemptRequest.maxOutputTokens,
       });
 
       return { event: JSON.parse(text) as ChosenEvent };

@@ -127,7 +127,7 @@ export function toOpenAiMessages(
 export function toOpenAiCallSettings(request: AgentTextRequest) {
   return {
     temperature: request.temperature,
-    max_completion_tokens: request.maxTokens,
+    max_completion_tokens: request.maxOutputTokens,
     top_p: request.topP,
     seed: request.seed,
     stop: request.stopSequences,
@@ -291,7 +291,7 @@ export function createOpenAiExecutors({
       tools,
       tool_choice: "required" as ChatCompletionToolChoiceOption,
       temperature: request.temperature,
-      max_completion_tokens: request.maxTokens,
+      max_completion_tokens: request.maxOutputTokens,
       top_p: request.topP,
       stop: request.stopSequences,
       seed: request.seed,

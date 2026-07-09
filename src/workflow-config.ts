@@ -136,7 +136,7 @@ export interface AgentWorkflowRequestConfig {
   tools?: AgentTools;
   toolChoice?: AgentToolChoice | unknown;
   temperature?: unknown;
-  maxTokens?: unknown;
+  maxOutputTokens?: unknown;
   topP?: unknown;
   topK?: unknown;
   seed?: unknown;
@@ -283,11 +283,11 @@ function createRequestsFromWorkflowConfig(
             ? undefined
             : ({ input }) =>
                 evaluateWorkflowConfigValue(request.temperature, { input }) as number | undefined,
-        maxTokens:
-          request.maxTokens === undefined
+        maxOutputTokens:
+          request.maxOutputTokens === undefined
             ? undefined
             : ({ input }) =>
-                evaluateWorkflowConfigValue(request.maxTokens, { input }) as number | undefined,
+                evaluateWorkflowConfigValue(request.maxOutputTokens, { input }) as number | undefined,
         topP:
           request.topP === undefined
             ? undefined

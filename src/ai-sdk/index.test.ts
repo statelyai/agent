@@ -98,7 +98,7 @@ describe("toAiSdkCallSettings", () => {
       model: "openai/gpt-5.4-mini",
       prompt: "hi",
       temperature: 0.2,
-      maxTokens: 100,
+      maxOutputTokens: 100,
       topP: 0.9,
       topK: 40,
       seed: 7,

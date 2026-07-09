@@ -182,7 +182,7 @@ export interface DecisionLogicConfig<
     | ((args: { input: InferOutput<TInputSchema> }) => readonly TEvent[]);
   maxRetries?: number; // default 2
   temperature?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
-  maxTokens?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
+  maxOutputTokens?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
   // ...same model params as TextLogic
   metadata?: ResolveTextLogicValue<Record<string, unknown> | undefined, InferOutput<TInputSchema>>;
 }
@@ -296,7 +296,7 @@ export interface AgentDecisionRequest {
    */
   attempts: DecisionAttempt[];
   temperature?: number;
-  maxTokens?: number;
+  maxOutputTokens?: number;
   topP?: number;
   topK?: number;
   seed?: number;

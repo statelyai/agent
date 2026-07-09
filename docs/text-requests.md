@@ -39,7 +39,7 @@ const agentSetup = setupAgent({
 ```
 
 - Each schema field accepts any [Standard Schema](https://standardschema.dev) validator.
-- Each request-shaping field (`system`, `prompt`, `messages`, `temperature`, `maxTokens`, and the rest) is either a static value or a `({ input }) => value` function.
+- Each request-shaping field (`system`, `prompt`, `messages`, `temperature`, `maxOutputTokens`, and the rest) is either a static value or a `({ input }) => value` function.
 
 ### Model references and typed aliases
 

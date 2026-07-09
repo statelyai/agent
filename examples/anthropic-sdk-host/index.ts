@@ -149,7 +149,7 @@ export function toAnthropicMessages(messages: AgentMessage[]): MessageParam[] {
  */
 export function toAnthropicCallSettings(request: AgentTextRequest) {
   return {
-    max_tokens: request.maxTokens ?? 1024,
+    max_tokens: request.maxOutputTokens ?? 1024,
     temperature: request.temperature,
     top_p: request.topP,
     top_k: request.topK,
