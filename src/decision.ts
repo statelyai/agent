@@ -13,7 +13,12 @@ import type {
   StandardSchemaV1,
 } from "./types.js";
 import { validateSchemaSync } from "./utils.js";
-import { DECIDE_ACTOR, resolveTextLogicValue, type ResolveTextLogicValue } from "./text-logic.js";
+import {
+  DECIDE_ACTOR,
+  PLAN_ACTOR,
+  resolveTextLogicValue,
+  type ResolveTextLogicValue,
+} from "./text-logic.js";
 import { sanitizeEventToolName, type AgentEventDescriptor } from "./events.js";
 import { executorBoundLogics } from "./internal/registry.js";
 
@@ -118,6 +123,91 @@ function decideActorWithExecutor(
 // Builds the unbound `agent.decide` builtin actor logic registered by setupAgent.
 export function createDecideActor(): DecisionLogic<StandardSchemaV1<AgentDecisionInput>> {
   return decideActorWithExecutor();
+}
+
+// ─── Plan (multi-event decision) ───
+
+/**
+ * Inline input for the `agent.plan` builtin actor — a multi-event decision.
+ * Where `agent.decide` picks exactly one currently-legal event, `agent.plan`
+ * applies an ordered sequence of them: each step re-reads the live snapshot,
+ * asks the `decide` executor for one legal event (same validation and
+ * `rejected-by-guard` retry loop as a decision), sends it to the machine,
+ * and repeats until a `stopOn` event is chosen, `maxSteps` is reached, no
+ * legal candidate remains, or an applied event exits the invoking state
+ * (which cancels the invoke — the machine simply moves on).
+ *
+ * Requires a snapshot-aware host ({@link runAgent}); the step path does not
+ * surface plan requests yet (see docs/roadmap.md).
+ */
+export interface AgentPlanInput<
+  TEvent extends string = string,
+  TMetadata = Record<string, unknown>,
+  TModel extends string = string,
+> extends AgentDecisionInput<TEvent, TMetadata, TModel> {
+  /** Maximum events applied in one plan. Default 8. */
+  maxSteps?: number;
+  /**
+   * Events that end the plan once chosen: the event is still validated and
+   * sent, then the loop stops. Declare a no-op event (e.g. `NOTHING`) here
+   * to give the model an explicit "done / no action needed" move.
+   */
+  stopOn?: readonly TEvent[];
+}
+
+/** What an `agent.plan` invoke resolves with (its `onDone` output). */
+export interface AgentPlanOutput {
+  /** The events applied, in order (possibly empty). */
+  steps: ChosenEvent[];
+  /** Why the loop ended. */
+  stopped: "stop-event" | "max-steps" | "no-legal-events";
+}
+
+/**
+ * Actor logic for the `agent.plan` builtin. Like the unbound `agent.decide`
+ * placeholder, the registered logic cannot run by itself: applying events
+ * mid-invoke needs a live parent actor, which only a snapshot-aware host
+ * (`runAgent`) has. runAgent swaps this placeholder for its own
+ * implementation at bind time.
+ */
+export interface PlanLogic<
+  TInputSchema extends StandardSchemaV1 = StandardSchemaV1<AgentPlanInput>,
+> extends AsyncActorLogic<AgentPlanOutput, InferOutput<TInputSchema>> {
+  readonly kind: "statelyai.planLogic";
+  readonly maxRetries: number;
+  /** Builds the per-step base {@link AgentDecisionRequest} (id/events filled in per step). */
+  request(input: InferOutput<TInputSchema>): AgentDecisionRequest;
+  /** @internal Resolves declared `allowedEvents` (undefined = all currently legal). */
+  allowedEventTypes(input: InferOutput<TInputSchema>): readonly string[] | undefined;
+}
+
+// Builds the unbound `agent.plan` builtin actor logic registered by setupAgent.
+export function createPlanActor(): PlanLogic {
+  const logic = createAsyncLogic<AgentPlanOutput, AgentPlanInput>({
+    run: async () => {
+      throw new Error(
+        `'${PLAN_ACTOR}' requires a snapshot-aware host: it applies events to the ` +
+          `live machine between model calls. Run the machine with runAgent(...) ` +
+          `(with a 'decide' executor), or provide a custom implementation with ` +
+          `machine.provide({ actorSources: { '${PLAN_ACTOR}': ... } }).`,
+      );
+    },
+  });
+
+  return Object.assign(logic, {
+    kind: "statelyai.planLogic" as const,
+    maxRetries: 2,
+    request: decideRequestFromInput,
+    allowedEventTypes: (input: AgentPlanInput) =>
+      resolveAllowedEventTypes(input.allowedEvents, input),
+  }) as PlanLogic;
+}
+
+/** Type guard: true for the `agent.plan` builtin logic (checks the `kind` marker). @internal */
+export function isPlanLogic(logic: unknown): logic is PlanLogic {
+  return (
+    !!logic && (logic as { kind?: unknown }).kind === "statelyai.planLogic"
+  );
 }
 
 // ─── Decision logic ───

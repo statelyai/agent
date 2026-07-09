@@ -17,6 +17,7 @@ import {
   createTextLogic,
   userInputActor,
   DECIDE_ACTOR,
+  PLAN_ACTOR,
   USER_INPUT_ACTOR,
   type AgentModelMap,
   type AgentModelRef,
@@ -25,7 +26,7 @@ import {
   type TextLogic,
   type TextLogicConfig,
 } from "./text-logic.js";
-import { createDecideActor } from "./decision.js";
+import { createDecideActor, createPlanActor } from "./decision.js";
 import { appendMessages } from "./messages.js";
 import { agentExecutionOptions } from "./internal/registry.js";
 import {
@@ -675,6 +676,7 @@ function createAgentActorSources<
     ...builtinTextActors,
     [USER_INPUT_ACTOR]: userInputActor,
     [DECIDE_ACTOR]: createDecideActor(),
+    [PLAN_ACTOR]: createPlanActor(),
     ...actorSources,
     ...requestActors,
   } as SetupActors<AgentSetupActors<AgentAllActors<TActors, TRequestSchemas>, string, TModel>>;

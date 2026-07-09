@@ -24,6 +24,8 @@ export type {
   AgentDecisionInput,
   AgentDecisionRequest,
   AgentDecisionExecutor,
+  AgentPlanInput,
+  AgentPlanOutput,
 } from "./decision.js";
 export type {
   AgentModelMap,

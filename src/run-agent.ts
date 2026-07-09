@@ -28,10 +28,14 @@ import {
 } from "./text-logic.js";
 import {
   isDecisionLogic,
+  isPlanLogic,
   resolveDecision,
   type AgentDecisionExecutor,
   type AgentDecisionRequest,
+  type AgentPlanInput,
+  type AgentPlanOutput,
   type DecisionLogic,
+  type PlanLogic,
 } from "./decision.js";
 import type { AgentRequest, AgentStepRequest } from "./steps.js";
 import {
@@ -357,7 +361,10 @@ function assertMachineBindable(
       // string-keyed sources can be rebound by runAgent; direct objects
       // cannot. Only a problem if it's an agent logic that still needs
       // execution (no executor of its own).
-      if ((isTextLogic(src) || isDecisionLogic(src)) && !executorBoundLogics.has(src as object)) {
+      if (
+        (isTextLogic(src) || isDecisionLogic(src) || isPlanLogic(src)) &&
+        !executorBoundLogics.has(src as object)
+      ) {
         throw new Error(
           `runAgent: ${where} '${stateName}' invokes a direct-object actor logic ` +
             `(kind: '${(src as TextLogic | DecisionLogic).kind}'). Direct-object invoke ` +
@@ -405,6 +412,20 @@ function assertMachineBindable(
       if (!options.hasDecide) {
         throw new Error(
           `runAgent: state '${stateName}' invokes decision source '${src}' but no ` +
+            `'decide' executor was provided to runAgent(...).`,
+        );
+      }
+      continue;
+    }
+
+    if (isPlanLogic(logic)) {
+      // Plans resolve steps through the same `decide` executor.
+      if (ctx.isChild) {
+        throw unboundChildRequestError(ctx.childPath, stateName, src, "plan");
+      }
+      if (!options.hasDecide) {
+        throw new Error(
+          `runAgent: state '${stateName}' invokes plan source '${src}' but no ` +
             `'decide' executor was provided to runAgent(...).`,
         );
       }
@@ -491,7 +512,7 @@ function unboundChildRequestError(
   childPath: string,
   stateName: string,
   requestSrc: string,
-  kind: "text" | "streaming text" | "decision",
+  kind: "text" | "streaming text" | "decision" | "plan",
 ): Error {
   return new Error(
     `runAgent: child machine '${childPath}' (state '${stateName}') invokes ${kind} ` +
@@ -578,6 +599,29 @@ function wrapTextLogicForRunAgent(logic: TextLogic, runCtx: RunAgentBindContext)
   });
 }
 
+// Wraps runCtx's `decide` executor with model-call budgeting and tracing —
+// shared by the decision and plan wrappers.
+function createCountingDecide(runCtx: RunAgentBindContext): AgentDecisionExecutor {
+  return async (attemptRequest) => {
+    runCtx.consumeModelCall();
+    runCtx.onTrace?.({ type: "request.start", request: attemptRequest });
+    try {
+      const result = await runCtx.decide!(attemptRequest);
+      runCtx.onResult?.(attemptRequest, { output: result.event, raw: result });
+      runCtx.onTrace?.({
+        type: "request.end",
+        request: attemptRequest,
+        output: result.event,
+        raw: result,
+      });
+      return result;
+    } catch (error) {
+      runCtx.onTrace?.({ type: "request.error", request: attemptRequest, error });
+      throw error;
+    }
+  };
+}
+
 /**
  * Builds the decision actor logic runAgent installs in place of a
  * `DecisionLogic`/`agent.decide` source. `DecisionLogic.withExecutor(...)`
@@ -627,26 +671,7 @@ function createRunAgentDecisionLogic(
 
       const request: AgentDecisionRequest = { ...logic.request(input as never), id, events };
 
-      const countingDecide: AgentDecisionExecutor = async (attemptRequest) => {
-        runCtx.consumeModelCall();
-        runCtx.onTrace?.({ type: "request.start", request: attemptRequest });
-        try {
-          const result = await runCtx.decide!(attemptRequest);
-          runCtx.onResult?.(attemptRequest, { output: result.event, raw: result });
-          runCtx.onTrace?.({
-            type: "request.end",
-            request: attemptRequest,
-            output: result.event,
-            raw: result,
-          });
-          return result;
-        } catch (error) {
-          runCtx.onTrace?.({ type: "request.error", request: attemptRequest, error });
-          throw error;
-        }
-      };
-
-      return resolveDecision(request, countingDecide, {
+      return resolveDecision(request, createCountingDecide(runCtx), {
         maxRetries: logic.maxRetries,
         signal,
         canTake: (event) => {
@@ -664,6 +689,103 @@ function createRunAgentDecisionLogic(
     withExecutor: (nextExecute: AgentDecisionExecutor) =>
       createRunAgentDecisionLogic(logic.withExecutor(nextExecute), runCtx),
   }) as DecisionLogic;
+}
+
+/**
+ * Builds the plan actor logic runAgent installs in place of the `agent.plan`
+ * builtin: iterated {@link resolveDecision}. Each step re-reads the live
+ * snapshot (so the candidate set reflects everything applied so far), asks
+ * the `decide` executor for one legal event with the same validation/retry
+ * loop a decision gets, and sends it to the machine. The loop ends on a
+ * `stopOn` event, at `maxSteps`, when no legal candidate remains, or when an
+ * applied event exits the invoking state (xstate cancels this invoke — the
+ * machine simply moves on and the pending output is discarded).
+ *
+ * The invoke's `input` is resolved once, so the prompt cannot re-render
+ * context between steps; instead the applied trail is appended to the prompt
+ * each step so the model can see plan progress.
+ */
+function createRunAgentPlanLogic(logic: PlanLogic, runCtx: RunAgentBindContext): PlanLogic {
+  const planLogic = createAsyncLogic<AgentPlanOutput, AgentPlanInput>({
+    run: async ({ input, signal, self }) => {
+      if (!runCtx.decide) {
+        throw new Error("runAgent: no 'decide' executor provided.");
+      }
+      const { id } = selfIdAndSrc(self);
+      const maxSteps = input.maxSteps ?? 8;
+      const stopOn = new Set<string>(input.stopOn ?? []);
+      const steps: ChosenEvent[] = [];
+      const countingDecide = createCountingDecide(runCtx);
+      const base = logic.request(input);
+
+      // Same microtask yield as the decision wrapper: let the invoking
+      // transition commit before the first snapshot read.
+      await Promise.resolve();
+
+      while (steps.length < maxSteps) {
+        const actorRef = runCtx.actorHolder.actorRef;
+        if (!actorRef || signal.aborted) {
+          break;
+        }
+        const snapshot = actorRef.getSnapshot() as AnyMachineSnapshot;
+        const events = getAcceptedEvents(snapshot, {
+          schemas: runCtx.schemas,
+          eventTypes: logic.allowedEventTypes(input),
+        });
+        if (events.length === 0) {
+          return { steps, stopped: "no-legal-events" };
+        }
+
+        const trail =
+          steps.length === 0
+            ? ""
+            : `\n\nEvents already applied in this plan, in order:\n${steps
+                .map((step) => JSON.stringify(step))
+                .join("\n")}\nContinue from here; do not repeat applied events.`;
+        const request: AgentDecisionRequest = {
+          ...base,
+          id: `${id}[${steps.length}]`,
+          events,
+          prompt: base.prompt === undefined && trail === "" ? undefined : `${base.prompt ?? ""}${trail}`,
+          attempts: [],
+        };
+
+        const chosen = await resolveDecision(request, countingDecide, {
+          maxRetries: input.maxRetries ?? logic.maxRetries,
+          signal,
+          canTake: (event) => {
+            // A stopOn event terminates the plan rather than driving a
+            // transition — a pure no-op handler (`NOTHING: {}`) makes
+            // `snapshot.can(...)` false, so exempt stop events from the check.
+            if (stopOn.has(event.type)) {
+              return true;
+            }
+            const ref = runCtx.actorHolder.actorRef;
+            return ref ? (ref.getSnapshot() as AnyMachineSnapshot).can(event) : true;
+          },
+        });
+
+        steps.push(chosen);
+        actorRef.send(chosen as never);
+        // Let the applied transition commit before the next snapshot read
+        // (and let xstate cancel this invoke if the event exited the state).
+        await Promise.resolve();
+
+        if (stopOn.has(chosen.type)) {
+          return { steps, stopped: "stop-event" };
+        }
+      }
+
+      return { steps, stopped: "max-steps" };
+    },
+  });
+
+  return Object.assign(planLogic, {
+    kind: "statelyai.planLogic" as const,
+    maxRetries: logic.maxRetries,
+    request: logic.request,
+    allowedEventTypes: logic.allowedEventTypes,
+  }) as PlanLogic;
 }
 
 /**
@@ -788,6 +910,11 @@ export async function runAgent<TMachine extends AnyStateMachine>(
 
     if (isDecisionLogic(logic)) {
       wrappedSources[key] = createRunAgentDecisionLogic(logic, runCtx);
+      continue;
+    }
+
+    if (isPlanLogic(logic)) {
+      wrappedSources[key] = createRunAgentPlanLogic(logic, runCtx);
       continue;
     }
 

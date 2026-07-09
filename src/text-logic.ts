@@ -7,7 +7,12 @@ import type {
   StandardSchemaV1,
 } from "./types.js";
 import { validateSchemaSync } from "./utils.js";
-import type { AgentDecisionExecutor, AgentDecisionInput } from "./decision.js";
+import type {
+  AgentDecisionExecutor,
+  AgentDecisionInput,
+  AgentPlanInput,
+  AgentPlanOutput,
+} from "./decision.js";
 import type { ChosenEvent } from "./types.js";
 import { executorBoundLogics, unboundPlaceholderLogics } from "./internal/registry.js";
 
@@ -19,6 +24,8 @@ export const GENERATE_TEXT_ACTOR = "agent.generateText" as const;
 export const STREAM_TEXT_ACTOR = "agent.streamText" as const;
 // Well-known invoke `src` for the builtin decision actor.
 export const DECIDE_ACTOR = "agent.decide" as const;
+// Well-known invoke `src` for the builtin multi-event plan actor.
+export const PLAN_ACTOR = "agent.plan" as const;
 
 /** Whether a text request should be resolved with `generateText` (one-shot) or `streamText` (chunked, via `onChunk`). */
 export type AgentRequestMode = "generate" | "stream";
@@ -82,7 +89,7 @@ export interface AgentUserInput<TMetadata = Record<string, unknown>> {
   metadata?: TMetadata;
 }
 
-/** The four `agent.*` builtin actor logics every setupAgent-built machine registers. @internal */
+/** The five `agent.*` builtin actor logics every setupAgent-built machine registers. @internal */
 export type BuiltinAgentActors<TEvent extends string = string, TModel extends string = string> = {
   [GENERATE_TEXT_ACTOR]: AsyncActorLogic<unknown, AgentTextRequest>;
   [STREAM_TEXT_ACTOR]: AsyncActorLogic<unknown, AgentTextRequest>;
@@ -90,6 +97,10 @@ export type BuiltinAgentActors<TEvent extends string = string, TModel extends st
   [DECIDE_ACTOR]: AsyncActorLogic<
     ChosenEvent,
     AgentDecisionInput<TEvent, Record<string, unknown>, TModel>
+  >;
+  [PLAN_ACTOR]: AsyncActorLogic<
+    AgentPlanOutput,
+    AgentPlanInput<TEvent, Record<string, unknown>, TModel>
   >;
 };
 
