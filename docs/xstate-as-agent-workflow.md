@@ -225,8 +225,13 @@ const haikuMachine = agent.createMachine({
     validating: { type: 'choice', choice: /* ...same as before... */ },
     judging: {
       invoke: {
-        src: 'judge', // a named decision source, no prompt here
-        input: ({ context }) => ({ haiku: context.haiku, critique: context.critique }),
+        src: 'agent.decide', // state-local decision
+        input: ({ context }) => ({
+          model: 'judge',
+          system: 'You judge haiku. APPROVE good ones, else REVISE with a critique.',
+          prompt: `Judge:\n${context.haiku}`,
+          allowedEvents: ['APPROVE', 'REVISE'] as const,
+        }),
         onDone: sendDecision(),
         onError: { target: 'sending' },
       },
@@ -247,7 +252,7 @@ const haikuMachine = agent.createMachine({
 The prompt map, defined separately (could live in another file, a DB row, a config service):
 
 ```ts
-import { createDecisionLogic, createTextLogic } from '@statelyai/agent';
+import { createTextLogic } from '@statelyai/agent';
 
 const prompts = {
   write: {
@@ -260,16 +265,12 @@ const prompts = {
   },
 };
 
-// Build actor sources from the map — this is your `mapStates`.
+// Build text actor sources from the map — this is your `mapStates`.
+// The `judge` decision is state-local (`src: 'agent.decide'`), so its prompt
+// lives on the invoke's `input`, not here.
 const actorSources = {
   write: createTextLogic({ model: 'writer', ...prompts.write }),
   revise: createTextLogic({ model: 'writer', ...prompts.revise }),
-  judge: createDecisionLogic({
-    model: 'judge',
-    system: 'You judge haiku. APPROVE good ones, else REVISE with a critique.',
-    prompt: ({ input }) => `Judge:\n${input.haiku}`,
-    allowedEvents: ['APPROVE', 'REVISE'],
-  }),
 };
 
 // Bind at the boundary. runAgent merges actorSources onto the machine first.
@@ -327,8 +328,8 @@ That closes the loop: **the machine is the portable artifact.** Prompts embedded
 
 - **`setupAgent(config)`** — schema-first `setup()`. Registers `agent.generateText` / `streamText` / `decide` / `userInput` builtins; returns `createMachine` plus `schemas`, `models`, `requests`, and `appendMessages`.
 - **`runAgent(machine, { input, generateText, decide, streamText?, actorSources?, userInput?, signal?, maxModelCalls?, snapshot?, event?, onTrace? })`** — runs to `done | idle | error`. Resume from `idle` by passing `{ snapshot, event }` back in.
-- **`createTextLogic(config)`** / **`createDecisionLogic(config)`** — reusable "produce a value" / "choose an event" actor sources. `system`/`prompt`/`model`/`allowedEvents` can each be static or `({ input }) => value`.
-- **Step path** — `initialAgentStep` / `transitionAgentStep` / `resolveAgentStep` / `getMachineAgentRequests`, `executeAgentRequest` (text), `resolveDecision` (decision), `getAcceptedEvents` (enumerate legal events), `sendDecision()` (deliver a chosen event from an `agent.decide` `onDone`).
+- **`createTextLogic(config)`** — reusable "produce a value" actor source. `system`/`prompt`/`model` can each be static or `({ input }) => value`. Decisions are state-local via `src: 'agent.decide'`; to reuse one, share its input builder.
+- **Step path** — `initialAgentStep` / `transitionAgentStep` / `resolveAgentStep` / `getAgentRequests`, `executeAgentRequest` (text), `resolveDecision` (decision), `getAcceptedEvents` (enumerate legal events), `sendDecision()` (deliver a chosen event from an `agent.decide` `onDone`).
 - **`createAiSdkExecutors({ models })`** — returns `{ generateText, streamText, decide }` from a Vercel AI SDK model map. Spread into `runAgent` or pass to the step helpers.
 </content>
 </invoke>

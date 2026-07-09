@@ -1,6 +1,6 @@
 # Host Actors
 
-`setupAgent(...)` gives a machine typed, built-in actor sources for model work: `agent.generateText` / `agent.streamText` for inline text requests, `agent.decide` for decisions, `agent.userInput` for human input, plus co-located `requests:` when a call deserves a reusable name. Decisions are state-local: author them inline on the invoke with `src: 'agent.decide'`, or pull reusable decision logic into `createDecisionLogic(...)` under `actorSources:`. In every case, the machine only *declares* the request; the host executes it by supplying executors to `runAgent(...)` (or the step helpers) or by providing actor implementations directly.
+`setupAgent(...)` gives a machine typed, built-in actor sources for model work: `agent.generateText` / `agent.streamText` for inline text requests, `agent.decide` for decisions, `agent.userInput` for human input, plus co-located `requests:` when a call deserves a reusable name. Decisions are state-local: author them inline on the invoke with `src: 'agent.decide'`. In every case, the machine only *declares* the request; the host executes it by supplying executors to `runAgent(...)` (or the step helpers) or by providing actor implementations directly.
 
 The machine declares:
 
@@ -70,7 +70,7 @@ const result = await runAgent(machine, {
 
 Every agent invoke should have a durable `id` — it's how a resumed/replayed run matches the invoke back to its `onDone` transition.
 
-When a request is reusable — called from more than one state, or worth testing standalone — extract it into `requests:` (co-located on `setupAgent`) or `createTextLogic(...)` (standalone). `runAgent(...)` is convenience only: you can always inspect `request.input`/`request.tools` and call `initialAgentStep(...)`, `executeAgentRequest(...)`, `resolveAgentStep(...)` yourself, or drop to `initialTransition(...)`/`transition(...)`/`transitionResult(...)` when a host wants to own every XState action directly. See [`../readme.md`](../readme.md#the-step-path-durable-hosts) for the step-path host loop.
+When a request is reusable — called from more than one state, or worth testing standalone — extract it into `requests:` (co-located on `setupAgent`) or `createTextLogic(...)` (standalone). `runAgent(...)` is convenience only: you can always inspect `request.input`/`request.tools` and call `initialAgentStep(...)`, `executeAgentRequest(...)`, `resolveAgentStep(...)` yourself, or drop to XState's `initialTransition(...)`/`transition(...)` when a host wants to own every XState action directly. See [`../readme.md`](../readme.md#the-step-path-durable-hosts) for the step-path host loop.
 
 For external events, advance the same step object:
 
@@ -129,10 +129,10 @@ invoke:
 
 ## Decisions and allowed events
 
-A decision's `allowedEvents` declares which machine events are candidates for the model to choose from; XState's guards then decide which of those are actually legal from the current snapshot. `getAgentRequests(...)` (used internally by the step helpers) intersects the two and puts the survivors on the decision request's `events` field — separate from the model-call input, so the model sees only options it could actually take:
+A decision's `allowedEvents` declares which machine events are candidates for the model to choose from; XState's guards then decide which of those are actually legal from the current snapshot. `getAgentRequests(machine, actions, snapshot)` (used internally by the step helpers, drawing schemas and actor sources from the machine's registered `setupAgent` options) intersects the two and puts the survivors on the decision request's `events` field — separate from the model-call input, so the model sees only options it could actually take:
 
 ```ts
-const requests = getAgentRequests(actions, { snapshot, schemas, actorSources: { chooseMove } });
+const requests = getAgentRequests(machine, actions, snapshot);
 const request = requests[0]; // kind: 'decision'
 request.events.map((event) => event.type);
 // ['ATTACK', 'DEFEND'] — HEAL and FLEE excluded, whether by allowedEvents or by guard

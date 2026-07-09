@@ -135,13 +135,13 @@ See [Text requests](text-requests.md) for the full request surface, including st
 
 ### Actors
 
-`actorSources` registers reusable actor logic: text logic from `createTextLogic`, decision logic from `createDecisionLogic`, or any XState actor. Register logic here when it is reusable, exported, or worth testing standalone.
+`actorSources` registers reusable actor logic: text logic from `createTextLogic`, or any XState actor. Register logic here when it is reusable, exported, or worth testing standalone. Decisions are state-local (`src: 'agent.decide'`), not actor sources; to reuse one, share its input builder.
 
 ```ts
 const gameSetup = setupAgent({
   schemas: gameSchemas,
   models,
-  actorSources: { chooseMove, summarizeTurn },
+  actorSources: { summarizeTurn },
 });
 ```
 

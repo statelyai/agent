@@ -87,50 +87,40 @@ Details:
 
 Core validates and retries; it never talks to a model. How the model is coerced into choosing exactly one option (tool-per-event with forced tool choice, structured output over an event union, or anything else) is host business. The shipped `createAiSdkExecutors` provides a `decide` executor for the Vercel AI SDK; the raw-SDK examples force the choice with `tool_choice`. See [Hosts](hosts.md).
 
-## Reusable decision logic
+## Reusable decisions
 
-<!-- createDecisionLogic from src/decision.ts and examples/game-agent -->
+Decisions are state-local: author them inline on the invoke with `src: 'agent.decide'`. There is no reusable decision-logic object.
 
-When a decision is reusable, exported, or worth testing standalone, pull it out with `createDecisionLogic` and register it under `actorSources:`. The game-agent example exports `chooseMove` and computes `allowedEvents` as a function of input, gating `HEAL` on the player's HP:
+To reuse one decision across states or machines, share the **input builder** — the `({ context }) => ({ model, system, prompt, allowedEvents })` function — not an actor or logic object. Each state passes it to its own `agent.decide` invoke.
 
 ```ts
-import { createDecisionLogic } from '@statelyai/agent';
-
-export const chooseMove = createDecisionLogic({
-  schemas: { input: z.object({ playerHp: z.number(), enemyHp: z.number() }) },
-  model: 'moveChooser',
+const chooseMoveInput = ({ context }) => ({
+  model: 'quick',
   system: 'You are playing a turn-based game. Choose exactly one legal move.',
-  prompt: ({ input }) => `Player HP: ${input.playerHp}\nEnemy HP: ${input.enemyHp}`,
-  allowedEvents: ({ input }) =>
-    input.playerHp <= 6
-      ? ['ATTACK', 'DEFEND', 'HEAL', 'FLEE']
-      : ['ATTACK', 'DEFEND', 'FLEE'],
+  prompt: `Player HP: ${context.playerHp}\nEnemy HP: ${context.enemyHp}`,
+  allowedEvents: ['ATTACK', 'DEFEND', 'FLEE'] as const,
 });
 ```
 
 ```ts
-const gameSetup = setupAgent({ schemas: gameSchemas, models, actorSources: { chooseMove } });
-
-// ...in the machine:
+// ...in the machine, reused across states:
 choosingMove: {
   invoke: {
     id: 'chooseMove',
-    src: 'chooseMove',
-    input: ({ context }) => ({ playerHp: context.playerHp, enemyHp: context.enemyHp }),
+    src: 'agent.decide',
+    input: chooseMoveInput,
     onDone: sendDecision(),
     onError: { target: 'fumbled' },
   },
   on: {
     ATTACK: ({ context }) => ({ target: 'summarizing', context: { /* ... */ } }),
-    HEAL: ({ context, event }) => ({ target: 'summarizing', context: { /* ... */ } }),
+    DEFEND: ({ context, event }) => ({ target: 'summarizing', context: { /* ... */ } }),
     // ...
   },
 }
 ```
 
-When the player is above 6 HP, `HEAL` is not offered at all. See [examples/game-agent/index.ts](../examples/game-agent/index.ts).
-
-> **Note:** Use inline `agent.decide` for a one-off, state-local decision. Reach for `createDecisionLogic` when the same decision is reused across states or machines, or you want to unit-test it on its own.
+`allowedEvents` declares which machine events the model may choose from; guards then filter to the ones actually legal from the current snapshot.
 
 ## Where to go next
 

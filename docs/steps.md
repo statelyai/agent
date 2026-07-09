@@ -22,7 +22,7 @@ That split is the whole durability story:
 The flip side: because transitions are pure, **the host must execute everything async itself.** There are exactly three kinds:
 
 1. **Model requests** (`step.requests`): text requests via `executeAgentRequest`, decisions via `resolveDecision`. The loop below.
-2. **Plain actors** (a non-model `invoke`, like a send-email side effect): these do **not** appear in `step.requests`. They surface in `step.actions` as spawn actions carrying `id`, `src`, and `input`. The host runs the effect in its own runtime, then feeds the result back with `resolveAgentStep(machine, step, id, output)` (or builds the event by hand with `doneEvent`).
+2. **Plain actors** (a non-model `invoke`, like a send-email side effect): these do **not** appear in `step.requests`. They surface in `step.actions` as spawn actions carrying `id`, `src`, and `input`. The host runs the effect in its own runtime, then feeds the result back with `resolveAgentStep(machine, step, id, output)`.
 3. **Delayed transitions** (`after`): schedulable raise actions in `step.actions`; the host owns the clock (see below).
 
 A step with `requests: []` and `done: false` therefore means one of two things: the machine is **idle** waiting for an external event (a human reply: persist the snapshot and resume later with `transitionAgentStep`), or a **plain actor or timer is pending** in `step.actions` and the host must execute it. Check `step.actions` to tell them apart; do not treat empty requests as done or as an error.
