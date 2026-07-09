@@ -56,7 +56,10 @@ describe("blessed AI SDK executors", () => {
       content: [],
     });
 
-    const result = await runAgent(machine, { input: { prompt: "hi" }, generateText: bless(generateText) });
+    const result = await runAgent(machine, {
+      input: { prompt: "hi" },
+      generateText: bless(generateText),
+    });
     expect(result.status).toBe("done");
     expect(result.status === "done" ? result.output : undefined).toEqual({ result: "hello" });
   });
@@ -119,7 +122,10 @@ describe("blessed AI SDK executors", () => {
       content: [],
     });
 
-    const result = await runAgent(machine, { input: { prompt: "q" }, generateText: bless(generateText) });
+    const result = await runAgent(machine, {
+      input: { prompt: "q" },
+      generateText: bless(generateText),
+    });
     expect(result.status).toBe("done");
     expect(result.status === "done" ? result.output : undefined).toEqual({
       result: { answer: "42" },
@@ -133,7 +139,10 @@ describe("blessed AI SDK executors", () => {
       content: [],
     });
 
-    const result = await runAgent(machine, { input: { prompt: "q" }, generateText: bless(generateText) });
+    const result = await runAgent(machine, {
+      input: { prompt: "q" },
+      generateText: bless(generateText),
+    });
     expect(result.status).toBe("error");
     expect(String(result.status === "error" ? result.error : "")).toMatch(
       /createAiSdkExecutors from '@statelyai\/agent\/ai-sdk'/,
@@ -145,7 +154,10 @@ describe("blessed AI SDK executors", () => {
     const generateText = async (_request: AgentTextRequest & { tools: AgentTools }) =>
       ({ nonsense: true }) as never;
 
-    const result = await runAgent(machine, { input: { prompt: "q" }, generateText: bless(generateText) });
+    const result = await runAgent(machine, {
+      input: { prompt: "q" },
+      generateText: bless(generateText),
+    });
     expect(result.status).toBe("error");
     expect(String(result.status === "error" ? result.error : "")).toMatch(
       /must return\s+\{ output \}/,

@@ -3,8 +3,7 @@ import { runAgent } from "../../src/index.js";
 import type { AgentRequestExecutor } from "../../src/index.js";
 import { triageMachine } from "./index.js";
 
-const TICKET =
-  "I was charged twice for my March subscription. Please refund the duplicate.";
+const TICKET = "I was charged twice for my March subscription. Please refund the duplicate.";
 
 describe("ticket-triage", () => {
   test("triages the ticket: prompt carries the text, structured classification lands in the output", async () => {

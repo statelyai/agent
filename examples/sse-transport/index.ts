@@ -136,7 +136,11 @@ export function createSseServer(streamText: AgentRequestExecutor = mockStreamTex
       const output = result.status === "done" ? result.output : { error: result.status };
       writeSseFrame(res, output, "done");
     } catch (error) {
-      writeSseFrame(res, { error: error instanceof Error ? error.message : String(error) }, "error");
+      writeSseFrame(
+        res,
+        { error: error instanceof Error ? error.message : String(error) },
+        "error",
+      );
     } finally {
       res.end();
     }

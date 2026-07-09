@@ -17,19 +17,19 @@
  * Run:
  *   OPENAI_API_KEY=... npx tsx examples/ai-sdk-game-host/index.ts
  */
-import { createAiSdkExecutors } from '../../src/ai-sdk/index.js';
+import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
 import {
   initialAgentStep,
   resolveAgentRequests,
   type AgentRequestExecutors,
-} from '../../src/index.js';
+} from "../../src/index.js";
 import {
   gameActors,
   gameMachine,
   gameSchemas,
   models,
   turnSummarySchema,
-} from '../game-agent/index.js';
+} from "../game-agent/index.js";
 
 // Adapter-provided executors: `decide` forces a tool call, one tool per
 // candidate event, and reads the chosen event off the tool call — the
@@ -63,16 +63,15 @@ export async function runAiSdkGameTurn(
 }
 
 async function main() {
-  const output = await runAiSdkGameTurn(
-    { playerHp: 20, enemyHp: 15 },
-    (value) => console.log('[state]', JSON.stringify(value)),
+  const output = await runAiSdkGameTurn({ playerHp: 20, enemyHp: 15 }, (value) =>
+    console.log("[state]", JSON.stringify(value)),
   );
   console.log(output);
 }
 
-if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   if (!process.env.OPENAI_API_KEY) {
-    console.error('Set OPENAI_API_KEY to run this example.');
+    console.error("Set OPENAI_API_KEY to run this example.");
     process.exit(1);
   }
   void main();

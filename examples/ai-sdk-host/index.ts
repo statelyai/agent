@@ -21,9 +21,9 @@
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/ai-sdk-host/index.ts
  */
-import { type LanguageModel } from 'ai';
-import { openai } from '@ai-sdk/openai';
-import { createActor, createAsyncLogic, toPromise } from 'xstate';
+import { type LanguageModel } from "ai";
+import { openai } from "@ai-sdk/openai";
+import { createActor, createAsyncLogic, toPromise } from "xstate";
 import {
   executeAgentRequest,
   initialAgentStep,
@@ -34,15 +34,15 @@ import {
   type StandardSchemaV1,
   type TextLogic,
   type TextLogicOutput,
-} from '../../src/index.js';
-import { createAiSdkExecutors } from '../../src/ai-sdk/index.js';
-import { jokeMachine, models as jokeModels, tellJoke } from '../joke/index.js';
+} from "../../src/index.js";
+import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
+import { jokeMachine, models as jokeModels, tellJoke } from "../joke/index.js";
 import {
   models as triageModels,
   triageActors,
   triageMachine,
   triageSchemas,
-} from '../triage/index.js';
+} from "../triage/index.js";
 
 // ─── Host Adapter: AI SDK execution ───
 
@@ -53,7 +53,7 @@ interface AiSdkTextHostOptions {
 }
 
 function defaultResolveModel(modelRef: string): LanguageModel {
-  return openai(modelRef.replace(/^openai\//, ''));
+  return openai(modelRef.replace(/^openai\//, ""));
 }
 
 /**
@@ -63,9 +63,7 @@ function defaultResolveModel(modelRef: string): LanguageModel {
  * seam between the host and `createAiSdkExecutors` — everything else is
  * expressed as thin wrappers over the returned executors.
  */
-function executorsFor(
-  options: AiSdkTextHostOptions = {},
-): AgentRequestExecutors {
+function executorsFor(options: AiSdkTextHostOptions = {}): AgentRequestExecutors {
   return options.models
     ? createAiSdkExecutors({ models: options.models })
     : createAiSdkExecutors({
@@ -87,10 +85,7 @@ export function createAiSdkTextActor<
 ): TextLogic<TInputSchema, TOutputSchema, TMetadata> {
   const { generateText } = executorsFor(options);
   return logic.withExecutor(async ({ request, signal }) => {
-    const { output } = await generateText(
-      { ...request, tools: request.tools ?? {} },
-      { signal },
-    );
+    const { output } = await generateText({ ...request, tools: request.tools ?? {} }, { signal });
     return { output: output as TextLogicOutput<typeof logic> };
   });
 }
@@ -121,17 +116,15 @@ export function createAiSdkStreamingTextActor<
 
 export async function runTriageDemo(
   ticket: string,
-  generateText: AgentRequestExecutor = executorsFor({ models: triageModels })
-    .generateText,
+  generateText: AgentRequestExecutor = executorsFor({ models: triageModels }).generateText,
 ) {
   const result = await runAgent(triageMachine, {
     input: { ticket },
     generateText,
     // The host-side observability hook: log each machine transition as it runs.
-    onTransition: (snapshot) =>
-      console.log(`  state -> ${String(snapshot.value)}`),
+    onTransition: (snapshot) => console.log(`  state -> ${String(snapshot.value)}`),
   });
-  if (result.status !== 'done') {
+  if (result.status !== "done") {
     throw new Error(`Triage demo did not complete: ${result.status}`);
   }
   return result.output;
@@ -139,8 +132,7 @@ export async function runTriageDemo(
 
 export async function runTriageStepDemo(
   ticket: string,
-  generateText: AgentRequestExecutor = executorsFor({ models: triageModels })
-    .generateText,
+  generateText: AgentRequestExecutor = executorsFor({ models: triageModels }).generateText,
 ) {
   let step = initialAgentStep(
     triageMachine,
@@ -153,12 +145,12 @@ export async function runTriageStepDemo(
 
   while (!step.done) {
     if (step.requests.length === 0) {
-      throw new Error('Machine is waiting without an agent request.');
+      throw new Error("Machine is waiting without an agent request.");
     }
 
     for (const request of step.requests) {
-      if (request.kind !== 'text') {
-        throw new Error('Decision requests are not supported in this demo.');
+      if (request.kind !== "text") {
+        throw new Error("Decision requests are not supported in this demo.");
       }
       const output = await executeAgentRequest(request, { generateText });
       step = resolveAgentStep(triageMachine, step, request, output, {
@@ -189,49 +181,43 @@ export async function runStreamingDemo(
         tellJoke: streamingTellJoke,
         // Rate the streamed joke, then end the loop after one joke.
         rateJoke: createAsyncLogic({
-          run: async () => ({ rating: 9, explanation: 'solid pun' }),
+          run: async () => ({ rating: 9, explanation: "solid pun" }),
         }),
-        'agent.decide': createAsyncLogic({
-          run: async () => ({ type: 'END' as const }),
+        "agent.decide": createAsyncLogic({
+          run: async () => ({ type: "END" as const }),
         }),
       },
     }),
     { input: { topic } },
   );
-  actor.subscribe((snapshot) =>
-    console.log('\n  state ->', JSON.stringify(snapshot.value)),
-  );
+  actor.subscribe((snapshot) => console.log("\n  state ->", JSON.stringify(snapshot.value)));
   actor.start();
   const output = await toPromise(actor);
-  process.stdout.write('\n');
-  return output.jokes.at(-1) ?? '';
+  process.stdout.write("\n");
+  return output.jokes.at(-1) ?? "";
 }
 
 async function main() {
   // Demo 1: runAgent drives the triage machine to completion. It classifies a
   // support ticket and returns a structured { sentiment, category, reply }.
   // onTransition (wired in runTriageDemo) narrates the machine's states.
-  console.log('Demo 1: runAgent + generateText (structured triage)');
-  console.log(
-    '  Classifies a support ticket into { sentiment, category, reply }.',
-  );
-  const triage = await runTriageDemo('My invoice is wrong and I am furious.');
-  console.log('  result:', triage);
+  console.log("Demo 1: runAgent + generateText (structured triage)");
+  console.log("  Classifies a support ticket into { sentiment, category, reply }.");
+  const triage = await runTriageDemo("My invoice is wrong and I am furious.");
+  console.log("  result:", triage);
 
   // Demo 2: streaming a joke about state machines, chunks printed live as they
   // arrive (via the onChunk side channel), then the settled final state.
-  console.log('\nDemo 2: streamText (live chunks)');
-  console.log(
-    '  Streaming a joke about state machines, chunks printed live as they arrive:',
-  );
-  process.stdout.write('  ');
-  const joke = await runStreamingDemo('state machines');
+  console.log("\nDemo 2: streamText (live chunks)");
+  console.log("  Streaming a joke about state machines, chunks printed live as they arrive:");
+  process.stdout.write("  ");
+  const joke = await runStreamingDemo("state machines");
   console.log(`  final joke: ${joke}`);
 }
 
-if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   if (!process.env.OPENAI_API_KEY) {
-    console.error('Set OPENAI_API_KEY to run this example.');
+    console.error("Set OPENAI_API_KEY to run this example.");
     process.exit(1);
   }
   void main();

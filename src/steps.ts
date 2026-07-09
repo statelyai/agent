@@ -24,11 +24,7 @@ import {
   type AgentRequestMode,
   type AgentTextRequest,
 } from "./text-logic.js";
-import {
-  isDecisionLogic,
-  resolveDecision,
-  type AgentDecisionRequest,
-} from "./decision.js";
+import { isDecisionLogic, resolveDecision, type AgentDecisionRequest } from "./decision.js";
 import type { ChosenEvent } from "./types.js";
 import {
   getAcceptedEvents,
@@ -397,16 +393,10 @@ export async function resolveAgentRequests<TMachine extends AnyActorLogic>(
       throw new Error("resolveAgentRequests: no 'decide' executor provided.");
     }
     const chosenEvent = await resolveDecision(request, executors.decide, {
-      canTake: (event: ChosenEvent) =>
-        (step.snapshot as AnyMachineSnapshot).can(event as never),
+      canTake: (event: ChosenEvent) => (step.snapshot as AnyMachineSnapshot).can(event as never),
       maxRetries: options?.maxRetries,
     });
-    return transitionAgentStep(
-      machine,
-      step,
-      chosenEvent as EventFromLogic<TMachine>,
-      options,
-    );
+    return transitionAgentStep(machine, step, chosenEvent as EventFromLogic<TMachine>, options);
   }
 
   const mode = request.mode ?? "generate";

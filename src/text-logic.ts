@@ -683,7 +683,9 @@ export interface NormalizeGeneratorResultInfo {
 }
 
 // True for a value that looks like an AI SDK StreamTextResult: has a `textStream` async iterable.
-function hasTextStream(value: object): value is { textStream: AsyncIterable<string>; text?: unknown } {
+function hasTextStream(
+  value: object,
+): value is { textStream: AsyncIterable<string>; text?: unknown } {
   return (
     "textStream" in value &&
     typeof (value as { textStream?: unknown }).textStream === "object" &&
@@ -694,7 +696,11 @@ function hasTextStream(value: object): value is { textStream: AsyncIterable<stri
 }
 
 // Runs a raw AI SDK final text string through the request's outputSchema (best-effort), throwing a helpful error on parse failure.
-function parseRawAiSdkText(text: string, request: AgentTextRequest<any> | undefined, id: string): unknown {
+function parseRawAiSdkText(
+  text: string,
+  request: AgentTextRequest<any> | undefined,
+  id: string,
+): unknown {
   if (!request?.outputSchema) {
     return text;
   }

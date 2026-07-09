@@ -35,11 +35,11 @@
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/todo-nl/index.ts
  */
-import { z } from 'zod';
-import { openai } from '@ai-sdk/openai';
-import { createAiSdkExecutors } from '../../src/ai-sdk/index.js';
-import { promptLine } from '../helpers/cli.js';
-import { createAgentSchemas, runAgent, setupAgent } from '../../src/index.js';
+import { z } from "zod";
+import { openai } from "@ai-sdk/openai";
+import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
+import { promptLine } from "../helpers/cli.js";
+import { createAgentSchemas, runAgent, setupAgent } from "../../src/index.js";
 
 const todoSchema = z.object({
   id: z.number(),
@@ -50,7 +50,7 @@ const todoSchema = z.object({
 type Todo = z.infer<typeof todoSchema>;
 
 const models = {
-  quick: openai('gpt-5.4-mini'),
+  quick: openai("gpt-5.4-mini"),
 } as const;
 
 export const todoSchemas = createAgentSchemas({
@@ -79,20 +79,18 @@ export const todoSchemas = createAgentSchemas({
 
 const PLAN_SYSTEM_PROMPT =
   "You manage a todo list by translating a user's natural-language command " +
-  'into a sequence of list operation events. One command may need several ' +
+  "into a sequence of list operation events. One command may need several " +
   "events (e.g. 'add X and Y' → two ADD_TODO). Apply them one at a time, in " +
-  'order. Prefer the most direct mapping. Only reference todo ids that appear ' +
-  'in the current list. If the command asks to quit/exit, choose QUIT. When ' +
-  'the command is fully handled — or maps to no action (small talk, already ' +
-  'satisfied) — choose the done move to end.';
+  "order. Prefer the most direct mapping. Only reference todo ids that appear " +
+  "in the current list. If the command asks to quit/exit, choose QUIT. When " +
+  "the command is fully handled — or maps to no action (small talk, already " +
+  "satisfied) — choose the done move to end.";
 
 function renderTodoList(todos: Todo[]): string {
   if (todos.length === 0) {
-    return '(the todo list is empty)';
+    return "(the todo list is empty)";
   }
-  return todos
-    .map((todo) => `  #${todo.id} [${todo.done ? 'x' : ' '}] ${todo.title}`)
-    .join('\n');
+  return todos.map((todo) => `  #${todo.id} [${todo.done ? "x" : " "}] ${todo.title}`).join("\n");
 }
 
 const agentSetup = setupAgent({
@@ -101,30 +99,30 @@ const agentSetup = setupAgent({
 });
 
 export const todoMachine = agentSetup.createMachine({
-  id: 'todo-nl',
+  id: "todo-nl",
   context: ({ input }) => ({
     todos: input.todos,
     nextId: input.todos.reduce((max, todo) => Math.max(max, todo.id), 0) + 1,
     pendingCommand: null,
     log: [],
   }),
-  initial: 'awaitingCommand',
+  initial: "awaitingCommand",
   states: {
     awaitingCommand: {
-      tags: ['awaiting-user'],
+      tags: ["awaiting-user"],
       invoke: {
-        src: 'agent.userInput',
+        src: "agent.userInput",
         input: ({ context }) => ({
           prompt: [
-            'Current todo list:',
+            "Current todo list:",
             renderTodoList(context.todos),
             "What would you like to do? (natural language, or 'quit')",
-          ].join('\n'),
+          ].join("\n"),
         }),
         onDone: ({ event }) => ({
-          target: 'planning',
+          target: "planning",
           context: {
-            pendingCommand: String(event.output ?? ''),
+            pendingCommand: String(event.output ?? ""),
           },
         }),
       },
@@ -138,25 +136,20 @@ export const todoMachine = agentSetup.createMachine({
     // appends the applied trail to the prompt for us).
     planning: {
       invoke: {
-        id: 'planCommand',
-        src: 'agent.plan',
+        id: "planCommand",
+        src: "agent.plan",
         input: ({ context }) => ({
-          model: 'quick',
+          model: "quick",
           system: PLAN_SYSTEM_PROMPT,
           prompt: [
-            'Current todo list:',
+            "Current todo list:",
             renderTodoList(context.todos),
-            '',
-            `User command: ${context.pendingCommand ?? ''}`,
-          ].join('\n'),
+            "",
+            `User command: ${context.pendingCommand ?? ""}`,
+          ].join("\n"),
           // Typo'd names are caught at compile time — allowedEvents is typed
           // against the machine's event-schema keys.
-          allowedEvents: [
-            'ADD_TODO',
-            'TOGGLE_TODO',
-            'DELETE_TODO',
-            'QUIT',
-          ] as const,
+          allowedEvents: ["ADD_TODO", "TOGGLE_TODO", "DELETE_TODO", "QUIT"] as const,
           // The plan ends via the built-in done move (offered automatically),
           // at maxSteps, or when QUIT exits the state (below) and cancels the
           // invoke. No `stopOn` sentinel needed.
@@ -165,15 +158,15 @@ export const todoMachine = agentSetup.createMachine({
         // The plan finished on the done move (or maxSteps): back to the user. If
         // QUIT was applied, the state already exited and this onDone never ran.
         onDone: {
-          target: 'awaitingCommand',
+          target: "awaitingCommand",
           context: { pendingCommand: null },
         },
         // The plan couldn't produce a legal event (e.g. kept choosing a bad
         // id). Treat it as "nothing to do" and go back to the user.
         onError: {
-          target: 'awaitingCommand',
+          target: "awaitingCommand",
           context: ({ context }) => ({
-            log: [...context.log, '(could not interpret command)'],
+            log: [...context.log, "(could not interpret command)"],
             pendingCommand: null,
           }),
         },
@@ -181,10 +174,7 @@ export const todoMachine = agentSetup.createMachine({
       on: {
         ADD_TODO: ({ context, event }) => ({
           context: {
-            todos: [
-              ...context.todos,
-              { id: context.nextId, title: event.title, done: false },
-            ],
+            todos: [...context.todos, { id: context.nextId, title: event.title, done: false }],
             nextId: context.nextId + 1,
             log: [...context.log, `added #${context.nextId}: ${event.title}`],
           },
@@ -219,13 +209,13 @@ export const todoMachine = agentSetup.createMachine({
         },
 
         QUIT: {
-          target: 'done',
+          target: "done",
         },
       },
     },
 
     done: {
-      type: 'final',
+      type: "final",
       output: ({ context }) => ({
         todos: context.todos,
         log: context.log,
@@ -240,23 +230,22 @@ export async function main() {
   const result = await runAgent(todoMachine, {
     input: { todos: [] },
     ...executors,
-    userInput: async ({ prompt }) => promptLine(`${prompt ?? '>'}\n> `),
-    onTransition: (snapshot) =>
-      console.log('[state]', JSON.stringify(snapshot.value)),
+    userInput: async ({ prompt }) => promptLine(`${prompt ?? ">"}\n> `),
+    onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
   });
 
-  if (result.status !== 'done') {
+  if (result.status !== "done") {
     throw new Error(`Todo NL did not complete: ${result.status}`);
   }
 
-  console.log('\nFinal todo list:');
+  console.log("\nFinal todo list:");
   console.log(renderTodoList(result.output.todos));
   console.log(`\n${result.output.log.length} action(s) taken.`);
 }
 
-if (import.meta.url === new URL(process.argv[1]!, 'file:').href) {
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   if (!process.env.OPENAI_API_KEY) {
-    console.error('Set OPENAI_API_KEY to run this example.');
+    console.error("Set OPENAI_API_KEY to run this example.");
     process.exit(1);
   }
   void main();

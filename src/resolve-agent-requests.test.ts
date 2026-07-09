@@ -80,10 +80,10 @@ function createTinyAgent() {
   return machine;
 }
 
-function mockExecutors(opts: {
-  move: "GO" | "STOP";
-  summary?: string;
-}): { executors: AgentRequestExecutors; calls: string[] } {
+function mockExecutors(opts: { move: "GO" | "STOP"; summary?: string }): {
+  executors: AgentRequestExecutors;
+  calls: string[];
+} {
   const calls: string[] = [];
 
   const decide: AgentDecisionExecutor = async (request) => {

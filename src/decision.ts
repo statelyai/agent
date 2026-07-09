@@ -227,9 +227,7 @@ export function createPlanActor(): PlanLogic {
 
 /** Type guard: true for the `agent.plan` builtin logic (checks the `kind` marker). @internal */
 export function isPlanLogic(logic: unknown): logic is PlanLogic {
-  return (
-    !!logic && (logic as { kind?: unknown }).kind === "statelyai.planLogic"
-  );
+  return !!logic && (logic as { kind?: unknown }).kind === "statelyai.planLogic";
 }
 
 // ─── Decision logic ───
@@ -290,8 +288,7 @@ function resolveAllowedEventTypes(
   if (allowedEvents === undefined) {
     return undefined;
   }
-  const resolved =
-    typeof allowedEvents === "function" ? allowedEvents({ input }) : allowedEvents;
+  const resolved = typeof allowedEvents === "function" ? allowedEvents({ input }) : allowedEvents;
   return typeof resolved === "string" ? [resolved] : resolved;
 }
 

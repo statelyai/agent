@@ -287,7 +287,9 @@ function createRequestsFromWorkflowConfig(
           request.maxOutputTokens === undefined
             ? undefined
             : ({ input }) =>
-                evaluateWorkflowConfigValue(request.maxOutputTokens, { input }) as number | undefined,
+                evaluateWorkflowConfigValue(request.maxOutputTokens, { input }) as
+                  | number
+                  | undefined,
         topP:
           request.topP === undefined
             ? undefined

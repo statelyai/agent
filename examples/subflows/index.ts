@@ -125,10 +125,7 @@ export async function runSubflowsExample(options?: {
         actorSources: {
           // Adapt the raw `(request, info)` executor to a TextLogic executor
           // via the shared bridge (defaults `tools`, forwards `signal`).
-          researchTopic: bindRequestExecutor(
-            childAgentSetup.requests.researchTopic,
-            generateText,
-          ),
+          researchTopic: bindRequestExecutor(childAgentSetup.requests.researchTopic, generateText),
         },
       }),
     },

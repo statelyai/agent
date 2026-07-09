@@ -84,4 +84,4 @@ AI SDK pattern set (fan-out, routing, reflection, map-reduce shapes):
 - [`ai-sdk-evaluator-optimizer/index.test.ts`](/Users/davidkpiano/Code/agent/examples/ai-sdk-evaluator-optimizer/index.test.ts)
 - [`ai-sdk-marketing-chain/index.test.ts`](/Users/davidkpiano/Code/agent/examples/ai-sdk-marketing-chain/index.test.ts)
 
-New examples should use `createTextLogic(...)` for reusable LLM work and `setupAgent({ schemas, actors, requests })` for schema-first machine authoring. Decisions are authored inline in states via `src: 'agent.decide'` (state-local); to reuse one across states, share the *input builder* function (a `({ context }) => ({ model, system, prompt, allowedEvents })` fn), not an actor. There is no `decisions:` key on `setupAgent`.
+New examples should use `createTextLogic(...)` for reusable LLM work and `setupAgent({ schemas, actors, requests })` for schema-first machine authoring. Decisions are authored inline in states via `src: 'agent.decide'` (state-local); to reuse one across states, share the _input builder_ function (a `({ context }) => ({ model, system, prompt, allowedEvents })` fn), not an actor. There is no `decisions:` key on `setupAgent`.

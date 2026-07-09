@@ -1,10 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { runAgent } from "../../src/index.js";
-import type {
-  AgentDecisionRequest,
-  AgentRequestExecutor,
-  ChosenEvent,
-} from "../../src/index.js";
+import type { AgentDecisionRequest, AgentRequestExecutor, ChosenEvent } from "../../src/index.js";
 import { jokeMachine } from "./index.js";
 
 // Streaming joke executor: emits chunks and returns the accumulated text.
