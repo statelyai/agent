@@ -1,0 +1,14 @@
+{
+  "name": "twenty-questions",
+  "title": "Twenty Questions",
+  "kind": "agent-workflow",
+  "origin": {
+    "type": "stately-agent",
+    "source": "Created in this repository",
+    "url": null
+  },
+  "comparison": {
+    "targets": ["LangGraph", "Burr", "Flowise"],
+    "purpose": "Shows the decision loop with machine-held context, guard-enforced legality, typed model aliases, answer/guess feedback classification, scoring, play-again reset, and machine-owned user prompts."
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "ai-sdk-marketing-chain",
+  "title": "Vercel AI SDK Marketing Chain",
+  "kind": "comparison",
+  "origin": {
+    "type": "docs",
+    "source": "Vercel AI SDK sequential processing workflow",
+    "url": "https://ai-sdk.dev/docs/agents/workflows#sequential-processing-chains"
+  },
+  "comparison": {
+    "targets": ["Vercel AI SDK", "sequential processing", "chains"],
+    "purpose": "Ports AI SDK marketing-copy chain into an explicit XState machine."
+  }
+}

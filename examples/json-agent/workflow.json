@@ -1,0 +1,128 @@
+{
+  "id": "support-ticket-json",
+  "description": "Support ticket flow: decide escalate-vs-reply, draft a reply, wait for human approval. Defined entirely as data — no code, no eval.",
+  "schemas": {
+    "input": {
+      "type": "object",
+      "properties": {
+        "ticket": { "type": "string" }
+      },
+      "required": ["ticket"]
+    },
+    "context": {
+      "type": "object",
+      "properties": {
+        "ticket": { "type": "string" },
+        "reply": { "type": "string" },
+        "resolution": { "type": "string" }
+      },
+      "required": ["ticket"]
+    },
+    "events": {
+      "ESCALATE": {
+        "type": "object",
+        "properties": {
+          "reason": { "type": "string" }
+        },
+        "required": ["reason"]
+      },
+      "REPLY": {
+        "type": "object",
+        "properties": {}
+      },
+      "APPROVE": {
+        "type": "object",
+        "properties": {}
+      },
+      "REJECT": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    "output": {
+      "type": "object",
+      "properties": {
+        "resolution": { "type": "string" },
+        "reply": { "type": "string" }
+      },
+      "required": ["resolution"]
+    }
+  },
+  "context": {
+    "ticket": "{{ input.ticket }}"
+  },
+  "requests": {
+    "draftReply": {
+      "model": "openai/gpt-5.4-mini",
+      "system": "Draft a short, courteous support reply to the customer's ticket.",
+      "prompt": "{{ context.ticket }}",
+      "input": {
+        "type": "object",
+        "properties": {
+          "ticket": { "type": "string" }
+        },
+        "required": ["ticket"]
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "reply": { "type": "string" }
+        },
+        "required": ["reply"]
+      }
+    }
+  },
+  "initial": "triaging",
+  "states": {
+    "triaging": {
+      "invoke": {
+        "id": "triageDecision",
+        "src": "agent.decide",
+        "input": {
+          "model": "openai/gpt-5.4-mini",
+          "system": "Decide whether this support ticket needs human escalation or a drafted reply.",
+          "prompt": "{{ context.ticket }}",
+          "allowedEvents": ["ESCALATE", "REPLY"],
+          "maxRetries": 2
+        },
+        "onError": {
+          "target": "resolved",
+          "assign": { "resolution": "escalated" }
+        }
+      },
+      "on": {
+        "ESCALATE": { "target": "resolved", "assign": { "resolution": "escalated" } },
+        "REPLY": { "target": "drafting" }
+      }
+    },
+    "drafting": {
+      "invoke": {
+        "id": "draft",
+        "src": "draftReply",
+        "input": {
+          "ticket": "{{ context.ticket }}"
+        },
+        "onDone": {
+          "target": "awaitingApproval",
+          "assign": {
+            "reply": "{{ event.output.reply }}"
+          }
+        }
+      }
+    },
+    "awaitingApproval": {
+      "description": "Idle: nothing left to do until a human approves or rejects the drafted reply.",
+      "on": {
+        "APPROVE": { "target": "resolved", "assign": { "resolution": "replied" } },
+        "REJECT": { "target": "resolved", "assign": { "resolution": "escalated" } }
+      }
+    },
+    "resolved": {
+      "type": "final",
+      "output": {
+        "resolution": "{{ context.resolution }}",
+        "reply": "{{ context.reply }}"
+      }
+    }
+  }
+}

@@ -1,128 +1,36 @@
 # @statelyai/agent
 
-## 2.0.0-next.5
+## 2.0.0-alpha.0
 
 ### Major Changes
 
-- [`2abec3e`](https://github.com/statelyai/agent/commit/2abec3e4d13d75f0ae1840f6dd2812f8fe9fb8d1) Thanks [@davidkpiano](https://github.com/davidkpiano)! - "Strategy" has been renamed to "policy", and "score" has been renamed to "reward".
+- [#67](https://github.com/statelyai/agent/pull/67) [`d750efc`](https://github.com/statelyai/agent/commit/d750efcf98f21ce6ca250a2944521fa8e0b3f09a) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Rewrite `@statelyai/agent` as a typed, host-agnostic authoring layer for agent state machines on XState v6. The machine is a portable blueprint: it decides which states exist, which model calls happen, and which events are legal right now; your host executes them with any SDK.
 
-- [`56ebde3`](https://github.com/statelyai/agent/commit/56ebde34ef7c897c1b845f026a5b38f41ef6a36f) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Set ai as peer dependency
+  **Authoring**
 
-### Minor Changes
+  - `setupAgent({ schemas | context/events/input/output/meta, actors, requests })`: schema-first machine authoring (Standard Schema — Zod, Valibot, ArkType) with typed context, events, invoke inputs/outputs, and state/transition `meta`.
+  - `createTextLogic(...)` for reusable, schema-typed model calls; co-located `requests:` for inline ones.
+  - **Decisions**: the model chooses exactly one _currently-legal_ machine event. Author state-locally with the `agent.decide` builtin (typed `allowedEvents` against your event schema keys; omitted = all currently-legal events) plus `sendDecision()`, or reusably with `createDecisionLogic(...)`. Core validates (`unknown-event` / `invalid-payload` / `rejected-by-guard` via `snapshot.can`) and retries with attempts fed back to the model; how the model is coerced is adapter business.
+  - **Machines as data**: full agent workflows — states, transitions, guards, text requests, decisions, human steps — can be defined as pure JSON, validated against the published `@statelyai/agent/agent-workflow.json` schema, and lowered with `setupAgent.fromConfig(...)`. `fromConfig(...)` requires a `compileSchema` option to compile the config's JSON Schemas into runtime validators — bring your own engine (Ajv, @cfworker/json-schema, ...) or pass the exported `minimalSchemaCompiler` to opt into the built-in subset validator (type/properties/required/items/enum/const only).
 
-- [`ea0c45e`](https://github.com/statelyai/agent/commit/ea0c45e5f099ea270a8ebd49fc3f700cc5827320) Thanks [@davidkpiano](https://github.com/davidkpiano)! - You can now add **insights** for observations made. Insights are additional context about the observations made, which can be useful for agent decision making.
+  **Messages**
 
-## 2.0.0-next.4
+  - `AgentMessage` is a parts-based discriminated union (system/user/assistant/tool with text/image/file/tool-call/tool-result parts), structurally mirroring AI SDK `ModelMessage` with no dependency on `ai`. Adds `toolMessage(...)`; `messagesSchema` validates roles and per-role content shapes.
 
-### Major Changes
+  **Running**
 
-- [`4a79bac`](https://github.com/statelyai/agent/commit/4a79bacbda33340b34a4b6271c2bd0fa2673ce25) Thanks [@davidkpiano](https://github.com/davidkpiano)! - - The `machine` and `machineHash` properties were removed from `AgentObservation` and `AgentObservationInput`
-  - The `defaultOptions` property was removed from `Agent`
-  - `AgentDecideOptions` was renamed to `AgentDecideInput`
-  - The `execute` property was removed from `AgentDecideInput`
-  - The `episodeId` optional property was added to `AgentDecideInput`, `AgentObservationInput`, and `AgentFeedbackInput`
-  - `decisionId` was added to `AgentObservationInput` and `AgentFeedbackInput`
+  - `runAgent(machine, { input, generateText, streamText?, decide?, ... })`: bind executors, run to settlement, get `{ status: 'done' | 'idle' | 'error' }`. Idle-first human-in-the-loop: waiting states settle `idle` with a JSON-serializable snapshot; resume with `{ snapshot, event }`. Observation-only callbacks (`onTransition`, `onResult`, `onChunk`); `maxModelCalls` budget; `AbortSignal` support; bind-time errors for anything unbound.
+  - Step path for durable hosts: `initialAgentStep` / `transitionAgentStep` / `resolveAgentStep` / `resolveDecision` give per-model-call checkpoints (Cloudflare Workflows, Temporal, etc.); `step.requests` is a `kind`-discriminated union of text and decision requests; delayed transitions surface as schedulable actions.
+  - `createAiSdkExecutors({ resolveModel })` from `@statelyai/agent/ai-sdk`: the shipped Vercel AI SDK adapter (structured output, streaming with chunk observation, tool-per-event decide, `metadata.maxSteps` tool loops). `ai` is an optional peer dependency; core depends only on `xstate` (peer).
 
-## 2.0.0-next.3
+  **Removed / breaking**
 
-### Major Changes
-
-- [`bf6b468`](https://github.com/statelyai/agent/commit/bf6b468d66d58bf53629d70d1b2a273948c9ba1e) Thanks [@davidkpiano](https://github.com/davidkpiano)! - The `state` can no longer be specified in `agent.interact(...)`, since the actual state value is already observed and passed to the `strategy` function.
-
-  The `context` provided to agent decision functions, like `agent.decide({ context })` and in `agent.interact(...)`, is now used solely to override the `state.context` provided to the prompt template.
-
-### Minor Changes
-
-- [`1287a6d`](https://github.com/statelyai/agent/commit/1287a6d405ed3bd6be37a61aaa9d54d963b5b1cd) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Add `score` and `comment` fields for feedback
-
-### Patch Changes
-
-- [`5b5a8e7`](https://github.com/statelyai/agent/commit/5b5a8e7012d550f5b05d0fefc9eade7731202577) Thanks [@davidkpiano](https://github.com/davidkpiano)! - The `score` is now required for feedback:
-
-  ```ts
-  agent.addFeedback({
-    score: 0.5,
-    goal: "Win the game",
-    observationId: "...",
-  });
-  ```
-
-- [`5b5a8e7`](https://github.com/statelyai/agent/commit/5b5a8e7012d550f5b05d0fefc9eade7731202577) Thanks [@davidkpiano](https://github.com/davidkpiano)! - The entire observed `state` must be provided, instead of only `context`, for any agent decision making functions:
-
-  ```ts
-  agent.interact(actor, (obs) => {
-    // ...
-    return {
-      goal: "Some goal",
-      // instead of context
-      state: obs.state,
-    };
-  });
-  ```
-
-- [`9d65d71`](https://github.com/statelyai/agent/commit/9d65d71e41f9f0f84f637ea7e0a0e22ccf67f264) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Remove `goal` from feedback input
-
-## 2.0.0-next.2
-
-### Minor Changes
-
-- [`4d870fe`](https://github.com/statelyai/agent/commit/4d870fe38ad0c906bafb2e0f6b2dabb745900ad3) Thanks [@davidkpiano](https://github.com/davidkpiano)! - planner -> strategy
-  agent.addPlan -> agent.addDecision
-  agent.getPlans -> agent.getDecisions
-
-  The word "strategy" is now used instead of "planner" to make it more clear what the agent is doing: it uses a strategy to make decisions. The method `agent.addPlan(…)` has been renamed to `agent.addDecision(…)` and `agent.getPlans(…)` has been renamed to `agent.getDecisions(…)` to reflect this change. Additionally, you specify the `strategy` instead of the `planner` when creating an agent:
-
-  ```diff
-  const agent = createAgent({
-  - planner: createSimplePlanner(),
-  + strategy: createSimpleStrategy(),
-    ...
-  });
-  ```
-
-- [`f1189cb`](https://github.com/statelyai/agent/commit/f1189cb980e52fa909888d27d3300dcd913ea47f) Thanks [@davidkpiano](https://github.com/davidkpiano)! - For feedback, the `goal`, `observationId`, and `attributes` are now required, and `feedback` and `reward` are removed since they are redundant.
-
-- [`7b16326`](https://github.com/statelyai/agent/commit/7b163266c61bfc8125ed4d00924680d932001e27) Thanks [@davidkpiano](https://github.com/davidkpiano)! - You can specify `allowedEvents` in `agent.decide(...)` to allow from a list of specific events to be sent to the agent. This is useful when using `agent.decide(...)` without a state machine.
-
-  ```ts
-  const agent = createAgent({
-    // ...
-    events: {
-      PLAY: z.object({}).describe("Play a move"),
-      SKIP: z.object({}).describe("Skip a move"),
-      FORFEIT: z.object({}).describe("Forfeit the game"),
-    },
-  });
-
-  // ...
-  const decision = await agent.decide({
-    // Don't allow the agent to send `FORFEIT` or other events
-    allowedEvents: ["PLAY", "SKIP"],
-    // ...
-  });
-  ```
-
-## 2.0.0-next.1
-
-### Minor Changes
-
-- [`6a9861d`](https://github.com/statelyai/agent/commit/6a9861d959ce295114f53c95c5bdaa097348bacb) Thanks [@davidkpiano](https://github.com/davidkpiano)! - You can specify `maxAttempts` in `agent.decide({ maxAttempts: 5 })`. This will allow the agent to attempt to make a decision up to the specified number of `maxAttempts` before giving up. The default value is `2`.
-
-### Patch Changes
-
-- [`8c3eab8`](https://github.com/statelyai/agent/commit/8c3eab8950cb85e662c6afb5d8cefb1d5ef54dd8) Thanks [@davidkpiano](https://github.com/davidkpiano)! - The `name` field in `createAgent({ name: '...' })` has been renamed to `id`.
-
-- [`8c3eab8`](https://github.com/statelyai/agent/commit/8c3eab8950cb85e662c6afb5d8cefb1d5ef54dd8) Thanks [@davidkpiano](https://github.com/davidkpiano)! - The `description` field in `createAgent({ description: '...' })` is now used for the `system` prompt in agent decision making when a `system` prompt is not provided.
-
-## 2.0.0-next.0
-
-### Major Changes
-
-- [#51](https://github.com/statelyai/agent/pull/51) [`574b6fd`](https://github.com/statelyai/agent/commit/574b6fd62e8a41df311aa1ea00fae60c32ad595e) Thanks [@davidkpiano](https://github.com/davidkpiano)! - - `agent.generateText(…)` is removed in favor of using the AI SDK's `generateText(…)` function with a wrapped model.
-  - `agent.streamText(…)` is removed in favor of using the AI SDK's `streamText(…)` function with a wrapped model.
-  - Custom adapters are removed for now, but may be re-added in future releases. Using the AI SDK is recommended for now.
-  - Correlation IDs are removed in favor of using [OpenTelemetry with the AI SDK](https://sdk.vercel.ai/docs/ai-sdk-core/telemetry#telemetry).
-  - The `createAgentMiddleware(…)` function was introduced to facilitate agent message history. You can also use `agent.wrap(model)` to wrap a model with Stately Agent middleware.
+  - `createAgentMachine(...)`, `@statelyai/agent/local`, and the custom runtime surface: runtime is normal XState actors and snapshots.
+  - `agentEvents` / `eventTypes` (event tools on text requests) → replaced by decisions and `allowedEvents`.
+  - `getAvailableEvents` → `getAcceptedEvents`; `getEventTools` and `AgentRequestLogic` removed.
+  - `runAgent` returns the `done | idle | error` status union instead of the machine output, and never throws on a waiting machine.
+  - `AgentMessage` is the new union shape; the open index signature is gone. Persisted contexts holding old-shape messages need manual migration.
+  - Executor results are unwrapped as `object → text → output`; `toolResults` inspection removed.
 
 ## 1.1.6
 

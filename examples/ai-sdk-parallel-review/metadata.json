@@ -1,0 +1,14 @@
+{
+  "name": "ai-sdk-parallel-review",
+  "title": "Vercel AI SDK Parallel Review",
+  "kind": "comparison",
+  "origin": {
+    "type": "docs",
+    "source": "Vercel AI SDK parallel processing workflow",
+    "url": "https://ai-sdk.dev/docs/agents/workflows#parallel-processing"
+  },
+  "comparison": {
+    "targets": ["Vercel AI SDK", "parallel processing"],
+    "purpose": "Ports AI SDK parallel code review into an explicit XState machine."
+  }
+}

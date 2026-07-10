@@ -1,0 +1,14 @@
+{
+  "name": "json-agent",
+  "title": "JSON Agent",
+  "kind": "agent-workflow",
+  "origin": {
+    "type": "stately-agent",
+    "source": "Created in this repository",
+    "url": null
+  },
+  "comparison": {
+    "targets": ["Flowise"],
+    "purpose": "Shows a full agent workflow — decision, text request, idle human-in-the-loop step — authored as a real .json file and lowered by setupAgent.fromConfig(...) into the same runnable XState machine as TS authoring."
+  }
+}

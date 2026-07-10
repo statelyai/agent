@@ -130,3 +130,9 @@ dist/
 .pnp.*
 
 .vscode/settings.json
+
+docs/superpowers
+
+.scratch
+CLAUDE.md
+AGENTS.md

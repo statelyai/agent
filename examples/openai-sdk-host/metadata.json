@@ -1,0 +1,14 @@
+{
+  "name": "openai-sdk-host",
+  "title": "OpenAI SDK Host",
+  "kind": "host-adapter",
+  "origin": {
+    "type": "sdk-adapter",
+    "source": "Raw OpenAI SDK integration built for this repository",
+    "url": "https://github.com/openai/openai-node"
+  },
+  "comparison": {
+    "targets": ["OpenAI SDK", "SDK-neutral host adapters"],
+    "purpose": "Shows the generateText/streamText/decide executor contract implemented directly against the raw openai package's Chat Completions API, with no Vercel AI SDK in between."
+  }
+}

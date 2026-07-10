@@ -1,0 +1,14 @@
+{
+  "name": "sse-transport",
+  "title": "SSE Streaming Transport",
+  "kind": "agent-workflow",
+  "origin": {
+    "type": "stately-agent",
+    "source": "Host-owned transport wiring runAgent's streaming seams to a client",
+    "url": null
+  },
+  "comparison": {
+    "targets": ["Vercel AI SDK", "LangGraph"],
+    "purpose": "Forwards runAgent's onChunk/onTransition/onResult seams to a client over Server-Sent Events (same seam works for WebSocket)."
+  }
+}

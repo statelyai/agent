@@ -1,0 +1,14 @@
+{
+  "name": "long-running-onboarding",
+  "title": "Long-Running Onboarding",
+  "kind": "pattern",
+  "origin": {
+    "type": "article",
+    "source": "Google Cloud Tech article: Build Long-running AI agents that pause, resume, and never lose context with ADK",
+    "url": "https://x.com/GoogleCloudTech/status/2074940791277932742"
+  },
+  "comparison": {
+    "targets": ["Google ADK", "durable agents", "human-in-the-loop", "multi-agent delegation"],
+    "purpose": "Ports the article's onboarding coordinator shape into Stately Agent: explicit durable state, event-driven idle gates, snapshot resume across days, and delegated IT provisioning."
+  }
+}

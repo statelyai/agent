@@ -1,0 +1,14 @@
+{
+  "name": "joke",
+  "title": "Joke Teller",
+  "kind": "agent-workflow",
+  "origin": {
+    "type": "stately-agent",
+    "source": "Ported from the v1 joke-teller example in this repository",
+    "url": null
+  },
+  "comparison": {
+    "targets": ["Vercel AI SDK", "LangGraph"],
+    "purpose": "Machine-owned tell -> rate -> decide loop: a joke streams, gets rated 1-10, and the model decides (via agent.decide) whether to tell another or stop."
+  }
+}

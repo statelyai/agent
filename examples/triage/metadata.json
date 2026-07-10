@@ -1,0 +1,14 @@
+{
+  "name": "triage",
+  "title": "Support Ticket Triage",
+  "kind": "agent-workflow",
+  "origin": {
+    "type": "stately-agent",
+    "source": "Extracted from the AI SDK host demo in this repository",
+    "url": null
+  },
+  "comparison": {
+    "targets": ["CrewAI", "LangGraph"],
+    "purpose": "Shows a structured-output classification workflow as a normal XState machine."
+  }
+}

@@ -1,25 +1,10 @@
 {
   "mode": "pre",
-  "tag": "next",
+  "tag": "alpha",
   "initialVersions": {
     "@statelyai/agent": "1.1.6"
   },
   "changesets": [
-    "calm-beans-talk",
-    "cyan-carpets-perform",
-    "fast-donkeys-argue",
-    "grumpy-dolphins-think",
-    "light-hats-drive",
-    "long-guests-explode",
-    "nice-pants-rule",
-    "odd-kiwis-compare",
-    "old-jobs-check",
-    "old-teachers-tap",
-    "pink-eagles-deliver",
-    "quiet-turtles-do",
-    "smart-yaks-pull",
-    "sweet-clouds-mix",
-    "swift-mangos-rush",
-    "tough-ways-rhyme"
+    "setup-agent-xstate-cutover"
   ]
 }

@@ -1,0 +1,14 @@
+{
+  "name": "swarm-handoff",
+  "title": "Swarm Handoff",
+  "kind": "pattern",
+  "origin": {
+    "type": "pattern",
+    "source": "Active-agent swarm / handoff multi-agent pattern",
+    "url": "https://github.com/langchain-ai/langgraphjs/tree/main/examples"
+  },
+  "comparison": {
+    "targets": ["swarm", "handoff"],
+    "purpose": "An active-agent conversation hands off between two specialists; the active agent persists across a snapshot round-trip."
+  }
+}

@@ -1,128 +1,106 @@
-import {
-  ActorRefLike,
-  AnyActorRef,
-  AnyMachineSnapshot,
-  AnyStateMachine,
-  AnyStateNode,
-} from 'xstate';
-import hash from 'object-hash';
-import { ObservedState, TransitionData } from './types';
+import type { AnyMachineSnapshot } from "xstate";
+import type {
+  AssistantMessage,
+  FilePart,
+  ImagePart,
+  StandardSchemaV1,
+  SystemMessage,
+  TextPart,
+  ToolCallPart,
+  ToolMessage,
+  ToolResultPart,
+  UserMessage,
+} from "./types.js";
 
-export function getAllTransitions(state: AnyMachineSnapshot): TransitionData[] {
-  const nodes = state._nodes;
-  const transitions = (nodes as AnyStateNode[])
-    .map((node) => [...(node as AnyStateNode).transitions.values()])
-    .map((nodeTransitions) => {
-      return nodeTransitions.map((nodeEventTransitions) => {
-        return nodeEventTransitions.map((transition) => {
-          return {
-            ...transition,
-            guard:
-              typeof transition.guard === 'string'
-                ? { type: transition.guard }
-                : (transition.guard as any), // TODO: fix
-          };
-        });
-      });
-    })
-    .flat(2);
-
-  return transitions;
-}
-
-export function getAllMachineTransitions(
-  stateNode: AnyStateNode
-): TransitionData[] {
-  const transitions: TransitionData[] = [...stateNode.transitions.values()]
-    .map((nodeTransitions) => {
-      return nodeTransitions.map((transition) => {
-        return {
-          ...transition,
-          guard:
-            typeof transition.guard === 'string'
-              ? { type: transition.guard }
-              : (transition.guard as any), // TODO: fix
-        };
-      });
-    })
-    .flat(2);
-
-  for (const s of Object.values(stateNode.states)) {
-    const stateTransitions = getAllMachineTransitions(s);
-    transitions.push(...stateTransitions);
-  }
-
-  return transitions;
-}
-
-export function wrapInXml(tagName: string, content: string): string {
-  return `<${tagName}>${content}</${tagName}>`;
-}
-
-export function convertToXml(obj: Record<string, any>): string {
-  return Object.entries(obj)
-    .map(([key, value]) => {
-      if (typeof value === 'object' && value !== null) {
-        return wrapInXml(key, convertToXml(value));
-      } else {
-        return wrapInXml(key, value);
-      }
-    })
-    .join('');
-}
-
-export function randomId(prefix?: string): string {
-  const timestamp = Date.now().toString(36);
-  const random = Math.random().toString(36).substring(2, 9);
-  // return timestamp + random;
-  return `${prefix || ''}${timestamp}${random}`;
-}
-
-const machineHashes: WeakMap<AnyStateMachine, string> = new WeakMap();
 /**
- * Returns a string hash representing only the transitions in the state machine.
+ * Deep-clones a snapshot to a plain-JSON value via a `JSON` round-trip, the
+ * shape you persist and later feed back to `runAgent({ snapshot })`. Asserts
+ * JSON-serializability: functions, `undefined`, and other non-JSON values are
+ * dropped or throw exactly as `JSON.stringify`/`JSON.parse` would. Returns a
+ * plain-JSON deep clone, not a live snapshot.
  */
-export function getMachineHash(machine: AnyStateMachine): string {
-  if (machineHashes.has(machine)) return machineHashes.get(machine)!;
-  const transitions = getAllMachineTransitions(machine.root);
-  const machineHash = hash(transitions);
-  machineHashes.set(machine, machineHash);
-  return machineHash;
+export function persistSnapshot<TSnapshot>(snapshot: TSnapshot): TSnapshot {
+  return JSON.parse(JSON.stringify(snapshot)) as TSnapshot;
 }
 
-export function isActorRef(
-  actorRefLike: ActorRefLike
-): actorRefLike is AnyActorRef {
-  return (
-    'src' in actorRefLike &&
-    'system' in actorRefLike &&
-    'sessionId' in actorRefLike
+/** Builds a {@link UserMessage} from a string or multimodal content parts. */
+export function userMessage(content: string | Array<TextPart | ImagePart | FilePart>): UserMessage {
+  return { role: "user", content };
+}
+
+/** Builds an {@link AssistantMessage} from a string or content parts (text, files, tool calls/results). */
+export function assistantMessage(
+  content: string | Array<TextPart | FilePart | ToolCallPart | ToolResultPart>,
+): AssistantMessage {
+  return { role: "assistant", content };
+}
+
+/** Builds a {@link SystemMessage}. */
+export function systemMessage(content: string): SystemMessage {
+  return { role: "system", content };
+}
+
+/** Builds a {@link ToolMessage} from one or more tool-result parts. */
+export function toolMessage(content: Array<ToolResultPart>): ToolMessage {
+  return { role: "tool", content };
+}
+
+// A snapshot's meta value type, recovered from its `getMeta()` return type
+// (`Record<StateId, TMeta | undefined>`). For a schema-typed machine (e.g.
+// `setupAgent({ meta })`), this resolves to the meta schema's output type; for
+// an untyped snapshot it falls back to `MetaObject`.
+type MetaOfSnapshot<TSnapshot extends { getMeta(): Record<string, unknown> }> = NonNullable<
+  ReturnType<TSnapshot["getMeta"]>[keyof ReturnType<TSnapshot["getMeta"]>]
+>;
+
+/**
+ * Returns the merged `meta` of a snapshot's active state(s) — the typed
+ * replacement for the `Object.values(snapshot.getMeta())[0]` dance.
+ *
+ * `snapshot.getMeta()` is keyed by state id; a leaf machine has one active
+ * state, but parallel/nested machines can have several. This shallow-merges
+ * every active state's meta into one object (later/deeper entries win) and
+ * returns `{}` when no active state declares meta.
+ *
+ * The return type is recovered from the snapshot's own `getMeta()` type, so a
+ * schema-typed machine (`setupAgent({ meta })`) yields the meta schema's
+ * output type. Pass an explicit `TMeta` to override when the snapshot is
+ * untyped (e.g. `AnyMachineSnapshot`).
+ *
+ * @example HITL: read the current state's interaction protocol off an idle
+ * snapshot to render for a human.
+ * ```ts
+ * const { interaction } = getStateMeta(result.snapshot);
+ * ```
+ */
+export function getStateMeta<
+  TSnapshot extends { getMeta(): Record<string, unknown> } = AnyMachineSnapshot,
+  TMeta = MetaOfSnapshot<TSnapshot>,
+>(snapshot: TSnapshot): Partial<TMeta> {
+  return Object.assign(
+    {},
+    ...Object.values(snapshot.getMeta()).filter(
+      (meta): meta is Record<string, unknown> => meta != null,
+    ),
   );
 }
 
-export function getTransitions(
-  state: ObservedState<any>,
-  machine: AnyStateMachine
-): TransitionData[] {
-  if (!machine) {
-    return [];
+/**
+ * Validates `value` against a {@link StandardSchemaV1}, synchronously.
+ * Throws if the schema's `validate` returns a `Promise` (async validation is
+ * not supported anywhere in this library) or if validation reports issues —
+ * in which case the thrown `Error.message` joins every issue message with
+ * `', '`.
+ */
+export function validateSchemaSync<T>(schema: StandardSchemaV1<T>, value: unknown): T {
+  const result = schema["~standard"].validate(value);
+  if (result instanceof Promise) {
+    throw new Error("Async schema validation is not supported.");
   }
 
-  const resolvedState = machine.resolveState({
-    ...state,
-    // Need this property defined to make TS happy
-    context: state.context,
-  });
-  return getAllTransitions(resolvedState);
-}
+  if (result.issues) {
+    throw new Error(result.issues.map((issue: { message: string }) => issue.message).join(", "));
+  }
 
-export function isMachineActor(
-  actor: ActorRefLike
-): actor is typeof actor & { src: AnyStateMachine } {
-  return (
-    'src' in actor &&
-    typeof actor.src === 'object' &&
-    actor.src !== null &&
-    'definition' in actor.src
-  );
+  return result.value as T;
 }

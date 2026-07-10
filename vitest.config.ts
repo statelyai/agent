@@ -1,15 +1,9 @@
-import { defineConfig } from 'vitest/config';
+// vitest.config.ts
 import dotenv from 'dotenv';
 dotenv.config();
 
-export default defineConfig({
+export default {
   test: {
     testTimeout: 10000, // Global timeout of 10000ms for all tests
-    coverage: {
-      provider: 'v8',
-      reporter: ['text', 'json', 'html'],
-      exclude: ['**.test.ts'],
-      include: ['src'],
-    },
   },
-});
+};

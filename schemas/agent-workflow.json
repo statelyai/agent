@@ -1,0 +1,527 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://stately.ai/schemas/agent-workflow.json",
+  "title": "Stately Agent Workflow Definition",
+  "description": "Static, declarative agent workflow definition that can be lowered to a setupAgent(...) XState machine.",
+  "type": "object",
+  "required": ["initial", "states"],
+  "properties": {
+    "key": {
+      "description": "Stable workflow key used by tools, storage, and visual editors.",
+      "type": "string",
+      "minLength": 1
+    },
+    "id": {
+      "description": "Optional XState machine id.",
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "description": "Definition version chosen by the author.",
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "queryLanguage": {
+      "description": "Expression language used inside {{ }} expressions. The built-in setupAgent.fromConfig lowering currently supports simple dot-path expressions over input, context, and event.",
+      "type": "string",
+      "default": "path"
+    },
+    "schemas": {
+      "$ref": "#/$defs/AgentSchemas"
+    },
+    "context": {
+      "description": "Initial XState context. Values may be JSON literals or whole-string {{ }} expressions evaluated with machine input.",
+      "$ref": "#/$defs/ExpressionObject"
+    },
+    "requests": {
+      "description": "Named model requests that become typed invoke sources.",
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/Identifier"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/Request"
+      },
+      "default": {}
+    },
+    "initial": {
+      "description": "Initial child state key.",
+      "type": "string"
+    },
+    "states": {
+      "description": "Root state nodes.",
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "$ref": "#/$defs/Identifier"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/State"
+      }
+    },
+    "meta": {
+      "$ref": "#/$defs/JsonObject"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "Identifier": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z_$][A-Za-z0-9_$.-]*$"
+    },
+    "ExpressionString": {
+      "description": "Whole-string expression delimited by {{ }}.",
+      "type": "string",
+      "pattern": "^\\{\\{[\\s\\S]*\\}\\}$"
+    },
+    "TemplateString": {
+      "description": "String that may contain {{ }} template expressions. Escape literal delimiters according to the selected expression/template evaluator.",
+      "type": "string"
+    },
+    "JsonValue": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "boolean" },
+        { "type": "number" },
+        { "type": "string" },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/JsonValue"
+          }
+        },
+        {
+          "$ref": "#/$defs/JsonObject"
+        }
+      ]
+    },
+    "JsonObject": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      }
+    },
+    "ExpressionValue": {
+      "description": "JSON value or whole-string {{ }} expression. Use this for typed values, not prompt templating.",
+      "anyOf": [
+        { "$ref": "#/$defs/ExpressionString" },
+        { "type": "null" },
+        { "type": "boolean" },
+        { "type": "number" },
+        { "type": "string" },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ExpressionValue"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/ExpressionValue"
+          }
+        }
+      ]
+    },
+    "ExpressionObject": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/ExpressionValue"
+      }
+    },
+    "JsonSchema": {
+      "description": "JSON Schema object.",
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": true
+    },
+    "AgentSchemas": {
+      "type": "object",
+      "properties": {
+        "input": {
+          "$ref": "#/$defs/JsonSchema"
+        },
+        "context": {
+          "$ref": "#/$defs/JsonSchema"
+        },
+        "events": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonSchema"
+          }
+        },
+        "emitted": {
+          "type": "object",
+          "description": "Schemas for events emitted outward by emit actions, keyed by emitted event type.",
+          "propertyNames": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonSchema"
+          }
+        },
+        "output": {
+          "$ref": "#/$defs/JsonSchema"
+        },
+        "meta": {
+          "$ref": "#/$defs/JsonSchema"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Request": {
+      "type": "object",
+      "required": ["model", "input", "output"],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["generate", "stream"],
+          "default": "generate"
+        },
+        "description": {
+          "type": "string"
+        },
+        "model": {
+          "$ref": "#/$defs/TemplateString"
+        },
+        "system": {
+          "$ref": "#/$defs/TemplateString"
+        },
+        "prompt": {
+          "$ref": "#/$defs/TemplateString"
+        },
+        "messages": {
+          "anyOf": [
+            { "$ref": "#/$defs/ExpressionString" },
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Message"
+              }
+            }
+          ]
+        },
+        "input": {
+          "$ref": "#/$defs/JsonSchema"
+        },
+        "output": {
+          "$ref": "#/$defs/JsonSchema"
+        },
+        "tools": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/Tool"
+          }
+        },
+        "toolChoice": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": ["auto", "none", "required"]
+            },
+            {
+              "type": "object",
+              "required": ["type", "name"],
+              "properties": {
+                "type": {
+                  "const": "tool"
+                },
+                "name": {
+                  "$ref": "#/$defs/Identifier"
+                }
+              },
+              "additionalProperties": false
+            },
+            { "$ref": "#/$defs/ExpressionString" }
+          ]
+        },
+        "temperature": {
+          "$ref": "#/$defs/ExpressionValue"
+        },
+        "maxOutputTokens": {
+          "$ref": "#/$defs/ExpressionValue"
+        },
+        "topP": {
+          "$ref": "#/$defs/ExpressionValue"
+        },
+        "topK": {
+          "$ref": "#/$defs/ExpressionValue"
+        },
+        "seed": {
+          "$ref": "#/$defs/ExpressionValue"
+        },
+        "stopSequences": {
+          "anyOf": [
+            { "$ref": "#/$defs/ExpressionString" },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "metadata": {
+          "$ref": "#/$defs/ExpressionValue"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Message": {
+      "type": "object",
+      "required": ["role", "content"],
+      "properties": {
+        "role": {
+          "$ref": "#/$defs/TemplateString"
+        },
+        "content": {
+          "$ref": "#/$defs/TemplateString"
+        }
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/ExpressionValue"
+      }
+    },
+    "Tool": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "input": {
+          "$ref": "#/$defs/JsonSchema"
+        },
+        "output": {
+          "$ref": "#/$defs/JsonSchema"
+        }
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      }
+    },
+    "State": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["parallel", "history", "final", "choice"]
+        },
+        "initial": {
+          "type": "string"
+        },
+        "states": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/State"
+          }
+        },
+        "invoke": {
+          "anyOf": [
+            { "$ref": "#/$defs/Invoke" },
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Invoke"
+              }
+            }
+          ]
+        },
+        "choice": {
+          "description": "Choice-state routing, equivalent to XState's type: 'choice' + choice transition function.",
+          "$ref": "#/$defs/TransitionOrArray"
+        },
+        "on": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/TransitionOrArray"
+          }
+        },
+        "always": {
+          "$ref": "#/$defs/TransitionOrArray"
+        },
+        "onDone": {
+          "$ref": "#/$defs/TransitionOrArray"
+        },
+        "after": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/TransitionOrArray"
+          }
+        },
+        "entry": {
+          "$ref": "#/$defs/ActionOrArray"
+        },
+        "exit": {
+          "$ref": "#/$defs/ActionOrArray"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "output": {
+          "$ref": "#/$defs/ExpressionValue"
+        },
+        "meta": {
+          "$ref": "#/$defs/ExpressionObject"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Invoke": {
+      "type": "object",
+      "required": ["src"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "src": {
+          "description": "Actor source name. 'agent.decide' invokes are special: decision delivery is automatic (the chosen event is sent as soon as the model decides) and 'onDone' must be omitted — see the 'onDone' description.",
+          "$ref": "#/$defs/Identifier"
+        },
+        "input": {
+          "$ref": "#/$defs/ExpressionValue"
+        },
+        "onDone": {
+          "description": "Not valid on an 'agent.decide' invoke — the built-in lowering rejects it at setupAgent.fromConfig(...) time. A decision has no output value of its own (its output IS the chosen event), so delivery is automatic and not configurable from JSON. 'onError' (retries exhausted) still applies to 'agent.decide' invokes.",
+          "$ref": "#/$defs/TransitionOrArray"
+        },
+        "onError": {
+          "$ref": "#/$defs/TransitionOrArray"
+        },
+        "meta": {
+          "$ref": "#/$defs/ExpressionObject"
+        }
+      },
+      "additionalProperties": false
+    },
+    "TransitionOrArray": {
+      "anyOf": [
+        { "$ref": "#/$defs/Transition" },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Transition"
+          }
+        }
+      ]
+    },
+    "Transition": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "anyOf": [
+            { "type": "string" },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "guard": {
+          "anyOf": [
+            { "$ref": "#/$defs/ExpressionString" },
+            {
+              "type": "object",
+              "required": ["type"],
+              "properties": {
+                "type": {
+                  "type": "string"
+                },
+                "params": {
+                  "$ref": "#/$defs/ExpressionValue"
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "assign": {
+          "description": "Context assignments applied when this transition is taken.",
+          "$ref": "#/$defs/ExpressionObject"
+        },
+        "actions": {
+          "$ref": "#/$defs/ActionOrArray"
+        },
+        "description": {
+          "type": "string"
+        },
+        "reenter": {
+          "type": "boolean"
+        },
+        "meta": {
+          "$ref": "#/$defs/ExpressionObject"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ActionOrArray": {
+      "anyOf": [
+        { "$ref": "#/$defs/Action" },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Action"
+          }
+        }
+      ]
+    },
+    "Action": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/ExpressionValue"
+        },
+        "assign": {
+          "$ref": "#/$defs/ExpressionObject"
+        },
+        "emit": {
+          "description": "Event emitted outward through runAgent's on handlers.",
+          "$ref": "#/$defs/ExpressionValue"
+        }
+      },
+      "anyOf": [{ "required": ["type"] }, { "required": ["assign"] }, { "required": ["emit"] }],
+      "additionalProperties": {
+        "$ref": "#/$defs/ExpressionValue"
+      }
+    }
+  }
+}

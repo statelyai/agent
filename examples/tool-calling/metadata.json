@@ -1,0 +1,14 @@
+{
+  "name": "tool-calling",
+  "title": "Tool Calling",
+  "kind": "pattern",
+  "origin": {
+    "type": "stately-agent",
+    "source": "Consolidated from the Burr tool-calling and LangGraph tool-calling-progress demos",
+    "url": null
+  },
+  "comparison": {
+    "targets": ["Burr", "LangGraph"],
+    "purpose": "Model selects a tool via structured output; typed tool actors (calculator, unit converter, sample-data lookup) genuinely execute; progress is surfaced via onTransition; a final request formats the result."
+  }
+}

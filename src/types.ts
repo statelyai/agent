@@ -1,498 +1,186 @@
-import {
-  ActorLogic,
-  ActorRefLike,
-  AnyEventObject,
-  AnyStateMachine,
-  EventFrom,
-  SnapshotFrom,
-  StateValue,
-  TransitionSnapshot,
-  Values,
-} from 'xstate';
-import {
-  CoreMessage,
-  generateText,
-  GenerateTextResult,
-  LanguageModel,
-  streamText,
-} from 'ai';
-import { ZodContextMapping, ZodEventMapping } from './schemas';
-import { TypeOf } from 'zod';
-import { Expert } from './expert';
-
-export type GenerateTextOptions = Parameters<typeof generateText>[0];
-
-export type StreamTextOptions = Parameters<typeof streamText>[0];
-
-export type CostFunction<TExpert extends AnyExpert> = (
-  path: ExpertPath<TExpert>
-) => number;
-
-export type ExpertDecideInput<TExpert extends AnyExpert> = Omit<
-  ExpertGenerateTextOptions,
-  'model' | 'prompt' | 'tools' | 'toolChoice'
-> & {
-  /**
-   * The parent decision that this decision is a part of.
-   */
-  decisionId?: string;
-  /**
-   * The currently observed state.
-   */
-  state: ObservedState<TExpert>;
-  /**
-   * The context to provide in the prompt to the expert. This overrides the `state.context`.
-   */
-  context?: Record<string, any>;
-  /**
-   * The goal for the expert to accomplish.
-   * The expert will make a decision based on this goal.
-   */
-  goal: string;
-  /**
-   * The events that the expert can trigger. This is a mapping of
-   * event types to Zod event schemas.
-   */
-  events?: ZodEventMapping;
-  allowedEvents?: Array<EventFromExpert<TExpert>['type']>;
-  /**
-   * The state machine that represents the environment the expert
-   * is interacting with.
-   */
-  machine?: AnyStateMachine;
-
-  /**
-   * A function that calculates the total cost of the path to the goal state.
-   */
-  costFunction?: CostFunction<TExpert>;
-
-  /**
-   * The maximum number of attempts to make a decision.
-   * Defaults to 2.
-   */
-  maxAttempts?: number;
-  /**
-   * The policy to use for making a decision.
-   */
-  policy?: ExpertPolicy<TExpert>;
-  model?: LanguageModel;
-  /**
-   * The previous relevant feedback from the expert.
-   */
-  feedback?: ExpertFeedback[];
-  /**
-   * The previous relevant observations from the expert.
-   */
-  observations?: ExpertObservation<any>[];
-  /**
-   * The previous relevant decisions from the expert.
-   */
-  decisions?: ExpertDecision<TExpert>[];
-  /**
-   * The previous relevant insights from the expert.
-   */
-  insights?: ExpertInsight[];
-  toolChoice?: 'auto' | 'none' | 'required';
-} & BaseInput;
-
-export type ExpertStep<TExpert extends AnyExpert> = {
-  /** The event to take */
-  event: EventFromExpert<TExpert>;
-  /** The next expected state after taking the event */
-  state: ObservedState<TExpert> | null;
-};
-
-export type ExpertPath<TExpert extends AnyExpert> = {
-  /** The expected ending state of the path */
-  state: ObservedState<TExpert> | null;
-  /** The steps to reach the ending state */
-  steps: Array<ExpertStep<TExpert>>;
-  weight?: number;
-};
-
-export interface ExpertDecisionInput<TExpert extends AnyExpert>
-  extends BaseInput {
-  goal: string;
-  decisionId?: string | null;
-  policy?: string | null;
-  goalState?: ObservedState<TExpert> | null;
-  nextEvent?: EventFromExpert<TExpert> | null;
-  paths?: ExpertPath<TExpert>[];
-}
-
-export interface ExpertDecision<TExpert extends AnyExpert = AnyExpert>
-  extends BaseProperties {
-  /**
-   * The parent decision that this decision is a part of.
-   */
-  decisionId: string | null;
-  /**
-   * The policy used to generate the decision
-   */
-  policy: string | null;
-  goal: string;
-  /**
-   * The ending state of the decision.
-   */
-  goalState: ObservedState<TExpert> | null;
-  /**
-   * The next event that the expert decided needs to occur to achieve the `goal`.
-   *
-   * This next event is chosen from the
-   */
-  nextEvent: EventFromExpert<TExpert> | null;
-  /**
-   * The paths that the expert can take to achieve the goal.
-   */
-  paths: ExpertPath<TExpert>[];
-}
-
-export interface TransitionData {
-  eventType: string;
-  description?: string;
-  guard?: { type: string };
-  target?: any;
-}
-
-export type PromptTemplate<TExpert extends AnyExpert> = (data: {
-  goal: string;
-  /**
-   * The observed state
-   */
-  stateValue?: any;
-  context?: Record<string, any>;
-  /**
-   * The state machine model of the observed environment
-   */
-  machine?: unknown;
-  /**
-   * The potential next transitions that can be taken
-   * in the state machine
-   */
-  transitions?: TransitionData[];
-  /**
-   * Relevant past observations
-   */
-  observations?: ExpertObservation<any>[]; // TODO
-  /**
-   * Relevant feedback
-   */
-  feedback?: ExpertFeedback[];
-  /**
-   * Relevant messages
-   */
-  messages?: ExpertMessage[];
-  /**
-   * Relevant past decisions
-   */
-  decisions?: ExpertDecision<TExpert>[];
-  /**
-   * Relevant past insights
-   */
-  insights?: ExpertInsight[];
-}) => string;
-
-export type ExpertPolicy<TExpert extends AnyExpert = AnyExpert> = (
-  expert: TExpert,
-  input: ExpertDecideInput<TExpert>
-) => Promise<ExpertDecision<TExpert> | undefined>;
-
-export type ExpertInteractInput<T extends AnyExpert> = Omit<
-  ExpertDecideInput<T>,
-  'state'
-> & {
-  state?: never;
-};
-
-export interface ExpertFeedback extends BaseProperties {
-  decisionId: string;
-  reward: number;
-  comment: string | undefined;
-  attributes: Record<string, any>;
-}
-
-interface BaseProperties {
-  id: string;
-  episodeId: string;
-  timestamp: number;
-}
-
-type BaseInput = Partial<BaseProperties>;
-
-export interface ExpertFeedbackInput extends BaseInput {
-  /**
-   * The decision ID that this feedback is relevant for.
-   */
-  decisionId: string;
-  reward: number;
-  comment?: string;
-  attributes?: Record<string, any>;
-}
-
-export type ExpertMessage = BaseProperties &
-  CoreMessage & {
-    /**
-     * The parent decision that this message is a part of.
-     */
-    decisionId?: string;
-    /**
-     * The response ID of the message, which references
-     * which message this message is responding to, if any.
-     */
-    responseId?: string;
-    result?: GenerateTextResult<any, any>;
-  };
-
-type JSONObject = {
-  [key: string]: JSONValue;
-};
-type JSONArray = JSONValue[];
-type JSONValue = null | string | number | boolean | JSONObject | JSONArray;
-
-type LanguageModelV1ProviderMetadata = Record<
-  string,
-  Record<string, JSONValue>
->;
-
-export interface LanguageModelV1TextPart {
-  type: 'text';
-  /**
-The text content.
-   */
-  text: string;
-  /**
-   * Additional provider-specific metadata. They are passed through
-   * to the provider from the AI SDK and enable provider-specific
-   * functionality that can be fully encapsulated in the provider.
-   */
-  providerMetadata?: LanguageModelV1ProviderMetadata;
-}
-
-export interface LanguageModelV1ToolCallPart {
-  type: 'tool-call';
-  /**
-ID of the tool call. This ID is used to match the tool call with the tool result.
+/**
+ * The [Standard Schema](https://standardschema.dev) interface. Every schema
+ * this library accepts (context, events, input/output, tool schemas, …) is a
+ * `StandardSchemaV1` — Zod, Valibot, ArkType, and hand-written validators all
+ * implement it, so the library never depends on a specific validation
+ * library. JSON workflow configs use a caller-provided {@link SchemaCompiler}.
  */
-  toolCallId: string;
-  /**
-Name of the tool that is being called.
- */
-  toolName: string;
-  /**
-Arguments of the tool call. This is a JSON-serializable object that matches the tool's input schema.
-   */
-  args: unknown;
-  /**
-   * Additional provider-specific metadata. They are passed through
-   * to the provider from the AI SDK and enable provider-specific
-   * functionality that can be fully encapsulated in the provider.
-   */
-  providerMetadata?: LanguageModelV1ProviderMetadata;
-}
-
-export type ExpertMessageInput = CoreMessage & {
-  timestamp?: number;
-  id?: string;
-  /**
-   * The response ID of the message, which references
-   * which message this message is responding to, if any.
-   */
-  responseId?: string;
-  result?: GenerateTextResult<any, any>;
-};
-
-export interface ExpertObservation<TActor extends ActorRefLike> {
-  id: string;
-  episodeId: string;
-  /**
-   * The decision that this observation is relevant for
-   */
-  decisionId?: string | undefined;
-  goal?: string;
-  prevState: SnapshotFrom<TActor> | undefined;
-  event: EventFrom<TActor> | undefined;
-  state: SnapshotFrom<TActor>;
-  // machineHash: string | undefined;
-  timestamp: number;
-}
-
-export interface ExpertObservationInput<TExpert extends AnyExpert>
-  extends BaseInput {
-  state: ObservedState<TExpert>;
-  /**
-   * The expert decision that the observation is relevant for
-   */
-  decisionId?: string | undefined;
-  prevState?: ObservedState<TExpert>;
-  event?: AnyEventObject;
-  goal?: string | undefined;
-}
-
-export type ExpertEmittedEvent<TExpert extends AnyExpert> =
-  | {
-      type: 'feedback';
-      feedback: ExpertFeedback;
-    }
-  | {
-      type: 'observation';
-      observation: ExpertObservation<any>; // TODO
-    }
-  | {
-      type: 'message';
-      message: ExpertMessage;
-    }
-  | {
-      type: 'decision';
-      decision: ExpertDecision<TExpert>;
-    }
-  | {
-      type: 'insight';
-      insight: ExpertInsight;
+export interface StandardSchemaV1<Input = unknown, Output = Input> {
+  readonly "~standard": {
+    readonly version: 1;
+    readonly vendor: string;
+    readonly validate: (value: unknown) => any;
+    readonly types?: { readonly input: Input; readonly output: Output };
+    readonly jsonSchema?: {
+      readonly input?: (...args: any[]) => unknown;
+      readonly output?: (...args: any[]) => unknown;
     };
+  };
+}
 
-export type ExpertLogic<TExpert extends AnyExpert> = ActorLogic<
-  TransitionSnapshot<ExpertMemoryContext<TExpert>>,
-  | {
-      type: 'expert.feedback';
-      feedback: ExpertFeedback;
-    }
-  | {
-      type: 'expert.observe';
-      observation: ExpertObservation<any>; // TODO
-    }
-  | {
-      type: 'expert.message';
-      message: ExpertMessage;
-    }
-  | {
-      type: 'expert.decision';
-      decision: ExpertDecision<TExpert>;
-    }
-  | {
-      type: 'expert.insight';
-      insight: ExpertInsight;
-    },
-  any, // TODO: input
-  any,
-  ExpertEmittedEvent<TExpert>
->;
+/** The validated output type of a {@link StandardSchemaV1}. */
+export type InferOutput<T> = T extends StandardSchemaV1<any, infer O> ? O : never;
 
-export type EventsFromZodEventMapping<TEventSchemas extends ZodEventMapping> =
-  Compute<
-    Values<{
-      [K in keyof TEventSchemas & string]: {
-        type: K;
-      } & TypeOf<TEventSchemas[K]>;
-    }>
-  >;
+/** An event schema's output, widened to `unknown` when it validates an empty object (no payload fields). */
+export type EventPayload<T> = T extends Record<string, never> ? unknown : T;
 
-export type ContextFromZodContextMapping<
-  TContextSchema extends ZodContextMapping
-> = {
-  [K in keyof TContextSchema & string]: TypeOf<TContextSchema[K]>;
+/**
+ * The discriminated event union derived from a machine's event schema map
+ * (e.g. `{ ASK: z.object({ question: z.string() }) }` → `{ type: 'ASK';
+ * question: string }`). Used internally by {@link createAgentSchemas} and
+ * `setupAgent` to type a machine's `TEvent`.
+ */
+export type EventUnion<T extends Record<string, StandardSchemaV1>> = {
+  [K in keyof T & string]: { type: K } & EventPayload<InferOutput<T[K]>>;
+}[keyof T & string];
+
+/** Raw binary or string content for an {@link ImagePart}/{@link FilePart}. */
+export type DataContent = string | Uint8Array | ArrayBuffer;
+/** Provider-specific passthrough options, keyed by provider name (e.g. `{ anthropic: { cacheControl: ... } }`). */
+export type ProviderOptions = Record<string, Record<string, unknown>>;
+
+/** A plain-text segment of a multi-part {@link AgentMessage} content array. */
+export interface TextPart {
+  type: "text";
+  text: string;
+  providerOptions?: ProviderOptions;
+}
+
+/**
+ * Binary (`Uint8Array`/`ArrayBuffer`) and `URL` values are not
+ * JSON-serializable. Machines that persist snapshots/event logs should use
+ * URL strings or base64-encoded strings in `image` instead.
+ */
+export interface ImagePart {
+  type: "image";
+  image: DataContent | URL;
+  mediaType?: string;
+  providerOptions?: ProviderOptions;
+}
+
+/**
+ * Binary (`Uint8Array`/`ArrayBuffer`) and `URL` values are not
+ * JSON-serializable. Machines that persist snapshots/event logs should use
+ * URL strings or base64-encoded strings in `data` instead.
+ */
+export interface FilePart {
+  type: "file";
+  data: DataContent | URL;
+  mediaType: string;
+  filename?: string;
+  providerOptions?: ProviderOptions;
+}
+
+/** A model-issued tool call, as an {@link AssistantMessage} content part. */
+export interface ToolCallPart {
+  type: "tool-call";
+  toolCallId: string;
+  toolName: string;
+  input: unknown;
+  providerOptions?: ProviderOptions;
+}
+
+/** The result payload of a {@link ToolResultPart}, discriminated by shape (plain text/JSON, or an error variant of either). */
+export type ToolResultOutput =
+  | { type: "text"; value: string }
+  | { type: "json"; value: unknown }
+  | { type: "error-text"; value: string }
+  | { type: "error-json"; value: unknown }
+  | { type: "content"; value: Array<TextPart | ImagePart> };
+
+/** A tool's result, as a {@link ToolMessage} content part. */
+export interface ToolResultPart {
+  type: "tool-result";
+  toolCallId: string;
+  toolName: string;
+  output: ToolResultOutput;
+  providerOptions?: ProviderOptions;
+}
+
+/** A system-role {@link AgentMessage}. Create with {@link systemMessage}. */
+export type SystemMessage = {
+  role: "system";
+  content: string;
+  providerOptions?: ProviderOptions;
+};
+/** A user-role {@link AgentMessage}, optionally multimodal. Create with {@link userMessage}. */
+export type UserMessage = {
+  role: "user";
+  content: string | Array<TextPart | ImagePart | FilePart>;
+  providerOptions?: ProviderOptions;
+};
+/** An assistant-role {@link AgentMessage}, which may carry tool calls/results inline. Create with {@link assistantMessage}. */
+export type AssistantMessage = {
+  role: "assistant";
+  content: string | Array<TextPart | FilePart | ToolCallPart | ToolResultPart>;
+  providerOptions?: ProviderOptions;
+};
+/** A tool-role {@link AgentMessage} carrying one or more tool results. Create with {@link toolMessage}. */
+export type ToolMessage = {
+  role: "tool";
+  content: Array<ToolResultPart>;
+  providerOptions?: ProviderOptions;
 };
 
-export type AnyExpert = Expert<any, any>;
+/**
+ * A single conversation turn, in this library's portable message model
+ * (structurally compatible with the AI SDK's `ModelMessage`). Stored as
+ * plain context state — see {@link appendMessages} — and passed to text/
+ * decision requests via `messages`. Validate a context field with
+ * {@link messagesSchema}.
+ */
+export type AgentMessage = SystemMessage | UserMessage | AssistantMessage | ToolMessage;
 
-export type FromExpert<T> = T | ((expert: AnyExpert) => T | Promise<T>);
-
-export type CommonTextOptions = {
-  prompt: FromExpert<string>;
-  model?: LanguageModel;
-  messages?: CoreMessage[];
-  template?: PromptTemplate<any>;
-  context?: Record<string, any>;
-};
-
-export type ExpertGenerateTextOptions = Omit<
-  GenerateTextOptions,
-  'model' | 'prompt' | 'messages'
-> &
-  CommonTextOptions;
-
-export type ExpertStreamTextOptions = Omit<
-  StreamTextOptions,
-  'model' | 'prompt' | 'messages'
-> &
-  CommonTextOptions;
-
-export interface ObservedState<TExpert extends AnyExpert> {
-  /**
-   * The current state value of the state machine, e.g.
-   * `"loading"` or `"processing"` or `"ready"`
-   */
-  value: StateValue;
-  /**
-   * Additional contextual data related to the current state
-   */
-  context?: ContextFromExpert<TExpert>;
+/** A tool exposed to a text request, described for both the model and (optionally) host execution. */
+export interface AgentToolDescriptor {
+  description?: string;
+  inputSchema?: StandardSchemaV1;
+  outputSchema?: StandardSchemaV1;
+  execute?: AgentToolExecute;
+  [key: string]: unknown;
 }
 
-export type ObservedStateFrom<TActor extends ActorRefLike> = Pick<
-  SnapshotFrom<TActor>,
-  'value' | 'context'
->;
+/** A bare tool implementation (no description/schema) — shorthand for {@link AgentToolDescriptor.execute}. */
+export type AgentToolExecute = (input?: unknown) => unknown | Promise<unknown>;
 
-export type ExpertMemoryContext<TExpert extends AnyExpert> = {
-  observations: ExpertObservation<any>[]; // TODO
-  messages: ExpertMessage[];
-  decisions: ExpertDecision<TExpert>[];
-  feedback: ExpertFeedback[];
-  insights: ExpertInsight[];
-};
+/** A tool entry in {@link AgentTools}: either a full descriptor or a bare execute function. */
+export type AgentTool = AgentToolDescriptor | AgentToolExecute;
 
-export type Compute<A extends any> = { [K in keyof A]: A[K] } & unknown;
+/** The `tools` map passed on an {@link AgentTextRequest}, keyed by tool name. */
+export type AgentTools = Record<string, AgentTool | undefined>;
 
-export type MaybePromise<T> = T | Promise<T>;
+/** How a text request's model should select among its `tools`; `{ type: 'tool', name }` forces one specific tool. */
+export type AgentToolChoice = "auto" | "none" | "required" | { type: "tool"; name: string };
 
-export type EventFromExpert<T extends AnyExpert> = T extends Expert<
-  infer _,
-  infer TEventSchemas
->
-  ? EventsFromZodEventMapping<TEventSchemas>
+/** The event chosen and raised by a decision. */
+export type ChosenEvent = { type: string; [key: string]: unknown };
+
+// The wildcard patterns a dotted event-type union admits: 'a.b.c' yields 'a.*' | 'a.b.*'.
+type EventWildcardsOf<TEvent extends string> = TEvent extends `${infer Head}.${infer Rest}`
+  ? `${Head}.*` | `${Head}.${EventWildcardsOf<Rest>}`
   : never;
 
-export type TypesFromExpert<T extends AnyExpert> = T extends Expert<
-  infer TContextSchema,
-  infer TEventSchema
->
-  ? {
-      context: ContextFromZodContextMapping<TContextSchema>;
-      events: EventsFromZodEventMapping<TEventSchema>;
-    }
-  : never;
+/** One `allowedEvents` entry: an exact declared event type, `'*'` (every event), or a `'prefix.*'` wildcard derived from the declared dotted event types. */
+export type AllowedEventPattern<TEvent extends string = string> =
+  | TEvent
+  | "*"
+  | EventWildcardsOf<TEvent>;
 
-export type ContextFromExpert<T extends AnyExpert> = T extends Expert<
-  infer TContextSchema,
-  infer _TEventSchema
->
-  ? ContextFromZodContextMapping<TContextSchema>
-  : never;
-
-export interface StorageAdapter<TExpert extends AnyExpert, TQuery> {
-  addObservation(
-    observationInput: ExpertObservationInput<TExpert>
-  ): Promise<ExpertObservation<any>>;
-  getObservations(queryObject?: TQuery): Promise<ExpertObservation<any>[]>;
-  addFeedback(feedbackInput: ExpertFeedbackInput): Promise<ExpertFeedback>;
-  getFeedback(queryObject?: TQuery): Promise<ExpertFeedback[]>;
-  addMessage(messageInput: ExpertMessageInput): Promise<ExpertMessage>;
-  getMessages(queryObject?: TQuery): Promise<ExpertMessage[]>;
-  addDecision(
-    decisionInput: ExpertDecideInput<TExpert>
-  ): Promise<ExpertDecision<TExpert>>;
-  getDecisions(queryObject?: TQuery): Promise<ExpertDecision<TExpert>[]>;
-}
-
-export type StorageAdapterQuery<T extends StorageAdapter<any, any>> =
-  T extends StorageAdapter<infer _, infer TQuery> ? TQuery : never;
-
-export interface ExpertInsightInput extends BaseInput {
-  observationId: string;
-  attributes: Record<string, any>;
-}
-
-export interface ExpertInsight extends BaseProperties {
-  observationId: string;
-  attributes: Record<string, any>;
-}
+/**
+ * Candidate event types for a decision or plan (declared on the
+ * `agent.decide`/`agent.plan` builtins' `allowedEvents` input). A single
+ * entry or an array; entries are exact event types or wildcard patterns
+ * (`'*'` for every event, `'todo.*'` for a dotted namespace). The effective
+ * candidate set offered to the model is this declaration **intersected with
+ * the snapshot's currently-legal events** (via `getAcceptedEvents`) —
+ * omitting `allowedEvents` means "all currently-legal events." A resolver
+ * function can therefore only ever narrow, never widen, the real surface.
+ * Wildcards expand against the live snapshot, so they need a snapshot-aware
+ * host (`runAgent` or the step path).
+ */
+export type AllowedEvents<TEvent extends string = string, TInput = unknown> =
+  | AllowedEventPattern<TEvent>
+  | readonly AllowedEventPattern<TEvent>[]
+  | ((args: {
+      input: TInput;
+    }) => AllowedEventPattern<TEvent> | readonly AllowedEventPattern<TEvent>[]);

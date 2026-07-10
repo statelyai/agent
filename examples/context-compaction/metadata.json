@@ -1,0 +1,14 @@
+{
+  "name": "context-compaction",
+  "title": "Context Compaction",
+  "kind": "agent-workflow",
+  "origin": {
+    "type": "stately-agent",
+    "source": "Ported in spirit from v1 summary.ts (next branch)",
+    "url": null
+  },
+  "comparison": {
+    "targets": ["LangGraph", "Vercel AI SDK"],
+    "purpose": "Context-window management: a chat loop that compacts its own history. When the message array exceeds a threshold, a dedicated `compacting` state summarizes the stale messages (folding in the prior summary) and keeps only the last N turns, then feeds the summary back as context. Compaction is an explicit, inspectable machine state rather than hidden middleware."
+  }
+}

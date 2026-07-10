@@ -1,0 +1,14 @@
+{
+  "name": "subflows",
+  "title": "Subflows",
+  "kind": "pattern",
+  "origin": {
+    "type": "pattern",
+    "source": "Subflow / nested-graph composition pattern",
+    "url": "https://github.com/langchain-ai/langgraphjs/tree/main/examples"
+  },
+  "comparison": {
+    "targets": ["subflows", "nested-graphs"],
+    "purpose": "A parent agent invokes a whole child agent machine as one actor, with typed input/output mapping and the child's request bound via .provide."
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "human-in-the-loop",
+  "title": "Human in the Loop",
+  "kind": "pattern",
+  "origin": {
+    "type": "stately-agent",
+    "source": "Consolidated from the LangGraph human-in-the-loop and snapshot-persistence demos",
+    "url": null
+  },
+  "comparison": {
+    "targets": ["LangGraph"],
+    "purpose": "Idle review state with typed meta.interaction, REJECT-with-reason redraft loop, and a JSON snapshot round-trip across two runAgent calls."
+  }
+}

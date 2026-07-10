@@ -1,0 +1,14 @@
+{
+  "name": "plan-and-execute",
+  "title": "Plan and Execute",
+  "kind": "pattern",
+  "origin": {
+    "type": "pattern",
+    "source": "Plan-and-execute / ReWOO agent pattern",
+    "url": "https://github.com/langchain-ai/langgraphjs/tree/main/examples"
+  },
+  "comparison": {
+    "targets": ["plan-and-execute", "ReWOO"],
+    "purpose": "A planner produces a typed step list, an explicit index loop gathers per-step evidence, and a solver composes the answer from the evidence map."
+  }
+}

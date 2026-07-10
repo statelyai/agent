@@ -1,0 +1,14 @@
+{
+  "name": "rag",
+  "title": "Retrieval-Augmented Generation",
+  "kind": "pattern",
+  "origin": {
+    "type": "stately-agent",
+    "source": "Consolidated from the LangGraph RAG and Burr conversational-RAG demos",
+    "url": null
+  },
+  "comparison": {
+    "targets": ["LangGraph", "Burr"],
+    "purpose": "Retrieval as a typed plain actor (honest keyword scoring over a sample corpus), a grounded answer request, and conversational memory accumulating in machine context."
+  }
+}
