@@ -118,6 +118,8 @@ The machine never talks to a model. It emits typed requests; a host resolves the
 - **Edge/durable runtimes:** inside a Cloudflare Durable Object ([examples/cloudflare-agent-host](examples/cloudflare-agent-host)) and against Workers AI ([examples/cloudflare-workers-ai-host](examples/cloudflare-workers-ai-host)).
 - **Anything else:** a raw `fetch` works; the contract is plain objects in, `{ output }` out. See [hosts](https://stately.ai/docs/agents).
 
+Even the executor contract is optional: at the step level ([docs/steps.md](docs/steps.md)) a request is plain data you can resolve with any code — no adapter at all.
+
 Embedding instead of hosting? A run-to-done machine drops into a normal tool call as-is, because `runAgent` is just an awaitable function:
 
 ```ts

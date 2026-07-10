@@ -101,6 +101,19 @@ See [examples/ai-sdk-game-host/index.ts](../examples/ai-sdk-game-host/index.ts) 
 
 > **Note:** `executeAgentRequest` is text-only; passing a `kind: 'decision'` request throws. A decision has no output value to feed into `resolveAgentStep`; it produces a chosen event applied with `transitionAgentStep`.
 
+### The floor: no executors at all
+
+`executeAgentRequest` and `resolveDecision` are conveniences, not requirements. A `kind: 'text'` request carries everything needed (`model` ref, `system`, `prompt`, `messages`, `tools`, `outputSchema`, `maxOutputTokens`); call any API yourself and feed the result back:
+
+```ts
+const text = await yourOwnFetch(request);
+step = resolveAgentStep(machine, step, request, text);
+```
+
+For decisions, `request.events` carries the candidates (`type`, `toolName`, payload `inputSchema`). Pick an event however you like (your own model call, a rules engine, a human) and apply it with `transitionAgentStep`; guards still reject illegal events. `resolveDecision` remains available a la carte when you want its validate-and-retry loop (`canTake: (e) => step.snapshot.can(e)`).
+
+The full ladder: `runAgent` (owns the loop), `resolveAgentRequests` (one call per iteration), raw step helpers with executors, raw step helpers with your own code, the machine as pure oracle.
+
 ## The AgentStep shape
 
 Each `step` is a plain, inspectable object:
