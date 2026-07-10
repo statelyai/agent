@@ -555,13 +555,55 @@ export interface AgentRequestExecutorInfo {
   signal?: AbortSignal;
 }
 
-/** Host implementation of one text call (`generateText` or `streamText`) — resolves a lowered {@link AgentTextRequest} to an `{ output }` envelope (see {@link AgentRequestExecutorResult}), unwrapped by {@link normalizeGeneratorResult}. */
+/**
+ * A raw Vercel AI SDK `generateText` result shape: resolves `{ text }` (a
+ * string or a promise of one) instead of the `{ output }`
+ * {@link AgentRequestExecutorResult} envelope. Admitted directly as an executor
+ * return type so `ai`'s `generateText` passes to `runAgent`/executors without a
+ * cast — {@link normalizeGeneratorResult} unwraps `text` at runtime (text-only;
+ * structured output is best-effort JSON parsing against the request's
+ * `outputSchema`). Extra fields (`content`, `usage`, …) are ignored.
+ */
+export type AiSdkShapedTextResult = {
+  text: string | PromiseLike<string>;
+  [key: string]: unknown;
+};
+
+/**
+ * A raw Vercel AI SDK `streamText` result shape: exposes a `textStream` async
+ * iterable of string chunks (and, optionally, a `text` promise for the final
+ * text) instead of the `{ output }` {@link AgentRequestExecutorResult} envelope.
+ * Admitted directly as an executor return type so `ai`'s `streamText` passes to
+ * `runAgent`/executors without a cast — {@link normalizeGeneratorResult}
+ * iterates `textStream`, forwarding chunks, then resolves the final text
+ * (text-only; structured output is best-effort). Extra fields are ignored.
+ */
+export type AiSdkShapedStreamResult = {
+  textStream: AsyncIterable<string>;
+  text?: PromiseLike<string>;
+  [key: string]: unknown;
+};
+
+/**
+ * Host implementation of one text call (`generateText` or `streamText`) —
+ * resolves a lowered {@link AgentTextRequest} to an `{ output }` envelope (see
+ * {@link AgentRequestExecutorResult}), unwrapped by
+ * {@link normalizeGeneratorResult}. The return type is widened to also admit the
+ * raw Vercel AI SDK shapes ({@link AiSdkShapedTextResult} /
+ * {@link AiSdkShapedStreamResult}) so `ai`'s own `generateText`/`streamText`
+ * pass through without a cast; `normalizeGeneratorResult` checks for `{ output }`
+ * first, then falls back to those shapes at runtime.
+ */
 export type AgentRequestExecutor<
   TResult extends AgentRequestExecutorResult = AgentRequestExecutorResult,
 > = (
   request: AgentTextRequest & { tools: AgentTools },
   info?: AgentRequestExecutorInfo,
-) => PromiseLike<TResult> | TResult;
+) =>
+  | PromiseLike<TResult | AiSdkShapedTextResult | AiSdkShapedStreamResult>
+  | TResult
+  | AiSdkShapedTextResult
+  | AiSdkShapedStreamResult;
 
 /**
  * The full set of host executors a machine's agent actors are resolved

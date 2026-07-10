@@ -5,15 +5,14 @@ import {
   createTextLogic,
   runAgent,
   setupAgent,
-  type AgentRequestExecutor,
   type AgentTextRequest,
   type AgentTools,
 } from "./index.js";
 
-// Raw AI SDK functions don't structurally match `AgentRequestExecutor` (they
-// resolve `{ text }`/`{ textStream }`, not `{ output }`) — a caller passing raw
-// `ai` functions casts them. These fakes stand in for that; `bless` is that cast.
-const bless = <T>(fn: T): AgentRequestExecutor => fn as unknown as AgentRequestExecutor;
+// Raw AI SDK functions pass to `runAgent`'s `generateText`/`streamText`
+// directly: their `{ text }`/`{ textStream }` return shapes are admitted by
+// `AgentRequestExecutor`'s widened return type — no cast needed. These fakes
+// stand in for `ai`'s own functions.
 
 // Fake AI-SDK-shaped executors (no `ai` import). generateText resolves a
 // GenerateTextResult-like `{ text, content }`; streamText resolves a
@@ -58,7 +57,7 @@ describe("blessed AI SDK executors", () => {
 
     const result = await runAgent(machine, {
       input: { prompt: "hi" },
-      generateText: bless(generateText),
+      generateText,
     });
     expect(result.status).toBe("done");
     expect(result.status === "done" ? result.output : undefined).toEqual({ result: "hello" });
@@ -106,7 +105,7 @@ describe("blessed AI SDK executors", () => {
       input: { prompt: "hi" },
       // generateText required by the type but unused for this stream-only machine.
       generateText: async () => ({ output: "" }),
-      streamText: bless(streamText),
+      streamText,
       onChunk: (chunk) => chunks.push(chunk),
     });
 
@@ -124,7 +123,7 @@ describe("blessed AI SDK executors", () => {
 
     const result = await runAgent(machine, {
       input: { prompt: "q" },
-      generateText: bless(generateText),
+      generateText,
     });
     expect(result.status).toBe("done");
     expect(result.status === "done" ? result.output : undefined).toEqual({
@@ -141,7 +140,7 @@ describe("blessed AI SDK executors", () => {
 
     const result = await runAgent(machine, {
       input: { prompt: "q" },
-      generateText: bless(generateText),
+      generateText,
     });
     expect(result.status).toBe("error");
     expect(String(result.status === "error" ? result.error : "")).toMatch(
@@ -156,7 +155,7 @@ describe("blessed AI SDK executors", () => {
 
     const result = await runAgent(machine, {
       input: { prompt: "q" },
-      generateText: bless(generateText),
+      generateText,
     });
     expect(result.status).toBe("error");
     expect(String(result.status === "error" ? result.error : "")).toMatch(

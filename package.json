@@ -27,6 +27,16 @@
         "default": "./dist/ai-sdk.cjs"
       }
     },
+    "./openai-compat": {
+      "import": {
+        "types": "./dist/openai-compat.d.mts",
+        "default": "./dist/openai-compat.mjs"
+      },
+      "require": {
+        "types": "./dist/openai-compat.d.cts",
+        "default": "./dist/openai-compat.cjs"
+      }
+    },
     "./agent-workflow.json": "./schemas/agent-workflow.json"
   },
   "files": [

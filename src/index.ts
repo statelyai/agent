@@ -37,6 +37,8 @@ export type {
   AgentModelMap,
   AgentModelRef,
   AgentTextRequest,
+  AiSdkShapedStreamResult,
+  AiSdkShapedTextResult,
   AgentRequestExecutor,
   AgentRequestExecutorInfo,
   AgentRequestExecutorResult,

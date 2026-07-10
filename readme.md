@@ -112,7 +112,8 @@ if (result.status === 'idle') {
 
 The machine never talks to a model. It emits typed requests; a host resolves them with an executor set of up to three plain functions (`generateText`, `streamText`, `decide`) that return `{ output }`:
 
-- **Vercel AI SDK:** `createAiSdkExecutors({ models })` from `@statelyai/agent/ai-sdk` is the one shipped adapter.
+- **Vercel AI SDK:** `createAiSdkExecutors({ models })` from `@statelyai/agent/ai-sdk` is one shipped adapter.
+- **OpenAI-compatible wire format:** `createOpenAiCompatExecutors({ baseUrl })` from `@statelyai/agent/openai-compat` is a second shipped adapter — a complete `generateText`/`streamText`/`decide` set over raw `fetch`, zero dependencies, for any Chat Completions endpoint (Groq, Together, Ollama, vLLM, OpenRouter, LM Studio, OpenAI).
 - **Raw SDKs:** the same contract hand-rolled against the `openai` package ([examples/openai-sdk-host](examples/openai-sdk-host)) and `@anthropic-ai/sdk` ([examples/anthropic-sdk-host](examples/anthropic-sdk-host)).
 - **Edge/durable runtimes:** inside a Cloudflare Durable Object ([examples/cloudflare-agent-host](examples/cloudflare-agent-host)) and against Workers AI ([examples/cloudflare-workers-ai-host](examples/cloudflare-workers-ai-host)).
 - **Anything else:** a raw `fetch` works; the contract is plain objects in, `{ output }` out. See [hosts](https://stately.ai/docs/agents).

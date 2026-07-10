@@ -265,8 +265,10 @@ An `AgentTextRequest` is spread-compatible with the AI SDK's call options, and t
 
 Two caveats:
 
-- **Structured output is best-effort.** For a request with an `outputSchema`, the raw text is `JSON.parse`d and validated; a parse failure throws. For reliable structured output, use `createAiSdkExecutors` from `@statelyai/agent/ai-sdk`.
-- **`decide` needs an adapter.** The tool-per-event mapping lives in `createAiSdkExecutors`; there is no raw AI SDK function for it.
+- **Structured output is best-effort.** For a request with an `outputSchema`, the raw text is `JSON.parse`d and validated; a parse failure throws. For reliable structured output, use `createAiSdkExecutors` from `@statelyai/agent/ai-sdk` or `createOpenAiCompatExecutors` from `@statelyai/agent/openai-compat`.
+- **`decide` needs an adapter.** The tool-per-event mapping lives in `createAiSdkExecutors` (and `createOpenAiCompatExecutors`); there is no raw AI SDK function for it.
+
+For any OpenAI-compatible Chat Completions endpoint (Groq, Together, Ollama, vLLM, OpenRouter, LM Studio, OpenAI itself), `createOpenAiCompatExecutors({ baseUrl, apiKey?, models? })` from `@statelyai/agent/openai-compat` is a second shipped adapter — a complete `{ generateText, streamText, decide }` set over raw `fetch` with zero dependencies (pass a `fetch` override for Workers or tests).
 
 ## Low-level primitive
 

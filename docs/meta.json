@@ -10,6 +10,7 @@
     "context-compaction",
     "human-in-the-loop",
     "hosts",
+    "interop",
     "steps",
     "machines-as-data",
     "multi-agent",
