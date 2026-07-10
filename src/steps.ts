@@ -159,7 +159,7 @@ export function getAgentRequestsWith(
  *
  * @internal
  */
-export function doneEvent(
+function doneEvent(
   request: Pick<AgentRequest, "id"> | string,
   output: unknown,
 ): { type: `xstate.done.actor.${string}`; output: unknown } {
