@@ -18,7 +18,6 @@ Everything here is **additive**: none of it blocks the alpha, and all of it bene
 ## Runtime options
 
 - **`hostContext` on `runAgent`.** Host-owned values (sessions, auth/billing ids) threaded to executors and actors without touching machine context. The documented patterns (see [host actors](host-actors.md)) cover this today via closures and input mapping; the option ships only if those prove insufficient in practice.
-- **Automatic nested-machine executor binding.** `runAgent` binds the top-level machine's sources; a child machine's requests must be bound via `.provide(...)`. The alpha adds a loud bind-time error when a child request is unbound; transitive auto-binding is the follow-up.
 - **Dynamic fan-out helper.** Declarative dynamic parallelism. Today: `Promise.all` over host actors inside one invoke (see `examples/ai-sdk-orchestrator-worker`). A `fanOut(...)` helper plus per-branch progress events ships if the manual pattern proves too repetitive.
 
 ## Ecosystem

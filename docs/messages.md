@@ -50,9 +50,9 @@ userMessage([
 Messages are plain context state. Declare a `messages` field validated by `messagesSchema`, and grow it over transitions:
 
 ```ts
-import { createAgentSchemas, messagesSchema } from '@statelyai/agent';
+import { messagesSchema, setupAgent } from '@statelyai/agent';
 
-const schemas = createAgentSchemas({
+const agentSetup = setupAgent({
   context: z.object({
     prompt: z.string(),
     messages: messagesSchema,

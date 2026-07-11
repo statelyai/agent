@@ -467,6 +467,13 @@ export interface AgentDecisionRequest {
   seed?: number;
   stopSequences?: string[];
   metadata?: Record<string, unknown>;
+  /**
+   * Abort signal for the underlying model call, threaded through by
+   * {@link resolveDecision} from its `options.signal` so a `decide` executor
+   * can cancel the in-flight request (symmetric with the text executors'
+   * `info.signal`). Runtime-only — never serialized into a provider request.
+   */
+  signal?: AbortSignal;
 }
 
 /**
@@ -579,7 +586,13 @@ export async function resolveDecision<TEvent extends ChosenEvent = ChosenEvent>(
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     options.signal?.throwIfAborted();
-    const { event } = await executor({ ...request, attempts: [...attempts] });
+    const { event } = await executor({
+      ...request,
+      attempts: [...attempts],
+      // Thread the run's abort signal onto the request so the executor can
+      // cancel its in-flight model call (adapters read `request.signal`).
+      signal: options.signal,
+    });
 
     const descriptor = eventsByType.get(event.type);
     if (!descriptor) {

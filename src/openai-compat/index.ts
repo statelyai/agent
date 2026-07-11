@@ -402,7 +402,7 @@ export function createOpenAiCompatExecutors(
       }),
     };
 
-    const response = await post(body);
+    const response = await post(body, request.signal);
     const json = (await response.json()) as WireResponse;
     const choice = json.choices?.[0];
     const toolCall = choice?.message?.tool_calls?.[0];
@@ -429,6 +429,10 @@ export function createOpenAiCompatExecutors(
     }
 
     return {
+      // The event's own `type` is spread LAST so it always wins: a stray
+      // `type` key in the model's parsed tool arguments can never override the
+      // machine event type. Event payloads are flat under the event object, so
+      // a payload field named `type` is unrepresentable by construction.
       event: {
         ...(args && typeof args === "object" ? args : {}),
         type: chosenEvent.type,

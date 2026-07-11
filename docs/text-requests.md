@@ -15,22 +15,21 @@ Pass a `requests` map to `setupAgent`. Each entry becomes an invokable actor und
 
 ```ts
 import { z } from 'zod';
-import { createAgentSchemas, setupAgent } from '@statelyai/agent';
+import { setupAgent } from '@statelyai/agent';
+import { openai } from '@ai-sdk/openai';
 
+const models = { quick: openai('gpt-5.4-mini') } as const;
 const answerSchema = z.object({ answer: z.string() });
 
-const schemas = createAgentSchemas({
+const agentSetup = setupAgent({
+  models,
   context: z.object({ prompt: z.string(), answer: z.string().nullable() }),
   input: z.object({ prompt: z.string() }),
   output: answerSchema,
-});
-
-const agentSetup = setupAgent({
-  schemas,
   requests: {
     answerQuestion: {
       schemas: { input: z.object({ prompt: z.string() }), output: answerSchema },
-      model: 'openai/gpt-5.4-mini',
+      model: 'quick',
       system: 'Answer the question directly.',
       prompt: ({ input }) => input.prompt,
     },
@@ -43,7 +42,7 @@ const agentSetup = setupAgent({
 
 ### Model references and typed aliases
 
-`model` is a string. By default any string, passed straight through to your [host](hosts.md). Register a `models` map on `setupAgent` to narrow `model` to the map's keys, making a typo a compile error and sharing one alias map between authoring and the host adapter:
+Prefer a `models` registry (the canonical form): it narrows `model` to the map's keys, making a typo a compile error and sharing one alias map between authoring and the host adapter. A bare `model` string is the escape hatch — any string, passed straight through to your [host](hosts.md) to resolve — for a machine that must not name concrete models (see [Which authoring form when](machines.md#which-authoring-form-when)).
 
 ```ts
 import { openai } from '@ai-sdk/openai';
@@ -54,8 +53,10 @@ const models = {
 } as const;
 
 const agentSetup = setupAgent({
-  schemas,
   models,
+  context: z.object({ prompt: z.string(), answer: z.string().nullable() }),
+  input: z.object({ prompt: z.string() }),
+  output: answerSchema,
   requests: {
     answerQuestion: {
       schemas: { input: z.object({ prompt: z.string() }), output: answerSchema },
@@ -71,8 +72,6 @@ const agentSetup = setupAgent({
 Invoke by name with `src`, pass `input`, read the typed result in `onDone`:
 
 ```ts
-import { parseOutput } from '@statelyai/agent';
-
 const machine = agentSetup.createMachine({
   context: ({ input }) => ({ prompt: input.prompt, answer: null }),
   initial: 'answering',
@@ -84,7 +83,7 @@ const machine = agentSetup.createMachine({
         input: ({ context }) => ({ prompt: context.prompt }),
         onDone: ({ output }) => ({
           target: 'done',
-          context: { answer: parseOutput(answerSchema, output).answer },
+          context: { answer: output.answer },
         }),
       },
     },
@@ -96,7 +95,18 @@ const machine = agentSetup.createMachine({
 });
 ```
 
-`parseOutput(schema, output)` validates a value against a schema and returns it parsed, throwing on mismatch. The output is already validated against the request's own output schema when it resolves, so `parseOutput` is a convenience for narrowing at the call site.
+Inside `onDone`, `output` is already validated against the request's own output schema and typed from it (`{ answer: string }` here), so you read `output.answer` directly — no parsing step is ever needed in the machine.
+
+### Narrowing an unknown output outside the machine
+
+`parseOutput(schema, output)` validates a value against a schema and returns it parsed, throwing on mismatch. It is an escape hatch for host code that holds a raw, still-untyped output — e.g. a value read back from a persisted snapshot, or an inline `agent.generateText` result whose static type is `unknown`. Inside a request's `onDone` it is never needed.
+
+```ts
+import { parseOutput } from '@statelyai/agent';
+
+// Host code with an untyped value from elsewhere:
+const answer = parseOutput(answerSchema, rawOutput); // typed as { answer: string }
+```
 
 ## Structured output vs plain text
 
@@ -188,7 +198,7 @@ export const research = createTextLogic({
 
 <!-- createTextLogic from src/text-logic.ts and examples/email-drafter -->
 
-`createTextLogic` builds a standalone text request you can export, test on its own, and register under `actorSources`. A `requests` entry is exactly what `setupAgent` builds internally from `createTextLogic`, so the two are interchangeable.
+Inline `requests:` (above) is the default. `createTextLogic` is the escape hatch when a request should be standalone — exported, tested on its own, or shared across machines — and registered under `actorSources`. A `requests` entry is exactly what `setupAgent` builds internally from `createTextLogic`, so the two are interchangeable (see [Which authoring form when](machines.md#which-authoring-form-when)).
 
 ```ts
 import { createTextLogic, setupAgent } from '@statelyai/agent';
@@ -204,8 +214,10 @@ export const draftEmail = createTextLogic({
 });
 
 const agentSetup = setupAgent({
-  schemas,
   models,
+  context,
+  input,
+  output,
   actorSources: { draftEmail },
 });
 ```

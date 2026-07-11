@@ -77,6 +77,16 @@ export function toAiSdkTools(tools: AgentTools) {
   return Object.fromEntries(entries);
 }
 
+// Multi-step tool loops: `metadata` is the host-owned per-call channel (see
+// AgentTextRequest.metadata). `metadata.maxSteps` bounds the AI SDK tool-call
+// loop for a request; default stays single-step. Shared by generateText and
+// streamText so both honor it symmetrically.
+function maxStepsSetting(request: AgentTextRequest): { stopWhen?: ReturnType<typeof stepCountIs> } {
+  return typeof request.metadata?.maxSteps === "number"
+    ? { stopWhen: stepCountIs(request.metadata.maxSteps) }
+    : {};
+}
+
 // Permissive fallback StandardSchemaV1/FlexibleSchema used for tools/events with no declared input schema.
 const unknownSchema = {
   "~standard": {
@@ -233,12 +243,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
       model,
       abortSignal: info?.signal,
       ...toAiSdkCallSettings(request),
-      // Multi-step tool loops: `metadata` is the host-owned per-call channel
-      // (see AgentTextRequest.metadata). `metadata.maxSteps` bounds the AI
-      // SDK tool-call loop for this request; default stays single-step.
-      ...(typeof request.metadata?.maxSteps === "number"
-        ? { stopWhen: stepCountIs(request.metadata.maxSteps) }
-        : {}),
+      ...maxStepsSetting(request),
     };
 
     if (isStructuredOutputRequest(request)) {
@@ -276,6 +281,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
       model,
       abortSignal: info?.signal,
       ...toAiSdkCallSettings(request),
+      ...maxStepsSetting(request),
     });
 
     for await (const chunk of result.textStream) {
@@ -296,6 +302,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
 
     const result = await aiGenerateText({
       model,
+      abortSignal: request.signal,
       system: request.system,
       ...(messages ? { messages } : { prompt: request.prompt ?? "" }),
       tools,
@@ -321,6 +328,11 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
     }
 
     return {
+      // The event's own `type` (from the chosen event descriptor) is spread
+      // LAST so it always wins: a stray `type` key in the model's tool input
+      // can never override the machine event type. Payloads are flat under the
+      // event object, so a payload field named `type` is unrepresentable — the
+      // event discriminant owns that slot.
       event: {
         ...(toolCall.input && typeof toolCall.input === "object" ? toolCall.input : {}),
         type: chosenEvent.type,

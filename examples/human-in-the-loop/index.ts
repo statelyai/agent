@@ -27,6 +27,7 @@ import {
   persistSnapshot,
   runAgent,
   setupAgent,
+  WAIT_TAG,
   type AgentRequestExecutors,
 } from "../../src/index.js";
 
@@ -83,6 +84,7 @@ export const humanInTheLoopMachine = agentSetup.createMachine({
     // `meta.interaction` tells the host what to show; legal events come from
     // `getAcceptedEvents(snapshot)`.
     reviewing: {
+      tags: [WAIT_TAG],
       meta: {
         interaction: {
           label: "Review the draft: approve to publish, or reject with a reason.",

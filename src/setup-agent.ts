@@ -658,6 +658,45 @@ function assertNoActorKeyCollisions(
   }
 }
 
+// The builtin `agent.*` actor keys — reserved so a user `actorSources`/
+// `requests` entry cannot silently clobber a builtin via spread order.
+const RESERVED_AGENT_ACTOR_KEYS: readonly string[] = [
+  ...Object.keys(builtinTextActors),
+  USER_INPUT_ACTOR,
+  DECIDE_ACTOR,
+  PLAN_ACTOR,
+];
+
+/**
+ * Rejects a user-supplied `actorSources`/`requests` key in the reserved
+ * `agent.*` builtin namespace. Without this, the builtins-first spread in
+ * {@link createAgentActorSources} lets such a key overwrite the builtin
+ * (`agent.decide`, `agent.plan`, …) silently. Deliberate override of a builtin
+ * is still possible after the machine is created, via
+ * `machine.provide({ actorSources: { 'agent.decide': ... } })`.
+ */
+function assertNoReservedAgentKeys(
+  actorSources: Record<string, unknown> | undefined,
+  requests: Record<string, unknown>,
+): void {
+  const groups: [string, Record<string, unknown> | undefined][] = [
+    ["actorSources", actorSources],
+    ["requests", requests],
+  ];
+  for (const [groupName, group] of groups) {
+    for (const key of Object.keys(group ?? {})) {
+      if (RESERVED_AGENT_ACTOR_KEYS.includes(key)) {
+        throw new Error(
+          `setupAgent: '${groupName}' key '${key}' is a reserved builtin agent actor and ` +
+            `cannot be redefined here (it would silently clobber the builtin). Reserved keys: ` +
+            `${RESERVED_AGENT_ACTOR_KEYS.join(", ")}. To deliberately override a builtin, do it ` +
+            `on the created machine instead: machine.provide({ actorSources: { '${key}': ... } }).`,
+        );
+      }
+    }
+  }
+}
+
 // Merges the four builtin `agent.*` actors with user `actors` and generated request actors, after checking for key collisions.
 function createAgentActorSources<
   TActors extends { [K in keyof TActors]: AnyActorLogic },
@@ -668,6 +707,10 @@ function createAgentActorSources<
   requestActors: RequestActors<TRequestSchemas>,
 ): SetupActors<AgentSetupActors<AgentAllActors<TActors, TRequestSchemas>, string, TModel>> {
   assertNoActorKeyCollisions(
+    actorSources as Record<string, unknown> | undefined,
+    requestActors as Record<string, unknown>,
+  );
+  assertNoReservedAgentKeys(
     actorSources as Record<string, unknown> | undefined,
     requestActors as Record<string, unknown>,
   );

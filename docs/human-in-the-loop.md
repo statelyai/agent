@@ -13,6 +13,35 @@ The machine decides which events are legal in the waiting state; the host delive
 
 > **Note:** Idle is a whole-machine condition: `runAgent` settles only when nothing else is in flight. In a parallel machine where one region waits for a human while a sibling still has work running, the run finishes that work first. Waits modeled with `agent.userInput` are exempt: they are pending placeholders that never block the settle. See [Parallel machines and pending user input](#parallel-machines-and-pending-user-input).
 
+### Tag intentional waits
+
+<!-- WAIT_TAG and RunAgentOptions.isSuspended from src/run-agent.ts -->
+
+By default `runAgent` detects a resting state with a timing heuristic. Mark states that intentionally wait for an external event with the `WAIT_TAG` tag and the settle becomes deterministic instead:
+
+```ts
+import { WAIT_TAG } from '@statelyai/agent';
+
+reviewing: {
+  tags: [WAIT_TAG],
+  on: { APPROVE: { target: 'published' } },
+},
+```
+
+Tags are serializable and show up in the Stately visualizer. The tag is recommended, not required: untagged machines fall back to the heuristic and behave exactly as before. A tagged wait still respects whole-machine idle — a sibling region's in-flight work runs to completion first.
+
+To detect suspension some other way, pass `isSuspended`. The default is `(s) => s.hasTag(WAIT_TAG)`; a custom detector replaces it:
+
+```ts
+await runAgent(machine, {
+  input,
+  generateText,
+  isSuspended: (snapshot) => snapshot.matches('reviewing'),
+});
+```
+
+> The `isSuspended` option name is provisional and may change before 2.0.
+
 ## A waiting state
 
 In this drafting workflow, `reviewing` has no invoke. Once reached, nothing happens until a human sends `APPROVE` or `REJECT`:
@@ -132,15 +161,34 @@ The persist-and-resume loop has one recurring shape: **run to idle → serialize
 - [file-snapshot-store](../examples/file-snapshot-store/index.ts): a `node:fs` store keyed by session id, resumed across several fresh `runAgent` calls (with a SQLite variant sketched inline).
 - [machine-as-tool](../examples/machine-as-tool/index.ts): the same handle passed through a host harness's tool call. `startTool` runs to idle and returns the handle; `resumeTool` revives it and delivers the event.
 
-To reject an event the current state can't take before resuming, rehydrate the handle and check `getAcceptedEvents`:
+### Illegal resume events throw
+
+<!-- IllegalResumeEventError and onIllegalResumeEvent from src/run-agent.ts -->
+
+Resuming with an event the restored state cannot take is a programmer error, so `runAgent` throws `IllegalResumeEventError` (carrying `eventType` and `acceptedTypes`) before delivering it — the same class as its bind-time throws, not an `error`-status settle. You do not need to pre-check legality yourself:
+
+```ts
+import { IllegalResumeEventError, runAgent } from '@statelyai/agent';
+
+try {
+  await runAgent(machine, { snapshot, event: { type: 'NOPE' }, generateText });
+} catch (error) {
+  if (error instanceof IllegalResumeEventError) {
+    // error.acceptedTypes lists what the restored state does accept
+  }
+}
+```
+
+A type-legal event a **guard** rejects is not an illegal resume event: the machine simply takes no transition and the run settles per normal semantics. To restore the older silent-drop behavior, pass `onIllegalResumeEvent: 'ignore'`.
+
+You still call `getAcceptedEvents` yourself only when you want to *render* the choices — rehydrate the handle and read them:
 
 ```ts
 import { createActor } from 'xstate';
 import { getAcceptedEvents } from '@statelyai/agent';
 
 const snapshot = createActor(machine, { snapshot: JSON.parse(handle) }).getSnapshot();
-const legal = getAcceptedEvents(snapshot).map((e) => e.type);
-if (!legal.includes(event.type)) throw new Error(`Event '${event.type}' is not legal here.`);
+const choices = getAcceptedEvents(snapshot); // one descriptor per legal event
 ```
 
 ### Reading interaction meta
@@ -214,10 +262,10 @@ if (first.status === 'idle' && first.pendingUserInputs) {
 
 Resuming without a handler settles idle again with the same pending inputs, so a host can safely re-enter the loop.
 
-Choosing between the two waiting styles:
+## Choosing between the two waiting styles
 
-- **Idle state** (`on:` handler, no invoke): the wait is an event choice; resume delivers the event. Best for approve/reject flows where `getAcceptedEvents` drives a UI.
-- **`agent.userInput`**: the wait is a value request with a prompt and schema; resume supplies the value. Best for free-form input, and the only style that lets sibling parallel regions keep working while a human is pending.
+- **Idle state** (`on:` handler, no invoke, marked with `tags: [WAIT_TAG]`): the wait is an **event choice**; resume delivers the chosen event. Best for approve/reject flows where `getAcceptedEvents` drives a UI.
+- **`agent.userInput`**: the wait is a **value request** with a prompt and schema; resume supplies the value. Best for free-form input, and the only style that lets sibling parallel regions keep working while a human is pending.
 
 ## Related
 

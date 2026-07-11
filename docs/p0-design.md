@@ -420,7 +420,7 @@ export type RunAgentResult<TMachine extends AnyStateMachine> =
   | { status: 'idle'; snapshot: SnapshotFrom<TMachine> }
   | {
       status: 'error';
-      cause: 'aborted' | 'max-model-calls' | 'machine';
+      cause: 'aborted' | 'max-model-calls' | 'decision-exhausted' | 'machine' | 'stopped';
       error: unknown;
       snapshot: SnapshotFrom<TMachine>;
     };
@@ -448,7 +448,7 @@ Typing is load-bearing: `input`/`event`/`onTransition` are machine-typed (`Input
     r = await runAgent(machine, { snapshot: r.snapshot, event, ...executors });
   }
   ```
-- **`error`** — a `runAgent`-level failure, discriminated by `cause`: `'aborted'` (signal fired), `'max-model-calls'` (budget exceeded), `'machine'` (machine error state, decision exhausted surfacing as one, or external stop). Programmer errors (bad config, missing executor/actor source) still throw — at bind time (§3.2). **(Q3.1 resolved: `error` is a variant, not a throw.)**
+- **`error`** — a `runAgent`-level failure, discriminated by `cause`: `'aborted'` (signal fired), `'max-model-calls'` (budget exceeded), `'decision-exhausted'` (machine error state whose error is/wraps an unhandled `DecisionExhaustedError`), `'machine'` (any other machine error state), or `'stopped'` (external stop). Programmer errors (bad config, missing executor/actor source) still throw — at bind time (§3.2). **(Q3.1 resolved: `error` is a variant, not a throw.)**
 
 ### 3.2 Behavior
 
@@ -464,8 +464,8 @@ Typing is load-bearing: `input`/`event`/`onTransition` are machine-typed (`Input
 4. `actor.start()`; if `options.event`, `actor.send(event)`.
 5. **Settle loop.** Subscribe; on each snapshot:
    - `status === 'done'` ⇒ `{ status:'done', output, snapshot }`.
-   - `status === 'error'` ⇒ `{ status:'error', cause:'machine', error: snapshot.error, snapshot }`.
-   - `status === 'stopped'` (external stop) ⇒ `{ status:'error', cause:'machine', error: new Error('Actor stopped externally.'), snapshot }` — without this the settle loop hangs forever.
+   - `status === 'error'` ⇒ `{ status:'error', cause: <'decision-exhausted' if snapshot.error is/wraps an unhandled DecisionExhaustedError, else 'machine'>, error: snapshot.error, snapshot }`.
+   - `status === 'stopped'` (external stop) ⇒ `{ status:'error', cause:'stopped', error: new Error('Actor stopped externally.'), snapshot }` — without this the settle loop hangs forever.
    - `isIdle(snapshot)` and not done ⇒ `{ status:'idle', snapshot }`. No callback consulted — idle always settles; the caller resumes (§3.4).
    - every transition ⇒ `onTransition(snapshot, event)` (observation only, exceptions in the callback are the caller's).
 6. `maxModelCalls` ⇒ `{ status:'error', cause:'max-model-calls', … }`; abort ⇒ `{ status:'error', cause:'aborted', … }`.

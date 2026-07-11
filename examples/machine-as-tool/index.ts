@@ -23,14 +23,8 @@
 import assert from "node:assert/strict";
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
+import { createAsyncLogic, type AnyMachineSnapshot } from "xstate";
 import {
-  createActor,
-  createAsyncLogic,
-  type AnyMachineSnapshot,
-  type AnyStateMachine,
-} from "xstate";
-import {
-  getAcceptedEvents,
   getStateMeta,
   runAgent,
   setupAgent,
@@ -236,23 +230,10 @@ export async function resumeTool(
   return toToolResult(result);
 }
 
-/**
- * Reject an event the machine can't take in its current state. The harness
- * calls this before `resumeTool` so an illegal event is refused up front
- * instead of being silently dropped by the machine.
- */
-export function assertEventLegal(handle: Handle, event: { type: string }): void {
-  // Rehydrate the persisted handle into a live snapshot so `getAcceptedEvents`
-  // can read the machine's legal transitions from it.
-  const actor = createActor(refundMachine as AnyStateMachine, {
-    snapshot: JSON.parse(handle),
-  });
-  const snapshot = actor.getSnapshot() as AnyMachineSnapshot;
-  const legal = getAcceptedEvents(snapshot).map((e) => e.type);
-  if (!legal.includes(event.type)) {
-    throw new Error(`Event '${event.type}' is not legal here. Legal events: ${legal.join(", ")}`);
-  }
-}
+// Illegal events are refused up front by `runAgent` itself: `resumeTool`'s
+// `runAgent(refundMachine, { snapshot, event })` throws `IllegalResumeEventError`
+// when the restored state can't take the event, so the harness needs no
+// hand-rolled legality check before resuming.
 
 // Demo: happy path through the harness bridge.
 export async function runMachineAsToolExample() {
@@ -294,7 +275,6 @@ export async function main() {
   }
   console.log("\n[harness auto-approves]\n");
 
-  assertEventLegal(started.handle, { type: "APPROVE" });
   const finished = await resumeTool(started.handle, { type: "APPROVE" }, realExecutors);
   console.log("Result:", finished);
 }

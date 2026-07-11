@@ -22,7 +22,7 @@ export {
   resolveAgentStep,
   transitionAgentStep,
 } from "./steps.js";
-export { runAgent } from "./run-agent.js";
+export { IllegalResumeEventError, runAgent, WAIT_TAG } from "./run-agent.js";
 export { getStateMeta, persistSnapshot, validateSchemaSync } from "./utils.js";
 export { assistantMessage, systemMessage, toolMessage, userMessage } from "./utils.js";
 

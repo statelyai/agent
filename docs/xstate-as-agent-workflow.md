@@ -29,7 +29,6 @@ The default. Prompts live next to the states that use them.
 import { z } from 'zod';
 import { openai } from '@ai-sdk/openai';
 import {
-  createAgentSchemas,
   createTextLogic,
   runAgent,
   sendDecision,
@@ -41,22 +40,6 @@ const models = {
   writer: openai('gpt-5.4-mini'),
   judge: openai('gpt-5.4-mini'),
 } as const;
-
-const schemas = createAgentSchemas({
-  context: z.object({
-    topic: z.string(),
-    haiku: z.string().nullable(),
-    critique: z.string().nullable(),
-    revisions: z.number(),
-  }),
-  events: {
-    // The judge chooses exactly one of these.
-    APPROVE: z.object({}),
-    REVISE: z.object({ critique: z.string() }),
-  },
-  input: z.object({ topic: z.string() }),
-  output: z.object({ haiku: z.string() }),
-});
 
 // Text logic: "produce a value." Prompt embedded.
 const writeHaiku = createTextLogic({
@@ -77,7 +60,23 @@ const reviseHaiku = createTextLogic({
     `Revise this haiku:\n${input.haiku}\n\nCritique:\n${input.critique}`,
 });
 
-const agent = setupAgent({ schemas, models, actorSources: { writeHaiku, reviseHaiku } });
+const agent = setupAgent({
+  models,
+  context: z.object({
+    topic: z.string(),
+    haiku: z.string().nullable(),
+    critique: z.string().nullable(),
+    revisions: z.number(),
+  }),
+  events: {
+    // The judge chooses exactly one of these.
+    APPROVE: z.object({}),
+    REVISE: z.object({ critique: z.string() }),
+  },
+  input: z.object({ topic: z.string() }),
+  output: z.object({ haiku: z.string() }),
+  actorSources: { writeHaiku, reviseHaiku },
+});
 
 const haikuMachine = agent.createMachine({
   id: 'haiku',
@@ -331,5 +330,3 @@ That closes the loop: **the machine is the portable artifact.** Prompts embedded
 - **`createTextLogic(config)`** — reusable "produce a value" actor source. `system`/`prompt`/`model` can each be static or `({ input }) => value`. Decisions are state-local via `src: 'agent.decide'`; to reuse one, share its input builder.
 - **Step path** — `initialAgentStep` / `transitionAgentStep` / `resolveAgentStep` / `getAgentRequests`, `executeAgentRequest` (text), `resolveDecision` (decision), `getAcceptedEvents` (enumerate legal events), `sendDecision()` (deliver a chosen event from an `agent.decide` `onDone`).
 - **`createAiSdkExecutors({ models })`** — returns `{ generateText, streamText, decide }` from a Vercel AI SDK model map. Spread into `runAgent` or pass to the step helpers.
-</content>
-</invoke>
