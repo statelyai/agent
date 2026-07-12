@@ -26,6 +26,7 @@ import {
   type RunAgentResult,
 } from "../../src/index.js";
 import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
+import { resolveExecutors, runExampleMain } from "../helpers/main.js";
 
 const agentName = z.enum(["travel", "food"]);
 
@@ -131,7 +132,7 @@ export const swarmHandoffMachine = agentSetup.createMachine({
 export async function runSwarmHandoffExample(
   options?: RunAgentOptions<typeof swarmHandoffMachine>,
 ) {
-  const executors = options ?? { ...createAiSdkExecutors({ models }) };
+  const executors = resolveExecutors(models, options);
 
   // Turn 1: the travel agent holds the mic and answers.
   const first = await runAgent(swarmHandoffMachine, {
@@ -255,15 +256,11 @@ async function runDemo() {
   console.log(`[${food.activeAgent}] ${food.reply}`);
 }
 
-if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
-    process.exit(1);
-  }
+runExampleMain(import.meta.url, async () => {
   const forceDemo = process.argv.includes("--demo");
   if (forceDemo || !process.stdout.isTTY) {
     await runDemo();
   } else {
     await runInteractive();
   }
-}
+});

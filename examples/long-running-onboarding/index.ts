@@ -28,6 +28,7 @@ import {
   setupAgent,
   type AgentRequestExecutors,
 } from "../../src/index.js";
+import { resolveExecutors, runExampleMain } from "../helpers/main.js";
 
 export const models = defineModels({
   scheduler: openai("gpt-5.4-mini"),
@@ -72,16 +73,18 @@ const provisionIt = createAsyncLogic({
   },
 });
 
+const contextSchema = z.object({
+  employee: employeeSchema,
+  welcomePacketId: z.string().nullable(),
+  docsSignedAt: z.string().nullable(),
+  accounts: accountsSchema.nullable(),
+  hardwareDeliveredAt: z.string().nullable(),
+  schedule: z.string().nullable(),
+});
+
 const coordinatorSetup = setupAgent({
   models,
-  context: z.object({
-    employee: employeeSchema,
-    welcomePacketId: z.string().nullable(),
-    docsSignedAt: z.string().nullable(),
-    accounts: accountsSchema.nullable(),
-    hardwareDeliveredAt: z.string().nullable(),
-    schedule: z.string().nullable(),
-  }),
+  context: contextSchema,
   input: z.object({ employee: employeeSchema }),
   output: z.object({
     employeeId: z.string(),
@@ -127,6 +130,48 @@ const coordinatorSetup = setupAgent({
           `Slack: ${input.accounts.slack}`,
           `Hardware delivered: ${input.hardwareDeliveredAt}`,
         ].join("\n"),
+    },
+  },
+  // waitingForHardware's HARDWARE_DELIVERED sets hardwareDeliveredAt in the
+  // same transition that enters preparingSchedule; accounts was already set
+  // earlier by provisioningIt. Both narrowed non-null there and downstream in
+  // onboarded (schedule is set by preparingSchedule's own onDone).
+  states: {
+    sendingWelcomePacket: {},
+    // Narrowing threads through the chain: each state declares what is
+    // guaranteed by the time it is entered, so every bare `target` into the
+    // next narrowed state typechecks.
+    waitingForSignedDocs: {
+      schemas: { context: contextSchema.extend({ welcomePacketId: z.string() }) },
+    },
+    provisioningIt: {
+      schemas: { context: contextSchema.extend({ welcomePacketId: z.string() }) },
+    },
+    waitingForHardware: {
+      schemas: {
+        context: contextSchema.extend({
+          welcomePacketId: z.string(),
+          accounts: accountsSchema,
+        }),
+      },
+    },
+    preparingSchedule: {
+      schemas: {
+        context: contextSchema.extend({
+          welcomePacketId: z.string(),
+          accounts: accountsSchema,
+          hardwareDeliveredAt: z.string(),
+        }),
+      },
+    },
+    onboarded: {
+      schemas: {
+        context: contextSchema.extend({
+          welcomePacketId: z.string(),
+          accounts: accountsSchema,
+          schedule: z.string(),
+        }),
+      },
     },
   },
 });
@@ -194,8 +239,8 @@ export const longRunningOnboardingMachine = coordinatorSetup.createMachine({
         src: "writeDayOneSchedule",
         input: ({ context }) => ({
           employee: context.employee,
-          accounts: context.accounts ?? { email: "", slack: "", ticketId: "" },
-          hardwareDeliveredAt: context.hardwareDeliveredAt ?? "",
+          accounts: context.accounts,
+          hardwareDeliveredAt: context.hardwareDeliveredAt,
         }),
         onDone: ({ output }) => ({
           target: "onboarded",
@@ -207,9 +252,9 @@ export const longRunningOnboardingMachine = coordinatorSetup.createMachine({
       type: "final",
       output: ({ context }) => ({
         employeeId: context.employee.id,
-        welcomePacketId: context.welcomePacketId ?? "",
-        accounts: context.accounts ?? { email: "", slack: "", ticketId: "" },
-        schedule: context.schedule ?? "",
+        welcomePacketId: context.welcomePacketId,
+        accounts: context.accounts,
+        schedule: context.schedule,
       }),
     },
   },
@@ -250,7 +295,7 @@ export async function runLongRunningOnboardingExample(
 
   const first = await runAgent(longRunningOnboardingMachine, {
     input: { employee },
-    ...(options.generateText ? { generateText: options.generateText } : {}),
+    ...resolveExecutors(models, options.generateText ? { generateText: options.generateText } : undefined),
     ...(options.onTransition ? { onTransition: options.onTransition } : {}),
   });
   if (first.status !== "idle") {
@@ -264,7 +309,7 @@ export async function runLongRunningOnboardingExample(
   const second = await runAgent(longRunningOnboardingMachine, {
     snapshot: persistedAfterWelcome,
     event: { type: "DOCS_SIGNED", signedAt: "2026-07-20" },
-    ...(options.generateText ? { generateText: options.generateText } : {}),
+    ...resolveExecutors(models, options.generateText ? { generateText: options.generateText } : undefined),
     ...(options.onTransition ? { onTransition: options.onTransition } : {}),
   });
   if (second.status !== "idle") {
@@ -278,7 +323,7 @@ export async function runLongRunningOnboardingExample(
   const third = await runAgent(longRunningOnboardingMachine, {
     snapshot: persistedAfterProvisioning,
     event: { type: "HARDWARE_DELIVERED", deliveredAt: "2026-07-28" },
-    ...(options.generateText ? { generateText: options.generateText } : {}),
+    ...resolveExecutors(models, options.generateText ? { generateText: options.generateText } : undefined),
     ...(options.onTransition ? { onTransition: options.onTransition } : {}),
   });
   if (third.status !== "done") {
@@ -288,16 +333,8 @@ export async function runLongRunningOnboardingExample(
   return { idleStates, idlePrompts, idleEventTypes, output: third.output };
 }
 
-if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
-    process.exit(1);
-  }
-  const { createAiSdkExecutors } = await import("../../src/ai-sdk/index.js");
-  const { generateText } = createAiSdkExecutors({ models });
-
+runExampleMain(import.meta.url, async () => {
   const result = await runLongRunningOnboardingExample({
-    generateText,
     onTransition: ({ value }) => console.log("[state]", JSON.stringify(value)),
   });
 
@@ -305,4 +342,4 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   console.log("Idle prompts:", result.idlePrompts.join(" / "));
   console.log("Accounts:", result.output.accounts);
   console.log("Schedule:", result.output.schedule);
-}
+});

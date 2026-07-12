@@ -20,6 +20,7 @@ import { generateText, Output, type LanguageModel } from "ai";
 import { createAsyncLogic } from "xstate";
 import { setupAgent, runAgent } from "../../src/index.js";
 import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
+import { runExampleMain } from "../helpers/main.js";
 
 const implementationPlanSchema = z.object({
   files: z.array(
@@ -94,13 +95,15 @@ export function createImplementChangesActor(model: LanguageModel) {
   });
 }
 
+const contextSchema = z.object({
+  featureRequest: z.string(),
+  plan: implementationPlanSchema.nullable(),
+  changes: z.array(fileChangeSchema),
+});
+
 const agentSetup = setupAgent({
   models,
-  context: z.object({
-    featureRequest: z.string(),
-    plan: implementationPlanSchema.nullable(),
-    changes: z.array(fileChangeSchema),
-  }),
+  context: contextSchema,
   input: z.object({ featureRequest: z.string() }),
   output: z.object({
     plan: implementationPlanSchema,
@@ -109,6 +112,16 @@ const agentSetup = setupAgent({
   actorSources: {
     // Bound to the real AI SDK by default; overridden in tests via `.provide`.
     implementChanges: createImplementChangesActor(models.worker),
+  },
+  // planning sets plan before any state that reads it — narrow it non-null there.
+  states: {
+    planning: {},
+    implementing: {
+      schemas: { context: contextSchema.extend({ plan: implementationPlanSchema }) },
+    },
+    done: {
+      schemas: { context: contextSchema.extend({ plan: implementationPlanSchema }) },
+    },
   },
   requests: {
     planImplementation: {
@@ -150,7 +163,7 @@ export const aiSdkOrchestratorWorkerMachine = agentSetup.createMachine({
         src: "implementChanges",
         input: ({ context }) => ({
           featureRequest: context.featureRequest,
-          plan: context.plan ?? { files: [], estimatedComplexity: "low" },
+          plan: context.plan,
         }),
         onDone: ({ output }) => ({
           target: "done",
@@ -161,7 +174,7 @@ export const aiSdkOrchestratorWorkerMachine = agentSetup.createMachine({
     done: {
       type: "final",
       output: ({ context }) => ({
-        plan: context.plan ?? { files: [], estimatedComplexity: "low" },
+        plan: context.plan,
         changes: context.changes,
       }),
     },
@@ -182,14 +195,10 @@ export async function runAiSdkOrchestratorWorkerExample(
   return result.output;
 }
 
-if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
-    process.exit(1);
-  }
+runExampleMain(import.meta.url, async () => {
   console.log(
     await runAiSdkOrchestratorWorkerExample((snapshot) =>
       console.log("[state]", JSON.stringify(snapshot.value)),
     ),
   );
-}
+});

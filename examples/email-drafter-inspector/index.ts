@@ -27,6 +27,7 @@ import { createInspectorServer } from "@statelyai/inspect/server";
 import { confirm, input as textInput, select } from "@inquirer/prompts";
 import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
 import { getStateMeta } from "../../src/index.js";
+import { runExampleMain } from "../helpers/main.js";
 import {
   draftEmail,
   emailDrafter,
@@ -197,6 +198,4 @@ export async function main() {
   }
 }
 
-if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  void main();
-}
+runExampleMain(import.meta.url, main, { requireEnv: false });

@@ -41,6 +41,7 @@ import {
   type StandardSchemaV1,
 } from "../../src/index.js";
 import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
+import { runExampleMain } from "../helpers/main.js";
 
 // The Ajv-to-StandardSchema recipe: compile the JSON Schema with Ajv, then
 // wrap the compiled validator as a `StandardSchemaV1`, mapping Ajv's
@@ -114,10 +115,6 @@ export async function runJsonAgentDemo(ticket: string) {
   return result.output;
 }
 
-if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
-    process.exit(1);
-  }
+runExampleMain(import.meta.url, async () => {
   console.log(await runJsonAgentDemo("My invoice total looks wrong, please help."));
-}
+});

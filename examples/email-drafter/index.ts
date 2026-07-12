@@ -16,6 +16,7 @@ import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
 import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
 import { withReadline } from "../helpers/cli.js";
+import { runExampleMain } from "../helpers/main.js";
 import {
   type AgentMessage,
   assistantMessage,
@@ -473,10 +474,4 @@ export async function main() {
   });
 }
 
-if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
-    process.exit(1);
-  }
-  void main();
-}
+runExampleMain(import.meta.url, main);

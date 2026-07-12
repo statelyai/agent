@@ -31,6 +31,7 @@ import {
   setupAgent,
   userMessage,
 } from "../../src/index.js";
+import { runExampleMain } from "../helpers/main.js";
 
 const transcriptTurnSchema = z.object({
   question: z.string(),
@@ -164,6 +165,26 @@ const agentSetup = setupAgent({
         ),
       ],
     },
+  },
+  // The only transition into `gameOver` is classifyingPlayAgain's onDone
+  // (playAgain=false), reached only after a GUESS event already set `guess` —
+  // guaranteed non-null there. `stumped` (reached on decide/classify errors,
+  // possibly before any GUESS) is deliberately left unnarrowed.
+  states: {
+    deciding: {},
+    awaitingAnswer: {},
+    classifyingAnswer: {},
+    // The play-again states are NOT narrowed even though `guess` is set by
+    // then: their reset transition back to `deciding` writes `guess: null`,
+    // and context updates typecheck against the SOURCE state's narrowed
+    // context, so a narrowed source can never widen a field back to null.
+    // Transitions into `gameOver` prove `guess` explicitly instead.
+    awaitingGuessFeedback: {},
+    classifyingGuessFeedback: {},
+    awaitingPlayAgain: {},
+    classifyingPlayAgain: {},
+    gameOver: { schemas: { context: twentyQuestionsSchemas.context.extend({ guess: z.string() }) } },
+    stumped: {},
   },
 });
 
@@ -388,16 +409,21 @@ export const twentyQuestionsMachine = agentSetup.createMachine({
                 context: {
                   messages: [...context.messages, userMessage(context.pendingRawAnswer ?? "")],
                   pendingRawAnswer: null,
+                  // Prove gameOver's narrowing: a GUESS always preceded this state.
+                  guess: context.guess ?? "",
                 },
               },
-        onError: { target: "gameOver" },
+        onError: ({ context }) => ({
+          target: "gameOver",
+          context: { guess: context.guess ?? "" },
+        }),
       },
     },
 
     gameOver: {
       type: "final",
       output: ({ context }) => ({
-        guess: context.guess ?? "",
+        guess: context.guess,
         questionsUsed: context.transcript.length,
         userScore: context.userScore,
         agentScore: context.agentScore,
@@ -436,10 +462,4 @@ export async function main() {
   console.log(`Final score — user: ${result.output.userScore}, agent: ${result.output.agentScore}`);
 }
 
-if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
-    process.exit(1);
-  }
-  void main();
-}
+runExampleMain(import.meta.url, main);

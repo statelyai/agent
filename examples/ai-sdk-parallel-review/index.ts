@@ -14,6 +14,7 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { setupAgent, runAgent } from "../../src/index.js";
 import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
+import { runExampleMain } from "../helpers/main.js";
 
 const reviewSchema = z.object({
   type: z.enum(["security", "performance", "maintainability"]),
@@ -38,20 +39,30 @@ export const models = defineModels({
 
 const codeInput = z.object({ code: z.string() });
 
+const contextSchema = z.object({
+  code: z.string(),
+  security: reviewSchema.nullable(),
+  performance: reviewSchema.nullable(),
+  maintainability: reviewSchema.nullable(),
+  summary: z.string().nullable(),
+});
+
 const agentSetup = setupAgent({
   models,
-  context: z.object({
-    code: z.string(),
-    security: reviewSchema.nullable(),
-    performance: reviewSchema.nullable(),
-    maintainability: reviewSchema.nullable(),
-    summary: z.string().nullable(),
-  }),
+  context: contextSchema,
   input: codeInput,
   output: z.object({
     reviews: z.array(reviewSchema),
     summary: z.string(),
   }),
+  // summarizing sets summary before done reads it — narrow it non-null there.
+  states: {
+    reviewing: {},
+    summarizing: {},
+    done: {
+      schemas: { context: contextSchema.extend({ summary: z.string() }) },
+    },
+  },
   requests: {
     reviewSecurity: {
       schemas: { input: codeInput, output: aspectReviewSchema },
@@ -188,7 +199,7 @@ export const aiSdkParallelReviewMachine = agentSetup.createMachine({
       type: "final",
       output: ({ context }) => ({
         reviews: collectReviews(context),
-        summary: context.summary ?? "",
+        summary: context.summary,
       }),
     },
   },
@@ -208,14 +219,10 @@ export async function runAiSdkParallelReviewExample(
   return result.output;
 }
 
-if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
-    process.exit(1);
-  }
+runExampleMain(import.meta.url, async () => {
   console.log(
     await runAiSdkParallelReviewExample((snapshot) =>
       console.log("[state]", JSON.stringify(snapshot.value)),
     ),
   );
-}
+});

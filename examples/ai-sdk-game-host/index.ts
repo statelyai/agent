@@ -30,6 +30,7 @@ import {
   models,
   turnSummarySchema,
 } from "../game-agent/index.js";
+import { runExampleMain } from "../helpers/main.js";
 
 // Adapter-provided executors: `decide` forces a tool call, one tool per
 // candidate event, and reads the chosen event off the tool call — the
@@ -69,12 +70,6 @@ async function main() {
   console.log(output);
 }
 
-if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
-    process.exit(1);
-  }
-  void main();
-}
+runExampleMain(import.meta.url, main);
 
 export { turnSummarySchema };

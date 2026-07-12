@@ -22,6 +22,7 @@ import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
 import { defineModels } from "../../src/ai-sdk/index.js";
 import { runAgent, setupAgent, type AgentRequestExecutors } from "../../src/index.js";
+import { runExampleMain } from "../helpers/main.js";
 
 export const models = defineModels({
   answerer: openai("gpt-5.4-mini"),
@@ -106,14 +107,16 @@ function scoreDocument(question: string, text: string): number {
   return score;
 }
 
+const ragContextSchema = z.object({
+  question: z.string(),
+  documents: z.array(z.string()),
+  answer: z.string().nullable(),
+  memory: z.array(z.string()),
+});
+
 const agentSetup = setupAgent({
   models,
-  context: z.object({
-    question: z.string(),
-    documents: z.array(z.string()),
-    answer: z.string().nullable(),
-    memory: z.array(z.string()),
-  }),
+  context: ragContextSchema,
   input: z.object({
     question: z.string(),
     memory: z.array(z.string()).default([]),
@@ -123,6 +126,14 @@ const agentSetup = setupAgent({
     documents: z.array(z.string()),
     memory: z.array(z.string()),
   }),
+  // answering always sets `answer` before `done` reads it — narrow it non-null there.
+  states: {
+    retrieving: {},
+    answering: {},
+    done: {
+      schemas: { context: ragContextSchema.extend({ answer: z.string() }) },
+    },
+  },
   actorSources: {
     // Typed plain actor: keyword retrieval over the sample corpus. Top 3 docs.
     retrieve: createAsyncLogic<string[], { question: string }>({
@@ -202,7 +213,7 @@ export const ragMachine = agentSetup.createMachine({
     done: {
       type: "final",
       output: ({ context }) => ({
-        answer: context.answer ?? "",
+        answer: context.answer,
         documents: context.documents,
         memory: context.memory,
       }),
@@ -246,11 +257,7 @@ export async function runRAGExample(options: RunRAGOptions = {}): Promise<RAGRes
   return result.output;
 }
 
-if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
-    process.exit(1);
-  }
+runExampleMain(import.meta.url, async () => {
   const { createAiSdkExecutors } = await import("../../src/ai-sdk/index.js");
   const { generateText } = createAiSdkExecutors({ models });
 
@@ -265,4 +272,4 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   console.log("\nRetrieved documents:");
   result.documents.forEach((doc, i) => console.log(`  [${i + 1}] ${doc}`));
   console.log("\nGrounded answer:", result.answer);
-}
+});

@@ -43,6 +43,7 @@ import {
   userMessage,
   type AgentRequestExecutors,
 } from "../../src/index.js";
+import { runExampleMain } from "../helpers/main.js";
 
 export const models = defineModels({
   reasoner: openai("gpt-5.4-mini"),
@@ -348,11 +349,7 @@ export async function runReactAgentExample(
   return { ...result.output, progress };
 }
 
-if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
-    process.exit(1);
-  }
+runExampleMain(import.meta.url, async () => {
   const { createAiSdkExecutors } = await import("../../src/ai-sdk/index.js");
   const { generateText } = createAiSdkExecutors({ models });
 
@@ -366,4 +363,4 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   console.log("Question:", question);
   console.log("Answer:", result.answer);
   console.log("Steps:", result.steps);
-}
+});

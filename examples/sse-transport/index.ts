@@ -24,14 +24,17 @@ import { openai } from "@ai-sdk/openai";
 import type { AnyStateMachine } from "xstate";
 import { runAgent, setupAgent, type AgentRequestExecutor } from "../../src/index.js";
 import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
+import { runExampleMain } from "../helpers/main.js";
 
 /**
  * A minimal streaming machine: one `mode: 'stream'` text request, then done.
  * The streamed text becomes the machine output.
  */
+const sseContextSchema = z.object({ topic: z.string(), text: z.string().nullable() });
+
 export function createSseMachine(): AnyStateMachine {
   const agentSetup = setupAgent({
-    context: z.object({ topic: z.string(), text: z.string().nullable() }),
+    context: sseContextSchema,
     input: z.object({ topic: z.string() }),
     output: z.object({ text: z.string() }),
     requests: {
@@ -40,6 +43,14 @@ export function createSseMachine(): AnyStateMachine {
         schemas: { input: z.object({ topic: z.string() }), output: z.string() },
         model: "writer",
         prompt: ({ input }) => input.topic,
+      },
+    },
+    // streaming's onDone sets `text` before any transition into "done" —
+    // narrow it non-null there.
+    states: {
+      streaming: {},
+      done: {
+        schemas: { context: sseContextSchema.extend({ text: z.string() }) },
       },
     },
   });
@@ -58,7 +69,7 @@ export function createSseMachine(): AnyStateMachine {
       },
       done: {
         type: "final",
-        output: ({ context }) => ({ text: context.text ?? "" }),
+        output: ({ context }) => ({ text: context.text }),
       },
     },
   }) as AnyStateMachine;
@@ -170,10 +181,4 @@ export async function main() {
   process.on("SIGINT", () => server.close(() => process.exit(0)));
 }
 
-if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
-    process.exit(1);
-  }
-  void main();
-}
+runExampleMain(import.meta.url, main);

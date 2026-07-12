@@ -34,6 +34,7 @@ import {
   systemMessage,
   userMessage,
 } from "../../src/index.js";
+import { runExampleMain } from "../helpers/main.js";
 
 // Annotated so the exported const has a portable, nameable type (TS2742).
 export const models = defineModels({
@@ -265,10 +266,4 @@ export async function main() {
   }
 }
 
-if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
-    process.exit(1);
-  }
-  void main();
-}
+runExampleMain(import.meta.url, main);

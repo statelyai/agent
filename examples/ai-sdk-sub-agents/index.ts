@@ -21,6 +21,7 @@ import {
 import { z } from "zod";
 import { setupAgent, type AgentTool, type AgentToolExecute, runAgent } from "../../src/index.js";
 import { toAiSdkTools, defineModels } from "../../src/ai-sdk/index.js";
+import { runExampleMain } from "../helpers/main.js";
 
 const answerSchema = z.object({ answer: z.string() });
 const taskInputSchema = z.object({ task: z.string() });
@@ -61,15 +62,24 @@ function executeTool(tool: AgentTool | undefined, input: unknown) {
   return typeof tool === "function" ? tool(input) : tool?.execute?.(input);
 }
 
+const subAgentContextSchema = z.object({
+  task: z.string(),
+  answer: z.string().nullable(),
+});
+
 function createAiSdkSubAgentWorkflow(subAgents: SubAgents) {
   const agentSetup = setupAgent({
     models,
-    context: z.object({
-      task: z.string(),
-      answer: z.string().nullable(),
-    }),
+    context: subAgentContextSchema,
     input: taskInputSchema,
     output: answerSchema,
+    // supervising sets answer before done reads it — narrow it non-null there.
+    states: {
+      supervising: {},
+      done: {
+        schemas: { context: subAgentContextSchema.extend({ answer: z.string() }) },
+      },
+    },
     requests: {
       supervise: {
         schemas: {
@@ -115,7 +125,7 @@ function createAiSdkSubAgentWorkflow(subAgents: SubAgents) {
       },
       done: {
         type: "final",
-        output: ({ context }) => ({ answer: context.answer ?? "" }),
+        output: ({ context }) => ({ answer: context.answer }),
       },
     },
   });
@@ -197,10 +207,6 @@ export async function runAiSdkSubAgentsDeterministicExample() {
   });
 }
 
-if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
-    process.exit(1);
-  }
+runExampleMain(import.meta.url, async () => {
   console.log(await runAiSdkSubAgentsDemo("Explain composable agents."));
-}
+});

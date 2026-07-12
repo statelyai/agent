@@ -27,6 +27,7 @@ import {
   type AgentRequestExecutor,
 } from "../../src/index.js";
 import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
+import { runExampleMain } from "../helpers/main.js";
 
 const stanceSchema = z.enum(["affirmative", "negative"]);
 const transcriptEntrySchema = z.object({
@@ -132,17 +133,29 @@ export const debaterMachine = debaterAgentSetup.createMachine({
 });
 
 // ─── Facilitator agent: schedule A/B turns, then conclude ───
+const facilitatorContextSchema = z.object({
+  question: z.string(),
+  rounds: z.number(),
+  transcript: transcriptSchema,
+  conclusion: z.string().nullable(),
+});
+
 const facilitatorAgentSetup = setupAgent({
-  context: z.object({
-    question: z.string(),
-    rounds: z.number(),
-    transcript: transcriptSchema,
-    conclusion: z.string().nullable(),
-  }),
+  context: facilitatorContextSchema,
   input: z.object({ question: z.string(), rounds: z.number().default(DEFAULT_ROUNDS) }),
   output: z.object({ conclusion: z.string(), transcript: transcriptSchema }),
   events: { "DEBATE.ARGUMENT_SUBMITTED": transcriptEntrySchema },
   actorSources: { affirmative: debaterMachine, negative: debaterMachine },
+  // concluding's onDone is the only transition into "done" and always sets
+  // conclusion — narrow it non-null there.
+  states: {
+    requesting: {},
+    awaiting: {},
+    concluding: {},
+    done: {
+      schemas: { context: facilitatorContextSchema.extend({ conclusion: z.string() }) },
+    },
+  },
   requests: {
     concludeDebate: {
       schemas: {
@@ -225,7 +238,7 @@ export const debateMachine = facilitatorAgentSetup.createMachine({
     done: {
       type: "final",
       output: ({ context }) => ({
-        conclusion: context.conclusion ?? "",
+        conclusion: context.conclusion,
         transcript: context.transcript,
       }),
     },
@@ -270,11 +283,7 @@ export async function runDebateSubAgentsExample(options?: {
   return result.output;
 }
 
-if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
-    process.exit(1);
-  }
+runExampleMain(import.meta.url, async () => {
   const output = await runDebateSubAgentsExample({
     onTransition: (value) => console.log(`[state] ${JSON.stringify(value)}`),
   });
@@ -282,4 +291,4 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     console.log(`[R${turn.round} ${turn.stance}] ${turn.text}`);
   }
   console.log(`\n--- Facilitator verdict ---\n${output.conclusion}`);
-}
+});

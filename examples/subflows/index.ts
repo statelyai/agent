@@ -24,6 +24,7 @@ import { openai } from "@ai-sdk/openai";
 import { type InspectionEvent } from "xstate";
 import { runAgent, setupAgent, type AgentRequestExecutor } from "../../src/index.js";
 import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
+import { runExampleMain } from "../helpers/main.js";
 
 export const models = defineModels({
   researcher: openai("gpt-5.4-mini"),
@@ -130,11 +131,7 @@ export async function runSubflowsExample(options?: {
   return result.output;
 }
 
-if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
-    process.exit(1);
-  }
+runExampleMain(import.meta.url, async () => {
   // Contrast the two observation channels:
   //   - onTransition: root machine only (`subflows-parent`).
   //   - inspect: the WHOLE actor system, so the invoked child machine
@@ -150,4 +147,4 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     },
   });
   console.log(`\n${output.research}`);
-}
+});

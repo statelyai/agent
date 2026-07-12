@@ -30,7 +30,6 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createMachine } from "xstate";
 import { getShortestPaths } from "xstate/graph";
-import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
 import {
   createAgentSchemas,
   runAgent,
@@ -38,6 +37,7 @@ import {
   type RunAgentOptions,
   setupAgent,
 } from "../../src/index.js";
+import { resolveExecutors, runExampleMain } from "../helpers/main.js";
 
 type Bank = "left" | "right";
 
@@ -627,7 +627,7 @@ export async function runAssistedRiverCrossingExample(
 ) {
   const result = await runAgent(riverCrossingAssistedMachine, {
     input: { maxMoves: 12 },
-    ...(options ?? { ...createAiSdkExecutors({ models }) }),
+    ...resolveExecutors(models, options),
   });
   if (result.status !== "done") {
     throw new Error(`Assisted river crossing did not complete: ${result.status}`);
@@ -642,7 +642,7 @@ export async function runRiverCrossingExample(
 ) {
   const result = await runAgent(riverCrossingMachine, {
     input: { maxMoves: 12 },
-    ...(options ?? { ...createAiSdkExecutors({ models }) }),
+    ...resolveExecutors(models, options),
   });
   if (result.status !== "done") {
     throw new Error(`River crossing did not complete: ${result.status}`);
@@ -683,10 +683,4 @@ export async function main() {
   );
 }
 
-if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
-    process.exit(1);
-  }
-  void main();
-}
+runExampleMain(import.meta.url, main);

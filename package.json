@@ -45,6 +45,7 @@
   ],
   "scripts": {
     "build": "tsdown",
+    "proto:prefabs": "tsx .scratch/prefabs/demo.ts",
     "typecheck": "pnpm run typecheck:src && pnpm run typecheck:examples",
     "typecheck:src": "tsc --noEmit",
     "typecheck:examples": "tsc -p examples/tsconfig.json --noEmit",

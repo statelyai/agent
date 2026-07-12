@@ -21,6 +21,7 @@ import {
   runAgent,
   setupAgent,
 } from "../../src/index.js";
+import { runExampleMain } from "../helpers/main.js";
 
 export const turnSummarySchema = z.object({
   summary: z.string(),
@@ -105,10 +106,25 @@ export const gameActors = {
   summarizeTurn,
 };
 
+// `summarizing` always sets `lastSummary` before any of these states is
+// reached (either via the summarize onDone, or FLEE's own context patch), so
+// it's narrowed non-null on every path in.
+const nonNullSummaryContext = gameSchemas.context.extend({ lastSummary: z.string() });
+
 const gameAgentSetup = setupAgent({
   schemas: gameSchemas,
   models,
   actorSources: gameActors,
+  states: {
+    choosingMove: {},
+    summarizing: {},
+    checkingOutcome: {},
+    done: { schemas: { context: nonNullSummaryContext } },
+    won: { schemas: { context: nonNullSummaryContext } },
+    lost: { schemas: { context: nonNullSummaryContext } },
+    fled: { schemas: { context: nonNullSummaryContext } },
+    fumbled: {},
+  },
 });
 
 export const gameMachine = gameAgentSetup.createMachine({
@@ -189,7 +205,7 @@ export const gameMachine = gameAgentSetup.createMachine({
       type: "final",
       output: ({ context }) => ({
         outcome: "continue",
-        summary: context.lastSummary ?? "",
+        summary: context.lastSummary,
         playerHp: context.playerHp,
         enemyHp: context.enemyHp,
       }),
@@ -198,7 +214,7 @@ export const gameMachine = gameAgentSetup.createMachine({
       type: "final",
       output: ({ context }) => ({
         outcome: "won",
-        summary: context.lastSummary ?? "You won.",
+        summary: context.lastSummary,
         playerHp: context.playerHp,
         enemyHp: context.enemyHp,
       }),
@@ -207,7 +223,7 @@ export const gameMachine = gameAgentSetup.createMachine({
       type: "final",
       output: ({ context }) => ({
         outcome: "lost",
-        summary: context.lastSummary ?? "You lost.",
+        summary: context.lastSummary,
         playerHp: context.playerHp,
         enemyHp: context.enemyHp,
       }),
@@ -216,7 +232,7 @@ export const gameMachine = gameAgentSetup.createMachine({
       type: "final",
       output: ({ context }) => ({
         outcome: "fled",
-        summary: context.lastSummary ?? "You fled the encounter.",
+        summary: context.lastSummary,
         playerHp: context.playerHp,
         enemyHp: context.enemyHp,
       }),
@@ -254,13 +270,7 @@ export async function main() {
   console.log(summary);
 }
 
-if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
-    process.exit(1);
-  }
-  void main();
-}
+runExampleMain(import.meta.url, main);
 
 // ─── Type probe: compilation fails if the root/final output stops being typed ───
 
@@ -273,9 +283,12 @@ gameAgentSetup.createMachine({
   },
   // @ts-expect-error root machine output must match gameSchemas.output
   output: () => ({ wrong: true }),
-  initial: "probe",
+  // `fumbled` (an unnarrowed declared state) — the setup's per-state schemas
+  // block constrains machines to declared state keys, so this probe machine
+  // must reuse one.
+  initial: "fumbled",
   states: {
-    probe: {
+    fumbled: {
       type: "final",
       // @ts-expect-error top-level final state output must match gameSchemas.output
       output: () => ({ wrong: true }),

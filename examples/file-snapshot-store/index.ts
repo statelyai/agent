@@ -28,10 +28,13 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { runAgent, setupAgent } from "../../src/index.js";
 import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
+import { runExampleMain } from "../helpers/main.js";
 import type { Snapshot } from "xstate";
 
+const draftContextSchema = z.object({ topic: z.string(), draft: z.string().nullable() });
+
 const agentSetup = setupAgent({
-  context: z.object({ topic: z.string(), draft: z.string().nullable() }),
+  context: draftContextSchema,
   input: z.object({ topic: z.string() }),
   output: z.object({ draft: z.string() }),
   events: {
@@ -46,6 +49,18 @@ const agentSetup = setupAgent({
         "You draft short, concrete announcement copy. Two or three sentences. " +
         'If the topic includes a "Revision:" note, apply it. Return only the draft text.',
       prompt: ({ input }) => input.topic,
+    },
+  },
+  // drafting's onDone sets `draft` before every path into "reviewing" (a
+  // REJECT loops back through drafting, which re-sets it) — narrow it
+  // non-null from "reviewing" onward.
+  states: {
+    drafting: {},
+    reviewing: {
+      schemas: { context: draftContextSchema.extend({ draft: z.string() }) },
+    },
+    published: {
+      schemas: { context: draftContextSchema.extend({ draft: z.string() }) },
     },
   },
 });
@@ -75,7 +90,7 @@ export const draftMachine = agentSetup.createMachine({
     },
     published: {
       type: "final",
-      output: ({ context }) => ({ draft: context.draft ?? "" }),
+      output: ({ context }) => ({ draft: context.draft }),
     },
   },
 });
@@ -185,10 +200,4 @@ export async function main() {
   console.log("Published:", third.output.draft);
 }
 
-if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
-    process.exit(1);
-  }
-  void main();
-}
+runExampleMain(import.meta.url, main);

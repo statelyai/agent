@@ -28,25 +28,28 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
 import { createAgentSchemas, runAgent, setupAgent } from "../../src/index.js";
+import { runExampleMain } from "../helpers/main.js";
 
 const models = {
   quick: openai("gpt-5.4-mini"),
 } as const;
 
+const guardrailsContextSchema = z.object({
+  question: z.string(),
+  topic: z.string().nullable(),
+  answer: z.string().nullable(),
+  reason: z.string(),
+  critique: z.string(),
+  revisions: z.number(),
+  maxRevisions: z.number(),
+  validated: z
+    .object({ answerable: z.boolean(), inScope: z.boolean(), reason: z.string() })
+    .nullable(),
+  verified: z.object({ supported: z.boolean(), critique: z.string() }).nullable(),
+});
+
 export const guardrailsSchemas = createAgentSchemas({
-  context: z.object({
-    question: z.string(),
-    topic: z.string().nullable(),
-    answer: z.string().nullable(),
-    reason: z.string(),
-    critique: z.string(),
-    revisions: z.number(),
-    maxRevisions: z.number(),
-    validated: z
-      .object({ answerable: z.boolean(), inScope: z.boolean(), reason: z.string() })
-      .nullable(),
-    verified: z.object({ supported: z.boolean(), critique: z.string() }).nullable(),
-  }),
+  context: guardrailsContextSchema,
   input: z.object({
     question: z.string(),
     topic: z.string().optional(),
@@ -62,6 +65,23 @@ export const guardrailsSchemas = createAgentSchemas({
 const agentSetup = setupAgent({
   schemas: guardrailsSchemas,
   models,
+  // answering (and its retry, revising) always sets `answer` before either
+  // state's request reads it — narrow it non-null there.
+  states: {
+    validatingQuestion: {},
+    checkingQuestion: {},
+    answering: {},
+    verifyingAnswer: {
+      schemas: { context: guardrailsContextSchema.extend({ answer: z.string() }) },
+    },
+    checkingAnswer: {},
+    revising: {
+      schemas: { context: guardrailsContextSchema.extend({ answer: z.string() }) },
+    },
+    answered: {},
+    refused: {},
+    unverified: {},
+  },
   requests: {
     validateQuestion: {
       schemas: {
@@ -202,7 +222,7 @@ export const guardrailsMachine = agentSetup.createMachine({
         src: "verifyAnswer",
         input: ({ context }) => ({
           question: context.question,
-          answer: context.answer ?? "",
+          answer: context.answer,
         }),
         onDone: ({ output }) => ({
           target: "checkingAnswer",
@@ -238,7 +258,7 @@ export const guardrailsMachine = agentSetup.createMachine({
         src: "revise",
         input: ({ context }) => ({
           question: context.question,
-          answer: context.answer ?? "",
+          answer: context.answer,
           critique: context.critique,
         }),
         onDone: ({ context, output }) => ({
@@ -275,10 +295,4 @@ export async function main() {
   console.log(result.output);
 }
 
-if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
-    process.exit(1);
-  }
-  void main();
-}
+runExampleMain(import.meta.url, main);

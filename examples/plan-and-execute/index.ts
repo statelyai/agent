@@ -21,6 +21,7 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { runAgent, setupAgent, type RunAgentOptions } from "../../src/index.js";
 import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
+import { resolveExecutors, runExampleMain } from "../helpers/main.js";
 
 const stepSchema = z.object({ id: z.string(), question: z.string() });
 const planSchema = z.object({ steps: z.array(stepSchema) });
@@ -31,21 +32,33 @@ export const models = defineModels({
   solver: openai("gpt-5.4-mini"),
 });
 
+const planAndExecuteContextSchema = z.object({
+  goal: z.string(),
+  steps: z.array(stepSchema),
+  stepIndex: z.number(),
+  evidence: z.record(z.string(), z.string()),
+  answer: z.string().nullable(),
+});
+
 const agentSetup = setupAgent({
   models,
-  context: z.object({
-    goal: z.string(),
-    steps: z.array(stepSchema),
-    stepIndex: z.number(),
-    evidence: z.record(z.string(), z.string()),
-    answer: z.string().nullable(),
-  }),
+  context: planAndExecuteContextSchema,
   input: z.object({ goal: z.string() }),
   output: z.object({
     steps: z.array(stepSchema),
     answer: z.string(),
     evidence: z.record(z.string(), z.string()),
   }),
+  // solveTask always sets `answer` before `done` reads it — narrow it non-null there.
+  states: {
+    planning: {},
+    executing: {},
+    gathering: {},
+    solving: {},
+    done: {
+      schemas: { context: planAndExecuteContextSchema.extend({ answer: z.string() }) },
+    },
+  },
   requests: {
     planTask: {
       schemas: {
@@ -154,7 +167,7 @@ export const planAndExecuteMachine = agentSetup.createMachine({
       type: "final",
       output: ({ context }) => ({
         steps: context.steps,
-        answer: context.answer ?? "",
+        answer: context.answer,
         evidence: context.evidence,
       }),
     },
@@ -168,7 +181,7 @@ export async function runPlanAndExecuteExample(
     input: {
       goal: "Should a small team pick XState or a hand-rolled reducer for agent workflows?",
     },
-    ...(options ?? { ...createAiSdkExecutors({ models }) }),
+    ...resolveExecutors(models, options),
   });
   if (result.status !== "done") {
     throw new Error(`Plan-and-execute example did not complete: ${result.status}`);
@@ -176,11 +189,7 @@ export async function runPlanAndExecuteExample(
   return result.output;
 }
 
-if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
-    process.exit(1);
-  }
+runExampleMain(import.meta.url, async () => {
   const output = await runPlanAndExecuteExample({
     ...createAiSdkExecutors({ models }),
     onTransition: (snapshot) =>
@@ -199,4 +208,4 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     console.log(`  ${id}: ${text}`);
   }
   console.log(`\nAnswer:\n${output.answer}`);
-}
+});

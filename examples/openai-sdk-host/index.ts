@@ -49,6 +49,7 @@ import {
 } from "../../src/index.js";
 import { triageMachine } from "../triage/index.js";
 import { twentyQuestionsMachine } from "../twenty-questions/index.js";
+import { runExampleMain } from "../helpers/main.js";
 
 // ─── Request → OpenAI param mapping (pure, unit-testable) ───
 
@@ -413,10 +414,4 @@ async function main() {
   console.log(`Final score — user: ${result.userScore}, agent: ${result.agentScore}`);
 }
 
-if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
-    process.exit(1);
-  }
-  void main();
-}
+runExampleMain(import.meta.url, main);

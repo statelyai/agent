@@ -19,6 +19,7 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { runAgent, setupAgent, type RunAgentOptions } from "../../src/index.js";
 import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
+import { resolveExecutors, runExampleMain } from "../helpers/main.js";
 
 const specialistSchema = z.enum(["researcher", "coder", "writer"]);
 
@@ -167,7 +168,7 @@ export async function runSupervisorExample(options?: RunAgentOptions<typeof supe
     input: {
       request: "Write a friendly release announcement for our new SDK.",
     },
-    ...(options ?? { ...createAiSdkExecutors({ models }) }),
+    ...resolveExecutors(models, options),
   });
   if (result.status !== "done") {
     throw new Error(`Supervisor example did not complete: ${result.status}`);
@@ -179,11 +180,7 @@ export async function runSupervisorExample(options?: RunAgentOptions<typeof supe
 // branch each request actually flows through.
 const SPECIALIST_STATES = ["researcher", "coder", "writer"] as const;
 
-if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
-    process.exit(1);
-  }
+runExampleMain(import.meta.url, async () => {
   const executors = createAiSdkExecutors({ models });
 
   // Three requests that clearly belong to three different specialists — the
@@ -218,4 +215,4 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     console.log(`Route decision: ${specialist} (${reason})`);
     console.log(`Answer: ${answer}\n`);
   }
-}
+});

@@ -9,6 +9,7 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
 import { createAgentSchemas, createTextLogic, runAgent, setupAgent } from "../../src/index.js";
+import { runExampleMain } from "../helpers/main.js";
 
 export const triageSchema = z.object({
   sentiment: z.enum(["positive", "neutral", "negative"]),
@@ -16,11 +17,13 @@ export const triageSchema = z.object({
   reply: z.string(),
 });
 
+const contextSchema = z.object({
+  ticket: z.string(),
+  triage: triageSchema.nullable(),
+});
+
 const schemas = createAgentSchemas({
-  context: z.object({
-    ticket: z.string(),
-    triage: triageSchema.nullable(),
-  }),
+  context: contextSchema,
   input: z.object({ ticket: z.string() }),
   output: triageSchema,
 });
@@ -53,6 +56,13 @@ const triageAgentSetup = setupAgent({
   schemas,
   models,
   actorSources: triageActors,
+  // `triaging` assigns `triage` before `done` is entered — narrow it non-null there.
+  states: {
+    triaging: {},
+    done: {
+      schemas: { context: contextSchema.extend({ triage: triageSchema }) },
+    },
+  },
 });
 
 export const triageSchemas = schemas;
@@ -74,8 +84,7 @@ export const triageMachine = triageAgentSetup.createMachine({
     },
     done: {
       type: "final",
-      output: ({ context }) =>
-        context.triage ?? { sentiment: "neutral", category: "other", reply: "" },
+      output: ({ context }) => context.triage,
     },
   },
 });
@@ -101,10 +110,4 @@ export async function main() {
   console.log(JSON.stringify(result.output, null, 2));
 }
 
-if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
-    process.exit(1);
-  }
-  void main();
-}
+runExampleMain(import.meta.url, main);

@@ -277,6 +277,25 @@ done: {
 
 When the root declares no `output` and exactly one final state does, `agentSetup.createMachine` promotes that output to the root, so `snapshot.output` is set without repeating it on every final state.
 
+### Narrow context per state
+
+A context field that starts `null` and is assigned mid-run forces a `?? fallback` at every later read, including in a final state's `output`. When a state is reachable **only** after that field is set, declare a per-state `schemas.context` under `setupAgent({ states })` (mirroring XState's `setup({ states })`) to narrow the field non-null. The narrowed type flows into that state's invoke `input`, transition functions, and `output`, so the coalesce disappears:
+
+```ts
+const context = z.object({ question: z.string(), plan: planSchema.nullable() });
+
+const agentSetup = setupAgent({
+  context,
+  // `planning` assigns `plan` before `executing` and `done` run, so narrow it there.
+  states: {
+    executing: { schemas: { context: context.extend({ plan: planSchema }) } },
+    done: { schemas: { context: context.extend({ plan: planSchema }) } },
+  },
+});
+```
+
+Inside those states `context.plan` is `Plan`, not `Plan | null`. Narrow only where every path into the state has assigned the field. A state also reachable on an error or refusal route (where the field is still `null`) must keep its nullable handling. This narrows the *type* only, so runtime behavior is unchanged. See [examples/sql-agent/index.ts](../examples/sql-agent/index.ts).
+
 ## State and transition meta
 
 <!-- typed meta protocol from examples/email-drafter/index.ts -->

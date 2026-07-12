@@ -11,6 +11,7 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { setupAgent, runAgent } from "../../src/index.js";
 import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
+import { runExampleMain } from "../helpers/main.js";
 
 const classificationSchema = z.object({
   reasoning: z.string(),
@@ -39,13 +40,19 @@ const agentSetup = setupAgent({
     response: z.string(),
   }),
   // After classifying, `classification` is always set — narrow it non-null.
+  // responding sets response before done reads it — narrow that too.
   states: {
     classifying: {},
     responding: {
       schemas: { context: contextSchema.extend({ classification: classificationSchema }) },
     },
     done: {
-      schemas: { context: contextSchema.extend({ classification: classificationSchema }) },
+      schemas: {
+        context: contextSchema.extend({
+          classification: classificationSchema,
+          response: z.string(),
+        }),
+      },
     },
   },
   requests: {
@@ -121,7 +128,7 @@ export const aiSdkRoutingMachine = agentSetup.createMachine({
       type: "final",
       output: ({ context }) => ({
         classification: context.classification,
-        response: context.response ?? "",
+        response: context.response,
       }),
     },
   },
@@ -141,14 +148,10 @@ export async function runAiSdkRoutingExample(
   return result.output;
 }
 
-if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
-    process.exit(1);
-  }
+runExampleMain(import.meta.url, async () => {
   console.log(
     await runAiSdkRoutingExample((snapshot) =>
       console.log("[state]", JSON.stringify(snapshot.value)),
     ),
   );
-}
+});

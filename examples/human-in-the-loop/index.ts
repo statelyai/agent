@@ -30,6 +30,7 @@ import {
   WAIT_TAG,
   type AgentRequestExecutors,
 } from "../../src/index.js";
+import { resolveExecutors, runExampleMain } from "../helpers/main.js";
 
 export const models = defineModels({
   writer: openai("gpt-5.4-mini"),
@@ -39,12 +40,14 @@ const interactionSchema = z.object({
   label: z.string(),
 });
 
+const contextSchema = z.object({
+  topic: z.string(),
+  draft: z.string().nullable(),
+});
+
 const agentSetup = setupAgent({
   models,
-  context: z.object({
-    topic: z.string(),
-    draft: z.string().nullable(),
-  }),
+  context: contextSchema,
   input: z.object({ topic: z.string() }),
   output: z.object({ published: z.boolean(), draft: z.string() }),
   meta: z.object({ interaction: interactionSchema.optional() }),
@@ -62,6 +65,16 @@ const agentSetup = setupAgent({
       system: "You write short, punchy internal announcements — two or three sentences.",
       prompt: ({ input }) => `Write a short announcement about: ${input.topic}`,
     },
+  },
+  // The only path into `published` is reviewing's APPROVE, reached only after
+  // drafting's onDone has already set `draft` — guaranteed non-null there.
+  states: {
+    drafting: {},
+    // Both reviewing and published are only reachable after drafting's onDone
+    // set `draft`; narrowing reviewing lets its bare APPROVE target satisfy
+    // published's narrowed context.
+    reviewing: { schemas: { context: contextSchema.extend({ draft: z.string() }) } },
+    published: { schemas: { context: contextSchema.extend({ draft: z.string() }) } },
   },
 });
 
@@ -104,7 +117,7 @@ export const humanInTheLoopMachine = agentSetup.createMachine({
       type: "final",
       output: ({ context }) => ({
         published: true,
-        draft: context.draft ?? "",
+        draft: context.draft,
       }),
     },
   },
@@ -138,7 +151,7 @@ export async function runHumanInTheLoopExample(
   // Phase 1: draft, then settle idle at `reviewing`.
   const first = await runAgent(humanInTheLoopMachine, {
     input: { topic },
-    ...(generateText ? { generateText } : {}),
+    ...resolveExecutors(models, generateText ? { generateText } : undefined),
     ...(onTransition ? { onTransition } : {}),
   });
 
@@ -157,7 +170,7 @@ export async function runHumanInTheLoopExample(
   const second = await runAgent(humanInTheLoopMachine, {
     snapshot: persisted,
     event: { type: "APPROVE" },
-    ...(generateText ? { generateText } : {}),
+    ...resolveExecutors(models, generateText ? { generateText } : undefined),
     ...(onTransition ? { onTransition } : {}),
   });
 
@@ -174,16 +187,8 @@ export async function runHumanInTheLoopExample(
   };
 }
 
-if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
-    process.exit(1);
-  }
-  const { createAiSdkExecutors } = await import("../../src/ai-sdk/index.js");
-  const { generateText } = createAiSdkExecutors({ models });
-
+runExampleMain(import.meta.url, async () => {
   const result = await runHumanInTheLoopExample({
-    generateText,
     onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
   });
 
@@ -194,4 +199,4 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   console.log("\n--- Phase 2: resumed with APPROVE ---");
   console.log("Published:", result.published);
   console.log("Final draft:", result.publishedDraft);
-}
+});

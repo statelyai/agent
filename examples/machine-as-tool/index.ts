@@ -32,6 +32,7 @@ import {
   type RunAgentResult,
 } from "../../src/index.js";
 import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
+import { runExampleMain } from "../helpers/main.js";
 
 // Typed interaction protocol handed to the harness. Schema-typed meta means
 // the host gets a real contract, not Record<string, unknown>. This is a
@@ -279,10 +280,4 @@ export async function main() {
   console.log("Result:", finished);
 }
 
-if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
-    process.exit(1);
-  }
-  void main();
-}
+runExampleMain(import.meta.url, main);

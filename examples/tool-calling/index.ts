@@ -24,6 +24,7 @@ import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
 import { defineModels } from "../../src/ai-sdk/index.js";
 import { runAgent, setupAgent, type AgentRequestExecutors } from "../../src/index.js";
+import { runExampleMain } from "../helpers/main.js";
 
 export const models = defineModels({
   router: openai("gpt-5.4-mini"),
@@ -78,20 +79,58 @@ const toolResultSchema = z.object({
 });
 type ToolResult = z.infer<typeof toolResultSchema>;
 
+const toolCallingContextSchema = z.object({
+  query: z.string(),
+  selected: selectedToolUnion.nullable(),
+  result: toolResultSchema.nullable(),
+  finalAnswer: z.string().nullable(),
+});
+
 const agentSetup = setupAgent({
   models,
-  context: z.object({
-    query: z.string(),
-    selected: selectedToolUnion.nullable(),
-    result: toolResultSchema.nullable(),
-    finalAnswer: z.string().nullable(),
-  }),
+  context: toolCallingContextSchema,
   input: z.object({ query: z.string() }),
   output: z.object({
     tool: z.string(),
     result: toolResultSchema,
     finalAnswer: z.string(),
   }),
+  // selectingTool sets `selected`, and whichever tool state runs sets `result`,
+  // before formatting sets `finalAnswer` — all guaranteed non-null by `done`.
+  states: {
+    selectingTool: {},
+    // Narrowing threads the chain: selected is set entering dispatch, result
+    // entering formatting, finalAnswer entering done.
+    dispatch: {
+      schemas: { context: toolCallingContextSchema.extend({ selected: selectedToolUnion }) },
+    },
+    calculating: {
+      schemas: { context: toolCallingContextSchema.extend({ selected: selectedToolUnion }) },
+    },
+    converting: {
+      schemas: { context: toolCallingContextSchema.extend({ selected: selectedToolUnion }) },
+    },
+    lookingUp: {
+      schemas: { context: toolCallingContextSchema.extend({ selected: selectedToolUnion }) },
+    },
+    formatting: {
+      schemas: {
+        context: toolCallingContextSchema.extend({
+          selected: selectedToolUnion,
+          result: toolResultSchema,
+        }),
+      },
+    },
+    done: {
+      schemas: {
+        context: toolCallingContextSchema.extend({
+          selected: selectedToolUnion,
+          result: toolResultSchema,
+          finalAnswer: z.string(),
+        }),
+      },
+    },
+  },
   actorSources: {
     // Real calculator — actually computes.
     calculate: createAsyncLogic<
@@ -261,9 +300,9 @@ export const toolCallingMachine = agentSetup.createMachine({
     done: {
       type: "final",
       output: ({ context }) => ({
-        tool: context.selected?.tool ?? "",
-        result: context.result ?? { summary: "", value: null },
-        finalAnswer: context.finalAnswer ?? "",
+        tool: context.selected.tool,
+        result: context.result,
+        finalAnswer: context.finalAnswer,
       }),
     },
   },
@@ -307,11 +346,7 @@ export async function runToolCallingExample(
   return { ...result.output, progress };
 }
 
-if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
-    process.exit(1);
-  }
+runExampleMain(import.meta.url, async () => {
   const { createAiSdkExecutors } = await import("../../src/ai-sdk/index.js");
   const { generateText } = createAiSdkExecutors({ models });
 
@@ -326,4 +361,4 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   console.log("Selected tool:", result.tool);
   console.log("Tool result:", result.result.summary);
   console.log("Answer:", result.finalAnswer);
-}
+});

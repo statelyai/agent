@@ -44,7 +44,8 @@ import {
   type AgentRequestExecutor,
   type RunAgentOptions,
 } from "../../src/index.js";
-import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
+import { defineModels } from "../../src/ai-sdk/index.js";
+import { resolveExecutors, runExampleMain } from "../helpers/main.js";
 
 const planSchema = z.object({ subtopics: z.array(z.string()) });
 
@@ -54,22 +55,36 @@ export const models = defineModels({
   reducer: openai("gpt-5.4-mini"),
 });
 
+const fanOutContextSchema = z.object({
+  topic: z.string(),
+  subtopics: z.array(z.string()),
+  // reduced result map: branch id -> summary
+  summaries: z.record(z.string(), z.string()),
+  expected: z.number(),
+  digest: z.string().nullable(),
+});
+
 const agentSetup = setupAgent({
   models,
-  context: z.object({
-    topic: z.string(),
-    subtopics: z.array(z.string()),
-    // reduced result map: branch id -> summary
-    summaries: z.record(z.string(), z.string()),
-    expected: z.number(),
-    digest: z.string().nullable(),
-  }),
+  context: fanOutContextSchema,
   input: z.object({ topic: z.string() }),
   output: z.object({
     subtopics: z.array(z.string()),
     summaries: z.record(z.string(), z.string()),
     digest: z.string(),
   }),
+  // reducing always sets `digest` before `done` reads it — narrow it non-null there.
+  // Every machine state must be declared here once any per-state schema is;
+  // states without overrides declare `{}`.
+  states: {
+    planning: {},
+    fanningOut: {},
+    collecting: {},
+    reducing: {},
+    done: {
+      schemas: { context: fanOutContextSchema.extend({ digest: z.string() }) },
+    },
+  },
   requests: {
     planSubtopics: {
       schemas: {
@@ -197,7 +212,7 @@ export function createFanOutMachine(generateText: AgentRequestExecutor) {
         output: ({ context }) => ({
           subtopics: context.subtopics,
           summaries: context.summaries,
-          digest: context.digest ?? "",
+          digest: context.digest,
         }),
       },
     },
@@ -208,7 +223,7 @@ export async function runFanOutExample(
   options?: RunAgentOptions<ReturnType<typeof createFanOutMachine>>,
   observe?: RunAgentOptions<ReturnType<typeof createFanOutMachine>>["onTransition"],
 ) {
-  const executors = options ?? createAiSdkExecutors({ models });
+  const executors = resolveExecutors(models, options);
   const generateText = executors.generateText;
   if (!generateText) {
     throw new Error("runFanOutExample requires a generateText executor.");
@@ -228,11 +243,7 @@ export async function runFanOutExample(
   return result.output;
 }
 
-if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
-    process.exit(1);
-  }
+runExampleMain(import.meta.url, async () => {
   const output = await runFanOutExample(undefined, (snapshot) =>
     console.log(
       "[state]",
@@ -249,4 +260,4 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     console.log(`  ${id}: ${text}`);
   }
   console.log(`\nDigest:\n${output.digest}`);
-}
+});

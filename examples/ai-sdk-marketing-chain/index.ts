@@ -10,6 +10,7 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { setupAgent, runAgent } from "../../src/index.js";
 import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
+import { runExampleMain } from "../helpers/main.js";
 
 const qualitySchema = z.object({
   hasCallToAction: z.boolean(),
@@ -29,14 +30,16 @@ export const models = defineModels({
   improver: openai("gpt-5.4-mini"),
 });
 
+const contextSchema = z.object({
+  product: z.string(),
+  copy: z.string().nullable(),
+  quality: qualitySchema.nullable(),
+  finalCopy: z.string().nullable(),
+});
+
 const agentSetup = setupAgent({
   models,
-  context: z.object({
-    product: z.string(),
-    copy: z.string().nullable(),
-    quality: qualitySchema.nullable(),
-    finalCopy: z.string().nullable(),
-  }),
+  context: contextSchema,
   input: z.object({ product: z.string() }),
   output: z.object({ copy: z.string(), quality: qualitySchema }),
   emitted: {
@@ -45,6 +48,25 @@ const agentSetup = setupAgent({
       emotionalAppeal: z.number(),
       clarity: z.number(),
     }),
+  },
+  // writing sets copy before any state that reads it; evaluating also sets
+  // quality before checking/improving/done — narrow both non-null there.
+  states: {
+    writing: {},
+    evaluating: {
+      schemas: { context: contextSchema.extend({ copy: z.string() }) },
+    },
+    checking: {},
+    improving: {
+      schemas: {
+        context: contextSchema.extend({ copy: z.string(), quality: qualitySchema }),
+      },
+    },
+    done: {
+      schemas: {
+        context: contextSchema.extend({ copy: z.string(), quality: qualitySchema }),
+      },
+    },
   },
   requests: {
     writeMarketingCopy: {
@@ -114,7 +136,7 @@ export const aiSdkMarketingChainMachine = agentSetup.createMachine({
       invoke: {
         id: "evaluateMarketingCopy",
         src: "evaluateMarketingCopy",
-        input: ({ context }) => ({ copy: context.copy ?? "" }),
+        input: ({ context }) => ({ copy: context.copy }),
         onDone: ({ output }, enq) => {
           enq.emit({ type: "EVALUATED", ...output });
           return {
@@ -134,12 +156,8 @@ export const aiSdkMarketingChainMachine = agentSetup.createMachine({
         id: "improveMarketingCopy",
         src: "improveMarketingCopy",
         input: ({ context }) => ({
-          copy: context.copy ?? "",
-          quality: context.quality ?? {
-            hasCallToAction: false,
-            emotionalAppeal: 0,
-            clarity: 0,
-          },
+          copy: context.copy,
+          quality: context.quality,
         }),
         onDone: ({ output }) => ({
           target: "done",
@@ -150,12 +168,8 @@ export const aiSdkMarketingChainMachine = agentSetup.createMachine({
     done: {
       type: "final",
       output: ({ context }) => ({
-        copy: context.finalCopy ?? context.copy ?? "",
-        quality: context.quality ?? {
-          hasCallToAction: false,
-          emotionalAppeal: 0,
-          clarity: 0,
-        },
+        copy: context.finalCopy ?? context.copy,
+        quality: context.quality,
       }),
     },
   },
@@ -179,10 +193,6 @@ export async function runAiSdkMarketingChainExample() {
   return result.output;
 }
 
-if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
-    process.exit(1);
-  }
+runExampleMain(import.meta.url, async () => {
   console.log(await runAiSdkMarketingChainExample());
-}
+});
