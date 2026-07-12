@@ -5,7 +5,6 @@ import {
   createTextLogic,
   initialAgentStep,
   resolveAgentRequests,
-  sendDecision,
   setupAgent,
 } from "./index.js";
 import type {
@@ -48,7 +47,6 @@ function createTinyAgent() {
           id: "decide",
           src: "agent.decide",
           input: () => ({ model: "quick", allowedEvents: ["GO", "STOP"] as const }),
-          onDone: sendDecision(),
         },
         on: {
           GO: { target: "summarizing" },

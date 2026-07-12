@@ -13,8 +13,7 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { setupAgent, runAgent } from "../../src/index.js";
-import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
-import { type LanguageModel } from "ai";
+import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
 
 const reviewSchema = z.object({
   type: z.enum(["security", "performance", "maintainability"]),
@@ -30,15 +29,12 @@ const aspectReviewSchema = z.object({
   severity: z.enum(["low", "medium", "high"]),
 });
 
-export const models: Record<
-  "securityReviewer" | "performanceReviewer" | "maintainabilityReviewer" | "summarizer",
-  LanguageModel
-> = {
+export const models = defineModels({
   securityReviewer: openai("gpt-5.4-mini"),
   performanceReviewer: openai("gpt-5.4-mini"),
   maintainabilityReviewer: openai("gpt-5.4-mini"),
   summarizer: openai("gpt-5.4-mini"),
-} as const;
+});
 
 const codeInput = z.object({ code: z.string() });
 

@@ -19,7 +19,6 @@ import {
   resolveAgentStep,
   resolveDecision,
   runAgent,
-  sendDecision,
   setupAgent,
   toolMessage,
   transitionAgentStep,
@@ -1471,7 +1470,6 @@ describe("setupAgent", () => {
             id: "chooseMove",
             src: "chooseMove",
             input: ({ context }) => ({ prompt: context.prompt }),
-            onDone: sendDecision(),
             onError: { target: "fumbled" },
           },
           on: {
@@ -2048,7 +2046,10 @@ describe("setupAgent", () => {
     expect(second.status === "done" && second.output).toEqual({ draft: "Hello world." });
   });
 
-  test("fromConfig: explicit onDone on an agent.decide invoke throws a clear error", () => {
+  test("fromConfig: an explicit onDone on an agent.decide invoke is allowed (delivery is automatic)", () => {
+    // Delivery is now automatic, but an onDone MAY be declared to observe a
+    // chosen event whose transition stays in-state — fromConfig no longer
+    // rejects it (it lowers like any other invoke's onDone).
     expect(() =>
       setupAgent.fromConfig(
         {
@@ -2076,7 +2077,7 @@ describe("setupAgent", () => {
         },
         { compileSchema: ajvCompiler() },
       ),
-    ).toThrow(/decision delivery is automatic/i);
+    ).not.toThrow();
   });
 
   test("agent.userInput is a blessed host-provided actor for static workflows", async () => {
@@ -2346,7 +2347,6 @@ describe("decision step discovery", () => {
             id: "choosingMove",
             src: "chooseMove",
             input: {},
-            onDone: sendDecision(),
             onError: { target: "fumbled" },
           },
           on: {
@@ -2391,7 +2391,6 @@ describe("decision step discovery", () => {
             id: "choosingMove",
             src: "chooseMove",
             input: {},
-            onDone: sendDecision(),
           },
           on: {
             ATTACK: { target: "attacked" },
@@ -2409,7 +2408,7 @@ describe("decision step discovery", () => {
   });
 });
 
-describe("decision live path (createActor)", () => {
+describe("decision live path (runAgent auto-delivery)", () => {
   const attackSchema = z.object({ target: z.string() });
 
   const decisionSchemas = createAgentSchemas({
@@ -2437,7 +2436,6 @@ describe("decision live path (createActor)", () => {
             id: "choosingMove",
             src: "chooseMove",
             input: {},
-            onDone: sendDecision(),
             onError: { target: "fumbled" },
           },
           on: {
@@ -2454,25 +2452,22 @@ describe("decision live path (createActor)", () => {
     return { agent, machine, chooseMove };
   }
 
-  test("delivers the chosen event via sendTo(self) and passes modes 1-2 validation", async () => {
-    const { machine, chooseMove } = buildMachine();
+  test("delivers the chosen event to the machine automatically and passes modes 1-2 validation", async () => {
+    const { machine } = buildMachine();
 
-    const actor = createActor(
-      machine.provide({
-        actorSources: {
-          chooseMove: chooseMove.withExecutor(
-            async (): Promise<{ event: ChosenEvent }> => ({
-              event: { type: "ATTACK", target: "goblin" },
-            }),
-          ),
-        },
+    // runAgent auto-delivers the chosen event to the invoking actor — no
+    // onDone wiring. ATTACK exits `choosingMove`, so the invoke is cancelled
+    // and the machine reaches `done-state`.
+    const result = await runAgent(machine, {
+      input: {},
+      generateText: async () => ({ output: {} }),
+      decide: async (): Promise<{ event: ChosenEvent }> => ({
+        event: { type: "ATTACK", target: "goblin" },
       }),
-      { input: {} },
-    ).start();
+    });
 
-    await waitFor(actor, (snapshot) => snapshot.status === "done");
-
-    expect(actor.getSnapshot().value).toBe("done-state");
+    expect(result.status).toBe("done");
+    expect(result.status === "done" && result.snapshot.value).toBe("done-state");
   });
 
   test("surfaces a DecisionExhaustedError via onError when the executor returns a disallowed event", async () => {
@@ -2536,7 +2531,6 @@ describe("inline agent.decide invoke (state-local decisions)", () => {
               prompt: "Choose a move.",
               allowedEvents: ["ATTACK", "DEFEND"] as const,
             },
-            onDone: sendDecision(),
             onError: { target: "fumbled" },
           },
           on: {
@@ -2566,14 +2560,23 @@ describe("inline agent.decide invoke (state-local decisions)", () => {
     expect(result.status === "done" && result.snapshot.value).toBe("attacked");
   });
 
-  test("agent.decide provide()d with a decide executor via createActor delivers the chosen event", async () => {
+  test("agent.decide provide()d with a self-delivering logic via createActor delivers the chosen event", async () => {
     const { machine } = buildMachine();
 
     const actor = createActor(
       machine.provide({
         actorSources: {
+          // Delivery is the decision actor's own job now
+          // (exactly what runAgent's wrapper does): send the chosen event to the
+          // invoking parent, then complete with it as output. Yield a microtask
+          // first so the invoking transition has committed before the send.
           "agent.decide": createAsyncLogic({
-            run: async () => ({ type: "DEFEND" }) as ChosenEvent,
+            run: async ({ self }) => {
+              await Promise.resolve();
+              const chosen = { type: "DEFEND" } as ChosenEvent;
+              (self as { _parent?: { send: (event: ChosenEvent) => void } })._parent?.send(chosen);
+              return chosen;
+            },
           }),
         },
       } as never),
@@ -2616,7 +2619,6 @@ describe("inline agent.decide invoke (state-local decisions)", () => {
               model: "test-model",
               allowedEvents: ["ATTACK"],
             },
-            onDone: sendDecision(),
           },
           on: { ATTACK: { target: "attacked" } },
         },
@@ -2638,7 +2640,6 @@ describe("inline agent.decide invoke (state-local decisions)", () => {
               model: "test-model",
               allowedEvents: ["ATTAK"],
             },
-            onDone: sendDecision(),
           },
           on: { ATTACK: { target: "attacked" } },
         },

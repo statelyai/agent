@@ -7,8 +7,7 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { type LanguageModel } from "ai";
-import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
+import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
 import { createAgentSchemas, createTextLogic, runAgent, setupAgent } from "../../src/index.js";
 
 export const triageSchema = z.object({
@@ -26,11 +25,9 @@ const schemas = createAgentSchemas({
   output: triageSchema,
 });
 
-// Annotated with LanguageModel so the exported const has a portable, nameable
-// type (TS2742); model-ref keys are inferred from this map regardless.
-export const models: Record<"ticketTriage", LanguageModel> = {
+export const models = defineModels({
   ticketTriage: openai("gpt-5.4-mini"),
-} as const;
+});
 
 export const triageTicket = createTextLogic({
   schemas: {
@@ -67,7 +64,6 @@ export const triageMachine = triageAgentSetup.createMachine({
   states: {
     triaging: {
       invoke: {
-        id: "triage",
         src: "triageTicket",
         input: ({ context }) => ({ ticket: context.ticket }),
         onDone: ({ output }) => ({

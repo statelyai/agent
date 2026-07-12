@@ -13,9 +13,8 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { type LanguageModel } from "ai";
 import { createAsyncLogic } from "xstate";
-import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
+import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
 import { withReadline } from "../helpers/cli.js";
 import {
   type AgentMessage,
@@ -102,13 +101,11 @@ const eventSchemas = {
 
 const outputSchema = z.object({ sentEmails: z.array(emailDraftSchema) });
 
-// Annotated with LanguageModel so the exported const has a portable, nameable
-// type (TS2742); model-ref keys are inferred from this map regardless.
-export const models: Record<"promptEvaluator" | "emailDrafter" | "draftStreamer", LanguageModel> = {
+export const models = defineModels({
   promptEvaluator: openai("gpt-5.4-mini"),
   emailDrafter: openai("gpt-5.4-mini"),
   draftStreamer: openai("gpt-5.4-mini"),
-} as const;
+});
 
 export const evaluatePrompt = createTextLogic({
   schemas: {

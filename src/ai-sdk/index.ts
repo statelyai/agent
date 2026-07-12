@@ -101,8 +101,32 @@ const unknownSchema = {
 
 // ─── createAiSdkExecutors ───
 
-/** AI SDK model registry: maps model refs (as used in `setupAgent({ models })`/`AgentTextRequest.model`) to AI SDK `LanguageModel` values. */
-export type AiSdkModelMap = Record<string, LanguageModel>;
+/** AI SDK model registry: maps model refs (as used in `setupAgent({ models })`/`AgentTextRequest.model`) to AI SDK `LanguageModel` values. The optional `TKey` parameter pins the ref keys (see {@link defineModels}); it defaults to `string`, so bare `AiSdkModelMap` stays `Record<string, LanguageModel>`. */
+export type AiSdkModelMap<TKey extends string = string> = Record<TKey, LanguageModel>;
+
+/**
+ * Identity helper for a `models` map whose value is exported. Returns the map
+ * unchanged, but types it as {@link AiSdkModelMap}`<keyof T & string>` — a
+ * portable, nameable type — so an exported `const models = defineModels({...})`
+ * needs no `Record<'a' | 'b', LanguageModel>` annotation and never triggers
+ * TS2742 ("inferred type cannot be named without a reference to …"). The exact
+ * ref keys survive, so `createAiSdkExecutors({ models })` and
+ * `setupAgent({ models })` still infer/autocomplete them.
+ *
+ * @example
+ * ```ts
+ * export const models = defineModels({
+ *   quick: openai('gpt-5.4-mini'),
+ *   deep: openai('gpt-5.4'),
+ * });
+ * // typeof models === AiSdkModelMap<'quick' | 'deep'>
+ * ```
+ */
+export function defineModels<T extends Record<string, LanguageModel>>(
+  models: T,
+): AiSdkModelMap<keyof T & string> {
+  return models;
+}
 
 /**
  * Options for {@link createAiSdkExecutors}: either a static `models` map

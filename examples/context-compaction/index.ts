@@ -24,8 +24,7 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { type LanguageModel } from "ai";
-import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
+import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
 import {
   type AgentMessage,
   assistantMessage,
@@ -37,9 +36,9 @@ import {
 } from "../../src/index.js";
 
 // Annotated so the exported const has a portable, nameable type (TS2742).
-export const models: Record<"chat", LanguageModel> = {
+export const models = defineModels({
   chat: openai("gpt-5.4-mini"),
-} as const;
+});
 
 export const contextCompactionSchemas = createAgentSchemas({
   context: z.object({

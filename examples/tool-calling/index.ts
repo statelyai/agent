@@ -22,13 +22,13 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
-import { type LanguageModel } from "ai";
+import { defineModels } from "../../src/ai-sdk/index.js";
 import { runAgent, setupAgent, type AgentRequestExecutors } from "../../src/index.js";
 
-export const models: Record<"router" | "formatter", LanguageModel> = {
+export const models = defineModels({
   router: openai("gpt-5.4-mini"),
   formatter: openai("gpt-5.4-mini"),
-} as const;
+});
 
 /** Sample data: a tiny fixed exchange-rate table (stand-in for a rates API). */
 export const SAMPLE_RATES: Record<string, number> = {

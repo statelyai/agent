@@ -20,12 +20,12 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
-import { type LanguageModel } from "ai";
+import { defineModels } from "../../src/ai-sdk/index.js";
 import { runAgent, setupAgent, type AgentRequestExecutors } from "../../src/index.js";
 
-export const models: Record<"answerer", LanguageModel> = {
+export const models = defineModels({
   answerer: openai("gpt-5.4-mini"),
-} as const;
+});
 
 /**
  * Sample data: a tiny in-file corpus about XState / state machines. Stand-in

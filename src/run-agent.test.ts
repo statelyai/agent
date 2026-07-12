@@ -7,7 +7,6 @@ import {
   createTextLogic,
   IllegalResumeEventError,
   runAgent,
-  sendDecision,
   setupAgent,
   WAIT_TAG,
   type AgentDecisionRequest,
@@ -283,7 +282,6 @@ describe("runAgent", () => {
             id: "choosingMove",
             src: "chooseMove",
             input: {},
-            onDone: sendDecision(),
             onError: { target: "fumbled" },
           },
           on: {
@@ -528,7 +526,7 @@ describe("runAgent", () => {
         initial: "choosingMove",
         states: {
           choosingMove: {
-            invoke: { id: "choosingMove", src: "chooseMove", input: {}, onDone: sendDecision() },
+            invoke: { id: "choosingMove", src: "chooseMove", input: {} },
             on: { ATTACK: { target: "done" } },
           },
           done: { type: "final" },
@@ -1064,7 +1062,6 @@ describe("runAgent", () => {
               // No allowedEvents — omitted means "all currently-legal events."
               src: "agent.decide",
               input: { model: "test-model", prompt: "Choose a move." },
-              onDone: sendDecision(),
               onError: { target: "fumbled" },
             },
             on: {
@@ -1114,7 +1111,6 @@ describe("runAgent", () => {
               id: "choosingMove",
               src: "chooseMove",
               input: {},
-              onDone: sendDecision(),
               onError: { target: "fumbled" },
             },
             on: {
@@ -1155,7 +1151,6 @@ describe("runAgent", () => {
               id: "choosingMove",
               src: "agent.decide",
               input: { model: "test-model", prompt: "Choose a move." },
-              onDone: sendDecision(),
               onError: { target: "fumbled" },
             },
             on: {
@@ -1216,7 +1211,7 @@ describe("runAgent", () => {
     });
   });
 
-  test("sendDecision: the decided event is delivered exactly once despite transition-fn re-evaluation", async () => {
+  test("auto-delivery: the decided event is delivered exactly once despite transition-fn re-evaluation", async () => {
     const schemas = createAgentSchemas({
       context: z.object({ attackCount: z.number() }),
       input: z.object({}),
@@ -1239,12 +1234,12 @@ describe("runAgent", () => {
             id: "choosingMove",
             src: "chooseMove",
             input: {},
-            onDone: sendDecision(),
           },
           on: {
             // Counts how many times ATTACK is actually processed as an
-            // event by the machine — re-evaluating the transition function
-            // (spike S3: 8x) must not multiply delivery.
+            // event by the machine — the auto-delivery send happens once
+            // inside the decision actor's own async run, so transition-fn
+            // re-evaluation (spike S3: 8x) cannot multiply delivery.
             ATTACK: ({ context }) => ({
               target: "attacked",
               context: { attackCount: context.attackCount + 1 },
@@ -1270,6 +1265,135 @@ describe("runAgent", () => {
     expect(result.status).toBe("done");
     expect(result.status === "done" ? result.snapshot.context.attackCount : undefined).toBe(1);
     expect(attackEventsObserved).toBe(1);
+  });
+
+  test("chosen event whose transition stays in-state: the invoke completes and onDone observes the chosen event as output", async () => {
+    const schemas = createAgentSchemas({
+      context: z.object({ noted: z.boolean(), notedType: z.string().nullable() }),
+      input: z.object({}),
+      output: z.object({ noted: z.boolean(), notedType: z.string().nullable() }),
+      events: { NOTE: z.object({}) },
+    });
+    const agent = setupAgent({ schemas });
+    const machine = agent.createMachine({
+      context: { noted: false, notedType: null },
+      initial: "deciding",
+      states: {
+        deciding: {
+          invoke: {
+            src: "agent.decide",
+            input: {
+              model: "test-model",
+              prompt: "Note it.",
+              allowedEvents: ["NOTE"] as const,
+            },
+            // NOTE is an INTERNAL transition (no target): it updates context but
+            // stays in `deciding`, so the auto-delivered event does NOT cancel
+            // the invoke. The invoke completes and this onDone fires with the
+            // chosen event as its output.
+            onDone: ({ output }) => ({
+              target: "recorded",
+              context: { notedType: (output as { type: string }).type },
+            }),
+          },
+          on: {
+            NOTE: ({ context: _context }) => ({ context: { noted: true } }),
+          },
+        },
+        recorded: {
+          type: "final",
+          output: ({ context }) => ({ noted: context.noted, notedType: context.notedType }),
+        },
+      },
+    });
+
+    const result = await runAgent(machine, {
+      input: {},
+      generateText: async () => ({ output: {} }),
+      decide: async (): Promise<{ event: ChosenEvent }> => ({ event: { type: "NOTE" } }),
+    });
+
+    expect(result.status).toBe("done");
+    if (result.status !== "done") throw new Error("expected done");
+    // Auto-delivery ran the in-state NOTE transition (context.noted set true)…
+    expect(result.output.noted).toBe(true);
+    // …and because NOTE stayed in-state the invoke completed, so onDone saw the
+    // chosen event as its output.
+    expect(result.output.notedType).toBe("NOTE");
+  });
+
+  test("decision inside an invoked child machine delivers to the child (invokingActorOf)", async () => {
+    const childSchemas = createAgentSchemas({
+      context: z.object({ move: z.string().nullable() }),
+      input: z.object({}),
+      output: z.object({ move: z.string() }),
+      events: { ATTACK: z.object({}), FLEE: z.object({}) },
+    });
+    const childAgent = setupAgent({ schemas: childSchemas });
+    const childMachine = childAgent.createMachine({
+      context: { move: null },
+      initial: "choosing",
+      states: {
+        choosing: {
+          invoke: {
+            src: "agent.decide",
+            input: {
+              model: "test-model",
+              prompt: "Choose a move.",
+              allowedEvents: ["ATTACK", "FLEE"] as const,
+            },
+            onError: { target: "stuck" },
+          },
+          on: {
+            // The chosen event must be delivered to THIS child actor (not the
+            // root) to drive it to `done` — that is what invokingActorOf covers.
+            ATTACK: ({ context: _context }) => ({ target: "done", context: { move: "ATTACK" } }),
+            FLEE: ({ context: _context }) => ({ target: "done", context: { move: "FLEE" } }),
+          },
+        },
+        done: { type: "final", output: ({ context }) => ({ move: context.move ?? "?" }) },
+        stuck: {},
+      },
+    });
+
+    const parentSchemas = createAgentSchemas({
+      context: z.object({ childMove: z.string().nullable() }),
+      input: z.object({}),
+      output: z.object({ childMove: z.string().nullable() }),
+    });
+    const parentAgent = setupAgent({
+      schemas: parentSchemas,
+      actorSources: { child: childMachine },
+    });
+    const parentMachine = parentAgent.createMachine({
+      context: { childMove: null },
+      initial: "delegating",
+      states: {
+        delegating: {
+          invoke: {
+            src: "child",
+            input: {},
+            onDone: ({ output }) => ({
+              target: "done",
+              context: { childMove: (output as { move: string }).move },
+            }),
+          },
+        },
+        done: { type: "final", output: ({ context }) => ({ childMove: context.childMove }) },
+      },
+    });
+
+    const result = await runAgent(parentMachine, {
+      input: {},
+      generateText: async () => ({ output: {} }),
+      decide: async (): Promise<{ event: ChosenEvent }> => ({ event: { type: "ATTACK" } }),
+    });
+
+    expect(result.status).toBe("done");
+    if (result.status !== "done") throw new Error("expected done");
+    // The child transitioned to its own `done` off the delivered ATTACK and
+    // produced that output — proof the event reached the child, not the root.
+    expect(result.output.childMove).toBe("ATTACK");
   });
 });
 
@@ -1929,7 +2053,6 @@ describe("runAgent error cause split", () => {
             id: "choosing",
             src: "chooseMove",
             input: {},
-            onDone: sendDecision(),
             ...(withOnError ? { onError: { target: "fumbled" } } : {}),
           },
           on: { ATTACK: { target: "attacked" }, HEAL: { target: "healed" } },

@@ -48,11 +48,11 @@ The loop has phases even though nothing names them: it is deciding what to do, t
 
 ```ts
 import { z } from 'zod';
-import { setupAgent, runAgent, sendDecision } from '@statelyai/agent';
-import { createAiSdkExecutors } from '@statelyai/agent/ai-sdk';
+import { setupAgent, runAgent } from '@statelyai/agent';
+import { createAiSdkExecutors, defineModels } from '@statelyai/agent/ai-sdk';
 import { openai } from '@ai-sdk/openai';
 
-const models = { quick: openai('gpt-5.4-mini') } as const;
+const models = defineModels({ quick: openai('gpt-5.4-mini') });
 
 const agentSetup = setupAgent({
   models,
@@ -88,7 +88,6 @@ const machine = agentSetup.createMachine({
           prompt: `${context.request} (amount: $${context.amount})`,
           allowedEvents: ['REFUND', 'ESCALATE'] as const, // typo = compile error
         }),
-        onDone: sendDecision(),
       },
       on: {
         // The guard owns the limit, not the prompt: REFUND above $100 returns

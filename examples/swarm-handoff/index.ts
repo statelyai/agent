@@ -17,7 +17,6 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { type LanguageModel } from "ai";
 import { withReadline } from "../helpers/cli.js";
 import {
   persistSnapshot,
@@ -26,14 +25,14 @@ import {
   type RunAgentOptions,
   type RunAgentResult,
 } from "../../src/index.js";
-import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
+import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
 
 const agentName = z.enum(["travel", "food"]);
 
-export const models: Record<"travel" | "food", LanguageModel> = {
+export const models = defineModels({
   travel: openai("gpt-5.4-mini"),
   food: openai("gpt-5.4-mini"),
-} as const;
+});
 
 const agentSetup = setupAgent({
   models,

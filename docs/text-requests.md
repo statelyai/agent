@@ -16,9 +16,10 @@ Pass a `requests` map to `setupAgent`. Each entry becomes an invokable actor und
 ```ts
 import { z } from 'zod';
 import { setupAgent } from '@statelyai/agent';
+import { defineModels } from '@statelyai/agent/ai-sdk';
 import { openai } from '@ai-sdk/openai';
 
-const models = { quick: openai('gpt-5.4-mini') } as const;
+const models = defineModels({ quick: openai('gpt-5.4-mini') });
 const answerSchema = z.object({ answer: z.string() });
 
 const agentSetup = setupAgent({
@@ -46,11 +47,12 @@ Prefer a `models` registry (the canonical form): it narrows `model` to the map's
 
 ```ts
 import { openai } from '@ai-sdk/openai';
+import { defineModels } from '@statelyai/agent/ai-sdk';
 
-const models = {
+const models = defineModels({
   quick: openai('gpt-5.4-mini'),
   careful: openai('gpt-5.4'),
-} as const;
+});
 
 const agentSetup = setupAgent({
   models,

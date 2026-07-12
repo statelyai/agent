@@ -1,10 +1,4 @@
-import {
-  createAsyncLogic,
-  type AnyActorRef,
-  type AsyncActorLogic,
-  type EnqueueObject,
-  type EventObject,
-} from "xstate";
+import { createAsyncLogic, type AsyncActorLogic } from "xstate";
 import type {
   AgentMessage,
   AllowedEvents,
@@ -263,9 +257,10 @@ export interface DecisionLogicConfig<
 
 /**
  * Actor logic for a decision: an async effect that resolves to exactly one
- * currently-legal {@link ChosenEvent} (never a plain value) and is meant to
- * be raised into the machine — see {@link sendDecision}. Built by
- * {@link createDecisionLogic}. Register it under `actorSources:` to reuse/export/
+ * currently-legal {@link ChosenEvent} (never a plain value). Under `runAgent`
+ * the chosen event is delivered to the invoking actor automatically — the
+ * transition it triggers usually exits the invoking state and ends the invoke.
+ * Built by {@link createDecisionLogic}. Register it under `actorSources:` to reuse/export/
  * test it standalone; for a state-local, zero-config decision, use the
  * `agent.decide` builtin invoke instead.
  */
@@ -637,41 +632,4 @@ export async function resolveDecision<TEvent extends ChosenEvent = ChosenEvent>(
   }
 
   throw new DecisionExhaustedError(attempts);
-}
-
-/**
- * Transition-function factory for an `agent.decide` invoke's `onDone`.
- * Delivers the chosen event via `enq.sendTo(self, …)` — external and
- * observable (event-sourcing, §4.3) — rather than `enq.raise` (internal).
- *
- * v6 alpha transition functions are re-evaluated multiple times per
- * transition (spike S3: 8x) — purity is load-bearing here. This function
- * only calls `enq`, never side-effects directly, so re-evaluation is safe.
- *
- * @example
- * ```ts
- * deciding: {
- *   invoke: {
- *     src: 'agent.decide',
- *     input: ({ context }) => ({ model: 'quick', allowedEvents: ['ASK', 'GUESS'] }),
- *     onDone: sendDecision(),
- *     onError: { target: 'stumped' },
- *   },
- *   on: {
- *     ASK: ({ event }) => ({ target: 'awaitingAnswer' }),
- *     GUESS: ({ event }) => ({ target: 'awaitingGuessFeedback' }),
- *   },
- * }
- * ```
- */
-export function sendDecision<
-  TEvent extends EventObject = EventObject,
-  TEmitted extends EventObject = EventObject,
->(): (
-  args: { output: ChosenEvent; self: AnyActorRef },
-  enq: EnqueueObject<TEvent, TEmitted>,
-) => void {
-  return ({ output, self }, enq) => {
-    enq.sendTo(self, output as TEvent);
-  };
 }

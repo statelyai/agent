@@ -9,8 +9,7 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { setupAgent, runAgent } from "../../src/index.js";
-import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
-import { type LanguageModel } from "ai";
+import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
 
 const qualitySchema = z.object({
   hasCallToAction: z.boolean(),
@@ -24,11 +23,11 @@ function qualityPasses(quality: z.infer<typeof qualitySchema> | null) {
   );
 }
 
-export const models: Record<"copywriter" | "evaluator" | "improver", LanguageModel> = {
+export const models = defineModels({
   copywriter: openai("gpt-5.4-mini"),
   evaluator: openai("gpt-5.4-mini"),
   improver: openai("gpt-5.4-mini"),
-} as const;
+});
 
 const agentSetup = setupAgent({
   models,

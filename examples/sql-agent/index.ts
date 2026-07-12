@@ -21,10 +21,9 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { type LanguageModel } from "ai";
 import { createAsyncLogic, type AnyMachineSnapshot } from "xstate";
 import { getStateMeta, runAgent, setupAgent, type RunAgentOptions } from "../../src/index.js";
-import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
+import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
 
 // ─── In-memory sample table (the whole "database") ───
 type Order = { id: number; category: string; amount: number };
@@ -68,10 +67,10 @@ const metaSchema = z.object({
     .optional(),
 });
 
-export const models: Record<"planner" | "summarizer", LanguageModel> = {
+export const models = defineModels({
   planner: openai("gpt-5.4-mini"),
   summarizer: openai("gpt-5.4-mini"),
-} as const;
+});
 
 const contextSchema = z.object({
   question: z.string(),

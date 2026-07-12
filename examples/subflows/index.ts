@@ -21,14 +21,13 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { type LanguageModel } from "ai";
 import { type InspectionEvent } from "xstate";
 import { runAgent, setupAgent, type AgentRequestExecutor } from "../../src/index.js";
-import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
+import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
 
-export const models: Record<"researcher", LanguageModel> = {
+export const models = defineModels({
   researcher: openai("gpt-5.4-mini"),
-} as const;
+});
 
 // ─── Child agent: research one topic ───
 const childAgentSetup = setupAgent({

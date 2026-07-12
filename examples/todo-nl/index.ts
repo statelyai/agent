@@ -136,7 +136,6 @@ export const todoMachine = agentSetup.createMachine({
     // appends the applied trail to the prompt for us).
     planning: {
       invoke: {
-        id: "planCommand",
         src: "agent.plan",
         input: ({ context }) => ({
           model: "quick",

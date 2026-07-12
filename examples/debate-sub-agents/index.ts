@@ -20,14 +20,13 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { type LanguageModel } from "ai";
 import {
   bindRequestExecutor,
   runAgent,
   setupAgent,
   type AgentRequestExecutor,
 } from "../../src/index.js";
-import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
+import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
 
 const stanceSchema = z.enum(["affirmative", "negative"]);
 const transcriptEntrySchema = z.object({
@@ -39,11 +38,11 @@ const transcriptSchema = z.array(transcriptEntrySchema);
 
 const DEFAULT_ROUNDS = 3;
 
-export const models: Record<"affirmative" | "negative" | "facilitator", LanguageModel> = {
+export const models = defineModels({
   affirmative: openai("gpt-5.4-mini"),
   negative: openai("gpt-5.4-mini"),
   facilitator: openai("gpt-5.4-mini"),
-} as const;
+});
 
 // ─── Child agent: one debater arguing a fixed stance ───
 const debaterAgentSetup = setupAgent({

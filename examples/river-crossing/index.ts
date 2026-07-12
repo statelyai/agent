@@ -36,7 +36,6 @@ import {
   runAgent,
   type AgentTools,
   type RunAgentOptions,
-  sendDecision,
   setupAgent,
 } from "../../src/index.js";
 
@@ -474,7 +473,6 @@ export const riverCrossingMachine = agentSetup.createMachine({
   states: {
     deciding: {
       invoke: {
-        id: "chooseMove",
         src: "agent.decide",
         input: ({ context }) => ({
           model: "planner",
@@ -485,7 +483,6 @@ export const riverCrossingMachine = agentSetup.createMachine({
           allowedEvents: ["TAKE_WOLF", "TAKE_GOAT", "TAKE_CABBAGE", "CROSS_ALONE"] as const,
           maxRetries: 3,
         }),
-        onDone: sendDecision(),
         onError: { target: "failed" },
       },
       on: {

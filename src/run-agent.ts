@@ -758,6 +758,12 @@ function createCountingDecide(runCtx: RunAgentBindContext): AgentDecisionExecuto
  * To supply `canTake` (mode-3, §2.6), runAgent instead builds a fresh async
  * logic here that calls `resolveDecision` itself, reusing `logic.request(...)`
  * to build the request the same way the original logic would have.
+ *
+ * On success it SENDS the chosen event to the invoking actor (auto-delivery,
+ * mirroring {@link createRunAgentPlanLogic}) and then completes with that event
+ * as its output — so callers never wire an `onDone` to deliver it. See the
+ * send-then-complete note inside `run` for how exit-cancels-invoke interacts
+ * with `onDone`.
  */
 function createRunAgentDecisionLogic(
   logic: DecisionLogic,
@@ -799,12 +805,28 @@ function createRunAgentDecisionLogic(
 
       const request: AgentDecisionRequest = { ...logic.request(input as never), id, events };
 
-      return resolveDecision(request, createCountingDecide(runCtx), {
+      const chosen = await resolveDecision(request, createCountingDecide(runCtx), {
         maxRetries: logic.maxRetries,
         signal,
         canTake: (event) =>
           actorRef ? (actorRef.getSnapshot() as AnyMachineSnapshot).can(event) : true,
       });
+
+      // Auto-deliver (mirrors createRunAgentPlanLogic): send the chosen event
+      // to the invoking actor, then complete with it as output. The delivered
+      // event's transition typically EXITS the invoking state, which cancels
+      // this invoke — so `onDone` never fires on that path (same semantics as a
+      // plan whose applied event exits the state). If the transition stays
+      // in-state instead, the invoke completes and `onDone` (if any) observes
+      // `chosen` as its output. The send happens in this actor's own async
+      // `run` — not a re-evaluated transition function — so it fires exactly
+      // once regardless of v6-alpha transition re-evaluation.
+      actorRef?.send(chosen as never);
+      // Let the applied transition commit (and let xstate cancel this invoke if
+      // the event exited the state) before completing.
+      await Promise.resolve();
+
+      return chosen;
     },
   });
 

@@ -208,7 +208,7 @@ export type ChosenEvent = { type: string; [key: string]: unknown };
 
 ### 2.4 Builtin `agent.decide` (v6-alpha-correct syntax)
 
-Zero-config counterpart, symmetric with `agent.generateText`/`agent.streamText`. Invoked with inline input. **Side effects go through the `enq` param of a transition function — there is no `{ actions: [...] }` key and no standalone `raise()`/action-creator in v6 alpha** (verified against `xstate@6.0.0-alpha.16`: `types.v6.d.ts:416-436`, `types.d.ts:207-226`). The chosen event is delivered with **`enq.sendTo(self, output)`** — an *external, observable* send (so it lands in the event log; see §4.3), **not** `enq.raise` (internal, invisible).
+Zero-config counterpart, symmetric with `agent.generateText`/`agent.streamText`. Invoked with inline input. **Side effects go through the `enq` param of a transition function — there is no `{ actions: [...] }` key and no standalone `raise()`/action-creator in v6 alpha** (verified against `xstate@6.0.0-alpha.16`: `types.v6.d.ts:416-436`, `types.d.ts:207-226`). Delivery is built into the decision actor: when the decision resolves, it sends the chosen event to the invoking actor automatically via an *external, observable* send (so it lands in the event log; see §4.3), **not** an internal `raise` (invisible).
 
 ```ts
 choosingMove: {
@@ -221,7 +221,6 @@ choosingMove: {
       allowedEvents: context.playerHp <= 6 ? lowHpMoves : defaultMoves, // optional
       maxRetries: 2,
     }),
-    onDone: sendDecision(),           // ≡ ({ output, self }, enq) => enq.sendTo(self, output)
     onError: { target: 'fumbled' },   // retries exhausted (§2.6)
   },
   on: {
@@ -232,21 +231,11 @@ choosingMove: {
 }
 ```
 
-`allowedEvents` omitted ⇒ every legal event of `choosingMove` is offered. On `onDone` with no `target`, the machine stays in `choosingMove` (the completed invoke is not re-run), then the sent event is processed by the state's `on:` handlers.
+`allowedEvents` omitted ⇒ every legal event of `choosingMove` is offered. The chosen event is delivered to the state's `on:` handlers automatically; its transition usually exits `choosingMove`, cancelling the invoke, so `onDone` normally never runs. When the transition stays in-state, the invoke completes and an explicit `onDone` (optional, rare) observes the chosen event as output.
 
-### 2.5 `sendDecision()` helper (a transition function, not an action)
+### 2.5 Automatic delivery (built into the decision actor)
 
-Because v6 alpha has no action-creators, the helper is a **transition-function factory**, not an action object:
-
-```ts
-export function sendDecision(): (
-  args: { output: ChosenEvent; self: AnyActorRef },
-  enq: EnqueueObject
-) => void;
-// ≡ ({ output, self }, enq) => { enq.sendTo(self, output); }
-```
-
-Delivered via `sendTo(self, …)` (external event) rather than `enq.raise(…)` (internal) specifically so the decision is recorded in the observable event stream — this is what makes event sourcing (§4.3) work. The P3 `decide:` state-block sugar lowers to exactly this invoke + `sendDecision()` + `onError`.
+Delivery is not a user-wired helper. When the decision resolves, the decision actor sends the chosen event to the invoking actor itself, via an external `sendTo(self, …)` (not internal `raise`) specifically so the decision is recorded in the observable event stream — this is what makes event sourcing (§4.3) work. The P3 `decide:` state-block sugar is just this invoke + `onError`.
 
 ### 2.6 `resolveDecision` — validation + retry core
 
@@ -351,7 +340,7 @@ Each executor call counts against `runAgent`'s `maxModelCalls` (a decision that 
 - **Step path (durable host) — supported API.** The host has the snapshot: `canTake: (e) => snapshot.can(e)`, then `transitionAgentStep(...)`. **Full modes 1–3.** The shipped `twenty-questions` example wires this directly off the step object: `canTake: (e) => step.snapshot.can(e)`.
 - **Bare `createActor` with `agent.decide` — modes 1–2 only** (type + payload validation, no guard check). Documented limitation; no untyped-internals traversal in a v1 alpha. A new constraint on this tier: an **omitted `allowedEvents` under bare `createActor` is a fail-fast error** — with no snapshot to enumerate legal events against, "all legal events" can't be resolved, so it must be declared explicitly. `runAgent` and the step path both support omitted `allowedEvents` (⇒ all legal events) fully, since both have a snapshot to intersect against.
 
-On success the `agent.decide` actor completes with `output = chosenEvent` (→ `sendDecision()` sends it via `enq.sendTo(self, …)`); on `DecisionExhaustedError` it rejects (→ invoke `onError`, error carries `attempts`).
+On success the `agent.decide` actor resolves with the chosen event as output and delivers it to the invoking actor itself via `enq.sendTo(self, …)`; on `DecisionExhaustedError` it rejects (→ invoke `onError`, error carries `attempts`).
 
 ### 2.7 `getAcceptedEvents` guard note
 
@@ -599,7 +588,7 @@ Timers surface only in `step.actions`; `step.requests` never contains them — a
 
 **Resolved:**
 
-- **Q6.1** — helper name is **`sendDecision()`** (it's a `sendTo(self, …)`, not a raise).
+- **Q6.1** — **superseded**: delivery is built into the decision actor (a `sendTo(self, …)`, not a raise). No user-facing helper — the standalone delivery export was removed.
 - **Q6.2** — ~~best-effort mode-3 via `self._parent`~~ **superseded**: the internals hack is deleted. Bare `createActor` is modes 1–2, documented (§2.6). Blessed paths (`runAgent`/step) supply `canTake` from real snapshots.
 - **Q6.3** — P0 fixes only the *shapes* (recorded envelope carries `{ event, raw }`, §4.3/§4.4); the first event-log storage adapter ships in P3.
 - **Q6.4** — decision executor contract is `{ event, reason? }` (§2.6): coercion mechanics (forced tool choice, structured output) live in adapters; core validates + retries. Retry feedback travels as `request.attempts` data — core never rewrites prompts.
@@ -634,5 +623,5 @@ Timers surface only in `step.actions`; `step.requests` never contains them — a
 
 **Implementation notes from the spikes (binding for the P0 code):**
 
-- **Transition functions are re-evaluated** (S3 measured 8× evaluations for one logical transition; exactly one `GO` was sent — `enq` deduplicates). All effects in transition/onDone functions MUST go through `enq`; never side-effect directly in the function body. `sendDecision()` (§2.5) already complies; the purity requirement gets a doc callout and a test.
+- **Transition functions are re-evaluated** (S3 measured 8× evaluations for one logical transition; exactly one `GO` was sent — `enq` deduplicates). All effects in transition/onDone functions MUST go through `enq`; never side-effect directly in the function body. The decision actor's built-in delivery (§2.5) already complies; the purity requirement gets a doc callout and a test.
 - **Bind-time invoke enumeration walks `machine.config` recursively** (S6), never `machine.root`/built StateNodes, or object srcs masquerade as registered strings and the §3.2.2 fail-fast silently misses them.

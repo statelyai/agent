@@ -11,7 +11,7 @@ Twenty Questions is the running example: each turn, the model chooses `ASK` or `
 
 ## The inline `agent.decide` invoke
 
-<!-- agent.decide builtin and sendDecision from src/setup-agent.ts and src/decision.ts -->
+<!-- agent.decide builtin from src/setup-agent.ts and src/decision.ts -->
 
 Author a decision inline with the builtin `agent.decide` actor source, right on the invoke that needs one. Give it a `model`, an optional `system` and `prompt`, and `allowedEvents`:
 
@@ -26,7 +26,6 @@ deciding: {
       prompt: `Questions remaining: ${context.questionsRemaining}`,
       allowedEvents: ['ASK', 'GUESS'] as const,
     }),
-    onDone: sendDecision(),          // delivers the chosen event into this state's `on:`
     onError: { target: 'stumped' },  // retries exhausted
   },
   on: {
@@ -59,7 +58,11 @@ Patterns and exact types can mix (`['todo.*', 'reset']`). Wildcards expand again
 
 ## Delivering the chosen event
 
-`sendDecision()` is the transition function for the decide invoke's `onDone`. The chosen event lands in `on:` exactly as if a user had sent it: a chosen `ASK` runs the `ASK` transition, a chosen `GUESS` runs the `GUESS` transition. You handle the outcome with ordinary transitions, not special decision plumbing.
+Delivery is automatic. When the decision resolves, the chosen event is sent to the invoking actor for you — it lands in `on:` exactly as if a user had sent it: a chosen `ASK` runs the `ASK` transition, a chosen `GUESS` runs the `GUESS` transition. You handle the outcome with ordinary transitions, not special decision plumbing.
+
+That chosen event's transition typically **exits** the invoking state (`ASK` → `awaitingAnswer`, `GUESS` → `revealing`), which cancels the invoke — so `onDone` normally never fires. This mirrors `agent.plan`, where exiting the state ends the plan.
+
+`onDone` is optional and rarely needed. Declare it only when the chosen event's transition stays **in-state**: then the invoke completes and `onDone` observes the chosen event as its output. `onError` (retries exhausted → `DecisionExhaustedError`) is unaffected.
 
 ## Guard enforcement
 
@@ -120,7 +123,6 @@ choosingMove: {
     id: 'chooseMove',
     src: 'agent.decide',
     input: chooseMoveInput,
-    onDone: sendDecision(),
     onError: { target: 'fumbled' },
   },
   on: {

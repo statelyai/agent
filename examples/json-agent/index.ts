@@ -9,7 +9,7 @@
  *
  *   - `agent.decide` (triaging): the model chooses ESCALATE or REPLY. JSON
  *     cannot express a function, so the lowering delivers the chosen event
- *     automatically (equivalent to `onDone: sendDecision()` in TS authoring)
+ *     automatically (the same auto-delivery `agent.decide` does in TS authoring)
  *     — only `onError` is configurable from the config.
  *   - `draftReply` (drafting): a plain text request, same as any
  *     `setupAgent({ requests: {...} })` request.

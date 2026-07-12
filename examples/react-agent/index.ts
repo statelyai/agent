@@ -34,7 +34,7 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
-import { type LanguageModel } from "ai";
+import { defineModels } from "../../src/ai-sdk/index.js";
 import {
   type AgentMessage,
   assistantMessage,
@@ -44,9 +44,9 @@ import {
   type AgentRequestExecutors,
 } from "../../src/index.js";
 
-export const models: Record<"reasoner", LanguageModel> = {
+export const models = defineModels({
   reasoner: openai("gpt-5.4-mini"),
-} as const;
+});
 
 /** Sample data: a tiny labeled knowledge base (stand-in for a retrieval tool). */
 export const KNOWLEDGE_BASE: Record<string, string> = {

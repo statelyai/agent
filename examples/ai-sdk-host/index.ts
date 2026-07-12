@@ -23,7 +23,6 @@
  */
 import { type LanguageModel } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { createActor, createAsyncLogic, toPromise } from "xstate";
 import {
   executeAgentRequest,
   initialAgentStep,
@@ -175,26 +174,22 @@ export async function runStreamingDemo(
     onChunk: (chunk) => process.stdout.write(chunk),
   }),
 ) {
-  const actor = createActor(
-    jokeMachine.provide({
-      actorSources: {
-        tellJoke: streamingTellJoke,
-        // Rate the streamed joke, then end the loop after one joke.
-        rateJoke: createAsyncLogic({
-          run: async () => ({ rating: 9, explanation: "solid pun" }),
-        }),
-        "agent.decide": createAsyncLogic({
-          run: async () => ({ type: "END" as const }),
-        }),
-      },
-    }),
-    { input: { topic } },
+  const result = await runAgent(
+    jokeMachine.provide({ actorSources: { tellJoke: streamingTellJoke } }),
+    {
+      input: { topic },
+      // Rate the streamed joke; the decision then ends the loop after one joke.
+      // The chosen END event is delivered to the machine automatically.
+      generateText: async () => ({ output: { rating: 9, explanation: "solid pun" } }),
+      decide: async () => ({ event: { type: "END" as const } }),
+      onTransition: (snapshot) => console.log("\n  state ->", JSON.stringify(snapshot.value)),
+    },
   );
-  actor.subscribe((snapshot) => console.log("\n  state ->", JSON.stringify(snapshot.value)));
-  actor.start();
-  const output = await toPromise(actor);
   process.stdout.write("\n");
-  return output.jokes.at(-1) ?? "";
+  if (result.status !== "done") {
+    throw new Error(`runStreamingDemo did not complete: ${result.status}`);
+  }
+  return result.output.jokes.at(-1) ?? "";
 }
 
 async function main() {

@@ -1,6 +1,7 @@
 /**
  * Turn-based combat agent: each turn the model decides one legal move
- * (`agent.decide` + `sendDecision()`), the move updates HP, and a text
+ * (`agent.decide`, whose chosen event is auto-delivered), the move updates HP,
+ * and a text
  * request narrates the result. `allowedEvents` widens to include HEAL only
  * when the player is low on HP — the legal move set is computed from context.
  *
@@ -13,13 +14,11 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { type LanguageModel } from "ai";
-import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
+import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
 import {
   createAgentSchemas,
   createTextLogic,
   runAgent,
-  sendDecision,
   setupAgent,
 } from "../../src/index.js";
 
@@ -56,12 +55,10 @@ export const gameSchemas = createAgentSchemas({
 
 type GameEventType = keyof typeof gameSchemas.events;
 
-// Annotated with LanguageModel so the exported const has a portable, nameable
-// type (TS2742); model-ref keys are inferred from this map regardless.
-export const models: Record<"moveChooser" | "turnSummarizer", LanguageModel> = {
+export const models = defineModels({
   moveChooser: openai("gpt-5.4-mini"),
   turnSummarizer: openai("gpt-5.4-mini"),
-} as const;
+});
 
 const defaultMoveEvents = ["ATTACK", "DEFEND", "FLEE"] satisfies GameEventType[];
 const lowHpMoveEvents = ["ATTACK", "DEFEND", "HEAL", "FLEE"] satisfies GameEventType[];
@@ -126,10 +123,8 @@ export const gameMachine = gameAgentSetup.createMachine({
   states: {
     choosingMove: {
       invoke: {
-        id: "chooseMove",
         src: "agent.decide",
         input: chooseMoveInput,
-        onDone: sendDecision(),
         onError: { target: "fumbled" },
       },
       on: {

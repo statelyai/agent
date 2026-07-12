@@ -19,7 +19,7 @@ import { openai } from "@ai-sdk/openai";
 import { generateText, Output, type LanguageModel } from "ai";
 import { createAsyncLogic } from "xstate";
 import { setupAgent, runAgent } from "../../src/index.js";
-import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
+import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
 
 const implementationPlanSchema = z.object({
   files: z.array(
@@ -57,10 +57,10 @@ const workerSystemPrompts: Record<ImplementationPlan["files"][number]["changeTyp
     "You remove a file. Return an empty `code` string and a one-line `explanation` of why it is safe to delete.",
 };
 
-export const models: Record<"orchestrator" | "worker", LanguageModel> = {
+export const models = defineModels({
   orchestrator: openai("gpt-5.4-mini"),
   worker: openai("gpt-5.4-mini"),
-} as const;
+});
 
 /**
  * Host-owned worker fan-out: one real model call per planned file, run

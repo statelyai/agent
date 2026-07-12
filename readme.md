@@ -31,12 +31,12 @@ A refund agent in one machine: the model decides, a **guard** owns the $100 auto
 
 ```ts
 import { z } from 'zod';
-import { runAgent, sendDecision, setupAgent, WAIT_TAG } from '@statelyai/agent';
-import { createAiSdkExecutors } from '@statelyai/agent/ai-sdk';
+import { runAgent, setupAgent, WAIT_TAG } from '@statelyai/agent';
+import { createAiSdkExecutors, defineModels } from '@statelyai/agent/ai-sdk';
 import { openai } from '@ai-sdk/openai';
 
 // Model ids here are placeholders — use any model your provider offers.
-const models = { quick: openai('gpt-5.4-mini') } as const;
+const models = defineModels({ quick: openai('gpt-5.4-mini') });
 
 const agent = setupAgent({
   models,
@@ -64,7 +64,6 @@ const machine = agent.createMachine({
           prompt: `${context.request} (amount: $${context.amount})`,
           allowedEvents: ['AUTO_APPROVE', 'NEEDS_REVIEW'] as const, // typo = compile error
         }),
-        onDone: sendDecision(),
       },
       on: {
         // The guard owns the limit, not the prompt: AUTO_APPROVE above $100 is

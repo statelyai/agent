@@ -1,11 +1,6 @@
 export { appendMessages, messagesSchema } from "./messages.js";
 export { createAgentSchemas, setupAgent } from "./setup-agent.js";
-export {
-  DecisionExhaustedError,
-  PLAN_DONE_EVENT_TYPE,
-  resolveDecision,
-  sendDecision,
-} from "./decision.js";
+export { DecisionExhaustedError, PLAN_DONE_EVENT_TYPE, resolveDecision } from "./decision.js";
 export { EVENT_TOOL_PREFIX, getAcceptedEvents, matchesEventPattern } from "./events.js";
 export {
   bindRequestExecutor,

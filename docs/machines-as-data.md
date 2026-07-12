@@ -181,7 +181,7 @@ states:
       REPLY: { target: drafting }
 ```
 
-Delivery of the chosen event is automatic. TypeScript authoring writes `onDone: sendDecision()`, but JSON cannot express a function, so the lowering wires it up; declaring `onDone` on an `agent.decide` invoke is an error. Only `onError` (retries exhausted) is configurable.
+Delivery of the chosen event is automatic — the decision actor sends it to the invoking actor when it resolves, in both TypeScript and JSON. That event's transition usually exits the invoking state, cancelling the invoke, so `onDone` normally never fires; it is optional and only observed when the chosen event's transition stays in-state. Only `onError` (retries exhausted) is commonly configured.
 
 ## Choice states and emitted events
 

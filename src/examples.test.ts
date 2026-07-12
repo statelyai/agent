@@ -14,6 +14,7 @@ import {
   getAgentRequests,
   resolveAgentStep,
   resolveDecision,
+  runAgent,
   transitionAgentStep,
   type AgentTextRequest,
 } from "./index.js";
@@ -185,18 +186,19 @@ describe("curated XState setup examples", () => {
         rateJoke: rateJokeLogic.withExecutor(async () => ({
           output: { rating: jokes === 1 ? 3 : 9, explanation: "because" },
         })),
-        "agent.decide": createAsyncLogic({
-          run: async () => ({ type: decisions[decisionIndex++] ?? "END" }),
-        }),
       },
     });
 
-    const actor = createActor(machine, { input: { topic: "state machines" } });
-    actor.start();
-    await toPromise(actor);
+    // runAgent auto-delivers each chosen decision event: the machine's
+    // `deciding` state loops back to `telling` on TELL_ANOTHER and ends on END.
+    const result = await runAgent(machine, {
+      input: { topic: "state machines" },
+      decide: async () => ({ event: { type: decisions[decisionIndex++] ?? "END" } }),
+    });
 
     expect(jokes).toBe(2);
-    expect(actor.getSnapshot().output).toEqual({
+    expect(result.status).toBe("done");
+    expect(result.status === "done" && result.output).toEqual({
       topic: "state machines",
       jokes: ["joke 1 about state machines", "joke 2 about state machines"],
       lastRating: 9,

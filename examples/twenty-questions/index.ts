@@ -4,7 +4,7 @@
  *
  * The agent asks yes/no questions to narrow down a secret, then guesses.
  * Showcases:
- *   - Inline `agent.decide` invoke + `sendDecision()`: the model picks
+ *   - Inline `agent.decide` invoke (chosen event auto-delivered): the model picks
  *     exactly one currently-legal event (ASK or GUESS) each turn. The
  *     decision is authored state-local — it lives in the `deciding` state
  *     that invokes it, typed against the machine's own event schemas.
@@ -28,7 +28,6 @@ import {
   assistantMessage,
   createAgentSchemas,
   runAgent,
-  sendDecision,
   setupAgent,
   userMessage,
 } from "../../src/index.js";
@@ -216,18 +215,18 @@ export const twentyQuestionsMachine = agentSetup.createMachine({
   states: {
     deciding: {
       invoke: {
-        id: "chooseAction",
         src: "agent.decide",
         input: ({ context }) => ({
           model: "quick",
           system: DECIDE_SYSTEM_PROMPT,
           prompt: renderTranscriptPrompt(context),
-          // Typo'd event names are caught at compile time — allowedEvents is
-          // typed against the machine's event-schema keys (ASK | GUESS | ANSWER).
+          // allowedEvents is an optional narrowing: listing events buys
+          // compile-time typo safety (typed against the machine's event-schema
+          // keys, ASK | GUESS | ANSWER). Omit it and all currently-legal
+          // events are allowed.
           allowedEvents: ["ASK", "GUESS"] as const,
           maxRetries: 2,
         }),
-        onDone: sendDecision(),
         onError: { target: "stumped" },
       },
       on: {

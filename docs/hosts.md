@@ -24,10 +24,10 @@ Those functions are the **executors**, typed as `AgentRequestExecutors`:
 `createAiSdkExecutors` from `@statelyai/agent/ai-sdk` is the one adapter this package ships. It builds the `{ generateText, streamText, decide }` set from the Vercel AI SDK, mapping requests onto `generateText`/`streamText` and, for decisions, onto a tool-forced `generateText` call.
 
 ```ts
-import { createAiSdkExecutors } from '@statelyai/agent/ai-sdk';
+import { createAiSdkExecutors, defineModels } from '@statelyai/agent/ai-sdk';
 import { openai } from '@ai-sdk/openai';
 
-const models = { quick: openai('gpt-5.4-mini') } as const;
+const models = defineModels({ quick: openai('gpt-5.4-mini') });
 
 const result = await runAgent(machine, {
   input: { prompt: 'Why state machines?' },
@@ -43,11 +43,12 @@ Prefer model aliases shared between `setupAgent` and the adapter: pass one `mode
 
 ```ts
 import { openai } from '@ai-sdk/openai';
+import { defineModels } from '@statelyai/agent/ai-sdk';
 
-const models = {
+const models = defineModels({
   quick: openai('gpt-5.4-mini'),
   careful: openai('gpt-5.4'),
-} as const;
+});
 
 const agentSetup = setupAgent({
   models,

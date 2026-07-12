@@ -32,10 +32,10 @@ A [decision](decisions.md) is where this matters most: the model chooses exactly
 ```ts
 import { z } from 'zod';
 import { runAgent, setupAgent } from '@statelyai/agent';
-import { createAiSdkExecutors } from '@statelyai/agent/ai-sdk';
+import { createAiSdkExecutors, defineModels } from '@statelyai/agent/ai-sdk';
 import { openai } from '@ai-sdk/openai';
 
-const models = { quick: openai('gpt-5.4-mini') } as const;
+const models = defineModels({ quick: openai('gpt-5.4-mini') });
 const answerSchema = z.object({ answer: z.string() });
 
 const agentSetup = setupAgent({

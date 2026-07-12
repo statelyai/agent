@@ -17,9 +17,8 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { type LanguageModel } from "ai";
 import { runAgent, setupAgent, type RunAgentOptions } from "../../src/index.js";
-import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
+import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
 
 const specialistSchema = z.enum(["researcher", "coder", "writer"]);
 
@@ -28,12 +27,12 @@ const routeSchema = z.object({
   reason: z.string(),
 });
 
-export const models: Record<"supervisor" | "researcher" | "coder" | "writer", LanguageModel> = {
+export const models = defineModels({
   supervisor: openai("gpt-5.4-mini"),
   researcher: openai("gpt-5.4-mini"),
   coder: openai("gpt-5.4-mini"),
   writer: openai("gpt-5.4-mini"),
-} as const;
+});
 
 const agentSetup = setupAgent({
   models,

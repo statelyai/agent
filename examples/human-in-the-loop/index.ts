@@ -20,7 +20,7 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { type LanguageModel } from "ai";
+import { defineModels } from "../../src/ai-sdk/index.js";
 import {
   getAcceptedEvents,
   getStateMeta,
@@ -31,9 +31,9 @@ import {
   type AgentRequestExecutors,
 } from "../../src/index.js";
 
-export const models: Record<"writer", LanguageModel> = {
+export const models = defineModels({
   writer: openai("gpt-5.4-mini"),
-} as const;
+});
 
 const interactionSchema = z.object({
   label: z.string(),

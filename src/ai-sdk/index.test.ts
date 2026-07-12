@@ -12,6 +12,7 @@ import type { AgentDecisionRequest } from "../decision.js";
 import type { AgentEventDescriptor } from "../events.js";
 import {
   createAiSdkExecutors,
+  defineModels,
   isStructuredOutputRequest,
   toAiSdkCallSettings,
   toAiSdkEventTools,
@@ -19,6 +20,30 @@ import {
   toAiSdkTools,
   toDecisionMessages,
 } from "./index.js";
+import type { AiSdkModelMap } from "./index.js";
+
+describe("defineModels", () => {
+  test("returns the map unchanged and pins a nameable, key-preserving type", () => {
+    const model = new MockLanguageModelV3({});
+    const models = defineModels({ quick: model, deep: model });
+
+    // Identity at runtime.
+    expect(models).toEqual({ quick: model, deep: model });
+
+    // Type-level: the return type is the nameable `AiSdkModelMap<'quick' | 'deep'>`
+    // — no TS2742 when the const is exported (examples/joke exercises that export
+    // case under the examples typecheck). Assign both ways to pin the exact type.
+    const asMap: AiSdkModelMap<"quick" | "deep"> = models;
+    const roundTrip: typeof models = asMap;
+    void roundTrip;
+
+    // Key set is preserved for model-ref inference at the call site.
+    createAiSdkExecutors({ models });
+
+    // @ts-expect-error — 'nope' is not one of the declared model keys.
+    void models.nope;
+  });
+});
 
 describe("toAiSdkTools", () => {
   test("converts agent tool descriptors to AI SDK tools", () => {

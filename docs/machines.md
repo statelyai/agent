@@ -84,11 +84,12 @@ const agentSetup = setupAgent({
 
 ```ts
 import { openai } from '@ai-sdk/openai';
+import { defineModels } from '@statelyai/agent/ai-sdk';
 
-const models = {
+const models = defineModels({
   quick: openai('gpt-5.4-mini'),
   careful: openai('gpt-5.4'),
-} as const;
+});
 
 const agentSetup = setupAgent({
   models,

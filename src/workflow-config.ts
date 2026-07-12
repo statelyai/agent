@@ -1,8 +1,7 @@
 import type { AnyStateMachine, AsyncActorLogic, MetaObject } from "xstate";
 import type { AgentMessage, AgentToolChoice, AgentTools, StandardSchemaV1 } from "./types.js";
 import { validateSchemaSync } from "./utils.js";
-import { DECIDE_ACTOR, type AgentRequestMode } from "./text-logic.js";
-import { sendDecision } from "./decision.js";
+import { type AgentRequestMode } from "./text-logic.js";
 import { missingActor } from "./internal/registry.js";
 import {
   createAgentSchemas,
@@ -172,10 +171,10 @@ export interface AgentWorkflowStateConfig {
 
 /**
  * An `invoke` entry in {@link AgentWorkflowStateConfig}. For `src:
- * 'agent.decide'`, `onDone` must be omitted — decision delivery is automatic
- * (equivalent to `onDone: sendDecision()` in TS authoring), since a
- * decision's output *is* the chosen event and there is no function value to
- * express in JSON; only `onError` (retries exhausted) is configurable here.
+ * 'agent.decide'`, the chosen event is delivered automatically — its
+ * transition usually exits the state and ends the invoke, so an `onDone` is
+ * rarely needed; declare one only to observe a chosen event whose transition
+ * stays in-state. `onError` handles retries-exhausted.
  */
 export interface AgentWorkflowInvokeConfig {
   id?: string;
@@ -452,20 +451,11 @@ function lowerWorkflowTransitionOrArray(
     : lowerWorkflowTransition(transitionConfig);
 }
 
-// Lowers an invoke config into an xstate invoke config; special-cases `agent.decide` to auto-wire `sendDecision()` as onDone.
+// Lowers an invoke config into an xstate invoke config. `agent.decide` needs no
+// special-casing: the decision actor auto-delivers the chosen event to the
+// invoking actor, so a decide invoke lowers like any other (an optional `onDone`
+// observes only a chosen event whose transition stays in-state).
 function lowerWorkflowInvoke(invokeConfig: AgentWorkflowInvokeConfig) {
-  const isDecideInvoke = invokeConfig.src === DECIDE_ACTOR;
-
-  if (isDecideInvoke && invokeConfig.onDone !== undefined) {
-    throw new Error(
-      `setupAgent.fromConfig: invoke '${invokeConfig.id ?? invokeConfig.src}' targets ` +
-        `'${DECIDE_ACTOR}' and declares an 'onDone'. Decision delivery is automatic — a ` +
-        `decision has no output value of its own, its output IS the chosen event, which ` +
-        `is delivered via 'sendDecision()' — so 'onDone' cannot be configured from JSON. ` +
-        `Only 'onError' (retries-exhausted) is configurable here.`,
-    );
-  }
-
   return {
     ...(invokeConfig.id !== undefined ? { id: invokeConfig.id } : {}),
     src: invokeConfig.src,
@@ -475,11 +465,9 @@ function lowerWorkflowInvoke(invokeConfig: AgentWorkflowInvokeConfig) {
             evaluateWorkflowConfigValue(invokeConfig.input, { context, event }),
         }
       : {}),
-    ...(isDecideInvoke
-      ? { onDone: sendDecision() }
-      : invokeConfig.onDone !== undefined
-        ? { onDone: lowerWorkflowTransitionOrArray(invokeConfig.onDone) }
-        : {}),
+    ...(invokeConfig.onDone !== undefined
+      ? { onDone: lowerWorkflowTransitionOrArray(invokeConfig.onDone) }
+      : {}),
     ...(invokeConfig.onError !== undefined
       ? { onError: lowerWorkflowTransitionOrArray(invokeConfig.onError) }
       : {}),

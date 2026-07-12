@@ -24,9 +24,10 @@ Declare a **models registry** (short keys mapped to resolved models, shared betw
 ```ts
 import { z } from 'zod';
 import { openai } from '@ai-sdk/openai';
+import { defineModels } from '@statelyai/agent/ai-sdk';
 
 // Model ids here are placeholders — use any model your provider offers.
-const models = { quick: openai('gpt-5.4-mini') } as const;
+const models = defineModels({ quick: openai('gpt-5.4-mini') });
 
 const answerSchema = z.object({ answer: z.string() });
 const contextSchema = z.object({ prompt: z.string(), answer: z.string().nullable() });
