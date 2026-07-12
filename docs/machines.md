@@ -9,78 +9,74 @@ An **agent machine** is a typed XState state machine describing what your agent 
 
 You author a machine in three steps:
 
-1. Declare schemas with `createAgentSchemas`.
-2. Wire up models, requests, and actor sources with `setupAgent`.
+1. Declare a models registry and your `context`/`input`/`output`/`events` schema fields.
+2. Pass them to `setupAgent` along with your requests and actor sources.
 3. Build the machine with `agentSetup.createMachine`.
 
 ## Declare schemas
 
-<!-- createAgentSchemas surface from src/setup-agent.ts -->
+<!-- flat schema fields on setupAgent from src/setup-agent.ts -->
 
-`createAgentSchemas` builds the schema pack that types your machine's context, event payloads, input, output, and state meta. Only `context` is required; `events`, `input`, `output`, and `meta` default to empty or unknown schemas.
+`setupAgent` takes your schema fields directly — `context`, `events`, `input`, `output`, and `meta` — typing the machine's context, event payloads, input, output, and state meta. Only `context` is required; the rest default to empty or unknown schemas. Every schema is a [Standard Schema](https://standardschema.dev), so Zod, Valibot, ArkType, or a hand-written validator all work, and they are retained on the agent for runtime validation, so you get typed context and events without `{} as Type` casts.
 
 ```ts
 import { z } from 'zod';
-import { createAgentSchemas } from '@statelyai/agent';
+import { setupAgent } from '@statelyai/agent';
 
-const schemas = createAgentSchemas({
+const agentSetup = setupAgent({
+  models,
   context: z.object({ prompt: z.string(), answer: z.string().nullable() }),
   input: z.object({ prompt: z.string() }),
   output: z.object({ answer: z.string() }),
 });
 ```
 
-Every schema is a [Standard Schema](https://standardschema.dev), so Zod, Valibot, ArkType, or a hand-written validator all work. The pack is retained on the agent for runtime validation, so you get typed context and events without `{} as Type` casts.
-
-**Event schemas** make event payloads typed. Declare one schema per event type:
+**Event schemas** make event payloads typed. Declare one schema per event type under `events`:
 
 ```ts
-const schemas = createAgentSchemas({
-  context: z.object({ playerHp: z.number(), enemyHp: z.number() }),
-  input: z.object({ playerHp: z.number(), enemyHp: z.number() }),
-  output: z.object({ outcome: z.string() }),
-  events: {
-    ATTACK: z.object({ target: z.string().default('goblin') }),
-    HEAL: z.object({ amount: z.number().min(1).max(8).default(4) }),
-    FLEE: z.object({}),
-  },
-});
+events: {
+  ATTACK: z.object({ target: z.string().default('goblin') }),
+  HEAL: z.object({ amount: z.number().min(1).max(8).default(4) }),
+  FLEE: z.object({}),
+},
 ```
 
 In a `HEAL` transition, `event.amount` is a `number`. Reading a field the event does not carry is a compile error.
 
-**Emitted event schemas** type the progress events a machine narrates outward with `enq.emit(...)` (received by hosts via [`runAgent`'s `on` handlers](hosts.md#observation-seams)):
+**Emitted event schemas** type the progress events a machine narrates outward with `enq.emit(...)` (received by hosts via [`runAgent`'s `on` handlers](hosts.md#observation-seams)). Declare them under `emitted`:
 
 ```ts
-const schemas = createAgentSchemas({
-  context: z.object({ /* ... */ }),
-  emitted: {
-    EVALUATED: z.object({ qualityScore: z.number(), iteration: z.number() }),
-  },
-});
+emitted: {
+  EVALUATED: z.object({ qualityScore: z.number(), iteration: z.number() }),
+},
 ```
 
 With this declared, `enq.emit({ type: 'EVALUATED', ... })` and the host-side `on: { EVALUATED: handler }` are both fully typed; emitting an undeclared type or a wrong payload is a compile error.
+
+> **Sharing a schema pack.** To reuse one schema set across several machines or the step helpers, declare it once with `createAgentSchemas({ context, input, output, events })` and pass the result as `setupAgent({ schemas })`. The two forms are equivalent — see [Which authoring form when](#which-authoring-form-when).
 
 ## Set up the agent
 
 <!-- setupAgent config surface (models, requests, actorSources, builtins) from src/setup-agent.ts -->
 
-`setupAgent` takes the schemas plus optional `models`, `requests`, and `actorSources`, and returns a **setup** whose `createMachine` builds the machine. Like XState's `setup()`, the return value is not a running agent; it is the typed foundation machines are authored from, so name it accordingly (`agentSetup`, `gameSetup`).
+`setupAgent` takes your models and schema fields plus optional `requests` and `actorSources`, and returns a **setup** whose `createMachine` builds the machine. Like XState's `setup()`, the return value is not a running agent; it is the typed foundation machines are authored from, so name it accordingly (`agentSetup`, `gameSetup`).
 
 ```ts
 import { setupAgent } from '@statelyai/agent';
 
 const agentSetup = setupAgent({
-  schemas,
   models,
+  context,
+  input,
+  output,
+  events,
   requests,
   actorSources,
 });
 ```
 
 - The builtins `agent.generateText`, `agent.streamText`, `agent.userInput`, and `agent.decide` are registered automatically; invoke them by name.
-- You can skip `createAgentSchemas` and pass schema fields directly: `setupAgent({ context, input, output, events, ... })`. The two forms are equivalent; the standalone pack is useful when you share schemas across machines or the step helpers.
+- Prefer inline schema fields (above); reach for the `createAgentSchemas` pack form only to share one schema set across machines or the step helpers — see [Which authoring form when](#which-authoring-form-when).
 
 ### Models
 
@@ -95,8 +91,10 @@ const models = {
 } as const;
 
 const agentSetup = setupAgent({
-  schemas,
   models,
+  context,
+  input,
+  output,
   requests: {
     answerQuestion: {
       schemas: { input: z.object({ prompt: z.string() }), output: answerSchema },
@@ -107,7 +105,7 @@ const agentSetup = setupAgent({
 });
 ```
 
-Aliases are optional. A request can carry any `model:` string (like `'openai/gpt-5.4-mini'`) that the host resolves at run time. See [Hosts](hosts.md).
+Aliases are optional. A request can carry any `model:` string (like `'openai/gpt-5.4-mini'`) that the host resolves at run time — see [Which authoring form when](#which-authoring-form-when) and [Hosts](hosts.md).
 
 ### Requests
 
@@ -115,8 +113,10 @@ Aliases are optional. A request can carry any `model:` string (like `'openai/gpt
 
 ```ts
 const agentSetup = setupAgent({
-  schemas,
   models,
+  context,
+  input,
+  output,
   requests: {
     classifyAnswer: {
       schemas: {
@@ -174,6 +174,20 @@ const machine = agentSetup.createMachine({
   },
 });
 ```
+
+## Which authoring form when
+
+<!-- canonical form vs the supported escape hatches -->
+
+The canonical form covers most machines. Each alternate is a supported escape hatch for one specific need:
+
+| Form | Reach for it when |
+|---|---|
+| **Canonical** — `models` registry + flat schema fields on `setupAgent`, `model: 'quick'` keys, host with `createAiSdkExecutors({ models })` | Default. A single machine whose models are known at author time. |
+| **`createAgentSchemas` pack** — `setupAgent({ schemas })` | Sharing one schema set across several machines or the [step helpers](steps.md). |
+| **String refs + `resolveModel`** — `model: 'openai/gpt-5.4-mini'`, `createAiSdkExecutors({ resolveModel })` | The machine must not name concrete models — maximum portability, refs resolved by the host or loaded from JSON [config](machines-as-data.md). |
+| **`createTextLogic`** — a standalone request value | A request that is exported, reused across states or machines, or unit-tested on its own. See [Text requests](text-requests.md#reusable-request-logic-with-createtextlogic). |
+| **`withExecutor`** — `logic.withExecutor(...)` | Binding execution onto one logic rather than the whole host: per-logic host binding or dynamic spawns. See [Hosts](hosts.md#testing-with-deterministic-executors). |
 
 ## Transitions
 
@@ -266,7 +280,7 @@ When the root declares no `output` and exactly one final state does, `agentSetup
 
 <!-- typed meta protocol from examples/email-drafter/index.ts -->
 
-`meta` attaches typed data to a state or transition. With a `meta` schema in `createAgentSchemas`, hosts read a typed interaction protocol instead of `Record<string, unknown>`:
+`meta` attaches typed data to a state or transition. With a `meta` schema on `setupAgent`, hosts read a typed interaction protocol instead of `Record<string, unknown>`:
 
 ```ts
 prompting: {

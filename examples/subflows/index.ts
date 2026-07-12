@@ -8,9 +8,10 @@
  *   - a parent that registers the child under `actorSources.child` and invokes
  *     it by name, mapping its own `{ topic }` in and the child's
  *     `{ research }` out.
- *   - the child's own request bound via `.provide({ actorSources })` — runAgent
- *     only wraps the parent's own sources, so the nested child carries its own
- *     executor binding (same as handing the child machine to any actor system).
+ *   - the child's request inheriting runAgent's `generateText` automatically —
+ *     runAgent rebinds every unbound request in an invoked child machine (at
+ *     any depth) with the same host executors it gives the parent's own
+ *     requests. No nested `.provide` ceremony; bind explicitly only to override.
  *
  * Dual-mode: `runSubflowsExample(options?)` takes an injectable `generateText`
  * executor (the test passes a mock — keyless CI); the direct run below uses a
@@ -22,12 +23,7 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { type LanguageModel } from "ai";
 import { type InspectionEvent } from "xstate";
-import {
-  bindRequestExecutor,
-  runAgent,
-  setupAgent,
-  type AgentRequestExecutor,
-} from "../../src/index.js";
+import { runAgent, setupAgent, type AgentRequestExecutor } from "../../src/index.js";
 import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
 
 export const models: Record<"researcher", LanguageModel> = {
@@ -117,18 +113,10 @@ export async function runSubflowsExample(options?: {
 
   const result = await runAgent(subflowsMachine, {
     input: options?.input ?? { topic: "state machines for AI agents" },
-    actorSources: {
-      // The child is a nested machine invoked by name, not a parent request —
-      // runAgent only wraps the parent's own sources, so the child's request
-      // keeps its own binding before being registered as the `child` source.
-      child: childMachine.provide({
-        actorSources: {
-          // Adapt the raw `(request, info)` executor to a TextLogic executor
-          // via the shared bridge (defaults `tools`, forwards `signal`).
-          researchTopic: bindRequestExecutor(childAgentSetup.requests.researchTopic, generateText),
-        },
-      }),
-    },
+    // The child is registered as the `child` actor source in the parent setup;
+    // runAgent rebinds its unbound `researchTopic` request with THIS
+    // generateText automatically — no nested `.provide` needed.
+    generateText,
     // onTransition sees ONLY the root (parent) machine's transitions.
     ...(options?.onTransition ? { onTransition: options.onTransition } : {}),
     // inspect is the system-wide passthrough: it fires for every actor in the

@@ -75,6 +75,9 @@ export const jsonAgentMachine = setupAgent.fromConfig(workflowConfig, {
   compileSchema: ajvCompiler,
 });
 
+// A JSON-authored machine carries string model refs (it cannot reference a
+// `models` registry object), so this host uses `resolveModel` — the max-portability
+// escape hatch — instead of the canonical `createAiSdkExecutors({ models })`.
 function resolveModel(modelRef: string): LanguageModel {
   return openai(modelRef.replace(/^openai\//, ""));
 }

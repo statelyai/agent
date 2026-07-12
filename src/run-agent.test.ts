@@ -5,9 +5,11 @@ import { createDecisionLogic } from "./decision.js";
 import {
   createAgentSchemas,
   createTextLogic,
+  IllegalResumeEventError,
   runAgent,
   sendDecision,
   setupAgent,
+  WAIT_TAG,
   type AgentDecisionRequest,
   type AgentTextRequest,
   type AgentTools,
@@ -739,43 +741,45 @@ describe("runAgent", () => {
         });
       };
 
-      test("(1) an UNBOUND child request throws at bind time naming the child + request", async () => {
+      test("(1) an UNBOUND child request inherits the parent generateText and runs to done", async () => {
         const parentMachine = makeParentMachine(makeChildMachine(false));
-
-        await expect(
-          runAgent(parentMachine, {
-            input: { topic: "agents" },
-            generateText: async () => ({ output: "x" }),
-          }),
-        ).rejects.toThrow(/child machine.*child.*researchTopic/s);
-
-        // Message must point at the nested-.provide remedy and say executors
-        // are not inherited.
-        await expect(
-          runAgent(parentMachine, {
-            input: { topic: "agents" },
-            generateText: async () => ({ output: "x" }),
-          }),
-        ).rejects.toThrow(/do NOT inherit|withExecutor/);
-      });
-
-      test("(2) a properly-bound child (nested .provide + .withExecutor) runs to done", async () => {
-        const parentMachine = makeParentMachine(makeChildMachine(true));
 
         const result = await runAgent(parentMachine, {
           input: { topic: "agents" },
-          // No decide/streamText; parent generateText is NOT what runs the
-          // child request — the child's own bound executor does.
-          generateText: async () => ({ output: "unused" }),
+          // The child's `researchTopic` request has no executor of its own; it
+          // inherits THIS generateText via runAgent's host-backed wrapper.
+          generateText: async ({ prompt }) => ({ output: `parent-ran: ${prompt}` }),
+        });
+
+        expect(result.status).toBe("done");
+        expect(result.status === "done" ? result.output : undefined).toEqual({
+          research: "parent-ran: agents",
+        });
+      });
+
+      test("(2) a child with its own .withExecutor keeps it (parent generateText NOT called for it)", async () => {
+        const parentMachine = makeParentMachine(makeChildMachine(true));
+
+        let parentCalls = 0;
+        const result = await runAgent(parentMachine, {
+          // Explicit binding shadows inheritance: the child's own bound
+          // executor runs the request, so this parent generateText is never
+          // called for it.
+          generateText: async () => {
+            parentCalls += 1;
+            return { output: "unused" };
+          },
+          input: { topic: "agents" },
         });
 
         expect(result.status).toBe("done");
         expect(result.status === "done" ? result.output : undefined).toEqual({
           research: "Research: agents",
         });
+        expect(parentCalls).toBe(0);
       });
 
-      test("(3) grandchild depth: an unbound request in a child-of-child throws", async () => {
+      test("(3) grandchild depth: an unbound request in a child-of-child inherits and runs to done", async () => {
         // Grandchild (depth 2) has an unbound request; child (depth 1)
         // invokes the grandchild; parent invokes the child.
         const grandchild = makeChildMachine(false, 2);
@@ -814,12 +818,17 @@ describe("runAgent", () => {
           midMachine as unknown as ReturnType<typeof makeChildMachine>,
         );
 
-        await expect(
-          runAgent(parentMachine, {
-            input: { topic: "agents" },
-            generateText: async () => ({ output: "x" }),
-          }),
-        ).rejects.toThrow(/researchTopic/);
+        // The grandchild's unbound `researchTopic` inherits the top-level
+        // generateText through parent > mid > grandchild (all string-keyed).
+        const result = await runAgent(parentMachine, {
+          input: { topic: "agents" },
+          generateText: async ({ prompt }) => ({ output: `depth: ${prompt}` }),
+        });
+
+        expect(result.status).toBe("done");
+        expect(result.status === "done" ? result.output : undefined).toEqual({
+          research: "depth: agents",
+        });
       });
 
       test("(4) a recursively self-invoking machine does not infinite-loop the bind walk", async () => {
@@ -862,6 +871,80 @@ describe("runAgent", () => {
           generateText: async () => ({ output: "x" }),
         });
         expect(["done", "idle", "error"]).toContain(result.status);
+      });
+
+      test("(5) child requests count toward maxModelCalls and appear in onTrace", async () => {
+        const parentMachine = makeParentMachine(makeChildMachine(false));
+
+        // The child's single inherited model call shows up in onTrace with the
+        // child request's own src.
+        const trace: AgentTraceEvent<typeof parentMachine>[] = [];
+        const ok = await runAgent(parentMachine, {
+          input: { topic: "agents" },
+          generateText: async () => ({ output: "y" }),
+          onTrace: (event) => trace.push(event),
+        });
+        expect(ok.status).toBe("done");
+        expect(
+          trace
+            .filter((event) => event.type === "request.start")
+            .map((event) => (event.request as { src?: string }).src),
+        ).toContain("researchTopic");
+
+        // ...and it draws from the SAME shared budget: capping at 0 makes the
+        // child's model call exceed it, settling a max-model-calls error.
+        const capped = await runAgent(parentMachine, {
+          input: { topic: "agents" },
+          maxModelCalls: 0,
+          generateText: async () => ({ output: "y" }),
+        });
+        expect(capped.status).toBe("error");
+        expect(capped.status === "error" ? capped.cause : undefined).toBe("max-model-calls");
+      });
+
+      test("(6) a missing streamText for a child STREAM request throws at bind naming the chain", async () => {
+        const streamResearch = createTextLogic({
+          mode: "stream",
+          schemas: { input: z.object({ topic: z.string() }), output: z.string() },
+          model: "test-model",
+          prompt: ({ input }) => input.topic,
+        });
+        const childAgent = setupAgent({
+          context: z.object({ topic: z.string(), research: z.string().nullable() }),
+          input: z.object({ topic: z.string() }),
+          output: z.object({ research: z.string() }),
+          actorSources: { streamResearch },
+        });
+        const streamChild = childAgent.createMachine({
+          id: "stream-child",
+          context: ({ input }) => ({ topic: input.topic, research: null }),
+          initial: "researching",
+          states: {
+            researching: {
+              invoke: {
+                src: "streamResearch",
+                input: ({ context }) => ({ topic: context.topic }),
+                onDone: ({ output }) => ({ target: "done", context: { research: output } }),
+              },
+            },
+            done: {
+              type: "final",
+              output: ({ context }) => ({ research: context.research ?? "" }),
+            },
+          },
+        });
+        const parentMachine = makeParentMachine(
+          streamChild as unknown as ReturnType<typeof makeChildMachine>,
+        );
+
+        // generateText is present but streamText is not — the child's stream
+        // request has no executor to inherit, so bind fails naming the chain.
+        await expect(
+          runAgent(parentMachine, {
+            input: { topic: "agents" },
+            generateText: async () => ({ output: "x" }),
+          }),
+        ).rejects.toThrow(/child machine.*streamText/s);
       });
     });
   });
@@ -1587,5 +1670,400 @@ describe("inspect passthrough (system-wide visibility)", () => {
       .map((entry) => entry.value);
     expect(childValues).toContain("working");
     expect(childValues).toContain("finished");
+  });
+});
+
+describe("Feature A: explicit suspension detection (WAIT_TAG / isSuspended)", () => {
+  test("a WAIT_TAG wait state settles idle and resumes to done", async () => {
+    const agent = setupAgent({
+      context: z.object({}),
+      input: z.object({}),
+      output: z.object({ approved: z.boolean() }),
+      events: { APPROVE: z.object({}) },
+    });
+    const machine = agent.createMachine({
+      context: {},
+      initial: "reviewing",
+      states: {
+        reviewing: {
+          tags: [WAIT_TAG],
+          on: { APPROVE: { target: "done" } },
+        },
+        done: { type: "final", output: () => ({ approved: true }) },
+      },
+    });
+
+    const first = await runAgent(machine, {
+      input: {},
+      generateText: async () => ({ output: {} }),
+    });
+    expect(first.status).toBe("idle");
+    if (first.status !== "idle") throw new Error("expected idle");
+    expect(first.snapshot.value).toBe("reviewing");
+
+    const second = await runAgent(machine, {
+      snapshot: first.snapshot,
+      event: { type: "APPROVE" },
+      generateText: async () => ({ output: {} }),
+    });
+    expect(second.status).toBe("done");
+    expect(second.status === "done" ? second.output : undefined).toEqual({ approved: true });
+  });
+
+  test("a WAIT_TAG region does not settle early while a sibling still has work in flight", async () => {
+    const agent = setupAgent({
+      context: z.object({ summary: z.string().nullable() }),
+      input: z.object({}),
+      output: z.object({ summary: z.string() }),
+      events: { APPROVE: z.object({}) },
+      requests: {
+        summarize: {
+          schemas: { input: z.object({}), output: z.string() },
+          model: "m",
+          prompt: () => "summarize",
+        },
+      },
+    });
+    const machine = agent.createMachine({
+      context: { summary: null },
+      type: "parallel",
+      states: {
+        review: {
+          initial: "waiting",
+          states: {
+            waiting: { tags: [WAIT_TAG], on: { APPROVE: { target: "approved" } } },
+            approved: { type: "final" },
+          },
+        },
+        work: {
+          initial: "summarizing",
+          states: {
+            summarizing: {
+              invoke: {
+                id: "sum",
+                src: "summarize",
+                input: {},
+                onDone: ({ output }) => ({ target: "summarized", context: { summary: output } }),
+              },
+            },
+            summarized: { type: "final" },
+          },
+        },
+      },
+    });
+
+    const result = await runAgent(machine, {
+      input: {},
+      // Async model call: if the WAIT_TAG region settled the run early, the
+      // summary would still be null. It must be present, proving the sibling
+      // work completed before the idle settle.
+      generateText: () =>
+        new Promise((res) => setTimeout(() => res({ output: "done-summary" }), 10)),
+    });
+
+    expect(result.status).toBe("idle");
+    if (result.status !== "idle") throw new Error("expected idle");
+    expect((result.snapshot.context as { summary: string | null }).summary).toBe("done-summary");
+  });
+
+  test("a custom isSuspended detector is used instead of the WAIT_TAG default", async () => {
+    const agent = setupAgent({
+      context: z.object({}),
+      input: z.object({}),
+      output: z.object({}),
+      events: { GO: z.object({}) },
+    });
+    // No WAIT_TAG anywhere: the default detector would never fire.
+    const machine = agent.createMachine({
+      context: {},
+      initial: "paused",
+      states: {
+        paused: { on: { GO: { target: "done" } } },
+        done: { type: "final", output: () => ({}) },
+      },
+    });
+
+    const seen: string[] = [];
+    const result = await runAgent(machine, {
+      input: {},
+      generateText: async () => ({ output: {} }),
+      isSuspended: (snapshot) => {
+        seen.push(JSON.stringify(snapshot.value));
+        return snapshot.matches("paused");
+      },
+    });
+
+    expect(result.status).toBe("idle");
+    expect(result.status === "idle" ? result.snapshot.value : undefined).toBe("paused");
+    // The custom detector was consulted (proving it replaced the default).
+    expect(seen).toContain('"paused"');
+  });
+
+  test("untagged machines still settle idle via the fallback heuristic (unchanged)", async () => {
+    const agent = setupAgent({
+      context: z.object({}),
+      input: z.object({}),
+      output: z.object({}),
+      events: { APPROVE: z.object({}) },
+    });
+    const machine = agent.createMachine({
+      context: {},
+      initial: "reviewing",
+      states: {
+        // No tags, no custom detector — pure heuristic path.
+        reviewing: { on: { APPROVE: { target: "done" } } },
+        done: { type: "final", output: () => ({}) },
+      },
+    });
+
+    const result = await runAgent(machine, {
+      input: {},
+      generateText: async () => ({ output: {} }),
+    });
+    expect(result.status).toBe("idle");
+    expect(result.status === "idle" ? result.snapshot.value : undefined).toBe("reviewing");
+  });
+});
+
+describe("Feature B: illegal resume event throws", () => {
+  const agent = setupAgent({
+    context: z.object({ ok: z.boolean() }),
+    input: z.object({}),
+    output: z.object({}),
+    events: { APPROVE: z.object({}), REJECT: z.object({ reason: z.string() }), SUBMIT: z.object({}) },
+  });
+  const machine = agent.createMachine({
+    context: { ok: false },
+    initial: "reviewing",
+    states: {
+      reviewing: {
+        on: {
+          APPROVE: { target: "done" },
+          REJECT: { target: "done" },
+          // Type-legal but guard-narrowed: rejected while ok === false.
+          SUBMIT: ({ context }) => (context.ok ? { target: "done" } : undefined),
+        },
+      },
+      done: { type: "final", output: () => ({}) },
+    },
+  });
+
+  const generateText = async () => ({ output: {} });
+
+  test("resuming with an event the restored state cannot take throws IllegalResumeEventError with acceptedTypes", async () => {
+    const first = await runAgent(machine, { input: {}, generateText });
+    expect(first.status).toBe("idle");
+    if (first.status !== "idle") throw new Error("expected idle");
+
+    let caught: unknown;
+    try {
+      await runAgent(machine, {
+        snapshot: first.snapshot,
+        event: { type: "NOPE" } as never,
+        generateText,
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(IllegalResumeEventError);
+    const err = caught as IllegalResumeEventError;
+    expect(err.eventType).toBe("NOPE");
+    expect(err.acceptedTypes.slice().sort()).toEqual(["APPROVE", "REJECT", "SUBMIT"]);
+  });
+
+  test("onIllegalResumeEvent: 'ignore' restores the older silent-drop behavior", async () => {
+    const first = await runAgent(machine, { input: {}, generateText });
+    if (first.status !== "idle") throw new Error("expected idle");
+
+    const second = await runAgent(machine, {
+      snapshot: first.snapshot,
+      event: { type: "NOPE" } as never,
+      onIllegalResumeEvent: "ignore",
+      generateText,
+    });
+
+    // No throw: the event is silently dropped and the run settles idle again.
+    expect(second.status).toBe("idle");
+    expect(second.status === "idle" ? second.snapshot.value : undefined).toBe("reviewing");
+  });
+
+  test("a type-legal event a guard rejects does not throw (settles per normal semantics)", async () => {
+    const first = await runAgent(machine, { input: {}, generateText });
+    if (first.status !== "idle") throw new Error("expected idle");
+
+    // SUBMIT is a declared, type-legal event; its guard rejects it here. This
+    // is NOT an illegal resume event — no throw, machine takes no transition.
+    const second = await runAgent(machine, {
+      snapshot: first.snapshot,
+      event: { type: "SUBMIT" },
+      generateText,
+    });
+
+    expect(second.status).toBe("idle");
+    expect(second.status === "idle" ? second.snapshot.value : undefined).toBe("reviewing");
+  });
+});
+
+describe("runAgent error cause split", () => {
+  // Builds a decision machine whose `decide` always returns an unknown event,
+  // so resolveDecision exhausts its retries and throws DecisionExhaustedError.
+  function exhaustingDecisionMachine(withOnError: boolean) {
+    const schemas = createAgentSchemas({
+      context: z.object({}),
+      input: z.object({}),
+      events: { ATTACK: z.object({}), HEAL: z.object({}) },
+    });
+    const chooseMove = createDecisionLogic({
+      model: "test-model",
+      prompt: "Choose a move.",
+      allowedEvents: ["ATTACK", "HEAL"] as const,
+    });
+    const agent = setupAgent({ schemas, actorSources: { chooseMove } });
+    return agent.createMachine({
+      context: {},
+      initial: "choosing",
+      states: {
+        choosing: {
+          invoke: {
+            id: "choosing",
+            src: "chooseMove",
+            input: {},
+            onDone: sendDecision(),
+            ...(withOnError ? { onError: { target: "fumbled" } } : {}),
+          },
+          on: { ATTACK: { target: "attacked" }, HEAL: { target: "healed" } },
+        },
+        attacked: { type: "final" },
+        healed: { type: "final" },
+        fumbled: {},
+      },
+    });
+  }
+
+  const alwaysUnknown = async (): Promise<{ event: ChosenEvent }> => ({
+    event: { type: "BOGUS" },
+  });
+
+  test("unhandled DecisionExhaustedError settles cause 'decision-exhausted'", async () => {
+    const result = await runAgent(exhaustingDecisionMachine(false), {
+      input: {},
+      generateText: async () => ({ output: {} }),
+      decide: alwaysUnknown,
+    });
+
+    expect(result.status).toBe("error");
+    expect(result.status === "error" ? result.cause : undefined).toBe("decision-exhausted");
+  });
+
+  test("a DecisionExhaustedError handled by onError does NOT settle an error", async () => {
+    const result = await runAgent(exhaustingDecisionMachine(true), {
+      input: {},
+      generateText: async () => ({ output: {} }),
+      decide: alwaysUnknown,
+    });
+
+    // onError routed it to `fumbled` — the run settles idle, not error.
+    expect(result.status).not.toBe("error");
+    expect(result.status === "idle" ? result.snapshot.value : undefined).toBe("fumbled");
+  });
+
+  test("a plain executor throw (not decision-exhausted) still settles cause 'machine'", async () => {
+    const schemas = createAgentSchemas({
+      context: z.object({}),
+      input: z.object({}),
+      output: z.object({}),
+    });
+    const step = createTextLogic({
+      schemas: { input: z.object({}), output: z.object({}) },
+      model: "test-model",
+    });
+    const agent = setupAgent({ schemas, actorSources: { step } });
+    const machine = agent.createMachine({
+      context: {},
+      initial: "working",
+      states: {
+        working: { invoke: { id: "step", src: "step", input: {}, onDone: { target: "done" } } },
+        done: { type: "final" },
+      },
+    });
+
+    const result = await runAgent(machine, {
+      input: {},
+      generateText: async () => {
+        throw new Error("boom");
+      },
+    });
+
+    expect(result.status).toBe("error");
+    expect(result.status === "error" ? result.cause : undefined).toBe("machine");
+  });
+});
+
+describe("runAgent dev-mode serialization guard", () => {
+  test("warns once, naming the path, when idle context holds a non-JSON value (Date)", async () => {
+    const schemas = createAgentSchemas({
+      context: z.object({ createdAt: z.date() }),
+      input: z.object({}),
+      events: { GO: z.object({}) },
+    });
+    const agent = setupAgent({ schemas });
+    const machine = agent.createMachine({
+      context: () => ({ createdAt: new Date() }),
+      initial: "waiting",
+      states: {
+        waiting: { on: { GO: { target: "done" } } },
+        done: { type: "final" },
+      },
+    });
+
+    const warnings: string[] = [];
+    const original = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map(String).join(" "));
+    };
+    try {
+      const result = await runAgent(machine, {
+        input: {},
+        generateText: async () => ({ output: {} }),
+      });
+      expect(result.status).toBe("idle");
+    } finally {
+      console.warn = original;
+    }
+
+    const serializationWarnings = warnings.filter((w) => w.includes("persist/resume"));
+    expect(serializationWarnings).toHaveLength(1);
+    expect(serializationWarnings[0]).toContain("context.createdAt (Date)");
+  });
+
+  test("does not warn when idle context is fully JSON-serializable", async () => {
+    const schemas = createAgentSchemas({
+      context: z.object({ topic: z.string() }),
+      input: z.object({}),
+      events: { GO: z.object({}) },
+    });
+    const agent = setupAgent({ schemas });
+    const machine = agent.createMachine({
+      context: () => ({ topic: "cats" }),
+      initial: "waiting",
+      states: {
+        waiting: { on: { GO: { target: "done" } } },
+        done: { type: "final" },
+      },
+    });
+
+    const warnings: string[] = [];
+    const original = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map(String).join(" "));
+    };
+    try {
+      await runAgent(machine, { input: {}, generateText: async () => ({ output: {} }) });
+    } finally {
+      console.warn = original;
+    }
+
+    expect(warnings.filter((w) => w.includes("persist/resume"))).toHaveLength(0);
   });
 });

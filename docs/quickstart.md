@@ -15,53 +15,53 @@ npm install @statelyai/agent xstate ai @ai-sdk/openai zod
 - `ai` (the Vercel AI SDK) is optional: only needed for the shipped adapter, `createAiSdkExecutors`. Core has no runtime dependency besides `xstate`.
 - `@ai-sdk/openai` and `zod` are used in the examples below.
 
-## Describe your schemas
+## Describe your models and schemas
 
 <!-- quickstart walkthrough, based on readme.md quickstart -->
 
-`createAgentSchemas` takes the machine's `context`, `input`, and `output` as [Standard Schema](https://standardschema.dev) values (Zod works). These types flow through the rest of the setup.
+Declare a **models registry** (short keys mapped to resolved models, shared between `setupAgent` and the host) and the machine's `context`, `input`, and `output` as [Standard Schema](https://standardschema.dev) values (Zod works). These pass directly to `setupAgent` and flow through the rest of the setup.
 
 ```ts
 import { z } from 'zod';
-import { createAgentSchemas } from '@statelyai/agent';
+import { openai } from '@ai-sdk/openai';
+
+// Model ids here are placeholders — use any model your provider offers.
+const models = { quick: openai('gpt-5.4-mini') } as const;
 
 const answerSchema = z.object({ answer: z.string() });
-
-const schemas = createAgentSchemas({
-  context: z.object({ prompt: z.string(), answer: z.string().nullable() }),
-  input: z.object({ prompt: z.string() }),
-  output: answerSchema,
-});
+const contextSchema = z.object({ prompt: z.string(), answer: z.string().nullable() });
+const inputSchema = z.object({ prompt: z.string() });
 ```
 
 ## Set up the agent with a request
 
-`setupAgent` takes your schemas and requests, and returns a **setup** (not a running agent) that you author machines from, just like XState's `setup()`. A **text request** is a typed model call: it names a `model`, declares its own input and output schemas, and builds a prompt from its input.
+`setupAgent` takes your models, schema fields, and requests, and returns a **setup** (not a running agent) that you author machines from, just like XState's `setup()`. A **text request** is a typed model call: it names a `model`, declares its own input and output schemas, and builds a prompt from its input.
 
 ```ts
 import { setupAgent } from '@statelyai/agent';
 
 const agentSetup = setupAgent({
-  schemas,
+  models,
+  context: contextSchema,
+  input: inputSchema,
+  output: answerSchema,
   requests: {
     answerQuestion: {
       schemas: { input: z.object({ prompt: z.string() }), output: answerSchema },
-      model: 'openai/gpt-5.4-mini',
+      model: 'quick',
       prompt: ({ input }) => input.prompt,
     },
   },
 });
 ```
 
-The `model` value is a string reference. The host resolves it to a real model later, so the machine stays free of any SDK.
+The `model` value is a key into the `models` registry, so a typo is a compile error. For a machine that must not name concrete models, drop the registry and use string refs the host resolves at run time — see [Which authoring form when](machines.md#which-authoring-form-when).
 
 ## Author the machine
 
-`agentSetup.createMachine` builds a typed XState machine. The `answering` state invokes `answerQuestion`; its `onDone` moves to `done` and writes the parsed answer into context. `parseOutput` validates the request output against its schema.
+`agentSetup.createMachine` builds a typed XState machine. The `answering` state invokes `answerQuestion`; its `onDone` moves to `done` and writes the answer into context. `output` is already validated against the request's output schema and typed as `{ answer: string }`, so you read `output.answer` directly.
 
 ```ts
-import { parseOutput } from '@statelyai/agent';
-
 const machine = agentSetup.createMachine({
   context: ({ input }) => ({ prompt: input.prompt, answer: null }),
   initial: 'answering',
@@ -73,7 +73,7 @@ const machine = agentSetup.createMachine({
         input: ({ context }) => ({ prompt: context.prompt }),
         onDone: ({ output }) => ({
           target: 'done',
-          context: { answer: parseOutput(answerSchema, output).answer },
+          context: { answer: output.answer },
         }),
       },
     },
@@ -89,18 +89,15 @@ The machine now fully describes the agent, but nothing has called a model yet. T
 
 ## Run it against a host
 
-`runAgent` drives the machine and calls the host's executors whenever a state needs a model. Build the executor set with `createAiSdkExecutors` from the `@statelyai/agent/ai-sdk` entry point.
+`runAgent` drives the machine and calls the host's executors whenever a state needs a model. Build the executor set with `createAiSdkExecutors` from the `@statelyai/agent/ai-sdk` entry point, passing the same `models` registry so request keys resolve to real models.
 
 ```ts
 import { runAgent } from '@statelyai/agent';
 import { createAiSdkExecutors } from '@statelyai/agent/ai-sdk';
-import { openai } from '@ai-sdk/openai';
 
 const result = await runAgent(machine, {
   input: { prompt: 'Why state machines?' },
-  ...createAiSdkExecutors({
-    resolveModel: (modelRef) => openai(modelRef.replace(/^openai\//, '')),
-  }),
+  ...createAiSdkExecutors({ models }),
 });
 ```
 

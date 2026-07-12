@@ -23,6 +23,72 @@ export function persistSnapshot<TSnapshot>(snapshot: TSnapshot): TSnapshot {
   return JSON.parse(JSON.stringify(snapshot)) as TSnapshot;
 }
 
+/**
+ * Walks a context value and returns the dot-paths of the first few values that
+ * would NOT survive a JSON persist/resume round-trip (see {@link persistSnapshot}):
+ * `Date`, `Map`, `Set`, `RegExp`, functions, `undefined`, `bigint`, class
+ * instances (non-plain objects), and circular references. Plain objects,
+ * arrays, and JSON primitives are walked/allowed. Returns `[]` for a
+ * fully-JSON-safe value. Cheap and bounded (stops after `limit` findings) —
+ * intended for a dev-only warning at the moment persistence matters.
+ */
+export function findNonSerializableContextPaths(context: unknown, limit = 5): string[] {
+  const paths: string[] = [];
+  const seen = new WeakSet<object>();
+
+  const walk = (value: unknown, path: string): void => {
+    if (paths.length >= limit) {
+      return;
+    }
+    if (value === null) {
+      return;
+    }
+    const type = typeof value;
+    if (type === "string" || type === "number" || type === "boolean") {
+      return;
+    }
+    if (type === "undefined" || type === "bigint" || type === "function" || type === "symbol") {
+      paths.push(`${path} (${type})`);
+      return;
+    }
+    // Objects. `seen` holds only the current ancestor chain: a value revisited
+    // while still on the chain is a true cycle; a shared (DAG) reference is
+    // not — JSON.stringify duplicates those fine — so entries are removed
+    // again after their children are walked.
+    const obj = value as object;
+    if (seen.has(obj)) {
+      paths.push(`${path} (circular)`);
+      return;
+    }
+
+    if (Array.isArray(value)) {
+      seen.add(obj);
+      value.forEach((item, index) => walk(item, `${path}[${index}]`));
+      seen.delete(obj);
+      return;
+    }
+
+    const proto = Object.getPrototypeOf(value);
+    if (proto === Object.prototype || proto === null) {
+      // Plain object — walk its entries.
+      seen.add(obj);
+      for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+        walk(item, `${path}.${key}`);
+      }
+      seen.delete(obj);
+      return;
+    }
+
+    // Any other object (Date, Map, Set, RegExp, class instance, …) does not
+    // round-trip through JSON.
+    const ctorName = (value as { constructor?: { name?: string } }).constructor?.name ?? "object";
+    paths.push(`${path} (${ctorName})`);
+  };
+
+  walk(context, "context");
+  return paths;
+}
+
 /** Builds a {@link UserMessage} from a string or multimodal content parts. */
 export function userMessage(content: string | Array<TextPart | ImagePart | FilePart>): UserMessage {
   return { role: "user", content };

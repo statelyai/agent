@@ -359,4 +359,53 @@ describe("decide (tool_choice required, over fake fetch)", () => {
 
     await expect(decide(decisionRequest())).rejects.toThrow(/unknown tool 'send_event_BOGUS'/);
   });
+
+  test("the event's own type always wins over a `type` field in the tool arguments", async () => {
+    const { fetch } = fakeFetch(() =>
+      jsonResponse({
+        choices: [
+          {
+            message: {
+              tool_calls: [
+                {
+                  type: "function",
+                  function: {
+                    name: "send_event_GUESS",
+                    // Stray `type` in the parsed arguments must not override the event type.
+                    arguments: JSON.stringify({ type: "WRONG", guess: "a cat" }),
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    );
+    const { decide } = createOpenAiCompatExecutors({ baseUrl: "http://x/v1", fetch });
+
+    const result = await decide(decisionRequest());
+    expect(result.event).toEqual({ type: "GUESS", guess: "a cat" });
+  });
+
+  test("forwards request.signal to fetch and rejects when it is aborted", async () => {
+    // fetch that honors the abort signal, like the real one.
+    const fetch: FetchLike = (_url, init) =>
+      new Promise((_resolve, reject) => {
+        const signal = init.signal;
+        if (signal?.aborted) {
+          reject(new DOMException("Aborted", "AbortError"));
+          return;
+        }
+        signal?.addEventListener("abort", () =>
+          reject(new DOMException("Aborted", "AbortError")),
+        );
+      });
+    const { decide } = createOpenAiCompatExecutors({ baseUrl: "http://x/v1", fetch });
+
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      decide(decisionRequest({ signal: controller.signal } as Partial<AgentDecisionRequest>)),
+    ).rejects.toThrow(/Aborted/);
+  });
 });

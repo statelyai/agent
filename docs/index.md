@@ -31,22 +31,22 @@ A [decision](decisions.md) is where this matters most: the model chooses exactly
 
 ```ts
 import { z } from 'zod';
-import { createAgentSchemas, parseOutput, runAgent, setupAgent } from '@statelyai/agent';
+import { runAgent, setupAgent } from '@statelyai/agent';
 import { createAiSdkExecutors } from '@statelyai/agent/ai-sdk';
 import { openai } from '@ai-sdk/openai';
 
+const models = { quick: openai('gpt-5.4-mini') } as const;
 const answerSchema = z.object({ answer: z.string() });
 
 const agentSetup = setupAgent({
-  schemas: createAgentSchemas({
-    context: z.object({ prompt: z.string(), answer: z.string().nullable() }),
-    input: z.object({ prompt: z.string() }),
-    output: answerSchema,
-  }),
+  models,
+  context: z.object({ prompt: z.string(), answer: z.string().nullable() }),
+  input: z.object({ prompt: z.string() }),
+  output: answerSchema,
   requests: {
     answerQuestion: {
       schemas: { input: z.object({ prompt: z.string() }), output: answerSchema },
-      model: 'openai/gpt-5.4-mini',
+      model: 'quick',
       prompt: ({ input }) => input.prompt,
     },
   },
@@ -62,7 +62,7 @@ const machine = agentSetup.createMachine({
         input: ({ context }) => ({ prompt: context.prompt }),
         onDone: ({ output }) => ({
           target: 'done',
-          context: { answer: parseOutput(answerSchema, output).answer },
+          context: { answer: output.answer },
         }),
       },
     },
@@ -72,7 +72,7 @@ const machine = agentSetup.createMachine({
 
 const result = await runAgent(machine, {
   input: { prompt: 'Why state machines?' },
-  ...createAiSdkExecutors({ resolveModel: (ref) => openai(ref.replace(/^openai\//, '')) }),
+  ...createAiSdkExecutors({ models }),
 });
 
 if (result.status === 'done') {
@@ -95,7 +95,6 @@ Explicitly not shipped yet:
 - **OpenTelemetry exporter.** Build your own from the observation seams on `runAgent`.
 - **SSE/WebSocket transport helpers.** Host your own stream over what `onChunk` gives you.
 - **Dynamic-parallelism primitive.** Fan-out is plain `Promise.all(...)` over host actors.
-- **Nested-machine executor binding.** A child machine keeps its own `.provide({ actorSources })` binding.
 - **Visualization tooling.** Stately Studio and a VS Code extension own diagramming and inspection.
 
 If something here blocks you, or the API surface feels wrong, open an issue. This alpha exists to find that out before 2.0 stable.

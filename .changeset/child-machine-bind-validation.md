@@ -1,21 +1,20 @@
 ---
-"@statelyai/agent": patch
+"@statelyai/agent": minor
 ---
 
-`runAgent` now validates invoked child machines at bind time.
+`runAgent`'s executors now inherit down the whole actor tree.
 
-Previously, when a machine invoked a child machine whose own states invoke agent requests (`agent.generateText`, a named text request, or `agent.decide`) and that child request was left unbound, `runAgent` would not catch it at bind time — the run would settle in a wrong idle-looking state or fail mid-run instead of failing fast. The bind walk treated an invoked child machine as one opaque actor and never descended into its internal invokes.
-
-The bind walk now recurses into invoked child state machines (arbitrarily deep, with a cycle guard for self-invoking machines). An unbound agent request inside a child machine throws a loud bind-time error naming the child invoke chain and the request `src`, with the fix spelled out. Child machine requests do **not** inherit the parent `runAgent`'s `generateText`/`streamText`/`decide` executors at runtime, so each child request must carry its own executor (`requestLogic.withExecutor(...)`) or be bound as a string-keyed source inside the child via nested `.provide`:
+Agent requests inside invoked child machines — at any depth — inherit the `generateText`/`streamText`/`decide` executors passed to `runAgent`, the same host-backed wrappers the top-level machine's own requests get. A child request participates in the run's `maxModelCalls` budget, `onTrace`, `onChunk`, and `onResult` exactly like a parent request. No per-child `.provide` ceremony is needed:
 
 ```ts
-runAgent(parentMachine, {
-  actorSources: {
-    child: childMachine.provide({
-      actorSources: { request: requestLogic.withExecutor(...) },
-    }),
-  },
-});
+runAgent(parentMachine, { input, generateText }); // child requests inherit generateText
 ```
 
-Properly-bound children (the existing nested-`.provide` pattern) are unaffected.
+Rules:
+
+- **Inheritance is the default** for any request reached through string-keyed actor sources (invoke `src` strings, registered `actorSources`), arbitrarily deep, cycle-safe.
+- **Explicit bindings win.** A request that carries its own executor (`.withExecutor(...)`, `bindRequestExecutor(...)`, or a child's own `.provide({ actorSources })`) keeps it — the parent's executors are never called for it.
+- **Missing executors still fail fast.** A reachable request whose required executor kind was not passed (e.g. a child stream request with no `streamText`) throws a loud bind-time error naming the invoke chain and the request `src`, before any actor runs.
+- **Escape hatch.** Dynamically created logics (e.g. machine factories used with `enq.spawn`) and children invoked as direct-object `src` objects aren't reachable by the static bind walk; bind those explicitly with `bindRequestExecutor(...)` / `.withExecutor(...)`, or register the child as a string-keyed source.
+
+This replaces the previous alpha behavior, where a child machine was treated as one opaque actor and an unbound child request threw a bind-time error demanding a nested `.provide`.

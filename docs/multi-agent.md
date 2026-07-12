@@ -55,7 +55,7 @@ const machine = agentSetup.createMachine({
 });
 ```
 
-Each child binds its own request executors with `.provide({ actorSources })` **before** being registered as a parent actor. The section on nested executor binding below explains why.
+A child machine's own requests inherit the executors you pass to `runAgent` — no per-child binding needed. The section on nested executor inheritance below explains the rules.
 
 ## Sub-agents as host-owned tools
 
@@ -122,33 +122,27 @@ states: {
 
 Each debater sits idle until it receives `DEBATE.ARGUMENT_REQUESTED`, composes an argument, and sends `DEBATE.ARGUMENT_SUBMITTED` back. The parent appends to a shared transcript and requests the next turn. The machines share state only through the messages they choose to send.
 
-## Nested-machine executor binding
+## Nested-machine executor inheritance
 
-<!-- nested executor binding caveat from src/run-agent.ts and examples/subflows -->
+<!-- nested executor inheritance from src/run-agent.ts and examples/subflows -->
 
-> **Warning:** `runAgent` binds executors only for the **top-level** machine's own text and decision sources. A child machine keeps its own `.provide({ actorSources })` binding; `runAgent` does not reach into it; child requests do **not** inherit the parent's `generateText`/`streamText`/`decide`. Bind the child's request executors yourself before registering it.
->
-> `runAgent` validates this at **bind time**: it recurses into invoked child machines (arbitrarily deep) and throws a loud error naming the child and the unbound request `src` before any actor runs, rather than settling the parent in a wrong idle-looking state.
-
-[examples/subflows/index.ts](../examples/subflows/index.ts) shows the pattern:
+`runAgent` rebinds the executors you pass it (`generateText`/`streamText`/`decide`) onto every unbound agent request in the machine — **including requests inside invoked child machines, at any depth**. A child request inherits the same host-backed executors as the parent's own requests and shares the run's `maxModelCalls` budget, `onTrace`, `onChunk`, and `onResult`.
 
 ```ts
 const result = await runAgent(parentMachine, {
   input: { topic: 'agents' },
-  generateText: async () => ({}),
-  actorSources: {
-    child: childMachine.provide({
-      actorSources: {
-        researchTopic: childSetup.requests.researchTopic.withExecutor(
-          async ({ input }) => `Research: ${input.topic}`,
-        ),
-      },
-    }),
-  },
+  generateText, // covers the parent's requests AND the child's researchTopic
 });
 ```
 
-The `generateText` passed to `runAgent` covers the parent's own requests; the child's request is covered by its own `.withExecutor(...)` binding.
+The rules:
+
+- **Inheritance is the default.** Any request reached through string-keyed actor sources (invoke `src` strings, registered `actorSources`) inherits, no matter how deeply nested. Cycles are handled.
+- **Explicit bindings win.** A request that already carries its own executor — via `.withExecutor(...)`, `bindRequestExecutor(...)`, or a child's own `.provide({ actorSources })` — keeps it. Explicit binding shadows inheritance, so the parent's executors are never called for it.
+- **Missing executors still fail fast.** If a reachable request needs an executor kind you didn't pass (e.g. a child has a `mode: 'stream'` request but `runAgent` got no `streamText`), binding throws a loud error naming the invoke chain and the request `src` before any actor runs.
+- **Escape hatch for dynamic spawns.** Logics created dynamically (e.g. machine factories used with `enq.spawn`) aren't in any invoke config for the static bind walk to reach, so they can't inherit. Bind those explicitly with `bindRequestExecutor(...)` / `.withExecutor(...)` (see [examples/fan-out/index.ts](../examples/fan-out/index.ts)). The same applies to a child invoked as a **direct-object** `src` (an inline machine object rather than a registered name): register it as a string-keyed source to let it inherit, or bind its requests yourself.
+
+[examples/subflows/index.ts](../examples/subflows/index.ts) shows the default: the parent registers the child under `actorSources.child`, passes `generateText` to `runAgent`, and the child's `researchTopic` request inherits it — no nested `.provide`.
 
 ## Fan-out today
 

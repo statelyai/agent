@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import { createActor } from "xstate";
 import { getStateMeta, persistSnapshot, setupAgent } from "./index.js";
+import { findNonSerializableContextPaths } from "./utils.js";
 
 const metaSchema = z.object({
   interaction: z
@@ -107,5 +108,68 @@ describe("persistSnapshot", () => {
     });
 
     expect(persisted).toEqual({ keep: 1 });
+  });
+});
+
+describe("findNonSerializableContextPaths", () => {
+  test("returns [] for a fully JSON-safe context", () => {
+    expect(
+      findNonSerializableContextPaths({
+        topic: "cats",
+        count: 3,
+        ok: true,
+        nested: { list: [1, "two", { deep: null }] },
+        empty: null,
+      }),
+    ).toEqual([]);
+  });
+
+  test("flags a Date value, naming its path", () => {
+    const paths = findNonSerializableContextPaths({ createdAt: new Date() });
+    expect(paths).toHaveLength(1);
+    expect(paths[0]).toMatch(/^context\.createdAt \(Date\)$/);
+  });
+
+  test("flags Map, Set, function, undefined, bigint, and class instances", () => {
+    class Widget {
+      x = 1;
+    }
+    const paths = findNonSerializableContextPaths(
+      {
+        map: new Map(),
+        set: new Set(),
+        fn: () => 1,
+        undef: undefined,
+        big: 10n,
+        inst: new Widget(),
+      },
+      10,
+    );
+    expect(paths).toEqual([
+      "context.map (Map)",
+      "context.set (Set)",
+      "context.fn (function)",
+      "context.undef (undefined)",
+      "context.big (bigint)",
+      "context.inst (Widget)",
+    ]);
+  });
+
+  test("flags a value nested inside plain objects/arrays with a dotted path", () => {
+    const paths = findNonSerializableContextPaths({ a: { b: [{ when: new Date() }] } });
+    expect(paths).toEqual(["context.a.b[0].when (Date)"]);
+  });
+
+  test("flags a circular reference instead of recursing forever", () => {
+    const obj: Record<string, unknown> = { self: null };
+    obj.self = obj;
+    const paths = findNonSerializableContextPaths(obj);
+    expect(paths).toEqual(["context.self (circular)"]);
+  });
+
+  test("does not flag a shared (DAG) reference as circular", () => {
+    const shared = { ok: true };
+    const paths = findNonSerializableContextPaths({ a: shared, b: shared });
+    expect(paths).toEqual([]);
   });
 });

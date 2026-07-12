@@ -31,25 +31,24 @@ A refund agent in one machine: the model decides, a **guard** owns the $100 auto
 
 ```ts
 import { z } from 'zod';
-import { createAgentSchemas, runAgent, sendDecision, setupAgent } from '@statelyai/agent';
+import { runAgent, sendDecision, setupAgent, WAIT_TAG } from '@statelyai/agent';
 import { createAiSdkExecutors } from '@statelyai/agent/ai-sdk';
 import { openai } from '@ai-sdk/openai';
 
+// Model ids here are placeholders — use any model your provider offers.
 const models = { quick: openai('gpt-5.4-mini') } as const;
 
 const agent = setupAgent({
   models,
-  schemas: createAgentSchemas({
-    context: z.object({ request: z.string(), amount: z.number() }),
-    input: z.object({ request: z.string(), amount: z.number() }),
-    output: z.object({ refunded: z.boolean() }),
-    events: {
-      AUTO_APPROVE: z.object({}),
-      NEEDS_REVIEW: z.object({ reason: z.string() }),
-      APPROVE: z.object({}),
-      DENY: z.object({}),
-    },
-  }),
+  context: z.object({ request: z.string(), amount: z.number() }),
+  input: z.object({ request: z.string(), amount: z.number() }),
+  output: z.object({ refunded: z.boolean() }),
+  events: {
+    AUTO_APPROVE: z.object({}),
+    NEEDS_REVIEW: z.object({ reason: z.string() }),
+    APPROVE: z.object({}),
+    DENY: z.object({}),
+  },
 });
 
 const machine = agent.createMachine({
@@ -77,6 +76,8 @@ const machine = agent.createMachine({
     },
     awaitingHuman: {
       // No invoke: runAgent settles { status: 'idle', snapshot } here.
+      // WAIT_TAG marks the wait as intentional so the idle settle is deterministic.
+      tags: [WAIT_TAG],
       on: {
         APPROVE: { target: 'refunded' },
         DENY: { target: 'denied' },

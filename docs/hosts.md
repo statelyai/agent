@@ -27,11 +27,11 @@ Those functions are the **executors**, typed as `AgentRequestExecutors`:
 import { createAiSdkExecutors } from '@statelyai/agent/ai-sdk';
 import { openai } from '@ai-sdk/openai';
 
+const models = { quick: openai('gpt-5.4-mini') } as const;
+
 const result = await runAgent(machine, {
   input: { prompt: 'Why state machines?' },
-  ...createAiSdkExecutors({
-    resolveModel: (modelRef) => openai(modelRef.replace(/^openai\//, '')),
-  }),
+  ...createAiSdkExecutors({ models }),
 });
 ```
 
@@ -50,8 +50,10 @@ const models = {
 } as const;
 
 const agentSetup = setupAgent({
-  schemas,
   models,
+  context: z.object({ prompt: z.string(), answer: z.string().nullable() }),
+  input: z.object({ prompt: z.string() }),
+  output: answerSchema,
   requests: {
     answerQuestion: {
       schemas: { input: z.object({ prompt: z.string() }), output: answerSchema },
@@ -67,7 +69,7 @@ await runAgent(machine, {
 });
 ```
 
-For a fully dynamic or externally configured host, use `resolveModel` instead: it takes the raw ref string and returns a model, so refs like `"openai/gpt-5.4-mini"` resolve without a static map. You can pass both; `resolveModel` wins. With `models` alone, an unknown ref throws.
+For a fully dynamic or externally configured host — one whose machine must not name concrete models — use `resolveModel` instead: it takes the raw ref string and returns a model, so refs like `"openai/gpt-5.4-mini"` resolve without a static map. You can pass both; `resolveModel` wins. With `models` alone, an unknown ref throws. This is the max-portability escape hatch — see [Which authoring form when](machines.md#which-authoring-form-when).
 
 Model refs are opaque strings, so any string is a legal `model:` value. A `models` map is optional: it gives you key autocomplete on request `model:` fields and a place for the executor to resolve those refs. The AI SDK adapter resolves a ref through its `models` map, or through `resolveModel` when the map has no match.
 

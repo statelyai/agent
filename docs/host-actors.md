@@ -1,4 +1,7 @@
-# Host Actors
+---
+title: Host actors
+description: The machine declares typed actor requests; the host executes them with executors or actor implementations, on any SDK or runtime.
+---
 
 `setupAgent(...)` gives a machine typed, built-in actor sources for model work: `agent.generateText` / `agent.streamText` for inline text requests, `agent.decide` for decisions, `agent.userInput` for human input, plus co-located `requests:` when a call deserves a reusable name. Decisions are state-local: author them inline on the invoke with `src: 'agent.decide'`. In every case, the machine only *declares* the request; the host executes it by supplying executors to `runAgent(...)` (or the step helpers) or by providing actor implementations directly.
 
@@ -24,20 +27,17 @@ Inline `agent.generateText` is the fastest path for a one-off text request:
 
 ```ts
 import {
-  createAgentSchemas,
   parseOutput,
   runAgent,
   setupAgent,
 } from '@statelyai/agent';
 
-const schemas = createAgentSchemas({
+const agent = setupAgent({
   context: contextSchema,
   input: inputSchema,
   output: outputSchema,
   events: eventSchemas,
 });
-
-const agent = setupAgent({ schemas });
 const machine = agent.createMachine({
   initial: 'generating',
   states: {
@@ -80,7 +80,7 @@ step = transitionAgentStep(machine, step, { type: 'REVISE', prompt: nextPrompt }
 
 ## User input
 
-Use `agent.userInput` when workflow logic needs to wait for a human *without* going through the idle-first pattern (see [`../readme.md`](../readme.md#human-in-the-loop--persistence) for that default). It's a normal invoked actor; the host owns how the request is delivered and resumed. Two ways to implement it:
+`agent.userInput` is one of the two waiting styles; see [Choosing between the two waiting styles](human-in-the-loop.md#choosing-between-the-two-waiting-styles) for when to pick it over an idle state. It's a normal invoked actor; the host owns how the request is delivered and resumed. Two ways to implement it:
 
 **`RunAgentOptions.userInput`** — the inline path, for gathering input without settling the run:
 

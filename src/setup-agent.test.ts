@@ -619,6 +619,50 @@ describe("setupAgent", () => {
     ).rejects.toThrow("expected string");
   });
 
+  test("request output is validated and typed in invoke.onDone (no parseOutput needed)", () => {
+    const agent = setupAgent({
+      context: z.object({ prompt: z.string(), answer: z.string().nullable() }),
+      input: z.object({ prompt: z.string() }),
+      requests: {
+        answer: {
+          schemas: {
+            input: z.object({ prompt: z.string() }),
+            output: z.object({ answer: z.string() }),
+          },
+          model: "test-model",
+          prompt: ({ input }) => input.prompt,
+        },
+      },
+    });
+
+    agent.createMachine({
+      context: ({ input }) => ({ prompt: input.prompt, answer: null }),
+      initial: "answering",
+      states: {
+        answering: {
+          invoke: {
+            id: "answer",
+            src: "answer",
+            input: ({ context }) => ({ prompt: context.prompt }),
+            onDone: ({ output }) => {
+              // `output` is typed as the request's output schema type
+              // (`{ answer: string }`) — already validated, no parseOutput.
+              const answer: string = output.answer;
+              // @ts-expect-error `output` has no `missing` property (proves it
+              // is the typed object, not `unknown`/`any`).
+              void output.missing;
+              return { target: "done", context: { answer } };
+            },
+          },
+        },
+        done: {
+          type: "final",
+          output: ({ context }) => ({ answer: context.answer ?? "" }),
+        },
+      },
+    });
+  });
+
   test("setupAgent preserves typed action guard and delay names", () => {
     const schemas = createAgentSchemas({
       context: z.object({ prompt: z.string(), ready: z.boolean() }),
@@ -2663,5 +2707,48 @@ describe("per-state context schemas (setupAgent({ states }))", () => {
     await toPromise(actor);
 
     expect(actor.getSnapshot().output).toEqual({ answer: "about states" });
+  });
+});
+
+describe("setupAgent reserved agent.* actor keys", () => {
+  const schemas = createAgentSchemas({
+    context: z.object({}),
+    input: z.object({}),
+  });
+  const someLogic = createAsyncLogic({ run: async () => ({}) });
+
+  test("throws when actorSources tries to redefine a builtin agent.* key", () => {
+    expect(() =>
+      setupAgent({
+        schemas,
+        actorSources: { "agent.decide": someLogic } as never,
+      }),
+    ).toThrow(/reserved builtin agent actor/);
+  });
+
+  test("throws when requests tries to claim a reserved agent.* key", () => {
+    expect(() =>
+      setupAgent({
+        schemas,
+        requests: {
+          "agent.plan": { schemas: { input: z.object({}), output: z.object({}) }, model: "m" },
+        } as never,
+      }),
+    ).toThrow(/reserved builtin agent actor/);
+  });
+
+  test("the reserved-key error points users to machine.provide for deliberate overrides", () => {
+    expect(() =>
+      setupAgent({
+        schemas,
+        actorSources: { "agent.generateText": someLogic } as never,
+      }),
+    ).toThrow(/machine\.provide/);
+  });
+
+  test("a non-reserved actorSources key is accepted", () => {
+    expect(() =>
+      setupAgent({ schemas, actorSources: { myActor: someLogic } }),
+    ).not.toThrow();
   });
 });

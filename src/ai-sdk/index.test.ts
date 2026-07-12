@@ -1,8 +1,17 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
+import { MockLanguageModelV3, simulateReadableStream } from "ai/test";
+
+// The language-model stream-part type, derived from the mock's `doStream`
+// result rather than importing `@ai-sdk/provider` directly (not a direct dep).
+type MockDoStream = NonNullable<ConstructorParameters<typeof MockLanguageModelV3>[0]>["doStream"];
+type MockStreamResult = Extract<MockDoStream, { stream: unknown }>;
+type LanguageModelStreamPart =
+  MockStreamResult extends { stream: ReadableStream<infer P> } ? P : never;
 import type { AgentDecisionRequest } from "../decision.js";
 import type { AgentEventDescriptor } from "../events.js";
 import {
+  createAiSdkExecutors,
   isStructuredOutputRequest,
   toAiSdkCallSettings,
   toAiSdkEventTools,
@@ -290,5 +299,154 @@ describe("onResult metadata enrichment", () => {
     expect(result.event).toEqual({ type: "GO" });
     expect(result.usage).toMatchObject({ inputTokens: 5, outputTokens: 2 });
     expect(result.finishReason).toBe("tool-calls");
+  });
+
+  test("decide: the event's own type always wins over a `type` field in the tool input", async () => {
+    const { MockLanguageModelV3 } = await import("ai/test");
+    const { createAiSdkExecutors } = await import("./index.js");
+
+    const model = new MockLanguageModelV3({
+      doGenerate: {
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call-1",
+            toolName: "choose_GO",
+            // Model returns a stray `type` in the tool input — it must NOT
+            // override the chosen event's own type.
+            input: JSON.stringify({ type: "WRONG", note: "hi" }),
+          },
+        ],
+        finishReason: { unified: "tool-calls", raw: "tool_calls" },
+        usage: {
+          inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+          outputTokens: { total: 1, text: 1, reasoning: 0 },
+        },
+        warnings: [],
+      },
+    });
+
+    const executors = createAiSdkExecutors({ models: { m: model } });
+    const result = await executors.decide({
+      kind: "decision",
+      id: "d1",
+      model: "m",
+      prompt: "choose",
+      events: [{ type: "GO", toolName: "choose_GO" }],
+      attempts: [],
+    });
+
+    expect(result.event).toEqual({ type: "GO", note: "hi" });
+  });
+});
+
+describe("metadata.maxSteps (multi-step tool loops)", () => {
+  const streamUsage = {
+    inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+    outputTokens: { total: 1, text: 1, reasoning: 0 },
+  };
+  const toolCallStreamChunks = (id: string): LanguageModelStreamPart[] => [
+    { type: "stream-start", warnings: [] },
+    { type: "tool-call", toolCallId: id, toolName: "ping", input: "{}" },
+    { type: "finish", finishReason: { unified: "tool-calls", raw: "tool_calls" }, usage: streamUsage },
+  ];
+  const finalTextStreamChunks: LanguageModelStreamPart[] = [
+    { type: "stream-start", warnings: [] },
+    { type: "text-start", id: "t1" },
+    { type: "text-delta", id: "t1", delta: "done" },
+    { type: "text-end", id: "t1" },
+    { type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: streamUsage },
+  ];
+
+  const pingTool = {
+    ping: {
+      description: "ping",
+      inputSchema: z.object({}),
+      execute: async () => "pong",
+    },
+  };
+
+  test("streamText honors metadata.maxSteps (loops the tool call, matching generateText)", async () => {
+    let calls = 0;
+    const model = new MockLanguageModelV3({
+      doStream: async () => {
+        calls++;
+        return {
+          stream: simulateReadableStream({
+            chunks: calls < 3 ? toolCallStreamChunks(`call-${calls}`) : finalTextStreamChunks,
+          }),
+        };
+      },
+    });
+    const { streamText } = createAiSdkExecutors({ models: { m: model } });
+
+    const result = await streamText({
+      model: "m",
+      prompt: "hi",
+      metadata: { maxSteps: 5 },
+      tools: pingTool,
+    });
+
+    expect(calls).toBe(3);
+    expect(result.output).toBe("done");
+  });
+
+  test("streamText stays single-step when maxSteps is absent (regression: was ignored)", async () => {
+    let calls = 0;
+    const model = new MockLanguageModelV3({
+      doStream: async () => {
+        calls++;
+        return {
+          stream: simulateReadableStream({ chunks: toolCallStreamChunks(`call-${calls}`) }),
+        };
+      },
+    });
+    const { streamText } = createAiSdkExecutors({ models: { m: model } });
+
+    await streamText({ model: "m", prompt: "hi", tools: pingTool });
+
+    // Without maxSteps, the tool loop is not entered — exactly one model call.
+    expect(calls).toBe(1);
+  });
+
+  test("generateText honors metadata.maxSteps (symmetry check)", async () => {
+    let calls = 0;
+    const model = new MockLanguageModelV3({
+      doGenerate: async () => {
+        calls++;
+        const finishReason = { unified: "tool-calls" as const, raw: "tool_calls" };
+        const usage = {
+          inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+          outputTokens: { total: 1, text: 1, reasoning: 0 },
+        };
+        if (calls < 3) {
+          return {
+            content: [
+              { type: "tool-call" as const, toolCallId: `call-${calls}`, toolName: "ping", input: "{}" },
+            ],
+            finishReason,
+            usage,
+            warnings: [],
+          };
+        }
+        return {
+          content: [{ type: "text" as const, text: "done" }],
+          finishReason: { unified: "stop" as const, raw: "stop" },
+          usage,
+          warnings: [],
+        };
+      },
+    });
+    const { generateText } = createAiSdkExecutors({ models: { m: model } });
+
+    const result = await generateText({
+      model: "m",
+      prompt: "hi",
+      metadata: { maxSteps: 5 },
+      tools: pingTool,
+    });
+
+    expect(calls).toBe(3);
+    expect(result.output).toBe("done");
   });
 });
