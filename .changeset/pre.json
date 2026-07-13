@@ -17,6 +17,7 @@
     "executor-result-widening",
     "explicit-suspension-and-illegal-resume",
     "get-state-meta",
+    "keyless-verify-lint-simulate",
     "max-output-tokens-rename",
     "nested-executors-option",
     "openai-compat-adapter",
@@ -24,6 +25,7 @@
     "resolve-agent-requests",
     "run-agent-completion-and-versioning",
     "setup-agent-actor-sources-and-model-refs",
-    "setup-agent-xstate-cutover"
+    "setup-agent-xstate-cutover",
+    "typed-tools-union-output-core-helpers"
   ]
 }
