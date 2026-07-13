@@ -17,8 +17,21 @@ export {
   resolveAgentStep,
   transitionAgentStep,
 } from "./steps.js";
-export { IllegalResumeEventError, runAgent, WAIT_TAG } from "./run-agent.js";
-export { getStateMeta, persistSnapshot, validateSchemaSync } from "./utils.js";
+export {
+  AgentIdleError,
+  IllegalResumeEventError,
+  inspectTransitions,
+  runAgent,
+  runAgentToCompletion,
+  SnapshotVersionMismatchError,
+  WAIT_TAG,
+} from "./run-agent.js";
+export {
+  getMachineStructuralHash,
+  getStateMeta,
+  persistSnapshot,
+  validateSchemaSync,
+} from "./utils.js";
 export { assistantMessage, systemMessage, toolMessage, userMessage } from "./utils.js";
 
 export type {
@@ -63,6 +76,7 @@ export type {
 export type {
   AgentTraceEvent,
   AgentUserInputExecutor,
+  InspectedActorRef,
   PendingUserInput,
   RunAgentOptions,
   RunAgentResult,
@@ -88,6 +102,7 @@ export type {
 
 export type {
   AgentMessage,
+  AgentSnapshotStore,
   AgentTool,
   AgentToolChoice,
   AgentToolDescriptor,

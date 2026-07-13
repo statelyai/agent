@@ -15,7 +15,7 @@ import {
   type SnapshotFrom,
 } from "xstate";
 import type { AgentTools, ChosenEvent } from "./types.js";
-import { findNonSerializableContextPaths } from "./utils.js";
+import { findNonSerializableContextPaths, getMachineStructuralHash } from "./utils.js";
 import { getAcceptedEvents, sanitizeEventToolName, type AgentSchemas } from "./events.js";
 import {
   isTextLogic,
@@ -86,6 +86,56 @@ export class IllegalResumeEventError extends Error {
     );
     this.name = "IllegalResumeEventError";
     this.eventType = eventType;
+    this.acceptedTypes = acceptedTypes;
+  }
+}
+
+/**
+ * Thrown by {@link runAgent} when resuming from a `snapshot` whose stamped
+ * `agentMeta.version` differs from the current machine's version, under the
+ * default `onVersionMismatch: 'throw'` and with no `migrateSnapshot` hook. The
+ * structural fingerprint of the machine changed since the snapshot was
+ * persisted (a state/transition/invoke was added, removed, or retargeted), so
+ * the snapshot may no longer resume cleanly. `from` is the snapshot's version,
+ * `to` the current machine's.
+ */
+export class SnapshotVersionMismatchError extends Error {
+  readonly from: string;
+  readonly to: string;
+  readonly machineId: string;
+  constructor(from: string, to: string, machineId: string) {
+    super(
+      `runAgent: cannot resume snapshot stamped with machine version '${from}' against ` +
+        `machine '${machineId}' at version '${to}' — the machine's structure changed since ` +
+        `the snapshot was persisted. Provide options.migrateSnapshot to adapt it, or set ` +
+        `options.onVersionMismatch to 'warn'/'ignore' to proceed anyway.`,
+    );
+    this.name = "SnapshotVersionMismatchError";
+    this.from = from;
+    this.to = to;
+    this.machineId = machineId;
+  }
+}
+
+/**
+ * Thrown by {@link runAgentToCompletion} when the run settles `idle` instead of
+ * `done`: the machine paused for external input. Carries the idle `snapshot`
+ * and `acceptedTypes` (the event types that could resume it, via
+ * {@link getAcceptedEvents}). Use {@link runAgent} directly when idle is an
+ * expected outcome you handle.
+ */
+export class AgentIdleError extends Error {
+  readonly snapshot: AnyMachineSnapshot;
+  readonly acceptedTypes: string[];
+  constructor(snapshot: AnyMachineSnapshot, acceptedTypes: string[]) {
+    super(
+      `runAgentToCompletion: the machine paused (idle) instead of completing. Resume it by ` +
+        `calling runAgent with one of these events: ${
+          acceptedTypes.length > 0 ? acceptedTypes.join(", ") : "(none)"
+        }.`,
+    );
+    this.name = "AgentIdleError";
+    this.snapshot = snapshot;
     this.acceptedTypes = acceptedTypes;
   }
 }
@@ -179,6 +229,35 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine>
    * rejects is never an illegal resume event.
    */
   onIllegalResumeEvent?: "throw" | "ignore";
+
+  // version stamping
+  /**
+   * The version stamped onto every settled snapshot's `agentMeta` and compared
+   * against an incoming snapshot's stamp on resume. Defaults to
+   * {@link getMachineStructuralHash} of the machine (a structural fingerprint).
+   * Set an explicit value (e.g. a semver or build id) to control migration
+   * boundaries yourself.
+   */
+  machineVersion?: string;
+  /**
+   * How to handle a resume `snapshot` whose stamped `agentMeta.version` differs
+   * from the current machine's version. `'throw'` (default) throws
+   * {@link SnapshotVersionMismatchError} with `from`/`to`; `'warn'`
+   * `console.warn`s once and proceeds; `'ignore'` proceeds silently. Ignored
+   * when {@link migrateSnapshot} is provided (that runs instead), and never
+   * triggers for an unstamped snapshot (no `agentMeta`).
+   */
+  onVersionMismatch?: "throw" | "warn" | "ignore";
+  /**
+   * Called instead of {@link onVersionMismatch} when a resume snapshot's
+   * version mismatches the current machine's: receives the incoming snapshot
+   * and `{ from, to }`, and its return value is used as the snapshot to resume
+   * from. A throw propagates.
+   */
+  migrateSnapshot?: (
+    snapshot: Snapshot<unknown>,
+    info: { from: string; to: string },
+  ) => Snapshot<unknown>;
 
   // implementations — sugar for machine.provide({ actorSources }) before the run
   /** Actor source implementations, merged onto the machine before binding — sugar for `machine.provide({ actorSources })` ahead of the run. */
@@ -1069,6 +1148,18 @@ export async function runAgent<TMachine extends AnyStateMachine>(
   const runId = `run_${nextRunAgentTraceId++}`;
   let traceSeq = 0;
 
+  // Version stamping (§ item 2): every settled snapshot carries a plain,
+  // enumerable `agentMeta` field so it survives JSON persist/resume, and an
+  // incoming snapshot's stamp is checked against this version on resume.
+  const machineId = (machine.config as { id?: string }).id ?? machine.id ?? "(machine)";
+  const machineVersion = options.machineVersion ?? getMachineStructuralHash(machine);
+  const agentMeta = { machineId, version: machineVersion };
+  const stampAgentMeta = (snapshot: unknown): void => {
+    if (snapshot && typeof snapshot === "object") {
+      (snapshot as { agentMeta?: unknown }).agentMeta = agentMeta;
+    }
+  };
+
   const onTrace = (event: AgentTraceEventPayload<TMachine>) => {
     options.onTrace?.({
       runId,
@@ -1213,6 +1304,37 @@ export async function runAgent<TMachine extends AnyStateMachine>(
 
   const isSuspended = options.isSuspended ?? ((s: AnyMachineSnapshot) => s.hasTag(WAIT_TAG));
 
+  // Version stamping (§ item 2): when resuming, compare the incoming snapshot's
+  // stamped version against this machine's. A mismatch runs `migrateSnapshot`
+  // (its return value is used) if provided, else `onVersionMismatch`
+  // ('throw' | 'warn' | 'ignore'). An unstamped snapshot (no `agentMeta`) is
+  // always accepted. The (possibly migrated) snapshot is threaded through the
+  // illegal-resume check, createActor, and the run.start trace.
+  let effectiveSnapshot = options.snapshot;
+  if (effectiveSnapshot !== undefined) {
+    const incoming = (effectiveSnapshot as { agentMeta?: { version?: string } }).agentMeta;
+    const from = incoming?.version;
+    if (from !== undefined && from !== machineVersion) {
+      const info = { from, to: machineVersion };
+      if (options.migrateSnapshot) {
+        effectiveSnapshot = options.migrateSnapshot(effectiveSnapshot, info);
+      } else {
+        const mode = options.onVersionMismatch ?? "throw";
+        if (mode === "throw") {
+          throw new SnapshotVersionMismatchError(from, machineVersion, machineId);
+        }
+        if (mode === "warn") {
+          console.warn(
+            `runAgent: resuming a snapshot stamped with machine version '${from}' against ` +
+              `machine '${machineId}' at version '${machineVersion}'. Structural changes may ` +
+              `not resume cleanly.`,
+          );
+        }
+        // 'ignore': proceed silently.
+      }
+    }
+  }
+
   // Feature B: reject a resume `event` the restored state cannot take. Checked
   // here (before the actor starts, like the bind-time throws) against the
   // type-level legal set of the restored snapshot — a live-but-unstarted actor
@@ -1220,12 +1342,12 @@ export async function runAgent<TMachine extends AnyStateMachine>(
   // still appears here, so it is never treated as illegal. Opt out with
   // onIllegalResumeEvent: 'ignore' (the older silent behavior).
   if (
-    options.snapshot !== undefined &&
+    effectiveSnapshot !== undefined &&
     options.event !== undefined &&
     (options.onIllegalResumeEvent ?? "throw") === "throw"
   ) {
     const restoredSnapshot = createActor(boundMachine, {
-      snapshot: options.snapshot,
+      snapshot: effectiveSnapshot,
     } as never).getSnapshot() as AnyMachineSnapshot;
     const acceptedTypes = getAcceptedEvents(restoredSnapshot, { schemas: runCtx.schemas }).map(
       (descriptor) => descriptor.type,
@@ -1257,6 +1379,13 @@ export async function runAgent<TMachine extends AnyStateMachine>(
       }
       if (options.signal) {
         options.signal.removeEventListener("abort", onAbort);
+      }
+      // Stamp the settled snapshot(s) with the machine id + version. A plain
+      // enumerable field (snapshots are not frozen), so it survives JSON
+      // persist/resume and is read back on the next resume's version check.
+      stampAgentMeta(result.snapshot);
+      if ("persistedSnapshot" in result) {
+        stampAgentMeta(result.persistedSnapshot);
       }
       onTrace({ type: "run.end", ...result } as AgentTraceEventPayload<TMachine>);
       actor.stop();
@@ -1313,7 +1442,7 @@ export async function runAgent<TMachine extends AnyStateMachine>(
 
     actor = createActor(boundMachine, {
       input: options.input as never,
-      snapshot: options.snapshot,
+      snapshot: effectiveSnapshot,
       inspect: (event: InspectionEvent) => {
         // System-wide passthrough (children included) before runAgent's own
         // root-transition filtering below.
@@ -1432,7 +1561,7 @@ export async function runAgent<TMachine extends AnyStateMachine>(
     onTrace({
       type: "run.start",
       ...(options.input !== undefined ? { input: options.input } : {}),
-      ...(options.snapshot !== undefined ? { snapshot: options.snapshot } : {}),
+      ...(effectiveSnapshot !== undefined ? { snapshot: effectiveSnapshot } : {}),
       ...(options.event !== undefined ? { event: options.event } : {}),
     });
 
@@ -1443,6 +1572,76 @@ export async function runAgent<TMachine extends AnyStateMachine>(
       actor.send(options.event as never);
     }
   });
+}
+
+/**
+ * Runs an agent machine to a **final state** and returns its output, for
+ * run-to-done flows where an idle pause is unexpected. Wraps {@link runAgent}:
+ *
+ * - `done` → resolves with `result.output` (the machine's `OutputFrom`).
+ * - `idle` → throws {@link AgentIdleError} carrying the idle snapshot and the
+ *   event types that could resume it.
+ * - `error` → throws `result.error` when it is an `Error`; otherwise wraps it
+ *   in an `Error` whose `.cause` is the {@link RunAgentErrorCause} and whose
+ *   `.error` is the raw thrown value.
+ *
+ * Use {@link runAgent} directly when idle is an expected outcome you handle
+ * (human-in-the-loop, resumable flows); use `runAgentToCompletion` when the
+ * machine is meant to run straight through to a final state.
+ */
+export async function runAgentToCompletion<TMachine extends AnyStateMachine>(
+  machine: TMachine,
+  options: RunAgentOptions<TMachine>,
+): Promise<OutputFrom<TMachine>> {
+  const result = await runAgent(machine, options);
+  if (result.status === "done") {
+    return result.output;
+  }
+  if (result.status === "idle") {
+    const acceptedTypes = getAcceptedEvents(result.snapshot as AnyMachineSnapshot, {
+      schemas: getRegisteredAgentExecutionOptions(machine).schemas,
+    }).map((descriptor) => descriptor.type);
+    throw new AgentIdleError(result.snapshot as AnyMachineSnapshot, acceptedTypes);
+  }
+  // error
+  if (result.error instanceof Error) {
+    throw result.error;
+  }
+  const wrapped = new Error(`runAgentToCompletion: run failed with cause '${result.cause}'.`);
+  (wrapped as { cause?: unknown }).cause = result.cause;
+  (wrapped as { error?: unknown }).error = result.error;
+  throw wrapped;
+}
+
+/**
+ * The actor handed to an {@link inspectTransitions} handler: an
+ * {@link AnyActorRef} widened with the runtime `id`/`src` used to attribute a
+ * transition to the root machine or a specific invoked child (xstate's static
+ * `ActorRef` type omits them, but they are always present at runtime).
+ */
+export type InspectedActorRef = AnyActorRef & { id: string; src?: string | AnyActorLogic };
+
+/**
+ * Wraps a `(snapshot, actorRef) => void` handler into a function usable as
+ * {@link RunAgentOptions.inspect}: it filters the raw inspection stream to
+ * `@xstate.transition` events and hands the handler the typed
+ * {@link AnyMachineSnapshot} and the {@link InspectedActorRef} that
+ * transitioned. Attribute a child actor via `actorRef.id`/`actorRef.src`. Saves
+ * the manual `event.type === '@xstate.transition'` filtering and the snapshot/
+ * actorRef casts.
+ */
+export function inspectTransitions(
+  handler: (snapshot: AnyMachineSnapshot, actorRef: InspectedActorRef) => void,
+): (inspectionEvent: InspectionEvent) => void {
+  return (inspectionEvent: InspectionEvent) => {
+    if (inspectionEvent.type !== "@xstate.transition") {
+      return;
+    }
+    handler(
+      inspectionEvent.snapshot as AnyMachineSnapshot,
+      inspectionEvent.actorRef as unknown as InspectedActorRef,
+    );
+  };
 }
 
 // True when a snapshot is active but has no in-flight children and no pending eventless/after work — see §3.3 in docs/p0-design.md for the approximation this makes. `ignoreUserInputChildren` exempts pending `agent.userInput` placeholder children (they wait for a human indefinitely and must not block an idle settle).

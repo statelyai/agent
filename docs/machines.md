@@ -31,6 +31,8 @@ const agentSetup = setupAgent({
 });
 ```
 
+To keep conversation history in context, add a `messages` field — use `messagesSchema` or the `z.custom<AgentMessage[]>` recipe (see [messages](messages.md#the-zcustom-recipe)).
+
 **Event schemas** make event payloads typed. Declare one schema per event type under `events`:
 
 ```ts

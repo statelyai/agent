@@ -22,7 +22,12 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { type InspectionEvent } from "xstate";
-import { runAgent, setupAgent, type AgentRequestExecutor } from "../../src/index.js";
+import {
+  inspectTransitions,
+  runAgent,
+  setupAgent,
+  type AgentRequestExecutor,
+} from "../../src/index.js";
 import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
 import { runExampleMain } from "../helpers/main.js";
 
@@ -138,13 +143,13 @@ runExampleMain(import.meta.url, async () => {
   //     (`subflows-child`) shows up too, attributed by actor id.
   const output = await runSubflowsExample({
     onTransition: ({ value }) => console.log(`[onTransition] parent: ${JSON.stringify(value)}`),
-    inspect: (event) => {
-      if (event.type !== "@xstate.transition") return;
-      const snapshot = event.snapshot as { value?: unknown };
+    // inspectTransitions filters the raw inspection stream to transitions and
+    // hands over the typed snapshot + actorRef — no manual @xstate.transition
+    // check or casts.
+    inspect: inspectTransitions((snapshot, actorRef) => {
       if (snapshot.value === undefined) return;
-      const actorId = (event.actorRef as { id?: string }).id ?? "(unknown)";
-      console.log(`[inspect] [${actorId}] ${JSON.stringify(snapshot.value)}`);
-    },
+      console.log(`[inspect] [${actorRef.id}] ${JSON.stringify(snapshot.value)}`);
+    }),
   });
   console.log(`\n${output.research}`);
 });

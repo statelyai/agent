@@ -21,7 +21,7 @@
  * Run: OPENAI_API_KEY=... npx tsx examples/file-snapshot-store/index.ts
  */
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -30,6 +30,7 @@ import { runAgent, setupAgent } from "../../src/index.js";
 import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
 import { runExampleMain } from "../helpers/main.js";
 import type { Snapshot } from "xstate";
+import type { AgentSnapshotStore } from "../../src/index.js";
 
 const draftContextSchema = z.object({ topic: z.string(), draft: z.string().nullable() });
 
@@ -99,19 +100,22 @@ export const draftMachine = agentSetup.createMachine({
 //
 // One JSON file per session id. `save` on every idle settle; `load` when a
 // fresh process resumes. See the SQLite sketch in the header comment.
-export interface SnapshotStore {
-  save(sessionId: string, snapshot: Snapshot<unknown>): void;
-  load(sessionId: string): Snapshot<unknown>;
-}
-
-export function createFileSnapshotStore(dir: string): SnapshotStore {
-  const pathFor = (sessionId: string) => join(dir, `${sessionId}.json`);
+//
+// Typed as the library's `AgentSnapshotStore` — the type-only contract that
+// lets any store (file, SQLite, KV, …) interoperate. The interface is
+// async-shaped (`load` returns `Snapshot | undefined`); this fs implementation
+// happens to do its I/O synchronously.
+export function createFileSnapshotStore(dir: string): AgentSnapshotStore {
+  const pathFor = (id: string) => join(dir, `${id}.json`);
   return {
-    save(sessionId, snapshot) {
-      writeFileSync(pathFor(sessionId), JSON.stringify(snapshot), "utf8");
+    async save(id, snapshot) {
+      writeFileSync(pathFor(id), JSON.stringify(snapshot), "utf8");
     },
-    load(sessionId) {
-      return JSON.parse(readFileSync(pathFor(sessionId), "utf8")) as Snapshot<unknown>;
+    async load(id) {
+      const path = pathFor(id);
+      return existsSync(path)
+        ? (JSON.parse(readFileSync(path, "utf8")) as Snapshot<unknown>)
+        : undefined;
     },
   };
 }
@@ -130,21 +134,21 @@ export async function runFileSnapshotStoreExample() {
     generateText,
   });
   assert.equal(first.status, "idle");
-  store.save(sessionId, first.snapshot);
+  await store.save(sessionId, first.snapshot);
 
   // ── Process 2 (fresh runAgent): load, reject once, checkpoint again. ──
   const second = await runAgent(draftMachine, {
-    snapshot: store.load(sessionId),
+    snapshot: await store.load(sessionId),
     event: { type: "REJECT", reason: "too terse" },
     generateText,
   });
   // REJECT loops back through drafting to reviewing → idle again.
   assert.equal(second.status, "idle");
-  store.save(sessionId, second.snapshot);
+  await store.save(sessionId, second.snapshot);
 
   // ── Process 3 (fresh runAgent): load, approve, run to done. ──
   const third = await runAgent(draftMachine, {
-    snapshot: store.load(sessionId),
+    snapshot: await store.load(sessionId),
     event: { type: "APPROVE" },
     generateText,
   });
@@ -172,24 +176,24 @@ export async function main() {
     onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
   });
   assert.equal(first.status, "idle");
-  store.save(sessionId, first.snapshot);
+  await store.save(sessionId, first.snapshot);
   console.log(`Draft checkpointed to ${snapshotPath}`);
   console.log(`Draft: ${first.snapshot.context.draft}\n`);
 
   // Process 2 (fresh runAgent): load, request a revision, checkpoint again.
   const second = await runAgent(draftMachine, {
-    snapshot: store.load(sessionId),
+    snapshot: await store.load(sessionId),
     event: { type: "REJECT", reason: "make it punchier" },
     generateText,
     onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
   });
   assert.equal(second.status, "idle");
-  store.save(sessionId, second.snapshot);
+  await store.save(sessionId, second.snapshot);
   console.log(`Revised draft: ${second.snapshot.context.draft}\n`);
 
   // Process 3 (fresh runAgent): load, approve, run to done.
   const third = await runAgent(draftMachine, {
-    snapshot: store.load(sessionId),
+    snapshot: await store.load(sessionId),
     event: { type: "APPROVE" },
     generateText,
     onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),

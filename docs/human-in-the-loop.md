@@ -161,6 +161,8 @@ The persist-and-resume loop has one recurring shape: **run to idle → serialize
 - [file-snapshot-store](../examples/file-snapshot-store/index.ts): a `node:fs` store keyed by session id, resumed across several fresh `runAgent` calls (with a SQLite variant sketched inline).
 - [machine-as-tool](../examples/machine-as-tool/index.ts): the same handle passed through a host harness's tool call. `startTool` runs to idle and returns the handle; `resumeTool` revives it and delivers the event.
 
+The `AgentSnapshotStore` type — `load(id): Promise<Snapshot | undefined>` and `save(id, snapshot): Promise<void>` — is exported so different stores share one shape and interoperate. It is **type-only**: the library ships no implementation; a store (file, SQLite, KV row) is userland. The file-snapshot-store example annotates its store with it.
+
 ### Illegal resume events throw
 
 <!-- IllegalResumeEventError and onIllegalResumeEvent from src/run-agent.ts -->
@@ -180,6 +182,30 @@ try {
 ```
 
 A type-legal event a **guard** rejects is not an illegal resume event: the machine simply takes no transition and the run settles per normal semantics. To restore the older silent-drop behavior, pass `onIllegalResumeEvent: 'ignore'`.
+
+### Resuming across machine versions
+
+<!-- agentMeta stamping, onVersionMismatch, migrateSnapshot from src/run-agent.ts -->
+
+Every settled snapshot carries a plain `agentMeta: { machineId, version }` field (it survives the JSON round-trip). `version` defaults to `getMachineStructuralHash(machine)` — a dependency-free hash over the machine's structure (state ids/nesting, transition event types and targets, invoke srcs, `initial`), ignoring prompts, guards, and other functions. So a snapshot persisted for days remembers which machine shape produced it.
+
+On resume, `runAgent` compares the incoming stamp against the current machine's version. If they differ (a state or transition was added, removed, or retargeted since the snapshot was saved):
+
+- `onVersionMismatch: 'throw'` (default) throws `SnapshotVersionMismatchError` with `from`/`to`.
+- `'warn'` logs once and proceeds; `'ignore'` proceeds silently.
+- `migrateSnapshot(snapshot, { from, to })` — when provided — runs instead; its return value is the snapshot resumed from, so you can adapt an old snapshot to the new shape.
+
+An unstamped snapshot (no `agentMeta`) is always accepted. Pass an explicit `machineVersion` (a semver or build id) to control migration boundaries yourself rather than tracking the structural hash.
+
+```ts
+try {
+  await runAgent(machine, { snapshot, event, generateText });
+} catch (error) {
+  if (error instanceof SnapshotVersionMismatchError) {
+    // error.from / error.to — the machine changed since this snapshot was saved
+  }
+}
+```
 
 You still call `getAcceptedEvents` yourself only when you want to *render* the choices — rehydrate the handle and read them:
 

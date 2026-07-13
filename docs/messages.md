@@ -72,6 +72,21 @@ on: {
 
 A request that needs history sends it through `messages` instead of a bare `prompt`. [examples/email-drafter/index.ts](../examples/email-drafter/index.ts) keeps a running `messages` array in context and feeds it to a `createTextLogic` request.
 
+### The `z.custom` recipe
+
+`messagesSchema` is the shipped validator. When you want a messages field without deep per-part validation — the array is built from library helpers you already trust — the canonical recipe is a `z.custom` typed as `AgentMessage[]` with a cheap runtime check:
+
+```ts
+import { z } from 'zod';
+import type { AgentMessage } from '@statelyai/agent';
+
+context: z.object({
+  messages: z.custom<AgentMessage[]>((v) => Array.isArray(v)),
+}),
+```
+
+This preserves the exact `AgentMessage[]` type at author time while keeping the runtime check to a shallow `Array.isArray`. Use `messagesSchema` instead when you want full structural validation of each part.
+
 ## Persisting messages
 
 > **Warning:** `ImagePart` and `FilePart` can carry binary data (`Uint8Array` or `ArrayBuffer`) or a `URL` instance, none of which are JSON-serializable. If you persist machine context containing messages, store binary content as base64 strings and URLs as strings. The library does not convert this for you.

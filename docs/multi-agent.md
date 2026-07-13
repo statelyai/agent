@@ -57,6 +57,31 @@ const machine = agentSetup.createMachine({
 
 A child machine's own requests inherit the executors you pass to `runAgent` — no per-child binding needed. The section on nested executor inheritance below explains the rules.
 
+### Observing child actors
+
+<!-- onTransition vs inspect/inspectTransitions from src/run-agent.ts -->
+
+`runAgent` exposes two observation seams:
+
+- **`onTransition`** fires for the **root** machine's transitions only. Use it for parent progress.
+- **`inspect`** is the raw, system-wide inspection stream — the root machine, every invoked child machine, and spawned actors — so it is the only way to see a child's states. Attribute each event via `event.actorRef.id` (the invoke id) or `.src`.
+
+`inspectTransitions(handler)` wraps `inspect`: it filters the stream to `@xstate.transition` events and hands the handler the typed snapshot and actorRef, replacing the manual `event.type === '@xstate.transition'` check and casts.
+
+```ts
+import { inspectTransitions, runAgent } from '@statelyai/agent';
+
+await runAgent(parentMachine, {
+  generateText,
+  onTransition: (snapshot) => console.log('parent:', snapshot.value),
+  inspect: inspectTransitions((snapshot, actorRef) => {
+    console.log(`[${actorRef.id}]`, snapshot.value); // child transitions included
+  }),
+});
+```
+
+[examples/subflows/index.ts](../examples/subflows/index.ts) contrasts the two channels side by side.
+
 ## Sub-agents as host-owned tools
 
 <!-- host-owned sub-agent tools from examples/ai-sdk-sub-agents/index.ts -->

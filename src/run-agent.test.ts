@@ -3,11 +3,16 @@ import { z } from "zod";
 import { createActor, createAsyncLogic, setup, toPromise } from "xstate";
 import { createDecisionLogic } from "./decision.js";
 import {
+  AgentIdleError,
   createAgentSchemas,
   createTextLogic,
+  getMachineStructuralHash,
   IllegalResumeEventError,
+  inspectTransitions,
   runAgent,
+  runAgentToCompletion,
   setupAgent,
+  SnapshotVersionMismatchError,
   WAIT_TAG,
   type AgentDecisionRequest,
   type AgentTextRequest,
@@ -2188,5 +2193,317 @@ describe("runAgent dev-mode serialization guard", () => {
     }
 
     expect(warnings.filter((w) => w.includes("persist/resume"))).toHaveLength(0);
+  });
+});
+
+// ─── runAgentToCompletion (item 1) ───
+describe("runAgentToCompletion", () => {
+  const buildDraftMachine = () => {
+    const schemas = createAgentSchemas({
+      context: z.object({ prompt: z.string(), draft: z.string().nullable() }),
+      input: z.object({ prompt: z.string() }),
+      output: z.object({ draft: z.string() }),
+      events: { APPROVE: z.object({}) },
+    });
+    const draftText = createTextLogic({
+      schemas: { input: z.object({ prompt: z.string() }), output: z.string() },
+      model: "test-model",
+      prompt: ({ input }) => input.prompt,
+    });
+    const agent = setupAgent({ schemas, actorSources: { draftText } });
+    return agent.createMachine({
+      context: ({ input }) => ({ prompt: input.prompt, draft: null }),
+      initial: "drafting",
+      states: {
+        drafting: {
+          invoke: {
+            id: "draft",
+            src: "draftText",
+            input: ({ context }) => ({ prompt: context.prompt }),
+            onDone: ({ output }) => ({ target: "awaitingApproval", context: { draft: output } }),
+          },
+        },
+        awaitingApproval: { on: { APPROVE: { target: "done" } } },
+        done: { type: "final", output: ({ context }) => ({ draft: context.draft ?? "" }) },
+      },
+    });
+  };
+
+  const generateText = async (request: AgentTextRequest & { tools: AgentTools }) => ({
+    output: `Draft: ${request.prompt}`,
+  });
+
+  test("done: resolves with the machine output", async () => {
+    const machine = buildDraftMachine();
+    const first = await runAgent(machine, { input: { prompt: "notes" }, generateText });
+    if (first.status !== "idle") throw new Error("expected idle");
+
+    const output = await runAgentToCompletion(machine, {
+      snapshot: first.snapshot,
+      event: { type: "APPROVE" },
+      generateText,
+    });
+    expect(output).toEqual({ draft: "Draft: notes" });
+  });
+
+  test("idle: throws AgentIdleError carrying snapshot + acceptedTypes", async () => {
+    const machine = buildDraftMachine();
+    await expect(
+      runAgentToCompletion(machine, { input: { prompt: "notes" }, generateText }),
+    ).rejects.toBeInstanceOf(AgentIdleError);
+
+    let caught: AgentIdleError | undefined;
+    try {
+      await runAgentToCompletion(machine, { input: { prompt: "notes" }, generateText });
+    } catch (error) {
+      caught = error as AgentIdleError;
+    }
+    expect(caught?.acceptedTypes).toContain("APPROVE");
+    expect((caught?.snapshot as { value?: unknown }).value).toBe("awaitingApproval");
+  });
+
+  test("error (Error): rethrows the underlying Error as-is", async () => {
+    const schemas = createAgentSchemas({
+      context: z.object({ prompt: z.string() }),
+      input: z.object({ prompt: z.string() }),
+      output: z.object({}),
+    });
+    const boom = createTextLogic({
+      schemas: { input: z.object({ prompt: z.string() }), output: z.string() },
+      model: "test-model",
+      prompt: ({ input }) => input.prompt,
+    });
+    const agent = setupAgent({ schemas, actorSources: { boom } });
+    const machine = agent.createMachine({
+      context: ({ input }) => ({ prompt: input.prompt }),
+      initial: "working",
+      states: {
+        working: { invoke: { id: "boom", src: "boom", input: ({ context }) => context } },
+      },
+    });
+    const thrown = new Error("executor exploded");
+    await expect(
+      runAgentToCompletion(machine, {
+        input: { prompt: "x" },
+        generateText: async () => {
+          throw thrown;
+        },
+      }),
+    ).rejects.toBe(thrown);
+  });
+
+  test("error (non-Error): wraps, preserving cause + raw error", async () => {
+    const machine = buildDraftMachine();
+    const controller = new AbortController();
+    controller.abort("stringy-reason");
+
+    let caught: (Error & { cause?: unknown; error?: unknown }) | undefined;
+    try {
+      await runAgentToCompletion(machine, {
+        input: { prompt: "notes" },
+        generateText,
+        signal: controller.signal,
+      });
+    } catch (error) {
+      caught = error as Error & { cause?: unknown; error?: unknown };
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect(caught?.cause).toBe("aborted");
+    expect(caught?.error).toBe("stringy-reason");
+  });
+});
+
+// ─── Snapshot version stamping + migrate hook (item 2) ───
+describe("snapshot version stamping", () => {
+  const versionSchemas = () =>
+    createAgentSchemas({
+      context: z.object({ n: z.number() }),
+      input: z.object({}),
+      output: z.object({ n: z.number() }),
+      events: { GO: z.object({}) },
+    });
+  const buildMachine = () =>
+    setupAgent({ schemas: versionSchemas() }).createMachine({
+      id: "versioned",
+      context: () => ({ n: 0 }),
+      initial: "waiting",
+      states: {
+        waiting: { on: { GO: { target: "done" } } },
+        done: { type: "final", output: ({ context }) => ({ n: context.n }) },
+      },
+    });
+  // A structurally-different machine (extra state) → different structural hash.
+  const buildEditedMachine = () =>
+    setupAgent({ schemas: versionSchemas() }).createMachine({
+      id: "versioned",
+      context: () => ({ n: 0 }),
+      initial: "waiting",
+      states: {
+        waiting: { on: { GO: { target: "done" } } },
+        done: { type: "final", output: ({ context }) => ({ n: context.n }) },
+        extra: {},
+      },
+    });
+  const generateText = async () => ({ output: {} });
+
+  test("stamp present on idle and on done, using the structural hash", async () => {
+    const machine = buildMachine();
+    const version = getMachineStructuralHash(machine);
+
+    const idle = await runAgent(machine, { input: {}, generateText });
+    if (idle.status !== "idle") throw new Error("expected idle");
+    expect((idle.snapshot as { agentMeta?: unknown }).agentMeta).toEqual({
+      machineId: "versioned",
+      version,
+    });
+
+    const done = await runAgent(machine, {
+      snapshot: idle.snapshot,
+      event: { type: "GO" },
+      generateText,
+    });
+    if (done.status !== "done") throw new Error("expected done");
+    expect((done.snapshot as { agentMeta?: { version?: string } }).agentMeta?.version).toBe(version);
+  });
+
+  test("same-machine resume passes", async () => {
+    const machine = buildMachine();
+    const idle = await runAgent(machine, { input: {}, generateText });
+    if (idle.status !== "idle") throw new Error("expected idle");
+    const done = await runAgent(machine, {
+      snapshot: idle.snapshot,
+      event: { type: "GO" },
+      generateText,
+    });
+    expect(done.status).toBe("done");
+  });
+
+  test("structurally-edited machine resume throws with from/to", async () => {
+    const v1 = buildMachine();
+    const v2 = buildEditedMachine();
+    const idle = await runAgent(v1, { input: {}, generateText });
+    if (idle.status !== "idle") throw new Error("expected idle");
+
+    let caught: SnapshotVersionMismatchError | undefined;
+    try {
+      await runAgent(v2, { snapshot: idle.snapshot, event: { type: "GO" }, generateText });
+    } catch (error) {
+      caught = error as SnapshotVersionMismatchError;
+    }
+    expect(caught).toBeInstanceOf(SnapshotVersionMismatchError);
+    expect(caught?.from).toBe(getMachineStructuralHash(v1));
+    expect(caught?.to).toBe(getMachineStructuralHash(v2));
+  });
+
+  test("machineVersion override is respected on stamp and mismatch", async () => {
+    const machine = buildMachine();
+    const idle = await runAgent(machine, { input: {}, generateText, machineVersion: "v1" });
+    if (idle.status !== "idle") throw new Error("expected idle");
+    expect((idle.snapshot as { agentMeta?: { version?: string } }).agentMeta?.version).toBe("v1");
+
+    let caught: SnapshotVersionMismatchError | undefined;
+    try {
+      await runAgent(machine, {
+        snapshot: idle.snapshot,
+        event: { type: "GO" },
+        generateText,
+        machineVersion: "v2",
+      });
+    } catch (error) {
+      caught = error as SnapshotVersionMismatchError;
+    }
+    expect(caught?.from).toBe("v1");
+    expect(caught?.to).toBe("v2");
+  });
+
+  test("migrateSnapshot is called with correct args and its result is used", async () => {
+    const machine = buildMachine();
+    const idle = await runAgent(machine, { input: {}, generateText, machineVersion: "v1" });
+    if (idle.status !== "idle") throw new Error("expected idle");
+
+    const calls: Array<{ from: string; to: string }> = [];
+    const done = await runAgent(machine, {
+      snapshot: idle.snapshot,
+      event: { type: "GO" },
+      generateText,
+      machineVersion: "v2",
+      migrateSnapshot: (snapshot, info) => {
+        calls.push(info);
+        return snapshot;
+      },
+    });
+    expect(calls).toEqual([{ from: "v1", to: "v2" }]);
+    expect(done.status).toBe("done");
+  });
+
+  test("warn mode proceeds", async () => {
+    const machine = buildMachine();
+    const idle = await runAgent(machine, { input: {}, generateText, machineVersion: "v1" });
+    if (idle.status !== "idle") throw new Error("expected idle");
+
+    const warnings: string[] = [];
+    const original = console.warn;
+    console.warn = (...args: unknown[]) => warnings.push(args.map(String).join(" "));
+    let done;
+    try {
+      done = await runAgent(machine, {
+        snapshot: idle.snapshot,
+        event: { type: "GO" },
+        generateText,
+        machineVersion: "v2",
+        onVersionMismatch: "warn",
+      });
+    } finally {
+      console.warn = original;
+    }
+    expect(done?.status).toBe("done");
+    expect(warnings.some((w) => w.includes("machine version 'v1'"))).toBe(true);
+  });
+});
+
+// ─── inspectTransitions (item 4) ───
+describe("inspectTransitions", () => {
+  test("observes an invoked child machine's transitions with its actorRef", async () => {
+    const childAgent = setupAgent({
+      context: z.object({}),
+      output: z.object({ ok: z.boolean() }),
+    });
+    const childMachine = childAgent.createMachine({
+      id: "insp-child",
+      context: () => ({}),
+      output: () => ({ ok: true }),
+      initial: "childWorking",
+      states: {
+        childWorking: { always: { target: "childDone" } },
+        childDone: { type: "final" },
+      },
+    });
+    const parentAgent = setupAgent({
+      context: z.object({}),
+      output: z.object({ ok: z.boolean() }),
+      actorSources: { child: childMachine },
+    });
+    const parentMachine = parentAgent.createMachine({
+      id: "insp-parent",
+      context: () => ({}),
+      output: () => ({ ok: true }),
+      initial: "delegating",
+      states: {
+        delegating: { invoke: { id: "child", src: "child", onDone: { target: "done" } } },
+        done: { type: "final" },
+      },
+    });
+
+    const observed: Array<{ id: string; value: unknown }> = [];
+    const result = await runAgent(parentMachine, {
+      input: {},
+      generateText: async () => ({ output: {} }),
+      inspect: inspectTransitions((snapshot, actorRef) => {
+        observed.push({ id: actorRef.id, value: snapshot.value });
+      }),
+    });
+
+    expect(result.status).toBe("done");
+    expect(observed.some((entry) => entry.id === "child" && entry.value === "childDone")).toBe(true);
   });
 });

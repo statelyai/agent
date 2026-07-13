@@ -13,8 +13,10 @@
  *     answer is revised at most once, then re-verified. A second failure ends
  *     in an `unverified` final state carrying the critique as the reason —
  *     the content is flagged, never returned as if trusted.
- *   - `type: "choice"` states for typed branching on structured request output
- *     (the xstate alpha does not infer context through inline `always` guards).
+ *   - `type: "choice"` states as explicit, named decision points: each gates a
+ *     branch on structured request output and shows up as its own node in the
+ *     Stately visualizer, keeping the branching logic separate from the states
+ *     that invoke the requests.
  *   - Attempt tracking in context to bound the revision loop.
  *
  * Contrast with `ai-sdk-evaluator-optimizer`: that loops to *refine* output

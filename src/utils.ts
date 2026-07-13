@@ -1,4 +1,4 @@
-import type { AnyMachineSnapshot } from "xstate";
+import type { AnyMachineSnapshot, AnyStateMachine } from "xstate";
 import type {
   AssistantMessage,
   FilePart,
@@ -87,6 +87,80 @@ export function findNonSerializableContextPaths(context: unknown, limit = 5): st
 
   walk(context, "context");
   return paths;
+}
+
+/**
+ * A stable, dependency-free structural fingerprint of a machine — a short hex
+ * `djb2` hash over its **structural** config only: state ids/nesting, transition
+ * event types and targets, invoke `src`s, `initial`, and any other serializable
+ * config fields. Function values (context/output builders, prompts, inline
+ * guards/actions) are excluded entirely, so two machines that differ only in
+ * their prompts or executors hash identically; adding/removing/retargeting a
+ * state or transition changes the hash.
+ *
+ * Used by {@link runAgent} to stamp settled snapshots with a `version` and to
+ * detect a structurally-edited machine on resume. It is a change detector, not
+ * a cryptographic digest — collisions are possible but unlikely for real
+ * configs. Pass an explicit `machineVersion` to `runAgent` to override it.
+ */
+export function getMachineStructuralHash(machine: AnyStateMachine): string {
+  return djb2Hex(stableStructuralString((machine as { config: unknown }).config));
+}
+
+// Deterministic structural serialization: sorted object keys, function/
+// undefined/symbol values omitted, cycles collapsed. Not reversible — only used
+// as hash input, so the exact string shape is irrelevant as long as it is
+// stable for a given structural config.
+function stableStructuralString(value: unknown, seen: WeakSet<object> = new WeakSet()): string {
+  if (value === null) {
+    return "null";
+  }
+  const type = typeof value;
+  if (type === "function" || type === "undefined" || type === "symbol") {
+    return "";
+  }
+  if (type === "string") {
+    return JSON.stringify(value);
+  }
+  if (type === "number" || type === "boolean") {
+    return String(value);
+  }
+  if (type === "bigint") {
+    return `${value as bigint}n`;
+  }
+  const obj = value as object;
+  if (seen.has(obj)) {
+    return '"[circular]"';
+  }
+  seen.add(obj);
+  let out: string;
+  if (Array.isArray(value)) {
+    out = `[${value.map((item) => stableStructuralString(item, seen)).join(",")}]`;
+  } else {
+    const parts: string[] = [];
+    for (const key of Object.keys(obj as Record<string, unknown>).sort()) {
+      const child = (obj as Record<string, unknown>)[key];
+      // Skip function/undefined/symbol values: their key must not perturb the
+      // hash either, so drop the whole entry rather than emit an empty value.
+      const childType = typeof child;
+      if (childType === "function" || childType === "undefined" || childType === "symbol") {
+        continue;
+      }
+      parts.push(`${JSON.stringify(key)}:${stableStructuralString(child, seen)}`);
+    }
+    out = `{${parts.join(",")}}`;
+  }
+  seen.delete(obj);
+  return out;
+}
+
+// djb2 → unsigned 32-bit → 8-char hex. No dependencies.
+function djb2Hex(input: string): string {
+  let hash = 5381;
+  for (let i = 0; i < input.length; i++) {
+    hash = ((hash << 5) + hash + input.charCodeAt(i)) | 0;
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
 /** Builds a {@link UserMessage} from a string or multimodal content parts. */

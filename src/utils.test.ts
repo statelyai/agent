@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import { createActor } from "xstate";
-import { getStateMeta, persistSnapshot, setupAgent } from "./index.js";
+import { getMachineStructuralHash, getStateMeta, persistSnapshot, setupAgent } from "./index.js";
 import { findNonSerializableContextPaths } from "./utils.js";
 
 const metaSchema = z.object({
@@ -171,5 +171,60 @@ describe("findNonSerializableContextPaths", () => {
     const shared = { ok: true };
     const paths = findNonSerializableContextPaths({ a: shared, b: shared });
     expect(paths).toEqual([]);
+  });
+});
+
+describe("getMachineStructuralHash", () => {
+  const build = (opts: { extraState?: boolean; prompt?: string; target?: string }) => {
+    const agent = setupAgent({
+      context: z.object({ n: z.number() }),
+      events: { GO: z.object({}) },
+    });
+    // A function value (prompt-like) that must not affect the hash.
+    const entry = () => console.log(opts.prompt ?? "default");
+    const target = opts.target ?? "b";
+    if (opts.extraState) {
+      return agent.createMachine({
+        id: "h",
+        context: () => ({ n: 0 }),
+        entry,
+        initial: "a",
+        states: {
+          a: { on: { GO: { target } } },
+          b: { type: "final" },
+          alt: { type: "final" },
+          c: {},
+        },
+      });
+    }
+    return agent.createMachine({
+      id: "h",
+      context: () => ({ n: 0 }),
+      entry,
+      initial: "a",
+      states: {
+        a: { on: { GO: { target } } },
+        b: { type: "final" },
+        alt: { type: "final" },
+      },
+    });
+  };
+
+  test("is stable and hex", () => {
+    const hash = getMachineStructuralHash(build({}));
+    expect(hash).toMatch(/^[0-9a-f]{8}$/);
+    expect(getMachineStructuralHash(build({}))).toBe(hash);
+  });
+
+  test("ignores function-valued config (prompts/actions)", () => {
+    expect(getMachineStructuralHash(build({ prompt: "one" }))).toBe(
+      getMachineStructuralHash(build({ prompt: "two" })),
+    );
+  });
+
+  test("changes when a state is added or a transition retargeted", () => {
+    const base = getMachineStructuralHash(build({}));
+    expect(getMachineStructuralHash(build({ extraState: true }))).not.toBe(base);
+    expect(getMachineStructuralHash(build({ target: "alt" }))).not.toBe(base);
   });
 });

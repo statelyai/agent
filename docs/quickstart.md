@@ -117,6 +117,13 @@ if (result.status === 'done') {
 }
 ```
 
+Use `runAgent` when an idle pause is expected and you handle it (human-in-the-loop, resumable flows). For a run that is meant to go straight through to a final state, `runAgentToCompletion(machine, options)` returns the output directly — it throws `AgentIdleError` if the machine pauses and rethrows the underlying error otherwise:
+
+```ts
+const output = await runAgentToCompletion(machine, { input, ...executors });
+console.log(output.answer);
+```
+
 ## Next steps
 
 - [Agent machines](machines.md): authoring states, transitions, and typed context.

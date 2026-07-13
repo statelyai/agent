@@ -1,3 +1,17 @@
+import type { Snapshot } from "xstate";
+
+/**
+ * A minimal, type-only contract for a snapshot store: persist a `runAgent`
+ * idle/settled snapshot under an id and load it back. It exists purely so
+ * userland stores (a file, a SQLite table, a KV row, …) share one shape and
+ * interoperate — there is **zero runtime** behind it; the library ships no
+ * implementation. See `examples/file-snapshot-store` for a `node:fs` store.
+ */
+export interface AgentSnapshotStore {
+  load(id: string): Promise<Snapshot<unknown> | undefined>;
+  save(id: string, snapshot: Snapshot<unknown>): Promise<void>;
+}
+
 /**
  * The [Standard Schema](https://standardschema.dev) interface. Every schema
  * this library accepts (context, events, input/output, tool schemas, …) is a

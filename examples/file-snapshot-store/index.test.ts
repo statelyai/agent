@@ -19,7 +19,7 @@ test("multi-turn idle/resume across fresh processes via the file store", async (
     generateText,
   });
   expect(first.status).toBe("idle");
-  store.save(sessionId, first.snapshot);
+  await store.save(sessionId, first.snapshot);
 
   // The checkpoint is a real JSON file on disk.
   const onDisk = JSON.parse(readFileSync(join(dir, `${sessionId}.json`), "utf8"));
@@ -27,16 +27,16 @@ test("multi-turn idle/resume across fresh processes via the file store", async (
 
   // Cycle 1: reject → back to reviewing (fresh runAgent = new process).
   const second = await runAgent(draftMachine, {
-    snapshot: store.load(sessionId),
+    snapshot: await store.load(sessionId),
     event: { type: "REJECT", reason: "add detail" },
     generateText,
   });
   expect(second.status).toBe("idle");
-  store.save(sessionId, second.snapshot);
+  await store.save(sessionId, second.snapshot);
 
   // Cycle 2: approve → done.
   const third = await runAgent(draftMachine, {
-    snapshot: store.load(sessionId),
+    snapshot: await store.load(sessionId),
     event: { type: "APPROVE" },
     generateText,
   });

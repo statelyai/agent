@@ -105,6 +105,33 @@ This is backed by real implementations against four runtimes:
 - [examples/anthropic-sdk-host/index.ts](../examples/anthropic-sdk-host/index.ts): the raw `@anthropic-ai/sdk` package (Messages API), structured output via a forced tool call, decisions forced with `tool_choice: { type: 'any' }`.
 - [examples/cloudflare-agent-host/index.ts](../examples/cloudflare-agent-host/index.ts) and [examples/cloudflare-workers-ai-host/index.ts](../examples/cloudflare-workers-ai-host/index.ts): inside a Cloudflare Durable Object and against the Workers AI binding.
 
+## Retries
+
+Transport-level retries — HTTP 429s, timeouts, exponential backoff — belong in the executor or the SDK it wraps, not the machine. The AI SDK's `maxRetries` (and the equivalent on the OpenAI/Anthropic clients) already handles them; a raw-`fetch` executor adds its own retry loop. The machine never sees a transient network failure.
+
+Machine-level retry is a different thing: an authored `onError` transition that re-enters a state after a *semantic* failure (a validation rejection, an exhausted decision). That is control flow you model explicitly, not a transport concern.
+
+## Budgets
+
+`maxModelCalls` is the built-in loop backstop (default 100; exceeding it settles an `error` with cause `'max-model-calls'`). For finer budgets — a token cap, a per-request-src call count — wrap the executors. Because a child machine's requests inherit the parent's executors, one wrapper counts the whole tree:
+
+```ts
+function withBudget(executors: AgentRequestExecutors, maxCalls: number) {
+  const calls = new Map<string, number>();
+  return {
+    ...executors,
+    generateText: async (request, info) => {
+      const n = (calls.get(request.src) ?? 0) + 1;
+      calls.set(request.src, n);
+      if (n > maxCalls) throw new Error(`Budget exceeded for '${request.src}'`);
+      return executors.generateText!(request, info);
+    },
+  };
+}
+
+await runAgent(machine, { input, ...withBudget(executors, 20) });
+```
+
 ## Observation seams
 
 <!-- onTrace/onChunk/onResult/onTransition/on signatures from src/run-agent.ts -->
@@ -116,7 +143,7 @@ This is backed by real implementations against four runtimes:
 - **`onResult(request, result)`**: once per resolved text or decision request (decision retries fire per attempt), with the normalized `result.output` and the raw executor result. `result.raw` is whatever your executor returned, verbatim: return `usage` alongside `output` and `onResult` becomes your token meter. The shipped adapter already does this (`raw as AiSdkGenerateResult` carries `usage`, `finishReason`, `toolCalls`, `toolResults`).
 - **`onTransition(snapshot, event)`**: every machine transition, with the new snapshot and the causing event.
 - **`on: { EVENT: handler, '*': handler }`**: events the machine emits with `enq.emit(...)`, keyed by emitted event type (`'*'` catches all).
-- **`inspect(inspectionEvent)`**: raw xstate inspection passthrough for the whole actor system. `onTransition` covers the root machine only; when a state invokes a child machine (see [multi-agent](multi-agent.md)), filter `inspectionEvent.type === '@xstate.transition'` and read `inspectionEvent.actorRef` to watch the child's states too, attributed to the child.
+- **`inspect(inspectionEvent)`**: raw xstate inspection passthrough for the whole actor system. `onTransition` covers the root machine only; when a state invokes a child machine (see [multi-agent](multi-agent.md)), filter `inspectionEvent.type === '@xstate.transition'` and read `inspectionEvent.actorRef` to watch the child's states too, attributed to the child. The `inspectTransitions(handler)` helper does that filtering for you and hands over the typed snapshot + actorRef.
 
 ```ts
 await runAgent(machine, {
