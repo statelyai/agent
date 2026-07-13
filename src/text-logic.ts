@@ -11,7 +11,7 @@ import type {
   AgentDecisionExecutor,
   AgentDecisionInput,
   AgentPlanInput,
-  AgentPlanOutput,
+  PlanLogic,
 } from "./decision.js";
 import type { ChosenEvent } from "./types.js";
 import { executorBoundLogics, unboundPlaceholderLogics } from "./internal/registry.js";
@@ -111,9 +111,8 @@ export type BuiltinAgentActors<TEvent extends string = string, TModel extends st
     ChosenEvent,
     AgentDecisionInput<TEvent, Record<string, unknown>, TModel>
   >;
-  [PLAN_ACTOR]: AsyncActorLogic<
-    AgentPlanOutput,
-    AgentPlanInput<TEvent, Record<string, unknown>, TModel>
+  [PLAN_ACTOR]: PlanLogic<
+    StandardSchemaV1<AgentPlanInput<TEvent, Record<string, unknown>, TModel>>
   >;
 };
 

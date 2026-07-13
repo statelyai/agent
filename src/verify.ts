@@ -18,11 +18,12 @@ import type { AnyActorLogic, AnyMachineSnapshot, AnyStateMachine } from "xstate"
 import type { ChosenEvent } from "./types.js";
 import { getJsonSchemaSync } from "./utils.js";
 import { getAcceptedEvents } from "./events.js";
-import { isDecisionLogic, isPlanLogic } from "./decision.js";
+import { isDecisionLogic, isPlanLogic, PLAN_DONE_EVENT_TYPE } from "./decision.js";
 import { isTextLogic } from "./text-logic.js";
 import { executorBoundLogics, getRegisteredAgentExecutionOptions } from "./internal/registry.js";
 import {
   initialAgentStep,
+  resolveAgentRequests,
   resolveAgentStep,
   transitionAgentStep,
   type AgentStep,
@@ -696,10 +697,10 @@ function takeFromQueue<T>(
  * });
  * ```
  */
-export function simulateAgent(
+export async function simulateAgent(
   machine: AnyStateMachine,
   options: SimulateAgentOptions,
-): SimulateAgentResult {
+): Promise<SimulateAgentResult> {
   const maxSteps = options.maxSteps ?? 100;
   const script: SimulationScript = {
     text: { ...options.script.text },
@@ -727,6 +728,20 @@ export function simulateAgent(
           throw scriptDryError("decision", decisionSrc, request.id, request);
         }
         step = transitionAgentStep(machine, step, taken.value as never);
+        trail.push({ state: step.snapshot.value, appliedEvent: taken.value });
+        continue;
+      }
+      if (request.kind === "plan") {
+        // A plan step IS a decision: consume the next scripted chosen event
+        // (keyed by the plan invoke's src) and advance through the SAME
+        // protocol durable hosts use — resolveAgentRequests with a decide
+        // executor that returns the scripted choice. Validation, the reserved
+        // done-move, stop reasons, and ledger bookkeeping all apply unchanged.
+        const taken = takeFromQueue(script.decisions, request.src);
+        if (!taken.found) {
+          throw scriptDryError("decision", request.src, request.id, request);
+        }
+        step = await resolveAgentRequests(machine, step, decideOnly(taken.value));
         trail.push({ state: step.snapshot.value, appliedEvent: taken.value });
         continue;
       }
@@ -768,6 +783,16 @@ export function simulateAgent(
 
 function mapValues<T, U>(obj: Record<string, T>, fn: (value: T) => U): Record<string, U> {
   return Object.fromEntries(Object.entries(obj).map(([key, value]) => [key, fn(value)]));
+}
+
+// A decide-only executors object: a plan step consumes only the `decide`
+// executor (returning the scripted chosen event), never generateText/streamText.
+// resolveAgentRequests's plan path uses `decide` exclusively, so the required
+// text executors are legitimately absent here.
+function decideOnly(event: unknown): Parameters<typeof resolveAgentRequests>[2] {
+  return { decide: async () => ({ event: event as never }) } as unknown as Parameters<
+    typeof resolveAgentRequests
+  >[2];
 }
 
 function scriptDryError(
@@ -830,11 +855,11 @@ type BranchEvent = { type: string; [key: string]: unknown };
 
 // Shared DFS engine for explorePaths/canReach. When `stopWhen` returns true for
 // a visited snapshot, exploration halts and the witness path is returned.
-function explore(
+async function explore(
   machine: AnyStateMachine,
   options: ExplorePathsOptions,
   stopWhen?: (snapshot: AnyMachineSnapshot) => boolean,
-): { report: AgentPathReport; witness?: ChosenEvent[] } {
+): Promise<{ report: AgentPathReport; witness?: ChosenEvent[] }> {
   const maxDepth = options.maxDepth ?? 8;
   const maxPaths = options.maxPaths ?? 200;
   const textOutputs = options.textOutputs ?? {};
@@ -881,7 +906,9 @@ function explore(
         recordState(current.snapshot);
         continue;
       }
-      if (request && request.kind === "decision") {
+      if (request && (request.kind === "decision" || request.kind === "plan")) {
+        // A plan request is a branch point (fork per candidate in visit), just
+        // like a decision — settle here and let visit enumerate its candidates.
         return { step: current };
       }
       // No request: maybe a pending scripted invoke (userInput), else a wait.
@@ -899,7 +926,7 @@ function explore(
     return { step: current };
   };
 
-  const visit = (step: AgentStep, path: ChosenEvent[], depth: number): void => {
+  const visit = async (step: AgentStep, path: ChosenEvent[], depth: number): Promise<void> => {
     if (witness !== undefined) {
       return;
     }
@@ -932,11 +959,15 @@ function explore(
       return;
     }
 
-    // Branch point: a decision request's candidates, or an idle wait's
-    // externally-accepted events.
+    // Branch point: a decision/plan request's candidates, or an idle wait's
+    // externally-accepted events. A plan forks like a decision — one branch per
+    // candidate — but each branch is advanced through `resolveAgentRequests`
+    // (exact ledger/budget/stop semantics) and its candidate list includes the
+    // reserved `agent.plan.done` move.
     const request = settled.requests[0] as AgentStepRequest | undefined;
+    const isPlan = request?.kind === "plan";
     const branchEvents: BranchEvent[] =
-      request?.kind === "decision"
+      request?.kind === "decision" || request?.kind === "plan"
         ? request.events.map((descriptor) => ({ type: descriptor.type }))
         : getAcceptedEvents(settled.snapshot).map((descriptor) => ({ type: descriptor.type }));
 
@@ -958,19 +989,24 @@ function explore(
         if (pathsExplored >= maxPaths) hitPathCap = true;
         return;
       }
-      // Guard legality: a type-legal-but-guard-rejected candidate is a pruned branch.
-      if (!(settled.snapshot as AnyMachineSnapshot).can(event as never)) {
+      // Guard legality: a type-legal-but-guard-rejected candidate is a pruned
+      // branch. The plan's reserved done move terminates the plan rather than
+      // driving a transition, so it is always legal (never guard-checked).
+      const isDoneMove = isPlan && event.type === PLAN_DONE_EVENT_TYPE;
+      if (!isDoneMove && !(settled.snapshot as AnyMachineSnapshot).can(event as never)) {
         prunedByGuard++;
         continue;
       }
-      const next = transitionAgentStep(machine, settled, event as never);
+      const next = isPlan
+        ? await resolveAgentRequests(machine, settled, decideOnly(event))
+        : transitionAgentStep(machine, settled, event as never);
       recordState(next.snapshot);
-      visit(next, [...path, event as ChosenEvent], depth + 1);
+      await visit(next, [...path, event as ChosenEvent], depth + 1);
     }
   };
 
   if (witness === undefined) {
-    visit(initial, [], 0);
+    await visit(initial, [], 0);
   }
 
   return {
@@ -991,7 +1027,10 @@ function explore(
  * depth, model-free, and reports which states are reached and how each path
  * terminates. At each decision request it forks one branch per candidate event
  * (guard-rejected candidates are counted in `prunedByGuard`, not explored); at
- * an idle wait it forks per externally-accepted event. Text/`userInput` invokes
+ * an idle wait it forks per externally-accepted event. A `agent.plan` request
+ * forks the same way — one branch per candidate, including the reserved
+ * `agent.plan.done` move — advancing each branch through the real plan protocol
+ * (`resolveAgentRequests`), so a plan can consume several depth units. Text/`userInput` invokes
  * are resolved from `textOutputs` (a by-src canned-output map) — a missing src
  * halts that branch with a `needs-output` terminal rather than throwing.
  *
@@ -1000,15 +1039,15 @@ function explore(
  *
  * @example
  * ```ts
- * const report = explorePaths(refundMachine, { input: { request: 'x', amount: 5000 } });
+ * const report = await explorePaths(refundMachine, { input: { request: 'x', amount: 5000 } });
  * // report.terminals → both 'refunded' and 'denied'; report.prunedByGuard → 1
  * ```
  */
-export function explorePaths(
+export async function explorePaths(
   machine: AnyStateMachine,
   options: ExplorePathsOptions = {},
-): AgentPathReport {
-  return explore(machine, options).report;
+): Promise<AgentPathReport> {
+  return (await explore(machine, options)).report;
 }
 
 /** The result of a {@link canReach} query. */
@@ -1025,16 +1064,16 @@ export interface CanReachResult {
  *
  * @example
  * ```ts
- * const { canReach, witness } = canReach(refundMachine, 'denied', { input: { request: 'x', amount: 5000 } });
+ * const { canReach, witness } = await canReach(refundMachine, 'denied', { input: { request: 'x', amount: 5000 } });
  * // canReach → true; witness → [{ type: 'NEEDS_REVIEW' }, { type: 'DENY' }]
  * ```
  */
-export function canReach(
+export async function canReach(
   machine: AnyStateMachine,
   statePath: string,
   options: ExplorePathsOptions = {},
-): CanReachResult {
-  const { witness } = explore(machine, options, (snapshot) => {
+): Promise<CanReachResult> {
+  const { witness } = await explore(machine, options, (snapshot) => {
     try {
       return (snapshot as AnyMachineSnapshot).matches(statePath as never);
     } catch {

@@ -83,6 +83,7 @@ export type {
   AgentRequestSource,
 } from "./events.js";
 export type {
+  AgentPlanRequest,
   AgentRequest,
   AgentStep,
   AgentStepRequest,

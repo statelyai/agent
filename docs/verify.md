@@ -34,18 +34,18 @@ if (errors.length) {
 | `final-without-output` | error | The machine declares an output schema but a top-level final state has no `output`. |
 | `missing-final` | warning | No reachable final state — the machine can only idle/loop (legal, but flagged). |
 
-## `simulateAgent(machine, { input, script, maxSteps? })`
+## `await simulateAgent(machine, { input, script, maxSteps? })`
 
-A deterministic, model-free playthrough on the pure step path. The `script` supplies responses by invoke `src` (FIFO queues), so runs are reproducible:
+A deterministic, model-free playthrough on the pure step path (async — it drives plan steps through the real durable protocol). The `script` supplies responses by invoke `src` (FIFO queues), so runs are reproducible:
 
-- `decisions` — the `ChosenEvent` to apply for each decision (keyed by decision src, usually `agent.decide`);
+- `decisions` — the `ChosenEvent` to apply for each decision (keyed by decision src, usually `agent.decide`). A plan step is a decision too: key its chosen events by the plan invoke's src (`agent.plan`) and end with the reserved `agent.plan.done` move to complete the plan;
 - `text` — output values for text requests (keyed by request src);
 - `userInput` — answers for `agent.userInput` invokes.
 
 ```ts
 import { simulateAgent } from '@statelyai/agent';
 
-const { status, snapshot, trail } = simulateAgent(machine, {
+const { status, snapshot, trail } = await simulateAgent(machine, {
   input: { questionsRemaining: 20 },
   script: {
     decisions: { 'agent.decide': [{ type: 'GUESS', guess: 'a cat' }] },
@@ -61,14 +61,14 @@ const { status, snapshot, trail } = simulateAgent(machine, {
 
 Returns `{ status, snapshot, trail }`. It throws a descriptive error — naming the pending request's kind, src, and id — when the script runs dry mid-request, so a missing response is obvious.
 
-## `explorePaths(machine, { input, maxDepth?, textOutputs? })`
+## `await explorePaths(machine, { input, maxDepth?, textOutputs? })`
 
-Enumerates decision and external-event branches, model-free, and reports coverage. At each decision request it forks one branch per candidate event (guard-rejected candidates are counted in `prunedByGuard`, not explored); at an idle wait it forks per externally-accepted event. Text/`userInput` invokes are resolved from `textOutputs` (a by-src canned-output map); a missing src halts that branch with a `needs-output` terminal instead of throwing.
+Enumerates decision and external-event branches, model-free, and reports coverage (async — plan branches advance through the real plan protocol). At each decision request it forks one branch per candidate event (guard-rejected candidates are counted in `prunedByGuard`, not explored); at an idle wait it forks per externally-accepted event. A `agent.plan` request forks the same way — plan steps fork like decisions, including the reserved `agent.plan.done` move (always legal; other candidates prune when their guard rejects them) — so a single plan can consume several depth units. Text/`userInput` invokes are resolved from `textOutputs` (a by-src canned-output map); a missing src halts that branch with a `needs-output` terminal instead of throwing.
 
 ```ts
 import { explorePaths } from '@statelyai/agent';
 
-const report = explorePaths(refundMachine, {
+const report = await explorePaths(refundMachine, {
   input: { request: 'Refund my duplicate charge', amount: 5000 },
 });
 // report.terminals   → both 'refunded' and 'denied'
@@ -78,14 +78,14 @@ const report = explorePaths(refundMachine, {
 
 Bounded by `maxDepth` (default 8) and `maxPaths` (default 200; `report.hitPathCap` flags a partial report).
 
-## `canReach(machine, statePath, opts)`
+## `await canReach(machine, statePath, opts)`
 
-Thin wrapper over `explorePaths` answering "can this state be reached?" with a witness path.
+Thin wrapper over `explorePaths` answering "can this state be reached?" with a witness path (async).
 
 ```ts
 import { canReach } from '@statelyai/agent';
 
-const { canReach: ok, witness } = canReach(refundMachine, 'denied', {
+const { canReach: ok, witness } = await canReach(refundMachine, 'denied', {
   input: { request: 'x', amount: 5000 },
 });
 // ok → true; witness → [{ type: 'NEEDS_REVIEW' }, { type: 'DENY' }]

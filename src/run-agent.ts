@@ -28,7 +28,9 @@ import {
   type TextLogic,
 } from "./text-logic.js";
 import {
+  advancePlanLedger,
   DecisionExhaustedError,
+  initialPlanLedger,
   isDecisionLogic,
   isPlanLogic,
   PLAN_DONE_EVENT_TYPE,
@@ -958,11 +960,18 @@ function createRunAgentPlanLogic(logic: PlanLogic, runCtx: RunAgentBindContext):
         throw new Error("runAgent: no 'decide' executor provided.");
       }
       const { id } = selfIdAndSrc(self);
-      const maxSteps = input.maxSteps ?? 8;
       const stopOn = new Set<string>(input.stopOn ?? []);
-      const steps: ChosenEvent[] = [];
       const countingDecide = createCountingDecide(runCtx);
       const base = logic.request(input);
+
+      // All bookkeeping (applied trail + remaining budget) rides the shared
+      // plan ledger — the SAME driver the step path uses on the invoke child's
+      // own snapshot. Here it is a local ledger the host advances by hand.
+      let ledger = initialPlanLedger(logic, input);
+      const end = (stopped: AgentPlanOutput["stopped"]): AgentPlanOutput => {
+        ledger = advancePlanLedger(logic, ledger, { type: "plan.ended", stopped });
+        return ledger.output as AgentPlanOutput;
+      };
 
       // Same microtask yield as the decision wrapper: let the invoking
       // transition commit before the first snapshot read.
@@ -973,7 +982,7 @@ function createRunAgentPlanLogic(logic: PlanLogic, runCtx: RunAgentBindContext):
       // it, so a plan inside a child machine drives the CHILD.
       const invokingActor = invokingActorOf(self, runCtx);
 
-      while (steps.length < maxSteps) {
+      while (ledger.context.stepsRemaining > 0) {
         const actorRef = invokingActor;
         if (!actorRef || signal.aborted) {
           break;
@@ -984,7 +993,7 @@ function createRunAgentPlanLogic(logic: PlanLogic, runCtx: RunAgentBindContext):
           eventTypes: logic.allowedEventTypes(input),
         });
         if (machineEvents.length === 0) {
-          return { steps, stopped: "no-legal-events" };
+          return end("no-legal-events");
         }
         // Every step also offers the built-in "done" move: an explicit "no
         // further action needed" the model can choose instead of being forced
@@ -997,16 +1006,17 @@ function createRunAgentPlanLogic(logic: PlanLogic, runCtx: RunAgentBindContext):
           ? machineEvents
           : [...machineEvents, doneDescriptor];
 
+        const applied = ledger.context.applied;
         const trail =
-          steps.length === 0
+          applied.length === 0
             ? ""
-            : `\n\nEvents already applied in this plan, in order:\n${steps
+            : `\n\nEvents already applied in this plan, in order:\n${applied
                 .map((step) => JSON.stringify(step))
                 .join("\n")}\nContinue from here; do not repeat applied events.`;
         const doneHint = `\n\nWhen the request is fully handled (or no action is needed), choose '${PLAN_DONE_EVENT_TYPE}'.`;
         const request: AgentDecisionRequest = {
           ...base,
-          id: `${id}[${steps.length}]`,
+          id: `${id}[${applied.length}]`,
           events,
           prompt: `${base.prompt ?? ""}${trail}${doneHint}`,
           attempts: [],
@@ -1030,30 +1040,33 @@ function createRunAgentPlanLogic(logic: PlanLogic, runCtx: RunAgentBindContext):
         });
 
         if (chosen.type === PLAN_DONE_EVENT_TYPE) {
-          return { steps, stopped: "done" };
+          return end("done");
         }
 
-        steps.push(chosen);
         actorRef.send(chosen as never);
+        ledger = advancePlanLedger(logic, ledger, { type: "plan.applied", event: chosen });
         // Let the applied transition commit before the next snapshot read
         // (and let xstate cancel this invoke if the event exited the state).
         await Promise.resolve();
 
         if (stopOn.has(chosen.type)) {
-          return { steps, stopped: "stop-event" };
+          return end("stop-event");
         }
       }
 
-      return { steps, stopped: "max-steps" };
+      return end("max-steps");
     },
   });
 
+  // runAgent owns async: the invoke child is this async wrapper, not the
+  // createLogic ledger (the ledger is internal bookkeeping). The `kind` marker
+  // is what isPlanLogic keys on; the transition-shape mismatch is expected.
   return Object.assign(planLogic, {
     kind: "statelyai.planLogic" as const,
     maxRetries: logic.maxRetries,
     request: logic.request,
     allowedEventTypes: logic.allowedEventTypes,
-  }) as PlanLogic;
+  }) as unknown as PlanLogic;
 }
 
 /**

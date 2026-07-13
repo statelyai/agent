@@ -170,7 +170,7 @@ export async function runCloudflareGameTurn(env: Env, input = { playerHp: 20, en
         schemas: gameSchemas,
         actorSources: gameActors,
       });
-    } else {
+    } else if (request.kind === "text") {
       const output = await runWorkersAiTextRequest(env, request);
       step = resolveAgentStep(gameMachine, step, request, output, {
         schemas: gameSchemas,

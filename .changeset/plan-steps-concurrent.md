@@ -1,0 +1,10 @@
+---
+"@statelyai/agent": minor
+---
+
+Step-path parity for plans and concurrent text requests by default.
+
+- **`agent.plan` on the step path.** An `agent.plan` invoke now surfaces as a re-surfacing `kind: 'plan'` `AgentPlanRequest` (`{ id, src, input, events, applied, stepsRemaining }`) — all plain serializable data. Resolve one decision per step (candidates include the reserved `agent.plan.done` move); a real machine event advances the plan and the next step re-surfaces it, while the done move / a `stopOn` event / an exhausted budget / no legal events completes it with `{ steps, stopped }`. `resolveAgentRequests` drives all of this natively, one plan step per call, so the two-line durable host loop works with plans unchanged. Semantics match `runAgent` exactly (same validation/retry, same stop reasons `'done' | 'stop-event' | 'max-steps' | 'no-legal-events'`, exit-cancels-invoke). `agent.plan` is now a stateful, transition-based ledger actor: the in-progress plan state (applied trail + remaining budget) lives in the plan invoke child's own snapshot `context`, so it lands at `children.<id>.snapshot.context` in a persisted snapshot for free — surviving a full `getPersistedSnapshot` → JSON → restore round-trip and resuming identically mid-plan. Both hosts (the step path and `runAgent`) drive the same ledger through shared drivers.
+- **Concurrent text requests are the default.** `resolveAgentRequests` resolves all pending text requests of a step in parallel (`Promise.all`) — parallel statechart regions are genuinely concurrent — applying outputs in request-array order (deterministic for durable replay). Decisions and plans stay one-at-a-time (applying either changes the legal candidate set). A host that wants strictly sequential text resolution loops the manual `executeAgentRequest` + `resolveAgentStep` helpers one at a time.
+
+New exported type: `AgentPlanRequest` (added to the `AgentStepRequest` union).

@@ -172,7 +172,7 @@ How it behaves:
 - **Partial application, no rollback.** Events are sent to the machine as the plan runs, not staged. If step 3 of 5 stops the plan, steps 1–2 already applied and stay applied. There is no transactional undo.
 - **`onDone` output** is `{ steps, stopped }` — the events applied in order, and why the loop ended (`'done' | 'stop-event' | 'max-steps' | 'no-legal-events'`).
 - **`stopOn` (rare).** For "send this real machine event **and** stop" semantics, list it in `stopOn`: the event is validated and sent, then the loop ends (`stopped: 'stop-event'`). The built-in done move already covers the common "no further action" case, so `stopOn` is only for ending on an actual state change.
-- **`runAgent`-only for now.** Applying events mid-invoke needs a live parent actor, which only a snapshot-aware host has. The step-loop path doesn't drive `agent.plan` yet; provide a custom `actorSources['agent.plan']` if you need it elsewhere.
+- **One ledger, both hosts.** `agent.plan` is a single stateful, transition-based ledger actor: its snapshot `context` (`{ applied, stepsRemaining, stopped }`) holds the in-progress plan state, advanced one `plan.applied`/`plan.ended` event at a time. `runAgent` drives `agent.plan` directly; the [step path](steps.md#plans-on-the-step-path) surfaces it as a re-surfacing `kind: 'plan'` request that `resolveAgentRequests` advances one step per call. Both hosts drive the *same* ledger through shared drivers, and because the ledger is the invoke child's own `context`, it lands at `children.<id>.snapshot.context` in a persisted snapshot for free — surviving persist/resume mid-plan.
 
 Full example: [examples/todo-nl/index.ts](../examples/todo-nl/index.ts) drives free-text commands through one `agent.plan` invoke.
 

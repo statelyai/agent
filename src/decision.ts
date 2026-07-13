@@ -1,4 +1,10 @@
-import { createAsyncLogic, type AsyncActorLogic } from "xstate";
+import {
+  createAsyncLogic,
+  createLogic,
+  type AsyncActorLogic,
+  type LogicActorLogic,
+  type LogicSnapshot,
+} from "xstate";
 import type {
   AgentMessage,
   AllowedEvents,
@@ -143,8 +149,9 @@ export function createDecideActor(): DecisionLogic<StandardSchemaV1<AgentDecisio
  * legal candidate remains, or an applied event exits the invoking state
  * (which cancels the invoke — the machine simply moves on).
  *
- * Requires a snapshot-aware host ({@link runAgent}); the step path does not
- * surface plan requests yet (see docs/roadmap.md).
+ * Requires a snapshot-aware host: {@link runAgent}, or the step path (where an
+ * `agent.plan` invoke re-surfaces as a `kind: 'plan'` request that
+ * `resolveAgentRequests` drives one step per call).
  */
 export interface AgentPlanInput<
   TEvent extends string = string,
@@ -180,15 +187,52 @@ export interface AgentPlanOutput {
 }
 
 /**
- * Actor logic for the `agent.plan` builtin. Like the unbound `agent.decide`
- * placeholder, the registered logic cannot run by itself: applying events
- * mid-invoke needs a live parent actor, which only a snapshot-aware host
- * (`runAgent`) has. runAgent swaps this placeholder for its own
- * implementation at bind time.
+ * The in-progress state of a plan, held in the `agent.plan` invoke child's own
+ * `createLogic` snapshot `context`. Because a `createLogic` snapshot serializes
+ * (and restores) by identity, this lands at
+ * `children.<planId>.snapshot.context` in a machine's persisted snapshot for
+ * free — so a step-path host that persists after every event resumes a plan
+ * mid-flight without a bespoke carrier.
+ */
+export interface PlanLedgerContext {
+  /** The events applied so far in this plan, in order (the trail). */
+  applied: ChosenEvent[];
+  /** How many more events the plan may apply (`maxSteps - applied.length`). */
+  stepsRemaining: number;
+  /** Set once the plan terminates; `null` while in flight. */
+  stopped: AgentPlanOutput["stopped"] | null;
+}
+
+/**
+ * The two ledger events that drive a {@link PlanLedgerContext} forward:
+ * `plan.applied` appends one event to the trail and decrements the budget;
+ * `plan.ended` records the stop reason and completes the ledger (its snapshot
+ * goes `done` with the {@link AgentPlanOutput}).
+ */
+export type PlanLedgerEvent =
+  | { type: "plan.applied"; event: ChosenEvent }
+  | { type: "plan.ended"; stopped: AgentPlanOutput["stopped"] };
+
+/** The `createLogic` snapshot type of a plan ledger. @internal */
+export type PlanLedgerSnapshot = LogicSnapshot<PlanLedgerContext, AgentPlanOutput, AgentPlanInput>;
+
+/**
+ * Actor logic for the `agent.plan` builtin: a stateful, transition-based
+ * ledger. Its snapshot `context` ({@link PlanLedgerContext}) IS the plan's
+ * in-progress state — the applied trail plus remaining budget — advanced one
+ * {@link PlanLedgerEvent} at a time. On the step path the invoke child runs this
+ * logic directly (so its context persists at `children.<id>.snapshot.context`);
+ * runAgent swaps in an async implementation that drives the SAME ledger via the
+ * shared {@link initialPlanLedger}/{@link advancePlanLedger} drivers.
  */
 export interface PlanLogic<
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1<AgentPlanInput>,
-> extends AsyncActorLogic<AgentPlanOutput, InferOutput<TInputSchema>> {
+> extends LogicActorLogic<
+    PlanLedgerContext,
+    AgentPlanOutput,
+    PlanLedgerEvent,
+    InferOutput<TInputSchema>
+  > {
   readonly kind: "statelyai.planLogic";
   readonly maxRetries: number;
   /** Builds the per-step base {@link AgentDecisionRequest} (id/events filled in per step). */
@@ -197,17 +241,35 @@ export interface PlanLogic<
   allowedEventTypes(input: InferOutput<TInputSchema>): readonly string[] | undefined;
 }
 
-// Builds the unbound `agent.plan` builtin actor logic registered by setupAgent.
+// Builds the `agent.plan` builtin actor logic registered by setupAgent — a
+// transition-based ledger over PlanLedgerContext. On the step path the invoke
+// child runs this directly; runAgent installs an async wrapper that drives the
+// same ledger through the shared drivers below.
 export function createPlanActor(): PlanLogic {
-  const logic = createAsyncLogic<AgentPlanOutput, AgentPlanInput>({
-    run: async () => {
-      throw new Error(
-        `'${PLAN_ACTOR}' requires a snapshot-aware host: it applies events to the ` +
-          `live machine between model calls. Run the machine with runAgent(...) ` +
-          `(with a 'decide' executor), or provide a custom implementation with ` +
-          `machine.provide({ actorSources: { '${PLAN_ACTOR}': ... } }).`,
-      );
-    },
+  const logic = createLogic<PlanLedgerContext, AgentPlanOutput, PlanLedgerEvent, AgentPlanInput>({
+    context: ({ input }) => ({
+      applied: [],
+      stepsRemaining: input.maxSteps ?? 8,
+      stopped: null,
+    }),
+    // Also receives xstate's internal init event (XSTATE_INIT); the default
+    // `undefined` branch tolerates it (leaves the snapshot unchanged).
+    run: ({ context, event }) =>
+      event.type === "plan.applied"
+        ? {
+            context: {
+              ...context,
+              applied: [...context.applied, event.event],
+              stepsRemaining: context.stepsRemaining - 1,
+            },
+          }
+        : event.type === "plan.ended"
+          ? {
+              context: { ...context, stopped: event.stopped },
+              status: "done",
+              output: { steps: context.applied, stopped: event.stopped },
+            }
+          : undefined,
   });
 
   return Object.assign(logic, {
@@ -217,6 +279,36 @@ export function createPlanActor(): PlanLogic {
     allowedEventTypes: (input: AgentPlanInput) =>
       resolveAllowedEventTypes(input.allowedEvents, input),
   }) as PlanLogic;
+}
+
+// A minimal actor scope for the pure ledger drivers: getInitialSnapshot and the
+// ledger transitions (plan.applied/plan.ended) touch neither system nor emit,
+// so an inert stub suffices.
+const PLAN_LEDGER_SCOPE = { emit: () => {} } as never;
+
+/**
+ * Builds a fresh plan ledger snapshot from resolved plan input — the shared
+ * starting point for BOTH hosts (the step path reads the invoke child's own
+ * initial snapshot; runAgent seeds a local ledger with this). @internal
+ */
+export function initialPlanLedger(logic: PlanLogic, input: AgentPlanInput): PlanLedgerSnapshot {
+  return logic.getInitialSnapshot(PLAN_LEDGER_SCOPE, input as never);
+}
+
+/**
+ * Advances a plan ledger by one {@link PlanLedgerEvent}, returning the next
+ * snapshot (unwrapping `createLogic`'s `[snapshot, effects]` tuple). Pure — no
+ * mutation of the input snapshot. @internal
+ */
+export function advancePlanLedger(
+  logic: PlanLogic,
+  snapshot: PlanLedgerSnapshot,
+  event: PlanLedgerEvent,
+): PlanLedgerSnapshot {
+  const result = logic.transition(snapshot, event, PLAN_LEDGER_SCOPE) as
+    | [PlanLedgerSnapshot, unknown]
+    | PlanLedgerSnapshot;
+  return Array.isArray(result) ? result[0] : result;
 }
 
 /** Type guard: true for the `agent.plan` builtin logic (checks the `kind` marker). @internal */
