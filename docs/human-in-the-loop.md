@@ -155,6 +155,15 @@ if (result.status === 'done') {
 }
 ```
 
+A generic host that builds the human's event dynamically (from form input, a webhook payload, an interaction protocol) can't type it against a specific machine. `parseAgentEvent(snapshot, event)` validates the `{ type, ...payload }` at runtime — accepted event types and registered payload schemas — and returns it typed as the machine's event union, throwing a descriptive error otherwise. This replaces `event as never` casts in meta-driven hosts:
+
+```ts
+import { parseAgentEvent } from '@statelyai/agent';
+
+const event = parseAgentEvent(result.snapshot, { type: chosenType, ...formPayload });
+result = await runAgent(machine, { snapshot: result.snapshot, event, executors });
+```
+
 Legality comes from the machine, not a system prompt: `getAcceptedEvents` reports only events the snapshot can actually take, so a UI built from these choices cannot drive the machine into an illegal transition.
 
 ## Persist and resume across processes

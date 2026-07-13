@@ -130,6 +130,11 @@ if (getAgentOutputMode(request.outputSchema) === 'structured') {
 
 Return the **unwrapped** `.result` as `output` — the machine only ever validates and sees the schema it declared, never the envelope. `reasoning` is surfaced on the raw executor result only (never in machine context/output); see [reasoning opt-in](./text-requests.md#reasoning). The shipped `createAiSdkExecutors` and `createOpenAiCompatExecutors` adapters and the raw OpenAI/Anthropic example hosts all follow this exact contract. (Prompt-serialized hosts that don't send a provider response schema — e.g. the Workers AI host — instead parse best-effort JSON and skip the envelope.)
 
+Two related helpers for hand-rolled hosts:
+
+- **`isStandardSchema(value)`** narrows an unknown schema value to `StandardSchemaV1` before extraction. Request `tools` accept whatever a user's SDK produces, so a tool's `inputSchema` may be an SDK-specific wrapper core can't read — check with `isStandardSchema` and fall back to unconstrained parameters instead of crashing (this is what `toOpenAiTools` does).
+- **`renderDecisionAttempts(request)`** renders a decision request's prior failed `attempts` as feedback messages to append to the next call, so retries converge instead of repeating the same illegal choice. Both shipped adapters and all three raw-SDK example hosts use it; see [Decisions](decisions.md#validation-and-retries).
+
 ## Retries
 
 Transport-level retries — HTTP 429s, timeouts, exponential backoff — belong in the executor or the SDK it wraps, not the machine. The AI SDK's `maxRetries` (and the equivalent on the OpenAI/Anthropic clients) already handles them; a raw-`fetch` executor adds its own retry loop. The machine never sees a transient network failure.

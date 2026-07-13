@@ -6,6 +6,9 @@
   "main": "dist/index.cjs",
   "module": "dist/index.mjs",
   "types": "dist/index.d.mts",
+  "bin": {
+    "statelyai-agent": "dist/cli.mjs"
+  },
   "exports": {
     ".": {
       "import": {

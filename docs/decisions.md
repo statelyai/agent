@@ -94,7 +94,7 @@ Each attempt runs three checks in order. Each failure is typed and fed back to t
 Details:
 
 - Default 2 retries, so up to 3 attempts. Set `maxRetries` on the decide input to change it.
-- Prior failed attempts ride on `request.attempts`, so a host adapter can render "your last choice failed because X" into the next call. Core never rewrites the prompt itself.
+- Prior failed attempts ride on `request.attempts`, so a host adapter can render "your last choice failed because X" into the next call. Core never rewrites the prompt itself; `renderDecisionAttempts(request)` is the exported helper that renders the attempts list into feedback messages (used by both shipped adapters and the raw-SDK example hosts).
 - Exhausting retries throws `DecisionExhaustedError` (carrying the attempts list), caught by the invoke's `onError`. In Twenty Questions, that routes to a `stumped` final state instead of crashing the run.
 
 ## Coercion

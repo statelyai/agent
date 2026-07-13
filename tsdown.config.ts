@@ -6,6 +6,7 @@ export default defineConfig({
     'ai-sdk': 'src/ai-sdk/index.ts',
     'openai-compat': 'src/openai-compat/index.ts',
     zod: 'src/zod/index.ts',
+    cli: 'src/cli.ts',
   },
   format: ['esm', 'cjs'],
   dts: true,

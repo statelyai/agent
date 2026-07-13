@@ -36,6 +36,7 @@ export {
   runAgentToCompletion,
   SnapshotVersionMismatchError,
 } from "./run-agent.js";
+export { canReach, explorePaths, lintAgentMachine, simulateAgent } from "./verify.js";
 export {
   getJsonSchema,
   getJsonSchemaSync,
@@ -95,6 +96,19 @@ export type {
   RunAgentOptions,
   RunAgentResult,
 } from "./run-agent.js";
+export type {
+  AgentLintDiagnostic,
+  AgentLintSeverity,
+  AgentPathReport,
+  AgentPathTerminal,
+  CanReachResult,
+  ExplorePathsOptions,
+  LintAgentMachineOptions,
+  SimulateAgentOptions,
+  SimulateAgentResult,
+  SimulationScript,
+  SimulationTrailEntry,
+} from "./verify.js";
 export type {
   AgentWorkflowActionConfig,
   AgentWorkflowActorConfig,

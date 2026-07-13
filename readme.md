@@ -149,6 +149,7 @@ For machines that pause for approval across tool calls, persist the idle snapsho
 - **Dynamic fan-out.** Spawn N branches at runtime with per-branch state visible in the snapshot, then reduce. See [examples/fan-out](examples/fan-out).
 - **Traceable runs.** `runAgent` can emit one ordered `onTrace` stream for evals, JSONL logs, and telemetry adapters, while `onChunk` handles streaming text and `on` handles typed domain progress from `enq.emit(...)`. See [examples/ai-sdk-evaluator-optimizer](examples/ai-sdk-evaluator-optimizer).
 - **Machines as data.** A whole agent as validated JSON, safe to generate, store, or edit visually, run identically to hand-authored TypeScript. See [examples/json-agent](examples/json-agent).
+- **Keyless verification.** Lint a generated machine for dead states and undeliverable decisions, simulate it against a script, or enumerate every decision branch — all without an API key or a single model call. See [docs/verify](docs/verify.md).
 
 **Full documentation: [stately.ai/docs/agents](https://stately.ai/docs/agents)** · [What's not here yet](docs/roadmap.md)
 

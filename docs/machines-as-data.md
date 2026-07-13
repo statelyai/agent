@@ -214,3 +214,7 @@ The data form is narrower than TypeScript authoring, by design:
 - Function-valued fields (`allowedEvents`, `guard`, `input` as functions) cannot appear in JSON at all.
 
 When you need comparisons, computed guards, or function-valued fields, author in TypeScript with `setupAgent(...)` and Zod (or any Standard Schema).
+
+## Verifying a generated machine
+
+A machine built from data can be checked before it ever runs — no API key, no model call. Lint it with `lintAgentMachine`, simulate a scripted playthrough, or enumerate its decision branches. The `statelyai-agent lint <workflow.json>` CLI does this for a JSON config in CI. See [verify](verify).
