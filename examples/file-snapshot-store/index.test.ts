@@ -16,7 +16,7 @@ test("multi-turn idle/resume across fresh processes via the file store", async (
 
   const first = await runAgent(draftMachine, {
     input: { topic: "release notes" },
-    generateText,
+    executors: { generateText },
   });
   expect(first.status).toBe("idle");
   await store.save(sessionId, first.snapshot);
@@ -29,7 +29,7 @@ test("multi-turn idle/resume across fresh processes via the file store", async (
   const second = await runAgent(draftMachine, {
     snapshot: await store.load(sessionId),
     event: { type: "REJECT", reason: "add detail" },
-    generateText,
+    executors: { generateText },
   });
   expect(second.status).toBe("idle");
   await store.save(sessionId, second.snapshot);
@@ -38,7 +38,7 @@ test("multi-turn idle/resume across fresh processes via the file store", async (
   const third = await runAgent(draftMachine, {
     snapshot: await store.load(sessionId),
     event: { type: "APPROVE" },
-    generateText,
+    executors: { generateText },
   });
   expect(third.status).toBe("done");
   if (third.status !== "done") return;

@@ -60,7 +60,7 @@ describe("guardrails", () => {
 
     const result = await runAgent(guardrailsMachine, {
       input: { question: "Who won the 2018 World Cup?", topic: "geography" },
-      generateText,
+      executors: { generateText },
     });
 
     expect(result.status).toBe("done");
@@ -82,7 +82,7 @@ describe("guardrails", () => {
 
     const result = await runAgent(guardrailsMachine, {
       input: { question: "What is the capital of France?", topic: "geography" },
-      generateText,
+      executors: { generateText },
     });
 
     expect(result.status).toBe("done");
@@ -106,7 +106,7 @@ describe("guardrails", () => {
 
     const result = await runAgent(guardrailsMachine, {
       input: { question: "What is the capital of France?", topic: "geography" },
-      generateText,
+      executors: { generateText },
     });
 
     expect(result.status).toBe("done");

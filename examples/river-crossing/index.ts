@@ -480,7 +480,7 @@ export const riverCrossingMachine = agentSetup.createMachine({
           prompt: `${getMachineDescription()}\n\n${renderWorld(context)}`,
           // Typo'd event names are caught at compile time — allowedEvents is
           // typed against the machine's event-schema keys.
-          allowedEvents: ["TAKE_WOLF", "TAKE_GOAT", "TAKE_CABBAGE", "CROSS_ALONE"] as const,
+          allowedEvents: ["TAKE_WOLF", "TAKE_GOAT", "TAKE_CABBAGE", "CROSS_ALONE"],
           maxRetries: 3,
         }),
         onError: { target: "failed" },

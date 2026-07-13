@@ -21,7 +21,7 @@ describe("ticket-triage", () => {
 
     const result = await runAgent(triageMachine, {
       input: { ticket: TICKET },
-      generateText,
+      executors: { generateText },
     });
 
     expect(result.status).toBe("done");
@@ -44,7 +44,7 @@ describe("ticket-triage", () => {
 
     const result = await runAgent(triageMachine, {
       input: { ticket: TICKET },
-      generateText,
+      executors: { generateText },
     });
 
     // No onError handler -> schema-validation failure surfaces as an error.

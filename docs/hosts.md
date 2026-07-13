@@ -31,7 +31,7 @@ const models = defineModels({ quick: openai('gpt-5.4-mini') });
 
 const result = await runAgent(machine, {
   input: { prompt: 'Why state machines?' },
-  ...createAiSdkExecutors({ models }),
+  executors: createAiSdkExecutors({ models }),
 });
 ```
 
@@ -66,7 +66,7 @@ const agentSetup = setupAgent({
 
 await runAgent(machine, {
   input,
-  ...createAiSdkExecutors({ models }),
+  executors: createAiSdkExecutors({ models }),
 });
 ```
 
@@ -95,7 +95,7 @@ const executors: AgentRequestExecutors = {
   },
 };
 
-await runAgent(machine, { input, ...executors });
+await runAgent(machine, { input, executors });
 ```
 
 This is backed by real implementations against four runtimes:
@@ -116,20 +116,20 @@ Machine-level retry is a different thing: an authored `onError` transition that 
 `maxModelCalls` is the built-in loop backstop (default 100; exceeding it settles an `error` with cause `'max-model-calls'`). For finer budgets — a token cap, a per-request-src call count — wrap the executors. Because a child machine's requests inherit the parent's executors, one wrapper counts the whole tree:
 
 ```ts
-function withBudget(executors: AgentRequestExecutors, maxCalls: number) {
+function withBudget(base: AgentRequestExecutors, maxCalls: number) {
   const calls = new Map<string, number>();
   return {
-    ...executors,
+    ...base,
     generateText: async (request, info) => {
       const n = (calls.get(request.src) ?? 0) + 1;
       calls.set(request.src, n);
       if (n > maxCalls) throw new Error(`Budget exceeded for '${request.src}'`);
-      return executors.generateText!(request, info);
+      return base.generateText!(request, info);
     },
   };
 }
 
-await runAgent(machine, { input, ...withBudget(executors, 20) });
+await runAgent(machine, { input, executors: withBudget(executors, 20) });
 ```
 
 ## Observation seams
@@ -148,7 +148,7 @@ await runAgent(machine, { input, ...withBudget(executors, 20) });
 ```ts
 await runAgent(machine, {
   input,
-  ...executors,
+  executors,
   onTrace: (event) => jsonl.write(event),
   onChunk: (chunk, info) => process.stdout.write(chunk),
   onResult: (request, result) => log(request.id, result.raw),

@@ -183,7 +183,7 @@ export async function main() {
 
   const result = await runAgent(jokeMachine, {
     input: { topic },
-    ...executors,
+    executors,
     onChunk: (chunk) => process.stdout.write(chunk),
     onTransition: (snapshot) => {
       const value = snapshot.value;

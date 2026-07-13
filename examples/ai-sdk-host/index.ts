@@ -120,7 +120,7 @@ export async function runTriageDemo(
 ) {
   const result = await runAgent(triageMachine, {
     input: { ticket },
-    generateText,
+    executors: { generateText },
     // The host-side observability hook: log each machine transition as it runs.
     onTransition: (snapshot) => console.log(`  state -> ${String(snapshot.value)}`),
   });
@@ -181,8 +181,10 @@ export async function runStreamingDemo(
       input: { topic },
       // Rate the streamed joke; the decision then ends the loop after one joke.
       // The chosen END event is delivered to the machine automatically.
-      generateText: async () => ({ output: { rating: 9, explanation: "solid pun" } }),
-      decide: async () => ({ event: { type: "END" as const } }),
+      executors: {
+        generateText: async () => ({ output: { rating: 9, explanation: "solid pun" } }),
+        decide: async () => ({ event: { type: "END" as const } }),
+      },
       onTransition: (snapshot) => console.log("\n  state ->", JSON.stringify(snapshot.value)),
     },
   );

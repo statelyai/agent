@@ -149,7 +149,7 @@ export const todoMachine = agentSetup.createMachine({
           ].join("\n"),
           // Typo'd names are caught at compile time — allowedEvents is typed
           // against the machine's event-schema keys.
-          allowedEvents: ["ADD_TODO", "TOGGLE_TODO", "DELETE_TODO", "QUIT"] as const,
+          allowedEvents: ["ADD_TODO", "TOGGLE_TODO", "DELETE_TODO", "QUIT"],
           // The plan ends via the built-in done move (offered automatically),
           // at maxSteps, or when QUIT exits the state (below) and cancels the
           // invoke. No `stopOn` sentinel needed.
@@ -229,7 +229,7 @@ const executors = createAiSdkExecutors({ models });
 export async function main() {
   const result = await runAgent(todoMachine, {
     input: { todos: [] },
-    ...executors,
+    executors,
     userInput: async ({ prompt }) => promptLine(`${prompt ?? ">"}\n> `),
     onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
   });

@@ -14,7 +14,7 @@ const generateText = async (request: AgentTextRequest) => {
 };
 
 test("sql agent plans, awaits approval, executes the local engine, and summarizes", async () => {
-  const { interaction, output } = await runSqlAgentExample({ generateText });
+  const { interaction, output } = await runSqlAgentExample({ executors: { generateText } });
 
   // The idle approval state exposed a typed interaction.
   assert.equal(interaction?.type, "select");
@@ -32,7 +32,7 @@ test("sql agent plans, awaits approval, executes the local engine, and summarize
 
 test("rejecting the query short-circuits without executing", async () => {
   const { output } = await runSqlAgentExample({
-    generateText,
+    executors: { generateText },
     approval: "REJECT",
   });
   assert.equal(output.answer, "Query rejected by the reviewer.");

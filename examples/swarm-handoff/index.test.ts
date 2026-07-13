@@ -5,9 +5,11 @@ import { runSwarmHandoffExample } from "./index.js";
 
 test("swarm handoff switches the active agent and persists it across a round-trip", async () => {
   const { travel, food } = await runSwarmHandoffExample({
-    generateText: async (request: AgentTextRequest) => ({
-      output: `[${request.model}] ${request.prompt}`,
-    }),
+    executors: {
+      generateText: async (request: AgentTextRequest) => ({
+        output: `[${request.model}] ${request.prompt}`,
+      }),
+    },
   });
 
   // Turn 1: travel agent answered.

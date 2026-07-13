@@ -252,7 +252,7 @@ export interface AiSdkExecutors extends AgentRequestExecutors<
  * @example
  * ```ts
  * const executors = createAiSdkExecutors({ models: { quick: openai('gpt-5.4-mini') } });
- * const result = await runAgent(machine, { input, ...executors });
+ * const result = await runAgent(machine, { input, executors });
  * ```
  */
 export function createAiSdkExecutors<TModels extends AiSdkModelMap>(

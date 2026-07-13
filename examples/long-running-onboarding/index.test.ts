@@ -38,7 +38,7 @@ test("does not provision IT before documents are signed", async () => {
         equipment: "MacBook Air",
       },
     },
-    generateText,
+    executors: { generateText },
   });
 
   expect(first.status).toBe("idle");

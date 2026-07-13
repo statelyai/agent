@@ -270,7 +270,7 @@ export async function runDebateSubAgentsExample(options?: {
       question: options?.input?.question ?? "Should agents be modeled as actors?",
       rounds: options?.input?.rounds ?? DEFAULT_ROUNDS,
     },
-    generateText,
+    executors: { generateText },
     actorSources: { affirmative: boundDebater(), negative: boundDebater() },
     ...(options?.onTransition
       ? { onTransition: ({ value }: { value: unknown }) => options.onTransition!(value) }

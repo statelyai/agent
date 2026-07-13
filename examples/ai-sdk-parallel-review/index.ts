@@ -210,7 +210,7 @@ export async function runAiSdkParallelReviewExample(
 ) {
   const result = await runAgent(aiSdkParallelReviewMachine, {
     input: { code: "const x = eval(input);" },
-    ...createAiSdkExecutors({ models }),
+    executors: createAiSdkExecutors({ models }),
     onTransition: observe,
   });
   if (result.status !== "done") {

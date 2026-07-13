@@ -132,12 +132,12 @@ export const swarmHandoffMachine = agentSetup.createMachine({
 export async function runSwarmHandoffExample(
   options?: RunAgentOptions<typeof swarmHandoffMachine>,
 ) {
-  const executors = resolveExecutors(models, options);
+  const resolved = resolveExecutors(models, options);
 
   // Turn 1: the travel agent holds the mic and answers.
   const first = await runAgent(swarmHandoffMachine, {
     input: { message: "I want a 3-day trip to Lisbon.", activeAgent: "travel" },
-    ...executors,
+    ...resolved,
   });
   if (first.status !== "idle") {
     throw new Error(`Swarm handoff did not settle idle after turn 1: ${first.status}`);
@@ -156,7 +156,7 @@ export async function runSwarmHandoffExample(
       to: "food",
       message: "What are the must-try dishes there?",
     },
-    ...executors,
+    ...resolved,
   });
   if (second.status !== "idle") {
     throw new Error(`Swarm handoff did not settle idle after turn 2: ${second.status}`);
@@ -209,13 +209,13 @@ async function runInteractive() {
       return runAgent(swarmHandoffMachine, {
         snapshot,
         event: { type: "HANDOFF" as const, to, message },
-        ...executors,
+        executors,
         onTransition,
       });
     }
     return runAgent(swarmHandoffMachine, {
       input: { message, activeAgent: to },
-      ...executors,
+      executors,
       onTransition,
     });
   }

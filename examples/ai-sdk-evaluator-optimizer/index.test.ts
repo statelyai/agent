@@ -17,35 +17,37 @@ test("AI SDK evaluator-optimizer maps to an explicit machine", async () => {
       EVALUATED: (e) => evaluated.push(e.iteration),
       IMPROVED: (e) => improved.push(e.translation),
     },
-    generateText: async (request) => {
-      if (request.prompt?.startsWith("Translate this text to Spanish:")) {
-        return { output: "Spanish:Hello friend" };
-      }
-      if (request.prompt?.includes("Suggestions:")) {
-        return { output: "Spanish:Hello friend improved" };
-      }
-      evaluations += 1;
-      return evaluations === 1
-        ? {
-            output: {
-              qualityScore: 6,
-              preservesTone: true,
-              preservesNuance: false,
-              culturallyAccurate: true,
-              specificIssues: ["missing nuance"],
-              improvementSuggestions: ["add idiom"],
-            },
-          }
-        : {
-            output: {
-              qualityScore: 9,
-              preservesTone: true,
-              preservesNuance: true,
-              culturallyAccurate: true,
-              specificIssues: [],
-              improvementSuggestions: [],
-            },
-          };
+    executors: {
+      generateText: async (request) => {
+        if (request.prompt?.startsWith("Translate this text to Spanish:")) {
+          return { output: "Spanish:Hello friend" };
+        }
+        if (request.prompt?.includes("Suggestions:")) {
+          return { output: "Spanish:Hello friend improved" };
+        }
+        evaluations += 1;
+        return evaluations === 1
+          ? {
+              output: {
+                qualityScore: 6,
+                preservesTone: true,
+                preservesNuance: false,
+                culturallyAccurate: true,
+                specificIssues: ["missing nuance"],
+                improvementSuggestions: ["add idiom"],
+              },
+            }
+          : {
+              output: {
+                qualityScore: 9,
+                preservesTone: true,
+                preservesNuance: true,
+                culturallyAccurate: true,
+                specificIssues: [],
+                improvementSuggestions: [],
+              },
+            };
+      },
     },
   });
   assert.equal(result.status, "done");

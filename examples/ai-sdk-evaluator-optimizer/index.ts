@@ -226,7 +226,7 @@ export async function runAiSdkEvaluatorOptimizerExample() {
       targetLanguage: "Spanish",
       maxIterations: 3,
     },
-    ...createAiSdkExecutors({ models }),
+    executors: createAiSdkExecutors({ models }),
     onTransition: (snapshot) =>
       console.log(
         "[state]",

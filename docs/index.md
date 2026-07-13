@@ -72,7 +72,7 @@ const machine = agentSetup.createMachine({
 
 const result = await runAgent(machine, {
   input: { prompt: 'Why state machines?' },
-  ...createAiSdkExecutors({ models }),
+  executors: createAiSdkExecutors({ models }),
 });
 
 if (result.status === 'done') {

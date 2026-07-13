@@ -46,7 +46,7 @@ describe("todo-nl", () => {
 
     const result = await runAgent(todoMachine, {
       input: { todos: [] },
-      decide,
+      executors: { decide },
       userInput,
     });
 
@@ -77,7 +77,7 @@ describe("todo-nl", () => {
 
     const result = await runAgent(todoMachine, {
       input: { todos: [{ id: 1, title: "write tests", done: false }] },
-      decide,
+      executors: { decide },
       userInput,
     });
 
@@ -99,7 +99,7 @@ describe("todo-nl", () => {
 
     const result = await runAgent(todoMachine, {
       input: { todos: [{ id: 1, title: "existing", done: true }] },
-      decide,
+      executors: { decide },
       userInput,
     });
 

@@ -254,7 +254,7 @@ export interface OpenAiCompatExecutors extends AgentRequestExecutors {
  *   apiKey: process.env.GROQ_API_KEY,
  *   models: { quick: 'llama-3.3-70b-versatile' },
  * });
- * const result = await runAgent(machine, { input, ...executors });
+ * const result = await runAgent(machine, { input, executors });
  * ```
  */
 export function createOpenAiCompatExecutors(

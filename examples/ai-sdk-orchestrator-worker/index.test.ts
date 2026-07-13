@@ -43,15 +43,17 @@ test("AI SDK orchestrator-worker plans then fans out a worker call per file", as
 
   const result = await runAgent(machine, {
     input: { featureRequest: "Add settings page" },
-    generateText: async () => ({
-      output: {
-        files: [
-          { purpose: "Add UI", filePath: "app/page.tsx", changeType: "modify" },
-          { purpose: "Add test", filePath: "app/page.test.tsx", changeType: "create" },
-        ],
-        estimatedComplexity: "medium",
-      },
-    }),
+    executors: {
+      generateText: async () => ({
+        output: {
+          files: [
+            { purpose: "Add UI", filePath: "app/page.tsx", changeType: "modify" },
+            { purpose: "Add test", filePath: "app/page.test.tsx", changeType: "create" },
+          ],
+          estimatedComplexity: "medium",
+        },
+      }),
+    },
   });
 
   assert.equal(result.status, "done");

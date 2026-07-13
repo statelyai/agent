@@ -121,7 +121,7 @@ export async function runSubflowsExample(options?: {
     // The child is registered as the `child` actor source in the parent setup;
     // runAgent rebinds its unbound `researchTopic` request with THIS
     // generateText automatically — no nested `.provide` needed.
-    generateText,
+    executors: { generateText },
     // onTransition sees ONLY the root (parent) machine's transitions.
     ...(options?.onTransition ? { onTransition: options.onTransition } : {}),
     // inspect is the system-wide passthrough: it fires for every actor in the

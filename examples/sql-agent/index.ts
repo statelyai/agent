@@ -238,13 +238,13 @@ export async function runSqlAgentExample(
   observe?: RunAgentOptions<typeof sqlAgentMachine>["onTransition"],
 ) {
   const { approval = "APPROVE", ...runOptions } = options ?? {};
-  const executors: RunAgentOptions<typeof sqlAgentMachine> = resolveExecutors(models, runOptions);
+  const resolved: RunAgentOptions<typeof sqlAgentMachine> = resolveExecutors(models, runOptions);
 
   const first = await runAgent(sqlAgentMachine, {
     input: { question: "What is the total amount spent on electronics?" },
-    // Direct-run narrator; a caller's own `onTransition` in `executors` wins.
+    // Direct-run narrator; a caller's own `onTransition` in `resolved` wins.
     onTransition: observe,
-    ...executors,
+    ...resolved,
   });
   if (first.status !== "idle") {
     throw new Error(`SQL agent did not settle idle for approval: ${first.status}`);
@@ -255,7 +255,7 @@ export async function runSqlAgentExample(
     snapshot: JSON.parse(JSON.stringify(first.snapshot)),
     event: { type: approval },
     onTransition: observe,
-    ...executors,
+    ...resolved,
   });
   if (second.status !== "done") {
     throw new Error(`SQL agent did not complete: ${second.status}`);

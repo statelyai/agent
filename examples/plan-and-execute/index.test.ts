@@ -7,25 +7,27 @@ test("plan-and-execute plans steps, gathers per-step evidence, and solves from t
   const workerQuestions: string[] = [];
   const output = await runPlanAndExecuteExample({
     input: { goal: "Compare two libraries." },
-    generateText: async (request: AgentTextRequest) => {
-      if (request.model === "planner") {
-        return {
-          output: {
-            steps: [
-              { id: "E1", question: "What is library A?" },
-              { id: "E2", question: "What is library B?" },
-            ],
-          },
-        };
-      }
-      if (request.model === "worker") {
-        workerQuestions.push(request.prompt ?? "");
-        return { output: `evidence for: ${request.prompt}` };
-      }
-      // solver — its prompt embeds the whole evidence map.
-      assert.ok(request.prompt?.includes("E1:"));
-      assert.ok(request.prompt?.includes("E2:"));
-      return { output: "final answer from evidence" };
+    executors: {
+      generateText: async (request: AgentTextRequest) => {
+        if (request.model === "planner") {
+          return {
+            output: {
+              steps: [
+                { id: "E1", question: "What is library A?" },
+                { id: "E2", question: "What is library B?" },
+              ],
+            },
+          };
+        }
+        if (request.model === "worker") {
+          workerQuestions.push(request.prompt ?? "");
+          return { output: `evidence for: ${request.prompt}` };
+        }
+        // solver — its prompt embeds the whole evidence map.
+        assert.ok(request.prompt?.includes("E1:"));
+        assert.ok(request.prompt?.includes("E2:"));
+        return { output: "final answer from evidence" };
+      },
     },
   });
 

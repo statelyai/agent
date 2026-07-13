@@ -72,7 +72,7 @@ A child machine's own requests inherit the executors you pass to `runAgent` — 
 import { inspectTransitions, runAgent } from '@statelyai/agent';
 
 await runAgent(parentMachine, {
-  generateText,
+  executors: { generateText },
   onTransition: (snapshot) => console.log('parent:', snapshot.value),
   inspect: inspectTransitions((snapshot, actorRef) => {
     console.log(`[${actorRef.id}]`, snapshot.value); // child transitions included
@@ -156,7 +156,7 @@ Each debater sits idle until it receives `DEBATE.ARGUMENT_REQUESTED`, composes a
 ```ts
 const result = await runAgent(parentMachine, {
   input: { topic: 'agents' },
-  generateText, // covers the parent's requests AND the child's researchTopic
+  executors: { generateText }, // covers the parent's requests AND the child's researchTopic
 });
 ```
 

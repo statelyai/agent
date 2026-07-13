@@ -20,11 +20,11 @@ Here a waiting state **is** a state. `runAgent` settles `{ status: 'idle', snaps
 
 ```ts
 // here: resume starts AT `reviewing`; `drafting` (and its model call) never re-runs
-const first = await runAgent(machine, { input, ...executors });   // -> idle
+const first = await runAgent(machine, { input, executors });   // -> idle
 const done = await runAgent(machine, {
   snapshot: first.snapshot,
   event: { type: 'APPROVE' },
-  ...executors,
+  executors,
 });
 ```
 
@@ -43,10 +43,10 @@ const state = await graph.getState({ configurable: { thread_id: 'abc' } });
 Here the snapshot is plain JSON you store anywhere, with no checkpointer to wire and no thread addressing:
 
 ```ts
-const result = await runAgent(machine, { input, ...executors });
+const result = await runAgent(machine, { input, executors });
 await store.put(id, JSON.stringify(result.snapshot)); // any DB, file, queue, localStorage
 // later, any process:
-await runAgent(machine, { snapshot: JSON.parse(await store.get(id)), event, ...executors });
+await runAgent(machine, { snapshot: JSON.parse(await store.get(id)), event, executors });
 ```
 
 Context must be JSON-serializable; that is the one constraint. See [Human in the loop](human-in-the-loop.md#persist-and-resume-across-processes).
@@ -60,7 +60,7 @@ Here the machine never talks to a model. It emits typed requests; a host resolve
 ```ts
 const executors = createAiSdkExecutors({ models });      // Vercel AI SDK adapter
 // or createOpenAiCompatExecutors({ baseUrl }), or hand-rolled { generateText, decide }
-await runAgent(machine, { input, ...executors });
+await runAgent(machine, { input, executors });
 ```
 
 See [Host actors](host-actors.md).

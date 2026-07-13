@@ -25,14 +25,16 @@ describe("joke-teller", () => {
 
     const result = await runAgent(jokeMachine, {
       input: { topic: "penguins" },
-      streamText: async (request, info) => {
-        seenTopics.push(request.prompt?.match(/joke about (.*)\./)?.[1] ?? "");
-        return streamText(request, info);
-      },
-      generateText: rate,
-      decide: async (request: AgentDecisionRequest): Promise<{ event: ChosenEvent }> => {
-        // High rating -> END.
-        return { event: { type: "END" } };
+      executors: {
+        streamText: async (request, info) => {
+          seenTopics.push(request.prompt?.match(/joke about (.*)\./)?.[1] ?? "");
+          return streamText(request, info);
+        },
+        generateText: rate,
+        decide: async (request: AgentDecisionRequest): Promise<{ event: ChosenEvent }> => {
+          // High rating -> END.
+          return { event: { type: "END" } };
+        },
       },
     });
 
@@ -49,12 +51,14 @@ describe("joke-teller", () => {
 
     const result = await runAgent(jokeMachine, {
       input: { topic: "state machines" },
-      streamText,
-      generateText: createRater([3, 8]),
-      decide: async (): Promise<{ event: ChosenEvent }> => {
-        decideCount += 1;
-        // First joke rated low -> loop; second -> end.
-        return { event: { type: decideCount === 1 ? "TELL_ANOTHER" : "END" } };
+      executors: {
+        streamText,
+        generateText: createRater([3, 8]),
+        decide: async (): Promise<{ event: ChosenEvent }> => {
+          decideCount += 1;
+          // First joke rated low -> loop; second -> end.
+          return { event: { type: decideCount === 1 ? "TELL_ANOTHER" : "END" } };
+        },
       },
     });
 

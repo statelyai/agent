@@ -547,7 +547,7 @@ export namespace setupAgent {
    * const machine = setupAgent.fromConfig(workflowConfig, {
    *   compileSchema,
    * });
-   * const result = await runAgent(machine, { input: { ticket }, generateText, decide });
+   * const result = await runAgent(machine, { input: { ticket }, executors: { generateText, decide } });
    * ```
    */
   export function fromConfig(

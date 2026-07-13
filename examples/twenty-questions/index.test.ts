@@ -37,8 +37,24 @@ function createClassifier(seenModels: string[] = []): AgentRequestExecutor {
         },
       };
     }
+    if (request.system?.includes("side question")) {
+      // answerSideQuestion: prompt carries `Side question: ...`.
+      const question = request.prompt?.match(/Side question: (.*)/)?.[1] ?? "";
+      return { output: `Briefly: the answer to "${question}" is yes.` };
+    }
+    // classifyAnswer: a reply ending in '?' is a side question back at the agent.
+    if (rawAnswer.endsWith("?")) {
+      return {
+        output: {
+          kind: "sideQuestion",
+          question: rawAnswer,
+          reasoning: `classified side question ${rawAnswer}`,
+        },
+      };
+    }
     return {
       output: {
+        kind: "answer",
         answer: rawAnswer === "mhm" || rawAnswer === "for sure" ? "yes" : "no",
         reasoning: `classified ${rawAnswer}`,
       },
@@ -65,8 +81,7 @@ describe("twenty-questions", () => {
 
     const result = await runAgent(twentyQuestionsMachine, {
       input: { questionsRemaining: 20 },
-      generateText: createClassifier(textModels),
-      decide,
+      executors: { generateText: createClassifier(textModels), decide },
       userInput: async (input: AgentUserInput) => {
         prompts.push(input.prompt ?? "");
         return answers.shift() ?? "no";
@@ -106,8 +121,7 @@ describe("twenty-questions", () => {
 
     const result = await runAgent(twentyQuestionsMachine, {
       input: { questionsRemaining: 1 },
-      generateText: createClassifier(),
-      decide,
+      executors: { generateText: createClassifier(), decide },
       userInput: async () => "correct",
     });
 
@@ -131,10 +145,12 @@ describe("twenty-questions", () => {
 
     const result = await runAgent(twentyQuestionsMachine, {
       input: { questionsRemaining: 1 },
-      generateText: createClassifier(),
-      decide: async () => ({
-        event: { type: "GUESS", guess: guesses.shift() ?? "unknown" },
-      }),
+      executors: {
+        generateText: createClassifier(),
+        decide: async () => ({
+          event: { type: "GUESS", guess: guesses.shift() ?? "unknown" },
+        }),
+      },
       userInput: async ({ prompt }) => {
         prompts.push(prompt ?? "");
         return answers.shift() ?? "no";
@@ -156,5 +172,67 @@ describe("twenty-questions", () => {
       "My guess is a piano. Was I right?",
       "Do you want to play another round?",
     ]);
+  });
+
+  test("side-question detour: answers it, emits SIDE_ANSWER, re-asks the SAME question without consuming a turn", async () => {
+    const prompts: string[] = [];
+    const sideAnswers: { question: string; answer: string }[] = [];
+    // Reply 1 is a side question; reply 2 answers the re-asked question; then
+    // guess feedback and play-again wrap up.
+    const answers = [
+      "is a lizard considered domestic?",
+      "mhm",
+      "correct",
+      "no",
+    ];
+
+    let decisions = 0;
+    const decide = async (): Promise<{ event: ChosenEvent }> => {
+      decisions += 1;
+      if (decisions === 1) {
+        return { event: { type: "ASK", question: "Is it an animal?" } };
+      }
+      return { event: { type: "GUESS", guess: "a lizard" } };
+    };
+
+    const result = await runAgent(twentyQuestionsMachine, {
+      input: { questionsRemaining: 20 },
+      executors: { generateText: createClassifier(), decide },
+      userInput: async ({ prompt }: AgentUserInput) => {
+        prompts.push(prompt ?? "");
+        return answers.shift() ?? "no";
+      },
+      on: {
+        SIDE_ANSWER: ({ question, answer }) => {
+          sideAnswers.push({ question, answer });
+        },
+      },
+    });
+
+    expect(result.status).toBe("done");
+    if (result.status !== "done") throw new Error("expected done");
+
+    // The detour answered the side question (secret-free canned reply) ...
+    expect(sideAnswers).toEqual([
+      {
+        question: "is a lizard considered domestic?",
+        answer: 'Briefly: the answer to "is a lizard considered domestic?" is yes.',
+      },
+    ]);
+    // ... and the SAME pending question was re-asked (no turn consumed, no
+    // extra transcript entry: questionsUsed stays 1 for the single ASK).
+    expect(prompts).toEqual([
+      "Is it an animal?",
+      "Is it an animal?",
+      "My guess is a lizard. Was I right?",
+      "Do you want to play another round?",
+    ]);
+    expect(result.output).toEqual({
+      guess: "a lizard",
+      questionsUsed: 1,
+      userScore: 0,
+      agentScore: 1,
+      roundsPlayed: 1,
+    });
   });
 });

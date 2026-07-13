@@ -61,10 +61,15 @@ describe('createTextLogic({ mode: "stream" })', () => {
 
     const result = await runAgent(machine, {
       input: { topic: "state machines" },
-      generateText: async () => {
+      onChunk: (chunk, info) => {
+        chunks.push(chunk);
+        chunkRequests.push(info.request);
+      },
+      executors: {
+        generateText: async () => {
         throw new Error("generateText should not be used for stream requests");
       },
-      streamText: async (
+        streamText: async (
         _request: AgentTextRequest & { tools: AgentTools },
         info?: AgentRequestExecutorInfo,
       ) => {
@@ -73,9 +78,6 @@ describe('createTextLogic({ mode: "stream" })', () => {
         }
         return { output: parts.join("") };
       },
-      onChunk: (chunk, info) => {
-        chunks.push(chunk);
-        chunkRequests.push(info.request);
       },
     });
 
@@ -121,7 +123,9 @@ describe('createTextLogic({ mode: "stream" })', () => {
     await expect(
       runAgent(machine, {
         input: { topic: "x" },
-        generateText: async () => ({ output: "nope" }),
+        executors: {
+          generateText: async () => ({ output: "nope" }),
+        },
       }),
     ).rejects.toThrow(/streamText/);
   });
@@ -287,21 +291,22 @@ describe('createTextLogic({ mode: "stream" })', () => {
 
     const result = await runAgent(machine, {
       input: {},
-      generateText: async () => {
+      onChunk: (chunk, info) => {
+        if (info.request.kind === "text") {
+          chunksById[info.request.id]?.push(chunk);
+        }
+      },
+      executors: {
+        generateText: async () => {
         throw new Error("generateText should not be used");
       },
-      streamText: async (request, info) => {
+        streamText: async (request, info) => {
         // emit two chunks tagged with which stream produced them
         const tag = request.prompt === "a" ? "A" : "B";
         info?.onChunk?.(tag);
         info?.onChunk?.(tag);
         return { output: `${tag}${tag}` };
       },
-      // even if streams interleave, info.request.id tells them apart
-      onChunk: (chunk, info) => {
-        if (info.request.kind === "text") {
-          chunksById[info.request.id]?.push(chunk);
-        }
       },
     });
 

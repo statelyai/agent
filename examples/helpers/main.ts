@@ -55,9 +55,10 @@ export function runExampleMain(
 }
 
 /**
- * Dual-mode executor resolution: use caller-injected `overrides` when present
- * (the tests pass mocks — keyless CI), otherwise build real executors from
- * `models`. Spread the result straight into `runAgent`:
+ * Dual-mode executor resolution for the new nested `executors` option. Tests
+ * inject their own run options (`{ executors: { generateText, ... }, ... }` —
+ * keyless CI); a direct run passes nothing, so real executors are built from
+ * `models`. Either way the result is spread straight into `runAgent`:
  *
  * @example
  * ```ts
@@ -66,12 +67,16 @@ export function runExampleMain(
  *   ...resolveExecutors(models, options),
  * });
  * ```
+ *
+ * When `overrides` is non-empty it is forwarded verbatim (so an injected
+ * `executors` plus any `onTransition`/`input` overrides all flow through);
+ * otherwise only a freshly-built `{ executors }` is returned.
  */
 export function resolveExecutors<TModels extends AiSdkModelMap, TOverrides extends object>(
   models: TModels,
   overrides?: TOverrides,
-): TOverrides | AiSdkExecutors {
+): TOverrides | { executors: AiSdkExecutors } {
   return overrides && Object.keys(overrides).length > 0
     ? overrides
-    : createAiSdkExecutors({ models });
+    : { executors: createAiSdkExecutors({ models }) };
 }

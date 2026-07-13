@@ -17,21 +17,23 @@ test("AI SDK marketing chain maps to an explicit machine", async () => {
           clarity: e.clarity,
         }),
     },
-    generateText: async () => {
-      calls += 1;
-      if (calls === 1) {
-        return { output: "Buy state machines" };
-      }
-      if (calls === 2) {
-        return {
-          output: {
-            hasCallToAction: false,
-            emotionalAppeal: 5,
-            clarity: 6,
-          },
-        };
-      }
-      return { output: "Buy state machines. Start today." };
+    executors: {
+      generateText: async () => {
+        calls += 1;
+        if (calls === 1) {
+          return { output: "Buy state machines" };
+        }
+        if (calls === 2) {
+          return {
+            output: {
+              hasCallToAction: false,
+              emotionalAppeal: 5,
+              clarity: 6,
+            },
+          };
+        }
+        return { output: "Buy state machines. Start today." };
+      },
     },
   });
   assert.equal(result.status, "done");

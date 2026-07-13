@@ -5,15 +5,21 @@
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/triage/index.ts
  */
-import { z } from "zod";
-import { openai } from "@ai-sdk/openai";
-import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
-import { createAgentSchemas, createTextLogic, runAgent, setupAgent } from "../../src/index.js";
-import { runExampleMain } from "../helpers/main.js";
+import { z } from 'zod';
+import { openai } from '@ai-sdk/openai';
+import { createAiSdkExecutors, defineModels } from '../../src/ai-sdk/index.js';
+import {
+  createAgentSchemas,
+  createTextLogic,
+  runAgent,
+  setupAgent,
+} from '../../src/index.js';
+import { promptLine } from '../helpers/cli.js';
+import { runExampleMain } from '../helpers/main.js';
 
 export const triageSchema = z.object({
-  sentiment: z.enum(["positive", "neutral", "negative"]),
-  category: z.enum(["billing", "technical", "other"]),
+  sentiment: z.enum(['positive', 'neutral', 'negative']),
+  category: z.enum(['billing', 'technical', 'other']),
   reply: z.string(),
 });
 
@@ -29,7 +35,7 @@ const schemas = createAgentSchemas({
 });
 
 export const models = defineModels({
-  ticketTriage: openai("gpt-5.4-mini"),
+  ticketTriage: openai('gpt-5.4-mini'),
 });
 
 export const triageTicket = createTextLogic({
@@ -37,14 +43,14 @@ export const triageTicket = createTextLogic({
     input: z.object({ ticket: z.string() }),
     output: triageSchema,
   },
-  model: "ticketTriage",
+  model: 'ticketTriage',
   system: [
-    "You triage inbound support tickets. For each ticket, return:",
+    'You triage inbound support tickets. For each ticket, return:',
     "- sentiment: the customer's tone (positive, neutral, or negative).",
-    "- category: billing, technical, or other.",
-    "- reply: two or three sentences, addressed to the customer, that",
-    "  acknowledge the issue and state the next step. No greeting boilerplate.",
-  ].join("\n"),
+    '- category: billing, technical, or other.',
+    '- reply: two or three sentences, addressed to the customer, that',
+    '  acknowledge the issue and state the next step. No greeting boilerplate.',
+  ].join('\n'),
   prompt: ({ input }) => input.ticket,
 });
 
@@ -68,22 +74,22 @@ const triageAgentSetup = setupAgent({
 export const triageSchemas = schemas;
 
 export const triageMachine = triageAgentSetup.createMachine({
-  id: "ticket-triage",
+  id: 'ticket-triage',
   context: ({ input }) => ({ ticket: input.ticket, triage: null }),
-  initial: "triaging",
+  initial: 'triaging',
   states: {
     triaging: {
       invoke: {
-        src: "triageTicket",
+        src: 'triageTicket',
         input: ({ context }) => ({ ticket: context.ticket }),
         onDone: ({ output }) => ({
-          target: "done",
+          target: 'done',
           context: { triage: output },
         }),
       },
     },
     done: {
-      type: "final",
+      type: 'final',
       output: ({ context }) => context.triage,
     },
   },
@@ -91,20 +97,24 @@ export const triageMachine = triageAgentSetup.createMachine({
 
 // Sample data — a stand-in for a ticket pulled from your support inbox.
 const SAMPLE_TICKET =
-  "I was charged twice for my March subscription and the second charge never " +
-  "showed up as a plan on my account. Can you refund the duplicate? This is " +
-  "the third time billing has gone wrong this year.";
+  'I was charged twice for my March subscription and the second charge never ' +
+  'showed up as a plan on my account. Can you refund the duplicate? This is ' +
+  'the third time billing has gone wrong this year.';
 
 export async function main() {
   const executors = createAiSdkExecutors({ models });
 
+  const pasted = await promptLine('Paste a ticket (blank = sample) > ');
+  const ticket = pasted === '' ? SAMPLE_TICKET : pasted;
+
   const result = await runAgent(triageMachine, {
-    input: { ticket: SAMPLE_TICKET },
-    ...executors,
-    onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
+    input: { ticket },
+    executors,
+    onTransition: (snapshot) =>
+      console.log('[state]', JSON.stringify(snapshot.value)),
   });
 
-  if (result.status !== "done") {
+  if (result.status !== 'done') {
     throw new Error(`Triage did not complete: ${result.status}`);
   }
   console.log(JSON.stringify(result.output, null, 2));

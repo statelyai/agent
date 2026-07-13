@@ -113,7 +113,7 @@ const haikuMachine = agent.createMachine({
           model: 'judge',
           system: 'You are a poetry judge. APPROVE good haiku, else REVISE with a critique.',
           prompt: `Judge this haiku:\n${context.haiku}`,
-          allowedEvents: ['APPROVE', 'REVISE'] as const,
+          allowedEvents: ['APPROVE', 'REVISE'],
         }),
         onError: { target: 'sending' }, // ran out of retries -> ship it
       },
@@ -144,7 +144,7 @@ const haikuMachine = agent.createMachine({
 
 const result = await runAgent(haikuMachine, {
   input: { topic: 'state machines' },
-  ...createAiSdkExecutors({ models }),
+  executors: createAiSdkExecutors({ models }),
 });
 
 if (result.status === 'done') console.log(result.output.haiku);
@@ -227,7 +227,7 @@ const haikuMachine = agent.createMachine({
           model: 'judge',
           system: 'You judge haiku. APPROVE good ones, else REVISE with a critique.',
           prompt: `Judge:\n${context.haiku}`,
-          allowedEvents: ['APPROVE', 'REVISE'] as const,
+          allowedEvents: ['APPROVE', 'REVISE'],
         }),
         onError: { target: 'sending' },
       },
@@ -273,7 +273,7 @@ const actorSources = {
 const result = await runAgent(haikuMachine, {
   input: { topic: 'state machines' },
   actorSources,
-  ...createAiSdkExecutors({ models }),
+  executors: createAiSdkExecutors({ models }),
 });
 ```
 
@@ -310,7 +310,7 @@ Because the shape carries no LLM assumptions, the same definition round-trips th
 
 ```ts
 const machine = setupAgent.fromConfig(workflowJson, { compileSchema });
-await runAgent(machine, { input, ...executors });
+await runAgent(machine, { input, executors });
 ```
 
 That closes the loop: **the machine is the portable artifact.** Prompts embedded or mapped, run whole or stepped by hand, authored in TypeScript or loaded as JSON — every combination drives the identical graph.

@@ -437,7 +437,7 @@ export async function main() {
     // Start the machine; it settles idle at the first interaction state.
     let result = await runAgent(emailDrafter, {
       input: undefined,
-      ...executors,
+      executors,
     });
 
     while (result.status === "idle") {
@@ -462,7 +462,7 @@ export async function main() {
       result = await runAgent(emailDrafter, {
         snapshot: result.snapshot,
         event: event as never,
-        ...executors,
+        executors,
       });
     }
 

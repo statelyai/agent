@@ -63,8 +63,10 @@ const machine = agent.createMachine({
 
 const result = await runAgent(machine, {
   input,
-  generateText: (request) => generateText(request), // any SDK
-  streamText: (request) => streamText(request),
+  executors: {
+    generateText: (request) => generateText(request), // any SDK
+    streamText: (request) => streamText(request),
+  },
 });
 ```
 
@@ -87,7 +89,7 @@ step = transitionAgentStep(machine, step, { type: 'REVISE', prompt: nextPrompt }
 ```ts
 const result = await runAgent(machine, {
   input,
-  generateText,
+  executors: { generateText },
   userInput: async (input) => showFormAndWaitForSubmit(input),
 });
 ```
@@ -258,7 +260,7 @@ The `generateText`/`streamText` executors accept the raw Vercel AI SDK functions
 ```ts
 import { generateText, streamText } from 'ai';
 
-await runAgent(machine, { input, generateText, streamText });
+await runAgent(machine, { input, executors: { generateText, streamText } });
 ```
 
 An `AgentTextRequest` is spread-compatible with the AI SDK's call options, and their result shapes are unwrapped natively: `generateText`'s `{ text }` and `streamText`'s `{ textStream }` (chunks reach `onChunk`, final text is `await result.text`).

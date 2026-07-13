@@ -186,7 +186,7 @@ export async function runAiSdkOrchestratorWorkerExample(
 ) {
   const result = await runAgent(aiSdkOrchestratorWorkerMachine, {
     input: { featureRequest: "Add settings page" },
-    ...createAiSdkExecutors({ models }),
+    executors: createAiSdkExecutors({ models }),
     onTransition: observe,
   });
   if (result.status !== "done") {

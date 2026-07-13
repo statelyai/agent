@@ -13,8 +13,7 @@ test("REPLY path: decide drafts a reply, settles idle, resumes on human APPROVE"
 
   const first = await runAgent(jsonAgentMachine, {
     input: { ticket: "My invoice total looks wrong." },
-    generateText,
-    decide,
+    executors: { generateText, decide },
   });
 
   expect(first.status).toBe("idle");
@@ -22,8 +21,7 @@ test("REPLY path: decide drafts a reply, settles idle, resumes on human APPROVE"
   const second = await runAgent(jsonAgentMachine, {
     snapshot: first.status === "idle" ? first.snapshot : undefined,
     event: { type: "APPROVE" },
-    generateText,
-    decide,
+    executors: { generateText, decide },
   });
 
   expect(second.status).toBe("done");
@@ -41,8 +39,7 @@ test("ESCALATE path: decide escalates directly, no reply drafted", async () => {
 
   const result = await runAgent(jsonAgentMachine, {
     input: { ticket: "This is unacceptable, get me a manager." },
-    generateText,
-    decide,
+    executors: { generateText, decide },
   });
 
   expect(result.status).toBe("done");

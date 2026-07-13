@@ -203,15 +203,26 @@ type AgentTraceEventPayload<TMachine extends AnyStateMachine = AnyStateMachine> 
     : never;
 
 /**
- * Options for {@link runAgent}. Extends {@link AgentRequestExecutors}
- * (`generateText` required; `streamText`/`decide` required only if the
- * machine actually uses streaming text / decisions — checked at bind time,
- * before any actor runs).
+ * Options for {@link runAgent}.
+ *
+ * Host executors are passed as a single {@link AgentRequestExecutors}-shaped
+ * set under `executors` (the same shape the step path takes). Each executor
+ * kind is required only if the machine actually reaches a request of that kind
+ * — checked at bind time, before any actor runs. The whole `executors` field is
+ * optional: a machine whose agent sources all carry their own executor
+ * (`.withExecutor(...)`) needs none.
  */
-export interface RunAgentOptions<TMachine extends AnyStateMachine>
-  extends
-    Partial<Pick<AgentRequestExecutors, "generateText">>,
-    Omit<AgentRequestExecutors, "generateText"> {
+export interface RunAgentOptions<TMachine extends AnyStateMachine> {
+  /**
+   * The host executor set backing the machine's agent actors — build it with
+   * `createAiSdkExecutors({ models })` from '@statelyai/agent/ai-sdk', or supply
+   * `{ generateText?, streamText?, decide? }` by hand. Every slot is optional
+   * here (unlike the step path's {@link AgentRequestExecutors}): each kind is
+   * bind-time-checked only when the machine actually reaches a request of that
+   * kind, so e.g. a stream-only machine may pass `{ streamText }` alone.
+   */
+  executors?: Partial<AgentRequestExecutors>;
+
   /** Machine input, passed straight to `createActor(machine, { input })`. Omit when resuming via `snapshot`. */
   input?: InputFrom<TMachine>;
 
@@ -1119,21 +1130,21 @@ function rebindChildMachine(
  *
  * @example
  * ```ts
- * let r = await runAgent(machine, { input, ...executors });
+ * const executors = createAiSdkExecutors({ models });
+ * let r = await runAgent(machine, { input, executors });
  * while (r.status === 'idle') {
  *   const event = await promptUser(getAcceptedEvents(r.snapshot));
- *   r = await runAgent(machine, { snapshot: r.snapshot, event, ...executors });
+ *   r = await runAgent(machine, { snapshot: r.snapshot, event, executors });
  * }
  * if (r.status !== 'done') throw new Error(`Run did not complete: ${r.status}`);
  * console.log(r.output);
  * ```
  *
- * The `generateText`/`streamText` executors accept the raw Vercel AI SDK
- * functions directly (`runAgent(machine, { generateText, streamText })` with
- * `generateText`/`streamText` imported from `ai`) — their `{ text }`/
- * `{ textStream }` results are unwrapped natively. `decide` cannot be a raw AI
- * SDK function: the tool-per-event mapping lives in an adapter — use
- * `createAiSdkExecutors` from '@statelyai/agent/ai-sdk'.
+ * The `executors`' `generateText`/`streamText` accept the raw Vercel AI SDK
+ * functions directly (`executors: { generateText, streamText }` with them
+ * imported from `ai`) — their `{ text }`/`{ textStream }` results are unwrapped
+ * natively. `decide` cannot be a raw AI SDK function: the tool-per-event mapping
+ * lives in an adapter — use `createAiSdkExecutors` from '@statelyai/agent/ai-sdk'.
  */
 export async function runAgent<TMachine extends AnyStateMachine>(
   machine: TMachine,
@@ -1214,16 +1225,16 @@ export async function runAgent<TMachine extends AnyStateMachine>(
   const effectiveSources = provided.implementations.actorSources as Record<string, AnyActorLogic>;
 
   assertBindable(provided, effectiveSources, {
-    hasGenerateText: !!options.generateText,
-    hasDecide: !!options.decide,
-    hasStreamText: !!options.streamText,
+    hasGenerateText: !!options.executors?.generateText,
+    hasDecide: !!options.executors?.decide,
+    hasStreamText: !!options.executors?.streamText,
   });
 
   const actorHolder: { actorRef: AnyActorRef | undefined } = { actorRef: undefined };
   const runCtx: RunAgentBindContext = {
-    generateText: options.generateText,
-    streamText: options.streamText,
-    decide: options.decide,
+    generateText: options.executors?.generateText,
+    streamText: options.executors?.streamText,
+    decide: options.executors?.decide,
     onChunk: options.onChunk,
     onResult: options.onResult,
     onTrace: onTrace as RunAgentBindContext["onTrace"],

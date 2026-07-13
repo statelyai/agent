@@ -143,16 +143,18 @@ export async function runAiSdkSubAgentsDemo(task: string) {
   const result = await runAgent(machine, {
     input: { task },
     onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
-    generateText: async (request) => {
-      const { output } = await generateText({
-        model,
-        system: request.system,
-        prompt: request.prompt ?? "",
-        tools: toAiSdkTools(request.tools ?? {}),
-        output: Output.object({ schema: answerSchema }),
-        stopWhen: stepCountIs(8),
-      });
-      return { output };
+    executors: {
+      generateText: async (request) => {
+        const { output } = await generateText({
+          model,
+          system: request.system,
+          prompt: request.prompt ?? "",
+          tools: toAiSdkTools(request.tools ?? {}),
+          output: Output.object({ schema: answerSchema }),
+          stopWhen: stepCountIs(8),
+        });
+        return { output };
+      },
     },
   });
   if (result.status !== "done") {
@@ -189,14 +191,16 @@ export async function runAiSdkSubAgentsDeterministicExample() {
 
   const result = await runAgent(machine, {
     input: { task: "compose agent note" },
-    generateText: async (request) => {
-      const notes = await executeTool(request.tools?.askResearcher, {
-        prompt: request.prompt,
-      });
-      const answer = await executeTool(request.tools?.askWriter, {
-        prompt: String(notes),
-      });
-      return { output: { answer: String(answer) } };
+    executors: {
+      generateText: async (request) => {
+        const notes = await executeTool(request.tools?.askResearcher, {
+          prompt: request.prompt,
+        });
+        const answer = await executeTool(request.tools?.askWriter, {
+          prompt: String(notes),
+        });
+        return { output: { answer: String(answer) } };
+      },
     },
   });
 

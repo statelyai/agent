@@ -286,7 +286,7 @@ export async function main() {
       question: "What is the capital of France?",
       topic: "geography",
     },
-    ...executors,
+    executors,
     onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
   });
 

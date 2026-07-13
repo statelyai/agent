@@ -15,9 +15,11 @@ test("parallel streaming requests are disambiguated by request.id in onChunk", a
 
   const { output, buffers } = await runParallelStreamsExample({
     input: { topic: "actors" },
-    // generateText is required by the type but unused here (both requests stream).
-    generateText: async () => ({ output: "" }),
-    streamText,
+    executors: {
+      // generateText is required by the type but unused here (both requests stream).
+      generateText: async () => ({ output: "" }),
+      streamText,
+    },
   });
 
   // onChunk routed each stream's chunks to the right buffer via request.id.

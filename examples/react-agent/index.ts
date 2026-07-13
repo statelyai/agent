@@ -335,7 +335,7 @@ export async function runReactAgentExample(
   const progress: string[] = [];
   const result = await runAgent(reactAgentMachine, {
     input: { question, maxSteps },
-    ...(generateText ? { generateText } : {}),
+    ...(generateText ? { executors: { generateText } } : {}),
     onTransition: (snapshot) => {
       const state = String(snapshot.value);
       progress.push(state);

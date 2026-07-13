@@ -7,14 +7,16 @@ test("supervisor routes a request to one typed specialist and composes the resul
   const seenModels: string[] = [];
   const output = await runSupervisorExample({
     input: { request: "Explain how event sourcing works." },
-    generateText: async (request: AgentTextRequest) => {
-      seenModels.push(request.model);
-      if (request.model === "supervisor") {
-        return {
-          output: { specialist: "researcher", reason: "informational question" },
-        };
-      }
-      return { output: `[${request.model}] answered: ${request.prompt}` };
+    executors: {
+      generateText: async (request: AgentTextRequest) => {
+        seenModels.push(request.model);
+        if (request.model === "supervisor") {
+          return {
+            output: { specialist: "researcher", reason: "informational question" },
+          };
+        }
+        return { output: `[${request.model}] answered: ${request.prompt}` };
+      },
     },
   });
 

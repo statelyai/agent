@@ -178,7 +178,7 @@ export const aiSdkMarketingChainMachine = agentSetup.createMachine({
 export async function runAiSdkMarketingChainExample() {
   const result = await runAgent(aiSdkMarketingChainMachine, {
     input: { product: "state machines" },
-    ...createAiSdkExecutors({ models }),
+    executors: createAiSdkExecutors({ models }),
     onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
     on: {
       EVALUATED: (e) =>

@@ -24,7 +24,7 @@ deciding: {
       model: 'quick',
       system: 'Ask one yes/no question at a time, but guess on the final turn.',
       prompt: `Questions remaining: ${context.questionsRemaining}`,
-      allowedEvents: ['ASK', 'GUESS'] as const,
+      allowedEvents: ['ASK', 'GUESS'],
     }),
     onError: { target: 'stumped' },  // retries exhausted
   },
@@ -112,7 +112,7 @@ const chooseMoveInput = ({ context }) => ({
   model: 'quick',
   system: 'You are playing a turn-based game. Choose exactly one legal move.',
   prompt: `Player HP: ${context.playerHp}\nEnemy HP: ${context.enemyHp}`,
-  allowedEvents: ['ATTACK', 'DEFEND', 'FLEE'] as const,
+  allowedEvents: ['ATTACK', 'DEFEND', 'FLEE'],
 });
 ```
 
@@ -150,7 +150,7 @@ planning: {
     input: ({ context }) => ({
       model: 'quick',
       prompt: renderCommand(context),
-      allowedEvents: ['ADD_TODO', 'TOGGLE_TODO', 'QUIT'] as const,
+      allowedEvents: ['ADD_TODO', 'TOGGLE_TODO', 'QUIT'],
       maxSteps: 8,                    // hard cap (default 8)
     }),
     onDone: { target: 'awaitingCommand' },  // output: { steps, stopped }

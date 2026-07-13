@@ -102,7 +102,7 @@ export function runMachineStream(
 ) {
   return runAgent(machine, {
     input: { topic: "agents" },
-    streamText,
+    executors: { streamText },
     onChunk: (chunk) => handlers.onChunk(chunk),
     onTransition: (snapshot) => handlers.onTransition(snapshot.value),
   });

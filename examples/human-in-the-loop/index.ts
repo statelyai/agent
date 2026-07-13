@@ -151,7 +151,7 @@ export async function runHumanInTheLoopExample(
   // Phase 1: draft, then settle idle at `reviewing`.
   const first = await runAgent(humanInTheLoopMachine, {
     input: { topic },
-    ...resolveExecutors(models, generateText ? { generateText } : undefined),
+    ...resolveExecutors(models, generateText ? { executors: { generateText } } : undefined),
     ...(onTransition ? { onTransition } : {}),
   });
 
@@ -170,7 +170,7 @@ export async function runHumanInTheLoopExample(
   const second = await runAgent(humanInTheLoopMachine, {
     snapshot: persisted,
     event: { type: "APPROVE" },
-    ...resolveExecutors(models, generateText ? { generateText } : undefined),
+    ...resolveExecutors(models, generateText ? { executors: { generateText } } : undefined),
     ...(onTransition ? { onTransition } : {}),
   });
 

@@ -378,7 +378,7 @@ export async function runTriageDemo(client: Anthropic, ticket: string) {
   const { generateText } = createAnthropicExecutors({ client, resolveModel: resolveDemoModel });
   const result = await runAgent(triageMachine, {
     input: { ticket },
-    generateText,
+    executors: { generateText },
     onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
   });
   if (result.status !== "done") {
@@ -405,8 +405,7 @@ export async function runTwentyQuestionsDemo(client: Anthropic) {
   });
   const result = await runAgent(twentyQuestionsMachine, {
     input: { questionsRemaining: 20 },
-    generateText,
-    decide,
+    executors: { generateText, decide },
     userInput: async ({ prompt }) => promptAnswer(prompt ?? ">"),
     onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
   });

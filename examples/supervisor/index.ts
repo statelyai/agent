@@ -197,7 +197,7 @@ runExampleMain(import.meta.url, async () => {
     const specialistsHit: string[] = [];
     const result = await runAgent(supervisorMachine, {
       input: { request },
-      ...executors,
+      executors,
       onTransition: ({ value }) => {
         const state = String(value);
         if ((SPECIALIST_STATES as readonly string[]).includes(state)) {

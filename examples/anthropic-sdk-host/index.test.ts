@@ -309,7 +309,7 @@ describe("createAnthropicExecutors + runAgent", () => {
     const { generateText } = createAnthropicExecutors({ client });
     const result = await runAgent(triageMachine, {
       input: { ticket: "My invoice is wrong and I am furious." },
-      generateText,
+      executors: { generateText },
     });
 
     expect(result.status).toBe("done");
@@ -339,8 +339,7 @@ describe("createAnthropicExecutors + runAgent", () => {
     const { generateText, decide } = createAnthropicExecutors({ client });
     const result = await runAgent(twentyQuestionsMachine, {
       input: { questionsRemaining: 1 },
-      generateText,
-      decide,
+      executors: { generateText, decide },
       userInput: async () => "correct",
     });
 

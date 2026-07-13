@@ -44,7 +44,7 @@ describe("context-compaction", () => {
     // so after turn 3 (6 messages) the window overflows and compaction runs.
     const result = await runAgent(contextCompactionMachine, {
       input: { maxMessages: 4, keepRecent: 2 },
-      generateText,
+      executors: { generateText },
       userInput: scriptedUserInput(["q1", "q2", "q3"]),
     });
 
@@ -67,7 +67,7 @@ describe("context-compaction", () => {
     // Same overflow-then-one-more-turn script: turn 4 runs after compaction.
     await runAgent(contextCompactionMachine, {
       input: { maxMessages: 4, keepRecent: 2 },
-      generateText,
+      executors: { generateText },
       userInput: scriptedUserInput(["q1", "q2", "q3", "q4"]),
     });
 
@@ -86,7 +86,7 @@ describe("context-compaction", () => {
 
     const result = await runAgent(contextCompactionMachine, {
       input: { maxMessages: 8, keepRecent: 4 },
-      generateText,
+      executors: { generateText },
       // One real turn, then exit immediately.
       userInput: scriptedUserInput(["hello", "exit"]),
     });

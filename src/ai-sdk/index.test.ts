@@ -434,6 +434,80 @@ describe("metadata.maxSteps (multi-step tool loops)", () => {
     expect(calls).toBe(1);
   });
 
+  test("generateText: populated tool set round-trips — schema-parsed input, execute invoked, result fed back, final output", async () => {
+    // The dogfood #3 pins: a text request carrying a real tool set (description
+    // + zod inputSchema + execute) is converted to AI SDK tools, the model's
+    // raw JSON tool input is validated/parsed to the typed object handed to
+    // `execute`, the tool result is fed back into the next model call, and the
+    // final assistant text resolves as `output`.
+    const executeInputs: unknown[] = [];
+    const secondCallMessages: unknown[] = [];
+    let calls = 0;
+    const usage = {
+      inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+      outputTokens: { total: 1, text: 1, reasoning: 0 },
+    };
+    const model = new MockLanguageModelV3({
+      doGenerate: async (options) => {
+        calls++;
+        if (calls === 1) {
+          return {
+            content: [
+              {
+                type: "tool-call" as const,
+                toolCallId: "call-1",
+                toolName: "calculate",
+                // Raw JSON string, as a provider returns it — the adapter must
+                // let the AI SDK validate/parse it against `inputSchema`.
+                input: JSON.stringify({ a: 42, b: 17 }),
+              },
+            ],
+            finishReason: { unified: "tool-calls" as const, raw: "tool_calls" },
+            usage,
+            warnings: [],
+          };
+        }
+        // Capture the second call's prompt to prove the tool result was fed back.
+        secondCallMessages.push(...((options.prompt ?? []) as unknown[]));
+        return {
+          content: [{ type: "text" as const, text: "42 times 17 is 714." }],
+          finishReason: { unified: "stop" as const, raw: "stop" },
+          usage,
+          warnings: [],
+        };
+      },
+    });
+    const { generateText } = createAiSdkExecutors({ models: { m: model } });
+
+    const result = await generateText({
+      model: "m",
+      prompt: "What is 42 times 17?",
+      metadata: { maxSteps: 5 },
+      tools: {
+        calculate: {
+          description: "Multiply two numbers.",
+          inputSchema: z.object({ a: z.number(), b: z.number() }),
+          execute: async (input) => {
+            executeInputs.push(input);
+            const { a, b } = input as { a: number; b: number };
+            return { product: a * b };
+          },
+        },
+      },
+    });
+
+    // Schema conversion + parse: execute got the typed, parsed object (numbers),
+    // not the raw JSON string.
+    expect(executeInputs).toEqual([{ a: 42, b: 17 }]);
+    // Fed back: the second model call's messages carry a tool result for the call.
+    const fedBack = JSON.stringify(secondCallMessages);
+    expect(fedBack).toContain("tool-result");
+    expect(fedBack).toContain("714");
+    // Final output resolution + loop actually ran twice.
+    expect(calls).toBe(2);
+    expect(result.output).toBe("42 times 17 is 714.");
+  });
+
   test("generateText honors metadata.maxSteps (symmetry check)", async () => {
     let calls = 0;
     const model = new MockLanguageModelV3({

@@ -109,7 +109,7 @@ describe("agent.plan (multi-event decision)", () => {
       { type: "NOTHING" },
     ]);
 
-    const result = await runAgent(createTodoAgent(), { decide });
+    const result = await runAgent(createTodoAgent(), { executors: { generateText: async () => ({ output: {} }), decide } });
 
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");
@@ -140,7 +140,7 @@ describe("agent.plan (multi-event decision)", () => {
       return { event: { type: "NOTHING" } };
     };
 
-    const result = await runAgent(createTodoAgent(), { decide });
+    const result = await runAgent(createTodoAgent(), { executors: { generateText: async () => ({ output: {} }), decide } });
 
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");
@@ -161,7 +161,7 @@ describe("agent.plan (multi-event decision)", () => {
       { type: "ADD_TODO", title: "5" },
     ]);
 
-    const result = await runAgent(createTodoAgent(), { decide });
+    const result = await runAgent(createTodoAgent(), { executors: { generateText: async () => ({ output: {} }), decide } });
 
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");
@@ -175,7 +175,7 @@ describe("agent.plan (multi-event decision)", () => {
       { type: "QUIT" },
     ]);
 
-    const result = await runAgent(createTodoAgent(), { decide });
+    const result = await runAgent(createTodoAgent(), { executors: { generateText: async () => ({ output: {} }), decide } });
 
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");
@@ -190,7 +190,7 @@ describe("agent.plan (multi-event decision)", () => {
       { type: "agent.plan.done" },
     ]);
 
-    const result = await runAgent(createTodoAgent(), { decide });
+    const result = await runAgent(createTodoAgent(), { executors: { generateText: async () => ({ output: {} }), decide } });
 
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");
@@ -250,9 +250,12 @@ describe("allowedEvents wildcards", () => {
   async function candidateTypes(allowedEvents: unknown) {
     let captured: string[] = [];
     const result = await runAgent(createNamespacedAgent(allowedEvents), {
-      decide: async (request) => {
+      executors: {
+        generateText: async () => ({ output: {} }),
+        decide: async (request) => {
         captured = request.events.map((event) => event.type);
         return { event: { type: "agent.plan.done" } };
+      },
       },
     });
     expect(result.status).toBe("done");

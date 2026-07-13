@@ -193,7 +193,10 @@ describe("curated XState setup examples", () => {
     // `deciding` state loops back to `telling` on TELL_ANOTHER and ends on END.
     const result = await runAgent(machine, {
       input: { topic: "state machines" },
-      decide: async () => ({ event: { type: decisions[decisionIndex++] ?? "END" } }),
+      executors: {
+        generateText: async () => ({ output: {} }),
+        decide: async () => ({ event: { type: decisions[decisionIndex++] ?? "END" } }),
+      },
     });
 
     expect(jokes).toBe(2);

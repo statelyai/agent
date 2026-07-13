@@ -16,7 +16,7 @@
  *   - `awaitingApproval`: an idle state — no invoke, nothing left to do
  *     until a human sends APPROVE/REJECT. `runAgent` settles
  *     `{ status: 'idle', snapshot }`; the host persists that snapshot and
- *     resumes with `runAgent(machine, { snapshot, event, ...executors })`.
+ *     resumes with `runAgent(machine, { snapshot, event, executors })`.
  *
  * `fromConfig(...)` requires a `compileSchema` option — the library does not
  * bundle a JSON Schema engine, so the config's JSON Schemas (context/events/
@@ -91,8 +91,7 @@ export async function runJsonAgentDemo(ticket: string) {
 
   let result = await runAgent(jsonAgentMachine, {
     input: { ticket },
-    generateText,
-    decide,
+    executors: { generateText, decide },
     onTransition,
   });
 
@@ -102,8 +101,7 @@ export async function runJsonAgentDemo(ticket: string) {
     result = await runAgent(jsonAgentMachine, {
       snapshot: result.snapshot,
       event: { type: "APPROVE" },
-      generateText,
-      decide,
+      executors: { generateText, decide },
       onTransition,
     });
   }

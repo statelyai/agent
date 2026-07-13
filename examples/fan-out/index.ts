@@ -223,8 +223,8 @@ export async function runFanOutExample(
   options?: RunAgentOptions<ReturnType<typeof createFanOutMachine>>,
   observe?: RunAgentOptions<ReturnType<typeof createFanOutMachine>>["onTransition"],
 ) {
-  const executors = resolveExecutors(models, options);
-  const generateText = executors.generateText;
+  const resolved = resolveExecutors(models, options);
+  const generateText = resolved.executors?.generateText;
   if (!generateText) {
     throw new Error("runFanOutExample requires a generateText executor.");
   }
@@ -233,9 +233,9 @@ export async function runFanOutExample(
   const result = await runAgent(machine, {
     input: { topic: "How does an LLM agent framework stay durable?" },
     // `observe` is the direct-run narrator; a caller's own `onTransition`
-    // (e.g. the test's mid-flight capture) in `executors` takes precedence.
+    // (e.g. the test's mid-flight capture) in `resolved` takes precedence.
     onTransition: observe,
-    ...executors,
+    ...resolved,
   });
   if (result.status !== "done") {
     throw new Error(`Fan-out example did not complete: ${result.status}`);

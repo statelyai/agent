@@ -62,7 +62,7 @@ const machine = agent.createMachine({
           model: 'quick',
           system: 'Decide whether this refund can be auto-approved.',
           prompt: `${context.request} (amount: $${context.amount})`,
-          allowedEvents: ['AUTO_APPROVE', 'NEEDS_REVIEW'] as const, // typo = compile error
+          allowedEvents: ['AUTO_APPROVE', 'NEEDS_REVIEW'], // typo = compile error
         }),
       },
       on: {
@@ -91,7 +91,7 @@ const executors = createAiSdkExecutors({ models });
 
 const result = await runAgent(machine, {
   input: { request: 'Refund my duplicate charge', amount: 5000 },
-  ...executors,
+  executors,
 });
 
 if (result.status === 'idle') {
@@ -100,7 +100,7 @@ if (result.status === 'idle') {
   const resumed = await runAgent(machine, {
     snapshot: result.snapshot,
     event: { type: 'APPROVE' },
-    ...executors,
+    executors,
   });
   if (resumed.status === 'done') console.log(resumed.output); // { refunded: true }
 }
@@ -127,7 +127,7 @@ const refundTool = tool({
   description: 'Process a refund through the approval workflow.',
   inputSchema: z.object({ request: z.string(), amount: z.number() }),
   execute: async (input) => {
-    const result = await runAgent(machine, { input, ...executors });
+    const result = await runAgent(machine, { input, executors });
     return result.status === 'done' ? result.output : { pending: true };
   },
 });

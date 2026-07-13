@@ -14,7 +14,8 @@ test("fan-out plans subtopics, spawns one branch per subtopic, and reduces all s
   const midFlight: { children: string[]; active: number }[] = [];
 
   const output = await runFanOutExample({
-    generateText: async (request: AgentTextRequest) => {
+    executors: {
+      generateText: async (request: AgentTextRequest) => {
       if (request.model === "planner") {
         return { output: { subtopics } };
       }
@@ -32,6 +33,7 @@ test("fan-out plans subtopics, spawns one branch per subtopic, and reduces all s
       assert.ok(request.prompt?.includes("summary of durability"));
       assert.ok(request.prompt?.includes("summary of resumption"));
       return { output: "composed digest" };
+      },
     },
     onTransition: (snapshot: AnyMachineSnapshot) => {
       if (JSON.stringify(snapshot.value) !== '"collecting"') {

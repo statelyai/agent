@@ -139,7 +139,7 @@ export async function runAiSdkRoutingExample(
 ) {
   const result = await runAgent(aiSdkRoutingMachine, {
     input: { query: "The app crashes on launch." },
-    ...createAiSdkExecutors({ models }),
+    executors: createAiSdkExecutors({ models }),
     onTransition: observe,
   });
   if (result.status !== "done") {

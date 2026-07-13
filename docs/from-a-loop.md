@@ -86,7 +86,7 @@ const machine = agentSetup.createMachine({
           model: 'quick',
           system: 'Decide whether this refund can be issued directly.',
           prompt: `${context.request} (amount: $${context.amount})`,
-          allowedEvents: ['REFUND', 'ESCALATE'] as const, // typo = compile error
+          allowedEvents: ['REFUND', 'ESCALATE'], // typo = compile error
         }),
       },
       on: {
@@ -129,7 +129,7 @@ const executors = createAiSdkExecutors({ models });
 
 const result = await runAgent(machine, {
   input: { request: 'Refund my duplicate charge', amount: 5000 },
-  ...executors,
+  executors,
 });
 
 if (result.status === 'idle') {
@@ -137,7 +137,7 @@ if (result.status === 'idle') {
   const resumed = await runAgent(machine, {
     snapshot: result.snapshot,
     event: { type: 'APPROVE' },
-    ...executors,
+    executors,
   });
   if (resumed.status === 'done') console.log(resumed.output); // { refunded: true }
 }

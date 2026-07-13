@@ -131,7 +131,7 @@ export async function runFileSnapshotStoreExample() {
   // ── Process 1: run to the first idle, checkpoint to disk. ──
   const first = await runAgent(draftMachine, {
     input: { topic: "release notes" },
-    generateText,
+    executors: { generateText },
   });
   assert.equal(first.status, "idle");
   await store.save(sessionId, first.snapshot);
@@ -140,7 +140,7 @@ export async function runFileSnapshotStoreExample() {
   const second = await runAgent(draftMachine, {
     snapshot: await store.load(sessionId),
     event: { type: "REJECT", reason: "too terse" },
-    generateText,
+    executors: { generateText },
   });
   // REJECT loops back through drafting to reviewing → idle again.
   assert.equal(second.status, "idle");
@@ -150,7 +150,7 @@ export async function runFileSnapshotStoreExample() {
   const third = await runAgent(draftMachine, {
     snapshot: await store.load(sessionId),
     event: { type: "APPROVE" },
-    generateText,
+    executors: { generateText },
   });
   assert.equal(third.status, "done");
   assert.deepEqual(third.status === "done" ? third.output : undefined, {
@@ -172,7 +172,7 @@ export async function main() {
   // Process 1: draft, settle idle at review, checkpoint to disk.
   const first = await runAgent(draftMachine, {
     input: { topic: "Launch of our new snapshot store" },
-    generateText,
+    executors: { generateText },
     onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
   });
   assert.equal(first.status, "idle");
@@ -184,7 +184,7 @@ export async function main() {
   const second = await runAgent(draftMachine, {
     snapshot: await store.load(sessionId),
     event: { type: "REJECT", reason: "make it punchier" },
-    generateText,
+    executors: { generateText },
     onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
   });
   assert.equal(second.status, "idle");
@@ -195,7 +195,7 @@ export async function main() {
   const third = await runAgent(draftMachine, {
     snapshot: await store.load(sessionId),
     event: { type: "APPROVE" },
-    generateText,
+    executors: { generateText },
     onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
   });
   if (third.status !== "done") {

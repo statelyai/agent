@@ -191,7 +191,7 @@ type ToolResult = PendingResult | DoneResult;
 // Executors: stand-ins for real model / side-effect calls. A host swaps these
 // for `createAiSdkExecutors({ models })` and a real refund side effect.
 const executors: RunAgentOptions<typeof refundMachine> = {
-  generateText: async () => ({ output: { valid: true } }),
+  executors: { generateText: async () => ({ output: { valid: true } }) },
 };
 
 function toToolResult(result: RunAgentResult<typeof refundMachine>): ToolResult {
@@ -259,7 +259,7 @@ export async function runMachineAsToolExample() {
 // the round-trip a real tool-calling loop performs, minus the human.
 export async function main() {
   const realExecutors: RunAgentOptions<typeof refundMachine> = {
-    ...createAiSdkExecutors({ models: { validator: openai("gpt-5.4-mini") } }),
+    executors: createAiSdkExecutors({ models: { validator: openai("gpt-5.4-mini") } }),
     onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
   };
 

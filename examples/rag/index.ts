@@ -247,7 +247,7 @@ export async function runRAGExample(options: RunRAGOptions = {}): Promise<RAGRes
 
   const result = await runAgent(ragMachine, {
     input: { question, memory },
-    ...(generateText ? { generateText } : {}),
+    ...(generateText ? { executors: { generateText } } : {}),
     ...(onTransition ? { onTransition } : {}),
   });
 

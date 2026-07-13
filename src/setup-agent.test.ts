@@ -1417,11 +1417,13 @@ describe("setupAgent", () => {
 
     const runResult = await runAgent(machine, {
       input: { prompt: "why run agents?" },
-      generateText: (request: AgentTextRequest & { tools: AgentTools }) => ({
+      executors: {
+        generateText: (request: AgentTextRequest & { tools: AgentTools }) => ({
         output: {
           answer: `Ran: ${request.prompt}`,
         },
       }),
+      },
     });
     expect(runResult.status).toBe("done");
     expect(runResult.status === "done" ? runResult.output : undefined).toEqual({
@@ -1608,7 +1610,9 @@ describe("setupAgent", () => {
 
     const result = await runAgent(machine, {
       input: { question: "Why statecharts?" },
-      generateText: async () => ({ output: { answer: "Because logic matters." } }),
+      executors: {
+        generateText: async () => ({ output: { answer: "Because logic matters." } }),
+      },
     });
 
     expect(result.status).toBe("done");
@@ -1892,7 +1896,9 @@ describe("setupAgent", () => {
 
     const result = await runAgent(machine, {
       input: { question: "Why statecharts?" },
-      generateText: async () => ({ output: { answer: "Because logic matters." } }),
+      executors: {
+        generateText: async () => ({ output: { answer: "Because logic matters." } }),
+      },
     });
 
     expect(result.status).toBe("done");
@@ -1956,10 +1962,12 @@ describe("setupAgent", () => {
 
     const result = await runAgent(machine, {
       input: {},
-      generateText: async () => ({ output: {} }),
-      decide: async (input) => {
+      executors: {
+        generateText: async () => ({ output: {} }),
+        decide: async (input) => {
         receivedInputs.push(input);
         return { event: { type: "GUESS", answer: "42" } };
+      },
       },
     });
 
@@ -2031,7 +2039,7 @@ describe("setupAgent", () => {
 
     const generateText = async () => ({ output: { draft: "Hello world." } });
 
-    const first = await runAgent(machine, { input: {}, generateText });
+    const first = await runAgent(machine, { input: {}, executors: { generateText } });
     expect(first.status).toBe("idle");
 
     const persisted = JSON.parse(JSON.stringify(first.status === "idle" ? first.snapshot : null));
@@ -2039,7 +2047,9 @@ describe("setupAgent", () => {
     const second = await runAgent(machine, {
       snapshot: persisted,
       event: { type: "APPROVE" },
-      generateText,
+      executors: {
+        generateText,
+      },
     });
 
     expect(second.status).toBe("done");
@@ -2460,10 +2470,12 @@ describe("decision live path (runAgent auto-delivery)", () => {
     // and the machine reaches `done-state`.
     const result = await runAgent(machine, {
       input: {},
-      generateText: async () => ({ output: {} }),
-      decide: async (): Promise<{ event: ChosenEvent }> => ({
+      executors: {
+        generateText: async () => ({ output: {} }),
+        decide: async (): Promise<{ event: ChosenEvent }> => ({
         event: { type: "ATTACK", target: "goblin" },
       }),
+      },
     });
 
     expect(result.status).toBe("done");
@@ -2552,8 +2564,10 @@ describe("inline agent.decide invoke (state-local decisions)", () => {
 
     const result = await runAgent(machine, {
       input: {},
-      generateText: async () => ({ output: {} }),
-      decide: async () => ({ event: { type: "ATTACK", target: "goblin" } }),
+      executors: {
+        generateText: async () => ({ output: {} }),
+        decide: async () => ({ event: { type: "ATTACK", target: "goblin" } }),
+      },
     });
 
     expect(result.status).toBe("done");

@@ -35,7 +35,7 @@ To detect suspension some other way, pass `isSuspended`. The default is `(s) => 
 ```ts
 await runAgent(machine, {
   input,
-  generateText,
+  executors: { generateText },
   isSuspended: (snapshot) => snapshot.matches('reviewing'),
 });
 ```
@@ -100,7 +100,7 @@ const machine = agentSetup.createMachine({
 The first `runAgent` runs the draft, reaches `reviewing`, and settles `idle`. Persist the snapshot, wait for the human, resume with `{ snapshot, event }`:
 
 ```ts
-const first = await runAgent(machine, { input: { topic: 'release notes' }, generateText });
+const first = await runAgent(machine, { input: { topic: 'release notes' }, executors: { generateText } });
 
 console.log(first.status);
 // logs 'idle'
@@ -111,7 +111,7 @@ const persisted = JSON.parse(JSON.stringify(first.snapshot));
 const second = await runAgent(machine, {
   snapshot: persisted,
   event: { type: 'APPROVE' },
-  generateText,
+  executors: { generateText },
 });
 
 console.log(second.status);
@@ -129,12 +129,12 @@ The snapshot is a plain, JSON-serializable object; the `JSON.stringify`/`JSON.pa
 ```ts
 import { getAcceptedEvents, runAgent } from '@statelyai/agent';
 
-let result = await runAgent(machine, { input, generateText });
+let result = await runAgent(machine, { input, executors: { generateText } });
 
 while (result.status === 'idle') {
   const choices = getAcceptedEvents(result.snapshot);
   const event = await promptUser(choices);
-  result = await runAgent(machine, { snapshot: result.snapshot, event, generateText });
+  result = await runAgent(machine, { snapshot: result.snapshot, event, executors: { generateText } });
 }
 
 if (result.status === 'done') {
@@ -173,7 +173,7 @@ Resuming with an event the restored state cannot take is a programmer error, so 
 import { IllegalResumeEventError, runAgent } from '@statelyai/agent';
 
 try {
-  await runAgent(machine, { snapshot, event: { type: 'NOPE' }, generateText });
+  await runAgent(machine, { snapshot, event: { type: 'NOPE' }, executors: { generateText } });
 } catch (error) {
   if (error instanceof IllegalResumeEventError) {
     // error.acceptedTypes lists what the restored state does accept
@@ -199,7 +199,7 @@ An unstamped snapshot (no `agentMeta`) is always accepted. Pass an explicit `mac
 
 ```ts
 try {
-  await runAgent(machine, { snapshot, event, generateText });
+  await runAgent(machine, { snapshot, event, executors: { generateText } });
 } catch (error) {
   if (error instanceof SnapshotVersionMismatchError) {
     // error.from / error.to — the machine changed since this snapshot was saved

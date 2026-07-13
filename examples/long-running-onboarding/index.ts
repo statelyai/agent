@@ -295,7 +295,7 @@ export async function runLongRunningOnboardingExample(
 
   const first = await runAgent(longRunningOnboardingMachine, {
     input: { employee },
-    ...resolveExecutors(models, options.generateText ? { generateText: options.generateText } : undefined),
+    ...resolveExecutors(models, options.generateText ? { executors: { generateText: options.generateText } } : undefined),
     ...(options.onTransition ? { onTransition: options.onTransition } : {}),
   });
   if (first.status !== "idle") {
@@ -309,7 +309,7 @@ export async function runLongRunningOnboardingExample(
   const second = await runAgent(longRunningOnboardingMachine, {
     snapshot: persistedAfterWelcome,
     event: { type: "DOCS_SIGNED", signedAt: "2026-07-20" },
-    ...resolveExecutors(models, options.generateText ? { generateText: options.generateText } : undefined),
+    ...resolveExecutors(models, options.generateText ? { executors: { generateText: options.generateText } } : undefined),
     ...(options.onTransition ? { onTransition: options.onTransition } : {}),
   });
   if (second.status !== "idle") {
@@ -323,7 +323,7 @@ export async function runLongRunningOnboardingExample(
   const third = await runAgent(longRunningOnboardingMachine, {
     snapshot: persistedAfterProvisioning,
     event: { type: "HARDWARE_DELIVERED", deliveredAt: "2026-07-28" },
-    ...resolveExecutors(models, options.generateText ? { generateText: options.generateText } : undefined),
+    ...resolveExecutors(models, options.generateText ? { executors: { generateText: options.generateText } } : undefined),
     ...(options.onTransition ? { onTransition: options.onTransition } : {}),
   });
   if (third.status !== "done") {

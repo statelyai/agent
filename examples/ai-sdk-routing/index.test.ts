@@ -7,18 +7,20 @@ test("AI SDK routing maps to an explicit machine", async () => {
   const routedModels: string[] = [];
   const result = await runAgent(aiSdkRoutingMachine, {
     input: { query: "The app crashes on launch." },
-    generateText: async (request) => {
-      if (request.prompt?.startsWith("Classify this customer query:")) {
-        return {
-          output: {
-            reasoning: "needs troubleshooting",
-            type: "technical",
-            complexity: "complex",
-          },
-        };
-      }
-      routedModels.push(request.model);
-      return { output: `technical:${request.prompt}` };
+    executors: {
+      generateText: async (request) => {
+        if (request.prompt?.startsWith("Classify this customer query:")) {
+          return {
+            output: {
+              reasoning: "needs troubleshooting",
+              type: "technical",
+              complexity: "complex",
+            },
+          };
+        }
+        routedModels.push(request.model);
+        return { output: `technical:${request.prompt}` };
+      },
     },
   });
   assert.deepEqual(routedModels, ["complexAnswerer"]);

@@ -191,7 +191,7 @@ export async function runPlanAndExecuteExample(
 
 runExampleMain(import.meta.url, async () => {
   const output = await runPlanAndExecuteExample({
-    ...createAiSdkExecutors({ models }),
+    executors: createAiSdkExecutors({ models }),
     onTransition: (snapshot) =>
       console.log(
         "[state]",

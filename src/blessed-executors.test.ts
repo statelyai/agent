@@ -57,7 +57,9 @@ describe("blessed AI SDK executors", () => {
 
     const result = await runAgent(machine, {
       input: { prompt: "hi" },
-      generateText,
+      executors: {
+        generateText,
+      },
     });
     expect(result.status).toBe("done");
     expect(result.status === "done" ? result.output : undefined).toEqual({ result: "hello" });
@@ -103,10 +105,11 @@ describe("blessed AI SDK executors", () => {
     const chunks: string[] = [];
     const result = await runAgent(machine, {
       input: { prompt: "hi" },
-      // generateText required by the type but unused for this stream-only machine.
-      generateText: async () => ({ output: "" }),
-      streamText,
       onChunk: (chunk) => chunks.push(chunk),
+      executors: {
+        generateText: async () => ({ output: "" }),
+        streamText,
+      },
     });
 
     expect(result.status).toBe("done");
@@ -123,7 +126,9 @@ describe("blessed AI SDK executors", () => {
 
     const result = await runAgent(machine, {
       input: { prompt: "q" },
-      generateText,
+      executors: {
+        generateText,
+      },
     });
     expect(result.status).toBe("done");
     expect(result.status === "done" ? result.output : undefined).toEqual({
@@ -140,7 +145,9 @@ describe("blessed AI SDK executors", () => {
 
     const result = await runAgent(machine, {
       input: { prompt: "q" },
-      generateText,
+      executors: {
+        generateText,
+      },
     });
     expect(result.status).toBe("error");
     expect(String(result.status === "error" ? result.error : "")).toMatch(
@@ -155,7 +162,9 @@ describe("blessed AI SDK executors", () => {
 
     const result = await runAgent(machine, {
       input: { prompt: "q" },
-      generateText,
+      executors: {
+        generateText,
+      },
     });
     expect(result.status).toBe("error");
     expect(String(result.status === "error" ? result.error : "")).toMatch(

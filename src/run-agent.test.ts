@@ -67,7 +67,9 @@ describe("runAgent", () => {
 
     const result = await runAgent(machine, {
       input: { prompt: "why state machines?" },
-      generateText,
+      executors: {
+        generateText,
+      },
     });
 
     expect(result.status).toBe("done");
@@ -125,7 +127,9 @@ describe("runAgent", () => {
 
     const first = await runAgent(machine, {
       input: { prompt: "release notes" },
-      generateText,
+      executors: {
+        generateText,
+      },
     });
 
     expect(first.status).toBe("idle");
@@ -137,7 +141,9 @@ describe("runAgent", () => {
     const second = await runAgent(machine, {
       snapshot: first.snapshot,
       event: { type: "APPROVE" },
-      generateText,
+      executors: {
+        generateText,
+      },
     });
 
     expect(second.status).toBe("done");
@@ -226,7 +232,9 @@ describe("runAgent", () => {
 
     const first = await runAgent(machine, {
       input: { topic: "incident recap" },
-      generateText,
+      executors: {
+        generateText,
+      },
     });
     expect(first.status).toBe("idle");
     if (first.status !== "idle") throw new Error("expected idle");
@@ -239,7 +247,9 @@ describe("runAgent", () => {
     const second = await runAgent(machine, {
       snapshot: persisted,
       event: { type: "APPROVE" },
-      generateText,
+      executors: {
+        generateText,
+      },
     });
 
     expect(second.status).toBe("done");
@@ -254,7 +264,9 @@ describe("runAgent", () => {
     const third = await runAgent(machine, {
       snapshot: persisted,
       event: { type: "REJECT" },
-      generateText,
+      executors: {
+        generateText,
+      },
     });
     expect(third.status).toBe("idle");
     expect(sideEffectRuns).toBe(1); // audit STILL exactly once
@@ -315,8 +327,10 @@ describe("runAgent", () => {
 
     const result = await runAgent(machine, {
       input: {},
-      generateText: async () => ({ output: {} }),
-      decide,
+      executors: {
+        generateText: async () => ({ output: {} }),
+        decide,
+      },
     });
 
     expect(result.status).toBe("done");
@@ -363,9 +377,11 @@ describe("runAgent", () => {
     const result = await runAgent(machine, {
       input: {},
       maxModelCalls: 3,
-      generateText: async () => {
+      executors: {
+        generateText: async () => {
         calls += 1;
         return { output: calls };
+      },
       },
     });
 
@@ -401,7 +417,9 @@ describe("runAgent", () => {
     const result = await runAgent(machine, {
       input: {},
       signal: controller.signal,
-      generateText: async () => ({ output: {} }),
+      executors: {
+        generateText: async () => ({ output: {} }),
+      },
     });
 
     expect(result.status).toBe("error");
@@ -434,10 +452,12 @@ describe("runAgent", () => {
     const resultPromise = runAgent(machine, {
       input: {},
       signal: controller.signal,
-      generateText: () =>
+      executors: {
+        generateText: () =>
         new Promise((resolveExec) => {
           setTimeout(() => resolveExec({ output: {} }), 50);
         }),
+      },
     });
     setTimeout(() => controller.abort(), 5);
 
@@ -470,8 +490,10 @@ describe("runAgent", () => {
 
     const result = await runAgent(machine, {
       input: {},
-      generateText: async () => {
+      executors: {
+        generateText: async () => {
         throw new Error("boom");
+      },
       },
     });
 
@@ -513,7 +535,9 @@ describe("runAgent", () => {
       });
 
       const result = await runAgent(machine, {
-        generateText: async () => ({ output: {} }),
+        executors: {
+          generateText: async () => ({ output: {} }),
+        },
       });
       expect(result.status).toBe("done");
     });
@@ -539,7 +563,7 @@ describe("runAgent", () => {
       });
 
       await expect(
-        runAgent(machine, { input: {}, generateText: async () => ({ output: {} }) }),
+        runAgent(machine, { input: {}, executors: { generateText: async () => ({ output: {} }) } }),
       ).rejects.toThrow(/chooseMove/);
     });
 
@@ -568,7 +592,9 @@ describe("runAgent", () => {
 
       const result = await runAgent(machine, {
         input: {},
-        generateText: async () => ({ output: {} }),
+        executors: {
+          generateText: async () => ({ output: {} }),
+        },
       });
 
       expect(result.status).toBe("idle");
@@ -594,7 +620,7 @@ describe("runAgent", () => {
       });
 
       await expect(
-        runAgent(machine, { input: undefined, generateText: async () => ({ output: {} }) }),
+        runAgent(machine, { input: undefined, executors: { generateText: async () => ({ output: {} }) } }),
       ).rejects.toThrow(/notRegistered/);
     });
 
@@ -625,7 +651,7 @@ describe("runAgent", () => {
       });
 
       await expect(
-        runAgent(machine, { input: {}, generateText: async () => ({ output: {} }) }),
+        runAgent(machine, { input: {}, executors: { generateText: async () => ({ output: {} }) } }),
       ).rejects.toThrow(/streamSummary/);
     });
 
@@ -653,7 +679,7 @@ describe("runAgent", () => {
       });
 
       await expect(
-        runAgent(machine, { generateText: async () => ({ output: {} }) }),
+        runAgent(machine, { executors: { generateText: async () => ({ output: {} }) } }),
       ).rejects.toThrow(/direct-object/);
     });
 
@@ -749,9 +775,9 @@ describe("runAgent", () => {
 
         const result = await runAgent(parentMachine, {
           input: { topic: "agents" },
-          // The child's `researchTopic` request has no executor of its own; it
-          // inherits THIS generateText via runAgent's host-backed wrapper.
-          generateText: async ({ prompt }) => ({ output: `parent-ran: ${prompt}` }),
+          executors: {
+            generateText: async ({ prompt }) => ({ output: `parent-ran: ${prompt}` }),
+          },
         });
 
         expect(result.status).toBe("done");
@@ -765,14 +791,13 @@ describe("runAgent", () => {
 
         let parentCalls = 0;
         const result = await runAgent(parentMachine, {
-          // Explicit binding shadows inheritance: the child's own bound
-          // executor runs the request, so this parent generateText is never
-          // called for it.
-          generateText: async () => {
+          input: { topic: "agents" },
+          executors: {
+            generateText: async () => {
             parentCalls += 1;
             return { output: "unused" };
           },
-          input: { topic: "agents" },
+          },
         });
 
         expect(result.status).toBe("done");
@@ -825,7 +850,9 @@ describe("runAgent", () => {
         // generateText through parent > mid > grandchild (all string-keyed).
         const result = await runAgent(parentMachine, {
           input: { topic: "agents" },
-          generateText: async ({ prompt }) => ({ output: `depth: ${prompt}` }),
+          executors: {
+            generateText: async ({ prompt }) => ({ output: `depth: ${prompt}` }),
+          },
         });
 
         expect(result.status).toBe("done");
@@ -871,7 +898,9 @@ describe("runAgent", () => {
         const result = await runAgent(selfMachine, {
           input: { n: 0 },
           signal: AbortSignal.abort(),
-          generateText: async () => ({ output: "x" }),
+          executors: {
+            generateText: async () => ({ output: "x" }),
+          },
         });
         expect(["done", "idle", "error"]).toContain(result.status);
       });
@@ -884,8 +913,10 @@ describe("runAgent", () => {
         const trace: AgentTraceEvent<typeof parentMachine>[] = [];
         const ok = await runAgent(parentMachine, {
           input: { topic: "agents" },
-          generateText: async () => ({ output: "y" }),
           onTrace: (event) => trace.push(event),
+          executors: {
+            generateText: async () => ({ output: "y" }),
+          },
         });
         expect(ok.status).toBe("done");
         expect(
@@ -899,7 +930,9 @@ describe("runAgent", () => {
         const capped = await runAgent(parentMachine, {
           input: { topic: "agents" },
           maxModelCalls: 0,
-          generateText: async () => ({ output: "y" }),
+          executors: {
+            generateText: async () => ({ output: "y" }),
+          },
         });
         expect(capped.status).toBe("error");
         expect(capped.status === "error" ? capped.cause : undefined).toBe("max-model-calls");
@@ -945,7 +978,9 @@ describe("runAgent", () => {
         await expect(
           runAgent(parentMachine, {
             input: { topic: "agents" },
-            generateText: async () => ({ output: "x" }),
+            executors: {
+              generateText: async () => ({ output: "x" }),
+            },
           }),
         ).rejects.toThrow(/child machine.*streamText/s);
       });
@@ -966,7 +1001,9 @@ describe("runAgent", () => {
 
     const result = await runAgent(machine, {
       input: undefined,
-      generateText: async () => ({ output: {} }),
+      executors: {
+        generateText: async () => ({ output: {} }),
+      },
     });
 
     expect(result.status).toBe("done");
@@ -986,9 +1023,11 @@ describe("runAgent", () => {
     const result = await runAgent(machine, {
       input: undefined,
       event: { type: "GO" },
-      generateText: async () => ({ output: {} }),
       onTransition: (_snapshot, event) => {
         seenEventTypes.push(event.type);
+      },
+      executors: {
+        generateText: async () => ({ output: {} }),
       },
     });
 
@@ -1032,10 +1071,12 @@ describe("runAgent", () => {
 
     const result = await runAgent(machine, {
       input: {},
-      generateText: async () => ({ output: {} }),
       userInput: async (input) => {
         expect(input).toEqual(expect.objectContaining({ prompt: "How was it?" }));
         return { feedback: "great" };
+      },
+      executors: {
+        generateText: async () => ({ output: {} }),
       },
     });
 
@@ -1089,8 +1130,10 @@ describe("runAgent", () => {
 
       const result = await runAgent(machine, {
         input: {},
-        generateText: async () => ({ output: {} }),
-        decide,
+        executors: {
+          generateText: async () => ({ output: {} }),
+          decide,
+        },
       });
 
       expect(result.status).toBe("done");
@@ -1137,8 +1180,10 @@ describe("runAgent", () => {
 
       const result = await runAgent(machine, {
         input: {},
-        generateText: async () => ({ output: {} }),
-        decide,
+        executors: {
+          generateText: async () => ({ output: {} }),
+          decide,
+        },
       });
 
       expect(result.status).toBe("done");
@@ -1187,8 +1232,10 @@ describe("runAgent", () => {
 
       const result = await runAgent(machine, {
         input: {},
-        generateText: async () => ({ output: {} }),
-        decide,
+        executors: {
+          generateText: async () => ({ output: {} }),
+          decide,
+        },
       });
 
       expect(result.status).toBe("done");
@@ -1258,12 +1305,14 @@ describe("runAgent", () => {
     let attackEventsObserved = 0;
     const result = await runAgent(machine, {
       input: {},
-      generateText: async () => ({ output: {} }),
-      decide: async () => ({ event: { type: "ATTACK" } }),
       onTransition: (_snapshot, event) => {
         if (event.type === "ATTACK") {
           attackEventsObserved += 1;
         }
+      },
+      executors: {
+        generateText: async () => ({ output: {} }),
+        decide: async () => ({ event: { type: "ATTACK" } }),
       },
     });
 
@@ -1314,8 +1363,10 @@ describe("runAgent", () => {
 
     const result = await runAgent(machine, {
       input: {},
-      generateText: async () => ({ output: {} }),
-      decide: async (): Promise<{ event: ChosenEvent }> => ({ event: { type: "NOTE" } }),
+      executors: {
+        generateText: async () => ({ output: {} }),
+        decide: async (): Promise<{ event: ChosenEvent }> => ({ event: { type: "NOTE" } }),
+      },
     });
 
     expect(result.status).toBe("done");
@@ -1390,8 +1441,10 @@ describe("runAgent", () => {
 
     const result = await runAgent(parentMachine, {
       input: {},
-      generateText: async () => ({ output: {} }),
-      decide: async (): Promise<{ event: ChosenEvent }> => ({ event: { type: "ATTACK" } }),
+      executors: {
+        generateText: async () => ({ output: {} }),
+        decide: async (): Promise<{ event: ChosenEvent }> => ({ event: { type: "ATTACK" } }),
+      },
     });
 
     expect(result.status).toBe("done");
@@ -1471,7 +1524,9 @@ describe("agent.userInput as a pending placeholder (durable parallel HITL)", () 
   test("a sibling region finishes its model call, then the run settles idle with the pending user input", async () => {
     const result = await runAgent(machine, {
       input: {},
-      generateText: async () => ({ output: "a summary" }),
+      executors: {
+        generateText: async () => ({ output: "a summary" }),
+      },
     });
 
     expect(result.status).toBe("idle");
@@ -1485,7 +1540,9 @@ describe("agent.userInput as a pending placeholder (durable parallel HITL)", () 
   test("the persisted snapshot JSON round-trips and resumes with a userInput handler to done", async () => {
     const first = await runAgent(machine, {
       input: {},
-      generateText: async () => ({ output: "a summary" }),
+      executors: {
+        generateText: async () => ({ output: "a summary" }),
+      },
     });
     if (first.status !== "idle" || !first.persistedSnapshot) {
       throw new Error("expected idle with persistedSnapshot");
@@ -1495,12 +1552,14 @@ describe("agent.userInput as a pending placeholder (durable parallel HITL)", () 
 
     const second = await runAgent(machine, {
       snapshot: stored,
-      generateText: async () => {
-        throw new Error("no model call expected on resume");
-      },
       userInput: async (input) => {
         expect(input).toEqual({ prompt: "Feedback?" });
         return { feedback: "ship it" };
+      },
+      executors: {
+        generateText: async () => {
+        throw new Error("no model call expected on resume");
+      },
       },
     });
 
@@ -1512,7 +1571,9 @@ describe("agent.userInput as a pending placeholder (durable parallel HITL)", () 
   test("resuming without a handler settles idle again with the same pending input", async () => {
     const first = await runAgent(machine, {
       input: {},
-      generateText: async () => ({ output: "a summary" }),
+      executors: {
+        generateText: async () => ({ output: "a summary" }),
+      },
     });
     if (first.status !== "idle" || !first.persistedSnapshot) {
       throw new Error("expected idle with persistedSnapshot");
@@ -1520,7 +1581,9 @@ describe("agent.userInput as a pending placeholder (durable parallel HITL)", () 
 
     const again = await runAgent(machine, {
       snapshot: JSON.parse(JSON.stringify(first.persistedSnapshot)),
-      generateText: async () => ({ output: "unused" }),
+      executors: {
+        generateText: async () => ({ output: "unused" }),
+      },
     });
 
     expect(again.status).toBe("idle");
@@ -1574,10 +1637,12 @@ describe("emitted events (runAgent `on`)", () => {
 
     const result = await runAgent(machine, {
       input: { topic: "rivers" },
-      generateText: async () => ({ output: "a draft" }),
       on: {
         DRAFTING_STARTED: (emitted) => started.push(emitted.topic),
         DRAFTED: (emitted) => drafted.push(emitted.length),
+      },
+      executors: {
+        generateText: async () => ({ output: "a draft" }),
       },
     });
 
@@ -1591,8 +1656,10 @@ describe("emitted events (runAgent `on`)", () => {
 
     await runAgent(machine, {
       input: { topic: "rivers" },
-      generateText: async () => ({ output: "a draft" }),
       on: { "*": (emitted) => seen.push(emitted.type) },
+      executors: {
+        generateText: async () => ({ output: "a draft" }),
+      },
     });
 
     expect(seen).toEqual(["DRAFTING_STARTED", "DRAFTED"]);
@@ -1603,8 +1670,10 @@ describe("emitted events (runAgent `on`)", () => {
 
     const result = await runAgent(machine, {
       input: { topic: "rivers" },
-      generateText: async () => ({ output: "a draft", usage: { totalTokens: 3 } }),
       onTrace: (event) => trace.push(event),
+      executors: {
+        generateText: async () => ({ output: "a draft", usage: { totalTokens: 3 } }),
+      },
     });
 
     expect(result.status).toBe("done");
@@ -1665,12 +1734,15 @@ describe("onTrace stream chunks", () => {
 
     const trace: AgentTraceEvent<typeof machine>[] = [];
     const result = await runAgent(machine, {
-      streamText: async (_request, info) => {
+      onTrace: (event) => trace.push(event),
+      executors: {
+        generateText: async () => ({ output: {} }),
+        streamText: async (_request, info) => {
         info?.onChunk?.("a");
         info?.onChunk?.("b");
         return { output: "ab" };
       },
-      onTrace: (event) => trace.push(event),
+      },
     });
 
     expect(result.status).toBe("done");
@@ -1716,12 +1788,14 @@ describe("onResult raw pass-through", () => {
 
     const raws: unknown[] = [];
     const result = await runAgent(machine, {
-      generateText: async () => ({
+      onResult: (_request, { raw }) => raws.push(raw),
+      executors: {
+        generateText: async () => ({
         output: "42",
         usage: { inputTokens: 7, outputTokens: 3 },
         finishReason: "stop",
       }),
-      onResult: (_request, { raw }) => raws.push(raw),
+      },
     });
 
     expect(result.status).toBe("done");
@@ -1774,7 +1848,6 @@ describe("inspect passthrough (system-wide visibility)", () => {
     const inspected: Array<{ actorId: string; value: unknown }> = [];
 
     const result = await runAgent(parent, {
-      generateText: async () => ({ output: "" }),
       onTransition: (snapshot) => rootTransitions.push(JSON.stringify(snapshot.value)),
       inspect: (event) => {
         if (event.type !== "@xstate.transition") return;
@@ -1784,6 +1857,9 @@ describe("inspect passthrough (system-wide visibility)", () => {
           actorId: (event.actorRef as { id?: string }).id ?? "",
           value: snapshot.value,
         });
+      },
+      executors: {
+        generateText: async () => ({ output: "" }),
       },
     });
 
@@ -1824,7 +1900,9 @@ describe("Feature A: explicit suspension detection (WAIT_TAG / isSuspended)", ()
 
     const first = await runAgent(machine, {
       input: {},
-      generateText: async () => ({ output: {} }),
+      executors: {
+        generateText: async () => ({ output: {} }),
+      },
     });
     expect(first.status).toBe("idle");
     if (first.status !== "idle") throw new Error("expected idle");
@@ -1833,7 +1911,9 @@ describe("Feature A: explicit suspension detection (WAIT_TAG / isSuspended)", ()
     const second = await runAgent(machine, {
       snapshot: first.snapshot,
       event: { type: "APPROVE" },
-      generateText: async () => ({ output: {} }),
+      executors: {
+        generateText: async () => ({ output: {} }),
+      },
     });
     expect(second.status).toBe("done");
     expect(second.status === "done" ? second.output : undefined).toEqual({ approved: true });
@@ -1883,11 +1963,10 @@ describe("Feature A: explicit suspension detection (WAIT_TAG / isSuspended)", ()
 
     const result = await runAgent(machine, {
       input: {},
-      // Async model call: if the WAIT_TAG region settled the run early, the
-      // summary would still be null. It must be present, proving the sibling
-      // work completed before the idle settle.
-      generateText: () =>
+      executors: {
+        generateText: () =>
         new Promise((res) => setTimeout(() => res({ output: "done-summary" }), 10)),
+      },
     });
 
     expect(result.status).toBe("idle");
@@ -1915,10 +1994,12 @@ describe("Feature A: explicit suspension detection (WAIT_TAG / isSuspended)", ()
     const seen: string[] = [];
     const result = await runAgent(machine, {
       input: {},
-      generateText: async () => ({ output: {} }),
       isSuspended: (snapshot) => {
         seen.push(JSON.stringify(snapshot.value));
         return snapshot.matches("paused");
+      },
+      executors: {
+        generateText: async () => ({ output: {} }),
       },
     });
 
@@ -1947,7 +2028,9 @@ describe("Feature A: explicit suspension detection (WAIT_TAG / isSuspended)", ()
 
     const result = await runAgent(machine, {
       input: {},
-      generateText: async () => ({ output: {} }),
+      executors: {
+        generateText: async () => ({ output: {} }),
+      },
     });
     expect(result.status).toBe("idle");
     expect(result.status === "idle" ? result.snapshot.value : undefined).toBe("reviewing");
@@ -1980,7 +2063,7 @@ describe("Feature B: illegal resume event throws", () => {
   const generateText = async () => ({ output: {} });
 
   test("resuming with an event the restored state cannot take throws IllegalResumeEventError with acceptedTypes", async () => {
-    const first = await runAgent(machine, { input: {}, generateText });
+    const first = await runAgent(machine, { input: {}, executors: { generateText } });
     expect(first.status).toBe("idle");
     if (first.status !== "idle") throw new Error("expected idle");
 
@@ -1989,7 +2072,9 @@ describe("Feature B: illegal resume event throws", () => {
       await runAgent(machine, {
         snapshot: first.snapshot,
         event: { type: "NOPE" } as never,
-        generateText,
+        executors: {
+          generateText,
+        },
       });
     } catch (error) {
       caught = error;
@@ -2002,14 +2087,16 @@ describe("Feature B: illegal resume event throws", () => {
   });
 
   test("onIllegalResumeEvent: 'ignore' restores the older silent-drop behavior", async () => {
-    const first = await runAgent(machine, { input: {}, generateText });
+    const first = await runAgent(machine, { input: {}, executors: { generateText } });
     if (first.status !== "idle") throw new Error("expected idle");
 
     const second = await runAgent(machine, {
       snapshot: first.snapshot,
       event: { type: "NOPE" } as never,
       onIllegalResumeEvent: "ignore",
-      generateText,
+      executors: {
+        generateText,
+      },
     });
 
     // No throw: the event is silently dropped and the run settles idle again.
@@ -2018,7 +2105,7 @@ describe("Feature B: illegal resume event throws", () => {
   });
 
   test("a type-legal event a guard rejects does not throw (settles per normal semantics)", async () => {
-    const first = await runAgent(machine, { input: {}, generateText });
+    const first = await runAgent(machine, { input: {}, executors: { generateText } });
     if (first.status !== "idle") throw new Error("expected idle");
 
     // SUBMIT is a declared, type-legal event; its guard rejects it here. This
@@ -2026,7 +2113,9 @@ describe("Feature B: illegal resume event throws", () => {
     const second = await runAgent(machine, {
       snapshot: first.snapshot,
       event: { type: "SUBMIT" },
-      generateText,
+      executors: {
+        generateText,
+      },
     });
 
     expect(second.status).toBe("idle");
@@ -2076,8 +2165,10 @@ describe("runAgent error cause split", () => {
   test("unhandled DecisionExhaustedError settles cause 'decision-exhausted'", async () => {
     const result = await runAgent(exhaustingDecisionMachine(false), {
       input: {},
-      generateText: async () => ({ output: {} }),
-      decide: alwaysUnknown,
+      executors: {
+        generateText: async () => ({ output: {} }),
+        decide: alwaysUnknown,
+      },
     });
 
     expect(result.status).toBe("error");
@@ -2087,8 +2178,10 @@ describe("runAgent error cause split", () => {
   test("a DecisionExhaustedError handled by onError does NOT settle an error", async () => {
     const result = await runAgent(exhaustingDecisionMachine(true), {
       input: {},
-      generateText: async () => ({ output: {} }),
-      decide: alwaysUnknown,
+      executors: {
+        generateText: async () => ({ output: {} }),
+        decide: alwaysUnknown,
+      },
     });
 
     // onError routed it to `fumbled` — the run settles idle, not error.
@@ -2118,8 +2211,10 @@ describe("runAgent error cause split", () => {
 
     const result = await runAgent(machine, {
       input: {},
-      generateText: async () => {
+      executors: {
+        generateText: async () => {
         throw new Error("boom");
+      },
       },
     });
 
@@ -2153,7 +2248,9 @@ describe("runAgent dev-mode serialization guard", () => {
     try {
       const result = await runAgent(machine, {
         input: {},
-        generateText: async () => ({ output: {} }),
+        executors: {
+          generateText: async () => ({ output: {} }),
+        },
       });
       expect(result.status).toBe("idle");
     } finally {
@@ -2187,7 +2284,7 @@ describe("runAgent dev-mode serialization guard", () => {
       warnings.push(args.map(String).join(" "));
     };
     try {
-      await runAgent(machine, { input: {}, generateText: async () => ({ output: {} }) });
+      await runAgent(machine, { input: {}, executors: { generateText: async () => ({ output: {} }) } });
     } finally {
       console.warn = original;
     }
@@ -2235,13 +2332,15 @@ describe("runAgentToCompletion", () => {
 
   test("done: resolves with the machine output", async () => {
     const machine = buildDraftMachine();
-    const first = await runAgent(machine, { input: { prompt: "notes" }, generateText });
+    const first = await runAgent(machine, { input: { prompt: "notes" }, executors: { generateText } });
     if (first.status !== "idle") throw new Error("expected idle");
 
     const output = await runAgentToCompletion(machine, {
       snapshot: first.snapshot,
       event: { type: "APPROVE" },
-      generateText,
+      executors: {
+        generateText,
+      },
     });
     expect(output).toEqual({ draft: "Draft: notes" });
   });
@@ -2249,12 +2348,12 @@ describe("runAgentToCompletion", () => {
   test("idle: throws AgentIdleError carrying snapshot + acceptedTypes", async () => {
     const machine = buildDraftMachine();
     await expect(
-      runAgentToCompletion(machine, { input: { prompt: "notes" }, generateText }),
+      runAgentToCompletion(machine, { input: { prompt: "notes" }, executors: { generateText } }),
     ).rejects.toBeInstanceOf(AgentIdleError);
 
     let caught: AgentIdleError | undefined;
     try {
-      await runAgentToCompletion(machine, { input: { prompt: "notes" }, generateText });
+      await runAgentToCompletion(machine, { input: { prompt: "notes" }, executors: { generateText } });
     } catch (error) {
       caught = error as AgentIdleError;
     }
@@ -2285,8 +2384,10 @@ describe("runAgentToCompletion", () => {
     await expect(
       runAgentToCompletion(machine, {
         input: { prompt: "x" },
-        generateText: async () => {
+        executors: {
+          generateText: async () => {
           throw thrown;
+        },
         },
       }),
     ).rejects.toBe(thrown);
@@ -2301,8 +2402,10 @@ describe("runAgentToCompletion", () => {
     try {
       await runAgentToCompletion(machine, {
         input: { prompt: "notes" },
-        generateText,
         signal: controller.signal,
+        executors: {
+          generateText,
+        },
       });
     } catch (error) {
       caught = error as Error & { cause?: unknown; error?: unknown };
@@ -2350,7 +2453,7 @@ describe("snapshot version stamping", () => {
     const machine = buildMachine();
     const version = getMachineStructuralHash(machine);
 
-    const idle = await runAgent(machine, { input: {}, generateText });
+    const idle = await runAgent(machine, { input: {}, executors: { generateText } });
     if (idle.status !== "idle") throw new Error("expected idle");
     expect((idle.snapshot as { agentMeta?: unknown }).agentMeta).toEqual({
       machineId: "versioned",
@@ -2360,7 +2463,9 @@ describe("snapshot version stamping", () => {
     const done = await runAgent(machine, {
       snapshot: idle.snapshot,
       event: { type: "GO" },
-      generateText,
+      executors: {
+        generateText,
+      },
     });
     if (done.status !== "done") throw new Error("expected done");
     expect((done.snapshot as { agentMeta?: { version?: string } }).agentMeta?.version).toBe(version);
@@ -2368,12 +2473,14 @@ describe("snapshot version stamping", () => {
 
   test("same-machine resume passes", async () => {
     const machine = buildMachine();
-    const idle = await runAgent(machine, { input: {}, generateText });
+    const idle = await runAgent(machine, { input: {}, executors: { generateText } });
     if (idle.status !== "idle") throw new Error("expected idle");
     const done = await runAgent(machine, {
       snapshot: idle.snapshot,
       event: { type: "GO" },
-      generateText,
+      executors: {
+        generateText,
+      },
     });
     expect(done.status).toBe("done");
   });
@@ -2381,12 +2488,12 @@ describe("snapshot version stamping", () => {
   test("structurally-edited machine resume throws with from/to", async () => {
     const v1 = buildMachine();
     const v2 = buildEditedMachine();
-    const idle = await runAgent(v1, { input: {}, generateText });
+    const idle = await runAgent(v1, { input: {}, executors: { generateText } });
     if (idle.status !== "idle") throw new Error("expected idle");
 
     let caught: SnapshotVersionMismatchError | undefined;
     try {
-      await runAgent(v2, { snapshot: idle.snapshot, event: { type: "GO" }, generateText });
+      await runAgent(v2, { snapshot: idle.snapshot, event: { type: "GO" }, executors: { generateText } });
     } catch (error) {
       caught = error as SnapshotVersionMismatchError;
     }
@@ -2397,7 +2504,7 @@ describe("snapshot version stamping", () => {
 
   test("machineVersion override is respected on stamp and mismatch", async () => {
     const machine = buildMachine();
-    const idle = await runAgent(machine, { input: {}, generateText, machineVersion: "v1" });
+    const idle = await runAgent(machine, { input: {}, machineVersion: "v1", executors: { generateText } });
     if (idle.status !== "idle") throw new Error("expected idle");
     expect((idle.snapshot as { agentMeta?: { version?: string } }).agentMeta?.version).toBe("v1");
 
@@ -2406,8 +2513,10 @@ describe("snapshot version stamping", () => {
       await runAgent(machine, {
         snapshot: idle.snapshot,
         event: { type: "GO" },
-        generateText,
         machineVersion: "v2",
+        executors: {
+          generateText,
+        },
       });
     } catch (error) {
       caught = error as SnapshotVersionMismatchError;
@@ -2418,18 +2527,20 @@ describe("snapshot version stamping", () => {
 
   test("migrateSnapshot is called with correct args and its result is used", async () => {
     const machine = buildMachine();
-    const idle = await runAgent(machine, { input: {}, generateText, machineVersion: "v1" });
+    const idle = await runAgent(machine, { input: {}, machineVersion: "v1", executors: { generateText } });
     if (idle.status !== "idle") throw new Error("expected idle");
 
     const calls: Array<{ from: string; to: string }> = [];
     const done = await runAgent(machine, {
       snapshot: idle.snapshot,
       event: { type: "GO" },
-      generateText,
       machineVersion: "v2",
       migrateSnapshot: (snapshot, info) => {
         calls.push(info);
         return snapshot;
+      },
+      executors: {
+        generateText,
       },
     });
     expect(calls).toEqual([{ from: "v1", to: "v2" }]);
@@ -2438,7 +2549,7 @@ describe("snapshot version stamping", () => {
 
   test("warn mode proceeds", async () => {
     const machine = buildMachine();
-    const idle = await runAgent(machine, { input: {}, generateText, machineVersion: "v1" });
+    const idle = await runAgent(machine, { input: {}, machineVersion: "v1", executors: { generateText } });
     if (idle.status !== "idle") throw new Error("expected idle");
 
     const warnings: string[] = [];
@@ -2449,9 +2560,11 @@ describe("snapshot version stamping", () => {
       done = await runAgent(machine, {
         snapshot: idle.snapshot,
         event: { type: "GO" },
-        generateText,
         machineVersion: "v2",
         onVersionMismatch: "warn",
+        executors: {
+          generateText,
+        },
       });
     } finally {
       console.warn = original;
@@ -2497,10 +2610,12 @@ describe("inspectTransitions", () => {
     const observed: Array<{ id: string; value: unknown }> = [];
     const result = await runAgent(parentMachine, {
       input: {},
-      generateText: async () => ({ output: {} }),
       inspect: inspectTransitions((snapshot, actorRef) => {
         observed.push({ id: actorRef.id, value: snapshot.value });
       }),
+      executors: {
+        generateText: async () => ({ output: {} }),
+      },
     });
 
     expect(result.status).toBe("done");

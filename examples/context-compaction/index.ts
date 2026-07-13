@@ -239,7 +239,7 @@ async function promptLine(question: string): Promise<string> {
 export async function main() {
   const result = await runAgent(contextCompactionMachine, {
     input: { maxMessages: 8, keepRecent: 4 },
-    ...executors,
+    executors,
     userInput: async ({ prompt }) => promptLine(prompt ?? "You:"),
     onTransition: (snapshot) => {
       console.log("[state]", JSON.stringify(snapshot.value));

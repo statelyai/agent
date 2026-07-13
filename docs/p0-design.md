@@ -431,10 +431,10 @@ Typing is load-bearing: `input`/`event`/`onTransition` are machine-typed (`Input
 - **`idle`** — settled, no in-flight work; caller may `getAcceptedEvents(result.snapshot)`, send an event via resume, or persist. The canonical interactive loop:
 
   ```ts
-  let r = await runAgent(machine, { input, ...executors });
+  let r = await runAgent(machine, { input, executors });
   while (r.status === 'idle') {
     const event = await promptUser(getAcceptedEvents(r.snapshot));
-    r = await runAgent(machine, { snapshot: r.snapshot, event, ...executors });
+    r = await runAgent(machine, { snapshot: r.snapshot, event, executors });
   }
   ```
 - **`error`** — a `runAgent`-level failure, discriminated by `cause`: `'aborted'` (signal fired), `'max-model-calls'` (budget exceeded), `'decision-exhausted'` (machine error state whose error is/wraps an unhandled `DecisionExhaustedError`), `'machine'` (any other machine error state), or `'stopped'` (external stop). Programmer errors (bad config, missing executor/actor source) still throw — at bind time (§3.2). **(Q3.1 resolved: `error` is a variant, not a throw.)**
@@ -485,11 +485,11 @@ Debounce to a macrotask before declaring idle (children spin up across transitio
 ### 3.4 Serverless resume recipe
 
 ```ts
-let r = await runAgent(machine, { input, ...executors });        // → idle (awaiting approval)
+let r = await runAgent(machine, { input, executors });        // → idle (awaiting approval)
 await store.put(threadId, r.snapshot);                           // persist snapshot (or event log, §4.3)
 // ...later, new process, human approved...
 const snapshot = await store.get(threadId);
-r = await runAgent(machine, { snapshot, event: { type: 'APPROVE' }, ...executors });
+r = await runAgent(machine, { snapshot, event: { type: 'APPROVE' }, executors });
 ```
 
 ### 3.5 What `runAgent` is NOT

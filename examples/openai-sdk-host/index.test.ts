@@ -150,7 +150,7 @@ describe("createOpenAiExecutors + runAgent (stubbed client, no network)", () => 
     const { generateText } = createOpenAiExecutors({ client: stubClient as never });
     const result = await runAgent(triageMachine, {
       input: { ticket: "My invoice is wrong." },
-      generateText,
+      executors: { generateText },
     });
 
     expect(result.status).toBe("done");
@@ -215,8 +215,7 @@ describe("createOpenAiExecutors + runAgent (stubbed client, no network)", () => 
     const { generateText, decide } = createOpenAiExecutors({ client: stubClient as never });
     const result = await runAgent(twentyQuestionsMachine, {
       input: { questionsRemaining: 1 },
-      generateText,
-      decide,
+      executors: { generateText, decide },
       userInput: async () => answers.shift() ?? "no",
     });
 
@@ -246,9 +245,11 @@ describe("createOpenAiExecutors + runAgent (stubbed client, no network)", () => 
 
     const result = await runAgent(jokeMachine, {
       input: { topic: "state machines" },
-      generateText: async () => ({ output: { rating: 9, explanation: "stub" } }),
-      streamText,
-      decide: async () => ({ event: { type: "END" } }),
+      executors: {
+        generateText: async () => ({ output: { rating: 9, explanation: "stub" } }),
+        streamText,
+        decide: async () => ({ event: { type: "END" } }),
+      },
       onChunk: (chunk) => seen.push(chunk),
     });
 

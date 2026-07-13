@@ -206,6 +206,61 @@ describe("generateText (fake fetch, no network)", () => {
     expect(calls[0]!.body.model).toBe("mistral");
   });
 
+  test("populated tool set: converts the tools onto the wire body (no local loop)", async () => {
+    // openai-compat has no multi-step tool loop, so it does not run `execute` —
+    // it only advertises the tools to the model. This pins the seam that DOES
+    // exist: a request carrying a real tool set is serialized to wire function
+    // tools (name + description + JSON-Schema parameters).
+    let executed = false;
+    const { fetch, calls } = fakeFetch(() =>
+      jsonResponse({
+        choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+      }),
+    );
+    const { generateText } = createOpenAiCompatExecutors({
+      baseUrl: "http://x/v1",
+      fetch,
+      models: { quick: "some-model" },
+    });
+
+    const result = await generateText(
+      textRequest({
+        prompt: "What is 42 times 17?",
+        tools: {
+          calculate: {
+            description: "Multiply two numbers.",
+            inputSchema: z.object({ a: z.number(), b: z.number() }),
+            execute: async () => {
+              executed = true;
+              return { product: 714 };
+            },
+          },
+        },
+      }),
+    );
+
+    expect(result.output).toBe("ok");
+    // No local tool loop: execute is never called by this adapter.
+    expect(executed).toBe(false);
+    // Schema conversion: one wire function tool with converted parameters.
+    expect(calls[0]!.body.tools).toEqual([
+      {
+        type: "function",
+        function: {
+          name: "calculate",
+          description: "Multiply two numbers.",
+          parameters: expect.objectContaining({
+            type: "object",
+            properties: expect.objectContaining({
+              a: expect.objectContaining({ type: "number" }),
+              b: expect.objectContaining({ type: "number" }),
+            }),
+          }),
+        },
+      },
+    ]);
+  });
+
   test("throws on non-2xx, naming the status and body snippet", async () => {
     const { fetch } = fakeFetch(
       () => new Response("upstream boom", { status: 500, statusText: "Server Error" }),
