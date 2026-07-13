@@ -18,9 +18,11 @@
     "explicit-suspension-and-illegal-resume",
     "get-state-meta",
     "max-output-tokens-rename",
+    "nested-executors-option",
     "openai-compat-adapter",
     "request-name-on-text-requests",
     "resolve-agent-requests",
+    "run-agent-completion-and-versioning",
     "setup-agent-actor-sources-and-model-refs",
     "setup-agent-xstate-cutover"
   ]
