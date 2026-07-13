@@ -15,23 +15,30 @@ import {
   type TypedToolResult,
 } from "ai";
 import {
+  buildEnvelopeSchema,
   getAgentOutputMode,
   type AgentRequestExecutor,
   type AgentRequestExecutorInfo,
   type AgentRequestExecutors,
   type AgentTextRequest,
+  type StructuredOutputEnvelope,
 } from "../text-logic.js";
-import type { AgentDecisionExecutor, AgentDecisionRequest, DecisionAttempt } from "../decision.js";
+import { isStandardSchema } from "../utils.js";
+import { renderDecisionAttempts } from "../decision.js";
+import type { AgentDecisionExecutor, AgentDecisionRequest } from "../decision.js";
 import type { AgentEventDescriptor } from "../events.js";
 import type { AgentTools, ChosenEvent, StandardSchemaV1 } from "../types.js";
 
 /**
- * Maps an {@link AgentTools} map onto AI SDK `tool()` definitions — a bare
- * `AgentToolExecute` function becomes a tool with an unconstrained input
- * schema; an {@link AgentToolDescriptor} carries its `description`/
- * `inputSchema`/`execute` through directly. Used internally by
- * {@link toAiSdkCallSettings}; exported for callers building AI SDK calls by
- * hand outside `createAiSdkExecutors`.
+ * Maps an {@link AgentTools} map onto AI SDK `tool()` definitions. A tool that
+ * already carries its own Standard Schema `inputSchema` — an AI SDK
+ * `tool({...})`, or any equivalent descriptor — is passed through **unchanged**,
+ * so the SDK applies its own validation, calls `execute(input, options)`, and
+ * every extra property (`providerOptions`, `toModelOutput`, …) survives. A bare
+ * `AgentToolExecute` function becomes a tool with an unconstrained input schema;
+ * a minimal descriptor with no readable schema is converted with a permissive
+ * fallback. Used internally by {@link toAiSdkCallSettings}; exported for callers
+ * building AI SDK calls by hand outside `createAiSdkExecutors`.
  */
 export function toAiSdkTools(tools: AgentTools) {
   const entries: Array<[string, Tool<unknown, unknown> | Tool<unknown, never>]> = [];
@@ -49,6 +56,16 @@ export function toAiSdkTools(tools: AgentTools) {
           execute: (input) => descriptor(input),
         }),
       ]);
+      continue;
+    }
+
+    // Native path: the tool already exposes a Standard Schema `inputSchema`
+    // (the marker `tool({...})` leaves in place), so hand it to the SDK as-is —
+    // the SDK owns its typing/validation/execute(input, options), and extras
+    // ride along untouched. Only descriptors with no readable schema fall
+    // through to the conversion path below.
+    if (isStandardSchema(descriptor.inputSchema)) {
+      entries.push([name, descriptor as unknown as Tool<unknown, unknown>]);
       continue;
     }
 
@@ -212,6 +229,10 @@ export function isStructuredOutputRequest(
  */
 export type AiSdkGenerateResult = {
   output: unknown;
+  /** The model's reasoning, present only when the request opted in via
+   * `reasoning: true` and the model produced it (see the structured-output
+   * envelope in {@link buildEnvelopeSchema}). Never enters machine context/output. */
+  reasoning?: string;
   usage: LanguageModelUsage;
   finishReason: FinishReason;
   toolCalls: TypedToolCall<ToolSet>[];
@@ -271,14 +292,23 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
     };
 
     if (isStructuredOutputRequest(request)) {
+      // Every structured request is sent as the uniform `{ result, reasoning? }`
+      // envelope — a root object is universally accepted, unlike a bare union/
+      // array root. Unwrap `.result` before the machine validates the declared
+      // schema; surface `reasoning` on the raw result only.
+      const envelope = buildEnvelopeSchema(request.outputSchema!, {
+        reasoning: request.reasoning,
+      });
       const result = await aiGenerateText({
         ...common,
         output: Output.object({
-          schema: request.outputSchema as FlexibleSchema<unknown>,
+          schema: envelope as FlexibleSchema<unknown>,
         }),
       });
+      const { result: output, reasoning } = result.output as StructuredOutputEnvelope;
       return {
-        output: result.output,
+        output,
+        ...(reasoning !== undefined ? { reasoning } : {}),
         usage: result.usage,
         finishReason: result.finishReason,
         toolCalls: result.toolCalls,
@@ -387,8 +417,8 @@ export function toAiSdkEventTools(events: AgentEventDescriptor[]) {
 
 /**
  * Messages for a decision request, with prior failed `attempts` (§2.6)
- * rendered as an appended user message so retries converge. Core never
- * rewrites prompts — this is adapter business.
+ * rendered as appended user messages (via core's {@link renderDecisionAttempts})
+ * so retries converge. Core never rewrites prompts — this is adapter business.
  */
 export function toDecisionMessages(
   request: Pick<AgentDecisionRequest, "messages" | "prompt" | "events" | "attempts">,
@@ -403,17 +433,8 @@ export function toDecisionMessages(
     ...((request.messages as ModelMessage[] | undefined) ??
       (request.prompt !== undefined ? [{ role: "user" as const, content: request.prompt }] : [])),
   ];
-  for (const attempt of request.attempts) {
-    messages.push({
-      role: "user",
-      content: attemptFeedback(attempt, request.events),
-    });
+  for (const attempt of renderDecisionAttempts(request)) {
+    messages.push({ role: "user", content: attempt.content as string });
   }
   return messages;
-}
-
-// Renders one failed DecisionAttempt into a user-facing retry-feedback string naming the failure and the remaining candidate events.
-function attemptFeedback(attempt: DecisionAttempt, events: AgentEventDescriptor[]): string {
-  const types = events.map((event) => event.type).join(", ") || "(none)";
-  return `Your previous choice failed: ${attempt.reason}. Choose again from: ${types}`;
 }

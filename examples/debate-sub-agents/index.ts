@@ -21,7 +21,6 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import {
-  bindRequestExecutor,
   runAgent,
   setupAgent,
   type AgentRequestExecutor,
@@ -252,26 +251,13 @@ export async function runDebateSubAgentsExample(options?: {
 }) {
   const generateText = options?.generateText ?? createAiSdkExecutors({ models }).generateText;
 
-  // Each debater is a nested child machine. runAgent wraps only the parent's
-  // own sources, so the child's `composeArgument` request is bound here with
-  // the same injected `generateText` before the child is registered.
-  const boundDebater = () =>
-    debaterMachine.provide({
-      actorSources: {
-        composeArgument: bindRequestExecutor(
-          debaterAgentSetup.requests.composeArgument,
-          generateText,
-        ),
-      },
-    });
-
   const result = await runAgent(debateMachine, {
     input: {
       question: options?.input?.question ?? "Should agents be modeled as actors?",
       rounds: options?.input?.rounds ?? DEFAULT_ROUNDS,
     },
     executors: { generateText },
-    actorSources: { affirmative: boundDebater(), negative: boundDebater() },
+    actorSources: { affirmative: debaterMachine, negative: debaterMachine },
     ...(options?.onTransition
       ? { onTransition: ({ value }: { value: unknown }) => options.onTransition!(value) }
       : {}),

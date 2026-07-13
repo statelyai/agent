@@ -43,7 +43,11 @@ import type {
   ToolChoice,
 } from "@anthropic-ai/sdk/resources/messages.js";
 import {
+  buildEnvelopeSchema,
   getAgentOutputMode,
+  getJsonSchemaSync,
+  isStandardSchema,
+  renderDecisionAttempts,
   runAgent,
   type AgentDecisionExecutor,
   type AgentDecisionRequest,
@@ -54,37 +58,13 @@ import {
   type AgentTextRequest,
   type AgentTools,
   type ChosenEvent,
-  type DecisionAttempt,
-  type StandardSchemaV1,
+  type StructuredOutputEnvelope,
 } from "../../src/index.js";
 import { triageMachine } from "../triage/index.js";
 import { twentyQuestionsMachine } from "../twenty-questions/index.js";
 import { runExampleMain } from "../helpers/main.js";
 
 // ─── Request → Anthropic param mapping (pure, unit-testable) ───
-
-/**
- * Extracts a JSON Schema from a Standard Schema's optional
- * `~standard.jsonSchema` extension (implemented by e.g. Zod v4's
- * `z.toJSONSchema`). Returns `undefined` when the schema doesn't expose one
- * — callers must fall back to plain text in that case. The extension's
- * signature allows returning a Promise; this stays synchronous and treats a
- * Promise result as absent (documented limitation, not expected in practice
- * since Zod's implementation is synchronous).
- */
-export function extractJsonSchema(schema?: StandardSchemaV1): Record<string, unknown> | undefined {
-  const jsonSchema = (
-    schema?.["~standard"] as
-      | {
-          jsonSchema?: { input?: () => unknown };
-        }
-      | undefined
-  )?.jsonSchema?.input?.();
-
-  return jsonSchema && !(jsonSchema instanceof Promise)
-    ? (jsonSchema as Record<string, unknown>)
-    : undefined;
-}
 
 /**
  * Maps `AgentMessage[]` to Anthropic `MessageParam[]`. Anthropic has no
@@ -166,7 +146,7 @@ export function toAnthropicTools(tools: AgentTools): Tool[] {
       return [];
     }
     const inputSchema = typeof descriptor === "function" ? undefined : descriptor.inputSchema;
-    const jsonSchema = extractJsonSchema(inputSchema);
+    const jsonSchema = isStandardSchema(inputSchema) ? getJsonSchemaSync(inputSchema) : undefined;
     return [
       {
         name,
@@ -180,7 +160,7 @@ export function toAnthropicTools(tools: AgentTools): Tool[] {
 /** One Anthropic tool per candidate decision event. */
 export function toAnthropicEventTools(events: AgentEventDescriptor[]): Tool[] {
   return events.map((event) => {
-    const jsonSchema = extractJsonSchema(event.inputSchema);
+    const jsonSchema = getJsonSchemaSync(event.inputSchema);
     return {
       name: event.toolName,
       description: `Choose the '${event.type}' move.`,
@@ -203,15 +183,10 @@ export function toDecisionMessages(
       ? [{ role: "user", content: request.prompt }]
       : [];
 
-  for (const attempt of request.attempts) {
-    messages.push({ role: "user", content: attemptFeedback(attempt, request.events) });
+  for (const m of renderDecisionAttempts(request)) {
+    messages.push({ role: "user", content: m.content as string });
   }
   return messages;
-}
-
-function attemptFeedback(attempt: DecisionAttempt, events: AgentEventDescriptor[]): string {
-  const types = events.map((event) => event.type).join(", ") || "(none)";
-  return `Your previous choice failed: ${attempt.reason}. Choose again from: ${types}`;
 }
 
 /** The synthetic tool used to force structured output via a tool call. */
@@ -268,7 +243,15 @@ export function createAnthropicExecutors(
     };
 
     if (getAgentOutputMode(request.outputSchema) === "structured") {
-      const jsonSchema = extractJsonSchema(request.outputSchema);
+      // THE structured-output envelope contract (see docs/hosts.md): the forced
+      // tool's input schema is the declared schema wrapped as `{ result,
+      // reasoning? }`. Unwrap `.result` before returning so the machine validates
+      // the bare schema it declared; `reasoning` (opt-in) is surfaced on the raw
+      // result only.
+      const envelope = buildEnvelopeSchema(request.outputSchema!, {
+        reasoning: request.reasoning,
+      });
+      const jsonSchema = getJsonSchemaSync(envelope);
       if (jsonSchema) {
         const tool: Tool = {
           name: STRUCTURED_OUTPUT_TOOL_NAME,
@@ -284,7 +267,11 @@ export function createAnthropicExecutors(
           (block): block is Extract<typeof block, { type: "tool_use" }> =>
             block.type === "tool_use" && block.name === STRUCTURED_OUTPUT_TOOL_NAME,
         );
-        return { output: toolUse?.input };
+        const parsed = toolUse?.input as StructuredOutputEnvelope | undefined;
+        return {
+          output: parsed?.result,
+          ...(typeof parsed?.reasoning === "string" ? { reasoning: parsed.reasoning } : {}),
+        };
       }
       // No JSON Schema extension available on this schema (e.g. a hand-rolled
       // StandardSchemaV1 without `~standard.jsonSchema`) — fall back to text.

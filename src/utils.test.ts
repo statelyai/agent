@@ -1,8 +1,16 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import { createActor } from "xstate";
-import { getMachineStructuralHash, getStateMeta, persistSnapshot, setupAgent } from "./index.js";
+import {
+  getJsonSchema,
+  getJsonSchemaSync,
+  getMachineStructuralHash,
+  getStateMeta,
+  persistSnapshot,
+  setupAgent,
+} from "./index.js";
 import { findNonSerializableContextPaths } from "./utils.js";
+import type { StandardSchemaV1 } from "./types.js";
 
 const metaSchema = z.object({
   interaction: z
@@ -226,5 +234,35 @@ describe("getMachineStructuralHash", () => {
     const base = getMachineStructuralHash(build({}));
     expect(getMachineStructuralHash(build({ extraState: true }))).not.toBe(base);
     expect(getMachineStructuralHash(build({ target: "alt" }))).not.toBe(base);
+  });
+});
+
+describe("getJsonSchema / getJsonSchemaSync", () => {
+  test("reads the ~standard.jsonSchema extension (sync producer)", async () => {
+    const schema = z.object({ a: z.number() });
+    expect(getJsonSchemaSync(schema)).toMatchObject({ type: "object" });
+    await expect(getJsonSchema(schema)).resolves.toMatchObject({ type: "object" });
+  });
+
+  test("returns undefined when the schema exposes no jsonSchema extension", async () => {
+    const bare: StandardSchemaV1<number> = {
+      "~standard": { version: 1, vendor: "x", validate: (value) => ({ value: value as number }) },
+    };
+    expect(getJsonSchemaSync(bare)).toBeUndefined();
+    await expect(getJsonSchema(bare)).resolves.toBeUndefined();
+    expect(getJsonSchemaSync(undefined)).toBeUndefined();
+  });
+
+  test("getJsonSchemaSync treats an async producer as absent; getJsonSchema awaits it", async () => {
+    const asyncSchema: StandardSchemaV1 = {
+      "~standard": {
+        version: 1,
+        vendor: "x",
+        validate: (value) => ({ value }),
+        jsonSchema: { input: () => Promise.resolve({ type: "object", async: true }) },
+      },
+    };
+    expect(getJsonSchemaSync(asyncSchema)).toBeUndefined();
+    await expect(getJsonSchema(asyncSchema)).resolves.toMatchObject({ async: true });
   });
 });

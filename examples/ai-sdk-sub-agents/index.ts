@@ -9,9 +9,7 @@
 import assert from "node:assert/strict";
 import { openai } from "@ai-sdk/openai";
 import {
-  generateText,
   type GenerateTextResult,
-  Output,
   stepCountIs,
   type StreamTextResult,
   ToolLoopAgent,
@@ -20,8 +18,8 @@ import {
 } from "ai";
 import { z } from "zod";
 import { setupAgent, type AgentTool, type AgentToolExecute, runAgent } from "../../src/index.js";
-import { toAiSdkTools, defineModels } from "../../src/ai-sdk/index.js";
-import { runExampleMain } from "../helpers/main.js";
+import { defineModels } from "../../src/ai-sdk/index.js";
+import { resolveExecutors, runExampleMain } from "../helpers/main.js";
 
 const answerSchema = z.object({ answer: z.string() });
 const taskInputSchema = z.object({ task: z.string() });
@@ -104,6 +102,9 @@ function createAiSdkSubAgentWorkflow(subAgents: SubAgents) {
             execute: createSubAgentExecute(subAgents, "writer"),
           },
         },
+        // Bound the host-side tool loop so the supervisor can call both
+        // sub-agents across steps (the AI SDK adapter reads this).
+        metadata: { maxSteps: 8 },
       },
     },
   });
@@ -143,19 +144,7 @@ export async function runAiSdkSubAgentsDemo(task: string) {
   const result = await runAgent(machine, {
     input: { task },
     onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
-    executors: {
-      generateText: async (request) => {
-        const { output } = await generateText({
-          model,
-          system: request.system,
-          prompt: request.prompt ?? "",
-          tools: toAiSdkTools(request.tools ?? {}),
-          output: Output.object({ schema: answerSchema }),
-          stopWhen: stepCountIs(8),
-        });
-        return { output };
-      },
-    },
+    ...resolveExecutors(models, undefined),
   });
   if (result.status !== "done") {
     throw new Error(`Sub-agents demo did not complete: ${result.status}`);

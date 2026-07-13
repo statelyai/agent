@@ -226,6 +226,51 @@ export function getStateMeta<
 }
 
 /**
+ * Structural guard for a {@link StandardSchemaV1}: `true` when `value` carries
+ * the `~standard` marker. Used to tell an already-schema'd tool `inputSchema`
+ * (a Zod/Valibot/… schema) apart from an SDK-specific schema wrapper that core
+ * can't read directly — see the `ai-sdk` tool pass-through and `openai-compat`
+ * tool serialization.
+ */
+export function isStandardSchema(value: unknown): value is StandardSchemaV1 {
+  return typeof value === "object" && value !== null && "~standard" in value;
+}
+
+/**
+ * Pulls the JSON Schema off a {@link StandardSchemaV1} via its optional
+ * `~standard.jsonSchema.input()` extension (implemented by e.g. Zod v4's
+ * `z.toJSONSchema`), awaiting it when the producer is async. Returns
+ * `undefined` when the schema doesn't expose the extension. Use this to build
+ * a provider request's `response_format`/tool `parameters` from a schema.
+ */
+export async function getJsonSchema(
+  schema?: StandardSchemaV1,
+): Promise<Record<string, unknown> | undefined> {
+  const jsonSchemaFn = schema?.["~standard"].jsonSchema?.input;
+  if (!jsonSchemaFn) {
+    return undefined;
+  }
+  const result = jsonSchemaFn();
+  const resolved = result instanceof Promise ? await result : result;
+  return resolved as Record<string, unknown> | undefined;
+}
+
+/**
+ * Synchronous variant of {@link getJsonSchema}, for call sites that can't
+ * await (building tool/event descriptors inline). An async JSON Schema
+ * producer is treated as absent (returns `undefined`) — in practice Zod's
+ * `z.toJSONSchema` resolves synchronously.
+ */
+export function getJsonSchemaSync(schema?: StandardSchemaV1): Record<string, unknown> | undefined {
+  const jsonSchemaFn = schema?.["~standard"].jsonSchema?.input;
+  if (!jsonSchemaFn) {
+    return undefined;
+  }
+  const result = jsonSchemaFn();
+  return result instanceof Promise ? undefined : (result as Record<string, unknown> | undefined);
+}
+
+/**
  * Validates `value` against a {@link StandardSchemaV1}, synchronously.
  * Throws if the schema's `validate` returns a `Promise` (async validation is
  * not supported anywhere in this library) or if validation reports issues —

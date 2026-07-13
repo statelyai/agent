@@ -19,8 +19,8 @@ import { openai } from "@ai-sdk/openai";
 import { generateText, Output, type LanguageModel } from "ai";
 import { createAsyncLogic } from "xstate";
 import { setupAgent, runAgent } from "../../src/index.js";
-import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
-import { runExampleMain } from "../helpers/main.js";
+import { defineModels } from "../../src/ai-sdk/index.js";
+import { resolveExecutors, runExampleMain } from "../helpers/main.js";
 
 const implementationPlanSchema = z.object({
   files: z.array(
@@ -186,7 +186,7 @@ export async function runAiSdkOrchestratorWorkerExample(
 ) {
   const result = await runAgent(aiSdkOrchestratorWorkerMachine, {
     input: { featureRequest: "Add settings page" },
-    executors: createAiSdkExecutors({ models }),
+    ...resolveExecutors(models, undefined),
     onTransition: observe,
   });
   if (result.status !== "done") {

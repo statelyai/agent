@@ -105,6 +105,31 @@ This is backed by real implementations against four runtimes:
 - [examples/anthropic-sdk-host/index.ts](../examples/anthropic-sdk-host/index.ts): the raw `@anthropic-ai/sdk` package (Messages API), structured output via a forced tool call, decisions forced with `tool_choice: { type: 'any' }`.
 - [examples/cloudflare-agent-host/index.ts](../examples/cloudflare-agent-host/index.ts) and [examples/cloudflare-workers-ai-host/index.ts](../examples/cloudflare-workers-ai-host/index.ts): inside a Cloudflare Durable Object and against the Workers AI binding.
 
+## The structured-output envelope
+
+<!-- buildEnvelopeSchema and the wire contract from src/text-logic.ts; adapters in src/ai-sdk, src/openai-compat -->
+
+When a request has a structured output schema (`getAgentOutputMode(request.outputSchema) === 'structured'`), a host sends the schema to the provider wrapped as a root object — the **envelope** — and unwraps it before returning:
+
+```json
+{ "result": <the declared schema>, "reasoning": "<optional string>" }
+```
+
+This is THE wire contract for structured output. A root object is universally accepted as a provider response schema, unlike a bare union or array root that many providers reject. `buildEnvelopeSchema(request.outputSchema, { reasoning: request.reasoning })` builds it:
+
+```ts
+import { buildEnvelopeSchema, getAgentOutputMode, getJsonSchema } from '@statelyai/agent';
+
+if (getAgentOutputMode(request.outputSchema) === 'structured') {
+  const envelope = buildEnvelopeSchema(request.outputSchema, { reasoning: request.reasoning });
+  const jsonSchema = await getJsonSchema(envelope); // send this to the provider
+  const parsed = JSON.parse(providerContent); // { result, reasoning? }
+  return { output: parsed.result, reasoning: parsed.reasoning };
+}
+```
+
+Return the **unwrapped** `.result` as `output` — the machine only ever validates and sees the schema it declared, never the envelope. `reasoning` is surfaced on the raw executor result only (never in machine context/output); see [reasoning opt-in](./text-requests.md#reasoning). The shipped `createAiSdkExecutors` and `createOpenAiCompatExecutors` adapters and the raw OpenAI/Anthropic example hosts all follow this exact contract. (Prompt-serialized hosts that don't send a provider response schema — e.g. the Workers AI host — instead parse best-effort JSON and skip the envelope.)
+
 ## Retries
 
 Transport-level retries — HTTP 429s, timeouts, exponential backoff — belong in the executor or the SDK it wraps, not the machine. The AI SDK's `maxRetries` (and the equivalent on the OpenAI/Anthropic clients) already handles them; a raw-`fetch` executor adds its own retry loop. The machine never sees a transient network failure.

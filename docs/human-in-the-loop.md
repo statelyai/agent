@@ -13,24 +13,37 @@ The machine decides which events are legal in the waiting state; the host delive
 
 > **Note:** Idle is a whole-machine condition: `runAgent` settles only when nothing else is in flight. In a parallel machine where one region waits for a human while a sibling still has work running, the run finishes that work first. Waits modeled with `agent.userInput` are exempt: they are pending placeholders that never block the settle. See [Parallel machines and pending user input](#parallel-machines-and-pending-user-input).
 
-### Tag intentional waits
+### Declare your own wait signal
 
-<!-- WAIT_TAG and RunAgentOptions.isSuspended from src/run-agent.ts -->
+<!-- setupAgent({ isSuspended }) and RunAgentOptions.isSuspended from src/run-agent.ts, src/setup-agent.ts -->
 
-By default `runAgent` detects a resting state with a timing heuristic. Mark states that intentionally wait for an external event with the `WAIT_TAG` tag and the settle becomes deterministic instead:
+By default `runAgent` detects a resting state with a timing heuristic. To settle intentional waits deterministically instead, tell the machine what "suspended" means for it. There is no built-in tag — you choose the signal. Declare it once with `setupAgent({ isSuspended })`; the predicate travels with the machine (including through `machine.provide(...)`):
 
 ```ts
-import { WAIT_TAG } from '@statelyai/agent';
+const agentSetup = setupAgent({
+  // ...schemas...
+  isSuspended: (snapshot) => snapshot.hasTag('awaiting-review'),
+});
 
+// ...then mark the waiting states with the tag you chose:
 reviewing: {
-  tags: [WAIT_TAG],
+  tags: ['awaiting-review'],
   on: { APPROVE: { target: 'published' } },
 },
 ```
 
-Tags are serializable and show up in the Stately visualizer. The tag is recommended, not required: untagged machines fall back to the heuristic and behave exactly as before. A tagged wait still respects whole-machine idle — a sibling region's in-flight work runs to completion first.
+Tags are serializable and show up in the Stately visualizer, but the signal is yours to pick — a tag, a state match, or a `meta` field. A meta-driven flavor reuses annotations you may already have:
 
-To detect suspension some other way, pass `isSuspended`. The default is `(s) => s.hasTag(WAIT_TAG)`; a custom detector replaces it:
+```ts
+import { getStateMeta } from '@statelyai/agent';
+
+const agentSetup = setupAgent({
+  // ...schemas...
+  isSuspended: (snapshot) => getStateMeta(snapshot).interaction !== undefined,
+});
+```
+
+A host can override the machine's predicate per run by passing `isSuspended` to `runAgent` directly. Resolution order is: the `runAgent` option (host override) → the machine-carried predicate → the timing heuristic (when neither is present). A machine with no predicate falls back to the heuristic and behaves exactly as before. Any suspended wait still respects whole-machine idle — a sibling region's in-flight work runs to completion first.
 
 ```ts
 await runAgent(machine, {
@@ -290,7 +303,7 @@ Resuming without a handler settles idle again with the same pending inputs, so a
 
 ## Choosing between the two waiting styles
 
-- **Idle state** (`on:` handler, no invoke, marked with `tags: [WAIT_TAG]`): the wait is an **event choice**; resume delivers the chosen event. Best for approve/reject flows where `getAcceptedEvents` drives a UI.
+- **Idle state** (`on:` handler, no invoke, flagged by your own `isSuspended` signal): the wait is an **event choice**; resume delivers the chosen event. Best for approve/reject flows where `getAcceptedEvents` drives a UI.
 - **`agent.userInput`**: the wait is a **value request** with a prompt and schema; resume supplies the value. Best for free-form input, and the only style that lets sibling parallel regions keep working while a human is pending.
 
 ## Related

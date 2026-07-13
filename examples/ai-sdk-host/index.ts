@@ -6,8 +6,7 @@
  * `runStreamingDemo`). The machine declares named text logic calls; this host
  * provides their execution with the AI SDK. Streaming chunks flow through the
  * host side channel (`onChunk` → stdout, HTTP stream, etc.) — the machine
- * itself only transitions on the final text. `runTriageStepDemo` also shows
- * the manual step loop against the same triage machine for comparison.
+ * itself only transitions on the final text.
  *
  * Executors come from the shared `createAiSdkExecutors` adapter (the same one
  * every other example uses) — this host does not hand-roll AI SDK calls. The
@@ -24,9 +23,6 @@
 import { type LanguageModel } from "ai";
 import { openai } from "@ai-sdk/openai";
 import {
-  executeAgentRequest,
-  initialAgentStep,
-  resolveAgentStep,
   runAgent,
   type AgentRequestExecutor,
   type AgentRequestExecutors,
@@ -36,12 +32,7 @@ import {
 } from "../../src/index.js";
 import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
 import { jokeMachine, models as jokeModels, tellJoke } from "../joke/index.js";
-import {
-  models as triageModels,
-  triageActors,
-  triageMachine,
-  triageSchemas,
-} from "../triage/index.js";
+import { models as triageModels, triageMachine } from "../triage/index.js";
 import { runExampleMain } from "../helpers/main.js";
 
 // ─── Host Adapter: AI SDK execution ───
@@ -128,39 +119,6 @@ export async function runTriageDemo(
     throw new Error(`Triage demo did not complete: ${result.status}`);
   }
   return result.output;
-}
-
-export async function runTriageStepDemo(
-  ticket: string,
-  generateText: AgentRequestExecutor = executorsFor({ models: triageModels }).generateText,
-) {
-  let step = initialAgentStep(
-    triageMachine,
-    { ticket },
-    {
-      schemas: triageSchemas,
-      actorSources: triageActors,
-    },
-  );
-
-  while (!step.done) {
-    if (step.requests.length === 0) {
-      throw new Error("Machine is waiting without an agent request.");
-    }
-
-    for (const request of step.requests) {
-      if (request.kind !== "text") {
-        throw new Error("Decision requests are not supported in this demo.");
-      }
-      const output = await executeAgentRequest(request, { generateText });
-      step = resolveAgentStep(triageMachine, step, request, output, {
-        schemas: triageSchemas,
-        actorSources: triageActors,
-      });
-    }
-  }
-
-  return step.snapshot.output;
 }
 
 export async function runStreamingDemo(

@@ -1,10 +1,9 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import type { AgentDecisionRequest, AgentTextRequest } from "../../src/index.js";
-import { runAgent } from "../../src/index.js";
+import { getJsonSchema, runAgent } from "../../src/index.js";
 import {
   createOpenAiExecutors,
-  extractJsonSchema,
   toDecisionMessages,
   toOpenAiCallSettings,
   toOpenAiEventTools,
@@ -57,13 +56,13 @@ describe("request -> OpenAI param mapping (pure helpers)", () => {
     });
   });
 
-  test("extractJsonSchema reads the ~standard.jsonSchema extension when present", async () => {
+  test("getJsonSchema reads the ~standard.jsonSchema extension when present", async () => {
     const schema = z.object({ sentiment: z.enum(["positive", "negative"]) });
-    const jsonSchema = await extractJsonSchema(schema);
+    const jsonSchema = await getJsonSchema(schema);
     expect(jsonSchema).toMatchObject({ type: "object" });
   });
 
-  test("extractJsonSchema returns undefined for a schema without the extension", async () => {
+  test("getJsonSchema returns undefined for a schema without the extension", async () => {
     const bareSchema = {
       "~standard": {
         version: 1 as const,
@@ -71,10 +70,10 @@ describe("request -> OpenAI param mapping (pure helpers)", () => {
         validate: (value: unknown) => ({ value }),
       },
     };
-    expect(await extractJsonSchema(bareSchema)).toBeUndefined();
+    expect(await getJsonSchema(bareSchema)).toBeUndefined();
   });
 
-  test("extractJsonSchema awaits a Promise-returning jsonSchema.input()", async () => {
+  test("getJsonSchema awaits a Promise-returning jsonSchema.input()", async () => {
     const asyncSchema = {
       "~standard": {
         version: 1 as const,
@@ -85,7 +84,7 @@ describe("request -> OpenAI param mapping (pure helpers)", () => {
         },
       },
     };
-    expect(await extractJsonSchema(asyncSchema)).toEqual({ type: "string" });
+    expect(await getJsonSchema(asyncSchema)).toEqual({ type: "string" });
   });
 
   test("toOpenAiTools builds one function tool per AgentTools entry", () => {
@@ -129,14 +128,18 @@ describe("createOpenAiExecutors + runAgent (stubbed client, no network)", () => 
         completions: {
           create: async (params: { response_format?: unknown }) => {
             expect(params.response_format).toMatchObject({ type: "json_schema" });
+            // The host sends the `{ result }` envelope schema; the model replies
+            // in kind. The host unwraps `.result` before the machine validates.
             return {
               choices: [
                 {
                   message: {
                     content: JSON.stringify({
-                      sentiment: "negative",
-                      category: "billing",
-                      reply: "Sorry about that — we will fix your invoice.",
+                      result: {
+                        sentiment: "negative",
+                        category: "billing",
+                        reply: "Sorry about that — we will fix your invoice.",
+                      },
                     }),
                   },
                 },

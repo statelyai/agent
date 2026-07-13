@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import type { AgentRequestExecutor } from "../../src/index.js";
 import { createTextLogic } from "../../src/index.js";
 import { z } from "zod";
-import { runStreamingDemo, runTriageDemo, runTriageStepDemo } from "./index.js";
+import { runStreamingDemo, runTriageDemo } from "./index.js";
 
 /**
  * Mock `generateText` for the triage machine: returns a canned structured
@@ -38,19 +38,6 @@ describe("ai-sdk-host", () => {
     });
     // The machine lowered the ticket into a single text request's prompt.
     expect(tickets).toEqual(["I was charged twice."]);
-  });
-
-  test("runTriageStepDemo (manual loop) yields the same structured output", async () => {
-    const { generateText, tickets } = createTriageModel();
-
-    const output = await runTriageStepDemo("Refund please.", generateText);
-
-    expect(output).toEqual({
-      sentiment: "negative",
-      category: "billing",
-      reply: "We are sorry about the duplicate charge and will refund it.",
-    });
-    expect(tickets).toEqual(["Refund please."]);
   });
 
   test("runStreamingDemo settles on the accumulated final joke", async () => {

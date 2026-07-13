@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
+import { tool } from "ai";
 import type { AgentDecisionRequest } from "../decision.js";
 import type { AgentTextRequest } from "../text-logic.js";
 import type { AgentTools } from "../types.js";
@@ -121,6 +122,32 @@ describe("request -> wire param mapping (pure helpers)", () => {
     expect(tools[0]!.function.parameters).toMatchObject({ type: "object" });
   });
 
+  test("serializes a native AI SDK tool to a wire function tool, ignoring extras", () => {
+    // A raw-host adapter reads only `description`/`inputSchema`; a native
+    // `tool({...})` with an execute + extra fields must serialize cleanly (no
+    // crash on the extras) and never have its `execute` called here.
+    let executed = false;
+    const native = tool({
+      description: "Multiply two numbers.",
+      inputSchema: z.object({ a: z.number(), b: z.number() }),
+      execute: async () => {
+        executed = true;
+        return {};
+      },
+    }) as Record<string, unknown>;
+    native.customExtra = { keep: true };
+
+    const tools = toOpenAiTools({ calculate: native as never });
+
+    expect(tools).toHaveLength(1);
+    expect(tools[0]).toMatchObject({
+      type: "function",
+      function: { name: "calculate", description: "Multiply two numbers." },
+    });
+    expect(tools[0]!.function.parameters).toMatchObject({ type: "object" });
+    expect(executed).toBe(false);
+  });
+
   test("toOpenAiEventTools builds one function tool per candidate event", () => {
     const tools = toOpenAiEventTools([
       { type: "ASK", toolName: "send_event_ASK" },
@@ -178,10 +205,11 @@ describe("generateText (fake fetch, no network)", () => {
     expect(calls[0]!.body).not.toHaveProperty("response_format");
   });
 
-  test("structured output: sends response_format json_schema and parses the reply", async () => {
+  test("structured output: sends the { result } envelope schema and unwraps the reply", async () => {
     const { fetch, calls } = fakeFetch(() =>
       jsonResponse({
-        choices: [{ message: { content: JSON.stringify({ sentiment: "negative" }) } }],
+        // The model replies with the { result } envelope the wire schema asks for.
+        choices: [{ message: { content: JSON.stringify({ result: { sentiment: "negative" } }) } }],
       }),
     );
     const { generateText } = createOpenAiCompatExecutors({
@@ -197,13 +225,87 @@ describe("generateText (fake fetch, no network)", () => {
       }),
     );
 
+    // Transparent unwrap: the machine sees the declared schema value.
     expect(result.output).toEqual({ sentiment: "negative" });
-    expect(calls[0]!.body.response_format).toMatchObject({
+    // Every structured request is enveloped, even an object schema.
+    const responseFormat = calls[0]!.body.response_format as {
+      type: string;
+      json_schema: { name: string; strict: boolean; schema: Record<string, unknown> };
+    };
+    expect(responseFormat).toMatchObject({
       type: "json_schema",
-      json_schema: { name: "output", strict: false, schema: { type: "object" } },
+      json_schema: { name: "output", strict: false, schema: { type: "object", required: ["result"] } },
     });
+    expect(responseFormat.json_schema.schema).toHaveProperty("properties.result");
+    // No reasoning property without opt-in.
+    expect(JSON.stringify(responseFormat.json_schema.schema)).not.toContain("reasoning");
     // model ref passes through unchanged when not in a models map.
     expect(calls[0]!.body.model).toBe("mistral");
+  });
+
+  test("bare union outputSchema: enveloped uniformly and unwrapped", async () => {
+    const { fetch, calls } = fakeFetch(() =>
+      jsonResponse({
+        choices: [{ message: { content: JSON.stringify({ result: { kind: "a", a: 1 } }) } }],
+      }),
+    );
+    const { generateText } = createOpenAiCompatExecutors({
+      baseUrl: "http://localhost:11434/v1",
+      fetch,
+    });
+
+    const union = z.union([
+      z.object({ kind: z.literal("a"), a: z.number() }),
+      z.object({ kind: z.literal("b"), b: z.string() }),
+    ]);
+    const result = await generateText(textRequest({ model: "mistral", outputSchema: union }));
+
+    // Transparent unwrap: the user gets the bare union value, not the { result } wrapper.
+    expect(result.output).toEqual({ kind: "a", a: 1 });
+    // The wire schema is the object envelope, not a bare anyOf.
+    const responseFormat = calls[0]!.body.response_format as {
+      json_schema: { schema: Record<string, unknown> };
+    };
+    expect(responseFormat.json_schema.schema).toMatchObject({
+      type: "object",
+      required: ["result"],
+    });
+    expect(responseFormat.json_schema.schema).toHaveProperty("properties.result");
+  });
+
+  test("reasoning opt-in: advertises a reasoning property and surfaces it on the raw result", async () => {
+    const { fetch, calls } = fakeFetch(() =>
+      jsonResponse({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({ reasoning: "leans harsh", result: { sentiment: "negative" } }),
+            },
+          },
+        ],
+      }),
+    );
+    const { generateText } = createOpenAiCompatExecutors({
+      baseUrl: "http://localhost:11434/v1",
+      fetch,
+    });
+
+    const result = await generateText(
+      textRequest({
+        model: "mistral",
+        prompt: "Classify.",
+        outputSchema: z.object({ sentiment: z.enum(["positive", "negative"]) }),
+        reasoning: true,
+      }),
+    );
+
+    // Output is the declared schema value; reasoning is surfaced on the raw result only.
+    expect(result.output).toEqual({ sentiment: "negative" });
+    expect((result as { reasoning?: unknown }).reasoning).toBe("leans harsh");
+    const responseFormat = calls[0]!.body.response_format as {
+      json_schema: { schema: Record<string, unknown> };
+    };
+    expect(responseFormat.json_schema.schema).toHaveProperty("properties.reasoning");
   });
 
   test("populated tool set: converts the tools onto the wire body (no local loop)", async () => {

@@ -1,9 +1,20 @@
 export { appendMessages, messagesSchema } from "./messages.js";
 export { createAgentSchemas, setupAgent } from "./setup-agent.js";
-export { DecisionExhaustedError, PLAN_DONE_EVENT_TYPE, resolveDecision } from "./decision.js";
-export { EVENT_TOOL_PREFIX, getAcceptedEvents, matchesEventPattern } from "./events.js";
+export {
+  DecisionExhaustedError,
+  PLAN_DONE_EVENT_TYPE,
+  renderDecisionAttempts,
+  resolveDecision,
+} from "./decision.js";
+export {
+  EVENT_TOOL_PREFIX,
+  getAcceptedEvents,
+  matchesEventPattern,
+  parseAgentEvent,
+} from "./events.js";
 export {
   bindRequestExecutor,
+  buildEnvelopeSchema,
   createTextLogic,
   getAgentOutputMode,
   isStructuredOutputSchema,
@@ -24,10 +35,12 @@ export {
   runAgent,
   runAgentToCompletion,
   SnapshotVersionMismatchError,
-  WAIT_TAG,
 } from "./run-agent.js";
 export {
+  getJsonSchema,
+  getJsonSchemaSync,
   getMachineStructuralHash,
+  isStandardSchema,
   getStateMeta,
   persistSnapshot,
   validateSchemaSync,
@@ -54,6 +67,7 @@ export type {
   AgentRequestMode,
   AgentOutputMode,
   AgentUserInput,
+  StructuredOutputEnvelope,
   TextLogic,
   TextLogicConfig,
   TextLogicExecuteArgs,
@@ -107,6 +121,7 @@ export type {
   AgentToolChoice,
   AgentToolDescriptor,
   AgentToolExecute,
+  AgentToolSchema,
   AgentTools,
   AllowedEventPattern,
   AllowedEvents,

@@ -10,6 +10,7 @@ import {
   type AiSdkExecutors,
   type AiSdkModelMap,
 } from "../../src/ai-sdk/index.js";
+import type { AgentRequestExecutors } from "../../src/index.js";
 
 /** Options for {@link runExampleMain}. */
 export interface RunExampleMainOptions {
@@ -71,12 +72,34 @@ export function runExampleMain(
  * When `overrides` is non-empty it is forwarded verbatim (so an injected
  * `executors` plus any `onTransition`/`input` overrides all flow through);
  * otherwise only a freshly-built `{ executors }` is returned.
+ *
+ * Thin overload: pass a bare `generateText` executor as the second argument
+ * (what a keyless test injects) and it becomes `{ executors: { generateText } }`;
+ * pass `undefined` (a direct run) and real executors are built from `models`.
+ * This replaces the `resolveExecutors(models, x ? { executors: { generateText: x } } : undefined)`
+ * ternary the single-request examples used to repeat.
+ *
+ * @example
+ * ```ts
+ * const result = await runAgent(machine, { input, ...resolveExecutors(models, generateText) });
+ * ```
  */
+export function resolveExecutors<TModels extends AiSdkModelMap>(
+  models: TModels,
+  generateText: AgentRequestExecutors["generateText"] | undefined,
+): { executors: { generateText: AgentRequestExecutors["generateText"] } | AiSdkExecutors };
 export function resolveExecutors<TModels extends AiSdkModelMap, TOverrides extends object>(
   models: TModels,
   overrides?: TOverrides,
-): TOverrides | { executors: AiSdkExecutors } {
-  return overrides && Object.keys(overrides).length > 0
-    ? overrides
+): TOverrides | { executors: AiSdkExecutors };
+export function resolveExecutors<TModels extends AiSdkModelMap>(
+  models: TModels,
+  arg?: object | AgentRequestExecutors["generateText"],
+): object {
+  if (typeof arg === "function") {
+    return { executors: { generateText: arg } };
+  }
+  return arg && Object.keys(arg).length > 0
+    ? arg
     : { executors: createAiSdkExecutors({ models }) };
 }

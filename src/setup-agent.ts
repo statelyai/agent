@@ -1,6 +1,7 @@
 import {
   setup,
   type AnyActorLogic,
+  type AnyMachineSnapshot,
   type AnySetupConfig,
   type AnyStateMachine,
   type AsyncActorLogic,
@@ -28,7 +29,7 @@ import {
 } from "./text-logic.js";
 import { createDecideActor, createPlanActor } from "./decision.js";
 import { appendMessages } from "./messages.js";
-import { agentExecutionOptions } from "./internal/registry.js";
+import { agentExecutionOptions, machineSuspensionPredicates } from "./internal/registry.js";
 import {
   setupAgentFromConfig,
   type AgentWorkflowConfig,
@@ -312,6 +313,17 @@ type SetupAgentBaseConfig<
   actions?: NonNullable<AnySetupConfig["actions"]>;
   guards?: NonNullable<AnySetupConfig["guards"]>;
   delays?: NonNullable<AnySetupConfig["delays"]>;
+  /**
+   * Detects a snapshot that is an INTENTIONAL wait for an external event (a
+   * human approval, an inbound webhook, …) — the machine's own declaration of
+   * what "suspended" means for it, so `runAgent` settles those snapshots idle
+   * deterministically instead of using its timing heuristic. Travels with the
+   * machine through `machine.provide(...)`. A `runAgent({ isSuspended })` host
+   * override takes precedence; with neither, `runAgent` falls back to the timing
+   * heuristic. Declare your own signal — e.g. `(s) => s.hasTag('awaiting-review')`
+   * or `(s) => getStateMeta(s).interaction !== undefined`.
+   */
+  isSuspended?: (snapshot: AnyMachineSnapshot) => boolean;
 };
 
 // The raw xstate `setup(...)` result type for an agent config, before setupAgent's own extensions (schemas/models/requests/appendMessages, plus the wrapped createMachine) are added.
@@ -883,6 +895,14 @@ function createSetupAgent<
     createMachine(machineConfig: Parameters<typeof base.createMachine>[0]) {
       const machine = createBaseMachine(withRootOutputFromSingleFinal(machineConfig) as never);
       agentExecutionOptions.set(machine as object, machineOptions);
+      // Carry the wait-state predicate on the machine's root `config` (shared by
+      // reference across `.provide`), so it survives provide/executor rebinding.
+      if (config.isSuspended) {
+        const rootConfig = (machine as { config?: object }).config;
+        if (rootConfig) {
+          machineSuspensionPredicates.set(rootConfig, config.isSuspended);
+        }
+      }
       return machine;
     },
     schemas,

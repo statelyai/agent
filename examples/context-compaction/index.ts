@@ -26,7 +26,6 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
 import {
-  type AgentMessage,
   assistantMessage,
   createAgentSchemas,
   runAgent,
@@ -34,6 +33,8 @@ import {
   systemMessage,
   userMessage,
 } from "../../src/index.js";
+import { zodAgentMessages } from "../../src/zod/index.js";
+import { promptLine } from "../helpers/cli.js";
 import { runExampleMain } from "../helpers/main.js";
 
 // Annotated so the exported const has a portable, nameable type (TS2742).
@@ -43,7 +44,7 @@ export const models = defineModels({
 
 export const contextCompactionSchemas = createAgentSchemas({
   context: z.object({
-    messages: z.custom<AgentMessage[]>((value) => Array.isArray(value)),
+    messages: zodAgentMessages(),
     summary: z.string().nullable(),
     turns: z.number(),
     maxMessages: z.number(),
@@ -58,7 +59,7 @@ export const contextCompactionSchemas = createAgentSchemas({
   }),
   output: z.object({
     summary: z.string().nullable(),
-    messages: z.custom<AgentMessage[]>((value) => Array.isArray(value)),
+    messages: zodAgentMessages(),
     turns: z.number(),
   }),
 });
@@ -84,7 +85,7 @@ const agentSetup = setupAgent({
       schemas: {
         input: z.object({
           summary: z.string().nullable(),
-          messages: z.custom<AgentMessage[]>((value) => Array.isArray(value)),
+          messages: zodAgentMessages(),
         }),
         output: z.string(),
       },
@@ -102,7 +103,7 @@ const agentSetup = setupAgent({
       schemas: {
         input: z.object({
           priorSummary: z.string().nullable(),
-          staleMessages: z.custom<AgentMessage[]>((value) => Array.isArray(value)),
+          staleMessages: zodAgentMessages(),
         }),
         output: z.object({ summary: z.string() }),
       },
@@ -139,7 +140,6 @@ export const contextCompactionMachine = agentSetup.createMachine({
   initial: "awaitingUser",
   states: {
     awaitingUser: {
-      tags: ["awaiting-user"],
       invoke: {
         src: "agent.userInput",
         input: { prompt: "You:" },
@@ -226,28 +226,18 @@ export const contextCompactionMachine = agentSetup.createMachine({
 
 const executors = createAiSdkExecutors({ models });
 
-async function promptLine(question: string): Promise<string> {
-  const { createInterface } = await import("node:readline/promises");
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    return await rl.question(`${question} `);
-  } finally {
-    rl.close();
-  }
-}
-
 export async function main() {
   const result = await runAgent(contextCompactionMachine, {
     input: { maxMessages: 8, keepRecent: 4 },
     executors,
-    userInput: async ({ prompt }) => promptLine(prompt ?? "You:"),
+    userInput: async ({ prompt }) => promptLine(`${prompt ?? "You:"} `),
     onTransition: (snapshot) => {
       console.log("[state]", JSON.stringify(snapshot.value));
       if (snapshot.value === "compacting") {
         console.log("\n[compacting context...]");
       }
       // Print the latest assistant reply as it lands.
-      const last = (snapshot.context.messages as AgentMessage[]).at(-1);
+      const last = snapshot.context.messages.at(-1);
       if (snapshot.value === "checkingWindow" && last?.role === "assistant") {
         const text = typeof last.content === "string" ? last.content : "";
         console.log(`Assistant: ${text}`);

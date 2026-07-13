@@ -18,15 +18,16 @@ import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
 import { withReadline } from "../helpers/cli.js";
 import { runExampleMain } from "../helpers/main.js";
 import {
-  type AgentMessage,
   assistantMessage,
   createAgentSchemas,
   createTextLogic,
   getStateMeta,
+  parseAgentEvent,
   runAgent,
   setupAgent,
   userMessage,
 } from "../../src/index.js";
+import { zodAgentMessages } from "../../src/zod/index.js";
 
 const promptAssessmentSchema = z.object({
   satisfied: z.boolean(),
@@ -87,7 +88,7 @@ const contextSchema = z.object({
   assessment: promptAssessmentSchema.nullable(),
   draft: emailDraftSchema.nullable(),
   sentEmails: z.array(emailDraftSchema),
-  messages: z.custom<AgentMessage[]>((value) => Array.isArray(value)),
+  messages: zodAgentMessages(),
 });
 
 const eventSchemas = {
@@ -123,7 +124,7 @@ export const draftEmail = createTextLogic({
   schemas: {
     input: z.object({
       prompt: z.string(),
-      messages: z.custom<AgentMessage[]>((value) => Array.isArray(value)),
+      messages: zodAgentMessages(),
     }),
     output: emailDraftSchema,
   },
@@ -461,7 +462,9 @@ export async function main() {
       const event = await promptInteraction(rl, meta.interaction, meta.display);
       result = await runAgent(emailDrafter, {
         snapshot: result.snapshot,
-        event: event as never,
+        event: parseAgentEvent(result.snapshot, event, {
+          events: emailDrafterSchemas.events,
+        }),
         executors,
       });
     }

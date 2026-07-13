@@ -34,7 +34,12 @@ import type {
   ChatCompletionToolChoiceOption,
 } from "openai/resources/chat/completions/completions.js";
 import {
+  buildEnvelopeSchema,
   getAgentOutputMode,
+  getJsonSchema,
+  getJsonSchemaSync,
+  isStandardSchema,
+  renderDecisionAttempts,
   runAgent,
   type AgentDecisionExecutor,
   type AgentDecisionRequest,
@@ -44,50 +49,13 @@ import {
   type AgentTextRequest,
   type AgentTools,
   type ChosenEvent,
-  type DecisionAttempt,
-  type StandardSchemaV1,
+  type StructuredOutputEnvelope,
 } from "../../src/index.js";
 import { triageMachine } from "../triage/index.js";
 import { twentyQuestionsMachine } from "../twenty-questions/index.js";
 import { runExampleMain } from "../helpers/main.js";
 
 // ─── Request → OpenAI param mapping (pure, unit-testable) ───
-
-/**
- * Extracts a JSON Schema from a Standard Schema's optional
- * `~standard.jsonSchema` extension (implemented by e.g. Zod v4's
- * `z.toJSONSchema`). The extension's signature allows returning a `Promise`
- * per the StandardSchemaV1 contract — this helper awaits it when so. Returns
- * `undefined` when the schema doesn't expose the extension at all.
- */
-export async function extractJsonSchema(
-  schema?: StandardSchemaV1,
-): Promise<Record<string, unknown> | undefined> {
-  const jsonSchemaFn = schema?.["~standard"].jsonSchema?.input;
-  if (!jsonSchemaFn) {
-    return undefined;
-  }
-  const result = jsonSchemaFn();
-  const resolved = result instanceof Promise ? await result : result;
-  return resolved as Record<string, unknown> | undefined;
-}
-
-/**
- * Sync-only variant for call sites that build OpenAI tool/event descriptors
- * outside an async context (`toOpenAiTools`, `toOpenAiEventTools`). If the
- * schema's `~standard.jsonSchema.input()` returns a `Promise`, its schema is
- * treated as absent here (falls back to `{}` — an empty-parameters tool),
- * since these call sites can't await. In practice the schema compilers used
- * across these examples (e.g. Zod's `z.toJSONSchema`) resolve synchronously.
- */
-function extractJsonSchemaSync(schema?: StandardSchemaV1): Record<string, unknown> | undefined {
-  const jsonSchemaFn = schema?.["~standard"].jsonSchema?.input;
-  if (!jsonSchemaFn) {
-    return undefined;
-  }
-  const result = jsonSchemaFn();
-  return result instanceof Promise ? undefined : (result as Record<string, unknown> | undefined);
-}
 
 /** Maps `AgentTextRequest.messages`/`system`/`prompt` to OpenAI chat messages. */
 export function toOpenAiMessages(
@@ -156,7 +124,7 @@ export function toOpenAiTools(tools: AgentTools): ChatCompletionFunctionTool[] {
         function: {
           name,
           description: typeof descriptor === "function" ? undefined : descriptor.description,
-          parameters: extractJsonSchemaSync(inputSchema) ?? {},
+          parameters: (isStandardSchema(inputSchema) ? getJsonSchemaSync(inputSchema) : undefined) ?? {},
         },
       },
     ];
@@ -171,7 +139,7 @@ export function toOpenAiEventTools(events: AgentEventDescriptor[]): ChatCompleti
     function: {
       name: event.toolName,
       description: `Choose the '${event.type}' move.`,
-      parameters: extractJsonSchemaSync(event.inputSchema) ?? {},
+      parameters: getJsonSchemaSync(event.inputSchema) ?? {},
     },
   }));
 }
@@ -185,15 +153,10 @@ export function toDecisionMessages(
   request: Pick<AgentDecisionRequest, "messages" | "prompt" | "events" | "attempts">,
 ): ChatCompletionMessageParam[] {
   const messages = toOpenAiMessages(request);
-  for (const attempt of request.attempts) {
-    messages.push({ role: "user", content: attemptFeedback(attempt, request.events) });
+  for (const m of renderDecisionAttempts(request)) {
+    messages.push({ role: "user", content: m.content as string });
   }
   return messages;
-}
-
-function attemptFeedback(attempt: DecisionAttempt, events: AgentEventDescriptor[]): string {
-  const types = events.map((event) => event.type).join(", ") || "(none)";
-  return `Your previous choice failed: ${attempt.reason}. Choose again from: ${types}`;
 }
 
 // ─── createOpenAiExecutors ───
@@ -234,7 +197,15 @@ export function createOpenAiExecutors({
     };
 
     if (getAgentOutputMode(request.outputSchema) === "structured") {
-      const jsonSchema = await extractJsonSchema(request.outputSchema);
+      // THE structured-output envelope contract (see docs/hosts.md): send the
+      // declared schema wrapped as `{ result, reasoning? }` — a root object is
+      // universally accepted — then unwrap `.result` before returning, so the
+      // machine validates the bare schema it declared. `reasoning` (opt-in) is
+      // surfaced on the raw result only.
+      const envelope = buildEnvelopeSchema(request.outputSchema!, {
+        reasoning: request.reasoning,
+      });
+      const jsonSchema = await getJsonSchema(envelope);
       if (jsonSchema) {
         const response = await client.chat.completions.create(
           {
@@ -255,7 +226,11 @@ export function createOpenAiExecutors({
           { signal: info?.signal },
         );
         const content = response.choices[0]?.message.content;
-        return { output: content ? JSON.parse(content) : undefined };
+        const parsed = content ? (JSON.parse(content) as StructuredOutputEnvelope) : undefined;
+        return {
+          output: parsed?.result,
+          ...(typeof parsed?.reasoning === "string" ? { reasoning: parsed.reasoning } : {}),
+        };
       }
       // no structured output without a schema exposing ~standard.jsonSchema
       // — falls back to text.

@@ -1,5 +1,6 @@
-import { getNextTransitions, type AnyMachineSnapshot } from "xstate";
+import { getNextTransitions, type AnyMachineSnapshot, type EventObject, type MachineSnapshot } from "xstate";
 import type { StandardSchemaV1 } from "./types.js";
+import { validateSchemaSync } from "./utils.js";
 
 /** The invoke `src` of an {@link AgentRequest}/{@link AgentDecisionRequest} — a plain string, widened so literal `src` values still narrow in editor hints. */
 // `& {}` keeps literal-union autocomplete alive while still allowing any string — a bare `string` in a union would swallow the literals.
@@ -109,6 +110,67 @@ export interface AgentRequestOptions {
  * declared `allowedEvents` set — entries may be exact types or wildcard
  * patterns (`'*'`, `'todo.*'`; see {@link matchesEventPattern}).
  */
+/** Recovers a machine's event union from its snapshot type, so {@link parseAgentEvent} returns the machine-typed event without a downstream cast. @internal */
+export type EventFromSnapshot<TSnapshot> =
+  TSnapshot extends MachineSnapshot<any, infer TEvent, any, any, any, any, any, any>
+    ? TEvent
+    : EventObject;
+
+/**
+ * Runtime-validates a dynamically-built `{ type, ...payload }` event against a
+ * snapshot's currently-accepted events (via {@link getAcceptedEvents}) and,
+ * when one is registered, the event type's payload schema — returning the
+ * event typed as the machine's event union (recovered from the snapshot type)
+ * so it can be sent to `runAgent({ event })` / `actor.send(...)` without an
+ * `as never` cast. For generic, meta-driven hosts that assemble events from
+ * user input or a wire message.
+ *
+ * Throws a descriptive error when `event.type` is not currently accepted
+ * (listing the accepted types) or when its payload fails the registered schema.
+ * Pass event payload schemas via `options.events`/`options.schemas` (the same
+ * shape {@link getAcceptedEvents} takes) — the accepted TYPES always come from
+ * the live snapshot; the schemas only add payload validation.
+ *
+ * @example
+ * ```ts
+ * const event = parseAgentEvent(result.snapshot, rawEvent, { events: schemas.events });
+ * result = await runAgent(machine, { snapshot: result.snapshot, event, executors });
+ * ```
+ */
+export function parseAgentEvent<TSnapshot extends AnyMachineSnapshot>(
+  snapshot: TSnapshot,
+  event: { type: string } & Record<string, unknown>,
+  options: Pick<AgentRequestOptions, "events" | "schemas" | "eventToolName"> = {},
+): EventFromSnapshot<TSnapshot> {
+  const accepted = getAcceptedEvents(snapshot, options);
+  const descriptor = accepted.find((candidate) => candidate.type === event.type);
+  if (!descriptor) {
+    throw new Error(
+      `parseAgentEvent: '${event.type}' is not an accepted event in the current state. ` +
+        `Accepted: ${accepted.map((candidate) => candidate.type).join(", ") || "(none)"}.`,
+    );
+  }
+
+  if (descriptor.inputSchema) {
+    const { type, ...payload } = event;
+    try {
+      const validatedPayload = validateSchemaSync(descriptor.inputSchema, payload);
+      return {
+        ...(validatedPayload as Record<string, unknown>),
+        type,
+      } as EventFromSnapshot<TSnapshot>;
+    } catch (error) {
+      throw new Error(
+        `parseAgentEvent: '${event.type}' payload failed validation: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  return event as EventFromSnapshot<TSnapshot>;
+}
+
 export function getAcceptedEvents(
   snapshot: AnyMachineSnapshot,
   options: Pick<AgentRequestOptions, "events" | "schemas" | "eventToolName"> & {

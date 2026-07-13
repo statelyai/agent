@@ -8,8 +8,10 @@ type MockDoStream = NonNullable<ConstructorParameters<typeof MockLanguageModelV3
 type MockStreamResult = Extract<MockDoStream, { stream: unknown }>;
 type LanguageModelStreamPart =
   MockStreamResult extends { stream: ReadableStream<infer P> } ? P : never;
+import { tool } from "ai";
 import type { AgentDecisionRequest } from "../decision.js";
 import type { AgentEventDescriptor } from "../events.js";
+import type { AgentTools } from "../types.js";
 import {
   createAiSdkExecutors,
   defineModels,
@@ -63,6 +65,40 @@ describe("toAiSdkTools", () => {
         execute: expect.any(Function),
       }),
     );
+  });
+
+  test("passes a native AI SDK tool through unchanged, preserving extras", () => {
+    // A genuine `tool({...})` already carries its own Standard Schema
+    // `inputSchema`, so the adapter must hand the SAME object to the SDK — its
+    // typing/validation/execute(input, options) behavior applies untouched, and
+    // any extra field (here a custom `providerOptions`-style marker) survives.
+    const native = tool({
+      description: "Multiply two numbers.",
+      inputSchema: z.object({ a: z.number(), b: z.number() }),
+      execute: async ({ a, b }) => ({ product: a * b }),
+    }) as Record<string, unknown>;
+    native.customExtra = { keep: true };
+
+    const tools = toAiSdkTools({ calculate: native as never });
+
+    // Identity pass-through: the very same object reference reaches the SDK.
+    expect(tools.calculate).toBe(native);
+    // The extra field rode along untouched.
+    expect((tools.calculate as Record<string, unknown>).customExtra).toEqual({ keep: true });
+  });
+
+  test("a native AI SDK tool assigns into an AgentTools map with no cast (type test)", () => {
+    // Compile-time proof of §2: a real `ai` `tool({...})` with a concrete
+    // inputSchema and an (input, options) execute is structurally an AgentTool.
+    const tools: AgentTools = {
+      calculate: tool({
+        description: "Multiply two numbers.",
+        inputSchema: z.object({ a: z.number(), b: z.number() }),
+        execute: async ({ a, b }, options) => ({ product: a * b, id: options.toolCallId }),
+      }),
+    };
+
+    expect(tools.calculate).toBeDefined();
   });
 });
 
@@ -441,6 +477,7 @@ describe("metadata.maxSteps (multi-step tool loops)", () => {
     // `execute`, the tool result is fed back into the next model call, and the
     // final assistant text resolves as `output`.
     const executeInputs: unknown[] = [];
+    const executeOptions: unknown[] = [];
     const secondCallMessages: unknown[] = [];
     let calls = 0;
     const usage = {
@@ -484,21 +521,28 @@ describe("metadata.maxSteps (multi-step tool loops)", () => {
       prompt: "What is 42 times 17?",
       metadata: { maxSteps: 5 },
       tools: {
-        calculate: {
+        // A genuine AI SDK `tool({...})` — `input` is typed from `inputSchema`
+        // by the SDK, no cast. The adapter hands it to the SDK unchanged, so the
+        // SDK's own validation runs and `execute` is called with (input, options).
+        calculate: tool({
           description: "Multiply two numbers.",
           inputSchema: z.object({ a: z.number(), b: z.number() }),
-          execute: async (input) => {
+          execute: async (input, options) => {
             executeInputs.push(input);
-            const { a, b } = input as { a: number; b: number };
+            executeOptions.push(options);
+            const { a, b } = input;
             return { product: a * b };
           },
-        },
+        }),
       },
     });
 
     // Schema conversion + parse: execute got the typed, parsed object (numbers),
     // not the raw JSON string.
     expect(executeInputs).toEqual([{ a: 42, b: 17 }]);
+    // Native (input, options) arity: the SDK passed a second options arg
+    // carrying the tool call id.
+    expect(executeOptions[0]).toMatchObject({ toolCallId: "call-1" });
     // Fed back: the second model call's messages carry a tool result for the call.
     const fedBack = JSON.stringify(secondCallMessages);
     expect(fedBack).toContain("tool-result");
@@ -506,6 +550,120 @@ describe("metadata.maxSteps (multi-step tool loops)", () => {
     // Final output resolution + loop actually ran twice.
     expect(calls).toBe(2);
     expect(result.output).toBe("42 times 17 is 714.");
+  });
+
+  const structuredUsage = {
+    inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+    outputTokens: { total: 1, text: 1, reasoning: 0 },
+  };
+
+  test("generateText: every structured request is sent as the { result } envelope and unwrapped", async () => {
+    // The uniform envelope contract: an object schema (a valid root on its own)
+    // is STILL enveloped as `{ result: <schema> }`, so all structured requests
+    // are wire-identical. The adapter unwraps `.result` before returning, so the
+    // machine validates the declared schema transparently.
+    let sentResponseFormat: unknown;
+    const model = new MockLanguageModelV3({
+      doGenerate: async (options) => {
+        sentResponseFormat = (options as { responseFormat?: unknown }).responseFormat;
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({ result: { ok: true } }) }],
+          finishReason: { unified: "stop" as const, raw: "stop" },
+          usage: structuredUsage,
+          warnings: [],
+        };
+      },
+    });
+    const { generateText } = createAiSdkExecutors({ models: { m: model } });
+
+    const schema = z.object({ ok: z.boolean() });
+    const result = await generateText({ model: "m", prompt: "x", outputSchema: schema, tools: {} });
+
+    expect(result.output).toEqual({ ok: true });
+    expect(result.reasoning).toBeUndefined();
+    // The provider saw the enveloped schema (its json schema mentions `result`).
+    expect(JSON.stringify(sentResponseFormat)).toContain("result");
+  });
+
+  test("generateText: a bare union is enveloped uniformly and unwrapped", async () => {
+    const model = new MockLanguageModelV3({
+      doGenerate: async () => ({
+        content: [{ type: "text" as const, text: JSON.stringify({ result: { kind: "a", a: 1 } }) }],
+        finishReason: { unified: "stop" as const, raw: "stop" },
+        usage: structuredUsage,
+        warnings: [],
+      }),
+    });
+    const { generateText } = createAiSdkExecutors({ models: { m: model } });
+
+    const union = z.union([
+      z.object({ kind: z.literal("a"), a: z.number() }),
+      z.object({ kind: z.literal("b"), b: z.string() }),
+    ]);
+    const result = await generateText({ model: "m", prompt: "x", outputSchema: union, tools: {} });
+
+    // Transparent unwrap: caller gets the inner union value, not { result }.
+    expect(result.output).toEqual({ kind: "a", a: 1 });
+  });
+
+  test("generateText: reasoning opt-in adds a reasoning property and surfaces it on the raw result", async () => {
+    let sentResponseFormat: unknown;
+    const model = new MockLanguageModelV3({
+      doGenerate: async (options) => {
+        sentResponseFormat = (options as { responseFormat?: unknown }).responseFormat;
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({ reasoning: "because true", result: { ok: true } }),
+            },
+          ],
+          finishReason: { unified: "stop" as const, raw: "stop" },
+          usage: structuredUsage,
+          warnings: [],
+        };
+      },
+    });
+    const { generateText } = createAiSdkExecutors({ models: { m: model } });
+
+    const schema = z.object({ ok: z.boolean() });
+    const result = await generateText({
+      model: "m",
+      prompt: "x",
+      outputSchema: schema,
+      reasoning: true,
+      tools: {},
+    });
+
+    // Output is the declared schema value only; reasoning is a raw-result field.
+    expect(result.output).toEqual({ ok: true });
+    expect(result.reasoning).toBe("because true");
+    // The enveloped schema advertised `reasoning` to the provider.
+    expect(JSON.stringify(sentResponseFormat)).toContain("reasoning");
+  });
+
+  test("generateText: without reasoning opt-in, no reasoning property is sent", async () => {
+    let sentResponseFormat: unknown;
+    const model = new MockLanguageModelV3({
+      doGenerate: async (options) => {
+        sentResponseFormat = (options as { responseFormat?: unknown }).responseFormat;
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({ result: { ok: true } }) }],
+          finishReason: { unified: "stop" as const, raw: "stop" },
+          usage: structuredUsage,
+          warnings: [],
+        };
+      },
+    });
+    const { generateText } = createAiSdkExecutors({ models: { m: model } });
+
+    await generateText({
+      model: "m",
+      prompt: "x",
+      outputSchema: z.object({ ok: z.boolean() }),
+      tools: {},
+    });
+    expect(JSON.stringify(sentResponseFormat)).not.toContain("reasoning");
   });
 
   test("generateText honors metadata.maxSteps (symmetry check)", async () => {

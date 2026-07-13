@@ -72,9 +72,24 @@ on: {
 
 A request that needs history sends it through `messages` instead of a bare `prompt`. [examples/email-drafter/index.ts](../examples/email-drafter/index.ts) keeps a running `messages` array in context and feeds it to a `createTextLogic` request.
 
-### The `z.custom` recipe
+### A lightweight messages field
 
-`messagesSchema` is the shipped validator. When you want a messages field without deep per-part validation — the array is built from library helpers you already trust — the canonical recipe is a `z.custom` typed as `AgentMessage[]` with a cheap runtime check:
+`messagesSchema` is the shipped validator. When you want a messages field without deep per-part validation — the array is built from library helpers you already trust — reach for a field typed as `AgentMessage[]` with a cheap `Array.isArray` runtime check.
+
+With `zod`, use the shipped `zodAgentMessages()` from the `@statelyai/agent/zod` subpath (an optional `zod` peer):
+
+```ts
+import { z } from 'zod';
+import { zodAgentMessages } from '@statelyai/agent/zod';
+
+context: z.object({
+  messages: zodAgentMessages(),
+}),
+```
+
+`zodAgentMessages()` returns a `z.ZodType<AgentMessage[]>` — the exact `AgentMessage[]` type at author time, with the runtime check kept to a shallow `Array.isArray`.
+
+No-dependency fallback: the same recipe inline with `z.custom`, if you'd rather not add the subpath import:
 
 ```ts
 import { z } from 'zod';
@@ -85,7 +100,7 @@ context: z.object({
 }),
 ```
 
-This preserves the exact `AgentMessage[]` type at author time while keeping the runtime check to a shallow `Array.isArray`. Use `messagesSchema` instead when you want full structural validation of each part.
+Use `messagesSchema` instead when you want full structural validation of each part.
 
 ## Persisting messages
 

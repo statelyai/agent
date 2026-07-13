@@ -11,8 +11,8 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { setupAgent, runAgent } from "../../src/index.js";
-import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
-import { runExampleMain } from "../helpers/main.js";
+import { defineModels } from "../../src/ai-sdk/index.js";
+import { resolveExecutors, runExampleMain } from "../helpers/main.js";
 
 const translationEvaluationSchema = z.object({
   qualityScore: z.number().min(1).max(10),
@@ -226,7 +226,7 @@ export async function runAiSdkEvaluatorOptimizerExample() {
       targetLanguage: "Spanish",
       maxIterations: 3,
     },
-    executors: createAiSdkExecutors({ models }),
+    ...resolveExecutors(models, undefined),
     onTransition: (snapshot) =>
       console.log(
         "[state]",

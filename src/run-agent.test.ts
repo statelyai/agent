@@ -13,7 +13,6 @@ import {
   runAgentToCompletion,
   setupAgent,
   SnapshotVersionMismatchError,
-  WAIT_TAG,
   type AgentDecisionRequest,
   type AgentTextRequest,
   type AgentTools,
@@ -1803,6 +1802,63 @@ describe("onResult raw pass-through", () => {
       { output: "42", usage: { inputTokens: 7, outputTokens: 3 }, finishReason: "stop" },
     ]);
   });
+
+  test("reasoning on the raw executor result reaches onResult.raw and the request.end trace", async () => {
+    const agent = setupAgent({
+      context: z.object({ answer: z.string().nullable() }),
+      output: z.object({ answer: z.string() }),
+      requests: {
+        ask: {
+          schemas: { input: z.object({}), output: z.object({ answer: z.string() }) },
+          model: "m",
+          reasoning: true,
+          prompt: () => "q",
+        },
+      },
+    });
+
+    const machine = agent.createMachine({
+      context: { answer: null },
+      initial: "asking",
+      states: {
+        asking: {
+          invoke: {
+            src: "ask",
+            input: () => ({}),
+            onDone: ({ output }) => ({
+              target: "done",
+              context: { answer: (output as { answer: string }).answer },
+            }),
+          },
+        },
+        done: { type: "final", output: ({ context }) => ({ answer: context.answer ?? "" }) },
+      },
+    });
+
+    const raws: unknown[] = [];
+    const trace: AgentTraceEvent[] = [];
+    const result = await runAgent(machine, {
+      onResult: (_request, { raw }) => raws.push(raw),
+      onTrace: (event) => trace.push(event),
+      executors: {
+        // Executor surfaces reasoning alongside the (already-unwrapped) output —
+        // exactly what createAiSdkExecutors returns from the envelope.
+        generateText: async () => ({ output: { answer: "42" }, reasoning: "carefully" }),
+      },
+    });
+
+    expect(result.status).toBe("done");
+    // reasoning stays out of machine context/output.
+    expect(result.status === "done" ? result.output : undefined).toEqual({ answer: "42" });
+    // reasoning reaches onResult via raw.
+    expect(raws).toEqual([{ output: { answer: "42" }, reasoning: "carefully" }]);
+    // reasoning is lifted onto the request.end trace event as a field.
+    const end = trace.find(
+      (event): event is Extract<AgentTraceEvent, { type: "request.end" }> =>
+        event.type === "request.end",
+    );
+    expect(end?.reasoning).toBe("carefully");
+  });
 });
 
 describe("inspect passthrough (system-wide visibility)", () => {
@@ -1878,20 +1934,22 @@ describe("inspect passthrough (system-wide visibility)", () => {
   });
 });
 
-describe("Feature A: explicit suspension detection (WAIT_TAG / isSuspended)", () => {
-  test("a WAIT_TAG wait state settles idle and resumes to done", async () => {
+describe("Feature A: explicit suspension detection (isSuspended)", () => {
+  test("a machine-carried isSuspended predicate settles idle and resumes to done", async () => {
     const agent = setupAgent({
       context: z.object({}),
       input: z.object({}),
       output: z.object({ approved: z.boolean() }),
       events: { APPROVE: z.object({}) },
+      // The machine declares its own wait signal — a tag it chose.
+      isSuspended: (snapshot) => snapshot.hasTag("awaiting-review"),
     });
     const machine = agent.createMachine({
       context: {},
       initial: "reviewing",
       states: {
         reviewing: {
-          tags: [WAIT_TAG],
+          tags: ["awaiting-review"],
           on: { APPROVE: { target: "done" } },
         },
         done: { type: "final", output: () => ({ approved: true }) },
@@ -1919,12 +1977,13 @@ describe("Feature A: explicit suspension detection (WAIT_TAG / isSuspended)", ()
     expect(second.status === "done" ? second.output : undefined).toEqual({ approved: true });
   });
 
-  test("a WAIT_TAG region does not settle early while a sibling still has work in flight", async () => {
+  test("a suspended region does not settle early while a sibling still has work in flight", async () => {
     const agent = setupAgent({
       context: z.object({ summary: z.string().nullable() }),
       input: z.object({}),
       output: z.object({ summary: z.string() }),
       events: { APPROVE: z.object({}) },
+      isSuspended: (snapshot) => snapshot.hasTag("awaiting-review"),
       requests: {
         summarize: {
           schemas: { input: z.object({}), output: z.string() },
@@ -1940,7 +1999,7 @@ describe("Feature A: explicit suspension detection (WAIT_TAG / isSuspended)", ()
         review: {
           initial: "waiting",
           states: {
-            waiting: { tags: [WAIT_TAG], on: { APPROVE: { target: "approved" } } },
+            waiting: { tags: ["awaiting-review"], on: { APPROVE: { target: "approved" } } },
             approved: { type: "final" },
           },
         },
@@ -1974,14 +2033,20 @@ describe("Feature A: explicit suspension detection (WAIT_TAG / isSuspended)", ()
     expect((result.snapshot.context as { summary: string | null }).summary).toBe("done-summary");
   });
 
-  test("a custom isSuspended detector is used instead of the WAIT_TAG default", async () => {
+  test("the runAgent isSuspended option overrides the machine-carried predicate", async () => {
+    const machineSeen: string[] = [];
     const agent = setupAgent({
       context: z.object({}),
       input: z.object({}),
       output: z.object({}),
       events: { GO: z.object({}) },
+      // Machine-carried predicate would NEVER fire (wrong state) — proves the
+      // host option below wins.
+      isSuspended: (snapshot) => {
+        machineSeen.push(JSON.stringify(snapshot.value));
+        return snapshot.matches("done");
+      },
     });
-    // No WAIT_TAG anywhere: the default detector would never fire.
     const machine = agent.createMachine({
       context: {},
       initial: "paused",
@@ -2005,8 +2070,48 @@ describe("Feature A: explicit suspension detection (WAIT_TAG / isSuspended)", ()
 
     expect(result.status).toBe("idle");
     expect(result.status === "idle" ? result.snapshot.value : undefined).toBe("paused");
-    // The custom detector was consulted (proving it replaced the default).
+    // The host override was consulted; the machine-carried predicate was not.
     expect(seen).toContain('"paused"');
+    expect(machineSeen).toEqual([]);
+  });
+
+  test("the machine-carried predicate survives machine.provide (executor rebinding)", async () => {
+    const agent = setupAgent({
+      context: z.object({}),
+      input: z.object({}),
+      output: z.object({}),
+      events: { GO: z.object({}) },
+      isSuspended: (snapshot) => snapshot.matches("paused"),
+      requests: {
+        noop: {
+          schemas: { input: z.object({}), output: z.string() },
+          model: "m",
+          prompt: () => "noop",
+        },
+      },
+    });
+    const machine = agent.createMachine({
+      context: {},
+      initial: "paused",
+      states: {
+        paused: { on: { GO: { target: "done" } } },
+        done: { type: "final", output: () => ({}) },
+      },
+    });
+
+    // A user-side provide returns a NEW machine object; the predicate is carried
+    // on the shared root `config`, so it must still be found.
+    const provided = machine.provide({});
+
+    const result = await runAgent(provided, {
+      input: {},
+      executors: {
+        generateText: async () => ({ output: "x" }),
+      },
+    });
+
+    expect(result.status).toBe("idle");
+    expect(result.status === "idle" ? result.snapshot.value : undefined).toBe("paused");
   });
 
   test("untagged machines still settle idle via the fallback heuristic (unchanged)", async () => {

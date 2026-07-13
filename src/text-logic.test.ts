@@ -12,7 +12,11 @@ import {
   type AgentTextRequest,
   type AgentTools,
 } from "./index.js";
-import { executeAgentTextRequest, type AgentRequestExecutorInfo } from "./text-logic.js";
+import {
+  buildEnvelopeSchema,
+  executeAgentTextRequest,
+  type AgentRequestExecutorInfo,
+} from "./text-logic.js";
 
 // Focused coverage for the `mode: 'stream'` path of `createTextLogic`:
 // the `onChunk` seam, streamText-missing errors, structured-output behavior,
@@ -358,5 +362,67 @@ describe("bindRequestExecutor", () => {
 
     await toPromise(createActor(bound, { input: { topic: "x" } }).start());
     expect(capturedTools).toHaveProperty("search");
+  });
+});
+
+describe("buildEnvelopeSchema", () => {
+  test("envelopes an object schema as { result } and validates/unwraps", () => {
+    const inner = z.object({ ok: z.boolean() });
+    const envelope = buildEnvelopeSchema(inner);
+
+    const json = envelope["~standard"].jsonSchema!.input!() as Record<string, unknown>;
+    expect(json).toMatchObject({ type: "object", required: ["result"], additionalProperties: false });
+    expect(json).toHaveProperty("properties.result");
+    // No reasoning property without opt-in.
+    expect(json).not.toHaveProperty("properties.reasoning");
+
+    const good = envelope["~standard"].validate({ result: { ok: true } });
+    expect(good).toMatchObject({ value: { result: { ok: true } } });
+
+    const missing = envelope["~standard"].validate({ notResult: 1 });
+    expect(missing).toHaveProperty("issues");
+
+    // Inner validation failure propagates.
+    const badInner = envelope["~standard"].validate({ result: { ok: "nope" } });
+    expect(badInner).toHaveProperty("issues");
+  });
+
+  test("envelopes a bare union and an array uniformly (root object either way)", () => {
+    for (const inner of [
+      z.union([z.object({ a: z.string() }), z.object({ b: z.number() })]),
+      z.array(z.string()),
+    ]) {
+      const json = buildEnvelopeSchema(inner)["~standard"].jsonSchema!.input!() as Record<
+        string,
+        unknown
+      >;
+      expect(json).toMatchObject({ type: "object", required: ["result"] });
+      expect(json).toHaveProperty("properties.result");
+    }
+  });
+
+  test("reasoning opt-in adds a reasoning property BEFORE result and captures a string reasoning", () => {
+    const inner = z.object({ ok: z.boolean() });
+    const envelope = buildEnvelopeSchema(inner, { reasoning: true });
+
+    const json = envelope["~standard"].jsonSchema!.input!() as {
+      properties: Record<string, unknown>;
+      required: string[];
+    };
+    expect(json.properties).toHaveProperty("reasoning");
+    // reasoning is listed before result to nudge reason-first.
+    expect(Object.keys(json.properties)).toEqual(["reasoning", "result"]);
+    // reasoning stays optional — only result is required.
+    expect(json.required).toEqual(["result"]);
+
+    const withReasoning = envelope["~standard"].validate({
+      reasoning: "because",
+      result: { ok: true },
+    });
+    expect(withReasoning).toMatchObject({ value: { result: { ok: true }, reasoning: "because" } });
+
+    // A non-string reasoning is dropped, not surfaced.
+    const noReasoning = envelope["~standard"].validate({ reasoning: 42, result: { ok: true } });
+    expect(noReasoning).toEqual({ value: { result: { ok: true } } });
   });
 });

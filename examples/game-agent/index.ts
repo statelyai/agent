@@ -271,27 +271,3 @@ export async function main() {
 }
 
 runExampleMain(import.meta.url, main);
-
-// ─── Type probe: compilation fails if the root/final output stops being typed ───
-
-gameAgentSetup.createMachine({
-  context: {
-    playerHp: 20,
-    enemyHp: 15,
-    defended: false,
-    lastSummary: null,
-  },
-  // @ts-expect-error root machine output must match gameSchemas.output
-  output: () => ({ wrong: true }),
-  // `fumbled` (an unnarrowed declared state) — the setup's per-state schemas
-  // block constrains machines to declared state keys, so this probe machine
-  // must reuse one.
-  initial: "fumbled",
-  states: {
-    fumbled: {
-      type: "final",
-      // @ts-expect-error top-level final state output must match gameSchemas.output
-      output: () => ({ wrong: true }),
-    },
-  },
-});

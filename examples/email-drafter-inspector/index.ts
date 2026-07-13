@@ -26,11 +26,12 @@ import { createWebSocketInspector } from "@statelyai/inspect";
 import { createInspectorServer } from "@statelyai/inspect/server";
 import { confirm, input as textInput, select } from "@inquirer/prompts";
 import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
-import { getStateMeta } from "../../src/index.js";
+import { getStateMeta, parseAgentEvent } from "../../src/index.js";
 import { runExampleMain } from "../helpers/main.js";
 import {
   draftEmail,
   emailDrafter,
+  emailDrafterSchemas,
   evaluatePrompt,
   metaSchema,
   models,
@@ -181,7 +182,9 @@ export async function main() {
       }
 
       const event = await promptInteraction(meta.interaction);
-      actor.send(event as never);
+      actor.send(
+        parseAgentEvent(snapshot, event, { events: emailDrafterSchemas.events }),
+      );
     }
 
     if (actor.getSnapshot().status === "done") {

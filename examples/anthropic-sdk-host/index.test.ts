@@ -1,11 +1,10 @@
 import { describe, expect, test } from "vitest";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { Message } from "@anthropic-ai/sdk/resources/messages.js";
-import { runAgent } from "../../src/index.js";
+import { getJsonSchemaSync, runAgent } from "../../src/index.js";
 import type { AgentMessage } from "../../src/index.js";
 import {
   createAnthropicExecutors,
-  extractJsonSchema,
   toAnthropicCallSettings,
   toAnthropicEventTools,
   toAnthropicMessages,
@@ -210,7 +209,7 @@ describe("toAnthropicTools", () => {
 });
 
 describe("toAnthropicEventTools / decide shape", () => {
-  test("decision events map to tools with input_schema derived from extractJsonSchema", () => {
+  test("decision events map to tools with input_schema derived from getJsonSchemaSync", () => {
     const tools = toAnthropicEventTools([
       {
         type: "ASK",
@@ -235,22 +234,22 @@ describe("toAnthropicEventTools / decide shape", () => {
   });
 });
 
-describe("extractJsonSchema", () => {
+describe("getJsonSchemaSync", () => {
   test("extracts the schema from ~standard.jsonSchema.input()", () => {
     const schema = fakeSchema({ type: "object", properties: {} });
-    expect(extractJsonSchema(schema)).toEqual({ type: "object", properties: {} });
+    expect(getJsonSchemaSync(schema)).toEqual({ type: "object", properties: {} });
   });
 
   test("returns undefined when the extension is absent", () => {
     const schema = {
       "~standard": { version: 1, vendor: "test", validate: (v: unknown) => ({ value: v }) },
     } as const;
-    expect(extractJsonSchema(schema)).toBeUndefined();
+    expect(getJsonSchemaSync(schema)).toBeUndefined();
   });
 
   test("a structured-output request extracted schema flows into a forced-tool shape", () => {
     const schema = fakeSchema({ type: "object", properties: { sentiment: { type: "string" } } });
-    const jsonSchema = extractJsonSchema(schema);
+    const jsonSchema = getJsonSchemaSync(schema);
     expect(jsonSchema).toBeDefined();
     const tool = {
       name: "respond_with_output",
@@ -298,11 +297,15 @@ function stubClient(create: (params: unknown) => Promise<Message>): Anthropic {
 
 describe("createAnthropicExecutors + runAgent", () => {
   test("generateText: structured output via forced tool call drives the triage machine", async () => {
+    // The forced tool's input schema is the `{ result }` envelope; the model
+    // fills it in kind, and the host unwraps `.result` before validation.
     const client = stubClient(async () =>
       toolUseMessage("respond_with_output", {
-        sentiment: "negative",
-        category: "billing",
-        reply: "Sorry about that, we will fix your invoice.",
+        result: {
+          sentiment: "negative",
+          category: "billing",
+          reply: "Sorry about that, we will fix your invoice.",
+        },
       }),
     );
 

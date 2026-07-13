@@ -43,6 +43,7 @@ import {
 import type { AgentRequest, AgentStepRequest } from "./steps.js";
 import {
   executorBoundLogics,
+  getMachineSuspensionPredicate,
   getRegisteredAgentExecutionOptions,
   isUnboundPlaceholder,
 } from "./internal/registry.js";
@@ -55,17 +56,6 @@ import {
 // agent actor sources, runs the actor to completion or idle, and reports a
 // `done | idle | error` result. There is no continuation callback — idle
 // always settles and the caller resumes by snapshot (§3.4).
-
-/**
- * xstate state tag marking a state that intentionally waits for an external
- * event (a human approval, an inbound webhook, …). Put it on such states —
- * `states: { reviewing: { tags: [WAIT_TAG], on: { APPROVE: ... } } }` — and
- * runAgent settles that snapshot idle deterministically (see
- * {@link RunAgentOptions.isSuspended}), instead of relying on the timing
- * heuristic used for untagged machines. Tags are serializable and appear in
- * the Stately visualizer.
- */
-export const WAIT_TAG = "agent.wait" as const;
 
 /**
  * Thrown by {@link runAgent} when resuming with a `snapshot` + `event` whose
@@ -162,6 +152,10 @@ export type AgentTraceEvent<TMachine extends AnyStateMachine = AnyStateMachine> 
       request: AgentStepRequest;
       output: unknown;
       raw: unknown;
+      /** The model's reasoning, lifted off the raw executor result when the
+       * request opted into the structured-output envelope's `reasoning` field.
+       * Present only when the executor surfaced a string `reasoning`. */
+      reasoning?: string;
     }
   | { type: "request.error"; request: AgentStepRequest; error: unknown }
   | { type: "stream.chunk"; request: AgentRequest; chunk: string }
@@ -286,15 +280,18 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
   userInput?: AgentUserInputExecutor;
 
   /**
-   * Detects a snapshot that is an INTENTIONAL wait for an external event — the
-   * deterministic replacement for the timing heuristic runAgent uses to settle
-   * idle. Default: `(s) => s.hasTag(WAIT_TAG)`. When it returns true and
-   * nothing is in flight (no live requests/plans/invokes; the `agent.userInput`
-   * placeholder exemption still applies), runAgent settles idle immediately,
-   * without the `setTimeout` heuristic. It does NOT force-settle while agent
-   * work is in flight, and whole-machine idle semantics are unchanged;
-   * untagged machines (detector false) fall back to the heuristic exactly as
-   * before.
+   * Host override for detecting a snapshot that is an INTENTIONAL wait for an
+   * external event — the deterministic replacement for the timing heuristic
+   * runAgent uses to settle idle. Resolution order: this option (host override)
+   * → the machine-carried predicate declared via `setupAgent({ isSuspended })`
+   * → the timing heuristic (when neither is present). When the resolved
+   * predicate returns true and nothing is in flight (no live requests/plans/
+   * invokes; the `agent.userInput` placeholder exemption still applies), runAgent
+   * settles idle immediately, without the `setTimeout` heuristic. It does NOT
+   * force-settle while agent work is in flight, and whole-machine idle semantics
+   * are unchanged; a machine with no predicate falls back to the heuristic
+   * exactly as before. Declare your own signal, e.g.
+   * `(s) => s.hasTag('awaiting-review')`.
    *
    * Provisional name — may change before 2.0.
    */
@@ -806,8 +803,19 @@ function wrapTextLogicForRunAgent(logic: TextLogic, runCtx: RunAgentBindContext)
         },
       });
 
+      // Lift `reasoning` off the raw executor result (structured-output
+      // envelope opt-in) onto the request.end trace — never into machine output.
+      const rawReasoning = (raw as { reasoning?: unknown } | null | undefined)?.reasoning;
+      const reasoning = typeof rawReasoning === "string" ? rawReasoning : undefined;
+
       runCtx.onResult?.(agentRequest, { output, raw });
-      runCtx.onTrace?.({ type: "request.end", request: agentRequest, output, raw });
+      runCtx.onTrace?.({
+        type: "request.end",
+        request: agentRequest,
+        output,
+        raw,
+        ...(reasoning !== undefined ? { reasoning } : {}),
+      });
 
       return { output };
     } catch (error) {
@@ -1313,7 +1321,12 @@ export async function runAgent<TMachine extends AnyStateMachine>(
     actorSources: wrappedSources as never,
   }) as TMachine;
 
-  const isSuspended = options.isSuspended ?? ((s: AnyMachineSnapshot) => s.hasTag(WAIT_TAG));
+  // Resolution order: host override → machine-carried predicate
+  // (`setupAgent({ isSuspended })`, read off the original machine so it survives
+  // the provide/rebind above) → the timing heuristic (`() => false` here — the
+  // inspect handler falls through to `scheduleIdleCheck`).
+  const isSuspended =
+    options.isSuspended ?? getMachineSuspensionPredicate(machine) ?? (() => false);
 
   // Version stamping (§ item 2): when resuming, compare the incoming snapshot's
   // stamped version against this machine's. A mismatch runs `migrateSnapshot`

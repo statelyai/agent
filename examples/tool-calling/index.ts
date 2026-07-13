@@ -1,6 +1,13 @@
 /**
  * Tool calling: tools are part of the request, not machine states.
  *
+ * Tools are whatever your SDK produces. Here each tool is a native AI SDK
+ * `tool({...})` — with a `description`, a Zod `inputSchema`, and a typed
+ * `execute(input)` — dropped straight into `tools:`; the SDK owns the input
+ * typing, so no cast is needed in the tool body. (A plain
+ * `{ description, inputSchema, execute }` object works too, for hosts with no
+ * SDK — see docs/text-requests.md.)
+ *
  * One text request carries `tools` (a calculator, a unit converter, and a
  * sample-data currency lookup) and the host runs the tool loop — the AI SDK
  * adapter reads `metadata.maxSteps` to bound it. The machine stays a single
@@ -20,14 +27,11 @@
  * Run: OPENAI_API_KEY=... npx tsx examples/tool-calling/index.ts
  */
 import { z } from 'zod';
+import { tool } from 'ai';
 import { openai } from '@ai-sdk/openai';
 import { defineModels } from '../../src/ai-sdk/index.js';
-import {
-  runAgent,
-  setupAgent,
-  type AgentRequestExecutors,
-} from '../../src/index.js';
-import { runExampleMain } from '../helpers/main.js';
+import { runAgent, setupAgent, type AgentRequestExecutors } from '../../src/index.js';
+import { resolveExecutors, runExampleMain } from '../helpers/main.js';
 
 export const models = defineModels({
   assistant: openai('gpt-5.4-mini'),
@@ -75,7 +79,7 @@ const agentSetup = setupAgent({
       // Real tools, right on the request. The host executes them in its own
       // tool loop — the machine never sees the intermediate calls.
       tools: {
-        calculate: {
+        calculate: tool({
           description: 'Do arithmetic on two numbers.',
           inputSchema: z.object({
             operation: z.enum(['add', 'subtract', 'multiply', 'divide']),
@@ -83,11 +87,7 @@ const agentSetup = setupAgent({
             b: z.number(),
           }),
           execute: async (input) => {
-            const { operation, a, b } = input as {
-              operation: 'add' | 'subtract' | 'multiply' | 'divide';
-              a: number;
-              b: number;
-            };
+            const { operation, a, b } = input;
             const value =
               operation === 'add'
                 ? a + b
@@ -102,8 +102,8 @@ const agentSetup = setupAgent({
               ? { error: 'division by zero' }
               : { value };
           },
-        },
-        convertUnits: {
+        }),
+        convertUnits: tool({
           description: 'Convert a distance between km and mi.',
           inputSchema: z.object({
             value: z.number(),
@@ -111,11 +111,7 @@ const agentSetup = setupAgent({
             to: z.enum(['km', 'mi']),
           }),
           execute: async (input) => {
-            const { value, from, to } = input as {
-              value: number;
-              from: 'km' | 'mi';
-              to: 'km' | 'mi';
-            };
+            const { value, from, to } = input;
             const converted =
               from === to
                 ? value
@@ -124,19 +120,19 @@ const agentSetup = setupAgent({
                   : value * 1.609344;
             return { value: Math.round(converted * 1000) / 1000, unit: to };
           },
-        },
-        lookupRate: {
+        }),
+        lookupRate: tool({
           description: 'Look up a currency exchange rate.',
           inputSchema: z.object({ from: z.string(), to: z.string() }),
           execute: async (input) => {
-            const { from, to } = input as { from: string; to: string };
+            const { from, to } = input;
             const key = `${from.toUpperCase()}->${to.toUpperCase()}`;
             const rate = SAMPLE_RATES[key];
             return rate === undefined
               ? { error: `no sample rate for ${key}` }
               : { rate };
           },
-        },
+        }),
       },
       // Bound the host-side tool loop (the AI SDK adapter reads this).
       metadata: { maxSteps: 5 },
@@ -188,7 +184,7 @@ export async function runToolCallingExample(
   const progress: string[] = [];
   const result = await runAgent(toolCallingMachine, {
     input: { query },
-    ...(generateText ? { executors: { generateText } } : {}),
+    ...resolveExecutors(models, generateText),
     onTransition: (snapshot) => {
       const state = String(snapshot.value);
       progress.push(state);

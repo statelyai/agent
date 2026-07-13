@@ -28,13 +28,13 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
+import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
 import { createAgentSchemas, runAgent, setupAgent } from "../../src/index.js";
 import { runExampleMain } from "../helpers/main.js";
 
-const models = {
+const models = defineModels({
   quick: openai("gpt-5.4-mini"),
-} as const;
+});
 
 const guardrailsContextSchema = z.object({
   question: z.string(),

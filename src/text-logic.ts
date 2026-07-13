@@ -66,6 +66,14 @@ export interface AgentTextRequest<TMetadata = Record<string, unknown>> {
   tools?: AgentTools;
   toolChoice?: AgentToolChoice;
   outputSchema?: StandardSchemaV1;
+  /**
+   * Opt-in reasoning for a structured-output request: when `true`, adapters add
+   * an optional string `reasoning` property (listed BEFORE `result`) to the
+   * structured-output envelope schema, nudging the model to reason before
+   * committing to the result. The reasoning is surfaced on the executor's raw
+   * result (never in machine context/output). Ignored for text-mode requests.
+   */
+  reasoning?: boolean;
   temperature?: number;
   /**
    * Maximum number of output tokens to generate. Named `maxOutputTokens` (not
@@ -209,6 +217,7 @@ function createBuiltinTextActor(
             messages: ({ input }) => input.messages,
             tools: ({ input }) => input.tools,
             toolChoice: ({ input }) => input.toolChoice,
+            reasoning: ({ input }) => input.reasoning,
             temperature: ({ input }) => input.temperature,
             maxOutputTokens: ({ input }) => input.maxOutputTokens,
             topP: ({ input }) => input.topP,
@@ -297,6 +306,8 @@ export interface TextLogicConfig<
   messages?: ResolveTextLogicValue<AgentMessage[] | undefined, InferOutput<TInputSchema>>;
   tools?: ResolveTextLogicValue<AgentTools | undefined, InferOutput<TInputSchema>>;
   toolChoice?: ResolveTextLogicValue<AgentToolChoice | undefined, InferOutput<TInputSchema>>;
+  /** Opt into the structured-output envelope's `reasoning` field (see {@link AgentTextRequest.reasoning}). */
+  reasoning?: ResolveTextLogicValue<boolean | undefined, InferOutput<TInputSchema>>;
   temperature?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
   maxOutputTokens?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
   topP?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
@@ -415,6 +426,7 @@ export function createTextLogic<
       tools: resolveTextLogicValue(config.tools, args),
       toolChoice: resolveTextLogicValue(config.toolChoice, args),
       outputSchema: config.schemas.output,
+      reasoning: resolveTextLogicValue(config.reasoning, args),
       temperature: resolveTextLogicValue(config.temperature, args),
       maxOutputTokens: resolveTextLogicValue(config.maxOutputTokens, args),
       topP: resolveTextLogicValue(config.topP, args),
@@ -654,6 +666,79 @@ export function getAgentOutputMode(schema?: StandardSchemaV1): AgentOutputMode {
 /** True when {@link getAgentOutputMode} classifies `schema` as `'structured'`. */
 export function isStructuredOutputSchema(schema?: StandardSchemaV1): boolean {
   return getAgentOutputMode(schema) === "structured";
+}
+
+/** The unwrapped shape a {@link buildEnvelopeSchema} validate returns: the inner
+ * `result` value plus, when opted in and present, the model's `reasoning`. */
+export interface StructuredOutputEnvelope {
+  result: unknown;
+  reasoning?: string;
+}
+
+/**
+ * Builds the uniform structured-output envelope schema every structured request
+ * is sent to the provider as: a root object `{ result: <inner> }`, plus — when
+ * `options.reasoning` is `true` — an optional string `reasoning` property listed
+ * BEFORE `result` (property order nudges the model to reason first). This is THE
+ * wire contract for structured output: a root object is universally accepted as
+ * a provider response schema, unlike a bare union/array root that many providers
+ * reject.
+ *
+ * The returned {@link StandardSchemaV1} validates the `{ reasoning?, result }`
+ * envelope (unwrapping `result` through the original schema, capturing a string
+ * `reasoning` when present) and exposes the enveloped JSON Schema. Adapters read
+ * `.result` off the provider output before the machine validates it — so this is
+ * transparent: user-facing output types stay the declared (un-enveloped) schema,
+ * and `reasoning` is surfaced only on the raw executor result, never in machine
+ * context/output.
+ */
+export function buildEnvelopeSchema(
+  inner: StandardSchemaV1,
+  options: { reasoning?: boolean } = {},
+): StandardSchemaV1<StructuredOutputEnvelope> {
+  const includeReasoning = options.reasoning === true;
+  const buildJson = (innerJson: unknown) => ({
+    type: "object",
+    properties: {
+      // `reasoning` is listed BEFORE `result` so property order nudges the
+      // model to produce its reasoning first, then commit to the result.
+      ...(includeReasoning ? { reasoning: { type: "string" } } : {}),
+      result: innerJson ?? {},
+    },
+    required: ["result"],
+    additionalProperties: false,
+  });
+
+  return {
+    "~standard": {
+      version: 1,
+      vendor: "statelyai-agent",
+      validate(value: unknown) {
+        if (!value || typeof value !== "object" || !("result" in value)) {
+          return { issues: [{ message: "Expected a { result } envelope object" }] };
+        }
+        const innerResult = inner["~standard"].validate((value as { result: unknown }).result);
+        if (innerResult instanceof Promise) {
+          throw new Error("Async schema validation is not supported.");
+        }
+        if (innerResult.issues) {
+          return innerResult;
+        }
+        const envelope: StructuredOutputEnvelope = { result: innerResult.value };
+        const reasoning = (value as { reasoning?: unknown }).reasoning;
+        if (typeof reasoning === "string") {
+          envelope.reasoning = reasoning;
+        }
+        return { value: envelope };
+      },
+      jsonSchema: {
+        input: () => {
+          const innerJson = inner["~standard"].jsonSchema?.input?.();
+          return innerJson instanceof Promise ? innerJson.then(buildJson) : buildJson(innerJson);
+        },
+      },
+    },
+  } as StandardSchemaV1<StructuredOutputEnvelope>;
 }
 
 // Reads a schema's synchronous `~standard.jsonSchema.input()` JSON Schema, if the vendor implements that extension.

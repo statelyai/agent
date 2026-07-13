@@ -145,12 +145,30 @@ export type ToolMessage = {
  */
 export type AgentMessage = SystemMessage | UserMessage | AssistantMessage | ToolMessage;
 
-/** A tool exposed to a text request, described for both the model and (optionally) host execution. */
+/**
+ * A schema value on an {@link AgentToolDescriptor}. Core reads it as a
+ * {@link StandardSchemaV1} (via `getJsonSchema`/`isStandardSchema`) when it can,
+ * but the type is deliberately widened with `object` so an SDK-native tool —
+ * whose `inputSchema` is the SDK's own union type (a Zod schema, the SDK's
+ * `Schema`, a lazy thunk, …) — assigns structurally with no cast.
+ */
+export type AgentToolSchema = StandardSchemaV1 | object;
+
+/**
+ * A tool exposed to a text request, described for both the model and
+ * (optionally) host execution. This is a **minimal structural contract**: any
+ * object matching it — an AI SDK `tool({...})`, an MCP-style descriptor, or a
+ * hand-written `{ description, inputSchema, execute }` — is a valid entry, and
+ * extra properties (`providerOptions`, `toModelOutput`, …) pass through
+ * untouched via the index signature. `execute` is typed permissively so a
+ * native tool's `(input, options)` executor is structurally assignable; the
+ * SDK you built the tool with owns its precise input typing.
+ */
 export interface AgentToolDescriptor {
   description?: string;
-  inputSchema?: StandardSchemaV1;
-  outputSchema?: StandardSchemaV1;
-  execute?: AgentToolExecute;
+  inputSchema?: AgentToolSchema;
+  outputSchema?: AgentToolSchema;
+  execute?: (...args: any[]) => unknown;
   [key: string]: unknown;
 }
 

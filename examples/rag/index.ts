@@ -22,7 +22,7 @@ import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
 import { defineModels } from "../../src/ai-sdk/index.js";
 import { runAgent, setupAgent, type AgentRequestExecutors } from "../../src/index.js";
-import { runExampleMain } from "../helpers/main.js";
+import { resolveExecutors, runExampleMain } from "../helpers/main.js";
 
 export const models = defineModels({
   answerer: openai("gpt-5.4-mini"),
@@ -247,7 +247,7 @@ export async function runRAGExample(options: RunRAGOptions = {}): Promise<RAGRes
 
   const result = await runAgent(ragMachine, {
     input: { question, memory },
-    ...(generateText ? { executors: { generateText } } : {}),
+    ...resolveExecutors(models, generateText),
     ...(onTransition ? { onTransition } : {}),
   });
 

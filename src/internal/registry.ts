@@ -1,8 +1,36 @@
-import { createAsyncLogic, type AnyActorLogic, type AsyncActorLogic } from "xstate";
+import {
+  createAsyncLogic,
+  type AnyActorLogic,
+  type AnyMachineSnapshot,
+  type AnyStateMachine,
+  type AsyncActorLogic,
+} from "xstate";
 import type { AgentRequestOptions } from "../events.js";
 
 export type AgentExecutionOptions = Pick<AgentRequestOptions, "schemas" | "actorSources">;
 export const agentExecutionOptions = new WeakMap<object, AgentExecutionOptions>();
+
+/**
+ * Machine-carried wait-state predicates, keyed on the machine's root `config`
+ * object. `config` is shared by reference across `machine.provide(...)` (unlike
+ * the machine object itself), so a predicate registered here travels with the
+ * machine through `.provide` — which is why it is keyed on `config`, not the
+ * machine. Set by `setupAgent({ isSuspended })` in `createMachine`, read by
+ * `runAgent` (below the host `options.isSuspended` override, above the timing
+ * heuristic).
+ */
+export const machineSuspensionPredicates = new WeakMap<
+  object,
+  (snapshot: AnyMachineSnapshot) => boolean
+>();
+
+/** Reads the {@link machineSuspensionPredicates} predicate carried by `machine` (via its root `config`), if any. */
+export function getMachineSuspensionPredicate(
+  machine: AnyStateMachine,
+): ((snapshot: AnyMachineSnapshot) => boolean) | undefined {
+  const config = (machine as { config?: object }).config;
+  return config ? machineSuspensionPredicates.get(config) : undefined;
+}
 
 // Actor logic objects that are unbound placeholders (no host execution) and
 // carry no `kind` marker of their own — `agent.userInput` and workflow-config

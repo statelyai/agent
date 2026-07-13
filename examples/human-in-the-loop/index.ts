@@ -27,7 +27,6 @@ import {
   persistSnapshot,
   runAgent,
   setupAgent,
-  WAIT_TAG,
   type AgentRequestExecutors,
 } from "../../src/index.js";
 import { resolveExecutors, runExampleMain } from "../helpers/main.js";
@@ -55,6 +54,10 @@ const agentSetup = setupAgent({
     APPROVE: z.object({}),
     REJECT: z.object({ reason: z.string() }),
   },
+  // This machine declares its own wait signal: a tag it chose. runAgent settles
+  // idle deterministically whenever a resting snapshot carries it (no timing
+  // heuristic). A host could override this per-run via runAgent({ isSuspended }).
+  isSuspended: (snapshot) => snapshot.hasTag("awaiting-review"),
   requests: {
     writeDraft: {
       schemas: {
@@ -97,7 +100,7 @@ export const humanInTheLoopMachine = agentSetup.createMachine({
     // `meta.interaction` tells the host what to show; legal events come from
     // `getAcceptedEvents(snapshot)`.
     reviewing: {
-      tags: [WAIT_TAG],
+      tags: ["awaiting-review"],
       meta: {
         interaction: {
           label: "Review the draft: approve to publish, or reject with a reason.",
@@ -151,7 +154,7 @@ export async function runHumanInTheLoopExample(
   // Phase 1: draft, then settle idle at `reviewing`.
   const first = await runAgent(humanInTheLoopMachine, {
     input: { topic },
-    ...resolveExecutors(models, generateText ? { executors: { generateText } } : undefined),
+    ...resolveExecutors(models, generateText),
     ...(onTransition ? { onTransition } : {}),
   });
 
@@ -170,7 +173,7 @@ export async function runHumanInTheLoopExample(
   const second = await runAgent(humanInTheLoopMachine, {
     snapshot: persisted,
     event: { type: "APPROVE" },
-    ...resolveExecutors(models, generateText ? { executors: { generateText } } : undefined),
+    ...resolveExecutors(models, generateText),
     ...(onTransition ? { onTransition } : {}),
   });
 

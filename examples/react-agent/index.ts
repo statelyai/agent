@@ -36,14 +36,14 @@ import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
 import { defineModels } from "../../src/ai-sdk/index.js";
 import {
-  type AgentMessage,
   assistantMessage,
   runAgent,
   setupAgent,
   userMessage,
   type AgentRequestExecutors,
 } from "../../src/index.js";
-import { runExampleMain } from "../helpers/main.js";
+import { zodAgentMessages } from "../../src/zod/index.js";
+import { resolveExecutors, runExampleMain } from "../helpers/main.js";
 
 export const models = defineModels({
   reasoner: openai("gpt-5.4-mini"),
@@ -93,19 +93,12 @@ const reasonOrActUnion = z.union([
 ]);
 type ReasonOrAct = z.infer<typeof reasonOrActUnion>;
 
-// The request output is object-wrapped: a bare union serializes to a JSON
-// Schema with no top-level `type: "object"` (so the structured-output detector
-// would treat it as plain text), and OpenAI structured output rejects the
-// `oneOf` that `z.discriminatedUnion` emits while accepting a plain `z.union`'s
-// `anyOf`. The machine unwraps `.action` back into a union value.
-const reasonOrActSchema = z.object({ action: reasonOrActUnion });
-
 const agentSetup = setupAgent({
   models,
   context: z.object({
     question: z.string(),
     // Accumulating transcript: question + each tool call and its observation.
-    messages: z.custom<AgentMessage[]>((value) => Array.isArray(value)),
+    messages: zodAgentMessages(),
     stepsRemaining: z.number(),
     // The model's latest reason-or-act decision (drives dispatch).
     next: z.custom<ReasonOrAct>().nullable(),
@@ -164,10 +157,10 @@ const agentSetup = setupAgent({
     reasonOrAct: {
       schemas: {
         input: z.object({
-          messages: z.custom<AgentMessage[]>((value) => Array.isArray(value)),
+          messages: zodAgentMessages(),
           stepsRemaining: z.number(),
         }),
-        output: reasonOrActSchema,
+        output: reasonOrActUnion,
       },
       model: "reasoner",
       system:
@@ -175,8 +168,7 @@ const agentSetup = setupAgent({
         "tool to gather what you need, or give the final answer once you have " +
         "enough. Tools: calculate (arithmetic: add/subtract/multiply/divide), " +
         'lookup (retrieve a fact by key, e.g. "speed of light", "seconds per day"). ' +
-        "Prefer answering as soon as you can; you have a limited step budget. " +
-        "Put your decision in the `action` field.",
+        "Prefer answering as soon as you can; you have a limited step budget.",
       messages: ({ input }) => [
         ...input.messages,
         userMessage(
@@ -239,16 +231,16 @@ export const reactAgentMachine = agentSetup.createMachine({
         onDone: ({ context, output }) => ({
           target: "dispatch",
           context: {
-            next: output.action,
+            next: output,
             // Commit the final answer to context when the model is done.
-            answer: output.action.type === "answer" ? output.action.answer : context.answer,
+            answer: output.type === "answer" ? output.answer : context.answer,
             // Record the model's move in the transcript.
             messages: [
               ...context.messages,
               assistantMessage(
-                output.action.type === "answer"
-                  ? output.action.answer
-                  : `${output.action.thought}\n[calling ${output.action.tool}]`,
+                output.type === "answer"
+                  ? output.answer
+                  : `${output.thought}\n[calling ${output.tool}]`,
               ),
             ],
             // Decrement the budget once per model turn.
@@ -335,7 +327,7 @@ export async function runReactAgentExample(
   const progress: string[] = [];
   const result = await runAgent(reactAgentMachine, {
     input: { question, maxSteps },
-    ...(generateText ? { executors: { generateText } } : {}),
+    ...resolveExecutors(models, generateText),
     onTransition: (snapshot) => {
       const state = String(snapshot.value);
       progress.push(state);

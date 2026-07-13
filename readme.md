@@ -31,7 +31,7 @@ A refund agent in one machine: the model decides, a **guard** owns the $100 auto
 
 ```ts
 import { z } from 'zod';
-import { runAgent, setupAgent, WAIT_TAG } from '@statelyai/agent';
+import { runAgent, setupAgent } from '@statelyai/agent';
 import { createAiSdkExecutors, defineModels } from '@statelyai/agent/ai-sdk';
 import { openai } from '@ai-sdk/openai';
 
@@ -49,6 +49,9 @@ const agent = setupAgent({
     APPROVE: z.object({}),
     DENY: z.object({}),
   },
+  // The machine declares its own wait signal, so runAgent settles idle waits
+  // deterministically instead of using the timing heuristic.
+  isSuspended: (snapshot) => snapshot.hasTag('awaiting-human'),
 });
 
 const machine = agent.createMachine({
@@ -75,8 +78,9 @@ const machine = agent.createMachine({
     },
     awaitingHuman: {
       // No invoke: runAgent settles { status: 'idle', snapshot } here.
-      // WAIT_TAG marks the wait as intentional so the idle settle is deterministic.
-      tags: [WAIT_TAG],
+      // The tag matches this machine's isSuspended signal, so the idle settle
+      // is deterministic (no timing heuristic).
+      tags: ['awaiting-human'],
       on: {
         APPROVE: { target: 'refunded' },
         DENY: { target: 'denied' },

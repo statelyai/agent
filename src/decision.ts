@@ -6,7 +6,7 @@ import type {
   InferOutput,
   StandardSchemaV1,
 } from "./types.js";
-import { validateSchemaSync } from "./utils.js";
+import { userMessage, validateSchemaSync } from "./utils.js";
 import {
   DECIDE_ACTOR,
   PLAN_ACTOR,
@@ -504,6 +504,29 @@ export class DecisionExhaustedError extends Error {
     this.name = "DecisionExhaustedError";
     this.attempts = attempts;
   }
+}
+
+/**
+ * Renders a decision request's prior failed `attempts` into feedback messages
+ * a host appends to the model call so retries converge — the transport-agnostic
+ * "your last choice failed because X, choose again from Y" logic every adapter
+ * and raw-SDK host repeats. Returns one `user`-role {@link AgentMessage} per
+ * attempt (empty when there are none); adapters map each onto their wire
+ * message shape (`attempt.content` is always a string). Core never rewrites the
+ * request itself — this only turns the recorded attempts into messages.
+ *
+ * @example
+ * ```ts
+ * const messages = [...baseMessages, ...renderDecisionAttempts(request)];
+ * ```
+ */
+export function renderDecisionAttempts(
+  request: Pick<AgentDecisionRequest, "events" | "attempts">,
+): AgentMessage[] {
+  const types = request.events.map((event) => event.type).join(", ") || "(none)";
+  return request.attempts.map((attempt) =>
+    userMessage(`Your previous choice failed: ${attempt.reason}. Choose again from: ${types}`),
+  );
 }
 
 /**

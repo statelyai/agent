@@ -37,13 +37,14 @@ import {
   type RunAgentOptions,
   setupAgent,
 } from "../../src/index.js";
+import { defineModels } from "../../src/ai-sdk/index.js";
 import { resolveExecutors, runExampleMain } from "../helpers/main.js";
 
 type Bank = "left" | "right";
 
-const models = {
+const models = defineModels({
   planner: openai("gpt-5.4-mini"),
-} as const;
+});
 
 const bankSchema = z.enum(["left", "right"]);
 

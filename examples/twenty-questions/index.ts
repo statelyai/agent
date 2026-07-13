@@ -27,7 +27,7 @@
  */
 import { z } from 'zod';
 import { openai } from '@ai-sdk/openai';
-import { createAiSdkExecutors } from '../../src/ai-sdk/index.js';
+import { createAiSdkExecutors, defineModels } from '../../src/ai-sdk/index.js';
 import { promptLine } from '../helpers/cli.js';
 import {
   type AgentMessage,
@@ -37,6 +37,7 @@ import {
   setupAgent,
   userMessage,
 } from '../../src/index.js';
+import { zodAgentMessages } from '../../src/zod/index.js';
 import { runExampleMain } from '../helpers/main.js';
 
 const transcriptTurnSchema = z.object({
@@ -72,16 +73,16 @@ const playAgainClassificationSchema = z.object({
   reasoning: z.string(),
 });
 
-const models = {
+const models = defineModels({
   quick: openai('gpt-5.4-mini'),
-} as const;
+});
 
 export const twentyQuestionsSchemas = createAgentSchemas({
   context: z.object({
     maxQuestions: z.number(),
     questionsRemaining: z.number(),
     transcript: z.array(transcriptTurnSchema),
-    messages: z.custom<AgentMessage[]>((value) => Array.isArray(value)),
+    messages: zodAgentMessages(),
     pendingRawAnswer: z.string().nullable(),
     pendingSideQuestion: z.string().nullable(),
     guess: z.string().nullable(),
@@ -122,7 +123,7 @@ const agentSetup = setupAgent({
         input: z.object({
           question: z.string(),
           rawAnswer: z.string(),
-          messages: z.custom<AgentMessage[]>((value) => Array.isArray(value)),
+          messages: zodAgentMessages(),
           transcript: z.array(transcriptTurnSchema),
         }),
         output: answerClassificationSchema,
@@ -177,7 +178,7 @@ const agentSetup = setupAgent({
         input: z.object({
           guess: z.string(),
           rawAnswer: z.string(),
-          messages: z.custom<AgentMessage[]>((value) => Array.isArray(value)),
+          messages: zodAgentMessages(),
         }),
         output: guessFeedbackClassificationSchema,
       },
@@ -200,7 +201,7 @@ const agentSetup = setupAgent({
       schemas: {
         input: z.object({
           rawAnswer: z.string(),
-          messages: z.custom<AgentMessage[]>((value) => Array.isArray(value)),
+          messages: zodAgentMessages(),
         }),
         output: playAgainClassificationSchema,
       },
@@ -353,7 +354,6 @@ export const twentyQuestionsMachine = agentSetup.createMachine({
     },
 
     awaitingAnswer: {
-      tags: ['awaiting-user'],
       invoke: {
         src: 'agent.userInput',
         input: ({ context }) => ({
@@ -448,7 +448,6 @@ export const twentyQuestionsMachine = agentSetup.createMachine({
     },
 
     awaitingGuessFeedback: {
-      tags: ['awaiting-user'],
       invoke: {
         src: 'agent.userInput',
         input: ({ context }) => ({
@@ -487,7 +486,6 @@ export const twentyQuestionsMachine = agentSetup.createMachine({
     },
 
     awaitingPlayAgain: {
-      tags: ['awaiting-user'],
       invoke: {
         src: 'agent.userInput',
         input: {

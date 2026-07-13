@@ -9,8 +9,8 @@ function scriptedGenerateText(script: unknown[]) {
   return async (_request: { model: string }) => {
     const action = script[i] ?? script[script.length - 1];
     i++;
-    // The reasonOrAct request's output is object-wrapped ({ action: <union> }).
-    return { output: { action } };
+    // The reasonOrAct request's output is the bare reason-or-act union.
+    return { output: action };
   };
 }
 

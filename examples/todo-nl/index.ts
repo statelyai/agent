@@ -26,8 +26,9 @@
  *     don't exist.
  *   - QUIT exiting the `planning` state ends the plan naturally: xstate cancels
  *     the invoke, so no onDone runs — the machine just moves to `done`.
- *   - Machine-owned prompts: `agent.userInput` (tags: ['awaiting-user'])
- *     renders the current list so a host can just insert the machine and play.
+ *   - Machine-owned prompts: `agent.userInput` renders the current list so a
+ *     host can just insert the machine and play. The invoking wait state stays
+ *     untagged (it gathers input inline rather than idling for an event).
  *
  * Companion: `imperative.ts` builds the SAME app with no @statelyai/agent
  * import (raw `ai` generateObject + a while loop) so the two can be compared
@@ -37,7 +38,7 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
+import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
 import { promptLine } from "../helpers/cli.js";
 import { createAgentSchemas, runAgent, setupAgent } from "../../src/index.js";
 import { runExampleMain } from "../helpers/main.js";
@@ -50,9 +51,9 @@ const todoSchema = z.object({
 
 type Todo = z.infer<typeof todoSchema>;
 
-const models = {
+const models = defineModels({
   quick: openai("gpt-5.4-mini"),
-} as const;
+});
 
 export const todoSchemas = createAgentSchemas({
   context: z.object({
@@ -110,7 +111,6 @@ export const todoMachine = agentSetup.createMachine({
   initial: "awaitingCommand",
   states: {
     awaitingCommand: {
-      tags: ["awaiting-user"],
       invoke: {
         src: "agent.userInput",
         input: ({ context }) => ({

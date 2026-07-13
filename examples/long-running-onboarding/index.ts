@@ -97,6 +97,11 @@ const coordinatorSetup = setupAgent({
     DOCS_SIGNED: z.object({ signedAt: z.string() }),
     HARDWARE_DELIVERED: z.object({ deliveredAt: z.string() }),
   },
+  // Meta-based wait signal: this machine already annotates every human-wait
+  // state with `meta.interaction` (what the host should show), so it reuses that
+  // as its suspension signal instead of a separate tag. runAgent settles idle
+  // deterministically at any resting state carrying an interaction.
+  isSuspended: (snapshot) => getStateMeta(snapshot).interaction !== undefined,
   actorSources: {
     sendWelcomePacket: createAsyncLogic({
       schemas: {
@@ -199,6 +204,7 @@ export const longRunningOnboardingMachine = coordinatorSetup.createMachine({
       },
     },
     waitingForSignedDocs: {
+      // `meta.interaction` is this machine's wait signal (see setupAgent above).
       meta: {
         interaction: {
           label: "Wait until the employee signs onboarding documents.",
@@ -295,7 +301,7 @@ export async function runLongRunningOnboardingExample(
 
   const first = await runAgent(longRunningOnboardingMachine, {
     input: { employee },
-    ...resolveExecutors(models, options.generateText ? { executors: { generateText: options.generateText } } : undefined),
+    ...resolveExecutors(models, options.generateText),
     ...(options.onTransition ? { onTransition: options.onTransition } : {}),
   });
   if (first.status !== "idle") {
@@ -309,7 +315,7 @@ export async function runLongRunningOnboardingExample(
   const second = await runAgent(longRunningOnboardingMachine, {
     snapshot: persistedAfterWelcome,
     event: { type: "DOCS_SIGNED", signedAt: "2026-07-20" },
-    ...resolveExecutors(models, options.generateText ? { executors: { generateText: options.generateText } } : undefined),
+    ...resolveExecutors(models, options.generateText),
     ...(options.onTransition ? { onTransition: options.onTransition } : {}),
   });
   if (second.status !== "idle") {
@@ -323,7 +329,7 @@ export async function runLongRunningOnboardingExample(
   const third = await runAgent(longRunningOnboardingMachine, {
     snapshot: persistedAfterProvisioning,
     event: { type: "HARDWARE_DELIVERED", deliveredAt: "2026-07-28" },
-    ...resolveExecutors(models, options.generateText ? { executors: { generateText: options.generateText } } : undefined),
+    ...resolveExecutors(models, options.generateText),
     ...(options.onTransition ? { onTransition: options.onTransition } : {}),
   });
   if (third.status !== "done") {

@@ -10,8 +10,8 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { setupAgent, runAgent } from "../../src/index.js";
-import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
-import { runExampleMain } from "../helpers/main.js";
+import { defineModels } from "../../src/ai-sdk/index.js";
+import { resolveExecutors, runExampleMain } from "../helpers/main.js";
 
 const classificationSchema = z.object({
   reasoning: z.string(),
@@ -139,7 +139,7 @@ export async function runAiSdkRoutingExample(
 ) {
   const result = await runAgent(aiSdkRoutingMachine, {
     input: { query: "The app crashes on launch." },
-    executors: createAiSdkExecutors({ models }),
+    ...resolveExecutors(models, undefined),
     onTransition: observe,
   });
   if (result.status !== "done") {

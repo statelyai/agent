@@ -13,8 +13,8 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { setupAgent, runAgent } from "../../src/index.js";
-import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
-import { runExampleMain } from "../helpers/main.js";
+import { defineModels } from "../../src/ai-sdk/index.js";
+import { resolveExecutors, runExampleMain } from "../helpers/main.js";
 
 const reviewSchema = z.object({
   type: z.enum(["security", "performance", "maintainability"]),
@@ -210,7 +210,7 @@ export async function runAiSdkParallelReviewExample(
 ) {
   const result = await runAgent(aiSdkParallelReviewMachine, {
     input: { code: "const x = eval(input);" },
-    executors: createAiSdkExecutors({ models }),
+    ...resolveExecutors(models, undefined),
     onTransition: observe,
   });
   if (result.status !== "done") {

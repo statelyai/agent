@@ -13,15 +13,17 @@
  * against `POST {baseUrl}/chat/completions` instead of the `openai` package.
  */
 import {
+  buildEnvelopeSchema,
   getAgentOutputMode,
   type AgentRequestExecutor,
-  type AgentRequestExecutorInfo,
   type AgentRequestExecutors,
   type AgentTextRequest,
 } from "../text-logic.js";
-import type { AgentDecisionExecutor, AgentDecisionRequest, DecisionAttempt } from "../decision.js";
+import { getJsonSchema, getJsonSchemaSync, isStandardSchema } from "../utils.js";
+import { renderDecisionAttempts } from "../decision.js";
+import type { AgentDecisionExecutor, AgentDecisionRequest } from "../decision.js";
 import type { AgentEventDescriptor } from "../events.js";
-import type { AgentTools, ChosenEvent, StandardSchemaV1 } from "../types.js";
+import type { AgentTools, ChosenEvent } from "../types.js";
 
 // ─── Wire types (minimal, local — no `openai` package) ───
 
@@ -63,29 +65,9 @@ interface WireResponse {
  * Reads a Standard Schema's optional `~standard.jsonSchema.input()` extension
  * (implemented by e.g. Zod v4's `z.toJSONSchema`), awaiting it when it returns
  * a Promise. Returns `undefined` when the schema doesn't expose the extension.
+ * Thin re-export of core's {@link getJsonSchema}.
  */
-export async function extractJsonSchema(
-  schema?: StandardSchemaV1,
-): Promise<Record<string, unknown> | undefined> {
-  const jsonSchemaFn = schema?.["~standard"].jsonSchema?.input;
-  if (!jsonSchemaFn) {
-    return undefined;
-  }
-  const result = jsonSchemaFn();
-  const resolved = result instanceof Promise ? await result : result;
-  return resolved as Record<string, unknown> | undefined;
-}
-
-// Sync variant for tool/event descriptor building (can't await). A
-// Promise-returning schema is treated as absent (falls back to `{}`).
-function extractJsonSchemaSync(schema?: StandardSchemaV1): Record<string, unknown> | undefined {
-  const jsonSchemaFn = schema?.["~standard"].jsonSchema?.input;
-  if (!jsonSchemaFn) {
-    return undefined;
-  }
-  const result = jsonSchemaFn();
-  return result instanceof Promise ? undefined : (result as Record<string, unknown> | undefined);
-}
+export const extractJsonSchema = getJsonSchema;
 
 // ─── Request → wire param mapping (pure, unit-testable) ───
 
@@ -149,6 +131,9 @@ export function toOpenAiTools(tools: AgentTools): WireTool[] {
     if (!descriptor) {
       return [];
     }
+    // Read only `description`/`inputSchema`; any extra fields an SDK-native
+    // tool carries are ignored. A schema core can't read as Standard Schema
+    // (an SDK-specific wrapper) yields empty `parameters` rather than crashing.
     const inputSchema = typeof descriptor === "function" ? undefined : descriptor.inputSchema;
     return [
       {
@@ -156,7 +141,7 @@ export function toOpenAiTools(tools: AgentTools): WireTool[] {
         function: {
           name,
           description: typeof descriptor === "function" ? undefined : descriptor.description,
-          parameters: extractJsonSchemaSync(inputSchema) ?? {},
+          parameters: (isStandardSchema(inputSchema) ? getJsonSchemaSync(inputSchema) : undefined) ?? {},
         },
       },
     ];
@@ -171,26 +156,22 @@ export function toOpenAiEventTools(events: AgentEventDescriptor[]): WireTool[] {
     function: {
       name: event.toolName,
       description: `Choose the '${event.type}' move.`,
-      parameters: extractJsonSchemaSync(event.inputSchema) ?? {},
+      parameters: getJsonSchemaSync(event.inputSchema) ?? {},
     },
   }));
 }
 
 /** Messages for a decision request, with prior failed `attempts` rendered as
- * appended user messages so retries converge. */
+ * appended user messages (via core's {@link renderDecisionAttempts}) so
+ * retries converge. */
 export function toDecisionMessages(
   request: Pick<AgentDecisionRequest, "messages" | "prompt" | "events" | "attempts">,
 ): WireMessage[] {
   const messages = toOpenAiMessages(request);
-  for (const attempt of request.attempts) {
-    messages.push({ role: "user", content: attemptFeedback(attempt, request.events) });
+  for (const attempt of renderDecisionAttempts(request)) {
+    messages.push({ role: "user", content: attempt.content as string });
   }
   return messages;
-}
-
-function attemptFeedback(attempt: DecisionAttempt, events: AgentEventDescriptor[]): string {
-  const types = events.map((event) => event.type).join(", ") || "(none)";
-  return `Your previous choice failed: ${attempt.reason}. Choose again from: ${types}`;
 }
 
 function pruneUndefined(record: Record<string, unknown>): Record<string, unknown> {
@@ -317,8 +298,15 @@ export function createOpenAiCompatExecutors(
     };
 
     const structured = getAgentOutputMode(request.outputSchema) === "structured";
+    // Every structured request is sent as the uniform `{ result, reasoning? }`
+    // envelope — a root object is universally accepted, unlike a bare union/
+    // array root. Unwrap `.result` below before the machine validates the
+    // declared schema.
     if (structured) {
-      const jsonSchema = await extractJsonSchema(request.outputSchema);
+      const envelope = buildEnvelopeSchema(request.outputSchema!, {
+        reasoning: request.reasoning,
+      });
+      const jsonSchema = await getJsonSchema(envelope);
       body.response_format = jsonSchema
         ? {
             type: "json_schema",
@@ -342,16 +330,32 @@ export function createOpenAiCompatExecutors(
     const content = choice?.message?.content ?? "";
 
     if (structured) {
-      let output: unknown;
+      let parsed: unknown;
       try {
-        output = content ? JSON.parse(content) : undefined;
+        parsed = content ? JSON.parse(content) : undefined;
       } catch (error) {
         throw new Error(
           `createOpenAiCompatExecutors: generateText${nameSuffix(request)} — structured request ` +
             `returned non-JSON content: ${errorMessage(error)}`,
         );
       }
-      return { output, usage: json.usage, finishReason: choice?.finish_reason ?? undefined };
+      // Unwrap the `{ result, reasoning? }` envelope so the machine validates
+      // the declared schema; surface `reasoning` on the raw result only.
+      let output = parsed;
+      let reasoning: string | undefined;
+      if (parsed && typeof parsed === "object" && "result" in parsed) {
+        output = (parsed as { result: unknown }).result;
+        const rawReasoning = (parsed as { reasoning?: unknown }).reasoning;
+        if (typeof rawReasoning === "string") {
+          reasoning = rawReasoning;
+        }
+      }
+      return {
+        output,
+        ...(reasoning !== undefined ? { reasoning } : {}),
+        usage: json.usage,
+        finishReason: choice?.finish_reason ?? undefined,
+      };
     }
 
     return { output: content, usage: json.usage, finishReason: choice?.finish_reason ?? undefined };

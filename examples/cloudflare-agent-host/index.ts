@@ -56,6 +56,7 @@
 import { Agent, type Connection } from "agents";
 import { createActor, type Actor, type Snapshot } from "xstate";
 import type { LanguageModel } from "ai";
+import { parseAgentEvent } from "../../src/index.js";
 import {
   draftEmail,
   emailDrafter,
@@ -126,17 +127,27 @@ export abstract class EmailDrafterAgent extends Agent<Env, EmailDrafterState> {
 
   onMessage(connection: Connection, message: string) {
     // Client messages are machine events (PROMPT_SUBMITTED, SEND, ...).
-    // The machine's event schemas validate them before they hit the actor.
+    // `parseAgentEvent` validates the event against the snapshot's accepted
+    // events and the registered payload schemas before it hits the actor.
     const event = JSON.parse(message) as { type: string; [key: string]: unknown };
-    const schema =
-      emailDrafterSchemas.events[event.type as keyof typeof emailDrafterSchemas.events];
-    const result = schema?.["~standard"].validate(event);
-    // Event schemas here are synchronous (Zod) — a Promise result would mean
-    // an async validator, which this simple example doesn't support.
-    if (result && !(result instanceof Promise) && result.issues) {
-      connection.send(JSON.stringify({ type: "error", issues: result.issues }));
+    const snapshot = this.#actor?.getSnapshot();
+    if (!snapshot) {
       return;
     }
-    this.#actor?.send(event as never);
+    let parsed;
+    try {
+      parsed = parseAgentEvent(snapshot, event, {
+        events: emailDrafterSchemas.events,
+      });
+    } catch (error) {
+      connection.send(
+        JSON.stringify({
+          type: "error",
+          issues: [{ message: (error as Error).message }],
+        }),
+      );
+      return;
+    }
+    this.#actor?.send(parsed);
   }
 }

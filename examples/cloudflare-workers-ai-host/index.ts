@@ -29,6 +29,7 @@
 import {
   getAgentOutputMode,
   initialAgentStep,
+  renderDecisionAttempts,
   resolveAgentStep,
   resolveDecision,
   type AgentDecisionRequest,
@@ -121,8 +122,8 @@ async function runWorkersAiDecision(env: Env, request: AgentDecisionRequest): Pr
     request,
     async (attemptRequest) => {
       const legalEvents = attemptRequest.events.map((event) => `- ${event.type}`).join("\n");
-      const attemptFeedback = attemptRequest.attempts
-        .map((attempt) => `Your previous choice failed: ${attempt.reason}`)
+      const attemptFeedback = renderDecisionAttempts(attemptRequest)
+        .map((m) => m.content)
         .join("\n");
 
       const prompt = [
