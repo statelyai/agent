@@ -1,5 +1,109 @@
 # @statelyai/agent
 
+## 2.0.0-alpha.1
+
+### Major Changes
+
+- [#67](https://github.com/statelyai/agent/pull/67) [`e46fc52`](https://github.com/statelyai/agent/commit/e46fc52d999ee66ac869b686d2f8cfe3570c84f9) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Breaking: canonical `{ output }` executor envelope, optional `generateText` on `runAgent`, and unified `onChunk`.
+
+  - **Executors must return `{ output }`.** A `generateText`/`streamText` executor (and a `TextLogic` `.withExecutor(...)` callback) must now return an envelope `{ output: <value> }`, where `output` is the text string or structured object. Optional passthrough fields (usage, toolCalls, finishReason, raw, ...) are allowed alongside `output`. The old silent unwrapping of `object` / `text` / bare values is removed: a non-envelope return is a runtime error naming the request id ("executors must return { output }"). `withExecutor` is typed from the logic's output schema, so `{ output: T }` is inferred and a wrong shape is a compile error. `createAiSdkExecutors` now returns `{ output }` from both `generateText` and `streamText`.
+  - **`generateText` is optional on `runAgent`.** A machine with only plain actors (no text or decision request) runs with zero executors. A missing `generateText`/`streamText`/`decide` remains a loud bind-time error when the machine actually invokes an unbound text/decision source.
+  - **`onChunk` is unified to `(chunk, { request })`** across `runAgent` and the AI SDK per-actor streaming wrappers.
+
+- [#67](https://github.com/statelyai/agent/pull/67) [`e46fc52`](https://github.com/statelyai/agent/commit/e46fc52d999ee66ac869b686d2f8cfe3570c84f9) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Breaking: `setupAgent({ actorSources })` rename and open model refs.
+
+  - **`setupAgent({ actors })` is now `setupAgent({ actorSources })`.** The config key that registers actor source implementations is renamed to match XState v6's `setup({ actorSources })` and the already-correct `machine.provide({ actorSources })` / `runAgent(machine, { actorSources })`. The step-helper options key is renamed the same way: `initialAgentStep`/`transitionAgentStep`/`resolveAgentStep`/`getMachineAgentRequests`/`getAgentRequests` now take `{ actorSources }` instead of `{ actors }`. The runtime collision guard between `actorSources` and `requests` keeps working, with an updated message. Agent-object properties such as `agent.requests` are unchanged.
+  - **Model refs are open strings.** A request's `model:` field accepts any string. When a `models` map is registered its keys still autocomplete, but any other string is legal (`AgentModelRef` widened to `(keyof TModels & string) | (string & {})`). The `models` map is optional; refs are opaque routing keys resolved by the host or the AI SDK adapter (its `models` map or `resolveModel`). Identity-map ceremony (`const models = { "x": "x" } as const`) is no longer needed for bare refs.
+
+### Minor Changes
+
+- [#67](https://github.com/statelyai/agent/pull/67) [`4953d4c`](https://github.com/statelyai/agent/commit/4953d4c2cb785e370d227802ae1476f1b0eff80c) Thanks [@davidkpiano](https://github.com/davidkpiano)! - New `agent.plan` builtin: a multi-event decision. Where `agent.decide` picks exactly one legal event, `agent.plan` applies an ordered sequence of them: each step re-reads the live snapshot, asks the `decide` executor for one legal event (same validation and `rejected-by-guard` retry loop as a decision), sends it to the machine, and repeats.
+
+  Every step is offered a built-in done move — a reserved `agent.plan.done` candidate (`PLAN_DONE_EVENT_TYPE`). Choosing it ends the plan with `stopped: 'done'` and is never sent to the machine, so machines need no no-op sentinel event of their own. The plan also ends at `maxSteps` (default 8), when no legal candidate remains, or when an applied event exits the invoking state. `stopOn` remains for the rarer "send this real event AND stop" case (`stopped: 'stop-event'`).
+
+  The applied trail is appended to the prompt each step. Partial application, no rollback. `onDone` output is `{ steps, stopped }`. Requires `runAgent` (snapshot-aware host); no new executor slot. See docs/decisions.md and examples/todo-nl.
+
+- [#67](https://github.com/statelyai/agent/pull/67) [`e1ee37b`](https://github.com/statelyai/agent/commit/e1ee37bc49dc46039484e645a32855c558d8f2b1) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `allowedEvents` (on the `agent.decide` and `agent.plan` builtins) now accepts a single string as well as an array, plus wildcard patterns: `'*'` matches every currently-legal event, and `'ns.*'` matches a dotted namespace (`'todo.*'` → `todo.add`, `todo.toggle`, …). Patterns are typed against the declared dotted event types, so a namespace that matches nothing is a compile error; exact types and patterns can mix (`['todo.*', 'reset']`). Wildcards expand against the live snapshot, so they require a snapshot-aware host (`runAgent` or the step path); under a bare `createActor(...)`, list event types explicitly.
+
+- [#67](https://github.com/statelyai/agent/pull/67) [`66a8b9d`](https://github.com/statelyai/agent/commit/66a8b9d98b077549a6242b7de3cb375880a30d8a) Thanks [@davidkpiano](https://github.com/davidkpiano)! - API polish for alpha:
+
+  - `setupAgent({ states })`: per-state context schemas (xstate `setup({ states })`) narrow `context` inside declared states (invoke inputs, transition fns, final outputs), removing defensive `?? default` fallbacks.
+  - New helpers: `persistSnapshot(snapshot)` (JSON round-trip clone for idle-snapshot persistence) and `bindRequestExecutor(logic, executor)` (bind a child machine's text logic to a raw request executor without casts).
+  - `createDecisionLogic` removed from the public API. Decisions are state-local: use `src: 'agent.decide'` inline; reuse the input builder function, not an actor (see docs/decisions.md).
+  - Step vocabulary unified: `getMachineAgentRequests` renamed to `getAgentRequests`; the old hand-passed-options `getAgentRequests` is internal (`getAgentRequestsWith`); `doneEvent`/`transitionResult` are internal. Public step path: `initialAgentStep`, `transitionAgentStep`, `resolveAgentStep`, `getAgentRequests`, `executeAgentRequest`.
+  - Fixed stale `setupAgent` JSDoc that documented unimplemented result methods.
+
+- [#67](https://github.com/statelyai/agent/pull/67) [`1faf4e1`](https://github.com/statelyai/agent/commit/1faf4e1838a4483580e524e37ccc85911caa68ed) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `runAgent`'s `generateText`/`streamText` executors now accept the raw Vercel AI SDK functions directly (`runAgent(machine, { generateText, streamText })` with the functions imported from `ai`). Their result shapes are unwrapped natively: `generateText`'s `{ text }` and `streamText`'s `{ textStream }` (chunks forwarded to `onChunk`, final text from `await result.text`). Structured-output requests through raw functions are best-effort (JSON-parsed against the `outputSchema`); use `createAiSdkExecutors` from `@statelyai/agent/ai-sdk` for reliable structured output. `decide` still requires an adapter.
+
+- [#67](https://github.com/statelyai/agent/pull/67) [`e46fc52`](https://github.com/statelyai/agent/commit/e46fc52d999ee66ac869b686d2f8cfe3570c84f9) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `runAgent`'s executors now inherit down the whole actor tree.
+
+  Agent requests inside invoked child machines — at any depth — inherit the `generateText`/`streamText`/`decide` executors passed to `runAgent`, the same host-backed wrappers the top-level machine's own requests get. A child request participates in the run's `maxModelCalls` budget, `onTrace`, `onChunk`, and `onResult` exactly like a parent request. No per-child `.provide` ceremony is needed:
+
+  ```ts
+  runAgent(parentMachine, { input, generateText }); // child requests inherit generateText
+  ```
+
+  Rules:
+
+  - **Inheritance is the default** for any request reached through string-keyed actor sources (invoke `src` strings, registered `actorSources`), arbitrarily deep, cycle-safe.
+  - **Explicit bindings win.** A request that carries its own executor (`.withExecutor(...)`, `bindRequestExecutor(...)`, or a child's own `.provide({ actorSources })`) keeps it — the parent's executors are never called for it.
+  - **Missing executors still fail fast.** A reachable request whose required executor kind was not passed (e.g. a child stream request with no `streamText`) throws a loud bind-time error naming the invoke chain and the request `src`, before any actor runs.
+  - **Escape hatch.** Dynamically created logics (e.g. machine factories used with `enq.spawn`) and children invoked as direct-object `src` objects aren't reachable by the static bind walk; bind those explicitly with `bindRequestExecutor(...)` / `.withExecutor(...)`, or register the child as a string-keyed source.
+
+  This replaces the previous alpha behavior, where a child machine was treated as one opaque actor and an unbound child request threw a bind-time error demanding a nested `.provide`.
+
+- [`6011394`](https://github.com/statelyai/agent/commit/60113943ea6bf0f5cbd371c6cc84ea819a9bb931) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `agent.decide` now delivers its chosen event automatically, and `sendDecision` is removed (breaking).
+
+  When a decision resolves under `runAgent`, the chosen event is sent to the invoking actor directly (mirroring `agent.plan`) and the invoke completes with that event as its output. The delivered event's transition — defined by the state's own `on:` — usually exits the invoking state, which cancels the invoke, so `onDone` normally never fires. If the transition stays in-state, the invoke completes and an explicit `onDone` (now optional and rarely needed) observes the chosen event as output. `onError` (retries exhausted) is unchanged.
+
+  Because delivery is built in, `sendDecision` is gone — no `onDone: sendDecision()`, no import, no deprecation shim. Remove those lines; delivery already happens. In JSON workflows (`setupAgent.fromConfig`), a decide invoke no longer auto-wires `onDone` and no longer rejects a declared `onDone`.
+
+  New: `defineModels` helper (exported from `@statelyai/agent/ai-sdk`). An identity function whose return type is the nameable `AiSdkModelMap<keyof T & string>`, so an exported `const models = defineModels({ ... })` needs no `Record<'a' | 'b', LanguageModel>` annotation and never trips TS2742 — model-ref keys still infer at `createAiSdkExecutors({ models })` and `setupAgent({ models })`.
+
+- [#67](https://github.com/statelyai/agent/pull/67) [`3bcaef9`](https://github.com/statelyai/agent/commit/3bcaef9290d06fff5eb17d0271ca981a36a116a3) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `AgentRequestExecutor`'s return type is widened to also admit the raw Vercel AI SDK result shapes: `AiSdkShapedTextResult` (`{ text }`) and `AiSdkShapedStreamResult` (`{ textStream }`), alongside the existing `{ output }` `AgentRequestExecutorResult` envelope. Raw `ai` `generateText`/`streamText` functions now pass to `runAgent`'s `generateText`/`streamText` executors without a cast (`normalizeGeneratorResult` already unwrapped these shapes at runtime; this aligns the types). Type-only change, no runtime behavior change. The two new type names are exported from the package root.
+
+- [#70](https://github.com/statelyai/agent/pull/70) [`ca0dad3`](https://github.com/statelyai/agent/commit/ca0dad31b07f64b3a6e03d1ba2f76be977ec64c4) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Two `runAgent` additions for human-in-the-loop resume:
+
+  - **Explicit suspension detection.** New exported `WAIT_TAG` (`'agent.wait'`): put it in a state's `tags` to mark an intentional wait for an external event. When the machine rests in a tagged snapshot and nothing is in flight, `runAgent` settles idle deterministically instead of relying on the `setTimeout(0)` timing heuristic. New `RunAgentOptions.isSuspended?: (snapshot) => boolean` customizes detection (default `(s) => s.hasTag(WAIT_TAG)`). Whole-machine idle semantics and the `agent.userInput` placeholder exemption are unchanged, and untagged machines fall back to the heuristic exactly as before — fully backward compatible. (Provisional name: `isSuspended` may change before 2.0.)
+
+  - **Illegal resume events throw.** Resuming with `{ snapshot, event }` whose `type` the restored state cannot take now throws `IllegalResumeEventError` (carrying `eventType` and `acceptedTypes`) before delivering the event — a programmer error in the same class as `runAgent`'s bind-time throws, rather than a silent drop. A type-legal event a guard rejects is not an error (the machine takes no transition and settles normally). Opt out with `RunAgentOptions.onIllegalResumeEvent: 'ignore'` to restore the older silent behavior. `IllegalResumeEventError` is exported.
+
+- [#67](https://github.com/statelyai/agent/pull/67) [`d9d5dbd`](https://github.com/statelyai/agent/commit/d9d5dbd0033e7bc5c6703d3105ebade7d9e824d5) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Breaking: `maxTokens` renamed to `maxOutputTokens` across the request contract (`AgentTextRequest`, `AgentDecisionRequest`, decision/plan inputs, `TextLogicConfig`, workflow config). Rationale: `AgentTextRequest` is now spread-compatible with the Vercel AI SDK's `generateText`/`streamText` options — an AI SDK host is `generateText({ ...request, model })` plus model-ref resolution.
+
+- [#67](https://github.com/statelyai/agent/pull/67) [`3bcaef9`](https://github.com/statelyai/agent/commit/3bcaef9290d06fff5eb17d0271ca981a36a116a3) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Add `@statelyai/agent/openai-compat`, a second shipped adapter. `createOpenAiCompatExecutors({ baseUrl, apiKey?, headers?, fetch?, model?, models? })` returns a complete `{ generateText, streamText, decide }` executor set over the OpenAI Chat Completions wire format via raw `fetch`, with zero runtime dependencies. Works with any compatible endpoint — Groq, Together, Ollama, vLLM, OpenRouter, LM Studio, and OpenAI itself. Unlike the raw AI SDK path, this includes `decide` (tool-per-event + `tool_choice: "required"`) and reliable structured output (`response_format` json_schema). Pass a `fetch` override for Workers or tests.
+
+- [#67](https://github.com/statelyai/agent/pull/67) [`66b180d`](https://github.com/statelyai/agent/commit/66b180d5eed8fab629e08176ac16c81a1b41aa98) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Lowered text requests now carry their registered name: `AgentTextRequest.name` is stamped from the `setupAgent({ requests })` key (also via `setupAgent.fromConfig`), or from the new `TextLogicConfig.name` for standalone `createTextLogic` actors. Host executors, per-request routers, and test mocks can route on `request.name` instead of sniffing `system`/`prompt` text.
+
+- [#67](https://github.com/statelyai/agent/pull/67) [`1faf4e1`](https://github.com/statelyai/agent/commit/1faf4e1838a4483580e524e37ccc85911caa68ed) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Add `resolveAgentRequests(machine, step, executors, options?)`, a step-path helper that collapses the manual host loop. It resolves the current step's pending request — text via `executeAgentRequest` + `resolveAgentStep`, decision via `resolveDecision` (with `canTake` wired to `step.snapshot.can`) + `transitionAgentStep` — and returns the next step, so a complete durable host is `while (!step.done) step = await resolveAgentRequests(machine, step, executors)`. Plan requests are not yet surfaced on the step path.
+
+### Patch Changes
+
+- [#70](https://github.com/statelyai/agent/pull/70) [`ca0dad3`](https://github.com/statelyai/agent/commit/ca0dad31b07f64b3a6e03d1ba2f76be977ec64c4) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Six correctness fixes from a source audit:
+
+  - **ai-sdk `streamText` now honors `metadata.maxSteps`** — like `generateText`, so a streaming tool loop is bounded instead of running unbounded (both share one `maxStepsSetting` helper).
+  - **openai-compat `decide` now forwards an abort signal** — `resolveDecision` threads its `options.signal` onto the request (`AgentDecisionRequest.signal`), and both adapters forward it to the underlying model call, so an in-flight decision is cancellable (symmetric with the text executors).
+  - **`RunAgentResult` error `cause` split** — the overloaded `'machine'` is now `'machine' | 'decision-exhausted' | 'stopped'`: an unhandled `DecisionExhaustedError` (or one wrapped in the error's `cause` chain) settles `'decision-exhausted'`, an external stop settles `'stopped'`, and any other machine error state stays `'machine'` (`'aborted'`/`'max-model-calls'` unchanged).
+  - **Reserved `agent.*` actor keys are enforced** — `setupAgent({ actorSources })`/`{ requests }` now throws if a key collides with a builtin (`agent.generateText`, `agent.streamText`, `agent.userInput`, `agent.decide`, `agent.plan`) instead of silently clobbering it via spread order. Deliberate overrides are still possible via `machine.provide({ actorSources })`.
+  - **Dev-only snapshot-serialization warning** — when a run settles idle, in non-production it walks the machine context once and `console.warn`s (at most once per run, naming the offending path) if it holds a value that won't survive JSON persist/resume (`Date`, `Map`, `Set`, function, `undefined`, `bigint`, class instance, circular). Never throws.
+  - **Decision adapters: the event's own `type` always wins** — confirmed both adapters already spread the chosen event's `type` last, so a stray `type` key in the model's tool input can never override the machine event type; added regression tests locking this in.
+
+- [#67](https://github.com/statelyai/agent/pull/67) [`e46fc52`](https://github.com/statelyai/agent/commit/e46fc52d999ee66ac869b686d2f8cfe3570c84f9) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Improve type-level DX so authoring no longer forces user-side casts:
+
+  - `createDecisionLogic`'s `allowedEvents` resolver now receives its `input` typed
+    from the `schemas.input` schema (was `unknown`).
+  - `resolveDecision` is now generic over the machine's event union: typing
+    `canTake` (e.g. `(e: GameEvent) => snapshot.can(e)`) makes it return that union,
+    removing the re-narrowing parser hosts previously hand-wrote.
+  - `AllowedEvents` gained a `TInput` parameter to carry the resolver input type.
+
+  Also cleaned up stale casts/annotations in examples that these (and existing
+  inference) made unnecessary: child-machine `onDone` output and `invoke.input`
+  `context` were already correctly inferred.
+
+- [#67](https://github.com/statelyai/agent/pull/67) [`e46fc52`](https://github.com/statelyai/agent/commit/e46fc52d999ee66ac869b686d2f8cfe3570c84f9) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Add `getStateMeta(snapshot)` — returns the merged, typed `meta` of a snapshot's active state(s).
+
+  It replaces the untyped `Object.values(snapshot.getMeta())[0]` cast used to read a state's interaction protocol in human-in-the-loop hosts. The return type is recovered from the snapshot's own `getMeta()` type, so a schema-typed machine (`setupAgent({ meta })`) yields the meta schema's output type; pass an explicit type param for untyped snapshots. Meta from every active state is shallow-merged (later/deeper wins for nested and parallel machines), returning `{}` when no active state declares meta.
+
 ## 2.0.0-alpha.0
 
 ### Major Changes

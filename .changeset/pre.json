@@ -5,6 +5,23 @@
     "@statelyai/agent": "1.1.6"
   },
   "changesets": [
+    "agent-plan-builtin",
+    "allowed-events-wildcards",
+    "api-polish-states-helpers-prune",
+    "audit-bugfixes-batch",
+    "blessed-ai-sdk-executors",
+    "child-machine-bind-validation",
+    "decide-auto-delivery-and-define-models",
+    "decision-and-invoke-typing-dx",
+    "executor-output-envelope",
+    "executor-result-widening",
+    "explicit-suspension-and-illegal-resume",
+    "get-state-meta",
+    "max-output-tokens-rename",
+    "openai-compat-adapter",
+    "request-name-on-text-requests",
+    "resolve-agent-requests",
+    "setup-agent-actor-sources-and-model-refs",
     "setup-agent-xstate-cutover"
   ]
 }
