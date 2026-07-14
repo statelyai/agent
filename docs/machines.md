@@ -279,6 +279,8 @@ done: {
 
 When the root declares no `output` and exactly one final state does, `agentSetup.createMachine` promotes that output to the root, so `snapshot.output` is set without repeating it on every final state.
 
+Read `context` only in a final `output` function — never the entering `event`. A final `output` fn is evaluated more than once with different events (the event that entered the state, then the machine-done computation), so `event` is unreliable there. Capture whatever you need from the entering event into `context` in the transition that targets the final state, then read it back from `context`. (`lintAgentMachine`'s `final-output-reads-event` check flags this.)
+
 ### Narrow context per state
 
 A context field that starts `null` and is assigned mid-run forces a `?? fallback` at every later read, including in a final state's `output`. When a state is reachable **only** after that field is set, declare a per-state `schemas.context` under `setupAgent({ states })` (mirroring XState's `setup({ states })`) to narrow the field non-null. The narrowed type flows into that state's invoke `input`, transition functions, and `output`, so the coalesce disappears:

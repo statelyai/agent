@@ -32,6 +32,7 @@ if (errors.length) {
 | `unserializable-context` | warning | The context schema exposes no JSON schema (e.g. a `z.custom` messages array), so its fields can't be statically checked for JSON persist/resume. |
 | `direct-object-src` | warning | An invoke `src` is a direct object/machine value — it can't be rebound by `runAgent`, so it inherits no host executors. |
 | `final-without-output` | error | The machine declares an output schema but a top-level final state has no `output`. |
+| `final-output-reads-event` | warning | A top-level final state's `output` function reads the entering `event`. Final `output` fns are evaluated more than once with different events, so `event` is unreliable — read `context` only, capturing what you need into context in the transition that targets the final state. |
 | `missing-final` | warning | No reachable final state — the machine can only idle/loop (legal, but flagged). |
 
 ## `await simulateAgent(machine, { input, script, maxSteps? })`

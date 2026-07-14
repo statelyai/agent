@@ -136,7 +136,7 @@ describe("resolveAgentRequests", () => {
 
     await expect(
       resolveAgentRequests(machine, step, { generateText: executors.generateText }),
-    ).rejects.toThrow("resolveAgentRequests: no 'decide' executor provided.");
+    ).rejects.toThrow(/this step's decision request '.+' needs a 'decide' executor but none was provided\./);
   });
 
   test("throws a clear error when the generateText executor is missing", async () => {
@@ -149,9 +149,74 @@ describe("resolveAgentRequests", () => {
     expect(step.requests[0]?.kind).toBe("text");
 
     await expect(
-      resolveAgentRequests(machine, step, {
-        decide: executors.decide,
-      } as unknown as AgentRequestExecutors),
-    ).rejects.toThrow("resolveAgentRequests: no 'generateText' executor provided.");
+      resolveAgentRequests(machine, step, { decide: executors.decide }),
+    ).rejects.toThrow(/this step's text request '.+' needs a 'generateText' executor but none was provided\./);
+  });
+
+  test("throws a clear error when the streamText executor is missing", async () => {
+    const machine = createStreamAgent();
+    let step = initialAgentStep(machine);
+    expect(step.requests[0]?.kind).toBe("text");
+
+    // A partial executor set (generateText only) — no cast needed.
+    await expect(
+      resolveAgentRequests(machine, step, { generateText: async () => ({ output: "x" }) }),
+    ).rejects.toThrow(/this step's text request 'stream' needs a 'streamText' executor but none was provided\./);
+  });
+
+  test("a decide-only partial executor set drives a decision step with no cast, no generateText", async () => {
+    const machine = createTinyAgent();
+    let step = initialAgentStep(machine);
+    // No generateText/streamText — a decision step needs only `decide`, and the
+    // Partial<AgentRequestExecutors> entry point accepts it without a cast.
+    step = await resolveAgentRequests(machine, step, {
+      decide: async () => ({ event: { type: "STOP" } }),
+    });
+    while (!step.done) {
+      step = await resolveAgentRequests(machine, step, {
+        decide: async () => ({ event: { type: "STOP" } }),
+      });
+    }
+    expect(step.snapshot.output).toEqual({ outcome: "stopped", note: "no run" });
   });
 });
+
+// A single-state agent whose only work is a `mode: 'stream'` text request —
+// used to pin the missing-`streamText`-executor error.
+function createStreamAgent() {
+  const agent = setupAgent({
+    schemas: createAgentSchemas({
+      context: z.object({ text: z.string().nullable() }),
+      output: z.object({ text: z.string() }),
+    }),
+    actorSources: {
+      stream: createTextLogic({
+        schemas: { input: z.object({}), output: z.string() },
+        model: "quick",
+        mode: "stream",
+        prompt: "stream something",
+      }),
+    },
+  });
+  return agent.createMachine({
+    context: () => ({ text: null }),
+    initial: "streaming",
+    states: {
+      streaming: {
+        invoke: {
+          id: "stream",
+          src: "stream",
+          input: () => ({}),
+          onDone: ({ event }) => ({
+            target: "done",
+            context: { text: event.output as string },
+          }),
+        },
+      },
+      done: {
+        type: "final",
+        output: ({ context }) => ({ text: context.text ?? "" }),
+      },
+    },
+  });
+}

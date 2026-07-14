@@ -144,6 +144,27 @@ async function runViaSteps(machine: ReturnType<typeof createTodoAgent>, decide: 
 }
 
 describe("agent.plan on the step path", () => {
+  test("drives a plan with a decide-only partial executor set (no generateText, no cast)", async () => {
+    const machine = createTodoAgent();
+    const script: ChosenEvent[] = [
+      { type: "ADD", title: "milk" },
+      { type: "NOTHING" },
+    ];
+    let index = 0;
+    // A plan step consumes only `decide`; the Partial<AgentRequestExecutors>
+    // entry point accepts this object with no generateText and no cast.
+    let step = initialAgentStep(machine);
+    while (!step.done) {
+      step = await resolveAgentRequests(machine, step, {
+        decide: async () => ({ event: script[index++]! }),
+      });
+    }
+    expect(step.snapshot.output).toMatchObject({
+      titles: ["milk"],
+      stopped: "stop-event",
+    });
+  });
+
   test("re-surfaces a plan request with candidates, applied trail, and budget", async () => {
     const machine = createTodoAgent();
     const step = initialAgentStep(machine);

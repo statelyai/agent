@@ -12,6 +12,7 @@ import {
   type AgentPlanOutput,
   type StandardSchemaV1,
 } from "./index.js";
+import * as examples from "../examples/index.js";
 import {
   humanInTheLoopMachine,
   jokeMachine,
@@ -149,6 +150,24 @@ describe("lintAgentMachine — the lint corpus stays quiet", () => {
   ])("%s produces zero error-severity diagnostics", (_name, machine) => {
     expect(errorsOf(lintAgentMachine(machine))).toEqual([]);
   });
+
+  test("no example machine trips 'final-output-reads-event'", () => {
+    const tripped: string[] = [];
+    for (const [name, value] of Object.entries(examples)) {
+      const machine = value as { config?: unknown };
+      if (!machine || typeof machine !== "object" || typeof machine.config !== "object") {
+        continue;
+      }
+      try {
+        if (lintAgentMachine(machine as never).some((d) => d.code === "final-output-reads-event")) {
+          tripped.push(name);
+        }
+      } catch {
+        // Not a lintable machine export — skip.
+      }
+    }
+    expect(tripped).toEqual([]);
+  });
 });
 
 describe("lintAgentMachine — each check fires on a crafted bad machine", () => {
@@ -281,6 +300,53 @@ describe("lintAgentMachine — each check fires on a crafted bad machine", () =>
         path: "b",
       }),
     );
+  });
+
+  test("final-output-reads-event: a top-level final whose output reads event (warning)", () => {
+    const agent = setupAgent({
+      context: z.object({}),
+      output: z.object({ echoed: z.string() }),
+      events: { E: z.object({ value: z.string() }) },
+    });
+    const machine = agent.createMachine({
+      context: () => ({}),
+      initial: "a",
+      states: {
+        a: { on: { E: { target: "b" } } },
+        // Reads the entering event in the final output — the anti-pattern.
+        b: { type: "final", output: ({ event }) => ({ echoed: (event as { value: string }).value }) },
+      },
+    });
+
+    const diagnostics = lintAgentMachine(machine);
+    expect(diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: "final-output-reads-event",
+        severity: "warning",
+        path: "b",
+      }),
+    );
+    // A warning must never count as an error for the CLI/CI gate.
+    expect(errorsOf(diagnostics)).toEqual([]);
+  });
+
+  test("final-output-reads-event: quiet when a context-only final output", () => {
+    const agent = setupAgent({
+      context: z.object({ captured: z.string() }),
+      output: z.object({ echoed: z.string() }),
+      events: { E: z.object({ value: z.string() }) },
+    });
+    const machine = agent.createMachine({
+      context: () => ({ captured: "" }),
+      initial: "a",
+      states: {
+        a: { on: { E: { target: "b" } } },
+        // The final output reads context only — the correct pattern.
+        b: { type: "final", output: ({ context }) => ({ echoed: context.captured }) },
+      },
+    });
+
+    expect(lintAgentMachine(machine).some((d) => d.code === "final-output-reads-event")).toBe(false);
   });
 
   test("missing-final: a machine that can only loop", () => {

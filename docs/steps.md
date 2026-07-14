@@ -95,7 +95,7 @@ while (!step.done) {
 console.log(step.snapshot.output);
 ```
 
-Reach past it to the manual dispatch (shown above) when a host must interleave its own work between the request and the transition — per-turn persistence, one serverless invocation per turn, or a plain actor/timer pending in `step.actions`. `resolveAgentRequests` throws a clear error if the executor a request needs (`generateText`/`streamText` or `decide`) is missing. It also drives **plan** requests natively (see [Plans on the step path](#plans-on-the-step-path)) and resolves a step's pending text requests concurrently (see [Concurrent text requests](#concurrent-text-requests)).
+Reach past it to the manual dispatch (shown above) when a host must interleave its own work between the request and the transition — per-turn persistence, one serverless invocation per turn, or a plain actor/timer pending in `step.actions`. `resolveAgentRequests` (and `executeAgentRequest`) take a **partial** executor set — each request kind demands only its own executor (`generateText`/`streamText` for text, `decide` for decisions and plans) — and throw a clear per-kind error, naming the request, when the one a pending request needs is missing. It also drives **plan** requests natively (see [Plans on the step path](#plans-on-the-step-path)) and resolves a step's pending text requests concurrently (see [Concurrent text requests](#concurrent-text-requests)).
 
 See [examples/ai-sdk-game-host/index.ts](../examples/ai-sdk-game-host/index.ts) for the full loop, and [Decisions](decisions.md) for the validate-and-retry rules.
 

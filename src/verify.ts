@@ -52,6 +52,7 @@ export interface AgentLintDiagnostic {
     | "unserializable-context"
     | "direct-object-src"
     | "final-without-output"
+    | "final-output-reads-event"
     | "missing-final";
   severity: AgentLintSeverity;
   /** State path (`parent.child`) or config pointer (e.g. `(root)`, `context`) the finding is about. */
@@ -528,6 +529,46 @@ function checkFinalWithoutOutput(ctx: LintContext): AgentLintDiagnostic[] {
   return out;
 }
 
+// Heuristically detects whether a final-state `output` function reads data off
+// the entering `event`, via `fn.toString()`: a property, optional-chain, or
+// index access on `event` (`event.x`, `event?.x`, `event[...]`). A bare
+// destructured `event` that is only passed through — notably the
+// `setupAgent.fromConfig` template wrapper `({ context, event }) =>
+// evaluateWorkflowConfigValue(config, { context, event })` — is not a read and
+// stays quiet, so config-lowered machines don't false-flag.
+function outputFnReadsEvent(fn: (...args: never[]) => unknown): boolean {
+  return /\bevent\s*(?:\.|\?\.|\[)/.test(fn.toString());
+}
+
+function checkFinalOutputReadsEvent(ctx: LintContext): AgentLintDiagnostic[] {
+  const out: AgentLintDiagnostic[] = [];
+  for (const node of ctx.index.values()) {
+    if (node.parentPath !== "" || !node.isFinal) {
+      continue;
+    }
+    const output = node.config.output;
+    if (typeof output !== "function") {
+      continue;
+    }
+    if (!outputFnReadsEvent(output as (...args: never[]) => unknown)) {
+      continue;
+    }
+    out.push({
+      code: "final-output-reads-event",
+      severity: "warning",
+      path: node.path,
+      message:
+        `Final state '${node.path}' has an 'output' function that reads 'event'. Final-state ` +
+        `'output' functions are evaluated more than once with different events (the entering ` +
+        `event, then the machine-done computation) under current xstate behavior, so 'event' ` +
+        `is unreliable here. Read 'context' only; capture what you need from the entering ` +
+        `event into context in the transition that targets this state. (This guard can relax ` +
+        `if xstate guarantees a stable entering event across evaluations.)`,
+    });
+  }
+  return out;
+}
+
 function checkMissingFinal(ctx: LintContext): AgentLintDiagnostic[] {
   for (const node of ctx.index.values()) {
     if (node.isFinal && ctx.reachable.has(node.path)) {
@@ -552,6 +593,7 @@ const LINT_CHECKS: Array<(ctx: LintContext) => AgentLintDiagnostic[]> = [
   checkUnserializableContext,
   checkDirectObjectSrc,
   checkFinalWithoutOutput,
+  checkFinalOutputReadsEvent,
   checkMissingFinal,
 ];
 
@@ -741,7 +783,8 @@ export async function simulateAgent(
         if (!taken.found) {
           throw scriptDryError("decision", request.src, request.id, request);
         }
-        step = await resolveAgentRequests(machine, step, decideOnly(taken.value));
+        const event = taken.value;
+        step = await resolveAgentRequests(machine, step, { decide: async () => ({ event }) });
         trail.push({ state: step.snapshot.value, appliedEvent: taken.value });
         continue;
       }
@@ -783,16 +826,6 @@ export async function simulateAgent(
 
 function mapValues<T, U>(obj: Record<string, T>, fn: (value: T) => U): Record<string, U> {
   return Object.fromEntries(Object.entries(obj).map(([key, value]) => [key, fn(value)]));
-}
-
-// A decide-only executors object: a plan step consumes only the `decide`
-// executor (returning the scripted chosen event), never generateText/streamText.
-// resolveAgentRequests's plan path uses `decide` exclusively, so the required
-// text executors are legitimately absent here.
-function decideOnly(event: unknown): Parameters<typeof resolveAgentRequests>[2] {
-  return { decide: async () => ({ event: event as never }) } as unknown as Parameters<
-    typeof resolveAgentRequests
-  >[2];
 }
 
 function scriptDryError(
@@ -998,7 +1031,7 @@ async function explore(
         continue;
       }
       const next = isPlan
-        ? await resolveAgentRequests(machine, settled, decideOnly(event))
+        ? await resolveAgentRequests(machine, settled, { decide: async () => ({ event }) })
         : transitionAgentStep(machine, settled, event as never);
       recordState(next.snapshot);
       await visit(next, [...path, event as ChosenEvent], depth + 1);

@@ -771,7 +771,7 @@ export async function executeAgentTextRequest(
   mode: AgentRequestMode,
   id: string,
   input: AgentTextRequest<any>,
-  executors: AgentRequestExecutors,
+  executors: Partial<AgentRequestExecutors>,
   tools: AgentTools = {},
   info?: AgentRequestExecutorInfo,
 ): Promise<{ output: unknown; raw: unknown }> {

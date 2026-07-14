@@ -451,16 +451,16 @@ export function getAgentRequests(
  */
 export function executeAgentRequest(
   request: AgentRequest,
-  executors: AgentRequestExecutors,
+  executors: Partial<AgentRequestExecutors>,
 ): Promise<unknown>;
 export function executeAgentRequest(
   request: AgentRequest,
-  executors: AgentRequestExecutors,
+  executors: Partial<AgentRequestExecutors>,
   options: { verbose: true },
 ): Promise<{ output: unknown; raw: unknown }>;
 export async function executeAgentRequest(
   request: AgentRequest,
-  executors: AgentRequestExecutors,
+  executors: Partial<AgentRequestExecutors>,
   options?: { verbose?: boolean },
 ): Promise<unknown> {
   if ((request as AgentStepRequest).kind === "decision") {
@@ -469,6 +469,8 @@ export async function executeAgentRequest(
         "resolveDecision(request, executors.decide, ...) instead.",
     );
   }
+
+  assertTextExecutor(request, executors);
 
   const { output, raw } = await executeAgentTextRequest(
     request.mode ?? "generate",
@@ -539,7 +541,7 @@ export interface ResolveAgentRequestsOptions extends Partial<AgentExecutionOptio
 export async function resolveAgentRequests<TMachine extends AnyActorLogic>(
   machine: TMachine,
   step: AgentStep<SnapshotFrom<TMachine>>,
-  executors: AgentRequestExecutors,
+  executors: Partial<AgentRequestExecutors>,
   options?: ResolveAgentRequestsOptions,
 ): Promise<AgentStep<SnapshotFrom<TMachine>>> {
   const [request] = step.requests;
@@ -549,7 +551,9 @@ export async function resolveAgentRequests<TMachine extends AnyActorLogic>(
 
   if (request.kind === "decision") {
     if (!executors.decide) {
-      throw new Error("resolveAgentRequests: no 'decide' executor provided.");
+      throw new Error(
+        `this step's decision request '${request.id}' needs a 'decide' executor but none was provided.`,
+      );
     }
     const chosenEvent = await resolveDecision(request, executors.decide, {
       canTake: (event: ChosenEvent) => (step.snapshot as AnyMachineSnapshot).can(event as never),
@@ -582,14 +586,15 @@ export async function resolveAgentRequests<TMachine extends AnyActorLogic>(
   return next;
 }
 
-// Throws the clear missing-executor error for a text request's mode.
-function assertTextExecutor(request: AgentRequest, executors: AgentRequestExecutors): void {
+// Throws the clear per-kind missing-executor error for a text request's mode —
+// the descriptive style runAgent uses at bind time, naming the request src.
+function assertTextExecutor(request: AgentRequest, executors: Partial<AgentRequestExecutors>): void {
   const mode = request.mode ?? "generate";
+  const kind = mode === "stream" ? "streamText" : "generateText";
   const executor = mode === "stream" ? executors.streamText : executors.generateText;
   if (!executor) {
     throw new Error(
-      `resolveAgentRequests: no '${mode === "stream" ? "streamText" : "generateText"}' ` +
-        "executor provided.",
+      `this step's text request '${request.src}' needs a '${kind}' executor but none was provided.`,
     );
   }
 }
@@ -601,11 +606,13 @@ async function resolvePlanRequest<TMachine extends AnyActorLogic>(
   machine: TMachine,
   step: AgentStep<SnapshotFrom<TMachine>>,
   request: AgentPlanRequest,
-  executors: AgentRequestExecutors,
+  executors: Partial<AgentRequestExecutors>,
   options?: ResolveAgentRequestsOptions,
 ): Promise<AgentStep<SnapshotFrom<TMachine>>> {
   if (!executors.decide) {
-    throw new Error("resolveAgentRequests: no 'decide' executor provided.");
+    throw new Error(
+      `this step's plan request '${request.src}' needs a 'decide' executor but none was provided.`,
+    );
   }
   const stopOn = new Set<string>(request.input.stopOn ?? []);
 
