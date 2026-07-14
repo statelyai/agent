@@ -21,6 +21,7 @@
     "max-output-tokens-rename",
     "nested-executors-option",
     "openai-compat-adapter",
+    "plan-steps-concurrent",
     "request-name-on-text-requests",
     "resolve-agent-requests",
     "run-agent-completion-and-versioning",
