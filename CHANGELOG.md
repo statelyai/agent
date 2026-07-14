@@ -1,5 +1,18 @@
 # @statelyai/agent
 
+## 2.0.0-alpha.4
+
+### Minor Changes
+
+- [`5851499`](https://github.com/statelyai/agent/commit/5851499bae56d41d546ae75712193db264fc492f) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Step-path parity for plans and concurrent text requests by default.
+
+  - **`agent.plan` on the step path.** An `agent.plan` invoke now surfaces as a re-surfacing `kind: 'plan'` `AgentPlanRequest` (`{ id, src, input, events, applied, stepsRemaining }`) — all plain serializable data. Resolve one decision per step (candidates include the reserved `agent.plan.done` move); a real machine event advances the plan and the next step re-surfaces it, while the done move / a `stopOn` event / an exhausted budget / no legal events completes it with `{ steps, stopped }`. `resolveAgentRequests` drives all of this natively, one plan step per call, so the two-line durable host loop works with plans unchanged. Semantics match `runAgent` exactly (same validation/retry, same stop reasons `'done' | 'stop-event' | 'max-steps' | 'no-legal-events'`, exit-cancels-invoke). `agent.plan` is now a stateful, transition-based ledger actor: the in-progress plan state (applied trail + remaining budget) lives in the plan invoke child's own snapshot `context`, so it lands at `children.<id>.snapshot.context` in a persisted snapshot for free — surviving a full `getPersistedSnapshot` → JSON → restore round-trip and resuming identically mid-plan. Both hosts (the step path and `runAgent`) drive the same ledger through shared drivers.
+  - **Concurrent text requests are the default.** `resolveAgentRequests` resolves all pending text requests of a step in parallel (`Promise.all`) — parallel statechart regions are genuinely concurrent — applying outputs in request-array order (deterministic for durable replay). Decisions and plans stay one-at-a-time (applying either changes the legal candidate set). A host that wants strictly sequential text resolution loops the manual `executeAgentRequest` + `resolveAgentStep` helpers one at a time.
+
+  - **Partial executor sets on the step path.** `resolveAgentRequests` and `executeAgentRequest` now accept a `Partial<AgentRequestExecutors>` — each request kind demands only its own executor (`generateText`/`streamText` for text, `decide` for decisions and plans), so a decision- or plan-only step needs no `generateText`. A missing needed executor throws a descriptive per-kind error naming the request (matching `runAgent`'s bind-time style), e.g. `this step's text request '<src>' needs a 'generateText' executor but none was provided.`
+
+  New exported type: `AgentPlanRequest` (added to the `AgentStepRequest` union).
+
 ## 2.0.0-alpha.3
 
 ### Minor Changes
