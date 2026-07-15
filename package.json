@@ -1,6 +1,6 @@
 {
   "name": "@statelyai/agent",
-  "version": "2.0.0-alpha.4",
+  "version": "2.0.0-alpha.5",
   "description": "State-machine authoring layer for AI agents",
   "type": "module",
   "main": "dist/index.cjs",
