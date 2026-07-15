@@ -16,6 +16,7 @@
     "executor-output-envelope",
     "executor-result-widening",
     "explicit-suspension-and-illegal-resume",
+    "get-requests-state-interpretation",
     "get-state-meta",
     "keyless-verify-lint-simulate",
     "max-output-tokens-rename",
