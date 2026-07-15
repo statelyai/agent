@@ -588,7 +588,10 @@ export async function resolveAgentRequests<TMachine extends AnyActorLogic>(
 
 // Throws the clear per-kind missing-executor error for a text request's mode —
 // the descriptive style runAgent uses at bind time, naming the request src.
-function assertTextExecutor(request: AgentRequest, executors: Partial<AgentRequestExecutors>): void {
+function assertTextExecutor(
+  request: AgentRequest,
+  executors: Partial<AgentRequestExecutors>,
+): void {
   const mode = request.mode ?? "generate";
   const kind = mode === "stream" ? "streamText" : "generateText";
   const executor = mode === "stream" ? executors.streamText : executors.generateText;
@@ -718,9 +721,8 @@ function advancePlanChildLedger(
   id: string,
   event: PlanLedgerEvent,
 ): void {
-  const child = (snapshot as AnyMachineSnapshot & { children?: Record<string, unknown> }).children?.[
-    id
-  ] as { logic?: unknown; getSnapshot?: () => unknown } | undefined;
+  const child = (snapshot as AnyMachineSnapshot & { children?: Record<string, unknown> })
+    .children?.[id] as { logic?: unknown; getSnapshot?: () => unknown } | undefined;
   const childSnapshot = child?.getSnapshot?.();
   if (!isPlanLogic(child?.logic) || !childSnapshot || typeof childSnapshot !== "object") {
     return;
@@ -734,9 +736,8 @@ function advancePlanChildLedger(
 // True when the plan invoke child `id` is still active on `snapshot` (an
 // applied event that exited its state removes/stops it).
 function isPlanActive(snapshot: AnyMachineSnapshot, id: string): boolean {
-  const child = (snapshot as AnyMachineSnapshot & { children?: Record<string, unknown> }).children?.[
-    id
-  ] as { getSnapshot?: () => { status?: unknown } } | undefined;
+  const child = (snapshot as AnyMachineSnapshot & { children?: Record<string, unknown> })
+    .children?.[id] as { getSnapshot?: () => { status?: unknown } } | undefined;
   return child?.getSnapshot?.()?.status === "active";
 }
 

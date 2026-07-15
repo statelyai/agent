@@ -378,9 +378,9 @@ describe("runAgent", () => {
       maxModelCalls: 3,
       executors: {
         generateText: async () => {
-        calls += 1;
-        return { output: calls };
-      },
+          calls += 1;
+          return { output: calls };
+        },
       },
     });
 
@@ -453,9 +453,9 @@ describe("runAgent", () => {
       signal: controller.signal,
       executors: {
         generateText: () =>
-        new Promise((resolveExec) => {
-          setTimeout(() => resolveExec({ output: {} }), 50);
-        }),
+          new Promise((resolveExec) => {
+            setTimeout(() => resolveExec({ output: {} }), 50);
+          }),
       },
     });
     setTimeout(() => controller.abort(), 5);
@@ -491,8 +491,8 @@ describe("runAgent", () => {
       input: {},
       executors: {
         generateText: async () => {
-        throw new Error("boom");
-      },
+          throw new Error("boom");
+        },
       },
     });
 
@@ -619,7 +619,10 @@ describe("runAgent", () => {
       });
 
       await expect(
-        runAgent(machine, { input: undefined, executors: { generateText: async () => ({ output: {} }) } }),
+        runAgent(machine, {
+          input: undefined,
+          executors: { generateText: async () => ({ output: {} }) },
+        }),
       ).rejects.toThrow(/notRegistered/);
     });
 
@@ -793,9 +796,9 @@ describe("runAgent", () => {
           input: { topic: "agents" },
           executors: {
             generateText: async () => {
-            parentCalls += 1;
-            return { output: "unused" };
-          },
+              parentCalls += 1;
+              return { output: "unused" };
+            },
           },
         });
 
@@ -1557,8 +1560,8 @@ describe("agent.userInput as a pending placeholder (durable parallel HITL)", () 
       },
       executors: {
         generateText: async () => {
-        throw new Error("no model call expected on resume");
-      },
+          throw new Error("no model call expected on resume");
+        },
       },
     });
 
@@ -1737,10 +1740,10 @@ describe("onTrace stream chunks", () => {
       executors: {
         generateText: async () => ({ output: {} }),
         streamText: async (_request, info) => {
-        info?.onChunk?.("a");
-        info?.onChunk?.("b");
-        return { output: "ab" };
-      },
+          info?.onChunk?.("a");
+          info?.onChunk?.("b");
+          return { output: "ab" };
+        },
       },
     });
 
@@ -1790,10 +1793,10 @@ describe("onResult raw pass-through", () => {
       onResult: (_request, { raw }) => raws.push(raw),
       executors: {
         generateText: async () => ({
-        output: "42",
-        usage: { inputTokens: 7, outputTokens: 3 },
-        finishReason: "stop",
-      }),
+          output: "42",
+          usage: { inputTokens: 7, outputTokens: 3 },
+          finishReason: "stop",
+        }),
       },
     });
 
@@ -2024,7 +2027,7 @@ describe("Feature A: explicit suspension detection (isSuspended)", () => {
       input: {},
       executors: {
         generateText: () =>
-        new Promise((res) => setTimeout(() => res({ output: "done-summary" }), 10)),
+          new Promise((res) => setTimeout(() => res({ output: "done-summary" }), 10)),
       },
     });
 
@@ -2147,7 +2150,11 @@ describe("Feature B: illegal resume event throws", () => {
     context: z.object({ ok: z.boolean() }),
     input: z.object({}),
     output: z.object({}),
-    events: { APPROVE: z.object({}), REJECT: z.object({ reason: z.string() }), SUBMIT: z.object({}) },
+    events: {
+      APPROVE: z.object({}),
+      REJECT: z.object({ reason: z.string() }),
+      SUBMIT: z.object({}),
+    },
   });
   const machine = agent.createMachine({
     context: { ok: false },
@@ -2318,8 +2325,8 @@ describe("runAgent error cause split", () => {
       input: {},
       executors: {
         generateText: async () => {
-        throw new Error("boom");
-      },
+          throw new Error("boom");
+        },
       },
     });
 
@@ -2389,7 +2396,10 @@ describe("runAgent dev-mode serialization guard", () => {
       warnings.push(args.map(String).join(" "));
     };
     try {
-      await runAgent(machine, { input: {}, executors: { generateText: async () => ({ output: {} }) } });
+      await runAgent(machine, {
+        input: {},
+        executors: { generateText: async () => ({ output: {} }) },
+      });
     } finally {
       console.warn = original;
     }
@@ -2437,7 +2447,10 @@ describe("runAgentToCompletion", () => {
 
   test("done: resolves with the machine output", async () => {
     const machine = buildDraftMachine();
-    const first = await runAgent(machine, { input: { prompt: "notes" }, executors: { generateText } });
+    const first = await runAgent(machine, {
+      input: { prompt: "notes" },
+      executors: { generateText },
+    });
     if (first.status !== "idle") throw new Error("expected idle");
 
     const output = await runAgentToCompletion(machine, {
@@ -2458,7 +2471,10 @@ describe("runAgentToCompletion", () => {
 
     let caught: AgentIdleError | undefined;
     try {
-      await runAgentToCompletion(machine, { input: { prompt: "notes" }, executors: { generateText } });
+      await runAgentToCompletion(machine, {
+        input: { prompt: "notes" },
+        executors: { generateText },
+      });
     } catch (error) {
       caught = error as AgentIdleError;
     }
@@ -2491,8 +2507,8 @@ describe("runAgentToCompletion", () => {
         input: { prompt: "x" },
         executors: {
           generateText: async () => {
-          throw thrown;
-        },
+            throw thrown;
+          },
         },
       }),
     ).rejects.toBe(thrown);
@@ -2573,7 +2589,9 @@ describe("snapshot version stamping", () => {
       },
     });
     if (done.status !== "done") throw new Error("expected done");
-    expect((done.snapshot as { agentMeta?: { version?: string } }).agentMeta?.version).toBe(version);
+    expect((done.snapshot as { agentMeta?: { version?: string } }).agentMeta?.version).toBe(
+      version,
+    );
   });
 
   test("same-machine resume passes", async () => {
@@ -2598,7 +2616,11 @@ describe("snapshot version stamping", () => {
 
     let caught: SnapshotVersionMismatchError | undefined;
     try {
-      await runAgent(v2, { snapshot: idle.snapshot, event: { type: "GO" }, executors: { generateText } });
+      await runAgent(v2, {
+        snapshot: idle.snapshot,
+        event: { type: "GO" },
+        executors: { generateText },
+      });
     } catch (error) {
       caught = error as SnapshotVersionMismatchError;
     }
@@ -2609,7 +2631,11 @@ describe("snapshot version stamping", () => {
 
   test("machineVersion override is respected on stamp and mismatch", async () => {
     const machine = buildMachine();
-    const idle = await runAgent(machine, { input: {}, machineVersion: "v1", executors: { generateText } });
+    const idle = await runAgent(machine, {
+      input: {},
+      machineVersion: "v1",
+      executors: { generateText },
+    });
     if (idle.status !== "idle") throw new Error("expected idle");
     expect((idle.snapshot as { agentMeta?: { version?: string } }).agentMeta?.version).toBe("v1");
 
@@ -2632,7 +2658,11 @@ describe("snapshot version stamping", () => {
 
   test("migrateSnapshot is called with correct args and its result is used", async () => {
     const machine = buildMachine();
-    const idle = await runAgent(machine, { input: {}, machineVersion: "v1", executors: { generateText } });
+    const idle = await runAgent(machine, {
+      input: {},
+      machineVersion: "v1",
+      executors: { generateText },
+    });
     if (idle.status !== "idle") throw new Error("expected idle");
 
     const calls: Array<{ from: string; to: string }> = [];
@@ -2654,7 +2684,11 @@ describe("snapshot version stamping", () => {
 
   test("warn mode proceeds", async () => {
     const machine = buildMachine();
-    const idle = await runAgent(machine, { input: {}, machineVersion: "v1", executors: { generateText } });
+    const idle = await runAgent(machine, {
+      input: {},
+      machineVersion: "v1",
+      executors: { generateText },
+    });
     if (idle.status !== "idle") throw new Error("expected idle");
 
     const warnings: string[] = [];
@@ -2724,6 +2758,8 @@ describe("inspectTransitions", () => {
     });
 
     expect(result.status).toBe("done");
-    expect(observed.some((entry) => entry.id === "child" && entry.value === "childDone")).toBe(true);
+    expect(observed.some((entry) => entry.id === "child" && entry.value === "childDone")).toBe(
+      true,
+    );
   });
 });

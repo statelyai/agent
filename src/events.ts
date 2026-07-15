@@ -1,4 +1,9 @@
-import { getNextTransitions, type AnyMachineSnapshot, type EventObject, type MachineSnapshot } from "xstate";
+import {
+  getNextTransitions,
+  type AnyMachineSnapshot,
+  type EventObject,
+  type MachineSnapshot,
+} from "xstate";
 import type { StandardSchemaV1 } from "./types.js";
 import { validateSchemaSync } from "./utils.js";
 

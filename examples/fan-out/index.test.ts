@@ -16,23 +16,23 @@ test("fan-out plans subtopics, spawns one branch per subtopic, and reduces all s
   const output = await runFanOutExample({
     executors: {
       generateText: async (request: AgentTextRequest) => {
-      if (request.model === "planner") {
-        return { output: { subtopics } };
-      }
-      if (request.model === "worker") {
-        // The branch prompt embeds the subtopic; record it so we can assert
-        // every subtopic was fanned out.
-        const subtopic = request.prompt?.split("Subtopic: ")[1] ?? "";
-        branchInputs.push(subtopic);
-        // Small async gap so branches overlap and a mid-flight snapshot with
-        // multiple active children is observable.
-        await new Promise((r) => setTimeout(r, 5));
-        return { output: `summary of ${subtopic}` };
-      }
-      // reducer — its prompt embeds every summary.
-      assert.ok(request.prompt?.includes("summary of durability"));
-      assert.ok(request.prompt?.includes("summary of resumption"));
-      return { output: "composed digest" };
+        if (request.model === "planner") {
+          return { output: { subtopics } };
+        }
+        if (request.model === "worker") {
+          // The branch prompt embeds the subtopic; record it so we can assert
+          // every subtopic was fanned out.
+          const subtopic = request.prompt?.split("Subtopic: ")[1] ?? "";
+          branchInputs.push(subtopic);
+          // Small async gap so branches overlap and a mid-flight snapshot with
+          // multiple active children is observable.
+          await new Promise((r) => setTimeout(r, 5));
+          return { output: `summary of ${subtopic}` };
+        }
+        // reducer — its prompt embeds every summary.
+        assert.ok(request.prompt?.includes("summary of durability"));
+        assert.ok(request.prompt?.includes("summary of resumption"));
+        return { output: "composed digest" };
       },
     },
     onTransition: (snapshot: AnyMachineSnapshot) => {

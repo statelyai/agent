@@ -179,12 +179,7 @@ describe("twenty-questions", () => {
     const sideAnswers: { question: string; answer: string }[] = [];
     // Reply 1 is a side question; reply 2 answers the re-asked question; then
     // guess feedback and play-again wrap up.
-    const answers = [
-      "is a lizard considered domestic?",
-      "mhm",
-      "correct",
-      "no",
-    ];
+    const answers = ["is a lizard considered domestic?", "mhm", "correct", "no"];
 
     let decisions = 0;
     const decide = async (): Promise<{ event: ChosenEvent }> => {

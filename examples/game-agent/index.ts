@@ -15,12 +15,7 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
-import {
-  createAgentSchemas,
-  createTextLogic,
-  runAgent,
-  setupAgent,
-} from "../../src/index.js";
+import { createAgentSchemas, createTextLogic, runAgent, setupAgent } from "../../src/index.js";
 import { runExampleMain } from "../helpers/main.js";
 
 export const turnSummarySchema = z.object({

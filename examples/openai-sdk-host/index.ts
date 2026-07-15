@@ -124,7 +124,8 @@ export function toOpenAiTools(tools: AgentTools): ChatCompletionFunctionTool[] {
         function: {
           name,
           description: typeof descriptor === "function" ? undefined : descriptor.description,
-          parameters: (isStandardSchema(inputSchema) ? getJsonSchemaSync(inputSchema) : undefined) ?? {},
+          parameters:
+            (isStandardSchema(inputSchema) ? getJsonSchemaSync(inputSchema) : undefined) ?? {},
         },
       },
     ];

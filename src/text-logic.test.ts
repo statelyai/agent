@@ -71,17 +71,17 @@ describe('createTextLogic({ mode: "stream" })', () => {
       },
       executors: {
         generateText: async () => {
-        throw new Error("generateText should not be used for stream requests");
-      },
+          throw new Error("generateText should not be used for stream requests");
+        },
         streamText: async (
-        _request: AgentTextRequest & { tools: AgentTools },
-        info?: AgentRequestExecutorInfo,
-      ) => {
-        for (const part of parts) {
-          info?.onChunk?.(part);
-        }
-        return { output: parts.join("") };
-      },
+          _request: AgentTextRequest & { tools: AgentTools },
+          info?: AgentRequestExecutorInfo,
+        ) => {
+          for (const part of parts) {
+            info?.onChunk?.(part);
+          }
+          return { output: parts.join("") };
+        },
       },
     });
 
@@ -302,15 +302,15 @@ describe('createTextLogic({ mode: "stream" })', () => {
       },
       executors: {
         generateText: async () => {
-        throw new Error("generateText should not be used");
-      },
+          throw new Error("generateText should not be used");
+        },
         streamText: async (request, info) => {
-        // emit two chunks tagged with which stream produced them
-        const tag = request.prompt === "a" ? "A" : "B";
-        info?.onChunk?.(tag);
-        info?.onChunk?.(tag);
-        return { output: `${tag}${tag}` };
-      },
+          // emit two chunks tagged with which stream produced them
+          const tag = request.prompt === "a" ? "A" : "B";
+          info?.onChunk?.(tag);
+          info?.onChunk?.(tag);
+          return { output: `${tag}${tag}` };
+        },
       },
     });
 
@@ -371,7 +371,11 @@ describe("buildEnvelopeSchema", () => {
     const envelope = buildEnvelopeSchema(inner);
 
     const json = envelope["~standard"].jsonSchema!.input!() as Record<string, unknown>;
-    expect(json).toMatchObject({ type: "object", required: ["result"], additionalProperties: false });
+    expect(json).toMatchObject({
+      type: "object",
+      required: ["result"],
+      additionalProperties: false,
+    });
     expect(json).toHaveProperty("properties.result");
     // No reasoning property without opt-in.
     expect(json).not.toHaveProperty("properties.reasoning");

@@ -13,11 +13,7 @@ import {
   type StandardSchemaV1,
 } from "./index.js";
 import * as examples from "../examples/index.js";
-import {
-  humanInTheLoopMachine,
-  jokeMachine,
-  twentyQuestionsMachine,
-} from "../examples/index.js";
+import { humanInTheLoopMachine, jokeMachine, twentyQuestionsMachine } from "../examples/index.js";
 
 // A refund machine mirroring the README's keyless example: an `agent.decide`
 // that may AUTO_APPROVE (guarded to amount <= 100) or NEEDS_REVIEW, then a human
@@ -314,7 +310,10 @@ describe("lintAgentMachine — each check fires on a crafted bad machine", () =>
       states: {
         a: { on: { E: { target: "b" } } },
         // Reads the entering event in the final output — the anti-pattern.
-        b: { type: "final", output: ({ event }) => ({ echoed: (event as { value: string }).value }) },
+        b: {
+          type: "final",
+          output: ({ event }) => ({ echoed: (event as { value: string }).value }),
+        },
       },
     });
 
@@ -346,7 +345,9 @@ describe("lintAgentMachine — each check fires on a crafted bad machine", () =>
       },
     });
 
-    expect(lintAgentMachine(machine).some((d) => d.code === "final-output-reads-event")).toBe(false);
+    expect(lintAgentMachine(machine).some((d) => d.code === "final-output-reads-event")).toBe(
+      false,
+    );
   });
 
   test("missing-final: a machine that can only loop", () => {
@@ -395,11 +396,7 @@ describe("simulateAgent — keyless deterministic playthrough", () => {
         // A plan step IS a decision: scripted chosen events keyed by the plan
         // invoke's src, ending with the reserved done move.
         decisions: {
-          "agent.plan": [
-            { type: "STEP_A" },
-            { type: "STEP_B" },
-            { type: PLAN_DONE_EVENT_TYPE },
-          ],
+          "agent.plan": [{ type: "STEP_A" }, { type: "STEP_B" }, { type: PLAN_DONE_EVENT_TYPE }],
         },
       },
     });

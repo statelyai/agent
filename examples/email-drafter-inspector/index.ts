@@ -182,9 +182,7 @@ export async function main() {
       }
 
       const event = await promptInteraction(meta.interaction);
-      actor.send(
-        parseAgentEvent(snapshot, event, { events: emailDrafterSchemas.events }),
-      );
+      actor.send(parseAgentEvent(snapshot, event, { events: emailDrafterSchemas.events }));
     }
 
     if (actor.getSnapshot().status === "done") {

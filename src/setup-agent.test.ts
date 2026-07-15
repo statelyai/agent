@@ -1419,10 +1419,10 @@ describe("setupAgent", () => {
       input: { prompt: "why run agents?" },
       executors: {
         generateText: (request: AgentTextRequest & { tools: AgentTools }) => ({
-        output: {
-          answer: `Ran: ${request.prompt}`,
-        },
-      }),
+          output: {
+            answer: `Ran: ${request.prompt}`,
+          },
+        }),
       },
     });
     expect(runResult.status).toBe("done");
@@ -1965,9 +1965,9 @@ describe("setupAgent", () => {
       executors: {
         generateText: async () => ({ output: {} }),
         decide: async (input) => {
-        receivedInputs.push(input);
-        return { event: { type: "GUESS", answer: "42" } };
-      },
+          receivedInputs.push(input);
+          return { event: { type: "GUESS", answer: "42" } };
+        },
       },
     });
 
@@ -2473,8 +2473,8 @@ describe("decision live path (runAgent auto-delivery)", () => {
       executors: {
         generateText: async () => ({ output: {} }),
         decide: async (): Promise<{ event: ChosenEvent }> => ({
-        event: { type: "ATTACK", target: "goblin" },
-      }),
+          event: { type: "ATTACK", target: "goblin" },
+        }),
       },
     });
 
@@ -2762,8 +2762,6 @@ describe("setupAgent reserved agent.* actor keys", () => {
   });
 
   test("a non-reserved actorSources key is accepted", () => {
-    expect(() =>
-      setupAgent({ schemas, actorSources: { myActor: someLogic } }),
-    ).not.toThrow();
+    expect(() => setupAgent({ schemas, actorSources: { myActor: someLogic } })).not.toThrow();
   });
 });

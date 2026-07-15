@@ -228,11 +228,11 @@ export type PlanLedgerSnapshot = LogicSnapshot<PlanLedgerContext, AgentPlanOutpu
 export interface PlanLogic<
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1<AgentPlanInput>,
 > extends LogicActorLogic<
-    PlanLedgerContext,
-    AgentPlanOutput,
-    PlanLedgerEvent,
-    InferOutput<TInputSchema>
-  > {
+  PlanLedgerContext,
+  AgentPlanOutput,
+  PlanLedgerEvent,
+  InferOutput<TInputSchema>
+> {
   readonly kind: "statelyai.planLogic";
   readonly maxRetries: number;
   /** Builds the per-step base {@link AgentDecisionRequest} (id/events filled in per step). */

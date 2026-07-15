@@ -136,7 +136,9 @@ describe("resolveAgentRequests", () => {
 
     await expect(
       resolveAgentRequests(machine, step, { generateText: executors.generateText }),
-    ).rejects.toThrow(/this step's decision request '.+' needs a 'decide' executor but none was provided\./);
+    ).rejects.toThrow(
+      /this step's decision request '.+' needs a 'decide' executor but none was provided\./,
+    );
   });
 
   test("throws a clear error when the generateText executor is missing", async () => {
@@ -148,9 +150,9 @@ describe("resolveAgentRequests", () => {
     step = await resolveAgentRequests(machine, step, executors);
     expect(step.requests[0]?.kind).toBe("text");
 
-    await expect(
-      resolveAgentRequests(machine, step, { decide: executors.decide }),
-    ).rejects.toThrow(/this step's text request '.+' needs a 'generateText' executor but none was provided\./);
+    await expect(resolveAgentRequests(machine, step, { decide: executors.decide })).rejects.toThrow(
+      /this step's text request '.+' needs a 'generateText' executor but none was provided\./,
+    );
   });
 
   test("throws a clear error when the streamText executor is missing", async () => {
@@ -161,7 +163,9 @@ describe("resolveAgentRequests", () => {
     // A partial executor set (generateText only) — no cast needed.
     await expect(
       resolveAgentRequests(machine, step, { generateText: async () => ({ output: "x" }) }),
-    ).rejects.toThrow(/this step's text request 'stream' needs a 'streamText' executor but none was provided\./);
+    ).rejects.toThrow(
+      /this step's text request 'stream' needs a 'streamText' executor but none was provided\./,
+    );
   });
 
   test("a decide-only partial executor set drives a decision step with no cast, no generateText", async () => {

@@ -99,7 +99,5 @@ export function resolveExecutors<TModels extends AiSdkModelMap>(
   if (typeof arg === "function") {
     return { executors: { generateText: arg } };
   }
-  return arg && Object.keys(arg).length > 0
-    ? arg
-    : { executors: createAiSdkExecutors({ models }) };
+  return arg && Object.keys(arg).length > 0 ? arg : { executors: createAiSdkExecutors({ models }) };
 }

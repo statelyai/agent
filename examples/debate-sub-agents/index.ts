@@ -20,11 +20,7 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import {
-  runAgent,
-  setupAgent,
-  type AgentRequestExecutor,
-} from "../../src/index.js";
+import { runAgent, setupAgent, type AgentRequestExecutor } from "../../src/index.js";
 import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
 import { runExampleMain } from "../helpers/main.js";
 

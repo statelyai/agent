@@ -234,7 +234,11 @@ describe("generateText (fake fetch, no network)", () => {
     };
     expect(responseFormat).toMatchObject({
       type: "json_schema",
-      json_schema: { name: "output", strict: false, schema: { type: "object", required: ["result"] } },
+      json_schema: {
+        name: "output",
+        strict: false,
+        schema: { type: "object", required: ["result"] },
+      },
     });
     expect(responseFormat.json_schema.schema).toHaveProperty("properties.result");
     // No reasoning property without opt-in.
@@ -279,7 +283,10 @@ describe("generateText (fake fetch, no network)", () => {
         choices: [
           {
             message: {
-              content: JSON.stringify({ reasoning: "leans harsh", result: { sentiment: "negative" } }),
+              content: JSON.stringify({
+                reasoning: "leans harsh",
+                result: { sentiment: "negative" },
+              }),
             },
           },
         ],
@@ -553,9 +560,7 @@ describe("decide (tool_choice required, over fake fetch)", () => {
           reject(new DOMException("Aborted", "AbortError"));
           return;
         }
-        signal?.addEventListener("abort", () =>
-          reject(new DOMException("Aborted", "AbortError")),
-        );
+        signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
       });
     const { decide } = createOpenAiCompatExecutors({ baseUrl: "http://x/v1", fetch });
 

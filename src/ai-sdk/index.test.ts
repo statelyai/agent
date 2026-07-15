@@ -6,8 +6,9 @@ import { MockLanguageModelV3, simulateReadableStream } from "ai/test";
 // result rather than importing `@ai-sdk/provider` directly (not a direct dep).
 type MockDoStream = NonNullable<ConstructorParameters<typeof MockLanguageModelV3>[0]>["doStream"];
 type MockStreamResult = Extract<MockDoStream, { stream: unknown }>;
-type LanguageModelStreamPart =
-  MockStreamResult extends { stream: ReadableStream<infer P> } ? P : never;
+type LanguageModelStreamPart = MockStreamResult extends { stream: ReadableStream<infer P> }
+  ? P
+  : never;
 import { tool } from "ai";
 import type { AgentDecisionRequest } from "../decision.js";
 import type { AgentEventDescriptor } from "../events.js";
@@ -409,7 +410,11 @@ describe("metadata.maxSteps (multi-step tool loops)", () => {
   const toolCallStreamChunks = (id: string): LanguageModelStreamPart[] => [
     { type: "stream-start", warnings: [] },
     { type: "tool-call", toolCallId: id, toolName: "ping", input: "{}" },
-    { type: "finish", finishReason: { unified: "tool-calls", raw: "tool_calls" }, usage: streamUsage },
+    {
+      type: "finish",
+      finishReason: { unified: "tool-calls", raw: "tool_calls" },
+      usage: streamUsage,
+    },
   ];
   const finalTextStreamChunks: LanguageModelStreamPart[] = [
     { type: "stream-start", warnings: [] },
@@ -679,7 +684,12 @@ describe("metadata.maxSteps (multi-step tool loops)", () => {
         if (calls < 3) {
           return {
             content: [
-              { type: "tool-call" as const, toolCallId: `call-${calls}`, toolName: "ping", input: "{}" },
+              {
+                type: "tool-call" as const,
+                toolCallId: `call-${calls}`,
+                toolName: "ping",
+                input: "{}",
+              },
             ],
             finishReason,
             usage,

@@ -64,7 +64,9 @@ function createTodoAgent() {
           }),
         },
         on: {
-          ADD: ({ context, event }) => ({ context: { ...context, todos: [...context.todos, event.title] } }),
+          ADD: ({ context, event }) => ({
+            context: { ...context, todos: [...context.todos, event.title] },
+          }),
           // Guard: only toggles an existing index.
           TOGGLE: ({ context, event }) =>
             event.id < context.todos.length ? { context } : undefined,
@@ -135,7 +137,10 @@ function executors(decide: AgentDecisionExecutor): AgentRequestExecutors {
 }
 
 // Drives an agent machine to completion through the step loop.
-async function runViaSteps(machine: ReturnType<typeof createTodoAgent>, decide: AgentDecisionExecutor) {
+async function runViaSteps(
+  machine: ReturnType<typeof createTodoAgent>,
+  decide: AgentDecisionExecutor,
+) {
   let step = initialAgentStep(machine);
   while (!step.done) {
     step = await resolveAgentRequests(machine, step, executors(decide));
@@ -146,10 +151,7 @@ async function runViaSteps(machine: ReturnType<typeof createTodoAgent>, decide: 
 describe("agent.plan on the step path", () => {
   test("drives a plan with a decide-only partial executor set (no generateText, no cast)", async () => {
     const machine = createTodoAgent();
-    const script: ChosenEvent[] = [
-      { type: "ADD", title: "milk" },
-      { type: "NOTHING" },
-    ];
+    const script: ChosenEvent[] = [{ type: "ADD", title: "milk" }, { type: "NOTHING" }];
     let index = 0;
     // A plan step consumes only `decide`; the Partial<AgentRequestExecutors>
     // entry point accepts this object with no generateText and no cast.
@@ -234,11 +236,7 @@ describe("agent.plan on the step path", () => {
   const scenarios: { name: string; script: ChosenEvent[] }[] = [
     {
       name: "stop-event ends the plan (NOTHING)",
-      script: [
-        { type: "ADD", title: "milk" },
-        { type: "ADD", title: "eggs" },
-        { type: "NOTHING" },
-      ],
+      script: [{ type: "ADD", title: "milk" }, { type: "ADD", title: "eggs" }, { type: "NOTHING" }],
     },
     {
       name: "the built-in done move ends the plan",

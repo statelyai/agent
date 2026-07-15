@@ -359,8 +359,7 @@ function decisionKindOf(
 
 function isAgentLogicNeedingBinding(src: object): boolean {
   return (
-    (isTextLogic(src) || isDecisionLogic(src) || isPlanLogic(src)) &&
-    !executorBoundLogics.has(src)
+    (isTextLogic(src) || isDecisionLogic(src) || isPlanLogic(src)) && !executorBoundLogics.has(src)
   );
 }
 
@@ -630,9 +629,9 @@ export function lintAgentMachine(
     schemas: registered.schemas as LintContext["schemas"],
     actorSources:
       (registered.actorSources as Record<string, AnyActorLogic> | undefined) ??
-      ((machine as { implementations?: { actorSources?: Record<string, AnyActorLogic> } })
+      (machine as { implementations?: { actorSources?: Record<string, AnyActorLogic> } })
         .implementations?.actorSources ??
-        {}),
+      {},
   };
 
   const disabled = new Set(options.disable ?? []);
@@ -982,7 +981,9 @@ async function explore(
         state: settled.snapshot.value,
         missingSrc: blockedSrc,
       });
-      unexplored.push(`needs-output: no canned output for src '${blockedSrc}' at path [${path.map((e) => e.type).join(", ")}]`);
+      unexplored.push(
+        `needs-output: no canned output for src '${blockedSrc}' at path [${path.map((e) => e.type).join(", ")}]`,
+      );
       return;
     }
 
