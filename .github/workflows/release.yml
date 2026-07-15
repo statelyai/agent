@@ -29,7 +29,8 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: 22.18.0
+          node-version: 24.16.0
+          registry-url: https://registry.npmjs.org
       - name: install pnpm
         run: npm i pnpm@latest -g
       - name: install dependencies
@@ -58,7 +59,8 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: 22.18.0
+          node-version: 24.16.0
+          registry-url: https://registry.npmjs.org
       - name: install pnpm
         run: npm i pnpm@latest -g
       - name: install dependencies
