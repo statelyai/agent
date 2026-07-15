@@ -38,6 +38,7 @@ export {
 } from "./run-agent.js";
 export { canReach, explorePaths, lintAgentMachine, simulateAgent } from "./verify.js";
 export {
+  getAgentMessages,
   getJsonSchema,
   getJsonSchemaSync,
   getMachineStructuralHash,
@@ -90,6 +91,7 @@ export type {
   ResolveAgentRequestsOptions,
 } from "./steps.js";
 export type {
+  AgentStateRequest,
   AgentTraceEvent,
   AgentUserInputExecutor,
   InspectedActorRef,

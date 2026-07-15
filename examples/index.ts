@@ -19,6 +19,10 @@ export {
 } from "./game-agent/index.js";
 export { jokeActors, jokeMachine, jokeSchemas, rateJoke, tellJoke } from "./joke/index.js";
 export {
+  describedWorkflowMachine,
+  runDescribedWorkflowExample,
+} from "./described-workflow/index.js";
+export {
   triageActors,
   triageMachine,
   triageSchemas,

@@ -14,8 +14,13 @@ import {
   type Snapshot,
   type SnapshotFrom,
 } from "xstate";
-import type { AgentTools, ChosenEvent } from "./types.js";
-import { findNonSerializableContextPaths, getMachineStructuralHash } from "./utils.js";
+import type { AgentMessage, AgentTools, ChosenEvent } from "./types.js";
+import {
+  assistantMessage,
+  findNonSerializableContextPaths,
+  getMachineStructuralHash,
+  userMessage,
+} from "./utils.js";
 import { getAcceptedEvents, sanitizeEventToolName, type AgentSchemas } from "./events.js";
 import {
   isTextLogic,
@@ -135,6 +140,53 @@ export class AgentIdleError extends Error {
 /** Handler for `agent.userInput` invokes passed as {@link RunAgentOptions.userInput}. */
 export interface AgentUserInputExecutor {
   (input: AgentUserInput): PromiseLike<unknown>;
+}
+
+/**
+ * One model request read off the machine's CURRENT snapshot by a
+ * {@link RunAgentOptions.getRequests} hook. `model` is an executor model
+ * NAME — the same string every {@link AgentTextRequest.model} carries,
+ * resolved by the run's executors (e.g. a `defineModels` key when using
+ * `createAiSdkExecutors`) — never a model instance.
+ */
+export interface AgentStateRequest {
+  /** Instruction for this request's model call, appended to the run's message log as a user message. */
+  prompt: string;
+  /** System prompt for this request's model call(s). */
+  system?: string;
+  /** Executor model name (resolved by the run's executors). */
+  model: string;
+  /**
+   * `'text'` (default): a `generateText` call with the message log +
+   * `prompt`; the reply is appended to the log, then the machine is advanced
+   * per {@link AgentStateRequest.onDone}. `'decision'`: no text call — a
+   * single `decide` call (log + `prompt`) chooses the event. Use for pure
+   * routing states.
+   */
+  kind?: "text" | "decision";
+  /**
+   * What to send when this request's text call resolves — the EXPLICIT
+   * advancement contract, always an event OBJECT (the same shape
+   * `actor.send` takes; no string shorthand). A literal event sends exactly
+   * that; a function receives the text output (plus the live snapshot and
+   * message log) and returns the event to send — payload included — or
+   * `undefined` to send nothing. Omitted: a `decide` call chooses among the
+   * candidate events (requires a `decide` executor) — there is no implicit
+   * auto-send. A resolved event whose type the state does not accept throws
+   * (programmer error); one a guard rejects is simply not sent. Ignored for
+   * `kind: 'decision'` (the decide call IS the advancement).
+   */
+  onDone?:
+    | ChosenEvent
+    | ((args: {
+        output: unknown;
+        snapshot: AnyMachineSnapshot;
+        messages: readonly AgentMessage[];
+      }) => ChosenEvent | undefined);
+  /** Restricts this request's candidate outcome events for the `decide` fallback (default: every currently-accepted event). */
+  allowedEvents?: readonly string[];
+  /** Trace/request id; defaults to `interpret_<n>`. */
+  id?: string;
 }
 
 export type AgentTraceEvent<TMachine extends AnyStateMachine = AnyStateMachine> = {
@@ -299,6 +351,60 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
    */
   isSuspended?: (snapshot: AnyMachineSnapshot) => boolean;
 
+  // interpretation — the override to the default invoke-driven contract
+  /**
+   * The override to runAgent's DEFAULT contract. By default agent work is
+   * whatever the machine *invokes* (`agent.generateText`, TextLogic,
+   * `agent.decide`, …). With `getRequests`, whenever the machine would
+   * otherwise settle idle, this hook reads the snapshot and returns the model
+   * request(s) to run instead — prompts from state `description`s, `meta`,
+   * tags, a lookup table keyed by state value, wherever you keep them. Return
+   * nothing to settle idle (human-wait states).
+   *
+   * There is no blessed source for the prompts — this is a recipe seam.
+   * Prompts-in-descriptions, copy-paste and adapt:
+   *
+   * ```ts
+   * getRequests: (snapshot) =>
+   *   snapshot._nodes
+   *     .filter((node) => node.description && !node.tags.includes('waiting'))
+   *     .map((node) => ({
+   *       model: 'writer',
+   *       prompt: node.description!,
+   *       kind: node.tags.includes('decision') ? 'decision' : 'text',
+   *       // single-outcome states advance deterministically; else `decide`
+   *       onDone: node.ownEvents.length === 1 ? { type: node.ownEvents[0] } : undefined,
+   *       allowedEvents: node.ownEvents,
+   *     })),
+   * ```
+   *
+   * Each request runs per {@link AgentStateRequest.kind}, appends to the
+   * run's message log (see {@link RunAgentOptions.messages}), and advances
+   * the machine per {@link AgentStateRequest.onDone} — explicitly named/
+   * computed event, or a `decide` call when omitted — always gated by
+   * `snapshot.can`. Multiple requests run concurrently (parallel regions —
+   * scope each with `allowedEvents`, e.g. the node's `ownEvents`). A pass
+   * that sends no event settles idle. Every model call counts against
+   * `maxModelCalls`.
+   */
+  getRequests?: (
+    snapshot: SnapshotFrom<TMachine>,
+    // TODO: call this agentContext or something disambiguate
+    context: { messages: readonly AgentMessage[] },
+  ) => AgentStateRequest | readonly AgentStateRequest[] | undefined;
+  /**
+   * Adds to the run's aggregated message log (the working memory
+   * `getRequests` requests read and append to). The log starts as the resume
+   * `snapshot`'s stamped `messages` (else `[]`); an ARRAY here is APPENDED to
+   * that history — the safe default for folding in a user reply on resume,
+   * never silently erasing prior conversation. Pass a FUNCTION
+   * `(prior) => AgentMessage[]` to take full control (replace, filter,
+   * compact). The final log is stamped onto every settled result's
+   * `snapshot.messages` (like `agentMeta`), so persist/resume round-trips it
+   * with no extra wiring — read it with `getAgentMessages(snapshot)`.
+   */
+  messages?: AgentMessage[] | ((prior: AgentMessage[]) => AgentMessage[]);
+
   // observation — all void; no callback controls the run
   /** Fires for each streamed chunk of a `mode: 'stream'` text request, alongside the {@link AgentRequest} that produced it (parallel states can interleave multiple streams). Purely observational. */
   onChunk?: (chunk: string, info: { request: AgentRequest }) => void;
@@ -311,6 +417,15 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
    * observation — progress UIs, logging, tracing. Cannot send events.
    */
   onTransition?: (snapshot: SnapshotFrom<TMachine>, event: EventFromLogic<TMachine>) => void;
+  /**
+   * Fires for each message appended to the run's aggregated log (see
+   * {@link RunAgentOptions.messages}) the moment a `getRequests` request
+   * appends it — the live view of the log a caller otherwise only reads off
+   * the settled snapshot via `getAgentMessages`. Purely observational, like
+   * {@link onTransition}. Never fires for the seeded history, and never fires
+   * on a default invoke-driven run (nothing appends there).
+   */
+  onMessage?: (message: AgentMessage) => void;
   /**
    * Handlers for events the machine emits (`enq.emit(...)`), keyed by emitted
    * event type — `'*'` catches all. Typed from the machine's `emitted`
@@ -1251,6 +1366,13 @@ export async function runAgent<TMachine extends AnyStateMachine>(
     hasStreamText: !!options.executors?.streamText,
   });
 
+  if (options.getRequests && !options.executors?.generateText && !options.executors?.decide) {
+    throw new Error(
+      "runAgent: 'getRequests' requires a 'generateText' and/or 'decide' executor — " +
+        "the returned requests run through them.",
+    );
+  }
+
   const actorHolder: { actorRef: AnyActorRef | undefined } = { actorRef: undefined };
   const runCtx: RunAgentBindContext = {
     generateText: options.executors?.generateText,
@@ -1372,6 +1494,26 @@ export async function runAgent<TMachine extends AnyStateMachine>(
     }
   }
 
+  // State interpretation (see `RunAgentOptions.getRequests`): the run-owned
+  // message log — seeded from an explicit `options.messages`, else the resume
+  // snapshot's stamped `messages`, else empty — and its stamp, applied to
+  // every settled snapshot (like `agentMeta`) so persist/resume round-trips
+  // the log with no extra wiring.
+  const priorMessages =
+    (effectiveSnapshot as { messages?: AgentMessage[] } | undefined)?.messages ?? [];
+  const messages: AgentMessage[] =
+    typeof options.messages === "function"
+      ? [...options.messages([...priorMessages])]
+      : [...priorMessages, ...(options.messages ?? [])];
+  const stampMessages = (snapshot: unknown): void => {
+    if (!options.getRequests && !options.messages) {
+      return;
+    }
+    if (snapshot && typeof snapshot === "object") {
+      (snapshot as { messages?: AgentMessage[] }).messages = [...messages];
+    }
+  };
+
   // Feature B: reject a resume `event` the restored state cannot take. Checked
   // here (before the actor starts, like the bind-time throws) against the
   // type-level legal set of the restored snapshot — a live-but-unstarted actor
@@ -1421,8 +1563,10 @@ export async function runAgent<TMachine extends AnyStateMachine>(
       // enumerable field (snapshots are not frozen), so it survives JSON
       // persist/resume and is read back on the next resume's version check.
       stampAgentMeta(result.snapshot);
+      stampMessages(result.snapshot);
       if ("persistedSnapshot" in result) {
         stampAgentMeta(result.persistedSnapshot);
+        stampMessages(result.persistedSnapshot);
       }
       onTrace({ type: "run.end", ...result } as AgentTraceEventPayload<TMachine>);
       actor.stop();
@@ -1457,6 +1601,258 @@ export async function runAgent<TMachine extends AnyStateMachine>(
       });
     };
 
+    // TODO: is this entire new code smelly? why is this here? genuine q
+    // ─── State interpretation (RunAgentOptions.getRequests) ───
+    // Consulted at every would-be idle settle: if the hook returns request(s)
+    // for the current snapshot, run them (model call(s) → message log → one
+    // legal event sent each) instead of settling. `interpreting` blocks a
+    // concurrent idle settle while a pass's model calls are in flight.
+    let interpreting = false;
+    let interpretSeq = 0;
+
+    // Append to the run's message log + notify the live observer (onMessage).
+    const appendToLog = (...items: AgentMessage[]): void => {
+      messages.push(...items);
+      if (options.onMessage) {
+        for (const item of items) {
+          options.onMessage(item);
+        }
+      }
+    };
+
+    const settleInterpretError = (error: unknown) => {
+      settle({
+        status: "error",
+        cause: budgetExceeded
+          ? "max-model-calls"
+          : wrapsDecisionExhausted(error)
+            ? "decision-exhausted"
+            : "machine",
+        error,
+        snapshot: actor.getSnapshot(),
+      });
+    };
+
+    // A pass runs in TWO phases so the message log is deterministic
+    // regardless of executor latency:
+    //
+    // 1. Text phase (concurrent): every request's `generateText` call runs
+    //    against the SAME pass-start log + its own prompt — siblings are
+    //    isolated from each other's in-flight output, so no request's history
+    //    depends on which sibling finished first.
+    // 2. Advance phase (sequential, in request order): each request's
+    //    prompt/reply block is appended to the shared log, then its event is
+    //    resolved (`onDone`, or a `decide` call that DOES see the blocks
+    //    appended before it) and sent. Sends and log order follow request
+    //    order, never completion order.
+    interface StateRequestPlan {
+      stateRequest: AgentStateRequest;
+      id: string;
+      output: unknown;
+      /** This request's own log contribution (prompt, and reply for text requests). */
+      appended: AgentMessage[];
+    }
+
+    // Phase 1 for one request: the text call (skipped for kind: 'decision'),
+    // built from the frozen pass-start log.
+    const runTextPhase = async (
+      stateRequest: AgentStateRequest,
+      baseMessages: readonly AgentMessage[],
+    ): Promise<StateRequestPlan> => {
+      const { model, system } = stateRequest;
+      const id = stateRequest.id ?? `interpret_${++interpretSeq}`;
+      const promptMessage = userMessage(stateRequest.prompt);
+
+      if (stateRequest.kind === "decision") {
+        return { stateRequest, id, output: undefined, appended: [promptMessage] };
+      }
+
+      if (!runCtx.generateText) {
+        throw new Error(
+          "runAgent: a getRequests request needs a 'generateText' executor " +
+            "(or use kind: 'decision').",
+        );
+      }
+      const request: AgentTextRequest & { tools: AgentTools } = {
+        model,
+        ...(system !== undefined ? { system } : {}),
+        messages: [...baseMessages, promptMessage],
+        tools: {},
+      };
+      const agentRequest: AgentRequest = {
+        kind: "text",
+        id,
+        src: "agent.interpret",
+        mode: "generate",
+        input: request,
+        tools: {},
+        events: [],
+      };
+      consumeModelCall();
+      onTrace({ type: "request.start", request: agentRequest });
+      let output: unknown;
+      try {
+        const raw = await runCtx.generateText(request, { signal: options.signal });
+        output = await normalizeGeneratorResult(raw, id, { request });
+        runCtx.onResult?.(agentRequest, { output, raw });
+        onTrace({ type: "request.end", request: agentRequest, output, raw });
+      } catch (error) {
+        onTrace({ type: "request.error", request: agentRequest, error });
+        throw error;
+      }
+      return {
+        stateRequest,
+        id,
+        output,
+        appended: [
+          promptMessage,
+          assistantMessage(typeof output === "string" ? output : JSON.stringify(output)),
+        ],
+      };
+    };
+
+    // Phase 2 for one request: append its block to the shared log, resolve
+    // one legal event, send it. Returns true when an event was sent.
+    const runAdvancePhase = async (plan: StateRequestPlan): Promise<boolean> => {
+      const { stateRequest, id, output } = plan;
+      const { model, system } = stateRequest;
+      appendToLog(...plan.appended);
+
+      // Advance the machine — explicit contract first: the request's own
+      // `onDone` names (or computes, from the text output) the event to send.
+      // No implicit auto-send lives in core; deterministic single-outcome
+      // advancement is a RECIPE line (`onDone: { type: node.ownEvents[0] }`),
+      // visible and editable at the call site.
+      if (stateRequest.kind !== "decision" && stateRequest.onDone !== undefined) {
+        const snapshot = actor.getSnapshot() as AnyMachineSnapshot;
+        const resolved =
+          typeof stateRequest.onDone === "function"
+            ? stateRequest.onDone({ output, snapshot, messages })
+            : stateRequest.onDone;
+        if (!resolved) {
+          return false;
+        }
+        const acceptedTypes = getAcceptedEvents(snapshot, { schemas: runCtx.schemas }).map(
+          (descriptor) => descriptor.type,
+        );
+        if (!acceptedTypes.includes(resolved.type)) {
+          throw new Error(
+            `runAgent: getRequests request '${id}' resolved onDone to event '${resolved.type}', ` +
+              `which the current state does not accept. Accepted: ${
+                acceptedTypes.join(", ") || "(none)"
+              }.`,
+          );
+        }
+        if (!snapshot.can(resolved)) {
+          // Guard-rejected: nothing legal to send. The work is preserved in
+          // the message log; the pass-level check settles idle.
+          return false;
+        }
+        actor.send(resolved as never);
+        return true;
+      }
+
+      // Fallback (and the whole story for kind: 'decision'): a decision —
+      // carrying the full message log, so the model chooses with this
+      // request's work (and every earlier request's block) in view — picks
+      // one legal event. Candidates are read off the LIVE snapshot (an
+      // earlier request in this pass may have moved it), scoped by
+      // `allowedEvents`.
+      const events = getAcceptedEvents(actor.getSnapshot() as AnyMachineSnapshot, {
+        schemas: runCtx.schemas,
+        ...(stateRequest.allowedEvents ? { eventTypes: stateRequest.allowedEvents } : {}),
+      });
+      if (events.length === 0) {
+        return false;
+      }
+      if (!runCtx.decide) {
+        throw new Error(
+          "runAgent: a getRequests request without 'onDone' needs a 'decide' executor to " +
+            `choose between events ${events.map((descriptor) => `'${descriptor.type}'`).join(", ")}. ` +
+            "Provide request.onDone for deterministic advancement, or a 'decide' executor.",
+        );
+      }
+      const decisionRequest: AgentDecisionRequest = {
+        kind: "decision",
+        id,
+        model,
+        ...(system !== undefined ? { system } : {}),
+        messages: [...messages],
+        events,
+        attempts: [],
+      };
+      const chosen = await resolveDecision(decisionRequest, createCountingDecide(runCtx), {
+        signal: options.signal,
+        canTake: (event) => (actor.getSnapshot() as AnyMachineSnapshot).can(event),
+      });
+      appendToLog(assistantMessage(`[chose: ${chosen.type}]`));
+
+      if (settled) {
+        return false;
+      }
+      actor.send(chosen as never);
+      return true;
+    };
+
+    // Returns true when the caller must NOT settle idle: a getRequests pass
+    // was started for this snapshot, or one is already in flight.
+    const maybeInterpret = (snapshot: AnyMachineSnapshot): boolean => {
+      if (!options.getRequests || settled) {
+        return false;
+      }
+      if (interpreting) {
+        return true;
+      }
+      let requested: AgentStateRequest | readonly AgentStateRequest[] | undefined;
+      try {
+        requested = options.getRequests(snapshot as SnapshotFrom<TMachine>, { messages });
+      } catch (error) {
+        settleInterpretError(error);
+        return true;
+      }
+      const requests = (Array.isArray(requested) ? requested : requested ? [requested] : []).filter(
+        Boolean,
+      ) as AgentStateRequest[];
+      if (requests.length === 0) {
+        return false;
+      }
+      interpreting = true;
+      const baseMessages = [...messages];
+      void (async () => {
+        const plans = await Promise.all(
+          requests.map((stateRequest) => runTextPhase(stateRequest, baseMessages)),
+        );
+        let sentAny = false;
+        for (const plan of plans) {
+          if (settled) {
+            return;
+          }
+          sentAny = (await runAdvancePhase(plan)) || sentAny;
+        }
+        if (settled || sentAny) {
+          return;
+        }
+        // The whole pass sent no event: settle idle rather than re-running
+        // the same requests forever.
+        const current = actor.getSnapshot() as AnyMachineSnapshot;
+        if (isIdleSnapshot(current, { ignoreUserInputChildren: userInputIsPlaceholder })) {
+          settleIdle(current);
+        }
+      })()
+        .catch((error) => settleInterpretError(error))
+        .finally(() => {
+          interpreting = false;
+          // A transition observed DURING this pass (e.g. our own send while
+          // the machine reads as suspended) saw `interpreting` and skipped
+          // both settling and starting a new pass — re-evaluate now so the
+          // run always makes progress (settle, or the next pass).
+          if (!settled) {
+            scheduleIdleCheck();
+          }
+        });
+      return true;
+    };
+
     // Fallback for untagged machines: defer one macrotask so in-flight work
     // that starts synchronously with a transition registers first, then settle
     // idle if the snapshot is at rest. Feature A short-circuits this for
@@ -1472,7 +1868,9 @@ export async function runAgent<TMachine extends AnyStateMachine>(
         }
         const current = actor.getSnapshot() as AnyMachineSnapshot;
         if (isIdleSnapshot(current, { ignoreUserInputChildren: userInputIsPlaceholder })) {
-          settleIdle(current);
+          if (!maybeInterpret(current)) {
+            settleIdle(current);
+          }
         }
       }, 0);
     };
@@ -1554,7 +1952,9 @@ export async function runAgent<TMachine extends AnyStateMachine>(
           isSuspended(snapshot) &&
           isIdleSnapshot(snapshot, { ignoreUserInputChildren: userInputIsPlaceholder })
         ) {
-          settleIdle(snapshot);
+          if (!maybeInterpret(snapshot)) {
+            settleIdle(snapshot);
+          }
           return;
         }
 

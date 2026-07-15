@@ -1,5 +1,6 @@
 import type { AnyMachineSnapshot, AnyStateMachine } from "xstate";
 import type {
+  AgentMessage,
   AssistantMessage,
   FilePart,
   ImagePart,
@@ -223,6 +224,24 @@ export function getStateMeta<
       (meta): meta is Record<string, unknown> => meta != null,
     ),
   );
+}
+
+/**
+ * Reads the run-owned message log off a snapshot settled by a `runAgent` call
+ * that used `getRequests` (or `options.messages`) — the typed replacement for
+ * the `(snapshot as { messages?: AgentMessage[] }).messages` cast. runAgent
+ * stamps the log as a plain enumerable `messages` property (like `agentMeta`),
+ * so it survives a JSON persist/resume round-trip; this accessor works on the
+ * live settled snapshot and on a JSON-parsed persisted one alike. Returns `[]`
+ * when no log was stamped (e.g. a default invoke-driven run).
+ *
+ * The write path is `runAgent(..., { messages })`: an explicit seed that
+ * overrides the resume snapshot's stamped log (fold in a user reply on
+ * resume, or start a run with prior history).
+ */
+export function getAgentMessages(snapshot: unknown): AgentMessage[] {
+  const stamped = (snapshot as { messages?: unknown } | null | undefined)?.messages;
+  return Array.isArray(stamped) ? (stamped as AgentMessage[]) : [];
 }
 
 /**
