@@ -465,7 +465,7 @@ export type RunAgentResult<TMachine extends AnyStateMachine> =
  * - `'machine'` — any other machine error state.
  * - `'stopped'` — the actor was stopped externally (`status === 'stopped'`).
  */
-export type RunAgentErrorCause =
+type RunAgentErrorCause =
   | "aborted"
   | "max-model-calls"
   | "decision-exhausted"
