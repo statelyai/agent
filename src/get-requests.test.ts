@@ -217,22 +217,16 @@ describe("runAgent getRequests (state interpretation)", () => {
             onDone: { type: node.ownEvents[0]! },
           })),
       executors: {
-        generateText: async (request) => {
-          const prompt = String(request.messages?.at(-1)?.content);
-          // The FIRST region's call resolves last: log order must still
-          // follow request order, not completion order.
-          await new Promise((resolve) => setTimeout(resolve, prompt.includes("style") ? 20 : 1));
-          // Sibling isolation: each call sees only the pass-start history
-          // plus its own prompt, never a sibling's in-flight output.
-          expect(request.messages).toHaveLength(1);
-          return { output: `${prompt} -> ok` };
-        },
+        // Ordering/isolation under adversarial latency is pinned at the unit
+        // seam (state-request-pass.test.ts); here we cover the runAgent
+        // wiring: both regions advance, stamped log in request order.
+        generateText: async (request) => ({
+          output: `${String(request.messages?.at(-1)?.content)} -> ok`,
+        }),
       },
     });
 
     expect(result.status).toBe("done");
-    // Deterministic log: style's block first (request order), despite
-    // finishing second.
     expect(getAgentMessages(result.snapshot).map((message) => message.content)).toEqual([
       "Review the style.",
       "Review the style. -> ok",
@@ -312,6 +306,12 @@ describe("runAgent getRequests (state interpretation)", () => {
       "Revise per the notes.",
       "ok (5 in)",
     ]);
+
+    // A plain resume (no getRequests, no messages) must not drop the log the
+    // snapshot carried in — parity with agentMeta stamping.
+    const carried = await runAgent(machine, { snapshot: second.snapshot });
+    expect(carried.status).toBe("idle");
+    expect(getAgentMessages(carried.snapshot)).toEqual(getAgentMessages(second.snapshot));
 
     // FUNCTION form takes full control of the seed (here: replacement).
     const replaced = await runAgent(machine, {

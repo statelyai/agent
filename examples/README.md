@@ -15,6 +15,7 @@ Every example is dual-mode: run it directly against a real model with `OPENAI_AP
 - Long-running onboarding with durable idle gates: [`long-running-onboarding/index.ts`](/Users/davidkpiano/Code/agent/examples/long-running-onboarding/index.ts)
 - Running with host actors: [`ai-sdk-host/index.ts`](/Users/davidkpiano/Code/agent/examples/ai-sdk-host/index.ts)
 - Machines as data — a full workflow (decision, text request, idle human step) authored as a real `.json` file: [`json-agent/index.ts`](/Users/davidkpiano/Code/agent/examples/json-agent/index.ts)
+- A plain, invoke-less machine run as an agent via `getRequests` (prompts in state descriptions): [`described-workflow/index.ts`](/Users/davidkpiano/Code/agent/examples/described-workflow/index.ts)
 - Host actor guide: [`../docs/host-actors.md`](/Users/davidkpiano/Code/agent/docs/host-actors.md)
 - Framework comparison examples: [`supervisor/index.test.ts`](/Users/davidkpiano/Code/agent/examples/supervisor/index.test.ts), [`plan-and-execute/index.test.ts`](/Users/davidkpiano/Code/agent/examples/plan-and-execute/index.test.ts), [`rag/index.test.ts`](/Users/davidkpiano/Code/agent/examples/rag/index.test.ts), [`tool-calling/index.test.ts`](/Users/davidkpiano/Code/agent/examples/tool-calling/index.test.ts)
 
@@ -29,6 +30,7 @@ These use `setupAgent(...)` (or plain XState `setup(...)` plus `createTextLogic(
 - [`joke/index.ts`](/Users/davidkpiano/Code/agent/examples/joke/index.ts): minimal streaming text workflow
 - [`triage/index.ts`](/Users/davidkpiano/Code/agent/examples/triage/index.ts): structured-output support ticket triage
 - [`json-agent/index.ts`](/Users/davidkpiano/Code/agent/examples/json-agent/index.ts): `setupAgent.fromConfig(...)` lowering a support-ticket workflow authored as a real `.json` file (decision, text request, idle human approval step)
+- [`described-workflow/index.ts`](/Users/davidkpiano/Code/agent/examples/described-workflow/index.ts): a plain `createMachine` with zero invokes run as an agent via `runAgent({ getRequests })`, prompts read from state descriptions/meta, message log stamped on `snapshot.messages`
 - [`supervisor/index.ts`](/Users/davidkpiano/Code/agent/examples/supervisor/index.ts): a routing request's structured output hands off to a format-specific worker
 - [`human-in-the-loop/index.ts`](/Users/davidkpiano/Code/agent/examples/human-in-the-loop/index.ts): draft → idle review (typed `meta.interaction`) → APPROVE/REJECT redraft, with a JSON snapshot round-trip
 - [`long-running-onboarding/index.ts`](/Users/davidkpiano/Code/agent/examples/long-running-onboarding/index.ts): Google ADK-style onboarding coordinator with durable typed state, two idle dormancy gates, JSON snapshot resume across days, and delegated IT provisioning

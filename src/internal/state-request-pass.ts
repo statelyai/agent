@@ -3,6 +3,7 @@ import type { AgentMessage, AgentTools, ChosenEvent } from "../types.js";
 import { assistantMessage, userMessage } from "../utils.js";
 import { getAcceptedEvents, type AgentSchemas } from "../events.js";
 import {
+  INTERPRET_SOURCE,
   normalizeGeneratorResult,
   type AgentRequestExecutor,
   type AgentTextRequest,
@@ -73,7 +74,14 @@ export interface AgentStateRequest {
 /** The request-lifecycle trace events a pass emits through {@link StateRequestPassDeps.onTrace}. */
 type StateRequestTraceEvent =
   | { type: "request.start"; request: AgentStepRequest }
-  | { type: "request.end"; request: AgentStepRequest; output: unknown; raw: unknown }
+  | {
+      type: "request.end";
+      request: AgentStepRequest;
+      output: unknown;
+      raw: unknown;
+      /** Lifted off the raw executor result when it carries a string `reasoning` (structured-output envelope opt-in) — parity with the invoke-driven text path. */
+      reasoning?: string;
+    }
   | { type: "request.error"; request: AgentStepRequest; error: unknown };
 
 /** The host seams a pass runs against — a live actor's snapshot/send, the shared message log, budgeted executors, and observation hooks. */
@@ -149,7 +157,7 @@ async function runTextPhase(
   const agentRequest: AgentRequest = {
     kind: "text",
     id,
-    src: "agent.interpret",
+    src: INTERPRET_SOURCE,
     mode: "generate",
     input: request,
     tools: {},
@@ -161,8 +169,18 @@ async function runTextPhase(
   try {
     const raw = await deps.generateText(request, { signal: deps.signal });
     output = await normalizeGeneratorResult(raw, id, { request });
+    // Lift `reasoning` off the raw executor result onto the request.end
+    // trace — never into the log or machine (same as the invoke text path).
+    const rawReasoning = (raw as { reasoning?: unknown } | null | undefined)?.reasoning;
+    const reasoning = typeof rawReasoning === "string" ? rawReasoning : undefined;
     deps.onResult?.(agentRequest, { output, raw });
-    deps.onTrace?.({ type: "request.end", request: agentRequest, output, raw });
+    deps.onTrace?.({
+      type: "request.end",
+      request: agentRequest,
+      output,
+      raw,
+      ...(reasoning !== undefined ? { reasoning } : {}),
+    });
   } catch (error) {
     deps.onTrace?.({ type: "request.error", request: agentRequest, error });
     throw error;
@@ -254,11 +272,12 @@ async function runAdvancePhase(
     signal: deps.signal,
     canTake: (event) => deps.getSnapshot().can(event),
   });
-  deps.appendToLog(assistantMessage(`[chose: ${chosen.type}]`));
-
+  // Re-check after the await: a run that settled while the decision was in
+  // flight gets no further appends (no stray post-settle onMessage) or sends.
   if (deps.isSettled()) {
     return false;
   }
+  deps.appendToLog(assistantMessage(`[chose: ${chosen.type}]`));
   deps.send(chosen);
   return true;
 }

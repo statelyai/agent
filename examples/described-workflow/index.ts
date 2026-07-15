@@ -21,7 +21,7 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { createMachine } from "xstate";
+import { createMachine, type AnyMachineSnapshot } from "xstate";
 import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
 import {
   getAgentMessages,
@@ -81,22 +81,16 @@ export const describedWorkflowMachine = createMachine({
  * library); anything else falls back to a `decide` call scoped to the
  * node's own events.
  */
-export const getRequests = (snapshot: {
-  _nodes: Array<{
-    description?: string;
-    parent?: unknown;
-    tags: string[];
-    meta?: { role?: string };
-    ownEvents: string[];
-  }>;
-}): AgentStateRequest[] => {
+export const getRequests = (snapshot: AnyMachineSnapshot): AgentStateRequest[] => {
   const rootDescription = snapshot._nodes.find((node) => !node.parent)?.description;
   return snapshot._nodes
     .filter((node) => node.parent && node.description && !node.tags.includes("waiting"))
     .map((node) => ({
       model: "writer",
       prompt: node.description!,
-      system: [rootDescription, node.meta?.role].filter(Boolean).join("\n\n"),
+      system: [rootDescription, (node.meta as { role?: string } | undefined)?.role]
+        .filter(Boolean)
+        .join("\n\n"),
       kind: node.tags.includes("decision") ? "decision" : "text",
       onDone: node.ownEvents.length === 1 ? { type: node.ownEvents[0]! } : undefined,
       allowedEvents: node.ownEvents,

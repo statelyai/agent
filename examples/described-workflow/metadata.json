@@ -4,7 +4,7 @@
   "kind": "agent-workflow",
   "origin": {
     "type": "stately-agent",
-    "source": "New example for runAgent's `interpret` option",
+    "source": "New example for runAgent's `getRequests` option",
     "url": null
   },
   "comparison": {

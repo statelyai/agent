@@ -24,6 +24,7 @@ These five cover the core ideas: text requests, decisions, messages, and JSON au
 - [email-drafter](../examples/email-drafter/index.ts): reusable text logic, parts-based [messages](messages.md), and schema-typed state and transition meta.
 - [game-agent](../examples/game-agent/index.ts): `allowedEvents` narrowed as a function of input, gating moves by HP.
 - [json-agent](../examples/json-agent/index.ts): a full workflow (decision, text request, idle human step) authored as a real `.json` file and run with `runAgent`. See [Machines as data](machines-as-data.md).
+- [described-workflow](../examples/described-workflow/index.ts): a plain XState machine with zero invokes (prompts live in state `description`s and `meta`) run as an agent via `runAgent`'s `getRequests` option, with the message log aggregated onto `snapshot.messages`.
 
 ## Human in the loop and persistence
 

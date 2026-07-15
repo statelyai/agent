@@ -149,6 +149,40 @@ describe("runStateRequestPass", () => {
     ]);
   });
 
+  test("allowedEvents scopes the decide fallback's candidates", async () => {
+    const forkMachine = createMachine({
+      id: "fork",
+      initial: "deciding",
+      states: {
+        deciding: {
+          on: {
+            LEFT: { target: "complete" },
+            RIGHT: { target: "complete" },
+          },
+        },
+        complete: { type: "final" },
+      },
+    });
+    const harness = createHarness(forkMachine);
+    const offered: string[][] = [];
+
+    const { sentAny } = await runStateRequestPass(
+      [{ model: "m", prompt: "which?", allowedEvents: ["LEFT"] }],
+      {
+        ...harness.deps,
+        generateText: async () => ({ output: "hm" }),
+        decide: async (request) => {
+          offered.push(request.events.map((descriptor) => descriptor.type));
+          return { event: { type: "LEFT" } };
+        },
+      },
+    );
+
+    expect(sentAny).toBe(true);
+    // RIGHT is accepted by the state but scoped out of the candidates.
+    expect(offered).toEqual([["LEFT"]]);
+  });
+
   test("a pass that sends nothing reports sentAny: false", async () => {
     const harness = createHarness(stepMachine);
 

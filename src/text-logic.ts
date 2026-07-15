@@ -27,6 +27,9 @@ export const DECIDE_ACTOR = "agent.decide" as const;
 // Well-known invoke `src` for the builtin multi-event plan actor.
 export const PLAN_ACTOR = "agent.plan" as const;
 
+/** Synthetic `src` stamped on trace requests produced by `getRequests` state interpretation — NOT a registered actor source (nothing is invoked; the pass makes the call directly). */
+export const INTERPRET_SOURCE = "agent.interpret" as const;
+
 /** Whether a text request should be resolved with `generateText` (one-shot) or `streamText` (chunked, via `onChunk`). */
 export type AgentRequestMode = "generate" | "stream";
 /** A `setupAgent({ models })` model registry, mapping short model refs to provider-specific model values. */

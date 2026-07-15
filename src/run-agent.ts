@@ -15,7 +15,11 @@ import {
   type SnapshotFrom,
 } from "xstate";
 import type { AgentMessage, AgentTools, ChosenEvent } from "./types.js";
-import { findNonSerializableContextPaths, getMachineStructuralHash } from "./utils.js";
+import {
+  findNonSerializableContextPaths,
+  getAgentMessages,
+  getMachineStructuralHash,
+} from "./utils.js";
 import {
   runStateRequestPass,
   type AgentStateRequest,
@@ -344,8 +348,8 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
    */
   getRequests?: (
     snapshot: SnapshotFrom<TMachine>,
-    // TODO: call this agentContext or something disambiguate
-    context: { messages: readonly AgentMessage[] },
+    // Named to disambiguate from the machine's own `context`.
+    agentContext: { messages: readonly AgentMessage[] },
   ) => AgentStateRequest | readonly AgentStateRequest[] | undefined;
   /**
    * Adds to the run's aggregated message log (the working memory
@@ -1454,14 +1458,16 @@ export async function runAgent<TMachine extends AnyStateMachine>(
   // snapshot's stamped `messages`, else empty — and its stamp, applied to
   // every settled snapshot (like `agentMeta`) so persist/resume round-trips
   // the log with no extra wiring.
-  const priorMessages =
-    (effectiveSnapshot as { messages?: AgentMessage[] } | undefined)?.messages ?? [];
+  const priorMessages = getAgentMessages(effectiveSnapshot);
   const messages: AgentMessage[] =
     typeof options.messages === "function"
       ? [...options.messages([...priorMessages])]
       : [...priorMessages, ...(options.messages ?? [])];
   const stampMessages = (snapshot: unknown): void => {
-    if (!options.getRequests && !options.messages) {
+    // Stamp when this run uses the log — and also when a resumed snapshot
+    // carried one, so a plain invoke-driven resume never silently drops the
+    // conversation that round-tripped in (parity with agentMeta).
+    if (!options.getRequests && !options.messages && messages.length === 0) {
       return;
     }
     if (snapshot && typeof snapshot === "object") {
@@ -1556,11 +1562,14 @@ export async function runAgent<TMachine extends AnyStateMachine>(
       });
     };
 
-    // TODO: is this entire new code smelly? why is this here? genuine q
     // ─── State interpretation (RunAgentOptions.getRequests) ───
     // Consulted at every would-be idle settle: if the hook returns request(s)
     // for the current snapshot, run them (model call(s) → message log → one
-    // legal event sent each) instead of settling. `interpreting` blocks a
+    // legal event sent each) instead of settling. The pass logic itself is
+    // extracted (internal/state-request-pass.ts); what lives HERE is only the
+    // glue that must close over this run's mutable state — the live `actor`,
+    // the `settled` flag, the shared log, and the idle scheduler — none of
+    // which exist outside this promise executor. `interpreting` blocks a
     // concurrent idle settle while a pass's model calls are in flight.
     let interpreting = false;
     let interpretSeq = 0;
@@ -1575,14 +1584,19 @@ export async function runAgent<TMachine extends AnyStateMachine>(
       }
     };
 
+    // The run-level error cause ladder, shared by the interpret settle and
+    // the machine-error settle in the inspect handler.
+    const runErrorCause = (error: unknown): RunAgentErrorCause =>
+      budgetExceeded
+        ? "max-model-calls"
+        : wrapsDecisionExhausted(error)
+          ? "decision-exhausted"
+          : "machine";
+
     const settleInterpretError = (error: unknown) => {
       settle({
         status: "error",
-        cause: budgetExceeded
-          ? "max-model-calls"
-          : wrapsDecisionExhausted(error)
-            ? "decision-exhausted"
-            : "machine",
+        cause: runErrorCause(error),
         error,
         snapshot: actor.getSnapshot(),
       });
@@ -1625,8 +1639,8 @@ export async function runAgent<TMachine extends AnyStateMachine>(
         return true;
       }
       const requests = (Array.isArray(requested) ? requested : requested ? [requested] : []).filter(
-        Boolean,
-      ) as AgentStateRequest[];
+        (stateRequest): stateRequest is AgentStateRequest => Boolean(stateRequest),
+      );
       if (requests.length === 0) {
         return false;
       }
@@ -1721,14 +1735,9 @@ export async function runAgent<TMachine extends AnyStateMachine>(
           // Reaching an error state means no `onError` transition handled the
           // failure (a handled one transitions away instead of erroring). So a
           // DecisionExhaustedError surfacing here is genuinely unhandled.
-          const cause: RunAgentErrorCause = budgetExceeded
-            ? "max-model-calls"
-            : wrapsDecisionExhausted(snapshot.error)
-              ? "decision-exhausted"
-              : "machine";
           settle({
             status: "error",
-            cause,
+            cause: runErrorCause(snapshot.error),
             error: snapshot.error,
             snapshot: snapshot as SnapshotFrom<TMachine>,
           });

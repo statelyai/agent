@@ -304,6 +304,26 @@ const event = await resolveDecision(
 
 A rough, hand-written v5 machine works because the contract is minimal: **invokes return values, states accept events, guards decide legality.** The library supplies the model; the machine supplies the shape.
 
+The one-call form of the same idea is `runAgent`'s `getRequests` option. A machine with **no invokes at all** (prompts written as state `description`s, `meta`, tags, or any lookup you keep outside the machine) runs unmodified: whenever the machine would otherwise settle idle, your hook maps the snapshot to the model request(s) to run, each with an explicit `onDone` event (or a `decide` call when omitted). The run aggregates a message log and stamps it on every settled `snapshot.messages` (read it with `getAgentMessages`, observe it live with `onMessage`, seed it with `messages`).
+
+```ts
+const result = await runAgent(plainMachine, {
+  executors,
+  getRequests: (snapshot) =>
+    snapshot._nodes
+      .filter((node) => node.description && !node.tags.includes('waiting'))
+      .map((node) => ({
+        model: 'writer',
+        prompt: node.description!,
+        kind: node.tags.includes('decision') ? 'decision' : 'text',
+        onDone: node.ownEvents.length === 1 ? { type: node.ownEvents[0] } : undefined,
+        allowedEvents: node.ownEvents,
+      })),
+});
+```
+
+Where the prompts live is the hook's business, not the library's: this prompts-in-descriptions recipe is a starting point to copy and adapt. See the runnable [described-workflow](../examples/described-workflow/index.ts) example.
+
 ## The portability payoff
 
 Because the shape carries no LLM assumptions, the same definition round-trips through non-code representations. `setupAgent.fromConfig` builds a machine from serializable JSON — the kind a database, a visual editor, or an LLM could emit:
@@ -323,7 +343,7 @@ That closes the loop: **the machine is the portable artifact.** Prompts embedded
 ## API reference
 
 - **`setupAgent(config)`** — schema-first `setup()`. Registers `agent.generateText` / `streamText` / `decide` / `userInput` builtins; returns `createMachine` plus `schemas`, `models`, `requests`, and `appendMessages`.
-- **`runAgent(machine, { input, generateText, decide, streamText?, actorSources?, userInput?, signal?, maxModelCalls?, snapshot?, event?, onTrace? })`** — runs to `done | idle | error`. Resume from `idle` by passing `{ snapshot, event }` back in.
+- **`runAgent(machine, { input, executors, actorSources?, userInput?, signal?, maxModelCalls?, snapshot?, event?, onTrace?, getRequests?, messages?, onMessage? })`** — runs to `done | idle | error`. Resume from `idle` by passing `{ snapshot, event }` back in. `getRequests` overrides the invoke-driven default: it maps the snapshot to model requests whenever the machine would otherwise settle idle, so invoke-less described machines run as agents; `messages` seeds the run's aggregated log (array appends to resumed history, function replaces), `onMessage` observes it live, and `getAgentMessages(snapshot)` reads it off a settled snapshot.
 - **`createTextLogic(config)`** — reusable "produce a value" actor source. `system`/`prompt`/`model` can each be static or `({ input }) => value`. Decisions are state-local via `src: 'agent.decide'`; to reuse one, share its input builder.
 - **Step path** — `initialAgentStep` / `transitionAgentStep` / `resolveAgentStep` / `getAgentRequests`, `executeAgentRequest` (text), `resolveDecision` (decision), `getAcceptedEvents` (enumerate legal events).
 - **`createAiSdkExecutors({ models })`** — returns `{ generateText, streamText, decide }` from a Vercel AI SDK model map. Spread into `runAgent` or pass to the step helpers.
