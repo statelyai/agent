@@ -13,6 +13,7 @@
     "child-machine-bind-validation",
     "decide-auto-delivery-and-define-models",
     "decision-and-invoke-typing-dx",
+    "dx-sweep-resilience-and-sugar",
     "executor-output-envelope",
     "executor-result-widening",
     "explicit-suspension-and-illegal-resume",
