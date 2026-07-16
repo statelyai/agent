@@ -74,7 +74,7 @@ A request that needs history sends it through `messages` instead of a bare `prom
 
 ### A lightweight messages field
 
-`messagesSchema` is the shipped validator. When you want a messages field without deep per-part validation — the array is built from library helpers you already trust — reach for a field typed as `AgentMessage[]` with a cheap `Array.isArray` runtime check.
+`messagesSchema` is the shipped validator. When you want a messages field without deep per-part validation (the array is built from library helpers you already trust), reach for a field typed as `AgentMessage[]` with a cheap `Array.isArray` runtime check.
 
 With `zod`, use the shipped `zodAgentMessages()` from the `@statelyai/agent/zod` subpath (an optional `zod` peer):
 
@@ -87,7 +87,7 @@ context: z.object({
 }),
 ```
 
-`zodAgentMessages()` returns a `z.ZodType<AgentMessage[]>` — the exact `AgentMessage[]` type at author time, with the runtime check kept to a shallow `Array.isArray`.
+`zodAgentMessages()` returns a `z.ZodType<AgentMessage[]>`: the exact `AgentMessage[]` type at author time, with the runtime check kept to a shallow `Array.isArray`.
 
 No-dependency fallback: the same recipe inline with `z.custom`, if you'd rather not add the subpath import:
 

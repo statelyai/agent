@@ -17,7 +17,7 @@ You author a machine in three steps:
 
 <!-- flat schema fields on setupAgent from src/setup-agent.ts -->
 
-`setupAgent` takes your schema fields directly — `context`, `events`, `input`, `output`, and `meta` — typing the machine's context, event payloads, input, output, and state meta. Only `context` is required; the rest default to empty or unknown schemas. Every schema is a [Standard Schema](https://standardschema.dev), so Zod, Valibot, ArkType, or a hand-written validator all work, and they are retained on the agent for runtime validation, so you get typed context and events without `{} as Type` casts.
+`setupAgent` takes your schema fields directly (`context`, `events`, `input`, `output`, and `meta`), typing the machine's context, event payloads, input, output, and state meta. Only `context` is required; the rest default to empty or unknown schemas. Every schema is a [Standard Schema](https://standardschema.dev), so Zod, Valibot, ArkType, or a hand-written validator all work, and they are retained on the agent for runtime validation, so you get typed context and events without `{} as Type` casts.
 
 ```ts
 import { z } from "zod";
@@ -31,7 +31,7 @@ const agentSetup = setupAgent({
 });
 ```
 
-To keep conversation history in context, add a `messages` field — use `messagesSchema` or the `z.custom<AgentMessage[]>` recipe (see [messages](messages.md#the-zcustom-recipe)).
+To keep conversation history in context, add a `messages` field: use `messagesSchema` or the `z.custom<AgentMessage[]>` recipe (see [messages](messages.md#the-zcustom-recipe)).
 
 **Event schemas** make event payloads typed. Declare one schema per event type under `events`:
 
@@ -55,7 +55,7 @@ emitted: {
 
 With this declared, `enq.emit({ type: 'EVALUATED', ... })` and the host-side `on: { EVALUATED: handler }` are both fully typed; emitting an undeclared type or a wrong payload is a compile error.
 
-> **Sharing a schema pack.** To reuse one schema set across several machines or the step helpers, declare it once with `createAgentSchemas({ context, input, output, events })` and pass the result as `setupAgent({ schemas })`. The two forms are equivalent — see [Which authoring form when](#which-authoring-form-when).
+> **Sharing a schema pack.** To reuse one schema set across several machines or the step helpers, declare it once with `createAgentSchemas({ context, input, output, events })` and pass the result as `setupAgent({ schemas })`. The two forms are equivalent. See [Which authoring form when](#which-authoring-form-when).
 
 ## Set up the agent
 
@@ -78,7 +78,7 @@ const agentSetup = setupAgent({
 ```
 
 - The builtins `agent.generateText`, `agent.streamText`, `agent.userInput`, and `agent.decide` are registered automatically; invoke them by name.
-- Prefer inline schema fields (above); reach for the `createAgentSchemas` pack form only to share one schema set across machines or the step helpers — see [Which authoring form when](#which-authoring-form-when).
+- Prefer inline schema fields (above); reach for the `createAgentSchemas` pack form only to share one schema set across machines or the step helpers. See [Which authoring form when](#which-authoring-form-when).
 
 ### Models
 
@@ -108,7 +108,7 @@ const agentSetup = setupAgent({
 });
 ```
 
-Aliases are optional. A request can carry any `model:` string (like `'openai/gpt-5.4-mini'`) that the host resolves at run time — see [Which authoring form when](#which-authoring-form-when) and [Hosts](hosts.md).
+Aliases are optional. A request can carry any `model:` string (like `'openai/gpt-5.4-mini'`) that the host resolves at run time. See [Which authoring form when](#which-authoring-form-when) and [Hosts](hosts.md).
 
 ### Requests
 
@@ -186,11 +186,11 @@ The canonical form covers most machines. Each alternate is a supported escape ha
 
 | Form                                                                                                                                        | Reach for it when                                                                                                                                                           |
 | ------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Canonical** — `models` registry + flat schema fields on `setupAgent`, `model: 'quick'` keys, host with `createAiSdkExecutors({ models })` | Default. A single machine whose models are known at author time.                                                                                                            |
-| **`createAgentSchemas` pack** — `setupAgent({ schemas })`                                                                                   | Sharing one schema set across several machines or the [step helpers](steps.md).                                                                                             |
-| **String refs + `resolveModel`** — `model: 'openai/gpt-5.4-mini'`, `createAiSdkExecutors({ resolveModel })`                                 | The machine must not name concrete models — maximum portability, refs resolved by the host or loaded from JSON [config](machines-as-data.md).                               |
-| **`createTextLogic`** — a standalone request value                                                                                          | A request that is exported, reused across states or machines, or unit-tested on its own. See [Text requests](text-requests.md#reusable-request-logic-with-createtextlogic). |
-| **`withExecutor`** — `logic.withExecutor(...)`                                                                                              | Binding execution onto one logic rather than the whole host: per-logic host binding or dynamic spawns. See [Hosts](hosts.md#testing-with-deterministic-executors).          |
+| **Canonical**: `models` registry + flat schema fields on `setupAgent`, `model: 'quick'` keys, host with `createAiSdkExecutors({ models })` | Default. A single machine whose models are known at author time.                                                                                                            |
+| **`createAgentSchemas` pack**: `setupAgent({ schemas })`                                                                                   | Sharing one schema set across several machines or the [step helpers](steps.md).                                                                                             |
+| **String refs + `resolveModel`**: `model: 'openai/gpt-5.4-mini'`, `createAiSdkExecutors({ resolveModel })`                                 | The machine must not name concrete models: maximum portability, refs resolved by the host or loaded from JSON [config](machines-as-data.md).                               |
+| **`createTextLogic`**: a standalone request value                                                                                          | A request that is exported, reused across states or machines, or unit-tested on its own. See [Text requests](text-requests.md#reusable-request-logic-with-createtextlogic). |
+| **`withExecutor`**: `logic.withExecutor(...)`                                                                                              | Binding execution onto one logic rather than the whole host: per-logic host binding or dynamic spawns. See [Hosts](hosts.md#testing-with-deterministic-executors).          |
 
 ## Transitions
 
@@ -279,11 +279,11 @@ done: {
 
 When the root declares no `output` and exactly one final state does, `agentSetup.createMachine` promotes that output to the root, so `snapshot.output` is set without repeating it on every final state.
 
-Read `context` only in a final `output` function — never the entering `event`. A final `output` fn is evaluated more than once with different events (the event that entered the state, then the machine-done computation), so `event` is unreliable there. Capture whatever you need from the entering event into `context` in the transition that targets the final state, then read it back from `context`. (`lintAgentMachine`'s `final-output-reads-event` check flags this.)
+Read `context` only in a final `output` function, never the entering `event`. A final `output` fn is evaluated more than once with different events (the event that entered the state, then the machine-done computation), so `event` is unreliable there. Capture whatever you need from the entering event into `context` in the transition that targets the final state, then read it back from `context`. (`lintAgentMachine`'s `final-output-reads-event` check flags this.)
 
 ### Narrow context per state
 
-A context field that starts `null` and is assigned mid-run forces a `?? fallback` at every later read, including in a final state's `output`. When a state is reachable **only** after that field is set, narrow the field non-null under `setupAgent({ states })`. Declare just the fields that change — every other field keeps the base context schema. The narrowed type flows into that state's invoke `input`, transition functions, and `output`, so the coalesce disappears:
+A context field that starts `null` and is assigned mid-run forces a `?? fallback` at every later read, including in a final state's `output`. When a state is reachable **only** after that field is set, narrow the field non-null under `setupAgent({ states })`. Declare just the fields that change; every other field keeps the base context schema. The narrowed type flows into that state's invoke `input`, transition functions, and `output`, so the coalesce disappears:
 
 ```ts
 const context = z.object({ question: z.string(), plan: planSchema.nullable() });
@@ -298,7 +298,7 @@ const agentSetup = setupAgent({
 });
 ```
 
-(XState's full form — `executing: { schemas: { context: context.extend({ plan: planSchema }) } }` with a complete context schema — also works; the field-level form is sugar for it.)
+(XState's full form, `executing: { schemas: { context: context.extend({ plan: planSchema }) } }` with a complete context schema, also works; the field-level form is sugar for it.)
 
 Inside those states `context.plan` is `Plan`, not `Plan | null`. Narrow only where every path into the state has assigned the field. A state also reachable on an error or refusal route (where the field is still `null`) must keep its nullable handling. This narrows the _type_ only, so runtime behavior is unchanged. See [examples/sql-agent/index.ts](../examples/sql-agent/index.ts).
 

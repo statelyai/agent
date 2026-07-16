@@ -70,7 +70,7 @@ const agentSetup = setupAgent({
 await runAgent(machine, { input });
 ```
 
-For a fully dynamic or externally configured host — one whose machine must not name concrete models — use `resolveModel` instead: it takes the raw ref string and returns a model, so refs like `"openai/gpt-5.4-mini"` resolve without a static map. You can pass both; `resolveModel` wins. With `models` alone, an unknown ref throws. This is the max-portability escape hatch — see [Which authoring form when](machines.md#which-authoring-form-when). `parseModelRef(ref)` splits a `"provider/model-id"` ref into its parts, so a resolver is one line: `(ref) => openai(parseModelRef(ref).modelId)`.
+For a fully dynamic or externally configured host (one whose machine must not name concrete models), use `resolveModel` instead: it takes the raw ref string and returns a model, so refs like `"openai/gpt-5.4-mini"` resolve without a static map. You can pass both; `resolveModel` wins. With `models` alone, an unknown ref throws. This is the max-portability escape hatch. See [Which authoring form when](machines.md#which-authoring-form-when). `parseModelRef(ref)` splits a `"provider/model-id"` ref into its parts, so a resolver is one line: `(ref) => openai(parseModelRef(ref).modelId)`.
 
 Model refs are opaque strings, so any string is a legal `model:` value. A `models` map is optional: it gives you key autocomplete on request `model:` fields and a place for the executor to resolve those refs. The AI SDK adapter resolves a ref through its `models` map, or through `resolveModel` when the map has no match.
 
@@ -109,7 +109,7 @@ This is backed by real implementations against four runtimes:
 
 <!-- buildEnvelopeSchema and the wire contract from src/text-logic.ts; adapters in src/ai-sdk, src/openai-compat -->
 
-When a request has a structured output schema (`getAgentOutputMode(request.outputSchema) === 'structured'`), a host sends the schema to the provider wrapped as a root object — the **envelope** — and unwraps it before returning:
+When a request has a structured output schema (`getAgentOutputMode(request.outputSchema) === 'structured'`), a host sends the schema to the provider wrapped as a root object (the **envelope**) and unwraps it before returning:
 
 ```json
 { "result": <the declared schema>, "reasoning": "<optional string>" }
@@ -134,22 +134,22 @@ if (getAgentOutputMode(request.outputSchema) === "structured") {
 }
 ```
 
-Return the **unwrapped** `.result` as `output` — the machine only ever validates and sees the schema it declared, never the envelope. `reasoning` is surfaced on the raw executor result only (never in machine context/output); see [reasoning opt-in](./text-requests.md#reasoning). The shipped `createAiSdkExecutors` and `createOpenAiCompatExecutors` adapters and the raw OpenAI/Anthropic example hosts all follow this exact contract. (Prompt-serialized hosts that don't send a provider response schema — e.g. the Workers AI host — instead parse best-effort JSON and skip the envelope.)
+Return the **unwrapped** `.result` as `output`: the machine only ever validates and sees the schema it declared, never the envelope. `reasoning` is surfaced on the raw executor result only (never in machine context/output); see [reasoning opt-in](./text-requests.md#reasoning). The shipped `createAiSdkExecutors` and `createOpenAiCompatExecutors` adapters and the raw OpenAI/Anthropic example hosts all follow this exact contract. (Prompt-serialized hosts that don't send a provider response schema, e.g. the Workers AI host, instead parse best-effort JSON and skip the envelope.)
 
 Two related helpers for hand-rolled hosts:
 
-- **`isStandardSchema(value)`** narrows an unknown schema value to `StandardSchemaV1` before extraction. Request `tools` accept whatever a user's SDK produces, so a tool's `inputSchema` may be an SDK-specific wrapper core can't read — check with `isStandardSchema` and fall back to unconstrained parameters instead of crashing (this is what `toOpenAiTools` does).
+- **`isStandardSchema(value)`** narrows an unknown schema value to `StandardSchemaV1` before extraction. Request `tools` accept whatever a user's SDK produces, so a tool's `inputSchema` may be an SDK-specific wrapper core can't read: check with `isStandardSchema` and fall back to unconstrained parameters instead of crashing (this is what `toOpenAiTools` does).
 - **`renderDecisionAttempts(request)`** renders a decision request's prior failed `attempts` as feedback messages to append to the next call, so retries converge instead of repeating the same illegal choice. Both shipped adapters and all three raw-SDK example hosts use it; see [Decisions](decisions.md#validation-and-retries).
 
 ## Retries
 
-Transport-level retries — HTTP 429s, timeouts, exponential backoff — belong in the executor or the SDK it wraps, not the machine. The AI SDK's `maxRetries` (and the equivalent on the OpenAI/Anthropic clients) already handles them; a raw-`fetch` executor adds its own retry loop. The machine never sees a transient network failure.
+Transport-level retries (HTTP 429s, timeouts, exponential backoff) belong in the executor or the SDK it wraps, not the machine. The AI SDK's `maxRetries` (and the equivalent on the OpenAI/Anthropic clients) already handles them; a raw-`fetch` executor adds its own retry loop. The machine never sees a transient network failure.
 
 Machine-level retry is a different thing: an authored `onError` transition that re-enters a state after a _semantic_ failure (a validation rejection, an exhausted decision). That is control flow you model explicitly, not a transport concern.
 
 ## Budgets
 
-`maxModelCalls` is the built-in loop backstop (default 100; exceeding it settles an `error` with cause `'max-model-calls'`). For finer budgets — a token cap, a per-request-src call count — wrap the executors. Because a child machine's requests inherit the parent's executors, one wrapper counts the whole tree:
+`maxModelCalls` is the built-in loop backstop (default 100; exceeding it settles an `error` with cause `'max-model-calls'`). For finer budgets (a token cap, a per-request-src call count), wrap the executors. Because a child machine's requests inherit the parent's executors, one wrapper counts the whole tree:
 
 ```ts
 function withBudget(base: AgentRequestExecutors, maxCalls: number) {

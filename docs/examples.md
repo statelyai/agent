@@ -61,7 +61,7 @@ These compose agent machines as sub-agents or child actors. See [Multi-agent](mu
 
 Common agent workflows expressed as explicit XState machines.
 
-- [react-agent](../examples/react-agent/index.ts): ReAct as an explicit loop — one reason-or-act request per iteration (discriminated union: call a tool or answer), typed tool actors execute, a step-budget guard breaks the loop with a best-effort answer.
+- [react-agent](../examples/react-agent/index.ts): ReAct as an explicit loop: one reason-or-act request per iteration (discriminated union: call a tool or answer), typed tool actors execute, a step-budget guard breaks the loop with a best-effort answer.
 - [tool-calling](../examples/tool-calling/index.ts): the model selects a tool (structured output), typed tool actors execute, progress reported via transitions.
 - [rag](../examples/rag/index.ts): retrieve (typed plain actor over a sample corpus) then a grounded answer, with conversational memory in context.
 - [plan-and-execute](../examples/plan-and-execute/index.ts): a planner request produces structured output, execution states iterate the plan (keeps the ReWOO evidence-map idea).

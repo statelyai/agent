@@ -14,7 +14,7 @@ The machine declares:
 
 The host provides:
 
-- Vercel AI SDK, Cloudflare Workers AI, LangChain, local models, or custom code — via executors (`generateText`/`streamText`/`decide`) or `.withExecutor(...)`
+- Vercel AI SDK, Cloudflare Workers AI, LangChain, local models, or custom code, via executors (`generateText`/`streamText`/`decide`) or `.withExecutor(...)`
 - streaming side channels
 - tracing/logging
 - persistence and transport
@@ -66,9 +66,9 @@ const result = await runAgent(machine, {
 });
 ```
 
-Every agent invoke should have a durable `id` — it's how a resumed/replayed run matches the invoke back to its `onDone` transition.
+Every agent invoke should have a durable `id`: it's how a resumed/replayed run matches the invoke back to its `onDone` transition.
 
-When a request is reusable — called from more than one state, or worth testing standalone — extract it into `requests:` (co-located on `setupAgent`) or `createTextLogic(...)` (standalone). `runAgent(...)` is convenience only: you can always inspect `request.input`/`request.tools` and call `initialAgentStep(...)`, `executeAgentRequest(...)`, `resolveAgentStep(...)` yourself, or drop to XState's `initialTransition(...)`/`transition(...)` when a host wants to own every XState action directly. See [`../readme.md`](../readme.md#the-step-path-durable-hosts) for the step-path host loop.
+When a request is reusable (called from more than one state, or worth testing standalone), extract it into `requests:` (co-located on `setupAgent`) or `createTextLogic(...)` (standalone). `runAgent(...)` is convenience only: you can always inspect `request.input`/`request.tools` and call `initialAgentStep(...)`, `executeAgentRequest(...)`, `resolveAgentStep(...)` yourself, or drop to XState's `initialTransition(...)`/`transition(...)` when a host wants to own every XState action directly. See [`../readme.md`](../readme.md#the-step-path-durable-hosts) for the step-path host loop.
 
 For external events, advance the same step object:
 
@@ -80,7 +80,7 @@ step = transitionAgentStep(machine, step, { type: "REVISE", prompt: nextPrompt }
 
 `agent.userInput` is one of the two waiting styles; see [Choosing between the two waiting styles](human-in-the-loop.md#choosing-between-the-two-waiting-styles) for when to pick it over an idle state. It's a normal invoked actor; the host owns how the request is delivered and resumed. Two ways to implement it:
 
-**`RunAgentOptions.userInput`** — the inline path, for gathering input without settling the run:
+**`RunAgentOptions.userInput`**: the inline path, for gathering input without settling the run:
 
 ```ts
 const result = await runAgent(machine, {
@@ -90,7 +90,7 @@ const result = await runAgent(machine, {
 });
 ```
 
-**A provided actor source** — for the step path, or when `runAgent`'s inline path doesn't fit:
+**A provided actor source**: for the step path, or when `runAgent`'s inline path doesn't fit:
 
 ```ts
 import { createAsyncLogic } from "xstate";
@@ -104,7 +104,7 @@ const machine = setupAgent.fromConfig(config, { compileSchema }).provide({
 });
 ```
 
-If a machine invokes `agent.userInput` and neither is supplied, `runAgent` fails at bind time — before any model call — naming the actor and recommending the idle-state pattern instead.
+If a machine invokes `agent.userInput` and neither is supplied, `runAgent` fails at bind time, before any model call, naming the actor and recommending the idle-state pattern instead.
 
 Static config uses the same actor source:
 
@@ -125,13 +125,13 @@ invoke:
 
 ## Decisions and allowed events
 
-A decision's `allowedEvents` declares which machine events are candidates for the model to choose from; XState's guards then decide which of those are actually legal from the current snapshot. `getAgentRequests(machine, actions, snapshot)` (used internally by the step helpers, drawing schemas and actor sources from the machine's registered `setupAgent` options) intersects the two and puts the survivors on the decision request's `events` field — separate from the model-call input, so the model sees only options it could actually take:
+A decision's `allowedEvents` declares which machine events are candidates for the model to choose from; XState's guards then decide which of those are actually legal from the current snapshot. `getAgentRequests(machine, actions, snapshot)` (used internally by the step helpers, drawing schemas and actor sources from the machine's registered `setupAgent` options) intersects the two and puts the survivors on the decision request's `events` field, separate from the model-call input, so the model sees only options it could actually take:
 
 ```ts
 const requests = getAgentRequests(machine, actions, snapshot);
 const request = requests[0]; // kind: 'decision'
 request.events.map((event) => event.type);
-// ['ATTACK', 'DEFEND'] — HEAL and FLEE excluded, whether by allowedEvents or by guard
+// ['ATTACK', 'DEFEND']: HEAL and FLEE excluded, whether by allowedEvents or by guard
 ```
 
 Resolve the decision to get the chosen, validated event:
@@ -141,11 +141,11 @@ const event = await resolveDecision(request, decide);
 // { type: 'ATTACK', target: 'orc' }
 ```
 
-`resolveDecision` retries on an unknown event type, an invalid payload, or a guard rejection — see [`../readme.md`](../readme.md#decisions) for the full validation/retry contract. This is also why `getAcceptedEvents(...)` (type-only filtering, no guard evaluation) is not sufficient on its own for "is this choice legal": `resolveDecision`'s `snapshot.can(event)` check is what actually closes the gap at apply time.
+`resolveDecision` retries on an unknown event type, an invalid payload, or a guard rejection. See [`../readme.md`](../readme.md#decisions) for the full validation/retry contract. This is also why `getAcceptedEvents(...)` (type-only filtering, no guard evaluation) is not sufficient on its own for "is this choice legal": `resolveDecision`'s `snapshot.can(event)` check is what actually closes the gap at apply time.
 
 ## Actor runtime
 
-When you want XState to execute a named text/decision invoke directly — rather than routing every request through `runAgent`'s executor slots — provide an implementation with `logic.withExecutor(...)`:
+When you want XState to execute a named text/decision invoke directly (rather than routing every request through `runAgent`'s executor slots), provide an implementation with `logic.withExecutor(...)`:
 
 ```ts
 import { isStructuredOutputSchema, validateSchemaSync } from "@statelyai/agent";
@@ -180,7 +180,7 @@ createActor(machine.provide({ actorSources: { draftText: executableDraftText } }
 }).start();
 ```
 
-This is the same mechanism `runAgent` uses internally to bind `generateText`/`streamText`/`decide` — `.withExecutor(...)` is just the lower-level form, useful when a text/decision logic should carry its own execution wherever it's used, independent of the host loop.
+This is the same mechanism `runAgent` uses internally to bind `generateText`/`streamText`/`decide`: `.withExecutor(...)` is just the lower-level form, useful when a text/decision logic should carry its own execution wherever it's used, independent of the host loop.
 
 ## Metadata
 
@@ -241,13 +241,13 @@ A dedicated `hostContext` option is under consideration to make (a) less repetit
 
 ## Streaming
 
-Streaming chunks stay in the host side channel: HTTP stream, WebSocket, AI SDK UI stream, stdout, tracing callback, etc. The machine transitions on the final text — that keeps snapshots deterministic and replayable. `runAgent`'s `onChunk(chunk, { request })` callback is the observation seam; it's void, so it can't affect control flow.
+Streaming chunks stay in the host side channel: HTTP stream, WebSocket, AI SDK UI stream, stdout, tracing callback, etc. The machine transitions on the final text, which keeps snapshots deterministic and replayable. `runAgent`'s `onChunk(chunk, { request })` callback is the observation seam; it's void, so it can't affect control flow.
 
-The same request can run through `generateText(...)` or `streamText(...)` — the host decides, by choosing which executor to supply or which method `createTextLogic`'s `mode` invokes.
+The same request can run through `generateText(...)` or `streamText(...)`: the host decides, by choosing which executor to supply or which method `createTextLogic`'s `mode` invokes.
 
 ## Raw AI SDK functions
 
-The `generateText`/`streamText` executors accept the raw Vercel AI SDK functions directly — no adapter needed:
+The `generateText`/`streamText` executors accept the raw Vercel AI SDK functions directly, no adapter needed:
 
 ```ts
 import { generateText, streamText } from "ai";
@@ -262,7 +262,7 @@ Two caveats:
 - **Structured output is best-effort.** For a request with an `outputSchema`, the raw text is `JSON.parse`d and validated; a parse failure throws. For reliable structured output, use `createAiSdkExecutors` from `@statelyai/agent/ai-sdk` or `createOpenAiCompatExecutors` from `@statelyai/agent/openai-compat`.
 - **`decide` needs an adapter.** The tool-per-event mapping lives in `createAiSdkExecutors` (and `createOpenAiCompatExecutors`); there is no raw AI SDK function for it.
 
-For any OpenAI-compatible Chat Completions endpoint (Groq, Together, Ollama, vLLM, OpenRouter, LM Studio, OpenAI itself), `createOpenAiCompatExecutors({ baseUrl, apiKey?, models? })` from `@statelyai/agent/openai-compat` is a second shipped adapter — a complete `{ generateText, streamText, decide }` set over raw `fetch` with zero dependencies (pass a `fetch` override for Workers or tests).
+For any OpenAI-compatible Chat Completions endpoint (Groq, Together, Ollama, vLLM, OpenRouter, LM Studio, OpenAI itself), `createOpenAiCompatExecutors({ baseUrl, apiKey?, models? })` from `@statelyai/agent/openai-compat` is a second shipped adapter: a complete `{ generateText, streamText, decide }` set over raw `fetch` with zero dependencies (pass a `fetch` override for Workers or tests).
 
 ## Low-level primitive
 
@@ -285,4 +285,4 @@ const output = await draftText.execute(
 
 ## Why this shape
 
-The machine stays portable — it never imports a model SDK. The host keeps full runtime control: swap `createAiSdkExecutors` for a raw `fetch`, add tracing at the `onResult` seam, or drop to `.withExecutor(...)` when a request should carry its own execution. The workflow still gets typed transitions, XState snapshots, inspection, and testing throughout. Visualization is intentionally out of scope for this package — see the alpha-status note in [`../readme.md`](../readme.md#alpha-status--whats-not-here-yet).
+The machine stays portable: it never imports a model SDK. The host keeps full runtime control: swap `createAiSdkExecutors` for a raw `fetch`, add tracing at the `onResult` seam, or drop to `.withExecutor(...)` when a request should carry its own execution. The workflow still gets typed transitions, XState snapshots, inspection, and testing throughout. Visualization is intentionally out of scope for this package. See the alpha-status note in [`../readme.md`](../readme.md#alpha-status--whats-not-here-yet).

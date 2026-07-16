@@ -82,7 +82,7 @@ console.log(step.snapshot.output);
 
 ### One-line loop with `resolveAgentRequests`
 
-The dispatch above — pick the pending request, branch on `kind`, resolve it, advance — is the same every turn. `resolveAgentRequests` collapses it into one call: it resolves the current step's pending request (decision or text) and returns the next step, wiring `canTake` to `step.snapshot.can` for you. A complete durable host is two lines:
+The dispatch above (pick the pending request, branch on `kind`, resolve it, advance) is the same every turn. `resolveAgentRequests` collapses it into one call: it resolves the current step's pending request (decision or text) and returns the next step, wiring `canTake` to `step.snapshot.can` for you. A complete durable host is two lines:
 
 ```ts
 import { initialAgentStep, resolveAgentRequests } from "@statelyai/agent";
@@ -98,7 +98,7 @@ while (!step.done) {
 console.log(step.snapshot.output);
 ```
 
-Reach past it to the manual dispatch (shown above) when a host must interleave its own work between the request and the transition — per-turn persistence, one serverless invocation per turn, or a plain actor/timer pending in `step.actions`. `resolveAgentRequests` (and `executeAgentRequest`) take a **partial** executor set — each request kind demands only its own executor (`generateText`/`streamText` for text, `decide` for decisions and plans) — and throw a clear per-kind error, naming the request, when the one a pending request needs is missing. It also drives **plan** requests natively (see [Plans on the step path](#plans-on-the-step-path)) and resolves a step's pending text requests concurrently (see [Concurrent text requests](#concurrent-text-requests)).
+Reach past it to the manual dispatch (shown above) when a host must interleave its own work between the request and the transition: per-turn persistence, one serverless invocation per turn, or a plain actor/timer pending in `step.actions`. `resolveAgentRequests` (and `executeAgentRequest`) take a **partial** executor set (each request kind demands only its own executor: `generateText`/`streamText` for text, `decide` for decisions and plans) and throw a clear per-kind error, naming the request, when the one a pending request needs is missing. It also drives **plan** requests natively (see [Plans on the step path](#plans-on-the-step-path)) and resolves a step's pending text requests concurrently (see [Concurrent text requests](#concurrent-text-requests)).
 
 See [examples/ai-sdk-game-host/index.ts](../examples/ai-sdk-game-host/index.ts) for the full loop, and [Decisions](decisions.md) for the validate-and-retry rules.
 
@@ -130,7 +130,7 @@ A durable host persists this after every model call. Every request kind is plain
 
 ## Plans on the step path
 
-An [`agent.plan`](decisions.md#plans-multi-event-decisions) invoke applies an ordered _sequence_ of legal events — each one a decision — rather than a single one. On the step path it surfaces as a `kind: 'plan'` request that **re-surfaces on every step** while the plan is in flight (unlike text/decision requests, which surface once and resolve once):
+An [`agent.plan`](decisions.md#plans-multi-event-decisions) invoke applies an ordered _sequence_ of legal events (each one a decision) rather than a single one. On the step path it surfaces as a `kind: 'plan'` request that **re-surfaces on every step** while the plan is in flight (unlike text/decision requests, which surface once and resolve once):
 
 ```ts
 interface AgentPlanRequest {
@@ -144,22 +144,22 @@ interface AgentPlanRequest {
 }
 ```
 
-The protocol per step: resolve **one** decision from `events` (with `resolveDecision`, wiring `canTake` to `step.snapshot.can` exactly like a single decision), then apply it. A real machine event advances the plan — the _next_ step re-surfaces the request with an updated `applied`/`events`/`stepsRemaining`. The reserved `agent.plan.done` move, a `stopOn` event, an exhausted budget, or no legal events **completes** the plan: its invoke resolves with `{ steps, stopped }` (`stopped` is `'done' | 'stop-event' | 'max-steps' | 'no-legal-events'`), fed back like any invoke result. An applied event that exits the invoking state cancels the plan (its `onDone` never fires) — identical to `runAgent`.
+The protocol per step: resolve **one** decision from `events` (with `resolveDecision`, wiring `canTake` to `step.snapshot.can` exactly like a single decision), then apply it. A real machine event advances the plan: the _next_ step re-surfaces the request with an updated `applied`/`events`/`stepsRemaining`. The reserved `agent.plan.done` move, a `stopOn` event, an exhausted budget, or no legal events **completes** the plan: its invoke resolves with `{ steps, stopped }` (`stopped` is `'done' | 'stop-event' | 'max-steps' | 'no-legal-events'`), fed back like any invoke result. An applied event that exits the invoking state cancels the plan (its `onDone` never fires), identical to `runAgent`.
 
-`resolveAgentRequests` does all of this for you, one plan step (one decision, or one completion) per call — so the two-line durable host loop drives plans unchanged:
+`resolveAgentRequests` does all of this for you, one plan step (one decision, or one completion) per call, so the two-line durable host loop drives plans unchanged:
 
 ```ts
 let step = initialAgentStep(machine, input);
 while (!step.done) step = await resolveAgentRequests(machine, step, executors);
 ```
 
-**Crash-safe mid-plan.** `agent.plan` is a stateful, transition-based _ledger_ actor: its in-progress state (the `applied` trail and remaining budget) is the invoke child's own snapshot `context`, advanced one event at a time. So it lands in a machine's persisted snapshot for free —
+**Crash-safe mid-plan.** `agent.plan` is a stateful, transition-based _ledger_ actor: its in-progress state (the `applied` trail and remaining budget) is the invoke child's own snapshot `context`, advanced one event at a time. So it lands in a machine's persisted snapshot for free:
 
 ```
 children.plan1.snapshot.context = { applied: ChosenEvent[], stepsRemaining: number, stopped: string | null }
 ```
 
-— surviving a full `getPersistedSnapshot` → JSON → restore round-trip. A host that persists after every event and reloads resumes the plan identically:
+This survives a full `getPersistedSnapshot` → JSON → restore round-trip. A host that persists after every event and reloads resumes the plan identically:
 
 ```ts
 // persist mid-plan
@@ -177,7 +177,7 @@ while (!step.done) step = await resolveAgentRequests(machine, step, executors);
 
 ## Concurrent text requests
 
-Parallel machine regions can leave **multiple pending text requests** on one step. Because parallel statechart regions are genuinely concurrent, `resolveAgentRequests` resolves them all in parallel (`Promise.all`) and applies their outputs in **request-array order** — deterministic for durable replay regardless of which model call finishes first. This is the default (and only) behavior; no flag:
+Parallel machine regions can leave **multiple pending text requests** on one step. Because parallel statechart regions are genuinely concurrent, `resolveAgentRequests` resolves them all in parallel (`Promise.all`) and applies their outputs in **request-array order**: deterministic for durable replay regardless of which model call finishes first. This is the default (and only) behavior; no flag:
 
 ```ts
 step = await resolveAgentRequests(machine, step, executors);

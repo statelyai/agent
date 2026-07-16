@@ -26,7 +26,7 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { defineModels } from "@statelyai/agent/ai-sdk";
 
-// Model ids here are placeholders — use any model your provider offers.
+// Model ids here are placeholders; use any model your provider offers.
 const models = defineModels({ quick: openai("gpt-5.4-mini") });
 
 const answerSchema = z.object({ answer: z.string() });
@@ -56,7 +56,7 @@ const agentSetup = setupAgent({
 });
 ```
 
-The `model` value is a key into the `models` registry, so a typo is a compile error. For a machine that must not name concrete models, use string refs the host resolves at run time — see [Which authoring form when](machines.md#which-authoring-form-when).
+The `model` value is a key into the `models` registry, so a typo is a compile error. For a machine that must not name concrete models, use string refs the host resolves at run time. See [Which authoring form when](machines.md#which-authoring-form-when).
 
 ## Author the machine
 
@@ -114,7 +114,7 @@ if (result.status === "done") {
 }
 ```
 
-Use `runAgent` when an idle pause is expected and you handle it (human-in-the-loop, resumable flows). For a run that is meant to go straight through to a final state, `runAgentToCompletion(machine, options)` returns the output directly — it throws `AgentIdleError` if the machine pauses and rethrows the underlying error otherwise:
+Use `runAgent` when an idle pause is expected and you handle it (human-in-the-loop, resumable flows). For a run that is meant to go straight through to a final state, `runAgentToCompletion(machine, options)` returns the output directly: it throws `AgentIdleError` if the machine pauses and rethrows the underlying error otherwise:
 
 ```ts
 import { runAgentToCompletion } from "@statelyai/agent";

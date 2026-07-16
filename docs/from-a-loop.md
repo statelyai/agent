@@ -102,7 +102,7 @@ const machine = agentSetup.createMachine({
 });
 ```
 
-A chosen `REFUND` for `$5000` can no longer slip through — the guard returns `undefined` and the decision retries. See [Decisions](decisions.md).
+A chosen `REFUND` for `$5000` can no longer slip through: the guard returns `undefined` and the decision retries. See [Decisions](decisions.md).
 
 ## Step 3: the pause becomes an idle state with snapshot persistence
 

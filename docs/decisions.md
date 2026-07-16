@@ -49,18 +49,18 @@ deciding: {
 
 `allowedEvents` (on both `agent.decide` and `agent.plan`) accepts a single string or an array. Entries are exact event types or wildcard patterns:
 
-- `['ASK', 'GUESS']` — exact types, typed against the machine's event-schema keys (a typo is a compile error).
-- `'ASK'` — a single string is shorthand for a one-entry array.
-- `'*'` — every currently-legal event.
-- `'todo.*'` — a dotted namespace: every declared event under `todo.` (`todo.add`, `todo.toggle`, …). Patterns are typed against the declared dotted event types, so `'nope.*'` (matching nothing) is a compile error.
+- `['ASK', 'GUESS']`: exact types, typed against the machine's event-schema keys (a typo is a compile error).
+- `'ASK'`: a single string is shorthand for a one-entry array.
+- `'*'`: every currently-legal event.
+- `'todo.*'`: a dotted namespace, every declared event under `todo.` (`todo.add`, `todo.toggle`, …). Patterns are typed against the declared dotted event types, so `'nope.*'` (matching nothing) is a compile error.
 
 Patterns and exact types can mix (`['todo.*', 'reset']`). Wildcards expand against the live snapshot, so they need a **snapshot-aware host** (`runAgent` or the step path); under a bare `createActor(...)`, list event types explicitly.
 
 ## Delivering the chosen event
 
-Delivery is automatic. When the decision resolves, the chosen event is sent to the invoking actor for you — it lands in `on:` exactly as if a user had sent it: a chosen `ASK` runs the `ASK` transition, a chosen `GUESS` runs the `GUESS` transition. You handle the outcome with ordinary transitions, not special decision plumbing.
+Delivery is automatic. When the decision resolves, the chosen event is sent to the invoking actor for you. It lands in `on:` exactly as if a user had sent it: a chosen `ASK` runs the `ASK` transition, a chosen `GUESS` runs the `GUESS` transition. You handle the outcome with ordinary transitions, not special decision plumbing.
 
-That chosen event's transition typically **exits** the invoking state (`ASK` → `awaitingAnswer`, `GUESS` → `revealing`), which cancels the invoke — so `onDone` normally never fires. This mirrors `agent.plan`, where exiting the state ends the plan.
+That chosen event's transition typically **exits** the invoking state (`ASK` → `awaitingAnswer`, `GUESS` → `revealing`), which cancels the invoke, so `onDone` normally never fires. This mirrors `agent.plan`, where exiting the state ends the plan.
 
 `onDone` is optional and rarely needed. Declare it only when the chosen event's transition stays **in-state**: then the invoke completes and `onDone` observes the chosen event as its output. `onError` (retries exhausted → `DecisionExhaustedError`) is unaffected.
 
@@ -105,7 +105,7 @@ Core validates and retries; it never talks to a model. How the model is coerced 
 
 Decisions are state-local: author them inline on the invoke with `src: 'agent.decide'`. There is no reusable decision-logic object.
 
-To reuse one decision across states or machines, share the **input builder** — the `({ context }) => ({ model, system, prompt, allowedEvents })` function — not an actor or logic object. Each state passes it to its own `agent.decide` invoke.
+To reuse one decision across states or machines, share the **input builder** (the `({ context }) => ({ model, system, prompt, allowedEvents })` function), not an actor or logic object. Each state passes it to its own `agent.decide` invoke.
 
 ```ts
 const chooseMoveInput = ({ context }) => ({
@@ -164,15 +164,15 @@ planning: {
 
 How it behaves:
 
-- **Iterated decide.** Each step re-reads the live snapshot, so candidates always reflect everything applied so far. Each step runs the same validation/retry loop a single decision gets — a guard-rejected step retries with `rejected-by-guard` feedback (see [Validation and retries](#validation-and-retries)).
-- **Built-in done move.** Every step is offered a reserved `agent.plan.done` candidate (`PLAN_DONE_EVENT_TYPE`). Choosing it ends the plan (`stopped: 'done'`) and is never sent to the machine — so the machine needs no no-op sentinel event of its own. The library also hints this move in the prompt automatically.
+- **Iterated decide.** Each step re-reads the live snapshot, so candidates always reflect everything applied so far. Each step runs the same validation/retry loop a single decision gets. A guard-rejected step retries with `rejected-by-guard` feedback (see [Validation and retries](#validation-and-retries)).
+- **Built-in done move.** Every step is offered a reserved `agent.plan.done` candidate (`PLAN_DONE_EVENT_TYPE`). Choosing it ends the plan (`stopped: 'done'`) and is never sent to the machine, so the machine needs no no-op sentinel event of its own. The library also hints this move in the prompt automatically.
 - **`maxSteps`** caps the plan (default 8). Also stops when no legal candidate remains.
 - **Applied trail** is appended to the prompt automatically each step, so the model sees plan progress without you threading it through context.
-- **Exiting the state ends the plan.** An applied event that leaves the invoking state (e.g. `QUIT` above) cancels the invoke — xstate moves on and `onDone` never runs.
+- **Exiting the state ends the plan.** An applied event that leaves the invoking state (e.g. `QUIT` above) cancels the invoke; xstate moves on and `onDone` never runs.
 - **Partial application, no rollback.** Events are sent to the machine as the plan runs, not staged. If step 3 of 5 stops the plan, steps 1–2 already applied and stay applied. There is no transactional undo.
-- **`onDone` output** is `{ steps, stopped }` — the events applied in order, and why the loop ended (`'done' | 'stop-event' | 'max-steps' | 'no-legal-events'`).
+- **`onDone` output** is `{ steps, stopped }`: the events applied in order, and why the loop ended (`'done' | 'stop-event' | 'max-steps' | 'no-legal-events'`).
 - **`stopOn` (rare).** For "send this real machine event **and** stop" semantics, list it in `stopOn`: the event is validated and sent, then the loop ends (`stopped: 'stop-event'`). The built-in done move already covers the common "no further action" case, so `stopOn` is only for ending on an actual state change.
-- **One ledger, both hosts.** `agent.plan` is a single stateful, transition-based ledger actor: its snapshot `context` (`{ applied, stepsRemaining, stopped }`) holds the in-progress plan state, advanced one `plan.applied`/`plan.ended` event at a time. `runAgent` drives `agent.plan` directly; the [step path](steps.md#plans-on-the-step-path) surfaces it as a re-surfacing `kind: 'plan'` request that `resolveAgentRequests` advances one step per call. Both hosts drive the _same_ ledger through shared drivers, and because the ledger is the invoke child's own `context`, it lands at `children.<id>.snapshot.context` in a persisted snapshot for free — surviving persist/resume mid-plan.
+- **One ledger, both hosts.** `agent.plan` is a single stateful, transition-based ledger actor: its snapshot `context` (`{ applied, stepsRemaining, stopped }`) holds the in-progress plan state, advanced one `plan.applied`/`plan.ended` event at a time. `runAgent` drives `agent.plan` directly; the [step path](steps.md#plans-on-the-step-path) surfaces it as a re-surfacing `kind: 'plan'` request that `resolveAgentRequests` advances one step per call. Both hosts drive the _same_ ledger through shared drivers, and because the ledger is the invoke child's own `context`, it lands at `children.<id>.snapshot.context` in a persisted snapshot for free, surviving persist/resume mid-plan.
 
 Full example: [examples/todo-nl/index.ts](../examples/todo-nl/index.ts) drives free-text commands through one `agent.plan` invoke.
 

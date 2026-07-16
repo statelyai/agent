@@ -43,7 +43,7 @@ const agentSetup = setupAgent({
 
 ### Model references and typed aliases
 
-Prefer a `models` registry (the canonical form): it narrows `model` to the map's keys, making a typo a compile error and sharing one alias map between authoring and the host adapter. A bare `model` string is the escape hatch — any string, passed straight through to your [host](hosts.md) to resolve — for a machine that must not name concrete models (see [Which authoring form when](machines.md#which-authoring-form-when)).
+Prefer a `models` registry (the canonical form): it narrows `model` to the map's keys, making a typo a compile error and sharing one alias map between authoring and the host adapter. A bare `model` string is the escape hatch (any string, passed straight through to your [host](hosts.md) to resolve) for a machine that must not name concrete models (see [Which authoring form when](machines.md#which-authoring-form-when)).
 
 ```ts
 import { openai } from "@ai-sdk/openai";
@@ -97,11 +97,11 @@ const machine = agentSetup.createMachine({
 });
 ```
 
-Inside `onDone`, `output` is already validated against the request's own output schema and typed from it (`{ answer: string }` here), so you read `output.answer` directly — no parsing step is ever needed in the machine.
+Inside `onDone`, `output` is already validated against the request's own output schema and typed from it (`{ answer: string }` here), so you read `output.answer` directly; no parsing step is ever needed in the machine.
 
 ### Narrowing an unknown output outside the machine
 
-`parseOutput(schema, output)` validates a value against a schema and returns it parsed, throwing on mismatch. It is an escape hatch for host code that holds a raw, still-untyped output — e.g. a value read back from a persisted snapshot, or an inline `agent.generateText` result whose static type is `unknown`. Inside a request's `onDone` it is never needed.
+`parseOutput(schema, output)` validates a value against a schema and returns it parsed, throwing on mismatch. It is an escape hatch for host code that holds a raw, still-untyped output: e.g. a value read back from a persisted snapshot, or an inline `agent.generateText` result whose static type is `unknown`. Inside a request's `onDone` it is never needed.
 
 ```ts
 import { parseOutput } from "@statelyai/agent";
@@ -116,7 +116,7 @@ const answer = parseOutput(answerSchema, rawOutput); // typed as { answer: strin
 
 Output is **structured** when the output schema describes an object, an array, or a top-level union of them (`z.union`/`z.discriminatedUnion`), and plain text otherwise: `output: z.object({ ... })` returns a validated object, `output: z.string()` returns the model's text.
 
-Every structured request is sent to the provider wrapped in the [structured-output envelope](./hosts.md#the-structured-output-envelope) — a root object `{ result: <your schema> }` that hosts unwrap before validation. This makes a bare union or array root portable: it is nested under `result` for you, so providers that reject a union/array _root_ still accept it. You always declare and receive the bare schema; the envelope is invisible to the machine.
+Every structured request is sent to the provider wrapped in the [structured-output envelope](./hosts.md#the-structured-output-envelope): a root object `{ result: <your schema> }` that hosts unwrap before validation. This makes a bare union or array root portable: it is nested under `result` for you, so providers that reject a union/array _root_ still accept it. You always declare and receive the bare schema; the envelope is invisible to the machine.
 
 ```ts
 export const triageTicket = createTextLogic({
@@ -151,7 +151,7 @@ export const triageTicket = createTextLogic({
 });
 ```
 
-The reasoning never enters machine context or output — it is surfaced only on the raw executor result (`result.reasoning` on `createAiSdkExecutors`' `generateText`), on `runAgent`'s `onResult(request, { raw })`, and as a `reasoning` field on the `request.end` `onTrace` event. It is ignored for text-mode requests (no output schema, or `output: z.string()`).
+The reasoning never enters machine context or output; it is surfaced only on the raw executor result (`result.reasoning` on `createAiSdkExecutors`' `generateText`), on `runAgent`'s `onResult(request, { raw })`, and as a `reasoning` field on the `request.end` `onTrace` event. It is ignored for text-mode requests (no output schema, or `output: z.string()`).
 
 ## Streaming requests
 
@@ -186,9 +186,9 @@ const result = await runAgent(machine, {
 
 <!-- tools and metadata.maxSteps from src/types.ts (AgentTool) and src/ai-sdk/index.ts -->
 
-A text request can carry `tools`: a map of tool name to a tool. **Tools are whatever your SDK produces** — the `tools` type is a minimal structural contract (`description?`, `inputSchema?`, `outputSchema?`, `execute?`, plus any extra fields), so an AI SDK `tool({...})`, an MCP-style descriptor, or a plain object all drop in as-is. Extra fields (`providerOptions`, `toModelOutput`, …) pass through untouched.
+A text request can carry `tools`: a map of tool name to a tool. **Tools are whatever your SDK produces**: the `tools` type is a minimal structural contract (`description?`, `inputSchema?`, `outputSchema?`, `execute?`, plus any extra fields), so an AI SDK `tool({...})`, an MCP-style descriptor, or a plain object all drop in as-is. Extra fields (`providerOptions`, `toModelOutput`, …) pass through untouched.
 
-Bring your SDK's tool — the SDK owns the input typing, so `execute`'s argument is typed with no cast:
+Bring your SDK's tool: the SDK owns the input typing, so `execute`'s argument is typed with no cast:
 
 ```ts
 import { tool } from 'ai';
@@ -232,7 +232,7 @@ export const research = createTextLogic({
 
 <!-- createTextLogic from src/text-logic.ts and examples/email-drafter -->
 
-Inline `requests:` (above) is the default. `createTextLogic` is the escape hatch when a request should be standalone — exported, tested on its own, or shared across machines — and registered under `actorSources`. A `requests` entry is exactly what `setupAgent` builds internally from `createTextLogic`, so the two are interchangeable (see [Which authoring form when](machines.md#which-authoring-form-when)).
+Inline `requests:` (above) is the default. `createTextLogic` is the escape hatch when a request should be standalone (exported, tested on its own, or shared across machines) and registered under `actorSources`. A `requests` entry is exactly what `setupAgent` builds internally from `createTextLogic`, so the two are interchangeable (see [Which authoring form when](machines.md#which-authoring-form-when)).
 
 ```ts
 import { createTextLogic, setupAgent } from "@statelyai/agent";

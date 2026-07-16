@@ -2,7 +2,7 @@
 
 Keyless verification for agent machines. Coding agents generate these machines; they need a closed loop to **self-verify what they generated without any API keys or model calls**. `@statelyai/agent` ships three static/simulated APIs plus a thin CLI for that.
 
-Everything here runs on `machine.config` and the pure step path — no provider, no network, no keys.
+Everything here runs on `machine.config` and the pure step path: no provider, no network, no keys.
 
 ## Why keyless
 
@@ -14,7 +14,7 @@ An agent that emits a machine (from a prompt, a database, a visual editor) can't
 
 ## `lintAgentMachine(machine, options?)`
 
-Static structural checks over a built machine — works for TS-authored (`setupAgent(...).createMachine(...)`) and `setupAgent.fromConfig(...)`-compiled machines alike. Returns `AgentLintDiagnostic[]` (`{ code, severity, path, message }`), empty when clean.
+Static structural checks over a built machine, working for TS-authored (`setupAgent(...).createMachine(...)`) and `setupAgent.fromConfig(...)`-compiled machines alike. Returns `AgentLintDiagnostic[]` (`{ code, severity, path, message }`), empty when clean.
 
 ```ts
 import { lintAgentMachine } from "@statelyai/agent";
@@ -28,20 +28,20 @@ if (errors.length) {
 | Code                       | Severity | Fires when                                                                                                                                                                                                                                                                          |
 | -------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `unreachable-state`        | error    | A state no transition/`always`/`choice`/`onDone`/`onError` can reach from the initial state. Conservative: dynamic (function) transitions over-approximate, so it never false-flags.                                                                                                |
-| `decide-without-events`    | error    | A state invokes `agent.decide`/`agent.plan` but neither it nor any ancestor handles any event — the chosen event can never be delivered.                                                                                                                                            |
+| `decide-without-events`    | error    | A state invokes `agent.decide`/`agent.plan` but neither it nor any ancestor handles any event, so the chosen event can never be delivered.                                                                                                                                            |
 | `unserializable-context`   | warning  | The context schema exposes no JSON schema (e.g. a `z.custom` messages array), so its fields can't be statically checked for JSON persist/resume.                                                                                                                                    |
-| `direct-object-src`        | warning  | An invoke `src` is a direct object/machine value — it can't be rebound by `runAgent`, so it inherits no host executors.                                                                                                                                                             |
+| `direct-object-src`        | warning  | An invoke `src` is a direct object/machine value that can't be rebound by `runAgent`, so it inherits no host executors.                                                                                                                                                             |
 | `final-without-output`     | error    | The machine declares an output schema but a top-level final state has no `output`.                                                                                                                                                                                                  |
-| `final-output-reads-event` | warning  | A top-level final state's `output` function reads the entering `event`. Final `output` fns are evaluated more than once with different events, so `event` is unreliable — read `context` only, capturing what you need into context in the transition that targets the final state. |
-| `missing-final`            | warning  | No reachable final state — the machine can only idle/loop (legal, but flagged).                                                                                                                                                                                                     |
+| `final-output-reads-event` | warning  | A top-level final state's `output` function reads the entering `event`. Final `output` fns are evaluated more than once with different events, so `event` is unreliable. Read `context` only, capturing what you need into context in the transition that targets the final state. |
+| `missing-final`            | warning  | No reachable final state; the machine can only idle/loop (legal, but flagged).                                                                                                                                                                                                     |
 
 ## `await simulateAgent(machine, { input, script, maxSteps? })`
 
-A deterministic, model-free playthrough on the pure step path (async — it drives plan steps through the real durable protocol). The `script` supplies responses by invoke `src` (FIFO queues), so runs are reproducible:
+A deterministic, model-free playthrough on the pure step path (async: it drives plan steps through the real durable protocol). The `script` supplies responses by invoke `src` (FIFO queues), so runs are reproducible:
 
-- `decisions` — the `ChosenEvent` to apply for each decision (keyed by decision src, usually `agent.decide`). A plan step is a decision too: key its chosen events by the plan invoke's src (`agent.plan`) and end with the reserved `agent.plan.done` move to complete the plan;
-- `text` — output values for text requests (keyed by request src);
-- `userInput` — answers for `agent.userInput` invokes.
+- `decisions`: the `ChosenEvent` to apply for each decision (keyed by decision src, usually `agent.decide`). A plan step is a decision too: key its chosen events by the plan invoke's src (`agent.plan`) and end with the reserved `agent.plan.done` move to complete the plan;
+- `text`: output values for text requests (keyed by request src);
+- `userInput`: answers for `agent.userInput` invokes.
 
 ```ts
 import { simulateAgent } from "@statelyai/agent";
@@ -60,11 +60,11 @@ const { status, snapshot, trail } = await simulateAgent(machine, {
 // status: 'done' | 'idle' | 'exhausted'
 ```
 
-Returns `{ status, snapshot, trail }`. It throws a descriptive error — naming the pending request's kind, src, and id — when the script runs dry mid-request, so a missing response is obvious.
+Returns `{ status, snapshot, trail }`. It throws a descriptive error (naming the pending request's kind, src, and id) when the script runs dry mid-request, so a missing response is obvious.
 
 ## `await explorePaths(machine, { input, maxDepth?, textOutputs? })`
 
-Enumerates decision and external-event branches, model-free, and reports coverage (async — plan branches advance through the real plan protocol). At each decision request it forks one branch per candidate event (guard-rejected candidates are counted in `prunedByGuard`, not explored); at an idle wait it forks per externally-accepted event. A `agent.plan` request forks the same way — plan steps fork like decisions, including the reserved `agent.plan.done` move (always legal; other candidates prune when their guard rejects them) — so a single plan can consume several depth units. Text/`userInput` invokes are resolved from `textOutputs` (a by-src canned-output map); a missing src halts that branch with a `needs-output` terminal instead of throwing.
+Enumerates decision and external-event branches, model-free, and reports coverage (async: plan branches advance through the real plan protocol). At each decision request it forks one branch per candidate event (guard-rejected candidates are counted in `prunedByGuard`, not explored); at an idle wait it forks per externally-accepted event. A `agent.plan` request forks the same way (plan steps fork like decisions, including the reserved `agent.plan.done` move, which is always legal while other candidates prune when their guard rejects them), so a single plan can consume several depth units. Text/`userInput` invokes are resolved from `textOutputs` (a by-src canned-output map); a missing src halts that branch with a `needs-output` terminal instead of throwing.
 
 ```ts
 import { explorePaths } from "@statelyai/agent";
@@ -100,6 +100,6 @@ For machines authored as data (see [machines as data](machines-as-data)), a thin
 npx statelyai-agent lint workflow.json
 ```
 
-The library bundles no JSON Schema engine, so the CLI lints **structure only**: it compiles the config with a permissive pass-through compiler and runs `lintAgentMachine`. It exits `1` on any error-severity finding — drop it into CI or a generation loop. For full schema-aware linting, use the API with a real compiler: `lintAgentMachine(setupAgent.fromConfig(config, { compileSchema }))`.
+The library bundles no JSON Schema engine, so the CLI lints **structure only**: it compiles the config with a permissive pass-through compiler and runs `lintAgentMachine`. It exits `1` on any error-severity finding, so drop it into CI or a generation loop. For full schema-aware linting, use the API with a real compiler: `lintAgentMachine(setupAgent.fromConfig(config, { compileSchema }))`.
 
 > Because `fromConfig` lowers every transition to a function, `unreachable-state` is over-approximated for config machines; the other checks are unaffected.

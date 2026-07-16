@@ -181,7 +181,7 @@ states:
       REPLY: { target: drafting }
 ```
 
-Delivery of the chosen event is automatic — the decision actor sends it to the invoking actor when it resolves, in both TypeScript and JSON. That event's transition usually exits the invoking state, cancelling the invoke, so `onDone` normally never fires; it is optional and only observed when the chosen event's transition stays in-state. Only `onError` (retries exhausted) is commonly configured.
+Delivery of the chosen event is automatic: the decision actor sends it to the invoking actor when it resolves, in both TypeScript and JSON. That event's transition usually exits the invoking state, cancelling the invoke, so `onDone` normally never fires; it is optional and only observed when the chosen event's transition stays in-state. Only `onError` (retries exhausted) is commonly configured.
 
 ## Choice states and emitted events
 
@@ -217,4 +217,4 @@ When you need comparisons, computed guards, or function-valued fields, author in
 
 ## Verifying a generated machine
 
-A machine built from data can be checked before it ever runs — no API key, no model call. Lint it with `lintAgentMachine`, simulate a scripted playthrough, or enumerate its decision branches. The `statelyai-agent lint <workflow.json>` CLI does this for a JSON config in CI. See [verify](verify).
+A machine built from data can be checked before it ever runs: no API key, no model call. Lint it with `lintAgentMachine`, simulate a scripted playthrough, or enumerate its decision branches. The `statelyai-agent lint <workflow.json>` CLI does this for a JSON config in CI. See [verify](verify).

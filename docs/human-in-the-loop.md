@@ -17,7 +17,7 @@ The machine decides which events are legal in the waiting state; the host delive
 
 <!-- setupAgent({ isSuspended }) and RunAgentOptions.isSuspended from src/run-agent.ts, src/setup-agent.ts -->
 
-By default `runAgent` detects a resting state with a timing heuristic. To settle intentional waits deterministically instead, tell the machine what "suspended" means for it. There is no built-in tag — you choose the signal. Declare it once with `setupAgent({ isSuspended })`; the predicate travels with the machine (including through `machine.provide(...)`):
+By default `runAgent` detects a resting state with a timing heuristic. To settle intentional waits deterministically instead, tell the machine what "suspended" means for it. There is no built-in tag. You choose the signal. Declare it once with `setupAgent({ isSuspended })`; the predicate travels with the machine (including through `machine.provide(...)`):
 
 ```ts
 const agentSetup = setupAgent({
@@ -32,7 +32,7 @@ reviewing: {
 },
 ```
 
-Tags are serializable and show up in the Stately visualizer, but the signal is yours to pick — a tag, a state match, or a `meta` field. A meta-driven flavor reuses annotations you may already have:
+Tags are serializable and show up in the Stately visualizer, but the signal is yours to pick: a tag, a state match, or a `meta` field. A meta-driven flavor reuses annotations you may already have:
 
 ```ts
 import { getStateMeta } from "@statelyai/agent";
@@ -43,7 +43,7 @@ const agentSetup = setupAgent({
 });
 ```
 
-A host can override the machine's predicate per run by passing `isSuspended` to `runAgent` directly. Resolution order is: the `runAgent` option (host override) → the machine-carried predicate → the timing heuristic (when neither is present). A machine with no predicate falls back to the heuristic and behaves exactly as before. Any suspended wait still respects whole-machine idle — a sibling region's in-flight work runs to completion first.
+A host can override the machine's predicate per run by passing `isSuspended` to `runAgent` directly. Resolution order is: the `runAgent` option (host override) → the machine-carried predicate → the timing heuristic (when neither is present). A machine with no predicate falls back to the heuristic and behaves exactly as before. Any suspended wait still respects whole-machine idle: a sibling region's in-flight work runs to completion first.
 
 ```ts
 await runAgent(machine, {
@@ -162,7 +162,7 @@ if (result.status === "done") {
 }
 ```
 
-A generic host that builds the human's event dynamically (from form input, a webhook payload, an interaction protocol) can't type it against a specific machine. `parseAgentEvent(snapshot, event)` validates the `{ type, ...payload }` at runtime — accepted event types and registered payload schemas — and returns it typed as the machine's event union, throwing a descriptive error otherwise. This replaces `event as never` casts in meta-driven hosts:
+A generic host that builds the human's event dynamically (from form input, a webhook payload, an interaction protocol) can't type it against a specific machine. `parseAgentEvent(snapshot, event)` validates the `{ type, ...payload }` at runtime (accepted event types and registered payload schemas) and returns it typed as the machine's event union, throwing a descriptive error otherwise. This replaces `event as never` casts in meta-driven hosts:
 
 ```ts
 import { parseAgentEvent } from "@statelyai/agent";
@@ -190,13 +190,13 @@ The persist-and-resume loop has one recurring shape: **run to idle → serialize
 - [file-snapshot-store](../examples/file-snapshot-store/index.ts): a `node:fs` store keyed by session id, resumed across several fresh `runAgent` calls (with a SQLite variant sketched inline).
 - [machine-as-tool](../examples/machine-as-tool/index.ts): the same handle passed through a host harness's tool call. `startTool` runs to idle and returns the handle; `resumeTool` revives it and delivers the event.
 
-The `AgentSnapshotStore` type — `load(id): Promise<Snapshot | undefined>` and `save(id, snapshot): Promise<void>` — is exported so different stores share one shape and interoperate. It is **type-only**: the library ships no implementation; a store (file, SQLite, KV row) is userland. The file-snapshot-store example annotates its store with it.
+The `AgentSnapshotStore` type (`load(id): Promise<Snapshot | undefined>` and `save(id, snapshot): Promise<void>`) is exported so different stores share one shape and interoperate. It is **type-only**: the library ships no implementation; a store (file, SQLite, KV row) is userland. The file-snapshot-store example annotates its store with it.
 
 ### Illegal resume events throw
 
 <!-- IllegalResumeEventError and onIllegalResumeEvent from src/run-agent.ts -->
 
-Resuming with an event the restored state cannot take is a programmer error, so `runAgent` throws `IllegalResumeEventError` (carrying `eventType` and `acceptedTypes`) before delivering it — the same class as its bind-time throws, not an `error`-status settle. You do not need to pre-check legality yourself:
+Resuming with an event the restored state cannot take is a programmer error, so `runAgent` throws `IllegalResumeEventError` (carrying `eventType` and `acceptedTypes`) before delivering it: the same class as its bind-time throws, not an `error`-status settle. You do not need to pre-check legality yourself:
 
 ```ts
 import { IllegalResumeEventError, runAgent } from "@statelyai/agent";
@@ -210,19 +210,19 @@ try {
 }
 ```
 
-A type-legal event a **guard** rejects is not an illegal resume event: the machine simply takes no transition and the run settles per normal semantics. To restore the older silent-drop behavior, pass `onIllegalResumeEvent: 'ignore'`.
+A type-legal event a **guard** rejects is not an illegal resume event: the machine takes no transition and the run settles per normal semantics. To restore the older silent-drop behavior, pass `onIllegalResumeEvent: 'ignore'`.
 
 ### Resuming across machine versions
 
 <!-- agentMeta stamping, onVersionMismatch, migrateSnapshot from src/run-agent.ts -->
 
-Every settled snapshot carries a plain `agentMeta: { machineId, version }` field (it survives the JSON round-trip). `version` defaults to `getMachineStructuralHash(machine)` — a dependency-free hash over the machine's structure (state ids/nesting, transition event types and targets, invoke srcs, `initial`), ignoring prompts, guards, and other functions. So a snapshot persisted for days remembers which machine shape produced it.
+Every settled snapshot carries a plain `agentMeta: { machineId, version }` field (it survives the JSON round-trip). `version` defaults to `getMachineStructuralHash(machine)`: a dependency-free hash over the machine's structure (state ids/nesting, transition event types and targets, invoke srcs, `initial`), ignoring prompts, guards, and other functions. So a snapshot persisted for days remembers which machine shape produced it.
 
 On resume, `runAgent` compares the incoming stamp against the current machine's version. If they differ (a state or transition was added, removed, or retargeted since the snapshot was saved):
 
 - `onVersionMismatch: 'throw'` (default) throws `SnapshotVersionMismatchError` with `from`/`to`.
 - `'warn'` logs once and proceeds; `'ignore'` proceeds silently.
-- `migrateSnapshot(snapshot, { from, to })` — when provided — runs instead; its return value is the snapshot resumed from, so you can adapt an old snapshot to the new shape.
+- `migrateSnapshot(snapshot, { from, to })` (when provided) runs instead; its return value is the snapshot resumed from, so you can adapt an old snapshot to the new shape.
 
 An unstamped snapshot (no `agentMeta`) is always accepted. Pass an explicit `machineVersion` (a semver or build id) to control migration boundaries yourself rather than tracking the structural hash.
 
@@ -231,12 +231,12 @@ try {
   await runAgent(machine, { snapshot, event, executors: { generateText } });
 } catch (error) {
   if (error instanceof SnapshotVersionMismatchError) {
-    // error.from / error.to — the machine changed since this snapshot was saved
+    // error.from / error.to: the machine changed since this snapshot was saved
   }
 }
 ```
 
-You still call `getAcceptedEvents` yourself only when you want to _render_ the choices — rehydrate the handle and read them:
+You still call `getAcceptedEvents` yourself only when you want to _render_ the choices: rehydrate the handle and read them:
 
 ```ts
 import { createActor } from "xstate";
@@ -287,7 +287,7 @@ await runAgent(machine, {
 });
 ```
 
-The handler resolves to a `string` — what the human typed — so `onDone`'s `output` needs no cast. To collect structured input, gather the string(s) and parse/classify in a follow-up state (see [twenty-questions](../examples/twenty-questions/index.ts)) or register a custom actor source in place of `agent.userInput`.
+The handler resolves to a `string` (what the human typed), so `onDone`'s `output` needs no cast. To collect structured input, gather the string(s) and parse/classify in a follow-up state (see [twenty-questions](../examples/twenty-questions/index.ts)) or register a custom actor source in place of `agent.userInput`.
 
 Without a handler, `agent.userInput` becomes a **pending placeholder** instead of an error. See the next section.
 

@@ -2,7 +2,7 @@
 "@statelyai/agent": minor
 ---
 
-**Breaking:** `runAgent` / `runAgentToCompletion` no longer accept flat `generateText`, `streamText`, and `decide` options. Host executors are now passed as a single nested `executors` option — the same `AgentRequestExecutors` set the step path (`executeAgentRequest` / `resolveAgentRequests`) takes:
+**Breaking:** `runAgent` / `runAgentToCompletion` no longer accept flat `generateText`, `streamText`, and `decide` options. Host executors are now passed as a single nested `executors` option: the same `AgentRequestExecutors` set the step path (`executeAgentRequest` / `resolveAgentRequests`) takes:
 
 ```ts
 // before
