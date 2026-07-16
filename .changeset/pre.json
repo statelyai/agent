@@ -5,6 +5,7 @@
     "@statelyai/agent": "1.1.6"
   },
   "changesets": [
+    "agent-meta-on-traces-and-messages",
     "agent-plan-builtin",
     "allowed-events-wildcards",
     "api-polish-states-helpers-prune",
