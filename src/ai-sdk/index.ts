@@ -193,7 +193,7 @@ function resolveAiSdkModel<TModels extends AiSdkModelMap>(
 /**
  * AI SDK request-mapping settings shared by `generateText`/`streamText`.
  * `AgentTextRequest.messages` (`AgentMessage[]`) and AI SDK's `ModelMessage[]`
- * are structurally compatible by design (§1 of docs/p0-design.md) — the cast
+ * are structurally compatible by design (§1 of .scratch/p0-design.md) — the cast
  * below is a typed identity mapping, not a semantic conversion.
  */
 export function toAiSdkCallSettings(request: AgentTextRequest & { tools?: AgentTools }) {
@@ -613,7 +613,7 @@ export function createAgent(
 }
 
 /** One AI SDK `tool()` per candidate event — the "tool-per-event +
- * toolChoice: 'required'" recipe from docs/p0-design.md §2.6. */
+ * toolChoice: 'required'" recipe from .scratch/p0-design.md §2.6. */
 export function toAiSdkEventTools(events: AgentEventDescriptor[]) {
   return Object.fromEntries(
     events.map((event) => [

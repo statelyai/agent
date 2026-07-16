@@ -1,0 +1,14 @@
+{
+  "name": "plain-xstate",
+  "title": "Plain XState (no setupAgent)",
+  "kind": "agent-workflow",
+  "origin": {
+    "type": "stately-agent",
+    "source": "New example for driving a library-unaware XState v5 machine",
+    "url": null
+  },
+  "comparison": {
+    "targets": ["LangGraph", "hand-rolled loop"],
+    "purpose": "A normal XState v5 machine authored with plain `setup(...)` — a promise-shaped invoke, an `on: { APPROVE, REVISE }` decision state with a named guard, a final state, and zero knowledge of @statelyai/agent — is driven as an agent: bind the actor with `machine.provide(...)`, enumerate legal events with `getAcceptedEvents(snapshot)`, and choose with `resolveDecision(...)` gated by `snapshot.can(event)`. No setupAgent, no agent.decide."
+  }
+}

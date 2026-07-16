@@ -1,0 +1,14 @@
+{
+  "name": "corrective-rag",
+  "title": "Corrective RAG (CRAG)",
+  "kind": "agent-workflow",
+  "origin": {
+    "type": "langgraph",
+    "source": "LangGraph Corrective RAG (CRAG) tutorial",
+    "url": "https://langchain-ai.github.io/langgraph/tutorials/rag/langgraph_crag/"
+  },
+  "comparison": {
+    "targets": ["LangGraph"],
+    "purpose": "Self-correcting retrieval as explicit machine states: retrieve → grade → decide → (generate | rewrite → web-search → generate)."
+  }
+}

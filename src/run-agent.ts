@@ -63,7 +63,7 @@ import {
 
 // ─── runAgent (createActor wrapper) ───
 //
-// See docs/p0-design.md §3. Unlike the step helpers above (a pure
+// See .scratch/p0-design.md §3. Unlike the step helpers above (a pure
 // transition-at-a-time path for durable hosts), `runAgent` owns a live
 // `createActor` actor: it binds host executors directly onto the machine's
 // agent actor sources, runs the actor to completion or idle, and reports a
@@ -1894,7 +1894,7 @@ export function inspectTransitions(
   };
 }
 
-// True when a snapshot is active but has no in-flight children and no pending eventless/after work — see §3.3 in docs/p0-design.md for the approximation this makes. `ignoreUserInputChildren` exempts pending `agent.userInput` placeholder children (they wait for a human indefinitely and must not block an idle settle).
+// True when a snapshot is active but has no in-flight children and no pending eventless/after work — see §3.3 in .scratch/p0-design.md for the approximation this makes. `ignoreUserInputChildren` exempts pending `agent.userInput` placeholder children (they wait for a human indefinitely and must not block an idle settle).
 function isIdleSnapshot(
   snapshot: AnyMachineSnapshot,
   { ignoreUserInputChildren }: { ignoreUserInputChildren: boolean },

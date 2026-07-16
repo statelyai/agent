@@ -117,7 +117,13 @@ if (result.status === "done") {
 Use `runAgent` when an idle pause is expected and you handle it (human-in-the-loop, resumable flows). For a run that is meant to go straight through to a final state, `runAgentToCompletion(machine, options)` returns the output directly — it throws `AgentIdleError` if the machine pauses and rethrows the underlying error otherwise:
 
 ```ts
-const output = await runAgentToCompletion(machine, { input, executors });
+import { runAgentToCompletion } from "@statelyai/agent";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
+
+const output = await runAgentToCompletion(machine, {
+  input: { prompt: "Why state machines?" },
+  executors: createAiSdkExecutors({ models }),
+});
 console.log(output.answer);
 ```
 

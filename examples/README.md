@@ -17,6 +17,7 @@ Every example is dual-mode: run it directly against a real model with `OPENAI_AP
 - Running with host actors: [`ai-sdk-host/index.ts`](ai-sdk-host/index.ts)
 - Machines as data — a full workflow (decision, text request, idle human step) authored as a real `.json` file: [`json-agent/index.ts`](json-agent/index.ts)
 - A plain, invoke-less machine run as an agent via `getRequests` (prompts in state descriptions): [`described-workflow/index.ts`](described-workflow/index.ts)
+- A library-unaware `setup(...)` machine driven as an agent by hand (no `setupAgent`), with `getAcceptedEvents` + `resolveDecision`: [`plain-xstate/index.ts`](plain-xstate/index.ts)
 - Host actor guide: [`../docs/host-actors.md`](../docs/host-actors.md)
 - Framework comparison examples: [`supervisor/index.test.ts`](supervisor/index.test.ts), [`plan-and-execute/index.test.ts`](plan-and-execute/index.test.ts), [`rag/index.test.ts`](rag/index.test.ts), [`tool-calling/index.test.ts`](tool-calling/index.test.ts)
 
@@ -33,12 +34,16 @@ These use `setupAgent(...)` (or plain XState `setup(...)` plus `createTextLogic(
 - [`triage/index.ts`](triage/index.ts): structured-output support ticket triage
 - [`json-agent/index.ts`](json-agent/index.ts): `setupAgent.fromConfig(...)` lowering a support-ticket workflow authored as a real `.json` file (decision, text request, idle human approval step)
 - [`described-workflow/index.ts`](described-workflow/index.ts): a plain `createMachine` with zero invokes run as an agent via `runAgent({ getRequests })`, prompts read from state descriptions/meta, message log stamped on `snapshot.messages`
+- [`plain-xstate/index.ts`](plain-xstate/index.ts): a normal XState v5 `setup(...)` machine — a promise-shaped invoke, an `on: { APPROVE, REVISE }` decision state with a guarded transition, a final state, and zero knowledge of `@statelyai/agent` — adopted as an agent without `setupAgent`: bind the actor via `machine.provide(...)`, then drive the decision with `getAcceptedEvents(snapshot)` + `resolveDecision(...)` gated by `snapshot.can(event)`
 - [`supervisor/index.ts`](supervisor/index.ts): a routing request's structured output hands off to a format-specific worker
 - [`human-in-the-loop/index.ts`](human-in-the-loop/index.ts): draft → idle review (typed `meta.interaction`) → APPROVE/REJECT redraft, with a JSON snapshot round-trip
 - [`long-running-onboarding/index.ts`](long-running-onboarding/index.ts): Google ADK-style onboarding coordinator with durable typed state, two idle dormancy gates, JSON snapshot resume across days, and delegated IT provisioning
 - [`file-snapshot-store/index.ts`](file-snapshot-store/index.ts): durable HITL checkpoints in a file-backed snapshot store — each idle settle writes JSON to disk and a fresh `runAgent` call resumes across turns
 - [`machine-as-tool/index.ts`](machine-as-tool/index.ts): a whole agent machine embedded inside one tool call of a host harness — start/resume tools bridge a JSON-safe snapshot handle and read the typed interaction meta
 - [`rag/index.ts`](rag/index.ts): retrieve (typed plain actor, keyword scoring over a sample corpus) → grounded answer, with conversational memory in context
+- [`corrective-rag/index.ts`](corrective-rag/index.ts): LangGraph's CRAG tutorial as explicit states — retrieve → grade documents → conditional correction branch (rewrite query → web-search fallback) → grounded generate, every model call with a degrading `onError`
+- [`reflection-writer/index.ts`](reflection-writer/index.ts): LangGraph's Reflection tutorial (essay writer) — generate ↔ critique loop with a typed `maxRevisions` bound and structured `{ critique, satisfied }` early exit, transcript accumulated as role-flipped messages
+- [`customer-support/index.ts`](customer-support/index.ts): the core of LangGraph's customer-support tutorial — intent routing (typed union), safe Q&A with request-level tools, and sensitive actions gated behind an idle `confirming` state (`interrupt_before` as a real state: persist snapshot, resume with APPROVE/DENY)
 - [`tool-calling/index.ts`](tool-calling/index.ts): model selects a tool (structured output), typed tool actors execute, progress via `onTransition`
 - [`react-agent/index.ts`](react-agent/index.ts): LangGraph's `createReactAgent` as an explicit visible loop — one `reasonOrAct` request per iteration returns a call-a-tool-or-answer union, typed tool actors execute, and a step-budget guard breaks the loop with a best-effort answer
 - [`plan-and-execute/index.ts`](plan-and-execute/index.ts): planner structured output, execution states iterate the plan (keeps the ReWOO evidence-map idea)
@@ -73,6 +78,9 @@ Multi-step agent patterns:
 - [`plan-and-execute/index.test.ts`](plan-and-execute/index.test.ts): plan-and-execute, keeping the ReWOO evidence-map idea
 - [`subflows/index.test.ts`](subflows/index.test.ts): nested subgraphs / child flows
 - [`rag/index.test.ts`](rag/index.test.ts): retrieval-augmented generation (LangGraph RAG, Burr conversational RAG)
+- [`corrective-rag/index.test.ts`](corrective-rag/index.test.ts): corrective RAG (LangGraph CRAG tutorial — grade docs, rewrite query, web-search fallback)
+- [`reflection-writer/index.test.ts`](reflection-writer/index.test.ts): reflection loop (LangGraph reflection essay-writer tutorial)
+- [`customer-support/index.test.ts`](customer-support/index.test.ts): customer-support bot with sensitive-action approval (LangGraph flagship tutorial's `interrupt_before` pattern)
 - [`tool-calling/index.test.ts`](tool-calling/index.test.ts): tool calling with intermediate progress (Burr tool calling, LangGraph tool-calling-progress)
 - [`sql-agent/index.test.ts`](sql-agent/index.test.ts): SQL / tool-heavy agent workflow
 - [`human-in-the-loop/index.test.ts`](human-in-the-loop/index.test.ts): human-in-the-loop plus snapshot persistence

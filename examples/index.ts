@@ -22,11 +22,15 @@ export {
   describedWorkflowMachine,
   runDescribedWorkflowExample,
 } from "./described-workflow/index.js";
+export { plainWriterMachine, runPlainXstateExample } from "./plain-xstate/index.js";
 export { triageMachine, triageSchemas, triageSchema } from "./triage/index.js";
 export { twentyQuestionsMachine, twentyQuestionsSchemas } from "./twenty-questions/index.js";
 export { goFishMachine, goFishSchemas, ranks as goFishRanks } from "./go-fish/index.js";
 export { humanInTheLoopMachine, runHumanInTheLoopExample } from "./human-in-the-loop/index.js";
 export { ragMachine, runRAGExample } from "./rag/index.js";
+export { correctiveRagMachine, runCorrectiveRagExample } from "./corrective-rag/index.js";
+export { reflectionWriterMachine, runReflectionWriterExample } from "./reflection-writer/index.js";
+export { customerSupportMachine, runCustomerSupportExample } from "./customer-support/index.js";
 export { toolCallingMachine, runToolCallingExample } from "./tool-calling/index.js";
 export { reactAgentMachine, runReactAgentExample } from "./react-agent/index.js";
 export { supervisorMachine, runSupervisorExample } from "./supervisor/index.js";
