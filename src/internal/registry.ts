@@ -7,8 +7,14 @@ import {
 } from "xstate";
 import type { AgentRequestOptions } from "../events.js";
 
-export type AgentExecutionOptions = Pick<AgentRequestOptions, "schemas" | "actorSources">;
+export type AgentExecutionOptions = Pick<AgentRequestOptions, "schemas" | "actorSources"> & {
+  models?: object;
+};
 export const agentExecutionOptions = new WeakMap<object, AgentExecutionOptions>();
+
+export function getRegisteredAgentModels(machine: AnyActorLogic): object | undefined {
+  return agentExecutionOptions.get(machine as object)?.models;
+}
 
 /**
  * Machine-carried wait-state predicates, keyed on the machine's root `config`

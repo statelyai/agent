@@ -24,16 +24,19 @@ Those functions are the **executors**, typed as `AgentRequestExecutors`:
 `createAiSdkExecutors` from `@statelyai/agent/ai-sdk` is the one adapter this package ships. It builds the `{ generateText, streamText, decide }` set from the Vercel AI SDK, mapping requests onto `generateText`/`streamText` and, for decisions, onto a tool-forced `generateText` call.
 
 ```ts
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { defineModels, runAgent } from "@statelyai/agent/ai-sdk";
 import { openai } from "@ai-sdk/openai";
 
 const models = defineModels({ quick: openai("gpt-5.4-mini") });
 
 const result = await runAgent(machine, {
   input: { prompt: "Why state machines?" },
-  executors: createAiSdkExecutors({ models }),
 });
 ```
+
+Importing `runAgent` from the AI SDK entry point explicitly selects this host. It reads the model registry carried by the machine and builds `createAiSdkExecutors({ models })`. Core `runAgent` never selects a provider adapter and still takes explicit executors.
+
+For the shortest AI SDK path, `createAgent({ model, schemas, ...machineConfig })` returns `{ machine, run }`; `run(input)` has executors wired already. Requests still name their model (`"default"` for the single-model form). `schemas.context` and the normal XState `context` initializer remain explicit. Use `setupAgent` when you need its full setup surface or a host-independent machine.
 
 `ai` is an optional peer dependency, imported only by this subpath. Core has one runtime peer, `xstate`. You supply the model resolver, so no provider package becomes a dependency either.
 
@@ -64,10 +67,7 @@ const agentSetup = setupAgent({
   },
 });
 
-await runAgent(machine, {
-  input,
-  executors: createAiSdkExecutors({ models }),
-});
+await runAgent(machine, { input });
 ```
 
 For a fully dynamic or externally configured host — one whose machine must not name concrete models — use `resolveModel` instead: it takes the raw ref string and returns a model, so refs like `"openai/gpt-5.4-mini"` resolve without a static map. You can pass both; `resolveModel` wins. With `models` alone, an unknown ref throws. This is the max-portability escape hatch — see [Which authoring form when](machines.md#which-authoring-form-when). `parseModelRef(ref)` splits a `"provider/model-id"` ref into its parts, so a resolver is one line: `(ref) => openai(parseModelRef(ref).modelId)`.

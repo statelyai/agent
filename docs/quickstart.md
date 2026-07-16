@@ -19,7 +19,7 @@ npm install @statelyai/agent xstate ai @ai-sdk/openai zod
 
 <!-- quickstart walkthrough, based on readme.md quickstart -->
 
-Declare a **models registry** (short keys mapped to resolved models, shared between `setupAgent` and the host) and the machine's `context`, `input`, and `output` as [Standard Schema](https://standardschema.dev) values (Zod works). These pass directly to `setupAgent` and flow through the rest of the setup.
+Declare a **models registry** and the machine's schemas. Model keys remain explicit in requests, while the AI SDK host resolves them to provider models.
 
 ```ts
 import { z } from "zod";
@@ -56,7 +56,7 @@ const agentSetup = setupAgent({
 });
 ```
 
-The `model` value is a key into the `models` registry, so a typo is a compile error. For a machine that must not name concrete models, drop the registry and use string refs the host resolves at run time — see [Which authoring form when](machines.md#which-authoring-form-when).
+The `model` value is a key into the `models` registry, so a typo is a compile error. For a machine that must not name concrete models, use string refs the host resolves at run time — see [Which authoring form when](machines.md#which-authoring-form-when).
 
 ## Author the machine
 
@@ -90,15 +90,12 @@ The machine now fully describes the agent, but nothing has called a model yet. T
 
 ## Run it against a host
 
-`runAgent` drives the machine and calls the host's executors whenever a state needs a model. Build the executor set with `createAiSdkExecutors` from the `@statelyai/agent/ai-sdk` entry point, passing the same `models` registry so request keys resolve to real models.
+`runAgent` from the AI SDK entry point is an explicit AI SDK host. It drives the machine and builds the adapter from the machine's declared models. Core `runAgent` remains provider-agnostic and requires executors explicitly.
 
 ```ts
-import { runAgent } from "@statelyai/agent";
-import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-
+import { runAgent } from "@statelyai/agent/ai-sdk";
 const result = await runAgent(machine, {
   input: { prompt: "Why state machines?" },
-  executors: createAiSdkExecutors({ models }),
 });
 ```
 

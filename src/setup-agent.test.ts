@@ -75,6 +75,30 @@ function asTextRequest(request: AgentStepRequest | undefined): AgentRequest {
 }
 
 describe("setupAgent", () => {
+  test("accepts {} as a payload-less event schema", () => {
+    const agent = setupAgent({
+      context: z.object({ count: z.number() }),
+      input: z.object({ count: z.number() }),
+      events: { INCREMENT: {} },
+    });
+    const machine = agent.createMachine({
+      context: ({ input }) => input,
+      initial: "active",
+      states: {
+        active: {
+          on: { INCREMENT: { target: "done" } },
+        },
+        done: { type: "final" },
+      },
+    });
+
+    expect(agent.schemas.events.INCREMENT["~standard"].validate({})).toEqual({ value: {} });
+    const actor = createActor(machine, { input: { count: 0 } });
+    actor.start();
+    actor.send({ type: "INCREMENT" });
+    expect(actor.getSnapshot().status).toBe("done");
+  });
+
   test("discovers requests from XState's split spawn and start effects", () => {
     const schemas = createAgentSchemas({
       context: z.object({ prompt: z.string() }),

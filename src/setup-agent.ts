@@ -12,7 +12,14 @@ import {
   type SetupReturnFromConfig,
   type SetupStateSchema,
 } from "xstate";
-import type { AgentMessage, EventUnion, InferOutput, StandardSchemaV1 } from "./types.js";
+import type {
+  AgentEventSchemaInputMap,
+  AgentMessage,
+  EventUnion,
+  InferOutput,
+  NormalizedEventSchemas,
+  StandardSchemaV1,
+} from "./types.js";
 import {
   builtinTextActors,
   createTextLogic,
@@ -47,7 +54,7 @@ type ContextOf<TContextSchema extends StandardSchemaV1> = Constrain<
   MachineContext
 >;
 // An event schema map's discriminated event union, constrained to EventObject.
-type EventsOf<TEventSchemas extends Record<string, StandardSchemaV1>> = Constrain<
+type EventsOf<TEventSchemas extends AgentEventSchemaInputMap> = Constrain<
   EventUnion<TEventSchemas>,
   EventObject
 >;
@@ -77,14 +84,14 @@ export interface AgentSchemaPack<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>> = StandardSchemaV1<
     Record<string, unknown>
   >,
-  TEventSchemas extends Record<string, StandardSchemaV1> = Record<string, StandardSchemaV1>,
+  TEventSchemas extends AgentEventSchemaInputMap = AgentEventSchemaInputMap,
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
   TOutputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
   TMetaSchema extends StandardSchemaV1 = StandardSchemaV1<MetaObject>,
   TEmittedSchemas extends Record<string, StandardSchemaV1> = Record<string, StandardSchemaV1>,
 > {
   context: TContextSchema;
-  events: TEventSchemas;
+  events: NormalizedEventSchemas<TEventSchemas>;
   input: TInputSchema;
   output: TOutputSchema;
   meta: TMetaSchema;
@@ -95,7 +102,7 @@ export interface AgentSchemaPack<
 // Input to createAgentSchemas: only `context` is required, everything else defaults.
 type AgentSchemaConfig<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
-  TEventSchemas extends Record<string, StandardSchemaV1>,
+  TEventSchemas extends AgentEventSchemaInputMap,
   TInputSchema extends StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1,
   TMetaSchema extends StandardSchemaV1,
@@ -109,6 +116,29 @@ type AgentSchemaConfig<
   emitted?: TEmittedSchemas;
 };
 
+const emptyEventSchema: StandardSchemaV1<Record<string, never>> = {
+  "~standard": {
+    version: 1,
+    vendor: "statelyai-agent",
+    validate(value: unknown) {
+      return value !== null && typeof value === "object" && Object.keys(value).length === 0
+        ? { value: {} }
+        : { issues: [{ message: "Expected an empty event payload" }] };
+    },
+  },
+};
+
+function normalizeEventSchemas<T extends AgentEventSchemaInputMap>(
+  events: T,
+): NormalizedEventSchemas<T> {
+  return Object.fromEntries(
+    Object.entries(events).map(([type, schema]) => [
+      type,
+      schema && typeof schema === "object" && "~standard" in schema ? schema : emptyEventSchema,
+    ]),
+  ) as NormalizedEventSchemas<T>;
+}
+
 /**
  * Builds a machine's {@link AgentSchemaPack} from a partial schema
  * declaration — only `context` is required; `events`/`input`/`output`/`meta`
@@ -119,7 +149,7 @@ type AgentSchemaConfig<
  */
 export function createAgentSchemas<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
-  TEventSchemas extends Record<string, StandardSchemaV1> = {},
+  TEventSchemas extends AgentEventSchemaInputMap = {},
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
   TOutputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
   TMetaSchema extends StandardSchemaV1 = StandardSchemaV1<MetaObject>,
@@ -143,7 +173,7 @@ export function createAgentSchemas<
 > {
   return {
     context: schemas.context,
-    events: (schemas.events ?? {}) as TEventSchemas,
+    events: normalizeEventSchemas(schemas.events ?? {}) as NormalizedEventSchemas<TEventSchemas>,
     input: schemas.input as TInputSchema,
     output: schemas.output as TOutputSchema,
     meta: schemas.meta as TMetaSchema,
@@ -207,11 +237,11 @@ type AgentAllActors<
 // collapsing to `never` too (this reproduces with *raw* `setup({ schemas: {
 // context, events: {} } })`, so it is an xstate-alpha behavior we route
 // around by matching how hand-written setup omits an empty `events`).
-type AgentSetupEventsSchema<TEventSchemas extends Record<string, StandardSchemaV1>> = [
+type AgentSetupEventsSchema<TEventSchemas extends AgentEventSchemaInputMap> = [
   keyof TEventSchemas,
 ] extends [never]
   ? {}
-  : { events: TEventSchemas };
+  : { events: NormalizedEventSchemas<TEventSchemas> };
 
 // Same omit-when-empty routing as AgentSetupEventsSchema, for `emitted`
 // schemas: only a non-empty declared map reaches xstate's setup schemas, so
@@ -236,7 +266,7 @@ type AgentSetupEmittedSchema<TEmittedSchemas extends Record<string, StandardSche
 // (Repro: a state's `({ event }) => event.n` lost `n` under the old alias.)
 type AgentSetupXStateConfig<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
-  TEventSchemas extends Record<string, StandardSchemaV1>,
+  TEventSchemas extends AgentEventSchemaInputMap,
   TActors extends { [K in keyof TActors]: AnyActorLogic },
   TRequestSchemas extends AgentRequestSchemaMap,
   TInputSchema extends StandardSchemaV1,
@@ -400,7 +430,7 @@ function resolveAgentStateSchemas(
 // The public `setupAgent(config)` parameter type: schemas (packed or loose) plus models/actors/requests/actions/guards/delays.
 type SetupAgentBaseConfig<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
-  TEventSchemas extends Record<string, StandardSchemaV1>,
+  TEventSchemas extends AgentEventSchemaInputMap,
   TActors extends { [K in keyof TActors]: AnyActorLogic },
   TInputSchema extends StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1,
@@ -463,7 +493,7 @@ type SetupAgentBaseConfig<
 // The raw xstate `setup(...)` result type for an agent config, before setupAgent's own extensions (schemas/models/requests/appendMessages, plus the wrapped createMachine) are added.
 type SetupAgentXStateResult<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
-  TEventSchemas extends Record<string, StandardSchemaV1>,
+  TEventSchemas extends AgentEventSchemaInputMap,
   TActors extends { [K in keyof TActors]: AnyActorLogic },
   TRequestSchemas extends AgentRequestSchemaMap,
   TInputSchema extends StandardSchemaV1,
@@ -500,7 +530,7 @@ type SetupAgentXStateResult<
  */
 type SetupAgentResult<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
-  TEventSchemas extends Record<string, StandardSchemaV1>,
+  TEventSchemas extends AgentEventSchemaInputMap,
   TActors extends { [K in keyof TActors]: AnyActorLogic },
   TRequestSchemas extends AgentRequestSchemaMap,
   TInputSchema extends StandardSchemaV1,
@@ -575,6 +605,46 @@ type SetupAgentResult<
   >;
 };
 
+/** Typed machine config used by convenience authoring layers built on `setupAgent`. */
+export type AgentMachineConfig<
+  TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
+  TInputSchema extends StandardSchemaV1,
+  TEventSchemas extends AgentEventSchemaInputMap = {},
+  TOutputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
+  TModels extends AgentModelMap = {},
+> = Parameters<
+  SetupAgentResult<
+    TContextSchema,
+    TEventSchemas,
+    {},
+    {},
+    TInputSchema,
+    TOutputSchema,
+    StandardSchemaV1<MetaObject>,
+    TModels
+  >["createMachine"]
+>[0];
+
+/** Machine produced from {@link AgentMachineConfig}. */
+export type AgentMachine<
+  TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
+  TInputSchema extends StandardSchemaV1,
+  TEventSchemas extends AgentEventSchemaInputMap = {},
+  TOutputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
+  TModels extends AgentModelMap = {},
+> = ReturnType<
+  SetupAgentResult<
+    TContextSchema,
+    TEventSchemas,
+    {},
+    {},
+    TInputSchema,
+    TOutputSchema,
+    StandardSchemaV1<MetaObject>,
+    TModels
+  >["createMachine"]
+>;
+
 /**
  * Schema-first `setup(...)` for agent machines — the standard entry point
  * for authoring a machine (the blueprint) that this library then runs (via
@@ -622,7 +692,7 @@ type SetupAgentResult<
  */
 export function setupAgent<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
-  TEventSchemas extends Record<string, StandardSchemaV1>,
+  TEventSchemas extends AgentEventSchemaInputMap,
   TActors extends { [K in keyof TActors]: AnyActorLogic },
   TRequestSchemas extends AgentRequestSchemaMap = {},
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
@@ -736,7 +806,7 @@ export function createRequestActors<
 // Accepts either form of setupAgent's schema config (`{ schemas: pack }` or a loose AgentSchemaConfig) and returns a resolved AgentSchemaPack.
 function normalizeAgentSchemas<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
-  TEventSchemas extends Record<string, StandardSchemaV1>,
+  TEventSchemas extends AgentEventSchemaInputMap,
   TInputSchema extends StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1,
   TMetaSchema extends StandardSchemaV1,
@@ -769,7 +839,28 @@ function normalizeAgentSchemas<
   TMetaSchema,
   TEmittedSchemas
 > {
-  return "schemas" in config ? config.schemas : createAgentSchemas(config);
+  if ("schemas" in config && config.schemas) {
+    return config.schemas;
+  }
+  const loose = config as AgentSchemaConfig<
+    TContextSchema,
+    TEventSchemas,
+    TInputSchema,
+    TOutputSchema,
+    TMetaSchema,
+    TEmittedSchemas
+  >;
+  return createAgentSchemas<
+    TContextSchema,
+    TEventSchemas,
+    TInputSchema,
+    TOutputSchema,
+    TMetaSchema,
+    TEmittedSchemas
+  >({
+    ...loose,
+    context: loose.context,
+  });
 }
 
 // Defaults an omitted `setupAgent({ requests })` to an empty object.
@@ -883,7 +974,7 @@ function createAgentActorSources<
 // Assembles the plain-object config passed to xstate's setup(...) (see AgentSetupXStateConfig's note on why it's not SetupConfig<...>).
 function createAgentSetupConfig<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
-  TEventSchemas extends Record<string, StandardSchemaV1>,
+  TEventSchemas extends AgentEventSchemaInputMap,
   TActors extends { [K in keyof TActors]: AnyActorLogic },
   TRequestSchemas extends AgentRequestSchemaMap,
   TInputSchema extends StandardSchemaV1,
@@ -983,7 +1074,7 @@ function createAgentSetupConfig<
 // Implementation backing the public setupAgent(...) function: normalizes schemas/requests, builds actor sources, calls xstate's setup(...), and layers on the agent-specific result extensions (a wrapped createMachine plus schemas/models/requests/appendMessages).
 function createSetupAgent<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
-  TEventSchemas extends Record<string, StandardSchemaV1>,
+  TEventSchemas extends AgentEventSchemaInputMap,
   TActors extends { [K in keyof TActors]: AnyActorLogic },
   TRequestSchemas extends AgentRequestSchemaMap,
   TInputSchema extends StandardSchemaV1,
@@ -1020,7 +1111,14 @@ function createSetupAgent<
   TEmittedSchemas,
   TStateSchemas
 > {
-  const schemas = normalizeAgentSchemas(config);
+  const schemas = normalizeAgentSchemas<
+    TContextSchema,
+    TEventSchemas,
+    TInputSchema,
+    TOutputSchema,
+    TMetaSchema,
+    TEmittedSchemas
+  >(config);
   const requests = normalizeAgentRequestInput<TRequestSchemas, AgentModelRef<TModels>>(
     config.requests,
   );
@@ -1043,11 +1141,12 @@ function createSetupAgent<
   >(schemas, actorSources, config);
   const base = setup(setupConfig);
   const createBaseMachine = base.createMachine.bind(base);
+  const models = (config.models ?? {}) as TModels;
   const machineOptions = {
     schemas,
     actorSources,
+    models,
   };
-  const models = (config.models ?? {}) as TModels;
 
   return Object.assign(base, {
     createMachine(machineConfig: Parameters<typeof base.createMachine>[0]) {

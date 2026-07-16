@@ -29,6 +29,13 @@ import { renderDecisionAttempts } from "../decision.js";
 import type { AgentDecisionExecutor, AgentDecisionRequest } from "../decision.js";
 import type { AgentEventDescriptor } from "../events.js";
 import type { AgentTools, ChosenEvent, StandardSchemaV1 } from "../types.js";
+import { getRegisteredAgentModels } from "../internal/registry.js";
+import { setupAgent, type AgentMachine, type AgentMachineConfig } from "../setup-agent.js";
+import {
+  runAgent as runCoreAgent,
+  type RunAgentOptions,
+  type RunAgentResult,
+} from "../run-agent.js";
 
 /**
  * Maps an {@link AgentTools} map onto AI SDK `tool()` definitions. A tool that
@@ -479,6 +486,130 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
   };
 
   return { generateText, streamText, decide };
+}
+
+/** AI SDK host for a machine authored with `setupAgent({ models })`. */
+export function runAgent<TMachine extends import("xstate").AnyStateMachine>(
+  machine: TMachine,
+  options: Omit<RunAgentOptions<TMachine>, "executors">,
+): Promise<RunAgentResult<TMachine>> {
+  const models = getRegisteredAgentModels(machine) as AiSdkModelMap | undefined;
+  if (!models || Object.keys(models).length === 0) {
+    throw new Error(
+      "AI SDK runAgent: machine has no models. Pass `models` to setupAgent, or use core runAgent with explicit executors.",
+    );
+  }
+  return runCoreAgent(machine, {
+    ...options,
+    executors: createAiSdkExecutors({ models }),
+  });
+}
+
+type CreateAgentMachineConfig<
+  TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
+  TInputSchema extends StandardSchemaV1,
+  TEventSchemas extends import("../types.js").AgentEventSchemaInputMap,
+  TOutputSchema extends StandardSchemaV1,
+  TModels extends AiSdkModelMap,
+> = Omit<
+  AgentMachineConfig<TContextSchema, TInputSchema, TEventSchemas, TOutputSchema, TModels>,
+  "schemas"
+>;
+
+type CreateAgentBaseConfig<
+  TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
+  TInputSchema extends StandardSchemaV1,
+  TEventSchemas extends import("../types.js").AgentEventSchemaInputMap,
+  TOutputSchema extends StandardSchemaV1,
+  TModels extends AiSdkModelMap,
+> = CreateAgentMachineConfig<
+  TContextSchema,
+  TInputSchema,
+  TEventSchemas,
+  TOutputSchema,
+  TModels
+> & {
+  schemas: {
+    context: TContextSchema;
+    input: TInputSchema;
+    events?: TEventSchemas;
+    output?: TOutputSchema;
+  };
+};
+
+export interface CreatedAgent<TMachine extends import("xstate").AnyStateMachine> {
+  machine: TMachine;
+  run(
+    input: import("xstate").InputFrom<TMachine>,
+    options?: Omit<RunAgentOptions<TMachine>, "input" | "executors">,
+  ): Promise<RunAgentResult<TMachine>>;
+}
+
+/**
+ * One-call AI SDK entry point for the common case: creates a typed machine and
+ * a `run(input)` method with model executors already wired.
+ */
+export function createAgent<
+  TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
+  TInputSchema extends StandardSchemaV1,
+  TEventSchemas extends import("../types.js").AgentEventSchemaInputMap = {},
+  TOutputSchema extends StandardSchemaV1 = StandardSchemaV1,
+>(
+  config: CreateAgentBaseConfig<
+    TContextSchema,
+    TInputSchema,
+    TEventSchemas,
+    TOutputSchema,
+    AiSdkModelMap<"default">
+  > & { model: LanguageModel; models?: never },
+): CreatedAgent<
+  AgentMachine<TContextSchema, TInputSchema, TEventSchemas, TOutputSchema, AiSdkModelMap<"default">>
+>;
+export function createAgent<
+  TModels extends AiSdkModelMap,
+  TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
+  TInputSchema extends StandardSchemaV1,
+  TEventSchemas extends import("../types.js").AgentEventSchemaInputMap = {},
+  TOutputSchema extends StandardSchemaV1 = StandardSchemaV1,
+>(
+  config: CreateAgentBaseConfig<
+    TContextSchema,
+    TInputSchema,
+    TEventSchemas,
+    TOutputSchema,
+    TModels
+  > & {
+    models: TModels;
+    model?: never;
+  },
+): CreatedAgent<AgentMachine<TContextSchema, TInputSchema, TEventSchemas, TOutputSchema, TModels>>;
+export function createAgent(
+  config: Record<string, unknown> & {
+    schemas: {
+      context: StandardSchemaV1<Record<string, unknown>>;
+      input: StandardSchemaV1;
+      events?: import("../types.js").AgentEventSchemaInputMap;
+      output?: StandardSchemaV1;
+    };
+    model?: LanguageModel;
+    models?: AiSdkModelMap;
+  },
+): CreatedAgent<import("xstate").AnyStateMachine> {
+  const { model, models: configuredModels, schemas, ...machineConfig } = config;
+  const models = configuredModels ?? { default: model! };
+  const executors = createAiSdkExecutors({ models });
+
+  const agentSetup = setupAgent({ ...schemas, models } as never);
+  const machine = agentSetup.createMachine(
+    machineConfig as never,
+  ) as import("xstate").AnyStateMachine;
+
+  return {
+    machine,
+    run(runInput, options = {}) {
+      return runCoreAgent(machine, { ...options, input: runInput, executors });
+    },
+  };
 }
 
 /** One AI SDK `tool()` per candidate event — the "tool-per-event +

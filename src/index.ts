@@ -126,6 +126,8 @@ export type {
   SchemaCompiler,
 } from "./workflow-config.js";
 export type {
+  AgentMachine,
+  AgentMachineConfig,
   AgentRequestConfig,
   AgentSchemaPack,
   AgentSetupStateSchema,
@@ -139,6 +141,8 @@ export type {
 } from "./decision.js";
 
 export type {
+  AgentEventSchemaInput,
+  AgentEventSchemaInputMap,
   AgentMessage,
   AgentSnapshotStore,
   AgentTool,
@@ -157,6 +161,7 @@ export type {
   FilePart,
   ImagePart,
   InferOutput,
+  NormalizedEventSchemas,
   ProviderOptions,
   StandardSchemaV1,
   SystemMessage,

@@ -14,16 +14,19 @@ import type { AgentDecisionRequest } from "../decision.js";
 import type { AgentEventDescriptor } from "../events.js";
 import type { AgentTools } from "../types.js";
 import {
+  createAgent,
   createAiSdkExecutors,
   defineModels,
   extractFirstJsonValue,
   isStructuredOutputRequest,
+  runAgent as runAiSdkAgent,
   toAiSdkCallSettings,
   toAiSdkEventTools,
   toAiSdkToolChoice,
   toAiSdkTools,
   toDecisionMessages,
 } from "./index.js";
+import { setupAgent } from "../index.js";
 import type { AiSdkModelMap } from "./index.js";
 
 describe("defineModels", () => {
@@ -46,6 +49,67 @@ describe("defineModels", () => {
 
     // @ts-expect-error — 'nope' is not one of the declared model keys.
     void models.nope;
+  });
+});
+
+describe("AI SDK runAgent", () => {
+  const response = {
+    content: [{ type: "text" as const, text: "hello" }],
+    finishReason: { unified: "stop" as const, raw: "stop" },
+    usage: {
+      inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+      outputTokens: { total: 1, text: 1, reasoning: 0 },
+    },
+    warnings: [],
+  };
+
+  test("explicitly supplies AI SDK executors from the machine's models", async () => {
+    const models = defineModels({ quick: new MockLanguageModelV3({ doGenerate: response }) });
+    const agent = setupAgent({ context: z.object({}), input: z.object({}), models });
+    const machine = agent.createMachine({
+      context: ({ input }) => input,
+      initial: "writing",
+      states: {
+        writing: {
+          invoke: {
+            src: "agent.generateText",
+            input: { model: "quick", prompt: "hi" },
+            onDone: { target: "done" },
+          },
+        },
+        done: { type: "final" },
+      },
+    });
+
+    await expect(runAiSdkAgent(machine, { input: {} })).resolves.toMatchObject({ status: "done" });
+  });
+
+  test("createAgent builds and runs the common case", async () => {
+    const agent = createAgent({
+      model: new MockLanguageModelV3({ doGenerate: response }),
+      schemas: {
+        context: z.object({ prompt: z.string() }),
+        input: z.object({ prompt: z.string() }),
+        output: z.object({ ok: z.boolean() }),
+      },
+      context: ({ input }) => input,
+      initial: "writing",
+      states: {
+        writing: {
+          invoke: {
+            src: "agent.generateText",
+            input: ({ context }) => ({ model: "default", prompt: context.prompt }),
+            onDone: { target: "done" },
+          },
+        },
+        done: { type: "final", output: () => ({ ok: true }) },
+      },
+    });
+
+    await expect(agent.run({ prompt: "hi" })).resolves.toMatchObject({
+      status: "done",
+      output: { ok: true },
+    });
   });
 });
 

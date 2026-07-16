@@ -39,13 +39,31 @@ export type InferOutput<T> = T extends StandardSchemaV1<any, infer O> ? O : neve
 export type EventPayload<T> = T extends Record<string, never> ? unknown : T;
 
 /**
+ * One entry in an event schema map: a Standard Schema for the event's
+ * payload, or the `{}` shorthand for a payload-less event
+ * (`events: { CONFIRM: {} }` ≡ `events: { CONFIRM: z.object({}) }`).
+ */
+export type AgentEventSchemaInput = StandardSchemaV1 | Record<string, never>;
+
+/** An event schema map as authored: payload schemas and/or `{}` payload-less shorthands, keyed by event type. */
+export type AgentEventSchemaInputMap = Record<string, AgentEventSchemaInput>;
+
+/** Resolves an authored event schema map's `{}` shorthands to real (empty-payload) schemas — the type-level counterpart of the runtime normalization in `createAgentSchemas`. */
+export type NormalizedEventSchemas<T extends AgentEventSchemaInputMap> = {
+  [K in keyof T]: T[K] extends StandardSchemaV1 ? T[K] : StandardSchemaV1<{}>;
+};
+
+/**
  * The discriminated event union derived from a machine's event schema map
  * (e.g. `{ ASK: z.object({ question: z.string() }) }` → `{ type: 'ASK';
- * question: string }`). Used internally by {@link createAgentSchemas} and
- * `setupAgent` to type a machine's `TEvent`.
+ * question: string }`; a `{}` shorthand entry yields its bare `{ type: K }`).
+ * Used internally by {@link createAgentSchemas} and `setupAgent` to type a
+ * machine's `TEvent`.
  */
-export type EventUnion<T extends Record<string, StandardSchemaV1>> = {
-  [K in keyof T & string]: { type: K } & EventPayload<InferOutput<T[K]>>;
+export type EventUnion<T extends AgentEventSchemaInputMap> = {
+  [K in keyof T & string]: { type: K } & (T[K] extends StandardSchemaV1
+    ? EventPayload<InferOutput<T[K]>>
+    : unknown);
 }[keyof T & string];
 
 /** Raw binary or string content for an {@link ImagePart}/{@link FilePart}. */

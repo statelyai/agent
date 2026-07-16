@@ -24,18 +24,18 @@ Node 22.18 or newer is required.
 
 ## Quick start
 
-<!-- refund decision example using setupAgent, agent.decide, a machine guard, and runAgent -->
+<!-- refund decision example using setupAgent, agent.decide, a machine guard, and the AI SDK runAgent host -->
 
 This agent reviews refund requests. The model may propose an automatic refund, but the state machine owns the $100 limit.
 
 ```ts
-import { openai } from '@ai-sdk/openai';
-import { createAiSdkExecutors, defineModels } from '@statelyai/agent/ai-sdk';
-import { runAgent, setupAgent } from '@statelyai/agent';
-import { z } from 'zod';
+import { openai } from "@ai-sdk/openai";
+import { defineModels, runAgent } from "@statelyai/agent/ai-sdk";
+import { setupAgent } from "@statelyai/agent";
+import { z } from "zod";
 
 const models = defineModels({
-  fast: openai('gpt-5.4-mini'),
+  fast: openai("gpt-5.4-mini"),
 });
 
 const agent = setupAgent({
@@ -49,54 +49,52 @@ const agent = setupAgent({
     amount: z.number(),
   }),
   output: z.object({
-    outcome: z.enum(['refunded', 'review']),
+    outcome: z.enum(["refunded", "review"]),
   }),
   events: {
-    AUTO_REFUND: z.object({}),
+    AUTO_REFUND: {},
     REVIEW: z.object({ reason: z.string() }),
   },
 });
 
 const refundMachine = agent.createMachine({
   context: ({ input }) => input,
-  initial: 'deciding',
+  initial: "deciding",
   states: {
     deciding: {
       invoke: {
-        src: 'agent.decide',
+        src: "agent.decide",
         input: ({ context }) => ({
-          model: 'fast',
-          system: 'Choose AUTO_REFUND for eligible requests. Otherwise choose REVIEW.',
+          model: "fast",
+          system: "Choose AUTO_REFUND for eligible requests. Otherwise choose REVIEW.",
           prompt: `${context.request}\nAmount: $${context.amount}`,
-          allowedEvents: ['AUTO_REFUND', 'REVIEW'],
+          allowedEvents: ["AUTO_REFUND", "REVIEW"],
         }),
       },
       on: {
-        AUTO_REFUND: ({ context }) =>
-          context.amount <= 100 ? { target: 'refunded' } : undefined,
-        REVIEW: { target: 'review' },
+        AUTO_REFUND: ({ context }) => (context.amount <= 100 ? { target: "refunded" } : undefined),
+        REVIEW: { target: "review" },
       },
     },
     refunded: {
-      type: 'final',
-      output: () => ({ outcome: 'refunded' }),
+      type: "final",
+      output: () => ({ outcome: "refunded" }),
     },
     review: {
-      type: 'final',
-      output: () => ({ outcome: 'review' }),
+      type: "final",
+      output: () => ({ outcome: "review" }),
     },
   },
 });
 
 const result = await runAgent(refundMachine, {
   input: {
-    request: 'I was charged twice for the same order.',
+    request: "I was charged twice for the same order.",
     amount: 75,
   },
-  executors: createAiSdkExecutors({ models }),
 });
 
-if (result.status === 'done') {
+if (result.status === "done") {
   console.log(result.output);
 }
 ```
