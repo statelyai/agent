@@ -16,6 +16,7 @@ import type { AgentTools } from "../types.js";
 import {
   createAiSdkExecutors,
   defineModels,
+  extractFirstJsonValue,
   isStructuredOutputRequest,
   toAiSdkCallSettings,
   toAiSdkEventTools,
@@ -715,5 +716,133 @@ describe("metadata.maxSteps (multi-step tool loops)", () => {
 
     expect(calls).toBe(3);
     expect(result.output).toBe("done");
+  });
+});
+
+describe("structured-output resilience", () => {
+  const usage = {
+    inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+    outputTokens: { total: 1, text: 1, reasoning: 0 },
+  };
+  const answerSchema = z.object({ answer: z.string() });
+
+  test("extractFirstJsonValue recovers the first of two concatenated objects", () => {
+    expect(extractFirstJsonValue('{"a":1}{"b":2}')).toBe('{"a":1}');
+    expect(extractFirstJsonValue('{"a":"br{ce}s and \\"quotes\\""}{"b":2}')).toBe(
+      '{"a":"br{ce}s and \\"quotes\\""}',
+    );
+    expect(extractFirstJsonValue('[{"a":1}][{"b":2}]')).toBe('[{"a":1}]');
+  });
+
+  test("extractFirstJsonValue returns undefined when there is nothing to repair", () => {
+    expect(extractFirstJsonValue('{"a":1}')).toBeUndefined();
+    expect(extractFirstJsonValue("no json here")).toBeUndefined();
+    expect(extractFirstJsonValue('{"a":1')).toBeUndefined();
+  });
+
+  test("generateText salvages a response of two concatenated envelopes", async () => {
+    const model = new MockLanguageModelV3({
+      doGenerate: {
+        content: [
+          {
+            type: "text",
+            text: '{"result":{"answer":"first"}}{"result":{"answer":"second"}}',
+          },
+        ],
+        finishReason: { unified: "stop", raw: "stop" },
+        usage,
+        warnings: [],
+      },
+    });
+
+    const { generateText } = createAiSdkExecutors({ models: { m: model } });
+    const result = await generateText({
+      model: "m",
+      prompt: "hi",
+      outputSchema: answerSchema,
+      tools: {},
+    });
+
+    expect(result.output).toEqual({ answer: "first" });
+  });
+
+  test("generateText retries once when the output is unrepairable", async () => {
+    let calls = 0;
+    const model = new MockLanguageModelV3({
+      doGenerate: async () => {
+        calls++;
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: calls === 1 ? "not json at all" : '{"result":{"answer":"ok"}}',
+            },
+          ],
+          finishReason: { unified: "stop" as const, raw: "stop" },
+          usage,
+          warnings: [],
+        };
+      },
+    });
+
+    const { generateText } = createAiSdkExecutors({ models: { m: model } });
+    const result = await generateText({
+      model: "m",
+      prompt: "hi",
+      outputSchema: answerSchema,
+      tools: {},
+    });
+
+    expect(calls).toBe(2);
+    expect(result.output).toEqual({ answer: "ok" });
+  });
+
+  test("generateText does NOT retry a request that carries tools (side effects)", async () => {
+    let calls = 0;
+    const model = new MockLanguageModelV3({
+      doGenerate: async () => {
+        calls++;
+        return {
+          content: [{ type: "text" as const, text: "not json at all" }],
+          finishReason: { unified: "stop" as const, raw: "stop" },
+          usage,
+          warnings: [],
+        };
+      },
+    });
+
+    const { generateText } = createAiSdkExecutors({ models: { m: model } });
+    await expect(
+      generateText({
+        model: "m",
+        prompt: "hi",
+        outputSchema: answerSchema,
+        // A tool with an execute fn may have already run in the tool loop —
+        // re-sending the request would execute it again.
+        tools: { ping: async () => "pong" },
+      }),
+    ).rejects.toThrow();
+    expect(calls).toBe(1);
+  });
+
+  test("generateText surfaces the error when the retry also fails", async () => {
+    let calls = 0;
+    const model = new MockLanguageModelV3({
+      doGenerate: async () => {
+        calls++;
+        return {
+          content: [{ type: "text" as const, text: "never json" }],
+          finishReason: { unified: "stop" as const, raw: "stop" },
+          usage,
+          warnings: [],
+        };
+      },
+    });
+
+    const { generateText } = createAiSdkExecutors({ models: { m: model } });
+    await expect(
+      generateText({ model: "m", prompt: "hi", outputSchema: answerSchema, tools: {} }),
+    ).rejects.toThrow();
+    expect(calls).toBe(2);
   });
 });

@@ -24,13 +24,13 @@ Those functions are the **executors**, typed as `AgentRequestExecutors`:
 `createAiSdkExecutors` from `@statelyai/agent/ai-sdk` is the one adapter this package ships. It builds the `{ generateText, streamText, decide }` set from the Vercel AI SDK, mapping requests onto `generateText`/`streamText` and, for decisions, onto a tool-forced `generateText` call.
 
 ```ts
-import { createAiSdkExecutors, defineModels } from '@statelyai/agent/ai-sdk';
-import { openai } from '@ai-sdk/openai';
+import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { openai } from "@ai-sdk/openai";
 
-const models = defineModels({ quick: openai('gpt-5.4-mini') });
+const models = defineModels({ quick: openai("gpt-5.4-mini") });
 
 const result = await runAgent(machine, {
-  input: { prompt: 'Why state machines?' },
+  input: { prompt: "Why state machines?" },
   executors: createAiSdkExecutors({ models }),
 });
 ```
@@ -42,12 +42,12 @@ const result = await runAgent(machine, {
 Prefer model aliases shared between `setupAgent` and the adapter: pass one `models` map to both, and request `model:` values are typed against its keys.
 
 ```ts
-import { openai } from '@ai-sdk/openai';
-import { defineModels } from '@statelyai/agent/ai-sdk';
+import { openai } from "@ai-sdk/openai";
+import { defineModels } from "@statelyai/agent/ai-sdk";
 
 const models = defineModels({
-  quick: openai('gpt-5.4-mini'),
-  careful: openai('gpt-5.4'),
+  quick: openai("gpt-5.4-mini"),
+  careful: openai("gpt-5.4"),
 });
 
 const agentSetup = setupAgent({
@@ -58,7 +58,7 @@ const agentSetup = setupAgent({
   requests: {
     answerQuestion: {
       schemas: { input: z.object({ prompt: z.string() }), output: answerSchema },
-      model: 'quick', // typed as "quick" | "careful"
+      model: "quick", // typed as "quick" | "careful"
       prompt: ({ input }) => input.prompt,
     },
   },
@@ -70,7 +70,7 @@ await runAgent(machine, {
 });
 ```
 
-For a fully dynamic or externally configured host — one whose machine must not name concrete models — use `resolveModel` instead: it takes the raw ref string and returns a model, so refs like `"openai/gpt-5.4-mini"` resolve without a static map. You can pass both; `resolveModel` wins. With `models` alone, an unknown ref throws. This is the max-portability escape hatch — see [Which authoring form when](machines.md#which-authoring-form-when).
+For a fully dynamic or externally configured host — one whose machine must not name concrete models — use `resolveModel` instead: it takes the raw ref string and returns a model, so refs like `"openai/gpt-5.4-mini"` resolve without a static map. You can pass both; `resolveModel` wins. With `models` alone, an unknown ref throws. This is the max-portability escape hatch — see [Which authoring form when](machines.md#which-authoring-form-when). `parseModelRef(ref)` splits a `"provider/model-id"` ref into its parts, so a resolver is one line: `(ref) => openai(parseModelRef(ref).modelId)`.
 
 Model refs are opaque strings, so any string is a legal `model:` value. A `models` map is optional: it gives you key autocomplete on request `model:` fields and a place for the executor to resolve those refs. The AI SDK adapter resolves a ref through its `models` map, or through `resolveModel` when the map has no match.
 
@@ -83,12 +83,12 @@ A text request runs a single model call by default. Set `metadata.maxSteps` on t
 The contract is three plain functions, so a raw `fetch` is enough:
 
 ```ts
-import type { AgentRequestExecutors } from '@statelyai/agent';
+import type { AgentRequestExecutors } from "@statelyai/agent";
 
 const executors: AgentRequestExecutors = {
   generateText: async (request) => {
-    const res = await fetch('https://api.example.com/v1/generate', {
-      method: 'POST',
+    const res = await fetch("https://api.example.com/v1/generate", {
+      method: "POST",
       body: JSON.stringify({ model: request.model, prompt: request.prompt }),
     });
     return { output: await res.text() };
@@ -118,12 +118,18 @@ When a request has a structured output schema (`getAgentOutputMode(request.outpu
 This is THE wire contract for structured output. A root object is universally accepted as a provider response schema, unlike a bare union or array root that many providers reject. `buildEnvelopeSchema(request.outputSchema, { reasoning: request.reasoning })` builds it:
 
 ```ts
-import { buildEnvelopeSchema, getAgentOutputMode, getJsonSchema } from '@statelyai/agent';
+import {
+  buildEnvelopeSchema,
+  getAgentOutputMode,
+  getJsonSchema,
+  parseStructuredEnvelope,
+} from "@statelyai/agent";
 
-if (getAgentOutputMode(request.outputSchema) === 'structured') {
+if (getAgentOutputMode(request.outputSchema) === "structured") {
   const envelope = buildEnvelopeSchema(request.outputSchema, { reasoning: request.reasoning });
   const jsonSchema = await getJsonSchema(envelope); // send this to the provider
-  const parsed = JSON.parse(providerContent); // { result, reasoning? }
+  // Validated unwrap of the provider's { result, reasoning? } response:
+  const parsed = parseStructuredEnvelope(request, JSON.parse(providerContent));
   return { output: parsed.result, reasoning: parsed.reasoning };
 }
 ```
@@ -139,7 +145,7 @@ Two related helpers for hand-rolled hosts:
 
 Transport-level retries — HTTP 429s, timeouts, exponential backoff — belong in the executor or the SDK it wraps, not the machine. The AI SDK's `maxRetries` (and the equivalent on the OpenAI/Anthropic clients) already handles them; a raw-`fetch` executor adds its own retry loop. The machine never sees a transient network failure.
 
-Machine-level retry is a different thing: an authored `onError` transition that re-enters a state after a *semantic* failure (a validation rejection, an exhausted decision). That is control flow you model explicitly, not a transport concern.
+Machine-level retry is a different thing: an authored `onError` transition that re-enters a state after a _semantic_ failure (a validation rejection, an exhausted decision). That is control flow you model explicitly, not a transport concern.
 
 ## Budgets
 
@@ -187,7 +193,7 @@ await runAgent(machine, {
 });
 ```
 
-The split: `onTrace` is the whole ordered run ledger, useful for evals and exports. `onTransition` narrates the machine in xstate's vocabulary (state values, events), for targeted tracing and debugging. `on` narrates in *your* vocabulary: the machine emits domain progress events at moments the author chose, and the host renders them (a progress UI, an SSE stream, a log line). Declare their schemas in `setupAgent` and both `enq.emit(...)` and the `on` handlers are fully typed:
+The split: `onTrace` is the whole ordered run ledger, useful for evals and exports. `onTransition` narrates the machine in xstate's vocabulary (state values, events), for targeted tracing and debugging. `on` narrates in _your_ vocabulary: the machine emits domain progress events at moments the author chose, and the host renders them (a progress UI, an SSE stream, a log line). Declare their schemas in `setupAgent` and both `enq.emit(...)` and the `on` handlers are fully typed:
 
 ```ts
 const agent = setupAgent({
@@ -219,7 +225,7 @@ Because executors are plain functions, a test can supply scripted ones and never
 const machine = emailDrafter.provide({
   actorSources: {
     draftEmail: draftEmail.withExecutor(async ({ request }) => {
-      return { output: { to: 'sam@example.com', subject: 'Hello', body: 'Hi Sam!' } };
+      return { output: { to: "sam@example.com", subject: "Hello", body: "Hi Sam!" } };
     }),
   },
 });

@@ -10,7 +10,7 @@ description: Author an agent machine as a JSON or YAML config and lower it into 
 An agent machine can be pure data. Describe it as a JSON or YAML config and hand it to `setupAgent.fromConfig(...)`. The lowering produces the same kind of runnable XState machine that `setupAgent(...)` builds by hand: states, choice routing, transitions with guard expressions, emitted progress events, text requests, decisions, and human/idle steps included. Only the authoring format changes.
 
 ```ts
-import { setupAgent } from '@statelyai/agent';
+import { setupAgent } from "@statelyai/agent";
 
 const machine = setupAgent.fromConfig(config, { compileSchema });
 ```
@@ -24,7 +24,7 @@ A config is portable: generate it from a model, store it in a database row, or e
 The package ships a JSON Schema for validating and editing configs:
 
 ```ts
-import workflowSchema from '@statelyai/agent/agent-workflow.json';
+import workflowSchema from "@statelyai/agent/agent-workflow.json";
 ```
 
 Point an editor, form generator, or validation step at it to catch a malformed config before it reaches `fromConfig(...)`. It describes the whole config surface: `schemas` (including `events` and `emitted`), `context`, `requests`, `actors`, `initial`, and `states`, down to choice states, transitions, invokes, and actions.
@@ -133,17 +133,17 @@ JSON Schema engine; bring Ajv, @cfworker/json-schema, or another compiler that
 returns Standard Schema. Ajv recipe:
 
 ```ts
-import Ajv from 'ajv';
-import { setupAgent, type SchemaCompiler, type StandardSchemaV1 } from '@statelyai/agent';
+import Ajv from "ajv";
+import { setupAgent, type SchemaCompiler, type StandardSchemaV1 } from "@statelyai/agent";
 
 const ajv = new Ajv({ strict: false });
 
 const ajvCompileSchema: SchemaCompiler = (jsonSchema, name): StandardSchemaV1 => {
   const validate = ajv.compile(jsonSchema);
   return {
-    '~standard': {
+    "~standard": {
       version: 1,
-      vendor: 'ajv',
+      vendor: "ajv",
       validate: (value) =>
         validate(value)
           ? { value }

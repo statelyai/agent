@@ -43,7 +43,7 @@ deciding: {
 
 `allowedEvents` is typed against the machine's event-schema keys, so a typo'd event name is a compile error. Omit it to default to all currently-legal events.
 
-> **Note:** `allowedEvents` narrows the *declared* candidates; guards then decide what is actually legal from the current snapshot. A declared-but-currently-illegal choice does not get through.
+> **Note:** `allowedEvents` narrows the _declared_ candidates; guards then decide what is actually legal from the current snapshot. A declared-but-currently-illegal choice does not get through.
 
 ### `allowedEvents` patterns
 
@@ -109,10 +109,10 @@ To reuse one decision across states or machines, share the **input builder** —
 
 ```ts
 const chooseMoveInput = ({ context }) => ({
-  model: 'quick',
-  system: 'You are playing a turn-based game. Choose exactly one legal move.',
+  model: "quick",
+  system: "You are playing a turn-based game. Choose exactly one legal move.",
   prompt: `Player HP: ${context.playerHp}\nEnemy HP: ${context.enemyHp}`,
-  allowedEvents: ['ATTACK', 'DEFEND', 'FLEE'],
+  allowedEvents: ["ATTACK", "DEFEND", "FLEE"],
 });
 ```
 
@@ -172,7 +172,7 @@ How it behaves:
 - **Partial application, no rollback.** Events are sent to the machine as the plan runs, not staged. If step 3 of 5 stops the plan, steps 1–2 already applied and stay applied. There is no transactional undo.
 - **`onDone` output** is `{ steps, stopped }` — the events applied in order, and why the loop ended (`'done' | 'stop-event' | 'max-steps' | 'no-legal-events'`).
 - **`stopOn` (rare).** For "send this real machine event **and** stop" semantics, list it in `stopOn`: the event is validated and sent, then the loop ends (`stopped: 'stop-event'`). The built-in done move already covers the common "no further action" case, so `stopOn` is only for ending on an actual state change.
-- **One ledger, both hosts.** `agent.plan` is a single stateful, transition-based ledger actor: its snapshot `context` (`{ applied, stepsRemaining, stopped }`) holds the in-progress plan state, advanced one `plan.applied`/`plan.ended` event at a time. `runAgent` drives `agent.plan` directly; the [step path](steps.md#plans-on-the-step-path) surfaces it as a re-surfacing `kind: 'plan'` request that `resolveAgentRequests` advances one step per call. Both hosts drive the *same* ledger through shared drivers, and because the ledger is the invoke child's own `context`, it lands at `children.<id>.snapshot.context` in a persisted snapshot for free — surviving persist/resume mid-plan.
+- **One ledger, both hosts.** `agent.plan` is a single stateful, transition-based ledger actor: its snapshot `context` (`{ applied, stepsRemaining, stopped }`) holds the in-progress plan state, advanced one `plan.applied`/`plan.ended` event at a time. `runAgent` drives `agent.plan` directly; the [step path](steps.md#plans-on-the-step-path) surfaces it as a re-surfacing `kind: 'plan'` request that `resolveAgentRequests` advances one step per call. Both hosts drive the _same_ ledger through shared drivers, and because the ledger is the invoke child's own `context`, it lands at `children.<id>.snapshot.context` in a persisted snapshot for free — surviving persist/resume mid-plan.
 
 Full example: [examples/todo-nl/index.ts](../examples/todo-nl/index.ts) drives free-text commands through one `agent.plan` invoke.
 

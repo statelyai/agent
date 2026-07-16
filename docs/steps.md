@@ -43,7 +43,7 @@ import {
   resolveAgentStep,
   resolveDecision,
   transitionAgentStep,
-} from '@statelyai/agent';
+} from "@statelyai/agent";
 
 let step = initialAgentStep(gameMachine, input, {
   schemas: gameSchemas,
@@ -59,7 +59,7 @@ while (!step.done) {
     break;
   }
 
-  if (request.kind === 'decision') {
+  if (request.kind === "decision") {
     const chosenEvent = await resolveDecision(request, decide, {
       canTake: (event) => step.snapshot.can(event),
     });
@@ -85,11 +85,14 @@ console.log(step.snapshot.output);
 The dispatch above — pick the pending request, branch on `kind`, resolve it, advance — is the same every turn. `resolveAgentRequests` collapses it into one call: it resolves the current step's pending request (decision or text) and returns the next step, wiring `canTake` to `step.snapshot.can` for you. A complete durable host is two lines:
 
 ```ts
-import { initialAgentStep, resolveAgentRequests } from '@statelyai/agent';
+import { initialAgentStep, resolveAgentRequests } from "@statelyai/agent";
 
 let step = initialAgentStep(gameMachine, input, { schemas: gameSchemas, actorSources: gameActors });
 while (!step.done) {
-  step = await resolveAgentRequests(gameMachine, step, executors, { schemas: gameSchemas, actorSources: gameActors });
+  step = await resolveAgentRequests(gameMachine, step, executors, {
+    schemas: gameSchemas,
+    actorSources: gameActors,
+  });
 }
 
 console.log(step.snapshot.output);
@@ -127,21 +130,21 @@ A durable host persists this after every model call. Every request kind is plain
 
 ## Plans on the step path
 
-An [`agent.plan`](decisions.md#plans-multi-event-decisions) invoke applies an ordered *sequence* of legal events — each one a decision — rather than a single one. On the step path it surfaces as a `kind: 'plan'` request that **re-surfaces on every step** while the plan is in flight (unlike text/decision requests, which surface once and resolve once):
+An [`agent.plan`](decisions.md#plans-multi-event-decisions) invoke applies an ordered _sequence_ of legal events — each one a decision — rather than a single one. On the step path it surfaces as a `kind: 'plan'` request that **re-surfaces on every step** while the plan is in flight (unlike text/decision requests, which surface once and resolve once):
 
 ```ts
 interface AgentPlanRequest {
-  kind: 'plan';
+  kind: "plan";
   id: string;
   src: string;
-  input: AgentPlanInput;          // model, system, prompt, allowedEvents, stopOn, maxSteps
+  input: AgentPlanInput; // model, system, prompt, allowedEvents, stopOn, maxSteps
   events: AgentEventDescriptor[]; // legal machine candidates + the reserved agent.plan.done move
-  applied: ChosenEvent[];         // the trail so far
-  stepsRemaining: number;         // maxSteps - applied.length
+  applied: ChosenEvent[]; // the trail so far
+  stepsRemaining: number; // maxSteps - applied.length
 }
 ```
 
-The protocol per step: resolve **one** decision from `events` (with `resolveDecision`, wiring `canTake` to `step.snapshot.can` exactly like a single decision), then apply it. A real machine event advances the plan — the *next* step re-surfaces the request with an updated `applied`/`events`/`stepsRemaining`. The reserved `agent.plan.done` move, a `stopOn` event, an exhausted budget, or no legal events **completes** the plan: its invoke resolves with `{ steps, stopped }` (`stopped` is `'done' | 'stop-event' | 'max-steps' | 'no-legal-events'`), fed back like any invoke result. An applied event that exits the invoking state cancels the plan (its `onDone` never fires) — identical to `runAgent`.
+The protocol per step: resolve **one** decision from `events` (with `resolveDecision`, wiring `canTake` to `step.snapshot.can` exactly like a single decision), then apply it. A real machine event advances the plan — the _next_ step re-surfaces the request with an updated `applied`/`events`/`stepsRemaining`. The reserved `agent.plan.done` move, a `stopOn` event, an exhausted budget, or no legal events **completes** the plan: its invoke resolves with `{ steps, stopped }` (`stopped` is `'done' | 'stop-event' | 'max-steps' | 'no-legal-events'`), fed back like any invoke result. An applied event that exits the invoking state cancels the plan (its `onDone` never fires) — identical to `runAgent`.
 
 `resolveAgentRequests` does all of this for you, one plan step (one decision, or one completion) per call — so the two-line durable host loop drives plans unchanged:
 
@@ -150,7 +153,7 @@ let step = initialAgentStep(machine, input);
 while (!step.done) step = await resolveAgentRequests(machine, step, executors);
 ```
 
-**Crash-safe mid-plan.** `agent.plan` is a stateful, transition-based *ledger* actor: its in-progress state (the `applied` trail and remaining budget) is the invoke child's own snapshot `context`, advanced one event at a time. So it lands in a machine's persisted snapshot for free —
+**Crash-safe mid-plan.** `agent.plan` is a stateful, transition-based _ledger_ actor: its in-progress state (the `applied` trail and remaining budget) is the invoke child's own snapshot `context`, advanced one event at a time. So it lands in a machine's persisted snapshot for free —
 
 ```
 children.plan1.snapshot.context = { applied: ChosenEvent[], stepsRemaining: number, stopped: string | null }
@@ -167,7 +170,7 @@ let step = {
   snapshot,
   actions: [],
   requests: getAgentRequests(machine, [], snapshot),
-  done: snapshot.status === 'done',
+  done: snapshot.status === "done",
 };
 while (!step.done) step = await resolveAgentRequests(machine, step, executors);
 ```

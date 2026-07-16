@@ -75,20 +75,24 @@ test("budget exhaustion — best-effort answer, no throw", async () => {
 
 test("unknown tool name is rejected by the discriminated-union schema", async () => {
   // A hallucinated tool name can't validate into the reason-or-act union, so it
-  // never reaches an actor — the request output schema is the guard.
-  await expect(
-    runReactAgentExample({
-      question: "Use a fake tool.",
-      generateText: scriptedGenerateText([
-        {
-          type: "tool",
-          thought: "Calling something that does not exist.",
-          tool: "sendEmail", // not in the union
-          parameters: { to: "nobody" },
-        },
-      ]),
-    }),
-  ).rejects.toThrow();
+  // never reaches an actor — the request output schema is the guard. The
+  // reasoning invoke's onError then degrades to the best-effort exhausted path
+  // instead of erroring the run.
+  const result = await runReactAgentExample({
+    question: "Use a fake tool.",
+    generateText: scriptedGenerateText([
+      {
+        type: "tool",
+        thought: "Calling something that does not exist.",
+        tool: "sendEmail", // not in the union
+        parameters: { to: "nobody" },
+      },
+    ]),
+  });
+
+  expect(result.progress).not.toContain("calculating");
+  expect(result.progress).not.toContain("lookingUp");
+  expect(result.progress.at(-1)).toBe("exhausted");
 });
 
 test("machine exports a runnable definition", () => {

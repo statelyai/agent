@@ -28,7 +28,7 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { createMachine } from "xstate";
+import { setup } from "xstate";
 import { getShortestPaths } from "xstate/graph";
 import {
   createAgentSchemas,
@@ -40,13 +40,14 @@ import {
 import { defineModels } from "../../src/ai-sdk/index.js";
 import { resolveExecutors, runExampleMain } from "../helpers/main.js";
 
-type Bank = "left" | "right";
-
 const models = defineModels({
   planner: openai("gpt-5.4-mini"),
 });
 
+// Bank as a zod enum: `"left"`/`"right"` literals are accepted as `Bank`
+// without casts, and `Bank` is the schema's inferred type.
 const bankSchema = z.enum(["left", "right"]);
+type Bank = z.infer<typeof bankSchema>;
 
 export const riverCrossingSchemas = createAgentSchemas({
   context: z.object({
@@ -79,7 +80,16 @@ export const riverCrossingSchemas = createAgentSchemas({
 const opposite = (bank: Bank): Bank => (bank === "left" ? "right" : "left");
 
 type Items = "wolf" | "goat" | "cabbage";
-type WorldState = Record<"farmer" | Items, Bank>;
+
+// A world schema whose inferred type IS WorldState — one source of truth for
+// the farmer + item banks, shared by the tool input and machine context.
+const worldStateSchema = z.object({
+  farmer: bankSchema,
+  wolf: bankSchema,
+  goat: bankSchema,
+  cabbage: bankSchema,
+});
+type WorldState = z.infer<typeof worldStateSchema>;
 
 /**
  * True iff no bank holds an unsafe pair without the farmer present:
@@ -146,18 +156,29 @@ const EVENT_ITEM: Record<MoveEvent, Items | null> = {
  * it returns the next world state, or `undefined` when the move is illegal so
  * the traversal never enters an unsafe state.
  */
-const pureMachine = createMachine({
-  types: {} as {
-    context: WorldState;
-    events: { type: MoveEvent };
+const PURE_INITIAL_WORLD: WorldState = {
+  farmer: "left",
+  wolf: "left",
+  goat: "left",
+  cabbage: "left",
+};
+
+const pureMachine = setup({
+  // `worldStateSchema` is the source of truth: its inferred output IS
+  // WorldState, so each function-transition below is contextually typed with
+  // WorldState banks (no casts on `context`). Move events carry no payload.
+  schemas: {
+    context: worldStateSchema,
+    events: {
+      TAKE_WOLF: z.object({}),
+      TAKE_GOAT: z.object({}),
+      TAKE_CABBAGE: z.object({}),
+      CROSS_ALONE: z.object({}),
+    },
   },
+}).createMachine({
   id: "river-crossing-pure",
-  context: {
-    farmer: "left" as Bank,
-    wolf: "left" as Bank,
-    goat: "left" as Bank,
-    cabbage: "left" as Bank,
-  },
+  context: PURE_INITIAL_WORLD,
   initial: "crossing",
   states: {
     crossing: {
@@ -166,19 +187,19 @@ const pureMachine = createMachine({
       // the traversal never enters an unsafe state.
       on: {
         TAKE_WOLF: ({ context }) => {
-          const next = applyMove(context as WorldState, "wolf");
+          const next = applyMove(context, "wolf");
           if (next) return { context: next };
         },
         TAKE_GOAT: ({ context }) => {
-          const next = applyMove(context as WorldState, "goat");
+          const next = applyMove(context, "goat");
           if (next) return { context: next };
         },
         TAKE_CABBAGE: ({ context }) => {
-          const next = applyMove(context as WorldState, "cabbage");
+          const next = applyMove(context, "cabbage");
           if (next) return { context: next };
         },
         CROSS_ALONE: ({ context }) => {
-          const next = applyMove(context as WorldState, null);
+          const next = applyMove(context, null);
           if (next) return { context: next };
         },
       },
@@ -514,14 +535,9 @@ const findShortestPath: AgentTools[string] = {
   description:
     "Given the current banks of the farmer, wolf, goat, and cabbage, return " +
     "the optimal remaining sequence of move events to solve the puzzle.",
-  inputSchema: z.object({
-    farmer: bankSchema,
-    wolf: bankSchema,
-    goat: bankSchema,
-    cabbage: bankSchema,
-  }),
+  inputSchema: worldStateSchema,
   execute: (input?: unknown) => {
-    const sequence = shortestMoveSequence(input as WorldState);
+    const sequence = shortestMoveSequence(worldStateSchema.parse(input));
     // Surface the genuine tool call so the direct run shows the model actually
     // consulting the machine (not recalling the answer).
     console.log(`  [tool] findShortestPath → ${sequence ? sequence.join(", ") : "unsolvable"}`);

@@ -29,9 +29,9 @@
 import { z } from "zod";
 import { tool } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { defineModels } from "../../src/ai-sdk/index.js";
+import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
 import { runAgent, setupAgent, type AgentRequestExecutors } from "../../src/index.js";
-import { resolveExecutors, runExampleMain } from "../helpers/main.js";
+import { runExampleMain } from "../helpers/main.js";
 
 export const models = defineModels({
   assistant: openai("gpt-5.4-mini"),
@@ -57,12 +57,7 @@ const agentSetup = setupAgent({
   output: z.object({ finalAnswer: z.string() }),
   // answering sets `finalAnswer` before done reads it — narrowed non-null there.
   states: {
-    answering: {},
-    done: {
-      schemas: {
-        context: toolCallingContextSchema.extend({ finalAnswer: z.string() }),
-      },
-    },
+    done: { context: { finalAnswer: z.string() } },
   },
   requests: {
     answer: {
@@ -176,7 +171,7 @@ export async function runToolCallingExample(
   const progress: string[] = [];
   const result = await runAgent(toolCallingMachine, {
     input: { query },
-    ...resolveExecutors(models, generateText),
+    executors: generateText ? { generateText } : createAiSdkExecutors({ models }),
     onTransition: (snapshot) => {
       const state = String(snapshot.value);
       progress.push(state);
@@ -191,7 +186,6 @@ export async function runToolCallingExample(
 }
 
 runExampleMain(import.meta.url, async () => {
-  const { createAiSdkExecutors } = await import("../../src/ai-sdk/index.js");
   const { generateText } = createAiSdkExecutors({ models });
 
   const query = "How many miles is 10 kilometers?";

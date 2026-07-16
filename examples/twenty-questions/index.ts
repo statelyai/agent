@@ -68,11 +68,6 @@ const guessFeedbackClassificationSchema = z.object({
   reasoning: z.string(),
 });
 
-const playAgainClassificationSchema = z.object({
-  playAgain: z.boolean(),
-  reasoning: z.string(),
-});
-
 const models = defineModels({
   quick: openai("gpt-5.4-mini"),
 });
@@ -138,7 +133,6 @@ const agentSetup = setupAgent({
         "Keep reasoning short.",
       messages: ({ input }) => [
         ...input.messages,
-        // TOSO: should it be createUserMessage? or no?
         userMessage(
           [
             `Question: ${input.question}`,
@@ -201,7 +195,10 @@ const agentSetup = setupAgent({
           rawAnswer: z.string(),
           messages: zodAgentMessages(),
         }),
-        output: playAgainClassificationSchema,
+        output: z.object({
+          playAgain: z.boolean(),
+          reasoning: z.string(),
+        }),
       },
       model: "quick",
       system:
@@ -218,40 +215,16 @@ const agentSetup = setupAgent({
       ],
     },
   },
-  // The only transition into `gameOver` is classifyingPlayAgain's onDone
-  // (playAgain=false), reached only after a GUESS event already set `guess` —
-  // guaranteed non-null there. `stumped` (reached on decide/classify errors,
-  // possibly before any GUESS) is deliberately left unnarrowed.
+  // Only `gameOver` is narrowed. The only transition into it is
+  // classifyingPlayAgain's onDone (playAgain=false), reached only after a GUESS
+  // event already set `guess` — guaranteed non-null there. Every other state is
+  // left at the base context: partial `states` means unlisted states keep it,
+  // and states whose reset transitions write `guess`/`pendingSideQuestion` back
+  // to null cannot be narrowed (a narrowed source can't widen a field).
   states: {
-    deciding: {},
-    awaitingAnswer: {},
-    classifyingAnswer: {},
-    // Not narrowed (pendingSideQuestion: string) for the same reason as the
-    // play-again states below: its onDone writes the field back to null, and a
-    // narrowed source cannot widen a field.
-    answeringSideQuestion: {},
-    // The play-again states are NOT narrowed even though `guess` is set by
-    // then: their reset transition back to `deciding` writes `guess: null`,
-    // and context updates typecheck against the SOURCE state's narrowed
-    // context, so a narrowed source can never widen a field back to null.
-    // Transitions into `gameOver` prove `guess` explicitly instead.
-    awaitingGuessFeedback: {},
-    classifyingGuessFeedback: {},
-    awaitingPlayAgain: {},
-    classifyingPlayAgain: {},
-    gameOver: {
-      schemas: {
-        context: twentyQuestionsSchemas.context.extend({ guess: z.string() }),
-      },
-    },
-    stumped: {},
+    gameOver: { context: { guess: z.string() } },
   },
 });
-
-const DECIDE_SYSTEM_PROMPT =
-  "You are playing twenty questions. Ask one yes/no question at a time to " +
-  "narrow down the secret, or guess once you are confident. You have a " +
-  "limited number of questions remaining.";
 
 function renderTranscriptPrompt(context: {
   questionsRemaining: number;
@@ -300,13 +273,11 @@ export const twentyQuestionsMachine = agentSetup.createMachine({
         src: "agent.decide",
         input: ({ context }) => ({
           model: "quick",
-          system: DECIDE_SYSTEM_PROMPT,
+          system:
+            "You are playing twenty questions. Ask one yes/no question at a time to " +
+            "narrow down the secret, or guess once you are confident. You have a " +
+            "limited number of questions remaining.",
           prompt: renderTranscriptPrompt(context),
-          // allowedEvents is an optional narrowing: listing events buys
-          // compile-time typo safety (typed against the machine's event-schema
-          // keys — no `as const` needed; contextual typing keeps the literal
-          // union). Omit it and all currently-legal events are allowed.
-          allowedEvents: ["ASK", "GUESS"],
           maxRetries: 2,
         }),
         onError: { target: "stumped" },
@@ -354,10 +325,10 @@ export const twentyQuestionsMachine = agentSetup.createMachine({
         input: ({ context }) => ({
           prompt: context.transcript.at(-1)?.question ?? "Answer yes or no.",
         }),
-        onDone: ({ event }) => ({
+        onDone: ({ output }) => ({
           target: "classifyingAnswer",
           context: {
-            pendingRawAnswer: String(event.output ?? ""),
+            pendingRawAnswer: output,
           },
         }),
       },
@@ -432,10 +403,10 @@ export const twentyQuestionsMachine = agentSetup.createMachine({
           };
         },
         // If the side answer fails, just re-ask the pending question.
-        onError: ({ context }) => ({
+        onError: {
           target: "awaitingAnswer",
           context: { pendingSideQuestion: null },
-        }),
+        },
       },
     },
 
@@ -445,9 +416,9 @@ export const twentyQuestionsMachine = agentSetup.createMachine({
         input: ({ context }) => ({
           prompt: `My guess is ${context.guess}. Was I right?`,
         }),
-        onDone: ({ event }) => ({
+        onDone: ({ output }) => ({
           target: "classifyingGuessFeedback",
-          context: { pendingRawAnswer: String(event.output ?? "") },
+          context: { pendingRawAnswer: output },
         }),
       },
     },
@@ -483,9 +454,9 @@ export const twentyQuestionsMachine = agentSetup.createMachine({
         input: {
           prompt: "Do you want to play another round?",
         },
-        onDone: ({ event }) => ({
+        onDone: ({ output }) => ({
           target: "classifyingPlayAgain",
-          context: { pendingRawAnswer: String(event.output ?? "") },
+          context: { pendingRawAnswer: output },
         }),
       },
     },

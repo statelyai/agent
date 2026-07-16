@@ -9,6 +9,7 @@ Every example is dual-mode: run it directly against a real model with `OPENAI_AP
 ## Start Here
 
 - Decisions — the model choosing exactly one legal machine event: [`twenty-questions/index.ts`](twenty-questions/index.ts)
+- Hidden information + human play + machine-enforced rules: [`go-fish/index.ts`](go-fish/index.ts)
 - Minimal streaming text workflow: [`joke/index.ts`](joke/index.ts)
 - Authoring reusable requests, parts-based messages, and schema-typed state meta: [`email-drafter/index.ts`](email-drafter/index.ts)
 - Human-in-the-loop, the idle-first way: [`human-in-the-loop/index.ts`](human-in-the-loop/index.ts)
@@ -27,6 +28,7 @@ These use `setupAgent(...)` (or plain XState `setup(...)` plus `createTextLogic(
 - [`email-drafter/index.ts`](email-drafter/index.ts): typed email workflow with independently testable requests
 - [`email-drafter-inspector/index.ts`](email-drafter-inspector/index.ts): the email-drafter machine run as one live `createActor` session wired to `createWebSocketInspector`, so the whole flow is visible in the Stately Inspector (works without an API key via heuristic fallbacks)
 - [`game-agent/index.ts`](game-agent/index.ts): turn-based game workflow with `allowedEvents` narrowed as a function of input
+- [`go-fish/index.ts`](go-fish/index.ts): two-player hidden-information game with a checking-win → agent → human loop; the machine owns the deck, shows the human their hand, validates moves, and forms books
 - [`joke/index.ts`](joke/index.ts): minimal streaming text workflow
 - [`triage/index.ts`](triage/index.ts): structured-output support ticket triage
 - [`json-agent/index.ts`](json-agent/index.ts): `setupAgent.fromConfig(...)` lowering a support-ticket workflow authored as a real `.json` file (decision, text request, idle human approval step)

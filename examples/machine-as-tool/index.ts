@@ -23,7 +23,7 @@
 import assert from "node:assert/strict";
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { createAsyncLogic, type AnyMachineSnapshot } from "xstate";
+import { createAsyncLogic, type SnapshotFrom } from "xstate";
 import {
   getStateMeta,
   runAgent,
@@ -167,10 +167,12 @@ export const refundMachine = agentSetup.createMachine({
 //
 // `getStateMeta(snapshot)` merges the active state(s)' schema-typed meta into
 // one typed object (the typed replacement for the old
-// `Object.values(snapshot.getMeta())[0]` cast). This is the recommended way to
-// pull the interaction protocol out of an idle snapshot — copy it into your host.
-function readInteraction(snapshot: AnyMachineSnapshot) {
-  const meta = getStateMeta<AnyMachineSnapshot, z.infer<typeof metaSchema>>(snapshot);
+// `Object.values(snapshot.getMeta())[0]` cast). On a machine-typed snapshot
+// the meta type is inferred from the machine's meta schema — no generics. This
+// is the recommended way to pull the interaction protocol out of an idle
+// snapshot — copy it into your host.
+function readInteraction(snapshot: SnapshotFrom<typeof refundMachine>) {
+  const meta = getStateMeta(snapshot);
   return meta.interaction ?? null;
 }
 
@@ -207,7 +209,7 @@ function toToolResult(result: RunAgentResult<typeof refundMachine>): ToolResult 
   return {
     status: "pending",
     handle,
-    interaction: readInteraction(result.snapshot as AnyMachineSnapshot),
+    interaction: readInteraction(result.snapshot),
   };
 }
 

@@ -105,7 +105,7 @@ compacting: {
 },
 ```
 
-Passing `priorSummary` back in makes the summary *running*: each compaction folds the previous one in, so no fact needs to survive more than one hop.
+Passing `priorSummary` back in makes the summary _running_: each compaction folds the previous one in, so no fact needs to survive more than one hop.
 
 ## Summary as context
 

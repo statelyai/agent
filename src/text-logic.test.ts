@@ -5,6 +5,8 @@ import {
   bindRequestExecutor,
   createAgentSchemas,
   createTextLogic,
+  parseModelRef,
+  parseStructuredEnvelope,
   runAgent,
   setupAgent,
   type AgentRequest,
@@ -428,5 +430,52 @@ describe("buildEnvelopeSchema", () => {
     // A non-string reasoning is dropped, not surfaced.
     const noReasoning = envelope["~standard"].validate({ reasoning: 42, result: { ok: true } });
     expect(noReasoning).toEqual({ value: { result: { ok: true } } });
+  });
+});
+
+describe("parseModelRef", () => {
+  test("splits provider/model-id refs on the first slash", () => {
+    expect(parseModelRef("openai/gpt-5.4-mini")).toEqual({
+      provider: "openai",
+      modelId: "gpt-5.4-mini",
+    });
+    // Only the FIRST slash splits — model ids may contain slashes.
+    expect(parseModelRef("openrouter/meta/llama-3")).toEqual({
+      provider: "openrouter",
+      modelId: "meta/llama-3",
+    });
+  });
+
+  test("a ref without a slash has no provider", () => {
+    expect(parseModelRef("quick")).toEqual({ provider: undefined, modelId: "quick" });
+  });
+});
+
+describe("parseStructuredEnvelope", () => {
+  const request = {
+    outputSchema: z.object({ answer: z.string() }),
+    reasoning: undefined,
+  };
+
+  test("unwraps a valid { result } envelope", () => {
+    expect(parseStructuredEnvelope(request, { result: { answer: "ok" } })).toEqual({
+      result: { answer: "ok" },
+    });
+  });
+
+  test("surfaces reasoning when the request opted in", () => {
+    expect(
+      parseStructuredEnvelope(
+        { ...request, reasoning: true },
+        { result: { answer: "ok" }, reasoning: "because" },
+      ),
+    ).toEqual({ result: { answer: "ok" }, reasoning: "because" });
+  });
+
+  test("throws on a non-envelope value and on a missing outputSchema", () => {
+    expect(() => parseStructuredEnvelope(request, "not an envelope")).toThrow();
+    expect(() => parseStructuredEnvelope({ outputSchema: undefined }, { result: 1 })).toThrow(
+      /outputSchema/,
+    );
   });
 });

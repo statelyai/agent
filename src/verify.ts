@@ -22,6 +22,7 @@ import { isDecisionLogic, isPlanLogic, PLAN_DONE_EVENT_TYPE } from "./decision.j
 import { isTextLogic } from "./text-logic.js";
 import { executorBoundLogics, getRegisteredAgentExecutionOptions } from "./internal/registry.js";
 import {
+  getInvokeEffectMetadata,
   initialAgentStep,
   resolveAgentRequests,
   resolveAgentStep,
@@ -693,16 +694,9 @@ interface PendingInvoke {
 function pendingInvokes(step: AgentStep): PendingInvoke[] {
   const out: PendingInvoke[] = [];
   for (const action of step.actions) {
-    const type = (action as { type?: string }).type;
-    if (type !== "xstate.spawnChild" && type !== "@xstate.start") {
-      continue;
-    }
-    const params =
-      type === "@xstate.start"
-        ? (action as { id?: unknown; src?: unknown })
-        : ((action as { params?: { id?: unknown; src?: unknown } }).params ?? {});
-    if (typeof params.src === "string" && typeof params.id === "string") {
-      out.push({ id: params.id, src: params.src });
+    const metadata = getInvokeEffectMetadata(action);
+    if (typeof metadata?.src === "string" && typeof metadata.id === "string") {
+      out.push({ id: metadata.id, src: metadata.src });
     }
   }
   return out;

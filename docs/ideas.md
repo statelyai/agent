@@ -13,7 +13,7 @@ worth keeping:
 2. **Graph-based planning to goal states.** Because the machine is a graph,
    "plan" = a path of legal events from the current state to a goal state.
    A planner can enumerate candidate paths (shortest-path over the machine
-   graph) and let the model choose among *plans* rather than single events —
+   graph) and let the model choose among _plans_ rather than single events —
    a natural extension of the decision primitive from one event to an event
    sequence, with the same legality guarantees at every step.
 

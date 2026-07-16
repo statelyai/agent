@@ -20,8 +20,8 @@ You author a machine in three steps:
 `setupAgent` takes your schema fields directly — `context`, `events`, `input`, `output`, and `meta` — typing the machine's context, event payloads, input, output, and state meta. Only `context` is required; the rest default to empty or unknown schemas. Every schema is a [Standard Schema](https://standardschema.dev), so Zod, Valibot, ArkType, or a hand-written validator all work, and they are retained on the agent for runtime validation, so you get typed context and events without `{} as Type` casts.
 
 ```ts
-import { z } from 'zod';
-import { setupAgent } from '@statelyai/agent';
+import { z } from "zod";
+import { setupAgent } from "@statelyai/agent";
 
 const agentSetup = setupAgent({
   models,
@@ -64,7 +64,7 @@ With this declared, `enq.emit({ type: 'EVALUATED', ... })` and the host-side `on
 `setupAgent` takes your models and schema fields plus optional `requests` and `actorSources`, and returns a **setup** whose `createMachine` builds the machine. Like XState's `setup()`, the return value is not a running agent; it is the typed foundation machines are authored from, so name it accordingly (`agentSetup`, `gameSetup`).
 
 ```ts
-import { setupAgent } from '@statelyai/agent';
+import { setupAgent } from "@statelyai/agent";
 
 const agentSetup = setupAgent({
   models,
@@ -85,12 +85,12 @@ const agentSetup = setupAgent({
 `models` maps a short alias to a resolved model. With `models` present, request and decision `model:` values are typed against its keys, so a typo is a compile error, and app code shares one alias map between `setupAgent` and the host adapter.
 
 ```ts
-import { openai } from '@ai-sdk/openai';
-import { defineModels } from '@statelyai/agent/ai-sdk';
+import { openai } from "@ai-sdk/openai";
+import { defineModels } from "@statelyai/agent/ai-sdk";
 
 const models = defineModels({
-  quick: openai('gpt-5.4-mini'),
-  careful: openai('gpt-5.4'),
+  quick: openai("gpt-5.4-mini"),
+  careful: openai("gpt-5.4"),
 });
 
 const agentSetup = setupAgent({
@@ -101,7 +101,7 @@ const agentSetup = setupAgent({
   requests: {
     answerQuestion: {
       schemas: { input: z.object({ prompt: z.string() }), output: answerSchema },
-      model: 'quick', // typed as "quick" | "careful"
+      model: "quick", // typed as "quick" | "careful"
       prompt: ({ input }) => input.prompt,
     },
   },
@@ -124,10 +124,10 @@ const agentSetup = setupAgent({
     classifyAnswer: {
       schemas: {
         input: z.object({ question: z.string(), rawAnswer: z.string() }),
-        output: z.object({ answer: z.enum(['yes', 'no']) }),
+        output: z.object({ answer: z.enum(["yes", "no"]) }),
       },
-      model: 'quick',
-      system: 'Classify a natural-language answer as yes or no.',
+      model: "quick",
+      system: "Classify a natural-language answer as yes or no.",
       prompt: ({ input }) => `Q: ${input.question}\nA: ${input.rawAnswer}`,
     },
   },
@@ -157,22 +157,22 @@ const gameSetup = setupAgent({
 ```ts
 const machine = agentSetup.createMachine({
   context: ({ input }) => ({ prompt: input.prompt, answer: null }),
-  initial: 'answering',
+  initial: "answering",
   states: {
     answering: {
       invoke: {
-        id: 'answer',
-        src: 'answerQuestion',
+        id: "answer",
+        src: "answerQuestion",
         input: ({ context }) => ({ prompt: context.prompt }),
         onDone: ({ output }) => ({
-          target: 'done',
+          target: "done",
           context: { answer: output.answer },
         }),
       },
     },
     done: {
-      type: 'final',
-      output: ({ context }) => ({ answer: context.answer ?? '' }),
+      type: "final",
+      output: ({ context }) => ({ answer: context.answer ?? "" }),
     },
   },
 });
@@ -184,13 +184,13 @@ const machine = agentSetup.createMachine({
 
 The canonical form covers most machines. Each alternate is a supported escape hatch for one specific need:
 
-| Form | Reach for it when |
-|---|---|
-| **Canonical** — `models` registry + flat schema fields on `setupAgent`, `model: 'quick'` keys, host with `createAiSdkExecutors({ models })` | Default. A single machine whose models are known at author time. |
-| **`createAgentSchemas` pack** — `setupAgent({ schemas })` | Sharing one schema set across several machines or the [step helpers](steps.md). |
-| **String refs + `resolveModel`** — `model: 'openai/gpt-5.4-mini'`, `createAiSdkExecutors({ resolveModel })` | The machine must not name concrete models — maximum portability, refs resolved by the host or loaded from JSON [config](machines-as-data.md). |
-| **`createTextLogic`** — a standalone request value | A request that is exported, reused across states or machines, or unit-tested on its own. See [Text requests](text-requests.md#reusable-request-logic-with-createtextlogic). |
-| **`withExecutor`** — `logic.withExecutor(...)` | Binding execution onto one logic rather than the whole host: per-logic host binding or dynamic spawns. See [Hosts](hosts.md#testing-with-deterministic-executors). |
+| Form                                                                                                                                        | Reach for it when                                                                                                                                                           |
+| ------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Canonical** — `models` registry + flat schema fields on `setupAgent`, `model: 'quick'` keys, host with `createAiSdkExecutors({ models })` | Default. A single machine whose models are known at author time.                                                                                                            |
+| **`createAgentSchemas` pack** — `setupAgent({ schemas })`                                                                                   | Sharing one schema set across several machines or the [step helpers](steps.md).                                                                                             |
+| **String refs + `resolveModel`** — `model: 'openai/gpt-5.4-mini'`, `createAiSdkExecutors({ resolveModel })`                                 | The machine must not name concrete models — maximum portability, refs resolved by the host or loaded from JSON [config](machines-as-data.md).                               |
+| **`createTextLogic`** — a standalone request value                                                                                          | A request that is exported, reused across states or machines, or unit-tested on its own. See [Text requests](text-requests.md#reusable-request-logic-with-createtextlogic). |
+| **`withExecutor`** — `logic.withExecutor(...)`                                                                                              | Binding execution onto one logic rather than the whole host: per-logic host binding or dynamic spawns. See [Hosts](hosts.md#testing-with-deterministic-executors).          |
 
 ## Transitions
 
@@ -283,7 +283,7 @@ Read `context` only in a final `output` function — never the entering `event`.
 
 ### Narrow context per state
 
-A context field that starts `null` and is assigned mid-run forces a `?? fallback` at every later read, including in a final state's `output`. When a state is reachable **only** after that field is set, declare a per-state `schemas.context` under `setupAgent({ states })` (mirroring XState's `setup({ states })`) to narrow the field non-null. The narrowed type flows into that state's invoke `input`, transition functions, and `output`, so the coalesce disappears:
+A context field that starts `null` and is assigned mid-run forces a `?? fallback` at every later read, including in a final state's `output`. When a state is reachable **only** after that field is set, narrow the field non-null under `setupAgent({ states })`. Declare just the fields that change — every other field keeps the base context schema. The narrowed type flows into that state's invoke `input`, transition functions, and `output`, so the coalesce disappears:
 
 ```ts
 const context = z.object({ question: z.string(), plan: planSchema.nullable() });
@@ -292,13 +292,15 @@ const agentSetup = setupAgent({
   context,
   // `planning` assigns `plan` before `executing` and `done` run, so narrow it there.
   states: {
-    executing: { schemas: { context: context.extend({ plan: planSchema }) } },
-    done: { schemas: { context: context.extend({ plan: planSchema }) } },
+    executing: { context: { plan: planSchema } },
+    done: { context: { plan: planSchema } },
   },
 });
 ```
 
-Inside those states `context.plan` is `Plan`, not `Plan | null`. Narrow only where every path into the state has assigned the field. A state also reachable on an error or refusal route (where the field is still `null`) must keep its nullable handling. This narrows the *type* only, so runtime behavior is unchanged. See [examples/sql-agent/index.ts](../examples/sql-agent/index.ts).
+(XState's full form — `executing: { schemas: { context: context.extend({ plan: planSchema }) } }` with a complete context schema — also works; the field-level form is sugar for it.)
+
+Inside those states `context.plan` is `Plan`, not `Plan | null`. Narrow only where every path into the state has assigned the field. A state also reachable on an error or refusal route (where the field is still `null`) must keep its nullable handling. This narrows the _type_ only, so runtime behavior is unchanged. See [examples/sql-agent/index.ts](../examples/sql-agent/index.ts).
 
 ## State and transition meta
 

@@ -22,12 +22,12 @@ npm install @statelyai/agent xstate ai @ai-sdk/openai zod
 Declare a **models registry** (short keys mapped to resolved models, shared between `setupAgent` and the host) and the machine's `context`, `input`, and `output` as [Standard Schema](https://standardschema.dev) values (Zod works). These pass directly to `setupAgent` and flow through the rest of the setup.
 
 ```ts
-import { z } from 'zod';
-import { openai } from '@ai-sdk/openai';
-import { defineModels } from '@statelyai/agent/ai-sdk';
+import { z } from "zod";
+import { openai } from "@ai-sdk/openai";
+import { defineModels } from "@statelyai/agent/ai-sdk";
 
 // Model ids here are placeholders — use any model your provider offers.
-const models = defineModels({ quick: openai('gpt-5.4-mini') });
+const models = defineModels({ quick: openai("gpt-5.4-mini") });
 
 const answerSchema = z.object({ answer: z.string() });
 const contextSchema = z.object({ prompt: z.string(), answer: z.string().nullable() });
@@ -39,7 +39,7 @@ const inputSchema = z.object({ prompt: z.string() });
 `setupAgent` takes your models, schema fields, and requests, and returns a **setup** (not a running agent) that you author machines from, just like XState's `setup()`. A **text request** is a typed model call: it names a `model`, declares its own input and output schemas, and builds a prompt from its input.
 
 ```ts
-import { setupAgent } from '@statelyai/agent';
+import { setupAgent } from "@statelyai/agent";
 
 const agentSetup = setupAgent({
   models,
@@ -49,7 +49,7 @@ const agentSetup = setupAgent({
   requests: {
     answerQuestion: {
       schemas: { input: z.object({ prompt: z.string() }), output: answerSchema },
-      model: 'quick',
+      model: "quick",
       prompt: ({ input }) => input.prompt,
     },
   },
@@ -65,22 +65,22 @@ The `model` value is a key into the `models` registry, so a typo is a compile er
 ```ts
 const machine = agentSetup.createMachine({
   context: ({ input }) => ({ prompt: input.prompt, answer: null }),
-  initial: 'answering',
+  initial: "answering",
   states: {
     answering: {
       invoke: {
-        id: 'answer',
-        src: 'answerQuestion',
+        id: "answer",
+        src: "answerQuestion",
         input: ({ context }) => ({ prompt: context.prompt }),
         onDone: ({ output }) => ({
-          target: 'done',
+          target: "done",
           context: { answer: output.answer },
         }),
       },
     },
     done: {
-      type: 'final',
-      output: ({ context }) => ({ answer: context.answer ?? '' }),
+      type: "final",
+      output: ({ context }) => ({ answer: context.answer ?? "" }),
     },
   },
 });
@@ -93,11 +93,11 @@ The machine now fully describes the agent, but nothing has called a model yet. T
 `runAgent` drives the machine and calls the host's executors whenever a state needs a model. Build the executor set with `createAiSdkExecutors` from the `@statelyai/agent/ai-sdk` entry point, passing the same `models` registry so request keys resolve to real models.
 
 ```ts
-import { runAgent } from '@statelyai/agent';
-import { createAiSdkExecutors } from '@statelyai/agent/ai-sdk';
+import { runAgent } from "@statelyai/agent";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 const result = await runAgent(machine, {
-  input: { prompt: 'Why state machines?' },
+  input: { prompt: "Why state machines?" },
   executors: createAiSdkExecutors({ models }),
 });
 ```
@@ -111,7 +111,7 @@ const result = await runAgent(machine, {
 - `error`: something threw.
 
 ```ts
-if (result.status === 'done') {
+if (result.status === "done") {
   console.log(result.output.answer);
   // logs the model's answer to "Why state machines?"
 }

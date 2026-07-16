@@ -8,7 +8,7 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
-import { createAgentSchemas, createTextLogic, runAgent, setupAgent } from "../../src/index.js";
+import { createAgentSchemas, runAgent, setupAgent } from "../../src/index.js";
 import { promptLine } from "../helpers/cli.js";
 import { runExampleMain } from "../helpers/main.js";
 
@@ -33,36 +33,29 @@ export const models = defineModels({
   ticketTriage: openai("gpt-5.4-mini"),
 });
 
-export const triageTicket = createTextLogic({
-  schemas: {
-    input: z.object({ ticket: z.string() }),
-    output: triageSchema,
-  },
-  model: "ticketTriage",
-  system: [
-    "You triage inbound support tickets. For each ticket, return:",
-    "- sentiment: the customer's tone (positive, neutral, or negative).",
-    "- category: billing, technical, or other.",
-    "- reply: two or three sentences, addressed to the customer, that",
-    "  acknowledge the issue and state the next step. No greeting boilerplate.",
-  ].join("\n"),
-  prompt: ({ input }) => input.ticket,
-});
-
-export const triageActors = {
-  triageTicket,
-};
-
 const triageAgentSetup = setupAgent({
   schemas,
   models,
-  actorSources: triageActors,
+  requests: {
+    triageTicket: {
+      schemas: {
+        input: z.object({ ticket: z.string() }),
+        output: triageSchema,
+      },
+      model: "ticketTriage",
+      system: [
+        "You triage inbound support tickets. For each ticket, return:",
+        "- sentiment: the customer's tone (positive, neutral, or negative).",
+        "- category: billing, technical, or other.",
+        "- reply: two or three sentences, addressed to the customer, that",
+        "  acknowledge the issue and state the next step. No greeting boilerplate.",
+      ].join("\n"),
+      prompt: ({ input }) => input.ticket,
+    },
+  },
   // `triaging` assigns `triage` before `done` is entered — narrow it non-null there.
   states: {
-    triaging: {},
-    done: {
-      schemas: { context: contextSchema.extend({ triage: triageSchema }) },
-    },
+    done: { context: { triage: triageSchema } },
   },
 });
 

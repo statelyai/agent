@@ -23,12 +23,13 @@
 import { type LanguageModel } from "ai";
 import { openai } from "@ai-sdk/openai";
 import {
+  bindRequestExecutor,
+  parseModelRef,
   runAgent,
   type AgentRequestExecutor,
   type AgentRequestExecutors,
   type StandardSchemaV1,
   type TextLogic,
-  type TextLogicOutput,
 } from "../../src/index.js";
 import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
 import { jokeMachine, models as jokeModels, tellJoke } from "../joke/index.js";
@@ -44,7 +45,7 @@ interface AiSdkTextHostOptions {
 }
 
 function defaultResolveModel(modelRef: string): LanguageModel {
-  return openai(modelRef.replace(/^openai\//, ""));
+  return openai(parseModelRef(modelRef).modelId);
 }
 
 /**
@@ -74,11 +75,7 @@ export function createAiSdkTextActor<
   logic: TextLogic<TInputSchema, TOutputSchema, TMetadata>,
   options: AiSdkTextHostOptions = {},
 ): TextLogic<TInputSchema, TOutputSchema, TMetadata> {
-  const { generateText } = executorsFor(options);
-  return logic.withExecutor(async ({ request, signal }) => {
-    const { output } = await generateText({ ...request, tools: request.tools ?? {} }, { signal });
-    return { output: output as TextLogicOutput<typeof logic> };
-  });
+  return bindRequestExecutor(logic, executorsFor(options).generateText);
 }
 
 /**
@@ -94,13 +91,7 @@ export function createAiSdkStreamingTextActor<
   options: AiSdkTextHostOptions = {},
 ): TextLogic<TInputSchema, TOutputSchema, TMetadata> {
   const { streamText } = executorsFor(options);
-  return logic.withExecutor(async ({ request, signal }) => {
-    const { output } = await streamText!(
-      { ...request, tools: request.tools ?? {} },
-      { onChunk: options.onChunk, signal },
-    );
-    return { output: output as TextLogicOutput<typeof logic> };
-  });
+  return bindRequestExecutor(logic, streamText!, { onChunk: options.onChunk });
 }
 
 // ─── Demos ───

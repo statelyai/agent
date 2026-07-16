@@ -65,8 +65,9 @@ type ToolResult = z.infer<typeof toolResultSchema>;
 
 // "Reason or act": the model returns exactly one branch each iteration.
 // A tool name that isn't in the union can't validate — a hallucinated tool
-// never reaches an actor (the schema is the guard). Each branch carries a
-// `tool` literal; the `answer` branch is the "I'm done" branch.
+// never reaches an actor (the schema is the guard). The tool branches carry a
+// `tool` literal naming the actor to dispatch to; the `answer` branch is the
+// "I'm done" branch.
 const reasonOrActUnion = z.union([
   z.object({
     type: z.literal("tool"),
@@ -87,7 +88,6 @@ const reasonOrActUnion = z.union([
   z.object({
     type: z.literal("answer"),
     thought: z.string(),
-    tool: z.literal("answer"),
     answer: z.string(),
   }),
 ]);
@@ -247,6 +247,10 @@ export const reactAgentMachine = agentSetup.createMachine({
             stepsRemaining: context.stepsRemaining - 1,
           },
         }),
+        // A doubly-failed model call (adapter already JSON-repairs + retries
+        // once) degrades to the best-effort answer path instead of settling as
+        // an error.
+        onError: { target: "exhausted" },
       },
     },
     // Read the typed decision: answer → finish, tool → dispatch to that actor.
@@ -292,8 +296,9 @@ export const reactAgentMachine = agentSetup.createMachine({
     },
     // The model committed to an answer (in context) — done.
     answered: { type: "final" },
-    // Budget ran out before the model answered — done with a best-effort
-    // answer, resolved by the machine `output` getter above (no throw).
+    // Budget ran out before the model answered — or a reasoning call failed
+    // outright — done with a best-effort answer, resolved by the machine
+    // `output` getter above (no throw).
     exhausted: { type: "final" },
   },
 });

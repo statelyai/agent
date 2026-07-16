@@ -42,18 +42,8 @@ const agentSetup = setupAgent({
   // After classifying, `classification` is always set — narrow it non-null.
   // responding sets response before done reads it — narrow that too.
   states: {
-    classifying: {},
-    responding: {
-      schemas: { context: contextSchema.extend({ classification: classificationSchema }) },
-    },
-    done: {
-      schemas: {
-        context: contextSchema.extend({
-          classification: classificationSchema,
-          response: z.string(),
-        }),
-      },
-    },
+    responding: { context: { classification: classificationSchema } },
+    done: { context: { classification: classificationSchema, response: z.string() } },
   },
   requests: {
     classifyCustomerQuery: {
@@ -108,6 +98,7 @@ export const aiSdkRoutingMachine = agentSetup.createMachine({
           target: "responding",
           context: { classification: output },
         }),
+        onError: { target: "failed" },
       },
     },
     responding: {
@@ -122,6 +113,7 @@ export const aiSdkRoutingMachine = agentSetup.createMachine({
           target: "done",
           context: { response: output },
         }),
+        onError: { target: "failed" },
       },
     },
     done: {
@@ -129,6 +121,14 @@ export const aiSdkRoutingMachine = agentSetup.createMachine({
       output: ({ context }) => ({
         classification: context.classification,
         response: context.response,
+      }),
+    },
+    // Best-effort output when a model call fails.
+    failed: {
+      type: "final",
+      output: () => ({
+        classification: { reasoning: "", type: "general" as const, complexity: "simple" as const },
+        response: "",
       }),
     },
   },

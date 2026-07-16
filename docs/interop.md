@@ -10,7 +10,7 @@ An agent machine never talks to a model directly. It builds requests, and the **
 Whatever framework hands you a `LanguageModel`, drop it into `createAiSdkExecutors({ models })` and you have a full `{ generateText, streamText, decide }` set:
 
 ```ts
-import { createAiSdkExecutors } from '@statelyai/agent/ai-sdk';
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 const executors = createAiSdkExecutors({
   models: { quick: someLanguageModel, careful: anotherLanguageModel },
@@ -30,11 +30,11 @@ Three ways in, from most to least capable:
 Mastra agents are configured with an AI SDK `LanguageModel`. Reuse that same model object as an executor, with no re-config and no second provider setup:
 
 ```ts
-import { openai } from '@ai-sdk/openai';
-import { createAiSdkExecutors } from '@statelyai/agent/ai-sdk';
+import { openai } from "@ai-sdk/openai";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 // The model you already pass to `new Agent({ model })` in Mastra.
-const model = openai('gpt-5.4-mini');
+const model = openai("gpt-5.4-mini");
 
 await runAgent(machine, {
   input,
@@ -49,8 +49,8 @@ Anything exposing a `LanguageModel` works the same way, so the machine and Mastr
 `workers-ai-provider` turns a Workers AI binding into an AI SDK provider, so its models are ordinary `LanguageModel` objects:
 
 ```ts
-import { createWorkersAI } from 'workers-ai-provider';
-import { createAiSdkExecutors } from '@statelyai/agent/ai-sdk';
+import { createWorkersAI } from "workers-ai-provider";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 export default {
   async fetch(request, env) {
@@ -58,7 +58,7 @@ export default {
     const result = await runAgent(machine, {
       input: await request.json(),
       executors: createAiSdkExecutors({
-        models: { quick: workersai('@cf/meta/llama-3.1-8b-instruct') },
+        models: { quick: workersai("@cf/meta/llama-3.1-8b-instruct") },
       }),
     });
     return Response.json(result);
@@ -73,13 +73,13 @@ Pass Cloudflare-specific per-call options through request `metadata`: the host o
 Ollama serves an OpenAI-compatible API. No provider package needed, just point at the local endpoint:
 
 ```ts
-import { createOpenAiCompatExecutors } from '@statelyai/agent/openai-compat';
+import { createOpenAiCompatExecutors } from "@statelyai/agent/openai-compat";
 
 await runAgent(machine, {
   input,
   executors: createOpenAiCompatExecutors({
-    baseUrl: 'http://localhost:11434/v1',
-    apiKey: 'ollama', // Ollama ignores it, but the field is required.
+    baseUrl: "http://localhost:11434/v1",
+    apiKey: "ollama", // Ollama ignores it, but the field is required.
   }),
 });
 ```
@@ -88,10 +88,10 @@ Swap `baseUrl`/`apiKey` for Groq, vLLM, Together, or LM Studio and the executors
 
 ## What each path supports
 
-| Path | `generateText` | `streamText` | `decide` | Structured output |
-| --- | --- | --- | --- | --- |
-| `createAiSdkExecutors` | yes | yes | yes | yes |
-| `createOpenAiCompatExecutors` | yes | yes | yes | yes |
-| Raw `ai` functions | yes | yes | no | best-effort |
+| Path                          | `generateText` | `streamText` | `decide` | Structured output |
+| ----------------------------- | -------------- | ------------ | -------- | ----------------- |
+| `createAiSdkExecutors`        | yes            | yes          | yes      | yes               |
+| `createOpenAiCompatExecutors` | yes            | yes          | yes      | yes               |
+| Raw `ai` functions            | yes            | yes          | no       | best-effort       |
 
 `decide` maps each machine event to a forced tool call, and that mapping lives in an adapter, so raw `ai` functions cannot back a decision. For reliable structured output, use one of the two adapters. See [Text requests](./text-requests) and [Decisions](./decisions) for what each request type needs.

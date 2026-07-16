@@ -115,13 +115,8 @@ const agentSetup = setupAgent({
   },
   // planning sets plan before any state that reads it — narrow it non-null there.
   states: {
-    planning: {},
-    implementing: {
-      schemas: { context: contextSchema.extend({ plan: implementationPlanSchema }) },
-    },
-    done: {
-      schemas: { context: contextSchema.extend({ plan: implementationPlanSchema }) },
-    },
+    implementing: { context: { plan: implementationPlanSchema } },
+    done: { context: { plan: implementationPlanSchema } },
   },
   requests: {
     planImplementation: {
@@ -155,6 +150,7 @@ export const aiSdkOrchestratorWorkerMachine = agentSetup.createMachine({
           target: "implementing",
           context: { plan: output },
         }),
+        onError: { target: "failed" },
       },
     },
     implementing: {
@@ -175,6 +171,14 @@ export const aiSdkOrchestratorWorkerMachine = agentSetup.createMachine({
       type: "final",
       output: ({ context }) => ({
         plan: context.plan,
+        changes: context.changes,
+      }),
+    },
+    // Best-effort output when the planning model call fails.
+    failed: {
+      type: "final",
+      output: ({ context }) => ({
+        plan: context.plan ?? { files: [], estimatedComplexity: "low" as const },
         changes: context.changes,
       }),
     },

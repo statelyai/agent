@@ -32,20 +32,20 @@ export type DataContent = string | Uint8Array | ArrayBuffer;
 export type ProviderOptions = Record<string, Record<string, unknown>>;
 
 export interface TextPart {
-  type: 'text';
+  type: "text";
   text: string;
   providerOptions?: ProviderOptions;
 }
 
 export interface ImagePart {
-  type: 'image';
+  type: "image";
   image: DataContent | URL;
   mediaType?: string;
   providerOptions?: ProviderOptions;
 }
 
 export interface FilePart {
-  type: 'file';
+  type: "file";
   data: DataContent | URL;
   mediaType: string;
   filename?: string;
@@ -53,7 +53,7 @@ export interface FilePart {
 }
 
 export interface ToolCallPart {
-  type: 'tool-call';
+  type: "tool-call";
   toolCallId: string;
   toolName: string;
   input: unknown;
@@ -61,14 +61,14 @@ export interface ToolCallPart {
 }
 
 export type ToolResultOutput =
-  | { type: 'text'; value: string }
-  | { type: 'json'; value: unknown }
-  | { type: 'error-text'; value: string }
-  | { type: 'error-json'; value: unknown }
-  | { type: 'content'; value: Array<TextPart | ImagePart> };
+  | { type: "text"; value: string }
+  | { type: "json"; value: unknown }
+  | { type: "error-text"; value: string }
+  | { type: "error-json"; value: unknown }
+  | { type: "content"; value: Array<TextPart | ImagePart> };
 
 export interface ToolResultPart {
-  type: 'tool-result';
+  type: "tool-result";
   toolCallId: string;
   toolName: string;
   output: ToolResultOutput;
@@ -76,31 +76,27 @@ export interface ToolResultPart {
 }
 
 export type SystemMessage = {
-  role: 'system';
+  role: "system";
   content: string;
   providerOptions?: ProviderOptions;
 };
 export type UserMessage = {
-  role: 'user';
+  role: "user";
   content: string | Array<TextPart | ImagePart | FilePart>;
   providerOptions?: ProviderOptions;
 };
 export type AssistantMessage = {
-  role: 'assistant';
+  role: "assistant";
   content: string | Array<TextPart | FilePart | ToolCallPart | ToolResultPart>;
   providerOptions?: ProviderOptions;
 };
 export type ToolMessage = {
-  role: 'tool';
+  role: "tool";
   content: Array<ToolResultPart>;
   providerOptions?: ProviderOptions;
 };
 
-export type AgentMessage =
-  | SystemMessage
-  | UserMessage
-  | AssistantMessage
-  | ToolMessage;
+export type AgentMessage = SystemMessage | UserMessage | AssistantMessage | ToolMessage;
 ```
 
 **Decisions baked in:**
@@ -108,18 +104,16 @@ export type AgentMessage =
 - Tool-results live in a `tool`-role message (AI SDK convention), not folded into user messages (Anthropic convention). Adapter maps identity.
 - `Buffer` dropped from `DataContent` (it extends `Uint8Array`; keeps core runtime-agnostic).
 - `ReasoningPart` and tool-approval parts **omitted** — non-breaking to add later.
-- The open `[key: string]: unknown` index signature is **removed**. `providerOptions` is the sanctioned passthrough. → *migration break for anyone stuffing arbitrary fields onto messages.*
+- The open `[key: string]: unknown` index signature is **removed**. `providerOptions` is the sanctioned passthrough. → _migration break for anyone stuffing arbitrary fields onto messages._
 - **Durable persistence stance (blueprint):** binary parts (`Uint8Array`/`ArrayBuffer`) and `URL` instances are not JSON-serializable; persisting context is the host's concern. Machines that persist snapshots/event logs should carry URL strings or base64 in parts. Enforced by documentation only — JSDoc on `ImagePart`/`FilePart` plus the persistence recipe. No serializer in P0.
 
 ### 1.3 Helpers (`src/utils.ts`)
 
 ```ts
 export function systemMessage(content: string): SystemMessage;
-export function userMessage(
-  content: string | Array<TextPart | ImagePart | FilePart>
-): UserMessage;
+export function userMessage(content: string | Array<TextPart | ImagePart | FilePart>): UserMessage;
 export function assistantMessage(
-  content: string | Array<TextPart | FilePart | ToolCallPart | ToolResultPart>
+  content: string | Array<TextPart | FilePart | ToolCallPart | ToolResultPart>,
 ): AssistantMessage;
 export function toolMessage(content: Array<ToolResultPart>): ToolMessage; // NEW
 ```
@@ -161,7 +155,7 @@ export type AllowedEvents<TEvent extends string = string> =
   | ((args: { input: unknown }) => readonly TEvent[]);
 ```
 
-Semantics: declared candidates **∩ snapshot-legal events**. Omitted ⇒ all legal events. Resolver form allowed (runtime narrowing, e.g. HP-gated moves). Because it's intersected with legal events, a resolver can only ever *narrow* the real surface.
+Semantics: declared candidates **∩ snapshot-legal events**. Omitted ⇒ all legal events. Resolver form allowed (runtime narrowing, e.g. HP-gated moves). Because it's intersected with legal events, a resolver can only ever _narrow_ the real surface.
 
 On the `runAgent` (live) path, this intersection is not computed once at bind time — candidate events are rebuilt from the **live snapshot at decision time** (declared `allowedEvents` ∩ currently-legal events, via `getAcceptedEvents`, with machine event schemas attached), identical in shape to step discovery's `getAgentRequests`. This is now fixed: an earlier version trusted a stale/defaulted event list instead of re-deriving it per decision.
 
@@ -200,7 +194,7 @@ export interface DecisionLogic<...> extends AsyncActorLogic<
 export type ChosenEvent = { type: string; [key: string]: unknown };
 ```
 
-- No `output` schema (a decision has no output value; its output *is* the event).
+- No `output` schema (a decision has no output value; its output _is_ the event).
 - Decisions are **generate-only** — there is no streaming decision.
 - How the model is coerced into choosing (tool-per-event + `toolChoice: 'required'`, structured output over an event union, …) is **adapter business**, not core's (§2.6). `toolChoice` is therefore not configurable on decisions.
 - Standalone `createDecisionLogic` types `allowedEvents` only as `string[]` (it doesn't know the machine's events). The inline `agent.decide` builtin (§2.4) types it against the machine's event-schema keys instead.
@@ -208,7 +202,7 @@ export type ChosenEvent = { type: string; [key: string]: unknown };
 
 ### 2.4 Builtin `agent.decide` (v6-alpha-correct syntax)
 
-Zero-config counterpart, symmetric with `agent.generateText`/`agent.streamText`. Invoked with inline input. **Side effects go through the `enq` param of a transition function — there is no `{ actions: [...] }` key and no standalone `raise()`/action-creator in v6 alpha** (verified against `xstate@6.0.0-alpha.16`: `types.v6.d.ts:416-436`, `types.d.ts:207-226`). Delivery is built into the decision actor: when the decision resolves, it sends the chosen event to the invoking actor automatically via an *external, observable* send (so it lands in the event log; see §4.3), **not** an internal `raise` (invisible).
+Zero-config counterpart, symmetric with `agent.generateText`/`agent.streamText`. Invoked with inline input. **Side effects go through the `enq` param of a transition function — there is no `{ actions: [...] }` key and no standalone `raise()`/action-creator in v6 alpha** (verified against `xstate@6.0.0-alpha.16`: `types.v6.d.ts:416-436`, `types.d.ts:207-226`). Delivery is built into the decision actor: when the decision resolves, it sends the chosen event to the invoking actor automatically via an _external, observable_ send (so it lands in the event log; see §4.3), **not** an internal `raise` (invisible).
 
 ```ts
 choosingMove: {
@@ -239,7 +233,7 @@ Delivery is not a user-wired helper. When the decision resolves, the decision ac
 
 ### 2.6 `resolveDecision` — validation + retry core
 
-Core does **no provider mechanics**. The decision path is symmetric with the `generateText` path: the host receives an `AgentDecisionRequest`, and its **`decide` executor** returns `{ event, reason? }`. *How* the model is made to choose — tool-per-event + `toolChoice: 'required'`, structured output over an event union, anything — lives in the adapter. `/ai-sdk` ships the default `decide` executor (P1); a structured-output variant is a documented recipe for providers without forced tool choice.
+Core does **no provider mechanics**. The decision path is symmetric with the `generateText` path: the host receives an `AgentDecisionRequest`, and its **`decide` executor** returns `{ event, reason? }`. _How_ the model is made to choose — tool-per-event + `toolChoice: 'required'`, structured output over an event union, anything — lives in the adapter. `/ai-sdk` ships the default `decide` executor (P1); a structured-output variant is a documented recipe for providers without forced tool choice.
 
 ```ts
 export interface AgentRequestExecutorInfo {
@@ -249,7 +243,7 @@ export interface AgentRequestExecutorInfo {
 
 export type AgentRequestExecutor<TResult = AgentRequestExecutorResult> = (
   request: AgentTextRequest & { tools: AgentTools },
-  info?: AgentRequestExecutorInfo
+  info?: AgentRequestExecutorInfo,
 ) => PromiseLike<TResult> | TResult;
 
 /** Third executor slot, symmetric with generateText/streamText. */
@@ -263,11 +257,11 @@ export interface AgentRequestExecutors<
 }
 
 export type AgentDecisionExecutor = (
-  request: AgentDecisionRequest
+  request: AgentDecisionRequest,
 ) => PromiseLike<{ event: ChosenEvent; reason?: string }>;
 
 export interface AgentDecisionRequest {
-  kind: 'decision';
+  kind: "decision";
   /** Durable invoke id. */
   id: string;
   model: string;
@@ -302,7 +296,7 @@ export interface ResolveDecisionOptions {
 
 export interface DecisionAttempt {
   event?: ChosenEvent;
-  failure: 'unknown-event' | 'invalid-payload' | 'rejected-by-guard';
+  failure: "unknown-event" | "invalid-payload" | "rejected-by-guard";
   reason: string;
 }
 
@@ -313,7 +307,7 @@ export class DecisionExhaustedError extends Error {
 export async function resolveDecision(
   request: AgentDecisionRequest,
   executor: AgentDecisionExecutor,
-  options?: ResolveDecisionOptions
+  options?: ResolveDecisionOptions,
 ): Promise<ChosenEvent>;
 ```
 
@@ -336,7 +330,7 @@ Each executor call counts against `runAgent`'s `maxModelCalls` (a decision that 
 
 **Call sites — who supplies `canTake` (two-tier; the `self._parent` escape hatch is deleted):**
 
-- **`runAgent` (live) — supported API, no internals.** `runAgent` creates the actor, so it provides its *own* `agent.decide` source that closes over an `actorRef` holder (assigned right after `createActor`, before any decision runs): `canTake: (e) => actorRef.getSnapshot().can(e)`. The actor sits in the deciding state while the executor runs, so `.can()` reflects that state's guards. **Full modes 1–3.**
+- **`runAgent` (live) — supported API, no internals.** `runAgent` creates the actor, so it provides its _own_ `agent.decide` source that closes over an `actorRef` holder (assigned right after `createActor`, before any decision runs): `canTake: (e) => actorRef.getSnapshot().can(e)`. The actor sits in the deciding state while the executor runs, so `.can()` reflects that state's guards. **Full modes 1–3.**
 - **Step path (durable host) — supported API.** The host has the snapshot: `canTake: (e) => snapshot.can(e)`, then `transitionAgentStep(...)`. **Full modes 1–3.** The shipped `twenty-questions` example wires this directly off the step object: `canTake: (e) => step.snapshot.can(e)`.
 - **Bare `createActor` with `agent.decide` — modes 1–2 only** (type + payload validation, no guard check). Documented limitation; no untyped-internals traversal in a v1 alpha. A new constraint on this tier: an **omitted `allowedEvents` under bare `createActor` is a fail-fast error** — with no snapshot to enumerate legal events against, "all legal events" can't be resolved, so it must be declared explicitly. `runAgent` and the step path both support omitted `allowedEvents` (⇒ all legal events) fully, since both have a snapshot to intersect against.
 
@@ -344,7 +338,7 @@ On success the `agent.decide` actor resolves with the chosen event as output and
 
 ### 2.7 `getAcceptedEvents` guard note
 
-`getAcceptedEvents` (renamed from `getAvailableEvents`, §3.1) filters by event *type* only (see `getAcceptedEvents` in `setup-agent.ts`) — it does not evaluate guards. So the mode-3 `snapshot.can()` check is load-bearing: it's the only thing catching a type-legal-but-guard-rejected choice. Keep the candidate-*type* list as-is (over-exposes); `resolveDecision` closes the gap at apply time.
+`getAcceptedEvents` (renamed from `getAvailableEvents`, §3.1) filters by event _type_ only (see `getAcceptedEvents` in `setup-agent.ts`) — it does not evaluate guards. So the mode-3 `snapshot.can()` check is load-bearing: it's the only thing catching a type-legal-but-guard-rejected choice. Keep the candidate-_type_ list as-is (over-exposes); `resolveDecision` closes the gap at apply time.
 
 ### 2.8 Removals
 
@@ -362,11 +356,10 @@ On success the `agent.decide` actor resolves with the chosen event as output and
 
 ### 3.1 Signature
 
-A non-final machine can *always* accept events, so it is never "paused." The only distinction is whether it is **doing work** or **idle** (settled, nothing in flight). The result is a three-variant union; the accepted-event list is **derived** from the snapshot (via `getAcceptedEvents`), not embedded.
+A non-final machine can _always_ accept events, so it is never "paused." The only distinction is whether it is **doing work** or **idle** (settled, nothing in flight). The result is a three-variant union; the accepted-event list is **derived** from the snapshot (via `getAcceptedEvents`), not embedded.
 
 ```ts
-export interface RunAgentOptions<TMachine extends AnyStateMachine>
-  extends AgentRequestExecutors {
+export interface RunAgentOptions<TMachine extends AnyStateMachine> extends AgentRequestExecutors {
   input?: InputFrom<TMachine>;
 
   // resume
@@ -390,14 +383,11 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine>
   onChunk?: (chunk: string, info: { request: AgentRequest }) => void;
   onResult?: (
     request: AgentRequest | AgentDecisionRequest,
-    result: { output: unknown; raw: unknown }
+    result: { output: unknown; raw: unknown },
   ) => void; // §4.4
   /** Fires on every machine transition (snapshot + causing event). Pure
    * observation — progress UIs, logging, tracing. Cannot send events. */
-  onTransition?: (
-    snapshot: SnapshotFrom<TMachine>,
-    event: EventFromLogic<TMachine>
-  ) => void;
+  onTransition?: (snapshot: SnapshotFrom<TMachine>, event: EventFromLogic<TMachine>) => void;
 
   // control
   maxModelCalls?: number; // default 100
@@ -405,18 +395,18 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine>
 }
 
 export type RunAgentResult<TMachine extends AnyStateMachine> =
-  | { status: 'done'; output: OutputFrom<TMachine>; snapshot: SnapshotFrom<TMachine> }
-  | { status: 'idle'; snapshot: SnapshotFrom<TMachine> }
+  | { status: "done"; output: OutputFrom<TMachine>; snapshot: SnapshotFrom<TMachine> }
+  | { status: "idle"; snapshot: SnapshotFrom<TMachine> }
   | {
-      status: 'error';
-      cause: 'aborted' | 'max-model-calls' | 'decision-exhausted' | 'machine' | 'stopped';
+      status: "error";
+      cause: "aborted" | "max-model-calls" | "decision-exhausted" | "machine" | "stopped";
       error: unknown;
       snapshot: SnapshotFrom<TMachine>;
     };
 
 export async function runAgent<TMachine extends AnyStateMachine>(
   machine: TMachine,
-  options: RunAgentOptions<TMachine>
+  options: RunAgentOptions<TMachine>,
 ): Promise<RunAgentResult<TMachine>>;
 
 /** Renamed from getAvailableEvents. "Events this state can accept right now." */
@@ -432,11 +422,12 @@ Typing is load-bearing: `input`/`event`/`onTransition` are machine-typed (`Input
 
   ```ts
   let r = await runAgent(machine, { input, executors });
-  while (r.status === 'idle') {
+  while (r.status === "idle") {
     const event = await promptUser(getAcceptedEvents(r.snapshot));
     r = await runAgent(machine, { snapshot: r.snapshot, event, executors });
   }
   ```
+
 - **`error`** — a `runAgent`-level failure, discriminated by `cause`: `'aborted'` (signal fired), `'max-model-calls'` (budget exceeded), `'decision-exhausted'` (machine error state whose error is/wraps an unhandled `DecisionExhaustedError`), `'machine'` (any other machine error state), or `'stopped'` (external stop). Programmer errors (bad config, missing executor/actor source) still throw — at bind time (§3.2). **(Q3.1 resolved: `error` is a variant, not a throw.)**
 
 ### 3.2 Behavior
@@ -449,6 +440,7 @@ Typing is load-bearing: `input`/`event`/`onTransition` are machine-typed (`Input
    - invokes `onResult(request, { output, raw })` with the raw executor result (§4.4).
 
    **Fail fast at bind time** (throw, not an `'error'` result), naming the offending source: a `TextLogic` in `STREAM` mode with no `streamText` executor (the runtime bind-time throw — `generateText` itself can never be missing, since it's a required field on `RunAgentOptions`/`AgentRequestExecutors` and its absence is a compile-time TypeScript error), a decision with no `decide`, `agent.userInput` with neither `options.userInput` nor a provided actor source (error text recommends the idle-state HITL pattern), any other placeholder actor with no implementation, or a direct-object `src` that needs execution but can't be rebound. Detection is by logic `kind`, so machines built with raw `setup()` (no `setupAgent` registration) bind identically.
+
 3. `actor = createActor(provided, { input, snapshot })`.
 4. `actor.start()`; if `options.event`, `actor.send(event)`.
 5. **Settle loop.** Subscribe; on each snapshot:
@@ -462,34 +454,36 @@ Typing is load-bearing: `input`/`event`/`onTransition` are machine-typed (`Input
 
 ### 3.3 Idle detection (`isIdle`) — v6-verified
 
-Per the spike, `snapshot.status ∈ {'active','done','error','stopped'}` and `snapshot.children` is `Record<string, AnyActorRef | undefined>`; each child exposes `getSnapshot()`. There is **no** public field for pending internal (`always`/raised/`after`) events, so "no pending internal work" is only *approximable* via `getNextTransitions`:
+Per the spike, `snapshot.status ∈ {'active','done','error','stopped'}` and `snapshot.children` is `Record<string, AnyActorRef | undefined>`; each child exposes `getSnapshot()`. There is **no** public field for pending internal (`always`/raised/`after`) events, so "no pending internal work" is only _approximable_ via `getNextTransitions`:
 
 ```ts
 function isIdle(snapshot: AnyMachineSnapshot): boolean {
-  if (snapshot.status !== 'active') return false;
-  const childrenBusy = Object.values(snapshot.children ?? {})
-    .some((c) => c?.getSnapshot?.().status === 'active');   // in-flight invoked actors
+  if (snapshot.status !== "active") return false;
+  const childrenBusy = Object.values(snapshot.children ?? {}).some(
+    (c) => c?.getSnapshot?.().status === "active",
+  ); // in-flight invoked actors
   if (childrenBusy) return false;
   const hasPendingWork = getNextTransitions(snapshot).some(
-    (t) => t.eventType === ''                               // eventless (`always`)
-      || t.eventType.startsWith('xstate.after')             // pending `after` timer
+    (t) =>
+      t.eventType === "" || // eventless (`always`)
+      t.eventType.startsWith("xstate.after"), // pending `after` timer
   );
   return !hasPendingWork;
 }
 ```
 
-A state with an `after` delay is **working** (waiting on its own clock), not idle — settling there would strand the timer, since the actor is stopped on settle (§3.2.7). In the live path timers otherwise just run on the actor's clock; no special handling beyond this check. *(Spike S2 verified: delayed transitions surface as `xstate.after.<delay>.<stateId>` in `getNextTransitions`.)*
+A state with an `after` delay is **working** (waiting on its own clock), not idle — settling there would strand the timer, since the actor is stopped on settle (§3.2.7). In the live path timers otherwise just run on the actor's clock; no special handling beyond this check. _(Spike S2 verified: delayed transitions surface as `xstate.after.<delay>.<stateId>` in `getNextTransitions`.)_
 
 Debounce to a macrotask before declaring idle (children spin up across transitions), re-check on each emission. Residual imprecision (already-scheduled raised events aren't snapshot-visible) is acceptable — a stray idle just hands control back to the caller, who can resend.
 
 ### 3.4 Serverless resume recipe
 
 ```ts
-let r = await runAgent(machine, { input, executors });        // → idle (awaiting approval)
-await store.put(threadId, r.snapshot);                           // persist snapshot (or event log, §4.3)
+let r = await runAgent(machine, { input, executors }); // → idle (awaiting approval)
+await store.put(threadId, r.snapshot); // persist snapshot (or event log, §4.3)
 // ...later, new process, human approved...
 const snapshot = await store.get(threadId);
-r = await runAgent(machine, { snapshot, event: { type: 'APPROVE' }, executors });
+r = await runAgent(machine, { snapshot, event: { type: "APPROVE" }, executors });
 ```
 
 ### 3.5 What `runAgent` is NOT
@@ -511,10 +505,10 @@ Old normalizer duck-typed `toolResults` first (the legacy path where a decision 
 ```ts
 async function normalizeGeneratorResult(result: unknown): Promise<unknown> {
   const r = await result;
-  if (!r || typeof r !== 'object') return r;
-  if ('object' in r) return await (r as any).object;
-  if ('text' in r) return await (r as any).text;
-  if ('output' in r) return await (r as any).output;
+  if (!r || typeof r !== "object") return r;
+  if ("object" in r) return await (r as any).object;
+  if ("text" in r) return await (r as any).text;
+  if ("output" in r) return await (r as any).output;
   return r;
 }
 ```
@@ -525,27 +519,27 @@ The fragile "first `toolResults[].output`" heuristic is **deleted**. Decision re
 
 The step helpers are already event-driven: `transitionAgentStep` applies one event, `resolveAgentStep` applies one model-result event (`xstate.done.actor.<id>`), and a decision applies one sent event (§2.5). So durability is **event sourcing**, not (only) snapshot serialization:
 
-> Persist the ordered event log. Replay it through the pure `transition(...)` function to reconstruct state. A snapshot is an optional *compaction checkpoint*, not the source of truth.
+> Persist the ordered event log. Replay it through the pure `transition(...)` function to reconstruct state. A snapshot is an optional _compaction checkpoint_, not the source of truth.
 
 This is why decisions deliver via `enq.sendTo(self, …)` (external, recorded) rather than `enq.raise` (internal, invisible) — a raised event would not appear in the log and replay would diverge. Concretely, a durable host records, per step: the applied event **and** the raw executor result (§4.4) that produced it, so replay is deterministic (recorded outputs substitute for live model calls) and auditable (usage/tool-calls preserved).
 
-Not built in P0 (no storage adapter) — but the *shape* is fixed here so the step API and the recorded-event envelope support it. Storage adapters are P3.
+Not built in P0 (no storage adapter) — but the _shape_ is fixed here so the step API and the recorded-event envelope support it. Storage adapters are P3.
 
 ### 4.4 Raw executor result (Q4.1 resolved)
 
-The raw executor result (tool calls, token usage, finish reason) is retained — required for observability *and* event-sourced replay/audit. It surfaces in three reachable places, none bloating the common return:
+The raw executor result (tool calls, token usage, finish reason) is retained — required for observability _and_ event-sourced replay/audit. It surfaces in three reachable places, none bloating the common return:
 
 ```ts
 // step path: opt-in verbose return
 export function executeAgentRequest(
   request: AgentRequest,
-  executors: AgentRequestExecutors
-): Promise<unknown>;                                  // normalized value (unchanged default)
+  executors: AgentRequestExecutors,
+): Promise<unknown>; // normalized value (unchanged default)
 export function executeAgentRequest(
   request: AgentRequest,
   executors: AgentRequestExecutors,
-  options: { verbose: true }
-): Promise<{ output: unknown; raw: unknown }>;         // both
+  options: { verbose: true },
+): Promise<{ output: unknown; raw: unknown }>; // both
 ```
 
 - **Step path:** `executeAgentRequest(req, exec, { verbose: true }) → { output, raw }`.
@@ -556,7 +550,7 @@ export function executeAgentRequest(
 
 `after` delays lower to executable **delayed-raise actions** in `step.actions` — the one action family a durable host **must** execute: schedule the raised event on its own engine (Workflows timer, Temporal timer, queue delay) and apply it via `transitionAgentStep` when it fires. This is the blueprint stance applied to time: the machine declares the delay; the host owns the clock. In the live path timers run on the actor's clock and `isIdle` counts a pending `after` as busy (§3.3), so `runAgent` never settles under a live timer.
 
-*(Spike S1 verified: `transition()`/`initialTransition()` emit `{ type: '@xstate.raise', event, delay, id }` executable actions — event + delay + id, everything a host needs to schedule and de-duplicate.)*
+_(Spike S1 verified: `transition()`/`initialTransition()` emit `{ type: '@xstate.raise', event, delay, id }` executable actions — event + delay + id, everything a host needs to schedule and de-duplicate.)_
 
 Timers surface only in `step.actions`; `step.requests` never contains them — a durable host scanning for model/decision work can ignore `actions` entirely, and a host scheduling timers can ignore `requests` entirely.
 
@@ -568,7 +562,7 @@ Timers surface only in `step.actions`; `step.requests` never contains them — a
 2. `messagesSchema` now **rejects at runtime** messages that previously passed (unknown roles, unknown part types). Persisted contexts holding old-shape messages have no migration path in the alpha — documented: wipe or migrate manually.
 3. `agentEvents` (config) and `eventTypes` (request) removed → decisions + `allowedEvents`.
 4. `runAgent` return type changes from `OutputFrom<TMachine>` to `RunAgentResult<TMachine>` (`done | idle | error`); it no longer throws on a waiting machine. There is no continuation callback (`onPause`/`onIdle` do not exist) — idle settles and the caller resumes by snapshot. `onChunk` gains `{ request }`; `onTransition` added (observation-only).
-5. `runAgent` now runs *all* invokes (was: model-only) — machines with side-effecting actors that previously errored now execute. It stops its actor on every settle; resume is snapshot-only.
+5. `runAgent` now runs _all_ invokes (was: model-only) — machines with side-effecting actors that previously errored now execute. It stops its actor on every settle; resume is snapshot-only.
 6. `AgentRequestExecutors` gains optional `decide`; machines using decisions require it (bind-time throw otherwise).
 7. `AgentRequest` gains `kind: 'text'`; `AgentStep.requests` becomes a `kind`-discriminated union including `AgentDecisionRequest`.
 8. `getAvailableEvents` renamed `getAcceptedEvents`; `getEventTools` removed (descriptors only — adapters build tools).
@@ -590,7 +584,7 @@ Timers surface only in `step.actions`; `step.requests` never contains them — a
 
 - **Q6.1** — **superseded**: delivery is built into the decision actor (a `sendTo(self, …)`, not a raise). No user-facing helper — the standalone delivery export was removed.
 - **Q6.2** — ~~best-effort mode-3 via `self._parent`~~ **superseded**: the internals hack is deleted. Bare `createActor` is modes 1–2, documented (§2.6). Blessed paths (`runAgent`/step) supply `canTake` from real snapshots.
-- **Q6.3** — P0 fixes only the *shapes* (recorded envelope carries `{ event, raw }`, §4.3/§4.4); the first event-log storage adapter ships in P3.
+- **Q6.3** — P0 fixes only the _shapes_ (recorded envelope carries `{ event, raw }`, §4.3/§4.4); the first event-log storage adapter ships in P3.
 - **Q6.4** — decision executor contract is `{ event, reason? }` (§2.6): coercion mechanics (forced tool choice, structured output) live in adapters; core validates + retries. Retry feedback travels as `request.attempts` data — core never rewrites prompts.
 - **Q6.5** — non-model actors reach `runAgent` via the `actorSources` option (sugar for `machine.provide`); binding walks effective post-provide sources by logic `kind`, fails fast at bind time on anything unbound (§3.2).
 - **Q6.6** — binary/`URL` message parts vs persistence: host concern, documented stance only (§1.2), no serializer in P0.
@@ -611,15 +605,15 @@ Timers surface only in `step.actions`; `step.requests` never contains them — a
 
 **Spikes against `xstate@6.0.0-alpha.16` — all verified empirically 2026-07-02 (scripts in `.scratch/spikes/`):**
 
-| Spike | Verdict | Result |
-| --- | --- | --- |
-| S1 — step-path timers | ✅ PASS | `initialTransition` emits `{ type: '@xstate.raise', event, delay, id }` executable actions — hosts have everything to schedule; feeding the after-event back transitions correctly (§4.5 holds). |
-| S2 — `after` in `getNextTransitions` | ✅ PASS | Delayed transitions appear as `xstate.after.<delay>.<stateId>`; `always` as `eventType === ''` — `isIdle`'s `startsWith('xstate.after')` check is valid (§3.3 holds). |
-| S3 — onDone no-target + `sendTo(self)` | ✅ PASS* | Event arrives and takes the transition; completed invoke is **not** re-run (`runCount: 1`); the send is externally observable (v6 inspection: `@xstate.transition` events with `sent: [...]`). Output is on `event.output` in the onDone transition fn. |
-| S4 — double `provide` | ✅ PASS | Chained provides **merge** (`machine.implementations.actorSources` shows both overrides) — §3.2.1 holds. |
-| S5 — `snapshot.can()` payload + guards | ✅ PASS | Correct for object-form guards **and** function transitions (`HEAL: ({context,event}) => cond ? {target} : undefined`) across all cases — mode-3 holds for the dominant authoring style. |
-| S6 — direct-object srcs at bind time | ⚠️ PARTIAL | Detectable — but **only via `machine.config`** (raw authored src preserved). The built tree (`machine.root.states`) normalizes object srcs to synthetic string ids (`xstate.invoke.0.(machine).b`) and silently loses the distinction. |
-| S7 — zod v4 → JSON Schema | ✅ PASS | Both `['~standard'].jsonSchema.input/.output` and top-level `z.toJSONSchema(schema)` work (draft 2020-12). Use `z.toJSONSchema` where a zod instance is known; the `~standard` extension for vendor-agnostic paths. |
+| Spike                                  | Verdict    | Result                                                                                                                                                                                                                                                  |
+| -------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| S1 — step-path timers                  | ✅ PASS    | `initialTransition` emits `{ type: '@xstate.raise', event, delay, id }` executable actions — hosts have everything to schedule; feeding the after-event back transitions correctly (§4.5 holds).                                                        |
+| S2 — `after` in `getNextTransitions`   | ✅ PASS    | Delayed transitions appear as `xstate.after.<delay>.<stateId>`; `always` as `eventType === ''` — `isIdle`'s `startsWith('xstate.after')` check is valid (§3.3 holds).                                                                                   |
+| S3 — onDone no-target + `sendTo(self)` | ✅ PASS\*  | Event arrives and takes the transition; completed invoke is **not** re-run (`runCount: 1`); the send is externally observable (v6 inspection: `@xstate.transition` events with `sent: [...]`). Output is on `event.output` in the onDone transition fn. |
+| S4 — double `provide`                  | ✅ PASS    | Chained provides **merge** (`machine.implementations.actorSources` shows both overrides) — §3.2.1 holds.                                                                                                                                                |
+| S5 — `snapshot.can()` payload + guards | ✅ PASS    | Correct for object-form guards **and** function transitions (`HEAL: ({context,event}) => cond ? {target} : undefined`) across all cases — mode-3 holds for the dominant authoring style.                                                                |
+| S6 — direct-object srcs at bind time   | ⚠️ PARTIAL | Detectable — but **only via `machine.config`** (raw authored src preserved). The built tree (`machine.root.states`) normalizes object srcs to synthetic string ids (`xstate.invoke.0.(machine).b`) and silently loses the distinction.                  |
+| S7 — zod v4 → JSON Schema              | ✅ PASS    | Both `['~standard'].jsonSchema.input/.output` and top-level `z.toJSONSchema(schema)` work (draft 2020-12). Use `z.toJSONSchema` where a zod instance is known; the `~standard` extension for vendor-agnostic paths.                                     |
 
 **Implementation notes from the spikes (binding for the P0 code):**
 

@@ -35,7 +35,7 @@ reviewing: {
 Tags are serializable and show up in the Stately visualizer, but the signal is yours to pick — a tag, a state match, or a `meta` field. A meta-driven flavor reuses annotations you may already have:
 
 ```ts
-import { getStateMeta } from '@statelyai/agent';
+import { getStateMeta } from "@statelyai/agent";
 
 const agentSetup = setupAgent({
   // ...schemas...
@@ -49,7 +49,7 @@ A host can override the machine's predicate per run by passing `isSuspended` to 
 await runAgent(machine, {
   input,
   executors: { generateText },
-  isSuspended: (snapshot) => snapshot.matches('reviewing'),
+  isSuspended: (snapshot) => snapshot.matches("reviewing"),
 });
 ```
 
@@ -60,8 +60,8 @@ await runAgent(machine, {
 In this drafting workflow, `reviewing` has no invoke. Once reached, nothing happens until a human sends `APPROVE` or `REJECT`:
 
 ```ts
-import { z } from 'zod';
-import { setupAgent } from '@statelyai/agent';
+import { z } from "zod";
+import { setupAgent } from "@statelyai/agent";
 
 const agentSetup = setupAgent({
   context: z.object({ topic: z.string(), draft: z.string().nullable() }),
@@ -74,7 +74,7 @@ const agentSetup = setupAgent({
   requests: {
     writeDraft: {
       schemas: { input: z.object({ topic: z.string() }), output: z.string() },
-      model: 'writer',
+      model: "writer",
       prompt: ({ input }) => input.topic,
     },
   },
@@ -82,27 +82,27 @@ const agentSetup = setupAgent({
 
 const machine = agentSetup.createMachine({
   context: ({ input }) => ({ topic: input.topic, draft: null }),
-  initial: 'drafting',
+  initial: "drafting",
   states: {
     drafting: {
       invoke: {
-        src: 'writeDraft',
+        src: "writeDraft",
         input: ({ context }) => ({ topic: context.topic }),
-        onDone: ({ output }) => ({ target: 'reviewing', context: { draft: output } }),
+        onDone: ({ output }) => ({ target: "reviewing", context: { draft: output } }),
       },
     },
     reviewing: {
       on: {
-        APPROVE: { target: 'published' },
+        APPROVE: { target: "published" },
         REJECT: ({ context, event }) => ({
-          target: 'drafting',
+          target: "drafting",
           context: { topic: `${context.topic}\nRevision: ${event.reason}` },
         }),
       },
     },
     published: {
-      type: 'final',
-      output: ({ context }) => ({ published: true, draft: context.draft ?? '' }),
+      type: "final",
+      output: ({ context }) => ({ published: true, draft: context.draft ?? "" }),
     },
   },
 });
@@ -113,7 +113,10 @@ const machine = agentSetup.createMachine({
 The first `runAgent` runs the draft, reaches `reviewing`, and settles `idle`. Persist the snapshot, wait for the human, resume with `{ snapshot, event }`:
 
 ```ts
-const first = await runAgent(machine, { input: { topic: 'release notes' }, executors: { generateText } });
+const first = await runAgent(machine, {
+  input: { topic: "release notes" },
+  executors: { generateText },
+});
 
 console.log(first.status);
 // logs 'idle'
@@ -123,7 +126,7 @@ const persisted = JSON.parse(JSON.stringify(first.snapshot));
 // ...later, possibly a different process, the human approved...
 const second = await runAgent(machine, {
   snapshot: persisted,
-  event: { type: 'APPROVE' },
+  event: { type: "APPROVE" },
   executors: { generateText },
 });
 
@@ -140,17 +143,21 @@ The snapshot is a plain, JSON-serializable object; the `JSON.stringify`/`JSON.pa
 `getAcceptedEvents(snapshot)` returns one descriptor per **currently-legal** event: its `type`, a synthetic `toolName`, and its payload schema when registered. Drive the loop off it:
 
 ```ts
-import { getAcceptedEvents, runAgent } from '@statelyai/agent';
+import { getAcceptedEvents, runAgent } from "@statelyai/agent";
 
 let result = await runAgent(machine, { input, executors: { generateText } });
 
-while (result.status === 'idle') {
+while (result.status === "idle") {
   const choices = getAcceptedEvents(result.snapshot);
   const event = await promptUser(choices);
-  result = await runAgent(machine, { snapshot: result.snapshot, event, executors: { generateText } });
+  result = await runAgent(machine, {
+    snapshot: result.snapshot,
+    event,
+    executors: { generateText },
+  });
 }
 
-if (result.status === 'done') {
+if (result.status === "done") {
   console.log(result.output);
 }
 ```
@@ -158,7 +165,7 @@ if (result.status === 'done') {
 A generic host that builds the human's event dynamically (from form input, a webhook payload, an interaction protocol) can't type it against a specific machine. `parseAgentEvent(snapshot, event)` validates the `{ type, ...payload }` at runtime — accepted event types and registered payload schemas — and returns it typed as the machine's event union, throwing a descriptive error otherwise. This replaces `event as never` casts in meta-driven hosts:
 
 ```ts
-import { parseAgentEvent } from '@statelyai/agent';
+import { parseAgentEvent } from "@statelyai/agent";
 
 const event = parseAgentEvent(result.snapshot, { type: chosenType, ...formPayload });
 result = await runAgent(machine, { snapshot: result.snapshot, event, executors });
@@ -172,7 +179,7 @@ Between iterations, persist `result.snapshot` anywhere: a database row, a queue 
 
 For a checkpoint after every model call, not only at settle, see [Steps](steps.md).
 
-**Resume cannot re-run earlier work.** A resumed snapshot starts *at* the waiting state, so the states before it never re-enter: side effects and model calls that ran before the pause run exactly once, no matter how many times you resume. There is nothing to isolate and no discipline to remember. (Contrast with inline-interrupt designs, where code before the interrupt call re-executes on resume unless the author manually isolates it in its own node.) Re-running work is always an explicit, authored transition, such as a `REJECT` that targets the drafting state again. This guarantee is pinned by a test in `src/run-agent.test.ts` ("pre-idle side effects and model calls run exactly once").
+**Resume cannot re-run earlier work.** A resumed snapshot starts _at_ the waiting state, so the states before it never re-enter: side effects and model calls that ran before the pause run exactly once, no matter how many times you resume. There is nothing to isolate and no discipline to remember. (Contrast with inline-interrupt designs, where code before the interrupt call re-executes on resume unless the author manually isolates it in its own node.) Re-running work is always an explicit, authored transition, such as a `REJECT` that targets the drafting state again. This guarantee is pinned by a test in `src/run-agent.test.ts` ("pre-idle side effects and model calls run exactly once").
 
 > **Context must be JSON-serializable.** Persisted snapshots round-trip through `JSON.stringify`/`JSON.parse`, so anything in `context` that is not plain JSON silently corrupts on resume: `Date` becomes a string, `Map`/`Set` become `{}`, and class instances lose their prototype. Keep non-serializable handles (sessions, db clients, sockets) in closures and store only their serializable ids in `context`; see [host actors](host-actors.md#threading-host-context-into-actors-and-requests).
 
@@ -192,10 +199,10 @@ The `AgentSnapshotStore` type — `load(id): Promise<Snapshot | undefined>` and 
 Resuming with an event the restored state cannot take is a programmer error, so `runAgent` throws `IllegalResumeEventError` (carrying `eventType` and `acceptedTypes`) before delivering it — the same class as its bind-time throws, not an `error`-status settle. You do not need to pre-check legality yourself:
 
 ```ts
-import { IllegalResumeEventError, runAgent } from '@statelyai/agent';
+import { IllegalResumeEventError, runAgent } from "@statelyai/agent";
 
 try {
-  await runAgent(machine, { snapshot, event: { type: 'NOPE' }, executors: { generateText } });
+  await runAgent(machine, { snapshot, event: { type: "NOPE" }, executors: { generateText } });
 } catch (error) {
   if (error instanceof IllegalResumeEventError) {
     // error.acceptedTypes lists what the restored state does accept
@@ -229,11 +236,11 @@ try {
 }
 ```
 
-You still call `getAcceptedEvents` yourself only when you want to *render* the choices — rehydrate the handle and read them:
+You still call `getAcceptedEvents` yourself only when you want to _render_ the choices — rehydrate the handle and read them:
 
 ```ts
-import { createActor } from 'xstate';
-import { getAcceptedEvents } from '@statelyai/agent';
+import { createActor } from "xstate";
+import { getAcceptedEvents } from "@statelyai/agent";
 
 const snapshot = createActor(machine, { snapshot: JSON.parse(handle) }).getSnapshot();
 const choices = getAcceptedEvents(snapshot); // one descriptor per legal event
@@ -244,7 +251,7 @@ const choices = getAcceptedEvents(snapshot); // one descriptor per legal event
 Schema-typed state `meta` gives the host a typed interaction label or view hints to render for the human. Legal choices still come from the snapshot via `getAcceptedEvents`. Meta lives keyed by state id, so pull it off an idle snapshot with `getStateMeta`:
 
 ```ts
-import { getStateMeta } from '@statelyai/agent';
+import { getStateMeta } from "@statelyai/agent";
 
 const interaction = getStateMeta(snapshot).interaction ?? null;
 ```
@@ -263,11 +270,10 @@ reviewing: {
     src: 'agent.userInput',
     input: ({ context }) => ({
       prompt: `How is this draft? ${context.draft ?? ''}`,
-      schema: z.object({ feedback: z.string() }),
     }),
-    onDone: ({ event }) => ({
+    onDone: ({ output }) => ({
       target: 'revising',
-      context: { feedback: (event.output as { feedback: string }).feedback },
+      context: { feedback: output },
     }),
   },
 }
@@ -277,9 +283,11 @@ reviewing: {
 await runAgent(machine, {
   input,
   generateText,
-  userInput: async ({ prompt }) => ({ feedback: await ask(prompt ?? '') }),
+  userInput: async ({ prompt }) => ask(prompt ?? ""),
 });
 ```
+
+The handler resolves to a `string` — what the human typed — so `onDone`'s `output` needs no cast. To collect structured input, gather the string(s) and parse/classify in a follow-up state (see [twenty-questions](../examples/twenty-questions/index.ts)) or register a custom actor source in place of `agent.userInput`.
 
 Without a handler, `agent.userInput` becomes a **pending placeholder** instead of an error. See the next section.
 
@@ -289,7 +297,7 @@ Without a handler, `agent.userInput` becomes a **pending placeholder** instead o
 
 Whole-machine idle is not enough for parallel machines: one region may wait for a human while a sibling region still has work in flight. An unhandled `agent.userInput` invoke covers this case. It waits indefinitely and does not block idle detection, so the run keeps executing sibling work and then settles idle with two extra fields:
 
-- **`pendingUserInputs`**: one `{ id, input }` entry per pending `agent.userInput` invoke, carrying the invoke's resolved input (prompt, schema, and so on) for the host to render.
+- **`pendingUserInputs`**: one `{ id, input }` entry per pending `agent.userInput` invoke, carrying the invoke's resolved input (prompt, metadata) for the host to render.
 - **`persistedSnapshot`**: a JSON-serializable snapshot that includes the in-flight invokes. Persist this one; the live `snapshot` cannot round-trip active children.
 
 Resume with the persisted snapshot plus a `userInput` handler. The restored invoke re-runs against the handler and the machine proceeds:
@@ -297,13 +305,13 @@ Resume with the persisted snapshot plus a `userInput` handler. The restored invo
 ```ts
 const first = await runAgent(machine, { input, generateText });
 
-if (first.status === 'idle' && first.pendingUserInputs) {
+if (first.status === "idle" && first.pendingUserInputs) {
   await store.save(JSON.stringify(first.persistedSnapshot));
   // ...later, possibly a different process...
   const second = await runAgent(machine, {
     snapshot: JSON.parse(await store.load()),
     generateText,
-    userInput: async ({ prompt }) => ({ feedback: await ask(prompt ?? '') }),
+    userInput: async ({ prompt }) => ({ feedback: await ask(prompt ?? "") }),
   });
 }
 ```

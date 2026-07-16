@@ -1056,11 +1056,9 @@ describe("runAgent", () => {
             id: "ask",
             src: "agent.userInput",
             input: { prompt: "How was it?" },
-            onDone: ({ event }) => ({
+            onDone: ({ output }) => ({
               target: "done",
-              context: {
-                feedback: (event.output as { feedback?: string }).feedback ?? "",
-              },
+              context: { feedback: output },
             }),
           },
         },
@@ -1075,7 +1073,7 @@ describe("runAgent", () => {
       input: {},
       userInput: async (input) => {
         expect(input).toEqual(expect.objectContaining({ prompt: "How was it?" }));
-        return { feedback: "great" };
+        return "great";
       },
       executors: {
         generateText: async () => ({ output: {} }),
@@ -1513,7 +1511,7 @@ describe("agent.userInput as a pending placeholder (durable parallel HITL)", () 
               input: { prompt: "Feedback?" },
               onDone: ({ output }) => ({
                 target: "received",
-                context: { feedback: (output as { feedback: string }).feedback },
+                context: { feedback: output },
               }),
             },
           },
@@ -1556,7 +1554,7 @@ describe("agent.userInput as a pending placeholder (durable parallel HITL)", () 
       snapshot: stored,
       userInput: async (input) => {
         expect(input).toEqual({ prompt: "Feedback?" });
-        return { feedback: "ship it" };
+        return "ship it";
       },
       executors: {
         generateText: async () => {

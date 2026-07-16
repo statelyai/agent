@@ -1,0 +1,14 @@
+{
+  "name": "go-fish",
+  "title": "Go Fish",
+  "kind": "agent-workflow",
+  "origin": {
+    "type": "stately-agent",
+    "source": "Created in this repository",
+    "url": null
+  },
+  "comparison": {
+    "targets": ["LangGraph", "Burr", "Flowise"],
+    "purpose": "Shows hidden information, human input, model decisions, and machine-enforced game rules."
+  }
+}

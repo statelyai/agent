@@ -24,33 +24,45 @@ Register a child machine under `actorSources:` on the parent's `setupAgent(...)`
 ```ts
 const agentSetup = setupAgent({
   models,
-  context: z.object({ topic: z.string(), notes: z.string().nullable(), final: z.string().nullable() }),
+  context: z.object({
+    topic: z.string(),
+    notes: z.string().nullable(),
+    final: z.string().nullable(),
+  }),
   input: z.object({ topic: z.string() }),
   output: finalOutputSchema,
   actorSources: {
-    researchAgent: research.machine.provide({ actorSources: { /* ... */ } }),
-    writerAgent: writer.machine.provide({ actorSources: { /* ... */ } }),
+    researchAgent: research.machine.provide({
+      actorSources: {
+        /* ... */
+      },
+    }),
+    writerAgent: writer.machine.provide({
+      actorSources: {
+        /* ... */
+      },
+    }),
   },
 });
 
 const machine = agentSetup.createMachine({
-  initial: 'researching',
+  initial: "researching",
   states: {
     researching: {
       invoke: {
-        src: 'researchAgent',
+        src: "researchAgent",
         input: ({ context }) => ({ topic: context.topic }),
-        onDone: ({ output }) => ({ target: 'writing', context: { notes: output.notes } }),
+        onDone: ({ output }) => ({ target: "writing", context: { notes: output.notes } }),
       },
     },
     writing: {
       invoke: {
-        src: 'writerAgent',
-        input: ({ context }) => ({ notes: context.notes ?? '' }),
-        onDone: ({ output }) => ({ target: 'done', context: { final: output.draft } }),
+        src: "writerAgent",
+        input: ({ context }) => ({ notes: context.notes ?? "" }),
+        onDone: ({ output }) => ({ target: "done", context: { final: output.draft } }),
       },
     },
-    done: { type: 'final', output: ({ context }) => ({ final: context.final ?? '' }) },
+    done: { type: "final", output: ({ context }) => ({ final: context.final ?? "" }) },
   },
 });
 ```
@@ -69,11 +81,11 @@ A child machine's own requests inherit the executors you pass to `runAgent` — 
 `inspectTransitions(handler)` wraps `inspect`: it filters the stream to `@xstate.transition` events and hands the handler the typed snapshot and actorRef, replacing the manual `event.type === '@xstate.transition'` check and casts.
 
 ```ts
-import { inspectTransitions, runAgent } from '@statelyai/agent';
+import { inspectTransitions, runAgent } from "@statelyai/agent";
 
 await runAgent(parentMachine, {
   executors: { generateText },
-  onTransition: (snapshot) => console.log('parent:', snapshot.value),
+  onTransition: (snapshot) => console.log("parent:", snapshot.value),
   inspect: inspectTransitions((snapshot, actorRef) => {
     console.log(`[${actorRef.id}]`, snapshot.value); // child transitions included
   }),
@@ -155,7 +167,7 @@ Each debater sits idle until it receives `DEBATE.ARGUMENT_REQUESTED`, composes a
 
 ```ts
 const result = await runAgent(parentMachine, {
-  input: { topic: 'agents' },
+  input: { topic: "agents" },
   executors: { generateText }, // covers the parent's requests AND the child's researchTopic
 });
 ```

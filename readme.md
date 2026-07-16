@@ -132,6 +132,7 @@ The example has one model decision and two final outcomes. Real machines can add
 <!-- starter examples derived from examples/*/metadata.json and examples/index.ts -->
 
 - [Twenty Questions](examples/twenty-questions) shows a model choosing legal events in a loop.
+- [Go Fish](examples/go-fish) pits a model against a human while the machine enforces hidden-information game rules.
 - [Human in the loop](examples/human-in-the-loop) pauses, stores a snapshot, and resumes after review.
 - [Ticket triage](examples/triage) returns structured data from a model request.
 - [JSON agent](examples/json-agent) runs a machine defined as data.

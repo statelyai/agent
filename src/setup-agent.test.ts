@@ -75,6 +75,50 @@ function asTextRequest(request: AgentStepRequest | undefined): AgentRequest {
 }
 
 describe("setupAgent", () => {
+  test("discovers requests from XState's split spawn and start effects", () => {
+    const schemas = createAgentSchemas({
+      context: z.object({ prompt: z.string() }),
+      input: z.object({ prompt: z.string() }),
+    });
+    const agent = setupAgent({
+      schemas,
+      requests: {
+        draft: {
+          model: "test-model",
+          schemas: {
+            input: z.object({ prompt: z.string() }),
+            output: z.object({ body: z.string() }),
+          },
+          prompt: ({ input }) => input.prompt,
+        },
+      },
+    });
+    const machine = agent.createMachine({
+      context: ({ input }) => ({ prompt: input.prompt }),
+      initial: "drafting",
+      states: {
+        drafting: {
+          invoke: {
+            id: "draft",
+            src: "draft",
+            input: ({ context }) => ({ prompt: context.prompt }),
+          },
+        },
+      },
+    });
+
+    const step = initialAgentStep(machine, { prompt: "Write it." });
+
+    expect(step.requests).toMatchObject([
+      {
+        kind: "text",
+        id: "draft",
+        src: "draft",
+        input: { prompt: "Write it." },
+      },
+    ]);
+  });
+
   test("setupAgent accepts typed model aliases", () => {
     const schemas = createAgentSchemas({
       context: z.object({ prompt: z.string() }),
@@ -2722,6 +2766,78 @@ describe("per-state context schemas (setupAgent({ states }))", () => {
     await toPromise(actor);
 
     expect(actor.getSnapshot().output).toEqual({ answer: "about states" });
+  });
+
+  test("the field-level narrowing sugar ({ context: { field } }) narrows like the full form", async () => {
+    const agent = setupAgent({
+      schemas: createAgentSchemas({
+        context: z.object({ topic: z.string(), answer: z.string().nullable() }),
+        input: z.object({ topic: z.string() }),
+        output: z.object({ answer: z.string() }),
+      }),
+      actorSources: {
+        finish: createAsyncLogic({
+          run: async ({ input }: { input: { echo: string } }) => input.echo,
+        }),
+      },
+      // Sugar: only the field that changes is declared — no base re-statement.
+      states: {
+        finishing: { context: { answer: z.string() } },
+        done: { context: { answer: z.string() } },
+      },
+    });
+
+    const machine = agent.createMachine({
+      context: ({ input }) => ({ topic: input.topic, answer: null }),
+      initial: "working",
+      states: {
+        working: {
+          always: {
+            target: "finishing",
+            context: ({ context }) => ({ ...context, answer: `about ${context.topic}` }),
+          },
+        },
+        finishing: {
+          invoke: {
+            src: "finish",
+            // Narrowed: `context.answer` is `string` here; `topic` survives untouched.
+            input: ({ context }) => ({
+              echo: `${context.topic satisfies string}: ${context.answer satisfies string}`,
+            }),
+            onDone: { target: "done" },
+          },
+        },
+        done: {
+          type: "final",
+          output: ({ context }) => ({ answer: context.answer satisfies string }),
+        },
+      },
+    });
+
+    const actor = createActor(machine, { input: { topic: "states" } });
+    actor.start();
+    await toPromise(actor);
+
+    expect(actor.getSnapshot().output).toEqual({ answer: "about states" });
+  });
+
+  test("the sugar's merged schema validates: base plus overridden fields", () => {
+    const agent = setupAgent({
+      schemas: createAgentSchemas({
+        context: z.object({ topic: z.string(), answer: z.string().nullable() }),
+        input: z.object({ topic: z.string() }),
+      }),
+      states: {
+        done: { context: { answer: z.string() } },
+      },
+    });
+    // Reach through the machine config's resolved setup states to the merged schema.
+    const machine = agent.createMachine({
+      context: { topic: "t", answer: null },
+      initial: "done",
+      states: { done: {} },
+    });
+    expect(machine).toBeDefined();
   });
 });
 

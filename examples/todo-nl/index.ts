@@ -79,15 +79,6 @@ export const todoSchemas = createAgentSchemas({
   },
 });
 
-const PLAN_SYSTEM_PROMPT =
-  "You manage a todo list by translating a user's natural-language command " +
-  "into a sequence of list operation events. One command may need several " +
-  "events (e.g. 'add X and Y' → two ADD_TODO). Apply them one at a time, in " +
-  "order. Prefer the most direct mapping. Only reference todo ids that appear " +
-  "in the current list. If the command asks to quit/exit, choose QUIT. When " +
-  "the command is fully handled — or maps to no action (small talk, already " +
-  "satisfied) — choose the done move to end.";
-
 function renderTodoList(todos: Todo[]): string {
   if (todos.length === 0) {
     return "(the todo list is empty)";
@@ -120,10 +111,10 @@ export const todoMachine = agentSetup.createMachine({
             "What would you like to do? (natural language, or 'quit')",
           ].join("\n"),
         }),
-        onDone: ({ event }) => ({
+        onDone: ({ output }) => ({
           target: "planning",
           context: {
-            pendingCommand: String(event.output ?? ""),
+            pendingCommand: output,
           },
         }),
       },
@@ -140,16 +131,20 @@ export const todoMachine = agentSetup.createMachine({
         src: "agent.plan",
         input: ({ context }) => ({
           model: "quick",
-          system: PLAN_SYSTEM_PROMPT,
+          system:
+            "You manage a todo list by translating a user's natural-language command " +
+            "into a sequence of list operation events. One command may need several " +
+            "events (e.g. 'add X and Y' → two ADD_TODO). Apply them one at a time, in " +
+            "order. Prefer the most direct mapping. Only reference todo ids that appear " +
+            "in the current list. If the command asks to quit/exit, choose QUIT. When " +
+            "the command is fully handled — or maps to no action (small talk, already " +
+            "satisfied) — choose the done move to end.",
           prompt: [
             "Current todo list:",
             renderTodoList(context.todos),
             "",
             `User command: ${context.pendingCommand ?? ""}`,
           ].join("\n"),
-          // Typo'd names are caught at compile time — allowedEvents is typed
-          // against the machine's event-schema keys.
-          allowedEvents: ["ADD_TODO", "TOGGLE_TODO", "DELETE_TODO", "QUIT"],
           // The plan ends via the built-in done move (offered automatically),
           // at maxSteps, or when QUIT exits the state (below) and cancels the
           // invoke. No `stopOn` sentinel needed.

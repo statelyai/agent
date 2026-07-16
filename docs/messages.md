@@ -27,12 +27,12 @@ type AgentMessage = SystemMessage | UserMessage | AssistantMessage | ToolMessage
 Build each role with its helper:
 
 ```ts
-import { assistantMessage, systemMessage, userMessage } from '@statelyai/agent';
+import { assistantMessage, systemMessage, userMessage } from "@statelyai/agent";
 
 const messages = [
-  systemMessage('You draft concise emails.'),
-  userMessage('Draft a launch email.'),
-  assistantMessage('Here is a first draft: ...'),
+  systemMessage("You draft concise emails."),
+  userMessage("Draft a launch email."),
+  assistantMessage("Here is a first draft: ..."),
 ];
 ```
 
@@ -40,8 +40,8 @@ const messages = [
 
 ```ts
 userMessage([
-  { type: 'text', text: 'What is in this image?' },
-  { type: 'image', image: 'https://example.com/photo.png' },
+  { type: "text", text: "What is in this image?" },
+  { type: "image", image: "https://example.com/photo.png" },
 ]);
 ```
 
@@ -50,7 +50,7 @@ userMessage([
 Messages are plain context state. Declare a `messages` field validated by `messagesSchema`, and grow it over transitions:
 
 ```ts
-import { messagesSchema, setupAgent } from '@statelyai/agent';
+import { messagesSchema, setupAgent } from "@statelyai/agent";
 
 const agentSetup = setupAgent({
   context: z.object({

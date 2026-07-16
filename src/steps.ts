@@ -114,6 +114,39 @@ export interface AgentPlanRequest {
 /** `AgentStep.requests` element: a text, decision, or plan request. */
 export type AgentStepRequest = AgentRequest | AgentDecisionRequest | AgentPlanRequest;
 
+interface InvokeEffectMetadata {
+  id?: unknown;
+  src?: unknown;
+  input?: unknown;
+  logic?: unknown;
+}
+
+/** @internal Normalizes current and legacy XState invoke effect shapes. */
+export function getInvokeEffectMetadata(action: {
+  type?: string;
+  params?: unknown;
+  id?: unknown;
+  src?: unknown;
+  input?: unknown;
+  logic?: unknown;
+}): InvokeEffectMetadata | undefined {
+  if (action.type === "@xstate.spawn") {
+    return action;
+  }
+
+  if (action.type === "xstate.spawnChild") {
+    const params = action.params as InvokeEffectMetadata | undefined;
+    return params ? { ...params, logic: action.logic } : undefined;
+  }
+
+  // Before spawn/start were split, @xstate.start carried invoke metadata.
+  if (action.type === "@xstate.start" && typeof action.src === "string") {
+    return action;
+  }
+
+  return undefined;
+}
+
 /**
  * Scans a set of executable actions (as returned by xstate's `transition`/
  * `initialTransition`) for spawned `TextLogic`/`DecisionLogic` invokes and
@@ -139,14 +172,7 @@ export function getAgentRequestsWith(
   options: AgentRequestOptions = {},
 ): AgentStepRequest[] {
   const fromActions = actions.flatMap((action): AgentStepRequest[] => {
-    if (action.type !== "xstate.spawnChild" && action.type !== "@xstate.start") {
-      return [];
-    }
-
-    const params =
-      action.type === "@xstate.start"
-        ? action
-        : (action.params as { id?: unknown; src?: unknown; input?: unknown } | undefined);
+    const params = getInvokeEffectMetadata(action);
     if (!params || typeof params.src !== "string") {
       return [];
     }
@@ -156,8 +182,8 @@ export function getAgentRequestsWith(
     }
 
     const registeredLogic =
-      isTextLogic(action.logic) || isDecisionLogic(action.logic)
-        ? action.logic
+      isTextLogic(params.logic) || isDecisionLogic(params.logic)
+        ? params.logic
         : options.actorSources?.[params.src];
 
     if (isDecisionLogic(registeredLogic)) {

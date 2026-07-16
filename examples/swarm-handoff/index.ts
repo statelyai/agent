@@ -96,7 +96,6 @@ export const swarmHandoffMachine = agentSetup.createMachine({
     },
     travelTurn: {
       invoke: {
-        id: "travelReply",
         src: "travelReply",
         input: ({ context }) => ({ message: context.message }),
         onDone: ({ output }) => ({
@@ -107,7 +106,6 @@ export const swarmHandoffMachine = agentSetup.createMachine({
     },
     foodTurn: {
       invoke: {
-        id: "foodReply",
         src: "foodReply",
         input: ({ context }) => ({ message: context.message }),
         onDone: ({ output }) => ({

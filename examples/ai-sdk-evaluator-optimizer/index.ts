@@ -68,23 +68,9 @@ const agentSetup = setupAgent({
   },
   // `improving` runs only after evaluating set translation + evaluation.
   states: {
-    translating: {},
-    evaluating: {
-      // Narrowed states extend the base schema instead of re-declaring it.
-      schemas: { context: contextSchema.extend({ translation: z.string() }) },
-    },
-    checking: {},
-    improving: {
-      schemas: {
-        context: contextSchema.extend({
-          translation: z.string(),
-          evaluation: translationEvaluationSchema,
-        }),
-      },
-    },
-    done: {
-      schemas: { context: contextSchema.extend({ translation: z.string() }) },
-    },
+    evaluating: { context: { translation: z.string() } },
+    improving: { context: { translation: z.string(), evaluation: translationEvaluationSchema } },
+    done: { context: { translation: z.string() } },
   },
   requests: {
     translateText: {
@@ -157,6 +143,8 @@ export const aiSdkEvaluatorOptimizerMachine = agentSetup.createMachine({
             context: { translation: output },
           };
         },
+        // On failure, finish with an empty translation (best-effort output).
+        onError: { target: "done", context: { translation: "" } },
       },
     },
     evaluating: {
@@ -181,6 +169,8 @@ export const aiSdkEvaluatorOptimizerMachine = agentSetup.createMachine({
             },
           };
         },
+        // On failure, finish with the current (already-set) translation.
+        onError: { target: "done" },
       },
     },
     checking: {
@@ -206,6 +196,8 @@ export const aiSdkEvaluatorOptimizerMachine = agentSetup.createMachine({
             context: { translation: output },
           };
         },
+        // On failure, finish with the prior translation (best-effort output).
+        onError: { target: "done" },
       },
     },
     done: {

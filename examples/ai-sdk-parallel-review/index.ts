@@ -57,10 +57,8 @@ const agentSetup = setupAgent({
   }),
   // summarizing sets summary before done reads it — narrow it non-null there.
   states: {
-    reviewing: {},
-    summarizing: {},
     done: {
-      schemas: { context: contextSchema.extend({ summary: z.string() }) },
+      context: { summary: z.string() },
     },
   },
   requests: {
@@ -139,6 +137,9 @@ export const aiSdkParallelReviewMachine = agentSetup.createMachine({
                     security: { type: "security" as const, ...output },
                   },
                 }),
+                // On failure, finish this region anyway; the review stays null
+                // and is filtered out of the collected reviews.
+                onError: { target: "done" },
               },
             },
             done: { type: "final" },
@@ -158,6 +159,7 @@ export const aiSdkParallelReviewMachine = agentSetup.createMachine({
                     performance: { type: "performance" as const, ...output },
                   },
                 }),
+                onError: { target: "done" },
               },
             },
             done: { type: "final" },
@@ -177,6 +179,7 @@ export const aiSdkParallelReviewMachine = agentSetup.createMachine({
                     maintainability: { type: "maintainability" as const, ...output },
                   },
                 }),
+                onError: { target: "done" },
               },
             },
             done: { type: "final" },
@@ -193,6 +196,8 @@ export const aiSdkParallelReviewMachine = agentSetup.createMachine({
           target: "done",
           context: { summary: output },
         }),
+        // On failure, finish with an empty summary (best-effort output).
+        onError: { target: "done", context: { summary: "" } },
       },
     },
     done: {

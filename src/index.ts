@@ -18,7 +18,9 @@ export {
   createTextLogic,
   getAgentOutputMode,
   isStructuredOutputSchema,
+  parseModelRef,
   parseOutput,
+  parseStructuredEnvelope,
 } from "./text-logic.js";
 export {
   executeAgentRequest,
@@ -123,7 +125,12 @@ export type {
   FromConfigOptions,
   SchemaCompiler,
 } from "./workflow-config.js";
-export type { AgentRequestConfig, AgentSchemaPack } from "./setup-agent.js";
+export type {
+  AgentRequestConfig,
+  AgentSchemaPack,
+  AgentSetupStateSchema,
+  AgentStateNarrowing,
+} from "./setup-agent.js";
 export type {
   DecisionAttempt,
   DecisionLogic,

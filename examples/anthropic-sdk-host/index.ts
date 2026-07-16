@@ -44,6 +44,7 @@ import type {
 } from "@anthropic-ai/sdk/resources/messages.js";
 import {
   buildEnvelopeSchema,
+  parseStructuredEnvelope,
   getAgentOutputMode,
   getJsonSchemaSync,
   isStandardSchema,
@@ -58,7 +59,6 @@ import {
   type AgentTextRequest,
   type AgentTools,
   type ChosenEvent,
-  type StructuredOutputEnvelope,
 } from "../../src/index.js";
 import { triageMachine } from "../triage/index.js";
 import { twentyQuestionsMachine } from "../twenty-questions/index.js";
@@ -267,10 +267,11 @@ export function createAnthropicExecutors(
           (block): block is Extract<typeof block, { type: "tool_use" }> =>
             block.type === "tool_use" && block.name === STRUCTURED_OUTPUT_TOOL_NAME,
         );
-        const parsed = toolUse?.input as StructuredOutputEnvelope | undefined;
+        // Validated unwrap of the { result, reasoning? } envelope — no cast.
+        const parsed = parseStructuredEnvelope(request, toolUse?.input);
         return {
-          output: parsed?.result,
-          ...(typeof parsed?.reasoning === "string" ? { reasoning: parsed.reasoning } : {}),
+          output: parsed.result,
+          ...(typeof parsed.reasoning === "string" ? { reasoning: parsed.reasoning } : {}),
         };
       }
       // No JSON Schema extension available on this schema (e.g. a hand-rolled

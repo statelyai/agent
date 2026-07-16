@@ -35,6 +35,7 @@ import type {
 } from "openai/resources/chat/completions/completions.js";
 import {
   buildEnvelopeSchema,
+  parseStructuredEnvelope,
   getAgentOutputMode,
   getJsonSchema,
   getJsonSchemaSync,
@@ -49,7 +50,6 @@ import {
   type AgentTextRequest,
   type AgentTools,
   type ChosenEvent,
-  type StructuredOutputEnvelope,
 } from "../../src/index.js";
 import { triageMachine } from "../triage/index.js";
 import { twentyQuestionsMachine } from "../twenty-questions/index.js";
@@ -227,10 +227,11 @@ export function createOpenAiExecutors({
           { signal: info?.signal },
         );
         const content = response.choices[0]?.message.content;
-        const parsed = content ? (JSON.parse(content) as StructuredOutputEnvelope) : undefined;
+        // Validated unwrap of the { result, reasoning? } envelope — no cast.
+        const parsed = parseStructuredEnvelope(request, content ? JSON.parse(content) : undefined);
         return {
-          output: parsed?.result,
-          ...(typeof parsed?.reasoning === "string" ? { reasoning: parsed.reasoning } : {}),
+          output: parsed.result,
+          ...(typeof parsed.reasoning === "string" ? { reasoning: parsed.reasoning } : {}),
         };
       }
       // no structured output without a schema exposing ~standard.jsonSchema

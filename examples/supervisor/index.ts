@@ -120,6 +120,9 @@ export const supervisorMachine = agentSetup.createMachine({
           target: "dispatch",
           context: { specialist: output.specialist, reason: output.reason },
         }),
+        // On failure, fall through to done — the root output fills best-effort
+        // defaults for the unset fields.
+        onError: { target: "done" },
       },
     },
     dispatch: {
@@ -135,6 +138,7 @@ export const supervisorMachine = agentSetup.createMachine({
           target: "done",
           context: { answer: output },
         }),
+        onError: { target: "done" },
       },
     },
     coder: {
@@ -146,6 +150,7 @@ export const supervisorMachine = agentSetup.createMachine({
           target: "done",
           context: { answer: output },
         }),
+        onError: { target: "done" },
       },
     },
     writer: {
@@ -157,6 +162,7 @@ export const supervisorMachine = agentSetup.createMachine({
           target: "done",
           context: { answer: output },
         }),
+        onError: { target: "done" },
       },
     },
     done: { type: "final" },

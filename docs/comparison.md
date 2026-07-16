@@ -16,14 +16,14 @@ If you are choosing between this library, [LangGraph JS](https://github.com/lang
 
 LangGraph pauses with `interrupt()` inside a node. On resume, **the node function re-executes from the top** up to the `interrupt()` call, so any side effect before the interrupt runs again unless you isolate it in its own node. The author has to remember this.
 
-Here a waiting state **is** a state. `runAgent` settles `{ status: 'idle', snapshot }`; resume starts *at* the waiting state, so states before it never re-enter. Pre-pause side effects and model calls run exactly once, with nothing to isolate. This is pinned by a test in `src/run-agent.test.ts` ("pre-idle side effects and model calls run exactly once").
+Here a waiting state **is** a state. `runAgent` settles `{ status: 'idle', snapshot }`; resume starts _at_ the waiting state, so states before it never re-enter. Pre-pause side effects and model calls run exactly once, with nothing to isolate. This is pinned by a test in `src/run-agent.test.ts` ("pre-idle side effects and model calls run exactly once").
 
 ```ts
 // here: resume starts AT `reviewing`; `drafting` (and its model call) never re-runs
-const first = await runAgent(machine, { input, executors });   // -> idle
+const first = await runAgent(machine, { input, executors }); // -> idle
 const done = await runAgent(machine, {
   snapshot: first.snapshot,
-  event: { type: 'APPROVE' },
+  event: { type: "APPROVE" },
   executors,
 });
 ```
@@ -36,8 +36,8 @@ LangGraph persists through a **checkpointer** wired to the graph, addressed by a
 
 ```ts
 const graph = builder.compile({ checkpointer: new MemorySaver() });
-await graph.invoke(input, { configurable: { thread_id: 'abc' } });
-const state = await graph.getState({ configurable: { thread_id: 'abc' } });
+await graph.invoke(input, { configurable: { thread_id: "abc" } });
+const state = await graph.getState({ configurable: { thread_id: "abc" } });
 ```
 
 Here the snapshot is plain JSON you store anywhere, with no checkpointer to wire and no thread addressing:
@@ -58,7 +58,7 @@ LangGraph nodes typically hold LangChain model objects (`ChatOpenAI`, `ChatAnthr
 Here the machine never talks to a model. It emits typed requests; a host resolves them with an executor set of up to three plain functions (`generateText`, `streamText`, `decide`) returning `{ output }`. Swap SDKs by swapping executors; the machine is untouched.
 
 ```ts
-const executors = createAiSdkExecutors({ models });      // Vercel AI SDK adapter
+const executors = createAiSdkExecutors({ models }); // Vercel AI SDK adapter
 // or createOpenAiCompatExecutors({ baseUrl }), or hand-rolled { generateText, decide }
 await runAgent(machine, { input, executors });
 ```
@@ -77,12 +77,12 @@ A `while` loop over `switch (phase)` is the right first move. It is readable, ha
 
 Structure earns its place when one of these four shows up. Each is cheap in a machine and real work to hand-build:
 
-| What you need | Hand-rolled cost | Here |
-|---|---|---|
-| **Durable pause/resume across processes** | Serialize loop-local state, rebuild it on load, and make sure no pre-pause work re-runs. Easy to get subtly wrong. | Settle `idle`, persist the JSON snapshot, resume with an event. Pre-pause work runs once by construction. |
-| **Enforcing which actions are legal mid-flow** | Hand-written `if` checks scattered per phase; the model can still request an out-of-bounds action and you catch it late. | Guards make illegal transitions return `undefined`; the model can only choose a currently-legal event. See [Decisions](decisions.md). |
-| **Audit / replay of what happened** | Bolt on your own event log, then keep it in sync with the mutations. | The [step path](steps.md) is event-sourced: each step applies one event; persist the ordered log and replay deterministically. |
-| **Visualization / review by teammates or agents** | None; the flow lives only in code. | The machine is a graph — inspect it in Stately, review it visually, or hand the JSON to an agent. See [Machines as data](machines-as-data.md). |
+| What you need                                     | Hand-rolled cost                                                                                                         | Here                                                                                                                                           |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Durable pause/resume across processes**         | Serialize loop-local state, rebuild it on load, and make sure no pre-pause work re-runs. Easy to get subtly wrong.       | Settle `idle`, persist the JSON snapshot, resume with an event. Pre-pause work runs once by construction.                                      |
+| **Enforcing which actions are legal mid-flow**    | Hand-written `if` checks scattered per phase; the model can still request an out-of-bounds action and you catch it late. | Guards make illegal transitions return `undefined`; the model can only choose a currently-legal event. See [Decisions](decisions.md).          |
+| **Audit / replay of what happened**               | Bolt on your own event log, then keep it in sync with the mutations.                                                     | The [step path](steps.md) is event-sourced: each step applies one event; persist the ordered log and replay deterministically.                 |
+| **Visualization / review by teammates or agents** | None; the flow lives only in code.                                                                                       | The machine is a graph — inspect it in Stately, review it visually, or hand the JSON to an agent. See [Machines as data](machines-as-data.md). |
 
 The trade: a machine is more upfront structure than a loop. The payoff is that these four capabilities come from the shape of the machine instead of being hand-maintained. If you need none of them, a loop is genuinely fine.
 

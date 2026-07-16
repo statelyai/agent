@@ -14,12 +14,12 @@ A **text request** is a typed model call your machine can invoke by name. You de
 Pass a `requests` map to `setupAgent`. Each entry becomes an invokable actor under the same name.
 
 ```ts
-import { z } from 'zod';
-import { setupAgent } from '@statelyai/agent';
-import { defineModels } from '@statelyai/agent/ai-sdk';
-import { openai } from '@ai-sdk/openai';
+import { z } from "zod";
+import { setupAgent } from "@statelyai/agent";
+import { defineModels } from "@statelyai/agent/ai-sdk";
+import { openai } from "@ai-sdk/openai";
 
-const models = defineModels({ quick: openai('gpt-5.4-mini') });
+const models = defineModels({ quick: openai("gpt-5.4-mini") });
 const answerSchema = z.object({ answer: z.string() });
 
 const agentSetup = setupAgent({
@@ -30,8 +30,8 @@ const agentSetup = setupAgent({
   requests: {
     answerQuestion: {
       schemas: { input: z.object({ prompt: z.string() }), output: answerSchema },
-      model: 'quick',
-      system: 'Answer the question directly.',
+      model: "quick",
+      system: "Answer the question directly.",
       prompt: ({ input }) => input.prompt,
     },
   },
@@ -46,12 +46,12 @@ const agentSetup = setupAgent({
 Prefer a `models` registry (the canonical form): it narrows `model` to the map's keys, making a typo a compile error and sharing one alias map between authoring and the host adapter. A bare `model` string is the escape hatch — any string, passed straight through to your [host](hosts.md) to resolve — for a machine that must not name concrete models (see [Which authoring form when](machines.md#which-authoring-form-when)).
 
 ```ts
-import { openai } from '@ai-sdk/openai';
-import { defineModels } from '@statelyai/agent/ai-sdk';
+import { openai } from "@ai-sdk/openai";
+import { defineModels } from "@statelyai/agent/ai-sdk";
 
 const models = defineModels({
-  quick: openai('gpt-5.4-mini'),
-  careful: openai('gpt-5.4'),
+  quick: openai("gpt-5.4-mini"),
+  careful: openai("gpt-5.4"),
 });
 
 const agentSetup = setupAgent({
@@ -62,7 +62,7 @@ const agentSetup = setupAgent({
   requests: {
     answerQuestion: {
       schemas: { input: z.object({ prompt: z.string() }), output: answerSchema },
-      model: 'quick', // typed as "quick" | "careful"
+      model: "quick", // typed as "quick" | "careful"
       prompt: ({ input }) => input.prompt,
     },
   },
@@ -76,22 +76,22 @@ Invoke by name with `src`, pass `input`, read the typed result in `onDone`:
 ```ts
 const machine = agentSetup.createMachine({
   context: ({ input }) => ({ prompt: input.prompt, answer: null }),
-  initial: 'answering',
+  initial: "answering",
   states: {
     answering: {
       invoke: {
-        id: 'answer',
-        src: 'answerQuestion',
+        id: "answer",
+        src: "answerQuestion",
         input: ({ context }) => ({ prompt: context.prompt }),
         onDone: ({ output }) => ({
-          target: 'done',
+          target: "done",
           context: { answer: output.answer },
         }),
       },
     },
     done: {
-      type: 'final',
-      output: ({ context }) => ({ answer: context.answer ?? '' }),
+      type: "final",
+      output: ({ context }) => ({ answer: context.answer ?? "" }),
     },
   },
 });
@@ -104,7 +104,7 @@ Inside `onDone`, `output` is already validated against the request's own output 
 `parseOutput(schema, output)` validates a value against a schema and returns it parsed, throwing on mismatch. It is an escape hatch for host code that holds a raw, still-untyped output — e.g. a value read back from a persisted snapshot, or an inline `agent.generateText` result whose static type is `unknown`. Inside a request's `onDone` it is never needed.
 
 ```ts
-import { parseOutput } from '@statelyai/agent';
+import { parseOutput } from "@statelyai/agent";
 
 // Host code with an untyped value from elsewhere:
 const answer = parseOutput(answerSchema, rawOutput); // typed as { answer: string }
@@ -116,20 +116,20 @@ const answer = parseOutput(answerSchema, rawOutput); // typed as { answer: strin
 
 Output is **structured** when the output schema describes an object, an array, or a top-level union of them (`z.union`/`z.discriminatedUnion`), and plain text otherwise: `output: z.object({ ... })` returns a validated object, `output: z.string()` returns the model's text.
 
-Every structured request is sent to the provider wrapped in the [structured-output envelope](./hosts.md#the-structured-output-envelope) — a root object `{ result: <your schema> }` that hosts unwrap before validation. This makes a bare union or array root portable: it is nested under `result` for you, so providers that reject a union/array *root* still accept it. You always declare and receive the bare schema; the envelope is invisible to the machine.
+Every structured request is sent to the provider wrapped in the [structured-output envelope](./hosts.md#the-structured-output-envelope) — a root object `{ result: <your schema> }` that hosts unwrap before validation. This makes a bare union or array root portable: it is nested under `result` for you, so providers that reject a union/array _root_ still accept it. You always declare and receive the bare schema; the envelope is invisible to the machine.
 
 ```ts
 export const triageTicket = createTextLogic({
   schemas: {
     input: z.object({ ticket: z.string() }),
     output: z.object({
-      sentiment: z.enum(['positive', 'neutral', 'negative']),
-      category: z.enum(['billing', 'technical', 'other']),
+      sentiment: z.enum(["positive", "neutral", "negative"]),
+      category: z.enum(["billing", "technical", "other"]),
       reply: z.string(),
     }),
   },
-  model: 'ticketTriage',
-  system: 'Triage the support ticket: sentiment, category, and a short reply.',
+  model: "ticketTriage",
+  system: "Triage the support ticket: sentiment, category, and a short reply.",
   prompt: ({ input }) => input.ticket,
 });
 ```
@@ -145,7 +145,7 @@ Set `reasoning: true` on a structured request to add an optional string `reasoni
 ```ts
 export const triageTicket = createTextLogic({
   schemas: { input: z.object({ ticket: z.string() }), output: triageSchema },
-  model: 'ticketTriage',
+  model: "ticketTriage",
   reasoning: true, // opt in
   prompt: ({ input }) => input.ticket,
 });
@@ -161,20 +161,20 @@ A request streams when its `mode` is `'stream'`; without `mode` it is single-sho
 
 ```ts
 export const tellJoke = createTextLogic({
-  mode: 'stream',
+  mode: "stream",
   schemas: {
     input: z.object({ topic: z.string() }),
     output: z.string(),
   },
-  model: 'jokeWriter',
-  system: 'You tell short, punchy jokes.',
+  model: "jokeWriter",
+  system: "You tell short, punchy jokes.",
   prompt: ({ input }) => `Tell a joke about ${input.topic}.`,
 });
 ```
 
 ```ts
 const result = await runAgent(machine, {
-  input: { topic: 'state machines' },
+  input: { topic: "state machines" },
   executors: { generateText, streamText },
   onChunk: (chunk) => process.stdout.write(chunk),
 });
@@ -219,7 +219,7 @@ To let one request run a bounded tool-call loop, set `metadata.maxSteps`. The sh
 ```ts
 export const research = createTextLogic({
   schemas: { input: z.object({ question: z.string() }), output: z.string() },
-  model: 'careful',
+  model: "careful",
   prompt: ({ input }) => input.question,
   tools: { getWeather },
   metadata: { maxSteps: 5 },
@@ -235,15 +235,15 @@ export const research = createTextLogic({
 Inline `requests:` (above) is the default. `createTextLogic` is the escape hatch when a request should be standalone — exported, tested on its own, or shared across machines — and registered under `actorSources`. A `requests` entry is exactly what `setupAgent` builds internally from `createTextLogic`, so the two are interchangeable (see [Which authoring form when](machines.md#which-authoring-form-when)).
 
 ```ts
-import { createTextLogic, setupAgent } from '@statelyai/agent';
+import { createTextLogic, setupAgent } from "@statelyai/agent";
 
 export const draftEmail = createTextLogic({
   schemas: {
     input: z.object({ prompt: z.string(), messages: messagesSchema }),
     output: z.object({ to: z.string(), subject: z.string(), body: z.string() }),
   },
-  model: 'emailDrafter',
-  system: 'Draft a polished email from the request.',
+  model: "emailDrafter",
+  system: "Draft a polished email from the request.",
   messages: ({ input }) => [...input.messages, userMessage(input.prompt)],
 });
 

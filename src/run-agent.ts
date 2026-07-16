@@ -143,9 +143,9 @@ export class AgentIdleError extends Error {
   }
 }
 
-/** Handler for `agent.userInput` invokes passed as {@link RunAgentOptions.userInput}. */
+/** Handler for `agent.userInput` invokes passed as {@link RunAgentOptions.userInput}. Resolves to what the human typed. */
 export interface AgentUserInputExecutor {
-  (input: AgentUserInput): PromiseLike<unknown>;
+  (input: AgentUserInput): PromiseLike<string>;
 }
 
 export type AgentTraceEvent<TMachine extends AnyStateMachine = AnyStateMachine> = {
@@ -432,7 +432,7 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
  * actor is stopped on every settle path — there is no live actor to resume;
  * resume is always by snapshot.
  */
-/** A pending unhandled `agent.userInput` invoke surfaced on an idle settle — `id` is the invoke's id, `input` its resolved invoke input (prompt, schema, …). Answer it by resuming with a `userInput` handler. */
+/** A pending unhandled `agent.userInput` invoke surfaced on an idle settle — `id` is the invoke's id, `input` its resolved invoke input (prompt, metadata). Answer it by resuming with a `userInput` handler. */
 export interface PendingUserInput {
   id: string;
   input: AgentUserInput | undefined;
@@ -1359,7 +1359,7 @@ export async function runAgent<TMachine extends AnyStateMachine>(
     if (key === USER_INPUT_ACTOR) {
       if (options.userInput) {
         const userInput = options.userInput;
-        wrappedSources[key] = createAsyncLogic<unknown, AgentUserInput>({
+        wrappedSources[key] = createAsyncLogic<string, AgentUserInput>({
           run: async ({ input }) => await userInput(input),
         });
       } else if (isUnboundPlaceholder(logic)) {
@@ -1370,7 +1370,7 @@ export async function runAgent<TMachine extends AnyStateMachine>(
         // Resume with the persisted snapshot plus a `userInput` handler; the
         // restored invoke re-runs against the handler and completes.
         userInputIsPlaceholder = true;
-        wrappedSources[key] = createAsyncLogic<unknown, AgentUserInput>({
+        wrappedSources[key] = createAsyncLogic<string, AgentUserInput>({
           run: () => new Promise<never>(() => {}),
         });
       }
@@ -1922,7 +1922,7 @@ function isIdleSnapshot(
   return !hasPendingWork;
 }
 
-// Gathers the still-active `agent.userInput` placeholder children off an idle snapshot: one {@link PendingUserInput} per pending invoke, with the invoke's resolved input (prompt, schema, …) read off the child's own snapshot.
+// Gathers the still-active `agent.userInput` placeholder children off an idle snapshot: one {@link PendingUserInput} per pending invoke, with the invoke's resolved input (prompt, metadata) read off the child's own snapshot.
 function collectPendingUserInputs(snapshot: AnyMachineSnapshot): PendingUserInput[] {
   const pending: PendingUserInput[] = [];
   for (const [id, child] of Object.entries(snapshot.children ?? {})) {

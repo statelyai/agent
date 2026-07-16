@@ -21,7 +21,7 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { createAsyncLogic, type AnyMachineSnapshot } from "xstate";
+import { createAsyncLogic, type SnapshotFrom } from "xstate";
 import { getStateMeta, runAgent, setupAgent, type RunAgentOptions } from "../../src/index.js";
 import { defineModels } from "../../src/ai-sdk/index.js";
 import { resolveExecutors, runExampleMain } from "../helpers/main.js";
@@ -101,20 +101,9 @@ const agentSetup = setupAgent({
   },
   // planning sets plan before any state that reads it — narrow it non-null there.
   states: {
-    planning: {},
-    awaitingApproval: {
-      schemas: { context: contextSchema.extend({ plan: queryPlanSchema }) },
-    },
-    executing: {
-      schemas: { context: contextSchema.extend({ plan: queryPlanSchema }) },
-    },
-    summarizing: {
-      schemas: {
-        context: contextSchema.extend({ plan: queryPlanSchema, result: z.number() }),
-      },
-    },
-    rejected: {},
-    done: {},
+    awaitingApproval: { context: { plan: queryPlanSchema } },
+    executing: { context: { plan: queryPlanSchema } },
+    summarizing: { context: { plan: queryPlanSchema, result: z.number() } },
   },
   requests: {
     planQuery: {
@@ -172,6 +161,11 @@ export const sqlAgentMachine = agentSetup.createMachine({
           target: "awaitingApproval",
           context: { plan: output },
         }),
+        // A failed planning call ends the run gracefully (best-effort output).
+        onError: {
+          target: "rejected",
+          context: { answer: "Could not plan a query for this question." },
+        },
       },
     },
     // No invoke: runAgent settles idle here. The host reads meta.interaction
@@ -218,6 +212,11 @@ export const sqlAgentMachine = agentSetup.createMachine({
           result: context.result,
         }),
         onDone: ({ output }) => ({ target: "done", context: { answer: output } }),
+        // The result is already computed — fall back to a plain rendering.
+        onError: ({ context }) => ({
+          target: "done",
+          context: { answer: `Result: ${context.result}` },
+        }),
       },
     },
     rejected: { type: "final" },
@@ -225,10 +224,9 @@ export const sqlAgentMachine = agentSetup.createMachine({
   },
 });
 
-/** Reads the current state's typed interaction meta out of an idle snapshot. */
-export function readInteraction(snapshot: AnyMachineSnapshot) {
-  const meta = getStateMeta<AnyMachineSnapshot, z.infer<typeof metaSchema>>(snapshot);
-  return meta.interaction ?? null;
+/** Reads the current state's typed interaction meta out of an idle snapshot — inferred from the machine's meta schema, no generics. */
+export function readInteraction(snapshot: SnapshotFrom<typeof sqlAgentMachine>) {
+  return getStateMeta(snapshot).interaction ?? null;
 }
 
 export async function runSqlAgentExample(
@@ -249,7 +247,7 @@ export async function runSqlAgentExample(
   if (first.status !== "idle") {
     throw new Error(`SQL agent did not settle idle for approval: ${first.status}`);
   }
-  const interaction = readInteraction(first.snapshot as AnyMachineSnapshot);
+  const interaction = readInteraction(first.snapshot);
 
   const second = await runAgent(sqlAgentMachine, {
     snapshot: JSON.parse(JSON.stringify(first.snapshot)),

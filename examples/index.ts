@@ -22,14 +22,9 @@ export {
   describedWorkflowMachine,
   runDescribedWorkflowExample,
 } from "./described-workflow/index.js";
-export {
-  triageActors,
-  triageMachine,
-  triageSchemas,
-  triageSchema,
-  triageTicket,
-} from "./triage/index.js";
+export { triageMachine, triageSchemas, triageSchema } from "./triage/index.js";
 export { twentyQuestionsMachine, twentyQuestionsSchemas } from "./twenty-questions/index.js";
+export { goFishMachine, goFishSchemas, ranks as goFishRanks } from "./go-fish/index.js";
 export { humanInTheLoopMachine, runHumanInTheLoopExample } from "./human-in-the-loop/index.js";
 export { ragMachine, runRAGExample } from "./rag/index.js";
 export { toolCallingMachine, runToolCallingExample } from "./tool-calling/index.js";

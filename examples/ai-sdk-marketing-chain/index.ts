@@ -52,21 +52,9 @@ const agentSetup = setupAgent({
   // writing sets copy before any state that reads it; evaluating also sets
   // quality before checking/improving/done — narrow both non-null there.
   states: {
-    writing: {},
-    evaluating: {
-      schemas: { context: contextSchema.extend({ copy: z.string() }) },
-    },
-    checking: {},
-    improving: {
-      schemas: {
-        context: contextSchema.extend({ copy: z.string(), quality: qualitySchema }),
-      },
-    },
-    done: {
-      schemas: {
-        context: contextSchema.extend({ copy: z.string(), quality: qualitySchema }),
-      },
-    },
+    evaluating: { context: { copy: z.string() } },
+    improving: { context: { copy: z.string(), quality: qualitySchema } },
+    done: { context: { copy: z.string(), quality: qualitySchema } },
   },
   requests: {
     writeMarketingCopy: {
@@ -130,6 +118,7 @@ export const aiSdkMarketingChainMachine = agentSetup.createMachine({
           target: "evaluating",
           context: { copy: output },
         }),
+        onError: { target: "failed" },
       },
     },
     evaluating: {
@@ -144,6 +133,7 @@ export const aiSdkMarketingChainMachine = agentSetup.createMachine({
             context: { quality: output },
           };
         },
+        onError: { target: "failed" },
       },
     },
     checking: {
@@ -163,6 +153,7 @@ export const aiSdkMarketingChainMachine = agentSetup.createMachine({
           target: "done",
           context: { finalCopy: output },
         }),
+        onError: { target: "failed" },
       },
     },
     done: {
@@ -170,6 +161,14 @@ export const aiSdkMarketingChainMachine = agentSetup.createMachine({
       output: ({ context }) => ({
         copy: context.finalCopy ?? context.copy,
         quality: context.quality,
+      }),
+    },
+    // Best-effort output when a model call fails.
+    failed: {
+      type: "final",
+      output: ({ context }) => ({
+        copy: context.copy ?? "",
+        quality: context.quality ?? { hasCallToAction: false, emotionalAppeal: 1, clarity: 1 },
       }),
     },
   },

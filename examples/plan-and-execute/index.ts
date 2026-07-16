@@ -51,12 +51,8 @@ const agentSetup = setupAgent({
   }),
   // solveTask always sets `answer` before `done` reads it — narrow it non-null there.
   states: {
-    planning: {},
-    executing: {},
-    gathering: {},
-    solving: {},
     done: {
-      schemas: { context: planAndExecuteContextSchema.extend({ answer: z.string() }) },
+      context: { answer: z.string() },
     },
   },
   requests: {
@@ -120,6 +116,8 @@ export const planAndExecuteMachine = agentSetup.createMachine({
           target: "executing",
           context: { steps: output.steps },
         }),
+        // On failure, finish with an empty answer (best-effort output).
+        onError: { target: "done", context: { answer: "" } },
       },
     },
     // Explicit index/guard loop: gather evidence for one step, advance the
@@ -147,6 +145,12 @@ export const planAndExecuteMachine = agentSetup.createMachine({
             },
           },
         }),
+        // On failure, skip the failed step (advance the index) and continue the
+        // loop rather than retrying it forever.
+        onError: ({ context }) => ({
+          target: "executing",
+          context: { stepIndex: context.stepIndex + 1 },
+        }),
       },
     },
     solving: {
@@ -161,6 +165,8 @@ export const planAndExecuteMachine = agentSetup.createMachine({
           target: "done",
           context: { answer: output },
         }),
+        // On failure, finish with an empty answer (best-effort output).
+        onError: { target: "done", context: { answer: "" } },
       },
     },
     done: {

@@ -142,40 +142,26 @@ const coordinatorSetup = setupAgent({
   // earlier by provisioningIt. Both narrowed non-null there and downstream in
   // onboarded (schedule is set by preparingSchedule's own onDone).
   states: {
-    sendingWelcomePacket: {},
     // Narrowing threads through the chain: each state declares what is
     // guaranteed by the time it is entered, so every bare `target` into the
     // next narrowed state typechecks.
-    waitingForSignedDocs: {
-      schemas: { context: contextSchema.extend({ welcomePacketId: z.string() }) },
-    },
-    provisioningIt: {
-      schemas: { context: contextSchema.extend({ welcomePacketId: z.string() }) },
-    },
+    waitingForSignedDocs: { context: { welcomePacketId: z.string() } },
+    provisioningIt: { context: { welcomePacketId: z.string() } },
     waitingForHardware: {
-      schemas: {
-        context: contextSchema.extend({
-          welcomePacketId: z.string(),
-          accounts: accountsSchema,
-        }),
-      },
+      context: { welcomePacketId: z.string(), accounts: accountsSchema },
     },
     preparingSchedule: {
-      schemas: {
-        context: contextSchema.extend({
-          welcomePacketId: z.string(),
-          accounts: accountsSchema,
-          hardwareDeliveredAt: z.string(),
-        }),
+      context: {
+        welcomePacketId: z.string(),
+        accounts: accountsSchema,
+        hardwareDeliveredAt: z.string(),
       },
     },
     onboarded: {
-      schemas: {
-        context: contextSchema.extend({
-          welcomePacketId: z.string(),
-          accounts: accountsSchema,
-          schedule: z.string(),
-        }),
+      context: {
+        welcomePacketId: z.string(),
+        accounts: accountsSchema,
+        schedule: z.string(),
       },
     },
   },

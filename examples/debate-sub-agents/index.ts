@@ -122,6 +122,19 @@ export const debaterMachine = debaterAgentSetup.createMachine({
           }
           return { target: "idle" };
         },
+        // On failure, still submit an empty argument so the facilitator's
+        // turn loop advances instead of deadlocking.
+        onError: ({ context, parent }, enq) => {
+          if (parent) {
+            enq.sendTo(parent, {
+              type: "DEBATE.ARGUMENT_SUBMITTED",
+              stance: context.stance,
+              round: context.round,
+              text: "",
+            });
+          }
+          return { target: "idle" };
+        },
       },
     },
   },
@@ -141,14 +154,11 @@ const facilitatorAgentSetup = setupAgent({
   output: z.object({ conclusion: z.string(), transcript: transcriptSchema }),
   events: { "DEBATE.ARGUMENT_SUBMITTED": transcriptEntrySchema },
   actorSources: { affirmative: debaterMachine, negative: debaterMachine },
-  // concluding's onDone is the only transition into "done" and always sets
+  // Every transition into "done" (concluding's onDone and onError) sets
   // conclusion — narrow it non-null there.
   states: {
-    requesting: {},
-    awaiting: {},
-    concluding: {},
     done: {
-      schemas: { context: facilitatorContextSchema.extend({ conclusion: z.string() }) },
+      context: { conclusion: z.string() },
     },
   },
   requests: {
@@ -228,6 +238,8 @@ export const debateMachine = facilitatorAgentSetup.createMachine({
         src: "concludeDebate",
         input: ({ context }) => ({ question: context.question, transcript: context.transcript }),
         onDone: ({ output }) => ({ target: "done", context: { conclusion: output } }),
+        // On failure, finish with an empty conclusion (best-effort output).
+        onError: { target: "done", context: { conclusion: "" } },
       },
     },
     done: {

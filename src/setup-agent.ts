@@ -268,6 +268,135 @@ type AgentSetupXStateConfig<
   delays?: NonNullable<AnySetupConfig["delays"]>;
 };
 
+// ─── per-state context narrowing ───
+
+/**
+ * Field-level context-narrowing sugar for one `setupAgent({ states })` entry:
+ * each `context` entry overrides that field's schema inside the state; every
+ * other field keeps the base context schema. Sugar for the full xstate form —
+ * `{ context: { draft: z.string() } }` resolves to
+ * `{ schemas: { context: <base with draft: string> } }` — so only the fields
+ * that change are declared, not the whole context schema.
+ */
+export interface AgentStateNarrowing {
+  context: Record<string, StandardSchemaV1>;
+  states?: Record<string, AgentSetupStateSchema>;
+}
+
+/** One `setupAgent({ states })` entry: xstate's {@link SetupStateSchema} full form, or the {@link AgentStateNarrowing} field-level sugar. */
+export type AgentSetupStateSchema = SetupStateSchema | AgentStateNarrowing;
+
+// The narrowed context type for a state: base context with the declared fields' schemas swapped in.
+type NarrowedContext<
+  TContextSchema extends StandardSchemaV1,
+  TFields extends Record<string, StandardSchemaV1>,
+> = Omit<InferOutput<TContextSchema>, keyof TFields> & {
+  [K in keyof TFields]: InferOutput<TFields[K]>;
+};
+
+// Resolves one AgentSetupStateSchema into xstate's SetupStateSchema shape (recursing into nested states).
+type ResolveAgentStateSchema<TContextSchema extends StandardSchemaV1, T> = T extends {
+  context: infer TFields extends Record<string, StandardSchemaV1>;
+}
+  ? {
+      schemas: {
+        context: StandardSchemaV1<NarrowedContext<TContextSchema, TFields>>;
+      };
+    } & (T extends { states: infer TChildren extends Record<string, AgentSetupStateSchema> }
+      ? { states: ResolveAgentStateSchemas<TContextSchema, TChildren> }
+      : {})
+  : T extends { states: infer TChildren extends Record<string, AgentSetupStateSchema> }
+    ? Omit<T, "states"> & { states: ResolveAgentStateSchemas<TContextSchema, TChildren> }
+    : T;
+
+// Resolves a whole `setupAgent({ states })` map into xstate's Record<string, SetupStateSchema>.
+type ResolveAgentStateSchemas<
+  TContextSchema extends StandardSchemaV1,
+  TStates extends Record<string, AgentSetupStateSchema>,
+> = Constrain<
+  {
+    [K in keyof TStates]: ResolveAgentStateSchema<TContextSchema, TStates[K]>;
+  },
+  Record<string, SetupStateSchema>
+>;
+
+// Composite standard schema for a narrowed state context: validates against the
+// base context schema, then re-validates each overridden field. Purely a type/
+// validation carrier for xstate's setup({ states }) — no zod dependency.
+function mergeContextSchema(
+  base: StandardSchemaV1,
+  fields: Record<string, StandardSchemaV1>,
+): StandardSchemaV1 {
+  return {
+    "~standard": {
+      version: 1,
+      vendor: "statelyai-agent",
+      validate(value: unknown) {
+        const baseResult = base["~standard"].validate(value);
+        if (baseResult instanceof Promise) {
+          throw new Error("setupAgent: async context schemas are not supported.");
+        }
+        if (baseResult.issues) {
+          return baseResult;
+        }
+        const merged: Record<string, unknown> = {
+          ...(baseResult.value as Record<string, unknown>),
+        };
+        const issues: Array<{ message: string; path?: unknown[] }> = [];
+        for (const [key, fieldSchema] of Object.entries(fields)) {
+          const fieldResult = fieldSchema["~standard"].validate(
+            (value as Record<string, unknown>)[key],
+          );
+          if (fieldResult instanceof Promise) {
+            throw new Error("setupAgent: async context schemas are not supported.");
+          }
+          if (fieldResult.issues) {
+            issues.push(
+              ...(fieldResult.issues as Array<{ message: string; path?: unknown[] }>).map(
+                (issue) => ({
+                  ...issue,
+                  path: [key, ...(issue.path ?? [])],
+                }),
+              ),
+            );
+          } else {
+            merged[key] = fieldResult.value;
+          }
+        }
+        return issues.length > 0 ? { issues } : { value: merged };
+      },
+    },
+  } as StandardSchemaV1;
+}
+
+// Resolves the AgentStateNarrowing sugar in a `states` map to xstate's SetupStateSchema shape at runtime (the type-level counterpart is ResolveAgentStateSchemas).
+function resolveAgentStateSchemas(
+  contextSchema: StandardSchemaV1,
+  states: Record<string, AgentSetupStateSchema>,
+): Record<string, SetupStateSchema> {
+  return Object.fromEntries(
+    Object.entries(states).map(([key, state]) => {
+      if (!state || typeof state !== "object") {
+        return [key, state];
+      }
+      const children =
+        "states" in state && state.states
+          ? resolveAgentStateSchemas(contextSchema, state.states)
+          : undefined;
+      if ("context" in state && state.context) {
+        return [
+          key,
+          {
+            schemas: { context: mergeContextSchema(contextSchema, state.context) },
+            ...(children ? { states: children } : {}),
+          },
+        ];
+      }
+      return [key, children ? { ...state, states: children } : state];
+    }),
+  );
+}
+
 // The public `setupAgent(config)` parameter type: schemas (packed or loose) plus models/actors/requests/actions/guards/delays.
 type SetupAgentBaseConfig<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
@@ -279,7 +408,10 @@ type SetupAgentBaseConfig<
   TRequestSchemas extends AgentRequestSchemaMap,
   TModels extends AgentModelMap,
   TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
-  TStateSchemas extends Record<string, SetupStateSchema> = Record<string, SetupStateSchema>,
+  TStateSchemas extends Record<string, AgentSetupStateSchema> = Record<
+    string,
+    AgentSetupStateSchema
+  >,
 > = (
   | {
       schemas: AgentSchemaPack<
@@ -303,10 +435,12 @@ type SetupAgentBaseConfig<
   models?: TModels;
   actorSources?: TActors;
   /**
-   * Per-state schemas, mirroring xstate's `setup({ states })`: declare a
-   * `schemas.context` on a state to narrow `context` inside that state
-   * (invoke `input`, transition fns, final `output`) — e.g. mark a field
-   * non-null in states only reachable after it is set.
+   * Per-state schemas, mirroring xstate's `setup({ states })`: narrow
+   * `context` inside a state (invoke `input`, transition fns, final `output`)
+   * — e.g. mark a field non-null in states only reachable after it is set.
+   * Two forms per state: the {@link AgentStateNarrowing} sugar
+   * (`{ context: { draft: z.string() } }` — only the fields that change) or
+   * xstate's full `{ schemas: { context } }` with a complete context schema.
    */
   states?: TStateSchemas;
   requests?: AgentRequestInput<TRequestSchemas, AgentModelRef<TModels>>;
@@ -337,7 +471,10 @@ type SetupAgentXStateResult<
   TMetaSchema extends StandardSchemaV1,
   TModels extends AgentModelMap,
   TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
-  TStateSchemas extends Record<string, SetupStateSchema> = Record<string, SetupStateSchema>,
+  TStateSchemas extends Record<string, AgentSetupStateSchema> = Record<
+    string,
+    AgentSetupStateSchema
+  >,
 > = SetupReturnFromConfig<
   AgentSetupXStateConfig<
     TContextSchema,
@@ -349,7 +486,7 @@ type SetupAgentXStateResult<
     TMetaSchema,
     TModels,
     TEmittedSchemas,
-    TStateSchemas
+    ResolveAgentStateSchemas<TContextSchema, TStateSchemas>
   >
 >;
 
@@ -371,7 +508,10 @@ type SetupAgentResult<
   TMetaSchema extends StandardSchemaV1,
   TModels extends AgentModelMap,
   TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
-  TStateSchemas extends Record<string, SetupStateSchema> = Record<string, SetupStateSchema>,
+  TStateSchemas extends Record<string, AgentSetupStateSchema> = Record<
+    string,
+    AgentSetupStateSchema
+  >,
 > = Omit<
   SetupAgentXStateResult<
     TContextSchema,
@@ -490,7 +630,10 @@ export function setupAgent<
   TMetaSchema extends StandardSchemaV1 = StandardSchemaV1<MetaObject>,
   TModels extends AgentModelMap = {},
   TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
-  const TStateSchemas extends Record<string, SetupStateSchema> = Record<string, SetupStateSchema>,
+  const TStateSchemas extends Record<string, AgentSetupStateSchema> = Record<
+    string,
+    AgentSetupStateSchema
+  >,
 >(
   config: SetupAgentBaseConfig<
     TContextSchema,
@@ -748,7 +891,10 @@ function createAgentSetupConfig<
   TMetaSchema extends StandardSchemaV1,
   TModels extends AgentModelMap,
   TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
-  TStateSchemas extends Record<string, SetupStateSchema> = Record<string, SetupStateSchema>,
+  TStateSchemas extends Record<string, AgentSetupStateSchema> = Record<
+    string,
+    AgentSetupStateSchema
+  >,
 >(
   schemas: AgentSchemaPack<
     TContextSchema,
@@ -790,7 +936,7 @@ function createAgentSetupConfig<
   TMetaSchema,
   TModels,
   TEmittedSchemas,
-  TStateSchemas
+  ResolveAgentStateSchemas<TContextSchema, TStateSchemas>
 > {
   return {
     schemas: {
@@ -815,9 +961,18 @@ function createAgentSetupConfig<
       TMetaSchema,
       TModels,
       TEmittedSchemas,
-      TStateSchemas
+      ResolveAgentStateSchemas<TContextSchema, TStateSchemas>
     >["schemas"],
-    ...(config.states ? { states: config.states } : {}),
+    // Resolve the AgentStateNarrowing sugar into xstate's full per-state
+    // schema form (the cast mirrors the type-level ResolveAgentStateSchemas).
+    ...(config.states
+      ? {
+          states: resolveAgentStateSchemas(
+            schemas.context,
+            config.states,
+          ) as ResolveAgentStateSchemas<TContextSchema, TStateSchemas>,
+        }
+      : {}),
     actorSources,
     actions: config.actions,
     guards: config.guards,
@@ -836,7 +991,10 @@ function createSetupAgent<
   TMetaSchema extends StandardSchemaV1,
   TModels extends AgentModelMap,
   TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
-  TStateSchemas extends Record<string, SetupStateSchema> = Record<string, SetupStateSchema>,
+  TStateSchemas extends Record<string, AgentSetupStateSchema> = Record<
+    string,
+    AgentSetupStateSchema
+  >,
 >(
   config: SetupAgentBaseConfig<
     TContextSchema,

@@ -34,6 +34,7 @@ import { type LanguageModel } from "ai";
 import { openai } from "@ai-sdk/openai";
 import Ajv from "ajv";
 import {
+  parseModelRef,
   runAgent,
   setupAgent,
   type AgentWorkflowConfig,
@@ -80,7 +81,7 @@ export const jsonAgentMachine = setupAgent.fromConfig(workflowConfig, {
 // `models` registry object), so this host uses `resolveModel` — the max-portability
 // escape hatch — instead of the canonical `createAiSdkExecutors({ models })`.
 function resolveModel(modelRef: string): LanguageModel {
-  return openai(modelRef.replace(/^openai\//, ""));
+  return openai(parseModelRef(modelRef).modelId);
 }
 
 export async function runJsonAgentDemo(ticket: string) {

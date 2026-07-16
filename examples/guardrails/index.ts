@@ -70,19 +70,8 @@ const agentSetup = setupAgent({
   // answering (and its retry, revising) always sets `answer` before either
   // state's request reads it — narrow it non-null there.
   states: {
-    validatingQuestion: {},
-    checkingQuestion: {},
-    answering: {},
-    verifyingAnswer: {
-      schemas: { context: guardrailsContextSchema.extend({ answer: z.string() }) },
-    },
-    checkingAnswer: {},
-    revising: {
-      schemas: { context: guardrailsContextSchema.extend({ answer: z.string() }) },
-    },
-    answered: {},
-    refused: {},
-    unverified: {},
+    verifyingAnswer: { context: { answer: z.string() } },
+    revising: { context: { answer: z.string() } },
   },
   requests: {
     validateQuestion: {
@@ -194,6 +183,10 @@ export const guardrailsMachine = agentSetup.createMachine({
           target: "checkingQuestion",
           context: { validated: output },
         }),
+        onError: {
+          target: "refused",
+          context: { reason: "Input guardrail failed to run." },
+        },
       },
     },
     checkingQuestion: {
@@ -216,6 +209,10 @@ export const guardrailsMachine = agentSetup.createMachine({
           target: "verifyingAnswer",
           context: { answer: output.answer },
         }),
+        onError: {
+          target: "refused",
+          context: { reason: "Answer step failed." },
+        },
       },
     },
     // Output guardrail: verify the answer against the question.
@@ -230,6 +227,10 @@ export const guardrailsMachine = agentSetup.createMachine({
           target: "checkingAnswer",
           context: { verified: output, critique: output.critique },
         }),
+        onError: {
+          target: "unverified",
+          context: { reason: "Output guardrail failed to run." },
+        },
       },
     },
     checkingAnswer: {
@@ -270,6 +271,10 @@ export const guardrailsMachine = agentSetup.createMachine({
             revisions: context.revisions + 1,
           },
         }),
+        onError: {
+          target: "unverified",
+          context: { reason: "Revision step failed." },
+        },
       },
     },
     answered: { type: "final" },

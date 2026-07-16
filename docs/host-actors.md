@@ -3,7 +3,7 @@ title: Host actors
 description: The machine declares typed actor requests; the host executes them with executors or actor implementations, on any SDK or runtime.
 ---
 
-`setupAgent(...)` gives a machine typed, built-in actor sources for model work: `agent.generateText` / `agent.streamText` for inline text requests, `agent.decide` for decisions, `agent.userInput` for human input, plus co-located `requests:` when a call deserves a reusable name. Decisions are state-local: author them inline on the invoke with `src: 'agent.decide'`. In every case, the machine only *declares* the request; the host executes it by supplying executors to `runAgent(...)` (or the step helpers) or by providing actor implementations directly.
+`setupAgent(...)` gives a machine typed, built-in actor sources for model work: `agent.generateText` / `agent.streamText` for inline text requests, `agent.decide` for decisions, `agent.userInput` for human input, plus co-located `requests:` when a call deserves a reusable name. Decisions are state-local: author them inline on the invoke with `src: 'agent.decide'`. In every case, the machine only _declares_ the request; the host executes it by supplying executors to `runAgent(...)` (or the step helpers) or by providing actor implementations directly.
 
 The machine declares:
 
@@ -26,11 +26,7 @@ The host provides:
 Inline `agent.generateText` is the fastest path for a one-off text request:
 
 ```ts
-import {
-  parseOutput,
-  runAgent,
-  setupAgent,
-} from '@statelyai/agent';
+import { parseOutput, runAgent, setupAgent } from "@statelyai/agent";
 
 const agent = setupAgent({
   context: contextSchema,
@@ -39,25 +35,25 @@ const agent = setupAgent({
   events: eventSchemas,
 });
 const machine = agent.createMachine({
-  initial: 'generating',
+  initial: "generating",
   states: {
     generating: {
       invoke: {
-        id: 'draft',
-        src: 'agent.generateText',
+        id: "draft",
+        src: "agent.generateText",
         input: ({ context }) => ({
-          model: 'openai/gpt-5.4-mini',
+          model: "openai/gpt-5.4-mini",
           prompt: context.prompt,
           outputSchema: resultSchema,
           temperature: 0.2,
         }),
         onDone: ({ output }) => ({
-          target: 'done',
+          target: "done",
           context: { result: parseOutput(resultSchema, output) },
         }),
       },
     },
-    done: { type: 'final' },
+    done: { type: "final" },
   },
 });
 
@@ -77,7 +73,7 @@ When a request is reusable — called from more than one state, or worth testing
 For external events, advance the same step object:
 
 ```ts
-step = transitionAgentStep(machine, step, { type: 'REVISE', prompt: nextPrompt });
+step = transitionAgentStep(machine, step, { type: "REVISE", prompt: nextPrompt });
 ```
 
 ## User input
@@ -97,17 +93,15 @@ const result = await runAgent(machine, {
 **A provided actor source** — for the step path, or when `runAgent`'s inline path doesn't fit:
 
 ```ts
-import { createAsyncLogic } from 'xstate';
+import { createAsyncLogic } from "xstate";
 
-const machine = setupAgent
-  .fromConfig(config, { compileSchema })
-  .provide({
-    actorSources: {
-      'agent.userInput': createAsyncLogic({
-        run: async ({ input }) => showFormAndWaitForSubmit(input),
-      }),
-    },
-  });
+const machine = setupAgent.fromConfig(config, { compileSchema }).provide({
+  actorSources: {
+    "agent.userInput": createAsyncLogic({
+      run: async ({ input }) => showFormAndWaitForSubmit(input),
+    }),
+  },
+});
 ```
 
 If a machine invokes `agent.userInput` and neither is supplied, `runAgent` fails at bind time — before any model call — naming the actor and recommending the idle-state pattern instead.
@@ -154,38 +148,36 @@ const event = await resolveDecision(request, decide);
 When you want XState to execute a named text/decision invoke directly — rather than routing every request through `runAgent`'s executor slots — provide an implementation with `logic.withExecutor(...)`:
 
 ```ts
-import { isStructuredOutputSchema, validateSchemaSync } from '@statelyai/agent';
+import { isStructuredOutputSchema, validateSchemaSync } from "@statelyai/agent";
 
-const executableDraftText = draftText.withExecutor(
-  async ({ request, signal }) => {
-    if (isStructuredOutputSchema(request.outputSchema)) {
-      const result = await generateText({
-        model: resolveModel(request.model),
-        system: request.system,
-        prompt: request.prompt ?? '',
-        output: Output.object({ schema: request.outputSchema as never }),
-        abortSignal: signal,
-      });
-      return result.output;
-    }
-
+const executableDraftText = draftText.withExecutor(async ({ request, signal }) => {
+  if (isStructuredOutputSchema(request.outputSchema)) {
     const result = await generateText({
       model: resolveModel(request.model),
       system: request.system,
-      prompt: request.prompt ?? '',
+      prompt: request.prompt ?? "",
+      output: Output.object({ schema: request.outputSchema as never }),
       abortSignal: signal,
     });
-    return request.outputSchema
-      ? validateSchemaSync(request.outputSchema, result.text)
-      : result.text;
+    return result.output;
   }
-);
+
+  const result = await generateText({
+    model: resolveModel(request.model),
+    system: request.system,
+    prompt: request.prompt ?? "",
+    abortSignal: signal,
+  });
+  return request.outputSchema ? validateSchemaSync(request.outputSchema, result.text) : result.text;
+});
 ```
 
 Then run any machine with those actors, bypassing `runAgent`'s executor slots entirely:
 
 ```ts
-createActor(machine.provide({ actorSources: { draftText: executableDraftText } }), { input }).start();
+createActor(machine.provide({ actorSources: { draftText: executableDraftText } }), {
+  input,
+}).start();
 ```
 
 This is the same mechanism `runAgent` uses internally to bind `generateText`/`streamText`/`decide` — `.withExecutor(...)` is just the lower-level form, useful when a text/decision logic should carry its own execution wherever it's used, independent of the host loop.
@@ -197,7 +189,7 @@ Use `metadata` for host-specific details. It's intentionally uninterpreted by `@
 ```ts
 const draftText = createTextLogic({
   schemas: { input: draftInputSchema, output: resultSchema },
-  model: 'openai/gpt-5.4-mini',
+  model: "openai/gpt-5.4-mini",
   prompt: ({ input }) => input.prompt,
   metadata: ({ input }) => ({ traceId: input.requestId }),
 });
@@ -217,7 +209,7 @@ const machine = agent.createMachine({
   states: {
     answering: {
       invoke: {
-        src: 'answerQuestion',
+        src: "answerQuestion",
         input: ({ context }) => ({ prompt: context.prompt, tenantId: context.tenantId }),
         // ...
       },
@@ -258,7 +250,7 @@ The same request can run through `generateText(...)` or `streamText(...)` — th
 The `generateText`/`streamText` executors accept the raw Vercel AI SDK functions directly — no adapter needed:
 
 ```ts
-import { generateText, streamText } from 'ai';
+import { generateText, streamText } from "ai";
 
 await runAgent(machine, { input, executors: { generateText, streamText } });
 ```
@@ -279,15 +271,15 @@ Use `createTextLogic(...)` for reusable named model calls with typed source name
 Standalone inspection:
 
 ```ts
-const request = draftText.request({ prompt: 'Draft a launch email.' });
+const request = draftText.request({ prompt: "Draft a launch email." });
 ```
 
 Standalone execution:
 
 ```ts
 const output = await draftText.execute(
-  { prompt: 'Draft a launch email.' },
-  { generateText, streamText }
+  { prompt: "Draft a launch email." },
+  { generateText, streamText },
 );
 ```
 

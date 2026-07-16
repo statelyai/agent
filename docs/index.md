@@ -30,12 +30,12 @@ A [decision](decisions.md) is where this matters most: the model chooses exactly
 <!-- compact quickstart, consistent with readme.md quickstart and docs/quickstart.md -->
 
 ```ts
-import { z } from 'zod';
-import { runAgent, setupAgent } from '@statelyai/agent';
-import { createAiSdkExecutors, defineModels } from '@statelyai/agent/ai-sdk';
-import { openai } from '@ai-sdk/openai';
+import { z } from "zod";
+import { runAgent, setupAgent } from "@statelyai/agent";
+import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { openai } from "@ai-sdk/openai";
 
-const models = defineModels({ quick: openai('gpt-5.4-mini') });
+const models = defineModels({ quick: openai("gpt-5.4-mini") });
 const answerSchema = z.object({ answer: z.string() });
 
 const agentSetup = setupAgent({
@@ -46,7 +46,7 @@ const agentSetup = setupAgent({
   requests: {
     answerQuestion: {
       schemas: { input: z.object({ prompt: z.string() }), output: answerSchema },
-      model: 'quick',
+      model: "quick",
       prompt: ({ input }) => input.prompt,
     },
   },
@@ -54,28 +54,28 @@ const agentSetup = setupAgent({
 
 const machine = agentSetup.createMachine({
   context: ({ input }) => ({ prompt: input.prompt, answer: null }),
-  initial: 'answering',
+  initial: "answering",
   states: {
     answering: {
       invoke: {
-        src: 'answerQuestion',
+        src: "answerQuestion",
         input: ({ context }) => ({ prompt: context.prompt }),
         onDone: ({ output }) => ({
-          target: 'done',
+          target: "done",
           context: { answer: output.answer },
         }),
       },
     },
-    done: { type: 'final', output: ({ context }) => ({ answer: context.answer ?? '' }) },
+    done: { type: "final", output: ({ context }) => ({ answer: context.answer ?? "" }) },
   },
 });
 
 const result = await runAgent(machine, {
-  input: { prompt: 'Why state machines?' },
+  input: { prompt: "Why state machines?" },
   executors: createAiSdkExecutors({ models }),
 });
 
-if (result.status === 'done') {
+if (result.status === "done") {
   console.log(result.output.answer);
   // logs the model's answer
 }

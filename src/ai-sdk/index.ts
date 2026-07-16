@@ -1,5 +1,6 @@
 import {
   generateText as aiGenerateText,
+  NoObjectGeneratedError,
   Output,
   streamText as aiStreamText,
   stepCountIs,
@@ -219,6 +220,72 @@ export function isStructuredOutputRequest(
 }
 
 /**
+ * Extracts the first complete top-level JSON value from `text`, or returns
+ * `undefined` when there is nothing to repair (no complete value, or the value
+ * already spans the whole text). Models occasionally emit two structured-output
+ * envelopes back to back (`{"result":{…}}{"result":{…}}`), which fails JSON
+ * parsing wholesale; the balanced scan below recovers the first value and
+ * drops the rest.
+ */
+export function extractFirstJsonValue(text: string): string | undefined {
+  const start = text.search(/[{[]/);
+  if (start === -1) {
+    return undefined;
+  }
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i++) {
+    const char = text[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+    } else if (char === "{" || char === "[") {
+      depth++;
+    } else if (char === "}" || char === "]") {
+      depth--;
+      if (depth === 0) {
+        const value = text.slice(start, i + 1);
+        return value === text.trim() ? undefined : value;
+      }
+    }
+  }
+  return undefined;
+}
+
+// Wraps an AI SDK Output spec so a parse failure retries once against the
+// repaired text (first complete JSON value) before surfacing the original
+// error. Host-side salvage — the model round-trip is not repeated.
+function withJsonRepair<TOutput extends ReturnType<typeof Output.object<unknown>>>(
+  output: TOutput,
+): TOutput {
+  return {
+    ...output,
+    parseCompleteOutput: async (options, context) => {
+      try {
+        return await output.parseCompleteOutput(options, context);
+      } catch (error) {
+        const repaired = extractFirstJsonValue(options.text);
+        if (repaired === undefined) {
+          throw error;
+        }
+        return await output.parseCompleteOutput({ ...options, text: repaired }, context);
+      }
+    },
+  };
+}
+
+/**
  * Raw result shape from {@link AiSdkExecutors.generateText} — the `{ output }`
  * envelope (the validated structured object for structured-output requests,
  * or the accumulated text string otherwise; unwrapped by
@@ -299,12 +366,27 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
       const envelope = buildEnvelopeSchema(request.outputSchema!, {
         reasoning: request.reasoning,
       });
-      const result = await aiGenerateText({
-        ...common,
-        output: Output.object({
+      const structuredOutput = withJsonRepair(
+        Output.object({
           schema: envelope as FlexibleSchema<unknown>,
         }),
-      });
+      );
+      // One malformed response must not kill a run: when the output still
+      // fails parsing/validation after JSON repair, the request is re-sent
+      // once. (The SDK's own maxRetries covers network errors, not these.)
+      // Only tool-FREE requests retry: a request carrying tools may already
+      // have executed side effects in its tool loop before the final output
+      // failed to parse, and re-sending would run them again.
+      const canRetry = !request.tools || Object.keys(request.tools).length === 0;
+      let result;
+      try {
+        result = await aiGenerateText({ ...common, output: structuredOutput });
+      } catch (error) {
+        if (!canRetry || !NoObjectGeneratedError.isInstance(error) || info?.signal?.aborted) {
+          throw error;
+        }
+        result = await aiGenerateText({ ...common, output: structuredOutput });
+      }
       const { result: output, reasoning } = result.output as StructuredOutputEnvelope;
       return {
         output,

@@ -1,6 +1,6 @@
 /**
  * Human-in-the-loop: draft → idle review → APPROVE / REJECT redraft, with a
- * JSON snapshot round-trip across two `runAgent` calls.
+ * JSON snapshot round-trip across every `runAgent` call.
  *
  * Demonstrates:
  *   - An *idle* review state: `reviewing` has no invoke, so `runAgent` settles
@@ -10,11 +10,16 @@
  *     are inferred from the idle snapshot with `getAcceptedEvents(...)`.
  *   - REJECT-with-reason redraft loop: rejecting feeds the reason back into the
  *     next draft; APPROVE publishes.
- *   - Snapshot persistence: the idle snapshot survives `JSON.parse(JSON.stringify(...))`
- *     and resumes in a *second* `runAgent` call — the same machine, one more event.
+ *   - Snapshot persistence: each idle snapshot survives `persistSnapshot(...)`
+ *     (a JSON round-trip) and resumes in the *next* `runAgent` call.
  *
- * The `generateText` executor is injectable so tests can drive the machine with
- * a mock; on direct run it uses a real model.
+ * Two entry points:
+ *   - `runHumanInTheLoopExample(options)` — compact, test-facing: draft → idle →
+ *     persist → resume with APPROVE. The `generateText` executor is injectable
+ *     so keyless tests drive it with a mock.
+ *   - Direct run (`tsx examples/human-in-the-loop/index.ts`) — a real
+ *     interactive CLI loop: it prints each draft, asks you to approve or reject
+ *     (with a reason), and re-runs the machine until you approve.
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/human-in-the-loop/index.ts
  */
@@ -29,14 +34,11 @@ import {
   setupAgent,
   type AgentRequestExecutors,
 } from "../../src/index.js";
+import { promptLine } from "../helpers/cli.js";
 import { resolveExecutors, runExampleMain } from "../helpers/main.js";
 
 export const models = defineModels({
   writer: openai("gpt-5.4-mini"),
-});
-
-const interactionSchema = z.object({
-  label: z.string(),
 });
 
 const contextSchema = z.object({
@@ -49,7 +51,7 @@ const agentSetup = setupAgent({
   context: contextSchema,
   input: z.object({ topic: z.string() }),
   output: z.object({ published: z.boolean(), draft: z.string() }),
-  meta: z.object({ interaction: interactionSchema.optional() }),
+  meta: z.object({ interaction: z.object({ label: z.string() }).optional() }),
   events: {
     APPROVE: z.object({}),
     REJECT: z.object({ reason: z.string() }),
@@ -69,15 +71,12 @@ const agentSetup = setupAgent({
       prompt: ({ input }) => `Write a short announcement about: ${input.topic}`,
     },
   },
-  // The only path into `published` is reviewing's APPROVE, reached only after
-  // drafting's onDone has already set `draft` — guaranteed non-null there.
+  // `reviewing` and `published` are reachable only after drafting's onDone set
+  // `draft`; narrowing it to non-null lets reviewing's bare APPROVE target
+  // satisfy published's narrowed context.
   states: {
-    drafting: {},
-    // Both reviewing and published are only reachable after drafting's onDone
-    // set `draft`; narrowing reviewing lets its bare APPROVE target satisfy
-    // published's narrowed context.
-    reviewing: { schemas: { context: contextSchema.extend({ draft: z.string() }) } },
-    published: { schemas: { context: contextSchema.extend({ draft: z.string() }) } },
+    reviewing: { context: { draft: z.string() } },
+    published: { context: { draft: z.string() } },
   },
 });
 
@@ -118,10 +117,7 @@ export const humanInTheLoopMachine = agentSetup.createMachine({
     },
     published: {
       type: "final",
-      output: ({ context }) => ({
-        published: true,
-        draft: context.draft,
-      }),
+      output: ({ context }) => ({ published: true, draft: context.draft }),
     },
   },
 });
@@ -130,8 +126,6 @@ export interface RunHumanInTheLoopOptions {
   topic?: string;
   /** Injected for tests; direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
-  /** Direct run passes this to narrate state; tests leave it undefined (quiet). */
-  onTransition?: (snapshot: { value: unknown }) => void;
 }
 
 export interface HumanInTheLoopResult {
@@ -149,15 +143,11 @@ export interface HumanInTheLoopResult {
 export async function runHumanInTheLoopExample(
   options: RunHumanInTheLoopOptions = {},
 ): Promise<HumanInTheLoopResult> {
-  const { topic = "the new deploy pipeline", generateText, onTransition } = options;
+  const { topic = "the new deploy pipeline", generateText } = options;
+  const executors = resolveExecutors(models, generateText);
 
   // Phase 1: draft, then settle idle at `reviewing`.
-  const first = await runAgent(humanInTheLoopMachine, {
-    input: { topic },
-    ...resolveExecutors(models, generateText),
-    ...(onTransition ? { onTransition } : {}),
-  });
-
+  const first = await runAgent(humanInTheLoopMachine, { input: { topic }, ...executors });
   if (first.status !== "idle") {
     throw new Error(`Expected idle review state, got '${first.status}'.`);
   }
@@ -166,17 +156,13 @@ export async function runHumanInTheLoopExample(
   const { interaction } = getStateMeta(first.snapshot);
   const legalEvents = getAcceptedEvents(first.snapshot).map((event) => event.type);
 
-  // Persist: prove the idle snapshot survives a real JSON persistence layer.
-  const persisted = persistSnapshot(first.snapshot);
-
-  // Phase 2: ...later, new process, human approved. Same machine, one event.
+  // Phase 2: ...later, new process, human approved. Same machine, one event,
+  // resumed from the persisted (JSON-round-tripped) snapshot.
   const second = await runAgent(humanInTheLoopMachine, {
-    snapshot: persisted,
+    snapshot: persistSnapshot(first.snapshot),
     event: { type: "APPROVE" },
-    ...resolveExecutors(models, generateText),
-    ...(onTransition ? { onTransition } : {}),
+    ...executors,
   });
-
   if (second.status !== "done") {
     throw new Error(`Expected done after APPROVE, got '${second.status}'.`);
   }
@@ -190,16 +176,50 @@ export async function runHumanInTheLoopExample(
   };
 }
 
+// Direct run: a real interactive review loop. Each iteration settles idle at
+// `reviewing`, prints the draft, and asks the human. REJECT feeds a reason back
+// into a fresh draft (loop again); APPROVE publishes. Every resume is fed a
+// persisted snapshot, so the JSON round-trip is exercised on each turn.
 runExampleMain(import.meta.url, async () => {
-  const result = await runHumanInTheLoopExample({
-    onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
+  const executors = resolveExecutors(models, undefined);
+  let result = await runAgent(humanInTheLoopMachine, {
+    input: { topic: "the new deploy pipeline" },
+    ...executors,
   });
 
-  console.log("--- Phase 1: idle review ---");
-  console.log("Draft:", result.draft);
-  console.log("Prompt to human:", result.interactionLabel);
-  console.log("Legal events:", result.legalEvents.join(", "));
-  console.log("\n--- Phase 2: resumed with APPROVE ---");
-  console.log("Published:", result.published);
-  console.log("Final draft:", result.publishedDraft);
+  while (result.status === "idle") {
+    const snapshot = result.snapshot;
+    const { interaction } = getStateMeta(snapshot);
+    const legalEvents = getAcceptedEvents(snapshot).map((event) => event.type);
+
+    console.log("\n--- Draft for review ---");
+    console.log(snapshot.context.draft ?? "");
+    console.log("\n" + (interaction?.label ?? ""));
+    console.log("Legal events:", legalEvents.join(", "));
+
+    const persisted = persistSnapshot(snapshot);
+    const answer = (await promptLine("approve / reject? ")).toLowerCase();
+
+    if (answer.startsWith("a")) {
+      result = await runAgent(humanInTheLoopMachine, {
+        snapshot: persisted,
+        event: { type: "APPROVE" },
+        ...executors,
+      });
+      break;
+    }
+
+    const reason = await promptLine("Reason for rejection: ");
+    result = await runAgent(humanInTheLoopMachine, {
+      snapshot: persisted,
+      event: { type: "REJECT", reason },
+      ...executors,
+    });
+  }
+
+  if (result.status !== "done") {
+    throw new Error(`Expected done after APPROVE, got '${result.status}'.`);
+  }
+  console.log("\n--- Published ---");
+  console.log(result.output.draft);
 });

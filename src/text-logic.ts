@@ -44,6 +44,27 @@ export type AgentModelRef<TModels extends AgentModelMap = {}> = [keyof TModels] 
   : (keyof TModels & string) | (string & {});
 
 /**
+ * Splits a portable `"provider/model-id"` model ref (the convention JSON
+ * workflows and registry-less hosts use, e.g. `"openai/gpt-5.4-mini"`) into
+ * its parts. A ref with no `/` has no provider — `modelId` is the whole ref.
+ * The standard building block for a host's `resolveModel`:
+ *
+ * @example
+ * ```ts
+ * const resolveModel = (ref: string) => openai(parseModelRef(ref).modelId);
+ * ```
+ */
+export function parseModelRef(modelRef: string): {
+  provider: string | undefined;
+  modelId: string;
+} {
+  const slash = modelRef.indexOf("/");
+  return slash === -1
+    ? { provider: undefined, modelId: modelRef }
+    : { provider: modelRef.slice(0, slash), modelId: modelRef.slice(slash + 1) };
+}
+
+/**
  * Portable, provider-agnostic input a text request passes to a host
  * executor (`generateText`/`streamText` on {@link AgentRequestExecutors}).
  * Built by {@link TextLogic.request} / `DecisionLogic.request` from a
@@ -98,10 +119,15 @@ export interface AgentTextRequest<TMetadata = Record<string, unknown>> {
   metadata?: TMetadata;
 }
 
-/** Inline input for the `agent.userInput` builtin actor — a human-input request (CLI prompt, form, chat reply, …). See {@link RunAgentOptions.userInput}. */
+/**
+ * Inline input for the `agent.userInput` builtin actor — a human-input request
+ * (CLI prompt, chat reply, …) that resolves to the `string` the human typed.
+ * See {@link RunAgentOptions.userInput}. For structured input, parse/classify
+ * the string in a follow-up state, or register a custom actor source; host
+ * rendering hints (a form spec, say) belong in `metadata`.
+ */
 export interface AgentUserInput<TMetadata = Record<string, unknown>> {
   prompt?: string;
-  schema?: StandardSchemaV1;
   metadata?: TMetadata;
 }
 
@@ -109,7 +135,7 @@ export interface AgentUserInput<TMetadata = Record<string, unknown>> {
 export type BuiltinAgentActors<TEvent extends string = string, TModel extends string = string> = {
   [GENERATE_TEXT_ACTOR]: AsyncActorLogic<unknown, AgentTextRequest>;
   [STREAM_TEXT_ACTOR]: AsyncActorLogic<unknown, AgentTextRequest>;
-  [USER_INPUT_ACTOR]: AsyncActorLogic<unknown, AgentUserInput>;
+  [USER_INPUT_ACTOR]: AsyncActorLogic<string, AgentUserInput>;
   [DECIDE_ACTOR]: AsyncActorLogic<
     ChosenEvent,
     AgentDecisionInput<TEvent, Record<string, unknown>, TModel>
@@ -245,8 +271,8 @@ export const builtinTextActors = {
   [STREAM_TEXT_ACTOR]: createBuiltinTextActor(STREAM_TEXT_ACTOR, "stream", stringOutputSchema),
 } satisfies Pick<BuiltinAgentActors, typeof GENERATE_TEXT_ACTOR | typeof STREAM_TEXT_ACTOR>;
 
-/** The unbound `agent.userInput` builtin registered by setupAgent (an unbound-placeholder logic — see internal/registry.ts). @internal */
-export const userInputActor = createAsyncLogic<unknown, AgentUserInput>({
+/** The unbound `agent.userInput` builtin registered by setupAgent (an unbound-placeholder logic — see internal/registry.ts). Output is `string` — what the human typed. @internal */
+export const userInputActor = createAsyncLogic<string, AgentUserInput>({
   run: async () => {
     throw new Error(
       `'${USER_INPUT_ACTOR}' has no host execution. Provide an implementation ` +
@@ -527,11 +553,12 @@ export function bindRequestExecutor<
 >(
   logic: TextLogic<TInputSchema, TOutputSchema, TMetadata>,
   executor: AgentRequestExecutor,
+  info?: Pick<AgentRequestExecutorInfo, "onChunk">,
 ): TextLogic<TInputSchema, TOutputSchema, TMetadata> {
   return logic.withExecutor(async ({ request, signal }) => {
     const { output } = await executor(
       { ...request, tools: request.tools ?? {} } as AgentTextRequest & { tools: AgentTools },
-      { signal },
+      { signal, onChunk: info?.onChunk },
     );
     return { output } as AgentRequestExecutorResult<InferOutput<TOutputSchema>>;
   });
@@ -741,6 +768,26 @@ export function buildEnvelopeSchema(
       },
     },
   } as StandardSchemaV1<StructuredOutputEnvelope>;
+}
+
+/**
+ * Validates a raw provider value against the structured-output envelope for
+ * `request` and returns the unwrapped `{ result, reasoning? }` — the checked
+ * replacement for `raw as StructuredOutputEnvelope` in hand-written hosts.
+ * Pair with {@link buildEnvelopeSchema} (which produced the schema the
+ * provider was asked to satisfy).
+ */
+export function parseStructuredEnvelope(
+  request: Pick<AgentTextRequest, "outputSchema" | "reasoning">,
+  value: unknown,
+): StructuredOutputEnvelope {
+  if (!request.outputSchema) {
+    throw new Error("parseStructuredEnvelope: the request declares no outputSchema.");
+  }
+  const envelope = buildEnvelopeSchema(request.outputSchema, {
+    reasoning: request.reasoning,
+  });
+  return validateSchemaSync<StructuredOutputEnvelope>(envelope, value);
 }
 
 // Reads a schema's synchronous `~standard.jsonSchema.input()` JSON Schema, if the vendor implements that extension.
