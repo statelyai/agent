@@ -93,6 +93,8 @@ export type {
   ResolveAgentRequestsOptions,
 } from "./steps.js";
 export type {
+  AgentMessageInfo,
+  AgentRunMeta,
   AgentStateRequest,
   AgentTraceEvent,
   AgentUserInputExecutor,

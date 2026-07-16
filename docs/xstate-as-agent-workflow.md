@@ -280,7 +280,7 @@ Same machine graph as Version 1, but now the machine is pure control flow and th
 
 The strongest form of the claim: the machine need not know about this library **at all**. Any machine whose invokes resolve to values, and whose events you can enumerate, is drivable.
 
-- **`setupAgent` is optional.** It registers the four `agent.*` builtins and the schema pack. Without it, use the free functions with explicit options and bind sources with `machine.provide`.
+- **`setupAgent` is optional.** It registers the four `agent.*` builtins and the schema pack. Without it, use the free functions with explicit options and bind sources with `machine.provide({ actorSources: { ... } })` — the same `actorSources` key `setup()` uses.
 - For a decision, you don't need `agent.decide` either. Any state that waits on events is a decision point: enumerate the legal events with `getAcceptedEvents(snapshot)`, and let the model choose one with `resolveDecision`, gated by `snapshot.can(event)`.
 
 ```ts
@@ -295,6 +295,7 @@ const event = await resolveDecision(
     kind: "decision",
     id: "judge",
     model: "judge",
+    system: "You are a poetry judge.",
     prompt: `Judge:\n${haiku}`,
     events,
     attempts: [],
@@ -304,7 +305,9 @@ const event = await resolveDecision(
 );
 ```
 
-A rough, hand-written v5 machine works because the contract is minimal: **invokes return values, states accept events, guards decide legality.** The library supplies the model; the machine supplies the shape.
+A rough, hand-written v5 machine works because the contract is minimal: **invokes return values, states accept events, guards decide legality.** The library supplies the model; the machine supplies the shape. See the runnable [plain-xstate](../examples/plain-xstate/index.ts) example: a `setup()` machine with zero knowledge of this library, adopted with exactly these pieces.
+
+> **Guards on event transitions:** write them as function transitions that return `undefined` when blocked (as every example on this page does). XState v6 intentionally drops named string guards (`guard: 'canRevise'`) on `on:` transitions in favor of this form — which is also what makes `snapshot.can(event)`, and therefore `resolveDecision`'s `canTake`, reflect the guard.
 
 The one-call form of the same idea is `runAgent`'s `getRequests` option. A machine with **no invokes at all** (prompts written as state `description`s, `meta`, tags, or any lookup you keep outside the machine) runs unmodified: whenever the machine would otherwise settle idle, your hook maps the snapshot to the model request(s) to run, each with an explicit `onDone` event (or a `decide` call when omitted). The run aggregates a message log and stamps it on every settled `snapshot.messages` (read it with `getAgentMessages`, observe it live with `onMessage`, seed it with `messages`).
 

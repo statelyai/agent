@@ -1699,6 +1699,34 @@ describe("emitted events (runAgent `on`)", () => {
         raw: { output: "a draft", usage: { totalTokens: 3 } },
       }),
     );
+
+    // Every trace event carries the run's identity (version === structural hash).
+    const version = getMachineStructuralHash(machine);
+    expect(trace.length).toBeGreaterThan(0);
+    for (const event of trace) {
+      expect(event.machineId).toEqual(expect.any(String));
+      expect(event.machineVersion).toBe(version);
+    }
+    // All share the same runId across the stream.
+    expect(new Set(trace.map((event) => event.runId)).size).toBe(1);
+  });
+
+  test("machineVersion option overrides the version in every trace event", async () => {
+    const trace: AgentTraceEvent<typeof machine>[] = [];
+
+    await runAgent(machine, {
+      input: { topic: "rivers" },
+      machineVersion: "v-override",
+      onTrace: (event) => trace.push(event),
+      executors: {
+        generateText: async () => ({ output: "a draft", usage: { totalTokens: 3 } }),
+      },
+    });
+
+    expect(trace.length).toBeGreaterThan(0);
+    for (const event of trace) {
+      expect(event.machineVersion).toBe("v-override");
+    }
   });
 });
 

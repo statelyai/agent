@@ -174,7 +174,7 @@ await runAgent(machine, { input, executors: withBudget(executors, 20) });
 
 `runAgent` exposes purely observational callbacks; they return `void` and cannot control the run:
 
-- **`onTrace(event)`**: one ordered stream of run/request/chunk/transition/emit/end events, with `runId`, `seq`, and `timestamp`. This is the eval trace / JSONL / telemetry-adapter slot.
+- **`onTrace(event)`**: one ordered stream of run/request/chunk/transition/emit/end events, with `runId`, `seq`, `timestamp`, `machineId`, and `machineVersion` (the same identity stamped onto settled snapshots as `agentMeta`). This is the eval trace / JSONL / telemetry-adapter slot.
 - **`onChunk(chunk, info)`**: each streamed chunk of a `mode: 'stream'` request, with the `AgentRequest` that produced it (parallel streams stay distinguishable).
 - **`onResult(request, result)`**: once per resolved text or decision request (decision retries fire per attempt), with the normalized `result.output` and the raw executor result. `result.raw` is whatever your executor returned, verbatim: return `usage` alongside `output` and `onResult` becomes your token meter. The shipped adapter already does this (`raw as AiSdkGenerateResult` carries `usage`, `finishReason`, `toolCalls`, `toolResults`).
 - **`onTransition(snapshot, event)`**: every machine transition, with the new snapshot and the causing event.

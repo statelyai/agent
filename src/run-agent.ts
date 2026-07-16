@@ -148,10 +148,38 @@ export interface AgentUserInputExecutor {
   (input: AgentUserInput): PromiseLike<string>;
 }
 
+/**
+ * The run's machine identity, stamped onto every settled snapshot's `agentMeta`.
+ * `machineId` is the machine's `id`; `version` is
+ * {@link RunAgentOptions.machineVersion} or the
+ * {@link getMachineStructuralHash} of the machine. Trace events and the
+ * `onMessage` info arg carry the same identity flattened, as
+ * `machineId`/`machineVersion`.
+ */
+export interface AgentRunMeta {
+  machineId: string;
+  version: string;
+}
+
+/**
+ * Second argument passed to {@link RunAgentOptions.onMessage}: the run's
+ * identity, carried alongside each live message. Not stamped onto the message
+ * itself (messages stay clean model input).
+ */
+export interface AgentMessageInfo {
+  runId: string;
+  machineId: string;
+  /** {@link RunAgentOptions.machineVersion} or the machine's structural hash. */
+  machineVersion: string;
+}
+
 export type AgentTraceEvent<TMachine extends AnyStateMachine = AnyStateMachine> = {
   runId: string;
   seq: number;
   timestamp: string;
+  machineId: string;
+  /** {@link RunAgentOptions.machineVersion} or the machine's structural hash. */
+  machineVersion: string;
 } & (
   | {
       type: "run.start";
@@ -205,7 +233,7 @@ export type AgentTraceEvent<TMachine extends AnyStateMachine = AnyStateMachine> 
 type AgentTraceEventPayload<TMachine extends AnyStateMachine = AnyStateMachine> =
   AgentTraceEvent<TMachine> extends infer TEvent
     ? TEvent extends unknown
-      ? Omit<TEvent, "runId" | "seq" | "timestamp">
+      ? Omit<TEvent, "runId" | "seq" | "timestamp" | "machineId" | "machineVersion">
       : never
     : never;
 
@@ -384,7 +412,7 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
    * {@link onTransition}. Never fires for the seeded history, and never fires
    * on a default invoke-driven run (nothing appends there).
    */
-  onMessage?: (message: AgentMessage) => void;
+  onMessage?: (message: AgentMessage, info: AgentMessageInfo) => void;
   /**
    * Handlers for events the machine emits (`enq.emit(...)`), keyed by emitted
    * event type — `'*'` catches all. Typed from the machine's `emitted`
@@ -1259,7 +1287,7 @@ export async function runAgent<TMachine extends AnyStateMachine>(
   // incoming snapshot's stamp is checked against this version on resume.
   const machineId = (machine.config as { id?: string }).id ?? machine.id ?? "(machine)";
   const machineVersion = options.machineVersion ?? getMachineStructuralHash(machine);
-  const agentMeta = { machineId, version: machineVersion };
+  const agentMeta: AgentRunMeta = { machineId, version: machineVersion };
   const stampAgentMeta = (snapshot: unknown): void => {
     if (snapshot && typeof snapshot === "object") {
       (snapshot as { agentMeta?: unknown }).agentMeta = agentMeta;
@@ -1271,6 +1299,8 @@ export async function runAgent<TMachine extends AnyStateMachine>(
       runId,
       seq: ++traceSeq,
       timestamp: new Date().toISOString(),
+      machineId,
+      machineVersion,
       ...event,
     } as AgentTraceEvent<TMachine>);
   };
@@ -1578,8 +1608,9 @@ export async function runAgent<TMachine extends AnyStateMachine>(
     const appendToLog = (...items: AgentMessage[]): void => {
       messages.push(...items);
       if (options.onMessage) {
+        const info: AgentMessageInfo = { runId, machineId, machineVersion };
         for (const item of items) {
-          options.onMessage(item);
+          options.onMessage(item, info);
         }
       }
     };

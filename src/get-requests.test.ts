@@ -3,11 +3,13 @@ import { z } from "zod";
 import { createMachine } from "xstate";
 import {
   getAgentMessages,
+  getMachineStructuralHash,
   persistSnapshot,
   runAgent,
   userMessage,
   type AgentDecisionRequest,
   type AgentMessage,
+  type AgentMessageInfo,
   type AgentStateRequest,
   type AgentTextRequest,
   type AgentTools,
@@ -80,10 +82,14 @@ describe("runAgent getRequests (state interpretation)", () => {
     const textCalls: Array<AgentTextRequest & { tools: AgentTools }> = [];
     const decideCalls: AgentDecisionRequest[] = [];
     const live: AgentMessage[] = [];
+    const liveInfos: AgentMessageInfo[] = [];
 
     const result = await runAgent(taglineMachine, {
       getRequests: fromDescriptions("test-model"),
-      onMessage: (message) => live.push(message),
+      onMessage: (message, info) => {
+        live.push(message);
+        liveInfos.push(info);
+      },
       executors: {
         generateText: async (request) => {
           textCalls.push(request);
@@ -133,6 +139,25 @@ describe("runAgent getRequests (state interpretation)", () => {
     const messages = getAgentMessages(result.snapshot);
     expect(getAgentMessages(persistSnapshot(result.snapshot))).toEqual(messages);
     expect(live).toEqual(messages);
+
+    // The live info arg carries the run's identity, one per message, all
+    // sharing the same runId (machineVersion === the machine's structural hash).
+    expect(liveInfos).toHaveLength(live.length);
+    for (const info of liveInfos) {
+      expect(info.machineId).toBe("taglineWriter");
+      expect(info.machineVersion).toBe(getMachineStructuralHash(taglineMachine));
+      expect(info.runId).toBe(liveInfos[0]!.runId);
+      expect(typeof info.runId).toBe("string");
+    }
+
+    // Messages themselves stay clean — no agentMeta leaks onto them (model
+    // input, persisted onto the snapshot), live or on the settled snapshot.
+    for (const message of live) {
+      expect("agentMeta" in message).toBe(false);
+    }
+    for (const message of messages) {
+      expect("agentMeta" in message).toBe(false);
+    }
     expect(messages.map((message) => message.content)).toEqual([
       "Brainstorm three tagline ideas for the product.",
       "idea A, idea B, idea C",
