@@ -1,5 +1,15 @@
 # @statelyai/agent
 
+## 2.0.0-alpha.8
+
+### Minor Changes
+
+- [`2042f38`](https://github.com/statelyai/agent/commit/2042f387b54033e5f8aef894a4bf17322c979a81) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Reduce common-case agent ceremony:
+
+  - Payload-less events accept `{}` instead of an empty object schema.
+  - `@statelyai/agent/ai-sdk` exports an explicit AI SDK `runAgent` host using the machine's model registry.
+  - `createAgent` provides a one-call AI SDK machine plus `run(input)` entry point.
+
 ## 2.0.0-alpha.7
 
 ### Minor Changes

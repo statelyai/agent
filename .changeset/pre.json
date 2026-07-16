@@ -21,6 +21,7 @@
     "get-requests-state-interpretation",
     "get-state-meta",
     "keyless-verify-lint-simulate",
+    "leaner-agent-authoring",
     "max-output-tokens-rename",
     "nested-executors-option",
     "openai-compat-adapter",
