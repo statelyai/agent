@@ -1,5 +1,15 @@
 # @statelyai/agent
 
+## 2.0.0-alpha.9
+
+### Minor Changes
+
+- [`96094f7`](https://github.com/statelyai/agent/commit/96094f760bd281f766a89dbb1d6d97813ed4345d) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Trace events and live message emissions now carry the run's machine identity:
+
+  - **Trace envelope.** Every `onTrace` event now carries `machineId` and `machineVersion` alongside `runId`, `seq`, and `timestamp`: the same identity stamped onto settled snapshots as `agentMeta`.
+  - **`onMessage` info arg.** `onMessage` now receives a second argument, `info: AgentMessageInfo` (`{ runId, machineId, machineVersion }`). The message objects themselves are unchanged (they stay clean model input); the identity travels on the info arg. Existing one-argument handlers keep working.
+  - New exported types `AgentRunMeta` (the snapshot stamp's shape) and `AgentMessageInfo`.
+
 ## 2.0.0-alpha.8
 
 ### Minor Changes
