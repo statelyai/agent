@@ -3,6 +3,8 @@ title: Multi-agent composition
 description: Compose agent machines today by invoking them as child actors, exposing sub-agents as host-owned tools, and coordinating siblings through events.
 ---
 
+> **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
+
 ## Multi-agent composition
 
 Because an agent machine is an XState actor, you compose agents with the actor patterns XState already gives you. There is no separate orchestration layer to learn:

@@ -3,6 +3,8 @@ title: Agent machines
 description: Author an agent machine as a typed XState state machine that decides what your agent can do, while the host executes model calls.
 ---
 
+> **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
+
 ## Overview
 
 An **agent machine** is a typed XState state machine describing what your agent can do: which states exist, which transitions are legal, which model calls happen, and which events the model may choose right now. It is a blueprint; it never talks to a model directly.

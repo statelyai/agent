@@ -1,3 +1,5 @@
+> **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
+
 # Any XState machine is an agent workflow
 
 The central claim: **a state machine is the portable definition of an agent workflow.** You author the shape once (states, events, transitions). The LLM work is a set of actor sources bound at run time. Nothing about the shape assumes an LLM, so the same machine runs as a plain workflow, an agent, or a pure next-step function.

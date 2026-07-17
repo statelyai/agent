@@ -3,6 +3,8 @@ title: Decisions
 description: Let the model choose exactly one currently-legal machine event, validated and retried by the machine before it is taken.
 ---
 
+> **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
+
 ## Overview
 
 A **decision** is the model choosing exactly one currently-legal machine event. Not free text, not an arbitrary tool call. The machine declares the candidate events, its guards decide which are actually legal from the current state, and the model picks among the survivors. Because the model can only ever produce a legal event, an out-of-bounds choice is impossible rather than merely discouraged by a system prompt.
@@ -55,6 +57,8 @@ deciding: {
 - `'todo.*'`: a dotted namespace, every declared event under `todo.` (`todo.add`, `todo.toggle`, …). Patterns are typed against the declared dotted event types, so `'nope.*'` (matching nothing) is a compile error.
 
 Patterns and exact types can mix (`['todo.*', 'reset']`). Wildcards expand against the live snapshot, so they need a **snapshot-aware host** (`runAgent` or the step path); under a bare `createActor(...)`, list event types explicitly.
+
+`matchesEventPattern(eventType, pattern): boolean` is the exported helper behind this, for a host checking whether an event type matches an `allowedEvents` wildcard pattern (`'*'`, `'todo.*'`, or an exact type).
 
 ## Delivering the chosen event
 

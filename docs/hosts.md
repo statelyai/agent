@@ -3,6 +3,8 @@ title: Hosts and executors
 description: Give an agent machine the executor functions that call a model, and choose between the shipped AI SDK adapter or your own.
 ---
 
+> **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
+
 ## The executor contract
 
 <!-- AgentRequestExecutors contract and bind-time checks from src/run-agent.ts -->
@@ -104,6 +106,25 @@ This is backed by real implementations against four runtimes:
 - [examples/openai-sdk-host/index.ts](../examples/openai-sdk-host/index.ts): the raw `openai` package (Chat Completions), structured output via `response_format`, decisions forced with `tool_choice: 'required'`.
 - [examples/anthropic-sdk-host/index.ts](../examples/anthropic-sdk-host/index.ts): the raw `@anthropic-ai/sdk` package (Messages API), structured output via a forced tool call, decisions forced with `tool_choice: { type: 'any' }`.
 - [examples/cloudflare-agent-host/index.ts](../examples/cloudflare-agent-host/index.ts) and [examples/cloudflare-workers-ai-host/index.ts](../examples/cloudflare-workers-ai-host/index.ts): inside a Cloudflare Durable Object and against the Workers AI binding.
+
+### Adapter helpers for hand-written hosts
+
+The two shipped adapters export their request-mapping internals, so a hand-written host can reuse the parts it needs instead of reimplementing them.
+
+From `@statelyai/agent/ai-sdk`:
+
+- `toAiSdkTools(tools)`: maps an `AgentTools` map to AI SDK `tool()` definitions; a tool that already carries its own Standard Schema `inputSchema` passes through unchanged.
+- `toAiSdkCallSettings(request)`: maps a text request to the shared `generateText`/`streamText` settings (messages/prompt, sampling, tools, tool choice).
+- `toAiSdkToolChoice(toolChoice)`: maps an `AgentToolChoice` to AI SDK's tool-choice shape.
+- `toAiSdkEventTools(events)`: one AI SDK `tool()` per candidate decision event (the tool-per-event recipe).
+- `isStructuredOutputRequest(request)`: `true` when the request should use AI SDK structured `Output.object`.
+- `extractFirstJsonValue(text)`: recovers the first complete top-level JSON value when a model emits two structured-output envelopes back to back. `createAiSdkExecutors` applies it automatically as a one-shot repair (no model round-trip); exported for hand-written hosts.
+
+From `@statelyai/agent/openai-compat`:
+
+- `toOpenAiMessages(request)`: maps a request's `messages`/`system`/`prompt` to Chat Completions messages, expanding each tool result into its own `tool`-role message.
+- `toOpenAiEventTools(events)`: one wire function tool per candidate decision event.
+- `extractJsonSchema(schema)`: reads a Standard Schema's JSON Schema (a thin re-export of core `getJsonSchema`), for building `response_format` or tool `parameters`.
 
 ## The structured-output envelope
 

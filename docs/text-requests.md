@@ -3,6 +3,8 @@ title: Text requests
 description: Declare typed model calls on an agent machine and invoke them from a state, parsing structured or streamed output.
 ---
 
+> **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
+
 ## Overview
 
 A **text request** is a typed model call your machine can invoke by name. You declare it once, with its own input and output schemas, a model reference, and a prompt built from that input. The machine decides when to make the call; the host executes it.

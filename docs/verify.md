@@ -1,3 +1,5 @@
+> **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
+
 # Verify
 
 Keyless verification for agent machines. Coding agents generate these machines; they need a closed loop to **self-verify what they generated without any API keys or model calls**. `@statelyai/agent` ships three static/simulated APIs plus a thin CLI for that.

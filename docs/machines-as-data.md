@@ -3,6 +3,8 @@ title: Machines as data
 description: Author an agent machine as a JSON or YAML config and lower it into the same runnable XState machine that setupAgent builds in TypeScript.
 ---
 
+> **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
+
 ## Machines as data
 
 <!-- setupAgent.fromConfig lowering from src/workflow-config.ts -->

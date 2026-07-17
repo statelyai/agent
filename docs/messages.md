@@ -3,6 +3,8 @@ title: Messages
 description: Build and store conversation history as a parts-based message model that mirrors the AI SDK without depending on it.
 ---
 
+> **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
+
 ## The message model
 
 <!-- AgentMessage union and part types from src/types.ts -->
@@ -43,6 +45,27 @@ userMessage([
   { type: "text", text: "What is in this image?" },
   { type: "image", image: "https://example.com/photo.png" },
 ]);
+```
+
+`toolMessage(parts)` builds a `role: "tool"` message from an array of `ToolResultPart`s. Use it when hand-building transcript history that includes tool executions: each tool result is a `tool` message that follows the assistant message whose `ToolCallPart` invoked it. This seeds `runAgent({ messages })` with a prior conversation where tools ran, or lets a custom host append tool results after executing a request's tools.
+
+```ts
+import { assistantMessage, toolMessage, userMessage } from "@statelyai/agent";
+
+const messages = [
+  userMessage("What is the weather in Paris?"),
+  assistantMessage([
+    { type: "tool-call", toolCallId: "call_1", toolName: "getWeather", input: { city: "Paris" } },
+  ]),
+  toolMessage([
+    {
+      type: "tool-result",
+      toolCallId: "call_1",
+      toolName: "getWeather",
+      output: { type: "json", value: { tempC: 18 } },
+    },
+  ]),
+];
 ```
 
 ## Store messages in context

@@ -3,6 +3,8 @@ title: Compared to LangGraph and hand-rolling
 description: Honest head-to-heads against LangGraph JS and a hand-rolled tool-calling loop, including where LangGraph is ahead today.
 ---
 
+> **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
+
 ## Overview
 
 If you are choosing between this library, [LangGraph JS](https://github.com/langchain-ai/langgraphjs), and a hand-rolled loop, here is the honest comparison. The short version:

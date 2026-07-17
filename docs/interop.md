@@ -3,6 +3,8 @@ title: Using with other stacks
 description: Reuse models and executors from other AI frameworks via AI SDK LanguageModel objects, raw ai functions, and OpenAI-compatible endpoints.
 ---
 
+> **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
+
 ## Models are the interop currency
 
 An agent machine never talks to a model directly. It builds requests, and the **host** supplies executors that run them (see [Hosts and executors](./hosts)). So interop is really about where the executors come from, and the shared currency is the AI SDK **`LanguageModel`** object.

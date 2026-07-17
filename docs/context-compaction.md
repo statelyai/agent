@@ -3,6 +3,8 @@ title: Context compaction
 description: Bound a chat loop's message history by folding stale turns into a running summary from an explicit compaction state.
 ---
 
+> **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
+
 ## The problem
 
 <!-- explicit-state compaction pattern from examples/context-compaction/index.ts -->

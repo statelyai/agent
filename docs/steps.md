@@ -3,6 +3,8 @@ title: The step path
 description: Drive an agent machine one model call at a time so a durable host can checkpoint after every step.
 ---
 
+> **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
+
 ## Why it exists
 
 The **step path** is a set of helpers that advance an agent machine one transition at a time, handing you a plain, persistable checkpoint after every model call. It is the durable-host counterpart to [runAgent](hosts.md), not a lesser version of it.

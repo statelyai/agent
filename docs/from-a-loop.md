@@ -3,6 +3,8 @@ title: Migrating from a hand-rolled loop
 description: Convert a realistic while-loop tool-calling agent into an agent machine one step at a time, and see what you get for free.
 ---
 
+> **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
+
 ## Start: a hand-rolled loop
 
 Here is a realistic refund agent as a `while` loop with any SDK. It works. The model calls tools until it stops, a `$100` limit is enforced inline, and anything bigger has to pause for a human.

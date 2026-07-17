@@ -3,6 +3,8 @@ title: Quickstart
 description: Install @statelyai/agent and run your first agent machine end to end.
 ---
 
+> **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
+
 ## Installation
 
 <!-- install command and peer dependencies, consistent with package.json -->

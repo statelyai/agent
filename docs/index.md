@@ -3,6 +3,8 @@ title: Agents
 description: Author AI agents as typed XState state machines, where the machine decides and the host executes.
 ---
 
+> **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
+
 ## Overview
 
 `@statelyai/agent` lets you author an AI agent as a typed XState state machine. The machine is a portable blueprint of what your agent can do; it never talks to a model directly. The core idea: **the machine decides, the host executes.**
@@ -87,7 +89,7 @@ See the [Quickstart](quickstart.md) for a step-by-step walkthrough.
 
 <!-- not-shipped list, consistent with readme.md "Alpha status" section -->
 
-> **Warning:** This is a pre-release (2.0.0-alpha.0). The API changed completely in this release and is still settling. Expect breaking changes before 2.0 stable.
+The API changed completely in 2.0 and is still settling. Expect breaking changes before 2.0 stable.
 
 Explicitly not shipped yet:
 

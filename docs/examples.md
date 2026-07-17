@@ -3,6 +3,8 @@ title: Examples
 description: A curated index of runnable @statelyai/agent examples, grouped by what they demonstrate.
 ---
 
+> **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
+
 ## Running the examples
 
 The examples live in the repo under `examples/`, one flat directory per example with an `index.ts` entrypoint. Clone the repo, install dependencies, and run any example directly with `tsx`:

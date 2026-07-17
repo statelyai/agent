@@ -3,6 +3,8 @@ title: Human in the loop
 description: Pause an agent for human input by settling idle, persist the snapshot anywhere, and resume in a different process.
 ---
 
+> **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
+
 ## The idle-first model
 
 <!-- idle settle and snapshot resume behavior from src/run-agent.ts -->
@@ -121,7 +123,7 @@ const first = await runAgent(machine, {
 console.log(first.status);
 // logs 'idle'
 
-const persisted = JSON.parse(JSON.stringify(first.snapshot));
+const persisted = persistSnapshot(first.snapshot);
 
 // ...later, possibly a different process, the human approved...
 const second = await runAgent(machine, {
@@ -134,7 +136,7 @@ console.log(second.status);
 // logs 'done'
 ```
 
-The snapshot is a plain, JSON-serializable object; the `JSON.stringify`/`JSON.parse` round-trip above proves it survives a real persistence layer.
+`persistSnapshot(snapshot)` is the shipped helper for that round-trip: it deep-clones a snapshot to plain JSON via a `JSON.stringify`/`JSON.parse` pass, returning the exact shape you store and later feed back to `runAgent({ snapshot })`. It drops or throws on non-JSON values exactly as `JSON.stringify` would, so the persisted value is guaranteed to be what a real persistence layer sees.
 
 ## Present the human's choices
 

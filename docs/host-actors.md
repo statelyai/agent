@@ -3,6 +3,8 @@ title: Host actors
 description: The machine declares typed actor requests; the host executes them with executors or actor implementations, on any SDK or runtime.
 ---
 
+> **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
+
 `setupAgent(...)` gives a machine typed, built-in actor sources for model work: `agent.generateText` / `agent.streamText` for inline text requests, `agent.decide` for decisions, `agent.userInput` for human input, plus co-located `requests:` when a call deserves a reusable name. Decisions are state-local: author them inline on the invoke with `src: 'agent.decide'`. In every case, the machine only _declares_ the request; the host executes it by supplying executors to `runAgent(...)` (or the step helpers) or by providing actor implementations directly.
 
 The machine declares:

@@ -3,6 +3,8 @@ title: Post-alpha roadmap
 description: Work deliberately deferred past the 2.0 alpha, and why.
 ---
 
+> **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
+
 Everything here is **additive**: none of it blocks the alpha, and all of it benefits from real usage feedback before the API shape is chosen. If you hit one of these and have opinions, open an issue; that feedback is exactly what this list is waiting on.
 
 ## Helpers (deferred until embedders show us what they actually write)
