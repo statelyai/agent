@@ -9,6 +9,7 @@
     "agent-plan-builtin",
     "allowed-events-wildcards",
     "api-polish-states-helpers-prune",
+    "assert-agent-machine",
     "audit-bugfixes-batch",
     "blessed-ai-sdk-executors",
     "child-machine-bind-validation",
