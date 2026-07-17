@@ -1,5 +1,11 @@
 # @statelyai/agent
 
+## 2.0.0-alpha.10
+
+### Minor Changes
+
+- [`4b9421c`](https://github.com/statelyai/agent/commit/4b9421cb7bbc94b1ea534993a2bfba9f4133635e) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **`assertAgentMachine(machine, options?)`**: one-line pass/fail wrapper over `lintAgentMachine` for tests and generation loops. Silent when clean; throws the new `AgentLintError` (findings on `.diagnostics`, message formatted like the CLI lint report) on any error-severity finding. `warnings: true` fails warning-severity findings too, and `disable` forwards to lint. New exports: `assertAgentMachine`, `AgentLintError`, `AssertAgentMachineOptions`.
+
 ## 2.0.0-alpha.9
 
 ### Minor Changes
