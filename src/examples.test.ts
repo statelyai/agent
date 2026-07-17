@@ -6,6 +6,7 @@ import {
   evaluatePrompt,
   draftEmail,
   gameMachine,
+  rpsMachine,
   jokeMachine,
   rateJoke as rateJokeLogic,
   tellJoke as tellJokeLogic,
@@ -171,6 +172,41 @@ describe("curated XState setup examples", () => {
       playerHp: 20,
       enemyHp: 9,
     });
+  });
+
+  test("event-log game feeds the saved round history back into each decide prompt", async () => {
+    const prompts: string[] = [];
+    // The mock player uses ONLY the rendered history in the prompt: count the
+    // rounds it shows, look up the opponent's scripted pattern (rock, rock,
+    // paper), and throw the counter. Winning 3-0 proves the event log the
+    // machine saved to context round-trips into the model's prompt.
+    const pattern = ["ROCK", "ROCK", "PAPER"] as const;
+    const counters = { ROCK: "PAPER", PAPER: "SCISSORS", SCISSORS: "ROCK" } as const;
+
+    const result = await runAgent(rpsMachine, {
+      input: { targetWins: 3 },
+      executors: {
+        generateText: async () => ({ output: "" }),
+        decide: async (request) => {
+          prompts.push(request.prompt ?? "");
+          const roundsPlayed = (request.prompt?.match(/^Round \d+/gm) ?? []).length;
+          const predicted = pattern[roundsPlayed % pattern.length]!;
+          return { event: { type: `THROW_${counters[predicted]}` } };
+        },
+      },
+      maxModelCalls: 10,
+    });
+
+    expect(prompts[0]).toContain("No rounds played yet.");
+    expect(prompts[1]).toContain("Round 1: you threw paper, opponent threw rock — win");
+    expect(result.status).toBe("done");
+    if (result.status !== "done") {
+      throw new Error("unreachable");
+    }
+    expect(result.output.outcome).toBe("won");
+    expect(result.output.playerScore).toBe(3);
+    expect(result.output.opponentScore).toBe(0);
+    expect(result.output.history).toHaveLength(3);
   });
 
   test("joke workflow loops until the decision ends it", async () => {

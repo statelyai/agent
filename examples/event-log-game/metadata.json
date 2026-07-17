@@ -1,0 +1,14 @@
+{
+  "name": "event-log-game",
+  "title": "Event Log in Context (RPS Pattern Game)",
+  "kind": "agent-workflow",
+  "origin": {
+    "type": "stately-agent",
+    "source": "Created in this repository",
+    "url": null
+  },
+  "comparison": {
+    "targets": ["LangGraph", "Burr"],
+    "purpose": "Shows a machine reducing its own events into a context-held history log that the decide prompt reads back, so the model can only win by using the saved event history."
+  }
+}
