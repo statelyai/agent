@@ -38,7 +38,14 @@ export {
   runAgentToCompletion,
   SnapshotVersionMismatchError,
 } from "./run-agent.js";
-export { canReach, explorePaths, lintAgentMachine, simulateAgent } from "./verify.js";
+export {
+  AgentLintError,
+  assertAgentMachine,
+  canReach,
+  explorePaths,
+  lintAgentMachine,
+  simulateAgent,
+} from "./verify.js";
 export {
   getAgentMessages,
   getJsonSchema,
@@ -108,6 +115,7 @@ export type {
   AgentLintSeverity,
   AgentPathReport,
   AgentPathTerminal,
+  AssertAgentMachineOptions,
   CanReachResult,
   ExplorePathsOptions,
   LintAgentMachineOptions,

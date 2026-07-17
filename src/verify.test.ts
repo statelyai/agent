@@ -1,6 +1,8 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import {
+  AgentLintError,
+  assertAgentMachine,
   canReach,
   createTextLogic,
   explorePaths,
@@ -512,5 +514,81 @@ describe("canReach — reachability with a witness path", () => {
     });
     expect(result.canReach).toBe(false);
     expect(result.witness).toBeUndefined();
+  });
+});
+
+describe("assertAgentMachine — one-line pass/fail for tests", () => {
+  test("returns silently for a clean machine", () => {
+    expect(() => assertAgentMachine(jokeMachine)).not.toThrow();
+  });
+
+  test("throws AgentLintError with the findings for a broken machine", () => {
+    const agent = setupAgent({
+      context: z.object({}),
+      events: { E: z.object({}), F: z.object({}) },
+    });
+    const machine = agent.createMachine({
+      id: "broken",
+      context: () => ({}),
+      initial: "a",
+      states: {
+        a: { on: { E: { target: "b" } } },
+        b: { type: "final" },
+        c: { on: { F: { target: "b" } } }, // nothing targets `c`
+      },
+    });
+
+    let thrown: unknown;
+    try {
+      assertAgentMachine(machine);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(AgentLintError);
+    const lintError = thrown as AgentLintError;
+    expect(lintError.diagnostics).toContainEqual(
+      expect.objectContaining({ code: "unreachable-state", severity: "error", path: "c" }),
+    );
+    expect(lintError.message).toContain("'broken'");
+    expect(lintError.message).toContain("unreachable-state");
+    expect(lintError.message).toContain("c");
+  });
+
+  test("warnings pass by default; warnings: true fails them", () => {
+    const agent = setupAgent({
+      context: z.object({}),
+      events: { E: z.object({}) },
+    });
+    // No reachable final state: a warning-severity 'missing-final' finding.
+    const machine = agent.createMachine({
+      id: "loopy",
+      context: () => ({}),
+      initial: "a",
+      states: {
+        a: { on: { E: { target: "a" } } },
+      },
+    });
+
+    expect(() => assertAgentMachine(machine)).not.toThrow();
+    expect(() => assertAgentMachine(machine, { warnings: true })).toThrow(AgentLintError);
+  });
+
+  test("forwards lint options: a disabled check no longer fails the assert", () => {
+    const agent = setupAgent({
+      context: z.object({}),
+      events: { E: z.object({}), F: z.object({}) },
+    });
+    const machine = agent.createMachine({
+      context: () => ({}),
+      initial: "a",
+      states: {
+        a: { on: { E: { target: "b" } } },
+        b: { type: "final" },
+        c: { on: { F: { target: "b" } } },
+      },
+    });
+
+    expect(() => assertAgentMachine(machine)).toThrow(AgentLintError);
+    expect(() => assertAgentMachine(machine, { disable: ["unreachable-state"] })).not.toThrow();
   });
 });

@@ -27,6 +27,8 @@ if (errors.length) {
 }
 ```
 
+For a one-liner that throws instead of returning findings, use `assertAgentMachine(machine, options?)`: silent when clean, throws `AgentLintError` (findings on `.diagnostics`, message formatted like the CLI report) on any error-severity finding. `warnings: true` fails warnings too; `disable` skips checks, same as `lintAgentMachine`.
+
 | Code                       | Severity | Fires when                                                                                                                                                                                                                                                                          |
 | -------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `unreachable-state`        | error    | A state no transition/`always`/`choice`/`onDone`/`onError` can reach from the initial state. Conservative: dynamic (function) transitions over-approximate, so it never false-flags.                                                                                                |
@@ -36,6 +38,36 @@ if (errors.length) {
 | `final-without-output`     | error    | The machine declares an output schema but a top-level final state has no `output`.                                                                                                                                                                                                  |
 | `final-output-reads-event` | warning  | A top-level final state's `output` function reads the entering `event`. Final `output` fns are evaluated more than once with different events, so `event` is unreliable. Read `context` only, capturing what you need into context in the transition that targets the final state. |
 | `missing-final`            | warning  | No reachable final state; the machine can only idle/loop (legal, but flagged).                                                                                                                                                                                                     |
+
+## Assert machines in tests
+
+Everything above is a plain function, so a machine is a thing you assert in a unit test: no model, no API key, no mocks. Structural soundness, reachability, and full scripted playthroughs run deterministically in vitest/jest:
+
+```ts
+import { assertAgentMachine, canReach, simulateAgent } from "@statelyai/agent";
+import { supportMachine } from "./support-machine";
+
+test("machine is structurally sound", () => {
+  assertAgentMachine(supportMachine); // throws AgentLintError with findings
+});
+
+test("escalation is reachable", async () => {
+  const { canReach: reachable } = await canReach(supportMachine, "escalated", {
+    input: { question: "refund?" },
+  });
+  expect(reachable).toBe(true);
+});
+
+test("happy path settles done", async () => {
+  const result = await simulateAgent(supportMachine, {
+    input: { question: "refund?" },
+    script: { decisions: { "agent.decide": [{ type: "RESOLVE" }] } },
+  });
+  expect(result.status).toBe("done");
+});
+```
+
+Guards stay in force throughout: `canReach` and `simulateAgent` walk the same step path `runAgent` uses, so a path that exists in the graph but is guard-illegal never counts as reachable. Prompts change, models change; these tests pin the shape.
 
 ## `await simulateAgent(machine, { input, script, maxSteps? })`
 

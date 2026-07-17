@@ -639,6 +639,57 @@ export function lintAgentMachine(
   return LINT_CHECKS.flatMap((check) => check(ctx)).filter((d) => !disabled.has(d.code));
 }
 
+/** Options for {@link assertAgentMachine}. */
+export interface AssertAgentMachineOptions extends LintAgentMachineOptions {
+  /** Also fail on warning-severity findings. Default: errors only. */
+  warnings?: boolean;
+}
+
+/**
+ * Thrown by {@link assertAgentMachine} when lint finds failing diagnostics.
+ * `diagnostics` holds the findings; the message lists them one per finding,
+ * so a test runner's failure output reads like the CLI's lint report.
+ */
+export class AgentLintError extends Error {
+  public diagnostics: AgentLintDiagnostic[];
+  constructor(machineId: string, diagnostics: AgentLintDiagnostic[]) {
+    const lines = diagnostics.map(
+      (d) => `  ${d.severity === "error" ? "error" : "warn "}  ${d.code}  ${d.path}\n         ${d.message}`,
+    );
+    super(
+      `Agent machine '${machineId}' failed lint (${diagnostics.length} finding(s)):\n${lines.join("\n")}`,
+    );
+    this.name = "AgentLintError";
+    this.diagnostics = diagnostics;
+  }
+}
+
+/**
+ * Asserts a machine passes {@link lintAgentMachine}: returns silently when
+ * clean, throws {@link AgentLintError} (with the findings on `.diagnostics`)
+ * otherwise. Fails on error-severity findings; set `warnings: true` to fail on
+ * warnings too. The one-liner for tests and generation loops:
+ *
+ * @example
+ * ```ts
+ * test('agent machine is structurally sound', () => {
+ *   assertAgentMachine(machine);
+ * });
+ * ```
+ */
+export function assertAgentMachine(
+  machine: AnyStateMachine,
+  options: AssertAgentMachineOptions = {},
+): void {
+  const diagnostics = lintAgentMachine(machine, options);
+  const failing = options.warnings
+    ? diagnostics
+    : diagnostics.filter((d) => d.severity === "error");
+  if (failing.length > 0) {
+    throw new AgentLintError(machine.id ?? "(machine)", failing);
+  }
+}
+
 // ─── Simulation ───
 
 /**
