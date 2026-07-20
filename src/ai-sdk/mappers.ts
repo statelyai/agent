@@ -1,13 +1,5 @@
-import {
-  tool,
-  type FlexibleSchema,
-  type ModelMessage,
-  type Tool,
-} from "ai";
-import {
-  getAgentOutputMode,
-  type AgentTextRequest,
-} from "../text-logic.js";
+import { tool, type FlexibleSchema, type ModelMessage, type Tool } from "ai";
+import { getAgentOutputMode, type AgentTextRequest } from "../text-logic.js";
 import { isStandardSchema } from "../utils.js";
 import { renderDecisionAttempts } from "../decision.js";
 import type { AgentDecisionRequest } from "../decision.js";

@@ -154,9 +154,9 @@ describe("provideExecutors", () => {
       },
     });
 
-    expect(() =>
-      provideExecutors(machine, { generateText: async () => ({ output: "" }) }),
-    ).toThrow(/no 'decide' executor/);
+    expect(() => provideExecutors(machine, { generateText: async () => ({ output: "" }) })).toThrow(
+      /no 'decide' executor/,
+    );
   });
 
   test("merges options.actorSources before binding; an executor-bound override is left as-is", async () => {
@@ -191,7 +191,9 @@ describe("provideExecutors", () => {
     const bound = provideExecutors(
       machine,
       { generateText: async () => ({ output: "from executors.generateText" }) },
-      { actorSources: { draftText: draftText.withExecutor(async () => ({ output: "overridden" })) } },
+      {
+        actorSources: { draftText: draftText.withExecutor(async () => ({ output: "overridden" })) },
+      },
     );
 
     const actor = createActor(bound, { input: {} });

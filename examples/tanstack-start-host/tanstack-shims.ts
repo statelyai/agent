@@ -19,7 +19,9 @@ interface ServerFnBuilder<TInput> {
   ): (opts: { data: TInput }) => Promise<TOutput>;
 }
 
-export function createServerFn(_options: { method?: "GET" | "POST" } = {}): ServerFnBuilder<unknown> {
+export function createServerFn(
+  _options: { method?: "GET" | "POST" } = {},
+): ServerFnBuilder<unknown> {
   let validate: (input: unknown) => unknown = (input) => input;
   const builder: ServerFnBuilder<unknown> = {
     validator(fn) {

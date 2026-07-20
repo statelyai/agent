@@ -699,7 +699,8 @@ export class AgentLintError extends Error {
   public diagnostics: AgentLintDiagnostic[];
   constructor(machineId: string, diagnostics: AgentLintDiagnostic[]) {
     const lines = diagnostics.map(
-      (d) => `  ${d.severity === "error" ? "error" : "warn "}  ${d.code}  ${d.path}\n         ${d.message}`,
+      (d) =>
+        `  ${d.severity === "error" ? "error" : "warn "}  ${d.code}  ${d.path}\n         ${d.message}`,
     );
     super(
       `Agent machine '${machineId}' failed lint (${diagnostics.length} finding(s)):\n${lines.join("\n")}`,

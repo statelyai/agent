@@ -506,7 +506,10 @@ function lowerWorkflowTransitionOrArray(
   }
 
   return Array.isArray(transitionConfig)
-    ? ({ context, event }: { context: unknown; event: unknown }, enq: WorkflowTransitionEnqueue) => {
+    ? (
+        { context, event }: { context: unknown; event: unknown },
+        enq: WorkflowTransitionEnqueue,
+      ) => {
         const scope = { context, event };
         const transition = transitionConfig.find((candidate) =>
           workflowTransitionMatches(candidate, scope),

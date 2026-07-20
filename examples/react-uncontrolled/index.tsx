@@ -43,7 +43,10 @@ const agentSetup = setupAgent({
       prompt: ({ input }) => `Write a short announcement about: ${input.topic}`,
     },
   },
-  states: { reviewing: { context: { draft: z.string() } }, published: { context: { draft: z.string() } } },
+  states: {
+    reviewing: { context: { draft: z.string() } },
+    published: { context: { draft: z.string() } },
+  },
 });
 
 const announceMachine = agentSetup.createMachine({
@@ -109,7 +112,10 @@ export interface AnnouncerProps {
  * threading `onChunk` into `provideExecutors` so streamed text lands in local
  * state, and renders the current machine state.
  */
-export function Announcer({ topic = "the new deploy pipeline", executors = mockExecutors }: AnnouncerProps) {
+export function Announcer({
+  topic = "the new deploy pipeline",
+  executors = mockExecutors,
+}: AnnouncerProps) {
   const [streamed, setStreamed] = useState("");
 
   const actorRef = useRef<AnnounceActor | null>(null);
@@ -138,7 +144,10 @@ export function Announcer({ topic = "the new deploy pipeline", executors = mockE
           <button type="button" onClick={() => actor.send({ type: "APPROVE" })}>
             Approve
           </button>
-          <button type="button" onClick={() => actor.send({ type: "REJECT", reason: "make it punchier" })}>
+          <button
+            type="button"
+            onClick={() => actor.send({ type: "REJECT", reason: "make it punchier" })}
+          >
             Reject
           </button>
         </div>

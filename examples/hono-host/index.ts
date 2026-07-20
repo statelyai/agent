@@ -46,7 +46,10 @@ const reviewSetup = setupAgent({
       prompt: ({ input }) => `Write a short announcement about: ${input.topic}`,
     },
   },
-  states: { reviewing: { context: { draft: z.string() } }, published: { context: { draft: z.string() } } },
+  states: {
+    reviewing: { context: { draft: z.string() } },
+    published: { context: { draft: z.string() } },
+  },
 });
 
 export const announceMachine = reviewSetup.createMachine({
@@ -72,7 +75,10 @@ export const announceMachine = reviewSetup.createMachine({
         }),
       },
     },
-    published: { type: "final", output: ({ context }) => ({ published: true, draft: context.draft }) },
+    published: {
+      type: "final",
+      output: ({ context }) => ({ published: true, draft: context.draft }),
+    },
   },
 });
 

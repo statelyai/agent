@@ -25,7 +25,9 @@ export const v = {
   boolean: (): Schema<boolean> => ({}),
   nullable: <T>(_schema: Schema<T>): Schema<T | null> => ({}),
   /** Metadata action (real Valibot returns a pipe action); typed as a no-op. */
-  description: (_text: string): { readonly __action: "description" } => ({ __action: "description" }),
+  description: (_text: string): { readonly __action: "description" } => ({
+    __action: "description",
+  }),
   /** Pipe a schema through actions; the output type is the base schema's type. */
   pipe: <T>(schema: Schema<T>, ..._actions: unknown[]): Schema<T> => schema,
   object: <Shape extends Record<string, Schema<unknown>>>(

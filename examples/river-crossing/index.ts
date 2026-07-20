@@ -315,9 +315,7 @@ export async function runRiverCrossingExample(
 
 function printOutcome(output: { solved: boolean; moves: number; log: string[] }) {
   console.log(
-    output.solved
-      ? `Solved in ${output.moves} moves:`
-      : `Failed after ${output.moves} moves:`,
+    output.solved ? `Solved in ${output.moves} moves:` : `Failed after ${output.moves} moves:`,
   );
   for (const [i, entry] of output.log.entries()) {
     console.log(`  ${i + 1}. ${entry}`);
