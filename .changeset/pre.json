@@ -16,12 +16,14 @@
     "decide-auto-delivery-and-define-models",
     "decision-and-invoke-typing-dx",
     "dx-sweep-resilience-and-sugar",
+    "examples-package-imports",
     "executor-output-envelope",
     "executor-result-widening",
     "explicit-suspension-and-illegal-resume",
     "get-requests-cleanup-pass",
     "get-requests-state-interpretation",
     "get-state-meta",
+    "inspect-accepts-observer",
     "keyless-verify-lint-simulate",
     "leaner-agent-authoring",
     "max-output-tokens-rename",
@@ -33,6 +35,9 @@
     "run-agent-completion-and-versioning",
     "setup-agent-actor-sources-and-model-refs",
     "setup-agent-xstate-cutover",
-    "typed-tools-union-output-core-helpers"
+    "subpath-reorg-steps-adapter",
+    "tidy-agents-run-anywhere",
+    "typed-tools-union-output-core-helpers",
+    "versioned-trace-schema"
   ]
 }
