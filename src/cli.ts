@@ -32,7 +32,7 @@ function stubCompileSchema(jsonSchema: Record<string, unknown>): StandardSchemaV
 
 function printUsage(): void {
   process.stderr.write(
-    "Usage: statelyai-agent lint <workflow.json> [--no-schemas]\n\n" +
+    "Usage: statelyai-agent lint <workflow.json>\n\n" +
       "  Statically verifies an agent-machine JSON config (structure-only).\n" +
       "  Exits 1 on any error-severity finding.\n",
   );

@@ -696,13 +696,32 @@ export async function resolveDecision<TEvent extends ChosenEvent = ChosenEvent>(
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     options.signal?.throwIfAborted();
-    const { event } = await executor({
+    const result = await executor({
       ...request,
       attempts: [...attempts],
       // Thread the run's abort signal onto the request so the executor can
       // cancel its in-flight model call (adapters read `request.signal`).
       signal: options.signal,
     });
+
+    // Fail fast (and descriptively) on the common executor mistake of
+    // returning a bare event (`{ type: 'SAFE' }`) instead of the required
+    // `{ event: { type, ... } }` envelope — otherwise `event` is `undefined`
+    // and this throws a cryptic `Cannot read 'type'` that a machine routes
+    // silently to `onError`.
+    if (
+      !result ||
+      typeof result !== "object" ||
+      typeof (result as { event?: unknown }).event !== "object" ||
+      (result as { event?: unknown }).event === null ||
+      typeof (result as { event: { type?: unknown } }).event.type !== "string"
+    ) {
+      throw new Error(
+        "decide executor must return { event: { type: string, ... } }; got " +
+          `${JSON.stringify(result)}. Wrap the chosen event: return { event: { type: 'SAFE' } }.`,
+      );
+    }
+    const { event } = result;
 
     const descriptor = eventsByType.get(event.type);
     if (!descriptor) {

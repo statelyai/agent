@@ -36,6 +36,10 @@ export type SchemaCompiler = (
   name: string,
 ) => StandardSchemaV1;
 
+// Builtin decision actor src — an `onDone` on one of these is always a config
+// error (a decision's output IS its chosen event, delivered via `on`).
+const DECIDE_SRC = "agent.decide";
+
 const workflowConfigWholeExpressionPattern = /^\{\{\s*([\s\S]*?)\s*\}\}$/;
 const workflowConfigTemplateExpressionPattern = /\{\{\s*([\s\S]*?)\s*\}\}/g;
 
@@ -102,6 +106,8 @@ function evaluateWorkflowConfigValue(value: unknown, scope: ExpressionScope): un
  * transition time — see the sibling `evaluateWorkflowConfigValue` lowering.
  */
 export interface AgentWorkflowConfig {
+  /** JSON Schema reference (`"$schema"`) editors attach to a config file. Ignored by the lowering. */
+  $schema?: string;
   key?: string;
   id?: string;
   version?: string;
@@ -173,10 +179,10 @@ export interface AgentWorkflowStateConfig {
 
 /**
  * An `invoke` entry in {@link AgentWorkflowStateConfig}. For `src:
- * 'agent.decide'`, the chosen event is delivered automatically — its
- * transition usually exits the state and ends the invoke, so an `onDone` is
- * rarely needed; declare one only to observe a chosen event whose transition
- * stays in-state. `onError` handles retries-exhausted.
+ * 'agent.decide'`, the chosen event is delivered automatically and handled by
+ * the state's `on` transitions — a decision has no output of its own, so an
+ * `onDone` there is always a config error and is rejected at
+ * `setupAgent.fromConfig(...)` time. `onError` handles retries-exhausted.
  */
 export interface AgentWorkflowInvokeConfig {
   id?: string;
@@ -396,23 +402,79 @@ function workflowTransitionMatches(
     : false;
 }
 
-// Lowers a matched transition config into an xstate transition result object (target/context/description/reenter/meta).
+// Minimal structural view of the parts of xstate's transition-function
+// `enq` (EnqueueObject) the lowering uses.
+type WorkflowTransitionEnqueue = { emit: (event: unknown) => void };
+
+// Runs a matched transition's `actions` (emit/assign/named). The transition-
+// function form has no `actions` key in its result — actions run through the
+// `enq` argument: `emit` fires immediately, and `assign` assignments are
+// returned to merge into the result's `context` patch. A named `type` action
+// cannot be wired from a config (the lowering registers no action
+// implementations), so it errors rather than silently no-op.
+function applyWorkflowTransitionActions(
+  actionConfig: AgentWorkflowActionConfig | AgentWorkflowActionConfig[] | undefined,
+  scope: { context: unknown; event: unknown },
+  enq: WorkflowTransitionEnqueue,
+): Record<string, unknown> | undefined {
+  if (!actionConfig) {
+    return undefined;
+  }
+
+  const actions = Array.isArray(actionConfig) ? actionConfig : [actionConfig];
+  let assigned: Record<string, unknown> | undefined;
+  for (const action of actions) {
+    if (action.assign !== undefined) {
+      assigned = {
+        ...(assigned ?? {}),
+        ...Object.fromEntries(
+          Object.entries(action.assign).map(([key, value]) => [
+            key,
+            evaluateWorkflowConfigValue(value, scope),
+          ]),
+        ),
+      };
+    } else if (action.emit !== undefined) {
+      enq.emit(evaluateWorkflowConfigValue(action.emit, scope));
+    } else if (action.type) {
+      throw new Error(
+        `setupAgent.fromConfig: named action type '${action.type}' is not supported in a ` +
+          `transition 'actions' entry (config lowering wires no action implementations). Use ` +
+          `'emit' or 'assign', or move it to a state 'entry'/'exit'.`,
+      );
+    } else {
+      throw new Error(
+        "setupAgent.fromConfig: a transition action must declare 'emit', 'assign', or 'type'.",
+      );
+    }
+  }
+  return assigned;
+}
+
+// Lowers a matched transition config into an xstate transition result object
+// (target/context/description/reenter/meta), running its `actions` (emit/assign)
+// through `enq` and folding both the transition-level `assign` and any
+// assign-actions into the returned `context` patch.
 function lowerWorkflowTransitionResult(
   transitionConfig: AgentWorkflowTransitionConfig,
   scope: { context: unknown; event: unknown },
+  enq: WorkflowTransitionEnqueue,
 ) {
+  const actionAssign = applyWorkflowTransitionActions(transitionConfig.actions, scope, enq);
+  const configAssign = transitionConfig.assign
+    ? Object.fromEntries(
+        Object.entries(transitionConfig.assign).map(([key, value]) => [
+          key,
+          evaluateWorkflowConfigValue(value, scope),
+        ]),
+      )
+    : undefined;
+  const context =
+    configAssign || actionAssign ? { ...(configAssign ?? {}), ...(actionAssign ?? {}) } : undefined;
+
   return {
     ...(transitionConfig.target !== undefined ? { target: transitionConfig.target } : {}),
-    ...(transitionConfig.assign
-      ? {
-          context: Object.fromEntries(
-            Object.entries(transitionConfig.assign).map(([key, value]) => [
-              key,
-              evaluateWorkflowConfigValue(value, scope),
-            ]),
-          ),
-        }
-      : {}),
+    ...(context ? { context } : {}),
     ...(transitionConfig.description !== undefined
       ? { description: transitionConfig.description }
       : {}),
@@ -423,12 +485,15 @@ function lowerWorkflowTransitionResult(
 
 // Lowers a single transition config into an xstate transition function.
 function lowerWorkflowTransition(transitionConfig: AgentWorkflowTransitionConfig) {
-  return ({ context, event }: { context: unknown; event: unknown }) => {
+  return (
+    { context, event }: { context: unknown; event: unknown },
+    enq: WorkflowTransitionEnqueue,
+  ) => {
     const scope = { context, event };
     if (!workflowTransitionMatches(transitionConfig, scope)) {
       return undefined;
     }
-    return lowerWorkflowTransitionResult(transitionConfig, scope);
+    return lowerWorkflowTransitionResult(transitionConfig, scope, enq);
   };
 }
 
@@ -441,7 +506,7 @@ function lowerWorkflowTransitionOrArray(
   }
 
   return Array.isArray(transitionConfig)
-    ? ({ context, event }: { context: unknown; event: unknown }) => {
+    ? ({ context, event }: { context: unknown; event: unknown }, enq: WorkflowTransitionEnqueue) => {
         const scope = { context, event };
         const transition = transitionConfig.find((candidate) =>
           workflowTransitionMatches(candidate, scope),
@@ -449,7 +514,7 @@ function lowerWorkflowTransitionOrArray(
         if (!transition) {
           return undefined;
         }
-        return lowerWorkflowTransitionResult(transition, scope);
+        return lowerWorkflowTransitionResult(transition, scope, enq);
       }
     : lowerWorkflowTransition(transitionConfig);
 }
@@ -458,7 +523,19 @@ function lowerWorkflowTransitionOrArray(
 // special-casing: the decision actor auto-delivers the chosen event to the
 // invoking actor, so a decide invoke lowers like any other (an optional `onDone`
 // observes only a chosen event whose transition stays in-state).
-function lowerWorkflowInvoke(invokeConfig: AgentWorkflowInvokeConfig) {
+function lowerWorkflowInvoke(invokeConfig: AgentWorkflowInvokeConfig, stateKey: string) {
+  // A decision's output IS its chosen event, delivered automatically via the
+  // state's `on` transitions — so an `onDone` on an `agent.decide` invoke can
+  // never fire and is always a config error. Reject it early with the state named.
+  if (invokeConfig.src === DECIDE_SRC && invokeConfig.onDone !== undefined) {
+    throw new Error(
+      `setupAgent.fromConfig: state '${stateKey}' declares an 'onDone' on its 'agent.decide' ` +
+        `invoke, which is always a config error. A decision has no output of its own — the ` +
+        `chosen event is delivered automatically and handled by the state's 'on' transitions. ` +
+        `Remove the 'onDone' (use 'on' for the chosen event; 'onError' still handles retries exhausted).`,
+    );
+  }
+
   return {
     ...(invokeConfig.id !== undefined ? { id: invokeConfig.id } : {}),
     src: invokeConfig.src,
@@ -478,8 +555,79 @@ function lowerWorkflowInvoke(invokeConfig: AgentWorkflowInvokeConfig) {
   };
 }
 
-// Recursively lowers one AgentWorkflowStateConfig into an xstate state node config.
-function lowerWorkflowState(stateConfig: AgentWorkflowStateConfig): Record<string, unknown> {
+// Config-level structural lint: a plain-string transition `target` must name a
+// state at the same level (a sibling key). Relative (`.child`) and absolute
+// (`#id`) references are left to xstate to resolve.
+function assertValidTransitionTargets(
+  stateKey: string,
+  location: string,
+  transitionConfig: AgentWorkflowTransitionConfig | AgentWorkflowTransitionConfig[] | undefined,
+  siblingKeys: Set<string>,
+): void {
+  if (!transitionConfig) {
+    return;
+  }
+  const transitions = Array.isArray(transitionConfig) ? transitionConfig : [transitionConfig];
+  for (const transition of transitions) {
+    const targets =
+      transition.target === undefined
+        ? []
+        : Array.isArray(transition.target)
+          ? transition.target
+          : [transition.target];
+    for (const target of targets) {
+      if (typeof target !== "string" || target.startsWith("#") || target.startsWith(".")) {
+        continue;
+      }
+      const head = target.split(".")[0]!;
+      if (!siblingKeys.has(head)) {
+        throw new Error(
+          `setupAgent.fromConfig: state '${stateKey}' has a ${location} transition targeting ` +
+            `'${target}', which is not a state at that level. Valid targets: ${
+              [...siblingKeys].join(", ") || "(none)"
+            }.`,
+        );
+      }
+    }
+  }
+}
+
+// Validates every sibling-resolved transition target declared on one state.
+function assertStateTransitionTargets(
+  stateKey: string,
+  stateConfig: AgentWorkflowStateConfig,
+  siblingKeys: Set<string>,
+): void {
+  for (const [eventType, transition] of Object.entries(stateConfig.on ?? {})) {
+    assertValidTransitionTargets(stateKey, `'on.${eventType}'`, transition, siblingKeys);
+  }
+  for (const [delay, transition] of Object.entries(stateConfig.after ?? {})) {
+    assertValidTransitionTargets(stateKey, `'after.${delay}'`, transition, siblingKeys);
+  }
+  assertValidTransitionTargets(stateKey, "'always'", stateConfig.always, siblingKeys);
+  assertValidTransitionTargets(stateKey, "'onDone'", stateConfig.onDone, siblingKeys);
+  assertValidTransitionTargets(stateKey, "'choice'", stateConfig.choice, siblingKeys);
+  const invokes = stateConfig.invoke
+    ? Array.isArray(stateConfig.invoke)
+      ? stateConfig.invoke
+      : [stateConfig.invoke]
+    : [];
+  for (const invoke of invokes) {
+    assertValidTransitionTargets(stateKey, "invoke 'onDone'", invoke.onDone, siblingKeys);
+    assertValidTransitionTargets(stateKey, "invoke 'onError'", invoke.onError, siblingKeys);
+  }
+}
+
+// Recursively lowers one AgentWorkflowStateConfig into an xstate state node
+// config. `stateKey` names this state (for errors); `siblingKeys` is the set of
+// state keys at this level (for transition-target validation).
+function lowerWorkflowState(
+  stateKey: string,
+  stateConfig: AgentWorkflowStateConfig,
+  siblingKeys: Set<string>,
+): Record<string, unknown> {
+  assertStateTransitionTargets(stateKey, stateConfig, siblingKeys);
+  const childKeys = new Set(Object.keys(stateConfig.states ?? {}));
   return {
     ...(stateConfig.description !== undefined ? { description: stateConfig.description } : {}),
     ...(stateConfig.type !== undefined ? { type: stateConfig.type } : {}),
@@ -489,7 +637,7 @@ function lowerWorkflowState(stateConfig: AgentWorkflowStateConfig): Record<strin
           states: Object.fromEntries(
             Object.entries(stateConfig.states).map(([key, child]) => [
               key,
-              lowerWorkflowState(child),
+              lowerWorkflowState(key, child, childKeys),
             ]),
           ),
         }
@@ -500,8 +648,8 @@ function lowerWorkflowState(stateConfig: AgentWorkflowStateConfig): Record<strin
     ...(stateConfig.invoke !== undefined
       ? {
           invoke: Array.isArray(stateConfig.invoke)
-            ? stateConfig.invoke.map(lowerWorkflowInvoke)
-            : lowerWorkflowInvoke(stateConfig.invoke),
+            ? stateConfig.invoke.map((invoke) => lowerWorkflowInvoke(invoke, stateKey))
+            : lowerWorkflowInvoke(stateConfig.invoke, stateKey),
         }
       : {}),
     ...(stateConfig.on !== undefined
@@ -583,9 +731,15 @@ export function setupAgentFromConfig(
         }
       : {}),
     initial: config.initial,
-    states: Object.fromEntries(
-      Object.entries(config.states).map(([key, state]) => [key, lowerWorkflowState(state)]),
-    ),
+    states: (() => {
+      const rootKeys = new Set(Object.keys(config.states));
+      return Object.fromEntries(
+        Object.entries(config.states).map(([key, state]) => [
+          key,
+          lowerWorkflowState(key, state, rootKeys),
+        ]),
+      );
+    })(),
     ...(config.meta !== undefined ? { meta: config.meta } : {}),
   } as never);
 }

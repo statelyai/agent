@@ -653,7 +653,7 @@ export type AgentMachine<
  * state/transition meta are all standard schemas — no `{} as Type` casts —
  * and are retained on `result.schemas` for runtime validation. Also
  * registers the `agent.generateText`/`agent.streamText`/`agent.userInput`/
- * `agent.decide` builtin actors and lowers `requests`/`actorSources` into the
+ * `agent.decide`/`agent.plan` builtin actors and lowers `requests`/`actorSources` into the
  * machine's actor sources. The result is the xstate `setup(...)` object with
  * a wrapped `result.createMachine(...)` plus `result.schemas`/`models`/
  * `requests`/`appendMessages` attached. Also has a
@@ -943,7 +943,7 @@ function assertNoReservedAgentKeys(
   }
 }
 
-// Merges the four builtin `agent.*` actors with user `actors` and generated request actors, after checking for key collisions.
+// Merges the five builtin `agent.*` actors with user `actors` and generated request actors, after checking for key collisions.
 function createAgentActorSources<
   TActors extends { [K in keyof TActors]: AnyActorLogic },
   TRequestSchemas extends AgentRequestSchemaMap,

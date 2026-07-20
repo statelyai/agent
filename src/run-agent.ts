@@ -1172,6 +1172,75 @@ function createRunAgentPlanLogic(logic: PlanLogic, runCtx: RunAgentBindContext):
 }
 
 /**
+ * The set of string-keyed actor `src`s the machine's own config invokes
+ * (top-level, recursing into child STATES but not into invoked child
+ * machines). {@link provideExecutors} uses it to require an executor only for a
+ * source the machine actually invokes — the always-registered `agent.*`
+ * builtins that go unused must not force their executors to be supplied.
+ * @internal
+ */
+export function getConfiguredInvokeSrcs(machine: AnyStateMachine): Set<string> {
+  const invokes: Array<{ stateName: string; src: string | AnyActorLogic }> = [];
+  collectConfiguredInvokeSrcs(machine.config as never, machine.config.id ?? "(root)", invokes);
+  const srcs = new Set<string>();
+  for (const { src } of invokes) {
+    if (typeof src === "string") {
+      srcs.add(src);
+    }
+  }
+  return srcs;
+}
+
+/**
+ * A minimal {@link RunAgentBindContext} for `provideExecutors` (uncontrolled
+ * `createActor`): the same decision/plan wrappers runAgent installs, MINUS the
+ * run-scoped model-call counter and the onTrace/onResult/onChunk observation.
+ * `consumeModelCall` is a no-op (no budget), and `actorHolder.actorRef` is left
+ * undefined — the wrappers read the invoking actor off `self._parent`, which is
+ * always present under a live `createActor` tree. `schemas` come from the
+ * machine's registered `setupAgent` execution options (for event `inputSchema`s).
+ * @internal
+ */
+function provideBindContext(
+  machine: AnyStateMachine,
+  decide: AgentDecisionExecutor,
+): RunAgentBindContext {
+  return {
+    decide,
+    consumeModelCall: () => {},
+    actorHolder: { actorRef: undefined },
+    schemas: getRegisteredAgentExecutionOptions(machine).schemas,
+  };
+}
+
+/**
+ * Host-binds one `DecisionLogic`/`agent.decide` source for
+ * {@link provideExecutors}: runAgent's decision wrapper (snapshot-driven
+ * candidate events, `canTake`, auto-delivery of the chosen event) without
+ * run-scoped counting/tracing. @internal
+ */
+export function bindDecisionForProvide(
+  machine: AnyStateMachine,
+  logic: DecisionLogic,
+  decide: AgentDecisionExecutor,
+): DecisionLogic {
+  return createRunAgentDecisionLogic(logic, provideBindContext(machine, decide));
+}
+
+/**
+ * Host-binds one `agent.plan` source for {@link provideExecutors}: runAgent's
+ * plan wrapper (iterated snapshot-driven decisions, auto-delivery) without
+ * run-scoped counting/tracing. @internal
+ */
+export function bindPlanForProvide(
+  machine: AnyStateMachine,
+  logic: PlanLogic,
+  decide: AgentDecisionExecutor,
+): PlanLogic {
+  return createRunAgentPlanLogic(logic, provideBindContext(machine, decide));
+}
+
+/**
  * Recursively rebinds an invoked child machine's own agent sources with the
  * SAME host-backed wrappers runAgent applies to the top-level machine, so a
  * child's text/stream/decision/plan requests inherit runAgent's executors and

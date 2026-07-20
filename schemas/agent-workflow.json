@@ -6,6 +6,10 @@
   "type": "object",
   "required": ["initial", "states"],
   "properties": {
+    "$schema": {
+      "description": "JSON Schema reference an editor attaches to the config file. Ignored by the lowering.",
+      "type": "string"
+    },
     "key": {
       "description": "Stable workflow key used by tools, storage, and visual editors.",
       "type": "string",
@@ -22,11 +26,6 @@
     },
     "description": {
       "type": "string"
-    },
-    "queryLanguage": {
-      "description": "Expression language used inside {{ }} expressions. The built-in setupAgent.fromConfig lowering currently supports simple dot-path expressions over input, context, and event.",
-      "type": "string",
-      "default": "path"
     },
     "schemas": {
       "$ref": "#/$defs/AgentSchemas"

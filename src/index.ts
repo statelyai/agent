@@ -38,6 +38,8 @@ export {
   runAgentToCompletion,
   SnapshotVersionMismatchError,
 } from "./run-agent.js";
+export { provideExecutors } from "./provide-executors.js";
+export type { ProvideExecutorsOptions } from "./provide-executors.js";
 export {
   AgentLintError,
   assertAgentMachine,

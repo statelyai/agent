@@ -145,20 +145,37 @@ export type BuiltinAgentActors<TEvent extends string = string, TModel extends st
   >;
 };
 
-// Minimal input schema for the `agent.generateText`/`agent.streamText` builtins: any object with a string `model`.
+// Input schema for the `agent.generateText`/`agent.streamText` builtins: an
+// object with a string `model` AND at least one input source — a non-empty
+// `prompt` or a non-empty `messages` array — so the model is never called with
+// nothing to respond to.
 const agentTextInputSchema: StandardSchemaV1<AgentTextRequest> = {
   "~standard": {
     version: 1,
     vendor: "statelyai-agent",
     validate(value: unknown) {
-      const ok =
-        !!value &&
-        typeof value === "object" &&
-        typeof (value as AgentTextRequest).model === "string";
-
-      return ok
-        ? { value: value as AgentTextRequest }
-        : { issues: [{ message: "Expected agent text input with a model" }] };
+      if (!value || typeof value !== "object") {
+        return { issues: [{ message: "Expected agent text input object" }] };
+      }
+      const request = value as AgentTextRequest;
+      if (typeof request.model !== "string") {
+        return { issues: [{ message: "Expected agent text input with a string `model`" }] };
+      }
+      const hasPrompt = typeof request.prompt === "string" && request.prompt.length > 0;
+      const hasMessages = Array.isArray(request.messages) && request.messages.length > 0;
+      if (!hasPrompt && !hasMessages) {
+        const label = request.name ? ` '${request.name}'` : "";
+        return {
+          issues: [
+            {
+              message:
+                `Agent text request${label} has neither a non-empty \`prompt\` nor \`messages\` — ` +
+                "provide at least one so the model has something to respond to.",
+            },
+          ],
+        };
+      }
+      return { value: request };
     },
   },
 };

@@ -4,16 +4,14 @@ import { tool } from "ai";
 import type { AgentDecisionRequest } from "../decision.js";
 import type { AgentTextRequest } from "../text-logic.js";
 import type { AgentTools } from "../types.js";
+import { createOpenAiCompatExecutors, extractJsonSchema, type FetchLike } from "./index.js";
 import {
-  createOpenAiCompatExecutors,
-  extractJsonSchema,
   toDecisionMessages,
   toOpenAiCallSettings,
   toOpenAiEventTools,
   toOpenAiMessages,
   toOpenAiTools,
-  type FetchLike,
-} from "./index.js";
+} from "./mappers.js";
 
 // ─── Fake fetch: captures each request body, returns a real Response ───
 

@@ -54,6 +54,7 @@ export interface AgentLintDiagnostic {
     | "direct-object-src"
     | "final-without-output"
     | "final-output-reads-event"
+    | "undeclared-event"
     | "missing-final";
   severity: AgentLintSeverity;
   /** State path (`parent.child`) or config pointer (e.g. `(root)`, `context`) the finding is about. */
@@ -317,7 +318,7 @@ interface LintContext {
   config: AnyConfig;
   index: Map<string, StateNode>;
   reachable: Set<string>;
-  schemas: { context?: unknown; output?: unknown } | undefined;
+  schemas: { context?: unknown; output?: unknown; events?: Record<string, unknown> } | undefined;
   actorSources: Record<string, AnyActorLogic>;
 }
 
@@ -569,6 +570,49 @@ function checkFinalOutputReadsEvent(ctx: LintContext): AgentLintDiagnostic[] {
   return out;
 }
 
+// True for `on:` keys that are legitimately not among declared event schemas:
+// the catch-all wildcard, partial wildcard patterns, and xstate builtin events.
+function isBuiltinOrWildcardEvent(eventType: string): boolean {
+  return (
+    eventType === "*" ||
+    eventType.includes("*") ||
+    eventType.startsWith("xstate.") ||
+    eventType.startsWith("done.") ||
+    eventType.startsWith("error.")
+  );
+}
+
+// Flags `on:` handlers for events that are neither declared in `schemas.events`
+// nor a builtin/wildcard pattern — a likely typo. WARNING, not error: a config
+// may legitimately handle events it did not declare a payload schema for (the
+// lowering accepts any `on` key), so this only fires when the machine declares
+// typed events, and never blocks a run.
+function checkUndeclaredEvents(ctx: LintContext): AgentLintDiagnostic[] {
+  const declared = ctx.schemas?.events;
+  if (!declared || Object.keys(declared).length === 0) {
+    return [];
+  }
+  const declaredTypes = new Set(Object.keys(declared));
+  const out: AgentLintDiagnostic[] = [];
+  for (const node of ctx.index.values()) {
+    for (const eventType of Object.keys(node.config.on ?? {})) {
+      if (declaredTypes.has(eventType) || isBuiltinOrWildcardEvent(eventType)) {
+        continue;
+      }
+      out.push({
+        code: "undeclared-event",
+        severity: "warning",
+        path: node.path,
+        message:
+          `State '${node.path}' handles event '${eventType}' in 'on:', but it is not declared ` +
+          `in schemas.events and is not a builtin/wildcard pattern. If intentional its payload ` +
+          `stays unvalidated; otherwise this is likely a typo.`,
+      });
+    }
+  }
+  return out;
+}
+
 function checkMissingFinal(ctx: LintContext): AgentLintDiagnostic[] {
   for (const node of ctx.index.values()) {
     if (node.isFinal && ctx.reachable.has(node.path)) {
@@ -594,6 +638,7 @@ const LINT_CHECKS: Array<(ctx: LintContext) => AgentLintDiagnostic[]> = [
   checkDirectObjectSrc,
   checkFinalWithoutOutput,
   checkFinalOutputReadsEvent,
+  checkUndeclaredEvents,
   checkMissingFinal,
 ];
 

@@ -219,6 +219,28 @@ describe("lintAgentMachine — each check fires on a crafted bad machine", () =>
     );
   });
 
+  test("undeclared-event: an `on:` key not in schemas.events and not builtin (warning)", () => {
+    const agent = setupAgent({
+      context: z.object({}),
+      events: { GO: z.object({}) },
+    });
+    const machine = agent.createMachine({
+      context: () => ({}),
+      initial: "a",
+      states: {
+        a: { on: { GO: { target: "b" }, TYPOED: { target: "b" }, "*": { target: "b" } } },
+        b: { type: "final" },
+      },
+    });
+
+    const diagnostics = lintAgentMachine(machine);
+    expect(diagnostics).toContainEqual(
+      expect.objectContaining({ code: "undeclared-event", severity: "warning", path: "a" }),
+    );
+    // Declared `GO` and wildcard `*` do not warn — only the undeclared `TYPOED`.
+    expect(diagnostics.filter((d) => d.code === "undeclared-event")).toHaveLength(1);
+  });
+
   test("unserializable-context: a context schema with no JSON schema (warning)", () => {
     const rawContext: StandardSchemaV1<Record<string, unknown>> = {
       "~standard": {

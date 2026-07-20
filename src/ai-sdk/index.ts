@@ -4,103 +4,31 @@ import {
   Output,
   streamText as aiStreamText,
   stepCountIs,
-  tool,
   type FinishReason,
   type FlexibleSchema,
   type LanguageModel,
   type LanguageModelUsage,
-  type ModelMessage,
-  type Tool,
   type ToolSet,
   type TypedToolCall,
   type TypedToolResult,
 } from "ai";
 import {
   buildEnvelopeSchema,
-  getAgentOutputMode,
   type AgentRequestExecutor,
   type AgentRequestExecutorInfo,
   type AgentRequestExecutors,
   type AgentTextRequest,
   type StructuredOutputEnvelope,
 } from "../text-logic.js";
-import { isStandardSchema } from "../utils.js";
-import { renderDecisionAttempts } from "../decision.js";
-import type { AgentDecisionExecutor, AgentDecisionRequest } from "../decision.js";
-import type { AgentEventDescriptor } from "../events.js";
-import type { AgentTools, ChosenEvent, StandardSchemaV1 } from "../types.js";
-import { getRegisteredAgentModels } from "../internal/registry.js";
-import { setupAgent, type AgentMachine, type AgentMachineConfig } from "../setup-agent.js";
+import type { AgentDecisionExecutor } from "../decision.js";
+import type { AgentTools, ChosenEvent } from "../types.js";
 import {
-  runAgent as runCoreAgent,
-  type RunAgentOptions,
-  type RunAgentResult,
-} from "../run-agent.js";
-
-/**
- * Maps an {@link AgentTools} map onto AI SDK `tool()` definitions. A tool that
- * already carries its own Standard Schema `inputSchema` — an AI SDK
- * `tool({...})`, or any equivalent descriptor — is passed through **unchanged**,
- * so the SDK applies its own validation, calls `execute(input, options)`, and
- * every extra property (`providerOptions`, `toModelOutput`, …) survives. A bare
- * `AgentToolExecute` function becomes a tool with an unconstrained input schema;
- * a minimal descriptor with no readable schema is converted with a permissive
- * fallback. Used internally by {@link toAiSdkCallSettings}; exported for callers
- * building AI SDK calls by hand outside `createAiSdkExecutors`.
- */
-export function toAiSdkTools(tools: AgentTools) {
-  const entries: Array<[string, Tool<unknown, unknown> | Tool<unknown, never>]> = [];
-
-  for (const [name, descriptor] of Object.entries(tools)) {
-    if (!descriptor) {
-      continue;
-    }
-
-    if (typeof descriptor === "function") {
-      entries.push([
-        name,
-        tool({
-          inputSchema: unknownSchema,
-          execute: (input) => descriptor(input),
-        }),
-      ]);
-      continue;
-    }
-
-    // Native path: the tool already exposes a Standard Schema `inputSchema`
-    // (the marker `tool({...})` leaves in place), so hand it to the SDK as-is —
-    // the SDK owns its typing/validation/execute(input, options), and extras
-    // ride along untouched. Only descriptors with no readable schema fall
-    // through to the conversion path below.
-    if (isStandardSchema(descriptor.inputSchema)) {
-      entries.push([name, descriptor as unknown as Tool<unknown, unknown>]);
-      continue;
-    }
-
-    const inputSchema =
-      descriptor.inputSchema ??
-      (descriptor.schemas as { input?: StandardSchemaV1 } | undefined)?.input;
-    const toolOptions = {
-      description: descriptor.description,
-      inputSchema: inputSchema ? (inputSchema as FlexibleSchema<unknown>) : unknownSchema,
-    };
-
-    if (descriptor.execute) {
-      entries.push([
-        name,
-        tool({
-          ...toolOptions,
-          execute: (input) => descriptor.execute?.(input),
-        }),
-      ]);
-      continue;
-    }
-
-    entries.push([name, tool(toolOptions)]);
-  }
-
-  return Object.fromEntries(entries);
-}
+  extractFirstJsonValue,
+  isStructuredOutputRequest,
+  toAiSdkCallSettings,
+  toAiSdkEventTools,
+  toDecisionMessages,
+} from "./mappers.js";
 
 // Multi-step tool loops: `metadata` is the host-owned per-call channel (see
 // AgentTextRequest.metadata). `metadata.maxSteps` bounds the AI SDK tool-call
@@ -111,18 +39,6 @@ function maxStepsSetting(request: AgentTextRequest): { stopWhen?: ReturnType<typ
     ? { stopWhen: stepCountIs(request.metadata.maxSteps) }
     : {};
 }
-
-// Permissive fallback StandardSchemaV1/FlexibleSchema used for tools/events with no declared input schema.
-const unknownSchema = {
-  "~standard": {
-    version: 1,
-    vendor: "statelyai-agent",
-    validate: (value: unknown) => ({ value }),
-    jsonSchema: {
-      input: () => ({}),
-    },
-  },
-} as unknown as StandardSchemaV1 & FlexibleSchema<unknown>;
 
 // ─── createAiSdkExecutors ───
 
@@ -188,86 +104,6 @@ function resolveAiSdkModel<TModels extends AiSdkModelMap>(
     throw new Error(`createAiSdkExecutors: unknown model '${modelRef}'.`);
   }
   return model;
-}
-
-/**
- * AI SDK request-mapping settings shared by `generateText`/`streamText`.
- * `AgentTextRequest.messages` (`AgentMessage[]`) and AI SDK's `ModelMessage[]`
- * are structurally compatible by design (§1 of .scratch/p0-design.md) — the cast
- * below is a typed identity mapping, not a semantic conversion.
- */
-export function toAiSdkCallSettings(request: AgentTextRequest & { tools?: AgentTools }) {
-  const messages = request.messages as ModelMessage[] | undefined;
-  return {
-    system: request.system,
-    ...(messages ? { messages } : { prompt: request.prompt ?? "" }),
-    temperature: request.temperature,
-    maxOutputTokens: request.maxOutputTokens,
-    topP: request.topP,
-    topK: request.topK,
-    seed: request.seed,
-    stopSequences: request.stopSequences,
-    tools: request.tools ? toAiSdkTools(request.tools) : undefined,
-    toolChoice: toAiSdkToolChoice(request.toolChoice),
-  };
-}
-
-/** Maps an {@link AgentToolChoice} to AI SDK's tool-choice shape — `{ type: 'tool'; name }` becomes `{ type: 'tool'; toolName }`; `'auto'`/`'none'`/`'required'`/`undefined` pass through unchanged. */
-export function toAiSdkToolChoice(toolChoice: AgentTextRequest["toolChoice"]) {
-  return typeof toolChoice === "object"
-    ? { type: "tool" as const, toolName: toolChoice.name }
-    : toolChoice;
-}
-
-/** `true` when the request should use AI SDK structured `Output.object`. */
-export function isStructuredOutputRequest(
-  request: Pick<AgentTextRequest, "outputSchema">,
-): boolean {
-  return getAgentOutputMode(request.outputSchema) === "structured";
-}
-
-/**
- * Extracts the first complete top-level JSON value from `text`, or returns
- * `undefined` when there is nothing to repair (no complete value, or the value
- * already spans the whole text). Models occasionally emit two structured-output
- * envelopes back to back (`{"result":{…}}{"result":{…}}`), which fails JSON
- * parsing wholesale; the balanced scan below recovers the first value and
- * drops the rest.
- */
-export function extractFirstJsonValue(text: string): string | undefined {
-  const start = text.search(/[{[]/);
-  if (start === -1) {
-    return undefined;
-  }
-
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  for (let i = start; i < text.length; i++) {
-    const char = text[i];
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-      } else if (char === "\\") {
-        escaped = true;
-      } else if (char === '"') {
-        inString = false;
-      }
-      continue;
-    }
-    if (char === '"') {
-      inString = true;
-    } else if (char === "{" || char === "[") {
-      depth++;
-    } else if (char === "}" || char === "]") {
-      depth--;
-      if (depth === 0) {
-        const value = text.slice(start, i + 1);
-        return value === text.trim() ? undefined : value;
-      }
-    }
-  }
-  return undefined;
 }
 
 // Wraps an AI SDK Output spec so a parse failure retries once against the
@@ -486,168 +322,4 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
   };
 
   return { generateText, streamText, decide };
-}
-
-/** AI SDK host for a machine authored with `setupAgent({ models })`. */
-export function runAgent<TMachine extends import("xstate").AnyStateMachine>(
-  machine: TMachine,
-  options: Omit<RunAgentOptions<TMachine>, "executors">,
-): Promise<RunAgentResult<TMachine>> {
-  const models = getRegisteredAgentModels(machine) as AiSdkModelMap | undefined;
-  if (!models || Object.keys(models).length === 0) {
-    throw new Error(
-      "AI SDK runAgent: machine has no models. Pass `models` to setupAgent, or use core runAgent with explicit executors.",
-    );
-  }
-  return runCoreAgent(machine, {
-    ...options,
-    executors: createAiSdkExecutors({ models }),
-  });
-}
-
-type CreateAgentMachineConfig<
-  TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
-  TInputSchema extends StandardSchemaV1,
-  TEventSchemas extends import("../types.js").AgentEventSchemaInputMap,
-  TOutputSchema extends StandardSchemaV1,
-  TModels extends AiSdkModelMap,
-> = Omit<
-  AgentMachineConfig<TContextSchema, TInputSchema, TEventSchemas, TOutputSchema, TModels>,
-  "schemas"
->;
-
-type CreateAgentBaseConfig<
-  TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
-  TInputSchema extends StandardSchemaV1,
-  TEventSchemas extends import("../types.js").AgentEventSchemaInputMap,
-  TOutputSchema extends StandardSchemaV1,
-  TModels extends AiSdkModelMap,
-> = CreateAgentMachineConfig<
-  TContextSchema,
-  TInputSchema,
-  TEventSchemas,
-  TOutputSchema,
-  TModels
-> & {
-  schemas: {
-    context: TContextSchema;
-    input: TInputSchema;
-    events?: TEventSchemas;
-    output?: TOutputSchema;
-  };
-};
-
-export interface CreatedAgent<TMachine extends import("xstate").AnyStateMachine> {
-  machine: TMachine;
-  run(
-    input: import("xstate").InputFrom<TMachine>,
-    options?: Omit<RunAgentOptions<TMachine>, "input" | "executors">,
-  ): Promise<RunAgentResult<TMachine>>;
-}
-
-/**
- * One-call AI SDK entry point for the common case: creates a typed machine and
- * a `run(input)` method with model executors already wired.
- */
-export function createAgent<
-  TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
-  TInputSchema extends StandardSchemaV1,
-  TEventSchemas extends import("../types.js").AgentEventSchemaInputMap = {},
-  TOutputSchema extends StandardSchemaV1 = StandardSchemaV1,
->(
-  config: CreateAgentBaseConfig<
-    TContextSchema,
-    TInputSchema,
-    TEventSchemas,
-    TOutputSchema,
-    AiSdkModelMap<"default">
-  > & { model: LanguageModel; models?: never },
-): CreatedAgent<
-  AgentMachine<TContextSchema, TInputSchema, TEventSchemas, TOutputSchema, AiSdkModelMap<"default">>
->;
-export function createAgent<
-  TModels extends AiSdkModelMap,
-  TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
-  TInputSchema extends StandardSchemaV1,
-  TEventSchemas extends import("../types.js").AgentEventSchemaInputMap = {},
-  TOutputSchema extends StandardSchemaV1 = StandardSchemaV1,
->(
-  config: CreateAgentBaseConfig<
-    TContextSchema,
-    TInputSchema,
-    TEventSchemas,
-    TOutputSchema,
-    TModels
-  > & {
-    models: TModels;
-    model?: never;
-  },
-): CreatedAgent<AgentMachine<TContextSchema, TInputSchema, TEventSchemas, TOutputSchema, TModels>>;
-export function createAgent(
-  config: Record<string, unknown> & {
-    schemas: {
-      context: StandardSchemaV1<Record<string, unknown>>;
-      input: StandardSchemaV1;
-      events?: import("../types.js").AgentEventSchemaInputMap;
-      output?: StandardSchemaV1;
-    };
-    model?: LanguageModel;
-    models?: AiSdkModelMap;
-  },
-): CreatedAgent<import("xstate").AnyStateMachine> {
-  const { model, models: configuredModels, schemas, ...machineConfig } = config;
-  const models = configuredModels ?? { default: model! };
-  const executors = createAiSdkExecutors({ models });
-
-  const agentSetup = setupAgent({ ...schemas, models } as never);
-  const machine = agentSetup.createMachine(
-    machineConfig as never,
-  ) as import("xstate").AnyStateMachine;
-
-  return {
-    machine,
-    run(runInput, options = {}) {
-      return runCoreAgent(machine, { ...options, input: runInput, executors });
-    },
-  };
-}
-
-/** One AI SDK `tool()` per candidate event — the "tool-per-event +
- * toolChoice: 'required'" recipe from .scratch/p0-design.md §2.6. */
-export function toAiSdkEventTools(events: AgentEventDescriptor[]) {
-  return Object.fromEntries(
-    events.map((event) => [
-      event.toolName,
-      tool({
-        description: `Choose the '${event.type}' move.`,
-        inputSchema: event.inputSchema
-          ? (event.inputSchema as FlexibleSchema<unknown>)
-          : unknownSchema,
-      }),
-    ]),
-  );
-}
-
-/**
- * Messages for a decision request, with prior failed `attempts` (§2.6)
- * rendered as appended user messages (via core's {@link renderDecisionAttempts})
- * so retries converge. Core never rewrites prompts — this is adapter business.
- */
-export function toDecisionMessages(
-  request: Pick<AgentDecisionRequest, "messages" | "prompt" | "events" | "attempts">,
-): ModelMessage[] | undefined {
-  if (!request.messages && request.attempts.length === 0) {
-    return undefined;
-  }
-
-  // A prompt-authored decision that is retrying must not lose its original
-  // prompt when the request is lowered to messages for attempt feedback.
-  const messages: ModelMessage[] = [
-    ...((request.messages as ModelMessage[] | undefined) ??
-      (request.prompt !== undefined ? [{ role: "user" as const, content: request.prompt }] : [])),
-  ];
-  for (const attempt of renderDecisionAttempts(request)) {
-    messages.push({ role: "user", content: attempt.content as string });
-  }
-  return messages;
 }

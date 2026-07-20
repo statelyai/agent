@@ -2124,10 +2124,9 @@ describe("setupAgent", () => {
     expect(second.status === "done" && second.output).toEqual({ draft: "Hello world." });
   });
 
-  test("fromConfig: an explicit onDone on an agent.decide invoke is allowed (delivery is automatic)", () => {
-    // Delivery is now automatic, but an onDone MAY be declared to observe a
-    // chosen event whose transition stays in-state — fromConfig no longer
-    // rejects it (it lowers like any other invoke's onDone).
+  test("fromConfig: an onDone on an agent.decide invoke is rejected, naming the state", () => {
+    // A decision's output IS its chosen event (delivered via `on`), so an
+    // onDone there can never fire — fromConfig rejects it as a config error.
     expect(() =>
       setupAgent.fromConfig(
         {
@@ -2149,13 +2148,14 @@ describe("setupAgent", () => {
                 input: { model: "test-model", allowedEvents: ["ASK"] },
                 onDone: { target: "asked" },
               },
+              on: { ASK: { target: "asked" } },
             },
             asked: {},
           },
         },
         { compileSchema: ajvCompiler() },
       ),
-    ).not.toThrow();
+    ).toThrow(/state 'choosing'.*onDone.*agent\.decide/s);
   });
 
   test("agent.userInput is a blessed host-provided actor for static workflows", async () => {
@@ -2280,6 +2280,103 @@ describe("setupAgent", () => {
 
     expect(actor.getSnapshot().output).toEqual({ draft: "Hello Ada." });
   });
+
+  test("fromConfig lowers transition-level `actions` (emit fires; entry emit still works)", async () => {
+    const machine = setupAgent.fromConfig(
+      {
+        id: "json-transition-actions",
+        schemas: {
+          input: { type: "object", properties: {} },
+          context: { type: "object", properties: { decision: { type: "string" } } },
+          events: { GO: { type: "object", properties: {} } },
+          emitted: {
+            ENTERED: { type: "object", properties: {} },
+            TRIAGED: {
+              type: "object",
+              properties: { route: { type: "string" } },
+              required: ["route"],
+            },
+          },
+          output: {
+            type: "object",
+            properties: { decision: { type: "string" } },
+            required: ["decision"],
+          },
+        },
+        context: {},
+        initial: "waiting",
+        states: {
+          waiting: {
+            on: {
+              GO: {
+                target: "done",
+                assign: { decision: "went" },
+                actions: { emit: { type: "TRIAGED", route: "reply" } },
+              },
+            },
+          },
+          done: {
+            entry: { emit: { type: "ENTERED" } },
+            type: "final",
+            output: { decision: "{{ context.decision }}" },
+          },
+        },
+      },
+      { compileSchema: ajvCompiler() },
+    );
+
+    const emitted: unknown[] = [];
+    const first = await runAgent(machine, {
+      input: {},
+      on: { "*": (event) => emitted.push(event) },
+    });
+    expect(first.status).toBe("idle");
+
+    const resumed = await runAgent(machine, {
+      snapshot: JSON.parse(JSON.stringify(first.status === "idle" ? first.snapshot : null)),
+      event: { type: "GO" },
+      on: { "*": (event) => emitted.push(event) },
+    });
+
+    expect(resumed.status).toBe("done");
+    expect(resumed.status === "done" && resumed.output).toEqual({ decision: "went" });
+    // Transition-level emit fires (was previously dropped), then entry emit.
+    expect(emitted).toEqual([{ type: "TRIAGED", route: "reply" }, { type: "ENTERED" }]);
+  });
+
+  test("fromConfig accepts a config carrying a root `$schema` key", () => {
+    expect(() =>
+      setupAgent.fromConfig(
+        {
+          $schema: "https://stately.ai/schemas/agent-workflow.json",
+          id: "json-with-schema-key",
+          schemas: { context: { type: "object", properties: {} } },
+          context: {},
+          initial: "done",
+          states: { done: { type: "final" } },
+        },
+        { compileSchema: ajvCompiler() },
+      ),
+    ).not.toThrow();
+  });
+
+  test("fromConfig rejects a transition target that names no state at that level", () => {
+    expect(() =>
+      setupAgent.fromConfig(
+        {
+          id: "json-bad-target",
+          schemas: { context: { type: "object", properties: {} } },
+          context: {},
+          initial: "start",
+          states: {
+            start: { on: { GO: { target: "nonexistent" } } },
+            done: { type: "final" },
+          },
+        },
+        { compileSchema: ajvCompiler() },
+      ),
+    ).toThrow(/state 'start'.*'nonexistent'.*not a state at that level/s);
+  });
 });
 
 describe("resolveDecision", () => {
@@ -2309,6 +2406,18 @@ describe("resolveDecision", () => {
     }));
 
     expect(event).toEqual({ type: "ATTACK", target: "goblin" });
+  });
+
+  test("throws a descriptive error when the executor returns the wrong shape", async () => {
+    const request = makeRequest();
+    await expect(
+      // Common mistake: bare event instead of the `{ event }` envelope.
+      resolveDecision(request, async () => ({ type: "DEFEND" }) as never),
+    ).rejects.toThrow(/decide executor must return \{ event: \{ type: string/);
+
+    await expect(
+      resolveDecision(request, async () => ({ event: { noType: true } }) as never),
+    ).rejects.toThrow(/decide executor must return/);
   });
 
   test("retries after an unknown-event failure and reports prior attempts", async () => {
