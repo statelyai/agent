@@ -1,5 +1,54 @@
 # @statelyai/agent
 
+## 2.0.0-alpha.11
+
+### Minor Changes
+
+- [`3228715`](https://github.com/statelyai/agent/commit/32287157c0efe327d75f6f4e4d73f161c106527d) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Public API reorganization: a leaner root barrel, with adapter-author and durable-host plumbing moved behind two new subpaths. Breaking (alpha).
+
+  **New subpaths**
+
+  - `@statelyai/agent/steps` — the durable, per-model-call step path and decision control-flow: `initialAgentStep`, `transitionAgentStep`, `resolveAgentStep`, `getAgentRequests`, `executeAgentRequest`, `resolveAgentRequests`, `resolveDecision`, `renderDecisionAttempts`, `PLAN_DONE_EVENT_TYPE` (plus `AgentStep`/`AgentRequest`/`AgentPlanRequest`/`AgentStepRequest`, `ResolveAgentRequestsOptions`, `ResolveDecisionOptions`, `DecisionLogicConfig`).
+  - `@statelyai/agent/adapter` — the adapter-author seam: `bindRequestExecutor`, `buildEnvelopeSchema`, `parseStructuredEnvelope`, `getAgentOutputMode`, `isStructuredOutputSchema`, `parseOutput`, `parseModelRef`, `getJsonSchema`, `getJsonSchemaSync`, `isStandardSchema`, `validateSchemaSync`, `getMachineStructuralHash`, `matchesEventPattern` (plus `StructuredOutputEnvelope`, `AgentOutputMode`).
+
+  All of the above moved OFF the root barrel — update imports to the new subpaths.
+
+  **Removed outright**
+
+  - `EVENT_TOOL_PREFIX` (now internal; it just prefixes generated event tool names as `send_event_`).
+  - `extractJsonSchema` from `@statelyai/agent/openai-compat` — use `getJsonSchema` from `@statelyai/agent/adapter` (identical function).
+
+  **Other changes**
+
+  - New root type export `PlanLogic` — fixes TS4023 "cannot be named" when re-exporting a machine that uses `agent.plan`.
+  - `AgentRequestExecutors` slots are now all optional (`generateText?`, `streamText?`, `decide?`); a missing slot is still a clear bind-time error when the machine needs it. Adapter result sets (`AiSdkExecutors`, `OpenAiCompatExecutors`) still require all three.
+  - `SimulationScript.userInput` renamed to `invokes` (the by-src scripted-invoke channel for `simulateAgent`; unrelated to the `agent.userInput` actor).
+
+- [`f5a9b86`](https://github.com/statelyai/agent/commit/f5a9b8641ae25433aa3b368f7266804d740994b7) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Versioned trace schema, shared identically across the controlled and uncontrolled paths:
+
+  - **`schemaVersion`.** Every `onTrace` event now carries `schemaVersion` (currently `1`), exported as the const `AGENT_TRACE_SCHEMA_VERSION`. Consumers can gate on it.
+  - **`onTrace` for `provideExecutors`.** `ProvideExecutorsOptions` gains `onTrace`, emitting request-level events (`request.start`, `request.end` incl. lifted `reasoning`, `request.error`, `stream.chunk`) with shapes identical to `runAgent`. Because one bound machine can back many concurrent root actors, envelope state (`runId`, monotonic `seq`) is minted per root actor at runtime — two concurrent actors get distinct `runId`s and independent `seq`.
+  - **`traceTransitions(onTrace)`.** New exported xstate `inspect` handler that emits `machine.transition` trace events sharing the same versioned envelope and per-root-actor `seq` registry, so pairing it with `provideExecutors`' `onTrace` yields one ordered stream. The uncontrolled path has no `run.start`/`run.end` (no run boundary) by design.
+
+### Patch Changes
+
+- [`f5a9b86`](https://github.com/statelyai/agent/commit/f5a9b8641ae25433aa3b368f7266804d740994b7) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Examples now import the package by name (`@statelyai/agent`, `@statelyai/agent/ai-sdk`, `@statelyai/agent/zod`) instead of relative `../../src/...` paths, so each example is copy-paste-able outside the repo. Repo-level tsconfig/vitest aliases keep those names resolving to `src/` for the local dev loop.
+
+- [`f5a9b86`](https://github.com/statelyai/agent/commit/f5a9b8641ae25433aa3b368f7266804d740994b7) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `runAgent`'s `inspect` option now accepts an observer object (`{ next }`) as
+  well as a function, matching `createActor`. `@statelyai/inspect`'s
+  `inspector.inspect` now plugs in directly: `runAgent(machine, { inspect: inspector.inspect })`.
+
+- [`f7d7446`](https://github.com/statelyai/agent/commit/f7d7446b55465da8d97b642a415c3ee569d76290) Thanks [@davidkpiano](https://github.com/davidkpiano)! - DX pass: one `runAgent`, first-class uncontrolled mode, trimmed surface.
+
+  - **Breaking:** `@statelyai/agent/ai-sdk` no longer exports `runAgent` or `createAgent`. It is adapters-only (`defineModels`, `createAiSdkExecutors`). Use core `runAgent(machine, { input, executors: createAiSdkExecutors({ models }) })`; mix adapters by spreading executor sets.
+  - **Breaking:** adapter-internal mappers (`toAiSdkTools`, `toAiSdkCallSettings`, `toAiSdkToolChoice`, `toAiSdkEventTools`, `toDecisionMessages`, `isStructuredOutputRequest`, `extractFirstJsonValue`, `toOpenAiMessages`, `toOpenAiCallSettings`, `toOpenAiTools`, `toOpenAiEventTools`) are no longer exported. `extractJsonSchema` stays.
+  - **New:** `provideExecutors(machine, executors, options?)` binds every agent actor source in one call, returning a machine ready for a plain `createActor(...)` — the uncontrolled-mode counterpart to `runAgent`.
+  - Text requests now fail fast when both `prompt` and `messages` are missing.
+  - **Fix:** `setupAgent.fromConfig` no longer silently drops transition-level `actions` (emits and assigns on transitions now fire).
+  - `setupAgent.fromConfig` now rejects invalid transition targets and `onDone` on `agent.decide` invokes at build time; `lintAgentMachine` warns on undeclared `on:` events (`undeclared-event`).
+  - A decide executor returning a malformed result now throws a descriptive error instead of routing silently into `onError`.
+  - `agent-workflow.json` schema: accepts a root `$schema` key; removed the unimplemented `queryLanguage` property.
+
 ## 2.0.0-alpha.10
 
 ### Minor Changes
