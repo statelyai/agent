@@ -34,13 +34,13 @@ import { type LanguageModel } from "ai";
 import { openai } from "@ai-sdk/openai";
 import Ajv from "ajv";
 import {
-  parseModelRef,
   runAgent,
   setupAgent,
   type AgentWorkflowConfig,
   type SchemaCompiler,
   type StandardSchemaV1,
 } from "@statelyai/agent";
+import { parseModelRef } from "@statelyai/agent/adapter";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 // The Ajv-to-StandardSchema recipe: compile the JSON Schema with Ajv, then

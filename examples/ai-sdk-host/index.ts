@@ -23,15 +23,13 @@
 import { type LanguageModel } from "ai";
 import { openai } from "@ai-sdk/openai";
 import {
-  bindRequestExecutor,
-  parseModelRef,
   runAgent,
   type AgentRequestExecutor,
-  type AgentRequestExecutors,
   type StandardSchemaV1,
   type TextLogic,
 } from "@statelyai/agent";
-import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
+import { bindRequestExecutor, parseModelRef } from "@statelyai/agent/adapter";
+import { createAiSdkExecutors, type AiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import { jokeMachine, models as jokeModels, tellJoke } from "../joke/index.js";
 import { models as triageModels, triageMachine } from "../triage/index.js";
 
@@ -54,7 +52,7 @@ function defaultResolveModel(modelRef: string): LanguageModel {
  * seam between the host and `createAiSdkExecutors` — everything else is
  * expressed as thin wrappers over the returned executors.
  */
-function executorsFor(options: AiSdkTextHostOptions = {}): AgentRequestExecutors {
+function executorsFor(options: AiSdkTextHostOptions = {}): AiSdkExecutors {
   return options.models
     ? createAiSdkExecutors({ models: options.models })
     : createAiSdkExecutors({

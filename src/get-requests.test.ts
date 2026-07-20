@@ -3,7 +3,6 @@ import { z } from "zod";
 import { createMachine } from "xstate";
 import {
   getAgentMessages,
-  getMachineStructuralHash,
   persistSnapshot,
   runAgent,
   userMessage,
@@ -14,6 +13,7 @@ import {
   type AgentTextRequest,
   type AgentTools,
 } from "./index.js";
+import { getMachineStructuralHash } from "./adapter/index.js";
 
 // ─── State interpretation (runAgent's `getRequests` option) ───
 //

@@ -34,13 +34,6 @@ import type {
   ChatCompletionToolChoiceOption,
 } from "openai/resources/chat/completions/completions.js";
 import {
-  buildEnvelopeSchema,
-  parseStructuredEnvelope,
-  getAgentOutputMode,
-  getJsonSchema,
-  getJsonSchemaSync,
-  isStandardSchema,
-  renderDecisionAttempts,
   runAgent,
   type AgentDecisionExecutor,
   type AgentDecisionRequest,
@@ -51,6 +44,15 @@ import {
   type AgentTools,
   type ChosenEvent,
 } from "@statelyai/agent";
+import { renderDecisionAttempts } from "@statelyai/agent/steps";
+import {
+  buildEnvelopeSchema,
+  getAgentOutputMode,
+  getJsonSchema,
+  getJsonSchemaSync,
+  isStandardSchema,
+  parseStructuredEnvelope,
+} from "@statelyai/agent/adapter";
 import { triageMachine } from "../triage/index.js";
 import { twentyQuestionsMachine } from "../twenty-questions/index.js";
 

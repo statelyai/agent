@@ -1,21 +1,14 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import { createActor } from "xstate";
+import { createAgentSchemas, createTextLogic, runAgent, setupAgent } from "./index.js";
 import {
-  createAgentSchemas,
-  createTextLogic,
   getAgentRequests,
   initialAgentStep,
   resolveAgentRequests,
-  runAgent,
-  setupAgent,
-} from "./index.js";
-import type {
-  AgentDecisionExecutor,
-  AgentPlanRequest,
-  AgentRequestExecutors,
-  ChosenEvent,
-} from "./index.js";
+  type AgentPlanRequest,
+} from "./steps/index.js";
+import type { AgentDecisionExecutor, AgentRequestExecutors, ChosenEvent } from "./index.js";
 
 // A todo-list machine managed by one `agent.plan` invoke. Its final output
 // records the plan's stop reason and step count (when onDone fires), so the

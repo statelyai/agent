@@ -7,13 +7,13 @@ import {
   createTextLogic,
   explorePaths,
   lintAgentMachine,
-  PLAN_DONE_EVENT_TYPE,
   setupAgent,
   simulateAgent,
   type AgentLintDiagnostic,
   type AgentPlanOutput,
   type StandardSchemaV1,
 } from "./index.js";
+import { PLAN_DONE_EVENT_TYPE } from "./steps/index.js";
 import * as examples from "../examples/index.js";
 import { humanInTheLoopMachine, jokeMachine, twentyQuestionsMachine } from "../examples/index.js";
 
@@ -401,7 +401,7 @@ describe("simulateAgent — keyless deterministic playthrough", () => {
       input: { questionsRemaining: 20 },
       script: {
         decisions: { "agent.decide": [{ type: "GUESS", guess: "a cat" }] },
-        userInput: { "agent.userInput": ["yes", "no"] },
+        invokes: { "agent.userInput": ["yes", "no"] },
         text: {
           classifyGuessFeedback: [{ correct: true, reasoning: "matched" }],
           classifyPlayAgain: [{ playAgain: false, reasoning: "stop" }],

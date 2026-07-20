@@ -1,12 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
-import {
-  createAgentSchemas,
-  createTextLogic,
-  initialAgentStep,
-  resolveAgentRequests,
-  setupAgent,
-} from "./index.js";
+import { createAgentSchemas, createTextLogic, setupAgent } from "./index.js";
+import { initialAgentStep, resolveAgentRequests } from "./steps/index.js";
 import type {
   AgentDecisionExecutor,
   AgentRequestExecutor,

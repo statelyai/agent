@@ -37,6 +37,26 @@
         "default": "./dist/openai-compat.cjs"
       }
     },
+    "./steps": {
+      "import": {
+        "types": "./dist/steps.d.mts",
+        "default": "./dist/steps.mjs"
+      },
+      "require": {
+        "types": "./dist/steps.d.cts",
+        "default": "./dist/steps.cjs"
+      }
+    },
+    "./adapter": {
+      "import": {
+        "types": "./dist/adapter.d.mts",
+        "default": "./dist/adapter.mjs"
+      },
+      "require": {
+        "types": "./dist/adapter.d.cts",
+        "default": "./dist/adapter.cjs"
+      }
+    },
     "./zod": {
       "import": {
         "types": "./dist/zod.d.mts",
@@ -64,6 +84,7 @@
     "format:check": "oxfmt --check src examples",
     "knip": "knip",
     "check": "pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run knip",
+    "check:dts": "tsc -p fixtures/dts-consumer/tsconfig.json",
     "test": "vitest",
     "test:ci": "vitest --run",
     "prepublishOnly": "tsdown",

@@ -40,7 +40,7 @@ import {
   resolveAgentStep,
   resolveDecision,
   transitionAgentStep,
-} from "@statelyai/agent";
+} from "@statelyai/agent/steps";
 // gameMachine, gameSchemas, gameActors, models from examples/game-agent;
 // executors, decide from createAiSdkExecutors({ models }) (see examples/ai-sdk-game-host).
 const options = { schemas: gameSchemas, actorSources: gameActors };
@@ -76,7 +76,7 @@ console.log(step.snapshot.output);
 The dispatch above (pick the pending request, branch on `kind`, resolve it, advance) is the same every turn. `resolveAgentRequests` collapses it into one call: it resolves the current step's pending request (decision or text) and returns the next step, wiring `canTake` to `step.snapshot.can` for you. A complete durable host is two lines (`options` as above):
 
 ```ts
-import { initialAgentStep, resolveAgentRequests } from "@statelyai/agent";
+import { initialAgentStep, resolveAgentRequests } from "@statelyai/agent/steps";
 
 let step = initialAgentStep(gameMachine, input, options);
 while (!step.done) {

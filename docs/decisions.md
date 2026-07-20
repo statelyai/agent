@@ -53,7 +53,7 @@ deciding: {
 
 Patterns and exact types can mix (`['todo.*', 'reset']`). Wildcards expand against the live snapshot, so they need a **snapshot-aware host** (`runAgent` or the step path); under a bare `createActor(...)`, list event types explicitly.
 
-`matchesEventPattern(eventType, pattern): boolean` is the exported helper behind this, for a host checking whether an event type matches an `allowedEvents` pattern.
+`matchesEventPattern(eventType, pattern): boolean` (from `@statelyai/agent/adapter`) is the exported helper behind this, for a host checking whether an event type matches an `allowedEvents` pattern.
 
 ## Delivering the chosen event
 
@@ -88,7 +88,7 @@ Each attempt runs three checks in order. Each failure is typed and fed back to t
 Retry behavior:
 
 - Default 2 retries, so up to 3 attempts. Set `maxRetries` on the decide input to change it.
-- Prior failed attempts ride on `request.attempts`, so a host adapter can render "your last choice failed because X" into the next call. Core never rewrites the prompt itself; `renderDecisionAttempts(request)` is the exported helper that renders the attempts list into feedback messages (used by both shipped adapters and the raw-SDK example hosts).
+- Prior failed attempts ride on `request.attempts`, so a host adapter can render "your last choice failed because X" into the next call. Core never rewrites the prompt itself; `renderDecisionAttempts(request)` (from `@statelyai/agent/steps`) is the exported helper that renders the attempts list into feedback messages (used by both shipped adapters and the raw-SDK example hosts).
 - Exhausting retries throws `DecisionExhaustedError` (carrying the attempts list), caught by the invoke's `onError`. In Twenty Questions, that routes to a `stumped` final state instead of crashing the run.
 
 ## Coercion

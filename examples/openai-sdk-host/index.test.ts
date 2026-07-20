@@ -1,7 +1,8 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import type { AgentDecisionRequest, AgentTextRequest } from "@statelyai/agent";
-import { getJsonSchema, runAgent } from "@statelyai/agent";
+import { runAgent } from "@statelyai/agent";
+import { getJsonSchema } from "@statelyai/agent/adapter";
 import {
   createOpenAiExecutors,
   toDecisionMessages,

@@ -666,16 +666,18 @@ export type AgentRequestExecutor<
 /**
  * The full set of host executors a machine's agent actors are resolved
  * with — passed to `runAgent`, `executeAgentRequest`, and
- * `TextLogic.execute`. `generateText` is required; `streamText` is only
- * needed if the machine has a `mode: 'stream'` text request, and `decide`
- * only if it uses a decision — omitting either is a bind-time error when the
- * machine actually needs it (see `runAgent`).
+ * `TextLogic.execute`. Every slot is optional: `generateText` is needed only
+ * if the machine has a `mode: 'generate'` text request, `streamText` only for
+ * a `mode: 'stream'` request, and `decide` only for a decision/plan — omitting
+ * a slot the machine actually needs is a clear bind-time error (see `runAgent`
+ * and `provideExecutors`). Adapter result sets (`AiSdkExecutors`,
+ * `OpenAiCompatExecutors`) re-require all three.
  */
 export interface AgentRequestExecutors<
   TGenerateResult extends AgentRequestExecutorResult = AgentRequestExecutorResult,
   TStreamResult extends AgentRequestExecutorResult = AgentRequestExecutorResult,
 > {
-  generateText: AgentRequestExecutor<TGenerateResult>;
+  generateText?: AgentRequestExecutor<TGenerateResult>;
   streamText?: AgentRequestExecutor<TStreamResult>;
   decide?: AgentDecisionExecutor;
 }

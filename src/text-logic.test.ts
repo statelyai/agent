@@ -2,18 +2,16 @@ import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import { createActor, toPromise } from "xstate";
 import {
-  bindRequestExecutor,
   createAgentSchemas,
   createTextLogic,
-  parseModelRef,
-  parseStructuredEnvelope,
   runAgent,
   setupAgent,
-  type AgentRequest,
   type AgentRequestExecutor,
   type AgentTextRequest,
   type AgentTools,
 } from "./index.js";
+import { bindRequestExecutor, parseModelRef, parseStructuredEnvelope } from "./adapter/index.js";
+import { type AgentRequest } from "./steps/index.js";
 import {
   buildEnvelopeSchema,
   executeAgentTextRequest,

@@ -144,7 +144,7 @@ The machine can be a **next-step decider** instead of a runner: you own the loop
 
 ```ts
 // prettier-ignore
-import { executeAgentRequest, initialAgentStep, resolveAgentStep, resolveDecision, transitionAgentStep } from "@statelyai/agent";
+import { executeAgentRequest, initialAgentStep, resolveAgentStep, resolveDecision, transitionAgentStep } from "@statelyai/agent/steps";
 
 const executors = createAiSdkExecutors({ models });
 let step = initialAgentStep(haikuMachine, { topic: "state machines" });
@@ -208,7 +208,8 @@ The strongest form of the claim: the machine need not know about this library **
 - **You don't need `agent.decide` either.** Any state that waits on events is a decision point: enumerate legal events with `getAcceptedEvents(snapshot)`, let the model choose one with `resolveDecision`, gated by `snapshot.can(event)`.
 
 ```ts
-import { getAcceptedEvents, resolveDecision } from "@statelyai/agent";
+import { getAcceptedEvents } from "@statelyai/agent";
+import { resolveDecision } from "@statelyai/agent/steps";
 
 // `machine` is a bog-standard xstate machine with no agent-specific anything.
 const events = getAcceptedEvents(snapshot); // -> [{ type: 'APPROVE' }, { type: 'REVISE' }]

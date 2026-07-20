@@ -18,11 +18,8 @@
  *   OPENAI_API_KEY=... npx tsx examples/ai-sdk-game-host/index.ts
  */
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import {
-  initialAgentStep,
-  resolveAgentRequests,
-  type AgentRequestExecutors,
-} from "@statelyai/agent";
+import { type AgentRequestExecutors } from "@statelyai/agent";
+import { initialAgentStep, resolveAgentRequests } from "@statelyai/agent/steps";
 import {
   gameActors,
   gameMachine,

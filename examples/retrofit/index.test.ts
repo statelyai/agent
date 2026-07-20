@@ -30,7 +30,7 @@ test("preserves behavior: happy path — lookup then a small refund settles", as
         ],
       },
       // The lookupOrder actor's output, scripted (no live actor in simulation).
-      userInput: { lookupOrder: ["Order A1001: Standing desk, $240, Ada Lovelace"] },
+      invokes: { lookupOrder: ["Order A1001: Standing desk, $240, Ada Lovelace"] },
     },
   });
 

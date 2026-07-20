@@ -1,12 +1,8 @@
 import Ajv from "ajv";
 import { describe, expect, test } from "vitest";
 import { createActor, createAsyncLogic, waitFor } from "xstate";
-import {
-  initialAgentStep,
-  setupAgent,
-  type SchemaCompiler,
-  type StandardSchemaV1,
-} from "../index.js";
+import { setupAgent, type SchemaCompiler, type StandardSchemaV1 } from "../index.js";
+import { initialAgentStep } from "../steps/index.js";
 
 function ajvCompiler(): SchemaCompiler {
   const ajv = new Ajv({ strict: false });

@@ -5,6 +5,8 @@ export default defineConfig({
     index: 'src/index.ts',
     'ai-sdk': 'src/ai-sdk/index.ts',
     'openai-compat': 'src/openai-compat/index.ts',
+    steps: 'src/steps/index.ts',
+    adapter: 'src/adapter/index.ts',
     zod: 'src/zod/index.ts',
   },
   format: ['esm', 'cjs'],

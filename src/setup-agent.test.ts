@@ -8,24 +8,13 @@ import {
   createAgentSchemas,
   createTextLogic,
   DecisionExhaustedError,
-  executeAgentRequest,
   getAcceptedEvents,
-  getAgentOutputMode,
-  getAgentRequests,
-  initialAgentStep,
-  isStructuredOutputSchema,
   messagesSchema,
-  parseOutput,
-  resolveAgentStep,
-  resolveDecision,
   runAgent,
   setupAgent,
   toolMessage,
-  transitionAgentStep,
   userMessage,
   type AgentDecisionRequest,
-  type AgentRequest,
-  type AgentStepRequest,
   type AgentTextRequest,
   type AgentTools,
   type ChosenEvent,
@@ -33,6 +22,17 @@ import {
   type SchemaCompiler,
   type StandardSchemaV1,
 } from "./index.js";
+import {
+  executeAgentRequest,
+  getAgentRequests,
+  initialAgentStep,
+  resolveAgentStep,
+  resolveDecision,
+  transitionAgentStep,
+  type AgentRequest,
+  type AgentStepRequest,
+} from "./steps/index.js";
+import { getAgentOutputMode, isStructuredOutputSchema, parseOutput } from "./adapter/index.js";
 
 /**
  * ~15-line Ajv-to-StandardSchema adapter — the recipe for a real

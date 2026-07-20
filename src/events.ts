@@ -11,8 +11,8 @@ import { validateSchemaSync } from "./utils.js";
 // `& {}` keeps literal-union autocomplete alive while still allowing any string — a bare `string` in a union would swallow the literals.
 export type AgentRequestSource = string & {};
 
-/** Default prefix for the synthetic tool name generated per candidate event (e.g. `send_event_ASK`). Override per-request with {@link AgentEventToolNameResolver}. */
-export const EVENT_TOOL_PREFIX = "send_event_" as const;
+/** Default prefix for the synthetic tool name generated per candidate event (e.g. `send_event_ASK`). Override per-request with {@link AgentEventToolNameResolver}. @internal */
+const EVENT_TOOL_PREFIX = "send_event_" as const;
 
 /** Customizes the tool name generated for a candidate event; see {@link AgentRequestOptions.eventToolName}. */
 export type AgentEventToolNameResolver = (args: {

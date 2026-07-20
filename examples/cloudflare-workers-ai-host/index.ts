@@ -26,16 +26,15 @@
  * machine's requests must name a Workers AI model id (e.g.
  * `@cf/meta/llama-3.1-8b-instruct`). Requires the `wrangler` dev dependency.
  */
+import { type AgentDecisionRequest, type ChosenEvent } from "@statelyai/agent";
 import {
-  getAgentOutputMode,
   initialAgentStep,
   renderDecisionAttempts,
   resolveAgentStep,
   resolveDecision,
-  type AgentDecisionRequest,
   type AgentRequest,
-  type ChosenEvent,
-} from "@statelyai/agent";
+} from "@statelyai/agent/steps";
+import { getAgentOutputMode } from "@statelyai/agent/adapter";
 import { gameActors, gameMachine, gameSchemas } from "../game-agent/index.js";
 
 interface Env {

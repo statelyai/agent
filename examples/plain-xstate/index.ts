@@ -32,12 +32,8 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createActor, createAsyncLogic, setup, waitFor } from "xstate";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
-import {
-  getAcceptedEvents,
-  resolveDecision,
-  userMessage,
-  type AgentRequestExecutors,
-} from "@statelyai/agent";
+import { getAcceptedEvents, userMessage, type AgentRequestExecutors } from "@statelyai/agent";
+import { resolveDecision } from "@statelyai/agent/steps";
 
 export const models = defineModels({
   writer: openai("gpt-5.4-mini"),

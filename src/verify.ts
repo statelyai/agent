@@ -746,13 +746,13 @@ export function assertAgentMachine(
  *   `setupAgent({ requests })` key, or `agent.generateText`/`agent.streamText`).
  * - `decisions` — the {@link ChosenEvent} to apply for a decision request,
  *   keyed by decision src (usually `agent.decide`).
- * - `userInput` — output values for `agent.userInput` invokes, keyed by src
- *   (usually `agent.userInput`).
+ * - `invokes` — output values for scripted invokes (notably `agent.userInput`,
+ *   and any other actor whose output must be canned), keyed by src.
  */
 export interface SimulationScript {
   text?: Record<string, unknown[]>;
   decisions?: Record<string, ChosenEvent[]>;
-  userInput?: Record<string, unknown[]>;
+  invokes?: Record<string, unknown[]>;
 }
 
 /** One entry in a {@link SimulateAgentResult.trail}: the state after this step, plus what drove the step. */
@@ -837,7 +837,7 @@ export async function simulateAgent(
   const script: SimulationScript = {
     text: { ...options.script.text },
     decisions: mapValues(options.script.decisions ?? {}, (arr) => [...arr]),
-    userInput: mapValues(options.script.userInput ?? {}, (arr) => [...arr]),
+    invokes: mapValues(options.script.invokes ?? {}, (arr) => [...arr]),
   };
 
   let step = initialAgentStep(machine, options.input);
@@ -895,7 +895,7 @@ export async function simulateAgent(
     // (agent.userInput and friends surface as spawn actions, not requests).
     const [invoke] = pendingInvokes(step);
     if (invoke) {
-      const taken = takeFromQueue(script.userInput, invoke.src);
+      const taken = takeFromQueue(script.invokes, invoke.src);
       if (!taken.found) {
         throw scriptDryError("userInput", invoke.src, invoke.id);
       }

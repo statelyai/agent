@@ -38,12 +38,12 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import {
-  bindRequestExecutor,
   runAgent,
   setupAgent,
   type AgentRequestExecutor,
   type RunAgentOptions,
 } from "@statelyai/agent";
+import { bindRequestExecutor } from "@statelyai/agent/adapter";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 
 const planSchema = z.object({ subtopics: z.array(z.string()) });

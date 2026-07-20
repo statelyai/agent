@@ -138,7 +138,7 @@ Real reference implementations against four runtimes:
 
 ### Building a request payload by hand
 
-A hand-written host reads the fields it needs off the plain request and builds its own payload; the example hosts above are the reference to copy. The one public mapping helper is `extractJsonSchema(schema)` from `@statelyai/agent/openai-compat` (a thin re-export of core `getJsonSchema`): it reads a Standard Schema's JSON Schema for a `response_format` or a tool's `parameters`. Wrap the declared output schema with `buildEnvelopeSchema` first (see [the structured-output envelope](#the-structured-output-envelope)).
+A hand-written host reads the fields it needs off the plain request and builds its own payload; the example hosts above are the reference to copy. The one public mapping helper is `getJsonSchema(schema)` from `@statelyai/agent/adapter`: it reads a Standard Schema's JSON Schema for a `response_format` or a tool's `parameters`. Wrap the declared output schema with `buildEnvelopeSchema` first (see [the structured-output envelope](#the-structured-output-envelope)).
 
 ## The structured-output envelope
 
@@ -156,7 +156,7 @@ import {
   getAgentOutputMode,
   getJsonSchema,
   parseStructuredEnvelope,
-} from "@statelyai/agent";
+} from "@statelyai/agent/adapter";
 
 if (getAgentOutputMode(request.outputSchema) === "structured") {
   const envelope = buildEnvelopeSchema(request.outputSchema, { reasoning: request.reasoning });
@@ -266,7 +266,7 @@ const machine = emailDrafter.provide({
 `.withExecutor(...)` also binds execution onto one logic for normal XState use, bypassing `runAgent`'s executor slots. Provide the bound logic as an actor source and run with `createActor` directly:
 
 ```ts
-import { validateSchemaSync } from "@statelyai/agent";
+import { validateSchemaSync } from "@statelyai/agent/adapter";
 
 const executableDraftText = draftText.withExecutor(async ({ request, signal }) => {
   const result = await generateText({
@@ -299,7 +299,8 @@ The default is named `requests:` on `setupAgent`, executed by an adapter (above)
 For a one-off text request, `agent.generateText` is a quick inline path (prefer named [`requests:`](text-requests.md) once a call is reused or worth testing):
 
 ```ts
-import { parseOutput, runAgent } from "@statelyai/agent";
+import { runAgent } from "@statelyai/agent";
+import { parseOutput } from "@statelyai/agent/adapter";
 
 generating: {
   invoke: {

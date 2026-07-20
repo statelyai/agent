@@ -4,7 +4,8 @@ import { tool } from "ai";
 import type { AgentDecisionRequest } from "../decision.js";
 import type { AgentTextRequest } from "../text-logic.js";
 import type { AgentTools } from "../types.js";
-import { createOpenAiCompatExecutors, extractJsonSchema, type FetchLike } from "./index.js";
+import { createOpenAiCompatExecutors, type FetchLike } from "./index.js";
+import { getJsonSchema } from "../adapter/index.js";
 import {
   toDecisionMessages,
   toOpenAiCallSettings,
@@ -101,8 +102,8 @@ describe("request -> wire param mapping (pure helpers)", () => {
     expect(toOpenAiCallSettings({ model: "quick" } as AgentTextRequest)).toEqual({});
   });
 
-  test("extractJsonSchema reads the ~standard.jsonSchema extension when present", async () => {
-    const jsonSchema = await extractJsonSchema(
+  test("getJsonSchema reads the ~standard.jsonSchema extension when present", async () => {
+    const jsonSchema = await getJsonSchema(
       z.object({ sentiment: z.enum(["positive", "negative"]) }),
     );
     expect(jsonSchema).toMatchObject({ type: "object" });

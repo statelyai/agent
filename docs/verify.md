@@ -74,7 +74,7 @@ A deterministic, model-free playthrough on the pure step path (async: drives pla
 
 - `decisions`: the `ChosenEvent` to apply per decision (keyed by decision src, usually `agent.decide`). A plan step is a decision too: key its chosen events by the plan src (`agent.plan`) and end with the reserved `agent.plan.done` move to complete the plan;
 - `text`: output values for text requests (keyed by request src);
-- `userInput`: answers for `agent.userInput` invokes.
+- `invokes`: answers for `agent.userInput` invokes.
 
 ```ts
 import { simulateAgent } from "@statelyai/agent";
@@ -83,7 +83,7 @@ const { status, snapshot, trail } = await simulateAgent(machine, {
   input: { questionsRemaining: 20 },
   script: {
     decisions: { "agent.decide": [{ type: "GUESS", guess: "a cat" }] },
-    userInput: { "agent.userInput": ["yes", "no"] },
+    invokes: { "agent.userInput": ["yes", "no"] },
     text: {
       classifyGuessFeedback: [{ correct: true, reasoning: "matched" }],
       classifyPlayAgain: [{ playAgain: false, reasoning: "stop" }],

@@ -17,6 +17,8 @@ export default {
         find: "@statelyai/agent/openai-compat",
         replacement: src("openai-compat/index.ts"),
       },
+      { find: "@statelyai/agent/steps", replacement: src("steps/index.ts") },
+      { find: "@statelyai/agent/adapter", replacement: src("adapter/index.ts") },
       { find: "@statelyai/agent/zod", replacement: src("zod/index.ts") },
       { find: /^@statelyai\/agent$/, replacement: src("index.ts") },
     ],

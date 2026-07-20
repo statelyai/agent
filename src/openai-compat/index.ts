@@ -32,18 +32,6 @@ import {
   type WireResponse,
 } from "./mappers.js";
 
-// ─── JSON Schema extraction (ported from examples/openai-sdk-host) ───
-
-/**
- * Reads a Standard Schema's optional `~standard.jsonSchema.input()` extension
- * (implemented by e.g. Zod v4's `z.toJSONSchema`), awaiting it when it returns
- * a Promise. Returns `undefined` when the schema doesn't expose the extension.
- * Thin re-export of core's {@link getJsonSchema}. Kept exported (unlike the
- * wire mappers) because custom OpenAI-compatible hosts building their own
- * `response_format` payloads by hand rely on it.
- */
-export const extractJsonSchema = getJsonSchema;
-
 // ─── createOpenAiCompatExecutors ───
 
 /** Minimal `fetch` shape the adapter needs — matches the global `fetch` and
@@ -86,6 +74,7 @@ export interface CreateOpenAiCompatExecutorsOptions {
 
 /** `createOpenAiCompatExecutors` always populates all three executor slots. */
 export interface OpenAiCompatExecutors extends AgentRequestExecutors {
+  generateText: NonNullable<AgentRequestExecutors["generateText"]>;
   streamText: NonNullable<AgentRequestExecutors["streamText"]>;
   decide: AgentDecisionExecutor;
 }

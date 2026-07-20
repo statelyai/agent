@@ -67,7 +67,7 @@ In `onDone`, `output` is already validated against the request's output schema a
 `parseOutput(schema, output)` validates a value against a schema and returns it parsed, throwing on mismatch. Escape hatch for host code holding a raw, still-untyped output (from a persisted snapshot, or an inline `agent.generateText` result typed `unknown`). Never needed inside `onDone`.
 
 ```ts
-import { parseOutput } from "@statelyai/agent";
+import { parseOutput } from "@statelyai/agent/adapter";
 
 const answer = parseOutput(answerSchema, rawOutput); // typed as { answer: string }
 ```

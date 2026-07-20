@@ -168,6 +168,7 @@ export interface AiSdkExecutors extends AgentRequestExecutors<
   AiSdkGenerateResult,
   AiSdkStreamResult
 > {
+  generateText: AgentRequestExecutor<AiSdkGenerateResult>;
   streamText: AgentRequestExecutor<AiSdkStreamResult>;
   decide: AgentDecisionExecutor;
 }

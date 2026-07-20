@@ -7,7 +7,6 @@ import {
   AgentIdleError,
   createAgentSchemas,
   createTextLogic,
-  getMachineStructuralHash,
   IllegalResumeEventError,
   inspectTransitions,
   runAgent,
@@ -20,6 +19,7 @@ import {
   type AgentTraceEvent,
   type ChosenEvent,
 } from "./index.js";
+import { getMachineStructuralHash } from "./adapter/index.js";
 
 describe("runAgent", () => {
   test("done path: completes with typed output from a TextLogic invoke", async () => {

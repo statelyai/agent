@@ -1,35 +1,8 @@
 export { appendMessages, messagesSchema } from "./messages.js";
 export { createAgentSchemas, setupAgent } from "./setup-agent.js";
-export {
-  DecisionExhaustedError,
-  PLAN_DONE_EVENT_TYPE,
-  renderDecisionAttempts,
-  resolveDecision,
-} from "./decision.js";
-export {
-  EVENT_TOOL_PREFIX,
-  getAcceptedEvents,
-  matchesEventPattern,
-  parseAgentEvent,
-} from "./events.js";
-export {
-  bindRequestExecutor,
-  buildEnvelopeSchema,
-  createTextLogic,
-  getAgentOutputMode,
-  isStructuredOutputSchema,
-  parseModelRef,
-  parseOutput,
-  parseStructuredEnvelope,
-} from "./text-logic.js";
-export {
-  executeAgentRequest,
-  getAgentRequests,
-  initialAgentStep,
-  resolveAgentRequests,
-  resolveAgentStep,
-  transitionAgentStep,
-} from "./steps.js";
+export { DecisionExhaustedError } from "./decision.js";
+export { getAcceptedEvents, parseAgentEvent } from "./events.js";
+export { createTextLogic } from "./text-logic.js";
 export {
   AGENT_TRACE_SCHEMA_VERSION,
   AgentIdleError,
@@ -50,16 +23,7 @@ export {
   lintAgentMachine,
   simulateAgent,
 } from "./verify.js";
-export {
-  getAgentMessages,
-  getJsonSchema,
-  getJsonSchemaSync,
-  getMachineStructuralHash,
-  isStandardSchema,
-  getStateMeta,
-  persistSnapshot,
-  validateSchemaSync,
-} from "./utils.js";
+export { getAgentMessages, getStateMeta, persistSnapshot } from "./utils.js";
 export { assistantMessage, systemMessage, toolMessage, userMessage } from "./utils.js";
 
 export type {
@@ -80,9 +44,7 @@ export type {
   AgentRequestExecutorResult,
   AgentRequestExecutors,
   AgentRequestMode,
-  AgentOutputMode,
   AgentUserInput,
-  StructuredOutputEnvelope,
   TextLogic,
   TextLogicConfig,
   TextLogicExecuteArgs,
@@ -96,13 +58,6 @@ export type {
   AgentEventToolNameResolver,
   AgentRequestSource,
 } from "./events.js";
-export type {
-  AgentPlanRequest,
-  AgentRequest,
-  AgentStep,
-  AgentStepRequest,
-  ResolveAgentRequestsOptions,
-} from "./steps.js";
 export type {
   AgentMessageInfo,
   AgentRunMeta,
@@ -147,12 +102,7 @@ export type {
   AgentSetupStateSchema,
   AgentStateNarrowing,
 } from "./setup-agent.js";
-export type {
-  DecisionAttempt,
-  DecisionLogic,
-  DecisionLogicConfig,
-  ResolveDecisionOptions,
-} from "./decision.js";
+export type { DecisionAttempt, DecisionLogic, PlanLogic } from "./decision.js";
 
 export type {
   AgentEventSchemaInput,

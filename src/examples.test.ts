@@ -11,14 +11,13 @@ import {
   rateJoke as rateJokeLogic,
   tellJoke as tellJokeLogic,
 } from "../examples/index.js";
+import { runAgent, type AgentTextRequest } from "./index.js";
 import {
   getAgentRequests,
   resolveAgentStep,
   resolveDecision,
-  runAgent,
   transitionAgentStep,
-  type AgentTextRequest,
-} from "./index.js";
+} from "./steps/index.js";
 import { initialTransition } from "xstate";
 
 describe("curated XState setup examples", () => {
