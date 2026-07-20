@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { runAgent, type AgentTextRequest } from "../../src/index.js";
+import { runAgent, type AgentTextRequest } from "@statelyai/agent";
 import { longRunningOnboardingMachine, runLongRunningOnboardingExample } from "./index.js";
 
 const generateText = async (request: AgentTextRequest) => ({

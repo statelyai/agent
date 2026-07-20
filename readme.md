@@ -2,7 +2,7 @@
 
 **The logic layer for AI agents.**
 
-Build agents as state machines, with explicit control flow you can inspect, test, visualize, and run anywhere.
+Build agents as state machines to control exactly what the agent can do. The machine owns control flow; the model only ever picks a legal event. Testing, inspection, and visualization fall out for free.
 
 Stately Agent adds model requests and decisions to XState. The state machine defines what the agent can do. Your application chooses the model, runs the requests, and stores the state.
 
@@ -12,15 +12,21 @@ Stately Agent 2 is in alpha. APIs may change before the stable release.
 
 [Documentation](https://stately.ai/docs/agents) · [Examples](examples/README.md) · [XState](https://github.com/statelyai/xstate)
 
+## Three ways to start
+
+- **Author a new agent.** Build a machine from states, decisions, and typed requests; run it locally with `runAgent`, test it with no API key, then eject to any framework or runtime with zero machine changes. See the [Quickstart](docs/quickstart.md) and [Eject to your stack](docs/eject.md).
+- **Retrofit an existing agent.** Turn a `while` loop into a machine: your SDK calls, tools, and retry code become the executors; the machine replaces only the control flow. See [Migrating from a loop](docs/from-a-loop.md).
+- **Copy a known pattern.** ReAct, reflection, plan-and-execute, RAG, supervisor, and more, each a single runnable file you lift in 60 seconds. See [Agent patterns](docs/patterns.md).
+
 ## Install
 
 <!-- install command matching the package prerelease channel and package.json peers -->
 
 ```sh
-pnpm add @statelyai/agent@alpha xstate@alpha zod ai @ai-sdk/openai
+pnpm add @statelyai/agent@alpha xstate@alpha zod ai@^6 @ai-sdk/openai@^3
 ```
 
-Node 22.18 or newer is required. The package is ESM-only; the library targets XState v6 alpha and stays compatible with XState v5.
+Node 22.18 or newer is required. The package is ESM-only; the library targets XState v6 alpha and stays compatible with XState v5. Provider packages must match your `ai` major: `@ai-sdk/openai@^3` pairs with `ai@^6` (a bare `@ai-sdk/openai` resolves to `@latest`, which can mismatch the `ai` peer).
 
 ## Quick start
 
@@ -146,3 +152,6 @@ See [all examples](examples/README.md).
 - [Human in the loop](docs/human-in-the-loop.md)
 - [Testing and verification](docs/verify.md)
 - [Running on different hosts](docs/hosts.md)
+- [Eject to your stack](docs/eject.md)
+- [Agent patterns](docs/patterns.md)
+- [Migrating from a loop](docs/from-a-loop.md)

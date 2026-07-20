@@ -29,7 +29,7 @@ import {
   runAgent,
   setupAgent,
   type AgentRequestExecutors,
-} from "../../src/index.js";
+} from "@statelyai/agent";
 import type { Snapshot } from "xstate";
 
 // ─── The machine: draft → idle review → publish ───

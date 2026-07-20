@@ -1,0 +1,15 @@
+{
+  "name": "langsmith-otel",
+  "title": "LangSmith over OpenTelemetry",
+  "kind": "observability",
+  "manual": true,
+  "origin": {
+    "type": "observability-recipe",
+    "source": "runAgent onTrace mapped onto OpenTelemetry spans, shipped to LangSmith's OTLP endpoint; typechecks standalone with local @opentelemetry/* shims (OTel is not a repo dependency)",
+    "url": "https://docs.langchain.com/langsmith/trace-with-opentelemetry"
+  },
+  "comparison": {
+    "targets": ["LangSmith", "OpenTelemetry", "OTLP backends"],
+    "purpose": "Map the versioned AgentTraceEvent stream onto OTel spans (run.start -> root span, request.start/end -> child spans, request.error -> exception, run.end -> status) and export to LangSmith via OTLP; env-gated so it prints the trace stream to stdout without keys."
+  }
+}

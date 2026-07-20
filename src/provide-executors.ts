@@ -1,20 +1,17 @@
 import type { AnyActorLogic, AnyStateMachine } from "xstate";
-import {
-  bindRequestExecutor,
-  isTextLogic,
-  USER_INPUT_ACTOR,
-  type AgentRequestExecutors,
-} from "./text-logic.js";
+import { isTextLogic, USER_INPUT_ACTOR, type AgentRequestExecutors } from "./text-logic.js";
 import { isDecisionLogic, isPlanLogic } from "./decision.js";
 import {
   bindDecisionForProvide,
   bindPlanForProvide,
+  bindTextForProvide,
   getConfiguredInvokeSrcs,
+  type AgentTraceEvent,
 } from "./run-agent.js";
 import { executorBoundLogics } from "./internal/registry.js";
 
 /** Options for {@link provideExecutors}. */
-export interface ProvideExecutorsOptions {
+export interface ProvideExecutorsOptions<TMachine extends AnyStateMachine = AnyStateMachine> {
   /**
    * Extra actor-source overrides merged onto the machine BEFORE binding — the
    * same shape as `machine.provide({ actorSources })`. Use it to supply the
@@ -25,6 +22,18 @@ export interface ProvideExecutorsOptions {
   actorSources?: Record<string, AnyActorLogic>;
   /** Chunk sink threaded to every bound `mode: 'stream'` text source. */
   onChunk?: (chunk: string) => void;
+  /**
+   * A single ordered stream of request-level trace events
+   * (`request.start`/`request.end`/`request.error`/`stream.chunk`) with the
+   * SAME versioned envelope {@link runAgent} emits. Because one bound machine can
+   * back many concurrent root actors, envelope state (`runId`, monotonic `seq`)
+   * is minted per ROOT actor at runtime — two concurrent actors get distinct
+   * `runId`s and independent `seq`. Pair with {@link traceTransitions} on the
+   * actor's `inspect` to fold `machine.transition` events into the same stream.
+   * Unlike `runAgent` there are NO `run.start`/`run.end` events (no run
+   * boundary).
+   */
+  onTrace?: (event: AgentTraceEvent<TMachine>) => void;
 }
 
 /**
@@ -46,8 +55,12 @@ export interface ProvideExecutorsOptions {
  * - `mode: 'stream'` text source → `executors.streamText`
  * - decision / `agent.decide` source → `executors.decide` (snapshot-driven
  *   candidate events, guard `canTake`, and auto-delivery of the chosen event,
- *   mirroring `runAgent` but without its model-call counting or tracing)
+ *   mirroring `runAgent` but without its model-call counting)
  * - `agent.plan` source → `executors.decide` (iterated, same semantics)
+ *
+ * Pass `options.onTrace` to observe request-level trace events (identical in
+ * shape to `runAgent`'s); pair it with {@link traceTransitions} on the actor's
+ * `inspect` to also capture `machine.transition` events in the same stream.
  *
  * A source that already carries its own executor (`.withExecutor(...)`) is left
  * as-is. `agent.userInput` is left UNBOUND — an uncontrolled host handles idle
@@ -64,8 +77,12 @@ export interface ProvideExecutorsOptions {
 export function provideExecutors<TMachine extends AnyStateMachine>(
   machine: TMachine,
   executors: AgentRequestExecutors,
-  options: ProvideExecutorsOptions = {},
+  options: ProvideExecutorsOptions<TMachine> = {},
 ): TMachine {
+  const bindOptions = {
+    onChunk: options.onChunk,
+    onTrace: options.onTrace as ((event: AgentTraceEvent) => void) | undefined,
+  };
   const provided = (
     options.actorSources
       ? machine.provide({ actorSources: options.actorSources as never })
@@ -98,7 +115,7 @@ export function provideExecutors<TMachine extends AnyStateMachine>(
         }
         continue;
       }
-      wrappedSources[key] = bindDecisionForProvide(provided, logic, executors.decide);
+      wrappedSources[key] = bindDecisionForProvide(provided, logic, executors, bindOptions);
       continue;
     }
 
@@ -109,7 +126,7 @@ export function provideExecutors<TMachine extends AnyStateMachine>(
         }
         continue;
       }
-      wrappedSources[key] = bindPlanForProvide(provided, logic, executors.decide);
+      wrappedSources[key] = bindPlanForProvide(provided, logic, executors, bindOptions);
       continue;
     }
 
@@ -127,7 +144,7 @@ export function provideExecutors<TMachine extends AnyStateMachine>(
         }
         continue;
       }
-      wrappedSources[key] = bindRequestExecutor(logic, executor, { onChunk: options.onChunk });
+      wrappedSources[key] = bindTextForProvide(provided, logic, executors, bindOptions);
       continue;
     }
 

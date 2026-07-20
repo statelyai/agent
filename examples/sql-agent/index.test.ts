@@ -1,6 +1,6 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
-import type { AgentTextRequest } from "../../src/index.js";
+import type { AgentTextRequest } from "@statelyai/agent";
 import { executeQuery, runSqlAgentExample } from "./index.js";
 
 const generateText = async (request: AgentTextRequest) => {

@@ -7,7 +7,7 @@
  * Typechecked via `examples/tsconfig.json` (globs `examples/**`).
  */
 import { z } from "zod";
-import { setupAgent } from "../../src/index.js";
+import { setupAgent } from "@statelyai/agent";
 import { gameActors, gameSchemas, models } from "./index.js";
 
 // Rebuild the same setup the runnable machine uses. Rebuilt (not imported) so

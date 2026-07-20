@@ -18,7 +18,7 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { defineModels } from "../../src/ai-sdk/index.js";
+import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 import { createAsyncLogic } from "xstate";
 import {
   getAcceptedEvents,
@@ -27,8 +27,7 @@ import {
   runAgent,
   setupAgent,
   type AgentRequestExecutors,
-} from "../../src/index.js";
-import { resolveExecutors, runExampleMain } from "../helpers/main.js";
+} from "@statelyai/agent";
 
 export const models = defineModels({
   scheduler: openai("gpt-5.4-mini"),
@@ -287,7 +286,9 @@ export async function runLongRunningOnboardingExample(
 
   const first = await runAgent(longRunningOnboardingMachine, {
     input: { employee },
-    ...resolveExecutors(models, options.generateText),
+    ...(options.generateText
+      ? { executors: { generateText: options.generateText } }
+      : { executors: createAiSdkExecutors({ models }) }),
     ...(options.onTransition ? { onTransition: options.onTransition } : {}),
   });
   if (first.status !== "idle") {
@@ -301,7 +302,9 @@ export async function runLongRunningOnboardingExample(
   const second = await runAgent(longRunningOnboardingMachine, {
     snapshot: persistedAfterWelcome,
     event: { type: "DOCS_SIGNED", signedAt: "2026-07-20" },
-    ...resolveExecutors(models, options.generateText),
+    ...(options.generateText
+      ? { executors: { generateText: options.generateText } }
+      : { executors: createAiSdkExecutors({ models }) }),
     ...(options.onTransition ? { onTransition: options.onTransition } : {}),
   });
   if (second.status !== "idle") {
@@ -315,7 +318,9 @@ export async function runLongRunningOnboardingExample(
   const third = await runAgent(longRunningOnboardingMachine, {
     snapshot: persistedAfterProvisioning,
     event: { type: "HARDWARE_DELIVERED", deliveredAt: "2026-07-28" },
-    ...resolveExecutors(models, options.generateText),
+    ...(options.generateText
+      ? { executors: { generateText: options.generateText } }
+      : { executors: createAiSdkExecutors({ models }) }),
     ...(options.onTransition ? { onTransition: options.onTransition } : {}),
   });
   if (third.status !== "done") {
@@ -325,13 +330,23 @@ export async function runLongRunningOnboardingExample(
   return { idleStates, idlePrompts, idleEventTypes, output: third.output };
 }
 
-runExampleMain(import.meta.url, async () => {
-  const result = await runLongRunningOnboardingExample({
-    onTransition: ({ value }) => console.log("[state]", JSON.stringify(value)),
-  });
+// Run directly (`tsx index.ts`); skipped when a test imports this module.
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("Set OPENAI_API_KEY to run this example.");
+    process.exit(1);
+  }
+  void (async () => {
+    const result = await runLongRunningOnboardingExample({
+      onTransition: ({ value }) => console.log("[state]", JSON.stringify(value)),
+    });
 
-  console.log("Idle states:", result.idleStates.join(" -> "));
-  console.log("Idle prompts:", result.idlePrompts.join(" / "));
-  console.log("Accounts:", result.output.accounts);
-  console.log("Schedule:", result.output.schedule);
-});
+    console.log("Idle states:", result.idleStates.join(" -> "));
+    console.log("Idle prompts:", result.idlePrompts.join(" / "));
+    console.log("Accounts:", result.output.accounts);
+    console.log("Schedule:", result.output.schedule);
+  })().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

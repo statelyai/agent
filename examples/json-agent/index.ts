@@ -40,9 +40,8 @@ import {
   type AgentWorkflowConfig,
   type SchemaCompiler,
   type StandardSchemaV1,
-} from "../../src/index.js";
-import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
-import { runExampleMain } from "../helpers/main.js";
+} from "@statelyai/agent";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 // The Ajv-to-StandardSchema recipe: compile the JSON Schema with Ajv, then
 // wrap the compiled validator as a `StandardSchemaV1`, mapping Ajv's
@@ -114,6 +113,16 @@ export async function runJsonAgentDemo(ticket: string) {
   return result.output;
 }
 
-runExampleMain(import.meta.url, async () => {
-  console.log(await runJsonAgentDemo("My invoice total looks wrong, please help."));
-});
+// Run directly (`tsx index.ts`); skipped when a test imports this module.
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("Set OPENAI_API_KEY to run this example.");
+    process.exit(1);
+  }
+  void (async () => {
+    console.log(await runJsonAgentDemo("My invoice total looks wrong, please help."));
+  })().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

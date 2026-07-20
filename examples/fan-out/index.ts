@@ -43,9 +43,8 @@ import {
   setupAgent,
   type AgentRequestExecutor,
   type RunAgentOptions,
-} from "../../src/index.js";
-import { defineModels } from "../../src/ai-sdk/index.js";
-import { resolveExecutors, runExampleMain } from "../helpers/main.js";
+} from "@statelyai/agent";
+import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 
 const planSchema = z.object({ subtopics: z.array(z.string()) });
 
@@ -223,7 +222,10 @@ export async function runFanOutExample(
   options?: RunAgentOptions<ReturnType<typeof createFanOutMachine>>,
   observe?: RunAgentOptions<ReturnType<typeof createFanOutMachine>>["onTransition"],
 ) {
-  const resolved = resolveExecutors(models, options);
+  const resolved =
+    options && Object.keys(options).length > 0
+      ? options
+      : { executors: createAiSdkExecutors({ models }) };
   const generateText = resolved.executors?.generateText;
   if (!generateText) {
     throw new Error("runFanOutExample requires a generateText executor.");
@@ -243,21 +245,31 @@ export async function runFanOutExample(
   return result.output;
 }
 
-runExampleMain(import.meta.url, async () => {
-  const output = await runFanOutExample(undefined, (snapshot) =>
-    console.log(
-      "[state]",
-      JSON.stringify(snapshot.value),
-      `${Object.keys(snapshot.context.summaries).length}/${snapshot.context.expected} branches done`,
-    ),
-  );
-  console.log("Subtopics:");
-  for (const subtopic of output.subtopics) {
-    console.log(`  - ${subtopic}`);
+// Run directly (`tsx index.ts`); skipped when a test imports this module.
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("Set OPENAI_API_KEY to run this example.");
+    process.exit(1);
   }
-  console.log("\nSummaries:");
-  for (const [id, text] of Object.entries(output.summaries)) {
-    console.log(`  ${id}: ${text}`);
-  }
-  console.log(`\nDigest:\n${output.digest}`);
-});
+  void (async () => {
+    const output = await runFanOutExample(undefined, (snapshot) =>
+      console.log(
+        "[state]",
+        JSON.stringify(snapshot.value),
+        `${Object.keys(snapshot.context.summaries).length}/${snapshot.context.expected} branches done`,
+      ),
+    );
+    console.log("Subtopics:");
+    for (const subtopic of output.subtopics) {
+      console.log(`  - ${subtopic}`);
+    }
+    console.log("\nSummaries:");
+    for (const [id, text] of Object.entries(output.summaries)) {
+      console.log(`  ${id}: ${text}`);
+    }
+    console.log(`\nDigest:\n${output.digest}`);
+  })().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

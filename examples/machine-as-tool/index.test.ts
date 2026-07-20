@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { createAsyncLogic } from "xstate";
-import { IllegalResumeEventError, type RunAgentOptions } from "../../src/index.js";
+import { IllegalResumeEventError, type RunAgentOptions } from "@statelyai/agent";
 import { refundMachine, resumeTool, startTool } from "./index.js";
 
 // Mock executors: validator returns valid, processRefund is a no-op side effect.

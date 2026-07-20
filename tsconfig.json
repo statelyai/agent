@@ -11,7 +11,14 @@
     "noEmit": true,
     "declaration": true,
     "sourceMap": true,
-    "isolatedModules": true
+    "isolatedModules": true,
+    "paths": {
+      "@statelyai/agent": ["./src/index.ts"],
+      "@statelyai/agent/ai-sdk": ["./src/ai-sdk/index.ts"],
+      "@statelyai/agent/openai-compat": ["./src/openai-compat/index.ts"],
+      "@statelyai/agent/zod": ["./src/zod/index.ts"],
+      "@statelyai/agent/*": ["./src/*"]
+    }
   },
   "include": ["src"],
   "exclude": ["node_modules", "dist", "examples"]

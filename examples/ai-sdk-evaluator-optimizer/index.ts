@@ -10,9 +10,8 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { setupAgent, runAgent } from "../../src/index.js";
-import { defineModels } from "../../src/ai-sdk/index.js";
-import { resolveExecutors, runExampleMain } from "../helpers/main.js";
+import { setupAgent, runAgent } from "@statelyai/agent";
+import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 
 const translationEvaluationSchema = z.object({
   qualityScore: z.number().min(1).max(10),
@@ -218,7 +217,7 @@ export async function runAiSdkEvaluatorOptimizerExample() {
       targetLanguage: "Spanish",
       maxIterations: 3,
     },
-    ...resolveExecutors(models, undefined),
+    executors: createAiSdkExecutors({ models }),
     onTransition: (snapshot) =>
       console.log(
         "[state]",
@@ -238,6 +237,16 @@ export async function runAiSdkEvaluatorOptimizerExample() {
   return result.output;
 }
 
-runExampleMain(import.meta.url, async () => {
-  console.log(await runAiSdkEvaluatorOptimizerExample());
-});
+// Run directly (`tsx index.ts`); skipped when a test imports this module.
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("Set OPENAI_API_KEY to run this example.");
+    process.exit(1);
+  }
+  void (async () => {
+    console.log(await runAiSdkEvaluatorOptimizerExample());
+  })().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

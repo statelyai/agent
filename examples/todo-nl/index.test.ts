@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { runAgent } from "../../src/index.js";
-import type { AgentDecisionRequest, AgentUserInput, ChosenEvent } from "../../src/index.js";
+import { runAgent } from "@statelyai/agent";
+import type { AgentDecisionRequest, AgentUserInput, ChosenEvent } from "@statelyai/agent";
 import { todoMachine } from "./index.js";
 
 // A scripted decide executor: pops one event per call off `events`. The

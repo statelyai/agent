@@ -30,11 +30,10 @@ import {
   type AgentRequestExecutors,
   type StandardSchemaV1,
   type TextLogic,
-} from "../../src/index.js";
-import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
+} from "@statelyai/agent";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import { jokeMachine, models as jokeModels, tellJoke } from "../joke/index.js";
 import { models as triageModels, triageMachine } from "../triage/index.js";
-import { runExampleMain } from "../helpers/main.js";
 
 // ─── Host Adapter: AI SDK execution ───
 
@@ -162,4 +161,14 @@ async function main() {
   console.log(`  final joke: ${joke}`);
 }
 
-runExampleMain(import.meta.url, main);
+// Run directly (`tsx index.ts`); skipped when a test imports this module.
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("Set OPENAI_API_KEY to run this example.");
+    process.exit(1);
+  }
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

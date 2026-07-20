@@ -1,6 +1,6 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
-import { runAgent } from "../../src/index.js";
+import { runAgent } from "@statelyai/agent";
 import { aiSdkParallelReviewMachine } from "./index.js";
 
 test("AI SDK parallel review fans out to three aspect reviews then summarizes", async () => {

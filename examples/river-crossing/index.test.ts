@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { runAgent } from "../../src/index.js";
-import type { AgentDecisionRequest, ChosenEvent } from "../../src/index.js";
+import { runAgent } from "@statelyai/agent";
+import type { AgentDecisionRequest, ChosenEvent } from "@statelyai/agent";
 import { describeMachine, riverCrossingMachine, riverCrossingSchemas } from "./index.js";
 
 // A decide executor that plays a fixed script of event types in order.

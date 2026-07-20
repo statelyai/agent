@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { runAgent } from "../../src/index.js";
-import type { AgentMessage, AgentRequestExecutor, AgentUserInput } from "../../src/index.js";
+import { runAgent } from "@statelyai/agent";
+import type { AgentMessage, AgentRequestExecutor, AgentUserInput } from "@statelyai/agent";
 import { contextCompactionMachine } from "./index.js";
 
 function textContent(message: AgentMessage | undefined): string {

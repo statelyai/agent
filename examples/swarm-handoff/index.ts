@@ -17,16 +17,14 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { withReadline } from "../helpers/cli.js";
 import {
   persistSnapshot,
   runAgent,
   setupAgent,
   type RunAgentOptions,
   type RunAgentResult,
-} from "../../src/index.js";
-import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
-import { resolveExecutors, runExampleMain } from "../helpers/main.js";
+} from "@statelyai/agent";
+import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 
 const agentName = z.enum(["travel", "food"]);
 
@@ -130,7 +128,10 @@ export const swarmHandoffMachine = agentSetup.createMachine({
 export async function runSwarmHandoffExample(
   options?: RunAgentOptions<typeof swarmHandoffMachine>,
 ) {
-  const resolved = resolveExecutors(models, options);
+  const resolved =
+    options && Object.keys(options).length > 0
+      ? options
+      : { executors: createAiSdkExecutors({ models }) };
 
   // Turn 1: the travel agent holds the mic and answers.
   const first = await runAgent(swarmHandoffMachine, {
@@ -254,11 +255,34 @@ async function runDemo() {
   console.log(`[${food.activeAgent}] ${food.reply}`);
 }
 
-runExampleMain(import.meta.url, async () => {
-  const forceDemo = process.argv.includes("--demo");
-  if (forceDemo || !process.stdout.isTTY) {
-    await runDemo();
-  } else {
-    await runInteractive();
+/** Open a readline interface, run `fn` with it, and always close it. */
+async function withReadline<T>(
+  fn: (rl: { question: (query: string) => Promise<string> }) => Promise<T>,
+): Promise<T> {
+  const { createInterface } = await import("node:readline/promises");
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return await fn(rl);
+  } finally {
+    rl.close();
   }
-});
+}
+
+// Run directly (`tsx index.ts`); skipped when a test imports this module.
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("Set OPENAI_API_KEY to run this example.");
+    process.exit(1);
+  }
+  void (async () => {
+    const forceDemo = process.argv.includes("--demo");
+    if (forceDemo || !process.stdout.isTTY) {
+      await runDemo();
+    } else {
+      await runInteractive();
+    }
+  })().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import type { AgentTool } from "../../src/index.js";
+import type { AgentTool } from "@statelyai/agent";
 import { runToolCallingExample } from "./index.js";
 
 // Mock host: plays the adapter's tool loop for one request — picks the named

@@ -14,9 +14,7 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
-import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
-import { withReadline } from "../helpers/cli.js";
-import { runExampleMain } from "../helpers/main.js";
+import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 import {
   assistantMessage,
   createAgentSchemas,
@@ -26,8 +24,8 @@ import {
   runAgent,
   setupAgent,
   userMessage,
-} from "../../src/index.js";
-import { zodAgentMessages } from "../../src/zod/index.js";
+} from "@statelyai/agent";
+import { zodAgentMessages } from "@statelyai/agent/zod";
 
 const promptAssessmentSchema = z.object({
   satisfied: z.boolean(),
@@ -465,4 +463,27 @@ export async function main() {
   });
 }
 
-runExampleMain(import.meta.url, main);
+/** Open a readline interface, run `fn` with it, and always close it. */
+async function withReadline<T>(
+  fn: (rl: { question: (query: string) => Promise<string> }) => Promise<T>,
+): Promise<T> {
+  const { createInterface } = await import("node:readline/promises");
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return await fn(rl);
+  } finally {
+    rl.close();
+  }
+}
+
+// Run directly (`tsx index.ts`); skipped when a test imports this module.
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("Set OPENAI_API_KEY to run this example.");
+    process.exit(1);
+  }
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

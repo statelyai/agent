@@ -35,7 +35,7 @@ import {
   type AgentDecisionRequest,
   type AgentRequest,
   type ChosenEvent,
-} from "../../src/index.js";
+} from "@statelyai/agent";
 import { gameActors, gameMachine, gameSchemas } from "../game-agent/index.js";
 
 interface Env {

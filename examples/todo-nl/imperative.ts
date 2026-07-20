@@ -37,7 +37,6 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { generateObject } from "ai";
-import { runExampleMain } from "../helpers/main.js";
 
 interface Todo {
   id: number;
@@ -195,4 +194,14 @@ export async function main() {
   console.log(`\n${state.log.length} action(s) taken.`);
 }
 
-runExampleMain(import.meta.url, main);
+// Run directly (`tsx index.ts`); skipped when a test imports this module.
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("Set OPENAI_API_KEY to run this example.");
+    process.exit(1);
+  }
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

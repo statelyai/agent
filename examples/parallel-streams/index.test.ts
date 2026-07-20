@@ -1,6 +1,6 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
-import type { AgentTextRequest, AgentRequestExecutorInfo } from "../../src/index.js";
+import type { AgentTextRequest, AgentRequestExecutorInfo } from "@statelyai/agent";
 import { runParallelStreamsExample } from "./index.js";
 
 test("parallel streaming requests are disambiguated by request.id in onChunk", async () => {

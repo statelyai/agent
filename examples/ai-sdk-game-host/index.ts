@@ -17,12 +17,12 @@
  * Run:
  *   OPENAI_API_KEY=... npx tsx examples/ai-sdk-game-host/index.ts
  */
-import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   initialAgentStep,
   resolveAgentRequests,
   type AgentRequestExecutors,
-} from "../../src/index.js";
+} from "@statelyai/agent";
 import {
   gameActors,
   gameMachine,
@@ -30,7 +30,6 @@ import {
   models,
   turnSummarySchema,
 } from "../game-agent/index.js";
-import { runExampleMain } from "../helpers/main.js";
 
 // Adapter-provided executors: `decide` forces a tool call, one tool per
 // candidate event, and reads the chosen event off the tool call — the
@@ -70,6 +69,16 @@ async function main() {
   console.log(output);
 }
 
-runExampleMain(import.meta.url, main);
+// Run directly (`tsx index.ts`); skipped when a test imports this module.
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("Set OPENAI_API_KEY to run this example.");
+    process.exit(1);
+  }
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}
 
 export { turnSummarySchema };

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { AgentRequestExecutor } from "../../src/index.js";
+import type { AgentRequestExecutor } from "@statelyai/agent";
 import { runDebateSubAgentsExample } from "./index.js";
 
 /**

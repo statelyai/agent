@@ -1,7 +1,7 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import type { AnyMachineSnapshot } from "xstate";
-import type { AgentTextRequest } from "../../src/index.js";
+import type { AgentTextRequest } from "@statelyai/agent";
 import { runFanOutExample } from "./index.js";
 
 test("fan-out plans subtopics, spawns one branch per subtopic, and reduces all summaries", async () => {

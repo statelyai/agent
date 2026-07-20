@@ -43,7 +43,7 @@ import { z } from "zod";
 import { tool } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
-import { defineModels } from "../../src/ai-sdk/index.js";
+import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 import {
   getAcceptedEvents,
   getStateMeta,
@@ -51,9 +51,7 @@ import {
   runAgent,
   setupAgent,
   type AgentRequestExecutors,
-} from "../../src/index.js";
-import { promptLine } from "../helpers/cli.js";
-import { resolveExecutors, runExampleMain } from "../helpers/main.js";
+} from "@statelyai/agent";
 
 export const models = defineModels({
   router: openai("gpt-5.4-mini"),
@@ -355,7 +353,9 @@ export async function runCustomerSupportExample(
     generateText,
     onProgress,
   } = options;
-  const executors = resolveExecutors(models, generateText);
+  const executors = generateText
+    ? { executors: { generateText } }
+    : { executors: createAiSdkExecutors({ models }) };
 
   const progress: string[] = [];
   const track = (snapshot: { value: unknown }) => {
@@ -417,47 +417,67 @@ export async function runCustomerSupportExample(
 // Direct run: classify a query; if it settles idle for a sensitive action, print
 // the pending action and ask the human to approve or deny (with a reason). Every
 // resume is fed a persisted snapshot, so the JSON round-trip is exercised.
-runExampleMain(import.meta.url, async () => {
-  const { createAiSdkExecutors } = await import("../../src/ai-sdk/index.js");
-  const executors = createAiSdkExecutors({ models });
+/** Prompt once on stdin and resolve the trimmed reply. */
+async function promptLine(query: string): Promise<string> {
+  const { createInterface } = await import("node:readline/promises");
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return (await rl.question(query)).trim();
+  } finally {
+    rl.close();
+  }
+}
 
-  const query =
-    (await promptLine("Ask the airline bot (blank = cancel AB1234) > ")) ||
-    "Please cancel my booking AB1234.";
+// Run directly (`tsx index.ts`); skipped when a test imports this module.
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("Set OPENAI_API_KEY to run this example.");
+    process.exit(1);
+  }
+  void (async () => {
+    const executors = createAiSdkExecutors({ models });
 
-  let result = await runAgent(customerSupportMachine, {
-    input: { query },
-    executors,
-    onTransition: (snapshot) => console.log(`  → ${String(snapshot.value)}`),
-  });
+    const query =
+      (await promptLine("Ask the airline bot (blank = cancel AB1234) > ")) ||
+      "Please cancel my booking AB1234.";
 
-  if (result.status === "idle") {
-    const snapshot = result.snapshot;
-    const { interaction } = getStateMeta(snapshot);
-    const legalEvents = getAcceptedEvents(snapshot).map((event) => event.type);
-
-    console.log("\n--- Approval required ---");
-    console.log("Pending action:", snapshot.context.pendingAction?.summary);
-    console.log(interaction?.label ?? "");
-    console.log("Legal events:", legalEvents.join(", "));
-
-    const persisted = persistSnapshot(snapshot);
-    const answer = (await promptLine("approve / deny? ")).toLowerCase();
-    const event = answer.startsWith("a")
-      ? ({ type: "APPROVE" } as const)
-      : ({ type: "DENY", reason: await promptLine("Reason: ") } as const);
-
-    result = await runAgent(customerSupportMachine, {
-      snapshot: persisted,
-      event,
+    let result = await runAgent(customerSupportMachine, {
+      input: { query },
       executors,
       onTransition: (snapshot) => console.log(`  → ${String(snapshot.value)}`),
     });
-  }
 
-  if (result.status !== "done") {
-    throw new Error(`Support turn did not complete: ${result.status}`);
-  }
-  console.log("\n--- Result ---");
-  console.log(`[${result.output.resolution}] ${result.output.message}`);
-});
+    if (result.status === "idle") {
+      const snapshot = result.snapshot;
+      const { interaction } = getStateMeta(snapshot);
+      const legalEvents = getAcceptedEvents(snapshot).map((event) => event.type);
+
+      console.log("\n--- Approval required ---");
+      console.log("Pending action:", snapshot.context.pendingAction?.summary);
+      console.log(interaction?.label ?? "");
+      console.log("Legal events:", legalEvents.join(", "));
+
+      const persisted = persistSnapshot(snapshot);
+      const answer = (await promptLine("approve / deny? ")).toLowerCase();
+      const event = answer.startsWith("a")
+        ? ({ type: "APPROVE" } as const)
+        : ({ type: "DENY", reason: await promptLine("Reason: ") } as const);
+
+      result = await runAgent(customerSupportMachine, {
+        snapshot: persisted,
+        event,
+        executors,
+        onTransition: (snapshot) => console.log(`  → ${String(snapshot.value)}`),
+      });
+    }
+
+    if (result.status !== "done") {
+      throw new Error(`Support turn did not complete: ${result.status}`);
+    }
+    console.log("\n--- Result ---");
+    console.log(`[${result.output.resolution}] ${result.output.message}`);
+  })().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

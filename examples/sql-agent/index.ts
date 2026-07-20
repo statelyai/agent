@@ -28,9 +28,8 @@ import {
   runAgent,
   setupAgent,
   type RunAgentOptions,
-} from "../../src/index.js";
-import { defineModels } from "../../src/ai-sdk/index.js";
-import { resolveExecutors, runExampleMain } from "../helpers/main.js";
+} from "@statelyai/agent";
+import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 
 // ─── In-memory sample table (the whole "database") ───
 type Order = { id: number; category: string; amount: number };
@@ -242,7 +241,10 @@ export async function runSqlAgentExample(
   observe?: RunAgentOptions<typeof sqlAgentMachine>["onTransition"],
 ) {
   const { approval = "APPROVE", ...runOptions } = options ?? {};
-  const resolved: RunAgentOptions<typeof sqlAgentMachine> = resolveExecutors(models, runOptions);
+  const resolved: RunAgentOptions<typeof sqlAgentMachine> =
+    runOptions && Object.keys(runOptions).length > 0
+      ? runOptions
+      : { executors: createAiSdkExecutors({ models }) };
 
   const first = await runAgent(sqlAgentMachine, {
     input: { question: "What is the total amount spent on electronics?" },
@@ -268,12 +270,22 @@ export async function runSqlAgentExample(
   return { interaction, output: second.output };
 }
 
-runExampleMain(import.meta.url, async () => {
-  const { interaction, output } = await runSqlAgentExample(undefined, (snapshot) =>
-    console.log("[state]", JSON.stringify(snapshot.value)),
-  );
-  console.log(`Approval prompt: ${interaction?.label}`);
-  console.log(`Plan: ${JSON.stringify(output.plan)}`);
-  console.log(`Result: ${output.result}`);
-  console.log(`\n${output.answer}`);
-});
+// Run directly (`tsx index.ts`); skipped when a test imports this module.
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("Set OPENAI_API_KEY to run this example.");
+    process.exit(1);
+  }
+  void (async () => {
+    const { interaction, output } = await runSqlAgentExample(undefined, (snapshot) =>
+      console.log("[state]", JSON.stringify(snapshot.value)),
+    );
+    console.log(`Approval prompt: ${interaction?.label}`);
+    console.log(`Plan: ${JSON.stringify(output.plan)}`);
+    console.log(`Result: ${output.result}`);
+    console.log(`\n${output.answer}`);
+  })().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

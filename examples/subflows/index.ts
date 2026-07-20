@@ -27,9 +27,8 @@ import {
   runAgent,
   setupAgent,
   type AgentRequestExecutor,
-} from "../../src/index.js";
-import { defineModels } from "../../src/ai-sdk/index.js";
-import { resolveExecutors, runExampleMain } from "../helpers/main.js";
+} from "@statelyai/agent";
+import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 
 export const models = defineModels({
   researcher: openai("gpt-5.4-mini"),
@@ -118,10 +117,11 @@ export async function runSubflowsExample(options?: {
     input: options?.input ?? { topic: "state machines for AI agents" },
     // The child is registered as the `child` actor source in the parent setup;
     // runAgent rebinds its unbound `researchTopic` request with THESE executors
-    // automatically — no nested `.provide` needed. resolveExecutors builds the
-    // real AI SDK executors on a direct run, or forwards the test's injected
-    // `generateText` mock.
-    ...resolveExecutors(models, options?.generateText),
+    // automatically — no nested `.provide` needed. A direct run builds the real
+    // AI SDK executors; a test forwards its injected `generateText` mock.
+    ...(options?.generateText
+      ? { executors: { generateText: options.generateText } }
+      : { executors: createAiSdkExecutors({ models }) }),
     // onTransition sees ONLY the root (parent) machine's transitions.
     ...(options?.onTransition ? { onTransition: options.onTransition } : {}),
     // inspect is the system-wide passthrough: it fires for every actor in the
@@ -136,20 +136,30 @@ export async function runSubflowsExample(options?: {
   return result.output;
 }
 
-runExampleMain(import.meta.url, async () => {
-  // Contrast the two observation channels:
-  //   - onTransition: root machine only (`subflows-parent`).
-  //   - inspect: the WHOLE actor system, so the invoked child machine
-  //     (`subflows-child`) shows up too, attributed by actor id.
-  const output = await runSubflowsExample({
-    onTransition: ({ value }) => console.log(`[onTransition] parent: ${JSON.stringify(value)}`),
-    // inspectTransitions filters the raw inspection stream to transitions and
-    // hands over the typed snapshot + actorRef — no manual @xstate.transition
-    // check or casts.
-    inspect: inspectTransitions((snapshot, actorRef) => {
-      if (snapshot.value === undefined) return;
-      console.log(`[inspect] [${actorRef.id}] ${JSON.stringify(snapshot.value)}`);
-    }),
+// Run directly (`tsx index.ts`); skipped when a test imports this module.
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("Set OPENAI_API_KEY to run this example.");
+    process.exit(1);
+  }
+  void (async () => {
+    // Contrast the two observation channels:
+    //   - onTransition: root machine only (`subflows-parent`).
+    //   - inspect: the WHOLE actor system, so the invoked child machine
+    //     (`subflows-child`) shows up too, attributed by actor id.
+    const output = await runSubflowsExample({
+      onTransition: ({ value }) => console.log(`[onTransition] parent: ${JSON.stringify(value)}`),
+      // inspectTransitions filters the raw inspection stream to transitions and
+      // hands over the typed snapshot + actorRef — no manual @xstate.transition
+      // check or casts.
+      inspect: inspectTransitions((snapshot, actorRef) => {
+        if (snapshot.value === undefined) return;
+        console.log(`[inspect] [${actorRef.id}] ${JSON.stringify(snapshot.value)}`);
+      }),
+    });
+    console.log(`\n${output.research}`);
+  })().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
   });
-  console.log(`\n${output.research}`);
-});
+}

@@ -5,7 +5,9 @@ description: Statically lint, simulate, and explore agent machines without any A
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
 
-Coding agents generate agent machines; they need a closed loop to **self-verify what they generated without any API keys or model calls**. `@statelyai/agent` ships three static/simulated APIs plus a thin CLI for that. Everything runs on `machine.config` and the pure step path: no provider, no network, no keys. An emitted machine (from a prompt, a database, a visual editor) can't be trusted blindly, and running it costs model calls while exercising one path. These APIs check it before it spends a token:
+These APIs answer two questions without spending a token. **Prove an LLM-generated machine is legal before you run it:** lint, reachability, and scripted playthroughs catch dead states and undeliverable decisions statically ([authoring from scratch](quickstart.md)). **Prove a refactor preserved behavior:** `simulateAgent` replays a known outcome deterministically, so a machine converted [from a loop](from-a-loop.md) can be pinned before it ships.
+
+Coding agents generate agent machines; they need a closed loop to **self-verify what they generated without any API keys or model calls**. `@statelyai/agent` ships three static/simulated APIs for that. Everything runs on `machine.config` and the pure step path: no provider, no network, no keys. An emitted machine (from a prompt, a database, a visual editor) can't be trusted blindly, and running it costs model calls while exercising one path. These APIs check it before it spends a token:
 
 - catch dead states, undeliverable decisions, and output-contract gaps statically;
 - drive a scripted playthrough to a known outcome deterministically;
@@ -24,7 +26,7 @@ if (errors.length) {
 }
 ```
 
-For a one-liner that throws instead of returning findings, use `assertAgentMachine(machine, options?)`: silent when clean, throws `AgentLintError` (findings on `.diagnostics`, message formatted like the CLI report) on any error-severity finding. `warnings: true` fails warnings too; `disable` skips checks, same as `lintAgentMachine`.
+For a one-liner that throws instead of returning findings, use `assertAgentMachine(machine, options?)`: silent when clean, throws `AgentLintError` (findings on `.diagnostics`) on any error-severity finding. `warnings: true` fails warnings too; `disable` skips checks, same as `lintAgentMachine`.
 
 | Code                       | Severity | Fires when                                                                                                                                                                                                                                                                          |
 | -------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -91,7 +93,15 @@ const { status, snapshot, trail } = await simulateAgent(machine, {
 // status: 'done' | 'idle' | 'exhausted'
 ```
 
-Returns `{ status, snapshot, trail }`. It throws a descriptive error (naming the pending request's kind, src, and id) when the script runs dry mid-request, so a missing response is obvious.
+Returns `{ status, snapshot, trail }`. For a `'done'` run, the machine's output lives on `snapshot.output`. `SimulateAgentResult.snapshot` is typed as the generic `AnyMachineSnapshot`, so `.output` is `unknown` and needs a cast to your output type:
+
+```ts
+if (result.status === "done") {
+  const output = result.snapshot.output as { correct: boolean };
+}
+```
+
+It throws a descriptive error (naming the pending request's kind, src, and id) when the script runs dry mid-request, so a missing response is obvious.
 
 ## `await explorePaths(machine, { input, maxDepth?, textOutputs? })`
 
@@ -123,14 +133,18 @@ const { canReach: ok, witness } = await canReach(refundMachine, "denied", {
 // ok → true; witness → [{ type: 'NEEDS_REVIEW' }, { type: 'DENY' }]
 ```
 
-## CLI
+## Checking machines in CI
 
-For machines authored as data (see [machines as data](machines-as-data)), a thin `statelyai-agent lint` binary lints a JSON config:
+Everything on this page runs without an API key, so a small script is enough for CI or a generation loop:
 
-```bash
-npx statelyai-agent lint workflow.json
+```ts
+// check.ts — run with: npx tsx check.ts
+import { assertAgentMachine } from "@statelyai/agent";
+import { machine } from "./machine";
+
+assertAgentMachine(machine); // throws AgentLintError on error-severity findings
 ```
 
-The library bundles no JSON Schema engine, so the CLI lints **structure only**: it compiles the config with a permissive pass-through compiler and runs `lintAgentMachine`. It exits `1` on any error-severity finding, so drop it into CI or a generation loop. For full schema-aware linting, use the API with a real compiler: `lintAgentMachine(setupAgent.fromConfig(config, { compileSchema }))`.
+For machines authored as data (see [machines as data](machines-as-data)), lower the config first: `assertAgentMachine(setupAgent.fromConfig(config, { compileSchema }))`.
 
 Because `fromConfig` lowers every transition to a function, `unreachable-state` is over-approximated for config machines; the other checks are unaffected.

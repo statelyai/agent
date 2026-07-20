@@ -1,12 +1,12 @@
 import { describe, expect, test } from "vitest";
-import { runAgent } from "../../src/index.js";
+import { runAgent } from "@statelyai/agent";
 import type {
   AgentDecisionRequest,
   AgentMessage,
   AgentRequestExecutor,
   AgentUserInput,
   ChosenEvent,
-} from "../../src/index.js";
+} from "@statelyai/agent";
 import { twentyQuestionsMachine } from "./index.js";
 
 function textContent(message: AgentMessage | undefined) {

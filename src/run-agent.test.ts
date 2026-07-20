@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createActor, createAsyncLogic, setup, toPromise } from "xstate";
 import { createDecisionLogic } from "./decision.js";
 import {
+  AGENT_TRACE_SCHEMA_VERSION,
   AgentIdleError,
   createAgentSchemas,
   createTextLogic,
@@ -1700,10 +1701,12 @@ describe("emitted events (runAgent `on`)", () => {
       }),
     );
 
-    // Every trace event carries the run's identity (version === structural hash).
+    // Every trace event carries the run's identity (version === structural hash)
+    // and the versioned schema stamp.
     const version = getMachineStructuralHash(machine);
     expect(trace.length).toBeGreaterThan(0);
     for (const event of trace) {
+      expect(event.schemaVersion).toBe(AGENT_TRACE_SCHEMA_VERSION);
       expect(event.machineId).toEqual(expect.any(String));
       expect(event.machineVersion).toBe(version);
     }
@@ -1960,6 +1963,36 @@ describe("inspect passthrough (system-wide visibility)", () => {
       .map((entry) => entry.value);
     expect(childValues).toContain("working");
     expect(childValues).toContain("finished");
+  });
+
+  test("inspect accepts an observer object ({ next }), like createActor", async () => {
+    const machine = setupAgent({
+      context: z.object({}),
+      output: z.object({ ok: z.boolean() }),
+    }).createMachine({
+      id: "observed",
+      context: {},
+      initial: "working",
+      states: {
+        working: {
+          invoke: {
+            src: createAsyncLogic({ run: async () => "done" }),
+            onDone: { target: "finished" },
+          },
+        },
+        finished: { type: "final", output: () => ({ ok: true }) },
+      },
+    });
+
+    const seen: string[] = [];
+    const result = await runAgent(machine, {
+      // The @statelyai/inspect shape: an observer, not a function.
+      inspect: { next: (event) => seen.push(event.type) },
+      executors: { generateText: async () => ({ output: "" }) },
+    });
+
+    expect(result.status).toBe("done");
+    expect(seen).toContain("@xstate.transition");
   });
 });
 

@@ -29,9 +29,8 @@
 import { z } from "zod";
 import { tool } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
-import { runAgent, setupAgent, type AgentRequestExecutors } from "../../src/index.js";
-import { resolveExecutors, runExampleMain } from "../helpers/main.js";
+import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
 
 export const models = defineModels({
   assistant: openai("gpt-5.4-mini"),
@@ -171,7 +170,9 @@ export async function runToolCallingExample(
   const progress: string[] = [];
   const result = await runAgent(toolCallingMachine, {
     input: { query },
-    ...resolveExecutors(models, generateText),
+    ...(generateText
+      ? { executors: { generateText } }
+      : { executors: createAiSdkExecutors({ models }) }),
     onTransition: (snapshot) => {
       const state = String(snapshot.value);
       progress.push(state);
@@ -185,16 +186,26 @@ export async function runToolCallingExample(
   return { ...result.output, progress };
 }
 
-runExampleMain(import.meta.url, async () => {
-  const { generateText } = createAiSdkExecutors({ models });
+// Run directly (`tsx index.ts`); skipped when a test imports this module.
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("Set OPENAI_API_KEY to run this example.");
+    process.exit(1);
+  }
+  void (async () => {
+    const { generateText } = createAiSdkExecutors({ models });
 
-  const query = "How many miles is 10 kilometers?";
-  const result = await runToolCallingExample({
-    query,
-    generateText,
-    onProgress: (state) => console.log(`  → ${state}`),
+    const query = "How many miles is 10 kilometers?";
+    const result = await runToolCallingExample({
+      query,
+      generateText,
+      onProgress: (state) => console.log(`  → ${state}`),
+    });
+
+    console.log("Query:", query);
+    console.log("Answer:", result.finalAnswer);
+  })().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
   });
-
-  console.log("Query:", query);
-  console.log("Answer:", result.finalAnswer);
-});
+}

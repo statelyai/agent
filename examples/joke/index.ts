@@ -15,10 +15,8 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { defineModels } from "../../src/ai-sdk/index.js";
-import { promptLine } from "../helpers/cli.js";
-import { createAgentSchemas, createTextLogic, runAgent, setupAgent } from "../../src/index.js";
-import { resolveExecutors, runExampleMain } from "../helpers/main.js";
+import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAgentSchemas, createTextLogic, runAgent, setupAgent } from "@statelyai/agent";
 
 const DEFAULT_TOPIC = "state machines";
 
@@ -167,6 +165,17 @@ export const jokeMachine = jokeAgentSetup.createMachine({
   },
 });
 
+/** Prompt once on stdin and resolve the trimmed reply. */
+async function promptLine(query: string): Promise<string> {
+  const { createInterface } = await import("node:readline/promises");
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return (await rl.question(query)).trim();
+  } finally {
+    rl.close();
+  }
+}
+
 async function promptTopic(): Promise<string> {
   return (await promptLine("Give me a joke topic > ")) || DEFAULT_TOPIC;
 }
@@ -176,7 +185,7 @@ export async function main() {
 
   const result = await runAgent(jokeMachine, {
     input: { topic },
-    ...resolveExecutors(models, undefined),
+    executors: createAiSdkExecutors({ models }),
     onChunk: (chunk) => process.stdout.write(chunk),
     onTransition: (snapshot) => {
       const value = snapshot.value;
@@ -194,4 +203,14 @@ export async function main() {
   );
 }
 
-runExampleMain(import.meta.url, main);
+// Run directly (`tsx index.ts`); skipped when a test imports this module.
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("Set OPENAI_API_KEY to run this example.");
+    process.exit(1);
+  }
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

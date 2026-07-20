@@ -28,9 +28,8 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
-import { createAgentSchemas, runAgent, setupAgent } from "../../src/index.js";
-import { runExampleMain } from "../helpers/main.js";
+import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAgentSchemas, runAgent, setupAgent } from "@statelyai/agent";
 
 const models = defineModels({
   quick: openai("gpt-5.4-mini"),
@@ -302,4 +301,14 @@ export async function main() {
   console.log(result.output);
 }
 
-runExampleMain(import.meta.url, main);
+// Run directly (`tsx index.ts`); skipped when a test imports this module.
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("Set OPENAI_API_KEY to run this example.");
+    process.exit(1);
+  }
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

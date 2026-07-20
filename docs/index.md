@@ -29,6 +29,12 @@ A [decision](decisions.md) is where this matters most: the model chooses exactly
 
 Unlike a hand-rolled `while` loop or a graph framework, control flow is a state machine you can inspect, test, and resume, and the model can only ever pick a legal event. See [how this compares](comparison.md).
 
+## Three ways in
+
+- **Author a new agent.** Describe states, decisions, and typed requests, run locally with `runAgent`, then test and inspect it with no API key. Eject to any framework or runtime via `provideExecutors` with zero machine changes. Start at the [Quickstart](quickstart.md), then [Eject to your stack](eject.md).
+- **Retrofit an existing agent.** Have a `while` loop or tangled control flow? Your existing SDK calls, tools, and retry code become the executors; the machine replaces only the control flow and runs in your existing setup. See [Migrating from a loop](from-a-loop.md).
+- **Copy a known pattern.** ReAct, reflection, plan-and-execute, RAG, supervisor, swarm handoff, and more, each a single runnable file you lift in 60 seconds. Browse [Agent patterns](patterns.md).
+
 ## A quick teaser
 
 <!-- setup + invoke + run; full walkthrough lives in quickstart.md -->
@@ -100,6 +106,7 @@ If something here blocks you, or the API surface feels wrong, open an issue. Thi
 ## Documentation map
 
 - [Quickstart](quickstart.md): install and run your first agent machine end to end.
+- [Eject to your stack](eject.md): one machine, three hosts (local, Express, Cloudflare), zero machine changes.
 - [Agent machines](machines.md): `setupAgent`, states, invokes, typed context, and guards.
 - [Decisions](decisions.md): the model choosing exactly one currently-legal machine event.
 - [Plans](plans.md): the multi-event decision, `agent.plan`.
@@ -107,7 +114,10 @@ If something here blocks you, or the API surface feels wrong, open an issue. Thi
 - [Messages](messages.md): the parts-based `AgentMessage` model.
 - [Human in the loop](human-in-the-loop.md): idle-first pauses and resuming by snapshot.
 - [Hosts](hosts.md): executors, the AI SDK adapter, and writing your own.
+- [Observability](observability.md): the Stately Inspector locally, and the trace stream to OpenTelemetry in production.
 - [Steps](steps.md): the lower-level step path for durable hosts.
 - [Machines as data](machines-as-data.md): authoring an agent machine as JSON.
 - [Multi-agent](multi-agent.md): sub-agents and child actors.
+- [Migrating from a loop](from-a-loop.md): convert a hand-rolled `while` loop into an agent machine.
+- [Agent patterns](patterns.md): ReAct, reflection, RAG, supervisor, and more as copy-paste machines.
 - [Examples](examples.md): a curated index of runnable examples.

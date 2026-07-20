@@ -25,9 +25,8 @@ import { createActor, createAsyncLogic, waitFor } from "xstate";
 import { createWebSocketInspector } from "@statelyai/inspect";
 import { createInspectorServer } from "@statelyai/inspect/server";
 import { confirm, input as textInput, select } from "@inquirer/prompts";
-import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
-import { getStateMeta, parseAgentEvent } from "../../src/index.js";
-import { runExampleMain } from "../helpers/main.js";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
+import { getStateMeta, parseAgentEvent } from "@statelyai/agent";
 import {
   draftEmail,
   emailDrafter,
@@ -199,4 +198,10 @@ export async function main() {
   }
 }
 
-runExampleMain(import.meta.url, main, { requireEnv: false });
+// Run directly (`tsx index.ts`); skipped when a test imports this module.
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

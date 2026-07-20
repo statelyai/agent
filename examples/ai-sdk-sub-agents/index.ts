@@ -17,9 +17,8 @@ import {
   type LanguageModel,
 } from "ai";
 import { z } from "zod";
-import { setupAgent, type AgentTool, type AgentToolExecute, runAgent } from "../../src/index.js";
-import { defineModels } from "../../src/ai-sdk/index.js";
-import { resolveExecutors, runExampleMain } from "../helpers/main.js";
+import { setupAgent, type AgentTool, type AgentToolExecute, runAgent } from "@statelyai/agent";
+import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 
 const answerSchema = z.object({ answer: z.string() });
 const taskInputSchema = z.object({ task: z.string() });
@@ -144,7 +143,7 @@ export async function runAiSdkSubAgentsDemo(task: string) {
   const result = await runAgent(machine, {
     input: { task },
     onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
-    ...resolveExecutors(models, undefined),
+    executors: createAiSdkExecutors({ models }),
   });
   if (result.status !== "done") {
     throw new Error(`Sub-agents demo did not complete: ${result.status}`);
@@ -200,6 +199,16 @@ export async function runAiSdkSubAgentsDeterministicExample() {
   });
 }
 
-runExampleMain(import.meta.url, async () => {
-  console.log(await runAiSdkSubAgentsDemo("Explain composable agents."));
-});
+// Run directly (`tsx index.ts`); skipped when a test imports this module.
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("Set OPENAI_API_KEY to run this example.");
+    process.exit(1);
+  }
+  void (async () => {
+    console.log(await runAiSdkSubAgentsDemo("Explain composable agents."));
+  })().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

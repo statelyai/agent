@@ -1,6 +1,6 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
-import type { AgentTextRequest } from "../../src/index.js";
+import type { AgentTextRequest } from "@statelyai/agent";
 import { runSupervisorExample } from "./index.js";
 
 test("supervisor routes a request to one typed specialist and composes the result", async () => {

@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { Message } from "@anthropic-ai/sdk/resources/messages.js";
-import { getJsonSchemaSync, runAgent } from "../../src/index.js";
-import type { AgentMessage } from "../../src/index.js";
+import { getJsonSchemaSync, runAgent } from "@statelyai/agent";
+import type { AgentMessage } from "@statelyai/agent";
 import {
   createAnthropicExecutors,
   toAnthropicCallSettings,

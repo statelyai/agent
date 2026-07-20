@@ -27,13 +27,13 @@ export interface WireTool {
   };
 }
 
-export interface WireToolCall {
+interface WireToolCall {
   id?: string;
   type?: string;
   function?: { name?: string; arguments?: string };
 }
 
-export interface WireChoice {
+interface WireChoice {
   message?: { content?: string | null; tool_calls?: WireToolCall[] };
   delta?: { content?: string | null };
   finish_reason?: string | null;

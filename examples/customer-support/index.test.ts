@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import type { AgentTool } from "../../src/index.js";
+import type { AgentTool } from "@statelyai/agent";
 import { customerSupportMachine, runCustomerSupportExample } from "./index.js";
 
 // Mock host: routes on `request.name` (the setupAgent request key). The

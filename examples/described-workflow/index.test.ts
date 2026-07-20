@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { AgentMessage } from "../../src/index.js";
+import type { AgentMessage } from "@statelyai/agent";
 import { runDescribedWorkflowExample } from "./index.js";
 
 describe("described-workflow", () => {

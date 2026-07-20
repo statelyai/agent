@@ -26,7 +26,7 @@
 import { useRef, useState, useSyncExternalStore } from "react";
 import { createActor, type Actor, type SnapshotFrom } from "xstate";
 import { z } from "zod";
-import { provideExecutors, setupAgent, type AgentRequestExecutors } from "../../src/index.js";
+import { provideExecutors, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
 
 // ─── The machine: stream a draft → wait for the human → publish ───
 

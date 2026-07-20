@@ -18,9 +18,8 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { runAgent, setupAgent, type RunAgentOptions } from "../../src/index.js";
-import { defineModels } from "../../src/ai-sdk/index.js";
-import { resolveExecutors, runExampleMain } from "../helpers/main.js";
+import { runAgent, setupAgent, type RunAgentOptions } from "@statelyai/agent";
+import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 
 export const models = defineModels({
   thinker: openai("gpt-5.4-mini"),
@@ -121,7 +120,9 @@ export async function runParallelStreamsExample(
       buffers[request.id] = (buffers[request.id] ?? "") + chunk;
     },
     onTransition: observe,
-    ...resolveExecutors(models, options),
+    ...(options && Object.keys(options).length > 0
+      ? options
+      : { executors: createAiSdkExecutors({ models }) }),
   });
 
   if (result.status !== "done") {
@@ -130,10 +131,20 @@ export async function runParallelStreamsExample(
   return { output: result.output, buffers };
 }
 
-runExampleMain(import.meta.url, async () => {
-  const { buffers } = await runParallelStreamsExample(undefined, (snapshot) =>
-    console.log("[state]", JSON.stringify(snapshot.value)),
-  );
-  console.log("[thinker]\n" + buffers.thinker);
-  console.log("\n[poet]\n" + buffers.poet);
-});
+// Run directly (`tsx index.ts`); skipped when a test imports this module.
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("Set OPENAI_API_KEY to run this example.");
+    process.exit(1);
+  }
+  void (async () => {
+    const { buffers } = await runParallelStreamsExample(undefined, (snapshot) =>
+      console.log("[state]", JSON.stringify(snapshot.value)),
+    );
+    console.log("[thinker]\n" + buffers.thinker);
+    console.log("\n[poet]\n" + buffers.poet);
+  })().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

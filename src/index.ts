@@ -31,12 +31,14 @@ export {
   transitionAgentStep,
 } from "./steps.js";
 export {
+  AGENT_TRACE_SCHEMA_VERSION,
   AgentIdleError,
   IllegalResumeEventError,
   inspectTransitions,
   runAgent,
   runAgentToCompletion,
   SnapshotVersionMismatchError,
+  traceTransitions,
 } from "./run-agent.js";
 export { provideExecutors } from "./provide-executors.js";
 export type { ProvideExecutorsOptions } from "./provide-executors.js";

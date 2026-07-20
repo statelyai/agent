@@ -25,7 +25,7 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { defineModels } from "../../src/ai-sdk/index.js";
+import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 import {
   getAcceptedEvents,
   getStateMeta,
@@ -33,9 +33,7 @@ import {
   runAgent,
   setupAgent,
   type AgentRequestExecutors,
-} from "../../src/index.js";
-import { promptLine } from "../helpers/cli.js";
-import { resolveExecutors, runExampleMain } from "../helpers/main.js";
+} from "@statelyai/agent";
 
 export const models = defineModels({
   writer: openai("gpt-5.4-mini"),
@@ -144,7 +142,9 @@ export async function runHumanInTheLoopExample(
   options: RunHumanInTheLoopOptions = {},
 ): Promise<HumanInTheLoopResult> {
   const { topic = "the new deploy pipeline", generateText } = options;
-  const executors = resolveExecutors(models, generateText);
+  const executors = generateText
+    ? { executors: { generateText } }
+    : { executors: createAiSdkExecutors({ models }) };
 
   // Phase 1: draft, then settle idle at `reviewing`.
   const first = await runAgent(humanInTheLoopMachine, { input: { topic }, ...executors });
@@ -180,46 +180,67 @@ export async function runHumanInTheLoopExample(
 // `reviewing`, prints the draft, and asks the human. REJECT feeds a reason back
 // into a fresh draft (loop again); APPROVE publishes. Every resume is fed a
 // persisted snapshot, so the JSON round-trip is exercised on each turn.
-runExampleMain(import.meta.url, async () => {
-  const executors = resolveExecutors(models, undefined);
-  let result = await runAgent(humanInTheLoopMachine, {
-    input: { topic: "the new deploy pipeline" },
-    ...executors,
-  });
+/** Prompt once on stdin and resolve the trimmed reply. */
+async function promptLine(query: string): Promise<string> {
+  const { createInterface } = await import("node:readline/promises");
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return (await rl.question(query)).trim();
+  } finally {
+    rl.close();
+  }
+}
 
-  while (result.status === "idle") {
-    const snapshot = result.snapshot;
-    const { interaction } = getStateMeta(snapshot);
-    const legalEvents = getAcceptedEvents(snapshot).map((event) => event.type);
-
-    console.log("\n--- Draft for review ---");
-    console.log(snapshot.context.draft ?? "");
-    console.log("\n" + (interaction?.label ?? ""));
-    console.log("Legal events:", legalEvents.join(", "));
-
-    const persisted = persistSnapshot(snapshot);
-    const answer = (await promptLine("approve / reject? ")).toLowerCase();
-
-    if (answer.startsWith("a")) {
-      result = await runAgent(humanInTheLoopMachine, {
-        snapshot: persisted,
-        event: { type: "APPROVE" },
-        ...executors,
-      });
-      break;
-    }
-
-    const reason = await promptLine("Reason for rejection: ");
-    result = await runAgent(humanInTheLoopMachine, {
-      snapshot: persisted,
-      event: { type: "REJECT", reason },
+// Run directly (`tsx index.ts`); skipped when a test imports this module.
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("Set OPENAI_API_KEY to run this example.");
+    process.exit(1);
+  }
+  void (async () => {
+    const executors = { executors: createAiSdkExecutors({ models }) };
+    let result = await runAgent(humanInTheLoopMachine, {
+      input: { topic: "the new deploy pipeline" },
       ...executors,
     });
-  }
 
-  if (result.status !== "done") {
-    throw new Error(`Expected done after APPROVE, got '${result.status}'.`);
-  }
-  console.log("\n--- Published ---");
-  console.log(result.output.draft);
-});
+    while (result.status === "idle") {
+      const snapshot = result.snapshot;
+      const { interaction } = getStateMeta(snapshot);
+      const legalEvents = getAcceptedEvents(snapshot).map((event) => event.type);
+
+      console.log("\n--- Draft for review ---");
+      console.log(snapshot.context.draft ?? "");
+      console.log("\n" + (interaction?.label ?? ""));
+      console.log("Legal events:", legalEvents.join(", "));
+
+      const persisted = persistSnapshot(snapshot);
+      const answer = (await promptLine("approve / reject? ")).toLowerCase();
+
+      if (answer.startsWith("a")) {
+        result = await runAgent(humanInTheLoopMachine, {
+          snapshot: persisted,
+          event: { type: "APPROVE" },
+          ...executors,
+        });
+        break;
+      }
+
+      const reason = await promptLine("Reason for rejection: ");
+      result = await runAgent(humanInTheLoopMachine, {
+        snapshot: persisted,
+        event: { type: "REJECT", reason },
+        ...executors,
+      });
+    }
+
+    if (result.status !== "done") {
+      throw new Error(`Expected done after APPROVE, got '${result.status}'.`);
+    }
+    console.log("\n--- Published ---");
+    console.log(result.output.draft);
+  })().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

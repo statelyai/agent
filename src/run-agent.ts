@@ -173,7 +173,18 @@ export interface AgentMessageInfo {
   machineVersion: string;
 }
 
+/**
+ * The version of the {@link AgentTraceEvent} envelope every trace event carries
+ * as `schemaVersion`. Bumped only on a breaking change to the envelope or any
+ * payload shape, so a consumer can gate on it. Emitted identically by
+ * {@link runAgent}, {@link provideExecutors}' `onTrace`, and
+ * {@link traceTransitions}.
+ */
+export const AGENT_TRACE_SCHEMA_VERSION = 1;
+
 export type AgentTraceEvent<TMachine extends AnyStateMachine = AnyStateMachine> = {
+  /** The {@link AGENT_TRACE_SCHEMA_VERSION} the event was produced with. */
+  schemaVersion: typeof AGENT_TRACE_SCHEMA_VERSION;
   runId: string;
   seq: number;
   timestamp: string;
@@ -233,7 +244,10 @@ export type AgentTraceEvent<TMachine extends AnyStateMachine = AnyStateMachine> 
 type AgentTraceEventPayload<TMachine extends AnyStateMachine = AnyStateMachine> =
   AgentTraceEvent<TMachine> extends infer TEvent
     ? TEvent extends unknown
-      ? Omit<TEvent, "runId" | "seq" | "timestamp" | "machineId" | "machineVersion">
+      ? Omit<
+          TEvent,
+          "schemaVersion" | "runId" | "seq" | "timestamp" | "machineId" | "machineVersion"
+        >
       : never
     : never;
 
@@ -436,8 +450,14 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
    * Purely observational, like the other callbacks. Unlike them it also
    * fires during the final settle (a child's last transition and stop events
    * arrive while the run is tearing down).
+   *
+   * Accepts a function or an observer (`{ next }`), matching `createActor`'s
+   * `inspect` option, so `@statelyai/inspect`'s `inspector.inspect` plugs in
+   * directly.
    */
-  inspect?: (inspectionEvent: InspectionEvent) => void;
+  inspect?:
+    | ((inspectionEvent: InspectionEvent) => void)
+    | { next?: (inspectionEvent: InspectionEvent) => void };
 
   // control
   /** Caps the number of model/decision calls this run may make (each retry of a decision counts separately); exceeding it settles `{ status: 'error', cause: 'max-model-calls' }`. Default 100. */
@@ -827,13 +847,21 @@ function unrebindableChildRequestError(
 }
 
 // Shared state closed over by every wrapped actor source in one runAgent call: executors, observation callbacks, and the shared model-call budget/actor ref.
+/** @internal */
 interface RunAgentBindContext {
   generateText?: AgentRequestExecutor;
   streamText?: AgentRequestExecutor;
   decide?: AgentDecisionExecutor;
   onChunk?: (chunk: string, info: { request: AgentRequest }) => void;
   onResult?: (request: AgentStepRequest, result: { output: unknown; raw: unknown }) => void;
-  onTrace?: (event: AgentTraceEventPayload) => void;
+  /**
+   * Payload-level trace sink: the shared emission helpers hand it a bare
+   * {@link AgentTraceEventPayload} plus the emitting actor's `self` (the invoked
+   * async leaf). `runAgent` ignores `self` and stamps a run-scoped envelope;
+   * `provideExecutors` uses it to mint a per-root-actor envelope (see
+   * `provideTraceSink`).
+   */
+  onTrace?: (event: AgentTraceEventPayload, self?: unknown) => void;
   consumeModelCall: () => void;
   /** Assigned right after createActor (§2.6); read lazily by decision wraps. */
   actorHolder: { actorRef: AnyActorRef | undefined };
@@ -864,6 +892,13 @@ function invokingActorOf(self: unknown, runCtx: RunAgentBindContext): AnyActorRe
   return parent ?? runCtx.actorHolder.actorRef;
 }
 
+/**
+ * The shared text/stream emission helper: binds a {@link TextLogic} to
+ * `runCtx`'s executor and constructs the `request.start` / `stream.chunk` /
+ * `request.end` (incl. the lifted `reasoning`) / `request.error` trace payloads.
+ * Used by both `runAgent` and `provideExecutors` so the two paths produce
+ * identical event shapes by construction. @internal
+ */
 function wrapTextLogicForRunAgent(logic: TextLogic, runCtx: RunAgentBindContext): TextLogic {
   return logic.withExecutor(async ({ request, self, signal }) => {
     const { id, src } = selfIdAndSrc(self);
@@ -890,11 +925,11 @@ function wrapTextLogicForRunAgent(logic: TextLogic, runCtx: RunAgentBindContext)
     };
 
     runCtx.consumeModelCall();
-    runCtx.onTrace?.({ type: "request.start", request: agentRequest });
+    runCtx.onTrace?.({ type: "request.start", request: agentRequest }, self);
     try {
       const raw = await executor(requestWithTools, {
         onChunk: (chunk: string) => {
-          runCtx.onTrace?.({ type: "stream.chunk", request: agentRequest, chunk });
+          runCtx.onTrace?.({ type: "stream.chunk", request: agentRequest, chunk }, self);
           runCtx.onChunk?.(chunk, { request: agentRequest });
         },
         signal,
@@ -902,7 +937,7 @@ function wrapTextLogicForRunAgent(logic: TextLogic, runCtx: RunAgentBindContext)
       const output = await normalizeGeneratorResult(raw, id, {
         request,
         onChunk: (chunk: string) => {
-          runCtx.onTrace?.({ type: "stream.chunk", request: agentRequest, chunk });
+          runCtx.onTrace?.({ type: "stream.chunk", request: agentRequest, chunk }, self);
           runCtx.onChunk?.(chunk, { request: agentRequest });
         },
       });
@@ -913,40 +948,48 @@ function wrapTextLogicForRunAgent(logic: TextLogic, runCtx: RunAgentBindContext)
       const reasoning = typeof rawReasoning === "string" ? rawReasoning : undefined;
 
       runCtx.onResult?.(agentRequest, { output, raw });
-      runCtx.onTrace?.({
-        type: "request.end",
-        request: agentRequest,
-        output,
-        raw,
-        ...(reasoning !== undefined ? { reasoning } : {}),
-      });
+      runCtx.onTrace?.(
+        {
+          type: "request.end",
+          request: agentRequest,
+          output,
+          raw,
+          ...(reasoning !== undefined ? { reasoning } : {}),
+        },
+        self,
+      );
 
       return { output };
     } catch (error) {
-      runCtx.onTrace?.({ type: "request.error", request: agentRequest, error });
+      runCtx.onTrace?.({ type: "request.error", request: agentRequest, error }, self);
       throw error;
     }
   });
 }
 
 // Wraps runCtx's `decide` executor with model-call budgeting and tracing —
-// shared by the decision and plan wrappers.
-function createCountingDecide(runCtx: RunAgentBindContext): AgentDecisionExecutor {
+// shared by the decision and plan wrappers. `self` is the invoking decision/plan
+// leaf actor, threaded to `onTrace` so the provide path can attribute the event
+// to its root actor.
+function createCountingDecide(runCtx: RunAgentBindContext, self: unknown): AgentDecisionExecutor {
   return async (attemptRequest) => {
     runCtx.consumeModelCall();
-    runCtx.onTrace?.({ type: "request.start", request: attemptRequest });
+    runCtx.onTrace?.({ type: "request.start", request: attemptRequest }, self);
     try {
       const result = await runCtx.decide!(attemptRequest);
       runCtx.onResult?.(attemptRequest, { output: result.event, raw: result });
-      runCtx.onTrace?.({
-        type: "request.end",
-        request: attemptRequest,
-        output: result.event,
-        raw: result,
-      });
+      runCtx.onTrace?.(
+        {
+          type: "request.end",
+          request: attemptRequest,
+          output: result.event,
+          raw: result,
+        },
+        self,
+      );
       return result;
     } catch (error) {
-      runCtx.onTrace?.({ type: "request.error", request: attemptRequest, error });
+      runCtx.onTrace?.({ type: "request.error", request: attemptRequest, error }, self);
       throw error;
     }
   };
@@ -1007,7 +1050,7 @@ function createRunAgentDecisionLogic(
 
       const request: AgentDecisionRequest = { ...logic.request(input as never), id, events };
 
-      const chosen = await resolveDecision(request, createCountingDecide(runCtx), {
+      const chosen = await resolveDecision(request, createCountingDecide(runCtx, self), {
         maxRetries: logic.maxRetries,
         signal,
         canTake: (event) =>
@@ -1063,7 +1106,7 @@ function createRunAgentPlanLogic(logic: PlanLogic, runCtx: RunAgentBindContext):
       }
       const { id } = selfIdAndSrc(self);
       const stopOn = new Set<string>(input.stopOn ?? []);
-      const countingDecide = createCountingDecide(runCtx);
+      const countingDecide = createCountingDecide(runCtx, self);
       const base = logic.request(input);
 
       // All bookkeeping (applied trail + remaining budget) rides the shared
@@ -1191,22 +1234,106 @@ export function getConfiguredInvokeSrcs(machine: AnyStateMachine): Set<string> {
   return srcs;
 }
 
+// ─── Uncontrolled-path (provideExecutors) trace envelope ───
+//
+// `provideExecutors` binds a machine ONCE, but the returned machine can back
+// many concurrent root actors. Envelope state (runId + monotonic seq) is
+// therefore minted per ROOT actor at runtime and held in a module-level
+// WeakMap, keyed on the root actor ref (walk `self._parent` to the top). Both
+// the request-level trace (below) and {@link traceTransitions} read the same
+// registry, so their events form ONE ordered `seq` stream per root actor.
+
+interface RootTraceState {
+  runId: string;
+  seq: number;
+  machineId: string;
+  machineVersion: string;
+}
+
+const rootTraceRegistry = new WeakMap<object, RootTraceState>();
+let nextProvideRunId = 1;
+
+/** Walks `self._parent` from an invoked async leaf actor up to its root actor. */
+function rootActorOf(self: unknown): AnyActorRef | undefined {
+  let ref = self as { _parent?: unknown } | undefined;
+  if (!ref) {
+    return undefined;
+  }
+  while ((ref as { _parent?: unknown })._parent) {
+    ref = (ref as { _parent?: unknown })._parent as { _parent?: unknown };
+  }
+  return ref as unknown as AnyActorRef;
+}
+
+/** The per-root envelope state, minted on first use (runId `run_<n>`, matching runAgent). */
+function rootTraceState(root: AnyActorRef): RootTraceState {
+  let state = rootTraceRegistry.get(root as object);
+  if (!state) {
+    const logic = (root as { logic?: AnyStateMachine }).logic;
+    const machineId =
+      (logic?.config as { id?: string } | undefined)?.id ?? logic?.id ?? "(machine)";
+    const machineVersion = logic ? getMachineStructuralHash(logic) : "";
+    state = { runId: `run_${nextProvideRunId++}`, seq: 0, machineId, machineVersion };
+    rootTraceRegistry.set(root as object, state);
+  }
+  return state;
+}
+
+/** Stamps a per-root-actor envelope onto a bare trace payload. */
+function stampRootTrace(root: AnyActorRef, payload: AgentTraceEventPayload): AgentTraceEvent {
+  const state = rootTraceState(root);
+  return {
+    schemaVersion: AGENT_TRACE_SCHEMA_VERSION,
+    runId: state.runId,
+    seq: ++state.seq,
+    timestamp: new Date().toISOString(),
+    machineId: state.machineId,
+    machineVersion: state.machineVersion,
+    ...payload,
+  } as AgentTraceEvent;
+}
+
+/** Adapts a public `onTrace` into the payload-level {@link RunAgentBindContext.onTrace} sink used by the shared emission helpers. */
+function provideTraceSink(
+  onTrace?: (event: AgentTraceEvent) => void,
+): RunAgentBindContext["onTrace"] {
+  if (!onTrace) {
+    return undefined;
+  }
+  return (payload, self) => {
+    const root = rootActorOf(self);
+    if (root) {
+      onTrace(stampRootTrace(root, payload));
+    }
+  };
+}
+
+/** Options threaded into the `provideExecutors` bind helpers. @internal */
+export interface ProvideBindOptions {
+  onChunk?: (chunk: string) => void;
+  onTrace?: (event: AgentTraceEvent) => void;
+}
+
 /**
  * A minimal {@link RunAgentBindContext} for `provideExecutors` (uncontrolled
- * `createActor`): the same decision/plan wrappers runAgent installs, MINUS the
- * run-scoped model-call counter and the onTrace/onResult/onChunk observation.
- * `consumeModelCall` is a no-op (no budget), and `actorHolder.actorRef` is left
- * undefined — the wrappers read the invoking actor off `self._parent`, which is
- * always present under a live `createActor` tree. `schemas` come from the
- * machine's registered `setupAgent` execution options (for event `inputSchema`s).
- * @internal
+ * `createActor`): the same wrappers runAgent installs, MINUS the run-scoped
+ * model-call counter. `consumeModelCall` is a no-op (no budget), and
+ * `actorHolder.actorRef` is left undefined — the wrappers read the invoking
+ * actor off `self._parent`, always present under a live `createActor` tree.
+ * `onTrace` (when given) mints a per-root-actor envelope. `schemas` come from
+ * the machine's registered `setupAgent` execution options.
  */
 function provideBindContext(
   machine: AnyStateMachine,
-  decide: AgentDecisionExecutor,
+  executors: Partial<AgentRequestExecutors>,
+  options: ProvideBindOptions,
 ): RunAgentBindContext {
   return {
-    decide,
+    generateText: executors.generateText,
+    streamText: executors.streamText,
+    decide: executors.decide,
+    onChunk: options.onChunk ? (chunk) => options.onChunk!(chunk) : undefined,
+    onTrace: provideTraceSink(options.onTrace),
     consumeModelCall: () => {},
     actorHolder: { actorRef: undefined },
     schemas: getRegisteredAgentExecutionOptions(machine).schemas,
@@ -1214,30 +1341,47 @@ function provideBindContext(
 }
 
 /**
+ * Host-binds one text/stream source for {@link provideExecutors} using the SAME
+ * emission helper as `runAgent` ({@link wrapTextLogicForRunAgent}), so a bound
+ * text request emits request.start/stream.chunk/request.end/request.error with
+ * identical shapes. @internal
+ */
+export function bindTextForProvide(
+  machine: AnyStateMachine,
+  logic: TextLogic,
+  executors: Partial<AgentRequestExecutors>,
+  options: ProvideBindOptions,
+): TextLogic {
+  return wrapTextLogicForRunAgent(logic, provideBindContext(machine, executors, options));
+}
+
+/**
  * Host-binds one `DecisionLogic`/`agent.decide` source for
  * {@link provideExecutors}: runAgent's decision wrapper (snapshot-driven
- * candidate events, `canTake`, auto-delivery of the chosen event) without
- * run-scoped counting/tracing. @internal
+ * candidate events, `canTake`, auto-delivery of the chosen event) with the same
+ * request-level tracing runAgent emits, minus run-scoped counting. @internal
  */
 export function bindDecisionForProvide(
   machine: AnyStateMachine,
   logic: DecisionLogic,
-  decide: AgentDecisionExecutor,
+  executors: Partial<AgentRequestExecutors>,
+  options: ProvideBindOptions,
 ): DecisionLogic {
-  return createRunAgentDecisionLogic(logic, provideBindContext(machine, decide));
+  return createRunAgentDecisionLogic(logic, provideBindContext(machine, executors, options));
 }
 
 /**
  * Host-binds one `agent.plan` source for {@link provideExecutors}: runAgent's
- * plan wrapper (iterated snapshot-driven decisions, auto-delivery) without
- * run-scoped counting/tracing. @internal
+ * plan wrapper (iterated snapshot-driven decisions, auto-delivery) with the same
+ * request-level tracing runAgent emits, minus run-scoped counting. @internal
  */
 export function bindPlanForProvide(
   machine: AnyStateMachine,
   logic: PlanLogic,
-  decide: AgentDecisionExecutor,
+  executors: Partial<AgentRequestExecutors>,
+  options: ProvideBindOptions,
 ): PlanLogic {
-  return createRunAgentPlanLogic(logic, provideBindContext(machine, decide));
+  return createRunAgentPlanLogic(logic, provideBindContext(machine, executors, options));
 }
 
 /**
@@ -1365,6 +1509,7 @@ export async function runAgent<TMachine extends AnyStateMachine>(
 
   const onTrace = (event: AgentTraceEventPayload<TMachine>) => {
     options.onTrace?.({
+      schemaVersion: AGENT_TRACE_SCHEMA_VERSION,
       runId,
       seq: ++traceSeq,
       timestamp: new Date().toISOString(),
@@ -1713,7 +1858,7 @@ export async function runAgent<TMachine extends AnyStateMachine>(
       messages,
       appendToLog,
       generateText: runCtx.generateText,
-      decide: runCtx.decide ? createCountingDecide(runCtx) : undefined,
+      decide: runCtx.decide ? createCountingDecide(runCtx, undefined) : undefined,
       consumeModelCall,
       nextRequestId: () => `interpret_${++interpretSeq}`,
       onTrace,
@@ -1798,8 +1943,12 @@ export async function runAgent<TMachine extends AnyStateMachine>(
       snapshot: effectiveSnapshot,
       inspect: (event: InspectionEvent) => {
         // System-wide passthrough (children included) before runAgent's own
-        // root-transition filtering below.
-        options.inspect?.(event);
+        // root-transition filtering below. Function or observer, like createActor.
+        if (typeof options.inspect === "function") {
+          options.inspect(event);
+        } else {
+          options.inspect?.next?.(event);
+        }
 
         if (
           settled ||
@@ -1990,6 +2139,52 @@ export function inspectTransitions(
     handler(
       inspectionEvent.snapshot as AnyMachineSnapshot,
       inspectionEvent.actorRef as unknown as InspectedActorRef,
+    );
+  };
+}
+
+/**
+ * An xstate `inspect` handler that emits `machine.transition` trace events onto
+ * `onTrace`, sharing the SAME versioned envelope and per-root-actor `seq`
+ * registry as {@link provideExecutors}' `onTrace`. Pair the two on one actor to
+ * get a single ordered trace stream (request + transition events) for the
+ * uncontrolled path:
+ *
+ * ```ts
+ * const bound = provideExecutors(machine, executors, { onTrace });
+ * const actor = createActor(bound, { inspect: traceTransitions(onTrace) });
+ * ```
+ *
+ * Only ROOT-actor transitions are traced (matching `runAgent`'s
+ * `machine.transition`); child-actor transitions are ignored. Attribute the
+ * event via its envelope `runId`.
+ *
+ * By design this path has NO `run.start`/`run.end` events: `createActor` has no
+ * run boundary the way `runAgent` does, so the stream starts at the actor's
+ * first transition. It also does NOT emit `emit` trace events: in this xstate
+ * build emitted events are delivered through `actor.on(...)`, not the inspection
+ * protocol, so they are not observable from an `inspect` handler — subscribe
+ * with `actor.on('*', ...)` if you need them.
+ */
+export function traceTransitions<TMachine extends AnyStateMachine = AnyStateMachine>(
+  onTrace: (event: AgentTraceEvent<TMachine>) => void,
+): (inspectionEvent: InspectionEvent) => void {
+  return (inspectionEvent: InspectionEvent) => {
+    if (inspectionEvent.type !== "@xstate.transition") {
+      return;
+    }
+    const actorRef = inspectionEvent.actorRef as unknown as { _parent?: unknown };
+    // Root actor only (no parent) — matches runAgent's root-transition filter.
+    if (actorRef?._parent) {
+      return;
+    }
+    const root = actorRef as unknown as AnyActorRef;
+    onTrace(
+      stampRootTrace(root, {
+        type: "machine.transition",
+        snapshot: inspectionEvent.snapshot as SnapshotFrom<TMachine>,
+        event: inspectionEvent.event as EventFromLogic<TMachine>,
+      }) as AgentTraceEvent<TMachine>,
     );
   };
 }

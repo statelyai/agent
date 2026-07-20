@@ -1,6 +1,6 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
-import type { AgentTextRequest } from "../../src/index.js";
+import type { AgentTextRequest } from "@statelyai/agent";
 import { runSwarmHandoffExample } from "./index.js";
 
 test("swarm handoff switches the active agent and persists it across a round-trip", async () => {

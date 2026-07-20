@@ -1,6 +1,6 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
-import { runAgent } from "../../src/index.js";
+import { runAgent } from "@statelyai/agent";
 import { aiSdkMarketingChainMachine } from "./index.js";
 
 test("AI SDK marketing chain maps to an explicit machine", async () => {

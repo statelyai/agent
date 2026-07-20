@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { runAgent } from "../../src/index.js";
-import type { AgentRequestExecutor } from "../../src/index.js";
+import { runAgent } from "@statelyai/agent";
+import type { AgentRequestExecutor } from "@statelyai/agent";
 import { triageMachine } from "./index.js";
 
 const TICKET = "I was charged twice for my March subscription. Please refund the duplicate.";

@@ -53,10 +53,8 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
-import { defineModels } from "../../src/ai-sdk/index.js";
-import { runAgent, setupAgent, type AgentRequestExecutors } from "../../src/index.js";
-import { resolveExecutors, runExampleMain } from "../helpers/main.js";
-import { searchCorpus } from "../helpers/rag-corpus.js";
+import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
 
 export const models = defineModels({
   crag: openai("gpt-5.4-mini"),
@@ -105,6 +103,67 @@ export const SAMPLE_WEB_INDEX: Array<{ id: string; text: string }> = [
     text: "A vector database indexes embeddings for approximate nearest-neighbor search, the retrieval backbone of most production RAG systems.",
   },
 ];
+
+/** Content-word stop list for keyword scoring. */
+const STOP_WORDS = new Set([
+  "a",
+  "an",
+  "the",
+  "is",
+  "are",
+  "of",
+  "to",
+  "in",
+  "and",
+  "what",
+  "how",
+  "why",
+  "do",
+  "does",
+  "can",
+  "i",
+  "me",
+  "my",
+  "it",
+  "that",
+  "this",
+  "for",
+  "with",
+  "about",
+  "tell",
+  "explain",
+  "please",
+]);
+
+/** Honest keyword-overlap score (NOT embeddings): shared content words. */
+function scoreDocument(question: string, text: string): number {
+  const terms = new Set(
+    question
+      .toLowerCase()
+      .split(/[^a-z]+/)
+      .filter((word) => word.length > 2 && !STOP_WORDS.has(word)),
+  );
+  const haystack = text.toLowerCase();
+  let score = 0;
+  for (const term of terms) {
+    if (haystack.includes(term)) score += 1;
+  }
+  return score;
+}
+
+/** Top-N keyword matches over a corpus (score > 0), highest first. */
+function searchCorpus(
+  corpus: Array<{ id: string; text: string }>,
+  question: string,
+  limit: number,
+): string[] {
+  return corpus
+    .map((doc) => ({ text: doc.text, score: scoreDocument(question, doc.text) }))
+    .filter((scored) => scored.score > 0)
+    .sort((left, right) => right.score - left.score)
+    .slice(0, limit)
+    .map((scored) => scored.text);
+}
 
 // Grading output: one yes/no verdict per retrieved document, in order. This is
 // the one-request-over-all-docs form (LangGraph loops one call per doc instead).
@@ -379,7 +438,9 @@ export async function runCorrectiveRagExample(
   const progress: string[] = [];
   const result = await runAgent(correctiveRagMachine, {
     input: { question },
-    ...resolveExecutors(models, generateText),
+    ...(generateText
+      ? { executors: { generateText } }
+      : { executors: createAiSdkExecutors({ models }) }),
     onTransition: (snapshot) => {
       const state = String(snapshot.value);
       progress.push(state);
@@ -393,21 +454,30 @@ export async function runCorrectiveRagExample(
   return { ...result.output, progress };
 }
 
-runExampleMain(import.meta.url, async () => {
-  const { createAiSdkExecutors } = await import("../../src/ai-sdk/index.js");
-  const { generateText } = createAiSdkExecutors({ models });
+// Run directly (`tsx index.ts`); skipped when a test imports this module.
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("Set OPENAI_API_KEY to run this example.");
+    process.exit(1);
+  }
+  void (async () => {
+    const { generateText } = createAiSdkExecutors({ models });
 
-  // Off-topic for the sample corpus — retrieval is weak, so CRAG corrects:
-  // grade → rewrite → web search → generate.
-  const question = "What is prompt injection and how do you defend against it?";
-  const result = await runCorrectiveRagExample({
-    question,
-    generateText,
-    onProgress: (state) => console.log(`  → ${state}`),
+    // Off-topic for the sample corpus — retrieval is weak, so CRAG corrects:
+    // grade → rewrite → web search → generate.
+    const question = "What is prompt injection and how do you defend against it?";
+    const result = await runCorrectiveRagExample({
+      question,
+      generateText,
+      onProgress: (state) => console.log(`  → ${state}`),
+    });
+
+    console.log("\nQuestion:", question);
+    if (result.rewrittenQuestion) console.log("Rewritten:", result.rewrittenQuestion);
+    console.log("Used web search:", result.usedWebSearch);
+    console.log("\nAnswer:", result.answer);
+  })().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
   });
-
-  console.log("\nQuestion:", question);
-  if (result.rewrittenQuestion) console.log("Rewritten:", result.rewrittenQuestion);
-  console.log("Used web search:", result.usedWebSearch);
-  console.log("\nAnswer:", result.answer);
-});
+}

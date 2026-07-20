@@ -2,7 +2,7 @@ import { test } from "vitest";
 import assert from "node:assert/strict";
 import { z } from "zod";
 import { createAsyncLogic } from "xstate";
-import { runAgent } from "../../src/index.js";
+import { runAgent } from "@statelyai/agent";
 import { aiSdkOrchestratorWorkerMachine } from "./index.js";
 
 const fileChangeSchema = z.object({

@@ -22,14 +22,13 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createMachine, type AnyMachineSnapshot } from "xstate";
-import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
+import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 import {
   getAgentMessages,
   runAgent,
   type AgentRequestExecutors,
   type AgentStateRequest,
-} from "../../src/index.js";
-import { runExampleMain } from "../helpers/main.js";
+} from "@statelyai/agent";
 
 const models = defineModels({
   writer: openai("gpt-5.4-mini"),
@@ -117,6 +116,16 @@ export async function runDescribedWorkflowExample(
   return getAgentMessages(result.snapshot);
 }
 
-runExampleMain(import.meta.url, async () => {
-  await runDescribedWorkflowExample();
-});
+// Run directly (`tsx index.ts`); skipped when a test imports this module.
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("Set OPENAI_API_KEY to run this example.");
+    process.exit(1);
+  }
+  void (async () => {
+    await runDescribedWorkflowExample();
+  })().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

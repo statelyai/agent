@@ -18,7 +18,7 @@ import {
   setupAgent,
   type RunAgentOptions,
   type RunAgentResult,
-} from "../../src/index.js";
+} from "@statelyai/agent";
 
 // Typed interaction protocol handed to the host (a `select` with choices, each
 // optionally carrying a follow-up text `input`). Schema-typed meta = a real

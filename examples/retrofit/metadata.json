@@ -1,0 +1,13 @@
+{
+  "name": "retrofit",
+  "title": "Retrofit a hand-rolled loop",
+  "kind": "agent-workflow",
+  "origin": {
+    "type": "pattern",
+    "source": "A realistic while-loop tool-calling agent converted into an agent machine, step by step (docs/from-a-loop.md)"
+  },
+  "comparison": {
+    "targets": ["hand-rolled loop"],
+    "purpose": "before.ts is a genuinely tangled support-ticket agent built on raw AI SDK generateText: a while(true) loop, phase strings + boolean flags, nested if/else tool dispatch, an inline retry/backoff wrapper, a $100 refund limit as an `if`, and a human-approval pause faked with a { pending } sentinel + resume closure. step1/step2/step3 walk the refactor (phases → states, if/else → agent.decide + guard, sentinel → idle state), each shippable with the same observable behavior. index.ts is the final form; index.test.ts uses simulateAgent to prove the refactor preserved behavior on the happy and escalation paths."
+  }
+}

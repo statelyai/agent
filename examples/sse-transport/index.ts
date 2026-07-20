@@ -22,9 +22,8 @@ import type { AddressInfo } from "node:net";
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import type { AnyStateMachine } from "xstate";
-import { runAgent, setupAgent, type AgentRequestExecutor } from "../../src/index.js";
-import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
-import { runExampleMain } from "../helpers/main.js";
+import { runAgent, setupAgent, type AgentRequestExecutor } from "@statelyai/agent";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 /**
  * A minimal streaming machine: one `mode: 'stream'` text request, then done.
@@ -181,4 +180,14 @@ export async function main() {
   process.on("SIGINT", () => server.close(() => process.exit(0)));
 }
 
-runExampleMain(import.meta.url, main);
+// Run directly (`tsx index.ts`); skipped when a test imports this module.
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("Set OPENAI_API_KEY to run this example.");
+    process.exit(1);
+  }
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

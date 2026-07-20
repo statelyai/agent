@@ -59,10 +59,9 @@ import {
   type AgentTextRequest,
   type AgentTools,
   type ChosenEvent,
-} from "../../src/index.js";
+} from "@statelyai/agent";
 import { triageMachine } from "../triage/index.js";
 import { twentyQuestionsMachine } from "../twenty-questions/index.js";
-import { runExampleMain } from "../helpers/main.js";
 
 // ─── Request → Anthropic param mapping (pure, unit-testable) ───
 
@@ -415,4 +414,14 @@ async function main() {
   console.log(`Final score — user: ${result.userScore}, agent: ${result.agentScore}`);
 }
 
-runExampleMain(import.meta.url, main, { requireEnv: "ANTHROPIC_API_KEY" });
+// Run directly (`tsx index.ts`); skipped when a test imports this module.
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+  if (!process.env.ANTHROPIC_API_KEY) {
+    console.error("Set ANTHROPIC_API_KEY to run this example.");
+    process.exit(1);
+  }
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

@@ -7,7 +7,7 @@
  * `email-drafter/index.ts` so that file reads as a clean example. Typechecked
  * via `examples/tsconfig.json` (`include: ["."]`).
  */
-import { assistantMessage, setupAgent } from "../../src/index.js";
+import { assistantMessage, setupAgent } from "@statelyai/agent";
 import { emailDrafterActors, emailDrafterSchemas, models } from "./index.js";
 
 // Rebuild the same setup the runnable machine uses. Rebuilt (not imported) so

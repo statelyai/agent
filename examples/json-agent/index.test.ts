@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { runAgent } from "../../src/index.js";
+import { runAgent } from "@statelyai/agent";
 import { jsonAgentMachine, workflowConfig } from "./index.js";
 
 test("workflow.json is real JSON data, not code", () => {

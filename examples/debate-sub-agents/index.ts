@@ -20,9 +20,8 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { runAgent, setupAgent, type AgentRequestExecutor } from "../../src/index.js";
-import { defineModels } from "../../src/ai-sdk/index.js";
-import { resolveExecutors, runExampleMain } from "../helpers/main.js";
+import { runAgent, setupAgent, type AgentRequestExecutor } from "@statelyai/agent";
+import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 
 const stanceSchema = z.enum(["affirmative", "negative"]);
 const transcriptEntrySchema = z.object({
@@ -262,7 +261,9 @@ export async function runDebateSubAgentsExample(options?: {
       question: options?.input?.question ?? "Should agents be modeled as actors?",
       rounds: options?.input?.rounds ?? DEFAULT_ROUNDS,
     },
-    ...resolveExecutors(models, options?.generateText),
+    ...(options?.generateText
+      ? { executors: { generateText: options.generateText } }
+      : { executors: createAiSdkExecutors({ models }) }),
     actorSources: { affirmative: debaterMachine, negative: debaterMachine },
     ...(options?.onTransition
       ? { onTransition: ({ value }: { value: unknown }) => options.onTransition!(value) }
@@ -275,12 +276,22 @@ export async function runDebateSubAgentsExample(options?: {
   return result.output;
 }
 
-runExampleMain(import.meta.url, async () => {
-  const output = await runDebateSubAgentsExample({
-    onTransition: (value) => console.log(`[state] ${JSON.stringify(value)}`),
-  });
-  for (const turn of output.transcript) {
-    console.log(`[R${turn.round} ${turn.stance}] ${turn.text}`);
+// Run directly (`tsx index.ts`); skipped when a test imports this module.
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("Set OPENAI_API_KEY to run this example.");
+    process.exit(1);
   }
-  console.log(`\n--- Facilitator verdict ---\n${output.conclusion}`);
-});
+  void (async () => {
+    const output = await runDebateSubAgentsExample({
+      onTransition: (value) => console.log(`[state] ${JSON.stringify(value)}`),
+    });
+    for (const turn of output.transcript) {
+      console.log(`[R${turn.round} ${turn.stance}] ${turn.text}`);
+    }
+    console.log(`\n--- Facilitator verdict ---\n${output.conclusion}`);
+  })().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

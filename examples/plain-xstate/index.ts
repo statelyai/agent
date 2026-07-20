@@ -31,14 +31,13 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createActor, createAsyncLogic, setup, waitFor } from "xstate";
-import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
+import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 import {
   getAcceptedEvents,
   resolveDecision,
   userMessage,
   type AgentRequestExecutors,
-} from "../../src/index.js";
-import { runExampleMain } from "../helpers/main.js";
+} from "@statelyai/agent";
 
 export const models = defineModels({
   writer: openai("gpt-5.4-mini"),
@@ -205,8 +204,18 @@ export async function runPlainXstateExample(
   return { draft: settled.context.draft, attempts: settled.context.attempts, decisions };
 }
 
-runExampleMain(import.meta.url, async () => {
-  const result = await runPlainXstateExample();
-  console.log("Decisions:", result.decisions.join(" → "));
-  console.log(`\nFinal draft (after ${result.attempts} draft(s)):\n${result.draft}`);
-});
+// Run directly (`tsx index.ts`); skipped when a test imports this module.
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("Set OPENAI_API_KEY to run this example.");
+    process.exit(1);
+  }
+  void (async () => {
+    const result = await runPlainXstateExample();
+    console.log("Decisions:", result.decisions.join(" → "));
+    console.log(`\nFinal draft (after ${result.attempts} draft(s)):\n${result.draft}`);
+  })().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

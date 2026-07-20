@@ -17,9 +17,8 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { runAgent, setupAgent, type RunAgentOptions } from "../../src/index.js";
-import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
-import { resolveExecutors, runExampleMain } from "../helpers/main.js";
+import { runAgent, setupAgent, type RunAgentOptions } from "@statelyai/agent";
+import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 
 const specialistSchema = z.enum(["researcher", "coder", "writer"]);
 
@@ -174,7 +173,9 @@ export async function runSupervisorExample(options?: RunAgentOptions<typeof supe
     input: {
       request: "Write a friendly release announcement for our new SDK.",
     },
-    ...resolveExecutors(models, options),
+    ...(options && Object.keys(options).length > 0
+      ? options
+      : { executors: createAiSdkExecutors({ models }) }),
   });
   if (result.status !== "done") {
     throw new Error(`Supervisor example did not complete: ${result.status}`);
@@ -186,39 +187,49 @@ export async function runSupervisorExample(options?: RunAgentOptions<typeof supe
 // branch each request actually flows through.
 const SPECIALIST_STATES = ["researcher", "coder", "writer"] as const;
 
-runExampleMain(import.meta.url, async () => {
-  const executors = createAiSdkExecutors({ models });
-
-  // Three requests that clearly belong to three different specialists — the
-  // point is to see the router genuinely dispatch to researcher, coder, AND
-  // writer, not collapse everything into one branch.
-  const requests = [
-    "What year was the TCP protocol first standardized, and by whom?",
-    "Write a TypeScript function that debounces an async function.",
-    "Draft a warm two-sentence thank-you note to a conference organizer.",
-  ];
-
-  for (const request of requests) {
-    // Record which specialist state this request transitions through.
-    const specialistsHit: string[] = [];
-    const result = await runAgent(supervisorMachine, {
-      input: { request },
-      executors,
-      onTransition: ({ value }) => {
-        const state = String(value);
-        if ((SPECIALIST_STATES as readonly string[]).includes(state)) {
-          specialistsHit.push(state);
-        }
-        console.log(`  [state] ${state}`);
-      },
-    });
-    if (result.status !== "done") {
-      throw new Error(`Supervisor example did not complete: ${result.status}`);
-    }
-    const { specialist, reason, answer } = result.output;
-    console.log(`Request: ${request}`);
-    console.log(`Routed through: ${specialistsHit.join(" → ") || "(none)"}`);
-    console.log(`Route decision: ${specialist} (${reason})`);
-    console.log(`Answer: ${answer}\n`);
+// Run directly (`tsx index.ts`); skipped when a test imports this module.
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("Set OPENAI_API_KEY to run this example.");
+    process.exit(1);
   }
-});
+  void (async () => {
+    const executors = createAiSdkExecutors({ models });
+
+    // Three requests that clearly belong to three different specialists — the
+    // point is to see the router genuinely dispatch to researcher, coder, AND
+    // writer, not collapse everything into one branch.
+    const requests = [
+      "What year was the TCP protocol first standardized, and by whom?",
+      "Write a TypeScript function that debounces an async function.",
+      "Draft a warm two-sentence thank-you note to a conference organizer.",
+    ];
+
+    for (const request of requests) {
+      // Record which specialist state this request transitions through.
+      const specialistsHit: string[] = [];
+      const result = await runAgent(supervisorMachine, {
+        input: { request },
+        executors,
+        onTransition: ({ value }) => {
+          const state = String(value);
+          if ((SPECIALIST_STATES as readonly string[]).includes(state)) {
+            specialistsHit.push(state);
+          }
+          console.log(`  [state] ${state}`);
+        },
+      });
+      if (result.status !== "done") {
+        throw new Error(`Supervisor example did not complete: ${result.status}`);
+      }
+      const { specialist, reason, answer } = result.output;
+      console.log(`Request: ${request}`);
+      console.log(`Routed through: ${specialistsHit.join(" → ") || "(none)"}`);
+      console.log(`Route decision: ${specialist} (${reason})`);
+      console.log(`Answer: ${answer}\n`);
+    }
+  })().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

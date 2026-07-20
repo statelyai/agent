@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import type { AgentRequestExecutor } from "../../src/index.js";
-import { createTextLogic } from "../../src/index.js";
+import type { AgentRequestExecutor } from "@statelyai/agent";
+import { createTextLogic } from "@statelyai/agent";
 import { z } from "zod";
 import { runStreamingDemo, runTriageDemo } from "./index.js";
 

@@ -30,9 +30,8 @@ import {
   setupAgent,
   type RunAgentOptions,
   type RunAgentResult,
-} from "../../src/index.js";
-import { createAiSdkExecutors } from "../../src/ai-sdk/index.js";
-import { runExampleMain } from "../helpers/main.js";
+} from "@statelyai/agent";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 // Typed interaction protocol handed to the harness. Schema-typed meta means
 // the host gets a real contract, not Record<string, unknown>. This is a
@@ -282,4 +281,14 @@ export async function main() {
   console.log("Result:", finished);
 }
 
-runExampleMain(import.meta.url, main);
+// Run directly (`tsx index.ts`); skipped when a test imports this module.
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("Set OPENAI_API_KEY to run this example.");
+    process.exit(1);
+  }
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

@@ -19,6 +19,8 @@ Those functions are the **executors**, typed as `AgentRequestExecutors`:
 | `streamText(request, info)` | `{ output }` (accumulated text; chunks stream through `info.onChunk`) | machine has a streaming request |
 | `decide(request)` | `{ event }` (the one event the model chose) | machine has a decision |
 
+**Watch the arity:** `decide` takes **one** argument (the request); `generateText` and `streamText` take **two** (`request, info`, where `info` carries `onChunk` and the abort `signal`). Skimming the table, it's easy to give `decide` a second `info` param or drop `info` from a streaming executor.
+
 `runAgent` checks these at bind time, before any actor runs, so a machine that needs `decide` without one fails immediately rather than mid-run. A machine with only plain actors needs no executors. Each executor is a plain async function taking a plain request object, so any SDK or a raw `fetch` can back it.
 
 ## The shipped AI SDK adapter
@@ -239,7 +241,7 @@ onDone: ({ context, output }, enq) => {
 
 Emitted events are fire-and-forget observation, not control flow: they never target states, and a run behaves identically with no handlers attached.
 
-> **Note:** Tracing and OpenTelemetry are bring-your-own; no exporter ships. Build one on `onTrace`, or use the narrower seams (`onResult`, `onTransition`, `on`, `onChunk`).
+> **Note:** Tracing and OpenTelemetry are bring-your-own; no exporter ships. [Observability](observability.md) covers the versioned trace stream, watching a run in the Stately Inspector, and a copy-paste `onTrace` → OTel recipe.
 
 ## Testing with deterministic executors
 

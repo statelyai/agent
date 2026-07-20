@@ -11,4 +11,4 @@ DX pass: one `runAgent`, first-class uncontrolled mode, trimmed surface.
 - **Fix:** `setupAgent.fromConfig` no longer silently drops transition-level `actions` (emits and assigns on transitions now fire).
 - `setupAgent.fromConfig` now rejects invalid transition targets and `onDone` on `agent.decide` invokes at build time; `lintAgentMachine` warns on undeclared `on:` events (`undeclared-event`).
 - A decide executor returning a malformed result now throws a descriptive error instead of routing silently into `onError`.
-- `agent-workflow.json` schema: accepts a root `$schema` key; removed the unimplemented `queryLanguage` property; CLI usage no longer advertises the unimplemented `--no-schemas` flag.
+- `agent-workflow.json` schema: accepts a root `$schema` key; removed the unimplemented `queryLanguage` property.

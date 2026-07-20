@@ -19,9 +19,8 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { runAgent, setupAgent, type RunAgentOptions } from "../../src/index.js";
-import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
-import { resolveExecutors, runExampleMain } from "../helpers/main.js";
+import { runAgent, setupAgent, type RunAgentOptions } from "@statelyai/agent";
+import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 
 const stepSchema = z.object({ id: z.string(), question: z.string() });
 const planSchema = z.object({ steps: z.array(stepSchema) });
@@ -187,7 +186,9 @@ export async function runPlanAndExecuteExample(
     input: {
       goal: "Should a small team pick XState or a hand-rolled reducer for agent workflows?",
     },
-    ...resolveExecutors(models, options),
+    ...(options && Object.keys(options).length > 0
+      ? options
+      : { executors: createAiSdkExecutors({ models }) }),
   });
   if (result.status !== "done") {
     throw new Error(`Plan-and-execute example did not complete: ${result.status}`);
@@ -195,23 +196,33 @@ export async function runPlanAndExecuteExample(
   return result.output;
 }
 
-runExampleMain(import.meta.url, async () => {
-  const output = await runPlanAndExecuteExample({
-    executors: createAiSdkExecutors({ models }),
-    onTransition: (snapshot) =>
-      console.log(
-        "[state]",
-        JSON.stringify(snapshot.value),
-        `step ${snapshot.context.stepIndex}/${snapshot.context.steps.length}`,
-      ),
+// Run directly (`tsx index.ts`); skipped when a test imports this module.
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("Set OPENAI_API_KEY to run this example.");
+    process.exit(1);
+  }
+  void (async () => {
+    const output = await runPlanAndExecuteExample({
+      executors: createAiSdkExecutors({ models }),
+      onTransition: (snapshot) =>
+        console.log(
+          "[state]",
+          JSON.stringify(snapshot.value),
+          `step ${snapshot.context.stepIndex}/${snapshot.context.steps.length}`,
+        ),
+    });
+    console.log("Plan:");
+    for (const step of output.steps) {
+      console.log(`  ${step.id}: ${step.question}`);
+    }
+    console.log("\nEvidence:");
+    for (const [id, text] of Object.entries(output.evidence)) {
+      console.log(`  ${id}: ${text}`);
+    }
+    console.log(`\nAnswer:\n${output.answer}`);
+  })().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
   });
-  console.log("Plan:");
-  for (const step of output.steps) {
-    console.log(`  ${step.id}: ${step.question}`);
-  }
-  console.log("\nEvidence:");
-  for (const [id, text] of Object.entries(output.evidence)) {
-    console.log(`  ${id}: ${text}`);
-  }
-  console.log(`\nAnswer:\n${output.answer}`);
-});
+}

@@ -5,6 +5,10 @@ description: Convert a realistic while-loop tool-calling agent into an agent mac
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
 
+You have an agent that works, but its control flow is a `while` loop with `if`s, tool dispatch, and retry code tangled together. This page refactors that loop into an agent machine **without rewriting your model calls**. Your existing SDK calls, tools, and retry logic become the [executors](hosts.md); the machine replaces only the control flow. It drops into your existing server unchanged, and you can prove the refactor preserved behavior before shipping it.
+
+If you already have a state machine and just want to bind LLM work to it, start from [You already have an agent workflow](xstate-as-agent-workflow.md) instead. This page is for a loop.
+
 ## Start: a hand-rolled loop
 
 A realistic refund agent as a `while` loop with any SDK. It works: the model calls tools until it stops, a `$100` limit is enforced inline, and anything bigger pauses for a human.
@@ -144,8 +148,77 @@ if (result.status === 'idle') {
 }
 ```
 
+The idle snapshot is genuinely plain JSON, so a real `stringify` → store → `parse` round-trip resumes identically:
+
+```ts
+import { persistSnapshot } from "@statelyai/agent";
+
+// persistSnapshot deep-clones via JSON.stringify/parse; do it by hand to prove it:
+const wire = JSON.stringify(persistSnapshot(result.snapshot)); // what your DB/queue stores
+const restored = JSON.parse(wire); // a fresh process, no live objects
+
+const resumed = await runAgent(machine, {
+  snapshot: restored,
+  event: { type: "APPROVE" },
+  executors,
+});
+// resumed.status === 'done', resumed.output === { refunded: true }
+```
+
+Those executors are your existing model code. `createAiSdkExecutors` wraps the AI SDK, but the `generateText`/`streamText` slots accept the raw AI SDK functions directly, and any other SDK or a raw `fetch` backs them just as well. The tools, retry logic, and provider calls you already wrote move into the executors unchanged; only the `while` loop is gone. See [Hosts](hosts.md).
+
+## Drop it into your existing server
+
+The machine is host-agnostic, so it runs wherever your loop ran. For a straight-through request handler that owns its own actor, bind executors with `provideExecutors` and run a plain XState actor, no `runAgent`:
+
+```ts
+import { createActor } from "xstate";
+import { provideExecutors } from "@statelyai/agent";
+
+app.post("/refund", async (req, res) => {
+  const actor = createActor(provideExecutors(machine, executors), {
+    input: { request: req.body.request, amount: req.body.amount },
+  });
+  actor.subscribe((s) => {
+    if (s.status === "done") res.json(s.output);
+  });
+  actor.start();
+});
+```
+
+For the idle human pause (the `$100` escalation above) over HTTP, persist the snapshot with `runAgent` and resume on a later request. [Eject to your stack](eject.md) walks one machine from local to Express to Cloudflare with zero machine changes.
+
+## Prove the refactor preserved behavior
+
+Before shipping, pin the new machine's behavior with a deterministic, model-free playthrough. `simulateAgent` scripts the decisions and runs the same step path `runAgent` uses, no API key, no network:
+
+```ts
+import { simulateAgent } from "@statelyai/agent";
+
+// A $5000 refund must escalate, not auto-refund.
+const result = await simulateAgent(machine, {
+  input: { request: "Refund my duplicate charge", amount: 5000 },
+  script: { decisions: { "agent.decide": [{ type: "REFUND" }] } },
+});
+// The REFUND guard rejects amount > 100, so the run settles idle at awaitingHuman,
+// not refunded: the old loop's `if` is now enforced by construction.
+expect(result.status).toBe("idle");
+```
+
+`canReach` and `explorePaths` go further: enumerate every branch and prove which outcomes are reachable. See [Testing and verification](verify.md).
+
+## Other starting points
+
+A worked end-to-end version of this page's conversion — a genuinely tangled loop, refactored one shippable step at a time with the behavior pinned by tests — lives in [retrofit](../examples/retrofit/index.ts) (`before.ts` → `step1/2/3.ts` → `index.ts`).
+
+The same conversion works from shapes other than a `while` loop:
+
+- [plain-xstate](../examples/plain-xstate/index.ts): a bog-standard XState machine driven with no agent-specific setup.
+- [described-workflow](../examples/described-workflow/index.ts): prompts written as state `description`s, run via `runAgent`'s `getRequests` option.
+- [todo-nl](../examples/todo-nl/index.ts): natural-language commands mapped onto machine events.
+
 ## What you got for free
 
-Same behavior as the loop, plus legality by construction, snapshot resume, step-path [checkpointing](steps.md), and [visualization](machines-as-data.md), none of which the loop gives you without hand-built machinery. [Compared to LangGraph and hand-rolling](comparison.md) breaks each down against the alternatives.
+Same behavior as the loop, plus legality by construction, snapshot resume, step-path [checkpointing](steps.md), and [visualization](machines-as-data.md), none of which the loop gives you without hand-built machinery. The transcript and log bookkeeping you hand-maintained in the loop becomes the ordered [`onTrace`](observability.md) stream: one run/request/chunk/transition ledger for evals, JSONL, and telemetry. [Compared to LangGraph and hand-rolling](comparison.md) breaks each down against the alternatives.
 
 If you never need them, the loop was fine. When you do, the machine gives you each one for free.

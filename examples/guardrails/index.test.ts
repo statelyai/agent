@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { runAgent } from "../../src/index.js";
-import type { AgentRequestExecutor } from "../../src/index.js";
+import { runAgent } from "@statelyai/agent";
+import type { AgentRequestExecutor } from "@statelyai/agent";
 import { guardrailsMachine } from "./index.js";
 
 type Step = "validate" | "answer" | "verify" | "revise" | "unknown";

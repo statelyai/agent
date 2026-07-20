@@ -56,7 +56,7 @@
 import { Agent, type Connection } from "agents";
 import { createActor, type Actor, type Snapshot } from "xstate";
 import type { LanguageModel } from "ai";
-import { parseAgentEvent } from "../../src/index.js";
+import { parseAgentEvent } from "@statelyai/agent";
 import {
   draftEmail,
   emailDrafter,

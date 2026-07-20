@@ -10,12 +10,13 @@ description: Install @statelyai/agent and run your first agent machine end to en
 <!-- pinned alpha install; peers consistent with package.json -->
 
 ```bash
-npm install @statelyai/agent@alpha xstate@alpha zod ai @ai-sdk/openai
+npm install @statelyai/agent@alpha xstate@alpha zod ai@^6 @ai-sdk/openai@^3
 ```
 
 - Pin the alpha: the API is still settling.
 - `xstate` is the one required peer. The library targets **XState v6 alpha** and stays compatible with **XState v5**.
 - `ai` (the Vercel AI SDK) and `@ai-sdk/openai` back the shipped adapter, `createAiSdkExecutors`. Core has no runtime dependency besides `xstate`.
+- Provider packages must match your `ai` major. `@ai-sdk/openai@^3` pairs with `ai@^6`; a bare `@ai-sdk/openai` resolves to `@latest`, whose `LanguageModel` spec version may not match your `ai` peer.
 - The package is **ESM-only** and the examples use top-level `await`. Set `"type": "module"` in `package.json` (or use `.mts` files).
 
 ## Describe your models and schemas
@@ -151,6 +152,30 @@ if (result.status === "done") {
 ```
 
 Use `runAgent` when an idle pause is expected and you handle it. For a run meant to go straight through to a final state, `runAgentToCompletion(machine, options)` returns the output directly and throws `AgentIdleError` if the machine pauses.
+
+### See it run
+
+Watch the machine light up state by state in the [Stately Inspector](https://stately.ai/docs/inspector) while it runs. Add the inspector package and pass its handler to `runAgent`'s `inspect` option:
+
+```bash
+pnpm add @statelyai/inspect
+```
+
+```ts
+import { createInspectorServer } from "@statelyai/inspect/server";
+import { createWebSocketInspector } from "@statelyai/inspect";
+
+const server = createInspectorServer({ port: 8080, url: "https://editor.stately.ai" });
+const inspector = createWebSocketInspector({ url: "ws://localhost:8080" });
+
+await runAgent(machine, {
+  input: { prompt: "Why state machines?" },
+  executors: createAiSdkExecutors({ models }),
+  inspect: inspector.inspect, // opens the diagram and lights it up live
+});
+```
+
+It's the same machine you authored, so it renders as a live diagram in the Inspector, in [Stately Studio](https://stately.ai/editor), and in the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=statelyai.stately-vscode). See [Observability](observability.md) for production tracing to OpenTelemetry.
 
 ## Run it yourself (plain XState)
 

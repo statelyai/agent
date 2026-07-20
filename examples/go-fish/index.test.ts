@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import type { AgentDecisionRequest, ChosenEvent } from "../../src/index.js";
-import { runAgent } from "../../src/index.js";
+import type { AgentDecisionRequest, ChosenEvent } from "@statelyai/agent";
+import { runAgent } from "@statelyai/agent";
 import { goFishMachine, type Rank } from "./index.js";
 
 const deck: Rank[] = [

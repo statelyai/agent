@@ -16,12 +16,14 @@ Every example is dual-mode: run it directly against a real model with `OPENAI_AP
 - Minimal streaming text workflow: [`joke/index.ts`](joke/index.ts)
 - Authoring reusable requests, parts-based messages, and schema-typed state meta: [`email-drafter/index.ts`](email-drafter/index.ts)
 - Human-in-the-loop, the idle-first way: [`human-in-the-loop/index.ts`](human-in-the-loop/index.ts)
+- Retrofitting a hand-rolled `while`-loop agent into a machine, one shippable step at a time: [`retrofit/index.ts`](retrofit/index.ts)
 - Long-running onboarding with durable idle gates: [`long-running-onboarding/index.ts`](long-running-onboarding/index.ts)
 - Running with host actors: [`ai-sdk-host/index.ts`](ai-sdk-host/index.ts)
 - Machines as data: a full workflow (decision, text request, idle human step) authored as a real `.json` file: [`json-agent/index.ts`](json-agent/index.ts)
 - A plain, invoke-less machine run as an agent via `getRequests` (prompts in state descriptions): [`described-workflow/index.ts`](described-workflow/index.ts)
 - A library-unaware `setup(...)` machine driven as an agent by hand (no `setupAgent`), with `getAcceptedEvents` + `resolveDecision`: [`plain-xstate/index.ts`](plain-xstate/index.ts)
 - Hosts and executors guide: [`../docs/hosts.md`](../docs/hosts.md)
+- Tracing a run to LangSmith over OpenTelemetry (the `onTrace` → span recipe, env-gated to print keylessly): [`langsmith-otel/index.ts`](langsmith-otel/index.ts)
 - Framework comparison examples: [`supervisor/index.ts`](supervisor/index.ts), [`plan-and-execute/index.ts`](plan-and-execute/index.ts), [`rag/index.ts`](rag/index.ts), [`tool-calling/index.ts`](tool-calling/index.ts)
 
 ## XState Examples

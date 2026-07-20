@@ -248,4 +248,4 @@ For comparisons, computed guards, or function-valued fields, author in TypeScrip
 
 ## Verifying a generated machine
 
-A machine built from data can be checked before it runs: no API key, no model call. Lint it with `lintAgentMachine`, simulate a scripted playthrough, or enumerate its decision branches. The `statelyai-agent lint <workflow.json>` CLI does this for a JSON config in CI. See [Verify](verify.md).
+A machine built from data can be checked before it runs: no API key, no model call. Lint it with `lintAgentMachine`, simulate a scripted playthrough, or enumerate its decision branches, all in a plain script that CI can run. See [Verify](verify.md).

@@ -35,16 +35,15 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { defineModels } from "../../src/ai-sdk/index.js";
+import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 import {
   assistantMessage,
   runAgent,
   setupAgent,
   userMessage,
   type AgentRequestExecutors,
-} from "../../src/index.js";
-import { zodAgentMessages } from "../../src/zod/index.js";
-import { resolveExecutors, runExampleMain } from "../helpers/main.js";
+} from "@statelyai/agent";
+import { zodAgentMessages } from "@statelyai/agent/zod";
 
 export const models = defineModels({
   // One generator model, re-invoked each round over the growing transcript —
@@ -253,7 +252,9 @@ export async function runReflectionWriterExample(
   const progress: string[] = [];
   const result = await runAgent(reflectionWriterMachine, {
     input: { topic, maxRevisions },
-    ...resolveExecutors(models, generateText),
+    ...(generateText
+      ? { executors: { generateText } }
+      : { executors: createAiSdkExecutors({ models }) }),
     onTransition: (snapshot) => {
       const state = String(snapshot.value);
       progress.push(state);
@@ -267,19 +268,28 @@ export async function runReflectionWriterExample(
   return { ...result.output, progress };
 }
 
-runExampleMain(import.meta.url, async () => {
-  const { createAiSdkExecutors } = await import("../../src/ai-sdk/index.js");
-  const { generateText } = createAiSdkExecutors({ models });
+// Run directly (`tsx index.ts`); skipped when a test imports this module.
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("Set OPENAI_API_KEY to run this example.");
+    process.exit(1);
+  }
+  void (async () => {
+    const { generateText } = createAiSdkExecutors({ models });
 
-  const topic = "Why the little prince is relevant to modern childhood";
-  const result = await runReflectionWriterExample({
-    topic,
-    generateText,
-    onProgress: (state) => console.log(`  → ${state}`),
+    const topic = "Why the little prince is relevant to modern childhood";
+    const result = await runReflectionWriterExample({
+      topic,
+      generateText,
+      onProgress: (state) => console.log(`  → ${state}`),
+    });
+
+    console.log("Topic:", topic);
+    console.log("Revisions:", result.revisions);
+    console.log("Satisfied:", result.satisfied);
+    console.log("Essay:\n", result.essay);
+  })().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
   });
-
-  console.log("Topic:", topic);
-  console.log("Revisions:", result.revisions);
-  console.log("Satisfied:", result.satisfied);
-  console.log("Essay:\n", result.essay);
-});
+}

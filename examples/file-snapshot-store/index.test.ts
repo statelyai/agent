@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
-import { runAgent } from "../../src/index.js";
+import { runAgent } from "@statelyai/agent";
 import { createFileSnapshotStore, draftMachine, runFileSnapshotStoreExample } from "./index.js";
 
 const generateText = async ({ prompt }: { prompt?: string }) => ({

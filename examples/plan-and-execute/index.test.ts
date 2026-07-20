@@ -1,6 +1,6 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
-import type { AgentTextRequest } from "../../src/index.js";
+import type { AgentTextRequest } from "@statelyai/agent";
 import { runPlanAndExecuteExample } from "./index.js";
 
 test("plan-and-execute plans steps, gathers per-step evidence, and solves from the map", async () => {

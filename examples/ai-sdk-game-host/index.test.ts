@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { AgentDecisionExecutor, AgentRequestExecutor } from "../../src/index.js";
+import type { AgentDecisionExecutor, AgentRequestExecutor } from "@statelyai/agent";
 import { runAiSdkGameTurn } from "./index.js";
 
 /**

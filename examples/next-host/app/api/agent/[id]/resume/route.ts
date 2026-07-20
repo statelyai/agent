@@ -7,7 +7,7 @@
  * Same standalone-typecheck caveat as ../../route.ts: `RouteRequest`/`json`
  * are local shims; delete them in a real Next app.
  */
-import { runAgent } from "../../../../../../../src/index.js";
+import { runAgent } from "@statelyai/agent";
 import { json, type RouteRequest, type RouteResponse } from "../../../../../next-shims.js";
 import { announceMachine, executors, snapshots } from "../../route.js";
 

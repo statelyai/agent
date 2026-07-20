@@ -27,7 +27,7 @@ import {
   runAgent,
   setupAgent,
   type AgentRequestExecutors,
-} from "../../../../../src/index.js";
+} from "@statelyai/agent";
 import type { Snapshot } from "xstate";
 import { json, type RouteRequest, type RouteResponse } from "../../../next-shims.js";
 
