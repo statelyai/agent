@@ -89,7 +89,7 @@ See the [Quickstart](quickstart.md) for a step-by-step walkthrough.
 
 ## Alpha status
 
-<!-- not-shipped list, consistent with readme.md "Alpha status" section -->
+<!-- not-shipped list, consistent with readme.md's alpha note and docs/roadmap.md -->
 
 The API changed completely in 2.0 and is still settling. Expect breaking changes before 2.0 stable.
 

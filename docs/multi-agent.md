@@ -21,41 +21,33 @@ The machine decides, the [host](hosts.md) executes. Composition changes which ma
 
 Register a child machine under `actorSources:` on the parent's `setupAgent(...)`, then invoke it by name. The parent treats the child like any other invoked actor: typed `input`, final output in `onDone`.
 
-[examples/subflows/index.ts](../examples/subflows/index.ts) builds a research-then-write pipeline this way:
+[examples/subflows/index.ts](../examples/subflows/index.ts) delegates a topic to a research child this way:
 
 ```ts
-const agentSetup = setupAgent({
-  models,
-  context: z.object({ topic: z.string(), notes: z.string().nullable(), final: z.string().nullable() }),
+const parentAgentSetup = setupAgent({
+  context: z.object({ topic: z.string(), research: z.string().nullable() }),
   input: z.object({ topic: z.string() }),
-  output: finalOutputSchema,
-  actorSources: {
-    researchAgent: research.machine,
-    writerAgent: writer.machine,
-  },
+  output: z.object({ research: z.string() }),
+  actorSources: { child: childMachine },
 });
 
-const machine = agentSetup.createMachine({
-  initial: "researching",
+const subflowsMachine = parentAgentSetup.createMachine({
+  initial: "delegating",
   states: {
-    researching: {
+    delegating: {
       invoke: {
-        src: "researchAgent",
+        id: "child",
+        src: "child",
         input: ({ context }) => ({ topic: context.topic }),
-        onDone: ({ output }) => ({ target: "writing", context: { notes: output.notes } }),
+        onDone: ({ output }) => ({ target: "done", context: { research: output.research } }),
       },
     },
-    writing: {
-      invoke: {
-        src: "writerAgent",
-        input: ({ context }) => ({ notes: context.notes ?? "" }),
-        onDone: ({ output }) => ({ target: "done", context: { final: output.draft } }),
-      },
-    },
-    done: { type: "final", output: ({ context }) => ({ final: context.final ?? "" }) },
+    done: { type: "final", output: ({ context }) => ({ research: context.research ?? "" }) },
   },
 });
 ```
+
+`childMachine` is its own `setupAgent(...)` agent (`{ topic } -> { research }`); its `researchTopic` request inherits the parent run's executors automatically.
 
 A child machine's own requests inherit the executors you pass to `runAgent`, no per-child binding needed (see [nested executor inheritance](#nested-machine-executor-inheritance) below).
 
@@ -123,20 +115,20 @@ A parent can invoke several child agents at once and pass messages between them,
 
 ```ts
 invoke: [
-  { id: 'affirmativeDebater', src: 'debater', input: ({ context }) => ({ stance: 'affirmative', question: context.question }) },
-  { id: 'negativeDebater', src: 'debater', input: ({ context }) => ({ stance: 'negative', question: context.question }) },
+  { id: 'affirmative', src: 'affirmative', input: ({ context }) => ({ stance: 'affirmative', question: context.question }) },
+  { id: 'negative', src: 'negative', input: ({ context }) => ({ stance: 'negative', question: context.question }) },
 ],
+initial: 'requesting',
 states: {
-  requestingArgument: {
+  requesting: {
     always: ({ context, children }, enq) => {
-      const turn = nextTurn(context.transcript.length);
-      enq.sendTo(children[turn.actorId], {
+      const turn = turnAt(context.transcript.length);
+      enq.sendTo(children[turn.stance], {
         type: 'DEBATE.ARGUMENT_REQUESTED',
         round: turn.round,
-        question: context.question,
         transcript: context.transcript,
       });
-      return { target: 'waitingForArgument' };
+      return { target: 'awaiting' };
     },
   },
   // ...
