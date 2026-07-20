@@ -57,7 +57,7 @@ Context must be JSON-serializable; that is the one constraint. See [Human in the
 
 LangGraph nodes typically hold LangChain model objects (`ChatOpenAI`, `ChatAnthropic`) and call them inside node code, so swapping SDKs means editing nodes.
 
-Here the machine never talks to a model. It emits typed requests; a host resolves them with an executor set of up to three plain functions (`generateText`, `streamText`, `decide`) returning `{ output }`. Swap SDKs by swapping executors; the machine is untouched.
+Here the machine never talks to a model. It emits typed requests; a host resolves them with an executor set of up to three plain functions: `generateText`/`streamText` return `{ output }`, `decide` returns `{ event }` (the chosen event object). Swap SDKs by swapping executors; the machine is untouched.
 
 ```ts
 const executors = createAiSdkExecutors({ models }); // Vercel AI SDK adapter
@@ -65,7 +65,7 @@ const executors = createAiSdkExecutors({ models }); // Vercel AI SDK adapter
 await runAgent(machine, { input, executors });
 ```
 
-See [Host actors](host-actors.md).
+See [Hosts and executors](hosts.md).
 
 ### 4. Where LangGraph is ahead today
 

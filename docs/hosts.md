@@ -9,47 +9,70 @@ description: Give an agent machine the executor functions that call a model, and
 
 <!-- AgentRequestExecutors contract and bind-time checks from src/run-agent.ts -->
 
-A **host** is the code that runs an agent machine and supplies the functions that call a model. The machine decides what to ask; the host executes the ask. The machine never talks to a model directly.
+A **host** runs an agent machine and supplies the functions that call a model. The machine decides what to ask; the host executes it. The machine never talks to a model directly.
 
 Those functions are the **executors**, typed as `AgentRequestExecutors`:
 
-- `generateText(request)` returns `{ output }`, where `output` is the text string or the structured object. Optional passthrough fields (usage, tool calls, and so on) are allowed alongside `output`. Required only when the machine has a generate-mode text request.
-- `streamText(request, info)` streams chunks through `info.onChunk` and returns the accumulated `{ output }`. Required only when the machine has a streaming request.
-- `decide(request)` returns `{ event }`, the one event the model chose. Required only when the machine has a decision.
+| Executor | Returns | Required when |
+| --- | --- | --- |
+| `generateText(request)` | `{ output }` (text string or structured object; optional passthrough fields like `usage` allowed alongside) | machine has a generate-mode text request |
+| `streamText(request, info)` | `{ output }` (accumulated text; chunks stream through `info.onChunk`) | machine has a streaming request |
+| `decide(request)` | `{ event }` (the one event the model chose) | machine has a decision |
 
-`runAgent` checks these at bind time, before any actor runs, so a machine that needs `decide` without one fails immediately rather than mid-run. A machine with only plain actors needs no executors at all. Each executor is a plain async function taking a plain request object, so any SDK or a raw `fetch` can back it. The machine has no idea which one you used.
+`runAgent` checks these at bind time, before any actor runs, so a machine that needs `decide` without one fails immediately rather than mid-run. A machine with only plain actors needs no executors. Each executor is a plain async function taking a plain request object, so any SDK or a raw `fetch` can back it.
 
 ## The shipped AI SDK adapter
 
 <!-- createAiSdkExecutors surface from src/ai-sdk/index.ts -->
 
-`createAiSdkExecutors` from `@statelyai/agent/ai-sdk` is the one adapter this package ships. It builds the `{ generateText, streamText, decide }` set from the Vercel AI SDK, mapping requests onto `generateText`/`streamText` and, for decisions, onto a tool-forced `generateText` call.
+`createAiSdkExecutors` from `@statelyai/agent/ai-sdk` is the one adapter this package ships. It builds the `{ generateText, streamText, decide }` set from the Vercel AI SDK (decisions map onto a tool-forced `generateText` call). The subpath is adapters-only (`defineModels`, `createAiSdkExecutors`); `runAgent` always comes from core and always takes explicit executors.
 
 ```ts
-import { defineModels, runAgent } from "@statelyai/agent/ai-sdk";
+import { runAgent } from "@statelyai/agent";
+import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 import { openai } from "@ai-sdk/openai";
 
 const models = defineModels({ quick: openai("gpt-5.4-mini") });
 
 const result = await runAgent(machine, {
   input: { prompt: "Why state machines?" },
+  executors: createAiSdkExecutors({ models }),
 });
 ```
 
-Importing `runAgent` from the AI SDK entry point explicitly selects this host. It reads the model registry carried by the machine and builds `createAiSdkExecutors({ models })`. Core `runAgent` never selects a provider adapter and still takes explicit executors.
+Executor sets are plain objects, so mixing adapters is fine: keep one adapter's `decide`, swap in another's `streamText`.
 
-For the shortest AI SDK path, `createAgent({ model, schemas, ...machineConfig })` returns `{ machine, run }`; `run(input)` has executors wired already. Requests still name their model (`"default"` for the single-model form). `schemas.context` and the normal XState `context` initializer remain explicit. Use `setupAgent` when you need its full setup surface or a host-independent machine.
+```ts
+const executors = {
+  ...createAiSdkExecutors({ models }),
+  streamText: createOpenAiCompatExecutors({ baseUrl }).streamText,
+};
+```
 
-`ai` is an optional peer dependency, imported only by this subpath. Core has one runtime peer, `xstate`. You supply the model resolver, so no provider package becomes a dependency either.
+`ai` is an optional peer dependency, imported only by this subpath. Core's one runtime peer is `xstate`. You supply the model resolver, so no provider package becomes a dependency either.
+
+## Raw AI SDK functions and the OpenAI-compat adapter
+
+The `generateText`/`streamText` executors accept the raw Vercel AI SDK functions directly, no adapter needed:
+
+```ts
+import { generateText, streamText } from "ai";
+
+await runAgent(machine, { input, executors: { generateText, streamText } });
+```
+
+An `AgentTextRequest` is spread-compatible with the AI SDK's call options, and result shapes unwrap natively (`{ text }`; `{ textStream }`, final text via `await result.text`). Two caveats:
+
+- **Structured output is best-effort.** A request with an `outputSchema` has its raw text `JSON.parse`d and validated; a parse failure throws. For reliable structured output use `createAiSdkExecutors` or `createOpenAiCompatExecutors`.
+- **`decide` needs an adapter.** The tool-per-event mapping lives in the adapters; there is no raw AI SDK function for it.
+
+For any OpenAI-compatible Chat Completions endpoint (Groq, Together, Ollama, vLLM, OpenRouter, LM Studio, OpenAI itself), `createOpenAiCompatExecutors({ baseUrl, apiKey?, models? })` from `@statelyai/agent/openai-compat` is a second shipped adapter: a complete `{ generateText, streamText, decide }` set over raw `fetch` with zero dependencies (pass a `fetch` override for Workers or tests).
 
 ## Typed model aliases
 
 Prefer model aliases shared between `setupAgent` and the adapter: pass one `models` map to both, and request `model:` values are typed against its keys.
 
 ```ts
-import { openai } from "@ai-sdk/openai";
-import { defineModels } from "@statelyai/agent/ai-sdk";
-
 const models = defineModels({
   quick: openai("gpt-5.4-mini"),
   careful: openai("gpt-5.4"),
@@ -69,16 +92,18 @@ const agentSetup = setupAgent({
   },
 });
 
-await runAgent(machine, { input });
+await runAgent(machine, { input, executors: createAiSdkExecutors({ models }) });
 ```
 
-For a fully dynamic or externally configured host (one whose machine must not name concrete models), use `resolveModel` instead: it takes the raw ref string and returns a model, so refs like `"openai/gpt-5.4-mini"` resolve without a static map. You can pass both; `resolveModel` wins. With `models` alone, an unknown ref throws. This is the max-portability escape hatch. See [Which authoring form when](machines.md#which-authoring-form-when). `parseModelRef(ref)` splits a `"provider/model-id"` ref into its parts, so a resolver is one line: `(ref) => openai(parseModelRef(ref).modelId)`.
+For a fully dynamic host (one whose machine must not name concrete models), use `resolveModel` instead: it takes the raw ref string and returns a model, so refs like `"openai/gpt-5.4-mini"` resolve without a static map. You can pass both; `resolveModel` wins. With `models` alone, an unknown ref throws. `parseModelRef(ref)` splits a `"provider/model-id"` ref, so a resolver is one line: `(ref) => openai(parseModelRef(ref).modelId)`. See [Which authoring form when](machines.md#which-authoring-form-when).
 
-Model refs are opaque strings, so any string is a legal `model:` value. A `models` map is optional: it gives you key autocomplete on request `model:` fields and a place for the executor to resolve those refs. The AI SDK adapter resolves a ref through its `models` map, or through `resolveModel` when the map has no match.
+Model refs are opaque strings, so any string is a legal `model:` value; the `models` map only adds key autocomplete and a resolution point.
 
 ## Multi-step tool loops
 
-A text request runs a single model call by default. Set `metadata.maxSteps` on the request to allow a bounded tool-call loop; the adapter forwards it as `stopWhen: stepCountIs(maxSteps)`. This is adapter behavior, not core behavior: `metadata` is the host-owned per-call channel.
+A text request runs a single model call by default. Set `metadata.maxSteps` on the request to allow a bounded tool-call loop; the adapter forwards it as `stopWhen: stepCountIs(maxSteps)`. This is adapter behavior, not core.
+
+`metadata` is the host-owned per-call channel: uninterpreted by core except for adapter conventions like `maxSteps`. A host that doesn't understand a key ignores it, so requests stay portable. It is distinct from XState `meta` (state-node/transition metadata for tooling); request `metadata` is runtime input passed to the executor. See [Text requests](text-requests.md#tools-and-multi-step-loops).
 
 ## Writing your own executors
 
@@ -100,43 +125,28 @@ const executors: AgentRequestExecutors = {
 await runAgent(machine, { input, executors });
 ```
 
-This is backed by real implementations against four runtimes:
+Real reference implementations against four runtimes:
 
-- [examples/ai-sdk-host/index.ts](../examples/ai-sdk-host/index.ts): the Vercel AI SDK, through the shipped adapter.
-- [examples/openai-sdk-host/index.ts](../examples/openai-sdk-host/index.ts): the raw `openai` package (Chat Completions), structured output via `response_format`, decisions forced with `tool_choice: 'required'`.
-- [examples/anthropic-sdk-host/index.ts](../examples/anthropic-sdk-host/index.ts): the raw `@anthropic-ai/sdk` package (Messages API), structured output via a forced tool call, decisions forced with `tool_choice: { type: 'any' }`.
-- [examples/cloudflare-agent-host/index.ts](../examples/cloudflare-agent-host/index.ts) and [examples/cloudflare-workers-ai-host/index.ts](../examples/cloudflare-workers-ai-host/index.ts): inside a Cloudflare Durable Object and against the Workers AI binding.
+| Example | Backing |
+| --- | --- |
+| [ai-sdk-host](../examples/ai-sdk-host/index.ts) | Vercel AI SDK, through the shipped adapter |
+| [openai-sdk-host](../examples/openai-sdk-host/index.ts) | raw `openai` (Chat Completions); structured via `response_format`, decisions via `tool_choice: 'required'` |
+| [anthropic-sdk-host](../examples/anthropic-sdk-host/index.ts) | raw `@anthropic-ai/sdk` (Messages); structured via forced tool call, decisions via `tool_choice: { type: 'any' }` |
+| [cloudflare-agent-host](../examples/cloudflare-agent-host/index.ts), [cloudflare-workers-ai-host](../examples/cloudflare-workers-ai-host/index.ts) | Durable Object; Workers AI binding |
 
-### Adapter helpers for hand-written hosts
+### Building a request payload by hand
 
-The two shipped adapters export their request-mapping internals, so a hand-written host can reuse the parts it needs instead of reimplementing them.
-
-From `@statelyai/agent/ai-sdk`:
-
-- `toAiSdkTools(tools)`: maps an `AgentTools` map to AI SDK `tool()` definitions; a tool that already carries its own Standard Schema `inputSchema` passes through unchanged.
-- `toAiSdkCallSettings(request)`: maps a text request to the shared `generateText`/`streamText` settings (messages/prompt, sampling, tools, tool choice).
-- `toAiSdkToolChoice(toolChoice)`: maps an `AgentToolChoice` to AI SDK's tool-choice shape.
-- `toAiSdkEventTools(events)`: one AI SDK `tool()` per candidate decision event (the tool-per-event recipe).
-- `isStructuredOutputRequest(request)`: `true` when the request should use AI SDK structured `Output.object`.
-- `extractFirstJsonValue(text)`: recovers the first complete top-level JSON value when a model emits two structured-output envelopes back to back. `createAiSdkExecutors` applies it automatically as a one-shot repair (no model round-trip); exported for hand-written hosts.
-
-From `@statelyai/agent/openai-compat`:
-
-- `toOpenAiMessages(request)`: maps a request's `messages`/`system`/`prompt` to Chat Completions messages, expanding each tool result into its own `tool`-role message.
-- `toOpenAiEventTools(events)`: one wire function tool per candidate decision event.
-- `extractJsonSchema(schema)`: reads a Standard Schema's JSON Schema (a thin re-export of core `getJsonSchema`), for building `response_format` or tool `parameters`.
+A hand-written host reads the fields it needs off the plain request and builds its own payload; the example hosts above are the reference to copy. The one public mapping helper is `extractJsonSchema(schema)` from `@statelyai/agent/openai-compat` (a thin re-export of core `getJsonSchema`): it reads a Standard Schema's JSON Schema for a `response_format` or a tool's `parameters`. Wrap the declared output schema with `buildEnvelopeSchema` first (see [the structured-output envelope](#the-structured-output-envelope)).
 
 ## The structured-output envelope
 
 <!-- buildEnvelopeSchema and the wire contract from src/text-logic.ts; adapters in src/ai-sdk, src/openai-compat -->
 
-When a request has a structured output schema (`getAgentOutputMode(request.outputSchema) === 'structured'`), a host sends the schema to the provider wrapped as a root object (the **envelope**) and unwraps it before returning:
+When a request has a structured output schema (`getAgentOutputMode(request.outputSchema) === 'structured'`), a host sends the schema wrapped as a root object (the **envelope**) and unwraps it before returning. This is THE wire contract for structured output: a root object is universally accepted as a provider response schema, unlike a bare union or array root that many providers reject.
 
 ```json
 { "result": <the declared schema>, "reasoning": "<optional string>" }
 ```
-
-This is THE wire contract for structured output. A root object is universally accepted as a provider response schema, unlike a bare union or array root that many providers reject. `buildEnvelopeSchema(request.outputSchema, { reasoning: request.reasoning })` builds it:
 
 ```ts
 import {
@@ -149,28 +159,23 @@ import {
 if (getAgentOutputMode(request.outputSchema) === "structured") {
   const envelope = buildEnvelopeSchema(request.outputSchema, { reasoning: request.reasoning });
   const jsonSchema = await getJsonSchema(envelope); // send this to the provider
-  // Validated unwrap of the provider's { result, reasoning? } response:
   const parsed = parseStructuredEnvelope(request, JSON.parse(providerContent));
   return { output: parsed.result, reasoning: parsed.reasoning };
 }
 ```
 
-Return the **unwrapped** `.result` as `output`: the machine only ever validates and sees the schema it declared, never the envelope. `reasoning` is surfaced on the raw executor result only (never in machine context/output); see [reasoning opt-in](./text-requests.md#reasoning). The shipped `createAiSdkExecutors` and `createOpenAiCompatExecutors` adapters and the raw OpenAI/Anthropic example hosts all follow this exact contract. (Prompt-serialized hosts that don't send a provider response schema, e.g. the Workers AI host, instead parse best-effort JSON and skip the envelope.)
+Return the **unwrapped** `.result` as `output`: the machine only ever validates and sees the schema it declared. `reasoning` is surfaced on the raw executor result only, never in machine context/output (see [reasoning opt-in](./text-requests.md#reasoning)). The shipped adapters and the raw OpenAI/Anthropic example hosts all follow this contract. (Prompt-serialized hosts that don't send a response schema, e.g. the Workers AI host, parse best-effort JSON and skip the envelope.)
 
 Two related helpers for hand-rolled hosts:
 
-- **`isStandardSchema(value)`** narrows an unknown schema value to `StandardSchemaV1` before extraction. Request `tools` accept whatever a user's SDK produces, so a tool's `inputSchema` may be an SDK-specific wrapper core can't read: check with `isStandardSchema` and fall back to unconstrained parameters instead of crashing (this is what `toOpenAiTools` does).
+- **`isStandardSchema(value)`** narrows an unknown schema before extraction. A tool's `inputSchema` may be an SDK-specific wrapper core can't read: check with `isStandardSchema` and fall back to unconstrained parameters instead of crashing (what the shipped adapters do internally).
 - **`renderDecisionAttempts(request)`** renders a decision request's prior failed `attempts` as feedback messages to append to the next call, so retries converge instead of repeating the same illegal choice. Both shipped adapters and all three raw-SDK example hosts use it; see [Decisions](decisions.md#validation-and-retries).
 
-## Retries
+## Retries and budgets
 
-Transport-level retries (HTTP 429s, timeouts, exponential backoff) belong in the executor or the SDK it wraps, not the machine. The AI SDK's `maxRetries` (and the equivalent on the OpenAI/Anthropic clients) already handles them; a raw-`fetch` executor adds its own retry loop. The machine never sees a transient network failure.
+Transport-level retries (429s, timeouts, backoff) belong in the executor or the SDK it wraps, not the machine. The AI SDK's `maxRetries` (and the OpenAI/Anthropic client equivalents) handles them; a raw-`fetch` executor adds its own loop. The machine never sees a transient network failure. Machine-level retry is different: an authored `onError` transition re-entering a state after a _semantic_ failure (a validation rejection, an exhausted decision) is control flow you model explicitly.
 
-Machine-level retry is a different thing: an authored `onError` transition that re-enters a state after a _semantic_ failure (a validation rejection, an exhausted decision). That is control flow you model explicitly, not a transport concern.
-
-## Budgets
-
-`maxModelCalls` is the built-in loop backstop (default 100; exceeding it settles an `error` with cause `'max-model-calls'`). For finer budgets (a token cap, a per-request-src call count), wrap the executors. Because a child machine's requests inherit the parent's executors, one wrapper counts the whole tree:
+`maxModelCalls` is the built-in loop backstop (default 100; exceeding it settles an `error` with cause `'max-model-calls'`). For finer budgets (a token cap, a per-request-src call count), wrap the executors. A child machine's requests inherit the parent's executors, so one wrapper counts the whole tree:
 
 ```ts
 function withBudget(base: AgentRequestExecutors, maxCalls: number) {
@@ -195,12 +200,12 @@ await runAgent(machine, { input, executors: withBudget(executors, 20) });
 
 `runAgent` exposes purely observational callbacks; they return `void` and cannot control the run:
 
-- **`onTrace(event)`**: one ordered stream of run/request/chunk/transition/emit/end events, with `runId`, `seq`, `timestamp`, `machineId`, and `machineVersion` (the same identity stamped onto settled snapshots as `agentMeta`). This is the eval trace / JSONL / telemetry-adapter slot.
+- **`onTrace(event)`**: one ordered stream of run/request/chunk/transition/emit/end events, with `runId`, `seq`, `timestamp`, `machineId`, `machineVersion` (the same identity stamped onto settled snapshots as `agentMeta`). The eval trace / JSONL / telemetry-adapter slot.
 - **`onChunk(chunk, info)`**: each streamed chunk of a `mode: 'stream'` request, with the `AgentRequest` that produced it (parallel streams stay distinguishable).
-- **`onResult(request, result)`**: once per resolved text or decision request (decision retries fire per attempt), with the normalized `result.output` and the raw executor result. `result.raw` is whatever your executor returned, verbatim: return `usage` alongside `output` and `onResult` becomes your token meter. The shipped adapter already does this (`raw as AiSdkGenerateResult` carries `usage`, `finishReason`, `toolCalls`, `toolResults`).
-- **`onTransition(snapshot, event)`**: every machine transition, with the new snapshot and the causing event.
+- **`onResult(request, result)`**: once per resolved text or decision request (decision retries fire per attempt), with normalized `result.output` and the raw executor result. `result.raw` is whatever your executor returned verbatim: return `usage` alongside `output` and this becomes your token meter (the shipped adapter does; `raw as AiSdkGenerateResult` carries `usage`, `finishReason`, `toolCalls`, `toolResults`).
+- **`onTransition(snapshot, event)`**: every machine transition, with the new snapshot and causing event.
 - **`on: { EVENT: handler, '*': handler }`**: events the machine emits with `enq.emit(...)`, keyed by emitted event type (`'*'` catches all).
-- **`inspect(inspectionEvent)`**: raw xstate inspection passthrough for the whole actor system. `onTransition` covers the root machine only; when a state invokes a child machine (see [multi-agent](multi-agent.md)), filter `inspectionEvent.type === '@xstate.transition'` and read `inspectionEvent.actorRef` to watch the child's states too, attributed to the child. The `inspectTransitions(handler)` helper does that filtering for you and hands over the typed snapshot + actorRef.
+- **`inspect(inspectionEvent)`**: raw xstate inspection passthrough for the whole actor system. `onTransition` covers the root only; to watch a child machine's states (see [multi-agent](multi-agent.md)), filter `inspectionEvent.type === '@xstate.transition'` and read `inspectionEvent.actorRef`. The `inspectTransitions(handler)` helper does that filtering and hands over the typed snapshot + actorRef.
 
 ```ts
 await runAgent(machine, {
@@ -214,10 +219,10 @@ await runAgent(machine, {
 });
 ```
 
-The split: `onTrace` is the whole ordered run ledger, useful for evals and exports. `onTransition` narrates the machine in xstate's vocabulary (state values, events), for targeted tracing and debugging. `on` narrates in _your_ vocabulary: the machine emits domain progress events at moments the author chose, and the host renders them (a progress UI, an SSE stream, a log line). Declare their schemas in `setupAgent` and both `enq.emit(...)` and the `on` handlers are fully typed:
+The split: `onTrace` is the whole ordered run ledger (evals, exports); `onTransition` narrates in xstate's vocabulary (state values, events); `on` narrates in _your_ vocabulary, rendering domain progress events the machine emits at authored moments (a progress UI, an SSE stream, a log line). Declare their schemas in `setupAgent` and both `enq.emit(...)` and the `on` handlers are fully typed:
 
 ```ts
-const agent = setupAgent({
+const agentSetup = setupAgent({
   context: z.object({ /* ... */ }),
   emitted: {
     EVALUATED: z.object({ qualityScore: z.number(), iteration: z.number() }),
@@ -234,13 +239,13 @@ onDone: ({ context, output }, enq) => {
 
 Emitted events are fire-and-forget observation, not control flow: they never target states, and a run behaves identically with no handlers attached.
 
-> **Note:** Tracing and OpenTelemetry are bring-your-own; no exporter ships. Build one on `onTrace`, or keep using the narrower seams (`onResult`, `onTransition`, `on`, `onChunk`) when a host wants separate handlers.
+> **Note:** Tracing and OpenTelemetry are bring-your-own; no exporter ships. Build one on `onTrace`, or use the narrower seams (`onResult`, `onTransition`, `on`, `onChunk`).
 
 ## Testing with deterministic executors
 
 <!-- withExecutor test binding from src/text-logic.ts and examples/email-drafter -->
 
-Because executors are plain functions, a test can supply scripted ones and never touch the network. Bind them with `withExecutor`:
+Because executors are plain functions, a test supplies scripted ones and never touches the network. Bind them with `withExecutor`:
 
 ```ts
 const machine = emailDrafter.provide({
@@ -252,9 +257,152 @@ const machine = emailDrafter.provide({
 });
 ```
 
-[examples/email-drafter/index.ts](../examples/email-drafter/index.ts) drives a full run this way in its tests: fixed values, deterministic, no model called.
+[examples/email-drafter/index.ts](../examples/email-drafter/index.ts) drives a full run this way: fixed values, deterministic, no model called.
+
+### Direct execution without runAgent
+
+`.withExecutor(...)` also binds execution onto one logic for normal XState use, bypassing `runAgent`'s executor slots. Provide the bound logic as an actor source and run with `createActor` directly:
+
+```ts
+import { validateSchemaSync } from "@statelyai/agent";
+
+const executableDraftText = draftText.withExecutor(async ({ request, signal }) => {
+  const result = await generateText({
+    model: resolveModel(request.model),
+    system: request.system,
+    prompt: request.prompt ?? "",
+    abortSignal: signal,
+  });
+  return request.outputSchema
+    ? validateSchemaSync(request.outputSchema, result.text)
+    : result.text;
+});
+
+createActor(
+  machine.provide({ actorSources: { draftText: executableDraftText } }),
+  { input },
+).start();
+```
+
+This is the same mechanism `runAgent` uses internally to bind executors; the direct form is useful when a logic should carry its own execution wherever it's used, independent of the host loop. See [Which authoring form when](machines.md#which-authoring-form-when).
+
+## Beyond the happy path
+
+The default is named `requests:` on `setupAgent`, executed by an adapter (above). `setupAgent` also registers built-in actor sources for model work: `agent.generateText`/`agent.streamText` for inline text, `agent.decide` for standalone decisions, `agent.plan` for multi-event plans, `agent.userInput` for human input.
+
+### Inline agent.generateText
+
+<!-- inline agent.generateText + runAgent, from src/setup-agent.ts and src/index.ts -->
+
+For a one-off text request, `agent.generateText` is a quick inline path (prefer named [`requests:`](text-requests.md) once a call is reused or worth testing):
+
+```ts
+import { parseOutput, runAgent } from "@statelyai/agent";
+
+generating: {
+  invoke: {
+    id: "draft", // durable id: how a resumed/replayed run matches the invoke to its onDone
+    src: "agent.generateText",
+    input: ({ context }) => ({
+      model: "openai/gpt-5.4-mini",
+      prompt: context.prompt,
+      outputSchema: resultSchema,
+    }),
+    onDone: ({ output }) => ({
+      target: "done",
+      context: { result: parseOutput(resultSchema, output) },
+    }),
+  },
+},
+
+// ...
+await runAgent(machine, { input, executors: { generateText, streamText } }); // any SDK
+```
+
+Every agent invoke should have a durable `id`: it's how a resumed/replayed run matches the invoke back to its `onDone`. `agent.streamText` and `agent.decide` are the streaming and decision counterparts.
+
+### Implementing agent.userInput
+
+`agent.userInput` gathers human input mid-run without settling. It's one of two waiting styles; see [Choosing between the two waiting styles](human-in-the-loop.md#choosing-between-the-two-waiting-styles). The host owns delivery and resume. Two ways to implement it.
+
+**`RunAgentOptions.userInput`**, the inline path:
+
+```ts
+const result = await runAgent(machine, {
+  input,
+  executors: { generateText },
+  userInput: async (input) => showFormAndWaitForSubmit(input),
+});
+```
+
+**A provided actor source**, for the step path, or when the inline path doesn't fit:
+
+```ts
+import { createAsyncLogic } from "xstate";
+
+const boundMachine = machine.provide({
+  actorSources: {
+    "agent.userInput": createAsyncLogic({
+      run: async ({ input }) => showFormAndWaitForSubmit(input),
+    }),
+  },
+});
+```
+
+If a machine invokes `agent.userInput` and neither is supplied, `runAgent` fails at bind time, before any model call, naming the actor and recommending the idle-state pattern instead. Static [machine config](machines-as-data.md) uses the same actor source:
+
+```yaml
+invoke:
+  src: agent.userInput
+  input:
+    prompt: "Who should receive this email?"
+    schema:
+      type: object
+      properties:
+        recipient: { type: string }
+      required: [recipient]
+  onDone:
+    assign:
+      recipient: "{{ event.output.recipient }}"
+```
+
+### Resolving decisions standalone
+
+The step helpers surface a decision request whose `events` field holds only the events legal from the current snapshot ([`allowedEvents`](decisions.md) intersected with XState guards, via `getAgentRequests`). Resolve it to the chosen, validated event with `resolveDecision`:
+
+```ts
+const requests = getAgentRequests(machine, actions, snapshot);
+const request = requests[0]; // kind: 'decision'
+
+const event = await resolveDecision(request, decide);
+// { type: 'ATTACK', target: 'orc' }
+```
+
+`resolveDecision` retries on an unknown event type, an invalid payload, or a guard rejection; its `snapshot.can(event)` check closes the gap at apply time. See [Decisions](decisions.md#validation-and-retries).
+
+### Threading host context into actors and requests
+
+Agents often need host-owned values (a session handle, db client, auth or billing ids) reaching the code that makes a model call. There is no dedicated `hostContext` option today (one is under consideration but **not shipped**); which pattern to reach for depends on whether the value is serializable and needed per call:
+
+- **Serializable ids the machine carries:** pass as machine `input`, land in `context`, map into each actor's `input`.
+- **Non-serializable handles (a live session, db client, socket):** close over them where you define the actor via `.provide({ actorSources })` or `.withExecutor(...)`. The handle lives in the closure, never in `context` (it won't survive [snapshot serialization](human-in-the-loop.md#persist-and-resume-across-processes)).
+- **Per-call reference ids** (auth token, billing id, trace id): put them in the request's input schema so they're typed and validated at the call site, not smuggled through `metadata`.
+
+```ts
+function buildMachine(session: Session, db: DbClient) {
+  return baseMachine.provide({
+    actorSources: {
+      draftEmail: draftEmail.withExecutor(async ({ request }) => {
+        const history = await db.loadThread(request.threadId);
+        return session.prompt(request.prompt, { history });
+      }),
+    },
+  });
+}
+```
 
 ## Related
 
+- [Text requests](text-requests.md#reusable-request-logic-with-createtextlogic): declaring named model calls, and `createTextLogic` for standalone request logic.
 - [The step path](steps.md): the lower-level per-model-call checkpointing loop for durable hosts.
 - [Quickstart](quickstart.md): a host and a machine together end to end.

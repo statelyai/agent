@@ -7,9 +7,7 @@ description: Reuse models and executors from other AI frameworks via AI SDK Lang
 
 ## Models are the interop currency
 
-An agent machine never talks to a model directly. It builds requests, and the **host** supplies executors that run them (see [Hosts and executors](./hosts)). So interop is really about where the executors come from, and the shared currency is the AI SDK **`LanguageModel`** object.
-
-Whatever framework hands you a `LanguageModel`, drop it into `createAiSdkExecutors({ models })` and you have a full `{ generateText, streamText, decide }` set:
+Interop is about where a host's [executors](hosts.md) come from, and the shared currency is the AI SDK **`LanguageModel`** object. Whatever framework hands you one, drop it into `createAiSdkExecutors({ models })` for a full `{ generateText, streamText, decide }` set:
 
 ```ts
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
@@ -29,7 +27,7 @@ Three ways in, from most to least capable:
 
 ## Recipe: reuse a Mastra model
 
-Mastra agents are configured with an AI SDK `LanguageModel`. Reuse that same model object as an executor, with no re-config and no second provider setup:
+Mastra agents are configured with an AI SDK `LanguageModel`. Reuse that same model object as an executor, no re-config and no second provider setup:
 
 ```ts
 import { openai } from "@ai-sdk/openai";
@@ -44,7 +42,7 @@ await runAgent(machine, {
 });
 ```
 
-Anything exposing a `LanguageModel` works the same way, so the machine and Mastra share one model definition.
+Anything exposing a `LanguageModel` works the same way, so machine and Mastra share one model definition.
 
 ## Recipe: Cloudflare Workers AI
 
@@ -72,7 +70,7 @@ Pass Cloudflare-specific per-call options through request `metadata`: the host o
 
 ## Recipe: local Ollama via openai-compat
 
-Ollama serves an OpenAI-compatible API. No provider package needed, just point at the local endpoint:
+Ollama serves an OpenAI-compatible API. No provider package needed, point at the local endpoint:
 
 ```ts
 import { createOpenAiCompatExecutors } from "@statelyai/agent/openai-compat";
@@ -96,4 +94,4 @@ Swap `baseUrl`/`apiKey` for Groq, vLLM, Together, or LM Studio and the executors
 | `createOpenAiCompatExecutors` | yes            | yes          | yes      | yes               |
 | Raw `ai` functions            | yes            | yes          | no       | best-effort       |
 
-`decide` maps each machine event to a forced tool call, and that mapping lives in an adapter, so raw `ai` functions cannot back a decision. For reliable structured output, use one of the two adapters. See [Text requests](./text-requests) and [Decisions](./decisions) for what each request type needs.
+`decide` maps each machine event to a forced tool call, and that mapping lives in an adapter, so raw `ai` functions cannot back a decision. For reliable structured output, use one of the two adapters. See [Text requests](text-requests.md) and [Decisions](decisions.md).

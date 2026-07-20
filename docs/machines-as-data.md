@@ -5,11 +5,9 @@ description: Author an agent machine as a JSON or YAML config and lower it into 
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
 
-## Machines as data
-
 <!-- setupAgent.fromConfig lowering from src/workflow-config.ts -->
 
-An agent machine can be pure data. Describe it as a JSON or YAML config and hand it to `setupAgent.fromConfig(...)`. The lowering produces the same kind of runnable XState machine that `setupAgent(...)` builds by hand: states, choice routing, transitions with guard expressions, emitted progress events, text requests, decisions, and human/idle steps included. Only the authoring format changes.
+An agent machine can be pure data. Describe it as a JSON or YAML config and hand it to `setupAgent.fromConfig(...)` (a namespace member on `setupAgent`, same import). The lowering produces the same runnable XState machine `setupAgent(...)` builds by hand: states, choice routing, guard-expression transitions, emitted progress events, text requests, decisions, and human/idle steps. Only the authoring format changes.
 
 ```ts
 import { setupAgent } from "@statelyai/agent";
@@ -29,11 +27,11 @@ The package ships a JSON Schema for validating and editing configs:
 import workflowSchema from "@statelyai/agent/agent-workflow.json";
 ```
 
-Point an editor, form generator, or validation step at it to catch a malformed config before it reaches `fromConfig(...)`. It describes the whole config surface: `schemas` (including `events` and `emitted`), `context`, `requests`, `actors`, `initial`, and `states`, down to choice states, transitions, invokes, and actions.
+Point an editor, form generator, or validation step at it to catch a malformed config before `fromConfig(...)`. It describes the whole config surface: `schemas` (including `events` and `emitted`), `context`, `requests`, `actors`, `initial`, and `states`, down to choice states, transitions, invokes, and actions.
 
 ## Running example: a support ticket
 
-The rest of this page uses one config: the model triages a ticket (escalate or reply), drafts a reply when replying, then waits for a human to approve or reject. It is a real `.json` file at [examples/json-agent/workflow.json](../examples/json-agent/workflow.json), run by [examples/json-agent/index.ts](../examples/json-agent/index.ts). Here it is as YAML for readability:
+One config runs the rest of this page: the model triages a ticket (escalate or reply), drafts a reply when replying, then waits for a human to approve or reject. It is a real `.json` file at [examples/json-agent/workflow.json](../examples/json-agent/workflow.json), run by [examples/json-agent/index.ts](../examples/json-agent/index.ts). As YAML for readability:
 
 ```yaml
 id: support-ticket-json
@@ -128,11 +126,7 @@ states:
 
 <!-- compileSchema requirement and SchemaCompiler from src/workflow-config.ts -->
 
-A config carries JSON Schemas (context, events, input, output, and each request's input/output), and those need a runtime validator. The library bundles no JSON Schema engine, so it does not guess how strictly to validate: you bring the engine. `compileSchema` takes a JSON Schema object and a name and returns a Standard Schema validator; `fromConfig(...)` calls it once per schema.
-
-`fromConfig` requires a `compileSchema` option. Core intentionally ships no
-JSON Schema engine; bring Ajv, @cfworker/json-schema, or another compiler that
-returns Standard Schema. Ajv recipe:
+A config carries JSON Schemas (context, events, input, output, and each request's input/output) that need a runtime validator. The library bundles no JSON Schema engine and does not guess how strictly to validate: you bring the engine. `compileSchema` takes a JSON Schema object and a name and returns a Standard Schema validator; `fromConfig(...)` calls it once per schema and **requires** the option. Bring Ajv, @cfworker/json-schema, or another compiler that returns Standard Schema. Ajv recipe:
 
 ```ts
 import Ajv from "ajv";
@@ -149,7 +143,14 @@ const ajvCompileSchema: SchemaCompiler = (jsonSchema, name): StandardSchemaV1 =>
       validate: (value) =>
         validate(value)
           ? { value }
-          : { issues: (validate.errors ?? []).map((e) => ({ message: `${name} ${e.message}` })) },
+          : {
+              issues: (validate.errors ?? []).map((e) => ({
+                message: `${name}${e.instancePath} ${e.message}`,
+              })),
+            },
+      // Expose the source JSON Schema so lint's serializability checks
+      // (`unserializable-context`, `final-without-output`) can read the shape.
+      jsonSchema: { input: () => jsonSchema },
     },
   };
 };
@@ -157,15 +158,43 @@ const ajvCompileSchema: SchemaCompiler = (jsonSchema, name): StandardSchemaV1 =>
 const machine = setupAgent.fromConfig(config, { compileSchema: ajvCompileSchema });
 ```
 
+## Running a config
+
+A lowered machine runs through `runAgent(...)` like any other agent machine. Pass the machine input, the host `executors`, and `on` handlers for emitted events:
+
+```ts
+const result = await runAgent(machine, {
+  input: { ticket: "My download link 404s." },
+  executors: { decide, generateText },
+  on: { TRIAGED: (event) => console.log(event.route) },
+});
+```
+
+Executor return shapes:
+
+- `decide` → `{ event: { type, ...payload } }` — the chosen machine event (returning a bare `{ type }` throws a descriptive error).
+- `generateText` / `streamText` → `{ output }` — the structured result matching the request's `output` schema.
+
+A run settles one of two ways:
+
+- `{ status: 'done', output }` — reached a final state.
+- `{ status: 'idle', snapshot }` — paused at a human/idle state. Persist `snapshot`, then resume when the event arrives:
+
+```ts
+result = await runAgent(machine, { snapshot, event: { type: "APPROVE" }, executors });
+```
+
+An **idle/human state is any state with no `invoke`** (nothing runs; the machine waits for an external event via `on`). A state with an `invoke` is doing work (a decision, a text request, or a `agent.userInput` pause).
+
+Two `prompt`-shaped fields, different layers: a `requests` entry's `prompt` is the text sent to the model; an `invoke`'s `input` is the data passed to the invoked source (a request's typed input, or an `agent.decide` inline input carrying its own `model`/`prompt`/`allowedEvents`).
+
 ## Expressions
 
-The config is data, not code. Any value is a JSON literal or a whole-string `"{{ }}"` expression: a dot path resolved against `input`, `context`, and `event`. `"{{ context.ticket }}"` reads `context.ticket`; `"{{ event.output.reply }}"` reads `event.output.reply`. There is no code and no `eval`; the resolver walks the path and returns the value.
-
-Because an expression can only read a value, a config generated by a model, stored in a database, or produced by a visual editor cannot do anything a hand-authored machine could not do.
+The config is data, not code. Any value is a JSON literal or a whole-string `"{{ }}"` expression: a dot path resolved against `input`, `context`, and `event`. `"{{ context.ticket }}"` reads `context.ticket`; `"{{ event.output.reply }}"` reads `event.output.reply`. No code, no `eval`; the resolver walks the path and returns the value. Because an expression can only read, a config from a model, database, or visual editor cannot do anything a hand-authored machine could not.
 
 ## Decisions from JSON
 
-A [decision](decisions.md) works from a config too: invoke `src: agent.decide` with `allowedEvents`.
+A [decision](decisions.md) works from a config: invoke `src: agent.decide` with `allowedEvents`.
 
 ```yaml
 states:
@@ -183,7 +212,7 @@ states:
       REPLY: { target: drafting }
 ```
 
-Delivery of the chosen event is automatic: the decision actor sends it to the invoking actor when it resolves, in both TypeScript and JSON. That event's transition usually exits the invoking state, cancelling the invoke, so `onDone` normally never fires; it is optional and only observed when the chosen event's transition stays in-state. Only `onError` (retries exhausted) is commonly configured.
+Delivery of the chosen event is automatic: the decision actor sends it to the invoking actor when it resolves, in both TypeScript and JSON. Handle the chosen event with the state's `on` transitions. A decision has no output of its own, so an `onDone` on an `agent.decide` invoke can never fire — `fromConfig(...)` rejects it as a config error. Only `onError` (retries exhausted) applies.
 
 ## Choice states and emitted events
 
@@ -205,7 +234,7 @@ states:
     type: final
 ```
 
-Declare emitted event payloads under `schemas.emitted`. Hosts receive them through `runAgent(..., { on: { SCORED: handler } })`, the same as hand-authored machines using `enq.emit(...)`.
+Declare emitted event payloads under `schemas.emitted`. Hosts receive them through `runAgent(..., { on: { SCORED: handler } })`, same as hand-authored machines using `enq.emit(...)`.
 
 ## Honest limits
 
@@ -213,10 +242,10 @@ The data form is narrower than TypeScript authoring, by design:
 
 - Expressions are simple dot paths (`{{ context.foo.bar }}`), not arbitrary JavaScript.
 - Guard expressions are **truthy-only**: no `!=`, no comparisons, no boolean operators.
-- Function-valued fields (`allowedEvents`, `guard`, `input` as functions) cannot appear in JSON at all.
+- Function-valued fields (`allowedEvents`, `guard`, `input` as functions) cannot appear in JSON.
 
-When you need comparisons, computed guards, or function-valued fields, author in TypeScript with `setupAgent(...)` and Zod (or any Standard Schema).
+For comparisons, computed guards, or function-valued fields, author in TypeScript with `setupAgent(...)` and Zod (or any Standard Schema).
 
 ## Verifying a generated machine
 
-A machine built from data can be checked before it ever runs: no API key, no model call. Lint it with `lintAgentMachine`, simulate a scripted playthrough, or enumerate its decision branches. The `statelyai-agent lint <workflow.json>` CLI does this for a JSON config in CI. See [verify](verify).
+A machine built from data can be checked before it runs: no API key, no model call. Lint it with `lintAgentMachine`, simulate a scripted playthrough, or enumerate its decision branches. The `statelyai-agent lint <workflow.json>` CLI does this for a JSON config in CI. See [Verify](verify.md).

@@ -6,7 +6,7 @@ Build agents as state machines, with explicit control flow you can inspect, test
 
 Stately Agent adds model requests and decisions to XState. The state machine defines what the agent can do. Your application chooses the model, runs the requests, and stores the state.
 
-Any agent workflow or loop can be modeled as a state machine. Model calls and tools run as effects inside it. The model proposes an event. The machine decides whether it is allowed and what happens next.
+Any agent workflow or loop can be modeled as a state machine. Model calls and tools run as effects inside it. The model proposes an event. The machine decides whether it is allowed and what happens next. See [how this compares to LangGraph and hand-rolling a loop](docs/comparison.md).
 
 Stately Agent 2 is in alpha. APIs may change before the stable release.
 
@@ -20,7 +20,7 @@ Stately Agent 2 is in alpha. APIs may change before the stable release.
 pnpm add @statelyai/agent@alpha xstate@alpha zod ai @ai-sdk/openai
 ```
 
-Node 22.18 or newer is required.
+Node 22.18 or newer is required. The package is ESM-only; the library targets XState v6 alpha and stays compatible with XState v5.
 
 ## Quick start
 
@@ -30,15 +30,15 @@ This agent reviews refund requests. The model may propose an automatic refund, b
 
 ```ts
 import { openai } from "@ai-sdk/openai";
-import { defineModels, runAgent } from "@statelyai/agent/ai-sdk";
-import { setupAgent } from "@statelyai/agent";
+import { runAgent, setupAgent } from "@statelyai/agent";
+import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 import { z } from "zod";
 
 const models = defineModels({
   fast: openai("gpt-5.4-mini"),
 });
 
-const agent = setupAgent({
+const agentSetup = setupAgent({
   models,
   context: z.object({
     request: z.string(),
@@ -57,7 +57,7 @@ const agent = setupAgent({
   },
 });
 
-const refundMachine = agent.createMachine({
+const refundMachine = agentSetup.createMachine({
   context: ({ input }) => input,
   initial: "deciding",
   states: {
@@ -92,6 +92,7 @@ const result = await runAgent(refundMachine, {
     request: "I was charged twice for the same order.",
     amount: 75,
   },
+  executors: createAiSdkExecutors({ models }),
 });
 
 if (result.status === "done") {

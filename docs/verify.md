@@ -1,14 +1,11 @@
+---
+title: Testing and verification
+description: Statically lint, simulate, and explore agent machines without any API keys or model calls.
+---
+
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
 
-# Verify
-
-Keyless verification for agent machines. Coding agents generate these machines; they need a closed loop to **self-verify what they generated without any API keys or model calls**. `@statelyai/agent` ships three static/simulated APIs plus a thin CLI for that.
-
-Everything here runs on `machine.config` and the pure step path: no provider, no network, no keys.
-
-## Why keyless
-
-An agent that emits a machine (from a prompt, a database, a visual editor) can't trust it blindly. Running it costs model calls and only exercises one path. These APIs let the generator check the machine _structurally_ and _by simulation_ before it ever spends a token:
+Coding agents generate agent machines; they need a closed loop to **self-verify what they generated without any API keys or model calls**. `@statelyai/agent` ships three static/simulated APIs plus a thin CLI for that. Everything runs on `machine.config` and the pure step path: no provider, no network, no keys. An emitted machine (from a prompt, a database, a visual editor) can't be trusted blindly, and running it costs model calls while exercising one path. These APIs check it before it spends a token:
 
 - catch dead states, undeliverable decisions, and output-contract gaps statically;
 - drive a scripted playthrough to a known outcome deterministically;
@@ -41,7 +38,7 @@ For a one-liner that throws instead of returning findings, use `assertAgentMachi
 
 ## Assert machines in tests
 
-Everything above is a plain function, so a machine is a thing you assert in a unit test: no model, no API key, no mocks. Structural soundness, reachability, and full scripted playthroughs run deterministically in vitest/jest:
+Everything above is a plain function, so a machine is a thing you assert in a unit test: no model, no API key, no mocks. Structural soundness, reachability, and scripted playthroughs run deterministically in vitest/jest:
 
 ```ts
 import { assertAgentMachine, canReach, simulateAgent } from "@statelyai/agent";
@@ -67,13 +64,13 @@ test("happy path settles done", async () => {
 });
 ```
 
-Guards stay in force throughout: `canReach` and `simulateAgent` walk the same step path `runAgent` uses, so a path that exists in the graph but is guard-illegal never counts as reachable. Prompts change, models change; these tests pin the shape.
+Guards stay in force throughout: `canReach` and `simulateAgent` walk the same step path `runAgent` uses, so a graph path that is guard-illegal never counts as reachable. These tests pin the shape as prompts and models change.
 
 ## `await simulateAgent(machine, { input, script, maxSteps? })`
 
-A deterministic, model-free playthrough on the pure step path (async: it drives plan steps through the real durable protocol). The `script` supplies responses by invoke `src` (FIFO queues), so runs are reproducible:
+A deterministic, model-free playthrough on the pure step path (async: drives plan steps through the real durable protocol). The `script` supplies responses by invoke `src` (FIFO queues), so runs are reproducible:
 
-- `decisions`: the `ChosenEvent` to apply for each decision (keyed by decision src, usually `agent.decide`). A plan step is a decision too: key its chosen events by the plan invoke's src (`agent.plan`) and end with the reserved `agent.plan.done` move to complete the plan;
+- `decisions`: the `ChosenEvent` to apply per decision (keyed by decision src, usually `agent.decide`). A plan step is a decision too: key its chosen events by the plan src (`agent.plan`) and end with the reserved `agent.plan.done` move to complete the plan;
 - `text`: output values for text requests (keyed by request src);
 - `userInput`: answers for `agent.userInput` invokes.
 
@@ -98,7 +95,7 @@ Returns `{ status, snapshot, trail }`. It throws a descriptive error (naming the
 
 ## `await explorePaths(machine, { input, maxDepth?, textOutputs? })`
 
-Enumerates decision and external-event branches, model-free, and reports coverage (async: plan branches advance through the real plan protocol). At each decision request it forks one branch per candidate event (guard-rejected candidates are counted in `prunedByGuard`, not explored); at an idle wait it forks per externally-accepted event. A `agent.plan` request forks the same way (plan steps fork like decisions, including the reserved `agent.plan.done` move, which is always legal while other candidates prune when their guard rejects them), so a single plan can consume several depth units. Text/`userInput` invokes are resolved from `textOutputs` (a by-src canned-output map); a missing src halts that branch with a `needs-output` terminal instead of throwing.
+Enumerates decision and external-event branches, model-free, and reports coverage (async: plan branches advance through the real plan protocol). At each decision it forks one branch per candidate event (guard-rejected candidates count in `prunedByGuard`, not explored); at an idle wait it forks per externally-accepted event. A `agent.plan` request forks the same way (including the reserved `agent.plan.done` move, always legal), so a single plan can consume several depth units. Text/`userInput` invokes resolve from `textOutputs` (a by-src canned-output map); a missing src halts that branch with a `needs-output` terminal instead of throwing.
 
 ```ts
 import { explorePaths } from "@statelyai/agent";
@@ -136,4 +133,4 @@ npx statelyai-agent lint workflow.json
 
 The library bundles no JSON Schema engine, so the CLI lints **structure only**: it compiles the config with a permissive pass-through compiler and runs `lintAgentMachine`. It exits `1` on any error-severity finding, so drop it into CI or a generation loop. For full schema-aware linting, use the API with a real compiler: `lintAgentMachine(setupAgent.fromConfig(config, { compileSchema }))`.
 
-> Because `fromConfig` lowers every transition to a function, `unreachable-state` is over-approximated for config machines; the other checks are unaffected.
+Because `fromConfig` lowers every transition to a function, `unreachable-state` is over-approximated for config machines; the other checks are unaffected.

@@ -5,7 +5,7 @@ description: Work deliberately deferred past the 2.0 alpha, and why.
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
 
-Everything here is **additive**: none of it blocks the alpha, and all of it benefits from real usage feedback before the API shape is chosen. If you hit one of these and have opinions, open an issue; that feedback is exactly what this list is waiting on.
+Everything here is **additive**: none of it blocks the alpha, and all of it benefits from real usage feedback before the API shape is chosen. If you hit one of these and have opinions, open an issue; that feedback is what this list is waiting on.
 
 ## Helpers (deferred until embedders show us what they actually write)
 
@@ -19,7 +19,7 @@ Everything here is **additive**: none of it blocks the alpha, and all of it bene
 
 ## Runtime options
 
-- **`hostContext` on `runAgent`.** Host-owned values (sessions, auth/billing ids) threaded to executors and actors without touching machine context. The documented patterns (see [host actors](host-actors.md)) cover this today via closures and input mapping; the option ships only if those prove insufficient in practice.
+- **`hostContext` on `runAgent`.** Host-owned values (sessions, auth/billing ids) threaded to executors and actors without touching machine context. The documented patterns (see [threading host context](hosts.md#threading-host-context-into-actors-and-requests)) cover this today via closures and input mapping; the option ships only if those prove insufficient in practice.
 - **Dynamic fan-out helper.** Declarative dynamic parallelism. Today: `Promise.all` over host actors inside one invoke (see `examples/ai-sdk-orchestrator-worker`). A `fanOut(...)` helper plus per-branch progress events ships if the manual pattern proves too repetitive.
 
 ## Ecosystem
@@ -34,6 +34,8 @@ Everything here is **additive**: none of it blocks the alpha, and all of it bene
 ## Next up
 
 - **Plan executor (simulate + divergence replan).** The `agent.plan` builtin has shipped: iterated-decide, applying legal events one at a time against the live snapshot until the built-in done move, `maxSteps`, or the invoke exits its state (see [decisions](decisions.md) and `examples/todo-nl`). Next is the executor layer on top: a proposed plan is validated up front by simulating its event path against the machine; at runtime each step's actual snapshot is diffed against the simulated one, and divergence triggers a replan from the actual state under a budget. It ships as a documented pattern first, then promotes to core. Related: promoting `examples/river-crossing`'s `describeMachine` prototype to core, and a graph-search "solver mode" for pure machines via `xstate/graph`.
+- **Blessed introspection tools for `agent.decide`/`agent.plan`.** The machine can already predict what a candidate event would do (`machine.transition(...)` against the current snapshot: next state, whether anything changed). Rather than always rendering previews into the prompt, expose them as blessed machine-only tool calls the model may invoke before committing (`previewEvent(event)` → next state + changed, `describeState()`): the agent chooses when a preview is worth the extra call, so the common case pays no prompt bloat. Ships behind an explicit option if guard feedback alone proves insufficient.
+- **Decide coercion seam.** `system`/`prompt` on `agent.decide` are author-owned and `renderDecisionAttempts` covers retry feedback, but how candidates are presented to the model (tool-per-event naming, option descriptions) is buried in each host's `decide` executor; customizing it today means rewriting the executor. A `renderCandidates`-style option on the decide input would give a middle knob without forking the adapter. Parked to see whether real hosts ask for it.
 
 ## Ideas (no commitment)
 

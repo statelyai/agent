@@ -27,9 +27,11 @@ A [decision](decisions.md) is where this matters most: the model chooses exactly
 - **Inspectable.** States, transitions, and requests are data you can read, diagram, and reason about before anything runs.
 - **Serializable.** Every settle point produces a plain, JSON-serializable snapshot. Persist it anywhere and resume later.
 
+Unlike a hand-rolled `while` loop or a graph framework, control flow is a state machine you can inspect, test, and resume, and the model can only ever pick a legal event. See [how this compares](comparison.md).
+
 ## A quick teaser
 
-<!-- compact quickstart, consistent with readme.md quickstart and docs/quickstart.md -->
+<!-- setup + invoke + run; full walkthrough lives in quickstart.md -->
 
 ```ts
 import { z } from "zod";
@@ -62,10 +64,7 @@ const machine = agentSetup.createMachine({
       invoke: {
         src: "answerQuestion",
         input: ({ context }) => ({ prompt: context.prompt }),
-        onDone: ({ output }) => ({
-          target: "done",
-          context: { answer: output.answer },
-        }),
+        onDone: ({ output }) => ({ target: "done", context: { answer: output.answer } }),
       },
     },
     done: { type: "final", output: ({ context }) => ({ answer: context.answer ?? "" }) },
@@ -77,10 +76,7 @@ const result = await runAgent(machine, {
   executors: createAiSdkExecutors({ models }),
 });
 
-if (result.status === "done") {
-  console.log(result.output.answer);
-  // logs the model's answer
-}
+if (result.status === "done") console.log(result.output.answer);
 ```
 
 See the [Quickstart](quickstart.md) for a step-by-step walkthrough.
@@ -106,6 +102,7 @@ If something here blocks you, or the API surface feels wrong, open an issue. Thi
 - [Quickstart](quickstart.md): install and run your first agent machine end to end.
 - [Agent machines](machines.md): `setupAgent`, states, invokes, typed context, and guards.
 - [Decisions](decisions.md): the model choosing exactly one currently-legal machine event.
+- [Plans](plans.md): the multi-event decision, `agent.plan`.
 - [Text requests](text-requests.md): typed text and structured-output model calls.
 - [Messages](messages.md): the parts-based `AgentMessage` model.
 - [Human in the loop](human-in-the-loop.md): idle-first pauses and resuming by snapshot.
