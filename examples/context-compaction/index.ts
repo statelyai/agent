@@ -17,6 +17,13 @@
  *     summary (as a system message) followed by only the recent messages, so
  *     every reply stays grounded in older turns without resending them.
  *
+ * Tuning: higher `maxMessages` = fewer summarize calls, more verbatim fidelity,
+ * larger per-turn context; higher `keepRecent` = recent nuance survives
+ * compaction at the cost of window size. Keep `keepRecent` comfortably below
+ * `maxMessages` or the machine compacts on nearly every turn. Counting
+ * messages is the simplest trigger; to use a token budget instead, swap the
+ * `checkingWindow` predicate for a token estimate — nothing else moves.
+ *
  * Type `exit` to end; the machine outputs the final summary, recent messages,
  * and turn count.
  *

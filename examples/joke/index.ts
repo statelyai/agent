@@ -15,10 +15,10 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
+import { defineModels } from "../../src/ai-sdk/index.js";
 import { promptLine } from "../helpers/cli.js";
 import { createAgentSchemas, createTextLogic, runAgent, setupAgent } from "../../src/index.js";
-import { runExampleMain } from "../helpers/main.js";
+import { resolveExecutors, runExampleMain } from "../helpers/main.js";
 
 const DEFAULT_TOPIC = "state machines";
 
@@ -172,12 +172,11 @@ async function promptTopic(): Promise<string> {
 }
 
 export async function main() {
-  const executors = createAiSdkExecutors({ models });
   const topic = process.stdin.isTTY ? await promptTopic() : DEFAULT_TOPIC;
 
   const result = await runAgent(jokeMachine, {
     input: { topic },
-    executors,
+    ...resolveExecutors(models, undefined),
     onChunk: (chunk) => process.stdout.write(chunk),
     onTransition: (snapshot) => {
       const value = snapshot.value;

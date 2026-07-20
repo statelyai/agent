@@ -23,6 +23,7 @@ import { createAsyncLogic } from "xstate";
 import { defineModels } from "../../src/ai-sdk/index.js";
 import { runAgent, setupAgent, type AgentRequestExecutors } from "../../src/index.js";
 import { resolveExecutors, runExampleMain } from "../helpers/main.js";
+import { searchCorpus } from "../helpers/rag-corpus.js";
 
 export const models = defineModels({
   answerer: openai("gpt-5.4-mini"),
@@ -64,49 +65,6 @@ export const SAMPLE_CORPUS: Array<{ id: string; text: string }> = [
   },
 ];
 
-const STOP_WORDS = new Set([
-  "a",
-  "an",
-  "the",
-  "is",
-  "are",
-  "of",
-  "to",
-  "in",
-  "and",
-  "what",
-  "how",
-  "why",
-  "do",
-  "does",
-  "can",
-  "i",
-  "me",
-  "my",
-  "it",
-  "that",
-  "this",
-  "for",
-]);
-
-/** Honest keyword-overlap scoring — NOT embeddings. Counts shared content words. */
-function scoreDocument(question: string, text: string): number {
-  const terms = new Set(
-    question
-      .toLowerCase()
-      .split(/[^a-z]+/)
-      .filter((word) => word.length > 2 && !STOP_WORDS.has(word)),
-  );
-  const haystack = text.toLowerCase();
-  let score = 0;
-  for (const term of terms) {
-    if (haystack.includes(term)) {
-      score += 1;
-    }
-  }
-  return score;
-}
-
 const ragContextSchema = z.object({
   question: z.string(),
   documents: z.array(z.string()),
@@ -137,15 +95,7 @@ const agentSetup = setupAgent({
   actorSources: {
     // Typed plain actor: keyword retrieval over the sample corpus. Top 3 docs.
     retrieve: createAsyncLogic<string[], { question: string }>({
-      run: async ({ input }) =>
-        SAMPLE_CORPUS.map((doc) => ({
-          text: doc.text,
-          score: scoreDocument(input.question, doc.text),
-        }))
-          .filter((scored) => scored.score > 0)
-          .sort((left, right) => right.score - left.score)
-          .slice(0, 3)
-          .map((scored) => scored.text),
+      run: async ({ input }) => searchCorpus(SAMPLE_CORPUS, input.question, 3),
     }),
   },
   requests: {

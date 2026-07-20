@@ -22,7 +22,13 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic, type SnapshotFrom } from "xstate";
-import { getStateMeta, runAgent, setupAgent, type RunAgentOptions } from "../../src/index.js";
+import {
+  getStateMeta,
+  persistSnapshot,
+  runAgent,
+  setupAgent,
+  type RunAgentOptions,
+} from "../../src/index.js";
 import { defineModels } from "../../src/ai-sdk/index.js";
 import { resolveExecutors, runExampleMain } from "../helpers/main.js";
 
@@ -250,7 +256,7 @@ export async function runSqlAgentExample(
   const interaction = readInteraction(first.snapshot);
 
   const second = await runAgent(sqlAgentMachine, {
-    snapshot: JSON.parse(JSON.stringify(first.snapshot)),
+    snapshot: persistSnapshot(first.snapshot),
     event: { type: approval },
     onTransition: observe,
     ...resolved,

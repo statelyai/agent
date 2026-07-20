@@ -4,7 +4,10 @@
 
 Each example lives in a flat `examples/*` directory with an `index.ts` or `index.mts` entrypoint and a `metadata.json` file describing its origin and comparison purpose.
 
-Every example is dual-mode: run it directly against a real model with `OPENAI_API_KEY=... npx tsx examples/<name>/index.ts`, while its tests use injected mocks.
+Every example is dual-mode: run it directly against a real model with `OPENAI_API_KEY=... npx tsx examples/<name>/index.ts`, while its tests use injected mocks. Exceptions to the `OPENAI_API_KEY` + `tsx` default:
+
+- `anthropic-sdk-host` runs against the raw `@anthropic-ai/sdk` and needs `ANTHROPIC_API_KEY` instead.
+- `cloudflare-workers-ai-host` and `cloudflare-agent-host` target a Cloudflare Workers runtime (Durable Objects / Workers AI bindings), not Node/`tsx` — see each example's notes.
 
 ## Start Here
 
@@ -18,8 +21,8 @@ Every example is dual-mode: run it directly against a real model with `OPENAI_AP
 - Machines as data: a full workflow (decision, text request, idle human step) authored as a real `.json` file: [`json-agent/index.ts`](json-agent/index.ts)
 - A plain, invoke-less machine run as an agent via `getRequests` (prompts in state descriptions): [`described-workflow/index.ts`](described-workflow/index.ts)
 - A library-unaware `setup(...)` machine driven as an agent by hand (no `setupAgent`), with `getAcceptedEvents` + `resolveDecision`: [`plain-xstate/index.ts`](plain-xstate/index.ts)
-- Host actor guide: [`../docs/host-actors.md`](../docs/host-actors.md)
-- Framework comparison examples: [`supervisor/index.test.ts`](supervisor/index.test.ts), [`plan-and-execute/index.test.ts`](plan-and-execute/index.test.ts), [`rag/index.test.ts`](rag/index.test.ts), [`tool-calling/index.test.ts`](tool-calling/index.test.ts)
+- Hosts and executors guide: [`../docs/hosts.md`](../docs/hosts.md)
+- Framework comparison examples: [`supervisor/index.ts`](supervisor/index.ts), [`plan-and-execute/index.ts`](plan-and-execute/index.ts), [`rag/index.ts`](rag/index.ts), [`tool-calling/index.ts`](tool-calling/index.ts)
 
 ## XState Examples
 
@@ -28,8 +31,7 @@ These use `setupAgent(...)` (or plain XState `setup(...)` plus `createTextLogic(
 - [`twenty-questions/index.ts`](twenty-questions/index.ts): decision loop with machine-held context, typed model aliases, final-turn guess enforcement, scoring, play-again reset, and machine-owned user prompts
 - [`email-drafter/index.ts`](email-drafter/index.ts): typed email workflow with independently testable requests
 - [`email-drafter-inspector/index.ts`](email-drafter-inspector/index.ts): the email-drafter machine run as one live `createActor` session wired to `createWebSocketInspector`, so the whole flow is visible in the Stately Inspector (works without an API key via heuristic fallbacks)
-- [`game-agent/index.ts`](game-agent/index.ts): turn-based game workflow with `allowedEvents` narrowed as a function of input
-- [`event-log-game/index.ts`](event-log-game/index.ts): rock-paper-scissors vs a patterned opponent where the machine appends each round's events to `context.history` and the decide prompt reads the log back: the saved event history is the only way the model can infer the pattern and win
+- [`game-agent/index.ts`](game-agent/index.ts): games as machines, two lessons in one file — a turn-based combat agent with decision `allowedEvents` computed from context (HEAL only when low on HP), and a rock-paper-scissors agent (`rpsMachine`) that reduces each round's events into a `context.history` log the decide prompt reads back, so the saved event history is the only way the model can infer the opponent's pattern and win
 - [`go-fish/index.ts`](go-fish/index.ts): two-player hidden-information game with a checking-win → agent → human loop; the machine owns the deck, shows the human their hand, validates moves, and forms books
 - [`joke/index.ts`](joke/index.ts): minimal streaming text workflow
 - [`triage/index.ts`](triage/index.ts): structured-output support ticket triage
@@ -68,33 +70,46 @@ These use `setupAgent(...)` (or plain XState `setup(...)` plus `createTextLogic(
 - [`context-compaction/index.ts`](context-compaction/index.ts): a self-managing chat loop: history is compacted into a running summary by an explicit `compacting` state once it exceeds a threshold, keeping only the last N turns and feeding the summary back as context
 - [`guardrails/index.ts`](guardrails/index.ts): input/output guardrails as explicit gate states: validate the question before generating (refuse out-of-scope pre-generation), verify the answer after, revise at most once, never silently return unverified content (gating, vs. evaluator-optimizer's refining)
 
+## Framework Hosts
+
+The same agent machine served from real app frameworks, in both modes: controlled (`runAgent` per request, snapshot persisted between requests) and uncontrolled (`provideExecutors` + `createActor`, the app owns the actor).
+
+- [`express-host/index.ts`](express-host/index.ts): controlled mode over HTTP: an Express route runs/resumes an agent via `runAgent`; idle + persisted snapshot = human-in-the-loop across requests
+- [`hono-host/index.ts`](hono-host/index.ts): the express-host shape in Hono, plus a streaming endpoint piping `onChunk` into the response body
+- [`next-host/app/api/agent/route.ts`](next-host/app/api/agent/route.ts): Next.js App Router route handlers running an agent; snapshot persisted across the stateless request boundary (typechecks standalone via local shims)
+- [`tanstack-start-host/index.ts`](tanstack-start-host/index.ts): TanStack Start server functions (`startAgent`/`resumeAgent`) invoking `runAgent` (local `createServerFn` shim)
+- [`react-uncontrolled/index.tsx`](react-uncontrolled/index.tsx): uncontrolled mode: `createActor(provideExecutors(machine, executors))` drives itself; React observes snapshots, sends user events, and renders streamed text
+- [`flue-host/index.ts`](flue-host/index.ts): a Flue (`defineAgent` + `defineTool`) LLM agent with two tools bridging to a machine: `start_workflow` runs `runAgent` to idle/done and returns a JSON-safe handle, `resume_workflow` revives it with the human's decision (local `@flue/runtime` shims)
+- [`eve-host/agent.ts`](eve-host/agent.ts): the same start/resume tool bridge in Eve's folder convention (`instructions.md` + `agent.ts` + `tools/start_workflow.ts` / `tools/resume_workflow.ts`); the machine owns refund legality, the Eve agent converses (local `eve` shims)
+
 ## Comparison Examples
 
 These map LangGraph, Burr, and CrewAI Flow patterns onto XState. The dedicated per-framework ports were consolidated into pattern examples.
 
 Multi-step agent patterns:
 
-- [`supervisor/index.test.ts`](supervisor/index.test.ts): supervisor routing / handoff (LangGraph supervisor-handoff, Burr multi-agent collaboration, CrewAI content creator)
-- [`swarm-handoff/index.test.ts`](swarm-handoff/index.test.ts): persistent multi-agent network handing off across turns
-- [`plan-and-execute/index.test.ts`](plan-and-execute/index.test.ts): plan-and-execute, keeping the ReWOO evidence-map idea
-- [`subflows/index.test.ts`](subflows/index.test.ts): nested subgraphs / child flows
-- [`rag/index.test.ts`](rag/index.test.ts): retrieval-augmented generation (LangGraph RAG, Burr conversational RAG)
-- [`corrective-rag/index.test.ts`](corrective-rag/index.test.ts): corrective RAG (LangGraph CRAG tutorial: grade docs, rewrite query, web-search fallback)
-- [`reflection-writer/index.test.ts`](reflection-writer/index.test.ts): reflection loop (LangGraph reflection essay-writer tutorial)
-- [`customer-support/index.test.ts`](customer-support/index.test.ts): customer-support bot with sensitive-action approval (LangGraph flagship tutorial's `interrupt_before` pattern)
-- [`tool-calling/index.test.ts`](tool-calling/index.test.ts): tool calling with intermediate progress (Burr tool calling, LangGraph tool-calling-progress)
-- [`sql-agent/index.test.ts`](sql-agent/index.test.ts): SQL / tool-heavy agent workflow
-- [`human-in-the-loop/index.test.ts`](human-in-the-loop/index.test.ts): human-in-the-loop plus snapshot persistence
-- [`long-running-onboarding/index.test.ts`](long-running-onboarding/index.test.ts): long-running pause/resume onboarding flow with delegated IT provisioning
-- [`parallel-streams/index.test.ts`](parallel-streams/index.test.ts): parallel worker streams over a side channel
-- [`sse-transport/index.test.ts`](sse-transport/index.test.ts): relaying provider stream chunks over SSE
+- [`supervisor/index.ts`](supervisor/index.ts): supervisor routing / handoff (LangGraph supervisor-handoff, Burr multi-agent collaboration, CrewAI content creator)
+- [`swarm-handoff/index.ts`](swarm-handoff/index.ts): persistent multi-agent network handing off across turns
+- [`plan-and-execute/index.ts`](plan-and-execute/index.ts): plan-and-execute, keeping the ReWOO evidence-map idea
+- [`subflows/index.ts`](subflows/index.ts): nested subgraphs / child flows
+- [`fan-out/index.ts`](fan-out/index.ts): dynamic runtime fan-out / map-reduce (LangGraph `Send`): a planner produces N subtopics, the machine spawns one live child branch per subtopic, and a reducer composes the summaries into one digest
+- [`rag/index.ts`](rag/index.ts): retrieval-augmented generation (LangGraph RAG, Burr conversational RAG)
+- [`corrective-rag/index.ts`](corrective-rag/index.ts): corrective RAG (LangGraph CRAG tutorial: grade docs, rewrite query, web-search fallback)
+- [`reflection-writer/index.ts`](reflection-writer/index.ts): reflection loop (LangGraph reflection essay-writer tutorial)
+- [`customer-support/index.ts`](customer-support/index.ts): customer-support bot with sensitive-action approval (LangGraph flagship tutorial's `interrupt_before` pattern)
+- [`tool-calling/index.ts`](tool-calling/index.ts): tool calling with intermediate progress (Burr tool calling, LangGraph tool-calling-progress)
+- [`sql-agent/index.ts`](sql-agent/index.ts): SQL / tool-heavy agent workflow
+- [`human-in-the-loop/index.ts`](human-in-the-loop/index.ts): human-in-the-loop plus snapshot persistence
+- [`long-running-onboarding/index.ts`](long-running-onboarding/index.ts): long-running pause/resume onboarding flow with delegated IT provisioning
+- [`parallel-streams/index.ts`](parallel-streams/index.ts): parallel worker streams over a side channel
+- [`sse-transport/index.ts`](sse-transport/index.ts): relaying provider stream chunks over SSE
 
 AI SDK pattern set (fan-out, routing, reflection, map-reduce shapes):
 
-- [`ai-sdk-orchestrator-worker/index.test.ts`](ai-sdk-orchestrator-worker/index.test.ts)
-- [`ai-sdk-parallel-review/index.test.ts`](ai-sdk-parallel-review/index.test.ts)
-- [`ai-sdk-routing/index.test.ts`](ai-sdk-routing/index.test.ts)
-- [`ai-sdk-evaluator-optimizer/index.test.ts`](ai-sdk-evaluator-optimizer/index.test.ts)
-- [`ai-sdk-marketing-chain/index.test.ts`](ai-sdk-marketing-chain/index.test.ts)
+- [`ai-sdk-orchestrator-worker/index.ts`](ai-sdk-orchestrator-worker/index.ts)
+- [`ai-sdk-parallel-review/index.ts`](ai-sdk-parallel-review/index.ts)
+- [`ai-sdk-routing/index.ts`](ai-sdk-routing/index.ts)
+- [`ai-sdk-evaluator-optimizer/index.ts`](ai-sdk-evaluator-optimizer/index.ts)
+- [`ai-sdk-marketing-chain/index.ts`](ai-sdk-marketing-chain/index.ts)
 
 New examples should use `createTextLogic(...)` for reusable LLM work and `setupAgent({ schemas, actors, requests })` for schema-first machine authoring. Decisions are authored inline in states via `src: 'agent.decide'` (state-local); to reuse one across states, share the _input builder_ function (a `({ context }) => ({ model, system, prompt, allowedEvents })` fn), not an actor. There is no `decisions:` key on `setupAgent`.

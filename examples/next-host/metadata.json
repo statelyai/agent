@@ -1,0 +1,15 @@
+{
+  "name": "next-host",
+  "title": "Next.js Host",
+  "kind": "host-adapter",
+  "manual": true,
+  "origin": {
+    "type": "platform-adapter",
+    "source": "Next.js App Router route handlers calling runAgent; typechecked standalone with local web Request/Response shims (Next is not a repo dependency)",
+    "url": "https://nextjs.org/docs/app/building-your-application/routing/route-handlers"
+  },
+  "comparison": {
+    "targets": ["Next.js App Router", "Server Actions"],
+    "purpose": "Controlled mode in a Next route handler (app/api/agent/route.ts + [id]/resume): runAgent to idle/done, snapshot persisted across the stateless request boundary for human-in-the-loop."
+  }
+}

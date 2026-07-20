@@ -165,6 +165,7 @@ export const aiSdkOrchestratorWorkerMachine = agentSetup.createMachine({
           target: "done",
           context: { changes: output },
         }),
+        onError: { target: "failed" },
       },
     },
     done: {

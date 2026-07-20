@@ -21,8 +21,8 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { runAgent, setupAgent, type AgentRequestExecutor } from "../../src/index.js";
-import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
-import { runExampleMain } from "../helpers/main.js";
+import { defineModels } from "../../src/ai-sdk/index.js";
+import { resolveExecutors, runExampleMain } from "../helpers/main.js";
 
 const stanceSchema = z.enum(["affirmative", "negative"]);
 const transcriptEntrySchema = z.object({
@@ -257,14 +257,12 @@ export async function runDebateSubAgentsExample(options?: {
   generateText?: AgentRequestExecutor;
   onTransition?: (value: unknown) => void;
 }) {
-  const generateText = options?.generateText ?? createAiSdkExecutors({ models }).generateText;
-
   const result = await runAgent(debateMachine, {
     input: {
       question: options?.input?.question ?? "Should agents be modeled as actors?",
       rounds: options?.input?.rounds ?? DEFAULT_ROUNDS,
     },
-    executors: { generateText },
+    ...resolveExecutors(models, options?.generateText),
     actorSources: { affirmative: debaterMachine, negative: debaterMachine },
     ...(options?.onTransition
       ? { onTransition: ({ value }: { value: unknown }) => options.onTransition!(value) }

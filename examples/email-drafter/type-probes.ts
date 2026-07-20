@@ -81,16 +81,18 @@ agentSetup.createMachine({
     sentEmails: [],
     messages: [],
   },
-  initial: "streaming",
+  initial: "drafting",
   states: {
-    streaming: {
+    drafting: {
       invoke: {
-        id: "streamDraft",
-        src: "streamDraft",
-        input: ({ context }) => ({ prompt: context.prompt }),
+        id: "draftEmail",
+        src: "draftEmail",
+        input: ({ context }) => ({ prompt: context.prompt, messages: context.messages }),
+        // output is typed as the draftEmail logic's output schema (EmailDraft),
+        // so `output.body` is a string — a wrong field would fail to compile.
         onDone: ({ context, output }) => ({
           context: {
-            messages: [...context.messages, assistantMessage(output)],
+            messages: [...context.messages, assistantMessage(output.body)],
           },
         }),
       },

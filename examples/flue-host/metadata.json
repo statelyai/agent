@@ -1,0 +1,15 @@
+{
+  "name": "flue-host",
+  "title": "Flue Host",
+  "kind": "host-adapter",
+  "manual": true,
+  "origin": {
+    "type": "platform-adapter",
+    "source": "Flue defineAgent + defineTool (Valibot input/output, run({ input, signal })) calling runAgent; typechecks standalone via local flue-shims mirroring flueframework.com/docs as of 2026-07 (@flue/runtime is not a repo dependency)",
+    "url": "https://flueframework.com/docs/guide/tools/"
+  },
+  "comparison": {
+    "targets": ["Flue", "durable agent frameworks", "tool-calling agents"],
+    "purpose": "The Flue LLM agent gets two tools bridging to a statelyai/agent machine: start_workflow runs runAgent to idle/done and returns a JSON-safe handle + interaction label; resume_workflow revives the handle with the human's decision. The machine owns legality; the agent converses."
+  }
+}

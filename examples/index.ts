@@ -16,12 +16,10 @@ export {
   gameSchemas,
   summarizeTurn,
   turnSummarySchema,
-} from "./game-agent/index.js";
-export {
   rpsMachine,
   rpsSchemas,
   renderHistory as renderRpsHistory,
-} from "./event-log-game/index.js";
+} from "./game-agent/index.js";
 export { jokeActors, jokeMachine, jokeSchemas, rateJoke, tellJoke } from "./joke/index.js";
 export {
   describedWorkflowMachine,

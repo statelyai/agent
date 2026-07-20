@@ -18,27 +18,23 @@
  *     (`failure: 'rejected-by-guard'`) and retried — same pattern as
  *     twenty-questions' final-turn ASK guard. The model cannot cheat the
  *     rules; it can only learn them.
- *   - Machine-description-in-context: `describeMachine(...)` renders the
- *     machine's states, events (with their payload schemas), transitions,
- *     and the puzzle's explicit rules into compact markdown that is injected
- *     into the decide prompt — the model is handed knowledge of the whole
- *     machine it is driving. (Prototype; see the note on `describeMachine`.)
+ *   - Machine-description-in-context: `describeMachine(...)` (an experimental
+ *     prototype in ./describe-machine.ts) renders the machine's states, events
+ *     (with their payload schemas), transitions, and the puzzle's explicit
+ *     rules into compact markdown that is injected into the decide prompt — the
+ *     model is handed knowledge of the whole machine it is driving.
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/river-crossing/index.ts
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { setup } from "xstate";
-import { getShortestPaths } from "xstate/graph";
-import {
-  createAgentSchemas,
-  runAgent,
-  type AgentTools,
-  type RunAgentOptions,
-  setupAgent,
-} from "../../src/index.js";
+import { createAgentSchemas, runAgent, type RunAgentOptions, setupAgent } from "../../src/index.js";
 import { defineModels } from "../../src/ai-sdk/index.js";
 import { resolveExecutors, runExampleMain } from "../helpers/main.js";
+import { describeMachine } from "./describe-machine.js";
+
+// Re-exported so the barrel and tests can reach the prototype from this module.
+export { describeMachine } from "./describe-machine.js";
 
 const models = defineModels({
   planner: openai("gpt-5.4-mini"),
@@ -133,198 +129,6 @@ function moveLabel(item: Items | null, from: Bank): string {
   return `Farmer crosses ${from} → ${opposite(from)} with ${carried}`;
 }
 
-// ─── Pure machine + shortest-path tool (machine introspection) ───
-
-const MOVE_EVENTS = ["TAKE_WOLF", "TAKE_GOAT", "TAKE_CABBAGE", "CROSS_ALONE"] as const;
-type MoveEvent = (typeof MOVE_EVENTS)[number];
-
-const EVENT_ITEM: Record<MoveEvent, Items | null> = {
-  TAKE_WOLF: "wolf",
-  TAKE_GOAT: "goat",
-  TAKE_CABBAGE: "cabbage",
-  CROSS_ALONE: null,
-};
-
-/**
- * A dependency-free PURE copy of the puzzle as a plain XState machine: the same
- * physics as the agent machine, but with no LLM invoke — just the world in
- * context and one guarded self-transition per move. `xstate/graph`'s
- * `getShortestPaths` traverses this to compute the optimal remaining move
- * sequence, which the `findShortestPath` tool exposes to the model.
- *
- * Each move is a v6 function-transition (same style as the agent machine):
- * it returns the next world state, or `undefined` when the move is illegal so
- * the traversal never enters an unsafe state.
- */
-const PURE_INITIAL_WORLD: WorldState = {
-  farmer: "left",
-  wolf: "left",
-  goat: "left",
-  cabbage: "left",
-};
-
-const pureMachine = setup({
-  // `worldStateSchema` is the source of truth: its inferred output IS
-  // WorldState, so each function-transition below is contextually typed with
-  // WorldState banks (no casts on `context`). Move events carry no payload.
-  schemas: {
-    context: worldStateSchema,
-    events: {
-      TAKE_WOLF: z.object({}),
-      TAKE_GOAT: z.object({}),
-      TAKE_CABBAGE: z.object({}),
-      CROSS_ALONE: z.object({}),
-    },
-  },
-}).createMachine({
-  id: "river-crossing-pure",
-  context: PURE_INITIAL_WORLD,
-  initial: "crossing",
-  states: {
-    crossing: {
-      // Inlined so each function-transition is contextually typed by the
-      // machine. Returning `void` (no next) makes an illegal move a no-op, so
-      // the traversal never enters an unsafe state.
-      on: {
-        TAKE_WOLF: ({ context }) => {
-          const next = applyMove(context, "wolf");
-          if (next) return { context: next };
-        },
-        TAKE_GOAT: ({ context }) => {
-          const next = applyMove(context, "goat");
-          if (next) return { context: next };
-        },
-        TAKE_CABBAGE: ({ context }) => {
-          const next = applyMove(context, "cabbage");
-          if (next) return { context: next };
-        },
-        CROSS_ALONE: ({ context }) => {
-          const next = applyMove(context, null);
-          if (next) return { context: next };
-        },
-      },
-    },
-  },
-});
-
-/**
- * Computes the optimal remaining move sequence from a given world state by
- * running `getShortestPaths` on the pure machine. Returns the ordered event
- * names, or `null` if the state is unsolvable within the search.
- */
-export function shortestMoveSequence(from: WorldState): MoveEvent[] | null {
-  const paths = getShortestPaths(pureMachine, {
-    events: MOVE_EVENTS.map((type) => ({ type })),
-    fromState: pureMachine.resolveState({ value: "crossing", context: from }),
-    toState: (snapshot) =>
-      snapshot.context.farmer === "right" &&
-      snapshot.context.wolf === "right" &&
-      snapshot.context.goat === "right" &&
-      snapshot.context.cabbage === "right",
-  });
-  const best = paths[0];
-  if (!best) return null;
-  return best.steps
-    .map((step) => step.event.type)
-    .filter((type): type is MoveEvent => (MOVE_EVENTS as readonly string[]).includes(type));
-}
-
-// ─── describeMachine: render the machine's rules into the model's context ───
-
-/**
- * ┌─────────────────────────────────────────────────────────────────────┐
- * │ EXPERIMENTAL PROTOTYPE — not a stable API. Hand-rolled, example-local,│
- * │ and leans on zod/xstate introspection (`.shape`, `._zod.def.type`,    │
- * │ `machine.config`) that may break across minor versions. Do not depend │
- * │ on it outside this example; a real core helper is sketched below.     │
- * └─────────────────────────────────────────────────────────────────────┘
- *
- * A hand-rolled renderer of a machine's shape into compact markdown for
- * injection into an LLM prompt.
- *
- * Graph utilities live at the `xstate/graph` subpath in v6 (the standalone
- * `@xstate/graph` package is dead), and a self-contained machine's config
- * serializes to LLM-readable JSON. This prototype stays dependency-free and
- * derives what it can *generically* from `machine.config` (state names,
- * per-state transition event keys, invoke sources, final states) and from the
- * agent {@link AgentSchemaPack} (event payload field names/types). The parts
- * a static graph can't know — *why* a transition is guarded, i.e. the actual
- * legality rules — are passed in as `rules` text by the example.
- *
- * A real core helper (`agent.describe(machine)`?) would need xstate v6 to
- * expose, per transition, a machine-readable guard descriptor (name + human
- * label) rather than an opaque function, so the "unsafe pair" rules below
- * could be derived instead of hand-written. Until then this stays example-
- * local and honest about the split.
- */
-export function describeMachine(
-  machine: {
-    config: {
-      id?: string;
-      initial?: unknown;
-      states?: Record<string, unknown>;
-    };
-  },
-  schemas: { events: Record<string, unknown> },
-  extra?: { title?: string; rules?: string[] },
-): string {
-  const config = machine.config;
-  const states = config.states ?? {};
-  const lines: string[] = [];
-
-  lines.push(`# ${extra?.title ?? config.id ?? "machine"}`);
-  if (extra?.rules?.length) {
-    lines.push("", "## Rules", ...extra.rules.map((rule) => `- ${rule}`));
-  }
-
-  lines.push("", "## Events (each carries a `reasoning` string)");
-  for (const [name, schema] of Object.entries(schemas.events)) {
-    lines.push(`- **${name}**${renderEventFields(schema)}`);
-  }
-
-  lines.push("", "## States");
-  for (const [name, node] of Object.entries(states) as [string, StateNodeShape][]) {
-    const parts: string[] = [];
-    if (name === config.initial) parts.push("initial");
-    if (node?.type === "final") parts.push("final");
-    const invokeSrc = typeof node?.invoke?.src === "string" ? node.invoke.src : undefined;
-    if (invokeSrc) parts.push(`invokes \`${invokeSrc}\``);
-    const events = node?.on ? Object.keys(node.on) : [];
-    if (events.length) parts.push(`accepts ${events.map((event) => `\`${event}\``).join(", ")}`);
-    lines.push(`- **${name}**${parts.length ? ` — ${parts.join("; ")}` : ""}`);
-  }
-
-  return lines.join("\n");
-}
-
-interface StateNodeShape {
-  type?: string;
-  invoke?: { src?: unknown };
-  on?: Record<string, unknown>;
-}
-
-// Renders a zod event schema's non-`reasoning` fields as `(field: type, …)`.
-// Best-effort against zod v4's `.shape` / `._def.type`; empty when only
-// `reasoning` is present.
-function renderEventFields(schema: unknown): string {
-  const shape = (schema as { shape?: Record<string, unknown> })?.shape;
-  if (!shape) return "";
-  const fields = Object.entries(shape)
-    .filter(([key]) => key !== "reasoning")
-    .map(([key, field]) => `${key}: ${zodTypeName(field)}`);
-  return fields.length ? ` (${fields.join(", ")})` : "";
-}
-
-// zod v4 exposes the type tag on its internals namespace `._zod.def.type`
-// (e.g. "string", "number", "enum"); the legacy `._def.type` still works via
-// the v3 compat layer. Prefer the newer accessor, fall back to the old one.
-// Still introspection into private-ish shape — see the describeMachine banner.
-function zodTypeName(field: unknown): string {
-  const zodDef = (field as { _zod?: { def?: { type?: string } } })?._zod?.def;
-  const legacyDef = (field as { _def?: { type?: string; typeName?: string } })?._def;
-  return zodDef?.type ?? legacyDef?.type ?? legacyDef?.typeName ?? "value";
-}
-
 // ─── Agent + machine ───
 
 const agentSetup = setupAgent({
@@ -384,22 +188,20 @@ function getMachineDescription(): string {
   return machineDescription;
 }
 
+type RiverContext = {
+  farmer: Bank;
+  wolf: Bank;
+  goat: Bank;
+  cabbage: Bank;
+  moves: number;
+  maxMoves: number;
+  log: string[];
+};
+
 // A move transition: applies the physics, returns `undefined` when illegal so
 // the decision's `canTake` check rejects the choice and retries.
 function moveTransition(item: Items | null) {
-  return ({
-    context,
-  }: {
-    context: {
-      farmer: Bank;
-      wolf: Bank;
-      goat: Bank;
-      cabbage: Bank;
-      moves: number;
-      maxMoves: number;
-      log: string[];
-    };
-  }) => {
+  return ({ context }: { context: RiverContext }) => {
     const next = applyMove(worldOf(context), item);
     if (!next) return undefined; // illegal → rejected-by-guard → retry
     return {
@@ -416,18 +218,6 @@ function moveTransition(item: Items | null) {
   };
 }
 
-// ─── Shared machine skeleton (both variants) ───
-
-type RiverContext = {
-  farmer: Bank;
-  wolf: Bank;
-  goat: Bank;
-  cabbage: Bank;
-  moves: number;
-  maxMoves: number;
-  log: string[];
-};
-
 // True when the farmer, wolf, goat, and cabbage are all on the right bank.
 function allOnRight(context: Pick<RiverContext, "farmer" | "wolf" | "goat" | "cabbage">): boolean {
   return (
@@ -438,59 +228,24 @@ function allOnRight(context: Pick<RiverContext, "farmer" | "wolf" | "goat" | "ca
   );
 }
 
-// Initial context builder — everything starts on the left bank.
-const initialRiverContext = ({ input }: { input: { maxMoves: number } }): RiverContext => ({
-  farmer: "left",
-  wolf: "left",
-  goat: "left",
-  cabbage: "left",
-  moves: 0,
-  maxMoves: input.maxMoves,
-  log: [],
-});
-
-// Root output builder — reports whether the puzzle was solved.
-const riverOutput = ({ context }: { context: RiverContext }) => ({
-  solved: allOnRight(context),
-  moves: context.moves,
-  log: context.log,
-});
-
-// The non-deciding states are identical across both variants: the checkWin
-// dispatcher and the two final states.
-const sharedStates = {
-  // An always function-transition decides the outcome after each applied
-  // move: solved when everything is on the right bank, failed when the move
-  // budget is spent, otherwise back to deciding.
-  checkWin: {
-    always: ({ context }: { context: RiverContext }) => {
-      if (allOnRight(context)) return { target: "solved" };
-      if (context.moves >= context.maxMoves) return { target: "failed" };
-      return { target: "deciding" };
-    },
-  },
-  solved: { type: "final" },
-  // Reached on move-budget exhaustion or when the decide/recommend request
-  // exhausts retries.
-  failed: {
-    type: "final",
-    output: ({ context }: { context: RiverContext }) => ({
-      solved: false,
-      moves: context.moves,
-      log: context.log,
-    }),
-  },
-} as const;
-
-// Both machines are assembled from the same skeleton — `initialRiverContext`,
-// `riverOutput`, and `...sharedStates` (checkWin/solved/failed) — spread inline
-// so `setup.createMachine` still infers each variant's precise request/tool
-// typing from the config literal. Only the `deciding` state differs.
-
 export const riverCrossingMachine = agentSetup.createMachine({
   id: "river-crossing",
-  context: initialRiverContext,
-  output: riverOutput,
+  // Everything starts on the left bank.
+  context: ({ input }): RiverContext => ({
+    farmer: "left",
+    wolf: "left",
+    goat: "left",
+    cabbage: "left",
+    moves: 0,
+    maxMoves: input.maxMoves,
+    log: [],
+  }),
+  // Reports whether the puzzle was solved.
+  output: ({ context }) => ({
+    solved: allOnRight(context),
+    moves: context.moves,
+    log: context.log,
+  }),
   initial: "deciding",
   states: {
     deciding: {
@@ -519,138 +274,29 @@ export const riverCrossingMachine = agentSetup.createMachine({
         CROSS_ALONE: moveTransition(null),
       },
     },
-    ...sharedStates,
-  },
-});
-
-// ─── Tool-assisted variant: the model may consult a shortest-path tool ───
-
-const moveEventEnum = z.enum(MOVE_EVENTS);
-
-// The findShortestPath tool: the model hands it the current world, and it runs
-// getShortestPaths on the PURE machine to return the optimal remaining move
-// sequence. This is genuine machine introspection — the tool computes over the
-// same physics the agent machine enforces.
-const findShortestPath: AgentTools[string] = {
-  description:
-    "Given the current banks of the farmer, wolf, goat, and cabbage, return " +
-    "the optimal remaining sequence of move events to solve the puzzle.",
-  inputSchema: worldStateSchema,
-  execute: (input?: unknown) => {
-    const sequence = shortestMoveSequence(worldStateSchema.parse(input));
-    // Surface the genuine tool call so the direct run shows the model actually
-    // consulting the machine (not recalling the answer).
-    console.log(`  [tool] findShortestPath → ${sequence ? sequence.join(", ") : "unsolvable"}`);
-    return sequence
-      ? { solvable: true, sequence, moves: sequence.length }
-      : { solvable: false, sequence: [], moves: 0 };
-  },
-};
-
-const assistedAgentSetup = setupAgent({
-  schemas: createAgentSchemas({
-    context: riverCrossingSchemas.context,
-    input: riverCrossingSchemas.input,
-    output: riverCrossingSchemas.output,
-    events: riverCrossingSchemas.events,
-  }),
-  models,
-  requests: {
-    // The model calls findShortestPath, reads the returned sequence, and
-    // commits to the next move. Structured output ({ event }) with the tool in
-    // scope and a small multi-step budget so the tool call + answer both land.
-    recommendMove: {
-      schemas: {
-        input: z.object({
-          farmer: bankSchema,
-          wolf: bankSchema,
-          goat: bankSchema,
-          cabbage: bankSchema,
-          world: z.string(),
-        }),
-        output: z.object({ event: moveEventEnum }),
+    // An always function-transition decides the outcome after each applied
+    // move: solved when everything is on the right bank, failed when the move
+    // budget is spent, otherwise back to deciding.
+    checkWin: {
+      always: ({ context }: { context: RiverContext }) => {
+        if (allOnRight(context)) return { target: "solved" };
+        if (context.moves >= context.maxMoves) return { target: "failed" };
+        return { target: "deciding" };
       },
-      model: "planner",
-      system:
-        "You solve a river-crossing puzzle by driving a state machine. Call " +
-        "the findShortestPath tool with the current banks to get the optimal " +
-        "remaining move sequence, then return the FIRST event of that sequence " +
-        "as your next move.",
-      prompt: ({ input }) =>
-        `${input.world}\n\nCall findShortestPath with farmer=${input.farmer}, ` +
-        `wolf=${input.wolf}, goat=${input.goat}, cabbage=${input.cabbage}, ` +
-        `then return the first recommended event.`,
-      tools: { findShortestPath },
-      // Allow the tool call and the structured answer in one request.
-      metadata: { maxSteps: 4 },
+    },
+    solved: { type: "final" },
+    // Reached on move-budget exhaustion or when the decide request exhausts
+    // retries.
+    failed: {
+      type: "final",
+      output: ({ context }: { context: RiverContext }) => ({
+        solved: false,
+        moves: context.moves,
+        log: context.log,
+      }),
     },
   },
 });
-
-export const riverCrossingAssistedMachine = assistedAgentSetup.createMachine({
-  id: "river-crossing-assisted",
-  context: initialRiverContext,
-  output: riverOutput,
-  initial: "deciding",
-  states: {
-    deciding: {
-      invoke: {
-        id: "recommendMove",
-        src: "recommendMove",
-        input: ({ context }) => ({
-          farmer: context.farmer,
-          wolf: context.wolf,
-          goat: context.goat,
-          cabbage: context.cabbage,
-          world: renderWorld(context),
-        }),
-        // The tool-derived recommendation feeds the applied move directly: the
-        // machine still owns the physics (applyMove), so an illegal suggestion
-        // is a no-op that burns a move rather than cheating the rules.
-        onDone: ({ context, output }) => {
-          const item = EVENT_ITEM[output.event];
-          const next = applyMove(worldOf(context), item);
-          if (!next) {
-            // Illegal recommendation: record the wasted attempt, keep going.
-            return {
-              target: "checkWin",
-              context: {
-                moves: context.moves + 1,
-                log: [...context.log, `(rejected illegal ${output.event})`],
-              },
-            };
-          }
-          return {
-            target: "checkWin",
-            context: {
-              farmer: next.farmer,
-              wolf: next.wolf,
-              goat: next.goat,
-              cabbage: next.cabbage,
-              moves: context.moves + 1,
-              log: [...context.log, moveLabel(item, context.farmer)],
-            },
-          };
-        },
-        onError: { target: "failed" },
-      },
-    },
-    ...sharedStates,
-  },
-});
-
-export async function runAssistedRiverCrossingExample(
-  options?: RunAgentOptions<typeof riverCrossingAssistedMachine>,
-) {
-  const result = await runAgent(riverCrossingAssistedMachine, {
-    input: { maxMoves: 12 },
-    ...resolveExecutors(models, options),
-  });
-  if (result.status !== "done") {
-    throw new Error(`Assisted river crossing did not complete: ${result.status}`);
-  }
-  return result.output;
-}
 
 // ─── Dual-mode entrypoint ───
 
@@ -667,37 +313,23 @@ export async function runRiverCrossingExample(
   return result.output;
 }
 
-function printOutcome(label: string, output: { solved: boolean; moves: number; log: string[] }) {
+function printOutcome(output: { solved: boolean; moves: number; log: string[] }) {
   console.log(
     output.solved
-      ? `${label}: solved in ${output.moves} moves:`
-      : `${label}: failed after ${output.moves} moves:`,
+      ? `Solved in ${output.moves} moves:`
+      : `Failed after ${output.moves} moves:`,
   );
   for (const [i, entry] of output.log.entries()) {
     console.log(`  ${i + 1}. ${entry}`);
   }
 }
 
-// Two contrasting runs:
-//   1. Unaided — the model must plan from the machine description alone. It
-//      often stumbles (illegal moves, extra shuttles) or fails outright.
-//   2. Tool-assisted — the model may call findShortestPath, which introspects
-//      the pure machine via xstate/graph's getShortestPaths and hands back the
-//      optimal remaining sequence. The tool result feeds each move.
+// The model must plan from the machine description alone. It often stumbles
+// (illegal moves, extra shuttles) or fails outright — the machine rejects every
+// illegal move, so whatever it produces is a genuinely valid solution path.
 export async function main() {
-  console.log("=== Unaided attempt (planning from the description) ===");
-  const unaided = await runRiverCrossingExample();
-  printOutcome("Unaided", unaided);
-
-  console.log("\n=== Tool-assisted attempt (findShortestPath via xstate/graph) ===");
-  const assisted = await runAssistedRiverCrossingExample();
-  printOutcome("Assisted", assisted);
-
-  console.log(
-    `\nMove counts — unaided: ${unaided.moves}` +
-      `${unaided.solved ? "" : " (failed)"}, assisted: ${assisted.moves}` +
-      `${assisted.solved ? "" : " (failed)"}.`,
-  );
+  const output = await runRiverCrossingExample();
+  printOutcome(output);
 }
 
 runExampleMain(import.meta.url, main);

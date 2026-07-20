@@ -28,8 +28,8 @@ import {
   setupAgent,
   type AgentRequestExecutor,
 } from "../../src/index.js";
-import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
-import { runExampleMain } from "../helpers/main.js";
+import { defineModels } from "../../src/ai-sdk/index.js";
+import { resolveExecutors, runExampleMain } from "../helpers/main.js";
 
 export const models = defineModels({
   researcher: openai("gpt-5.4-mini"),
@@ -114,14 +114,14 @@ export async function runSubflowsExample(options?: {
   /** Raw system-wide inspection passthrough (parent AND invoked child). */
   inspect?: (event: InspectionEvent) => void;
 }) {
-  const generateText = options?.generateText ?? createAiSdkExecutors({ models }).generateText;
-
   const result = await runAgent(subflowsMachine, {
     input: options?.input ?? { topic: "state machines for AI agents" },
     // The child is registered as the `child` actor source in the parent setup;
-    // runAgent rebinds its unbound `researchTopic` request with THIS
-    // generateText automatically — no nested `.provide` needed.
-    executors: { generateText },
+    // runAgent rebinds its unbound `researchTopic` request with THESE executors
+    // automatically — no nested `.provide` needed. resolveExecutors builds the
+    // real AI SDK executors on a direct run, or forwards the test's injected
+    // `generateText` mock.
+    ...resolveExecutors(models, options?.generateText),
     // onTransition sees ONLY the root (parent) machine's transitions.
     ...(options?.onTransition ? { onTransition: options.onTransition } : {}),
     // inspect is the system-wide passthrough: it fires for every actor in the

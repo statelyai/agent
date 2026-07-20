@@ -1,0 +1,15 @@
+{
+  "name": "tanstack-start-host",
+  "title": "TanStack Start Host",
+  "kind": "host-adapter",
+  "manual": true,
+  "origin": {
+    "type": "platform-adapter",
+    "source": "TanStack Start server functions calling runAgent; typechecked standalone with a local createServerFn shim (@tanstack/react-start is not a repo dependency)",
+    "url": "https://tanstack.com/start/latest/docs/framework/react/server-functions"
+  },
+  "comparison": {
+    "targets": ["TanStack Start", "server functions"],
+    "purpose": "Controlled mode in server functions: startAgent runs a machine to idle/done and persists the snapshot; resumeAgent delivers the human event to finish the run."
+  }
+}

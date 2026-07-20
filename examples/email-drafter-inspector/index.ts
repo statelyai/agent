@@ -17,7 +17,7 @@
  * Run: npx tsx examples/email-drafter-inspector/index.ts
  * Env: OPENAI_API_KEY (optional; enables real model calls),
  * STATELY_INSPECT_PORT (default 8080), STATELY_INSPECT_URL (inspector page
- * to embed, default https://viz.localhost), STATELY_INSPECT_NO_OPEN=1 to
+ * to embed, default https://editor.stately.ai), STATELY_INSPECT_NO_OPEN=1 to
  * skip auto-opening the browser.
  */
 import { z } from "zod";

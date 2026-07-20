@@ -31,7 +31,7 @@ import { tool } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors, defineModels } from "../../src/ai-sdk/index.js";
 import { runAgent, setupAgent, type AgentRequestExecutors } from "../../src/index.js";
-import { runExampleMain } from "../helpers/main.js";
+import { resolveExecutors, runExampleMain } from "../helpers/main.js";
 
 export const models = defineModels({
   assistant: openai("gpt-5.4-mini"),
@@ -171,7 +171,7 @@ export async function runToolCallingExample(
   const progress: string[] = [];
   const result = await runAgent(toolCallingMachine, {
     input: { query },
-    executors: generateText ? { generateText } : createAiSdkExecutors({ models }),
+    ...resolveExecutors(models, generateText),
     onTransition: (snapshot) => {
       const state = String(snapshot.value);
       progress.push(state);

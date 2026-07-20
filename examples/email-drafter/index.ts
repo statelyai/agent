@@ -106,7 +106,6 @@ const outputSchema = z.object({ sentEmails: z.array(emailDraftSchema) });
 export const models = defineModels({
   promptEvaluator: openai("gpt-5.4-mini"),
   emailDrafter: openai("gpt-5.4-mini"),
-  draftStreamer: openai("gpt-5.4-mini"),
 });
 
 export const evaluatePrompt = createTextLogic({
@@ -134,16 +133,6 @@ export const draftEmail = createTextLogic({
   messages: ({ input }) => [...input.messages, userMessage(input.prompt)],
 });
 
-export const streamDraft = createTextLogic({
-  mode: "stream",
-  schemas: {
-    input: z.object({ prompt: z.string() }),
-    output: z.string(),
-  },
-  model: "draftStreamer",
-  prompt: ({ input }) => input.prompt,
-});
-
 export const emailDrafterSchemas = createAgentSchemas({
   context: contextSchema,
   events: eventSchemas,
@@ -160,7 +149,6 @@ export const emailDrafterActors = {
   }),
   evaluatePrompt,
   draftEmail,
-  streamDraft,
 };
 
 const agentSetup = setupAgent({

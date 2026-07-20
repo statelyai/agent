@@ -9,6 +9,6 @@
   },
   "comparison": {
     "targets": ["subflows", "nested-graphs"],
-    "purpose": "A parent agent invokes a whole child agent machine as one actor, with typed input/output mapping and the child's request bound via .provide."
+    "purpose": "A parent agent invokes a whole child agent machine as one actor, with typed input/output mapping; runAgent auto-rebinds the child's unbound request with the host executors, so no nested .provide is needed."
   }
 }

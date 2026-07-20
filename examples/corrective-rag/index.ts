@@ -56,6 +56,7 @@ import { createAsyncLogic } from "xstate";
 import { defineModels } from "../../src/ai-sdk/index.js";
 import { runAgent, setupAgent, type AgentRequestExecutors } from "../../src/index.js";
 import { resolveExecutors, runExampleMain } from "../helpers/main.js";
+import { searchCorpus } from "../helpers/rag-corpus.js";
 
 export const models = defineModels({
   crag: openai("gpt-5.4-mini"),
@@ -104,66 +105,6 @@ export const SAMPLE_WEB_INDEX: Array<{ id: string; text: string }> = [
     text: "A vector database indexes embeddings for approximate nearest-neighbor search, the retrieval backbone of most production RAG systems.",
   },
 ];
-
-const STOP_WORDS = new Set([
-  "a",
-  "an",
-  "the",
-  "is",
-  "are",
-  "of",
-  "to",
-  "in",
-  "and",
-  "what",
-  "how",
-  "why",
-  "do",
-  "does",
-  "can",
-  "i",
-  "me",
-  "my",
-  "it",
-  "that",
-  "this",
-  "for",
-  "with",
-  "about",
-  "tell",
-  "explain",
-  "please",
-]);
-
-/** Honest keyword-overlap scoring — NOT embeddings. Counts shared content words. */
-function scoreDocument(question: string, text: string): number {
-  const terms = new Set(
-    question
-      .toLowerCase()
-      .split(/[^a-z]+/)
-      .filter((word) => word.length > 2 && !STOP_WORDS.has(word)),
-  );
-  const haystack = text.toLowerCase();
-  let score = 0;
-  for (const term of terms) {
-    if (haystack.includes(term)) score += 1;
-  }
-  return score;
-}
-
-/** Top-N keyword matches over a corpus (score > 0), highest first. */
-function searchCorpus(
-  corpus: Array<{ id: string; text: string }>,
-  question: string,
-  limit: number,
-): string[] {
-  return corpus
-    .map((doc) => ({ text: doc.text, score: scoreDocument(question, doc.text) }))
-    .filter((scored) => scored.score > 0)
-    .sort((left, right) => right.score - left.score)
-    .slice(0, limit)
-    .map((scored) => scored.text);
-}
 
 // Grading output: one yes/no verdict per retrieved document, in order. This is
 // the one-request-over-all-docs form (LangGraph loops one call per doc instead).
