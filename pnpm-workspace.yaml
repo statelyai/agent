@@ -1,3 +1,6 @@
+packages:
+  - demo
+
 allowBuilds:
   core-js-pure: false
   esbuild: false
