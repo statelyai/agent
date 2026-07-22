@@ -9,10 +9,10 @@ Every well-known agent pattern is a control-flow shape: a loop, a branch, a fan-
 
 ## Copy-paste in 60 seconds
 
-Each pattern is a single self-contained `index.ts` — no shared harness, no local imports. To lift one:
+Each pattern is a single self-contained `index.ts`: no shared harness, no local imports. To lift one:
 
 1. Copy the one example file into your project as `index.ts`.
-2. Install the runtime deps (the provider package major must match your installed `ai` major — this repo is on `ai@6`, so `@ai-sdk/openai@3`, not 4):
+2. Install the runtime deps (the provider package major must match your installed `ai` major; this repo is on `ai@6`, so `@ai-sdk/openai@3`, not 4):
 
    ```sh
    pnpm add @statelyai/agent@2.0.0-alpha.10 ai@^6 zod@^4 xstate@6.0.0-alpha.21 @ai-sdk/openai@^3
@@ -35,9 +35,9 @@ Each pattern is a single self-contained `index.ts` — no shared harness, no loc
 
 4. Run it: `OPENAI_API_KEY=... npx tsx index.ts` (or swap in [any host](hosts.md)).
 
-Peer ranges (from `@statelyai/agent`): `ai@^6.0.67`, `xstate@>=6.0.0-alpha.16 <6.0.0`, `zod@^3.25 || ^4`. `@statelyai/agent` is alpha — pin the exact version.
+Peer ranges (from `@statelyai/agent`): `ai@^6.0.67`, `xstate@>=6.0.0-alpha.16 <6.0.0`, `zod@^3.25 || ^4`. `@statelyai/agent` is alpha; pin the exact version.
 
-Every example is dual-mode: run it directly against a real model, or drive it with injected mock executors in a test (no key, no network). Swap the host without touching the machine (see [Eject to your stack](eject.md)).
+Every example is dual-mode: run it directly against a real model, or drive it with injected mock executors in a test (no key, no network). Swap the host without touching the machine (see [Use in any stack](any-stack.md)).
 
 ## Reasoning and tool loops
 
@@ -90,7 +90,5 @@ See [Human in the loop](human-in-the-loop.md) for the idle-first pause and snaps
 ## Related
 
 - [Examples](examples.md): the full runnable index, grouped by what each demonstrates.
-- [Eject to your stack](eject.md): take any of these machines from local `runAgent` to your server or edge runtime, unchanged.
+- [Use in any stack](any-stack.md): take any of these machines from local `runAgent` to your server or edge runtime, unchanged.
 - [Migrating from a hand-rolled loop](from-a-loop.md): already have a `while` loop? Convert it step by step.
-</content>
-</invoke>

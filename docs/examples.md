@@ -19,7 +19,7 @@ Every example is dual-mode: run it directly with a real model as above, while it
 
 ## Start here
 
-These seven cover the core ideas: text requests, decisions, messages, and JSON authoring.
+These cover the core ideas: text requests, decisions, messages, and JSON authoring.
 
 - [twenty-questions](../examples/twenty-questions/index.ts): a decision loop where the model picks one legal event (ASK or GUESS) each turn; guard-enforced legality, machine-held score, play-again reset, machine-owned user prompts.
 - [joke](../examples/joke/index.ts): a minimal streaming text workflow.

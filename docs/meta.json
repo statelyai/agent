@@ -3,7 +3,7 @@
   "pages": [
     "index",
     "quickstart",
-    "eject",
+    "any-stack",
     "machines",
     "decisions",
     "plans",
@@ -11,6 +11,8 @@
     "messages",
     "human-in-the-loop",
     "hosts",
+    "express-host",
+    "cloudflare-host",
     "observability",
     "interop",
     "steps",
@@ -19,7 +21,6 @@
     "multi-agent",
     "from-a-loop",
     "xstate-as-agent-workflow",
-    "comparison",
     "patterns",
     "examples",
     "roadmap"

@@ -41,13 +41,14 @@ const agentSetup = setupAgent({
 
 ### Model references
 
-Prefer a `models` registry (canonical): it narrows `model` to the map's keys (`model: "quick"` is typed as `"quick" | "careful"`), so a typo is a compile error and one alias map is shared between authoring and the host adapter. A bare `model` string is the escape hatch (any string, passed through to your [host](hosts.md) to resolve) for a machine that must not name concrete models. See [Which authoring form when](machines.md#which-authoring-form-when).
+Prefer a `models` registry (canonical): it narrows `model` to the map's keys (`model: "quick"` is typed as `"quick" | "careful"`), so a typo is a compile error and one alias map is shared between authoring and the host adapter. A bare `model` string (any string, passed through to your [host](hosts.md) to resolve) is the alternative for a machine that must not name concrete models. See [Which authoring form when](machines.md#which-authoring-form-when).
 
 ## Invoke a request from a state
 
 Invoke by name with `src`, pass `input`, read the typed result in `onDone` (full machine in the [quickstart](quickstart.md)):
 
 ```ts
+// inside states: { ... }
 answering: {
   invoke: {
     id: "answer",
@@ -64,7 +65,7 @@ In `onDone`, `output` is already validated against the request's output schema a
 
 ### Narrowing an unknown output outside the machine
 
-`parseOutput(schema, output)` validates a value against a schema and returns it parsed, throwing on mismatch. Escape hatch for host code holding a raw, still-untyped output (from a persisted snapshot, or an inline `agent.generateText` result typed `unknown`). Never needed inside `onDone`.
+The `parseOutput(schema, output)` helper validates a value against a schema and returns it parsed, throwing on mismatch. Use it in host code holding a raw, still-untyped output (from a persisted snapshot, or an inline `agent.generateText` result typed `unknown`). Never needed inside `onDone`.
 
 ```ts
 import { parseOutput } from "@statelyai/agent/adapter";
@@ -96,7 +97,7 @@ export const triageTicket = createTextLogic({
 });
 ```
 
-The mode is derived from the schema; host adapters read it (via exported `getAgentOutputMode`/`isStructuredOutputSchema`) to decide whether to request structured output. You rarely call these directly. See [examples/triage/index.ts](../examples/triage/index.ts).
+The mode is derived from the schema automatically; you never set it. See [examples/triage/index.ts](../examples/triage/index.ts).
 
 ### Reasoning
 
@@ -137,7 +138,7 @@ const result = await runAgent(machine, {
 });
 ```
 
-`onChunk` fires per chunk alongside the request that produced it, so parallel streams stay distinguishable. It is purely observational. A `mode: 'stream'` request needs a `streamText` executor; without one, `runAgent` fails at bind time. See [examples/joke/index.ts](../examples/joke/index.ts).
+The `onChunk` callback fires per chunk alongside the request that produced it, so parallel streams stay distinguishable. It is purely observational. A `mode: 'stream'` request needs a `streamText` executor; without one, `runAgent` fails at bind time. See [examples/joke/index.ts](../examples/joke/index.ts).
 
 ## Tools and multi-step loops
 
@@ -150,6 +151,7 @@ Bring your SDK's tool and it owns the input typing, so `execute`'s argument is t
 ```ts
 import { tool } from 'ai';
 
+// inside a request
 tools: {
   getWeather: tool({
     description: 'Look up the current weather for a city.',
@@ -162,6 +164,7 @@ tools: {
 For a host with no SDK, the minimal shape is a plain object (or a bare `execute` function). Core reads `description`/`inputSchema` and runs `execute`:
 
 ```ts
+// inside a request
 tools: {
   getWeather: {
     description: 'Look up the current weather for a city.',
@@ -189,7 +192,7 @@ export const research = createTextLogic({
 
 <!-- createTextLogic from src/text-logic.ts and examples/email-drafter -->
 
-Inline `requests:` (above) is the default. `createTextLogic` is the escape hatch when a request should be standalone (exported, tested on its own, or shared across machines) and registered under `actorSources`. A `requests` entry is exactly what `setupAgent` builds internally from `createTextLogic`, so the two are interchangeable. See [Which authoring form when](machines.md#which-authoring-form-when).
+Inline `requests:` (above) is the default. Reach for `createTextLogic` when a request should be standalone (exported, tested on its own, or shared across machines) and registered under `actorSources`. Each `requests` entry is exactly what `setupAgent` builds internally from `createTextLogic`, so the two are interchangeable. See [Which authoring form when](machines.md#which-authoring-form-when).
 
 ```ts
 import { createTextLogic, setupAgent } from "@statelyai/agent";

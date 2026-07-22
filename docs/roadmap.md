@@ -7,7 +7,7 @@ description: Work deliberately deferred past the 2.0 alpha, and why.
 
 Everything here is **additive**: none of it blocks the alpha, and all of it benefits from real usage feedback before the API shape is chosen. If you hit one of these and have opinions, open an issue; that feedback is what this list is waiting on.
 
-## Helpers (deferred until embedders show us what they actually write)
+## Helpers (deferred until real usage shows the shape)
 
 - **`stepAgent` sugar.** A collapsed `await stepAgent({ machine, state, event })` over the step loop (see [the step path](steps.md)). Deferred because the loop is ~15 lines and a collapsed helper would have to freeze plain-actor and timer semantics now. Ships if alpha users keep hand-rolling the same wrapper.
 - **Idle persist/revive helper.** The persist snapshot, return pending handle, resume with event recipe (see [human in the loop](human-in-the-loop.md)) is currently a documented pattern rewritten by each host. A small helper lands once a couple of real stores (SQLite, Postgres, Redis) show the common shape.
@@ -15,7 +15,7 @@ Everything here is **additive**: none of it blocks the alpha, and all of it bene
 - **`kind: 'actor'` step requests.** Plain (non-model) actors surface only in `step.actions` today (documented in [the step path](steps.md)). Promoting them to first-class step requests would make the step loop uniform; deferred until step-path hosts confirm the need.
 - **Provider executor scaffolding.** Hand-rolling a raw-SDK executor is ~400 lines (see `examples/openai-sdk-host`, `examples/anthropic-sdk-host`). A `createExecutorsFromChat(...)` scaffold could cut that to ~60; deferred until a third provider example exposes the right seams. (`getJsonSchema` itself shipped; the scaffold would build on it.)
 - **Schema compiler recipes.** Keep core zero-dependency and avoid blessing one JSON Schema engine in the main package. If JSON-config users keep copying the Ajv adapter, add cookbook snippets or optional adapter packages outside core.
-- **Machine-as-tool helper.** `runAgent` inside a `tool({ execute })` already covers run-to-done machines in one line; a `toAiSdkTool(machine, executors)` helper would add the idle-handle persist/resume dance for pausing machines (see `examples/machine-as-tool`). Ships if embedders keep hand-rolling it.
+- **Machine-as-tool helper.** `runAgent` inside a `tool({ execute })` already covers run-to-done machines in one line; a `toAiSdkTool(machine, executors)` helper would add the idle-handle persist/resume dance for pausing machines (see `examples/machine-as-tool`). Ships if users keep hand-rolling it.
 
 ## Runtime options
 
@@ -28,7 +28,7 @@ Everything here is **additive**: none of it blocks the alpha, and all of it bene
 - **Tracing/OTel exporter** plugging into `onTrace`.
 - **Typed system-wide `onTransition`.** `runAgent`'s `inspect` passthrough already exposes every actor's transitions with their `actorRef`; a typed sugar (`onTransition` receiving `{ actorRef, path }` for child machines too) ships if hosts keep writing the same `@xstate.transition` filter.
 - **Transport helpers.** SSE example shipped (`examples/sse-transport`); WebSocket and AI SDK UI stream variants next.
-- **Host-loop signposting doc.** Expand the current `runAgent` vs step-loop guidance into a "pick by host type" guide if embedders still miss the split.
+- **Host-loop signposting doc.** Expand the current `runAgent` vs step-loop guidance into a "pick by host type" guide if users still miss the split.
 - **Framework migration recipes.** Parity trackers exist for selected frameworks; codemods only if demand shows.
 
 ## Next up

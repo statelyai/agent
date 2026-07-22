@@ -111,9 +111,9 @@ const machine = agentSetup.createMachine({
 
 The machine now fully describes the agent, but nothing has called a model yet. That is the host's job.
 
-## The five `agent.*` builtins
+## Built-in `agent.*` actor sources
 
-`setupAgent` registers five built-in actor sources every machine can invoke. They are magic `src` strings; a request's `input` shapes each call.
+`setupAgent` registers a set of built-in actor sources every machine can invoke. They are reserved `src` strings; a request's `input` shapes each call.
 
 | `src`                  | Purpose                                                     |
 | ---------------------- | ---------------------------------------------------------- |
@@ -127,7 +127,7 @@ Named `requests:` (like `answerQuestion`) are the reusable, testable counterpart
 
 ## Run it against a host
 
-`runAgent` from core drives the machine, calling your **executors** whenever the machine needs a model. `createAiSdkExecutors` builds that set from the AI SDK. This is the one canonical run form.
+The `runAgent` function from core drives the machine, calling your **executors** whenever the machine needs a model. The `createAiSdkExecutors` helper builds that set from the AI SDK.
 
 ```ts
 import { runAgent } from "@statelyai/agent";
@@ -197,7 +197,7 @@ actor.subscribe((s) => {
 actor.start();
 ```
 
-`agent.userInput` is left unbound (supply it via `provideExecutors`'s third argument, `{ actorSources }`); invoked child machines are not descended into. Use `runAgent` when you want idle handling and child rebinding for free.
+The `agent.userInput` source is left unbound (supply it via `provideExecutors`'s third argument, `{ actorSources }`), and invoked child machines are not descended into. Use `runAgent` when you want idle handling and child rebinding for free.
 
 ### Mocking in a test
 

@@ -16,7 +16,7 @@ The **machine** is the decision layer. It declares:
 - which model calls (**text requests** and **decisions**) each state makes
 - which events the model may choose right now
 
-The **host** is the execution layer. It supplies an executor set: three plain functions (`generateText`, `streamText`, `decide`) that take plain request objects and return plain results. `runAgent` drives the machine and calls them whenever the machine needs a model. Because the machine only knows the executor contract, the same machine runs unchanged against the Vercel AI SDK, Cloudflare Workers AI, a raw provider fetch, or anything else.
+The **host** is the execution layer. It supplies an executor set: three plain functions (`generateText`, `streamText`, `decide`) that take plain request objects and return plain results. The `runAgent` driver calls them whenever the machine needs a model. Because the machine only knows the executor contract, the same machine runs unchanged against the Vercel AI SDK, Cloudflare Workers AI, a raw provider fetch, or anything else.
 
 A [decision](decisions.md) is where this matters most: the model chooses exactly one **currently-legal** machine event, not free text and not an arbitrary tool call. An illegal choice is rejected before it takes effect, so illegal behavior is impossible by construction, not discouraged by a prompt.
 
@@ -27,15 +27,15 @@ A [decision](decisions.md) is where this matters most: the model chooses exactly
 - **Inspectable.** States, transitions, and requests are data you can read, diagram, and reason about before anything runs.
 - **Serializable.** Every settle point produces a plain, JSON-serializable snapshot. Persist it anywhere and resume later.
 
-Unlike a hand-rolled `while` loop or a graph framework, control flow is a state machine you can inspect, test, and resume, and the model can only ever pick a legal event. See [how this compares](comparison.md).
+Unlike a hand-rolled `while` loop or a graph framework, control flow is a state machine you can inspect, test, and resume, and the model can only ever pick a legal event.
 
 ## Three ways in
 
-- **Author a new agent.** Describe states, decisions, and typed requests, run locally with `runAgent`, then test and inspect it with no API key. Eject to any framework or runtime via `provideExecutors` with zero machine changes. Start at the [Quickstart](quickstart.md), then [Eject to your stack](eject.md).
+- **Author a new agent.** Describe states, decisions, and typed requests, run locally with `runAgent`, then test and inspect it with no API key. Use it in any framework or runtime via `provideExecutors` with zero machine changes. Start at the [Quickstart](quickstart.md), then [Use in any stack](any-stack.md).
 - **Retrofit an existing agent.** Have a `while` loop or tangled control flow? Your existing SDK calls, tools, and retry code become the executors; the machine replaces only the control flow and runs in your existing setup. See [Migrating from a loop](from-a-loop.md).
 - **Copy a known pattern.** ReAct, reflection, plan-and-execute, RAG, supervisor, swarm handoff, and more, each a single runnable file you lift in 60 seconds. Browse [Agent patterns](patterns.md).
 
-## A quick teaser
+## Example
 
 <!-- setup + invoke + run; full walkthrough lives in quickstart.md -->
 
@@ -96,7 +96,7 @@ The API changed completely in 2.0 and is still settling. Expect breaking changes
 Explicitly not shipped yet:
 
 - **Storage/checkpointer adapters.** Persisting snapshots or event logs is a documented recipe, not a package.
-- **OpenTelemetry exporter.** Build your own from the observation seams on `runAgent`.
+- **OpenTelemetry exporter.** Build your own from the observation callbacks on `runAgent`.
 - **SSE/WebSocket transport helpers.** Host your own stream over what `onChunk` gives you.
 - **Dynamic-parallelism primitive.** Fan-out is plain `Promise.all(...)` over host actors.
 - **Visualization tooling.** Stately Studio and a VS Code extension own diagramming and inspection.
@@ -106,7 +106,9 @@ If something here blocks you, or the API surface feels wrong, open an issue. Thi
 ## Documentation map
 
 - [Quickstart](quickstart.md): install and run your first agent machine end to end.
-- [Eject to your stack](eject.md): one machine, three hosts (local, Express, Cloudflare), zero machine changes.
+- [Use in any stack](any-stack.md): one machine runs locally, behind an HTTP route, or on the edge, with zero machine changes.
+- [Express host](express-host.md): drive an agent machine from an HTTP route.
+- [Cloudflare host](cloudflare-host.md): run an agent machine on the edge with Durable Object persistence.
 - [Agent machines](machines.md): `setupAgent`, states, invokes, typed context, and guards.
 - [Decisions](decisions.md): the model choosing exactly one currently-legal machine event.
 - [Plans](plans.md): the multi-event decision, `agent.plan`.

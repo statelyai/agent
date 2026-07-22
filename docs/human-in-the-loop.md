@@ -38,7 +38,7 @@ A host can override per run by passing `isSuspended` to `runAgent` directly. Res
 
 ## A waiting state
 
-`reviewing` has no invoke. Once reached, nothing happens until a human sends `APPROVE` or `REJECT`:
+The `reviewing` state has no invoke. Once reached, nothing happens until a human sends `APPROVE` or `REJECT`:
 
 ```ts
 import { z } from "zod";
@@ -103,13 +103,13 @@ const second = await runAgent(machine, { snapshot: persisted, event: { type: "AP
 // second.status === 'done'
 ```
 
-`persistSnapshot(snapshot)` is the shipped helper for that round-trip: it deep-clones to plain JSON via `JSON.stringify`/`JSON.parse`, returning the exact shape you store and feed back to `runAgent({ snapshot })`. It drops or throws on non-JSON values exactly as `JSON.stringify` would, so the persisted value matches what a real persistence layer sees.
+The shipped helper `persistSnapshot(snapshot)` handles that round-trip: it deep-clones to plain JSON via `JSON.stringify`/`JSON.parse`, returning the exact shape you store and feed back to `runAgent({ snapshot })`. It drops or throws on non-JSON values exactly as `JSON.stringify` would, so the persisted value matches what a real persistence layer sees.
 
 ## Present the human's choices
 
 <!-- getAcceptedEvents from src/events.ts -->
 
-`getAcceptedEvents(snapshot)` returns one descriptor per **currently-legal** event: its `type`, a synthetic `toolName`, and its payload schema when registered. Drive the loop off it:
+The `getAcceptedEvents(snapshot)` helper returns one descriptor per **currently-legal** event: its `type`, a synthetic `toolName`, and its payload schema when registered. Drive the loop off it:
 
 ```ts
 import { getAcceptedEvents, runAgent } from "@statelyai/agent";
@@ -213,7 +213,7 @@ import { getStateMeta } from "@statelyai/agent";
 const interaction = getStateMeta(snapshot).interaction ?? null;
 ```
 
-`getStateMeta` merges the active state(s)' meta into one typed object (later/deeper wins for nested or parallel machines, `{}` when none declare meta), typed from the machine's meta schema. Replaces the older `Object.values(snapshot.getMeta())[0]` cast. See `readInteraction` in [machine-as-tool](../examples/machine-as-tool/index.ts).
+The `getStateMeta` helper merges the active state(s)' meta into one typed object (later/deeper wins for nested or parallel machines, `{}` when none declare meta), typed from the machine's meta schema. It replaces the older `Object.values(snapshot.getMeta())[0]` cast. See `readInteraction` in [machine-as-tool](../examples/machine-as-tool/index.ts).
 
 ## Inline input without settling
 

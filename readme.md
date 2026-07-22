@@ -6,7 +6,7 @@ Build agents as state machines to control exactly what the agent can do. The mac
 
 Stately Agent adds model requests and decisions to XState. The state machine defines what the agent can do. Your application chooses the model, runs the requests, and stores the state.
 
-Any agent workflow or loop can be modeled as a state machine. Model calls and tools run as effects inside it. The model proposes an event. The machine decides whether it is allowed and what happens next. See [how this compares to LangGraph and hand-rolling a loop](docs/comparison.md).
+Any agent workflow or loop can be modeled as a state machine. Model calls and tools run as effects inside it. The model proposes an event. The machine decides whether it is allowed and what happens next.
 
 Stately Agent 2 is in alpha. APIs may change before the stable release.
 
@@ -14,7 +14,7 @@ Stately Agent 2 is in alpha. APIs may change before the stable release.
 
 ## Three ways to start
 
-- **Author a new agent.** Build a machine from states, decisions, and typed requests; run it locally with `runAgent`, test it with no API key, then eject to any framework or runtime with zero machine changes. See the [Quickstart](docs/quickstart.md) and [Eject to your stack](docs/eject.md).
+- **Author a new agent.** Build a machine from states, decisions, and typed requests; run it locally with `runAgent`, test it with no API key, then use it in any framework or runtime with zero machine changes. See the [Quickstart](docs/quickstart.md) and [Use in any stack](docs/any-stack.md).
 - **Retrofit an existing agent.** Turn a `while` loop into a machine: your SDK calls, tools, and retry code become the executors; the machine replaces only the control flow. See [Migrating from a loop](docs/from-a-loop.md).
 - **Copy a known pattern.** ReAct, reflection, plan-and-execute, RAG, supervisor, and more, each a single runnable file you lift in 60 seconds. See [Agent patterns](docs/patterns.md).
 
@@ -152,6 +152,6 @@ See [all examples](examples/README.md).
 - [Human in the loop](docs/human-in-the-loop.md)
 - [Testing and verification](docs/verify.md)
 - [Running on different hosts](docs/hosts.md)
-- [Eject to your stack](docs/eject.md)
+- [Use in any stack](docs/any-stack.md)
 - [Agent patterns](docs/patterns.md)
 - [Migrating from a loop](docs/from-a-loop.md)

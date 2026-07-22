@@ -5,11 +5,11 @@ description: Drive an agent machine one model call at a time so a durable host c
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
 
-## Why it exists
+## When to use the step path
 
-The **step path** is a set of helpers that advance an agent machine one transition at a time, handing you a plain, persistable checkpoint after every model call - the durable-host counterpart to [runAgent](hosts.md), not a lesser version. `runAgent` checkpoints only when the run settles (`done`, `idle`, `error`); Cloudflare Workflows, Temporal, or anything that must resume from the last model call drives the loop itself.
+The **step path** is a set of helpers that advance an agent machine one transition at a time, handing you a plain, persistable checkpoint after every model call. It is the durable-host counterpart to [runAgent](hosts.md), not a lesser version: `runAgent` checkpoints only when the run settles (`done`, `idle`, `error`), while Cloudflare Workflows, Temporal, or anything that must resume from the last model call drives the loop itself.
 
-It runs in any such host because of one property: **every step helper is a pure, synchronous function.** `initialAgentStep`, `transitionAgentStep`, and `resolveAgentStep` never await, never do IO, and always return the same step for the same inputs. All asynchrony lives in your code, between steps. That split is the whole durability story:
+It runs in any such host because of one property: **every step helper is a pure, synchronous function.** `initialAgentStep`, `transitionAgentStep`, and `resolveAgentStep` never await, never do IO, and always return the same step for the same inputs. All asynchrony lives in your code, between steps. That split is the basis for durability:
 
 - The host journals each async result (model output, actor result, timer firing) in its own runtime as its own activity.
 - Replay is deterministic: re-applying the journaled events through the pure transitions reconstructs the exact snapshot, so a crashed run resumes without re-billing model calls.
@@ -27,7 +27,7 @@ So `requests: []` with `done: false` means either the machine is **idle** waitin
 
 <!-- step helpers (initialAgentStep, resolveAgentStep, transitionAgentStep, executeAgentRequest) from src/steps.ts; running example examples/ai-sdk-game-host -->
 
-`initialAgentStep` starts a machine and returns its first step. Loop until `step.done`:
+The `initialAgentStep` helper starts a machine and returns its first step. Loop until `step.done`:
 
 - A **decision** request goes through `resolveDecision` (wire `canTake` to `step.snapshot.can` so guard-rejected choices are caught and retried), then `transitionAgentStep` applies the chosen event.
 - A **text** request goes through `executeAgentRequest`, then `resolveAgentStep` feeds the output back.
@@ -92,18 +92,19 @@ See [examples/ai-sdk-game-host/index.ts](../examples/ai-sdk-game-host/index.ts) 
 
 > **Note:** `executeAgentRequest` is text-only; passing a `kind: 'decision'` request throws. A decision has no output value to feed into `resolveAgentStep`; it produces a chosen event applied with `transitionAgentStep`.
 
-### The floor: no executors at all
+### Without the executor helpers
 
-`executeAgentRequest` and `resolveDecision` are conveniences, not requirements. A `kind: 'text'` request carries everything needed (`model` ref, `system`, `prompt`, `messages`, `tools`, `outputSchema`, `maxOutputTokens`); call any API yourself and feed the result back:
+The `executeAgentRequest` and `resolveDecision` helpers are conveniences, not requirements. A `kind: 'text'` request carries everything needed (`model` ref, `system`, `prompt`, `messages`, `tools`, `outputSchema`, `maxOutputTokens`); call any API yourself and feed the result back:
 
 ```ts
+// ...inside the loop, for a text request:
 const text = await yourOwnFetch(request);
 step = resolveAgentStep(machine, step, request, text);
 ```
 
 For decisions, `request.events` carries the candidates (`type`, `toolName`, payload `inputSchema`). Pick an event however you like (model call, rules engine, human) and apply it with `transitionAgentStep`; guards still reject illegal events. `resolveDecision` stays available a la carte for its validate-and-retry loop (`canTake: (e) => step.snapshot.can(e)`).
 
-The full ladder: `runAgent` (owns the loop), `resolveAgentRequests` (one call per iteration), raw step helpers with executors, raw step helpers with your own code, the machine as pure oracle.
+The full range, from most managed to least: `runAgent` (owns the loop), `resolveAgentRequests` (one call per iteration), raw step helpers with executors, raw step helpers with your own code, and the machine used purely to compute the next step.
 
 ## The AgentStep shape
 
@@ -132,9 +133,9 @@ interface AgentPlanRequest {
 }
 ```
 
-Per step: resolve **one** decision from `events` (`resolveDecision`, wiring `canTake` to `step.snapshot.can` like a single decision), then apply it. A real machine event advances the plan - the _next_ step re-surfaces the request with updated `applied`/`events`/`stepsRemaining`. The reserved `agent.plan.done` move, a `stopOn` event, an exhausted budget, or no legal events **completes** the plan: its invoke resolves with `{ steps, stopped }` (`stopped` is `'done' | 'stop-event' | 'max-steps' | 'no-legal-events'`), fed back like any invoke result. An applied event exiting the invoking state cancels the plan (`onDone` never fires), identical to `runAgent`.
+Per step: resolve **one** decision from `events` (`resolveDecision`, wiring `canTake` to `step.snapshot.can` like a single decision), then apply it. A real machine event advances the plan, and the _next_ step re-surfaces the request with updated `applied`/`events`/`stepsRemaining`. The reserved `agent.plan.done` move, a `stopOn` event, an exhausted budget, or no legal events **completes** the plan: its invoke resolves with `{ steps, stopped }` (`stopped` is `'done' | 'stop-event' | 'max-steps' | 'no-legal-events'`), fed back like any invoke result. An applied event exiting the invoking state cancels the plan (`onDone` never fires), identical to `runAgent`.
 
-`resolveAgentRequests` does all of this, one plan step (one decision, or one completion) per call, so the two-line durable host loop above drives plans unchanged.
+The `resolveAgentRequests` helper does all of this, one plan step (one decision, or one completion) per call, so the two-line durable host loop above drives plans unchanged.
 
 **Crash-safe mid-plan.** `agent.plan` is a stateful, transition-based _ledger_ actor: its in-progress state (the `applied` trail and remaining budget) is the invoke child's own snapshot `context`, advanced one event at a time, so it lands in a machine's persisted snapshot for free:
 

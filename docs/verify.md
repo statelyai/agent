@@ -5,17 +5,19 @@ description: Statically lint, simulate, and explore agent machines without any A
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
 
-These APIs answer two questions without spending a token. **Prove an LLM-generated machine is legal before you run it:** lint, reachability, and scripted playthroughs catch dead states and undeliverable decisions statically ([authoring from scratch](quickstart.md)). **Prove a refactor preserved behavior:** `simulateAgent` replays a known outcome deterministically, so a machine converted [from a loop](from-a-loop.md) can be pinned before it ships.
+Three APIs check an agent machine before it runs, with no API key or model call:
 
-Coding agents generate agent machines; they need a closed loop to **self-verify what they generated without any API keys or model calls**. `@statelyai/agent` ships three static/simulated APIs for that. Everything runs on `machine.config` and the pure step path: no provider, no network, no keys. An emitted machine (from a prompt, a database, a visual editor) can't be trusted blindly, and running it costs model calls while exercising one path. These APIs check it before it spends a token:
+- `lintAgentMachine` catches dead states, undeliverable decisions, and output-contract gaps statically.
+- `simulateAgent` drives a scripted playthrough to a known outcome deterministically.
+- `explorePaths` / `canReach` enumerate every decision branch and prove a target state is reachable.
 
-- catch dead states, undeliverable decisions, and output-contract gaps statically;
-- drive a scripted playthrough to a known outcome deterministically;
-- enumerate every decision branch and prove a target state is reachable.
+Use them to prove an LLM-generated machine is legal before you run it ([authoring from scratch](quickstart.md)), or to pin that a refactor preserved behavior, so a machine converted [from a loop](from-a-loop.md) is safe to ship.
 
-## `lintAgentMachine(machine, options?)`
+> **Note:** Everything on this page runs on `machine.config` and the pure step path: no provider, no network, no keys. It is deterministic, so these are ordinary vitest/jest unit tests and CI checks.
 
-Static structural checks over a built machine, working for TS-authored (`setupAgent(...).createMachine(...)`) and `setupAgent.fromConfig(...)`-compiled machines alike. Returns `AgentLintDiagnostic[]` (`{ code, severity, path, message }`), empty when clean.
+## Linting a machine
+
+The `lintAgentMachine(machine, options?)` function runs static structural checks over a built machine, for TS-authored (`setupAgent(...).createMachine(...)`) and `setupAgent.fromConfig(...)`-compiled machines alike. It returns `AgentLintDiagnostic[]` (`{ code, severity, path, message }`), empty when clean.
 
 ```ts
 import { lintAgentMachine } from "@statelyai/agent";
@@ -38,9 +40,9 @@ For a one-liner that throws instead of returning findings, use `assertAgentMachi
 | `final-output-reads-event` | warning  | A top-level final state's `output` function reads the entering `event`. Final `output` fns are evaluated more than once with different events, so `event` is unreliable. Read `context` only, capturing what you need into context in the transition that targets the final state. |
 | `missing-final`            | warning  | No reachable final state; the machine can only idle/loop (legal, but flagged).                                                                                                                                                                                                     |
 
-## Assert machines in tests
+## Asserting in tests
 
-Everything above is a plain function, so a machine is a thing you assert in a unit test: no model, no API key, no mocks. Structural soundness, reachability, and scripted playthroughs run deterministically in vitest/jest:
+Every check is a plain function, so assert structural soundness, reachability, and scripted playthroughs directly in vitest/jest:
 
 ```ts
 import { assertAgentMachine, canReach, simulateAgent } from "@statelyai/agent";
@@ -68,9 +70,9 @@ test("happy path settles done", async () => {
 
 Guards stay in force throughout: `canReach` and `simulateAgent` walk the same step path `runAgent` uses, so a graph path that is guard-illegal never counts as reachable. These tests pin the shape as prompts and models change.
 
-## `await simulateAgent(machine, { input, script, maxSteps? })`
+## Simulating a playthrough
 
-A deterministic, model-free playthrough on the pure step path (async: drives plan steps through the real durable protocol). The `script` supplies responses by invoke `src` (FIFO queues), so runs are reproducible:
+The `simulateAgent(machine, { input, script, maxSteps? })` call runs a deterministic, model-free playthrough on the pure step path (async: it drives plan steps through the real durable protocol). The `script` supplies responses by invoke `src` (FIFO queues), so runs are reproducible:
 
 - `decisions`: the `ChosenEvent` to apply per decision (keyed by decision src, usually `agent.decide`). A plan step is a decision too: key its chosen events by the plan src (`agent.plan`) and end with the reserved `agent.plan.done` move to complete the plan;
 - `text`: output values for text requests (keyed by request src);
@@ -93,7 +95,7 @@ const { status, snapshot, trail } = await simulateAgent(machine, {
 // status: 'done' | 'idle' | 'exhausted'
 ```
 
-Returns `{ status, snapshot, trail }`. For a `'done'` run, the machine's output lives on `snapshot.output`. `SimulateAgentResult.snapshot` is typed as the generic `AnyMachineSnapshot`, so `.output` is `unknown` and needs a cast to your output type:
+It returns `{ status, snapshot, trail }`. For a `'done'` run the output lives on `snapshot.output`, typed as the generic `AnyMachineSnapshot`, so it needs a cast to your output type:
 
 ```ts
 if (result.status === "done") {
@@ -101,11 +103,11 @@ if (result.status === "done") {
 }
 ```
 
-It throws a descriptive error (naming the pending request's kind, src, and id) when the script runs dry mid-request, so a missing response is obvious.
+> **Note:** When the script runs dry mid-request, `simulateAgent` throws a descriptive error naming the pending request's kind, src, and id, so a missing response is obvious.
 
-## `await explorePaths(machine, { input, maxDepth?, textOutputs? })`
+## Exploring every branch
 
-Enumerates decision and external-event branches, model-free, and reports coverage (async: plan branches advance through the real plan protocol). At each decision it forks one branch per candidate event (guard-rejected candidates count in `prunedByGuard`, not explored); at an idle wait it forks per externally-accepted event. A `agent.plan` request forks the same way (including the reserved `agent.plan.done` move, always legal), so a single plan can consume several depth units. Text/`userInput` invokes resolve from `textOutputs` (a by-src canned-output map); a missing src halts that branch with a `needs-output` terminal instead of throwing.
+The `explorePaths(machine, { input, maxDepth?, textOutputs? })` call enumerates decision and external-event branches, model-free, and reports coverage (async: plan branches advance through the real plan protocol). At each decision it forks one branch per candidate event (guard-rejected candidates count in `prunedByGuard`, not explored); at an idle wait it forks per externally-accepted event. An `agent.plan` request forks the same way (including the reserved `agent.plan.done` move, always legal), so a single plan can consume several depth units. Text/`userInput` invokes resolve from `textOutputs` (a by-src canned-output map); a missing src halts that branch with a `needs-output` terminal instead of throwing.
 
 ```ts
 import { explorePaths } from "@statelyai/agent";
@@ -118,11 +120,11 @@ const report = await explorePaths(refundMachine, {
 // report.reachedStates → ['deciding', 'awaitingHuman', 'refunded', 'denied']
 ```
 
-Bounded by `maxDepth` (default 8) and `maxPaths` (default 200; `report.hitPathCap` flags a partial report).
+Exploration is bounded by `maxDepth` (default 8) and `maxPaths` (default 200; `report.hitPathCap` flags a partial report).
 
-## `await canReach(machine, statePath, opts)`
+## Checking reachability
 
-Thin wrapper over `explorePaths` answering "can this state be reached?" with a witness path (async).
+The `canReach(machine, statePath, opts)` call wraps `explorePaths` to answer "can this state be reached?" with a witness path (async).
 
 ```ts
 import { canReach } from "@statelyai/agent";
@@ -138,13 +140,13 @@ const { canReach: ok, witness } = await canReach(refundMachine, "denied", {
 Everything on this page runs without an API key, so a small script is enough for CI or a generation loop:
 
 ```ts
-// check.ts — run with: npx tsx check.ts
+// check.ts (run with: npx tsx check.ts)
 import { assertAgentMachine } from "@statelyai/agent";
 import { machine } from "./machine";
 
 assertAgentMachine(machine); // throws AgentLintError on error-severity findings
 ```
 
-For machines authored as data (see [machines as data](machines-as-data)), lower the config first: `assertAgentMachine(setupAgent.fromConfig(config, { compileSchema }))`.
+For machines authored as data (see [machines as data](machines-as-data.md)), compile the config first: `assertAgentMachine(setupAgent.fromConfig(config, { compileSchema }))`.
 
-Because `fromConfig` lowers every transition to a function, `unreachable-state` is over-approximated for config machines; the other checks are unaffected.
+> **Note:** Because `fromConfig` lowers every transition to a function, `unreachable-state` is over-approximated for config machines. The other checks are unaffected.

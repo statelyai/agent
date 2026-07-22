@@ -7,7 +7,7 @@ description: Author an agent machine as a JSON or YAML config and lower it into 
 
 <!-- setupAgent.fromConfig lowering from src/workflow-config.ts -->
 
-An agent machine can be pure data. Describe it as a JSON or YAML config and hand it to `setupAgent.fromConfig(...)` (a namespace member on `setupAgent`, same import). The lowering produces the same runnable XState machine `setupAgent(...)` builds by hand: states, choice routing, guard-expression transitions, emitted progress events, text requests, decisions, and human/idle steps. Only the authoring format changes.
+An agent machine can be pure data. Describe it as a JSON or YAML config and hand it to `setupAgent.fromConfig(...)` (same import as `setupAgent`). It produces the same runnable XState machine `setupAgent(...)` builds by hand: states, choice routing, guard-expression transitions, emitted progress events, text requests, decisions, and idle steps. Only the authoring format changes.
 
 ```ts
 import { setupAgent } from "@statelyai/agent";
@@ -17,7 +17,7 @@ const machine = setupAgent.fromConfig(config, { compileSchema });
 
 A config is portable: generate it from a model, store it in a database row, or edit it in a visual builder, and it runs exactly like a hand-authored [machine](machines.md).
 
-## The published JSON Schema
+## Validating a config
 
 <!-- schema export path from package.json exports and schemas/agent-workflow.json -->
 
@@ -29,9 +29,9 @@ import workflowSchema from "@statelyai/agent/agent-workflow.json";
 
 Point an editor, form generator, or validation step at it to catch a malformed config before `fromConfig(...)`. It describes the whole config surface: `schemas` (including `events` and `emitted`), `context`, `requests`, `actors`, `initial`, and `states`, down to choice states, transitions, invokes, and actions.
 
-## Running example: a support ticket
+## Example: a support ticket config
 
-One config runs the rest of this page: the model triages a ticket (escalate or reply), drafts a reply when replying, then waits for a human to approve or reject. It is a real `.json` file at [examples/json-agent/workflow.json](../examples/json-agent/workflow.json), run by [examples/json-agent/index.ts](../examples/json-agent/index.ts). As YAML for readability:
+This config drives the examples below: the model triages a ticket (escalate or reply), drafts a reply, then waits for a human to approve or reject. It is a real `.json` file at [examples/json-agent/workflow.json](../examples/json-agent/workflow.json), run by [examples/json-agent/index.ts](../examples/json-agent/index.ts). As YAML for readability:
 
 ```yaml
 id: support-ticket-json
@@ -126,7 +126,7 @@ states:
 
 <!-- compileSchema requirement and SchemaCompiler from src/workflow-config.ts -->
 
-A config carries JSON Schemas (context, events, input, output, and each request's input/output) that need a runtime validator. The library bundles no JSON Schema engine and does not guess how strictly to validate: you bring the engine. `compileSchema` takes a JSON Schema object and a name and returns a Standard Schema validator; `fromConfig(...)` calls it once per schema and **requires** the option. Bring Ajv, @cfworker/json-schema, or another compiler that returns Standard Schema. Ajv recipe:
+The `fromConfig` call requires a `compileSchema` option. A config carries JSON Schemas (context, events, input, output, and each request's input/output) that need a runtime validator, and the library bundles no JSON Schema engine. Supply a `compileSchema` that takes a JSON Schema object plus a name and returns a Standard Schema validator; `fromConfig(...)` calls it once per schema. Use Ajv, @cfworker/json-schema, or any compiler that returns Standard Schema. Ajv:
 
 ```ts
 import Ajv from "ajv";
@@ -172,25 +172,25 @@ const result = await runAgent(machine, {
 
 Executor return shapes:
 
-- `decide` → `{ event: { type, ...payload } }` — the chosen machine event (returning a bare `{ type }` throws a descriptive error).
-- `generateText` / `streamText` → `{ output }` — the structured result matching the request's `output` schema.
+- `decide` returns `{ event: { type, ...payload } }`, the chosen machine event. A bare `{ type }` throws a descriptive error.
+- `generateText` / `streamText` return `{ output }`, the structured result matching the request's `output` schema.
 
 A run settles one of two ways:
 
-- `{ status: 'done', output }` — reached a final state.
-- `{ status: 'idle', snapshot }` — paused at a human/idle state. Persist `snapshot`, then resume when the event arrives:
+- `{ status: 'done', output }`: reached a final state.
+- `{ status: 'idle', snapshot }`: paused at an idle state. Persist `snapshot`, then resume when the event arrives:
 
 ```ts
 result = await runAgent(machine, { snapshot, event: { type: "APPROVE" }, executors });
 ```
 
-An **idle/human state is any state with no `invoke`** (nothing runs; the machine waits for an external event via `on`). A state with an `invoke` is doing work (a decision, a text request, or a `agent.userInput` pause).
+> **Note:** An idle state is any state with no `invoke`: nothing runs, so the machine waits for an external event via `on`. A state with an `invoke` is doing work (a decision, a text request, or an `agent.userInput` pause).
 
-Two `prompt`-shaped fields, different layers: a `requests` entry's `prompt` is the text sent to the model; an `invoke`'s `input` is the data passed to the invoked source (a request's typed input, or an `agent.decide` inline input carrying its own `model`/`prompt`/`allowedEvents`).
+> **Note:** Two `prompt`-shaped fields sit at different layers. A `requests` entry's `prompt` is the text sent to the model. An `invoke`'s `input` is the data passed to the invoked source: a request's typed input, or an `agent.decide` inline input carrying its own `model`/`prompt`/`allowedEvents`.
 
 ## Expressions
 
-The config is data, not code. Any value is a JSON literal or a whole-string `"{{ }}"` expression: a dot path resolved against `input`, `context`, and `event`. `"{{ context.ticket }}"` reads `context.ticket`; `"{{ event.output.reply }}"` reads `event.output.reply`. No code, no `eval`; the resolver walks the path and returns the value. Because an expression can only read, a config from a model, database, or visual editor cannot do anything a hand-authored machine could not.
+The config is data, not code. Any value is a JSON literal or a whole-string `"{{ }}"` expression: a dot path resolved against `input`, `context`, and `event`. For example, `"{{ context.ticket }}"` reads `context.ticket`. No code, no `eval`: the resolver walks the path and returns the value. Because an expression can only read, a config from a model, database, or visual editor cannot do anything a hand-authored machine could not.
 
 ## Decisions from JSON
 
@@ -212,7 +212,7 @@ states:
       REPLY: { target: drafting }
 ```
 
-Delivery of the chosen event is automatic: the decision actor sends it to the invoking actor when it resolves, in both TypeScript and JSON. Handle the chosen event with the state's `on` transitions. A decision has no output of its own, so an `onDone` on an `agent.decide` invoke can never fire — `fromConfig(...)` rejects it as a config error. Only `onError` (retries exhausted) applies.
+Delivery of the chosen event is automatic: the decision actor sends it to the invoking actor when it resolves, in both TypeScript and JSON. Handle the chosen event with the state's `on` transitions. A decision has no output of its own, so an `onDone` on an `agent.decide` invoke can never fire: `fromConfig(...)` rejects it as a config error. Only `onError` (retries exhausted) applies.
 
 ## Choice states and emitted events
 
@@ -236,7 +236,7 @@ states:
 
 Declare emitted event payloads under `schemas.emitted`. Hosts receive them through `runAgent(..., { on: { SCORED: handler } })`, same as hand-authored machines using `enq.emit(...)`.
 
-## Honest limits
+## Limits of the data form
 
 The data form is narrower than TypeScript authoring, by design:
 

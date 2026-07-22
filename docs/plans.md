@@ -18,6 +18,7 @@ Every step gets the same legality guarantees as a single decision: candidates co
 Author it inline with `src: 'agent.plan'`, same shape as `agent.decide` plus `stopOn` and `maxSteps`:
 
 ```ts
+// inside states: { ... }
 planning: {
   invoke: {
     src: 'agent.plan',
@@ -36,7 +37,7 @@ planning: {
 }
 ```
 
-`allowedEvents` accepts the same exact-type and wildcard forms as `agent.decide`; see [`allowedEvents` patterns](decisions.md#allowedevents-patterns).
+The `allowedEvents` list accepts the same exact-type and wildcard forms as `agent.decide`; see [`allowedEvents` patterns](decisions.md#allowedevents-patterns).
 
 ## How it behaves
 
@@ -48,7 +49,7 @@ planning: {
 - **Partial application, no rollback.** Events are sent as the plan runs, not staged. If step 3 of 5 stops the plan, steps 1–2 stay applied. No transactional undo.
 - **`onDone` output** is `{ steps, stopped }`: the events applied in order, and why the loop ended (`'done' | 'stop-event' | 'max-steps' | 'no-legal-events'`).
 - **`stopOn` (rare).** For "send this real machine event **and** stop", list it in `stopOn`: the event is validated and sent, then the loop ends (`stopped: 'stop-event'`). The built-in done move covers the common "no further action" case, so `stopOn` is only for ending on an actual state change.
-- **One ledger, both hosts.** `agent.plan` is a single stateful, transition-based ledger actor: its snapshot `context` (`{ applied, stepsRemaining, stopped }`) holds the in-progress plan state, advanced one `plan.applied`/`plan.ended` event at a time. `runAgent` drives it directly; the [step path](steps.md#plans-on-the-step-path) surfaces it as a re-surfacing `kind: 'plan'` request that `resolveAgentRequests` advances one step per call. Both hosts drive the _same_ ledger through shared drivers, and because the ledger is the invoke child's own `context`, it lands at `children.<id>.snapshot.context` in a persisted snapshot for free, surviving persist/resume mid-plan.
+- **Survives persist/resume.** `agent.plan` holds the in-progress plan as the invoke child's own snapshot `context` (`{ applied, stepsRemaining, stopped }`), so a persisted snapshot captures it at `children.<id>.snapshot.context` and a plan can resume mid-run. `runAgent` drives it directly; the [step path](steps.md#plans-on-the-step-path) surfaces the same plan as a re-surfacing `kind: 'plan'` request that `resolveAgentRequests` advances one step per call.
 
 Full example: [examples/todo-nl/index.ts](../examples/todo-nl/index.ts) drives free-text commands through one `agent.plan` invoke.
 

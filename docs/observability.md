@@ -5,16 +5,16 @@ description: Watch an agent run locally in the Stately Inspector, ship its versi
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
 
-Two seams, one model:
+Two ways to observe a run:
 
-- **Locally**, watch a run live in the [Stately Inspector](https://stately.ai/docs/inspector): the same machine you author renders as a diagram that lights up state by state.
+- **Locally**, watch it live in the [Stately Inspector](https://stately.ai/docs/inspector): the machine you author renders as a diagram that lights up state by state.
 - **In production**, ship the versioned trace stream to any [OpenTelemetry](https://opentelemetry.io) backend (Honeycomb, Langfuse, LangSmith, Grafana, …) with a copy-paste `onTrace` handler.
 
-No hosted platform, no adapter to install. And every trace pairs with a replayable snapshot: the same `runId` that scopes a trace also settles a JSON snapshot you can resume, so a traced run is a reproducible run.
+No hosted platform, no adapter to install. Every trace pairs with a replayable snapshot: the same `runId` that scopes a trace also settles a JSON snapshot you can resume, so a traced run is reproducible.
 
 ## The versioned trace stream
 
-`onTrace` fires a single ordered stream of `AgentTraceEvent`s. Every event carries the same envelope:
+The `onTrace` callback fires a single ordered stream of `AgentTraceEvent`s. Every event carries the same envelope:
 
 | Field | Meaning |
 | --- | --- |
@@ -40,13 +40,13 @@ The payload is a discriminated union on `type`:
 | `emit` | `event` | An event the machine emitted with `enq.emit(...)`; controlled path only. |
 | `run.end` | `status` (`done` \| `idle` \| `error`) + variant fields | `done`: `output`, `snapshot`. `idle`: `snapshot`, `pendingUserInputs?`, `persistedSnapshot?`. `error`: `cause`, `error`, `snapshot`. Run boundary; controlled path only. |
 
-`request` is an `AgentStepRequest`: text and plan requests carry `src`; a decision carries `model` instead. All three carry `id` and `kind`.
+Each `request` is an `AgentStepRequest`: text and plan requests carry `src`; a decision carries `model` instead. All three carry `id` and `kind`.
 
 ## Wiring it up
 
 ### Controlled (`runAgent`)
 
-`runAgent`'s `onTrace` emits the full stream, run boundary included:
+On `runAgent`, `onTrace` emits the full stream, run boundary included:
 
 ```ts
 import { runAgent, type AgentTraceEvent } from "@statelyai/agent";
@@ -73,12 +73,12 @@ const actor = createActor(bound, { inspect: traceTransitions(onTrace) });
 actor.start();
 ```
 
-Two documented asymmetries versus the controlled path:
+Two documented differences from the controlled path:
 
 - **No `run.start` / `run.end`.** A `createActor` has no run boundary the way `runAgent` does, so the stream starts at the first transition and never emits a settle event.
 - **No `emit` events.** In this XState build, emitted events are delivered through `actor.on(...)`, not the inspection protocol, so an `inspect` handler can't see them. Subscribe with `actor.on('*', ...)` if you need them.
 
-One more limitation: **`provideExecutors` does not descend into invoked child state machines.** A child machine with its own agent invokes needs its own `provideExecutors(...)` call (its own trace stream). `runAgent` rebinds children and traces them on the parent stream; the uncontrolled path does not. This is by design.
+> **Note:** `provideExecutors` does not descend into invoked child state machines. A child machine with its own agent invokes needs its own `provideExecutors(...)` call, and its own trace stream. `runAgent` rebinds children and traces them on the parent stream; the uncontrolled path does not, by design.
 
 ## Watch it locally
 
@@ -179,7 +179,7 @@ const onTrace = (event: AgentTraceEvent) => {
 
 The `request.*` events span the model call as `runAgent` sees it: one span per request, with usage on `event.raw`. For provider-level detail (token timing, the exact request the SDK sent), the Vercel AI SDK emits its own OpenTelemetry spans when you pass `experimental_telemetry`.
 
-The shipped `createAiSdkExecutors` does **not** forward `experimental_telemetry` (request `metadata` only carries adapter conventions like `maxSteps`). Enable it by supplying the text executors yourself (the raw `ai` functions are valid executors; see [interop](interop.md#models-are-the-interop-currency)) and keeping the adapter's `decide`:
+The shipped `createAiSdkExecutors` does **not** forward `experimental_telemetry` (request `metadata` only carries adapter conventions like `maxSteps`). Enable it by supplying the text executors yourself (the raw `ai` functions are valid executors; see [interop](interop.md#reusing-models-from-other-frameworks)) and keeping the adapter's `decide`:
 
 ```ts
 import { generateText, streamText } from "ai";
@@ -237,6 +237,6 @@ Because the snapshot is stamped with the same `machineVersion` the trace carries
 
 ## Related
 
-- [Hosts](hosts.md#observation-seams): the full set of observation callbacks (`onTrace`, `onResult`, `onTransition`, `on`, `onChunk`).
+- [Hosts](hosts.md#observation-callbacks): the full set of observation callbacks (`onTrace`, `onResult`, `onTransition`, `on`, `onChunk`).
 - [Human in the loop](human-in-the-loop.md): idle settles, persisting snapshots, and resuming by snapshot.
 - [Interop](interop.md): where executors come from, including the raw `ai` functions used above.

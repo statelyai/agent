@@ -4,10 +4,9 @@ description: Convert a realistic while-loop tool-calling agent into an agent mac
 ---
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
+This page refactors a working `while`-loop agent into an agent machine **without rewriting your model calls**: your SDK calls, tools, and retry logic become the [executors](hosts.md); the machine replaces only the control flow.
 
-You have an agent that works, but its control flow is a `while` loop with `if`s, tool dispatch, and retry code tangled together. This page refactors that loop into an agent machine **without rewriting your model calls**. Your existing SDK calls, tools, and retry logic become the [executors](hosts.md); the machine replaces only the control flow. It drops into your existing server unchanged, and you can prove the refactor preserved behavior before shipping it.
-
-If you already have a state machine and just want to bind LLM work to it, start from [You already have an agent workflow](xstate-as-agent-workflow.md) instead. This page is for a loop.
+If you already have a state machine and want to bind LLM work to it, start from [You already have an agent workflow](xstate-as-agent-workflow.md) instead.
 
 ## Start: a hand-rolled loop
 
@@ -114,6 +113,7 @@ A chosen `REFUND` for `$5000` can no longer slip through: the guard returns `und
 The loop's `return { pending: true }` becomes a real waiting **state** with no invoke. `runAgent` settles `idle` there instead of losing everything; the snapshot is plain JSON you persist anywhere.
 
 ```ts
+    // ...
     awaitingHuman: {
       // No invoke: runAgent settles { status: 'idle', snapshot } here.
       on: {
@@ -123,11 +123,12 @@ The loop's `return { pending: true }` becomes a real waiting **state** with no i
     },
     refunded: { type: 'final', output: () => ({ refunded: true }) },
     denied: { type: 'final', output: () => ({ refunded: false }) },
+    // ...
 ```
 
 ## Step 4: run it with `runAgent`
 
-The `while (true)` is gone. `runAgent` owns the loop; you supply executors built from the same `models` map.
+With `runAgent` owning the loop, the `while (true)` is gone; you supply executors built from the same `models` map.
 
 ```ts
 const executors = createAiSdkExecutors({ models });
@@ -165,7 +166,7 @@ const resumed = await runAgent(machine, {
 // resumed.status === 'done', resumed.output === { refunded: true }
 ```
 
-Those executors are your existing model code. `createAiSdkExecutors` wraps the AI SDK, but the `generateText`/`streamText` slots accept the raw AI SDK functions directly, and any other SDK or a raw `fetch` backs them just as well. The tools, retry logic, and provider calls you already wrote move into the executors unchanged; only the `while` loop is gone. See [Hosts](hosts.md).
+Those executors are your existing model code. The `createAiSdkExecutors` adapter wraps the AI SDK, but the `generateText`/`streamText` slots accept the raw AI SDK functions directly, and any other SDK or a raw `fetch` backs them just as well. The tools, retry logic, and provider calls you already wrote move into the executors unchanged; only the `while` loop is gone. See [Hosts](hosts.md).
 
 ## Drop it into your existing server
 
@@ -186,7 +187,7 @@ app.post("/refund", async (req, res) => {
 });
 ```
 
-For the idle human pause (the `$100` escalation above) over HTTP, persist the snapshot with `runAgent` and resume on a later request. [Eject to your stack](eject.md) walks one machine from local to Express to Cloudflare with zero machine changes.
+For the idle human pause (the `$100` escalation above) over HTTP, persist the snapshot with `runAgent` and resume on a later request. [Use in any stack](any-stack.md) drops one machine into local, Express, and Cloudflare hosts with zero machine changes.
 
 ## Prove the refactor preserved behavior
 
@@ -209,7 +210,7 @@ expect(result.status).toBe("idle");
 
 ## Other starting points
 
-A worked end-to-end version of this page's conversion — a genuinely tangled loop, refactored one shippable step at a time with the behavior pinned by tests — lives in [retrofit](../examples/retrofit/index.ts) (`before.ts` → `step1/2/3.ts` → `index.ts`).
+A worked end-to-end version of this page's conversion (a genuinely tangled loop, refactored one shippable step at a time with the behavior pinned by tests) lives in [retrofit](../examples/retrofit/index.ts): `before.ts`, then `step1/2/3.ts`, then `index.ts`.
 
 The same conversion works from shapes other than a `while` loop:
 
@@ -219,6 +220,6 @@ The same conversion works from shapes other than a `while` loop:
 
 ## What you got for free
 
-Same behavior as the loop, plus legality by construction, snapshot resume, step-path [checkpointing](steps.md), and [visualization](machines-as-data.md), none of which the loop gives you without hand-built machinery. The transcript and log bookkeeping you hand-maintained in the loop becomes the ordered [`onTrace`](observability.md) stream: one run/request/chunk/transition ledger for evals, JSONL, and telemetry. [Compared to LangGraph and hand-rolling](comparison.md) breaks each down against the alternatives.
+Same behavior as the loop, plus legality by construction, snapshot resume, step-path [checkpointing](steps.md), and [visualization](machines-as-data.md), none of which the loop gives you without hand-built machinery. The transcript and log bookkeeping you hand-maintained in the loop becomes the ordered [`onTrace`](observability.md) stream: one run/request/chunk/transition ledger for evals, JSONL, and telemetry.
 
 If you never need them, the loop was fine. When you do, the machine gives you each one for free.

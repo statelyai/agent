@@ -5,8 +5,6 @@ description: Compose agent machines today by invoking them as child actors, expo
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
 
-## Multi-agent composition
-
 An agent machine is an XState actor, so you compose agents with XState's existing actor patterns. No separate orchestration layer:
 
 - invoke one machine from another as a **child actor**
@@ -47,20 +45,18 @@ const subflowsMachine = parentAgentSetup.createMachine({
 });
 ```
 
-`childMachine` is its own `setupAgent(...)` agent (`{ topic } -> { research }`); its `researchTopic` request inherits the parent run's executors automatically.
-
-A child machine's own requests inherit the executors you pass to `runAgent`, no per-child binding needed (see [nested executor inheritance](#nested-machine-executor-inheritance) below).
+The child is its own `setupAgent(...)` agent (`{ topic } -> { research }`); its `researchTopic` request inherits the parent run's executors automatically, no per-child binding (see [executor inheritance](#executor-inheritance) below).
 
 ### Observing child actors
 
 <!-- onTransition vs inspect/inspectTransitions from src/run-agent.ts -->
 
-`runAgent` exposes two observation seams:
+`runAgent` offers two ways to observe:
 
 - **`onTransition`** fires for the **root** machine's transitions only. Use it for parent progress.
 - **`inspect`** is the raw, system-wide stream (root, every invoked child, and spawned actors), so it is the only way to see a child's states. Attribute each event via `event.actorRef.id` (the invoke id) or `.src`.
 
-`inspectTransitions(handler)` wraps `inspect`: it filters to `@xstate.transition` events and hands the handler the typed snapshot and actorRef, replacing the manual `event.type === '@xstate.transition'` check and casts.
+The `inspectTransitions(handler)` helper wraps `inspect`: it filters to `@xstate.transition` events and hands the handler the typed snapshot and actorRef, replacing the manual `event.type === '@xstate.transition'` check and casts.
 
 ```ts
 import { inspectTransitions, runAgent } from "@statelyai/agent";
@@ -105,7 +101,7 @@ requests: {
 
 The machine stays portable: delegation lives entirely on the host side of the boundary.
 
-This generalizes past tools: the host can provide **any async actor**. The machine declares a named actor source; the host supplies its implementation with `machine.provide({ actorSources })` or `logic.withExecutor(...)`. That actor can be a remote agent call, a queue round trip, or another framework's runtime. See [Hosts and executors](hosts.md).
+Beyond tools, the host can provide **any async actor**. The machine declares a named actor source; the host supplies its implementation. That actor can be a remote agent call, a queue round trip, or another framework's runtime. See [Hosts and executors](hosts.md).
 
 ## Sibling coordination through events
 
@@ -137,7 +133,7 @@ states: {
 
 Each debater idles until it receives `DEBATE.ARGUMENT_REQUESTED`, composes an argument, and sends `DEBATE.ARGUMENT_SUBMITTED` back. The parent appends to a shared transcript and requests the next turn. Machines share state only through the messages they send.
 
-## Nested-machine executor inheritance
+## Executor inheritance
 
 <!-- nested executor inheritance from src/run-agent.ts and examples/subflows -->
 
@@ -148,10 +144,10 @@ The rules:
 - **Inheritance is the default.** Any request reached through string-keyed actor sources (invoke `src` strings, registered `actorSources`) inherits, however deeply nested. Cycles are handled.
 - **Explicit bindings win.** A request already carrying its own executor (via `.withExecutor(...)`, `bindRequestExecutor(...)`, or a child's own `.provide({ actorSources })`) keeps it; the parent's executors are never called for it.
 - **Missing executors fail fast.** If a reachable request needs an executor kind you didn't pass (e.g. a child's `mode: 'stream'` request but no `streamText`), binding throws before any actor runs, naming the invoke chain and request `src`.
-- **Escape hatch for dynamic spawns.** Logics created dynamically (e.g. machine factories used with `enq.spawn`) aren't in any invoke config for the static bind walk to reach, so they can't inherit. Bind them explicitly with `bindRequestExecutor(...)` / `.withExecutor(...)` (see [examples/fan-out/index.ts](../examples/fan-out/index.ts)). Same for a child invoked as a **direct-object** `src` (an inline machine object, not a registered name): register it as a string-keyed source, or bind its requests yourself.
+- **Dynamic spawns need explicit binding.** Logics created dynamically (e.g. machine factories used with `enq.spawn`) aren't in any invoke config for the static bind walk to reach, so they can't inherit. Bind them explicitly with `bindRequestExecutor(...)` / `.withExecutor(...)` (see [examples/fan-out/index.ts](../examples/fan-out/index.ts)). Same for a child invoked as a **direct-object** `src` (an inline machine object, not a registered name): register it as a string-keyed source, or bind its requests yourself.
 
-## Fan-out today
+## Fan-out
 
-No dedicated fan-out primitive in this alpha. To run many sub-agents in parallel, use `Promise.all(...)` over host actors inside an executor or a tool's `execute`, and return the combined result to the machine as a single output. A Send-style dynamic-parallelism helper is not shipped yet.
+> **Note:** This alpha ships no dedicated fan-out primitive. To run many sub-agents in parallel, use `Promise.all(...)` over host actors inside an executor or a tool's `execute`, and return the combined result to the machine as a single output (see [examples/fan-out/index.ts](../examples/fan-out/index.ts)).
 
 See [Examples](examples.md) for the full list of sub-agent and multi-machine examples.
