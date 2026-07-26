@@ -25,5 +25,8 @@ export default {
   },
   test: {
     testTimeout: 10000, // Global timeout of 10000ms for all tests
+    // The demo app has its own vitest config (and `@` alias) — run its tests
+    // with `pnpm --dir demo test`.
+    exclude: ["**/node_modules/**", "demo/**"],
   },
 };
