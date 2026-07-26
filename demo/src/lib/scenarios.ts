@@ -38,6 +38,8 @@ export type Scenario = {
   description: string;
   placeholder: string;
   startLabel: string;
+  /** Pre-baked prompts, rendered as one-click "Try" chips. */
+  starters: string[];
 };
 
 export const scenarios: Scenario[] = [
@@ -48,6 +50,11 @@ export const scenarios: Scenario[] = [
     description: "The model proposes a refund; a policy state — not the model — enforces the $100 limit.",
     placeholder: "I need a $184 refund for a damaged delivery.",
     startLabel: "Assess refund",
+    starters: [
+      "I need a $184 refund for a damaged delivery.",
+      "Please refund $42 for a duplicate charge.",
+      "My order arrived broken — I want my money back.",
+    ],
   },
   {
     id: "approval",
@@ -56,6 +63,10 @@ export const scenarios: Scenario[] = [
     description: "The model drafts an update. A person must approve it before the machine can publish.",
     placeholder: "Draft a production update about a delayed database migration.",
     startLabel: "Draft update",
+    starters: [
+      "Draft a production update about a delayed database migration.",
+      "Announce scheduled maintenance for Saturday night.",
+    ],
   },
   {
     id: "routing",
@@ -64,6 +75,11 @@ export const scenarios: Scenario[] = [
     description: "The model picks one typed event. The machine owns every routing destination.",
     placeholder: "I was charged twice and cannot download my latest invoice.",
     startLabel: "Route request",
+    starters: [
+      "I was charged twice and cannot download my latest invoice.",
+      "The app crashes every time I open settings.",
+      "I can't log in after resetting my password.",
+    ],
   },
   {
     id: "research",
@@ -72,6 +88,10 @@ export const scenarios: Scenario[] = [
     description: "Two model calls run concurrently; the machine waits for both before synthesizing.",
     placeholder: "Analyze the risks and opportunities of adopting passkeys.",
     startLabel: "Start research",
+    starters: [
+      "Analyze the risks and opportunities of adopting passkeys.",
+      "Should a startup self-host its LLM inference?",
+    ],
   },
   {
     id: "pipeline",
@@ -80,6 +100,10 @@ export const scenarios: Scenario[] = [
     description: "Three model calls with separate states, outputs, and failure boundaries.",
     placeholder: "Turn these notes into a launch update: faster sync, safer retries, gradual rollout.",
     startLabel: "Run workflow",
+    starters: [
+      "Turn these notes into a launch update: faster sync, safer retries, gradual rollout.",
+      "Summarize sprint notes: fixed billing bug, shipped dark mode, hiring two engineers.",
+    ],
   },
   {
     id: "retry",
@@ -88,6 +112,10 @@ export const scenarios: Scenario[] = [
     description: "The machine owns the retry budget and switches to a fallback model when the primary fails.",
     placeholder: "Classify this ticket: I was charged twice and cannot open my invoice.",
     startLabel: "Classify ticket",
+    starters: [
+      "Classify this ticket: I was charged twice and cannot open my invoice.",
+      "Classify this ticket: exports time out after 30 seconds.",
+    ],
   },
   {
     id: "tools",
@@ -96,6 +124,10 @@ export const scenarios: Scenario[] = [
     description: "The model calls tools or finishes each turn; the machine caps the loop and forces an answer.",
     placeholder: "What is 42 times 17, and what is the speed of light?",
     startLabel: "Run agent",
+    starters: [
+      "What is 42 times 17, and what is the speed of light?",
+      "Multiply 128 by 46, then tell me the boiling point of water.",
+    ],
   },
   {
     id: "reflection",
@@ -104,6 +136,10 @@ export const scenarios: Scenario[] = [
     description: "A writer drafts, an evaluator scores; the machine loops until good enough or the budget is spent.",
     placeholder: "Write a vivid one-paragraph description of a tidal shoreline at dusk.",
     startLabel: "Write & refine",
+    starters: [
+      "Write a vivid one-paragraph description of a tidal shoreline at dusk.",
+      "Describe a night market in the rain, in one paragraph.",
+    ],
   },
 ];
 

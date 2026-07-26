@@ -32,11 +32,25 @@ export { goFishMachine, goFishSchemas, ranks as goFishRanks } from "./go-fish/in
 export { humanInTheLoopMachine, runHumanInTheLoopExample } from "./human-in-the-loop/index.js";
 export { ragMachine, runRAGExample } from "./rag/index.js";
 export { correctiveRagMachine, runCorrectiveRagExample } from "./corrective-rag/index.js";
+export { adaptiveRagMachine, runAdaptiveRagExample } from "./adaptive-rag/index.js";
+export { deepResearchMachine, runDeepResearchExample } from "./deep-research/index.js";
 export { reflectionWriterMachine, runReflectionWriterExample } from "./reflection-writer/index.js";
+export {
+  codeAssistantMachine,
+  executeCode,
+  runCodeAssistantExample,
+} from "./code-assistant/index.js";
 export { customerSupportMachine, runCustomerSupportExample } from "./customer-support/index.js";
+export { reviewToolCallsMachine, runReviewToolCallsExample } from "./review-tool-calls/index.js";
 export { toolCallingMachine, runToolCallingExample } from "./tool-calling/index.js";
 export { reactAgentMachine, runReactAgentExample } from "./react-agent/index.js";
 export { supervisorMachine, runSupervisorExample } from "./supervisor/index.js";
+export {
+  hierarchicalTeamsMachine,
+  researchTeamMachine,
+  runHierarchicalTeamsExample,
+  writingTeamMachine,
+} from "./hierarchical-teams/index.js";
 export { swarmHandoffMachine, runSwarmHandoffExample } from "./swarm-handoff/index.js";
 export { planAndExecuteMachine, runPlanAndExecuteExample } from "./plan-and-execute/index.js";
 export {
@@ -58,6 +72,13 @@ export {
   runFileSnapshotStoreExample,
 } from "./file-snapshot-store/index.js";
 export { createSseMachine, createSseServer, runMachineStream } from "./sse-transport/index.js";
+export { timeTravelMachine, runTimeTravelExample, CheckpointHistory } from "./time-travel/index.js";
+export {
+  aiSdkUiStreamMachine,
+  agentRunToUIMessageStream,
+  handleChatRequest,
+  runAiSdkUiStreamExample,
+} from "./ai-sdk-ui-stream/index.js";
 export {
   createAiSdkSubAgents,
   runAiSdkSubAgentsDemo,
@@ -99,6 +120,12 @@ export {
   contextCompactionSchemas,
   main as runContextCompactionExample,
 } from "./context-compaction/index.js";
+export { latsMachine, runLatsExample } from "./lats/index.js";
+export { runTradingTeamExample, tradingTeamMachine } from "./trading-team/index.js";
+export {
+  runSimulatedUserEvaluationExample,
+  simulatedUserEvaluationMachine,
+} from "./simulated-user-evaluation/index.js";
 export {
   guardrailsMachine,
   guardrailsSchemas,

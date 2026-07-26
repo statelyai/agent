@@ -10,5 +10,14 @@
   "comparison": {
     "targets": ["LangGraph", "Burr", "Flowise"],
     "purpose": "Shows hidden information, human input, model decisions, and machine-enforced game rules."
-  }
+  },
+  "starters": [
+    {
+      "seed": 42
+    },
+    {
+      "seed": 7,
+      "maxTurns": 20
+    }
+  ]
 }

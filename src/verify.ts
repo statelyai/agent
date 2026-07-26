@@ -533,10 +533,11 @@ function checkFinalWithoutOutput(ctx: LintContext): AgentLintDiagnostic[] {
 // Heuristically detects whether a final-state `output` function reads data off
 // the entering `event`, via `fn.toString()`: a property, optional-chain, or
 // index access on `event` (`event.x`, `event?.x`, `event[...]`). A bare
-// destructured `event` that is only passed through — notably the
-// `setupAgent.fromConfig` template wrapper `({ context, event }) =>
-// evaluateWorkflowConfigValue(config, { context, event })` — is not a read and
-// stays quiet, so config-lowered machines don't false-flag.
+// destructured `event` that is only passed through — notably the resolver
+// closures xstate's `createMachineFromConfig` generates for
+// `setupAgent.fromConfig` output slots (`({ context, event, self }) =>
+// evaluateResolvable(...)`) — is not a read and stays quiet, so config-lowered
+// machines don't false-flag.
 function outputFnReadsEvent(fn: (...args: never[]) => unknown): boolean {
   return /\bevent\s*(?:\.|\?\.|\[)/.test(fn.toString());
 }

@@ -25,7 +25,22 @@ const agentSetup = setupAgent({
     outcome: z.enum(["refunded", "approved", "denied", "needs-details"]),
     amount: z.number().nullable(),
   }),
-  meta: z.object({ interaction: z.object({ label: z.string() }).optional() }),
+  // `interaction` is the declarative UI-hint convention: `label` is the human
+  // prompt; `events` refines how each accepted event renders (button label,
+  // emphasis). The chat UI derives everything else from the event schemas.
+  meta: z.object({
+    interaction: z
+      .object({
+        label: z.string(),
+        events: z
+          .record(
+            z.string(),
+            z.object({ label: z.string().optional(), style: z.string().optional() }),
+          )
+          .optional(),
+      })
+      .optional(),
+  }),
   // The model's legal moves. AUTO_REFUND / REVIEW carry the amount the model
   // extracted from the request text; the machine validates and routes it.
   events: {
@@ -83,7 +98,15 @@ export const refundMachine = agentSetup.createMachine({
     // events (APPROVE / DENY) come from the snapshot via getAcceptedEvents.
     awaitingApproval: {
       tags: ["awaiting-approval"],
-      meta: { interaction: { label: "Amount exceeds the $100 auto-refund limit. Approve or deny." } },
+      meta: {
+        interaction: {
+          label: "Amount exceeds the $100 auto-refund limit. Approve or deny.",
+          events: {
+            APPROVE: { label: "Approve refund", style: "primary" },
+            DENY: { label: "Deny", style: "danger" },
+          },
+        },
+      },
       on: {
         APPROVE: { target: "approved" },
         DENY: { target: "denied" },

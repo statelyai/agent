@@ -1,8 +1,8 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
-import type { AnyMachineSnapshot } from "xstate";
-import type { AgentTextRequest } from "@statelyai/agent";
-import { runFanOutExample } from "./index.js";
+import type { AnyMachineSnapshot, Snapshot } from "xstate";
+import { persistSnapshot, runAgent, type AgentTextRequest } from "@statelyai/agent";
+import { fanOutMachine, runFanOutExample } from "./index.js";
 
 test("fan-out plans subtopics, spawns one branch per subtopic, and reduces all summaries", async () => {
   const subtopics = ["durability", "concurrency", "observability", "resumption"];
@@ -70,4 +70,53 @@ test("fan-out plans subtopics, spawns one branch per subtopic, and reduces all s
   const overlap = midFlight.some((m) => m.active >= 2);
   assert.ok(allFourLive, "expected all 4 branches as live children mid-flight");
   assert.ok(overlap, "expected >=2 branches active simultaneously mid-flight");
+});
+
+// FINDING (2026-07): resuming a snapshot persisted while branches are still in
+// flight does NOT re-run those spawned children. `persistSnapshot` captures the
+// live children with no resumable state (status undefined, no output); on
+// restore xstate drops them (`children: {}`), so `collecting` has nothing left
+// to await and `runAgent` settles `{ status: 'idle' }` in `collecting` with
+// `summaries: {}` — the run never completes. This is the same limitation the
+// module header notes: a durable step host replays child-done events to resume;
+// `runAgent`'s live-actor path cannot revive an async child frozen mid-flight.
+// Kept skipped until spawned-child resume is supported.
+test.skip("resumes a mid-flight snapshot and completes with all summaries", async () => {
+  const subtopics = ["durability", "concurrency", "observability", "resumption"];
+  const executors = {
+    generateText: async (request: AgentTextRequest) => {
+      if (request.model === "planner") return { output: { subtopics } };
+      if (request.model === "worker") {
+        const subtopic = request.prompt?.split("Subtopic: ")[1] ?? "";
+        // Delay so the captured `collecting` snapshot still has live branches.
+        await new Promise((r) => setTimeout(r, 20));
+        return { output: `summary of ${subtopic}` };
+      }
+      return { output: "composed digest" };
+    },
+  };
+
+  // Capture the first `collecting` snapshot (all 4 branches spawned, none done).
+  let captured: Snapshot<unknown> | null = null;
+  await runAgent(fanOutMachine, {
+    input: { topic: "durability" },
+    executors,
+    onTransition: (snapshot) => {
+      if (JSON.stringify(snapshot.value) !== '"collecting"') return;
+      if (!captured && Object.keys(snapshot.context.summaries).length < subtopics.length) {
+        captured = persistSnapshot(snapshot);
+      }
+    },
+  });
+  assert.ok(captured, "expected a mid-flight collecting snapshot");
+
+  const resumed = await runAgent(fanOutMachine, { snapshot: captured!, executors });
+
+  assert.equal(resumed.status, "done");
+  assert.deepEqual(resumed.status === "done" ? resumed.output.summaries : null, {
+    "branch-0": "summary of durability",
+    "branch-1": "summary of concurrency",
+    "branch-2": "summary of observability",
+    "branch-3": "summary of resumption",
+  });
 });

@@ -11,5 +11,6 @@
   "comparison": {
     "targets": ["Vercel AI SDK tool calling", "LangGraph tool nodes"],
     "purpose": "Shows AI SDK tool calls mapped to legal XState events for a game workflow."
-  }
+  },
+  "starters": []
 }

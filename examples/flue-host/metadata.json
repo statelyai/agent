@@ -11,5 +11,6 @@
   "comparison": {
     "targets": ["Flue", "durable agent frameworks", "tool-calling agents"],
     "purpose": "The Flue LLM agent gets two tools bridging to a statelyai/agent machine: start_workflow runs runAgent to idle/done and returns a JSON-safe handle + interaction label; resume_workflow revives the handle with the human's decision. The machine owns legality; the agent converses."
-  }
+  },
+  "starters": []
 }

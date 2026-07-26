@@ -1,22 +1,26 @@
 import { useEffect, useRef, useState } from "react";
 import { FileCode2 } from "lucide-react";
-import type { Scenario } from "@/lib/scenarios";
-import { scenarioSource } from "@/lib/scenarios";
 
-type CodePanelProps = { scenario: Scenario };
+type CodePanelProps = {
+  /** Path label shown in the heading, e.g. `src/agents/refund.ts`. */
+  fileLabel: string;
+  source: string;
+  /** Stable cache key for the highlighted output (scenario or example id). */
+  cacheKey: string;
+};
 
 /**
- * Shows the scenario's actual `src/agents/<id>.ts` source (imported verbatim via
- * Vite `?raw`), highlighted lazily on the client with Shiki so SSR stays simple.
+ * Shows a machine's actual source (imported verbatim via Vite `?raw` or served
+ * by the examples library), highlighted lazily on the client with Shiki so SSR
+ * stays simple.
  */
-export function CodePanel({ scenario }: CodePanelProps) {
-  const source = scenarioSource[scenario.id];
+export function CodePanel({ fileLabel, source, cacheKey }: CodePanelProps) {
   const [html, setHtml] = useState<string | null>(null);
   const cache = useRef(new Map<string, string>());
 
   useEffect(() => {
     let cancelled = false;
-    const cached = cache.current.get(scenario.id);
+    const cached = cache.current.get(cacheKey);
     if (cached) {
       setHtml(cached);
       return;
@@ -31,7 +35,7 @@ export function CodePanel({ scenario }: CodePanelProps) {
           defaultColor: false,
         });
         if (cancelled) return;
-        cache.current.set(scenario.id, out);
+        cache.current.set(cacheKey, out);
         setHtml(out);
       } catch {
         if (!cancelled) setHtml(null);
@@ -40,7 +44,7 @@ export function CodePanel({ scenario }: CodePanelProps) {
     return () => {
       cancelled = true;
     };
-  }, [scenario.id, source]);
+  }, [cacheKey, source]);
 
   return (
     <section className="work-panel code-panel" aria-labelledby="code-panel-title">
@@ -48,7 +52,7 @@ export function CodePanel({ scenario }: CodePanelProps) {
         <div>
           <span className="panel-kicker">Machine source</span>
           <h2 id="code-panel-title">
-            <FileCode2 size={15} aria-hidden="true" /> src/agents/{scenario.id}.ts
+            <FileCode2 size={15} aria-hidden="true" /> {fileLabel}
           </h2>
         </div>
       </div>

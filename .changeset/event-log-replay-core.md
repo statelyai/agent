@@ -1,0 +1,10 @@
+---
+"@statelyai/agent": minor
+---
+
+**`getAgentEffects` / `replay`**: the two core primitives over the append-only event log. Fold a journal of external inputs through xstate's pure `initialTransition`/`transition` and the machine's whole lifecycle — crash recovery, fork resume, and time travel — becomes deterministic replay, because the journaled completion order IS the serialization.
+
+- `getAgentEffects(machine, snapshot, actions, { history })` maps a transition's ORDERED executable actions — reconciled with the still-owed effects visible only on the snapshot — into an ordered `AgentEffect[]` a host starts at the frontier. Effect kinds mirror what a machine starts in one transition: `text`/`decision`/`plan` (agent invokes, shaped by the existing step-path internals), `task` (any other host-run invoke), `delay` (an `after(...)` timer), and `execute` (a fire-and-forget action — a custom entry action, `sendTo`, `cancel` — run once, never journaled). Document order within a transition is preserved; snapshot-owed effects (a re-surfacing `agent.plan`, children spawned by an earlier transition still pending) append after. Each `requestId` is `${siteId}#${n}`, `n` the 1-based occurrence derived from the journal (done AND error both count), so the same log yields identical requestIds on every replay.
+- `text`/`task` effects carry `toDoneEvent(output)` / `toErrorEvent(error)` that mint the exact `xstate.done.actor.<id>` / `xstate.error.actor.<id>` events xstate's actor system would deliver, so pushing them into the journal and calling `transition` is indistinguishable from a live run.
+- `replay(machine, entries, { input })` folds the journal WITHOUT executing anything and returns `{ snapshot, effects }` — the final snapshot plus the effects still owed at the frontier. Accepts an `EventObject[]` or an `AgentLogEntry[]`.
+- `initEntry(input)` builds the reserved first journal entry (`{ type: '@agent.init', input }`) that makes a log self-contained: `replay` consumes it to recover the machine input with no side-channel (an explicit `options.input` is the fallback when it is absent).

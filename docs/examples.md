@@ -58,6 +58,8 @@ These compose agent machines as sub-agents or child actors. See [Multi-agent](mu
 - [long-running-onboarding](../examples/long-running-onboarding/index.ts): a coordinator invoking typed IT provisioning between two event-driven waits.
 - [supervisor](../examples/supervisor/index.ts): a routing request whose structured output hands off to a format-specific worker.
 - [swarm-handoff](../examples/swarm-handoff/index.ts): a persistent multi-agent network handing off between typed child actors across turns.
+- [hierarchical-teams](../examples/hierarchical-teams/index.ts): a coordinator invokes research and writing child-team machines; each team owns specialist states and a typed boundary.
+- [trading-team](../examples/trading-team/index.ts): parallel analysts, bull/bear debate, trader proposal, risk review, and final approval as one composite workflow.
 
 ## Multi-step agent patterns
 
@@ -66,12 +68,19 @@ Common agent workflows expressed as explicit XState machines.
 - [react-agent](../examples/react-agent/index.ts): ReAct as an explicit loop: one reason-or-act request per iteration (discriminated union: call a tool or answer), typed tool actors execute, a step-budget guard breaks the loop with a best-effort answer.
 - [tool-calling](../examples/tool-calling/index.ts): the model selects a tool (structured output), typed tool actors execute, progress reported via transitions.
 - [rag](../examples/rag/index.ts): retrieve (typed plain actor over a sample corpus) then a grounded answer, with conversational memory in context.
+- [adaptive-rag](../examples/adaptive-rag/index.ts): routes local vs web, grades evidence, rewrites weak queries once, then grades the generated answer.
+- [deep-research](../examples/deep-research/index.ts): plans three searches, researches concurrently, reflects on coverage, optionally follows up once, then writes a sourced report.
 - [context-compaction](../examples/context-compaction/index.ts): a chat loop that bounds its own context window; a `compacting` state folds stale turns into a running summary once history passes a threshold, keeps the last N messages verbatim, and feeds the summary back as a system message.
 - [plan-and-execute](../examples/plan-and-execute/index.ts): a planner request produces structured output, execution states iterate the plan (the ReWOO evidence-map idea).
 - [sql-agent](../examples/sql-agent/index.ts): query generation, DB execution, and answer synthesis as separate typed states.
 - [triage](../examples/triage/index.ts): structured-output support ticket triage.
 - [parallel-streams](../examples/parallel-streams/index.ts): fan-out over parallel worker streams relayed through a side channel.
 - [sse-transport](../examples/sse-transport/index.ts): relaying provider stream chunks over an SSE transport.
+- [lats](../examples/lats/index.ts): bounded tree search with UCB-style leaf selection, candidate expansion, and reflection scoring.
+
+## Evaluation
+
+- [simulated-user-evaluation](../examples/simulated-user-evaluation/index.ts): a target chatbot and simulated user alternate under a turn bound, then an independent judge scores the transcript. LangSmith dataset and experiment services are intentionally excluded.
 
 ## Migration and observability
 

@@ -2,7 +2,9 @@ import Ajv from "ajv";
 import { describe, expect, test } from "vitest";
 import { createActor, createAsyncLogic, waitFor } from "xstate";
 import { setupAgent, type SchemaCompiler, type StandardSchemaV1 } from "../index.js";
-import { initialAgentStep } from "../steps/index.js";
+// initialAgentStep is an internal step-envelope helper now (off the public
+// /steps subpath); imported directly from ../steps.js.
+import { initialAgentStep } from "../steps.js";
 
 function ajvCompiler(): SchemaCompiler {
   const ajv = new Ajv({ strict: false });

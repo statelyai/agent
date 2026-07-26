@@ -10,5 +10,9 @@
   "comparison": {
     "targets": ["Vercel AI SDK", "orchestrator-worker"],
     "purpose": "Ports AI SDK orchestrator-worker into an explicit XState machine."
-  }
+  },
+  "starters": [
+    "Add a dark mode toggle persisted to localStorage.",
+    "Add CSV export to the reports page."
+  ]
 }

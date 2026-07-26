@@ -98,7 +98,7 @@ Explicitly not shipped yet:
 - **Storage/checkpointer adapters.** Persisting snapshots or event logs is a documented recipe, not a package.
 - **OpenTelemetry exporter.** Build your own from the observation callbacks on `runAgent`.
 - **SSE/WebSocket transport helpers.** Host your own stream over what `onChunk` gives you.
-- **Dynamic-parallelism primitive.** Fan-out is plain `Promise.all(...)` over host actors.
+- **Agent-specific dynamic fan-out helper.** Dynamic fan-out works today through XState `spawn(...)` or `Promise.all(...)` inside a host actor; core has no higher-level helper for branch binding and progress.
 - **Visualization tooling.** Stately Studio and a VS Code extension own diagramming and inspection.
 
 If something here blocks you, or the API surface feels wrong, open an issue. This alpha exists to find that out before 2.0 stable.
@@ -107,6 +107,7 @@ If something here blocks you, or the API surface feels wrong, open an issue. Thi
 
 - [Quickstart](quickstart.md): install and run your first agent machine end to end.
 - [Use in any stack](any-stack.md): one machine runs locally, behind an HTTP route, or on the edge, with zero machine changes.
+- [Scope and ecosystem boundaries](scope.md): what portable machine logic owns, what the host owns, and where specialized libraries fit.
 - [Express host](express-host.md): drive an agent machine from an HTTP route.
 - [Cloudflare host](cloudflare-host.md): run an agent machine on the edge with Durable Object persistence.
 - [Agent machines](machines.md): `setupAgent`, states, invokes, typed context, and guards.

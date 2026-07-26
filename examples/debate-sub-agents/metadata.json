@@ -10,5 +10,14 @@
   "comparison": {
     "targets": ["XState actor model", "event-based sub-agents", "multi-agent debate"],
     "purpose": "A facilitator agent invokes two debater child agents (affirmative + negative), schedules alternating A/B turns over N rounds via typed events, then runs a request that concludes over both sides — all driven by runAgent."
-  }
+  },
+  "starters": [
+    {
+      "question": "Should self-driving cars be legal on public roads?"
+    },
+    {
+      "question": "Is remote work better than in-office for engineers?",
+      "rounds": 3
+    }
+  ]
 }

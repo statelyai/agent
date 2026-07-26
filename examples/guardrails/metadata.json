@@ -10,5 +10,14 @@
   "comparison": {
     "targets": ["input/output guardrails", "evaluator-optimizer"],
     "purpose": "An input/output guardrail chain authored as explicit gate states: validate the question (answerable? in scope?) before generating, answer, verify the answer, then revise-or-fail. Contrasts with evaluator-optimizer's refinement loop: guardrails gate rather than refine — an out-of-scope question is refused before any answer is generated, and an unsupported answer is revised at most once then flagged as unverified, never silently returned."
-  }
+  },
+  "starters": [
+    {
+      "question": "What is the capital of Australia?"
+    },
+    {
+      "question": "How do I reset my database password?",
+      "topic": "our internal admin tooling"
+    }
+  ]
 }

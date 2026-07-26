@@ -10,5 +10,14 @@
   "comparison": {
     "targets": ["LangGraph"],
     "purpose": "LangGraph's Reflection tutorial as an explicit machine: a generator drafts an essay, a critique persona grades it in prose, and the role-flipped feedback loops back into a revision over an accumulating transcript. The loop bound is a typed guard (revisions >= maxRevisions) with early exit when the critic is satisfied, replacing the tutorial's implicit len(messages) > 6 message-count check."
-  }
+  },
+  "starters": [
+    {
+      "topic": "Why cities should ban cars from their downtown cores",
+      "maxRevisions": 3
+    },
+    {
+      "topic": "The case for a four-day work week"
+    }
+  ]
 }

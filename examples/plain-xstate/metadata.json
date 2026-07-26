@@ -10,5 +10,15 @@
   "comparison": {
     "targets": ["LangGraph", "hand-rolled loop"],
     "purpose": "A normal XState v5 machine authored with plain `setup(...)` — a promise-shaped invoke, an `on: { APPROVE, REVISE }` decision state with a named guard, a final state, and zero knowledge of @statelyai/agent — is driven as an agent: bind the actor with `machine.provide(...)`, enumerate legal events with `getAcceptedEvents(snapshot)`, and choose with `resolveDecision(...)` gated by `snapshot.can(event)`. No setupAgent, no agent.decide."
-  }
+  },
+  "starters": [
+    {
+      "topic": "a CLI that turns shell history into a changelog",
+      "maxRevisions": 2
+    },
+    {
+      "topic": "a solar-powered backyard weather station",
+      "maxRevisions": 3
+    }
+  ]
 }

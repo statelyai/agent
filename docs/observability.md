@@ -58,6 +58,30 @@ await runAgent(machine, {
 });
 ```
 
+### Streaming with `createAgentRun`
+
+`createAgentRun(machine, options)` wraps `runAgent` in a handle that exposes the same trace stream as an async iterator, alongside the same `result` promise:
+
+```ts
+import { createAgentRun } from "@statelyai/agent";
+
+const run = createAgentRun(machine, { input, executors });
+
+for await (const event of run.events) {
+  // run.start → request/chunk/transition/emit events → run.end
+  send(event); // e.g. SSE, a JSONL log, a progress UI
+}
+
+const result = await run.result; // done | idle | error, exactly as runAgent
+```
+
+- **Starts immediately** — the run is in flight when `createAgentRun` returns, not on first iteration.
+- **Buffered, never blocking** — events are queued unboundedly, so a slow or absent consumer never applies backpressure. Await `result` first and drain `events` after if you prefer.
+- **`onTrace` still fires** — pass `options.onTrace` and it receives every event too; the iterator is additive.
+- **Resumes identically** — pass a persisted `snapshot` (+ resume `event`) and it streams that run from its own `run.start`.
+
+`events` is single-consumer. Breaking out early stops delivery but does not cancel the run (`result` still settles) — pass `options.signal` to abort.
+
 ### Uncontrolled (`provideExecutors` + `traceTransitions`)
 
 The uncontrolled path binds the machine once, then drives it with a plain `createActor`. `provideExecutors`' `onTrace` emits the request-level events; `traceTransitions` on the actor's `inspect` folds in `machine.transition` events on the **same** `runId`/`seq` stream:

@@ -10,5 +10,6 @@
   "comparison": {
     "targets": ["LangGraph", "Burr"],
     "purpose": "Shows an XState-authored agent with reusable text logic, message history, human review, and typed outputs."
-  }
+  },
+  "starters": []
 }

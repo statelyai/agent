@@ -11,5 +11,9 @@
   "comparison": {
     "targets": ["Express", "REST agent backends"],
     "purpose": "Controlled mode over HTTP: POST /agent runs a machine to idle/done, an in-memory snapshot store keyed by run id, and POST /agent/:id/resume delivers the human event."
-  }
+  },
+  "starters": [
+    "Our new real-time collaboration feature is now in beta.",
+    "Scheduled maintenance this Saturday from 2-4am UTC."
+  ]
 }

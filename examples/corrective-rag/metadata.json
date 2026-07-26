@@ -10,5 +10,9 @@
   "comparison": {
     "targets": ["LangGraph"],
     "purpose": "Self-correcting retrieval as explicit machine states: retrieve → grade → decide → (generate | rewrite → web-search → generate)."
-  }
+  },
+  "starters": [
+    "How does the Raft consensus algorithm elect a leader?",
+    "What is the latest stable release of Node.js?"
+  ]
 }

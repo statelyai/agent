@@ -1,13 +1,20 @@
 /**
- * Cloudflare Workers AI step host for the game workflow.
+ * Cloudflare Workers AI step host for the game workflow — the DURABLE thin-loop
+ * flavor.
  *
- * Unlike `../ai-sdk-game-host/index.ts` (same explicit step loop, AI SDK
- * models), this drives the loop against a raw Workers AI `AI` binding. Workers
- * AI does not expose the same tool-calling shape as the Vercel AI SDK binding
- * path, so this host serializes allowed event tools into the prompt and accepts
- * JSON output for both text requests (structured output) and decision requests
- * (event choice) — see `resolveDecision` in `../../src/index.js` for the retry/
- * validation core this uses for the latter.
+ * Unlike `../ai-sdk-game-host/index.ts` (same append-only-log loop, AI SDK
+ * models, one in-process run), this one persists nothing but the JOURNAL of
+ * external inputs (`entries`) and resumes by REPLAYING it. Each iteration below
+ * calls `replay(machine, entries)` to rebuild `{ snapshot, effects }` from the
+ * log alone — exactly what a fresh Worker invocation would do after loading the
+ * journal from durable storage (KV, D1, a Durable Object). No snapshot blob is
+ * persisted; the log is the source of truth.
+ *
+ * Workers AI does not expose the same tool-calling shape as the Vercel AI SDK
+ * binding path, so this host serializes allowed event tools into the prompt and
+ * accepts JSON output for both text effects (structured output) and decision
+ * effects (event choice) — see `resolveDecision` for the retry/validation core
+ * this uses for the latter.
  *
  * Running this
  * -------------
@@ -26,14 +33,13 @@
  * machine's requests must name a Workers AI model id (e.g.
  * `@cf/meta/llama-3.1-8b-instruct`). Requires the `wrangler` dev dependency.
  */
-import { type AgentDecisionRequest, type ChosenEvent } from "@statelyai/agent";
+import { type EventObject } from "xstate";
 import {
-  initialAgentStep,
-  renderDecisionAttempts,
-  resolveAgentStep,
-  resolveDecision,
-  type AgentRequest,
-} from "@statelyai/agent/steps";
+  type AgentDecisionRequest,
+  type AgentTextRequest,
+  type ChosenEvent,
+} from "@statelyai/agent";
+import { initEntry, renderDecisionAttempts, replay, resolveDecision } from "@statelyai/agent/steps";
 import { getAgentOutputMode } from "@statelyai/agent/adapter";
 import { gameActors, gameMachine, gameSchemas } from "../game-agent/index.js";
 
@@ -67,24 +73,20 @@ async function runWorkersAiPrompt(
       : JSON.stringify(response);
 }
 
-/** Text request: structured output serialized into the prompt, JSON parsed back out. */
-async function runWorkersAiTextRequest(env: Env, request: AgentRequest) {
-  const structured = getAgentOutputMode(request.input.outputSchema) === "structured";
+/** Text effect: structured output serialized into the prompt, JSON parsed back out. */
+async function runWorkersAiTextRequest(env: Env, request: AgentTextRequest) {
+  const structured = getAgentOutputMode(request.outputSchema) === "structured";
   const basePrompt = structured
-    ? [
-        request.input.prompt ?? "",
-        "",
-        "Respond with JSON only, matching the requested shape.",
-      ].join("\n")
-    : (request.input.prompt ?? "");
+    ? [request.prompt ?? "", "", "Respond with JSON only, matching the requested shape."].join("\n")
+    : (request.prompt ?? "");
 
   const ask = (prompt: string) =>
     runWorkersAiPrompt(env, {
-      model: request.input.model,
-      system: request.input.system,
+      model: request.model,
+      system: request.system,
       prompt,
-      temperature: request.input.temperature,
-      maxOutputTokens: request.input.maxOutputTokens,
+      temperature: request.temperature,
+      maxOutputTokens: request.maxOutputTokens,
     });
 
   const text = await ask(basePrompt);
@@ -114,7 +116,7 @@ async function runWorkersAiTextRequest(env: Env, request: AgentRequest) {
   }
 }
 
-/** Decision request: legal events serialized into the prompt, JSON-parsed
+/** Decision effect: legal events serialized into the prompt, JSON-parsed
  * choice validated and retried via `resolveDecision`. */
 async function runWorkersAiDecision(env: Env, request: AgentDecisionRequest): Promise<ChosenEvent> {
   return resolveDecision(
@@ -152,33 +154,49 @@ async function runWorkersAiDecision(env: Env, request: AgentDecisionRequest): Pr
 }
 
 export async function runCloudflareGameTurn(env: Env, input = { playerHp: 20, enemyHp: 15 }) {
-  let step = initialAgentStep(gameMachine, input, {
-    schemas: gameSchemas,
-    actorSources: gameActors,
-  });
+  const options = { schemas: gameSchemas, actorSources: gameActors };
 
-  while (!step.done) {
-    const [request] = step.requests;
-    if (!request) {
-      throw new Error("Machine is waiting without an agent request.");
+  // The ONLY durable state is this journal of external inputs. In a real Worker
+  // it lives in KV/D1/a Durable Object; each turn below loads it, appends one
+  // completion, and stores it again.
+  const entries: EventObject[] = [initEntry(input).event];
+
+  // Resume-by-replay: rebuild the frontier from the log alone every iteration,
+  // exactly as a fresh Worker invocation would after loading `entries`.
+  let { snapshot, effects } = replay(gameMachine, entries, options);
+
+  while (snapshot.status === "active") {
+    let next: EventObject | undefined;
+    for (const effect of effects) {
+      if (effect.kind === "execute") {
+        effect.exec();
+        continue;
+      }
+      if (effect.kind === "text") {
+        next = effect.toDoneEvent(await runWorkersAiTextRequest(env, effect.request));
+        break;
+      }
+      if (effect.kind === "decision") {
+        next = await runWorkersAiDecision(env, effect.request);
+        break;
+      }
+      throw new Error(`This game host does not handle '${effect.kind}' effects.`);
+    }
+    if (!next) {
+      break; // idle: nothing async owed. Persist `entries`; resume on the next event.
     }
 
-    if (request.kind === "decision") {
-      const event = await runWorkersAiDecision(env, request);
-      step = resolveAgentStep(gameMachine, step, request, event, {
-        schemas: gameSchemas,
-        actorSources: gameActors,
-      });
-    } else if (request.kind === "text") {
-      const output = await runWorkersAiTextRequest(env, request);
-      step = resolveAgentStep(gameMachine, step, request, output, {
-        schemas: gameSchemas,
-        actorSources: gameActors,
-      });
-    }
+    // Journal the completion, then re-derive the next frontier by REPLAYING the
+    // whole log — crash-safe: the same log always rebuilds the same
+    // `{ snapshot, effects }`, so a Worker that crashed mid-turn resumes here
+    // with no lost or duplicated work. (A hot loop could fold with
+    // `transition(snapshot, next)` for speed and only `replay` on cold start —
+    // both yield the identical state.)
+    entries.push(next);
+    ({ snapshot, effects } = replay(gameMachine, entries, options));
   }
 
-  return step.snapshot.output;
+  return snapshot.output;
 }
 
 export default {

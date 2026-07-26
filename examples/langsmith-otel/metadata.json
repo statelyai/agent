@@ -11,5 +11,9 @@
   "comparison": {
     "targets": ["LangSmith", "OpenTelemetry", "OTLP backends"],
     "purpose": "Map the versioned AgentTraceEvent stream onto OTel spans (run.start -> root span, request.start/end -> child spans, request.error -> exception, run.end -> status) and export to LangSmith via OTLP; env-gated so it prints the trace stream to stdout without keys."
-  }
+  },
+  "starters": [
+    "why state machines make agents debuggable",
+    "the case for durable, resumable AI workflows"
+  ]
 }

@@ -1,8 +1,11 @@
 /**
- * The step path: durable, per-model-call-checkpoint hosting of an agent
- * machine. Public vocabulary — `initialAgentStep`, `transitionAgentStep`,
- * `resolveAgentStep`, `getAgentRequests`, `executeAgentRequest`,
- * `resolveAgentRequests`.
+ * The step envelope: an INTERNAL, per-model-call-checkpoint view of an agent
+ * machine (`AgentStep` = snapshot + actions + discovered requests + done). It
+ * once backed a public step API; the public step path is now the thin
+ * effect/replay loop in `./effects.ts` (re-exported from `@statelyai/agent/steps`).
+ * These helpers survive as internals that `runAgent`, `verify.ts`, and the
+ * effect path build on — the only symbol still on the public surface is
+ * {@link executeAgentRequest} (the `text`-effect resolver).
  * @module
  */
 import {
@@ -465,36 +468,60 @@ export function getAgentRequests(
 }
 
 /**
- * Resolves one **text** {@link AgentRequest} against a host's
- * {@link AgentRequestExecutors} — merges the request's tools, dispatches to
- * `generateText`/`streamText` per `request.mode`, and validates the result
- * against `request.input.outputSchema` if present. **Text-only**: passing a
- * `kind: 'decision'` request throws, directing the caller to
- * `resolveDecision(request, executors.decide, ...)` instead. By default
+ * Resolves one **text** request against a host's {@link AgentRequestExecutors}
+ * — merges the request's tools, dispatches to `generateText`/`streamText` per
+ * `mode`, and validates the result against the request's `outputSchema` if
+ * present. Accepts either a `kind: 'text'` `AgentEffect` (the thin-loop shape
+ * from `getAgentEffects`) or a legacy {@link AgentRequest} envelope.
+ * **Text-only**: passing a `kind: 'decision'` request throws, directing the
+ * caller to `resolveDecision(request, executors.decide, ...)` instead. By default
  * returns the normalized output; pass `{ verbose: true }` to also get the
  * raw executor result (tool calls, usage, finish reason — needed for
  * observability and event-sourced replay).
  */
+/** A `kind: 'text'` `AgentEffect` (structural, to avoid an import cycle with effects.ts). */
+interface TextEffectLike {
+  kind: "text";
+  requestId: string;
+  request: AgentTextRequest;
+  mode?: AgentRequestMode;
+}
+
 export function executeAgentRequest(
-  request: AgentRequest,
+  request: AgentRequest | TextEffectLike,
   executors: Partial<AgentRequestExecutors>,
 ): Promise<unknown>;
 export function executeAgentRequest(
-  request: AgentRequest,
+  request: AgentRequest | TextEffectLike,
   executors: Partial<AgentRequestExecutors>,
   options: { verbose: true },
 ): Promise<{ output: unknown; raw: unknown }>;
 export async function executeAgentRequest(
-  request: AgentRequest,
+  requestOrEffect: AgentRequest | TextEffectLike,
   executors: Partial<AgentRequestExecutors>,
   options?: { verbose?: boolean },
 ): Promise<unknown> {
-  if ((request as AgentStepRequest).kind === "decision") {
+  if ((requestOrEffect as { kind: string }).kind === "decision") {
     throw new Error(
       "executeAgentRequest(...) is text-only. Resolve a 'decision' request with " +
         "resolveDecision(request, executors.decide, ...) instead.",
     );
   }
+
+  // A text AgentEffect carries the bare AgentTextRequest under `request`;
+  // normalize it to the envelope shape this function has always taken.
+  const request: AgentRequest =
+    "requestId" in requestOrEffect
+      ? {
+          kind: "text",
+          id: requestOrEffect.requestId,
+          src: "",
+          mode: requestOrEffect.mode,
+          input: requestOrEffect.request,
+          tools: requestOrEffect.request.tools ?? {},
+          events: [],
+        }
+      : requestOrEffect;
 
   assertTextExecutor(request, executors);
 
@@ -514,9 +541,10 @@ export async function executeAgentRequest(
 }
 
 /**
- * Options for {@link resolveAgentRequests}.
+ * Options for {@link resolveAgentRequests}. Internal — the step envelope is no
+ * longer part of the public surface.
  */
-export interface ResolveAgentRequestsOptions extends Partial<AgentExecutionOptions> {
+interface ResolveAgentRequestsOptions extends Partial<AgentExecutionOptions> {
   /** Retries per decision, passed to `resolveDecision`. Default `2`. */
   maxRetries?: number;
 }

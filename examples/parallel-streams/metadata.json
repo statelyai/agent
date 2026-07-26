@@ -10,5 +10,9 @@
   "comparison": {
     "targets": ["parallel", "streaming"],
     "purpose": "Two parallel states each run a streaming request concurrently; onChunk's request.id disambiguates the interleaved chunk streams."
-  }
+  },
+  "starters": [
+    "The rise of state machines in AI agent design",
+    "Why octopuses would make excellent distributed systems"
+  ]
 }

@@ -1,0 +1,26 @@
+{
+  "name": "lats",
+  "title": "Language Agent Tree Search",
+  "kind": "search",
+  "origin": {
+    "type": "langgraph",
+    "source": "LangGraph Language Agent Tree Search tutorial",
+    "url": "https://github.com/langchain-ai/langgraph/blob/23961cff61a42b52525f3b20b4094d8d2fba1744/docs/docs/tutorials/lats/lats.ipynb"
+  },
+  "comparison": {
+    "targets": [
+      "LangGraph LATS",
+      "tree search",
+      "reflection"
+    ],
+    "purpose": "Bounded UCB-style leaf selection, batched candidate expansion, reflection scoring, and solved-or-budget termination as explicit machine states."
+  },
+  "starters": [
+    {
+      "problem": "Write a function that returns the longest palindromic substring."
+    },
+    {
+      "problem": "Plan a 3-day trip to Kyoto on a $500 budget."
+    }
+  ]
+}

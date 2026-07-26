@@ -3,7 +3,17 @@ import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import { createActor, createAsyncLogic, initialTransition, toPromise, waitFor } from "xstate";
 import { createDecisionLogic } from "./decision.js";
-import { getAgentRequestsWith, transitionResult } from "./steps.js";
+// Step-envelope internals (used to drive machines in these tests) come straight
+// from ./steps.js now that they're off the public /steps subpath.
+import {
+  getAgentRequests,
+  getAgentRequestsWith,
+  initialAgentStep,
+  resolveAgentStep,
+  transitionAgentStep,
+  transitionResult,
+  type AgentStepRequest,
+} from "./steps.js";
 import {
   createAgentSchemas,
   createTextLogic,
@@ -22,16 +32,7 @@ import {
   type SchemaCompiler,
   type StandardSchemaV1,
 } from "./index.js";
-import {
-  executeAgentRequest,
-  getAgentRequests,
-  initialAgentStep,
-  resolveAgentStep,
-  resolveDecision,
-  transitionAgentStep,
-  type AgentRequest,
-  type AgentStepRequest,
-} from "./steps/index.js";
+import { executeAgentRequest, resolveDecision, type AgentRequest } from "./steps/index.js";
 import { getAgentOutputMode, isStructuredOutputSchema, parseOutput } from "./adapter/index.js";
 
 /**
@@ -2376,6 +2377,154 @@ describe("setupAgent", () => {
         { compileSchema: ajvCompiler() },
       ),
     ).toThrow(/state 'start'.*'nonexistent'.*not a state at that level/s);
+  });
+
+  test("fromConfig resolves named guard references against options.guards", () => {
+    const guardCalls: unknown[] = [];
+    const machine = setupAgent.fromConfig(
+      {
+        id: "named-guards",
+        schemas: {
+          context: {
+            type: "object",
+            properties: { role: { type: "string" } },
+            required: ["role"],
+          },
+          events: {
+            MESSAGE: {
+              type: "object",
+              properties: { sender: { type: "string" } },
+              required: ["sender"],
+            },
+          },
+        },
+        context: { role: "listener" },
+        initial: "waiting",
+        states: {
+          waiting: {
+            on: { MESSAGE: { target: "handled", guard: "isFromHuman" } },
+          },
+          handled: { type: "final" },
+        },
+      },
+      {
+        compileSchema: ajvCompiler(),
+        guards: {
+          isFromHuman: ({ context, event }) => {
+            guardCalls.push({ context, event });
+            return (event as { sender?: string }).sender === "human";
+          },
+        },
+      },
+    );
+
+    const actor = createActor(machine).start();
+    // Guard returns false: the transition is blocked, not unconditional.
+    actor.send({ type: "MESSAGE", sender: "bot" });
+    expect(actor.getSnapshot().value).toBe("waiting");
+    actor.send({ type: "MESSAGE", sender: "human" });
+    expect(actor.getSnapshot().value).toBe("handled");
+    expect(guardCalls).toEqual([
+      { context: { role: "listener" }, event: { type: "MESSAGE", sender: "bot" } },
+      { context: { role: "listener" }, event: { type: "MESSAGE", sender: "human" } },
+    ]);
+  });
+
+  test("fromConfig throws at build time for an unknown named guard reference", () => {
+    expect(() =>
+      setupAgent.fromConfig(
+        {
+          id: "unknown-guard",
+          schemas: { context: { type: "object", properties: {} } },
+          context: {},
+          initial: "waiting",
+          states: {
+            waiting: { on: { GO: { target: "done", guard: "isAllowed" } } },
+            done: { type: "final" },
+          },
+        },
+        { compileSchema: ajvCompiler() },
+      ),
+    ).toThrow(/guard 'isAllowed'.*no\s+implementation/s);
+  });
+
+  test("fromConfig lowers a state-level onDone to the state's done transition", async () => {
+    const machine = setupAgent.fromConfig(
+      {
+        id: "state-ondone",
+        schemas: {
+          context: { type: "object", properties: { finished: { type: "boolean" } } },
+          output: {
+            type: "object",
+            properties: { finished: { type: "boolean" } },
+            required: ["finished"],
+          },
+        },
+        context: {},
+        initial: "working",
+        states: {
+          working: {
+            initial: "step",
+            states: { step: { type: "final" } },
+            onDone: { target: "done", assign: { finished: true } },
+          },
+          done: { type: "final", output: { finished: "{{ context.finished }}" } },
+        },
+      },
+      { compileSchema: ajvCompiler() },
+    );
+
+    const actor = createActor(machine).start();
+    await waitFor(actor, (snapshot) => snapshot.status === "done");
+    expect(actor.getSnapshot().output).toEqual({ finished: true });
+  });
+
+  test("fromConfig resolves named action types against options.actions", () => {
+    const notified: unknown[] = [];
+    const machine = setupAgent.fromConfig(
+      {
+        id: "named-actions",
+        schemas: {
+          context: {
+            type: "object",
+            properties: { user: { type: "string" } },
+            required: ["user"],
+          },
+        },
+        context: { user: "Ada" },
+        initial: "start",
+        states: {
+          start: {
+            entry: { type: "notify", params: { who: "{{ context.user }}" } },
+            type: "final",
+          },
+        },
+      },
+      {
+        compileSchema: ajvCompiler(),
+        actions: {
+          notify: (params) => notified.push(params),
+        },
+      },
+    );
+
+    createActor(machine).start();
+    expect(notified).toEqual([{ who: "Ada" }]);
+  });
+
+  test("fromConfig throws at build time for an unknown named action type", () => {
+    expect(() =>
+      setupAgent.fromConfig(
+        {
+          id: "unknown-action",
+          schemas: { context: { type: "object", properties: {} } },
+          context: {},
+          initial: "start",
+          states: { start: { entry: { type: "notify" }, type: "final" } },
+        },
+        { compileSchema: ajvCompiler() },
+      ),
+    ).toThrow(/action type 'notify'.*no\s+implementation/s);
   });
 });
 

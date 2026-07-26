@@ -943,8 +943,8 @@ function assertNoReservedAgentKeys(
   }
 }
 
-// Merges the five builtin `agent.*` actors with user `actors` and generated request actors, after checking for key collisions.
-function createAgentActorSources<
+// Merges the five builtin `agent.*` actors with user `actors` and generated request actors, after checking for key collisions. Exported for workflow-config's fromConfig lowering. @internal
+export function createAgentActorSources<
   TActors extends { [K in keyof TActors]: AnyActorLogic },
   TRequestSchemas extends AgentRequestSchemaMap,
   TModel extends string = string,

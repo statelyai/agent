@@ -1,0 +1,21 @@
+{
+  "name": "ai-sdk-ui-stream",
+  "title": "AI SDK UI Message Stream",
+  "kind": "host-adapter",
+  "origin": {
+    "type": "ai-sdk",
+    "source": "Vercel AI SDK UI message stream / useChat",
+    "url": "https://ai-sdk.dev/docs/ai-sdk-ui/chatbot"
+  },
+  "comparison": {
+    "targets": [
+      "LangGraph",
+      "AI SDK"
+    ],
+    "purpose": "Bridges a runAgent run to the AI SDK v6 UI message stream (text parts + data-agent-state parts) so a useChat client consumes it unchanged."
+  },
+  "starters": [
+    "A keyboard-first task manager for developers.",
+    "Noise-cancelling earbuds that translate 40 languages live."
+  ]
+}

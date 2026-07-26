@@ -12,12 +12,11 @@ import {
   tellJoke as tellJokeLogic,
 } from "../examples/index.js";
 import { runAgent, type AgentTextRequest } from "./index.js";
-import {
-  getAgentRequests,
-  resolveAgentStep,
-  resolveDecision,
-  transitionAgentStep,
-} from "./steps/index.js";
+// The step envelope (getAgentRequests/resolveAgentStep/transitionAgentStep) is
+// internal now — imported straight from ./steps.js (it backs verify.ts and these
+// example checks); resolveDecision remains on the public /steps subpath.
+import { getAgentRequests, resolveAgentStep, transitionAgentStep } from "./steps.js";
+import { resolveDecision } from "./steps/index.js";
 import { initialTransition } from "xstate";
 
 describe("curated XState setup examples", () => {

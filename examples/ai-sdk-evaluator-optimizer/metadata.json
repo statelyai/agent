@@ -10,5 +10,15 @@
   "comparison": {
     "targets": ["Vercel AI SDK", "evaluator-optimizer"],
     "purpose": "Ports AI SDK evaluator-optimizer into an explicit XState machine."
-  }
+  },
+  "starters": [
+    {
+      "text": "The early bird catches the worm.",
+      "targetLanguage": "Japanese"
+    },
+    {
+      "text": "Break a leg out there tonight!",
+      "targetLanguage": "French"
+    }
+  ]
 }

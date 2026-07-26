@@ -10,5 +10,9 @@
   "comparison": {
     "targets": ["sql-agent", "human-in-the-loop"],
     "purpose": "An approval-gated query flow over an in-memory table: the model plans a query, a human approves via typed interaction meta, and a local engine executes it."
-  }
+  },
+  "starters": [
+    "What is the total amount spent on electronics?",
+    "Which customer placed the most orders?"
+  ]
 }

@@ -11,5 +11,6 @@
   "comparison": {
     "targets": ["Next.js App Router", "Server Actions"],
     "purpose": "Controlled mode in a Next route handler (app/api/agent/route.ts + [id]/resume): runAgent to idle/done, snapshot persisted across the stateless request boundary for human-in-the-loop."
-  }
+  },
+  "starters": []
 }

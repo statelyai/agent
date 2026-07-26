@@ -10,5 +10,6 @@
   "comparison": {
     "targets": [],
     "purpose": "Runs the email-drafter machine as one live createActor session wired to createWebSocketInspector, so the whole agent flow is visible in the Stately Inspector."
-  }
+  },
+  "starters": []
 }

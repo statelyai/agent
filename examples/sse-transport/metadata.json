@@ -10,5 +10,6 @@
   "comparison": {
     "targets": ["Vercel AI SDK", "LangGraph"],
     "purpose": "Forwards runAgent's onChunk/onTransition/onResult seams to a client over Server-Sent Events (same seam works for WebSocket)."
-  }
+  },
+  "starters": []
 }

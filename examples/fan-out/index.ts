@@ -8,19 +8,19 @@
  * runtime, each branch's state visible in the snapshot, results reduced. It is
  * built on XState dynamic spawn — `enq.spawn(logic, { id, input })` in a state
  * `entry`, once per subtopic — not a fixed `type: 'parallel'` region (that would
- * hard-code the branch count; see `ai-sdk-parallel-review` for the static
- * counterpart). Each spawned branch is a pre-bound request logic
- * (`.withExecutor`), because spawned logics are not in any `invoke` config for
- * `runAgent`'s static bind walk to reach — so a branch carries its own executor.
- * That is why the machine is built by a factory over `generateText`: the
- * `entry` action closes over the pre-bound branch logic.
+ * hard-code the branch count).
+ *
+ * The branch logic is spawned BY REFERENCE off `actorSources` — the action's
+ * `actorSources.summarizeSubtopic` is the machine's post-`provide`
+ * implementation, so `runAgent` has already wrapped it with the host executor
+ * set. No `.withExecutor` pre-binding, no machine factory closing over an
+ * executor: the planner, every spawned branch, and the reducer all resolve
+ * through the ONE `executors` set passed to `runAgent`.
  *
  * Snapshot note: while branches are in flight, every branch is a live child on
  * `snapshot.children` (`branch-0..N-1`) and the persisted snapshot round-trips
  * them — the per-branch state is NOT opaque to the machine (the test asserts
- * this mid-flight). The one caveat: `runAgent`'s live-actor resume does not
- * re-run a spawned async child frozen mid-flight (same as any invoke on the
- * live path); a durable step host replays child-done events instead.
+ * this mid-flight).
  *
  * Shows:
  *   - `planning`: a structured-output request → a typed list of subtopics.
@@ -37,13 +37,7 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import {
-  runAgent,
-  setupAgent,
-  type AgentRequestExecutor,
-  type RunAgentOptions,
-} from "@statelyai/agent";
-import { bindRequestExecutor } from "@statelyai/agent/adapter";
+import { runAgent, setupAgent, type RunAgentOptions } from "@statelyai/agent";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 
 const planSchema = z.object({ subtopics: z.array(z.string()) });
@@ -96,8 +90,8 @@ const agentSetup = setupAgent({
         "summarizing. Return just the subtopic titles.",
       prompt: ({ input }) => input.topic,
     },
-    // The fan-out branch: one summary per subtopic. Spawned dynamically, so it
-    // is pre-bound with `.withExecutor` in the factory below.
+    // The fan-out branch: one summary per subtopic. Spawned dynamically off
+    // `actorSources.summarizeSubtopic` — no pre-binding; `runAgent` binds it.
     summarizeSubtopic: {
       schemas: {
         input: z.object({ topic: z.string(), subtopic: z.string() }),
@@ -130,109 +124,112 @@ export const fanOutSchemas = agentSetup.schemas;
 const BRANCH_PREFIX = "branch-";
 
 /**
- * Builds the fan-out machine, closing over the pre-bound branch logic. The
- * branch `.withExecutor` receives the already-built `request` (model, system,
- * prompt) and forwards it to `generateText`, so the planner, every branch, and
- * the reducer share ONE executor set.
+ * The fan-out machine. No factory, no pre-bound executor: the `fanningOut`
+ * entry spawns `actorSources.summarizeSubtopic` — the machine's current (post-
+ * `provide`) implementation, so `runAgent`'s host-bound executor reaches every
+ * branch. The planner, branches, and reducer share ONE executor set, passed to
+ * `runAgent({ executors })`.
  */
-export function createFanOutMachine(generateText: AgentRequestExecutor) {
-  const branchLogic = bindRequestExecutor(agentSetup.requests.summarizeSubtopic, generateText);
-
-  return agentSetup.createMachine({
-    id: "fan-out",
-    context: ({ input }) => ({
-      topic: input.topic,
-      subtopics: [],
-      summaries: {},
-      expected: 0,
-      digest: null,
-    }),
-    initial: "planning",
-    states: {
-      planning: {
-        invoke: {
-          id: "planSubtopics",
-          src: "planSubtopics",
-          input: ({ context }) => ({ topic: context.topic }),
-          onDone: ({ output }) => ({
-            target: "fanningOut",
-            context: {
-              subtopics: output.subtopics,
-              expected: output.subtopics.length,
-            },
-          }),
-        },
-      },
-      // DYNAMIC FAN-OUT: one spawn per subtopic — N decided at runtime from the
-      // planner's output, not the machine config. Each branch is a live child
-      // (`branch-0`..`branch-<N-1>`) visible on the snapshot until it completes.
-      fanningOut: {
-        entry: ({ context }, enq) => {
-          context.subtopics.forEach((subtopic, index) => {
-            enq.spawn(branchLogic, {
-              id: `${BRANCH_PREFIX}${index}`,
-              input: { topic: context.topic, subtopic },
-            });
-          });
-        },
-        always: { target: "collecting" },
-      },
-      // REDUCE: count every branch completion, keying its summary by branch id.
-      // A wildcard handler is how the parent observes N dynamic children whose
-      // ids are only known at runtime (no static `onDone` per branch).
-      collecting: {
-        on: {
-          "*": ({ context, event }) => {
-            const type = event.type as string;
-            if (!type.startsWith(`xstate.done.actor.${BRANCH_PREFIX}`)) {
-              return undefined;
-            }
-            const id = type.slice("xstate.done.actor.".length);
-            const summaries = {
-              ...context.summaries,
-              [id]: (event as unknown as { output: string }).output,
-            };
-            return Object.keys(summaries).length >= context.expected
-              ? { target: "reducing", context: { summaries } }
-              : { context: { summaries } };
+export const fanOutMachine = agentSetup.createMachine({
+  id: "fan-out",
+  context: ({ input }) => ({
+    topic: input.topic,
+    subtopics: [],
+    summaries: {},
+    expected: 0,
+    digest: null,
+  }),
+  initial: "planning",
+  states: {
+    planning: {
+      invoke: {
+        id: "planSubtopics",
+        src: "planSubtopics",
+        input: ({ context }) => ({ topic: context.topic }),
+        onDone: ({ output }) => ({
+          target: "fanningOut",
+          context: {
+            subtopics: output.subtopics,
+            expected: output.subtopics.length,
           },
-        },
-      },
-      reducing: {
-        invoke: {
-          id: "composeDigest",
-          src: "composeDigest",
-          input: ({ context }) => ({ topic: context.topic, summaries: context.summaries }),
-          onDone: ({ output }) => ({ target: "done", context: { digest: output } }),
-        },
-      },
-      done: {
-        type: "final",
-        output: ({ context }) => ({
-          subtopics: context.subtopics,
-          summaries: context.summaries,
-          digest: context.digest,
         }),
       },
     },
-  });
+    // DYNAMIC FAN-OUT: one spawn per subtopic — N decided at runtime from the
+    // planner's output, not the machine config. `actorSources.summarizeSubtopic`
+    // is the host-bound branch logic; each spawn is a live child
+    // (`branch-0`..`branch-<N-1>`) visible on the snapshot until it completes.
+    fanningOut: {
+      entry: ({ context, actorSources }, enq) => {
+        context.subtopics.forEach((subtopic, index) => {
+          enq.spawn(actorSources.summarizeSubtopic, {
+            id: `${BRANCH_PREFIX}${index}`,
+            input: { topic: context.topic, subtopic },
+          });
+        });
+      },
+      always: { target: "collecting" },
+    },
+    // REDUCE: count every branch completion, keying its summary by branch id.
+    // A wildcard handler is how the parent observes N dynamic children whose
+    // ids are only known at runtime (no static `onDone` per branch).
+    collecting: {
+      on: {
+        "*": ({ context, event }) => {
+          const type = event.type as string;
+          if (!type.startsWith(`xstate.done.actor.${BRANCH_PREFIX}`)) {
+            return undefined;
+          }
+          const id = type.slice("xstate.done.actor.".length);
+          const summaries = {
+            ...context.summaries,
+            [id]: (event as unknown as { output: string }).output,
+          };
+          return Object.keys(summaries).length >= context.expected
+            ? { target: "reducing", context: { summaries } }
+            : { context: { summaries } };
+        },
+      },
+    },
+    reducing: {
+      invoke: {
+        id: "composeDigest",
+        src: "composeDigest",
+        input: ({ context }) => ({ topic: context.topic, summaries: context.summaries }),
+        onDone: ({ output }) => ({ target: "done", context: { digest: output } }),
+      },
+    },
+    done: {
+      type: "final",
+      output: ({ context }) => ({
+        subtopics: context.subtopics,
+        summaries: context.summaries,
+        digest: context.digest,
+      }),
+    },
+  },
+});
+
+/**
+ * @deprecated The machine no longer needs a pre-bound executor — spawn resolves
+ * the branch logic off `actorSources` and `runAgent` binds it. Use
+ * `fanOutMachine` directly and pass `executors` to `runAgent`. The parameter is
+ * ignored; kept for call-site compatibility.
+ */
+export function createFanOutMachine(_generateText?: unknown) {
+  return fanOutMachine;
 }
 
 export async function runFanOutExample(
-  options?: RunAgentOptions<ReturnType<typeof createFanOutMachine>>,
-  observe?: RunAgentOptions<ReturnType<typeof createFanOutMachine>>["onTransition"],
+  options?: RunAgentOptions<typeof fanOutMachine>,
+  observe?: RunAgentOptions<typeof fanOutMachine>["onTransition"],
 ) {
   const resolved =
     options && Object.keys(options).length > 0
       ? options
       : { executors: createAiSdkExecutors({ models }) };
-  const generateText = resolved.executors?.generateText;
-  if (!generateText) {
-    throw new Error("runFanOutExample requires a generateText executor.");
-  }
 
-  const machine = createFanOutMachine(generateText);
-  const result = await runAgent(machine, {
+  const result = await runAgent(fanOutMachine, {
     input: { topic: "How does an LLM agent framework stay durable?" },
     // `observe` is the direct-run narrator; a caller's own `onTransition`
     // (e.g. the test's mid-flight capture) in `resolved` takes precedence.

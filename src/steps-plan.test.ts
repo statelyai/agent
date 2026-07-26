@@ -1,18 +1,210 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
-import { createActor } from "xstate";
+import { initialTransition, transition, type AnyMachineSnapshot, type EventObject } from "xstate";
 import { createAgentSchemas, createTextLogic, runAgent, setupAgent } from "./index.js";
 import {
-  getAgentRequests,
-  initialAgentStep,
-  resolveAgentRequests,
+  executeAgentRequest,
+  getAgentEffects,
+  initEntry,
+  PLAN_DONE_EVENT_TYPE,
+  replay,
+  resolveDecision,
+  type AgentDecisionRequest,
   type AgentPlanRequest,
 } from "./steps/index.js";
 import type { AgentDecisionExecutor, AgentRequestExecutors, ChosenEvent } from "./index.js";
 
+// ───────────────────────────────────────────────────────────────────────────
+// The thin-loop plan driver.
+//
+// The step-envelope `resolveAgentRequests`/`resolvePlanRequest` helpers are gone
+// from the public surface. Driving an `agent.plan` invoke is now the HOST's job,
+// over the append-only journal: a `plan` AgentEffect re-surfaces each frontier
+// (candidates recomputed from the live snapshot), and the host resolves ONE
+// decision per step, journals the chosen MACHINE event, and completes the plan
+// by journaling the invoke's `xstate.done.actor.<id>` event when the done-move /
+// a stopOn event / the budget / no-legal-events terminates it.
+//
+// What moved to host responsibility (was baked into `resolvePlanRequest`, now
+// this file's helpers): (1) the per-step decision request — id `plan1[n]`, the
+// applied trail appended to the prompt, the done-move hint — see
+// `planStepDecisionRequest`; (2) tracking the applied trail. A `plan` effect's
+// re-surfaced `applied`/`stepsRemaining` are NOT reconstructed under pure fold
+// (the invoke child's ledger context only advances when the ENVELOPE mutates it;
+// the thin loop journals bare machine events instead), so the host derives the
+// trail from the journal itself — `reconstructApplied` below. Everything else
+// (one decision per step, guard-gated retries, the four stop reasons, crash-safe
+// mid-plan resume) is re-pinned here against the thin loop.
+// ───────────────────────────────────────────────────────────────────────────
+
+// The plan's applied trail, reconstructed from the journal: for these
+// single-plan machines it is every journaled machine event (drop the reserved
+// init entry and any xstate.* completion/timer events). A machine that also
+// takes unrelated external events would scope this to the plan's active window.
+function reconstructApplied(entries: readonly EventObject[]): ChosenEvent[] {
+  return entries.slice(1).filter((event) => !event.type.startsWith("xstate.")) as ChosenEvent[];
+}
+
+// The invoke-completion event that fires the plan state's `onDone` — the host
+// feeds the plan's `{ steps, stopped }` output back exactly like a text result.
+function planDoneEvent(id: string, steps: ChosenEvent[], stopped: string): EventObject {
+  return {
+    type: `xstate.done.actor.${id}`,
+    output: { steps, stopped },
+    actorId: id,
+  } as EventObject;
+}
+
+// Lowers a re-surfaced plan request into the per-step decision request (mirrors
+// the old createRunAgentPlanLogic/planStepDecisionRequest recipe): id namespaced
+// by trail length, the trail appended to the prompt, and the built-in done-move
+// hint. This cosmetic shaping is now host recipe, not core.
+function planStepDecisionRequest(
+  request: AgentPlanRequest,
+  applied: ChosenEvent[],
+): AgentDecisionRequest {
+  const trail =
+    applied.length === 0
+      ? ""
+      : `\n\nEvents already applied in this plan, in order:\n${applied
+          .map((step) => JSON.stringify(step))
+          .join("\n")}\nContinue from here; do not repeat applied events.`;
+  const doneHint = `\n\nWhen the request is fully handled (or no action is needed), choose '${PLAN_DONE_EVENT_TYPE}'.`;
+  return {
+    kind: "decision",
+    id: `${request.id}[${applied.length}]`,
+    model: request.input.model,
+    system: request.input.system,
+    prompt: `${request.input.prompt ?? ""}${trail}${doneHint}`,
+    messages: request.input.messages,
+    events: request.events,
+    attempts: [],
+    temperature: request.input.temperature,
+    maxOutputTokens: request.input.maxOutputTokens,
+    topP: request.input.topP,
+    topK: request.input.topK,
+    seed: request.input.seed,
+    stopSequences: request.input.stopSequences,
+    metadata: request.input.metadata,
+  };
+}
+
+// Drives a single `agent.plan` invoke (id `planId`) to termination, folding each
+// applied event into the journal. Reloads the frontier by REPLAYING the journal
+// each step, so persisting `entries` between steps (see the mid-plan test) is
+// crash-safe. `persist` runs after every journal append.
+async function drivePlan(
+  machine: any,
+  planId: string,
+  entries: EventObject[],
+  decide: AgentDecisionExecutor,
+  persist?: () => void | Promise<void>,
+): Promise<void> {
+  for (;;) {
+    const { snapshot, effects } = replay(machine, entries);
+    if ((snapshot as AnyMachineSnapshot).status !== "active") {
+      return;
+    }
+    const planEffect = effects.find(
+      (effect) => effect.kind === "plan" && effect.request.id === planId,
+    );
+    if (!planEffect || planEffect.kind !== "plan") {
+      return; // the plan ended or an applied event exited its state (canceled).
+    }
+    const request = planEffect.request;
+    const applied = reconstructApplied(entries);
+    const maxSteps = request.input.maxSteps ?? 8;
+    const stopOn = new Set<string>(request.input.stopOn ?? []);
+    const machineEvents = request.events.filter((event) => event.type !== PLAN_DONE_EVENT_TYPE);
+
+    const complete = async (stopped: string) => {
+      entries.push(planDoneEvent(planId, applied, stopped));
+      await persist?.();
+    };
+
+    // Terminal pre-checks (no model call) — mirror runAgent's loop-top guards.
+    if (applied.length >= maxSteps) {
+      return complete("max-steps");
+    }
+    if (machineEvents.length === 0) {
+      return complete("no-legal-events");
+    }
+
+    const chosen = await resolveDecision(planStepDecisionRequest(request, applied), decide, {
+      canTake: (event) =>
+        event.type === PLAN_DONE_EVENT_TYPE || stopOn.has(event.type)
+          ? true
+          : (snapshot as AnyMachineSnapshot).can(event as never),
+    });
+
+    if (chosen.type === PLAN_DONE_EVENT_TYPE) {
+      return complete("done");
+    }
+
+    entries.push(chosen);
+    await persist?.();
+
+    if (stopOn.has(chosen.type)) {
+      // The stopOn event was applied; complete the plan — unless it exited the
+      // invoking state (which already canceled the invoke, so onDone never fires).
+      const after = replay(machine, entries);
+      const stillActive = after.effects.some(
+        (effect) => effect.kind === "plan" && effect.request.id === planId,
+      );
+      if (stillActive) {
+        entries.push(planDoneEvent(planId, reconstructApplied(entries), "stop-event"));
+        await persist?.();
+      }
+      return;
+    }
+  }
+}
+
+// Drives a whole machine to completion through the thin loop: resolve one
+// frontier effect per fold, dispatching plans to `drivePlan`. `decide` backs
+// every decision/plan; a text effect (none in these plan tests) would resolve
+// with `executeAgentRequest`.
+async function runViaEffects(
+  machine: any,
+  decide: AgentDecisionExecutor,
+  persist?: (entries: EventObject[]) => void | Promise<void>,
+): Promise<AnyMachineSnapshot> {
+  const entries: EventObject[] = [initEntry(undefined).event];
+  const runPersist = persist ? () => persist(entries) : undefined;
+
+  for (;;) {
+    const { snapshot, effects } = replay(machine, entries);
+    if ((snapshot as AnyMachineSnapshot).status !== "active") {
+      return snapshot as AnyMachineSnapshot;
+    }
+    for (const effect of effects) {
+      if (effect.kind === "execute") {
+        effect.exec();
+      }
+    }
+    const pending = effects.find((effect) => effect.kind !== "execute");
+    if (!pending) {
+      return snapshot as AnyMachineSnapshot; // idle
+    }
+    if (pending.kind === "plan") {
+      await drivePlan(machine, pending.request.id, entries, decide, runPersist);
+      continue;
+    }
+    if (pending.kind === "decision") {
+      const chosen = await resolveDecision(pending.request, decide, {
+        canTake: (event) => (snapshot as AnyMachineSnapshot).can(event as never),
+      });
+      entries.push(chosen);
+      await runPersist?.();
+      continue;
+    }
+    throw new Error(`this plan host does not handle '${pending.kind}' effects.`);
+  }
+}
+
 // A todo-list machine managed by one `agent.plan` invoke. Its final output
 // records the plan's stop reason and step count (when onDone fires), so the
-// SAME machine driven via runAgent and via the step loop can be compared for
+// SAME machine driven via runAgent and via the thin loop can be compared for
 // exact parity.
 function createTodoAgent() {
   const agent = setupAgent({
@@ -129,81 +321,60 @@ function executors(decide: AgentDecisionExecutor): AgentRequestExecutors {
   return { decide, generateText: async () => ({ output: {} }) };
 }
 
-// Drives an agent machine to completion through the step loop.
-async function runViaSteps(
-  machine: ReturnType<typeof createTodoAgent>,
-  decide: AgentDecisionExecutor,
-) {
-  let step = initialAgentStep(machine);
-  while (!step.done) {
-    step = await resolveAgentRequests(machine, step, executors(decide));
-  }
-  return step;
-}
-
-describe("agent.plan on the step path", () => {
-  test("drives a plan with a decide-only partial executor set (no generateText, no cast)", async () => {
+describe("agent.plan on the thin loop", () => {
+  test("drives a plan with a decide-only executor to a stop-event finish", async () => {
     const machine = createTodoAgent();
     const script: ChosenEvent[] = [{ type: "ADD", title: "milk" }, { type: "NOTHING" }];
     let index = 0;
-    // A plan step consumes only `decide`; the Partial<AgentRequestExecutors>
-    // entry point accepts this object with no generateText and no cast.
-    let step = initialAgentStep(machine);
-    while (!step.done) {
-      step = await resolveAgentRequests(machine, step, {
-        decide: async () => ({ event: script[index++]! }),
-      });
-    }
-    expect(step.snapshot.output).toMatchObject({
+    const snapshot = await runViaEffects(machine, async () => ({ event: script[index++]! }));
+    expect(snapshot.output).toMatchObject({
       titles: ["milk"],
       stopped: "stop-event",
     });
   });
 
-  test("re-surfaces a plan request with candidates, applied trail, and budget", async () => {
+  test("re-surfaces a plan effect with candidates and budget each frontier", () => {
     const machine = createTodoAgent();
-    const step = initialAgentStep(machine);
+    const entries: EventObject[] = [initEntry(undefined).event];
 
-    const [request] = step.requests;
-    expect(request?.kind).toBe("plan");
-    const plan = request as AgentPlanRequest;
+    // Frontier 0: the plan effect surfaces with the machine candidates plus the
+    // reserved done move.
+    let { snapshot, effects } = replay(machine, entries);
+    let planEffect = effects.find((effect) => effect.kind === "plan");
+    expect(planEffect?.kind).toBe("plan");
+    const plan = (planEffect as Extract<typeof planEffect, { kind: "plan" }>).request;
     expect(plan.id).toBe("plan1");
     expect(plan.src).toBe("agent.plan");
-    expect(plan.applied).toEqual([]);
-    expect(plan.stepsRemaining).toBe(5);
-    // Machine candidates plus the reserved done move.
+    expect(plan.input.model).toBe("quick");
+    expect(plan.input.maxSteps).toBe(5);
     expect(plan.events.map((event) => event.type)).toEqual(
       expect.arrayContaining(["ADD", "TOGGLE", "NOTHING", "QUIT", "agent.plan.done"]),
     );
-    expect(plan.input.model).toBe("quick");
-    expect(plan.input.maxSteps).toBe(5);
 
-    // Apply one event; the NEXT step re-surfaces the plan with an updated trail.
-    const { decide } = scriptedDecide([{ type: "ADD", title: "milk" }]);
-    const next = await resolveAgentRequests(machine, step, executors(decide));
-    const nextPlan = next.requests.find((r) => r.kind === "plan") as AgentPlanRequest;
-    expect(nextPlan).toBeDefined();
-    expect(nextPlan.applied).toEqual([{ type: "ADD", title: "milk" }]);
-    expect(nextPlan.stepsRemaining).toBe(4);
+    // Apply one event; the plan effect re-surfaces on the next frontier, and the
+    // host derives the applied trail from the journal.
+    entries.push({ type: "ADD", title: "milk" } as EventObject);
+    ({ snapshot, effects } = replay(machine, entries));
+    planEffect = effects.find((effect) => effect.kind === "plan");
+    expect(planEffect?.kind).toBe("plan");
+    expect(reconstructApplied(entries)).toEqual([{ type: "ADD", title: "milk" }]);
+    // NOTE: the re-surfaced effect's own `applied`/`stepsRemaining` are NOT
+    // folded under pure replay — the host tracks the trail (see the module note).
+    void snapshot;
   });
 
-  test("the plan ledger lands in the persisted snapshot at children.<id>.snapshot.context", async () => {
+  test("the applied trail round-trips as plain JSON in the journal", async () => {
     const machine = createTodoAgent();
-    const step = initialAgentStep(machine);
+    const entries: EventObject[] = [
+      initEntry(undefined).event,
+      { type: "ADD", title: "milk" } as EventObject,
+    ];
 
-    const { decide } = scriptedDecide([{ type: "ADD", title: "milk" }]);
-    const next = await resolveAgentRequests(machine, step, executors(decide));
-
-    // The applied trail + remaining budget serialize for free as the plan
-    // child's own createLogic snapshot context.
-    const persisted = machine.getPersistedSnapshot(next.snapshot as never) as unknown as {
-      children: Record<string, { snapshot: { context?: unknown } }>;
-    };
-    expect(persisted.children.plan1?.snapshot.context).toMatchObject({
-      applied: [{ type: "ADD", title: "milk" }],
-      stepsRemaining: 4, // maxSteps (5) - 1 applied
-      stopped: null,
-    });
+    // The journal is the durable artifact: it survives a full JSON round-trip.
+    const round = JSON.parse(JSON.stringify(entries)) as EventObject[];
+    expect(reconstructApplied(round)).toEqual([{ type: "ADD", title: "milk" }]);
+    const { snapshot } = replay(machine, round);
+    expect((snapshot as AnyMachineSnapshot).value).toBe("planning");
   });
 
   test("appends the applied trail to each step's decision prompt", async () => {
@@ -212,7 +383,7 @@ describe("agent.plan on the step path", () => {
       { type: "ADD", title: "milk" },
       { type: "NOTHING" },
     ]);
-    await runViaSteps(machine, decide);
+    await runViaEffects(machine, decide);
 
     expect(requests[0]!.prompt).toContain("Manage the todo list.");
     expect(requests[0]!.prompt).toContain("agent.plan.done");
@@ -225,7 +396,7 @@ describe("agent.plan on the step path", () => {
   });
 
   // Parity: identical machine + scripted decide, driven via runAgent AND via
-  // the step loop, must land on identical final output.
+  // the thin loop, must land on identical final output.
   const scenarios: { name: string; script: ChosenEvent[] }[] = [
     {
       name: "stop-event ends the plan (NOTHING)",
@@ -256,21 +427,16 @@ describe("agent.plan on the step path", () => {
       const viaRun = await runAgent(createTodoAgent(), {
         executors: executors(scriptedDecide(script).decide),
       });
-      const viaSteps = await runViaSteps(createTodoAgent(), scriptedDecide(script).decide);
+      const viaLoop = await runViaEffects(createTodoAgent(), scriptedDecide(script).decide);
 
       expect(viaRun.status).toBe("done");
       if (viaRun.status !== "done") throw new Error("expected done");
-      expect(viaSteps.snapshot.output).toEqual(viaRun.output);
+      expect(viaLoop.output).toEqual(viaRun.output);
     });
   }
 
   test("parity: guard-rejected step retries with rejected-by-guard feedback", async () => {
     // First choice toggles a missing index (guard rejects → retry), then recovers.
-    const script: ChosenEvent[] = [
-      { type: "ADD", title: "one" },
-      { type: "TOGGLE", id: 9 }, // rejected by guard
-      { type: "NOTHING" },
-    ];
     const buildDecide = () => {
       let call = 0;
       const decide: AgentDecisionExecutor = async () => {
@@ -281,15 +447,14 @@ describe("agent.plan on the step path", () => {
       };
       return decide;
     };
-    void script;
 
     const viaRun = await runAgent(createTodoAgent(), { executors: executors(buildDecide()) });
-    const viaSteps = await runViaSteps(createTodoAgent(), buildDecide());
+    const viaLoop = await runViaEffects(createTodoAgent(), buildDecide());
 
     expect(viaRun.status).toBe("done");
     if (viaRun.status !== "done") throw new Error("expected done");
-    expect(viaSteps.snapshot.output).toEqual(viaRun.output);
-    expect(viaSteps.snapshot.output).toMatchObject({ titles: ["one"], stopped: "stop-event" });
+    expect(viaLoop.output).toEqual(viaRun.output);
+    expect(viaLoop.output).toMatchObject({ titles: ["one"], stopped: "stop-event" });
   });
 
   test("parity: no-legal-events terminates before any model call", async () => {
@@ -301,24 +466,17 @@ describe("agent.plan on the step path", () => {
     };
 
     const viaRun = await runAgent(createDeadEndAgent(), { executors: executors(decide) });
-    const settled = await (async () => {
-      let step = initialAgentStep(machine);
-      while (!step.done) {
-        step = await resolveAgentRequests(machine, step, executors(decide));
-      }
-      return step;
-    })();
+    const settled = await runViaEffects(machine, decide);
 
     expect(viaRun.status).toBe("done");
     if (viaRun.status !== "done") throw new Error("expected done");
-    expect(settled.snapshot.output).toEqual({ stopped: "no-legal-events" });
+    expect(settled.output).toEqual({ stopped: "no-legal-events" });
     expect(viaRun.output).toEqual({ stopped: "no-legal-events" });
     // No decision was ever requested on either path.
     expect(calls).toBe(0);
   });
 
-  test("mid-plan snapshot survives a JSON round-trip and finishes identically", async () => {
-    const machine = createTodoAgent();
+  test("mid-plan journal survives a JSON round-trip and finishes identically", async () => {
     const script: ChosenEvent[] = [
       { type: "ADD", title: "milk" },
       { type: "ADD", title: "eggs" },
@@ -327,33 +485,25 @@ describe("agent.plan on the step path", () => {
     ];
 
     // Baseline: run straight through with no persistence.
-    const baseline = await runViaSteps(createTodoAgent(), scriptedDecide(script).decide);
+    const baseline = await runViaEffects(createTodoAgent(), scriptedDecide(script).decide);
 
-    // Persisting host: after EACH event, serialize the step to JSON via
-    // machine.getPersistedSnapshot, then reload from that JSON before continuing.
+    // Persisting host: after EACH journal append, serialize the ENTIRE journal
+    // to a JSON string and reload it in place — modeling a durable host that
+    // crashes and resumes from the persisted log between every step. The trail
+    // and frontier are both reconstructed from that log, so the run is
+    // crash-safe by construction.
+    const machine = createTodoAgent();
     const { decide } = scriptedDecide(script);
-    let step = initialAgentStep(machine);
     let reloads = 0;
-    while (!step.done) {
-      step = await resolveAgentRequests(machine, step, executors(decide));
-      if (step.done) break;
-      // Serialize → JSON string → parse → rehydrate → rebuild the step.
-      const persistedJson = JSON.stringify(machine.getPersistedSnapshot(step.snapshot as never));
-      const restored = createActor(machine, {
-        snapshot: JSON.parse(persistedJson) as never,
-      }).getSnapshot();
-      step = {
-        snapshot: restored,
-        actions: [],
-        requests: getAgentRequests(machine, [], restored),
-        done: restored.status === "done",
-      } as typeof step;
+    const settled = await runViaEffects(machine, decide, (entries) => {
+      const round = JSON.parse(JSON.stringify(entries)) as EventObject[];
+      entries.splice(0, entries.length, ...round);
       reloads += 1;
-    }
+    });
 
     expect(reloads).toBeGreaterThan(0);
-    expect(step.snapshot.output).toEqual(baseline.snapshot.output);
-    expect(step.snapshot.output).toMatchObject({
+    expect(settled.output).toEqual(baseline.output);
+    expect(settled.output).toMatchObject({
       titles: ["milk", "eggs", "bread"],
       stopped: "stop-event",
       steps: 4,
@@ -361,13 +511,20 @@ describe("agent.plan on the step path", () => {
   });
 });
 
-describe("resolveAgentRequests concurrency", () => {
+describe("thin loop: concurrent text effects (host responsibility)", () => {
+  // The old `resolveAgentRequests` resolved a step's parallel text requests with
+  // `Promise.all` and applied outputs in request-array order. That concurrency
+  // is now the host's to write: a frontier surfaces one `text` effect per
+  // parallel region, and a host that wants them concurrent runs `Promise.all`
+  // over the effect list and folds the outputs in effect-array order. These
+  // tests re-pin those two guarantees against exactly that host recipe.
+
   // Two parallel regions, each invoking a text request, then joining.
   function createParallelTextAgent() {
     const agent = setupAgent({
       schemas: createAgentSchemas({
         // `log` records apply ORDER (each region appends on its own onDone), so
-        // the request-array-order guarantee is directly observable.
+        // the effect-array-order guarantee is directly observable.
         context: z.object({ log: z.array(z.string()) }),
         output: z.object({ log: z.array(z.string()) }),
       }),
@@ -426,10 +583,25 @@ describe("resolveAgentRequests concurrency", () => {
     });
   }
 
-  test("starts both executors before either output applies; outputs apply in declared order", async () => {
+  // Resolve a `text` effect via the public `executeAgentRequest` resolver.
+  function resolveText(effect: Extract<import("./steps/index.js").AgentEffect, { kind: "text" }>) {
+    return (executors: Partial<AgentRequestExecutors>) =>
+      executeAgentRequest(
+        {
+          kind: "text",
+          id: effect.requestId,
+          src: effect.request.name ?? "",
+          input: effect.request,
+          tools: effect.request.tools ?? {},
+          events: [],
+        },
+        executors,
+      );
+  }
+
+  test("starts both executors before either output applies; outputs apply in effect order", async () => {
     const machine = createParallelTextAgent();
     const started: string[] = [];
-    // Deferred promises so we can observe both executors starting before any resolves.
     let releaseA!: () => void;
     let releaseB!: () => void;
     const gateA = new Promise<void>((r) => (releaseA = r));
@@ -442,32 +614,41 @@ describe("resolveAgentRequests concurrency", () => {
       return { output: id };
     };
 
-    let step = initialAgentStep(machine);
-    // writeA precedes writeB in the request array.
-    expect(step.requests.map((r) => r.id)).toEqual(["writeA", "writeB"]);
+    const entries: EventObject[] = [initEntry(undefined).event];
+    let [snapshot, actions] = initialTransition(machine, undefined);
+    const effects = getAgentEffects(machine, snapshot as AnyMachineSnapshot, actions, {
+      history: entries,
+    });
+    const textEffects = effects.filter((effect) => effect.kind === "text");
+    // writeA precedes writeB in the frontier's effect array (document order).
+    expect(textEffects.map((effect) => (effect as any).request.prompt)).toEqual(["a", "b"]);
 
-    const pending = resolveAgentRequests(machine, step, { generateText });
-    // Give both executors a tick to start.
+    // The host resolves them concurrently.
+    const pending = Promise.all(
+      textEffects.map((effect) => resolveText(effect as any)({ generateText })),
+    );
     await new Promise((r) => setTimeout(r, 0));
     // Both executors started BEFORE either output applied.
     expect(started.sort()).toEqual(["A", "B"]);
 
     // Release in REVERSE completion order; outputs must still apply in
-    // request-array order (A before B).
+    // effect-array order (A before B).
     releaseB();
     releaseA();
-    step = await pending;
+    const outputs = await pending;
+    for (let index = 0; index < textEffects.length; index++) {
+      const done = (textEffects[index] as any).toDoneEvent(outputs[index]);
+      entries.push(done);
+      [snapshot, actions] = transition(machine, snapshot, done as never);
+    }
 
-    // Applied in declared order regardless of which model call finished first.
-    expect(step.snapshot.context.log).toEqual(["A", "B"]);
+    // Applied in effect-array order regardless of which model call finished first.
+    expect((snapshot as any).context.log).toEqual(["A", "B"]);
   });
 
   test("both region executors run before the first output applies (concurrent by default)", async () => {
     const machine = createParallelTextAgent();
     const started: string[] = [];
-    // Hold the FIRST region's executor open; if resolution were sequential the
-    // second executor could not start. Under the default concurrent semantics
-    // both start immediately.
     let releaseFirst!: () => void;
     const gate = new Promise<void>((r) => (releaseFirst = r));
 
@@ -481,8 +662,16 @@ describe("resolveAgentRequests concurrency", () => {
       return { output: `text-${id}` };
     };
 
-    const step = initialAgentStep(machine);
-    const pending = resolveAgentRequests(machine, step, { generateText });
+    const entries: EventObject[] = [initEntry(undefined).event];
+    const [snapshot, actions] = initialTransition(machine, undefined);
+    const effects = getAgentEffects(machine, snapshot as AnyMachineSnapshot, actions, {
+      history: entries,
+    });
+    const textEffects = effects.filter((effect) => effect.kind === "text");
+
+    const pending = Promise.all(
+      textEffects.map((effect) => resolveText(effect as any)({ generateText })),
+    );
     await new Promise((r) => setTimeout(r, 0));
     // Concurrent: BOTH executors started even though the first is still open.
     expect(started.sort()).toEqual(["A", "B"]);

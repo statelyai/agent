@@ -1,0 +1,20 @@
+{
+  "name": "review-tool-calls",
+  "title": "Review Tool Calls",
+  "kind": "agent-workflow",
+  "origin": {
+    "type": "langgraph",
+    "source": "LangGraph review-tool-calls human-in-the-loop how-to",
+    "url": "https://langchain-ai.github.io/langgraph/how-tos/human_in_the_loop/review-tool-calls/"
+  },
+  "comparison": {
+    "targets": [
+      "LangGraph"
+    ],
+    "purpose": "LangGraph's interrupt() over a proposed tool call plus Command(resume={...}) to approve, edit-before-run, or reject-with-feedback, here as a first-class idle `reviewing` state resumed by typed APPROVE / EDIT / REJECT events."
+  },
+  "starters": [
+    "Refund me $60 for the late delivery on order #8891.",
+    "I want my money back for the subscription I never used."
+  ]
+}

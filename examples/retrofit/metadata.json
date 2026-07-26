@@ -9,5 +9,9 @@
   "comparison": {
     "targets": ["hand-rolled loop"],
     "purpose": "before.ts is a genuinely tangled support-ticket agent built on raw AI SDK generateText: a while(true) loop, phase strings + boolean flags, nested if/else tool dispatch, an inline retry/backoff wrapper, a $100 refund limit as an `if`, and a human-approval pause faked with a { pending } sentinel + resume closure. step1/step2/step3 walk the refactor (phases → states, if/else → agent.decide + guard, sentinel → idle state), each shippable with the same observable behavior. index.ts is the final form; index.test.ts uses simulateAgent to prove the refactor preserved behavior on the happy and escalation paths."
-  }
+  },
+  "starters": [
+    "My order arrived smashed and I want a refund for the $45 mug.",
+    "I was charged twice for order ORD-1234 — please fix this."
+  ]
 }

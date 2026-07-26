@@ -139,34 +139,53 @@ At run time, `runAgent` walks the machine, binds each `agent.*` / text / decisio
 
 The machine can be a **next-step decider** instead of a runner: you own the loop, the machine tells you what to do next. This is what durable hosts (Temporal, queues, Workflows) want: one model call per checkpoint, everything resumable.
 
+The host owns the loop over an append-only journal of external inputs. At each frontier `getAgentEffects` lowers the machine's pending work into an ordered `AgentEffect[]`; the host resolves one, journals the completion, and folds it back in with xstate's pure `transition`.
+
 ```ts
-// prettier-ignore
-import { executeAgentRequest, initialAgentStep, resolveAgentStep, resolveDecision, transitionAgentStep } from "@statelyai/agent/steps";
+import { initialTransition, transition, type AnyMachineSnapshot } from "xstate";
+import { executeAgentRequest, getAgentEffects, initEntry, resolveDecision } from "@statelyai/agent/steps";
 
 const executors = createAiSdkExecutors({ models });
-let step = initialAgentStep(haikuMachine, { topic: "state machines" });
+const input = { topic: "state machines" };
+const entries = [initEntry(input).event]; // reserved @agent.init entry; log is self-contained
+let [snapshot, actions] = initialTransition(haikuMachine, input);
 
-while (!step.done) {
-  for (const request of step.requests) {
-    if (request.kind === "text") {
-      // "produce a value" -> apply the output as the invoke's done event
-      const output = await executeAgentRequest(request, executors);
-      step = resolveAgentStep(haikuMachine, step, request, output);
-    } else {
-      // "choose an event": request carries the snapshot-legal candidates;
-      // resolveDecision validates + retries the choice.
-      const event = await resolveDecision(request, executors.decide, {
-        canTake: (e) => step.snapshot.can(e),
+while (snapshot.status === "active") {
+  const effects = getAgentEffects(haikuMachine, snapshot as AnyMachineSnapshot, actions, {
+    history: entries,
+  });
+  let next;
+  for (const effect of effects) {
+    if (effect.kind === "execute") {
+      effect.exec(); // fire-and-forget action; never journaled
+      continue;
+    }
+    if (effect.kind === "text") {
+      // "produce a value" -> journal the invoke's done event
+      const output = await executeAgentRequest(
+        { kind: "text", id: effect.requestId, src: "", input: effect.request, tools: effect.request.tools ?? {}, events: [] },
+        executors,
+      );
+      next = effect.toDoneEvent(output);
+      break;
+    }
+    if (effect.kind === "decision") {
+      // "choose an event": snapshot-legal candidates, validated + retried
+      next = await resolveDecision(effect.request, executors.decide, {
+        canTake: (e) => snapshot.can(e as never),
       });
-      step = transitionAgentStep(haikuMachine, step, event);
+      break;
     }
   }
+  if (!next) break; // idle: persist `entries`, resume later via `replay`
+  entries.push(next);
+  [snapshot, actions] = transition(haikuMachine, snapshot, next as never);
 }
 
-console.log(step.snapshot.output.haiku);
+console.log((snapshot.output as { haiku: string }).haiku);
 ```
 
-Same machine, same executors, zero changes to the definition. `runAgent` **is** this loop with an actor and idle-detection wrapped around it. Reach for the step path when you need to persist between calls, inject a human, or run inside someone else's scheduler.
+Same machine, same executors, zero changes to the definition. `runAgent` **is** this loop with an actor and idle-detection wrapped around it. Reach for the step path when you need to persist between calls, inject a human, or run inside someone else's scheduler. See [The step path](steps.md).
 
 ## Mapping prompts in from outside
 

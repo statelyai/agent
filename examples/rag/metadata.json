@@ -10,5 +10,13 @@
   "comparison": {
     "targets": ["LangGraph", "Burr"],
     "purpose": "Retrieval as a typed plain actor (honest keyword scoring over a sample corpus), a grounded answer request, and conversational memory accumulating in machine context."
-  }
+  },
+  "starters": [
+    {
+      "question": "What do the documents say about retrieval quality?"
+    },
+    {
+      "question": "Summarize the tradeoffs the corpus mentions about caching."
+    }
+  ]
 }

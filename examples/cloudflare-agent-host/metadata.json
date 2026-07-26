@@ -11,5 +11,6 @@
   "comparison": {
     "targets": ["Cloudflare Agents", "durable agent runtimes"],
     "purpose": "Shows persisted XState actor snapshots inside a Cloudflare Agent host."
-  }
+  },
+  "starters": []
 }

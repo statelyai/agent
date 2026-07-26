@@ -1,0 +1,20 @@
+{
+  "name": "hierarchical-teams",
+  "title": "Hierarchical Agent Teams",
+  "kind": "multi-agent",
+  "origin": {
+    "type": "langgraph",
+    "source": "LangGraph hierarchical agent teams tutorial",
+    "url": "https://github.com/langchain-ai/langgraph/blob/23961cff61a42b52525f3b20b4094d8d2fba1744/docs/docs/tutorials/multi_agent/hierarchical_agent_teams.ipynb"
+  },
+  "comparison": {
+    "targets": [
+      "LangGraph hierarchical teams"
+    ],
+    "purpose": "LLM supervisors that dynamically route among workers and loop, at two levels: a research-team supervisor (agent.decide) routes SEARCH/SCRAPE/FINISH over a bounded worker budget, under a coordinator supervisor that invokes the team machines through typed boundaries and can send one bounded revision round back to research."
+  },
+  "starters": [
+    "The impact of RISC-V on the data center market.",
+    "How tokenization affects LLM reasoning on math problems."
+  ]
+}

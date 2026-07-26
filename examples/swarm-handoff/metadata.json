@@ -10,5 +10,13 @@
   "comparison": {
     "targets": ["swarm", "handoff"],
     "purpose": "An active-agent conversation hands off between two specialists; the active agent persists across a snapshot round-trip."
-  }
+  },
+  "starters": [
+    {
+      "message": "I want a 3-day trip to Lisbon."
+    },
+    {
+      "message": "Find me flights and a hotel for next weekend."
+    }
+  ]
 }

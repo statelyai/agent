@@ -10,5 +10,15 @@
   "comparison": {
     "targets": ["LangGraph", "Burr", "Flowise"],
     "purpose": "Two lessons in one: a combat agent whose decision `allowedEvents` are computed from context (HEAL only when low HP), and a rock-paper-scissors agent that reduces its own round events into a context-held history log the decide prompt reads back, so the model can only win by using the saved event history."
-  }
+  },
+  "starters": [
+    {
+      "playerHp": 20,
+      "enemyHp": 15
+    },
+    {
+      "playerHp": 6,
+      "enemyHp": 15
+    }
+  ]
 }

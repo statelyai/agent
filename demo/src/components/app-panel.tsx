@@ -1,6 +1,9 @@
-import { ArrowRight, Bot, Check, CircleAlert, Eye, LoaderCircle, RefreshCcw, UserRound } from "lucide-react";
+import type { ReactNode } from "react";
+import { ArrowRight, Bot, Check, CircleAlert, LoaderCircle, RefreshCcw, UserRound } from "lucide-react";
+import { Streamdown } from "streamdown";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Button } from "@/components/ui/button";
+import { EventActions, StartFormCard } from "@/components/event-actions";
 import { Message, MessageAvatar, MessageContent } from "@/components/ui/message";
 import {
   MessageScroller,
@@ -9,46 +12,52 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller";
-import type { ScenarioResult } from "@/lib/agent-runner";
-import type { Scenario, ScenarioId } from "@/lib/scenarios";
+import type { TraceEntry } from "@/lib/agent-runner";
+import type { ChatIdle, JsonObject } from "@/lib/machine-ui";
 import { traceSteps, type TraceStep } from "@/lib/trace-view";
+
+/** The common shape of a settled run, scenario or library example alike. */
+export type ChatTurnResult = {
+  mode: string;
+  model?: string;
+  status: "done" | "idle" | "error";
+  trace: TraceEntry[];
+  response: string;
+};
 
 export type Turn = {
   id: number;
   input: string;
   role: "user" | "action";
-  status: "loading" | "ready" | "error";
-  result?: ScenarioResult;
+  /** "ignored": free text the machine's current state doesn't consume. */
+  status: "loading" | "ready" | "error" | "ignored";
+  result?: ChatTurnResult;
   error?: string;
 };
 
-export type PendingIdle = {
-  scenarioId: Scenario["id"];
-  acceptedEvents: string[];
-  prompt?: string;
+export type TextPolicy = {
+  /** Text entry hidden entirely when false (note explains why). */
+  visible: boolean;
+  placeholder: string;
+  submitLabel: string;
+  /** Shown under the composer (e.g. "needs OPENAI_API_KEY"). */
+  note?: string;
 };
 
 type AppPanelProps = {
-  scenario: Scenario;
+  title: string;
+  /** Empty-state content shown before the first turn. */
+  intro: ReactNode;
   turns: Turn[];
-  pendingIdle: PendingIdle | null;
+  pendingIdle: ChatIdle | null;
+  /** Structured-input start card (machines whose input isn't a single prompt). */
+  startForm: { schema: JsonObject; onStart: (values: Record<string, unknown>) => void } | null;
   input: string;
   onInputChange: (value: string) => void;
   onSubmit: (value: string) => void;
-  onResume: (event: { type: string; [key: string]: unknown }) => void;
+  onSendEvent: (event: { type: string; [key: string]: unknown }) => void;
   onRestart: () => void;
-};
-
-/** Presentational "what to watch for" hints per scenario, keyed off the id. */
-const watchHints: Record<ScenarioId, string> = {
-  refund: "The amount is over $100, so the machine routes to human approval — the model never gets to auto-refund.",
-  approval: "The run pauses in an idle state. Nothing publishes until you approve — that's the human in the loop.",
-  routing: "The model returns one typed event; watch the statechart jump to exactly one branch.",
-  research: "Two regions light up at once, then converge — the machine waits for both before synthesizing.",
-  pipeline: "Three states run in order. Each has its own output and its own failure boundary.",
-  retry: "Watch the retry counter and the switch to the fallback model when the primary call fails.",
-  tools: "The loop is capped by the machine — after the budget, it's forced to answer instead of calling more tools.",
-  reflection: "Draft → score → revise repeats until the score clears the bar or the budget runs out.",
+  textPolicy: TextPolicy;
 };
 
 /** The event token: `EVENT_TYPE  →  targetState · payload`, styled like a trace-log line. */
@@ -82,7 +91,7 @@ function PendingRow() {
   );
 }
 
-function RunMode({ result }: { result: ScenarioResult }) {
+function RunMode({ result }: { result: ChatTurnResult }) {
   const script = result.mode === "script";
   return (
     <span className="run-mode" data-script={script || undefined}>
@@ -109,7 +118,7 @@ function UserMessage({ text, role }: { text: string; role: Turn["role"] }) {
   );
 }
 
-function AssistantMessage({ result }: { result: ScenarioResult }) {
+function AssistantMessage({ result }: { result: ChatTurnResult }) {
   return (
     <Message>
       <MessageAvatar className="message-avatar" aria-hidden="true">
@@ -117,7 +126,9 @@ function AssistantMessage({ result }: { result: ScenarioResult }) {
       </MessageAvatar>
       <MessageContent>
         <Bubble variant="ghost">
-          <BubbleContent>{result.response}</BubbleContent>
+          <BubbleContent>
+            <Streamdown className="assistant-markdown">{result.response}</Streamdown>
+          </BubbleContent>
         </Bubble>
         <RunMode result={result} />
       </MessageContent>
@@ -125,60 +136,29 @@ function AssistantMessage({ result }: { result: ScenarioResult }) {
   );
 }
 
-function ApprovalCard({ pending, onResume }: { pending: PendingIdle; onResume: AppPanelProps["onResume"] }) {
-  const events = new Set(pending.acceptedEvents);
-  const isRefund = events.has("DENY");
-  return (
-    <div className="approval-card" role="group" aria-label="Human decision required">
-      <div className="approval-card__ribbon">
-        <UserRound size={13} aria-hidden="true" />
-        Human decision required
-      </div>
-      <div className="approval-card__body">
-        <strong className="approval-card__title">
-          {isRefund ? "Approve this refund?" : "Review before publishing"}
-        </strong>
-        <p>{pending.prompt ?? "This state is waiting for a human decision before the machine can continue."}</p>
-        <div className="approval-card__actions">
-          {events.has("APPROVE") ? (
-            <Button variant="primary" size="sm" onClick={() => onResume({ type: "APPROVE" })}>
-              <Check size={14} />
-              {isRefund ? "Approve refund" : "Approve & publish"}
-            </Button>
-          ) : null}
-          {events.has("DENY") ? (
-            <Button size="sm" onClick={() => onResume({ type: "DENY" })}>
-              Deny
-            </Button>
-          ) : null}
-          {events.has("REJECT") ? (
-            <Button size="sm" onClick={() => onResume({ type: "REJECT", reason: "Please revise the draft." })}>
-              Request changes
-            </Button>
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
-}
-
+/**
+ * The unified chat panel. Works for any machine: free text starts a run or
+ * maps to the idle state's text event; accepted events render as buttons via
+ * `EventActions` (with schema-generated payload dialogs); out-of-place
+ * messages are kept in the log but marked ignored.
+ */
 export function AppPanel({
-  scenario,
+  title,
+  intro,
   turns,
   pendingIdle,
+  startForm,
   input,
   onInputChange,
   onSubmit,
-  onResume,
+  onSendEvent,
   onRestart,
+  textPolicy,
 }: AppPanelProps) {
   const loading = turns.some((turn) => turn.status === "loading");
   const started = turns.length > 0;
   const lastReady = [...turns].reverse().find((turn) => turn.status === "ready")?.result;
-  // Approval scenario stays open for free-text interpretation while idle.
-  const interpretMode = pendingIdle?.scenarioId === "approval";
-  const canEnterText = (!started || interpretMode) && !loading;
-  const finished = !pendingIdle && !loading && started && lastReady?.status !== "idle";
+  const finished = !pendingIdle && !loading && started && lastReady && lastReady.status !== "idle";
 
   const status: "ready" | "running" | "awaiting" | "done" = pendingIdle
     ? "awaiting"
@@ -188,24 +168,19 @@ export function AppPanel({
         ? "done"
         : "ready";
   const stateLabel = pendingIdle
-    ? "idle · awaiting human"
+    ? "idle · awaiting input"
     : loading
       ? "running"
       : lastReady
         ? lastReady.status
         : "ready";
 
-  const placeholder = interpretMode
-    ? "Say “looks good” or “that’s no good”…"
-    : scenario.placeholder;
-  const submitLabel = interpretMode ? "Interpret review" : scenario.startLabel;
-
   return (
     <section className="work-panel app-panel" aria-labelledby="app-panel-title">
       <div className="panel-heading">
         <div>
           <span className="panel-kicker">Running app</span>
-          <h2 id="app-panel-title">{scenario.name}</h2>
+          <h2 id="app-panel-title">{title}</h2>
         </div>
         <span className="state-pill" data-status={status}>
           <span className="state-pill__dot" aria-hidden="true" />
@@ -217,22 +192,11 @@ export function AppPanel({
         <MessageScroller>
           <MessageScrollerViewport aria-label="Agent conversation">
             <MessageScrollerContent className="chat-content" aria-live="polite">
-              {!started ? (
-                <MessageScrollerItem messageId="intro">
-                  <div className="empty-state">
-                    <div className="empty-state__badge" aria-hidden="true">
-                      <Bot size={18} />
-                    </div>
-                    <span className="empty-state__eyebrow">{scenario.eyebrow}</span>
-                    <p className="empty-state__lead">{scenario.description}</p>
-                    <div className="empty-state__watch">
-                      <span className="empty-state__watch-label">
-                        <Eye size={13} aria-hidden="true" />
-                        Watch for
-                      </span>
-                      <p>{watchHints[scenario.id]}</p>
-                    </div>
-                  </div>
+              {!started ? <MessageScrollerItem messageId="intro">{intro}</MessageScrollerItem> : null}
+
+              {!started && startForm ? (
+                <MessageScrollerItem messageId="start-form">
+                  <StartFormCard schema={startForm.schema} onStart={startForm.onStart} />
                 </MessageScrollerItem>
               ) : null}
 
@@ -241,6 +205,11 @@ export function AppPanel({
                   <div className="conversation-turn">
                     <UserMessage text={turn.input} role={turn.role} />
                     {turn.status === "loading" ? <PendingRow /> : null}
+                    {turn.status === "ignored" ? (
+                      <p className="ignored-note" role="status">
+                        Not an accepted event in the current state — the machine ignored it.
+                      </p>
+                    ) : null}
                     {turn.status === "ready" && turn.result ? (
                       <>
                         {traceSteps(turn.result.trace).length ? (
@@ -262,9 +231,9 @@ export function AppPanel({
                 </MessageScrollerItem>
               ))}
 
-              {pendingIdle ? (
-                <MessageScrollerItem messageId="approval">
-                  <ApprovalCard pending={pendingIdle} onResume={onResume} />
+              {pendingIdle && !loading ? (
+                <MessageScrollerItem messageId="event-actions">
+                  <EventActions idle={pendingIdle} onSendEvent={onSendEvent} />
                 </MessageScrollerItem>
               ) : null}
             </MessageScrollerContent>
@@ -279,7 +248,7 @@ export function AppPanel({
             Run again
           </Button>
         </div>
-      ) : canEnterText ? (
+      ) : textPolicy.visible ? (
         <form
           className="prompt-input"
           onSubmit={(event) => {
@@ -293,16 +262,17 @@ export function AppPanel({
             rows={2}
             value={input}
             onChange={(event) => onInputChange(event.target.value)}
-            placeholder={placeholder}
+            placeholder={textPolicy.placeholder}
             maxLength={2000}
             disabled={loading}
             aria-label="Message"
           />
           <Button type="submit" variant="primary" size="sm" disabled={!input.trim() || loading}>
-            {loading ? "Running…" : submitLabel}
+            {loading ? "Running…" : textPolicy.submitLabel}
           </Button>
         </form>
       ) : null}
+      {textPolicy.note ? <p className="composer-note">{textPolicy.note}</p> : null}
     </section>
   );
 }

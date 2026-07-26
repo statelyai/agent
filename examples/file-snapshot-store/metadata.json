@@ -10,5 +10,9 @@
   "comparison": {
     "targets": [],
     "purpose": "Durable HITL checkpoints in a file-backed snapshot store: each idle settle writes JSON to disk and a fresh runAgent call resumes across multiple turns."
-  }
+  },
+  "starters": [
+    "Launch of our new snapshot store.",
+    "Q3 roadmap highlights for the platform team."
+  ]
 }

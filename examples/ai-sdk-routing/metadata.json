@@ -10,5 +10,9 @@
   "comparison": {
     "targets": ["Vercel AI SDK", "routing"],
     "purpose": "Ports AI SDK routing into an explicit XState machine."
-  }
+  },
+  "starters": [
+    "I want a refund for order #4821, it arrived broken.",
+    "The app crashes every time I tap Sync. Help!"
+  ]
 }

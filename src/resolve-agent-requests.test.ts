@@ -1,16 +1,106 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
+import { initialTransition, transition, type AnyMachineSnapshot, type EventObject } from "xstate";
 import { createAgentSchemas, createTextLogic, setupAgent } from "./index.js";
-import { initialAgentStep, resolveAgentRequests } from "./steps/index.js";
+import {
+  executeAgentRequest,
+  getAgentEffects,
+  initEntry,
+  resolveDecision,
+  type AgentEffect,
+} from "./steps/index.js";
 import type {
   AgentDecisionExecutor,
   AgentRequestExecutor,
   AgentRequestExecutors,
 } from "./index.js";
 
+// These tests once pinned the `resolveAgentRequests` step-envelope helper. That
+// helper is gone from the public surface; the per-frontier dispatch it
+// collapsed is now the host's own thin loop over `getAgentEffects`. The driver
+// below IS that loop — `text` effects resolve with `executeAgentRequest`,
+// `decision` effects with `resolveDecision` (guard-gated by `snapshot.can`) —
+// and the same semantics are re-pinned against it.
+//
+// What moved to host responsibility (and is therefore no longer a src-level
+// unit here): concurrent resolution of a step's parallel text requests. The
+// old helper ran them with `Promise.all` and applied outputs in request-array
+// order; the thin loop resolves one frontier effect per fold (deterministic by
+// construction), and a host that wants genuine concurrency writes its own
+// `Promise.race`/`Promise.all` over the effect list. See
+// `src/effects.test.ts` for the ordering/occurrence guarantees the fold gives.
+
+async function resolveEffect(
+  effect: AgentEffect,
+  snapshot: AnyMachineSnapshot,
+  executors: Partial<AgentRequestExecutors>,
+): Promise<EventObject | undefined> {
+  if (effect.kind === "execute") {
+    effect.exec();
+    return undefined;
+  }
+  if (effect.kind === "text") {
+    const output = await executeAgentRequest(
+      {
+        kind: "text",
+        id: effect.requestId,
+        src: effect.request.name ?? "",
+        input: effect.request,
+        tools: effect.request.tools ?? {},
+        events: [],
+      },
+      executors,
+    );
+    return effect.toDoneEvent(output);
+  }
+  if (effect.kind === "decision") {
+    if (!executors.decide) {
+      throw new Error(
+        `this frontier's decision request '${effect.request.id}' needs a 'decide' executor but none was provided.`,
+      );
+    }
+    return resolveDecision(effect.request, executors.decide, {
+      canTake: (event) => snapshot.can(event as never),
+    });
+  }
+  throw new Error(`unexpected effect kind '${effect.kind}'`);
+}
+
+// Drives a machine to completion through the thin loop, returning the final
+// snapshot.
+async function runViaEffects(
+  machine: any,
+  input: unknown,
+  executors: Partial<AgentRequestExecutors>,
+): Promise<AnyMachineSnapshot> {
+  const entries: EventObject[] = [initEntry(input).event];
+  let [snapshot, actions] = initialTransition(machine, input as never);
+
+  while ((snapshot as AnyMachineSnapshot).status === "active") {
+    const effects = getAgentEffects(machine, snapshot as AnyMachineSnapshot, actions, {
+      history: entries,
+    });
+    let next: EventObject | undefined;
+    for (const effect of effects) {
+      const event = await resolveEffect(effect, snapshot as AnyMachineSnapshot, executors);
+      if (event) {
+        next = event;
+        break;
+      }
+    }
+    if (!next) {
+      break;
+    }
+    entries.push(next);
+    [snapshot, actions] = transition(machine, snapshot, next as never);
+  }
+
+  return snapshot as AnyMachineSnapshot;
+}
+
 // Minimal two-request agent: first a decision (pick GO or STOP), then — on GO
-// — a text request that produces a summary. Exercises both request kinds
-// through the single-line step loop `resolveAgentRequests` collapses to.
+// — a text request that produces a summary. Exercises both effect kinds
+// through the single thin loop above.
 function createTinyAgent() {
   const agent = setupAgent({
     schemas: createAgentSchemas({
@@ -96,17 +186,14 @@ function mockExecutors(opts: { move: "GO" | "STOP"; summary?: string }): {
   return { executors: { generateText, decide }, calls };
 }
 
-describe("resolveAgentRequests", () => {
-  test("two-line loop drives decision → text to done with correct outputs", async () => {
+describe("thin loop: decision + text effects", () => {
+  test("drives decision → text to done with correct outputs", async () => {
     const machine = createTinyAgent();
     const { executors, calls } = mockExecutors({ move: "GO", summary: "A fine run." });
 
-    let step = initialAgentStep(machine);
-    while (!step.done) {
-      step = await resolveAgentRequests(machine, step, executors);
-    }
+    const snapshot = await runViaEffects(machine, undefined, executors);
 
-    expect(step.snapshot.output).toEqual({ outcome: "done", note: "A fine run." });
+    expect(snapshot.output).toEqual({ outcome: "done", note: "A fine run." });
     // Decision resolved first, then the text request, in order.
     expect(calls).toEqual(["decide", "summarize"]);
   });
@@ -115,24 +202,20 @@ describe("resolveAgentRequests", () => {
     const machine = createTinyAgent();
     const { executors, calls } = mockExecutors({ move: "STOP" });
 
-    let step = initialAgentStep(machine);
-    while (!step.done) {
-      step = await resolveAgentRequests(machine, step, executors);
-    }
+    const snapshot = await runViaEffects(machine, undefined, executors);
 
-    expect(step.snapshot.output).toEqual({ outcome: "stopped", note: "no run" });
+    expect(snapshot.output).toEqual({ outcome: "stopped", note: "no run" });
     expect(calls).toEqual(["decide"]);
   });
 
   test("throws a clear error when the decide executor is missing", async () => {
     const machine = createTinyAgent();
     const { executors } = mockExecutors({ move: "GO" });
-    const step = initialAgentStep(machine);
 
     await expect(
-      resolveAgentRequests(machine, step, { generateText: executors.generateText }),
+      runViaEffects(machine, undefined, { generateText: executors.generateText }),
     ).rejects.toThrow(
-      /this step's decision request '.+' needs a 'decide' executor but none was provided\./,
+      /this frontier's decision request '.+' needs a 'decide' executor but none was provided\./,
     );
   });
 
@@ -140,82 +223,25 @@ describe("resolveAgentRequests", () => {
     const machine = createTinyAgent();
     const { executors } = mockExecutors({ move: "GO" });
 
-    // Drive past the decision to reach the text request, then drop generateText.
-    let step = initialAgentStep(machine);
-    step = await resolveAgentRequests(machine, step, executors);
-    expect(step.requests[0]?.kind).toBe("text");
-
-    await expect(resolveAgentRequests(machine, step, { decide: executors.decide })).rejects.toThrow(
-      /this step's text request '.+' needs a 'generateText' executor but none was provided\./,
+    // Drive past the decision to reach the text effect, then drop generateText:
+    // executeAgentRequest surfaces the missing-executor error per kind.
+    await expect(runViaEffects(machine, undefined, { decide: executors.decide })).rejects.toThrow(
+      /text request '.*' needs a 'generateText' executor but none was provided\./,
     );
   });
 
-  test("throws a clear error when the streamText executor is missing", async () => {
-    const machine = createStreamAgent();
-    let step = initialAgentStep(machine);
-    expect(step.requests[0]?.kind).toBe("text");
+  // NOTE: the `mode: 'stream'` vs `'generate'` distinction is NOT carried on a
+  // `text` AgentEffect (it drops down to a bare AgentTextRequest), so the old
+  // "missing streamText executor" src-level assertion no longer applies — which
+  // executor a text effect needs is host-side knowledge now. `executeAgentRequest`
+  // defaults to `generateText`; a streaming host branches on its own request
+  // metadata before calling the resolver. See the report for details.
 
-    // A partial executor set (generateText only) — no cast needed.
-    await expect(
-      resolveAgentRequests(machine, step, { generateText: async () => ({ output: "x" }) }),
-    ).rejects.toThrow(
-      /this step's text request 'stream' needs a 'streamText' executor but none was provided\./,
-    );
-  });
-
-  test("a decide-only partial executor set drives a decision step with no cast, no generateText", async () => {
+  test("a decide-only executor set drives a decision-only run to done", async () => {
     const machine = createTinyAgent();
-    let step = initialAgentStep(machine);
-    // No generateText/streamText — a decision step needs only `decide`, and the
-    // Partial<AgentRequestExecutors> entry point accepts it without a cast.
-    step = await resolveAgentRequests(machine, step, {
+    const snapshot = await runViaEffects(machine, undefined, {
       decide: async () => ({ event: { type: "STOP" } }),
     });
-    while (!step.done) {
-      step = await resolveAgentRequests(machine, step, {
-        decide: async () => ({ event: { type: "STOP" } }),
-      });
-    }
-    expect(step.snapshot.output).toEqual({ outcome: "stopped", note: "no run" });
+    expect(snapshot.output).toEqual({ outcome: "stopped", note: "no run" });
   });
 });
-
-// A single-state agent whose only work is a `mode: 'stream'` text request —
-// used to pin the missing-`streamText`-executor error.
-function createStreamAgent() {
-  const agent = setupAgent({
-    schemas: createAgentSchemas({
-      context: z.object({ text: z.string().nullable() }),
-      output: z.object({ text: z.string() }),
-    }),
-    actorSources: {
-      stream: createTextLogic({
-        schemas: { input: z.object({}), output: z.string() },
-        model: "quick",
-        mode: "stream",
-        prompt: "stream something",
-      }),
-    },
-  });
-  return agent.createMachine({
-    context: () => ({ text: null }),
-    initial: "streaming",
-    states: {
-      streaming: {
-        invoke: {
-          id: "stream",
-          src: "stream",
-          input: () => ({}),
-          onDone: ({ event }) => ({
-            target: "done",
-            context: { text: event.output as string },
-          }),
-        },
-      },
-      done: {
-        type: "final",
-        output: ({ context }) => ({ text: context.text ?? "" }),
-      },
-    },
-  });
-}

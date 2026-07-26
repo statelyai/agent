@@ -10,5 +10,13 @@
   "comparison": {
     "targets": ["LangGraph", "Burr", "Flowise"],
     "purpose": "Shows the decision loop with machine-held context, guard-enforced legality, typed model aliases, answer/guess feedback classification, scoring, play-again reset, and machine-owned user prompts."
-  }
+  },
+  "starters": [
+    {
+      "questionsRemaining": 20
+    },
+    {
+      "questionsRemaining": 10
+    }
+  ]
 }

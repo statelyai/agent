@@ -10,5 +10,9 @@
   "comparison": {
     "targets": ["LangGraph Send", "map-reduce"],
     "purpose": "A planner generates N subtopics at runtime; the machine spawns one branch per subtopic via XState dynamic spawn (N not known until runtime), each branch is a live child visible in the snapshot, and a reducer composes the summaries into one digest."
-  }
+  },
+  "starters": [
+    "How does an LLM agent framework stay durable?",
+    "What makes a programming language good for beginners?"
+  ]
 }

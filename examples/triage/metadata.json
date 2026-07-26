@@ -10,5 +10,9 @@
   "comparison": {
     "targets": ["CrewAI", "LangGraph"],
     "purpose": "Shows a structured-output classification workflow as a normal XState machine."
-  }
+  },
+  "starters": [
+    "I cannot log in and my password reset email never arrives.",
+    "How do I upgrade to the annual plan?"
+  ]
 }

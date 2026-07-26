@@ -13,6 +13,8 @@ export {
   SnapshotVersionMismatchError,
   traceTransitions,
 } from "./run-agent.js";
+export { createAgentRun } from "./agent-run.js";
+export type { AgentRun } from "./agent-run.js";
 export { provideExecutors } from "./provide-executors.js";
 export type { ProvideExecutorsOptions } from "./provide-executors.js";
 export {
@@ -25,6 +27,19 @@ export {
 } from "./verify.js";
 export { getAgentMessages, getStateMeta, persistSnapshot } from "./utils.js";
 export { assistantMessage, systemMessage, toolMessage, userMessage } from "./utils.js";
+export {
+  AgentEventLogConflictError,
+  assertEventLogStoreConformance,
+  createInMemoryEventLogStore,
+} from "./event-log-store.js";
+export type { AgentEventLogStore, AgentLogEntry } from "./event-log-store.js";
+export { AGENT_INIT_EVENT_TYPE, getAgentEffects, initEntry, replay } from "./effects.js";
+export type {
+  AgentEffect,
+  GetAgentEffectsOptions,
+  ReplayOptions,
+  ReplayResult,
+} from "./effects.js";
 
 export type {
   AgentDecisionInput,

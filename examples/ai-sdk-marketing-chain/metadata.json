@@ -10,5 +10,9 @@
   "comparison": {
     "targets": ["Vercel AI SDK", "sequential processing", "chains"],
     "purpose": "Ports AI SDK marketing-copy chain into an explicit XState machine."
-  }
+  },
+  "starters": [
+    "A refillable stainless-steel bottle that keeps drinks cold for 24 hours.",
+    "An app that turns your grocery receipts into weekly recipes."
+  ]
 }

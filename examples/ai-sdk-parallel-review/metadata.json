@@ -10,5 +10,9 @@
   "comparison": {
     "targets": ["Vercel AI SDK", "parallel processing"],
     "purpose": "Ports AI SDK parallel code review into an explicit XState machine."
-  }
+  },
+  "starters": [
+    "function login(u, p) { return db.query('SELECT * FROM users WHERE u=' + u) }",
+    "const dedupe = a => a.filter((x, i) => a.indexOf(x) === i)"
+  ]
 }

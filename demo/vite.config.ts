@@ -12,6 +12,15 @@ export default defineConfig({
       "@": fileURLToPath(new URL("./src", import.meta.url)),
     },
   },
+  // The examples library lazily imports every `examples/*` module on the
+  // server. The `agents` package (cloudflare-agent-host) uses `cloudflare:`
+  // protocol imports that esbuild can't optimize — keep it external.
+  optimizeDeps: {
+    exclude: ["agents"],
+  },
+  ssr: {
+    external: ["agents"],
+  },
   plugins: [
     nitro(),
     viteTsConfigPaths({ projects: ["./tsconfig.json"] }),

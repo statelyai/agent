@@ -10,5 +10,9 @@
   "comparison": {
     "targets": ["plan-and-execute", "ReWOO"],
     "purpose": "A planner produces a typed step list, an explicit index loop gathers per-step evidence, and a solver composes the answer from the evidence map."
-  }
+  },
+  "starters": [
+    "Plan a 3-day food tour of Tokyo on a $200 budget.",
+    "Figure out how many tennis balls fit inside a school bus."
+  ]
 }

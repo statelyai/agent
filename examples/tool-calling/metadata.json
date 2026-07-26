@@ -10,5 +10,9 @@
   "comparison": {
     "targets": ["Burr", "LangGraph"],
     "purpose": "Model selects a tool via structured output; typed tool actors (calculator, unit converter, sample-data lookup) genuinely execute; progress is surfaced via onTransition; a final request formats the result."
-  }
+  },
+  "starters": [
+    "Convert 100 kilometers to miles.",
+    "What is 15% of 240?"
+  ]
 }

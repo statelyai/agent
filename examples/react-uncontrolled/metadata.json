@@ -11,5 +11,6 @@
   "comparison": {
     "targets": ["React", "@xstate/react"],
     "purpose": "Uncontrolled mode: createActor(provideExecutors(machine, executors)) drives itself, React observes snapshots and sends user events, and onChunk streams text into the UI."
-  }
+  },
+  "starters": []
 }

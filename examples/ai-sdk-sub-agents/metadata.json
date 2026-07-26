@@ -10,5 +10,6 @@
   "comparison": {
     "targets": ["Vercel AI SDK", "sub-agents", "host-owned tools"],
     "purpose": "Shows AI SDK ToolLoopAgent workers exposed as tools to a Stately Agent machine."
-  }
+  },
+  "starters": []
 }

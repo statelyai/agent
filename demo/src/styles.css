@@ -1,5 +1,6 @@
 @import "@fontsource-variable/geist";
 @import "tailwindcss";
+@source "../node_modules/streamdown/dist/*.js";
 
 @theme inline {
   --color-background: var(--background);
@@ -1354,4 +1355,322 @@ button:disabled {
   .examples-sidebar--mobile .examples-sidebar__topline .icon-button {
     display: none;
   }
+}
+
+/* ─── examples library (auto-discovered from examples/*) ─── */
+
+.examples-sidebar__panel {
+  height: calc(100% - 30px);
+}
+
+.examples-sidebar__scroll {
+  height: 100%;
+  overflow-y: auto;
+  padding-bottom: 14px;
+  scrollbar-width: thin;
+}
+
+.examples-sidebar__section {
+  display: block;
+  margin: 18px 8px 0;
+  color: var(--quiet);
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.examples-sidebar__section:first-child {
+  margin-top: 10px;
+}
+
+.example-list__empty {
+  padding: 8px 10px;
+  color: var(--quiet);
+  font-size: 12.5px;
+}
+
+.example-panel__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  align-content: start;
+  gap: 18px;
+  padding: 16px 18px 22px;
+}
+
+.example-panel__purpose {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.example-panel__loading,
+.example-panel__error {
+  margin: 0;
+  color: var(--quiet);
+  font-size: 13px;
+}
+
+.example-panel__error {
+  color: var(--danger, #b4232a);
+}
+
+.example-panel__machines {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.example-panel__machine {
+  padding: 5px 10px;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.example-panel__machine:hover {
+  color: var(--ink);
+}
+
+.example-panel__machine[data-active] {
+  color: var(--primary-ink);
+  border-color: color-mix(in oklch, var(--primary) 22%, var(--line));
+  background: var(--primary-soft);
+}
+
+.example-panel__run {
+  display: grid;
+  gap: 8px;
+}
+
+.example-panel__run .panel-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.example-panel__run pre {
+  margin: 0;
+  padding: 10px 12px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 12.5px;
+}
+
+.example-panel__run p {
+  margin: 0;
+  color: var(--quiet);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+/* ─── unified chat: event dialogs, schema forms, composer notes ─── */
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in oklch, black 32%, transparent);
+  backdrop-filter: blur(2px);
+  z-index: 60;
+}
+
+.dialog-popup {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  translate: -50% -50%;
+  width: min(420px, calc(100vw - 32px));
+  max-height: min(80vh, 560px);
+  overflow-y: auto;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-raised);
+  box-shadow: 0 18px 50px color-mix(in oklch, black 22%, transparent);
+  z-index: 61;
+}
+
+.dialog-title {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.dialog-description {
+  margin: 0 0 14px;
+  color: var(--quiet);
+  font-size: 12.5px;
+}
+
+.dialog-description code,
+.approval-card__text-hint code {
+  font-size: 11.5px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+
+.schema-form {
+  display: grid;
+  gap: 12px;
+}
+
+.schema-form__field {
+  display: grid;
+  gap: 5px;
+}
+
+.schema-form__label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.schema-form__label em {
+  color: var(--danger, #b4232a);
+  font-style: normal;
+}
+
+.schema-form__field input[type="text"],
+.schema-form__field input[type="number"],
+.schema-form__field select,
+.schema-form__field textarea {
+  width: 100%;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+}
+
+.schema-form__field textarea {
+  resize: vertical;
+}
+
+.schema-form__checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.schema-form__hint {
+  color: var(--quiet);
+  font-size: 11.5px;
+}
+
+.schema-form__error {
+  color: var(--danger, #b4232a);
+  font-size: 11.5px;
+}
+
+.schema-form__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.approval-card__text-hint {
+  margin: 8px 0 0;
+  color: var(--quiet);
+  font-size: 12px;
+}
+
+.ignored-note {
+  margin: 2px 44px 0 0;
+  text-align: right;
+  color: var(--quiet);
+  font-size: 11.5px;
+  font-style: italic;
+}
+
+.composer-note {
+  margin: 0;
+  padding: 8px 18px 12px;
+  color: var(--quiet);
+  font-size: 12px;
+}
+
+.button[data-style="danger"] {
+  color: var(--danger, #b4232a);
+  border-color: color-mix(in oklch, var(--danger, #b4232a) 30%, var(--line));
+}
+
+.example-intro .example-panel__machines,
+.example-intro .example-panel__run {
+  width: 100%;
+  max-width: 420px;
+  text-align: left;
+}
+
+/* ─── starter chips (pre-baked inputs) ─── */
+
+.starter-chips {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 7px;
+  width: 100%;
+  max-width: 440px;
+  margin-top: 6px;
+}
+
+.starter-chips__label {
+  color: var(--quiet);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: left;
+}
+
+.starter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.4;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.starter-chip > svg {
+  flex: none;
+  color: var(--quiet);
+}
+
+.starter-chip:hover {
+  color: var(--primary-ink);
+  border-color: color-mix(in oklch, var(--primary) 25%, var(--line));
+  background: var(--primary-soft);
+}
+
+.starter-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }

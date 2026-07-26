@@ -10,5 +10,9 @@
   "comparison": {
     "targets": ["Vercel AI SDK", "LangGraph"],
     "purpose": "Machine-owned tell -> rate -> decide loop: a joke streams, gets rated 1-10, and the model decides (via agent.decide) whether to tell another or stop."
-  }
+  },
+  "starters": [
+    "Tell me a joke about penguins reviewing code.",
+    "Tell me a joke about a state machine that won't transition."
+  ]
 }

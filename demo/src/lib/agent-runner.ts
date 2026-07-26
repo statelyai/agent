@@ -12,14 +12,15 @@
  * network.
  */
 import {
-  getAcceptedEvents,
-  getStateMeta,
   persistSnapshot,
   runAgent,
   type AgentRequestExecutors,
   type RunAgentResult,
 } from "@statelyai/agent";
 import type { AnyStateMachine, Snapshot } from "xstate";
+import { maybeCreateRunInspection } from "./inspection.server";
+import { createTraceRecorder, describeIdle, type TraceEntry } from "./machine-chat.server";
+import type { ChatIdle } from "./machine-ui";
 import { refundMachine } from "@/agents/refund";
 import { approvalMachine } from "@/agents/approval";
 import { routingMachine } from "@/agents/routing";
@@ -36,17 +37,11 @@ export type RunMode = "live" | "script";
 /** JSON-safe value — server fns must return serializable data (TanStack validates it). */
 type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
 
-export type TraceEntry = {
-  event: { type: string } & Record<string, Json>;
-  value: Json;
-  context: Record<string, Json>;
-};
+export type { TraceEntry };
 
-export type IdlePayload = {
+export type IdlePayload = ChatIdle & {
   /** JSON-serializable persisted snapshot; the client sends it back to resume. */
   snapshot: Json;
-  prompt?: string;
-  acceptedEvents: string[];
 };
 
 export type ScenarioResult = {
@@ -99,35 +94,6 @@ function inputFor(scenarioId: ScenarioId, prompt: string): Record<string, string
     case "tools":
       return { question: prompt };
   }
-}
-
-// ─── trace capture ───
-
-function smallContext(context: unknown): Record<string, Json> {
-  const out: Record<string, Json> = {};
-  if (!context || typeof context !== "object") return out;
-  for (const [key, value] of Object.entries(context as Record<string, unknown>)) {
-    if (value == null || typeof value === "number" || typeof value === "boolean") {
-      out[key] = value ?? null;
-    } else if (typeof value === "string") {
-      out[key] = value.length > 140 ? `${value.slice(0, 140)}…` : value;
-    } else if (Array.isArray(value)) {
-      out[key] = `Array(${value.length})`;
-    }
-  }
-  return out;
-}
-
-function smallEvent(event: unknown): { type: string } & Record<string, Json> {
-  if (!event || typeof event !== "object") return { type: String(event) };
-  const source = event as Record<string, unknown>;
-  const out: { type: string } & Record<string, Json> = { type: String(source.type ?? "event") };
-  for (const [key, value] of Object.entries(source)) {
-    if (key === "type") continue;
-    if (typeof value === "number" || typeof value === "boolean") out[key] = value;
-    else if (typeof value === "string" && value.length <= 60) out[key] = value;
-  }
-  return out;
 }
 
 // ─── executor resolution ───
@@ -216,11 +182,9 @@ function toResult(
   };
   if (result.status === "done") base.output = result.output as Json;
   if (result.status === "idle") {
-    const { interaction } = getStateMeta(result.snapshot);
     base.idle = {
+      ...describeIdle(machineFor(scenarioId), result.snapshot),
       snapshot: persistSnapshot(result.snapshot) as unknown as Json,
-      prompt: interaction?.label,
-      acceptedEvents: getAcceptedEvents(result.snapshot).map((event) => event.type),
     };
   }
   return base;
@@ -236,13 +200,12 @@ export async function startScenarioRun(
   model: string | undefined,
   executors: Partial<AgentRequestExecutors>,
 ): Promise<ScenarioResult> {
-  const trace: TraceEntry[] = [];
+  const { trace, onTransition } = createTraceRecorder();
   const result = await runAgent(machineFor(scenarioId), {
     input: inputFor(scenarioId, prompt),
     executors,
-    onTransition: (snapshot, event) => {
-      trace.push({ event: smallEvent(event), value: snapshot.value as Json, context: smallContext(snapshot.context) });
-    },
+    onTransition,
+    inspect: maybeCreateRunInspection(),
   });
   return toResult(scenarioId, mode, model, result as RunAgentResult<AnyStateMachine>, trace);
 }
@@ -256,16 +219,15 @@ export async function resumeScenarioRun(
   model: string | undefined,
   executors: Partial<AgentRequestExecutors>,
 ): Promise<ScenarioResult> {
-  const trace: TraceEntry[] = [];
+  const { trace, onTransition } = createTraceRecorder();
   // `onIllegalResumeEvent: "throw"` (the default) rejects an event the restored
   // state cannot accept — the snapshot-level validation the task requires.
   const result = await runAgent(machineFor(scenarioId), {
     snapshot,
     event,
     executors,
-    onTransition: (snap, ev) => {
-      trace.push({ event: smallEvent(ev), value: snap.value as Json, context: smallContext(snap.context) });
-    },
+    onTransition,
+    inspect: maybeCreateRunInspection(),
   });
   return toResult(scenarioId, mode, model, result as RunAgentResult<AnyStateMachine>, trace);
 }
@@ -333,7 +295,14 @@ function startResumeIdleEcho(
     idle: {
       snapshot: snapshot as unknown as Json,
       prompt: "Review the draft: approve to publish, or reject with a reason.",
-      acceptedEvents: scenarioId === "approval" ? ["APPROVE", "REJECT"] : [],
+      events:
+        scenarioId === "approval"
+          ? [
+              { type: "APPROVE", label: "Approve", style: "primary", jsonSchema: null, needsPayload: false },
+              { type: "REJECT", label: "Reject", style: "danger", jsonSchema: null, needsPayload: false },
+            ]
+          : [],
+      textEvent: null,
     },
   };
 }

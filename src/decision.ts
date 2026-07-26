@@ -282,9 +282,15 @@ export function createPlanActor(): PlanLogic {
 }
 
 // A minimal actor scope for the pure ledger drivers: getInitialSnapshot and the
-// ledger transitions (plan.applied/plan.ended) touch neither system nor emit,
-// so an inert stub suffices.
-const PLAN_LEDGER_SCOPE = { emit: () => {} } as never;
+// ledger transitions (plan.applied/plan.ended) touch neither system nor emit.
+// A `self` bearing an `id` is required because alpha.23's transition appends a
+// terminal `@xstate.terminate` effect (built from `actorScope.self.id`) when the
+// ledger reaches its `done` state — the effect is discarded here, but its
+// construction reads `self`, so an inert stub self suffices.
+const PLAN_LEDGER_SCOPE = {
+  emit: () => {},
+  self: { id: "agent.plan.ledger" },
+} as never;
 
 /**
  * Builds a fresh plan ledger snapshot from resolved plan input — the shared

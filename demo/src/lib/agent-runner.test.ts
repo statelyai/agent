@@ -26,7 +26,9 @@ describe("scenario outcomes (keyless)", () => {
   test("refund over $100 settles idle awaiting approval; APPROVE resumes to done", async () => {
     const first = await start("refund", "I need a $500 refund for a cancelled order.");
     expect(first.status).toBe("idle");
-    expect(first.idle?.acceptedEvents).toEqual(expect.arrayContaining(["APPROVE", "DENY"]));
+    expect(first.idle?.events.map((event) => event.type)).toEqual(
+      expect.arrayContaining(["APPROVE", "DENY"]),
+    );
     const second = await resume("refund", first.idle!.snapshot, { type: "APPROVE" });
     expect(second.status).toBe("done");
     expect((second.output as { outcome: string }).outcome).toBe("approved");
@@ -47,7 +49,9 @@ describe("scenario outcomes (keyless)", () => {
   test("approval drafts, settles idle, then publishes on APPROVE", async () => {
     const first = await start("approval", "Announce the delayed database migration.");
     expect(first.status).toBe("idle");
-    expect(first.idle?.acceptedEvents).toEqual(expect.arrayContaining(["APPROVE", "REJECT"]));
+    expect(first.idle?.events.map((event) => event.type)).toEqual(
+      expect.arrayContaining(["APPROVE", "REJECT"]),
+    );
     const second = await resume("approval", first.idle!.snapshot, { type: "APPROVE" });
     expect(second.status).toBe("done");
     expect((second.output as { published: boolean }).published).toBe(true);

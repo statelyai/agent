@@ -373,13 +373,13 @@ invoke:
 
 ### Resolving decisions standalone
 
-The step helpers surface a decision request whose `events` field holds only the events legal from the current snapshot ([`allowedEvents`](decisions.md) intersected with XState guards, via `getAgentRequests`). Resolve it to the chosen, validated event with `resolveDecision`:
+[`getAgentEffects`](steps.md) surfaces a decision effect whose request's `events` field holds only the events legal from the current snapshot ([`allowedEvents`](decisions.md) intersected with XState guards). Resolve it to the chosen, validated event with `resolveDecision`:
 
 ```ts
-const requests = getAgentRequests(machine, actions, snapshot);
-const request = requests[0]; // kind: 'decision'
+const effects = getAgentEffects(machine, snapshot, actions, { history });
+const effect = effects.find((e) => e.kind === "decision");
 
-const event = await resolveDecision(request, decide);
+const event = await resolveDecision(effect.request, decide);
 // { type: 'ATTACK', target: 'orc' }
 ```
 

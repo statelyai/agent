@@ -11,5 +11,6 @@
   "comparison": {
     "targets": ["Vercel AI SDK", "LangGraph runtime adapters"],
     "purpose": "Shows host-owned generateText and streamText execution for reusable XState text logic."
-  }
+  },
+  "starters": []
 }

@@ -10,5 +10,15 @@
   "comparison": {
     "targets": [],
     "purpose": "Embed a whole agent machine inside one tool call of a host harness: start/resume tools bridge a JSON-safe snapshot handle and read the typed interaction meta."
-  }
+  },
+  "starters": [
+    {
+      "amount": 129.99,
+      "orderId": "ORD-4471"
+    },
+    {
+      "amount": 780,
+      "orderId": "ORD-9002"
+    }
+  ]
 }

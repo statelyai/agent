@@ -1,0 +1,26 @@
+{
+  "name": "simulated-user-evaluation",
+  "title": "Simulated-user Evaluation",
+  "kind": "evaluation",
+  "origin": {
+    "type": "langgraph",
+    "source": "LangGraph chat bot evaluation as multi-agent simulation",
+    "url": "https://github.com/langchain-ai/langgraph/blob/23961cff61a42b52525f3b20b4094d8d2fba1744/docs/docs/tutorials/chatbot-simulation-evaluation/agent-simulation-evaluation.ipynb"
+  },
+  "comparison": {
+    "targets": [
+      "LangGraph chatbot simulation"
+    ],
+    "purpose": "A chatbot and simulated user alternate under a turn bound, then an independent evaluator scores the transcript. LangSmith dataset and experiment services are intentionally omitted."
+  },
+  "starters": [
+    {
+      "scenario": "A frustrated customer wants a refund for a delayed order.",
+      "opening": "Hi, I need to talk to someone about my late package."
+    },
+    {
+      "scenario": "A curious user asks about upgrading their subscription plan.",
+      "opening": "Can you tell me what the Pro plan includes?"
+    }
+  ]
+}

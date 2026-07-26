@@ -49,12 +49,12 @@ The `allowedEvents` list accepts the same exact-type and wildcard forms as `agen
 - **Partial application, no rollback.** Events are sent as the plan runs, not staged. If step 3 of 5 stops the plan, steps 1–2 stay applied. No transactional undo.
 - **`onDone` output** is `{ steps, stopped }`: the events applied in order, and why the loop ended (`'done' | 'stop-event' | 'max-steps' | 'no-legal-events'`).
 - **`stopOn` (rare).** For "send this real machine event **and** stop", list it in `stopOn`: the event is validated and sent, then the loop ends (`stopped: 'stop-event'`). The built-in done move covers the common "no further action" case, so `stopOn` is only for ending on an actual state change.
-- **Survives persist/resume.** `agent.plan` holds the in-progress plan as the invoke child's own snapshot `context` (`{ applied, stepsRemaining, stopped }`), so a persisted snapshot captures it at `children.<id>.snapshot.context` and a plan can resume mid-run. `runAgent` drives it directly; the [step path](steps.md#plans-on-the-step-path) surfaces the same plan as a re-surfacing `kind: 'plan'` request that `resolveAgentRequests` advances one step per call.
+- **Survives persist/resume.** `runAgent` holds the in-progress plan as the invoke child's own snapshot `context` (`{ applied, stepsRemaining, stopped }`), so a persisted snapshot captures it at `children.<id>.snapshot.context` and a plan can resume mid-run. On the [step path](steps.md#plans) the same plan re-surfaces as a `kind: 'plan'` effect each frontier: the host resolves one decision per frontier and derives the applied trail from the journal (see [Plans](steps.md#plans)).
 
 Full example: [examples/todo-nl/index.ts](../examples/todo-nl/index.ts) drives free-text commands through one `agent.plan` invoke.
 
 ## Where to go next
 
 - [Decisions](decisions.md): the single-event form, validation, retries, and coercion.
-- [The step path](steps.md#plans-on-the-step-path): plans as re-surfacing step requests with crash-safe mid-plan resume.
+- [The step path](steps.md#plans): plans as re-surfacing `kind: 'plan'` effects with crash-safe mid-plan resume.
 - [Verify](verify.md): plan branches in model-free simulation.
