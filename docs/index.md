@@ -95,7 +95,7 @@ The API changed completely in 2.0 and is still settling. Expect breaking changes
 
 Explicitly not shipped yet:
 
-- **Storage/checkpointer adapters.** Persisting snapshots or event logs is a documented recipe, not a package.
+- **Database storage adapters.** Core ships persistence contracts and an in-memory event-log store, but no SQLite, Postgres, or Redis adapter packages.
 - **OpenTelemetry exporter.** Build your own from the observation callbacks on `runAgent`.
 - **SSE/WebSocket transport helpers.** Host your own stream over what `onChunk` gives you.
 - **Agent-specific dynamic fan-out helper.** Dynamic fan-out works today through XState `spawn(...)` or `Promise.all(...)` inside a host actor; core has no higher-level helper for branch binding and progress.

@@ -17,7 +17,7 @@
     "@fontsource-variable/geist": "^5.2.8",
     "@shadcn/react": "^0.2.1",
     "@statelyai/agent": "workspace:*",
-    "@statelyai/sdk": "link:../../viz/packages/sdk",
+    "@statelyai/sdk": "^0.14.0",
     "@tanstack/react-router": "^1.170.6",
     "@tanstack/react-start": "^1.168.9",
     "@xstate/store": "^4.2.2",

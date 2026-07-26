@@ -129,8 +129,12 @@ export function createVizPanelStore() {
           message.type === "@statelyai.system.actorSnapshot" &&
           message.actorId === selectedActorId
         ) {
+          // Internal lifecycle events (@xstate.init / @xstate.stop) would
+          // clobber the run's real last event — keep them off the label.
           const eventType = (message.event as { type?: string } | null | undefined)?.type;
-          liveEvent = typeof eventType === "string" ? eventType : null;
+          if (typeof eventType === "string" && !eventType.startsWith("@xstate.")) {
+            liveEvent = eventType;
+          }
         }
 
         if (context.liveMessages.length === 0) {

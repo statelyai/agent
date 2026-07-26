@@ -111,8 +111,8 @@ importers:
         specifier: workspace:*
         version: link:..
       '@statelyai/sdk':
-        specifier: link:../../viz/packages/sdk
-        version: link:../../viz/packages/sdk
+        specifier: ^0.14.0
+        version: 0.14.0(cytoscape@3.34.0)(d3-force@3.0.0)(zod@4.4.3)
       '@tanstack/react-router':
         specifier: ^1.170.6
         version: 1.170.18(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -2541,10 +2541,36 @@ packages:
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==, tarball: https://registry.npmjs.org/@standard-schema/spec/-/spec-1.1.0.tgz}
 
+  '@statelyai/graph@1.0.0':
+    resolution: {integrity: sha512-ByUAB4hUFrbzLCeBsvf5kF+SUMqo7u8LobCCwF7nBJCYN5cs6ymgllktkGAEVZ7ekpWd8PojmUj81J68mZiAfg==, tarball: https://registry.npmjs.org/@statelyai/graph/-/graph-1.0.0.tgz}
+    peerDependencies:
+      cytoscape: ^3.0.0
+      d3-force: ^3.0.0
+      dotparser: ^1.0.0
+      elkjs: ^0.9.0 || ^0.10.0 || ^0.11.0
+      fast-xml-parser: ^5.0.0
+      zod: ^4.0.0
+    peerDependenciesMeta:
+      cytoscape:
+        optional: true
+      d3-force:
+        optional: true
+      dotparser:
+        optional: true
+      elkjs:
+        optional: true
+      fast-xml-parser:
+        optional: true
+      zod:
+        optional: true
+
   '@statelyai/inspect@0.7.2':
     resolution: {integrity: sha512-axuXSEBsI8pQ89rP2DWq+kHLjABiXpe2qYDOo6+jVLJ+9NPOTjutMnmDd+XcJjn76d+RH6sfHa0XkFIYPUHDOw==, tarball: https://registry.npmjs.org/@statelyai/inspect/-/inspect-0.7.2.tgz}
     peerDependencies:
       xstate: ^5.5.1
+
+  '@statelyai/sdk@0.14.0':
+    resolution: {integrity: sha512-3OrmGMCerak0fzIYV5zGxxt3bulreah/Uo3KYYkdS2WUinPvTq53YOaLL8YnytnyebypXaEdLw/aWPZ1XL4xMA==, tarball: https://registry.npmjs.org/@statelyai/sdk/-/sdk-0.14.0.tgz}
 
   '@tailwindcss/node@4.3.3':
     resolution: {integrity: sha512-/T8IKEsf9VTU6tLjgC7+sv2mOPtQxzE2jMw7u4Tt40Tx+QSZxpzh95/H6cMKoja9XuW7iMdLJYBB0o9G1CaAgg==, tarball: https://registry.npmjs.org/@tailwindcss/node/-/node-4.3.3.tgz}
@@ -5544,6 +5570,9 @@ packages:
     resolution: {integrity: sha512-bx8Q1STctnNaaDymWnkfQLKofs0mGNN7rLLapJlGuV3VlvegD7Ls4ggMjE3aUSWItCCzU0PEv45lI87iSigiCA==, tarball: https://registry.npmjs.org/xmlbuilder2/-/xmlbuilder2-4.0.3.tgz}
     engines: {node: '>=20.0'}
 
+  xstate@5.32.5:
+    resolution: {integrity: sha512-ULazi1oe6wGrXl0Frb6otSlkm5HLifbbVTkMk5kkSKqz4TkxJaVpnl6jOJwKeid3ORPxYyZQgNLUSYX9q65SIA==, tarball: https://registry.npmjs.org/xstate/-/xstate-5.32.5.tgz}
+
   xstate@6.0.0-alpha.23:
     resolution: {integrity: sha512-ol0lRgwtUBRhiC5CRRwFzi9PZ+7XkRiXGMmD6/Pv3Yra81Hb4aPGWuEu4NSu0K54MEgylUi8AV4Hpwp9KFADlg==, tarball: https://registry.npmjs.org/xstate/-/xstate-6.0.0-alpha.23.tgz}
     hasBin: true
@@ -7740,6 +7769,12 @@ snapshots:
 
   '@standard-schema/spec@1.1.0': {}
 
+  '@statelyai/graph@1.0.0(cytoscape@3.34.0)(d3-force@3.0.0)(zod@4.4.3)':
+    optionalDependencies:
+      cytoscape: 3.34.0
+      d3-force: 3.0.0
+      zod: 4.4.3
+
   '@statelyai/inspect@0.7.2(xstate@6.0.0-alpha.23)':
     dependencies:
       fast-safe-stringify: 2.1.1
@@ -7752,6 +7787,20 @@ snapshots:
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
+
+  '@statelyai/sdk@0.14.0(cytoscape@3.34.0)(d3-force@3.0.0)(zod@4.4.3)':
+    dependencies:
+      '@statelyai/graph': 1.0.0(cytoscape@3.34.0)(d3-force@3.0.0)(zod@4.4.3)
+      esbuild: 0.27.7
+      typescript: 5.9.3
+      xstate: 5.32.5
+    transitivePeerDependencies:
+      - cytoscape
+      - d3-force
+      - dotparser
+      - elkjs
+      - fast-xml-parser
+      - zod
 
   '@tailwindcss/node@4.3.3':
     dependencies:
@@ -11087,6 +11136,8 @@ snapshots:
       '@oozcitak/infra': 2.0.2
       '@oozcitak/util': 10.0.0
       js-yaml: 4.1.1
+
+  xstate@5.32.5: {}
 
   xstate@6.0.0-alpha.23: {}
 
