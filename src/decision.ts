@@ -464,7 +464,7 @@ export function createDecisionLogic<
         throw new Error(
           "Decision logic has no host execution. Pass an executor as the second " +
             "argument to createDecisionLogic(...), provide a runtime adapter, or " +
-            "extract it with getAgentRequests(..., { actorSources }) and resolveDecision(...).",
+            "extract it with getAgentEffects(..., { actorSources }) and resolveDecision(...).",
         );
       }
 

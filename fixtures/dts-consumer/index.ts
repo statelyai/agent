@@ -14,10 +14,11 @@ import { runAgent, setupAgent } from "@statelyai/agent";
 // Something from every subpath — proves each entry's public types resolve
 // from the shipped package, not just source.
 export {
-  initialAgentStep,
+  getAgentEffects,
+  replay,
   resolveDecision,
-  type AgentStep,
-  type ResolveAgentRequestsOptions,
+  type AgentEffect,
+  type ReplayResult,
 } from "@statelyai/agent/steps";
 export {
   getJsonSchema,

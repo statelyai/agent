@@ -29,7 +29,6 @@ import {
   USER_INPUT_ACTOR,
   type AgentModelMap,
   type AgentModelRef,
-  type AgentRequestMode,
   type BuiltinAgentActors,
   type TextLogic,
   type TextLogicConfig,
@@ -181,17 +180,24 @@ export function createAgentSchemas<
   };
 }
 
-// One `setupAgent({ requests })` entry's config — a TextLogicConfig plus the generate/stream `mode`.
+// One `setupAgent({ requests })` entry's config. Identical to a standalone
+// `createTextLogic(...)` config (`mode` included): a request entry lowers to
+// exactly that, with `name` defaulted from the map key.
 export type AgentRequestConfig<
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1 = StandardSchemaV1,
   TMetadata = Record<string, unknown>,
   TModel extends string = string,
-> = TextLogicConfig<TInputSchema, TOutputSchema, TMetadata, TModel> & {
-  mode?: AgentRequestMode;
-};
+> = TextLogicConfig<TInputSchema, TOutputSchema, TMetadata, TModel>;
 
 // Maps request keys to their input/output schema pair — the shape `setupAgent({ requests })` and `AgentRequestInput` are keyed by.
+//
+// This indirection looks removable (why not infer the request map directly
+// from the config?) but is load-bearing: `AgentRequestInput` anchors inference
+// on `schemas: TRequestSchemas[K]`, which is what gives the `({ input }) =>`
+// resolvers (`prompt`, `system`, `model`, …) their parameter types. Inferring
+// a `Record<string, AgentRequestConfig>` straight from the literal instead
+// makes every resolver's `input` an implicit `any`.
 export type AgentRequestSchemaMap = Record<
   string,
   {

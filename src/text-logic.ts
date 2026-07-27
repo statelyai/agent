@@ -489,7 +489,7 @@ export function createTextLogic<
         throw new Error(
           "Text logic has no host execution. Pass an executor as the second " +
             "argument to createTextLogic(...), provide a runtime adapter, or " +
-            "extract it with getAgentRequests(..., { actorSources }).",
+            "extract it with getAgentEffects(..., { actorSources }).",
         );
       }
 
