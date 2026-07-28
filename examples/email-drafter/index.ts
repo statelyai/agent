@@ -152,7 +152,7 @@ export const emailDrafterActors = {
 const agentSetup = setupAgent({
   schemas: emailDrafterSchemas,
   models,
-  actorSources: emailDrafterActors,
+  actors: emailDrafterActors,
 });
 
 export const emailDrafter = agentSetup.createMachine({

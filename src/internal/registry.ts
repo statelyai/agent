@@ -7,7 +7,7 @@ import {
 } from "xstate";
 import type { AgentRequestOptions } from "../events.js";
 
-export type AgentExecutionOptions = Pick<AgentRequestOptions, "schemas" | "actorSources"> & {
+export type AgentExecutionOptions = Pick<AgentRequestOptions, "schemas" | "actors"> & {
   models?: object;
 };
 export const agentExecutionOptions = new WeakMap<object, AgentExecutionOptions>();
@@ -49,7 +49,7 @@ export function missingActor(src: string): AsyncActorLogic<unknown, unknown> {
     run: async () => {
       throw new Error(
         `'${src}' has no host execution. Provide an implementation with ` +
-          `machine.provide({ actorSources: { '${src}': ... } }).`,
+          `machine.provide({ actors: { '${src}': ... } }).`,
       );
     },
   });

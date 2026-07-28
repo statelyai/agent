@@ -214,7 +214,7 @@ function createBuiltinTextActor(
     run: async () => {
       throw new Error(
         `'${src}' has no host execution. Provide an implementation with ` +
-          `machine.provide({ actorSources: { '${src}': ... } }) or execute the ` +
+          `machine.provide({ actors: { '${src}': ... } }) or execute the ` +
           `returned agent request with executeAgentRequest(...).`,
       );
     },
@@ -293,7 +293,7 @@ export const userInputActor = createAsyncLogic<string, AgentUserInput>({
   run: async () => {
     throw new Error(
       `'${USER_INPUT_ACTOR}' has no host execution. Provide an implementation ` +
-        `with machine.provide({ actorSources: { '${USER_INPUT_ACTOR}': ... } }).`,
+        `with machine.provide({ actors: { '${USER_INPUT_ACTOR}': ... } }).`,
     );
   },
 });
@@ -386,7 +386,7 @@ export type TextLogicExecutor<
 /**
  * Actor logic for a text request: an async effect that resolves typed input
  * to typed, schema-validated output via a model call. Built by
- * {@link createTextLogic}; register under `actorSources:` and invoke by name, or
+ * {@link createTextLogic}; register under `actors:` and invoke by name, or
  * bind an executor later with `withExecutor`. The `agent.generateText`/
  * `agent.streamText` builtins and `setupAgent({ requests })` entries are
  * both `TextLogic` under the hood.
@@ -427,7 +427,7 @@ export type TextLogicOutput<TLogic extends TextLogic> =
 /**
  * Creates reusable, standalone {@link TextLogic}: an actor that, when run,
  * resolves typed input to typed output via a model call. Register the
- * result under `actorSources:` and invoke it by name (equivalent to what
+ * result under `actors:` and invoke it by name (equivalent to what
  * `setupAgent({ requests })` builds internally for each request entry). Pass
  * `execute` here, or bind it later with `.withExecutor(...)`, a runtime
  * adapter's `machine.provide(...)`, or `runAgent`'s `generateText`/
@@ -489,7 +489,7 @@ export function createTextLogic<
         throw new Error(
           "Text logic has no host execution. Pass an executor as the second " +
             "argument to createTextLogic(...), provide a runtime adapter, or " +
-            "extract it with getAgentEffects(..., { actorSources }).",
+            "extract it with getAgentEffects(..., { actors }).",
         );
       }
 
@@ -557,7 +557,7 @@ export function createTextLogic<
  * @example
  * ```ts
  * childMachine.provide({
- *   actorSources: {
+ *   actors: {
  *     researchTopic: bindRequestExecutor(setup.requests.researchTopic, generateText),
  *   },
  * });

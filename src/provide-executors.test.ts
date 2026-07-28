@@ -37,7 +37,7 @@ describe("provideExecutors", () => {
       model: "test-model",
       prompt: ({ input }) => input.topic,
     });
-    const agent = setupAgent({ schemas, actorSources: { draftText } });
+    const agent = setupAgent({ schemas, actors: { draftText } });
     const machine = agent.createMachine({
       context: ({ input }) => ({ topic: input.topic, draft: null }),
       initial: "drafting",
@@ -81,7 +81,7 @@ describe("provideExecutors", () => {
       model: "test-model",
       prompt: ({ input }) => input.topic,
     });
-    const agent = setupAgent({ schemas, actorSources: { streamDraft } });
+    const agent = setupAgent({ schemas, actors: { streamDraft } });
     const machine = agent.createMachine({
       context: ({ input }) => ({ topic: input.topic, streamed: null }),
       initial: "streaming",
@@ -181,7 +181,7 @@ describe("provideExecutors", () => {
     );
   });
 
-  test("merges options.actorSources before binding; an executor-bound override is left as-is", async () => {
+  test("merges options.actors before binding; an executor-bound override is left as-is", async () => {
     const schemas = createAgentSchemas({
       context: z.object({ draft: z.string().nullable() }),
       input: z.object({}),
@@ -192,7 +192,7 @@ describe("provideExecutors", () => {
       model: "test-model",
       prompt: "draft",
     });
-    const agent = setupAgent({ schemas, actorSources: { draftText } });
+    const agent = setupAgent({ schemas, actors: { draftText } });
     const machine = agent.createMachine({
       context: () => ({ draft: null }),
       initial: "drafting",
@@ -214,7 +214,7 @@ describe("provideExecutors", () => {
       machine,
       { generateText: async () => ({ output: "from executors.generateText" }) },
       {
-        actorSources: { draftText: draftText.withExecutor(async () => ({ output: "overridden" })) },
+        actors: { draftText: draftText.withExecutor(async () => ({ output: "overridden" })) },
       },
     );
 
@@ -241,7 +241,7 @@ describe("provideExecutors onTrace / traceTransitions", () => {
       model: "test-model",
       prompt: ({ input }) => input.topic,
     });
-    const agent = setupAgent({ schemas, actorSources: { streamDraft } });
+    const agent = setupAgent({ schemas, actors: { streamDraft } });
     return agent.createMachine({
       context: ({ input }) => ({ topic: input.topic, streamed: null }),
       initial: "streaming",

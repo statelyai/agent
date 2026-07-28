@@ -643,7 +643,7 @@ describe("setupAgent", () => {
         },
       },
     });
-    const provided = machine.provide({ actorSources: {} });
+    const provided = machine.provide({ actors: {} });
     const step = initialAgentStep(provided, { prompt: "hello" });
 
     expect(getAgentRequests(provided, step.actions, step.snapshot)).toHaveLength(1);
@@ -816,7 +816,7 @@ describe("setupAgent", () => {
       events: { GO: z.object({ n: z.number() }) },
     });
     const child = createAsyncLogic<number, unknown>({ run: async () => 42 });
-    const agent = setupAgent({ schemas, actorSources: { child } });
+    const agent = setupAgent({ schemas, actors: { child } });
 
     agent.createMachine({
       context: { count: 0 },
@@ -962,7 +962,7 @@ describe("setupAgent", () => {
       }),
       input: z.object({ article: z.string() }),
       output: z.object({ summary: z.string() }),
-      actorSources: {
+      actors: {
         getSummary,
       },
     });
@@ -1037,7 +1037,7 @@ describe("setupAgent", () => {
       article: "State machines make agents inspectable.",
     });
     const [request] = getAgentRequestsWith(actions, {
-      actorSources: { getSummary },
+      actors: { getSummary },
     });
 
     expect(request).toEqual({
@@ -1089,7 +1089,7 @@ describe("setupAgent", () => {
     const agent = setupAgent({
       context: z.object({ article: z.string() }),
       input: z.object({ article: z.string() }),
-      actorSources: { streamSummary },
+      actors: { streamSummary },
     });
     const machine = agent.createMachine({
       context: ({ input }) => ({ article: input.article }),
@@ -1168,7 +1168,7 @@ describe("setupAgent", () => {
       }),
       input: z.object({ question: z.string() }),
       output: z.object({ answer: z.string() }),
-      actorSources: { answerQuestion },
+      actors: { answerQuestion },
     });
 
     const machine = agent.createMachine({
@@ -1225,7 +1225,7 @@ describe("setupAgent", () => {
         error: z.string().nullable(),
       }),
       input: z.object({ question: z.string() }),
-      actorSources: { answerQuestion },
+      actors: { answerQuestion },
     });
 
     const machine = agent.createMachine({
@@ -1344,7 +1344,7 @@ describe("setupAgent", () => {
     const calls: AgentTextRequest<{ temperature: number; traceId: string }>[] = [];
     const actor = createActor(
       machine.provide({
-        actorSources: {
+        actors: {
           draftEmail: draftEmail.withExecutor(async ({ request }) => {
             calls.push(
               request as AgentTextRequest<{
@@ -1528,7 +1528,7 @@ describe("setupAgent", () => {
         DEFEND: z.object({}),
         PAUSE: z.object({}),
       },
-      actorSources: { chooseMove },
+      actors: { chooseMove },
     });
 
     const machine = agent.createMachine({
@@ -2255,7 +2255,7 @@ describe("setupAgent", () => {
         { compileSchema: ajvCompiler() },
       )
       .provide({
-        actorSources: {
+        actors: {
           "agent.userInput": createAsyncLogic({
             run: async ({ input }) => {
               expect(input).toEqual(
@@ -2672,7 +2672,7 @@ describe("decision step discovery", () => {
       prompt: "Choose a move.",
       allowedEvents: ["ATTACK", "DEFEND"] as const,
     });
-    const agent = setupAgent({ schemas: decisionSchemas, actorSources: { chooseMove } });
+    const agent = setupAgent({ schemas: decisionSchemas, actors: { chooseMove } });
 
     const machine = agent.createMachine({
       context: {},
@@ -2717,7 +2717,7 @@ describe("decision step discovery", () => {
 
   test("omitted allowedEvents offers every snapshot-legal event", () => {
     const chooseMove = createDecisionLogic({ model: "test-model" });
-    const agent = setupAgent({ schemas: decisionSchemas, actorSources: { chooseMove } });
+    const agent = setupAgent({ schemas: decisionSchemas, actors: { chooseMove } });
     const machine = agent.createMachine({
       context: {},
       initial: "choosingMove",
@@ -2761,7 +2761,7 @@ describe("decision live path (runAgent auto-delivery)", () => {
       model: "test-model",
       allowedEvents: ["ATTACK", "DEFEND"] as const,
     });
-    const agent = setupAgent({ schemas: decisionSchemas, actorSources: { chooseMove } });
+    const agent = setupAgent({ schemas: decisionSchemas, actors: { chooseMove } });
 
     const machine = agent.createMachine({
       context: {},
@@ -2813,7 +2813,7 @@ describe("decision live path (runAgent auto-delivery)", () => {
 
     const actor = createActor(
       machine.provide({
-        actorSources: {
+        actors: {
           chooseMove: chooseMove.withExecutor(
             async (): Promise<{ event: ChosenEvent }> => ({
               event: { type: "FLEE" },
@@ -2905,7 +2905,7 @@ describe("inline agent.decide invoke (state-local decisions)", () => {
 
     const actor = createActor(
       machine.provide({
-        actorSources: {
+        actors: {
           // Delivery is the decision actor's own job now
           // (exactly what runAgent's wrapper does): send the chosen event to the
           // invoking parent, then complete with it as output. Yield a microtask
@@ -2997,7 +2997,7 @@ describe("per-state context schemas (setupAgent({ states }))", () => {
         input: z.object({ topic: z.string() }),
         output: z.object({ answer: z.string() }),
       }),
-      actorSources: {
+      actors: {
         finish: createAsyncLogic({
           run: async ({ input }: { input: { echo: string } }) => input.echo,
         }),
@@ -3057,7 +3057,7 @@ describe("per-state context schemas (setupAgent({ states }))", () => {
         input: z.object({ topic: z.string() }),
         output: z.object({ answer: z.string() }),
       }),
-      actorSources: {
+      actors: {
         finish: createAsyncLogic({
           run: async ({ input }: { input: { echo: string } }) => input.echo,
         }),
@@ -3130,11 +3130,11 @@ describe("setupAgent reserved agent.* actor keys", () => {
   });
   const someLogic = createAsyncLogic({ run: async () => ({}) });
 
-  test("throws when actorSources tries to redefine a builtin agent.* key", () => {
+  test("throws when actors tries to redefine a builtin agent.* key", () => {
     expect(() =>
       setupAgent({
         schemas,
-        actorSources: { "agent.decide": someLogic } as never,
+        actors: { "agent.decide": someLogic } as never,
       }),
     ).toThrow(/reserved builtin agent actor/);
   });
@@ -3154,12 +3154,12 @@ describe("setupAgent reserved agent.* actor keys", () => {
     expect(() =>
       setupAgent({
         schemas,
-        actorSources: { "agent.generateText": someLogic } as never,
+        actors: { "agent.generateText": someLogic } as never,
       }),
     ).toThrow(/machine\.provide/);
   });
 
-  test("a non-reserved actorSources key is accepted", () => {
-    expect(() => setupAgent({ schemas, actorSources: { myActor: someLogic } })).not.toThrow();
+  test("a non-reserved actors key is accepted", () => {
+    expect(() => setupAgent({ schemas, actors: { myActor: someLogic } })).not.toThrow();
   });
 });

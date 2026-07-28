@@ -42,7 +42,7 @@ const metaSchema = z.object({
 });
 
 const agentSetup = setupAgent({
-  actorSources: {
+  actors: {
     // Stand-in for the real refund side effect; runAgent uses it as-is.
     processRefund: createAsyncLogic({ run: async () => ({ ok: true }) }),
   },

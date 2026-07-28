@@ -6,7 +6,7 @@ import { refundMachine, resumeTool, startTool } from "./index.js";
 // Mock executors: validator returns valid, processRefund is a no-op side effect.
 const executors: RunAgentOptions<typeof refundMachine> = {
   executors: { generateText: async () => ({ output: { valid: true } }) },
-  actorSources: {
+  actors: {
     processRefund: createAsyncLogic({ run: async () => ({ ok: true }) }),
   },
 };

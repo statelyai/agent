@@ -98,7 +98,7 @@ const agentSetup = setupAgent({
   // The machine's own wait signal: the `awaiting-review` tag. `runAgent` settles
   // idle deterministically whenever a resting snapshot carries it.
   isSuspended: (snapshot) => snapshot.hasTag("awaiting-review"),
-  actorSources: {
+  actors: {
     // The consequential tool: applies the approved/edited refund. A real host
     // would call a payments API here; this fake records it and returns a receipt.
     sendRefund: createAsyncLogic<RefundCall, RefundCall>({

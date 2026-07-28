@@ -58,7 +58,7 @@ const setup = setupAgent({
     answer: z.string(),
     retries: z.number(),
   }),
-  actorSources: {
+  actors: {
     retrieve: createAsyncLogic<string[], { query: string }>({
       run: async ({ input }) => search(corpus, input.query),
     }),

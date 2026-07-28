@@ -31,7 +31,7 @@
     "shiki": "^1.29.2",
     "streamdown": "^2.5.0",
     "ws": "^8.21.1",
-    "xstate": "6.0.0-alpha.23",
+    "xstate": "6.0.0-alpha.25",
     "zod": "^4.3.6"
   },
   "devDependencies": {

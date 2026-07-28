@@ -151,7 +151,7 @@ const agentSetup = setupAgent({
       schemas: { context: ragContextSchema.extend({ answer: z.string() }) },
     },
   },
-  actorSources: {
+  actors: {
     // Typed plain actor: keyword retrieval over the sample corpus. Top 3 docs.
     retrieve: createAsyncLogic<string[], { question: string }>({
       run: async ({ input }) => searchCorpus(SAMPLE_CORPUS, input.question, 3),

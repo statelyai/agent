@@ -137,7 +137,7 @@
     "tsx": "^4.21.0",
     "typescript": "^5.6.2",
     "vitest": "^3.2.6",
-    "xstate": "6.0.0-alpha.23",
+    "xstate": "6.0.0-alpha.25",
     "zod": "^4.3.6"
   },
   "publishConfig": {
@@ -145,7 +145,7 @@
   },
   "peerDependencies": {
     "ai": "^6.0.67",
-    "xstate": ">=6.0.0-alpha.16 <6.0.0",
+    "xstate": ">=6.0.0-alpha.25 <6.0.0",
     "zod": "^3.25.0 || ^4.0.0"
   },
   "peerDependenciesMeta": {

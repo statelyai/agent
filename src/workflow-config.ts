@@ -11,7 +11,7 @@ import { validateSchemaSync } from "./utils.js";
 import { type AgentRequestMode } from "./text-logic.js";
 import { agentExecutionOptions, missingActor } from "./internal/registry.js";
 import {
-  createAgentActorSources,
+  createAgentActors,
   createAgentSchemas,
   createRequestActors,
   type AgentRequestInput,
@@ -160,7 +160,7 @@ export interface AgentWorkflowRequestConfig {
   metadata?: unknown;
 }
 
-/** An `actors` entry in {@link AgentWorkflowConfig} — declares a placeholder actor source (by key) with no host execution wired from JSON; provide it via `machine.provide({ actorSources })` after `setupAgent.fromConfig(...)`. */
+/** An `actors` entry in {@link AgentWorkflowConfig} — declares a placeholder actor source (by key) with no host execution wired from JSON; provide it via `machine.provide({ actors })` after `setupAgent.fromConfig(...)`. */
 export interface AgentWorkflowActorConfig {
   input?: JsonSchemaObject;
   output?: JsonSchemaObject;
@@ -358,7 +358,7 @@ function createActorPlaceholdersFromWorkflowConfig(config: AgentWorkflowConfig) 
 //
 // The config is lowered onto xstate's own JSON layer (`createMachineFromConfig`)
 // rather than a hand-rolled interpreter: named guards/actions resolve through
-// `implementations` (missing refs throw at build time), and every
+// `sources` (missing refs throw at build time), and every
 // template-bearing value becomes one `@expr` slot resolved by the evaluator
 // below — which reproduces the documented `{{ dotted.path }}` semantics
 // exactly.
@@ -430,7 +430,7 @@ function createWorkflowConfigEvaluator(contextSchema: StandardSchemaV1<Record<st
   };
 }
 
-// Host implementations + synthetic registrations threaded through translation.
+// Host sources + synthetic registrations threaded through translation.
 type WorkflowTranslation = {
   guards: Record<string, (args: { context: any; event: any }) => boolean>;
   actions: Record<string, (params: any) => unknown>;
@@ -567,6 +567,27 @@ function translateWorkflowTransitions(
     : translateWorkflowTransition(transitionConfig, translation, location);
 }
 
+function addTransitionMatch(
+  transition: Record<string, unknown> | Record<string, unknown>[] | undefined,
+  matches: Record<string, unknown>,
+): Record<string, unknown> | Record<string, unknown>[] | undefined {
+  if (Array.isArray(transition)) {
+    return transition.map((candidate) => addTransitionMatch(candidate, matches)!) as Record<
+      string,
+      unknown
+    >[];
+  }
+  return transition
+    ? {
+        ...transition,
+        matches: {
+          ...(transition.matches as Record<string, unknown> | undefined),
+          ...matches,
+        },
+      }
+    : undefined;
+}
+
 // Translates an invoke config into an InvokeJSON. `agent.decide` needs no
 // special-casing beyond validation: the decision actor auto-delivers the chosen
 // event to the invoking actor, so a decide invoke lowers like any other (an
@@ -688,7 +709,8 @@ function translateWorkflowState(
   // own done event, keyed by an explicit synthetic id (the `@state.` prefix
   // avoids colliding with the machine id — states themselves cannot declare
   // ids in an AgentWorkflowConfig).
-  const doneStateId = stateConfig.onDone !== undefined ? `@state.${childPath.join(".")}` : undefined;
+  const doneStateId =
+    stateConfig.onDone !== undefined ? `@state.${childPath.join(".")}` : undefined;
   const translatedOn = {
     ...Object.fromEntries(
       Object.entries(stateConfig.on ?? {}).map(([eventType, transitionConfig]) => [
@@ -698,10 +720,9 @@ function translateWorkflowState(
     ),
     ...(doneStateId
       ? {
-          [`xstate.done.state.${doneStateId}`]: translateWorkflowTransitions(
-            stateConfig.onDone,
-            translation,
-            location,
+          "xstate.done.state": addTransitionMatch(
+            translateWorkflowTransitions(stateConfig.onDone, translation, location),
+            { stateId: doneStateId },
           ),
         }
       : {}),
@@ -863,7 +884,7 @@ export function setupAgentFromConfig(
   const schemas = createSchemasFromWorkflowConfig(config, compileSchema);
   const requests = createRequestsFromWorkflowConfig(config, compileSchema);
   const requestActors = createRequestActors(requests);
-  const actorSources = createAgentActorSources(
+  const actors = createAgentActors(
     createActorPlaceholdersFromWorkflowConfig(config),
     requestActors,
   ) as Record<string, AnyActorLogic>;
@@ -888,23 +909,23 @@ export function setupAgentFromConfig(
       ),
     ),
     ...(options.actions ? { actions: options.actions } : {}),
-    // createMachineFromConfig embeds `implementations.actorSources[src]` as the
+    // createMachineFromConfig embeds `sources.actors[src]` as the
     // invoke's src DIRECTLY — but runAgent's executor rebinding needs srcs to
-    // stay string keys resolved through the machine's implementations. Mapping
+    // stay string keys resolved through the machine's sources. Mapping
     // each key to itself satisfies the JSON layer's every-src-implemented
     // assertion while keeping `src` a string; the real logic is then bound via
-    // `.provide({ actorSources })` below (and remains host-rebindable).
-    actorSources: Object.fromEntries(
-      Object.keys(actorSources).map((key) => [key, key]),
+    // `.provide({ actors })` below (and remains host-rebindable).
+    actors: Object.fromEntries(
+      Object.keys(actors).map((key) => [key, key]),
     ) as never,
     evaluators: {
       [AGENT_EXPRESSION_LANG]: createWorkflowConfigEvaluator(schemas.context),
     },
-  }).provide({ actorSources });
+  }).provide({ actors });
 
   // What setupAgent's wrapped createMachine registers for runAgent: the
-  // schemas/actorSources this machine executes with.
-  agentExecutionOptions.set(machine as object, { schemas, actorSources, models: {} });
+  // schemas/actors this machine executes with.
+  agentExecutionOptions.set(machine as object, { schemas, actors, models: {} });
   return machine;
 }
 

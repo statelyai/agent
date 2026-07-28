@@ -76,7 +76,7 @@ async function resolveEffect(
 }
 
 async function runTurn(input: unknown, executors: AgentRequestExecutors) {
-  const options = { schemas: gameSchemas, actorSources: gameActors };
+  const options = { schemas: gameSchemas, actors: gameActors };
   const entries: EventObject[] = [initEntry(input).event];
   let [snapshot, actions] = initialTransition(gameMachine, input);
 
@@ -127,7 +127,7 @@ For the durable, resume-by-replay flavor of this same loop (persist nothing but 
 
 Every non-`execute` effect carries a `requestId` of the form `site#occurrence`: the invoke/spawn site id, then a **1-based occurrence** derived from the journal (`job#1`, `job#2` on re-entry). Because it is derived from the log, the same journal yields identical requestIds on every replay.
 
-Use it as the **idempotency key** for at-least-once effect execution. A host runs the effect, then appends its completion; a crash in that window re-runs the effect on resume. An idempotent downstream (keyed by `requestId`) closes the gap. Errors count as completions: `xstate.error.actor.<id>` routes `onError` and increments the occurrence, so a retry is a fresh occurrence (`#2`, `#3`, …), not a re-run of the same one.
+Use it as the **idempotency key** for at-least-once effect execution. A host runs the effect, then appends its completion; a crash in that window re-runs the effect on resume. An idempotent downstream (keyed by `requestId`) closes the gap. Errors count as completions: `xstate.error.actor` with the effect's `actorId` routes `onError` and increments the occurrence, so a retry is a fresh occurrence (`#2`, `#3`, …), not a re-run of the same one.
 
 ## Crash recovery and resume
 
@@ -149,7 +149,7 @@ const { snapshot, effects } = replay(gameMachine, entries, options);
 
 An [`agent.plan`](plans.md) invoke applies an ordered sequence of legal events (each a decision), not one. On the step path it surfaces as a `kind: 'plan'` effect that **re-surfaces on every frontier** while the plan is in flight, its candidates recomputed from the live snapshot.
 
-Per frontier, the host resolves **one** decision from `request.events` (via `resolveDecision`, wiring `canTake` to `snapshot.can`, plus the reserved done move and any `stopOn` events) and journals the chosen machine event. The next frontier re-surfaces the plan effect. The plan **completes** on the reserved `agent.plan.done` move (`PLAN_DONE_EVENT_TYPE`), a `stopOn` event, an exhausted `maxSteps` budget, or no legal events. Completion is journaled as the invoke's `xstate.done.actor.<id>` event carrying `{ steps, stopped }`, which fires its `onDone`.
+Per frontier, the host resolves **one** decision from `request.events` (via `resolveDecision`, wiring `canTake` to `snapshot.can`, plus the reserved done move and any `stopOn` events) and journals the chosen machine event. The next frontier re-surfaces the plan effect. The plan **completes** on the reserved `agent.plan.done` move (`PLAN_DONE_EVENT_TYPE`), a `stopOn` event, an exhausted `maxSteps` budget, or no legal events. Completion is journaled as `xstate.done.actor` carrying the invoke's `actorId`, `sessionId`, and `{ steps, stopped }` output, which fires its `onDone`.
 
 The re-surfaced effect's own `applied` / `stepsRemaining` are **not** folded under pure replay (the thin loop journals bare machine events, not the invoke child's ledger mutations), so the host **derives the applied trail from the journal itself**. A single applied event that exits the invoking state cancels the invoke (`onDone` never fires), identical to `runAgent`. The full host-side plan driver, and parity with `runAgent` across all four stop reasons, is pinned in `src/steps-plan.test.ts`.
 

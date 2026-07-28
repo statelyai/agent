@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
-import { createActor, createAsyncLogic, setup, toPromise } from "xstate";
+import { createActor, createAsyncLogic, setup, toPromise, type EventObject } from "xstate";
 import { createDecisionLogic } from "./decision.js";
 import {
   AGENT_TRACE_SCHEMA_VERSION,
@@ -9,6 +9,7 @@ import {
   createTextLogic,
   IllegalResumeEventError,
   inspectTransitions,
+  replay,
   runAgent,
   runAgentToCompletion,
   setupAgent,
@@ -38,7 +39,7 @@ describe("runAgent", () => {
       prompt: ({ input }) => input.prompt,
     });
 
-    const agent = setupAgent({ schemas, actorSources: { answerQuestion } });
+    const agent = setupAgent({ schemas, actors: { answerQuestion } });
     const machine = agent.createMachine({
       context: ({ input }) => ({ prompt: input.prompt, answer: null }),
       initial: "answering",
@@ -65,17 +66,42 @@ describe("runAgent", () => {
       output: { answer: `Answered: ${request.prompt}` },
     });
 
+    const observedEvents: EventObject[] = [];
     const result = await runAgent(machine, {
       input: { prompt: "why state machines?" },
       executors: {
         generateText,
       },
+      onEvent: (event) => observedEvents.push(event),
     });
 
     expect(result.status).toBe("done");
     expect(result.status === "done" ? result.output : undefined).toEqual({
       answer: "Answered: why state machines?",
     });
+    expect(result.events).toEqual([
+      { type: "@agent.init", input: { prompt: "why state machines?" } },
+      {
+        type: "xstate.done.actor",
+        output: { answer: "Answered: why state machines?" },
+        actorId: "answer",
+        sessionId: expect.any(String),
+      },
+    ]);
+    expect(observedEvents).toEqual(result.events);
+
+    const replayed = replay(machine, result.events);
+    expect(replayed.snapshot.status).toBe("done");
+    expect(replayed.snapshot.output).toEqual({
+      answer: "Answered: why state machines?",
+    });
+
+    const fromAnotherActorSystem = result.events.map((event) =>
+      event.type === "xstate.done.actor"
+        ? ({ ...event, sessionId: "another-system:99" } as EventObject)
+        : event,
+    );
+    expect(replay(machine, fromAnotherActorSystem).snapshot.status).toBe("done");
   });
 
   test("idle + resume: settles idle waiting for an event, then completes on resume", async () => {
@@ -95,7 +121,7 @@ describe("runAgent", () => {
       prompt: ({ input }) => input.prompt,
     });
 
-    const agent = setupAgent({ schemas, actorSources: { draftText } });
+    const agent = setupAgent({ schemas, actors: { draftText } });
     const machine = agent.createMachine({
       context: ({ input }) => ({ prompt: input.prompt, draft: null }),
       initial: "drafting",
@@ -138,9 +164,12 @@ describe("runAgent", () => {
     }
     expect(first.snapshot.value).toBe("awaitingApproval");
 
+    const resumedEvents: EventObject[] = [];
     const second = await runAgent(machine, {
       snapshot: first.snapshot,
       event: { type: "APPROVE" },
+      events: first.events,
+      onEvent: (event) => resumedEvents.push(event),
       executors: {
         generateText,
       },
@@ -150,6 +179,55 @@ describe("runAgent", () => {
     expect(second.status === "done" ? second.output : undefined).toEqual({
       draft: "Draft: release notes",
     });
+    expect(second.events.map((event) => event.type)).toEqual([
+      "@agent.init",
+      "xstate.done.actor",
+      "APPROVE",
+    ]);
+    expect(resumedEvents.map((event) => event.type)).toEqual(["APPROVE"]);
+    expect(replay(machine, second.events).snapshot.status).toBe("done");
+  });
+
+  test("events: excludes raised events but includes timer deliveries", async () => {
+    const raisedMachine = setup({}).createMachine({
+      id: "raised-events",
+      initial: "starting",
+      states: {
+        starting: {
+          entry: (_args, enqueue) => enqueue.raise({ type: "CONTINUE" }),
+          on: { CONTINUE: { target: "done" } },
+        },
+        done: { type: "final" },
+      },
+    });
+
+    const raised = await runAgent(raisedMachine, {
+      input: undefined,
+      executors: {},
+    });
+    expect(raised.status).toBe("done");
+    expect(raised.events).toEqual([{ type: "@agent.init", input: undefined }]);
+    expect(replay(raisedMachine, raised.events).snapshot.status).toBe("done");
+
+    const timerMachine = setup({}).createMachine({
+      id: "timer-events",
+      initial: "waiting",
+      states: {
+        waiting: { after: { 5: { target: "done" } } },
+        done: { type: "final" },
+      },
+    });
+
+    const timed = await runAgent(timerMachine, {
+      input: undefined,
+      executors: {},
+    });
+    expect(timed.status).toBe("done");
+    expect(timed.events).toEqual([
+      { type: "@agent.init", input: undefined },
+      { type: "xstate.timer", id: "xstate.after.5.timer-events.waiting" },
+    ]);
+    expect(replay(timerMachine, timed.events).snapshot.status).toBe("done");
   });
 
   test("idle + resume: pre-idle side effects and model calls run exactly once, never re-executed on resume", async () => {
@@ -179,7 +257,7 @@ describe("runAgent", () => {
 
     const agent = setupAgent({
       schemas,
-      actorSources: {
+      actors: {
         draftText,
         recordAudit: createAsyncLogic<{ recorded: boolean }, unknown>({
           run: async () => {
@@ -289,7 +367,7 @@ describe("runAgent", () => {
       allowedEvents: ["ATTACK", "HEAL"] as const,
     });
 
-    const agent = setupAgent({ schemas, actorSources: { chooseMove } });
+    const agent = setupAgent({ schemas, actors: { chooseMove } });
     const machine = agent.createMachine({
       context: { hp: 10 },
       initial: "choosingMove",
@@ -336,6 +414,8 @@ describe("runAgent", () => {
     expect(result.status).toBe("done");
     expect(callCount).toBe(2);
     expect(requestsSeen[1]!.attempts[0]!.failure).toBe("rejected-by-guard");
+    expect(result.events.map((event) => event.type)).toEqual(["@agent.init", "ATTACK"]);
+    expect(replay(machine, result.events).snapshot.status).toBe("done");
   });
 
   test("maxModelCalls: exceeding the budget settles a max-model-calls error", async () => {
@@ -353,7 +433,7 @@ describe("runAgent", () => {
       model: "test-model",
     });
 
-    const agent = setupAgent({ schemas, actorSources: { step } });
+    const agent = setupAgent({ schemas, actors: { step } });
     const machine = agent.createMachine({
       context: { count: 0 },
       initial: "looping",
@@ -399,7 +479,7 @@ describe("runAgent", () => {
       schemas: { input: z.object({}), output: z.object({}) },
       model: "test-model",
     });
-    const agent = setupAgent({ schemas, actorSources: { step } });
+    const agent = setupAgent({ schemas, actors: { step } });
     const machine = agent.createMachine({
       context: {},
       initial: "working",
@@ -436,7 +516,7 @@ describe("runAgent", () => {
       schemas: { input: z.object({}), output: z.object({}) },
       model: "test-model",
     });
-    const agent = setupAgent({ schemas, actorSources: { step } });
+    const agent = setupAgent({ schemas, actors: { step } });
     const machine = agent.createMachine({
       context: {},
       initial: "working",
@@ -476,7 +556,7 @@ describe("runAgent", () => {
       schemas: { input: z.object({}), output: z.object({}) },
       model: "test-model",
     });
-    const agent = setupAgent({ schemas, actorSources: { step } });
+    const agent = setupAgent({ schemas, actors: { step } });
     const machine = agent.createMachine({
       context: {},
       initial: "working",
@@ -549,7 +629,7 @@ describe("runAgent", () => {
         events: { ATTACK: z.object({}) },
       });
       const chooseMove = createDecisionLogic({ model: "test-model" });
-      const agent = setupAgent({ schemas, actorSources: { chooseMove } });
+      const agent = setupAgent({ schemas, actors: { chooseMove } });
       const machine = agent.createMachine({
         context: {},
         initial: "choosingMove",
@@ -635,7 +715,7 @@ describe("runAgent", () => {
       });
       const agent = setupAgent({
         schemas: createAgentSchemas({ context: z.object({}), input: z.object({}) }),
-        actorSources: { streamSummary },
+        actors: { streamSummary },
       });
       const machine = agent.createMachine({
         context: {},
@@ -706,7 +786,7 @@ describe("runAgent", () => {
           context: z.object({ topic: z.string(), research: z.string().nullable() }),
           input: z.object({ topic: z.string() }),
           output: z.object({ research: z.string() }),
-          actorSources: { researchTopic },
+          actors: { researchTopic },
         });
         let childMachine = childAgent.createMachine({
           id: `child-${depth}`,
@@ -731,7 +811,7 @@ describe("runAgent", () => {
         });
         if (bindChildRequest) {
           childMachine = childMachine.provide({
-            actorSources: {
+            actors: {
               researchTopic: researchTopic.withExecutor(async ({ input }) => ({
                 output: `Research: ${input.topic}`,
               })),
@@ -746,7 +826,7 @@ describe("runAgent", () => {
           context: z.object({ topic: z.string(), research: z.string().nullable() }),
           input: z.object({ topic: z.string() }),
           output: z.object({ research: z.string() }),
-          actorSources: { child: childMachine },
+          actors: { child: childMachine },
         });
         return parentAgent.createMachine({
           id: "parent",
@@ -819,7 +899,7 @@ describe("runAgent", () => {
           context: z.object({ topic: z.string(), research: z.string().nullable() }),
           input: z.object({ topic: z.string() }),
           output: z.object({ research: z.string() }),
-          actorSources: { grandchild },
+          actors: { grandchild },
         });
         const midMachine = midAgent.createMachine({
           id: "mid",
@@ -889,9 +969,9 @@ describe("runAgent", () => {
         });
         // Make the 'self' source resolve to the machine itself, creating a
         // genuine identity cycle for the bind walk to guard against. Mutating
-        // implementations in place (rather than .provide, which returns a new
+        // sources in place (rather than .provide, which returns a new
         // object) keeps the invoked source === the machine being walked.
-        (selfMachine.implementations.actorSources as Record<string, unknown>).self = selfMachine;
+        (selfMachine.sources.actors as Record<string, unknown>).self = selfMachine;
 
         // The point under test is the BIND walk (the visited-set guard): it
         // must return rather than recurse forever on the identity cycle. A
@@ -952,7 +1032,7 @@ describe("runAgent", () => {
           context: z.object({ topic: z.string(), research: z.string().nullable() }),
           input: z.object({ topic: z.string() }),
           output: z.object({ research: z.string() }),
-          actorSources: { streamResearch },
+          actors: { streamResearch },
         });
         const streamChild = childAgent.createMachine({
           id: "stream-child",
@@ -1150,7 +1230,7 @@ describe("runAgent", () => {
         // allowedEvents omitted.
       });
 
-      const agent = setupAgent({ schemas, actorSources: { chooseMove } });
+      const agent = setupAgent({ schemas, actors: { chooseMove } });
       const machine = agent.createMachine({
         context: { hp: 10 },
         initial: "choosingMove",
@@ -1277,7 +1357,7 @@ describe("runAgent", () => {
       allowedEvents: ["ATTACK"] as const,
     });
 
-    const agent = setupAgent({ schemas, actorSources: { chooseMove } });
+    const agent = setupAgent({ schemas, actors: { chooseMove } });
     const machine = agent.createMachine({
       context: { attackCount: 0 },
       initial: "choosingMove",
@@ -1420,7 +1500,7 @@ describe("runAgent", () => {
     });
     const parentAgent = setupAgent({
       schemas: parentSchemas,
-      actorSources: { child: childMachine },
+      actors: { child: childMachine },
     });
     const parentMachine = parentAgent.createMachine({
       context: { childMove: null },
@@ -1681,6 +1761,13 @@ describe("emitted events (runAgent `on`)", () => {
     expect(trace.map((event) => event.seq)).toEqual(trace.map((_, index) => index + 1));
     expect(trace[0]).toEqual(expect.objectContaining({ type: "run.start", seq: 1 }));
     expect(trace.at(-1)).toEqual(expect.objectContaining({ type: "run.end", status: "done" }));
+    expect(trace.at(-1)).not.toHaveProperty("events");
+    expect(result.events).toHaveLength(2);
+    expect(result.events[0]!.type).toBe("@agent.init");
+    expect(result.events[1]).toMatchObject({
+      type: "xstate.done.actor",
+      actorId: expect.any(String),
+    });
     expect(trace.map((event) => event.type)).toEqual(
       expect.arrayContaining([
         "emit",
@@ -1916,7 +2003,7 @@ describe("inspect passthrough (system-wide visibility)", () => {
     const parent = setupAgent({
       context: z.object({}),
       output: z.object({ ok: z.boolean() }),
-      actorSources: { child },
+      actors: { child },
     }).createMachine({
       id: "parent",
       context: {},
@@ -2308,7 +2395,7 @@ describe("runAgent error cause split", () => {
       prompt: "Choose a move.",
       allowedEvents: ["ATTACK", "HEAL"] as const,
     });
-    const agent = setupAgent({ schemas, actorSources: { chooseMove } });
+    const agent = setupAgent({ schemas, actors: { chooseMove } });
     return agent.createMachine({
       context: {},
       initial: "choosing",
@@ -2370,7 +2457,7 @@ describe("runAgent error cause split", () => {
       schemas: { input: z.object({}), output: z.object({}) },
       model: "test-model",
     });
-    const agent = setupAgent({ schemas, actorSources: { step } });
+    const agent = setupAgent({ schemas, actors: { step } });
     const machine = agent.createMachine({
       context: {},
       initial: "working",
@@ -2481,7 +2568,7 @@ describe("runAgentToCompletion", () => {
       model: "test-model",
       prompt: ({ input }) => input.prompt,
     });
-    const agent = setupAgent({ schemas, actorSources: { draftText } });
+    const agent = setupAgent({ schemas, actors: { draftText } });
     return agent.createMachine({
       context: ({ input }) => ({ prompt: input.prompt, draft: null }),
       initial: "drafting",
@@ -2552,7 +2639,7 @@ describe("runAgentToCompletion", () => {
       model: "test-model",
       prompt: ({ input }) => input.prompt,
     });
-    const agent = setupAgent({ schemas, actorSources: { boom } });
+    const agent = setupAgent({ schemas, actors: { boom } });
     const machine = agent.createMachine({
       context: ({ input }) => ({ prompt: input.prompt }),
       initial: "working",
@@ -2792,7 +2879,7 @@ describe("inspectTransitions", () => {
     const parentAgent = setupAgent({
       context: z.object({}),
       output: z.object({ ok: z.boolean() }),
-      actorSources: { child: childMachine },
+      actors: { child: childMachine },
     });
     const parentMachine = parentAgent.createMachine({
       id: "insp-parent",

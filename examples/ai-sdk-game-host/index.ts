@@ -82,7 +82,7 @@ export async function runAiSdkGameTurn(
   // AI SDK set above.
   executors: AgentRequestExecutors = defaultExecutors,
 ) {
-  const options = { schemas: gameSchemas, actorSources: gameActors };
+  const options = { schemas: gameSchemas, actors: gameActors };
 
   // The journal starts with the reserved init entry carrying the input, so the
   // log is self-contained (a fresh process can `replay` it with no side channel).

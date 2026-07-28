@@ -26,7 +26,7 @@ Stately Agent 2 is in alpha. APIs may change before the stable release.
 pnpm add @statelyai/agent@alpha xstate@alpha zod ai@^6 @ai-sdk/openai@^3
 ```
 
-Node 22.18 or newer is required. The package is ESM-only; the library targets XState v6 alpha and stays compatible with XState v5. Provider packages must match your `ai` major: `@ai-sdk/openai@^3` pairs with `ai@^6` (a bare `@ai-sdk/openai` resolves to `@latest`, which can mismatch the `ai` peer).
+Node 22.18 or newer is required. The package is ESM-only and requires XState v6 alpha.25 or newer. Provider packages must match your `ai` major: `@ai-sdk/openai@^3` pairs with `ai@^6` (a bare `@ai-sdk/openai` resolves to `@latest`, which can mismatch the `ai` peer).
 
 ## Quick start
 
@@ -129,6 +129,7 @@ The example has one model decision and two final outcomes. Real machines can add
 - **Requests are typed.** Inputs, outputs, context, and events use Standard Schema. Zod works out of the box.
 - **Your code runs the model.** `runAgent` accepts executor functions. The example uses the Vercel AI SDK adapter, but the machine does not depend on a provider.
 - **Snapshots can be stored.** An agent can stop for human input, save its XState snapshot, and resume later in another process.
+- **Runs export replayable events.** Every `runAgent` result carries the external-input `EventObject[]`; pass it to `replay` to reconstruct the machine without repeating model or tool calls.
 - **Machines can be checked without model calls.** Lint their structure, simulate scripted decisions, and explore paths without an API key.
 - **Agents are XState machines.** Guards, actors, parallel states, inspection, testing, and visualization work as usual.
 

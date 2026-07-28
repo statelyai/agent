@@ -7,6 +7,7 @@ import {
   type AnyMachineSnapshot,
   type AnyStateMachine,
   type EmittedFrom,
+  type EventObject,
   type EventFromLogic,
   type InputFrom,
   type InspectionEvent,
@@ -60,6 +61,7 @@ import {
   getRegisteredAgentExecutionOptions,
   isUnboundPlaceholder,
 } from "./internal/registry.js";
+import { initEntry } from "./effects.js";
 
 // ─── runAgent (createActor wrapper) ───
 //
@@ -281,6 +283,13 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
   /** An event to send immediately after starting/resuming the actor (e.g. the human's answer to an idle-state prompt). */
   event?: EventFromLogic<TMachine>;
   /**
+   * A prior `runAgent` result's replayable `events`, copied as the prefix of
+   * this result's event log. Pass this alongside `snapshot` + `event` when
+   * resuming so the next result retains the complete, replayable history.
+   * These events are history only; `snapshot` remains the live resume source.
+   */
+  events?: readonly EventObject[];
+  /**
    * How to handle a resume `event` the restored state cannot accept (a
    * type-level check via {@link getAcceptedEvents}, only applied when resuming
    * from a `snapshot`). `'throw'` (default) throws {@link IllegalResumeEventError}
@@ -319,9 +328,9 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
     info: { from: string; to: string },
   ) => Snapshot<unknown>;
 
-  // implementations — sugar for machine.provide({ actorSources }) before the run
-  /** Actor source implementations, merged onto the machine before binding — sugar for `machine.provide({ actorSources })` ahead of the run. */
-  actorSources?: Record<string, AnyActorLogic>;
+  // actor sources — sugar for machine.provide({ actors }) before the run
+  /** Actor source implementations, merged onto the machine before binding — sugar for `machine.provide({ actors })` ahead of the run. */
+  actors?: Record<string, AnyActorLogic>;
 
   /**
    * Optional human-input handler for `agent.userInput` invokes (CLI prompt,
@@ -411,6 +420,13 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
   onChunk?: (chunk: string, info: { request: AgentRequest }) => void;
   /** Fires once per resolved text/decision request with its normalized output and the raw executor result (tool calls, usage, …) — the seam for tracing/observability and event-sourced replay logging. */
   onResult?: (request: AgentStepRequest, result: { output: unknown; raw: unknown }) => void;
+  /**
+   * Fires as each new replayable external input is appended to this run's
+   * event log. A fresh run begins with `@agent.init`; raised and other internal
+   * events are excluded. History supplied through {@link events} is not
+   * re-emitted. Purely observational, like {@link onTransition}.
+   */
+  onEvent?: (event: EventObject) => void;
   /** Fires a single ordered stream of run/request/chunk/transition/emit/end events. Intended for eval traces, JSONL logs, and adapter-owned telemetry/exporters. */
   onTrace?: (event: AgentTraceEvent<TMachine>) => void;
   /**
@@ -476,9 +492,9 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
  * failure, discriminated by `cause` (`'aborted'`, `'max-model-calls'`,
  * `'decision-exhausted'`, `'machine'` for any other machine error state, or
  * `'stopped'` for an external stop — see {@link RunAgentErrorCause}). Every
- * variant carries the final `snapshot`, and the underlying
- * actor is stopped on every settle path — there is no live actor to resume;
- * resume is always by snapshot.
+ * variant carries the final `snapshot` plus a replayable `events` array. The
+ * underlying actor is stopped on every settle path — there is no live actor to
+ * resume; resume is always by snapshot.
  */
 /** A pending unhandled `agent.userInput` invoke surfaced on an idle settle — `id` is the invoke's id, `input` its resolved invoke input (prompt, metadata). Answer it by resuming with a `userInput` handler. */
 export interface PendingUserInput {
@@ -486,7 +502,7 @@ export interface PendingUserInput {
   input: AgentUserInput | undefined;
 }
 
-export type RunAgentResult<TMachine extends AnyStateMachine> =
+type RunAgentOutcome<TMachine extends AnyStateMachine> =
   | { status: "done"; output: OutputFrom<TMachine>; snapshot: SnapshotFrom<TMachine> }
   | {
       status: "idle";
@@ -507,6 +523,19 @@ export type RunAgentResult<TMachine extends AnyStateMachine> =
       error: unknown;
       snapshot: SnapshotFrom<TMachine>;
     };
+
+export type RunAgentResult<TMachine extends AnyStateMachine> = RunAgentOutcome<TMachine> & {
+  /**
+   * Replayable external inputs observed through this run: machine input,
+   * effect completions/failures, user events, and timer firings. Raised and
+   * other internal events are excluded because replay re-derives them.
+   *
+   * A fresh run starts with `@agent.init`. When resuming from a snapshot, pass
+   * the preceding result's `events` through {@link RunAgentOptions.events} to
+   * retain a self-contained history.
+   */
+  events: EventObject[];
+};
 
 /**
  * Discriminates a {@link RunAgentResult} `error`:
@@ -588,7 +617,7 @@ function collectConfiguredInvokeSrcs(
 /**
  * Duck-types a state machine actor logic (an invoked child machine) vs. any
  * other actor logic. xstate's `StateMachine` carries `.config`, `.root`, and
- * a `.provide(...)` method plus an `implementations.actorSources` map — this
+ * a `.provide(...)` method plus a `sources.actors` map — this
  * combination is unique to machines and survives the dual-package/version
  * boundary an `instanceof` check would not. Used to descend the bind-time
  * walk into invoked child machines (their internal agent requests are opaque
@@ -601,8 +630,8 @@ function isStateMachine(logic: unknown): logic is AnyStateMachine {
     "config" in logic &&
     "root" in logic &&
     typeof (logic as { provide?: unknown }).provide === "function" &&
-    typeof (logic as { implementations?: unknown }).implementations === "object" &&
-    !!(logic as { implementations?: { actorSources?: unknown } }).implementations?.actorSources
+    typeof (logic as { sources?: unknown }).sources === "object" &&
+    !!(logic as { sources?: { actors?: unknown } }).sources?.actors
   );
 }
 
@@ -679,7 +708,7 @@ function assertMachineBindable(
             `(kind: '${(src as TextLogic | DecisionLogic).kind}'). Direct-object invoke ` +
             `srcs cannot be rebound by runAgent — either call '.withExecutor(...)' on ` +
             `the logic before invoking it, or register it as a string-keyed actor ` +
-            `source instead (machine.provide({ actorSources: { name: logic } })) and ` +
+            `source instead (machine.provide({ actors: { name: logic } })) and ` +
             `invoke it by name.`,
         );
       }
@@ -691,8 +720,8 @@ function assertMachineBindable(
     if (logic === undefined) {
       throw new Error(
         `runAgent: ${where} '${stateName}' invokes unregistered actor source '${src}'. ` +
-          `Provide it via machine.provide({ actorSources: { '${src}': ... } }) or ` +
-          `runAgent(machine, { actorSources: { '${src}': ... } }).`,
+          `Provide it via machine.provide({ actors: { '${src}': ... } }) or ` +
+          `runAgent(machine, { actors: { '${src}': ... } }).`,
       );
     }
 
@@ -775,8 +804,8 @@ function assertMachineBindable(
     if (isUnboundPlaceholder(logic)) {
       throw new Error(
         `runAgent: ${where} '${stateName}' invokes actor source '${src}', which has no ` +
-          `host execution. Provide it via machine.provide({ actorSources: { '${src}': ... } }) ` +
-          `or runAgent(machine, { actorSources: { '${src}': ... } }).`,
+          `host execution. Provide it via machine.provide({ actors: { '${src}': ... } }) ` +
+          `or runAgent(machine, { actors: { '${src}': ... } }).`,
       );
     }
 
@@ -804,7 +833,7 @@ function assertChildMachineBindable(
     typeof childSrc === "string" ? childSrc : (childMachine.config.id ?? "(child machine)");
   const childPath = ctx.childPath ? `${ctx.childPath} > ${childName}` : childName;
 
-  const childSources = childMachine.implementations.actorSources as Record<string, AnyActorLogic>;
+  const childSources = childMachine.sources.actors as Record<string, AnyActorLogic>;
 
   // A child is rebindable only when it is reached through string-keyed invoke
   // srcs all the way from the root: those can be swapped via `.provide`, so
@@ -841,7 +870,7 @@ function unrebindableChildRequestError(
       `string-keyed actor sources inherit runAgent's generateText/streamText/decide ` +
       `executors automatically; a direct-object child machine does not. Either bind the ` +
       `request with its own executor (requestLogic.withExecutor(...)), or register the ` +
-      `child as a string-keyed actor source (machine.provide({ actorSources: { <child>: ` +
+      `child as a string-keyed actor source (machine.provide({ actors: { <child>: ` +
       `childMachine } })) and invoke it by name.`,
   );
 }
@@ -1407,7 +1436,7 @@ function rebindChildMachine(
     return childMachine;
   }
   const childVisited = new Set([...visited, childMachine]);
-  const sources = childMachine.implementations.actorSources as Record<string, AnyActorLogic>;
+  const sources = childMachine.sources.actors as Record<string, AnyActorLogic>;
   const wrapped: Record<string, AnyActorLogic> = {};
 
   for (const [key, logic] of Object.entries(sources)) {
@@ -1439,7 +1468,7 @@ function rebindChildMachine(
   }
 
   return Object.keys(wrapped).length > 0
-    ? (childMachine.provide({ actorSources: wrapped as never }) as AnyStateMachine)
+    ? (childMachine.provide({ actors: wrapped as never }) as AnyStateMachine)
     : childMachine;
 }
 
@@ -1458,7 +1487,7 @@ function rebindChildMachine(
  *
  * Binding happens **before** the actor starts: every invoke the machine
  * could reach is walked and checked against the effective actor sources
- * (`options.actorSources` merged onto the machine), so a missing
+ * (`options.actors` merged onto the machine), so a missing
  * `streamText`/`decide` executor or any other unbound actor source throws
  * immediately — a bind-time error, not a mid-run failure. The one exception
  * is `agent.userInput`: unhandled, it binds as a pending placeholder that
@@ -1554,14 +1583,14 @@ export async function runAgent<TMachine extends AnyStateMachine>(
     );
   };
 
-  // §3.2 step 1: bind implementations. Conceptually `machine.provide({
-  // actorSources: options.actorSources })` first, then walk the EFFECTIVE
+  // §3.2 step 1: bind sources. Conceptually `machine.provide({
+  // actors: options.actors })` first, then walk the EFFECTIVE
   // (post-provide) sources (spike S4: chained provides merge).
   const provided = machine.provide({
-    actorSources: options.actorSources as never,
+    actors: options.actors as never,
   }) as TMachine;
 
-  const effectiveSources = provided.implementations.actorSources as Record<string, AnyActorLogic>;
+  const effectiveSources = provided.sources.actors as Record<string, AnyActorLogic>;
 
   assertBindable(provided, effectiveSources, {
     hasGenerateText: !!options.executors?.generateText,
@@ -1656,7 +1685,7 @@ export async function runAgent<TMachine extends AnyStateMachine>(
   }
 
   const boundMachine = provided.provide({
-    actorSources: wrappedSources as never,
+    actors: wrappedSources as never,
   }) as TMachine;
 
   // Resolution order: host override → machine-carried predicate
@@ -1742,6 +1771,15 @@ export async function runAgent<TMachine extends AnyStateMachine>(
     }
   }
 
+  const replayEvents: EventObject[] = [...(options.events ?? [])];
+  const appendReplayEvent = (event: EventObject): void => {
+    replayEvents.push(event);
+    options.onEvent?.(event);
+  };
+  if (replayEvents.length === 0 && effectiveSnapshot === undefined) {
+    appendReplayEvent(initEntry(options.input).event);
+  }
+
   return new Promise<RunAgentResult<TMachine>>((resolvePromise) => {
     let settled = false;
     let idleTimer: ReturnType<typeof setTimeout> | undefined;
@@ -1753,11 +1791,12 @@ export async function runAgent<TMachine extends AnyStateMachine>(
     // sent. Cleared right before `actor.send(options.event)`.
     let deliveringResumeEvent = options.event !== undefined;
 
-    const settle = (result: RunAgentResult<TMachine>) => {
+    const settle = (outcome: RunAgentOutcome<TMachine>) => {
       if (settled) {
         return;
       }
       settled = true;
+      const result = { ...outcome, events: [...replayEvents] } as RunAgentResult<TMachine>;
       if (idleTimer !== undefined) {
         clearTimeout(idleTimer);
       }
@@ -1773,7 +1812,7 @@ export async function runAgent<TMachine extends AnyStateMachine>(
         stampAgentMeta(result.persistedSnapshot);
         stampMessages(result.persistedSnapshot);
       }
-      onTrace({ type: "run.end", ...result } as AgentTraceEventPayload<TMachine>);
+      onTrace({ type: "run.end", ...outcome } as AgentTraceEventPayload<TMachine>);
       actor.stop();
       resolvePromise(result);
     };
@@ -1959,6 +1998,18 @@ export async function runAgent<TMachine extends AnyStateMachine>(
         }
 
         const snapshot = event.snapshot as AnyMachineSnapshot;
+
+        // The replay journal is deliberately smaller than the trace. A root
+        // transition is an external input when it came from outside the root
+        // actor (a host/user send or child completion). Timer delivery is the
+        // one self-sent input that must be retained. Initial and raised/internal
+        // events are re-derived by initialTransition/transition during replay.
+        if (
+          event.event.type !== "@xstate.init" &&
+          (event.sourceRef !== event.actorRef || event.event.type === "xstate.timer")
+        ) {
+          appendReplayEvent(event.event as EventObject);
+        }
 
         onTrace({
           type: "machine.transition",

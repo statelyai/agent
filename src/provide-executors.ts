@@ -14,12 +14,12 @@ import { executorBoundLogics } from "./internal/registry.js";
 export interface ProvideExecutorsOptions<TMachine extends AnyStateMachine = AnyStateMachine> {
   /**
    * Extra actor-source overrides merged onto the machine BEFORE binding — the
-   * same shape as `machine.provide({ actorSources })`. Use it to supply the
+   * same shape as `machine.provide({ actors })`. Use it to supply the
    * `agent.userInput` handler, a custom non-agent actor, or to shadow an agent
    * source with your own executor-bound logic. Merged first, so an override
    * that already carries its own executor is left untouched by the binding pass.
    */
-  actorSources?: Record<string, AnyActorLogic>;
+  actors?: Record<string, AnyActorLogic>;
   /** Chunk sink threaded to every bound `mode: 'stream'` text source. */
   onChunk?: (chunk: string) => void;
   /**
@@ -49,8 +49,8 @@ export interface ProvideExecutorsOptions<TMachine extends AnyStateMachine = AnyS
  *
  * behaves like a normal XState actor whose agent invokes now reach real models.
  *
- * Binding pass over `machine.implementations.actorSources` (after merging
- * `options.actorSources`):
+ * Binding pass over `machine.sources.actors` (after merging
+ * `options.actors`):
  * - `mode: 'generate'` text source → `executors.generateText`
  * - `mode: 'stream'` text source → `executors.streamText`
  * - decision / `agent.decide` source → `executors.decide` (snapshot-driven
@@ -64,7 +64,7 @@ export interface ProvideExecutorsOptions<TMachine extends AnyStateMachine = AnyS
  *
  * A source that already carries its own executor (`.withExecutor(...)`) is left
  * as-is. `agent.userInput` is left UNBOUND — an uncontrolled host handles idle
- * itself, so supply a handler via `options.actorSources` if the machine uses it.
+ * itself, so supply a handler via `options.actors` if the machine uses it.
  * Non-agent actors are untouched.
  *
  * Throws at bind time if a source needs an executor kind that `executors` does
@@ -84,12 +84,10 @@ export function provideExecutors<TMachine extends AnyStateMachine>(
     onTrace: options.onTrace as ((event: AgentTraceEvent) => void) | undefined,
   };
   const provided = (
-    options.actorSources
-      ? machine.provide({ actorSources: options.actorSources as never })
-      : machine
+    options.actors ? machine.provide({ actors: options.actors as never }) : machine
   ) as TMachine;
 
-  const effectiveSources = provided.implementations.actorSources as Record<string, AnyActorLogic>;
+  const effectiveSources = provided.sources.actors as Record<string, AnyActorLogic>;
   const wrappedSources: Record<string, AnyActorLogic> = {};
 
   // The always-registered `agent.*` builtins are present in every machine even
@@ -99,7 +97,7 @@ export function provideExecutors<TMachine extends AnyStateMachine>(
 
   for (const [key, logic] of Object.entries(effectiveSources)) {
     // Leave `agent.userInput` unbound: uncontrolled hosts drive human input
-    // themselves (pass a handler via options.actorSources if needed).
+    // themselves (pass a handler via options.actors if needed).
     if (key === USER_INPUT_ACTOR) {
       continue;
     }
@@ -151,7 +149,7 @@ export function provideExecutors<TMachine extends AnyStateMachine>(
     // Invoked child state machines and non-agent actors pass through untouched.
   }
 
-  return provided.provide({ actorSources: wrappedSources as never }) as TMachine;
+  return provided.provide({ actors: wrappedSources as never }) as TMachine;
 }
 
 function missingExecutorError(

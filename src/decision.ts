@@ -89,7 +89,7 @@ function decideActorWithExecutor(
       if (!execute) {
         throw new Error(
           `'${DECIDE_ACTOR}' has no host execution. Provide an implementation with ` +
-            `machine.provide({ actorSources: { '${DECIDE_ACTOR}': ... } }) or resolve ` +
+            `machine.provide({ actors: { '${DECIDE_ACTOR}': ... } }) or resolve ` +
             `the returned agent request with resolveDecision(...).`,
         );
       }
@@ -358,7 +358,7 @@ export interface DecisionLogicConfig<
  * currently-legal {@link ChosenEvent} (never a plain value). Under `runAgent`
  * the chosen event is delivered to the invoking actor automatically — the
  * transition it triggers usually exits the invoking state and ends the invoke.
- * Built by {@link createDecisionLogic}. Register it under `actorSources:` to reuse/export/
+ * Built by {@link createDecisionLogic}. Register it under `actors:` to reuse/export/
  * test it standalone; for a state-local, zero-config decision, use the
  * `agent.decide` builtin invoke instead.
  */
@@ -390,7 +390,7 @@ function resolveAllowedEventTypes(
  * run, resolves to exactly one currently-legal {@link ChosenEvent} by
  * calling the host `decide` executor (passed here as `execute`, or supplied
  * later via {@link DecisionLogic.withExecutor}, `machine.provide(...)`, or
- * `runAgent`'s `decide` option). Register the result under `actorSources:` and
+ * `runAgent`'s `decide` option). Register the result under `actors:` and
  * invoke it by name; for a one-off, state-local decision, prefer the
  * `agent.decide` builtin invoke instead — it needs no separate declaration
  * and types `allowedEvents` against the machine's own event schemas.
@@ -464,7 +464,7 @@ export function createDecisionLogic<
         throw new Error(
           "Decision logic has no host execution. Pass an executor as the second " +
             "argument to createDecisionLogic(...), provide a runtime adapter, or " +
-            "extract it with getAgentEffects(..., { actorSources }) and resolveDecision(...).",
+            "extract it with getAgentEffects(..., { actors }) and resolveDecision(...).",
         );
       }
 

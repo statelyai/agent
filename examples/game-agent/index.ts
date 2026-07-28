@@ -116,7 +116,7 @@ const nonNullSummaryContext = gameSchemas.context.extend({ lastSummary: z.string
 const gameAgentSetup = setupAgent({
   schemas: gameSchemas,
   models,
-  actorSources: gameActors,
+  actors: gameActors,
   states: {
     choosingMove: {},
     summarizing: {},

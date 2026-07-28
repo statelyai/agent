@@ -206,6 +206,7 @@ These `runAgent` callbacks are purely observational; they return `void` and cann
 - **`onTrace(event)`**: one ordered stream of run/request/chunk/transition/emit/end events, each stamped with `schemaVersion` (currently `1`, exported as `AGENT_TRACE_SCHEMA_VERSION`), `runId`, `seq`, `timestamp`, `machineId`, `machineVersion` (the same identity stamped onto settled snapshots as `agentMeta`). The eval trace / JSONL / telemetry-adapter slot. Uncontrolled mode gets the same stream: `provideExecutors` also accepts an `onTrace`, paired with `traceTransitions` on the actor's `inspect` to fold transitions in.
 - **`onChunk(chunk, info)`**: each streamed chunk of a `mode: 'stream'` request, with the `AgentRequest` that produced it (parallel streams stay distinguishable).
 - **`onResult(request, result)`**: once per resolved text or decision request (decision retries fire per attempt), with normalized `result.output` and the raw executor result. `result.raw` is whatever your executor returned verbatim: return `usage` alongside `output` and this becomes your token meter (the shipped adapter does; `raw as AiSdkGenerateResult` carries `usage`, `finishReason`, `toolCalls`, `toolResults`).
+- **`onEvent(event)`**: each newly appended replayable external input, as a plain `EventObject`. Use it to persist the event log while the run is in flight; seeded resume history is not re-emitted.
 - **`onTransition(snapshot, event)`**: every machine transition, with the new snapshot and causing event.
 - **`on: { EVENT: handler, '*': handler }`**: events the machine emits with `enq.emit(...)`, keyed by emitted event type (`'*'` catches all).
 - **`inspect(inspectionEvent)`**: raw xstate inspection passthrough for the whole actor system. `onTransition` covers the root only; to watch a child machine's states (see [multi-agent](multi-agent.md)), filter `inspectionEvent.type === '@xstate.transition'` and read `inspectionEvent.actorRef`. The `inspectTransitions(handler)` helper does that filtering and hands over the typed snapshot + actorRef.
@@ -217,6 +218,7 @@ await runAgent(machine, {
   onTrace: (event) => jsonl.write(event),
   onChunk: (chunk, info) => process.stdout.write(chunk),
   onResult: (request, result) => log(request.id, result.raw),
+  onEvent: (event) => eventLog.append(event),
   onTransition: (snapshot, event) => trace(snapshot.value, event.type),
   on: { EVALUATED: (e) => console.log(`score ${e.qualityScore}/10`) },
 });
@@ -252,7 +254,7 @@ Because executors are plain functions, a test supplies scripted ones and never t
 
 ```ts
 const machine = emailDrafter.provide({
-  actorSources: {
+  actors: {
     draftEmail: draftEmail.withExecutor(async ({ request }) => {
       return { output: { to: "sam@example.com", subject: "Hello", body: "Hi Sam!" } };
     }),
@@ -282,7 +284,7 @@ const executableDraftText = draftText.withExecutor(async ({ request, signal }) =
 });
 
 createActor(
-  machine.provide({ actorSources: { draftText: executableDraftText } }),
+  machine.provide({ actors: { draftText: executableDraftText } }),
   { input },
 ).start();
 ```
@@ -346,7 +348,7 @@ const result = await runAgent(machine, {
 import { createAsyncLogic } from "xstate";
 
 const boundMachine = machine.provide({
-  actorSources: {
+  actors: {
     "agent.userInput": createAsyncLogic({
       run: async ({ input }) => showFormAndWaitForSubmit(input),
     }),
@@ -390,13 +392,13 @@ The `resolveDecision` helper retries on an unknown event type, an invalid payloa
 Agents often need host-owned values (a session handle, db client, auth or billing ids) reaching the code that makes a model call. There is no dedicated `hostContext` option today (one is under consideration but **not shipped**); which pattern to reach for depends on whether the value is serializable and needed per call:
 
 - **Serializable ids the machine carries:** pass as machine `input`, land in `context`, map into each actor's `input`.
-- **Non-serializable handles (a live session, db client, socket):** close over them where you define the actor via `.provide({ actorSources })` or `.withExecutor(...)`. The handle lives in the closure, never in `context` (it won't survive [snapshot serialization](human-in-the-loop.md#persist-and-resume-across-processes)).
+- **Non-serializable handles (a live session, db client, socket):** close over them where you define the actor via `.provide({ actors })` or `.withExecutor(...)`. The handle lives in the closure, never in `context` (it won't survive [snapshot serialization](human-in-the-loop.md#persist-and-resume-across-processes)).
 - **Per-call reference ids** (auth token, billing id, trace id): put them in the request's input schema so they're typed and validated at the call site, not smuggled through `metadata`.
 
 ```ts
 function buildMachine(session: Session, db: DbClient) {
   return baseMachine.provide({
-    actorSources: {
+    actors: {
       draftEmail: draftEmail.withExecutor(async ({ request }) => {
         const history = await db.loadThread(request.threadId);
         return session.prompt(request.prompt, { history });

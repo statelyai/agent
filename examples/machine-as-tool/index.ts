@@ -57,10 +57,10 @@ const metaSchema = z.object({
 });
 
 const agentSetup = setupAgent({
-  actorSources: {
+  actors: {
     // Plain side-effecting actor (a stand-in for the real refund call).
     // This implementation is used as-is by runAgent; a host can override it
-    // per run via runAgent(machine, { actorSources: { processRefund: ... } }).
+    // per run via runAgent(machine, { actors: { processRefund: ... } }).
     processRefund: createAsyncLogic({ run: async () => ({ ok: true }) }),
   },
   context: z.object({

@@ -24,7 +24,7 @@ describe("curated XState setup examples", () => {
     const calls: AgentTextRequest[] = [];
     const sent: unknown[] = [];
     const machine = emailDrafter.provide({
-      actorSources: {
+      actors: {
         evaluatePrompt: evaluatePrompt.withExecutor(async ({ request }) => {
           calls.push(request);
           const satisfied = calls.filter((call) => call.system?.includes("Evaluate")).length > 1;
@@ -212,7 +212,7 @@ describe("curated XState setup examples", () => {
     let jokes = 0;
     let decisionIndex = 0;
     const machine = jokeMachine.provide({
-      actorSources: {
+      actors: {
         tellJoke: tellJokeLogic.withExecutor(async ({ input }) => {
           jokes += 1;
           return { output: `joke ${jokes} about ${input.topic}` };

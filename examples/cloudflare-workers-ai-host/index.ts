@@ -154,7 +154,7 @@ async function runWorkersAiDecision(env: Env, request: AgentDecisionRequest): Pr
 }
 
 export async function runCloudflareGameTurn(env: Env, input = { playerHp: 20, enemyHp: 15 }) {
-  const options = { schemas: gameSchemas, actorSources: gameActors };
+  const options = { schemas: gameSchemas, actors: gameActors };
 
   // The ONLY durable state is this journal of external inputs. In a real Worker
   // it lives in KV/D1/a Durable Object; each turn below loads it, appends one

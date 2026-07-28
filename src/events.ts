@@ -99,7 +99,7 @@ export interface AgentRequestOptions {
   snapshot?: AnyMachineSnapshot;
   events?: Record<string, StandardSchemaV1>;
   schemas?: AgentSchemas;
-  actorSources?: Record<string, unknown>;
+  actors?: Record<string, unknown>;
   /** Customize machine-event tool names. Defaults to send_event_<TYPE>. */
   eventToolName?: AgentEventToolNameResolver;
 }

@@ -10,8 +10,8 @@
  * `entry`, once per subtopic — not a fixed `type: 'parallel'` region (that would
  * hard-code the branch count).
  *
- * The branch logic is spawned BY REFERENCE off `actorSources` — the action's
- * `actorSources.summarizeSubtopic` is the machine's post-`provide`
+ * The branch logic is spawned BY REFERENCE off `actors` — the action's
+ * `actors.summarizeSubtopic` is the machine's post-`provide`
  * implementation, so `runAgent` has already wrapped it with the host executor
  * set. No `.withExecutor` pre-binding, no machine factory closing over an
  * executor: the planner, every spawned branch, and the reducer all resolve
@@ -25,7 +25,7 @@
  * Shows:
  *   - `planning`: a structured-output request → a typed list of subtopics.
  *   - `fanningOut`: `entry` spawns one branch per subtopic — dynamic N.
- *   - `collecting`: a wildcard `on` handler counts `xstate.done.actor.branch-*`
+ *   - `collecting`: an `xstate.done.actor` handler counts matching `actorId`s
  *     completions and keys each summary into `context.summaries`.
  *   - `reducing`: composes the digest from the whole summaries map.
  *
@@ -91,7 +91,7 @@ const agentSetup = setupAgent({
       prompt: ({ input }) => input.topic,
     },
     // The fan-out branch: one summary per subtopic. Spawned dynamically off
-    // `actorSources.summarizeSubtopic` — no pre-binding; `runAgent` binds it.
+    // `actors.summarizeSubtopic` — no pre-binding; `runAgent` binds it.
     summarizeSubtopic: {
       schemas: {
         input: z.object({ topic: z.string(), subtopic: z.string() }),
@@ -125,7 +125,7 @@ const BRANCH_PREFIX = "branch-";
 
 /**
  * The fan-out machine. No factory, no pre-bound executor: the `fanningOut`
- * entry spawns `actorSources.summarizeSubtopic` — the machine's current (post-
+ * entry spawns `actors.summarizeSubtopic` — the machine's current (post-
  * `provide`) implementation, so `runAgent`'s host-bound executor reaches every
  * branch. The planner, branches, and reducer share ONE executor set, passed to
  * `runAgent({ executors })`.
@@ -156,13 +156,13 @@ export const fanOutMachine = agentSetup.createMachine({
       },
     },
     // DYNAMIC FAN-OUT: one spawn per subtopic — N decided at runtime from the
-    // planner's output, not the machine config. `actorSources.summarizeSubtopic`
+    // planner's output, not the machine config. `actors.summarizeSubtopic`
     // is the host-bound branch logic; each spawn is a live child
     // (`branch-0`..`branch-<N-1>`) visible on the snapshot until it completes.
     fanningOut: {
-      entry: ({ context, actorSources }, enq) => {
+      entry: ({ context, actors }, enq) => {
         context.subtopics.forEach((subtopic, index) => {
-          enq.spawn(actorSources.summarizeSubtopic, {
+          enq.spawn(actors.summarizeSubtopic, {
             id: `${BRANCH_PREFIX}${index}`,
             input: { topic: context.topic, subtopic },
           });
@@ -171,16 +171,15 @@ export const fanOutMachine = agentSetup.createMachine({
       always: { target: "collecting" },
     },
     // REDUCE: count every branch completion, keying its summary by branch id.
-    // A wildcard handler is how the parent observes N dynamic children whose
-    // ids are only known at runtime (no static `onDone` per branch).
+    // The canonical done event carries `actorId`, so one handler can observe N
+    // dynamic children whose ids are only known at runtime.
     collecting: {
       on: {
-        "*": ({ context, event }) => {
-          const type = event.type as string;
-          if (!type.startsWith(`xstate.done.actor.${BRANCH_PREFIX}`)) {
+        "xstate.done.actor": ({ context, event }) => {
+          const id = (event as unknown as { actorId: string }).actorId;
+          if (!id.startsWith(BRANCH_PREFIX)) {
             return undefined;
           }
-          const id = type.slice("xstate.done.actor.".length);
           const summaries = {
             ...context.summaries,
             [id]: (event as unknown as { output: string }).output,
@@ -212,7 +211,7 @@ export const fanOutMachine = agentSetup.createMachine({
 
 /**
  * @deprecated The machine no longer needs a pre-bound executor — spawn resolves
- * the branch logic off `actorSources` and `runAgent` binds it. Use
+ * the branch logic off `actors` and `runAgent` binds it. Use
  * `fanOutMachine` directly and pass `executors` to `runAgent`. The parameter is
  * ignored; kept for call-site compatibility.
  */

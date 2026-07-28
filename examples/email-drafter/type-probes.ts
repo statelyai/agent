@@ -16,7 +16,7 @@ import { emailDrafterActors, emailDrafterSchemas, models } from "./index.js";
 const agentSetup = setupAgent({
   schemas: emailDrafterSchemas,
   models,
-  actorSources: emailDrafterActors,
+  actors: emailDrafterActors,
 });
 
 // meta is schema-typed, and event payloads are inferred per event type.

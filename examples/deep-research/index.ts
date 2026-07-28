@@ -7,10 +7,10 @@
  * changing the machine.
  *
  * Fan-out is dynamic: the planner returns 2-4 queries and `researching` spawns
- * one `research` branch per query off `actorSources` — the machine's post-
+ * one `research` branch per query off `actors` — the machine's post-
  * `provide` implementation, so `runAgent` binds the host executor onto every
  * branch (no pre-binding, no fixed parallel region). Branches are collected via
- * the wildcard `xstate.done.actor.*` pattern (see `examples/fan-out`).
+ * the canonical `xstate.done.actor` event's `actorId` (see `examples/fan-out`).
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/deep-research/index.ts
  */
@@ -139,12 +139,12 @@ export const deepResearchMachine = setup.createMachine({
       },
     },
     // DYNAMIC FAN-OUT: one researcher spawned per planned query — N decided at
-    // runtime. `actorSources.research` is the host-bound branch logic; each
+    // runtime. `actors.research` is the host-bound branch logic; each
     // spawn is a live child (`research-0`..`research-<N-1>`).
     researching: {
-      entry: ({ context, actorSources }, enq) => {
+      entry: ({ context, actors }, enq) => {
         context.queries.forEach((query, index) => {
-          enq.spawn(actorSources.research, {
+          enq.spawn(actors.research, {
             id: `${BRANCH_PREFIX}${index}`,
             input: { question: context.question, query },
           });
@@ -153,15 +153,14 @@ export const deepResearchMachine = setup.createMachine({
       always: { target: "collecting" },
     },
     // REDUCE: count every researcher completion, keying its finding by branch id
-    // via the wildcard `xstate.done.actor.*` pattern (ids only known at runtime).
+    // via canonical `xstate.done.actor` + `actorId` (ids only known at runtime).
     collecting: {
       on: {
-        "*": ({ context, event }) => {
-          const type = event.type as string;
-          if (!type.startsWith(`xstate.done.actor.${BRANCH_PREFIX}`)) {
+        "xstate.done.actor": ({ context, event }) => {
+          const id = (event as unknown as { actorId: string }).actorId;
+          if (!id.startsWith(BRANCH_PREFIX)) {
             return undefined;
           }
-          const id = type.slice("xstate.done.actor.".length);
           const findings = {
             ...context.findings,
             [id]: (event as unknown as { output: string }).output,

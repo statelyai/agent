@@ -13,6 +13,57 @@ Journal rule: **external inputs only.** Never journal raised/internal events —
 
 This puts one obligation on machine authors: transitions and effect inputs (prompt builders, spawn inputs) must be pure functions of state and event. No `Date.now()`, no `Math.random()` inside transition code — inject time and randomness as events or input.
 
+## Export events from `runAgent`
+
+<!-- RunAgentResult.events and RunAgentOptions events/onEvent from src/run-agent.ts; replay from src/effects.ts -->
+
+Every `runAgent` result carries the external inputs it observed as a plain `EventObject[]`. Pass it directly to `replay`:
+
+```ts
+import { replay, runAgent } from "@statelyai/agent";
+
+const first = await runAgent(machine, { input, executors });
+const { snapshot, effects } = replay(machine, first.events);
+```
+
+A fresh run starts with `@agent.init`. The remaining entries are effect completions/failures, externally sent events, and timer firings. Raised events and internal transitions are absent because `replay` re-derives them.
+
+XState v6 uses stable category event types with identity in payload fields. Preserve the whole object: an invoke completion is `{ type: "xstate.done.actor", actorId, sessionId, output }`; a timer firing is `{ type: "xstate.timer", id }`. `replay` rebinds logged actor sessions to the new actor system, so globally unique runtime IDs do not make the log machine-specific.
+
+When resuming by snapshot, pass the preceding events back to keep one complete history:
+
+```ts
+const second = await runAgent(machine, {
+  snapshot: first.snapshot,
+  event: { type: "APPROVE" },
+  events: first.events,
+  executors,
+});
+
+replay(machine, second.events);
+```
+
+The `events` option only carries history forward; `snapshot` remains the live resume source. If omitted on a snapshot resume, the returned array contains only events observed during that invocation and is not a complete replay from initialization.
+
+To capture the same replayable events while the run is in flight, use `onEvent`:
+
+```ts
+const events = [...previousEvents];
+
+const result = await runAgent(machine, {
+  snapshot,
+  event,
+  events: previousEvents,
+  executors,
+  onEvent: (event) => {
+    events.push(event);
+    appendToStore(event);
+  },
+});
+```
+
+`onEvent` fires once per newly observed entry, including `@agent.init` on a fresh run. It does not re-emit history supplied through `events`. Unlike `onTransition`, it excludes raised and internal events, so its output can be passed directly to `replay`.
+
 ## The store contract
 
 `AgentEventLogStore` is an append-only protocol with optimistic concurrency on the log length:

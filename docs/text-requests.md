@@ -192,7 +192,7 @@ export const research = createTextLogic({
 
 <!-- createTextLogic from src/text-logic.ts and examples/email-drafter -->
 
-Inline `requests:` (above) is the default. Reach for `createTextLogic` when a request should be standalone (exported, tested on its own, or shared across machines) and registered under `actorSources`. Each `requests` entry is exactly what `setupAgent` builds internally from `createTextLogic`, so the two are interchangeable. See [Which authoring form when](machines.md#which-authoring-form-when).
+Inline `requests:` (above) is the default. Reach for `createTextLogic` when a request should be standalone (exported, tested on its own, or shared across machines) and registered under `actors`. Each `requests` entry is exactly what `setupAgent` builds internally from `createTextLogic`, so the two are interchangeable. See [Which authoring form when](machines.md#which-authoring-form-when).
 
 ```ts
 import { createTextLogic, setupAgent } from "@statelyai/agent";
@@ -207,7 +207,7 @@ export const draftEmail = createTextLogic({
   messages: ({ input }) => [...input.messages, userMessage(input.prompt)],
 });
 
-const agentSetup = setupAgent({ models, context, input, output, actorSources: { draftEmail } });
+const agentSetup = setupAgent({ models, context, input, output, actors: { draftEmail } });
 ```
 
 Because `draftEmail` is a value, a test can import it and drive it with a fake executor, no machine required. [examples/email-drafter/index.ts](../examples/email-drafter/index.ts) shows structured, streaming, and message-based `createTextLogic` requests across a multi-state workflow.

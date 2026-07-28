@@ -66,7 +66,7 @@ const agentSetup = setupAgent({
   },
   input: z.object({ topic: z.string() }),
   output: z.object({ haiku: z.string() }),
-  actorSources: { writeHaiku, reviseHaiku },
+  actors: { writeHaiku, reviseHaiku },
 });
 
 const haikuMachine = agentSetup.createMachine({
@@ -201,26 +201,26 @@ const prompts = {
 };
 
 // Build text actor sources from the map (your `mapStates`).
-const actorSources = {
+const actors = {
   write: createTextLogic({ model: "writer", ...prompts.write }),
   revise: createTextLogic({ model: "writer", ...prompts.revise }),
 };
 
-// runAgent merges actorSources onto the machine before the run.
+// runAgent merges actors onto the machine before the run.
 const result = await runAgent(haikuMachine, {
   input: { topic: "state machines" },
-  actorSources,
+  actors,
   executors: createAiSdkExecutors({ models }),
 });
 ```
 
-The `write`/`revise` invokes now name bare `src` strings; the `judge` decision stays state-local (`src: 'agent.decide'`), so its prompt lives on the invoke's `input`. The `actorSources` option on `runAgent` is shorthand for `machine.provide({ actorSources })` (you can also `provide` them permanently, or pass them to the step helpers unchanged). Use this form when prompts are versioned separately, edited by non-engineers, or A/B tested.
+The `write`/`revise` invokes now name bare `src` strings; the `judge` decision stays state-local (`src: 'agent.decide'`), so its prompt lives on the invoke's `input`. The `actors` option on `runAgent` is shorthand for `machine.provide({ actors })` (you can also `provide` them permanently, or pass them to the step helpers unchanged). Use this form when prompts are versioned separately, edited by non-engineers, or A/B tested.
 
 ## Running a plain machine without `setupAgent`
 
 The strongest form of the claim: the machine need not know about this library **at all**. Any machine whose invokes resolve to values, and whose events you can enumerate, is drivable.
 
-- **`setupAgent` is optional.** It registers the five `agent.*` builtins and the schema pack. Without it, use the free functions and bind sources with `machine.provide({ actorSources: { ... } })`.
+- **`setupAgent` is optional.** It registers the five `agent.*` builtins and the schema pack. Without it, use the free functions and bind sources with `machine.provide({ actors: { ... } })`.
 - **You don't need `agent.decide` either.** Any state that waits on events is a decision point: enumerate legal events with `getAcceptedEvents(snapshot)`, let the model choose one with `resolveDecision`, gated by `snapshot.can(event)`.
 
 ```ts
@@ -240,7 +240,7 @@ const event = await resolveDecision(
 
 The contract is minimal: **invokes return values, states accept events, guards decide legality.** See the runnable [plain-xstate](../examples/plain-xstate/index.ts) example.
 
-> **Guards on event transitions:** write them as function transitions returning `undefined` when blocked (as every example here does). XState v6 drops named string guards on `on:` transitions in favor of this form, which is what makes `snapshot.can(event)` (and therefore `resolveDecision`'s `canTake`) reflect the guard. This library targets XState v6 alpha and stays compatible with v5.
+> **Guards on event transitions:** write them as function transitions returning `undefined` when blocked (as every example here does). XState v6 drops named string guards on `on:` transitions in favor of this form, which is what makes `snapshot.can(event)` (and therefore `resolveDecision`'s `canTake`) reflect the guard. This library requires XState v6 alpha.25 or newer.
 
 A machine with **no invokes at all** (prompts written as state `description`s, `meta`, or any external lookup) runs unmodified via `runAgent`'s `getRequests` option: whenever the machine would otherwise settle idle, your hook maps the snapshot to the request(s) to run. See [described-workflow](../examples/described-workflow/index.ts).
 

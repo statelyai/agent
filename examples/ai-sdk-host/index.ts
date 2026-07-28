@@ -122,7 +122,7 @@ export async function runStreamingDemo(
   }),
 ) {
   const result = await runAgent(
-    jokeMachine.provide({ actorSources: { tellJoke: streamingTellJoke } }),
+    jokeMachine.provide({ actors: { tellJoke: streamingTellJoke } }),
     {
       input: { topic },
       // Rate the streamed joke; the decision then ends the loop after one joke.

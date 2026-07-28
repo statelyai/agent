@@ -292,7 +292,7 @@ type AgentSetupXStateConfig<
   // Per-state schemas (xstate `setup({ states })`): narrows `context` inside
   // the declared states (invoke inputs, transition fns, final outputs).
   states?: TStateSchemas;
-  actorSources: SetupActors<
+  actors: SetupActors<
     AgentSetupActors<
       AgentAllActors<TActors, TRequestSchemas>,
       keyof TEventSchemas & string,
@@ -469,7 +469,7 @@ type SetupAgentBaseConfig<
     >
 ) & {
   models?: TModels;
-  actorSources?: TActors;
+  actors?: TActors;
   /**
    * Per-state schemas, mirroring xstate's `setup({ states })`: narrow
    * `context` inside a state (invoke `input`, transition fns, final `output`)
@@ -659,7 +659,7 @@ export type AgentMachine<
  * state/transition meta are all standard schemas — no `{} as Type` casts —
  * and are retained on `result.schemas` for runtime validation. Also
  * registers the `agent.generateText`/`agent.streamText`/`agent.userInput`/
- * `agent.decide`/`agent.plan` builtin actors and lowers `requests`/`actorSources` into the
+ * `agent.decide`/`agent.plan` builtin actors and lowers `requests`/`actors` into the
  * machine's actor sources. The result is the xstate `setup(...)` object with
  * a wrapped `result.createMachine(...)` plus `result.schemas`/`models`/
  * `requests`/`appendMessages` attached. Also has a
@@ -676,7 +676,7 @@ export type AgentMachine<
  *
  * const agent = setupAgent({
  *   schemas,
- *   actorSources: { tellJoke },
+ *   actors: { tellJoke },
  * });
  *
  * const jokeMachine = agent.createMachine({
@@ -880,18 +880,18 @@ function normalizeAgentRequestInput<
 }
 
 /**
- * Runtime guard: a key appearing in both `actorSources`/`requests` is almost
+ * Runtime guard: a key appearing in both `actors`/`requests` is almost
  * certainly a mistake (whichever spread applies last would silently win) —
  * fail fast with a clear message rather than let one implementation shadow
  * another.
  */
 function assertNoActorKeyCollisions(
-  actorSources: Record<string, unknown> | undefined,
+  actors: Record<string, unknown> | undefined,
   requests: Record<string, unknown>,
 ): void {
   const seenIn = new Map<string, string>();
   const groups: [string, Record<string, unknown> | undefined][] = [
-    ["actorSources", actorSources],
+    ["actors", actors],
     ["requests", requests],
   ];
 
@@ -902,7 +902,7 @@ function assertNoActorKeyCollisions(
         throw new Error(
           `setupAgent: key '${key}' is defined in both '${existingGroup}' and ` +
             `'${groupName}'. Each actor source key must be unique across ` +
-            `'actorSources' and 'requests'.`,
+            `'actors' and 'requests'.`,
         );
       }
       seenIn.set(key, groupName);
@@ -910,7 +910,7 @@ function assertNoActorKeyCollisions(
   }
 }
 
-// The builtin `agent.*` actor keys — reserved so a user `actorSources`/
+// The builtin `agent.*` actor keys — reserved so a user `actors`/
 // `requests` entry cannot silently clobber a builtin via spread order.
 const RESERVED_AGENT_ACTOR_KEYS: readonly string[] = [
   ...Object.keys(builtinTextActors),
@@ -920,19 +920,19 @@ const RESERVED_AGENT_ACTOR_KEYS: readonly string[] = [
 ];
 
 /**
- * Rejects a user-supplied `actorSources`/`requests` key in the reserved
+ * Rejects a user-supplied `actors`/`requests` key in the reserved
  * `agent.*` builtin namespace. Without this, the builtins-first spread in
- * {@link createAgentActorSources} lets such a key overwrite the builtin
+ * {@link createAgentActors} lets such a key overwrite the builtin
  * (`agent.decide`, `agent.plan`, …) silently. Deliberate override of a builtin
  * is still possible after the machine is created, via
- * `machine.provide({ actorSources: { 'agent.decide': ... } })`.
+ * `machine.provide({ actors: { 'agent.decide': ... } })`.
  */
 function assertNoReservedAgentKeys(
-  actorSources: Record<string, unknown> | undefined,
+  actors: Record<string, unknown> | undefined,
   requests: Record<string, unknown>,
 ): void {
   const groups: [string, Record<string, unknown> | undefined][] = [
-    ["actorSources", actorSources],
+    ["actors", actors],
     ["requests", requests],
   ];
   for (const [groupName, group] of groups) {
@@ -942,7 +942,7 @@ function assertNoReservedAgentKeys(
           `setupAgent: '${groupName}' key '${key}' is a reserved builtin agent actor and ` +
             `cannot be redefined here (it would silently clobber the builtin). Reserved keys: ` +
             `${RESERVED_AGENT_ACTOR_KEYS.join(", ")}. To deliberately override a builtin, do it ` +
-            `on the created machine instead: machine.provide({ actorSources: { '${key}': ... } }).`,
+            `on the created machine instead: machine.provide({ actors: { '${key}': ... } }).`,
         );
       }
     }
@@ -950,20 +950,20 @@ function assertNoReservedAgentKeys(
 }
 
 // Merges the five builtin `agent.*` actors with user `actors` and generated request actors, after checking for key collisions. Exported for workflow-config's fromConfig lowering. @internal
-export function createAgentActorSources<
+export function createAgentActors<
   TActors extends { [K in keyof TActors]: AnyActorLogic },
   TRequestSchemas extends AgentRequestSchemaMap,
   TModel extends string = string,
 >(
-  actorSources: TActors | undefined,
+  actors: TActors | undefined,
   requestActors: RequestActors<TRequestSchemas>,
 ): SetupActors<AgentSetupActors<AgentAllActors<TActors, TRequestSchemas>, string, TModel>> {
   assertNoActorKeyCollisions(
-    actorSources as Record<string, unknown> | undefined,
+    actors as Record<string, unknown> | undefined,
     requestActors as Record<string, unknown>,
   );
   assertNoReservedAgentKeys(
-    actorSources as Record<string, unknown> | undefined,
+    actors as Record<string, unknown> | undefined,
     requestActors as Record<string, unknown>,
   );
 
@@ -972,7 +972,7 @@ export function createAgentActorSources<
     [USER_INPUT_ACTOR]: userInputActor,
     [DECIDE_ACTOR]: createDecideActor(),
     [PLAN_ACTOR]: createPlanActor(),
-    ...actorSources,
+    ...actors,
     ...requestActors,
   } as SetupActors<AgentSetupActors<AgentAllActors<TActors, TRequestSchemas>, string, TModel>>;
 }
@@ -1001,7 +1001,7 @@ function createAgentSetupConfig<
     TMetaSchema,
     TEmittedSchemas
   >,
-  actorSources: SetupActors<
+  actors: SetupActors<
     AgentSetupActors<
       AgentAllActors<TActors, TRequestSchemas>,
       keyof TEventSchemas & string,
@@ -1070,7 +1070,7 @@ function createAgentSetupConfig<
           ) as ResolveAgentStateSchemas<TContextSchema, TStateSchemas>,
         }
       : {}),
-    actorSources,
+    actors,
     actions: config.actions,
     guards: config.guards,
     delays: config.delays,
@@ -1129,8 +1129,8 @@ function createSetupAgent<
     config.requests,
   );
   const requestActors = createRequestActors<TRequestSchemas, AgentModelRef<TModels>>(requests);
-  const actorSources = createAgentActorSources<TActors, TRequestSchemas, AgentModelRef<TModels>>(
-    config.actorSources,
+  const actors = createAgentActors<TActors, TRequestSchemas, AgentModelRef<TModels>>(
+    config.actors,
     requestActors,
   );
   const setupConfig = createAgentSetupConfig<
@@ -1144,13 +1144,13 @@ function createSetupAgent<
     TModels,
     TEmittedSchemas,
     TStateSchemas
-  >(schemas, actorSources, config);
+  >(schemas, actors, config);
   const base = setup(setupConfig);
   const createBaseMachine = base.createMachine.bind(base);
   const models = (config.models ?? {}) as TModels;
   const machineOptions = {
     schemas,
-    actorSources,
+    actors,
     models,
   };
 

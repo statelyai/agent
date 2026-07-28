@@ -166,7 +166,7 @@ const agentSetup = setupAgent({
     passed: z.boolean(),
     failures: z.array(z.string()),
   }),
-  actorSources: {
+  actors: {
     // check_code: the host-owned sandboxed executor. NOT a model call.
     runChecks: createAsyncLogic<
       ExecutionResult,

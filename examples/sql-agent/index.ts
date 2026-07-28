@@ -99,7 +99,7 @@ const agentSetup = setupAgent({
     APPROVE: z.object({}),
     REJECT: z.object({}),
   },
-  actorSources: {
+  actors: {
     runQuery: createAsyncLogic<number, { plan: QueryPlan }>({
       run: async ({ input }) => executeQuery(input.plan),
     }),

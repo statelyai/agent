@@ -101,7 +101,7 @@ const coordinatorSetup = setupAgent({
   // as its suspension signal instead of a separate tag. runAgent settles idle
   // deterministically at any resting state carrying an interaction.
   isSuspended: (snapshot) => getStateMeta(snapshot).interaction !== undefined,
-  actorSources: {
+  actors: {
     sendWelcomePacket: createAsyncLogic({
       schemas: {
         input: employeeSchema,

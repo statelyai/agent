@@ -35,7 +35,7 @@ Each pattern is a single self-contained `index.ts`: no shared harness, no local 
 
 4. Run it: `OPENAI_API_KEY=... npx tsx index.ts` (or swap in [any host](hosts.md)).
 
-Peer ranges (from `@statelyai/agent`): `ai@^6.0.67`, `xstate@>=6.0.0-alpha.16 <6.0.0`, `zod@^3.25 || ^4`. `@statelyai/agent` is alpha; pin the exact version.
+Peer ranges (from `@statelyai/agent`): `ai@^6.0.67`, `xstate@>=6.0.0-alpha.25 <6.0.0`, `zod@^3.25 || ^4`. `@statelyai/agent` is alpha; pin the exact version.
 
 Every example is dual-mode: run it directly against a real model, or drive it with injected mock executors in a test (no key, no network). Swap the host without touching the machine (see [Use in any stack](any-stack.md)).
 

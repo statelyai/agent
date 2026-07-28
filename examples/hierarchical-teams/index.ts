@@ -243,7 +243,7 @@ const coordinatorSetup = setupAgent({
     REVISE: z.object({}),
     PUBLISH: z.object({}),
   },
-  actorSources: { researchTeam: researchTeamMachine, writingTeam: writingTeamMachine },
+  actors: { researchTeam: researchTeamMachine, writingTeam: writingTeamMachine },
 });
 
 export const hierarchicalTeamsMachine = coordinatorSetup.createMachine({

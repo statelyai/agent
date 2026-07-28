@@ -28,7 +28,7 @@ importers:
         version: 8.5.2(@types/node@20.19.30)
       '@statelyai/inspect':
         specifier: ^0.7.2
-        version: 0.7.2(xstate@6.0.0-alpha.23)
+        version: 0.7.2(xstate@6.0.0-alpha.25)
       '@types/express':
         specifier: ^5.0.6
         version: 5.0.6
@@ -84,8 +84,8 @@ importers:
         specifier: ^3.2.6
         version: 3.2.7(@types/debug@4.1.13)(@types/node@20.19.30)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0)
       xstate:
-        specifier: 6.0.0-alpha.23
-        version: 6.0.0-alpha.23
+        specifier: 6.0.0-alpha.25
+        version: 6.0.0-alpha.25
       zod:
         specifier: ^4.3.6
         version: 4.3.6
@@ -153,8 +153,8 @@ importers:
         specifier: ^8.21.1
         version: 8.21.1
       xstate:
-        specifier: 6.0.0-alpha.23
-        version: 6.0.0-alpha.23
+        specifier: 6.0.0-alpha.25
+        version: 6.0.0-alpha.25
       zod:
         specifier: ^4.3.6
         version: 4.4.3
@@ -5573,8 +5573,8 @@ packages:
   xstate@5.32.5:
     resolution: {integrity: sha512-ULazi1oe6wGrXl0Frb6otSlkm5HLifbbVTkMk5kkSKqz4TkxJaVpnl6jOJwKeid3ORPxYyZQgNLUSYX9q65SIA==, tarball: https://registry.npmjs.org/xstate/-/xstate-5.32.5.tgz}
 
-  xstate@6.0.0-alpha.23:
-    resolution: {integrity: sha512-ol0lRgwtUBRhiC5CRRwFzi9PZ+7XkRiXGMmD6/Pv3Yra81Hb4aPGWuEu4NSu0K54MEgylUi8AV4Hpwp9KFADlg==, tarball: https://registry.npmjs.org/xstate/-/xstate-6.0.0-alpha.23.tgz}
+  xstate@6.0.0-alpha.25:
+    resolution: {integrity: sha512-zk36UtcEZJDcU0GH1xE94me6H+qVZq71bInqeqHXxxyW+PUCFCFH1emyjqFToGFJIyN54u35c59bLyp91c24kA==, tarball: https://registry.npmjs.org/xstate/-/xstate-6.0.0-alpha.25.tgz}
     hasBin: true
 
   y18n@5.0.8:
@@ -7775,7 +7775,7 @@ snapshots:
       d3-force: 3.0.0
       zod: 4.4.3
 
-  '@statelyai/inspect@0.7.2(xstate@6.0.0-alpha.23)':
+  '@statelyai/inspect@0.7.2(xstate@6.0.0-alpha.25)':
     dependencies:
       fast-safe-stringify: 2.1.1
       isomorphic-ws: 5.0.0(ws@8.21.0)
@@ -7783,7 +7783,7 @@ snapshots:
       safe-stable-stringify: 2.5.0
       superjson: 1.13.3
       ws: 8.21.0
-      xstate: 6.0.0-alpha.23
+      xstate: 6.0.0-alpha.25
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
@@ -11139,7 +11139,7 @@ snapshots:
 
   xstate@5.32.5: {}
 
-  xstate@6.0.0-alpha.23: {}
+  xstate@6.0.0-alpha.25: {}
 
   y18n@5.0.8: {}
 

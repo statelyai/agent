@@ -12,6 +12,8 @@ Two ways to observe a run:
 
 No hosted platform, no adapter to install. Every trace pairs with a replayable snapshot: the same `runId` that scopes a trace also settles a JSON snapshot you can resume, so a traced run is reproducible.
 
+`result.events` is the smaller replay journal: only machine input, effect completions/failures, externally sent events, and timer firings. `AgentTraceEvent[]` is the richer observational stream below: request lifecycle, chunks, transitions, emissions, timestamps, and run boundaries. Feed only `result.events` to `replay`; never feed it trace events. See [The event log](checkpoints.md#export-events-from-runagent).
+
 ## The versioned trace stream
 
 The `onTrace` callback fires a single ordered stream of `AgentTraceEvent`s. Every event carries the same envelope:

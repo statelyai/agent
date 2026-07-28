@@ -59,7 +59,7 @@ import {
  * / {@link AgentStep.requests}): the machine has spawned a
  * `TextLogic`-backed invoke and is waiting on its result. Resolve it with
  * {@link executeAgentRequest} (or by hand, then feed the output into
- * {@link resolveAgentStep} via `xstate.done.actor.<id>`).
+ * {@link resolveAgentStep} via `xstate.done.actor` + `actorId`).
  */
 export interface AgentRequest<TInput extends AgentTextRequest = AgentTextRequest> {
   kind: "text";
@@ -155,7 +155,7 @@ export function getInvokeEffectMetadata(action: {
  * `initialTransition`) for spawned `TextLogic`/`DecisionLogic` invokes and
  * lowers each into an {@link AgentStepRequest}. The hand-passed-schemas
  * implementation detail behind the public {@link getAgentRequests} — it needs
- * `schemas`/`actorSources` passed explicitly, whereas `getAgentRequests`
+ * `schemas`/`actors` passed explicitly, whereas `getAgentRequests`
  * pre-fills them from the machine's registered `setupAgent` options.
  * `options.snapshot` is required to resolve a decision's candidate events
  * (intersecting declared `allowedEvents` with what's currently legal) — omit
@@ -187,7 +187,7 @@ export function getAgentRequestsWith(
     const registeredLogic =
       isTextLogic(params.logic) || isDecisionLogic(params.logic)
         ? params.logic
-        : options.actorSources?.[params.src];
+        : options.actors?.[params.src];
 
     if (isDecisionLogic(registeredLogic)) {
       const decisionRequest = registeredLogic.request(params.input as never);
@@ -280,7 +280,7 @@ function getActivePlanRequests(options: AgentRequestOptions): AgentPlanRequest[]
       continue;
     }
     const src = typeof ref.src === "string" ? ref.src : undefined;
-    const logic = (src ? options.actorSources?.[src] : undefined) ?? ref.logic;
+    const logic = (src ? options.actors?.[src] : undefined) ?? ref.logic;
     if (!isPlanLogic(logic)) {
       continue;
     }
@@ -324,18 +324,25 @@ function getActivePlanRequests(options: AgentRequestOptions): AgentPlanRequest[]
 }
 
 /**
- * Builds the synthetic `xstate.done.actor.<id>` event xstate's `transition()`
- * expects to resolve a spawned invoke — the event {@link resolveAgentStep}
- * applies internally.
+ * Builds the canonical `xstate.done.actor` event xstate's `transition()`
+ * expects to resolve a spawned invoke — including the child session identity
+ * that rejects a stale completion from an earlier incarnation.
  *
  * @internal
  */
 function doneEvent(
+  snapshot: AnyMachineSnapshot,
   request: Pick<AgentRequest, "id"> | string,
   output: unknown,
-): { type: `xstate.done.actor.${string}`; output: unknown } {
+): EventObject {
   const id = typeof request === "string" ? request : request.id;
-  return { type: `xstate.done.actor.${id}`, output };
+  const child = (snapshot.children as Record<string, { sessionId?: unknown }>)[id];
+  return {
+    type: "xstate.done.actor",
+    actorId: id,
+    ...(typeof child?.sessionId === "string" ? { sessionId: child.sessionId } : {}),
+    output,
+  } as EventObject;
 }
 
 /**
@@ -352,7 +359,7 @@ export function transitionResult<TLogic extends AnyActorLogic>(
   request: Pick<AgentRequest, "id"> | string,
   output: unknown,
 ): [SnapshotFrom<TLogic>, ExecutableActionObjectFromLogic<TLogic>[]] {
-  const event = doneEvent(request, output);
+  const event = doneEvent(snapshot as AnyMachineSnapshot, request, output);
   const result = transition(logic, snapshot, event as never);
   applyFinalStateOutput(logic, result[0], event);
   return result;
@@ -446,7 +453,7 @@ export function resolveAgentStep<TMachine extends AnyActorLogic>(
 /**
  * Snapshot in, requests out: scans executable actions for spawned agent
  * invokes and lowers each into an {@link AgentStepRequest}, pre-filled with
- * the machine's registered `setupAgent` schemas/actorSources (so callers
+ * the machine's registered `setupAgent` schemas/actors (so callers
  * don't pass them by hand each call) — merged with any `options` passed here,
  * which take precedence. The step path's public discovery primitive;
  * `initialAgentStep`/`transitionAgentStep`/`resolveAgentStep` call it

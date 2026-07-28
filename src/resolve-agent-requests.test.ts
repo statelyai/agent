@@ -111,7 +111,7 @@ function createTinyAgent() {
         STOP: z.object({}),
       },
     }),
-    actorSources: {
+    actors: {
       summarize: createTextLogic({
         schemas: {
           input: z.object({ topic: z.string() }),

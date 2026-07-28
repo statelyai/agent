@@ -38,7 +38,7 @@ describe('createTextLogic({ mode: "stream" })', () => {
         input: z.object({ topic: z.string() }),
         output: z.object({ joke: z.string() }),
       }),
-      actorSources: { streamJoke },
+      actors: { streamJoke },
     });
     const machine = agent.createMachine({
       context: ({ input }) => ({ topic: input.topic, joke: null }),
@@ -108,7 +108,7 @@ describe('createTextLogic({ mode: "stream" })', () => {
         context: z.object({ topic: z.string() }),
         input: z.object({ topic: z.string() }),
       }),
-      actorSources: { streamJoke },
+      actors: { streamJoke },
     });
     const machine = agent.createMachine({
       context: ({ input }) => ({ topic: input.topic }),
@@ -252,7 +252,7 @@ describe('createTextLogic({ mode: "stream" })', () => {
         input: z.object({}),
         output: z.object({ a: z.string(), b: z.string() }),
       }),
-      actorSources: { streamA, streamB },
+      actors: { streamA, streamB },
     });
 
     const machine = agent.createMachine({

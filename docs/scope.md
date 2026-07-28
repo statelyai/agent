@@ -18,7 +18,7 @@ That boundary is deliberate. A machine should run unchanged with a different mod
 | Workflow states, branching, loops, parallelism, retries, approval gates | Machine | XState machine configuration |
 | Model calls and structured output | Host or model SDK | `AgentRequestExecutors` |
 | Tools and tool loops | Host or model SDK | request `tools` and `metadata` |
-| Search, RAG, crawling, data APIs | Specialized library or service | tool, executor, or `actorSources` implementation |
+| Search, RAG, crawling, data APIs | Specialized library or service | tool, executor, or `actors` implementation |
 | Long-term and semantic memory | Database or memory library | load into machine input; expose reads/writes as actors or tools |
 | Sandboxes, filesystems, generated artifacts | Sandbox or workspace library | host actors and artifact handles in machine context |
 | MCP discovery, auth, sessions, and transport | MCP client or host framework | pass discovered tool descriptors into requests |
@@ -44,7 +44,7 @@ A feature does not belong in core merely because popular agent applications need
 
 ## How to integrate specialized libraries
 
-- Wrap an async capability as an XState actor and provide it through `actorSources`.
+- Wrap an async capability as an XState actor and provide it through `actors`.
 - Pass SDK-native tools through a request's `tools` map.
 - Put host-only hints in request `metadata`; core preserves it without interpreting it.
 - Close over auth, tenant, tracing, and service clients when constructing executors or actors.

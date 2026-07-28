@@ -40,7 +40,7 @@ These use `setupAgent(...)` (or plain XState `setup(...)` plus `createTextLogic(
 - [`triage/index.ts`](triage/index.ts): structured-output support ticket triage
 - [`json-agent/index.ts`](json-agent/index.ts): `setupAgent.fromConfig(...)` lowering a support-ticket workflow authored as a real `.json` file (decision, text request, idle human approval step)
 - [`described-workflow/index.ts`](described-workflow/index.ts): a plain `createMachine` with zero invokes run as an agent via `runAgent({ getRequests })`, prompts read from state descriptions/meta, message log stamped on `snapshot.messages`
-- [`plain-xstate/index.ts`](plain-xstate/index.ts): a normal XState v5 `setup(...)` machine (a promise-shaped invoke, an `on: { APPROVE, REVISE }` decision state with a guarded transition, a final state, and zero knowledge of `@statelyai/agent`) adopted as an agent without `setupAgent`: bind the actor via `machine.provide(...)`, then drive the decision with `getAcceptedEvents(snapshot)` + `resolveDecision(...)` gated by `snapshot.can(event)`
+- [`plain-xstate/index.ts`](plain-xstate/index.ts): a normal XState v6 `setup(...)` machine (a promise-shaped invoke, an `on: { APPROVE, REVISE }` decision state with a guarded transition, a final state, and zero knowledge of `@statelyai/agent`) adopted as an agent without `setupAgent`: bind the actor via `machine.provide(...)`, then drive the decision with `getAcceptedEvents(snapshot)` + `resolveDecision(...)` gated by `snapshot.can(event)`
 - [`supervisor/index.ts`](supervisor/index.ts): a routing request's structured output hands off to a format-specific worker
 - [`hierarchical-teams/index.ts`](hierarchical-teams/index.ts): two-level supervisors — a research team routes SEARCH/SCRAPE/FINISH via `agent.decide` over a bounded worker budget, under a coordinator that invokes the team machines through typed boundaries and can send one bounded revision round back to research
 - [`human-in-the-loop/index.ts`](human-in-the-loop/index.ts): draft → idle review (typed `meta.interaction`) → APPROVE/REJECT redraft, with a JSON snapshot round-trip
@@ -107,7 +107,7 @@ Multi-step agent patterns:
 - [`swarm-handoff/index.ts`](swarm-handoff/index.ts): persistent multi-agent network handing off across turns
 - [`plan-and-execute/index.ts`](plan-and-execute/index.ts): plan-and-execute, keeping the ReWOO evidence-map idea
 - [`subflows/index.ts`](subflows/index.ts): nested subgraphs / child flows
-- [`fan-out/index.ts`](fan-out/index.ts): dynamic runtime fan-out / map-reduce (LangGraph `Send`): a planner produces N subtopics, the machine spawns one live child branch per subtopic off `actorSources` (no per-branch executor pre-binding), and a reducer composes the summaries into one digest
+- [`fan-out/index.ts`](fan-out/index.ts): dynamic runtime fan-out / map-reduce (LangGraph `Send`): a planner produces N subtopics, the machine spawns one live child branch per subtopic off `actors` (no per-branch executor pre-binding), and a reducer composes the summaries into one digest
 - [`rag/index.ts`](rag/index.ts): retrieval-augmented generation (LangGraph RAG, Burr conversational RAG)
 - [`corrective-rag/index.ts`](corrective-rag/index.ts): corrective RAG (LangGraph CRAG tutorial: grade docs, rewrite query, web-search fallback)
 - [`adaptive-rag/index.ts`](adaptive-rag/index.ts): adaptive RAG (route local vs web, grade retrieval and generation, bounded rewrite)
@@ -136,4 +136,4 @@ AI SDK pattern set (fan-out, routing, reflection, map-reduce shapes):
 
 <!-- setupAgent config keys and decision authoring from src/setup-agent.ts and src/decision.ts -->
 
-New examples should use `createTextLogic(...)` for reusable LLM work and `setupAgent({ schemas, actorSources, requests })` for schema-first machine authoring. Decisions are authored inline in states via `src: 'agent.decide'` (state-local); to reuse one across states, share the _input builder_ function (a `({ context }) => ({ model, system, prompt, allowedEvents })` fn), not an actor. There is no `decisions:` key on `setupAgent`.
+New examples should use `createTextLogic(...)` for reusable LLM work and `setupAgent({ schemas, actors, requests })` for schema-first machine authoring. Decisions are authored inline in states via `src: 'agent.decide'` (state-local); to reuse one across states, share the _input builder_ function (a `({ context }) => ({ model, system, prompt, allowedEvents })` fn), not an actor. There is no `decisions:` key on `setupAgent`.

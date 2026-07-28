@@ -297,7 +297,7 @@ describe("Oracle Agent Spec-style static workflows", () => {
         { compileSchema: ajvCompiler() },
       )
       .provide({
-        actorSources: {
+        actors: {
           node12: createAsyncLogic({
             run: async () => ({
               generated_text: "first generated text",

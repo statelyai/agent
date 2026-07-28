@@ -14,7 +14,7 @@ npm install @statelyai/agent@alpha xstate@alpha zod ai@^6 @ai-sdk/openai@^3
 ```
 
 - Pin the alpha: the API is still settling.
-- `xstate` is the one required peer. The library targets **XState v6 alpha** and stays compatible with **XState v5**.
+- `xstate` is the one required peer. The library requires **XState v6 alpha.25 or newer**.
 - `ai` (the Vercel AI SDK) and `@ai-sdk/openai` back the shipped adapter, `createAiSdkExecutors`. Core has no runtime dependency besides `xstate`.
 - Provider packages must match your `ai` major. `@ai-sdk/openai@^3` pairs with `ai@^6`; a bare `@ai-sdk/openai` resolves to `@latest`, whose `LanguageModel` spec version may not match your `ai` peer.
 - The package is **ESM-only** and the examples use top-level `await`. Set `"type": "module"` in `package.json` (or use `.mts` files).
@@ -145,6 +145,8 @@ const result = await runAgent(machine, {
 - `idle`: the machine is waiting on a human. See [Human in the loop](human-in-the-loop.md).
 - `error`: something threw.
 
+Every variant also carries `result.events`, a plain `EventObject[]` of replayable external inputs. Pass it to `replay(machine, result.events)` to reconstruct the final snapshot without executing model or tool calls. See [The event log](checkpoints.md#export-events-from-runagent).
+
 ```ts
 if (result.status === "done") {
   console.log(result.output.answer);
@@ -197,7 +199,7 @@ actor.subscribe((s) => {
 actor.start();
 ```
 
-The `agent.userInput` source is left unbound (supply it via `provideExecutors`'s third argument, `{ actorSources }`), and invoked child machines are not descended into. Use `runAgent` when you want idle handling and child rebinding for free.
+The `agent.userInput` source is left unbound (supply it via `provideExecutors`'s third argument, `{ actors }`), and invoked child machines are not descended into. Use `runAgent` when you want idle handling and child rebinding for free.
 
 ### Mocking in a test
 
@@ -208,7 +210,7 @@ const testMachine = provideExecutors(
   machine,
   { decide: async () => ({ event: { type: "ANSWER" } }) },
   {
-    actorSources: {
+    actors: {
       answerQuestion: agentSetup.requests.answerQuestion.withExecutor(async () => ({
         output: { answer: "Because they make illegal states unreachable." },
       })),

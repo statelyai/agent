@@ -46,7 +46,7 @@ const agentSetup = setupAgent({
     FINISH: z.object({ answer: z.string() }),
   },
   // Two real tools as typed actors — they genuinely compute.
-  actorSources: {
+  actors: {
     calculate: createAsyncLogic<{ summary: string }, z.infer<typeof calcSchema>>({
       run: async ({ input }) => {
         const { operation, a, b } = input;

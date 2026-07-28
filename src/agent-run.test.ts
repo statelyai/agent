@@ -152,7 +152,7 @@ describe("createAgentRun", () => {
       prompt: ({ input }) => input.prompt,
     });
 
-    const agent = setupAgent({ schemas, actorSources: { draftText } });
+    const agent = setupAgent({ schemas, actors: { draftText } });
     const machine = agent.createMachine({
       context: ({ input }) => ({ prompt: input.prompt, draft: null }),
       initial: "drafting",
@@ -243,7 +243,7 @@ describe("createAgentRun", () => {
       schemas: { input: z.object({}), output: z.object({}) },
       model: "test-model",
     });
-    const agent = setupAgent({ schemas, actorSources: { step } });
+    const agent = setupAgent({ schemas, actors: { step } });
     const machine = agent.createMachine({
       context: {},
       initial: "working",

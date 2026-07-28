@@ -134,7 +134,7 @@ const agentSetup = setupAgent({
   // deterministically whenever a resting snapshot carries it — no timing
   // heuristic, no host-side `snapshot.next` check.
   isSuspended: (snapshot) => snapshot.hasTag("awaiting-approval"),
-  actorSources: {
+  actors: {
     // Applies the approved sensitive action. Reads the real booking table and
     // returns a confirmation message. (A production host would persist the
     // change and enforce policy here — see the tutorial's cancel_ticket.)

@@ -16,7 +16,7 @@ type FileChange = z.infer<typeof fileChangeSchema>;
 test("AI SDK orchestrator-worker plans then fans out a worker call per file", async () => {
   // Deterministic worker: stands in for the real per-file model calls.
   const machine = aiSdkOrchestratorWorkerMachine.provide({
-    actorSources: {
+    actors: {
       implementChanges: createAsyncLogic<
         FileChange[],
         {

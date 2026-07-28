@@ -204,7 +204,7 @@ const agentSetup = setupAgent({
   states: {
     done: { context: { generation: z.string() } },
   },
-  actorSources: {
+  actors: {
     // retrieve: keyword search over the primary corpus. Top 3 docs.
     retrieve: createAsyncLogic<string[], { question: string }>({
       run: async ({ input }) => searchCorpus(SAMPLE_CORPUS, input.question, 3),

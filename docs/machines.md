@@ -71,9 +71,9 @@ Both `enq.emit({ type: 'EVALUATED', ... })` and the host-side `on: { EVALUATED: 
 
 ## Set up the agent
 
-<!-- setupAgent config surface (models, requests, actorSources, builtins) from src/setup-agent.ts -->
+<!-- setupAgent config surface (models, requests, actors, builtins) from src/setup-agent.ts -->
 
-Beyond schemas, `setupAgent` takes your models plus optional `requests` and `actorSources`, and returns a **setup** whose `createMachine` builds the machine. Like XState's `setup()`, the return value is the typed foundation, not a running agent, so name it accordingly (`agentSetup`, `gameSetup`).
+Beyond schemas, `setupAgent` takes your models plus optional `requests` and `actors`, and returns a **setup** whose `createMachine` builds the machine. Like XState's `setup()`, the return value is the typed foundation, not a running agent, so name it accordingly (`agentSetup`, `gameSetup`).
 
 - The builtins `agent.generateText`, `agent.streamText`, `agent.decide`, `agent.plan`, `agent.userInput` are registered automatically; invoke them by name.
 - Prefer inline schema fields; reach for the `createAgentSchemas` pack form only to share one schema set. See [Which authoring form when](#which-authoring-form-when).
@@ -130,7 +130,7 @@ See [Text requests](text-requests.md) for the full request surface, including st
 
 ### Actors
 
-The `actorSources` map registers reusable actor logic: text logic from `createTextLogic`, or any XState actor. Register logic here when it is reusable, exported, or worth testing standalone. Decisions are state-local (`src: 'agent.decide'`), not actor sources; to reuse one, share its input builder.
+The `actors` map registers reusable actor logic: text logic from `createTextLogic`, or any XState actor. Register logic here when it is reusable, exported, or worth testing standalone. Decisions are state-local (`src: 'agent.decide'`), not actor sources; to reuse one, share its input builder.
 
 ```ts
 import { createTextLogic } from "@statelyai/agent";
@@ -145,11 +145,11 @@ const agentSetup = setupAgent({
   models,
   context: z.object({ log: z.string(), summary: z.string().nullable() }),
   input: z.object({ log: z.string() }),
-  actorSources: { summarizeTurn },
+  actors: { summarizeTurn },
 });
 ```
 
-> **Warning:** Actor source keys must be unique across `actorSources` and `requests`. `setupAgent` throws at setup time on a collision rather than letting one silently shadow the other.
+> **Warning:** Actor source keys must be unique across `actors` and `requests`. `setupAgent` throws at setup time on a collision rather than letting one silently shadow the other.
 
 ## Create the machine
 
@@ -191,7 +191,7 @@ The canonical form covers most machines. Each alternate handles one specific nee
 | **`createAgentSchemas` pack**: `setupAgent({ schemas })`                                                                                   | Sharing one schema set across several machines or the [step helpers](steps.md).                                                                                             |
 | **String refs + `resolveModel`**: `model: 'openai/gpt-5.4-mini'`, `createAiSdkExecutors({ resolveModel })`                                 | The machine must not name concrete models: maximum portability, refs resolved by the host or loaded from JSON [config](machines-as-data.md).                               |
 | **`createTextLogic`**: a standalone request value                                                                                          | A request that is exported, reused across states or machines, or unit-tested on its own. See [Text requests](text-requests.md#reusable-request-logic-with-createtextlogic). |
-| **`withExecutor`**: `logic.withExecutor(...)`                                                                                              | Binding execution onto one logic rather than the whole host: per-logic host binding or an intentionally unregistered dynamic logic. Registered dynamic spawns inherit through `actorSources`; see [Multi-agent composition](multi-agent.md#dynamic-binding). |
+| **`withExecutor`**: `logic.withExecutor(...)`                                                                                              | Binding execution onto one logic rather than the whole host: per-logic host binding or an intentionally unregistered dynamic logic. Registered dynamic spawns inherit through `actors`; see [Multi-agent composition](multi-agent.md#dynamic-binding). |
 
 ## Transitions
 

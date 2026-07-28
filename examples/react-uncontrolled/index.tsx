@@ -15,8 +15,8 @@
  *
  * @xstate/react is NOT a dependency of this repo (and its peer range predates
  * XState v6), so the actor↔React binding is a hand-rolled `useSyncExternalStore`
- * subscription. In an app on XState v5/v6 you'd swap it for `useSelector` /
- * `useActorRef` from `@xstate/react`; the machine and executors are unchanged.
+ * subscription. With a matching `@xstate/react` release, swap it for
+ * `useSelector` / `useActorRef`; the machine and executors are unchanged.
  *
  * Executors are a keyless mock (no network) so the file is self-contained and
  * typechecks standalone. Swap in `createAiSdkExecutors({ models })` for real

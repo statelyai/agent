@@ -22,7 +22,7 @@ import type { AgentDecisionExecutor, AgentRequestExecutors, ChosenEvent } from "
 // over the append-only journal: a `plan` AgentEffect re-surfaces each frontier
 // (candidates recomputed from the live snapshot), and the host resolves ONE
 // decision per step, journals the chosen MACHINE event, and completes the plan
-// by journaling the invoke's `xstate.done.actor.<id>` event when the done-move /
+// by journaling the invoke's `xstate.done.actor` event when the done-move /
 // a stopOn event / the budget / no-legal-events terminates it.
 //
 // What moved to host responsibility (was baked into `resolvePlanRequest`, now
@@ -49,7 +49,7 @@ function reconstructApplied(entries: readonly EventObject[]): ChosenEvent[] {
 // feeds the plan's `{ steps, stopped }` output back exactly like a text result.
 function planDoneEvent(id: string, steps: ChosenEvent[], stopped: string): EventObject {
   return {
-    type: `xstate.done.actor.${id}`,
+    type: "xstate.done.actor",
     output: { steps, stopped },
     actorId: id,
   } as EventObject;
@@ -528,7 +528,7 @@ describe("thin loop: concurrent text effects (host responsibility)", () => {
         context: z.object({ log: z.array(z.string()) }),
         output: z.object({ log: z.array(z.string()) }),
       }),
-      actorSources: {
+      actors: {
         writeA: createTextLogic({
           schemas: { input: z.object({}), output: z.string() },
           model: "quick",

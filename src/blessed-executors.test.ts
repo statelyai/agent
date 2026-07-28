@@ -29,7 +29,7 @@ function makeGenerateTextMachine(output: z.ZodTypeAny) {
     model: "test-model",
     prompt: ({ input }) => input.prompt,
   });
-  const agent = setupAgent({ schemas, actorSources: { answer } });
+  const agent = setupAgent({ schemas, actors: { answer } });
   return agent.createMachine({
     context: ({ input }) => ({ prompt: input.prompt, result: null }),
     initial: "answering",
@@ -77,7 +77,7 @@ describe("blessed AI SDK executors", () => {
       model: "test-model",
       prompt: ({ input }) => input.prompt,
     });
-    const agent = setupAgent({ schemas, actorSources: { draft } });
+    const agent = setupAgent({ schemas, actors: { draft } });
     const machine = agent.createMachine({
       context: ({ input }) => ({ prompt: input.prompt, draft: null }),
       initial: "drafting",

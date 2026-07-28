@@ -91,7 +91,7 @@ export const jokeActors = { tellJoke, rateJoke };
 const jokeAgentSetup = setupAgent({
   schemas: jokeSchemas,
   models,
-  actorSources: jokeActors,
+  actors: jokeActors,
 });
 
 const DECIDE_SYSTEM =

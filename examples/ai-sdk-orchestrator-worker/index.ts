@@ -64,7 +64,7 @@ export const models = defineModels({
 
 /**
  * Host-owned worker fan-out: one real model call per planned file, run
- * concurrently. Swap this out via `.provide({ actorSources: { implementChanges } })`
+ * concurrently. Swap this out via `.provide({ actors: { implementChanges } })`
  * for a deterministic version in tests.
  */
 export function createImplementChangesActor(model: LanguageModel) {
@@ -108,7 +108,7 @@ const agentSetup = setupAgent({
     plan: implementationPlanSchema,
     changes: z.array(fileChangeSchema),
   }),
-  actorSources: {
+  actors: {
     // Bound to the real AI SDK by default; overridden in tests via `.provide`.
     implementChanges: createImplementChangesActor(models.worker),
   },

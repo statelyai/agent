@@ -92,7 +92,7 @@ export abstract class EmailDrafterAgent extends Agent<Env, EmailDrafterState> {
 
   onStart() {
     const machine = emailDrafter.provide({
-      actorSources: {
+      actors: {
         evaluatePrompt: createAiSdkTextActor(evaluatePrompt, {
           resolveModel: this.resolveModel,
         }),

@@ -109,7 +109,7 @@ function mixedAgent() {
     schemas: createAgentSchemas({
       context: z.object({ summary: z.string(), jobbed: z.string() }),
     }),
-    actorSources: {
+    actors: {
       summarize: createTextLogic({
         schemas: {
           input: z.object({ topic: z.string() }),
@@ -172,7 +172,7 @@ describe("getAgentEffects — the six-line host loop", () => {
     // The fire-and-forget entry action ran exactly once.
     expect(result.execCount).toBe(1);
     // The delay's after-event was journaled as a normal external entry.
-    expect(result.events.some((event) => event.type.startsWith("xstate.after."))).toBe(true);
+    expect(result.events.some((event) => event.type === "xstate.timer")).toBe(true);
   });
 });
 
@@ -194,12 +194,11 @@ function fanOutMachine() {
       },
       collecting: {
         on: {
-          "*": (args: any) => {
-            const type = args.event.type as string;
-            if (!type.startsWith("xstate.done.actor.branch-")) {
+          "xstate.done.actor": (args: any) => {
+            const id = args.event.actorId as string;
+            if (!id.startsWith("branch-")) {
               return undefined;
             }
-            const id = type.slice("xstate.done.actor.".length);
             const got = args.context.got + 1;
             const sums = { ...args.context.sums, [id]: args.event.output };
             return got >= args.context.n
@@ -227,8 +226,8 @@ describe("replay — crash / resume", () => {
     // Interrupted: keep only the journal up to two branch completions.
     const journal: EventObject[] = [
       initEntry({ n: 3 }).event,
-      { type: "xstate.done.actor.branch-0", output: "sum:branch-0", actorId: "branch-0" } as any,
-      { type: "xstate.done.actor.branch-1", output: "sum:branch-1", actorId: "branch-1" } as any,
+      { type: "xstate.done.actor", output: "sum:branch-0", actorId: "branch-0" } as any,
+      { type: "xstate.done.actor", output: "sum:branch-1", actorId: "branch-1" } as any,
     ];
 
     // Fresh process: replay from the log alone.
@@ -267,16 +266,16 @@ function reentrantMachine() {
         },
       },
     },
-  }).provide({ actorSources: { job } as any });
+  }).provide({ actors: { job } as any });
 }
 
 describe("getAgentEffects — occurrence determinism", () => {
   test("re-entry yields #2/#3, an error increments, replay is identical", () => {
     const machine = reentrantMachine();
 
-    const doneJob = { type: "xstate.done.actor.job", output: "x", actorId: "job" } as EventObject;
+    const doneJob = { type: "xstate.done.actor", output: "x", actorId: "job" } as EventObject;
     const errorJob = {
-      type: "xstate.error.actor.job",
+      type: "xstate.error.actor",
       error: new Error("boom"),
       actorId: "job",
     } as EventObject;
@@ -324,10 +323,10 @@ describe("replay — the journal rule (raise)", () => {
         },
         done: { type: "final" },
       },
-    }).provide({ actorSources: { job } as any });
+    }).provide({ actors: { job } as any });
 
     // The journal holds only the EXTERNAL job completion — no STEP entry.
-    const doneJob = { type: "xstate.done.actor.job", output: "ok", actorId: "job" } as EventObject;
+    const doneJob = { type: "xstate.done.actor", output: "ok", actorId: "job" } as EventObject;
     const journal = [initEntry().event, doneJob];
     expect(journal.some((event) => event.type === "STEP")).toBe(false);
 
@@ -357,7 +356,7 @@ describe("getAgentEffects — timers", () => {
       throw new Error("expected a delay effect");
     }
     expect(delay.delayMs).toBe(1000);
-    expect(delay.event.type).toBe("xstate.after.1000.timer.wait");
+    expect(delay.event).toEqual({ type: "xstate.timer", id: "xstate.after.1000.timer.wait" });
 
     // Journal the timer firing as a normal external entry; replay never waits.
     const resumed = replay(machine as any, [initEntry().event, delay.event]);

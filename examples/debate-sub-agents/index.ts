@@ -8,7 +8,7 @@
  * Authored the way the rest of the repo does it:
  *   - each debater is a child machine (like examples/subflows) with its own
  *     `composeArgument` request carrying its own stance-specific system prompt;
- *   - the parent invokes it by name under `actorSources` and schedules turns
+ *   - the parent invokes it by name under `actors` and schedules turns
  *     with events (like examples/supervisor dispatches specialists);
  *   - the whole thing runs via `runAgent`, not a raw `createActor`.
  *
@@ -152,7 +152,7 @@ const facilitatorAgentSetup = setupAgent({
   input: z.object({ question: z.string(), rounds: z.number().default(DEFAULT_ROUNDS) }),
   output: z.object({ conclusion: z.string(), transcript: transcriptSchema }),
   events: { "DEBATE.ARGUMENT_SUBMITTED": transcriptEntrySchema },
-  actorSources: { affirmative: debaterMachine, negative: debaterMachine },
+  actors: { affirmative: debaterMachine, negative: debaterMachine },
   // Every transition into "done" (concluding's onDone and onError) sets
   // conclusion — narrow it non-null there.
   states: {
@@ -264,7 +264,7 @@ export async function runDebateSubAgentsExample(options?: {
     ...(options?.generateText
       ? { executors: { generateText: options.generateText } }
       : { executors: createAiSdkExecutors({ models }) }),
-    actorSources: { affirmative: debaterMachine, negative: debaterMachine },
+    actors: { affirmative: debaterMachine, negative: debaterMachine },
     ...(options?.onTransition
       ? { onTransition: ({ value }: { value: unknown }) => options.onTransition!(value) }
       : {}),

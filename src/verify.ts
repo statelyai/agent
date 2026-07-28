@@ -319,7 +319,7 @@ interface LintContext {
   index: Map<string, StateNode>;
   reachable: Set<string>;
   schemas: { context?: unknown; output?: unknown; events?: Record<string, unknown> } | undefined;
-  actorSources: Record<string, AnyActorLogic>;
+  actors: Record<string, AnyActorLogic>;
 }
 
 function ancestorChain(node: StateNode, index: Map<string, StateNode>): StateNode[] {
@@ -344,12 +344,12 @@ function hasNonEmptyOn(config: AnyConfig): boolean {
 // builtin src string or by a registered/direct-object DecisionLogic/PlanLogic.
 function decisionKindOf(
   src: unknown,
-  actorSources: Record<string, AnyActorLogic>,
+  actors: Record<string, AnyActorLogic>,
 ): "decision" | "plan" | undefined {
   if (typeof src === "string") {
     if (src === DECIDE_SRC) return "decision";
     if (src === PLAN_SRC) return "plan";
-    const logic = actorSources[src];
+    const logic = actors[src];
     if (isDecisionLogic(logic)) return "decision";
     if (isPlanLogic(logic)) return "plan";
     return undefined;
@@ -424,7 +424,7 @@ function checkDecideWithoutEvents(ctx: LintContext): AgentLintDiagnostic[] {
   const out: AgentLintDiagnostic[] = [];
   for (const node of ctx.index.values()) {
     for (const invoke of node.invokes) {
-      const kind = decisionKindOf(invoke.src, ctx.actorSources);
+      const kind = decisionKindOf(invoke.src, ctx.actors);
       if (!kind) {
         continue;
       }
@@ -494,7 +494,7 @@ function checkDirectObjectSrc(ctx: LintContext): AgentLintDiagnostic[] {
           `State '${node.path}' invokes a direct-object agent logic. Direct-object invoke ` +
           `srcs cannot be rebound by runAgent, so they inherit no host executors — call ` +
           `'.withExecutor(...)' on the logic, or register it as a string-keyed actor source ` +
-          `(machine.provide({ actorSources: { name: logic } })) and invoke it by name.`,
+          `(machine.provide({ actors: { name: logic } })) and invoke it by name.`,
       });
     }
   }
@@ -674,10 +674,9 @@ export function lintAgentMachine(
     index,
     reachable,
     schemas: registered.schemas as LintContext["schemas"],
-    actorSources:
-      (registered.actorSources as Record<string, AnyActorLogic> | undefined) ??
-      (machine as { implementations?: { actorSources?: Record<string, AnyActorLogic> } })
-        .implementations?.actorSources ??
+    actors:
+      (registered.actors as Record<string, AnyActorLogic> | undefined) ??
+      (machine as { sources?: { actors?: Record<string, AnyActorLogic> } }).sources?.actors ??
       {},
   };
 

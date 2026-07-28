@@ -77,7 +77,14 @@ export type AgentEffect =
       toDoneEvent(output: unknown): EventObject;
       toErrorEvent(error: unknown): EventObject;
     }
-  | { kind: "delay"; requestId: string; id: string; delayMs: number; event: EventObject }
+  | {
+      kind: "delay";
+      requestId: string;
+      id: string;
+      delayMs: number;
+      /** The `{ type: 'xstate.timer', id }` event the host journals when the timer fires. */
+      event: EventObject;
+    }
   | { kind: "execute"; action: ExecutableActionObject; exec(): void };
 
 /**
@@ -120,12 +127,40 @@ function toEvents(history: readonly (EventObject | AgentLogEntry)[] | undefined)
   });
 }
 
-/** The `xstate.done.actor.<id>` / `xstate.error.actor.<id>` completion types for a site. */
-function doneType(id: string): string {
-  return `xstate.done.actor.${id}`;
+function rebindActorSession(
+  event: EventObject,
+  snapshot: AnyMachineSnapshot,
+  sessions: Map<string, string>,
+): EventObject {
+  const actorEvent = event as EventObject & { actorId?: unknown; sessionId?: unknown };
+  if (typeof actorEvent.actorId !== "string" || typeof actorEvent.sessionId !== "string") {
+    return event;
+  }
+
+  const key = `${actorEvent.actorId}\0${actorEvent.sessionId}`;
+  let sessionId = sessions.get(key);
+  if (!sessionId) {
+    const child = (snapshot.children as Record<string, { sessionId?: unknown }>)[
+      actorEvent.actorId
+    ];
+    if (typeof child?.sessionId !== "string") {
+      return event;
+    }
+    sessionId = child.sessionId;
+    sessions.set(key, sessionId);
+  }
+
+  return { ...event, sessionId } as EventObject;
 }
-function errorType(id: string): string {
-  return `xstate.error.actor.${id}`;
+
+const DONE_ACTOR_EVENT_TYPE = "xstate.done.actor";
+const ERROR_ACTOR_EVENT_TYPE = "xstate.error.actor";
+
+function isInvokeCompletion(event: EventObject, id: string): boolean {
+  return (
+    (event.type === DONE_ACTOR_EVENT_TYPE || event.type === ERROR_ACTOR_EVENT_TYPE) &&
+    (event as EventObject & { actorId?: unknown }).actorId === id
+  );
 }
 
 /**
@@ -133,25 +168,39 @@ function errorType(id: string): string {
  * error both count — an error is a semantic completion) for `id` in `events`.
  */
 function invokeOccurrence(events: readonly EventObject[], id: string): number {
-  const done = doneType(id);
-  const error = errorType(id);
   let count = 0;
   for (const event of events) {
-    if (event.type === done || event.type === error) {
+    if (isInvokeCompletion(event, id)) {
       count++;
     }
   }
   return count + 1;
 }
 
-/** The exact done/error events xstate's actor system delivers for an invoke `id`. */
-function invokeEventMinters(id: string): {
+/** The exact canonical done/error events xstate's actor system delivers for an invoke `id`. */
+function invokeEventMinters(
+  id: string,
+  snapshot: AnyMachineSnapshot,
+): {
   toDoneEvent(output: unknown): EventObject;
   toErrorEvent(error: unknown): EventObject;
 } {
+  const child = (snapshot.children as Record<string, { sessionId?: unknown }>)[id];
+  const identity = {
+    actorId: id,
+    ...(typeof child?.sessionId === "string" ? { sessionId: child.sessionId } : {}),
+  };
   return {
-    toDoneEvent: (output: unknown) => ({ type: doneType(id), output, actorId: id }) as EventObject,
-    toErrorEvent: (error: unknown) => ({ type: errorType(id), error, actorId: id }) as EventObject,
+    toDoneEvent: (output: unknown) => ({
+      type: DONE_ACTOR_EVENT_TYPE,
+      output,
+      ...identity,
+    }),
+    toErrorEvent: (error: unknown) => ({
+      type: ERROR_ACTOR_EVENT_TYPE,
+      error,
+      ...identity,
+    }),
   };
 }
 
@@ -208,7 +257,7 @@ function buildInvokeEffect(
       requestId,
       request: mapped.input,
       mode: mapped.mode,
-      ...invokeEventMinters(id),
+      ...invokeEventMinters(id, snapshot),
     };
   }
   if (mapped?.kind === "decision") {
@@ -224,12 +273,18 @@ function buildInvokeEffect(
     isTextLogic(meta.logic) || isDecisionLogic(meta.logic) || isPlanLogic(meta.logic)
       ? meta.logic
       : typeof meta.src === "string"
-        ? options.actorSources?.[meta.src]
+        ? options.actors?.[meta.src]
         : undefined;
 
   if (isTextLogic(logic)) {
     const request = logic.request(meta.input as never);
-    return { kind: "text", requestId, request, mode: logic.mode, ...invokeEventMinters(id) };
+    return {
+      kind: "text",
+      requestId,
+      request,
+      mode: logic.mode,
+      ...invokeEventMinters(id, snapshot),
+    };
   }
   if (isDecisionLogic(logic)) {
     const base = logic.request(meta.input as never);
@@ -248,7 +303,14 @@ function buildInvokeEffect(
 
   // Anything else is a plain host-run task.
   const src = typeof meta.src === "string" ? meta.src : id;
-  return { kind: "task", requestId, id, src, input: meta.input, ...invokeEventMinters(id) };
+  return {
+    kind: "task",
+    requestId,
+    id,
+    src,
+    input: meta.input,
+    ...invokeEventMinters(id, snapshot),
+  };
 }
 
 /**
@@ -266,10 +328,10 @@ function buildInvokeEffect(
  *
  * Every `requestId` is `${siteId}#${n}`, `n` the 1-based occurrence derived
  * from `options.history` — so the same log yields identical requestIds on every
- * replay. Because completed children are NOT pruned from a pure-`transition`
- * snapshot, a snapshot-owed child counts as owed only when it has ZERO
- * journaled completions; a re-entered invoke site instead re-derives from the
- * action list each fresh entry (so `#2`, `#3`, … stay correct).
+ * replay. XState alpha.24 prunes a child when its matching completion is
+ * folded; the history check also prevents older/restored snapshots from
+ * re-surfacing completed work. A re-entered invoke site instead re-derives
+ * from the action list each fresh entry (so `#2`, `#3`, … stay correct).
  */
 export function getAgentEffects(
   machine: AnyActorLogic,
@@ -316,8 +378,12 @@ export function getAgentEffects(
       const afterId = typeof rawAction.id === "string" ? rawAction.id : "";
       const parsed = parseAfterId(afterId);
       const siteId = parsed ? `${parsed.statePath}#${parsed.delayKey}` : afterId;
-      const event = rawAction.event ?? ({ type: afterId } as EventObject);
-      const firings = events.filter((candidate) => candidate.type === event.type).length;
+      const event = { type: "xstate.timer", id: afterId };
+      const firings = events.filter(
+        (candidate) =>
+          candidate.type === event.type &&
+          (candidate as EventObject & { id?: unknown }).id === afterId,
+      ).length;
       effects.push({
         kind: "delay",
         requestId: `${siteId}#${firings + 1}`,
@@ -344,7 +410,7 @@ export function getAgentEffects(
       continue;
     }
 
-    // Everything else with an executor is a fire-and-forget action. alpha.23's
+    // Everything else with an executor is a fire-and-forget action. XState's
     // executable effects carry `exec` as a METHOD that reads `this` (a custom
     // action's `execCustomEffect` reads `this.action`/`this.args`; `sendTo`/
     // `emit`/`cancel` read `this.source`), so it must be invoked on the original
@@ -375,8 +441,8 @@ export function getAgentEffects(
   }
 
   // 3. Snapshot-owed children: spawned by an earlier transition and not yet
-  // completed (zero journaled completions). Completed children linger in a
-  // pure-`transition` snapshot, so a nonzero completion count means "done."
+  // completed. Alpha.24 prunes matching completions from the snapshot; the
+  // history check additionally protects older/restored snapshots.
   const children = (snapshot as AnyMachineSnapshot & { children?: Record<string, unknown> })
     .children;
   for (const [id, child] of Object.entries(children ?? {})) {
@@ -448,8 +514,10 @@ export function replay<TMachine extends AnyActorLogic>(
   }
 
   let [snapshot, actions] = initialTransition(machine, input as never);
+  const sessions = new Map<string, string>();
   for (const event of journal) {
-    [snapshot, actions] = transition(machine, snapshot, event as never);
+    const reboundEvent = rebindActorSession(event, snapshot as AnyMachineSnapshot, sessions);
+    [snapshot, actions] = transition(machine, snapshot, reboundEvent as never);
   }
 
   const effects = getAgentEffects(machine, snapshot as AnyMachineSnapshot, actions, {

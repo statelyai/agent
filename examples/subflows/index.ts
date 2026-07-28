@@ -5,7 +5,7 @@
  * Shows:
  *   - a child agent machine (`researchChild`) with its own request + I/O
  *     schemas: `{ topic } -> { research }`.
- *   - a parent that registers the child under `actorSources.child` and invokes
+ *   - a parent that registers the child under `actors.child` and invokes
  *     it by name, mapping its own `{ topic }` in and the child's
  *     `{ research }` out.
  *   - the child's request inheriting runAgent's `generateText` automatically —
@@ -79,7 +79,7 @@ const parentAgentSetup = setupAgent({
   context: z.object({ topic: z.string(), research: z.string().nullable() }),
   input: z.object({ topic: z.string() }),
   output: z.object({ research: z.string() }),
-  actorSources: { child: childMachine },
+  actors: { child: childMachine },
 });
 
 export const subflowsMachine = parentAgentSetup.createMachine({

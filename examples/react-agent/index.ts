@@ -111,7 +111,7 @@ const agentSetup = setupAgent({
     answer: z.string(),
     steps: z.number(),
   }),
-  actorSources: {
+  actors: {
     // Real calculator — actually computes.
     calculate: createAsyncLogic<
       ToolResult,

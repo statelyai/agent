@@ -1,7 +1,7 @@
 /**
  * Plain XState, driven as an agent — the strongest form of the claim.
  *
- * `plainWriterMachine` below is a NORMAL XState v5 machine. It imports only
+ * `plainWriterMachine` below is a normal XState v6 machine. It imports only
  * from `xstate` (`setup`, `createAsyncLogic`), and it has ZERO knowledge of
  * `@statelyai/agent`: a promise-shaped actor for one step, a plain
  * `on: { APPROVE, REVISE }` decision state with a guarded transition bounding
@@ -70,7 +70,7 @@ export const plainWriterMachine = setup({
     input: z.object({ topic: z.string(), maxRevisions: z.number() }),
     output: z.object({ draft: z.string(), attempts: z.number() }),
   },
-  actorSources: {
+  actors: {
     // A bog-standard promise-shaped actor. Standalone it returns a canned
     // draft; the driving code replaces it with a model-backed one via
     // `machine.provide(...)`. The machine never mentions an LLM.
@@ -144,7 +144,7 @@ export async function runPlainXstateExample(
   // 1. Bind the promise actor to a real model call — the machine graph is
   //    unchanged, only the actor implementation is swapped.
   const boundMachine = plainWriterMachine.provide({
-    actorSources: {
+    actors: {
       writeDraft: createAsyncLogic<string, { topic: string; attempts: number }>({
         run: async ({ input }) => {
           const result = await generateText({

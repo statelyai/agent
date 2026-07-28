@@ -52,7 +52,7 @@ import {
 const executors = createAiSdkExecutors({ models });
 
 export const inspectedEmailDrafter = emailDrafter.provide({
-  actorSources: {
+  actors: {
     evaluatePrompt: evaluatePrompt.withExecutor(async ({ input }) => {
       if (process.env.OPENAI_API_KEY) {
         try {

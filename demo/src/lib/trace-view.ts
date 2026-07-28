@@ -14,13 +14,17 @@ export function stateValueLabel(value: unknown): string {
     .join(" · ");
 }
 
-/** Turns an internal/model event type into a human label. */
-export function prettifyEvent(type: string): { label: string; kind: "model" | "done" | "error" | "system" } {
-  if (type.startsWith("xstate.done.actor.")) {
-    return { label: type.slice("xstate.done.actor.".length), kind: "done" };
+/** Turns an internal/model event into a human label. */
+export function prettifyEvent(event: { type: string; actorId?: unknown }): {
+  label: string;
+  kind: "model" | "done" | "error" | "system";
+} {
+  const { type } = event;
+  if (type === "xstate.done.actor") {
+    return { label: typeof event.actorId === "string" ? event.actorId : type, kind: "done" };
   }
-  if (type.startsWith("xstate.error.actor.")) {
-    return { label: type.slice("xstate.error.actor.".length), kind: "error" };
+  if (type === "xstate.error.actor") {
+    return { label: typeof event.actorId === "string" ? event.actorId : type, kind: "error" };
   }
   if (type.startsWith("xstate.") || type.startsWith("@xstate.")) {
     return { label: type, kind: "system" };
@@ -39,7 +43,7 @@ export function traceSteps(trace: TraceEntry[]): TraceStep[] {
   return trace
     .filter((entry) => entry.event.type !== "xstate.init" && entry.event.type !== "@xstate.init")
     .map((entry) => {
-      const { label, kind } = prettifyEvent(entry.event.type);
+      const { label, kind } = prettifyEvent(entry.event);
       const payload = Object.entries(entry.event)
         .filter(([key]) => key !== "type")
         .map(([key, value]) => `${key}: ${value}`)
