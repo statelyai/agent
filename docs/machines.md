@@ -191,7 +191,7 @@ The canonical form covers most machines. Each alternate handles one specific nee
 | **`createAgentSchemas` pack**: `setupAgent({ schemas })`                                                                                   | Sharing one schema set across several machines or the [step helpers](steps.md).                                                                                             |
 | **String refs + `resolveModel`**: `model: 'openai/gpt-5.4-mini'`, `createAiSdkExecutors({ resolveModel })`                                 | The machine must not name concrete models: maximum portability, refs resolved by the host or loaded from JSON [config](machines-as-data.md).                               |
 | **`createTextLogic`**: a standalone request value                                                                                          | A request that is exported, reused across states or machines, or unit-tested on its own. See [Text requests](text-requests.md#reusable-request-logic-with-createtextlogic). |
-| **`withExecutor`**: `logic.withExecutor(...)`                                                                                              | Binding execution onto one logic rather than the whole host: per-logic host binding or dynamic spawns. See [Hosts](hosts.md#testing-with-deterministic-executors).          |
+| **`withExecutor`**: `logic.withExecutor(...)`                                                                                              | Binding execution onto one logic rather than the whole host: per-logic host binding or an intentionally unregistered dynamic logic. Registered dynamic spawns inherit through `actorSources`; see [Multi-agent composition](multi-agent.md#dynamic-binding). |
 
 ## Transitions
 

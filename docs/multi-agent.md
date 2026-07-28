@@ -144,10 +144,91 @@ The rules:
 - **Inheritance is the default.** Any request reached through string-keyed actor sources (invoke `src` strings, registered `actorSources`) inherits, however deeply nested. Cycles are handled.
 - **Explicit bindings win.** A request already carrying its own executor (via `.withExecutor(...)`, `bindRequestExecutor(...)`, or a child's own `.provide({ actorSources })`) keeps it; the parent's executors are never called for it.
 - **Missing executors fail fast.** If a reachable request needs an executor kind you didn't pass (e.g. a child's `mode: 'stream'` request but no `streamText`), binding throws before any actor runs, naming the invoke chain and request `src`.
-- **Dynamic spawns need explicit binding.** Logics created dynamically (e.g. machine factories used with `enq.spawn`) aren't in any invoke config for the static bind walk to reach, so they can't inherit. Bind them explicitly with `bindRequestExecutor(...)` / `.withExecutor(...)` (see [examples/fan-out/index.ts](../examples/fan-out/index.ts)). Same for a child invoked as a **direct-object** `src` (an inline machine object, not a registered name): register it as a string-keyed source, or bind its requests yourself.
+- **Registered dynamic spawns inherit.** Spawn the current implementation from the action's `actorSources`, not the original unbound logic. `runAgent` binds that registered source before the machine starts, so every runtime-created branch uses the same executors.
+- **Unregistered logic cannot inherit.** A new logic object constructed inside an action is invisible to both `runAgent` and `provideExecutors`; register it under `actorSources` or intentionally bind that logic with `.withExecutor(...)`.
+- **Direct-object child machines cannot inherit.** `invoke: { src: childMachine }` gives `runAgent` no string-keyed source to replace. Register the child under `actorSources` and invoke it by name.
+
+### Dynamic binding
+
+This works even though the branch count is known only at runtime:
+
+```ts
+const setup = setupAgent({
+  // `worker` is registered once; the host supplies its executor later.
+  requests: { worker: workerRequest },
+  // ...schemas
+});
+
+const machine = setup.createMachine({
+  // ...
+  states: {
+    fanningOut: {
+      entry: ({ context, actorSources }, enq) => {
+        context.jobs.forEach((job, index) => {
+          enq.spawn(actorSources.worker, {
+            id: `worker-${index}`,
+            input: { job },
+          });
+        });
+      },
+    },
+  },
+});
+
+await runAgent(machine, { executors: { generateText } });
+```
+
+`actorSources.worker` is the machine's current post-`provide` implementation. By the time the entry action runs, `runAgent` has replaced it with the host-bound worker. [The fan-out example](../examples/fan-out/index.ts) uses this exact shape.
+
+This does **not** inherit:
+
+```ts
+entry: ({ context }, enq) => {
+  // A fresh unregistered logic object: neither binding API can discover it.
+  enq.spawn(createTextLogic(workerConfig), { input: { job: context.job } });
+};
+```
+
+Register the logic and spawn it through `actorSources`, as above. Use `.withExecutor(...)` only when that one logic should deliberately carry its own host execution.
+
+### `runAgent` versus `provideExecutors`
+
+`runAgent` recursively binds registered child machines. `provideExecutors` currently binds only the machine passed to it; it does not descend into invoked child machines. Therefore these are not yet recursively equivalent:
+
+```ts
+// Works: runAgent recursively binds `child` and the child's `researchTopic` request.
+await runAgent(parentMachine, { executors });
+
+// Not enough: only the parent's own request sources are bound.
+const boundParent = provideExecutors(parentMachine, executors);
+createActor(boundParent, { input }).start();
+```
+
+For uncontrolled XState execution, bind each machine explicitly and replace the parent's child source with the bound child:
+
+```ts
+const boundChild = provideExecutors(childMachine, executors);
+const boundParent = provideExecutors(parentMachine, executors, {
+  actorSources: { child: boundChild },
+});
+
+createActor(boundParent, { input }).start();
+```
+
+Dynamic spawning itself is equivalent when the spawned source is registered on the machine being bound: both APIs replace that source before `actorSources.worker` is read. The difference is recursive traversal into child machines, not whether the branch count is static or dynamic.
 
 ## Fan-out
 
-> **Note:** This alpha ships no dedicated fan-out primitive. To run many sub-agents in parallel, use `Promise.all(...)` over host actors inside an executor or a tool's `execute`, and return the combined result to the machine as a single output (see [examples/fan-out/index.ts](../examples/fan-out/index.ts)).
+This alpha ships no dedicated fan-out primitive. Use XState dynamic spawn when each branch should be a visible child actor with independent progress and persisted identity:
+
+```ts
+entry: ({ context, actorSources }, enq) => {
+  context.jobs.forEach((job, index) => {
+    enq.spawn(actorSources.worker, { id: `worker-${index}`, input: { job } });
+  });
+};
+```
+
+Use `Promise.all(...)` inside a host actor or tool when the branches are implementation detail and the machine only needs their combined result. See [fan-out](../examples/fan-out/index.ts) for visible dynamic branches and [deep research](../examples/deep-research/index.ts) for a larger planner-worker-reducer flow.
 
 See [Examples](examples.md) for the full list of sub-agent and multi-machine examples.
