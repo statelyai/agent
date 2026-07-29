@@ -9,7 +9,17 @@ import {
   type EventObject,
 } from "xstate";
 import { createAgentSchemas, createTextLogic, setupAgent } from "./index.js";
-import { getAgentEffects, initEntry, replay, type AgentEffect } from "./effects.js";
+import {
+  createReplayEntry,
+  diffEventLogs,
+  getAgentEffects,
+  initEntry,
+  replay,
+  ReplayDivergenceError,
+  verifyReplay,
+  type AgentEffect,
+} from "./effects.js";
+import type { AgentLogEntry } from "./event-log-store.js";
 
 /** Reads a requestId off any non-`execute` effect (the kind without one). */
 function rid(effect: AgentEffect): string | undefined {
@@ -27,8 +37,8 @@ async function drive(
     taskOutput?: (id: string) => unknown;
     textOutput?: (request: { prompt?: string }) => unknown;
   } = {},
-): Promise<{ snapshot: AnyMachineSnapshot; events: EventObject[]; execCount: number }> {
-  const events: EventObject[] = [initEntry(input).event];
+): Promise<{ snapshot: AnyMachineSnapshot; events: AgentLogEntry[]; execCount: number }> {
+  const events: AgentLogEntry[] = [initEntry(machine, input)];
   let [snapshot, actions] = initialTransition(machine, input as never);
   let execCount = 0;
 
@@ -52,7 +62,7 @@ async function drive(
     if (!next) {
       break;
     }
-    events.push(next);
+    events.push(createReplayEntry(machine, events, next));
     [snapshot, actions] = transition(machine, snapshot, next as never);
   }
 
@@ -172,7 +182,7 @@ describe("getAgentEffects — the six-line host loop", () => {
     // The fire-and-forget entry action ran exactly once.
     expect(result.execCount).toBe(1);
     // The delay's after-event was journaled as a normal external entry.
-    expect(result.events.some((event) => event.type === "xstate.timer")).toBe(true);
+    expect(result.events.some((entry) => entry.event.type === "xstate.timer")).toBe(true);
   });
 });
 
@@ -224,11 +234,21 @@ describe("replay — crash / resume", () => {
     expect(baseline.snapshot.status).toBe("done");
 
     // Interrupted: keep only the journal up to two branch completions.
-    const journal: EventObject[] = [
-      initEntry({ n: 3 }).event,
-      { type: "xstate.done.actor", output: "sum:branch-0", actorId: "branch-0" } as any,
-      { type: "xstate.done.actor", output: "sum:branch-1", actorId: "branch-1" } as any,
-    ];
+    const journal: AgentLogEntry[] = [initEntry(machine as any, { n: 3 })];
+    journal.push(
+      createReplayEntry(machine as any, journal, {
+        type: "xstate.done.actor",
+        output: "sum:branch-0",
+        actorId: "branch-0",
+      } as any),
+    );
+    journal.push(
+      createReplayEntry(machine as any, journal, {
+        type: "xstate.done.actor",
+        output: "sum:branch-1",
+        actorId: "branch-1",
+      } as any),
+    );
 
     // Fresh process: replay from the log alone.
     const resumed = replay(machine as any, journal);
@@ -241,7 +261,7 @@ describe("replay — crash / resume", () => {
 
     // Completing the owed branch finishes the run — identical to uninterrupted.
     const done = (owed as Extract<AgentEffect, { kind: "task" }>).toDoneEvent("sum:branch-2");
-    const events = [...journal, done];
+    const events = [...journal, createReplayEntry(machine as any, journal, done)];
     const [finalSnapshot] = transition(machine as any, resumed.snapshot as any, done as never);
     expect((finalSnapshot as AnyMachineSnapshot).status).toBe("done");
     expect((finalSnapshot as any).output).toEqual((baseline.snapshot as any).output);
@@ -301,7 +321,15 @@ describe("getAgentEffects — occurrence determinism", () => {
     expect(rid(effects[0]!)).toBe("job#3");
 
     // Replaying the same log yields the identical requestId.
-    const replayed = replay(machine as any, [initEntry().event, doneJob, errorJob]);
+    const journal = [initEntry(machine as any)];
+    journal.push(createReplayEntry(machine as any, journal, doneJob));
+    journal.push(
+      createReplayEntry(machine as any, journal, {
+        ...errorJob,
+        error: { name: "Error", message: "boom" },
+      } as EventObject),
+    );
+    const replayed = replay(machine as any, journal);
     expect(rid(replayed.effects[0]!)).toBe("job#3");
   });
 });
@@ -327,8 +355,9 @@ describe("replay — the journal rule (raise)", () => {
 
     // The journal holds only the EXTERNAL job completion — no STEP entry.
     const doneJob = { type: "xstate.done.actor", output: "ok", actorId: "job" } as EventObject;
-    const journal = [initEntry().event, doneJob];
-    expect(journal.some((event) => event.type === "STEP")).toBe(false);
+    const journal = [initEntry(machine as any)];
+    journal.push(createReplayEntry(machine as any, journal, doneJob));
+    expect(journal.some((entry) => entry.event.type === "STEP")).toBe(false);
 
     const resumed = replay(machine as any, journal);
     expect(resumed.snapshot.status).toBe("done");
@@ -359,7 +388,82 @@ describe("getAgentEffects — timers", () => {
     expect(delay.event).toEqual({ type: "xstate.timer", id: "xstate.after.1000.timer.wait" });
 
     // Journal the timer firing as a normal external entry; replay never waits.
-    const resumed = replay(machine as any, [initEntry().event, delay.event]);
+    const journal = [initEntry(machine as any)];
+    journal.push(createReplayEntry(machine as any, journal, delay.event));
+    const resumed = replay(machine as any, journal);
     expect(resumed.snapshot.status).toBe("done");
+  });
+});
+
+describe("replay — envelope verification", () => {
+  const machine = createMachine({
+    id: "verified",
+    initial: "a",
+    context: { count: 0 },
+    states: {
+      a: {
+        on: {
+          INC: { context: ({ context }: any) => ({ count: context.count + 1 }) },
+          DONE: { target: "done" },
+        },
+      },
+      done: { type: "final" },
+    },
+  });
+
+  test("creates self-describing JSON entries and verifies every frontier", () => {
+    const entries = [initEntry(machine, undefined, { recordedAt: "2026-01-01T00:00:00.000Z" })];
+    entries.push(
+      createReplayEntry(
+        machine,
+        entries,
+        { type: "INC" },
+        {
+          recordedAt: "2026-01-01T00:00:01.000Z",
+        },
+      ),
+    );
+
+    expect(entries[0]).toMatchObject({
+      schemaVersion: 1,
+      id: "evt_00000000",
+      index: 0,
+      recordedAt: "2026-01-01T00:00:00.000Z",
+      machineId: "verified",
+      event: { type: "@agent.init" },
+      verification: { stateHash: expect.any(String), effectsHash: expect.any(String) },
+    });
+    const roundTripped = JSON.parse(JSON.stringify(entries)) as AgentLogEntry[];
+    expect(verifyReplay(machine, roundTripped).snapshot.context).toEqual({ count: 1 });
+  });
+
+  test("pins strict divergence to the first mismatched entry", () => {
+    const entries = [initEntry(machine)];
+    entries.push(createReplayEntry(machine, entries, { type: "INC" }));
+    entries[1] = {
+      ...entries[1]!,
+      verification: { ...entries[1]!.verification!, stateHash: "deadbeef" },
+    };
+
+    expect(() => verifyReplay(machine, entries)).toThrow(ReplayDivergenceError);
+    try {
+      verifyReplay(machine, entries);
+    } catch (error) {
+      expect(error).toMatchObject({ eventId: "evt_00000001", index: 1, kind: "state" });
+    }
+  });
+
+  test("diffs a shared prefix, branch tails, and logical state", () => {
+    const prefix = [initEntry(machine)];
+    const parent = [...prefix, createReplayEntry(machine, prefix, { type: "INC" })];
+    const fork = [...prefix, createReplayEntry(machine, prefix, { type: "DONE" })];
+
+    const diff = diffEventLogs(machine, parent, fork);
+    expect(diff.commonPrefix).toEqual({ length: 1, throughEventId: "evt_00000000" });
+    expect(diff.parentOnly.map((entry) => entry.event.type)).toEqual(["INC"]);
+    expect(diff.forkOnly.map((entry) => entry.event.type)).toEqual(["DONE"]);
+    expect(diff.stateChanges).toEqual(
+      expect.arrayContaining([expect.objectContaining({ path: "/status" })]),
+    );
   });
 });

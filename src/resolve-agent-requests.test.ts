@@ -73,7 +73,7 @@ async function runViaEffects(
   input: unknown,
   executors: Partial<AgentRequestExecutors>,
 ): Promise<AnyMachineSnapshot> {
-  const entries: EventObject[] = [initEntry(input).event];
+  const entries: EventObject[] = [initEntry(machine, input).event];
   let [snapshot, actions] = initialTransition(machine, input as never);
 
   while ((snapshot as AnyMachineSnapshot).status === "active") {

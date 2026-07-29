@@ -13,13 +13,35 @@
  * (`renderDecisionAttempts`, `PLAN_DONE_EVENT_TYPE`) hand-rolled loops rely on.
  * @module
  */
-export { AGENT_INIT_EVENT_TYPE, getAgentEffects, initEntry, replay } from "../effects.js";
+export {
+  AGENT_INIT_EVENT_TYPE,
+  ReplayDivergenceError,
+  ReplayMachineMismatchError,
+  createReplayEntry,
+  diffEventLogs,
+  getAgentEffects,
+  initEntry,
+  replay,
+  verifyReplay,
+} from "../effects.js";
 export type {
+  AgentEffectDiff,
+  AgentEventLogDiff,
   AgentEffect,
+  AgentLogPatchOperation,
+  CreateReplayEntryOptions,
   GetAgentEffectsOptions,
   ReplayOptions,
   ReplayResult,
 } from "../effects.js";
+
+export {
+  AGENT_EVENT_SCHEMA_VERSION,
+  NonSerializableAgentEventError,
+  assertAgentLogEntry,
+  assertJsonSerializable,
+} from "../event-log-store.js";
+export type { AgentLogEntry, AgentLogVerification, JsonValue } from "../event-log-store.js";
 
 export { executeAgentRequest } from "../steps.js";
 export type { AgentPlanRequest, AgentRequest, AgentStepRequest } from "../steps.js";

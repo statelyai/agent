@@ -143,11 +143,11 @@ The host owns the loop over an append-only journal of external inputs. At each f
 
 ```ts
 import { initialTransition, transition, type AnyMachineSnapshot } from "xstate";
-import { executeAgentRequest, getAgentEffects, initEntry, resolveDecision } from "@statelyai/agent/steps";
+import { createReplayEntry, executeAgentRequest, getAgentEffects, initEntry, resolveDecision } from "@statelyai/agent/steps";
 
 const executors = createAiSdkExecutors({ models });
 const input = { topic: "state machines" };
-const entries = [initEntry(input).event]; // reserved @agent.init entry; log is self-contained
+const entries = [initEntry(haikuMachine, input)]; // versioned @agent.init envelope
 let [snapshot, actions] = initialTransition(haikuMachine, input);
 
 while (snapshot.status === "active") {
@@ -178,7 +178,7 @@ while (snapshot.status === "active") {
     }
   }
   if (!next) break; // idle: persist `entries`, resume later via `replay`
-  entries.push(next);
+  entries.push(createReplayEntry(haikuMachine, entries, next));
   [snapshot, actions] = transition(haikuMachine, snapshot, next as never);
 }
 

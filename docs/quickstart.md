@@ -145,7 +145,7 @@ const result = await runAgent(machine, {
 - `idle`: the machine is waiting on a human. See [Human in the loop](human-in-the-loop.md).
 - `error`: something threw.
 
-Every variant also carries `result.events`, a plain `EventObject[]` of replayable external inputs. Pass it to `replay(machine, result.events)` to reconstruct the final snapshot without executing model or tool calls. See [The event log](checkpoints.md#export-events-from-runagent).
+Every variant also carries `result.events`, a versioned, JSON-safe `AgentLogEntry[]` around the replayable external inputs. Each entry includes identity, timestamp, machine version, and state/effect verification hashes. Pass it to `replay(machine, result.events)` to reconstruct the final snapshot without executing model or tool calls; use `verifyReplay` to require every hash. See [The event log](checkpoints.md#export-events-from-runagent).
 
 ```ts
 if (result.status === "done") {

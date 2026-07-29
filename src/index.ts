@@ -28,14 +28,37 @@ export {
 export { getAgentMessages, getStateMeta, persistSnapshot } from "./utils.js";
 export { assistantMessage, systemMessage, toolMessage, userMessage } from "./utils.js";
 export {
+  AGENT_EVENT_SCHEMA_VERSION,
   AgentEventLogConflictError,
+  NonSerializableAgentEventError,
+  assertAgentLogEntry,
   assertEventLogStoreConformance,
+  assertJsonSerializable,
   createInMemoryEventLogStore,
 } from "./event-log-store.js";
-export type { AgentEventLogStore, AgentLogEntry } from "./event-log-store.js";
-export { AGENT_INIT_EVENT_TYPE, getAgentEffects, initEntry, replay } from "./effects.js";
 export type {
+  AgentEventLogStore,
+  AgentLogEntry,
+  AgentLogVerification,
+  JsonValue,
+} from "./event-log-store.js";
+export {
+  AGENT_INIT_EVENT_TYPE,
+  ReplayDivergenceError,
+  ReplayMachineMismatchError,
+  createReplayEntry,
+  diffEventLogs,
+  getAgentEffects,
+  initEntry,
+  replay,
+  verifyReplay,
+} from "./effects.js";
+export type {
+  AgentEffectDiff,
+  AgentEventLogDiff,
   AgentEffect,
+  AgentLogPatchOperation,
+  CreateReplayEntryOptions,
   GetAgentEffectsOptions,
   ReplayOptions,
   ReplayResult,

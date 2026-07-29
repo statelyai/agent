@@ -10,9 +10,9 @@ Two ways to observe a run:
 - **Locally**, watch it live in the [Stately Inspector](https://stately.ai/docs/inspector): the machine you author renders as a diagram that lights up state by state.
 - **In production**, ship the versioned trace stream to any [OpenTelemetry](https://opentelemetry.io) backend (Honeycomb, Langfuse, LangSmith, Grafana, …) with a copy-paste `onTrace` handler.
 
-No hosted platform, no adapter to install. Every trace pairs with a replayable snapshot: the same `runId` that scopes a trace also settles a JSON snapshot you can resume, so a traced run is reproducible.
+No hosted platform, no adapter to install. Every trace pairs with a replayable event log and settled snapshot, so a traced run can be reproduced and resumed.
 
-`result.events` is the smaller replay journal: only machine input, effect completions/failures, externally sent events, and timer firings. `AgentTraceEvent[]` is the richer observational stream below: request lifecycle, chunks, transitions, emissions, timestamps, and run boundaries. Feed only `result.events` to `replay`; never feed it trace events. See [The event log](checkpoints.md#export-events-from-runagent).
+`result.events` is the smaller replay journal: a versioned `AgentLogEntry[]` containing machine input, effect completions/failures, externally sent events, and timer firings. Each entry has stable identity, acceptance time, machine identity/version, and verification hashes. `AgentTraceEvent[]` is the richer observational stream below: request lifecycle, chunks, transitions, emissions, timestamps, and run boundaries. Feed only `result.events` to `replay`; never feed it trace events. See [The event log](checkpoints.md#export-events-from-runagent).
 
 ## The versioned trace stream
 
@@ -38,11 +38,13 @@ The payload is a discriminated union on `type`:
 | `request.end` | `request`, `output`, `raw`, `reasoning?` | `raw` is your executor's verbatim result (usage, tool calls); `reasoning` present only when the request opted in. |
 | `request.error` | `request`, `error` | The model call threw. |
 | `stream.chunk` | `request`, `chunk` | Each streamed chunk of a `mode: 'stream'` request. |
-| `machine.transition` | `snapshot`, `event` | Root-machine transition (new snapshot + causing event). |
+| `machine.transition` | `snapshot`, `event`, `eventId?` | Root-machine transition. `eventId` links a journaled external input to its `AgentLogEntry`; raised/internal transitions have no id. |
 | `emit` | `event` | An event the machine emitted with `enq.emit(...)`; controlled path only. |
 | `run.end` | `status` (`done` \| `idle` \| `error`) + variant fields | `done`: `output`, `snapshot`. `idle`: `snapshot`, `pendingUserInputs?`, `persistedSnapshot?`. `error`: `cause`, `error`, `snapshot`. Run boundary; controlled path only. |
 
 Each `request` is an `AgentStepRequest`: text and plan requests carry `src`; a decision carries `model` instead. All three carry `id` and `kind`.
+
+Trace `timestamp` records when an observation was emitted. Replay-entry `recordedAt` records when the host accepted the durable machine input. Neither is semantic machine time; put time in the event payload when transition logic depends on it.
 
 ## Wiring it up
 

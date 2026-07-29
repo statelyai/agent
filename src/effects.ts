@@ -21,6 +21,7 @@ import {
   transition,
   type AnyActorLogic,
   type AnyMachineSnapshot,
+  type AnyStateMachine,
   type EventObject,
   type ExecutableActionObject,
   type SnapshotFrom,
@@ -29,7 +30,15 @@ import { getAgentRequestsWith, getInvokeEffectMetadata, type AgentPlanRequest } 
 import { isDecisionLogic, isPlanLogic, type AgentDecisionRequest } from "./decision.js";
 import { isTextLogic, type AgentRequestMode, type AgentTextRequest } from "./text-logic.js";
 import { getAcceptedEvents } from "./events.js";
-import type { AgentLogEntry } from "./event-log-store.js";
+import {
+  AGENT_EVENT_SCHEMA_VERSION,
+  assertAgentLogEntry,
+  assertJsonSerializable,
+  type AgentLogEntry,
+  type AgentLogVerification,
+  type JsonValue,
+} from "./event-log-store.js";
+import { getMachineStructuralHash } from "./utils.js";
 import {
   getRegisteredAgentExecutionOptions,
   type AgentExecutionOptions,
@@ -95,13 +104,73 @@ export type AgentEffect =
  */
 export const AGENT_INIT_EVENT_TYPE = "@agent.init" as const;
 
+/** Options controlling the durable envelope created by {@link createReplayEntry}. */
+export interface CreateReplayEntryOptions {
+  /** Explicit machine version; defaults to the machine's structural hash. */
+  machineVersion?: string;
+  /** Stable entry id; defaults to `evt_` plus the zero-padded index. */
+  id?: string;
+  /** RFC 3339 acceptance time; defaults to the current wall clock. */
+  recordedAt?: string;
+  causationId?: string;
+  correlationId?: string;
+  metadata?: Record<string, JsonValue>;
+  /** Omit hashes when recording only a post-snapshot suffix without its prefix. */
+  verification?: boolean;
+}
+
 /**
- * The reserved first journal entry: `{ index: 0, event: { type: '@agent.init',
- * input } }`. Prepend it to a log so {@link replay} can recover the machine
- * `input` from the log alone (no side-channel). See {@link AGENT_INIT_EVENT_TYPE}.
+ * Creates a JSON-safe, self-describing entry and records the state/effect
+ * hashes produced after replaying it. `entries` must be the complete prefix.
  */
-export function initEntry(input?: unknown): AgentLogEntry {
-  return { index: 0, event: { type: AGENT_INIT_EVENT_TYPE, input } as EventObject };
+export function createReplayEntry<TMachine extends AnyStateMachine>(
+  machine: TMachine,
+  entries: readonly AgentLogEntry[],
+  event: EventObject,
+  options: CreateReplayEntryOptions = {},
+): AgentLogEntry {
+  const index = entries.length;
+  const machineId = (machine.config as { id?: string }).id ?? machine.id ?? "(machine)";
+  const machineVersion = options.machineVersion ?? getMachineStructuralHash(machine);
+  const entry: AgentLogEntry = {
+    schemaVersion: AGENT_EVENT_SCHEMA_VERSION,
+    id: options.id ?? `evt_${String(index).padStart(8, "0")}`,
+    index,
+    recordedAt: options.recordedAt ?? new Date().toISOString(),
+    machineId,
+    machineVersion,
+    event: normalizeEventErrors(event),
+    ...(options.causationId !== undefined ? { causationId: options.causationId } : {}),
+    ...(options.correlationId !== undefined ? { correlationId: options.correlationId } : {}),
+    ...(options.metadata !== undefined ? { metadata: options.metadata } : {}),
+  };
+  assertAgentLogEntry(entry);
+  if (options.verification !== false) {
+    const result = replay(machine, [...entries, entry], {
+      machineVersion,
+      verify: false,
+    });
+    entry.verification = replayVerification(result.snapshot as AnyMachineSnapshot, result.effects);
+  }
+  assertAgentLogEntry(entry);
+  return entry;
+}
+
+/** Reserved first replay entry carrying machine input and verification hashes. */
+export function initEntry<TMachine extends AnyStateMachine>(
+  machine: TMachine,
+  input?: unknown,
+  options: CreateReplayEntryOptions = {},
+): AgentLogEntry {
+  return createReplayEntry(
+    machine,
+    [],
+    {
+      type: AGENT_INIT_EVENT_TYPE,
+      ...(input !== undefined ? { input } : {}),
+    } as EventObject,
+    options,
+  );
 }
 
 /** Options accepted by {@link getAgentEffects} and {@link replay}. */
@@ -484,6 +553,66 @@ export interface ReplayOptions extends Partial<AgentExecutionOptions> {
    * first entry. An init entry (the self-contained log) takes precedence.
    */
   input?: unknown;
+  /** Explicit expected machine version; defaults to the structural hash. */
+  machineVersion?: string;
+  /** Check recorded hashes when present; `'strict'` additionally requires them. */
+  verify?: boolean | "strict";
+}
+
+export class ReplayMachineMismatchError extends Error {
+  constructor(
+    readonly eventId: string,
+    readonly index: number,
+    readonly expected: { machineId: string; machineVersion: string },
+    readonly actual: { machineId: string; machineVersion: string },
+  ) {
+    super(
+      `Replay entry '${eventId}' at index ${index} targets machine ` +
+        `'${actual.machineId}'@'${actual.machineVersion}', expected ` +
+        `'${expected.machineId}'@'${expected.machineVersion}'.`,
+    );
+    this.name = "ReplayMachineMismatchError";
+  }
+}
+
+export class ReplayDivergenceError extends Error {
+  constructor(
+    readonly eventId: string,
+    readonly index: number,
+    readonly kind: "state" | "effects" | "missing-verification",
+    readonly expected?: string,
+    readonly actual?: string,
+  ) {
+    super(
+      kind === "missing-verification"
+        ? `Replay entry '${eventId}' at index ${index} has no verification hashes.`
+        : `Replay diverged after '${eventId}' at index ${index} (${kind}): ` +
+            `expected '${expected}', got '${actual}'.`,
+    );
+    this.name = "ReplayDivergenceError";
+  }
+}
+
+/** JSON Patch operation returned by {@link diffEventLogs}. */
+export type AgentLogPatchOperation =
+  | { op: "add"; path: string; value: JsonValue }
+  | { op: "remove"; path: string }
+  | { op: "replace"; path: string; value: JsonValue };
+
+export interface AgentEffectDiff {
+  added: JsonValue[];
+  removed: JsonValue[];
+  changed: Array<{ before: JsonValue; after: JsonValue }>;
+}
+
+export interface AgentEventLogDiff<TMachine extends AnyStateMachine> {
+  commonPrefix: { length: number; throughEventId?: string };
+  parentOnly: AgentLogEntry[];
+  forkOnly: AgentLogEntry[];
+  parent: ReplayResult<TMachine>;
+  fork: ReplayResult<TMachine>;
+  stateChanges: AgentLogPatchOperation[];
+  effectChanges: AgentEffectDiff;
 }
 
 /**
@@ -492,38 +621,342 @@ export interface ReplayOptions extends Partial<AgentExecutionOptions> {
  * ({@link getAgentEffects} of the final frontier, occurrence counts taken from
  * the whole log). Crash recovery, fork resume, and time travel in one call.
  *
- * `entries` is an `EventObject[]` or an `AgentLogEntry[]` (both accepted). A
- * reserved {@link initEntry} first entry (`{ type: '@agent.init', input }`)
- * supplies the machine input so a log replays with no side-channel; when
- * absent, `options.input` is used instead (the init entry wins if both exist).
+ * `entries` is a versioned {@link AgentLogEntry} array. A reserved
+ * {@link initEntry} first envelope carries `{ type: '@agent.init', input }`,
+ * so a complete log replays with no side-channel; when absent,
+ * `options.input` is used instead.
  * Raised/internal events are never in the journal — replay re-derives them
  * deterministically from the machine's own logic.
  */
-export function replay<TMachine extends AnyActorLogic>(
+export function replay<TMachine extends AnyStateMachine>(
   machine: TMachine,
-  entries: readonly (EventObject | AgentLogEntry)[],
+  entries: readonly AgentLogEntry[],
   options: ReplayOptions = {},
 ): ReplayResult<TMachine> {
+  const machineId = (machine.config as { id?: string }).id ?? machine.id ?? "(machine)";
+  const machineVersion = options.machineVersion ?? getMachineStructuralHash(machine);
+  const eventIds = new Set<string>();
+  for (let index = 0; index < entries.length; index++) {
+    const entry = entries[index]!;
+    assertAgentLogEntry(entry);
+    if (entry.index !== index) {
+      throw new Error(
+        `Replay entries must be contiguous from index 0; found entry.index ${entry.index} ` +
+          `at position ${index}.`,
+      );
+    }
+    if (eventIds.has(entry.id)) {
+      throw new Error(`Replay entries contain duplicate event id '${entry.id}'.`);
+    }
+    eventIds.add(entry.id);
+    if (entry.machineId !== machineId || entry.machineVersion !== machineVersion) {
+      throw new ReplayMachineMismatchError(
+        entry.id,
+        entry.index,
+        { machineId, machineVersion },
+        { machineId: entry.machineId, machineVersion: entry.machineVersion },
+      );
+    }
+  }
   const events = toEvents(entries);
 
   let input: unknown = options.input;
   let journal = events;
+  let journalEntries = entries;
   if (events[0]?.type === AGENT_INIT_EVENT_TYPE) {
     input = (events[0] as EventObject & { input?: unknown }).input;
     journal = events.slice(1);
+    journalEntries = entries.slice(1);
   }
 
   let [snapshot, actions] = initialTransition(machine, input as never);
+  let effects = getAgentEffects(machine, snapshot as AnyMachineSnapshot, actions, {
+    ...options,
+    history: entries.slice(0, events[0]?.type === AGENT_INIT_EVENT_TYPE ? 1 : 0),
+  });
+  if (events[0]?.type === AGENT_INIT_EVENT_TYPE) {
+    verifyEntry(entries[0]!, snapshot as AnyMachineSnapshot, effects, options.verify);
+  }
   const sessions = new Map<string, string>();
-  for (const event of journal) {
+  for (let index = 0; index < journal.length; index++) {
+    const event = journal[index]!;
     const reboundEvent = rebindActorSession(event, snapshot as AnyMachineSnapshot, sessions);
     [snapshot, actions] = transition(machine, snapshot, reboundEvent as never);
+    const consumed = entries.slice(0, entries.length - journalEntries.length + index + 1);
+    effects = getAgentEffects(machine, snapshot as AnyMachineSnapshot, actions, {
+      ...options,
+      history: consumed,
+    });
+    verifyEntry(journalEntries[index]!, snapshot as AnyMachineSnapshot, effects, options.verify);
   }
 
-  const effects = getAgentEffects(machine, snapshot as AnyMachineSnapshot, actions, {
-    ...options,
-    history: journal,
-  });
-
   return { snapshot: snapshot as SnapshotFrom<TMachine>, effects };
+}
+
+/** Requires and checks every entry's recorded state/effect hashes. */
+export function verifyReplay<TMachine extends AnyStateMachine>(
+  machine: TMachine,
+  entries: readonly AgentLogEntry[],
+  options: Omit<ReplayOptions, "verify"> = {},
+): ReplayResult<TMachine> {
+  return replay(machine, entries, { ...options, verify: "strict" });
+}
+
+/** Structural event-tail, logical-state, and owed-effect comparison. */
+export function diffEventLogs<TMachine extends AnyStateMachine>(
+  machine: TMachine,
+  parentEntries: readonly AgentLogEntry[],
+  forkEntries: readonly AgentLogEntry[],
+  options: ReplayOptions = {},
+): AgentEventLogDiff<TMachine> {
+  let commonLength = 0;
+  while (
+    commonLength < parentEntries.length &&
+    commonLength < forkEntries.length &&
+    stableJson(parentEntries[commonLength]) === stableJson(forkEntries[commonLength])
+  ) {
+    commonLength++;
+  }
+  const parent = replay(machine, parentEntries, options);
+  const fork = replay(machine, forkEntries, options);
+  const parentState = logicalReplayState(parent.snapshot as AnyMachineSnapshot);
+  const forkState = logicalReplayState(fork.snapshot as AnyMachineSnapshot);
+  return {
+    commonPrefix: {
+      length: commonLength,
+      ...(commonLength > 0 ? { throughEventId: parentEntries[commonLength - 1]!.id } : {}),
+    },
+    parentOnly: parentEntries.slice(commonLength),
+    forkOnly: forkEntries.slice(commonLength),
+    parent,
+    fork,
+    stateChanges: diffJson(parentState, forkState),
+    effectChanges: diffEffects(parent.effects, fork.effects),
+  };
+}
+
+function verifyEntry(
+  entry: AgentLogEntry,
+  snapshot: AnyMachineSnapshot,
+  effects: AgentEffect[],
+  mode: ReplayOptions["verify"],
+): void {
+  if (mode === false) {
+    return;
+  }
+  if (!entry.verification) {
+    if (mode === "strict") {
+      throw new ReplayDivergenceError(entry.id, entry.index, "missing-verification");
+    }
+    return;
+  }
+  const actual = replayVerification(snapshot, effects);
+  if (actual.stateHash !== entry.verification.stateHash) {
+    throw new ReplayDivergenceError(
+      entry.id,
+      entry.index,
+      "state",
+      entry.verification.stateHash,
+      actual.stateHash,
+    );
+  }
+  if (actual.effectsHash !== entry.verification.effectsHash) {
+    throw new ReplayDivergenceError(
+      entry.id,
+      entry.index,
+      "effects",
+      entry.verification.effectsHash,
+      actual.effectsHash,
+    );
+  }
+}
+
+function replayVerification(
+  snapshot: AnyMachineSnapshot,
+  effects: AgentEffect[],
+): AgentLogVerification {
+  return {
+    stateHash: hashStableJson(logicalReplayState(snapshot)),
+    effectsHash: hashStableJson(serializableEffects(effects)),
+  };
+}
+
+function logicalReplayState(snapshot: AnyMachineSnapshot): JsonValue {
+  const state: Record<string, unknown> = {
+    status: snapshot.status,
+    value: snapshot.value,
+    context: snapshot.context,
+  };
+  if (snapshot.output !== undefined) state.output = snapshot.output;
+  if (snapshot.error !== undefined) state.error = snapshot.error;
+  const canonical = canonicalizeForHash(state);
+  assertJsonSerializable(canonical, "snapshot");
+  return canonical as JsonValue;
+}
+
+function serializableEffects(effects: AgentEffect[]): JsonValue[] {
+  return effects.map((effect) => canonicalizeEffect(effect) as JsonValue);
+}
+
+function canonicalizeEffect(effect: AgentEffect): unknown {
+  if (effect.kind === "execute") {
+    return { kind: effect.kind, type: String(effect.action.type) };
+  }
+  const value = { ...effect } as Record<string, unknown>;
+  delete value.toDoneEvent;
+  delete value.toErrorEvent;
+  delete value.exec;
+  delete value.action;
+  return canonicalizeForHash(value);
+}
+
+function canonicalizeForHash(value: unknown, seen: WeakSet<object> = new WeakSet()): unknown {
+  if (value === undefined) return "[undefined]";
+  if (typeof value === "function") return "[function]";
+  if (typeof value === "bigint") return `[bigint:${String(value)}]`;
+  if (typeof value === "symbol") return `[symbol:${String(value)}]`;
+  if (value === null || typeof value !== "object") return value;
+  if (value instanceof Date) return `[Date:${value.toISOString()}]`;
+  if (value instanceof Error) {
+    return {
+      errorName: value.name,
+      message: value.message,
+      ...(value.cause !== undefined ? { cause: canonicalizeForHash(value.cause, seen) } : {}),
+    };
+  }
+  if (value instanceof Set) {
+    return [...value]
+      .map((item) => canonicalizeForHash(item, seen))
+      .sort((a, b) => stableJson(a).localeCompare(stableJson(b)));
+  }
+  if (value instanceof Map) {
+    return [...value.entries()]
+      .map(([key, item]) => [canonicalizeForHash(key, seen), canonicalizeForHash(item, seen)])
+      .sort(([a], [b]) => stableJson(a).localeCompare(stableJson(b)));
+  }
+  if (seen.has(value)) return "[circular]";
+  seen.add(value);
+  if (Array.isArray(value)) {
+    const result = value.map((item) => canonicalizeForHash(item, seen));
+    seen.delete(value);
+    return result;
+  }
+  const standard = (value as { "~standard"?: { vendor?: unknown; version?: unknown } })[
+    "~standard"
+  ];
+  if (standard) {
+    seen.delete(value);
+    return { schemaVendor: standard.vendor, schemaVersion: standard.version };
+  }
+  const result: Record<string, unknown> = {};
+  for (const key of Object.keys(value).sort()) {
+    result[key] = canonicalizeForHash((value as Record<string, unknown>)[key], seen);
+  }
+  seen.delete(value);
+  return result;
+}
+
+function normalizeEventErrors(value: unknown, seen: WeakMap<object, unknown> = new WeakMap()): any {
+  if (value instanceof Error) {
+    const normalized: Record<string, unknown> = {
+      name: value.name,
+      message: value.message,
+    };
+    seen.set(value, normalized);
+    if (value.cause !== undefined) normalized.cause = normalizeEventErrors(value.cause, seen);
+    return normalized;
+  }
+  if (value === null || typeof value !== "object") return value;
+  const existing = seen.get(value);
+  if (existing !== undefined) return existing;
+  if (Array.isArray(value)) {
+    const result: unknown[] = [];
+    seen.set(value, result);
+    for (const item of value) result.push(normalizeEventErrors(item, seen));
+    return result;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return value;
+  const result: Record<string, unknown> = {};
+  seen.set(value, result);
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    result[key] = normalizeEventErrors(item, seen);
+  }
+  return result;
+}
+
+function stableJson(value: unknown): string {
+  return JSON.stringify(sortJson(value));
+}
+
+function sortJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortJson);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.keys(value as Record<string, unknown>)
+        .sort()
+        .map((key) => [key, sortJson((value as Record<string, unknown>)[key])]),
+    );
+  }
+  return value;
+}
+
+function hashStableJson(value: unknown): string {
+  const input = stableJson(value);
+  let hash = 5381;
+  for (let index = 0; index < input.length; index++) {
+    hash = ((hash << 5) + hash + input.charCodeAt(index)) | 0;
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+function diffJson(before: JsonValue, after: JsonValue, path = ""): AgentLogPatchOperation[] {
+  if (stableJson(before) === stableJson(after)) return [];
+  if (
+    before === null ||
+    after === null ||
+    typeof before !== "object" ||
+    typeof after !== "object" ||
+    Array.isArray(before) ||
+    Array.isArray(after)
+  ) {
+    return [{ op: "replace", path, value: after }];
+  }
+  const changes: AgentLogPatchOperation[] = [];
+  const beforeObject = before as Record<string, JsonValue>;
+  const afterObject = after as Record<string, JsonValue>;
+  const keys = new Set([...Object.keys(beforeObject), ...Object.keys(afterObject)]);
+  for (const key of [...keys].sort()) {
+    const childPath = `${path}/${key.replaceAll("~", "~0").replaceAll("/", "~1")}`;
+    if (!(key in afterObject)) changes.push({ op: "remove", path: childPath });
+    else if (!(key in beforeObject))
+      changes.push({ op: "add", path: childPath, value: afterObject[key]! });
+    else changes.push(...diffJson(beforeObject[key]!, afterObject[key]!, childPath));
+  }
+  return changes;
+}
+
+function diffEffects(before: AgentEffect[], after: AgentEffect[]): AgentEffectDiff {
+  const beforeValues = serializableEffects(before);
+  const afterValues = serializableEffects(after);
+  const key = (value: JsonValue, index: number): string => {
+    const record = value as Record<string, JsonValue>;
+    return typeof record.requestId === "string"
+      ? record.requestId
+      : `${String(record.kind ?? "effect")}:${index}`;
+  };
+  const beforeMap = new Map(beforeValues.map((value, index) => [key(value, index), value]));
+  const afterMap = new Map(afterValues.map((value, index) => [key(value, index), value]));
+  const added: JsonValue[] = [];
+  const removed: JsonValue[] = [];
+  const changed: Array<{ before: JsonValue; after: JsonValue }> = [];
+  for (const [id, value] of beforeMap) {
+    const next = afterMap.get(id);
+    if (next === undefined) removed.push(value);
+    else if (stableJson(value) !== stableJson(next)) changed.push({ before: value, after: next });
+  }
+  for (const [id, value] of afterMap) {
+    if (!beforeMap.has(id)) added.push(value);
+  }
+  return { added, removed, changed };
 }

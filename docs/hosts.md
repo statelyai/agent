@@ -206,7 +206,7 @@ These `runAgent` callbacks are purely observational; they return `void` and cann
 - **`onTrace(event)`**: one ordered stream of run/request/chunk/transition/emit/end events, each stamped with `schemaVersion` (currently `1`, exported as `AGENT_TRACE_SCHEMA_VERSION`), `runId`, `seq`, `timestamp`, `machineId`, `machineVersion` (the same identity stamped onto settled snapshots as `agentMeta`). The eval trace / JSONL / telemetry-adapter slot. Uncontrolled mode gets the same stream: `provideExecutors` also accepts an `onTrace`, paired with `traceTransitions` on the actor's `inspect` to fold transitions in.
 - **`onChunk(chunk, info)`**: each streamed chunk of a `mode: 'stream'` request, with the `AgentRequest` that produced it (parallel streams stay distinguishable).
 - **`onResult(request, result)`**: once per resolved text or decision request (decision retries fire per attempt), with normalized `result.output` and the raw executor result. `result.raw` is whatever your executor returned verbatim: return `usage` alongside `output` and this becomes your token meter (the shipped adapter does; `raw as AiSdkGenerateResult` carries `usage`, `finishReason`, `toolCalls`, `toolResults`).
-- **`onEvent(event)`**: each newly appended replayable external input, as a plain `EventObject`. Use it to persist the event log while the run is in flight; seeded resume history is not re-emitted.
+- **`onEvent(entry)`**: each newly created versioned `AgentLogEntry` around a replayable external input. Entries are JSON-validated and carry ids, timestamps, machine identity/version, and replay hashes; seeded resume history is not re-emitted.
 - **`onTransition(snapshot, event)`**: every machine transition, with the new snapshot and causing event.
 - **`on: { EVENT: handler, '*': handler }`**: events the machine emits with `enq.emit(...)`, keyed by emitted event type (`'*'` catches all).
 - **`inspect(inspectionEvent)`**: raw xstate inspection passthrough for the whole actor system. `onTransition` covers the root only; to watch a child machine's states (see [multi-agent](multi-agent.md)), filter `inspectionEvent.type === '@xstate.transition'` and read `inspectionEvent.actorRef`. The `inspectTransitions(handler)` helper does that filtering and hands over the typed snapshot + actorRef.
@@ -218,11 +218,13 @@ await runAgent(machine, {
   onTrace: (event) => jsonl.write(event),
   onChunk: (chunk, info) => process.stdout.write(chunk),
   onResult: (request, result) => log(request.id, result.raw),
-  onEvent: (event) => eventLog.append(event),
+  onEvent: (entry) => eventLog.append(entry),
   onTransition: (snapshot, event) => trace(snapshot.value, event.type),
   on: { EVALUATED: (e) => console.log(`score ${e.qualityScore}/10`) },
 });
 ```
+
+`onEvent` is write-through observation, not transactional durability: the live XState actor has already accepted the event, and this synchronous callback cannot await an asynchronous store before the transition. For append-before-continue crash safety, drive the [pure step path](steps.md#durable-append-before-continue), where the host commits each completion envelope before exposing the derived state.
 
 The three differ in level: `onTrace` is the whole ordered run ledger (evals, exports); `onTransition` reports in XState's terms (state values, events); `on` reports the domain events the machine emits at authored moments (a progress UI, an SSE stream, a log line). Declare their schemas in `setupAgent` and both `enq.emit(...)` and the `on` handlers are fully typed:
 

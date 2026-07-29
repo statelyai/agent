@@ -14,7 +14,7 @@ v2 leaves alpha only when its durable formats can be promised. Changing a persis
 - **Runtime semantics complete first.** The durable-execution seams still moving (step request envelope, execution info, checkpoint contract, dynamic actor binding) settle before any freeze; freezing around them would lock in their current gaps.
 - **Stable XState v6.** The alpha pins `xstate@6.0.0-alpha.*`; v2 stable requires a stable v6 (persisted snapshot format is XState's, so its stability is a hard dependency). This is external schedule risk: if v6 stable slips, v2 stays alpha rather than freezing on an alpha snapshot format.
 - **Node LTS matrix.** Declare and CI-test the supported active LTS versions.
-- **Format freeze.** The durable formats freeze together, with documented versioning rules: the journal entry format (the reserved `@agent.init` entry plus external-input events), the `AgentEventLogStore` protocol, and the `AgentTraceEvent` envelope (`AGENT_TRACE_SCHEMA_VERSION`). Persisted snapshots are compaction caches, versioned by XState.
+- **Format freeze.** The durable formats freeze together, with documented versioning rules: the `AgentLogEntry` envelope (`AGENT_EVENT_SCHEMA_VERSION`, including the reserved `@agent.init` event and verification hashes), the `AgentEventLogStore` protocol, and the `AgentTraceEvent` envelope (`AGENT_TRACE_SCHEMA_VERSION`). Persisted snapshots are compaction caches, versioned by XState.
 - **Upgrade tests.** Fixture snapshots and traces from the frozen formats, replayed in CI against every release, so a break is caught before it ships.
 - **RC cycle.** At least one release candidate with the formats frozen and real hosts running against it before `2.0.0`.
 

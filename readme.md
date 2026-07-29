@@ -129,7 +129,7 @@ The example has one model decision and two final outcomes. Real machines can add
 - **Requests are typed.** Inputs, outputs, context, and events use Standard Schema. Zod works out of the box.
 - **Your code runs the model.** `runAgent` accepts executor functions. The example uses the Vercel AI SDK adapter, but the machine does not depend on a provider.
 - **Snapshots can be stored.** An agent can stop for human input, save its XState snapshot, and resume later in another process.
-- **Runs export replayable events.** Every `runAgent` result carries the external-input `EventObject[]`; pass it to `replay` to reconstruct the machine without repeating model or tool calls.
+- **Runs export verified replay entries.** Every `runAgent` result carries a JSON-safe `AgentLogEntry[]` with event identity, timestamp, machine version, and state/effect hashes; pass it to `replay` or `verifyReplay` without repeating model or tool calls.
 - **Machines can be checked without model calls.** Lint their structure, simulate scripted decisions, and explore paths without an API key.
 - **Agents are XState machines.** Guards, actors, parallel states, inspection, testing, and visualization work as usual.
 

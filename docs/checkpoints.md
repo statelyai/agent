@@ -17,7 +17,7 @@ This puts one obligation on machine authors: transitions and effect inputs (prom
 
 <!-- RunAgentResult.events and RunAgentOptions events/onEvent from src/run-agent.ts; replay from src/effects.ts -->
 
-Every `runAgent` result carries the external inputs it observed as a plain `EventObject[]`. Pass it directly to `replay`:
+Every `runAgent` result carries the external inputs it observed as a versioned `AgentLogEntry[]`. Pass it directly to `replay`:
 
 ```ts
 import { replay, runAgent } from "@statelyai/agent";
@@ -26,7 +26,25 @@ const first = await runAgent(machine, { input, executors });
 const { snapshot, effects } = replay(machine, first.events);
 ```
 
-A fresh run starts with `@agent.init`. The remaining entries are effect completions/failures, externally sent events, and timer firings. Raised events and internal transitions are absent because `replay` re-derives them.
+A fresh run starts with an envelope around `@agent.init`. The remaining entries wrap effect completions/failures, externally sent events, and timer firings. Raised events and internal transitions are absent because `replay` re-derives them.
+
+```ts
+interface AgentLogEntry {
+  schemaVersion: 1;
+  id: string;
+  index: number;
+  recordedAt: string;
+  machineId: string;
+  machineVersion: string;
+  event: EventObject;
+  causationId?: string;
+  correlationId?: string;
+  verification?: { stateHash: string; effectsHash: string };
+  metadata?: Record<string, JsonValue>;
+}
+```
+
+`recordedAt` is acceptance metadata, never semantic machine time. If a transition needs time, put it in the machine event itself. `machineVersion` is the explicit run option or the machine's structural hash. The verification hashes pin the logical state and still-owed effects after each entry.
 
 XState v6 uses stable category event types with identity in payload fields. Preserve the whole object: an invoke completion is `{ type: "xstate.done.actor", actorId, sessionId, output }`; a timer firing is `{ type: "xstate.timer", id }`. `replay` rebinds logged actor sessions to the new actor system, so globally unique runtime IDs do not make the log machine-specific.
 
@@ -55,14 +73,42 @@ const result = await runAgent(machine, {
   event,
   events: previousEvents,
   executors,
-  onEvent: (event) => {
-    events.push(event);
-    appendToStore(event);
+  onEvent: (entry) => {
+    events.push(entry);
+    appendToStore(entry);
   },
 });
 ```
 
-`onEvent` fires once per newly observed entry, including `@agent.init` on a fresh run. It does not re-emit history supplied through `events`. Unlike `onTransition`, it excludes raised and internal events, so its output can be passed directly to `replay`.
+`onEvent` fires once per newly observed envelope, including the `@agent.init` entry on a fresh run. It does not re-emit history supplied through `events`. Unlike `onTransition`, it excludes raised and internal events, so its output can be passed directly to `replay`.
+
+`runAgent` owns a live XState actor. Its `onEvent` callback observes an event after XState accepted it and cannot await an asynchronous store before the transition. It is useful for export/write-through recording, but is not an append-before-transition crash-safety guarantee. For that guarantee use the [pure step path](steps.md#durable-append-before-continue).
+
+## JSON is the wire contract
+
+`createReplayEntry`, `initEntry`, every built-in store append, and `replay` validate the complete envelope. Values that JSON would drop or coerce are rejected with `NonSerializableAgentEventError` carrying the exact `path`: `undefined`, functions, symbols, bigint, non-finite numbers, negative zero, sparse arrays, hidden properties, cycles, `Date`, `Map`, `Set`, and class instances. Framework error events normalize `Error` values to plain `{ name, message, cause? }` records before storage.
+
+Use `assertJsonSerializable(value)` and `assertAgentLogEntry(entry)` at custom transport boundaries. This strict subset makes an exported log mean the same thing in another process or language.
+
+## Strict replay verification
+
+Normal `replay` checks verification hashes when present. `verifyReplay` requires them on every entry and fails at the first mismatch:
+
+```ts
+import { ReplayDivergenceError, verifyReplay } from "@statelyai/agent";
+
+try {
+  verifyReplay(machine, entries);
+} catch (error) {
+  if (error instanceof ReplayDivergenceError) {
+    console.error(error.eventId, error.index, error.kind);
+  }
+}
+```
+
+`kind: "state"` means the current machine derived different logical state. `kind: "effects"` means it owed different work — for example a changed prompt, model, tool set, task input, or timer. `ReplayMachineMismatchError` rejects an envelope stamped for another machine id/version before folding it.
+
+Structural hashing cannot see custom function bodies or schema-validator implementations. Set an explicit `machineVersion` whenever those semantics change; the per-entry hashes then verify their observable state/effect consequences.
 
 ## The store contract
 
@@ -82,11 +128,31 @@ const entries = await store.read("session-1", { from: 3 });
 const next = await store.length("session-1"); // the next expectedIndex
 ```
 
-- `append` is atomic and rejects stale writers with `AgentEventLogConflictError` (`threadId`, `expectedIndex`, `actualLength`), so two hosts resuming one thread resolve to exactly one winner.
+- `append` is atomic and rejects stale writers with `AgentEventLogConflictError` (`threadId`, `expectedIndex`, `actualLength`), so two hosts resuming one thread resolve to exactly one winner. Event ids must also be unique within a thread.
 - `read`/`length` are the whole history API: the log *is* the history.
-- `fork({ threadId, newThreadId, upToIndex })` copies a prefix onto a new thread. Rewind and diverge — LangGraph's time travel — is `fork` at an earlier index plus different events appended. See [examples/time-travel](../examples/time-travel/index.ts).
+- `fork({ threadId, newThreadId, upToIndex })` copies an exclusive index prefix; `atEventId` is the inclusive event-id form. Forked entries retain their ids. Rewind and diverge by appending different envelopes to the new thread.
 
 Every entry carries optional host-owned `metadata`, stored verbatim.
+
+## Fork and diff
+
+```ts
+import { diffEventLogs } from "@statelyai/agent";
+
+await store.fork({
+  threadId: "session-1",
+  newThreadId: "candidate",
+  atEventId: "evt_00000007",
+});
+
+const diff = diffEventLogs(
+  machine,
+  await store.read("session-1"),
+  await store.read("candidate"),
+);
+```
+
+`diffEventLogs` returns the exact common prefix, parent-only and fork-only tails, both replay results, JSON Patch-style logical-state changes, and added/removed/changed frontier effects. It is structural only; semantic quality belongs to an evaluator.
 
 ## Conform your own store
 

@@ -21,8 +21,9 @@
  */
 import { initialTransition, transition, type AnyMachineSnapshot, type EventObject } from "xstate";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { type AgentRequestExecutors } from "@statelyai/agent";
+import { type AgentLogEntry, type AgentRequestExecutors } from "@statelyai/agent";
 import {
+  createReplayEntry,
   executeAgentRequest,
   getAgentEffects,
   initEntry,
@@ -86,7 +87,7 @@ export async function runAiSdkGameTurn(
 
   // The journal starts with the reserved init entry carrying the input, so the
   // log is self-contained (a fresh process can `replay` it with no side channel).
-  const entries: EventObject[] = [initEntry(input).event];
+  const entries: AgentLogEntry[] = [initEntry(gameMachine, input)];
   let [snapshot, actions] = initialTransition(gameMachine, input);
   onStep?.(snapshot.value);
 
@@ -111,7 +112,7 @@ export async function runAiSdkGameTurn(
       break; // idle: nothing async owed — persist `entries` and resume later.
     }
 
-    entries.push(next);
+    entries.push(createReplayEntry(gameMachine, entries, next));
     [snapshot, actions] = transition(gameMachine, snapshot, next as never);
     onStep?.(snapshot.value);
   }

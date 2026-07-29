@@ -1,13 +1,28 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
-import { createActor, initialTransition, setup, transition, type EventFromLogic } from "xstate";
+import { createActor, setup, type EventFromLogic } from "xstate";
 import { persistSnapshot } from "./utils.js";
+import { createReplayEntry, initEntry, replay } from "./effects.js";
 import {
   AgentEventLogConflictError,
+  NonSerializableAgentEventError,
+  assertAgentLogEntry,
   assertEventLogStoreConformance,
   createInMemoryEventLogStore,
   type AgentLogEntry,
 } from "./event-log-store.js";
+
+function testEntry(index: number, type: string): AgentLogEntry {
+  return {
+    schemaVersion: 1,
+    id: `evt_${index}`,
+    index,
+    recordedAt: "2026-01-01T00:00:00.000Z",
+    machineId: "test",
+    machineVersion: "v1",
+    event: { type },
+  };
+}
 
 describe("createInMemoryEventLogStore conformance", () => {
   test("passes the full conformance suite", async () => {
@@ -23,7 +38,7 @@ describe("AgentEventLogConflictError", () => {
     await store.append({
       threadId: "t",
       expectedIndex: 0,
-      entries: [{ index: 0, event: { type: "a" } }],
+      entries: [testEntry(0, "a")],
     });
 
     let caught: unknown;
@@ -31,7 +46,7 @@ describe("AgentEventLogConflictError", () => {
       await store.append({
         threadId: "t",
         expectedIndex: 0,
-        entries: [{ index: 0, event: { type: "b" } }],
+        entries: [testEntry(0, "b")],
       });
     } catch (error) {
       caught = error;
@@ -43,6 +58,58 @@ describe("AgentEventLogConflictError", () => {
     expect(conflict.expectedIndex).toBe(0);
     expect(conflict.actualLength).toBe(1);
     expect(conflict.name).toBe("AgentEventLogConflictError");
+  });
+});
+
+describe("JSON validation", () => {
+  test("rejects values that JSON would drop or coerce, with the exact path", async () => {
+    const store = createInMemoryEventLogStore();
+    const invalid = {
+      ...testEntry(0, "BROKEN"),
+      event: { type: "BROKEN", output: { createdAt: new Date() } },
+    } as unknown as AgentLogEntry;
+
+    await expect(
+      store.append({ threadId: "t", expectedIndex: 0, entries: [invalid] }),
+    ).rejects.toMatchObject({
+      name: "NonSerializableAgentEventError",
+      path: "entry.event.output.createdAt",
+      valueType: "Date",
+    });
+    await expect(
+      store.append({
+        threadId: "t",
+        expectedIndex: 0,
+        entries: [
+          {
+            ...testEntry(0, "BROKEN"),
+            event: { type: "BROKEN", value: undefined },
+          } as unknown as AgentLogEntry,
+        ],
+      }),
+    ).rejects.toBeInstanceOf(NonSerializableAgentEventError);
+  });
+
+  test("validates the envelope shape and RFC 3339 timestamp", () => {
+    expect(() => assertAgentLogEntry({ ...testEntry(0, "OK"), recordedAt: "yesterday" })).toThrow(
+      /RFC 3339/,
+    );
+    expect(() => assertAgentLogEntry({ ...testEntry(0, "OK"), event: { type: "" } })).toThrow(
+      /event.*type/,
+    );
+  });
+
+  test("rejects sparse arrays and hidden fields that JSON would silently coerce", () => {
+    const sparse = Object.assign([] as string[], { 0: "first", 2: "third", length: 3 });
+    expect(() =>
+      assertAgentLogEntry({ ...testEntry(0, "SPARSE"), event: { type: "SPARSE", sparse } }),
+    ).toThrow(NonSerializableAgentEventError);
+
+    const event = { type: "HIDDEN" };
+    Object.defineProperty(event, "hidden", { value: true, enumerable: false });
+    expect(() => assertAgentLogEntry({ ...testEntry(0, "HIDDEN"), event })).toThrow(
+      NonSerializableAgentEventError,
+    );
   });
 });
 
@@ -98,9 +165,12 @@ describe("deterministic replay from the log", () => {
       { type: "DONE" },
     ];
 
+    const first = initEntry(counterMachine);
+    await store.append({ threadId, expectedIndex: 0, entries: [first] });
     for (const event of externalEvents) {
-      const index = await store.length(threadId);
-      await store.append({ threadId, expectedIndex: index, entries: [{ index, event }] });
+      const prefix = await store.read(threadId);
+      const entry = createReplayEntry(counterMachine, prefix, event);
+      await store.append({ threadId, expectedIndex: prefix.length, entries: [entry] });
       actor.send(event);
     }
 
@@ -108,10 +178,7 @@ describe("deterministic replay from the log", () => {
 
     // ── "Fresh process": rebuild purely from the log via pure transitions.
     const journal: AgentLogEntry[] = await store.read(threadId);
-    let [snapshot] = initialTransition(counterMachine);
-    for (const logEntry of journal) {
-      [snapshot] = transition(counterMachine, snapshot, logEntry.event as never);
-    }
+    const { snapshot } = replay(counterMachine, journal);
 
     // The deterministic-replay property the whole durability model rests on.
     expect(persistSnapshot(snapshot)).toEqual(persistSnapshot(liveSnapshot));

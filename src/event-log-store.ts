@@ -1,5 +1,24 @@
 import type { EventObject } from "xstate";
 
+/** The durable replay-entry envelope version. */
+export const AGENT_EVENT_SCHEMA_VERSION = 1 as const;
+
+/** Values that round-trip through JSON without adapters or silent coercion. */
+export type JsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+
+export interface AgentLogVerification {
+  /** Hash of the logical machine projection after this entry is applied. */
+  stateHash: string;
+  /** Hash of the serializable effects owed at that frontier. */
+  effectsHash: string;
+}
+
 /**
  * One journaled entry: an EXTERNAL input to the machine — an effect completion
  * (a `done`/`error` event carrying its output inline), a user-sent event, or a
@@ -8,11 +27,202 @@ import type { EventObject } from "xstate";
  * JSON-safe, stored verbatim.
  */
 export interface AgentLogEntry {
+  /** Version of this outer envelope, independent of the machine event type. */
+  schemaVersion: typeof AGENT_EVENT_SCHEMA_VERSION;
+  /** Stable identity within the thread. Forked prefixes retain their ids. */
+  id: string;
   /** 0-based position in the thread's log. */
   index: number;
+  /** RFC 3339 wall-clock time when the host accepted the entry. Metadata only. */
+  recordedAt: string;
+  /** The authored XState machine id. */
+  machineId: string;
+  /** Explicit version or structural hash of the machine that accepted the event. */
+  machineVersion: string;
   event: EventObject;
+  /** Optional causal parent entry id, scoped to the same thread. */
+  causationId?: string;
+  /** Optional host-owned correlation id spanning threads/runs. */
+  correlationId?: string;
+  /** Recorded projection hashes used by strict replay verification. */
+  verification?: AgentLogVerification;
   /** Host-owned, JSON-safe; stored verbatim, never interpreted. */
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, JsonValue>;
+}
+
+/** A precise failure when an entry would not survive a JSON round-trip. */
+export class NonSerializableAgentEventError extends TypeError {
+  readonly path: string;
+  readonly valueType: string;
+
+  constructor(path: string, valueType: string) {
+    super(`Agent event field '${path}' is not JSON-serializable (${valueType}).`);
+    this.name = "NonSerializableAgentEventError";
+    this.path = path;
+    this.valueType = valueType;
+  }
+}
+
+/**
+ * Rejects values JSON would drop or coerce. Unlike `JSON.stringify`, this does
+ * not silently erase `undefined`/functions or turn non-finite numbers into
+ * `null`; durable entries contain only plain JSON values.
+ */
+export function assertJsonSerializable(
+  value: unknown,
+  path = "entry",
+  ancestors: WeakSet<object> = new WeakSet(),
+): asserts value is JsonValue {
+  if (value === null || typeof value === "string" || typeof value === "boolean") {
+    return;
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || Object.is(value, -0)) {
+      throw new NonSerializableAgentEventError(path, Object.is(value, -0) ? "-0" : String(value));
+    }
+    return;
+  }
+  if (typeof value !== "object") {
+    throw new NonSerializableAgentEventError(path, typeof value);
+  }
+  if (ancestors.has(value)) {
+    throw new NonSerializableAgentEventError(path, "circular reference");
+  }
+  ancestors.add(value);
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index++) {
+      if (!Object.hasOwn(value, index)) {
+        throw new NonSerializableAgentEventError(`${path}[${index}]`, "array hole");
+      }
+      assertJsonSerializable(value[index], `${path}[${index}]`, ancestors);
+    }
+    const extraKey = Object.keys(value).find(
+      (key) => !/^(?:0|[1-9]\d*)$/.test(key) || Number(key) >= value.length,
+    );
+    if (extraKey !== undefined) {
+      throw new NonSerializableAgentEventError(`${path}.${extraKey}`, "array property");
+    }
+    const symbols = Object.getOwnPropertySymbols(value);
+    if (symbols.length > 0) {
+      throw new NonSerializableAgentEventError(`${path}.[${String(symbols[0])}]`, "symbol key");
+    }
+    const hiddenKey = Object.getOwnPropertyNames(value).find(
+      (key) =>
+        key !== "length" &&
+        !/^(?:0|[1-9]\d*)$/.test(key) &&
+        !Object.getOwnPropertyDescriptor(value, key)?.enumerable,
+    );
+    if (hiddenKey !== undefined) {
+      throw new NonSerializableAgentEventError(`${path}.${hiddenKey}`, "non-enumerable property");
+    }
+    ancestors.delete(value);
+    return;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    const type = (value as { constructor?: { name?: string } }).constructor?.name ?? "object";
+    ancestors.delete(value);
+    throw new NonSerializableAgentEventError(path, type);
+  }
+  const symbols = Object.getOwnPropertySymbols(value);
+  if (symbols.length > 0) {
+    ancestors.delete(value);
+    throw new NonSerializableAgentEventError(`${path}.[${String(symbols[0])}]`, "symbol key");
+  }
+  const hiddenKey = Object.getOwnPropertyNames(value).find(
+    (key) => !Object.getOwnPropertyDescriptor(value, key)?.enumerable,
+  );
+  if (hiddenKey !== undefined) {
+    ancestors.delete(value);
+    throw new NonSerializableAgentEventError(`${path}.${hiddenKey}`, "non-enumerable property");
+  }
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    assertJsonSerializable(child, `${path}.${key}`, ancestors);
+  }
+  ancestors.delete(value);
+}
+
+/** Validates the complete durable envelope before append/export/replay. */
+export function assertAgentLogEntry(entry: unknown): asserts entry is AgentLogEntry {
+  if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+    throw new Error("Agent event entry must be an object.");
+  }
+  assertJsonSerializable(entry);
+  const candidate = entry as Partial<AgentLogEntry>;
+  if (candidate.schemaVersion !== AGENT_EVENT_SCHEMA_VERSION) {
+    throw new Error(
+      `Unsupported agent event schema version '${String(candidate.schemaVersion)}'; ` +
+        `expected '${AGENT_EVENT_SCHEMA_VERSION}'.`,
+    );
+  }
+  if (!Number.isInteger(candidate.index) || candidate.index! < 0) {
+    throw new Error(
+      `Agent event entry.index must be a non-negative integer; got ${String(candidate.index)}.`,
+    );
+  }
+  if (
+    typeof candidate.id !== "string" ||
+    !candidate.id ||
+    typeof candidate.machineId !== "string" ||
+    !candidate.machineId ||
+    typeof candidate.machineVersion !== "string" ||
+    !candidate.machineVersion
+  ) {
+    throw new Error("Agent event entry requires non-empty id, machineId, and machineVersion.");
+  }
+  if (
+    typeof candidate.recordedAt !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(
+      candidate.recordedAt,
+    ) ||
+    Number.isNaN(Date.parse(candidate.recordedAt))
+  ) {
+    throw new Error(
+      `Agent event entry.recordedAt is not RFC 3339: '${String(candidate.recordedAt)}'.`,
+    );
+  }
+  if (
+    candidate.event === null ||
+    typeof candidate.event !== "object" ||
+    Array.isArray(candidate.event) ||
+    typeof candidate.event.type !== "string" ||
+    !candidate.event.type
+  ) {
+    throw new Error("Agent event entry.event requires a non-empty string type.");
+  }
+  if (
+    candidate.causationId !== undefined &&
+    (typeof candidate.causationId !== "string" || !candidate.causationId)
+  ) {
+    throw new Error("Agent event entry.causationId must be a non-empty string when present.");
+  }
+  if (
+    candidate.correlationId !== undefined &&
+    (typeof candidate.correlationId !== "string" || !candidate.correlationId)
+  ) {
+    throw new Error("Agent event entry.correlationId must be a non-empty string when present.");
+  }
+  if (
+    candidate.metadata !== undefined &&
+    (candidate.metadata === null ||
+      typeof candidate.metadata !== "object" ||
+      Array.isArray(candidate.metadata))
+  ) {
+    throw new Error("Agent event entry.metadata must be an object when present.");
+  }
+  if (
+    candidate.verification !== undefined &&
+    (candidate.verification === null ||
+      typeof candidate.verification !== "object" ||
+      typeof candidate.verification.stateHash !== "string" ||
+      !candidate.verification.stateHash ||
+      typeof candidate.verification.effectsHash !== "string" ||
+      !candidate.verification.effectsHash)
+  ) {
+    throw new Error(
+      "Agent event entry.verification requires non-empty stateHash and effectsHash strings.",
+    );
+  }
 }
 
 /**
@@ -49,14 +259,20 @@ export interface AgentEventLogStore {
   /** The thread's current log length (0 for an unknown thread) — the next `expectedIndex`. */
   length(threadId: string): Promise<number>;
   /**
-   * Copy entries `[0, upToIndex)` onto a fresh, empty `newThreadId` — a fork
-   * point for time travel or a divergent branch, which then appends
-   * independently of the source. `upToIndex` defaults to the source's full
-   * length. Rejects (plain `Error`) if `newThreadId` already has entries, or if
-   * the source is unknown. Implementations may copy-on-write or physically
-   * copy; observable behavior must match a full copy.
+   * Copy a prefix onto a fresh, empty `newThreadId` — either `[0, upToIndex)`
+   * or through the inclusive `atEventId`. With neither cutoff the full source
+   * is copied. The fork then appends independently. Rejects (plain `Error`) if
+   * `newThreadId` already has entries, the source/id is unknown, or both cutoff
+   * forms are supplied. Implementations may copy-on-write or physically copy;
+   * observable behavior must match a full copy.
    */
-  fork(input: { threadId: string; newThreadId: string; upToIndex?: number }): Promise<void>;
+  fork(input: {
+    threadId: string;
+    newThreadId: string;
+    upToIndex?: number;
+    /** Inclusive event-id cutoff. Mutually exclusive with `upToIndex`. */
+    atEventId?: string;
+  }): Promise<void>;
 }
 
 /**
@@ -97,6 +313,9 @@ export function createInMemoryEventLogStore(): AgentEventLogStore {
 
   return {
     async append({ threadId, expectedIndex, entries }) {
+      for (const entry of entries) {
+        assertAgentLogEntry(entry);
+      }
       // Contiguity: every entry.index must follow expectedIndex in order.
       for (let i = 0; i < entries.length; i++) {
         if (entries[i]!.index !== expectedIndex + i) {
@@ -111,6 +330,15 @@ export function createInMemoryEventLogStore(): AgentEventLogStore {
       const length = list ? list.length : 0;
       if (length !== expectedIndex) {
         throw new AgentEventLogConflictError(threadId, expectedIndex, length);
+      }
+      const ids = new Set((list ?? []).map((entry) => entry.id));
+      for (const entry of entries) {
+        if (ids.has(entry.id)) {
+          throw new Error(
+            `AgentEventLogStore.append: duplicate event id "${entry.id}" in thread "${threadId}".`,
+          );
+        }
+        ids.add(entry.id);
       }
       const cloned = entries.map((entry) => clone(entry));
       if (list) {
@@ -130,7 +358,7 @@ export function createInMemoryEventLogStore(): AgentEventLogStore {
       return threads.get(threadId)?.length ?? 0;
     },
 
-    async fork({ threadId, newThreadId, upToIndex }) {
+    async fork({ threadId, newThreadId, upToIndex, atEventId }) {
       if ((threads.get(newThreadId)?.length ?? 0) > 0) {
         throw new Error(
           `AgentEventLogStore.fork: newThreadId "${newThreadId}" already has entries.`,
@@ -140,7 +368,17 @@ export function createInMemoryEventLogStore(): AgentEventLogStore {
       if (!source) {
         throw new Error(`AgentEventLogStore.fork: unknown source thread "${threadId}".`);
       }
-      const upTo = upToIndex ?? source.length;
+      if (upToIndex !== undefined && atEventId !== undefined) {
+        throw new Error("AgentEventLogStore.fork: pass either upToIndex or atEventId, not both.");
+      }
+      const eventIndex =
+        atEventId === undefined ? undefined : source.findIndex((entry) => entry.id === atEventId);
+      if (atEventId !== undefined && eventIndex === -1) {
+        throw new Error(
+          `AgentEventLogStore.fork: thread "${threadId}" has no event id "${atEventId}".`,
+        );
+      }
+      const upTo = eventIndex === undefined ? (upToIndex ?? source.length) : eventIndex + 1;
       if (upTo < 0 || upTo > source.length) {
         throw new Error(
           `AgentEventLogStore.fork: thread "${threadId}" (length ${source.length}) ` +
@@ -169,9 +407,14 @@ function fail(message: string): never {
   throw new Error(`event-log-store conformance: ${message}`);
 }
 
-function entry(index: number, type: string, metadata?: Record<string, unknown>): AgentLogEntry {
+function entry(index: number, type: string, metadata?: Record<string, JsonValue>): AgentLogEntry {
   return {
+    schemaVersion: AGENT_EVENT_SCHEMA_VERSION,
+    id: `evt_${index}`,
     index,
+    recordedAt: "2026-01-01T00:00:00.000Z",
+    machineId: "conformance",
+    machineVersion: "v1",
     event: { type, seq: index },
     ...(metadata !== undefined ? { metadata } : {}),
   } as AgentLogEntry;
@@ -193,9 +436,9 @@ function assertJsonEqual(actual: unknown, expected: unknown, message: string): v
  * Validates a store against the reference's semantics: empty read + zero length
  * for unknown threads; single and multi-entry append; contiguity misuse guard;
  * stale-`expectedIndex` conflict with correct fields; an interleaved concurrent
- * append race (exactly one winner); `read({ from })` incremental correctness;
- * thread isolation; metadata round-trip; deep-copy isolation on append and
- * read; and the full fork contract.
+ * append race (exactly one winner); event-id uniqueness; `read({ from })`
+ * incremental correctness; thread isolation; metadata round-trip; deep-copy
+ * isolation on append and read; and the full fork contract.
  */
 export async function assertEventLogStoreConformance(create: CreateStore): Promise<void> {
   // Unknown thread → empty read, zero length.
@@ -264,6 +507,25 @@ export async function assertEventLogStoreConformance(create: CreateStore): Promi
     }
     if (caught.threadId !== "t" || caught.expectedIndex !== 0 || caught.actualLength !== 1) {
       fail("conflict error must carry threadId, expectedIndex, and the actual length");
+    }
+  }
+
+  // Event identity is unique within a thread.
+  {
+    const store = await create();
+    await store.append({ threadId: "t", expectedIndex: 0, entries: [entry(0, "a")] });
+    let caught: unknown;
+    try {
+      await store.append({
+        threadId: "t",
+        expectedIndex: 1,
+        entries: [{ ...entry(1, "b"), id: "evt_0" }],
+      });
+    } catch (error) {
+      caught = error;
+    }
+    if (!(caught instanceof Error) || caught instanceof AgentEventLogConflictError) {
+      fail("a duplicate event id within a thread must throw a plain Error");
     }
   }
 
@@ -375,6 +637,14 @@ export async function assertEventLogStoreConformance(create: CreateStore): Promi
       (await store.read("fork-1")).map((e) => e.index),
       [0],
       "fork with upToIndex 1 must copy only entry 0",
+    );
+
+    // Inclusive event-id cutoff.
+    await store.fork({ threadId: "src", newThreadId: "fork-id", atEventId: "evt_1" });
+    assertJsonEqual(
+      (await store.read("fork-id")).map((e) => e.id),
+      ["evt_0", "evt_1"],
+      "fork with atEventId must include the named entry",
     );
 
     // The fork appends independently from its copied length; the source is untouched.

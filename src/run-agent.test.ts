@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
-import { createActor, createAsyncLogic, setup, toPromise, type EventObject } from "xstate";
+import { createActor, createAsyncLogic, setup, toPromise } from "xstate";
 import { createDecisionLogic } from "./decision.js";
 import {
   AGENT_TRACE_SCHEMA_VERSION,
@@ -15,6 +15,7 @@ import {
   setupAgent,
   SnapshotVersionMismatchError,
   type AgentDecisionRequest,
+  type AgentLogEntry,
   type AgentTextRequest,
   type AgentTools,
   type AgentTraceEvent,
@@ -66,7 +67,7 @@ describe("runAgent", () => {
       output: { answer: `Answered: ${request.prompt}` },
     });
 
-    const observedEvents: EventObject[] = [];
+    const observedEvents: AgentLogEntry[] = [];
     const result = await runAgent(machine, {
       input: { prompt: "why state machines?" },
       executors: {
@@ -79,7 +80,7 @@ describe("runAgent", () => {
     expect(result.status === "done" ? result.output : undefined).toEqual({
       answer: "Answered: why state machines?",
     });
-    expect(result.events).toEqual([
+    expect(result.events.map((entry) => entry.event)).toEqual([
       { type: "@agent.init", input: { prompt: "why state machines?" } },
       {
         type: "xstate.done.actor",
@@ -88,6 +89,14 @@ describe("runAgent", () => {
         sessionId: expect.any(String),
       },
     ]);
+    expect(result.events[0]).toMatchObject({
+      schemaVersion: 1,
+      id: "evt_00000000",
+      machineId: machine.id,
+      machineVersion: expect.any(String),
+      recordedAt: expect.any(String),
+      verification: { stateHash: expect.any(String), effectsHash: expect.any(String) },
+    });
     expect(observedEvents).toEqual(result.events);
 
     const replayed = replay(machine, result.events);
@@ -96,10 +105,10 @@ describe("runAgent", () => {
       answer: "Answered: why state machines?",
     });
 
-    const fromAnotherActorSystem = result.events.map((event) =>
-      event.type === "xstate.done.actor"
-        ? ({ ...event, sessionId: "another-system:99" } as EventObject)
-        : event,
+    const fromAnotherActorSystem = result.events.map((entry) =>
+      entry.event.type === "xstate.done.actor"
+        ? { ...entry, event: { ...entry.event, sessionId: "another-system:99" } }
+        : entry,
     );
     expect(replay(machine, fromAnotherActorSystem).snapshot.status).toBe("done");
   });
@@ -164,7 +173,7 @@ describe("runAgent", () => {
     }
     expect(first.snapshot.value).toBe("awaitingApproval");
 
-    const resumedEvents: EventObject[] = [];
+    const resumedEvents: AgentLogEntry[] = [];
     const second = await runAgent(machine, {
       snapshot: first.snapshot,
       event: { type: "APPROVE" },
@@ -179,12 +188,12 @@ describe("runAgent", () => {
     expect(second.status === "done" ? second.output : undefined).toEqual({
       draft: "Draft: release notes",
     });
-    expect(second.events.map((event) => event.type)).toEqual([
+    expect(second.events.map((entry) => entry.event.type)).toEqual([
       "@agent.init",
       "xstate.done.actor",
       "APPROVE",
     ]);
-    expect(resumedEvents.map((event) => event.type)).toEqual(["APPROVE"]);
+    expect(resumedEvents.map((entry) => entry.event.type)).toEqual(["APPROVE"]);
     expect(replay(machine, second.events).snapshot.status).toBe("done");
   });
 
@@ -206,7 +215,9 @@ describe("runAgent", () => {
       executors: {},
     });
     expect(raised.status).toBe("done");
-    expect(raised.events).toEqual([{ type: "@agent.init", input: undefined }]);
+    expect(raised.events.map((entry) => entry.event)).toEqual([
+      { type: "@agent.init", input: undefined },
+    ]);
     expect(replay(raisedMachine, raised.events).snapshot.status).toBe("done");
 
     const timerMachine = setup({}).createMachine({
@@ -223,7 +234,7 @@ describe("runAgent", () => {
       executors: {},
     });
     expect(timed.status).toBe("done");
-    expect(timed.events).toEqual([
+    expect(timed.events.map((entry) => entry.event)).toEqual([
       { type: "@agent.init", input: undefined },
       { type: "xstate.timer", id: "xstate.after.5.timer-events.waiting" },
     ]);
@@ -414,7 +425,7 @@ describe("runAgent", () => {
     expect(result.status).toBe("done");
     expect(callCount).toBe(2);
     expect(requestsSeen[1]!.attempts[0]!.failure).toBe("rejected-by-guard");
-    expect(result.events.map((event) => event.type)).toEqual(["@agent.init", "ATTACK"]);
+    expect(result.events.map((entry) => entry.event.type)).toEqual(["@agent.init", "ATTACK"]);
     expect(replay(machine, result.events).snapshot.status).toBe("done");
   });
 
@@ -1763,11 +1774,16 @@ describe("emitted events (runAgent `on`)", () => {
     expect(trace.at(-1)).toEqual(expect.objectContaining({ type: "run.end", status: "done" }));
     expect(trace.at(-1)).not.toHaveProperty("events");
     expect(result.events).toHaveLength(2);
-    expect(result.events[0]!.type).toBe("@agent.init");
-    expect(result.events[1]).toMatchObject({
+    expect(result.events[0]!.event.type).toBe("@agent.init");
+    expect(result.events[1]!.event).toMatchObject({
       type: "xstate.done.actor",
       actorId: expect.any(String),
     });
+    expect(
+      trace.flatMap((event) =>
+        event.type === "machine.transition" && event.eventId ? [event.eventId] : [],
+      ),
+    ).toEqual(result.events.map((entry) => entry.id));
     expect(trace.map((event) => event.type)).toEqual(
       expect.arrayContaining([
         "emit",

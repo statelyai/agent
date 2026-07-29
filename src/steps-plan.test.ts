@@ -4,6 +4,7 @@ import { initialTransition, transition, type AnyMachineSnapshot, type EventObjec
 import { createAgentSchemas, createTextLogic, runAgent, setupAgent } from "./index.js";
 import {
   executeAgentRequest,
+  createReplayEntry,
   getAgentEffects,
   initEntry,
   PLAN_DONE_EVENT_TYPE,
@@ -11,6 +12,7 @@ import {
   resolveDecision,
   type AgentDecisionRequest,
   type AgentPlanRequest,
+  type AgentLogEntry,
 } from "./steps/index.js";
 import type { AgentDecisionExecutor, AgentRequestExecutors, ChosenEvent } from "./index.js";
 
@@ -41,8 +43,11 @@ import type { AgentDecisionExecutor, AgentRequestExecutors, ChosenEvent } from "
 // single-plan machines it is every journaled machine event (drop the reserved
 // init entry and any xstate.* completion/timer events). A machine that also
 // takes unrelated external events would scope this to the plan's active window.
-function reconstructApplied(entries: readonly EventObject[]): ChosenEvent[] {
-  return entries.slice(1).filter((event) => !event.type.startsWith("xstate.")) as ChosenEvent[];
+function reconstructApplied(entries: readonly AgentLogEntry[]): ChosenEvent[] {
+  return entries
+    .slice(1)
+    .map((entry) => entry.event)
+    .filter((event) => !event.type.startsWith("xstate.")) as ChosenEvent[];
 }
 
 // The invoke-completion event that fires the plan state's `onDone` — the host
@@ -96,7 +101,7 @@ function planStepDecisionRequest(
 async function drivePlan(
   machine: any,
   planId: string,
-  entries: EventObject[],
+  entries: AgentLogEntry[],
   decide: AgentDecisionExecutor,
   persist?: () => void | Promise<void>,
 ): Promise<void> {
@@ -118,7 +123,7 @@ async function drivePlan(
     const machineEvents = request.events.filter((event) => event.type !== PLAN_DONE_EVENT_TYPE);
 
     const complete = async (stopped: string) => {
-      entries.push(planDoneEvent(planId, applied, stopped));
+      entries.push(createReplayEntry(machine, entries, planDoneEvent(planId, applied, stopped)));
       await persist?.();
     };
 
@@ -141,7 +146,7 @@ async function drivePlan(
       return complete("done");
     }
 
-    entries.push(chosen);
+    entries.push(createReplayEntry(machine, entries, chosen));
     await persist?.();
 
     if (stopOn.has(chosen.type)) {
@@ -152,7 +157,13 @@ async function drivePlan(
         (effect) => effect.kind === "plan" && effect.request.id === planId,
       );
       if (stillActive) {
-        entries.push(planDoneEvent(planId, reconstructApplied(entries), "stop-event"));
+        entries.push(
+          createReplayEntry(
+            machine,
+            entries,
+            planDoneEvent(planId, reconstructApplied(entries), "stop-event"),
+          ),
+        );
         await persist?.();
       }
       return;
@@ -167,9 +178,9 @@ async function drivePlan(
 async function runViaEffects(
   machine: any,
   decide: AgentDecisionExecutor,
-  persist?: (entries: EventObject[]) => void | Promise<void>,
+  persist?: (entries: AgentLogEntry[]) => void | Promise<void>,
 ): Promise<AnyMachineSnapshot> {
-  const entries: EventObject[] = [initEntry(undefined).event];
+  const entries: AgentLogEntry[] = [initEntry(machine, undefined)];
   const runPersist = persist ? () => persist(entries) : undefined;
 
   for (;;) {
@@ -194,7 +205,7 @@ async function runViaEffects(
       const chosen = await resolveDecision(pending.request, decide, {
         canTake: (event) => (snapshot as AnyMachineSnapshot).can(event as never),
       });
-      entries.push(chosen);
+      entries.push(createReplayEntry(machine, entries, chosen));
       await runPersist?.();
       continue;
     }
@@ -335,7 +346,7 @@ describe("agent.plan on the thin loop", () => {
 
   test("re-surfaces a plan effect with candidates and budget each frontier", () => {
     const machine = createTodoAgent();
-    const entries: EventObject[] = [initEntry(undefined).event];
+    const entries: AgentLogEntry[] = [initEntry(machine, undefined)];
 
     // Frontier 0: the plan effect surfaces with the machine candidates plus the
     // reserved done move.
@@ -353,7 +364,9 @@ describe("agent.plan on the thin loop", () => {
 
     // Apply one event; the plan effect re-surfaces on the next frontier, and the
     // host derives the applied trail from the journal.
-    entries.push({ type: "ADD", title: "milk" } as EventObject);
+    entries.push(
+      createReplayEntry(machine, entries, { type: "ADD", title: "milk" } as EventObject),
+    );
     ({ snapshot, effects } = replay(machine, entries));
     planEffect = effects.find((effect) => effect.kind === "plan");
     expect(planEffect?.kind).toBe("plan");
@@ -365,13 +378,13 @@ describe("agent.plan on the thin loop", () => {
 
   test("the applied trail round-trips as plain JSON in the journal", async () => {
     const machine = createTodoAgent();
-    const entries: EventObject[] = [
-      initEntry(undefined).event,
-      { type: "ADD", title: "milk" } as EventObject,
-    ];
+    const entries: AgentLogEntry[] = [initEntry(machine, undefined)];
+    entries.push(
+      createReplayEntry(machine, entries, { type: "ADD", title: "milk" } as EventObject),
+    );
 
     // The journal is the durable artifact: it survives a full JSON round-trip.
-    const round = JSON.parse(JSON.stringify(entries)) as EventObject[];
+    const round = JSON.parse(JSON.stringify(entries)) as AgentLogEntry[];
     expect(reconstructApplied(round)).toEqual([{ type: "ADD", title: "milk" }]);
     const { snapshot } = replay(machine, round);
     expect((snapshot as AnyMachineSnapshot).value).toBe("planning");
@@ -496,7 +509,7 @@ describe("agent.plan on the thin loop", () => {
     const { decide } = scriptedDecide(script);
     let reloads = 0;
     const settled = await runViaEffects(machine, decide, (entries) => {
-      const round = JSON.parse(JSON.stringify(entries)) as EventObject[];
+      const round = JSON.parse(JSON.stringify(entries)) as AgentLogEntry[];
       entries.splice(0, entries.length, ...round);
       reloads += 1;
     });
@@ -614,7 +627,7 @@ describe("thin loop: concurrent text effects (host responsibility)", () => {
       return { output: id };
     };
 
-    const entries: EventObject[] = [initEntry(undefined).event];
+    const entries: EventObject[] = [initEntry(machine, undefined).event];
     let [snapshot, actions] = initialTransition(machine, undefined);
     const effects = getAgentEffects(machine, snapshot as AnyMachineSnapshot, actions, {
       history: entries,
@@ -662,7 +675,7 @@ describe("thin loop: concurrent text effects (host responsibility)", () => {
       return { output: `text-${id}` };
     };
 
-    const entries: EventObject[] = [initEntry(undefined).event];
+    const entries: EventObject[] = [initEntry(machine, undefined).event];
     const [snapshot, actions] = initialTransition(machine, undefined);
     const effects = getAgentEffects(machine, snapshot as AnyMachineSnapshot, actions, {
       history: entries,

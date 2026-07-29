@@ -20,7 +20,7 @@ A machine's durable state is not a snapshot. It is the ordered **journal** of ex
 
 The loop is six moves:
 
-1. Start a journal with `initEntry(input)` (the reserved `@agent.init` first entry carries the machine input, so the log is self-contained).
+1. Start a journal with `initEntry(machine, input)` (the reserved `@agent.init` first envelope carries the machine input, identity, timestamp, and verification hashes).
 2. `initialTransition(machine, input)` gives the first `{ snapshot, actions }`.
 3. `getAgentEffects(machine, snapshot, actions, { history })` lowers the frontier into an ordered `AgentEffect[]`.
 4. Execute one async effect and journal its completion event (run `execute` effects inline; they produce no entry).
@@ -40,6 +40,7 @@ Taught from [examples/ai-sdk-game-host/index.ts](../examples/ai-sdk-game-host/in
 ```ts
 import { initialTransition, transition, type AnyMachineSnapshot, type EventObject } from "xstate";
 import {
+  createReplayEntry,
   executeAgentRequest,
   getAgentEffects,
   initEntry,
@@ -77,7 +78,7 @@ async function resolveEffect(
 
 async function runTurn(input: unknown, executors: AgentRequestExecutors) {
   const options = { schemas: gameSchemas, actors: gameActors };
-  const entries: EventObject[] = [initEntry(input).event];
+  const entries = [initEntry(gameMachine, input)];
   let [snapshot, actions] = initialTransition(gameMachine, input);
 
   while (snapshot.status === "active") {
@@ -99,7 +100,7 @@ async function runTurn(input: unknown, executors: AgentRequestExecutors) {
       break; // idle: nothing async owed. Persist `entries`; resume on the next event.
     }
 
-    entries.push(next);
+    entries.push(createReplayEntry(gameMachine, entries, next));
     [snapshot, actions] = transition(gameMachine, snapshot, next as never);
   }
 
@@ -118,6 +119,37 @@ Per-effect resolution, by kind:
 **Idle.** A frontier that produces no completion event (all `execute`, or nothing owed) means the machine is waiting on an external event or a timer. Persist `entries` and leave the loop; resume later by appending the event and folding it in (or by `replay`).
 
 For the durable, resume-by-replay flavor of this same loop (persist nothing but the journal, rebuild the frontier with `replay` each turn), see [examples/cloudflare-workers-ai-host/index.ts](../examples/cloudflare-workers-ai-host/index.ts).
+
+## Durable append before continue
+
+For an initialized thread, treat the transition after an effect as tentative until its completion envelope commits:
+
+```ts
+const entries = await store.read(threadId);
+const { snapshot, effects } = replay(machine, entries);
+const effect = effects.find((effect) => effect.kind !== "execute");
+if (!effect) throw new Error("Thread is idle");
+
+const event = await executeEffect(effect, {
+  idempotencyKey: effect.requestId,
+});
+const entry = createReplayEntry(machine, entries, event);
+
+// Atomic optimistic append. A competing writer causes a conflict; discard the
+// tentative result, reload, and replay the winning history.
+await store.append({
+  threadId,
+  expectedIndex: entries.length,
+  entries: [entry],
+});
+
+// Only now publish/use the new state. Replaying the committed log is simplest.
+const committed = replay(machine, [...entries, entry]);
+```
+
+The effect must run before its result can be appended, so a crash in that narrow window can retry it. Every owed effect has a replay-stable `requestId`; pass it to the provider/tool as an idempotency key. The event store guarantees one winning control-state append, not exactly-once behavior from an arbitrary external API.
+
+This pure driver is the strict durability path. `runAgent` owns a live XState actor; its `onEvent` sees accepted transitions synchronously and cannot await an asynchronous store before XState advances. A future durable runner can wrap this exact replay/effect/append loop, but passing a store to today's actor-backed runner would only provide write-through recording, not the same guarantee.
 
 ## Ordering guarantee
 

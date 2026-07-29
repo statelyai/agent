@@ -39,7 +39,14 @@ import {
   type AgentTextRequest,
   type ChosenEvent,
 } from "@statelyai/agent";
-import { initEntry, renderDecisionAttempts, replay, resolveDecision } from "@statelyai/agent/steps";
+import {
+  createReplayEntry,
+  initEntry,
+  renderDecisionAttempts,
+  replay,
+  resolveDecision,
+  type AgentLogEntry,
+} from "@statelyai/agent/steps";
 import { getAgentOutputMode } from "@statelyai/agent/adapter";
 import { gameActors, gameMachine, gameSchemas } from "../game-agent/index.js";
 
@@ -159,7 +166,7 @@ export async function runCloudflareGameTurn(env: Env, input = { playerHp: 20, en
   // The ONLY durable state is this journal of external inputs. In a real Worker
   // it lives in KV/D1/a Durable Object; each turn below loads it, appends one
   // completion, and stores it again.
-  const entries: EventObject[] = [initEntry(input).event];
+  const entries: AgentLogEntry[] = [initEntry(gameMachine, input)];
 
   // Resume-by-replay: rebuild the frontier from the log alone every iteration,
   // exactly as a fresh Worker invocation would after loading `entries`.
@@ -192,7 +199,7 @@ export async function runCloudflareGameTurn(env: Env, input = { playerHp: 20, en
     // with no lost or duplicated work. (A hot loop could fold with
     // `transition(snapshot, next)` for speed and only `replay` on cold start —
     // both yield the identical state.)
-    entries.push(next);
+    entries.push(createReplayEntry(gameMachine, entries, next));
     ({ snapshot, effects } = replay(gameMachine, entries, options));
   }
 

@@ -61,7 +61,8 @@ import {
   getRegisteredAgentExecutionOptions,
   isUnboundPlaceholder,
 } from "./internal/registry.js";
-import { initEntry } from "./effects.js";
+import { createReplayEntry, initEntry, ReplayMachineMismatchError } from "./effects.js";
+import { assertAgentLogEntry, type AgentLogEntry } from "./event-log-store.js";
 
 // ─── runAgent (createActor wrapper) ───
 //
@@ -217,6 +218,8 @@ export type AgentTraceEvent<TMachine extends AnyStateMachine = AnyStateMachine> 
       type: "machine.transition";
       snapshot: SnapshotFrom<TMachine>;
       event: EventFromLogic<TMachine>;
+      /** Durable replay-entry id when this transition corresponds to one. */
+      eventId?: string;
     }
   | { type: "emit"; event: EmittedFrom<TMachine> }
   | (
@@ -288,7 +291,7 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
    * resuming so the next result retains the complete, replayable history.
    * These events are history only; `snapshot` remains the live resume source.
    */
-  events?: readonly EventObject[];
+  events?: readonly AgentLogEntry[];
   /**
    * How to handle a resume `event` the restored state cannot accept (a
    * type-level check via {@link getAcceptedEvents}, only applied when resuming
@@ -426,7 +429,7 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
    * events are excluded. History supplied through {@link events} is not
    * re-emitted. Purely observational, like {@link onTransition}.
    */
-  onEvent?: (event: EventObject) => void;
+  onEvent?: (entry: AgentLogEntry) => void;
   /** Fires a single ordered stream of run/request/chunk/transition/emit/end events. Intended for eval traces, JSONL logs, and adapter-owned telemetry/exporters. */
   onTrace?: (event: AgentTraceEvent<TMachine>) => void;
   /**
@@ -526,15 +529,17 @@ type RunAgentOutcome<TMachine extends AnyStateMachine> =
 
 export type RunAgentResult<TMachine extends AnyStateMachine> = RunAgentOutcome<TMachine> & {
   /**
-   * Replayable external inputs observed through this run: machine input,
-   * effect completions/failures, user events, and timer firings. Raised and
-   * other internal events are excluded because replay re-derives them.
+   * Versioned, JSON-safe envelopes around replayable external inputs observed
+   * through this run: machine input, effect completions/failures, user events,
+   * and timer firings. Raised/internal events are excluded because replay
+   * re-derives them. Each entry carries timestamp, machine identity/version,
+   * and strict replay hashes.
    *
    * A fresh run starts with `@agent.init`. When resuming from a snapshot, pass
    * the preceding result's `events` through {@link RunAgentOptions.events} to
    * retain a self-contained history.
    */
-  events: EventObject[];
+  events: AgentLogEntry[];
 };
 
 /**
@@ -1771,13 +1776,51 @@ export async function runAgent<TMachine extends AnyStateMachine>(
     }
   }
 
-  const replayEvents: EventObject[] = [...(options.events ?? [])];
-  const appendReplayEvent = (event: EventObject): void => {
-    replayEvents.push(event);
-    options.onEvent?.(event);
+  const replayEvents: AgentLogEntry[] = [...(options.events ?? [])];
+  const replayEventIds = new Set<string>();
+  for (let index = 0; index < replayEvents.length; index++) {
+    const entry = replayEvents[index]!;
+    assertAgentLogEntry(entry);
+    if (entry.index !== index) {
+      throw new Error(
+        `runAgent events must be contiguous from index 0; found entry.index ${entry.index} ` +
+          `at position ${index}.`,
+      );
+    }
+    if (entry.machineId !== machineId || entry.machineVersion !== machineVersion) {
+      throw new ReplayMachineMismatchError(
+        entry.id,
+        entry.index,
+        { machineId, machineVersion },
+        { machineId: entry.machineId, machineVersion: entry.machineVersion },
+      );
+    }
+    if (replayEventIds.has(entry.id)) {
+      throw new Error(`runAgent events contain duplicate event id '${entry.id}'.`);
+    }
+    replayEventIds.add(entry.id);
+  }
+  const hasCompleteReplayHistory =
+    replayEvents[0]?.event.type === "@agent.init" ||
+    (effectiveSnapshot === undefined && replayEvents.length === 0);
+  const appendReplayEvent = (event: EventObject): AgentLogEntry => {
+    const entry = createReplayEntry(machine, replayEvents, event, {
+      machineVersion,
+      verification: hasCompleteReplayHistory,
+    });
+    if (replayEventIds.has(entry.id)) {
+      throw new Error(`runAgent generated duplicate event id '${entry.id}'.`);
+    }
+    replayEventIds.add(entry.id);
+    replayEvents.push(entry);
+    options.onEvent?.(entry);
+    return entry;
   };
   if (replayEvents.length === 0 && effectiveSnapshot === undefined) {
-    appendReplayEvent(initEntry(options.input).event);
+    const entry = initEntry(machine, options.input, { machineVersion });
+    replayEventIds.add(entry.id);
+    replayEvents.push(entry);
+    options.onEvent?.(entry);
   }
 
   return new Promise<RunAgentResult<TMachine>>((resolvePromise) => {
@@ -2004,17 +2047,21 @@ export async function runAgent<TMachine extends AnyStateMachine>(
         // actor (a host/user send or child completion). Timer delivery is the
         // one self-sent input that must be retained. Initial and raised/internal
         // events are re-derived by initialTransition/transition during replay.
+        let eventId: string | undefined;
         if (
           event.event.type !== "@xstate.init" &&
           (event.sourceRef !== event.actorRef || event.event.type === "xstate.timer")
         ) {
-          appendReplayEvent(event.event as EventObject);
+          eventId = appendReplayEvent(event.event as EventObject).id;
+        } else if (event.event.type === "@xstate.init") {
+          eventId = replayEvents[0]?.event.type === "@agent.init" ? replayEvents[0].id : undefined;
         }
 
         onTrace({
           type: "machine.transition",
           snapshot: snapshot as SnapshotFrom<TMachine>,
           event: event.event as EventFromLogic<TMachine>,
+          ...(eventId !== undefined ? { eventId } : {}),
         });
 
         options.onTransition?.(
