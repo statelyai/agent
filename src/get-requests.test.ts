@@ -13,7 +13,7 @@ import {
   type AgentTextRequest,
   type AgentTools,
 } from "./index.js";
-import { getMachineStructuralHash } from "./adapter/index.js";
+import { getMachineStructuralHash } from "./index.js";
 
 // ─── State interpretation (runAgent's `getRequests` option) ───
 //

@@ -12,19 +12,17 @@
     "messages",
     "human-in-the-loop",
     "hosts",
-    "express-host",
-    "cloudflare-host",
     "observability",
-    "interop",
+    "models-and-providers",
     "steps",
-    "checkpoints",
+    "event-log",
     "machines-as-data",
     "verify",
     "multi-agent",
     "from-a-loop",
+    "from-langgraph",
     "xstate-as-agent-workflow",
     "patterns",
-    "examples",
     "roadmap"
   ]
 }

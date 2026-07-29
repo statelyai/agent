@@ -1,5 +1,12 @@
 /**
- * ReAct agent — the classic reason-or-act loop as an EXPLICIT, visible machine.
+ * ReAct agent — the tool loop UNROLLED into explicit, visible machine states.
+ *
+ * This is the escalation, not the default. For plain tool use, keep the loop
+ * inside one request and let your SDK run it — that's examples/tool-calling
+ * (one state, `tools` on the request, `metadata.maxSteps` bounding the loop).
+ * Unroll to this shape when individual turns need what a state gives you: an
+ * approval gate before a dangerous tool, a spend guard, a snapshot you can
+ * persist and resume mid-loop.
  *
  * LangGraph: `createReactAgent(model, tools)` gives you a tool-calling agent
  * whose loop is opaque — reason → call tool → observe → repeat is hidden inside
@@ -36,13 +43,13 @@ import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 import {
+  type AgentMessage,
   assistantMessage,
   runAgent,
   setupAgent,
   userMessage,
   type AgentRequestExecutors,
 } from "@statelyai/agent";
-import { zodAgentMessages } from "@statelyai/agent/zod";
 
 export const models = defineModels({
   reasoner: openai("gpt-5.4-mini"),
@@ -97,7 +104,7 @@ const agentSetup = setupAgent({
   context: z.object({
     question: z.string(),
     // Accumulating transcript: question + each tool call and its observation.
-    messages: zodAgentMessages(),
+    messages: z.custom<AgentMessage[]>((v) => Array.isArray(v)),
     stepsRemaining: z.number(),
     // The model's latest reason-or-act decision (drives dispatch).
     next: z.custom<ReasonOrAct>().nullable(),
@@ -156,7 +163,7 @@ const agentSetup = setupAgent({
     reasonOrAct: {
       schemas: {
         input: z.object({
-          messages: zodAgentMessages(),
+          messages: z.custom<AgentMessage[]>((v) => Array.isArray(v)),
           stepsRemaining: z.number(),
         }),
         output: reasonOrActUnion,

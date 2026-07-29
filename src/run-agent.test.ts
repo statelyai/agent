@@ -7,13 +7,13 @@ import {
   AgentIdleError,
   createAgentSchemas,
   createTextLogic,
-  IllegalResumeEventError,
+  AgentIllegalResumeEventError,
   inspectTransitions,
   replay,
   runAgent,
-  runAgentToCompletion,
+  generateResult,
   setupAgent,
-  SnapshotVersionMismatchError,
+  AgentSnapshotVersionMismatchError,
   type AgentDecisionRequest,
   type AgentLogEntry,
   type AgentTextRequest,
@@ -21,7 +21,7 @@ import {
   type AgentTraceEvent,
   type ChosenEvent,
 } from "./index.js";
-import { getMachineStructuralHash } from "./adapter/index.js";
+import { getMachineStructuralHash } from "./index.js";
 
 describe("runAgent", () => {
   test("done path: completes with typed output from a TextLogic invoke", async () => {
@@ -1335,7 +1335,7 @@ describe("runAgent", () => {
       expect(requestsSeen[1]!.attempts[0]!.failure).toBe("rejected-by-guard");
     });
 
-    test("bare createActor + .withExecutor + allowedEvents omitted: rejects immediately with guidance, not DecisionExhaustedError", async () => {
+    test("bare createActor + .withExecutor + allowedEvents omitted: rejects immediately with guidance, not AgentDecisionExhaustedError", async () => {
       const chooseMove = createDecisionLogic(
         {
           model: "test-model",
@@ -2336,7 +2336,7 @@ describe("Feature B: illegal resume event throws", () => {
 
   const generateText = async () => ({ output: {} });
 
-  test("resuming with an event the restored state cannot take throws IllegalResumeEventError with acceptedTypes", async () => {
+  test("resuming with an event the restored state cannot take throws AgentIllegalResumeEventError with acceptedTypes", async () => {
     const first = await runAgent(machine, { input: {}, executors: { generateText } });
     expect(first.status).toBe("idle");
     if (first.status !== "idle") throw new Error("expected idle");
@@ -2354,8 +2354,8 @@ describe("Feature B: illegal resume event throws", () => {
       caught = error;
     }
 
-    expect(caught).toBeInstanceOf(IllegalResumeEventError);
-    const err = caught as IllegalResumeEventError;
+    expect(caught).toBeInstanceOf(AgentIllegalResumeEventError);
+    const err = caught as AgentIllegalResumeEventError;
     expect(err.eventType).toBe("NOPE");
     expect(err.acceptedTypes.slice().sort()).toEqual(["APPROVE", "REJECT", "SUBMIT"]);
   });
@@ -2399,7 +2399,7 @@ describe("Feature B: illegal resume event throws", () => {
 
 describe("runAgent error cause split", () => {
   // Builds a decision machine whose `decide` always returns an unknown event,
-  // so resolveDecision exhausts its retries and throws DecisionExhaustedError.
+  // so resolveDecision exhausts its retries and throws AgentDecisionExhaustedError.
   function exhaustingDecisionMachine(withOnError: boolean) {
     const schemas = createAgentSchemas({
       context: z.object({}),
@@ -2436,7 +2436,7 @@ describe("runAgent error cause split", () => {
     event: { type: "BOGUS" },
   });
 
-  test("unhandled DecisionExhaustedError settles cause 'decision-exhausted'", async () => {
+  test("unhandled AgentDecisionExhaustedError settles cause 'decision-exhausted'", async () => {
     const result = await runAgent(exhaustingDecisionMachine(false), {
       input: {},
       executors: {
@@ -2449,7 +2449,7 @@ describe("runAgent error cause split", () => {
     expect(result.status === "error" ? result.cause : undefined).toBe("decision-exhausted");
   });
 
-  test("a DecisionExhaustedError handled by onError does NOT settle an error", async () => {
+  test("a AgentDecisionExhaustedError handled by onError does NOT settle an error", async () => {
     const result = await runAgent(exhaustingDecisionMachine(true), {
       input: {},
       executors: {
@@ -2570,8 +2570,8 @@ describe("runAgent dev-mode serialization guard", () => {
   });
 });
 
-// ─── runAgentToCompletion (item 1) ───
-describe("runAgentToCompletion", () => {
+// ─── generateResult (item 1) ───
+describe("generateResult", () => {
   const buildDraftMachine = () => {
     const schemas = createAgentSchemas({
       context: z.object({ prompt: z.string(), draft: z.string().nullable() }),
@@ -2615,25 +2615,29 @@ describe("runAgentToCompletion", () => {
     });
     if (first.status !== "idle") throw new Error("expected idle");
 
-    const output = await runAgentToCompletion(machine, {
+    const result = await generateResult(machine, {
       snapshot: first.snapshot,
       event: { type: "APPROVE" },
       executors: {
         generateText,
       },
     });
-    expect(output).toEqual({ draft: "Draft: notes" });
+    expect(result.status).toBe("done");
+    expect(result.output).toEqual({ draft: "Draft: notes" });
+    // generateText-style metadata rides along with the output:
+    expect(result.snapshot.status).toBe("done");
+    expect(Array.isArray(result.events)).toBe(true);
   });
 
   test("idle: throws AgentIdleError carrying snapshot + acceptedTypes", async () => {
     const machine = buildDraftMachine();
     await expect(
-      runAgentToCompletion(machine, { input: { prompt: "notes" }, executors: { generateText } }),
+      generateResult(machine, { input: { prompt: "notes" }, executors: { generateText } }),
     ).rejects.toBeInstanceOf(AgentIdleError);
 
     let caught: AgentIdleError | undefined;
     try {
-      await runAgentToCompletion(machine, {
+      await generateResult(machine, {
         input: { prompt: "notes" },
         executors: { generateText },
       });
@@ -2665,7 +2669,7 @@ describe("runAgentToCompletion", () => {
     });
     const thrown = new Error("executor exploded");
     await expect(
-      runAgentToCompletion(machine, {
+      generateResult(machine, {
         input: { prompt: "x" },
         executors: {
           generateText: async () => {
@@ -2683,7 +2687,7 @@ describe("runAgentToCompletion", () => {
 
     let caught: (Error & { cause?: unknown; error?: unknown }) | undefined;
     try {
-      await runAgentToCompletion(machine, {
+      await generateResult(machine, {
         input: { prompt: "notes" },
         signal: controller.signal,
         executors: {
@@ -2776,7 +2780,7 @@ describe("snapshot version stamping", () => {
     const idle = await runAgent(v1, { input: {}, executors: { generateText } });
     if (idle.status !== "idle") throw new Error("expected idle");
 
-    let caught: SnapshotVersionMismatchError | undefined;
+    let caught: AgentSnapshotVersionMismatchError | undefined;
     try {
       await runAgent(v2, {
         snapshot: idle.snapshot,
@@ -2784,9 +2788,9 @@ describe("snapshot version stamping", () => {
         executors: { generateText },
       });
     } catch (error) {
-      caught = error as SnapshotVersionMismatchError;
+      caught = error as AgentSnapshotVersionMismatchError;
     }
-    expect(caught).toBeInstanceOf(SnapshotVersionMismatchError);
+    expect(caught).toBeInstanceOf(AgentSnapshotVersionMismatchError);
     expect(caught?.from).toBe(getMachineStructuralHash(v1));
     expect(caught?.to).toBe(getMachineStructuralHash(v2));
   });
@@ -2801,7 +2805,7 @@ describe("snapshot version stamping", () => {
     if (idle.status !== "idle") throw new Error("expected idle");
     expect((idle.snapshot as { agentMeta?: { version?: string } }).agentMeta?.version).toBe("v1");
 
-    let caught: SnapshotVersionMismatchError | undefined;
+    let caught: AgentSnapshotVersionMismatchError | undefined;
     try {
       await runAgent(machine, {
         snapshot: idle.snapshot,
@@ -2812,7 +2816,7 @@ describe("snapshot version stamping", () => {
         },
       });
     } catch (error) {
-      caught = error as SnapshotVersionMismatchError;
+      caught = error as AgentSnapshotVersionMismatchError;
     }
     expect(caught?.from).toBe("v1");
     expect(caught?.to).toBe("v2");
@@ -2923,5 +2927,279 @@ describe("inspectTransitions", () => {
     expect(observed.some((entry) => entry.id === "child" && entry.value === "childDone")).toBe(
       true,
     );
+  });
+});
+
+describe("runAgent usage aggregation", () => {
+  const usageSchemas = createAgentSchemas({
+    context: z.object({ first: z.string().nullable(), second: z.string().nullable() }),
+    input: z.object({}),
+    output: z.object({ first: z.string(), second: z.string() }),
+    events: { APPROVE: z.object({}) },
+  });
+
+  const step = createTextLogic({
+    schemas: { input: z.object({ label: z.string() }), output: z.string() },
+    model: "test-model",
+    prompt: ({ input }) => input.label,
+  });
+
+  const usageAgent = setupAgent({ schemas: usageSchemas, actors: { step } });
+
+  // first -> second -> done: two sequential model calls.
+  const twoCallMachine = usageAgent.createMachine({
+    context: { first: null, second: null },
+    initial: "first",
+    states: {
+      first: {
+        invoke: {
+          id: "first",
+          src: "step",
+          input: { label: "one" },
+          onDone: ({ output }) => ({ target: "second", context: { second: null, first: output } }),
+        },
+      },
+      second: {
+        invoke: {
+          id: "second",
+          src: "step",
+          input: { label: "two" },
+          onDone: ({ output, context }) => ({
+            target: "done",
+            context: { first: context.first, second: output },
+          }),
+        },
+      },
+      done: {
+        type: "final",
+        output: ({ context }) => ({ first: context.first ?? "", second: context.second ?? "" }),
+      },
+    },
+  });
+
+  test("sums reported token usage across calls and counts modelCalls", async () => {
+    const result = await runAgent(twoCallMachine, {
+      input: {},
+      executors: {
+        generateText: async (request: AgentTextRequest & { tools: AgentTools }) => ({
+          output: `out:${request.prompt}`,
+          usage: {
+            inputTokens: 10,
+            outputTokens: 4,
+            totalTokens: 14,
+            reasoningTokens: 2,
+            cachedInputTokens: 1,
+          },
+        }),
+      },
+    });
+
+    expect(result.status).toBe("done");
+    expect(result.usage).toEqual({
+      inputTokens: 20,
+      outputTokens: 8,
+      totalTokens: 28,
+      reasoningTokens: 4,
+      cachedInputTokens: 2,
+      modelCalls: 2,
+    });
+  });
+
+  test("partial usage: fields are summed over the calls that reported them", async () => {
+    let call = 0;
+    const result = await runAgent(twoCallMachine, {
+      input: {},
+      executors: {
+        generateText: async () => {
+          call += 1;
+          // Only the FIRST call reports usage, and only two fields of it.
+          return call === 1
+            ? { output: "a", usage: { inputTokens: 5, totalTokens: 6 } }
+            : { output: "b" };
+        },
+      },
+    });
+
+    expect(result.status).toBe("done");
+    // `outputTokens` was never reported by ANY call, so it stays undefined;
+    // reported fields are sums over the reporting subset.
+    expect(result.usage).toEqual({ inputTokens: 5, totalTokens: 6, modelCalls: 2 });
+    expect(result.usage.outputTokens).toBeUndefined();
+  });
+
+  test("counts model calls even when no executor reports usage", async () => {
+    const result = await runAgent(twoCallMachine, {
+      input: {},
+      executors: { generateText: async () => ({ output: "x" }) },
+    });
+
+    expect(result.usage).toEqual({ modelCalls: 2 });
+  });
+
+  test("idle result carries the usage of the calls made before the pause", async () => {
+    const idleMachine = usageAgent.createMachine({
+      context: { first: null, second: null },
+      initial: "first",
+      states: {
+        first: {
+          invoke: {
+            id: "first",
+            src: "step",
+            input: { label: "one" },
+            onDone: ({ output }) => ({
+              target: "waiting",
+              context: { second: null, first: output },
+            }),
+          },
+        },
+        waiting: { on: { APPROVE: { target: "done" } } },
+        done: {
+          type: "final",
+          output: ({ context }) => ({ first: context.first ?? "", second: "" }),
+        },
+      },
+    });
+
+    const result = await runAgent(idleMachine, {
+      input: {},
+      executors: {
+        generateText: async () => ({
+          output: "drafted",
+          usage: { inputTokens: 9, outputTokens: 3 },
+        }),
+      },
+    });
+
+    expect(result.status).toBe("idle");
+    expect(result.usage).toEqual({ inputTokens: 9, outputTokens: 3, modelCalls: 1 });
+
+    // A resumed run counts only ITS OWN calls, not the prior run's.
+    const resumed = await runAgent(idleMachine, {
+      snapshot: result.snapshot,
+      event: { type: "APPROVE" },
+      events: result.events,
+      executors: { generateText: async () => ({ output: "unused" }) },
+    });
+    expect(resumed.status).toBe("done");
+    expect(resumed.usage).toEqual({ modelCalls: 0 });
+  });
+
+  test("error result carries the usage of the calls made before the failure", async () => {
+    const result = await runAgent(twoCallMachine, {
+      input: {},
+      maxModelCalls: 1,
+      executors: {
+        generateText: async () => ({ output: "a", usage: { inputTokens: 11, totalTokens: 12 } }),
+      },
+    });
+
+    expect(result.status).toBe("error");
+    expect(result.status === "error" ? result.cause : undefined).toBe("max-model-calls");
+    // The over-budget call never reached the executor, so it is not counted.
+    expect(result.usage).toEqual({ inputTokens: 11, totalTokens: 12, modelCalls: 1 });
+  });
+
+  test("decide usage is aggregated, and each retry counts as its own call", async () => {
+    const decideSchemas = createAgentSchemas({
+      context: z.object({}),
+      input: z.object({}),
+      output: z.object({}),
+      events: { GO: z.object({}) },
+    });
+    const pick = createDecisionLogic({
+      model: "test-model",
+      prompt: "choose",
+      allowedEvents: ["GO"],
+    });
+    const decideAgent = setupAgent({ schemas: decideSchemas, actors: { pick } });
+    const decideMachine = decideAgent.createMachine({
+      context: {},
+      initial: "deciding",
+      states: {
+        deciding: {
+          invoke: { id: "pick", src: "pick", input: {} },
+          on: { GO: { target: "done" } },
+        },
+        done: { type: "final" },
+      },
+    });
+
+    let attempt = 0;
+    const result = await runAgent(decideMachine, {
+      input: {},
+      executors: {
+        decide: async () => {
+          attempt += 1;
+          return attempt === 1
+            ? // First attempt picks an illegal event -> retried.
+              { event: { type: "NOPE" } as ChosenEvent, usage: { inputTokens: 3 } }
+            : { event: { type: "GO" } as ChosenEvent, usage: { inputTokens: 4, outputTokens: 1 } };
+        },
+      },
+    });
+
+    expect(result.status).toBe("done");
+    expect(result.usage).toEqual({ inputTokens: 7, outputTokens: 1, modelCalls: 2 });
+  });
+
+  test("per-call usage rides the request.end trace event", async () => {
+    const trace: AgentTraceEvent<typeof twoCallMachine>[] = [];
+    await runAgent(twoCallMachine, {
+      input: {},
+      onTrace: (event) => trace.push(event),
+      executors: {
+        generateText: async () => ({ output: "x", usage: { inputTokens: 2, outputTokens: 1 } }),
+      },
+    });
+
+    const ends = trace.filter((event) => event.type === "request.end");
+    expect(ends).toHaveLength(2);
+    for (const end of ends) {
+      expect(end).toHaveProperty("usage", { inputTokens: 2, outputTokens: 1 });
+    }
+  });
+
+  test("generateResult resolves usage alongside output", async () => {
+    const result = await generateResult(twoCallMachine, {
+      input: {},
+      executors: {
+        generateText: async () => ({ output: "x", usage: { inputTokens: 6, outputTokens: 2 } }),
+      },
+    });
+
+    expect(result.output).toEqual({ first: "x", second: "x" });
+    expect(result.usage).toEqual({ inputTokens: 12, outputTokens: 4, modelCalls: 2 });
+  });
+
+  test("getRequests (state-interpretation) calls aggregate too", async () => {
+    const interpretSchemas = createAgentSchemas({
+      context: z.object({}),
+      input: z.object({}),
+      output: z.object({}),
+      events: { GO: z.object({}) },
+    });
+    const interpretAgent = setupAgent({ schemas: interpretSchemas });
+    const interpretMachine = interpretAgent.createMachine({
+      context: {},
+      initial: "start",
+      states: {
+        start: { on: { GO: { target: "done" } } },
+        done: { type: "final" },
+      },
+    });
+
+    const result = await runAgent(interpretMachine, {
+      input: {},
+      getRequests: (snapshot) =>
+        snapshot.value === "start"
+          ? { model: "test-model", prompt: "advance", onDone: { type: "GO" } }
+          : undefined,
+      executors: {
+        generateText: async () => ({ output: "ok", usage: { inputTokens: 8, outputTokens: 2 } }),
+      },
+    });
+
+    expect(result.status).toBe("done");
+    expect(result.usage).toEqual({ inputTokens: 8, outputTokens: 2, modelCalls: 1 });
   });
 });

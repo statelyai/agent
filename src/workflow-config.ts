@@ -808,7 +808,9 @@ function translateWorkflowState(
         }
       : {}),
     ...(stateConfig.tags !== undefined ? { tags: stateConfig.tags } : {}),
-    ...(stateConfig.output !== undefined ? { output: toWorkflowExpression(stateConfig.output) } : {}),
+    ...(stateConfig.output !== undefined
+      ? { output: toWorkflowExpression(stateConfig.output) }
+      : {}),
     ...(stateConfig.meta !== undefined ? { meta: stateConfig.meta } : {}),
   };
 }
@@ -870,7 +872,7 @@ function translateWorkflowConfig(
 export function setupAgentFromConfig(
   config: AgentWorkflowConfig,
   options: FromConfigOptions,
-): AnyStateMachine {
+): FromConfigResult {
   if (!options || typeof options.compileSchema !== "function") {
     throw new Error(
       "setupAgent.fromConfig(...) requires a 'compileSchema' option: " +
@@ -915,9 +917,7 @@ export function setupAgentFromConfig(
     // each key to itself satisfies the JSON layer's every-src-implemented
     // assertion while keeping `src` a string; the real logic is then bound via
     // `.provide({ actors })` below (and remains host-rebindable).
-    actors: Object.fromEntries(
-      Object.keys(actors).map((key) => [key, key]),
-    ) as never,
+    actors: Object.fromEntries(Object.keys(actors).map((key) => [key, key])) as never,
     evaluators: {
       [AGENT_EXPRESSION_LANG]: createWorkflowConfigEvaluator(schemas.context),
     },
@@ -926,7 +926,31 @@ export function setupAgentFromConfig(
   // What setupAgent's wrapped createMachine registers for runAgent: the
   // schemas/actors this machine executes with.
   agentExecutionOptions.set(machine as object, { schemas, actors, models: {} });
-  return machine;
+  return { machine, schemas };
+}
+
+/**
+ * What `setupAgent.fromConfig(...)` returns: the built machine plus the
+ * schema pack compiled from the config's `schemas` (with `compileSchema`).
+ * The pack is what hosts need for the runtime work the machine's types can't
+ * do for a JSON-authored agent — e.g. validating an inbound raw event:
+ *
+ * @example
+ * ```ts
+ * const { machine, schemas } = setupAgent.fromConfig(config, { compileSchema });
+ * const event = parseAgentEvent(snapshot, raw, { events: schemas.events });
+ * ```
+ */
+export interface FromConfigResult {
+  machine: AnyStateMachine;
+  /** Compiled `context`/`events`/`input`/`output`/`meta`/`emitted` schemas — the same pack `runAgent` executes this machine with. */
+  schemas: AgentSchemaPack<
+    StandardSchemaV1<Record<string, unknown>>,
+    Record<string, StandardSchemaV1>,
+    StandardSchemaV1,
+    StandardSchemaV1,
+    StandardSchemaV1<MetaObject>
+  >;
 }
 
 /** Options for `setupAgent.fromConfig(...)`. */

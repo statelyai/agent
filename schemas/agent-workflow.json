@@ -45,6 +45,17 @@
       },
       "default": {}
     },
+    "actors": {
+      "description": "Placeholder actor sources declared by key. JSON wires no execution; provide the logic via machine.provide({ actors }) after setupAgent.fromConfig(...).",
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/Identifier"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/Actor"
+      },
+      "default": {}
+    },
     "initial": {
       "description": "Initial child state key.",
       "type": "string"
@@ -233,6 +244,7 @@
           }
         },
         "toolChoice": {
+          "description": "Passed to the provider as-is; unlike other request fields it is NOT template-evaluated, so {{ }} expressions are not allowed here.",
           "anyOf": [
             {
               "type": "string",
@@ -250,9 +262,12 @@
                 }
               },
               "additionalProperties": false
-            },
-            { "$ref": "#/$defs/ExpressionString" }
+            }
           ]
+        },
+        "reasoning": {
+          "description": "Opt into the structured-output envelope's `reasoning` field.",
+          "type": "boolean"
         },
         "temperature": {
           "$ref": "#/$defs/ExpressionValue"
@@ -301,7 +316,8 @@
         "$ref": "#/$defs/ExpressionValue"
       }
     },
-    "Tool": {
+    "Actor": {
+      "description": "A placeholder actor source: schemas describe it for authors/editors; the implementation is provided by the host.",
       "type": "object",
       "properties": {
         "description": {
@@ -311,6 +327,21 @@
           "$ref": "#/$defs/JsonSchema"
         },
         "output": {
+          "$ref": "#/$defs/JsonSchema"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Tool": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "inputSchema": {
+          "$ref": "#/$defs/JsonSchema"
+        },
+        "outputSchema": {
           "$ref": "#/$defs/JsonSchema"
         }
       },
@@ -395,7 +426,8 @@
           "$ref": "#/$defs/ExpressionValue"
         },
         "meta": {
-          "$ref": "#/$defs/ExpressionObject"
+          "description": "Static state metadata, passed through verbatim. Not template-evaluated.",
+          "$ref": "#/$defs/JsonObject"
         }
       },
       "additionalProperties": false
@@ -420,9 +452,6 @@
         },
         "onError": {
           "$ref": "#/$defs/TransitionOrArray"
-        },
-        "meta": {
-          "$ref": "#/$defs/ExpressionObject"
         }
       },
       "additionalProperties": false
@@ -453,21 +482,10 @@
           ]
         },
         "guard": {
+          "description": "Either a whole-string {{ }} expression evaluated as truthy/falsy, or a named guard reference resolved against the `guards` passed to setupAgent.fromConfig(config, { guards }). Object guards ({ type, params }) are rejected by the lowering.",
           "anyOf": [
             { "$ref": "#/$defs/ExpressionString" },
-            {
-              "type": "object",
-              "required": ["type"],
-              "properties": {
-                "type": {
-                  "type": "string"
-                },
-                "params": {
-                  "$ref": "#/$defs/ExpressionValue"
-                }
-              },
-              "additionalProperties": false
-            }
+            { "$ref": "#/$defs/Identifier" }
           ]
         },
         "assign": {
@@ -484,7 +502,8 @@
           "type": "boolean"
         },
         "meta": {
-          "$ref": "#/$defs/ExpressionObject"
+          "description": "Static transition metadata, passed through verbatim. Not template-evaluated.",
+          "$ref": "#/$defs/JsonObject"
         }
       },
       "additionalProperties": false

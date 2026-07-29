@@ -231,4 +231,4 @@ entry: ({ context, actors }, enq) => {
 
 Use `Promise.all(...)` inside a host actor or tool when the branches are implementation detail and the machine only needs their combined result. See [fan-out](../examples/fan-out/index.ts) for visible dynamic branches and [deep research](../examples/deep-research/index.ts) for a larger planner-worker-reducer flow.
 
-See [Examples](examples.md) for the full list of sub-agent and multi-machine examples.
+See [Agent patterns](patterns.md#multi-agent) for the full list of sub-agent and multi-machine examples.

@@ -1,17 +1,27 @@
 ---
 title: The event log
-description: Append events, replay deterministically. Threads, history, forking, and time travel as log operations.
+description: The event log is the source of truth. Append external inputs, replay deterministically, fork and diff, persist to SQLite.
 ---
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
 
+## Durability map
+
+This page is the hub for the durability story. The neighbours:
+
+- [Human in the loop](human-in-the-loop.md): pausing at idle and resuming from a persisted snapshot.
+- [The step path](steps.md): per-model-call hosts that append before continuing.
+- [Observability](observability.md): replaying a traced run.
+- [SQLite stores](#sqlite-stores) (below): the shipped `AgentEventLogStore` and `AgentSnapshotStore` implementations.
+- [Hosts](hosts.md): where a thread id and a store live in a real deployment.
+
 ## The model
 
-A machine's durable state is not a snapshot. It is the ordered array of **external inputs** it has received: effect completions (done/error, outputs inline), user-sent events, timer firings. Because transitions are pure, folding that array through the machine reconstructs the exact snapshot — including which effects were started and which are still owed. The log is the source of truth; everything else is derived.
+A machine's durable state is not a snapshot. It is the ordered array of **external inputs** it has received: effect completions (done/error, outputs inline), user-sent events, timer firings. Because transitions are pure, folding that array through the machine reconstructs the exact snapshot, including which effects were started and which are still owed. The log is the source of truth; everything else is derived.
 
-Journal rule: **external inputs only.** Never journal raised/internal events — replay re-derives them, and journaling them would double-apply. Concurrency is captured, not re-run: the journaled completion order is the serialization, so replay is deterministic even when the live run raced.
+The rule: **external inputs only.** Never log raised/internal events; replay re-derives them, and logging them would double-apply. Concurrency is captured, not re-run: the recorded completion order is the serialization, so replay is deterministic even when the live run raced.
 
-This puts one obligation on machine authors: transitions and effect inputs (prompt builders, spawn inputs) must be pure functions of state and event. No `Date.now()`, no `Math.random()` inside transition code — inject time and randomness as events or input.
+This puts one obligation on machine authors: transitions and effect inputs (prompt builders, spawn inputs) must be pure functions of state and event. No `Date.now()`, no `Math.random()` inside transition code; inject time and randomness as events or input.
 
 ## Export events from `runAgent`
 
@@ -95,18 +105,20 @@ Use `assertJsonSerializable(value)` and `assertAgentLogEntry(entry)` at custom t
 Normal `replay` checks verification hashes when present. `verifyReplay` requires them on every entry and fails at the first mismatch:
 
 ```ts
-import { ReplayDivergenceError, verifyReplay } from "@statelyai/agent";
+import { AgentReplayDivergenceError, verifyReplay } from "@statelyai/agent";
 
 try {
   verifyReplay(machine, entries);
 } catch (error) {
-  if (error instanceof ReplayDivergenceError) {
+  if (error instanceof AgentReplayDivergenceError) {
     console.error(error.eventId, error.index, error.kind);
   }
 }
 ```
 
-`kind: "state"` means the current machine derived different logical state. `kind: "effects"` means it owed different work — for example a changed prompt, model, tool set, task input, or timer. `ReplayMachineMismatchError` rejects an envelope stamped for another machine id/version before folding it.
+`kind: "state"` means the current machine derived different logical state. `kind: "effects"` means it owed different work: a changed prompt, model, tool set, task input, or timer. `kind: "missing-verification"` means an entry carried no hashes at all. `AgentReplayMachineMismatchError` rejects an envelope stamped for another machine id/version before folding it.
+
+Every framework error extends `AgentError` and carries a stable `.code` (`"replay-divergence"`, `"event-log-conflict"`, `"non-serializable-event"`, …), so a host can branch on the code instead of on `instanceof`. The other durability-adjacent errors: `AgentIllegalResumeEventError`, `AgentSnapshotVersionMismatchError`, `AgentDecisionExhaustedError`.
 
 Structural hashing cannot see custom function bodies or schema-validator implementations. Set an explicit `machineVersion` whenever those semantics change; the per-entry hashes then verify their observable state/effect consequences.
 
@@ -115,16 +127,17 @@ Structural hashing cannot see custom function bodies or schema-validator impleme
 `AgentEventLogStore` is an append-only protocol with optimistic concurrency on the log length:
 
 ```ts
-import { createInMemoryEventLogStore } from "@statelyai/agent";
+import { createInMemoryEventLogStore, initEntry } from "@statelyai/agent";
 
 const store = createInMemoryEventLogStore();
+const entries = [initEntry(machine, input)];
 
 // append at the expected position (0 = new thread); a concurrent writer
 // with the same expectation loses with AgentEventLogConflictError
 await store.append({ threadId: "session-1", expectedIndex: 0, entries });
 
 // catch up incrementally
-const entries = await store.read("session-1", { from: 3 });
+const recent = await store.read("session-1", { from: 3 });
 const next = await store.length("session-1"); // the next expectedIndex
 ```
 
@@ -133,6 +146,32 @@ const next = await store.length("session-1"); // the next expectedIndex
 - `fork({ threadId, newThreadId, upToIndex })` copies an exclusive index prefix; `atEventId` is the inclusive event-id form. Forked entries retain their ids. Rewind and diverge by appending different envelopes to the new thread.
 
 Every entry carries optional host-owned `metadata`, stored verbatim.
+
+## SQLite stores
+
+<!-- from src/sqlite/index.ts -->
+
+`@statelyai/agent/sqlite` ships both durability stores on Node's built-in `node:sqlite`: no dependencies, but Node-only and requires Node >= 22.18.
+
+- `createSqliteEventLogStore(options)` returns an `AgentEventLogStore` plus `close()`.
+- `createSqliteSnapshotStore(options)` returns an `AgentSnapshotStore` plus `close()`.
+- `options.database` is a file path (or `':memory:'`) to open, or an existing `node:sqlite` `DatabaseSync` handle. Both stores can share one handle.
+- `close()` only closes a database the store opened itself; a passed-in handle stays the caller's to close.
+- `options.tableName` defaults to `agent_event_log` and `agent_snapshots`. Tables are created on demand.
+
+```ts
+import { DatabaseSync } from "node:sqlite";
+import { createSqliteEventLogStore, createSqliteSnapshotStore } from "@statelyai/agent/sqlite";
+
+const database = new DatabaseSync("./agent.db");
+const events = createSqliteEventLogStore({ database });
+const snapshots = createSqliteSnapshotStore({ database });
+
+await events.append({ threadId: "session-1", expectedIndex: 0, entries });
+await snapshots.save("session-1", snapshot);
+```
+
+`append` runs its length check and its inserts inside one `BEGIN IMMEDIATE` transaction. `node:sqlite` is synchronous, so nothing interleaves between the check and the write: racing appends resolve to exactly one winner, and the loser gets `AgentEventLogConflictError`.
 
 ## Fork and diff
 
@@ -156,7 +195,7 @@ const diff = diffEventLogs(
 
 ## Conform your own store
 
-`createInMemoryEventLogStore()` is the reference implementation and the conformance baseline. An append-only log with a unique `(threadId, index)` constraint is a natural fit for any database; prove yours matches the reference — races, isolation, ordering, fork semantics:
+`createInMemoryEventLogStore()` is the reference implementation and the conformance baseline. An append-only log with a unique `(threadId, index)` constraint is a natural fit for any database; prove yours matches the reference on races, isolation, ordering, and fork semantics:
 
 ```ts
 import { assertEventLogStoreConformance } from "@statelyai/agent";
@@ -164,13 +203,14 @@ import { assertEventLogStoreConformance } from "@statelyai/agent";
 await assertEventLogStoreConformance(() => createMyStore());
 ```
 
-Each assertion throws a descriptive `Error` on the first violation, so any runner (or a plain script) can drive it.
+Each assertion throws a descriptive `Error` on the first violation, so any runner (or a plain script) can drive it. The SQLite store passes the same suite.
 
 ## Snapshots are compaction, not truth
 
-[`AgentSnapshotStore`](human-in-the-loop.md) remains useful as an **idle-point cache**: at a quiescent point (an idle state with no in-flight effects), persist the snapshot and resume from it plus the events appended since, instead of replaying from index 0. Compact only at quiescent points — a snapshot taken mid-flight cannot carry in-flight effect state; the log can.
+[`AgentSnapshotStore`](human-in-the-loop.md) remains useful as an **idle-point cache**: at a quiescent point (an idle state with no in-flight effects), persist the snapshot and resume from it plus the events appended since, instead of replaying from index 0. Compact only at quiescent points; a snapshot taken mid-flight cannot carry in-flight effect state, but the log can.
 
 ## Related
 
 - [The step path](steps.md): driving a machine one external input at a time.
-- [Human in the loop](human-in-the-loop.md): idle states — the natural compaction points.
+- [Human in the loop](human-in-the-loop.md): idle states, the natural compaction points.
+- [Observability](observability.md): traces alongside the log, and `serializeTraceEvent` for JSONL output.

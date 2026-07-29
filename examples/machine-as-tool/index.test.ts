@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { createAsyncLogic } from "xstate";
-import { IllegalResumeEventError, type RunAgentOptions } from "@statelyai/agent";
+import { AgentIllegalResumeEventError, type RunAgentOptions } from "@statelyai/agent";
 import { refundMachine, resumeTool, startTool } from "./index.js";
 
 // Mock executors: validator returns valid, processRefund is a no-op side effect.
@@ -38,16 +38,16 @@ test("reject path: resume with REJECT ends with refunded:false", async () => {
   expect(done.output).toEqual({ refunded: false, reason: "duplicate" });
 });
 
-test("illegal event is rejected when resuming (runAgent throws IllegalResumeEventError)", async () => {
+test("illegal event is rejected when resuming (runAgent throws AgentIllegalResumeEventError)", async () => {
   const started = await startTool({ amount: 5, orderId: "ord-3" }, executors);
   expect(started.status).toBe("pending");
   if (started.status !== "pending") return;
 
   // PROMPT_SUBMITTED is not a legal event in awaitingApproval — resumeTool's
-  // runAgent throws IllegalResumeEventError before delivering it.
+  // runAgent throws AgentIllegalResumeEventError before delivering it.
   await expect(
     resumeTool(started.handle, { type: "PROMPT_SUBMITTED" } as never, executors),
-  ).rejects.toBeInstanceOf(IllegalResumeEventError);
+  ).rejects.toBeInstanceOf(AgentIllegalResumeEventError);
 
   // The legal events (APPROVE / REJECT) resume without throwing.
   const done = await resumeTool(started.handle, { type: "APPROVE" }, executors);

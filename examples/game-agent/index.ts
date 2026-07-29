@@ -239,7 +239,7 @@ export const gameMachine = gameAgentSetup.createMachine({
         enemyHp: context.enemyHp,
       }),
     },
-    // Reached when chooseMove exhausts its retries (DecisionExhaustedError):
+    // Reached when chooseMove exhausts its retries (AgentDecisionExhaustedError):
     // the decision loop stalled, so the encounter ends unresolved
     // (outcome 'continue') rather than as a win/loss/flee.
     fumbled: {

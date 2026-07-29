@@ -15,10 +15,7 @@
     "paths": {
       "@statelyai/agent": ["./src/index.ts"],
       "@statelyai/agent/ai-sdk": ["./src/ai-sdk/index.ts"],
-      "@statelyai/agent/openai-compat": ["./src/openai-compat/index.ts"],
-      "@statelyai/agent/steps": ["./src/steps/index.ts"],
-      "@statelyai/agent/adapter": ["./src/adapter/index.ts"],
-      "@statelyai/agent/zod": ["./src/zod/index.ts"]
+      "@statelyai/agent/sqlite": ["./src/sqlite/index.ts"]
     }
   },
   "include": ["src"],

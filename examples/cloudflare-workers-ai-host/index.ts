@@ -35,19 +35,17 @@
  */
 import { type EventObject } from "xstate";
 import {
-  type AgentDecisionRequest,
-  type AgentTextRequest,
-  type ChosenEvent,
-} from "@statelyai/agent";
-import {
   createReplayEntry,
+  getAgentOutputMode,
   initEntry,
   renderDecisionAttempts,
   replay,
   resolveDecision,
+  type AgentDecisionRequest,
   type AgentLogEntry,
-} from "@statelyai/agent/steps";
-import { getAgentOutputMode } from "@statelyai/agent/adapter";
+  type AgentTextRequest,
+  type ChosenEvent,
+} from "@statelyai/agent";
 import { gameActors, gameMachine, gameSchemas } from "../game-agent/index.js";
 
 interface Env {

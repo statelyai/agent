@@ -8,10 +8,7 @@
     "url": "https://ai-sdk.dev/docs/ai-sdk-ui/chatbot"
   },
   "comparison": {
-    "targets": [
-      "LangGraph",
-      "AI SDK"
-    ],
+    "targets": ["LangGraph", "AI SDK"],
     "purpose": "Bridges a runAgent run to the AI SDK v6 UI message stream (text parts + data-agent-state parts) so a useChat client consumes it unchanged."
   },
   "starters": [

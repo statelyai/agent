@@ -39,7 +39,7 @@ const agentSetup = setupAgent({
 });
 ```
 
-To keep conversation history in context, add a `messages` field via `messagesSchema` or the `z.custom<AgentMessage[]>` recipe (see [messages](messages.md#a-lightweight-messages-field)).
+To keep conversation history in context, add a `messages` field with the `z.custom<AgentMessage[]>` recipe (see [messages](messages.md#store-messages-in-context)).
 
 **Event schemas** type event payloads. Declare one schema per event type under `events`:
 
@@ -55,7 +55,7 @@ events: {
 
 In a `HEAL` transition, `event.amount` is a `number`; reading a field the event does not carry is a compile error. Write `{}` for a payload-less event.
 
-**Emitted event schemas** type the progress events a machine emits with `enq.emit(...)`, received by hosts via [`runAgent`'s `on` handlers](hosts.md#observation-callbacks). Declare them under `emitted`:
+**Emitted event schemas** type the progress events a machine emits with `enq.emit(...)`, received by hosts via [`runAgent`'s `on` handlers](observability.md#observation-callbacks). Declare them under `emitted`:
 
 ```ts
 // setupAgent({ ... })
@@ -80,7 +80,7 @@ Beyond schemas, `setupAgent` takes your models plus optional `requests` and `act
 
 ### Models
 
-The `models` map pairs a short alias with a resolved model. When present, request and decision `model:` values are typed against its keys (a typo is a compile error), and app code shares one alias map between `setupAgent` and the host adapter.
+The `models` map pairs a short alias with a resolved model. When present, request and decision `model:` values autocomplete its keys (unregistered strings are still accepted, so a typo fails at run time rather than compile time), and app code shares one alias map between `setupAgent` and the host adapter.
 
 ```ts
 import { openai } from "@ai-sdk/openai";
@@ -151,6 +151,22 @@ const agentSetup = setupAgent({
 
 > **Warning:** Actor source keys must be unique across `actors` and `requests`. `setupAgent` throws at setup time on a collision rather than letting one silently shadow the other.
 
+### Built-in actor sources
+
+<!-- builtin src reference, from src/setup-agent.ts -->
+
+`setupAgent` also registers reserved `src` strings on every machine, for ad-hoc model work that doesn't warrant a named request. The invoke's `input` shapes each call:
+
+| `src`                | Invoke `input`                                            | `onDone` output                                   | Reference                             |
+| -------------------- | --------------------------------------------------------- | ------------------------------------------------- | ------------------------------------- |
+| `agent.generateText` | `model`, `prompt` or `messages`, optional `system`, `outputSchema`, `tools` | text, or the value parsed from `outputSchema`     | [Text requests](text-requests.md)     |
+| `agent.streamText`   | same as `agent.generateText`                               | same, with chunks delivered to the host as they arrive | [Text requests](text-requests.md)     |
+| `agent.decide`       | `model`, `prompt`, optional `system`, `allowedEvents`      | the one chosen event, applied to the machine      | [Decisions](decisions.md)             |
+| `agent.plan`         | same as `agent.decide`                                     | several legal events applied in a row             | [Plans](plans.md)                     |
+| `agent.userInput`    | `prompt`, optional `schema`                                | the human's value                                 | [Human in the loop](human-in-the-loop.md) |
+
+Named `requests` stay the default (typed, reusable, testable); the builtins are the inline escape hatch. Both are executed by the host, so a machine using either still names no SDK.
+
 ## Create the machine
 
 The `agentSetup.createMachine` method is XState's `createMachine` with the agent's schemas and actors already bound. It registers the machine so the step helpers and [`runAgent`](hosts.md) resolve its schemas and actors without re-passing them.
@@ -192,6 +208,35 @@ The canonical form covers most machines. Each alternate handles one specific nee
 | **String refs + `resolveModel`**: `model: 'openai/gpt-5.4-mini'`, `createAiSdkExecutors({ resolveModel })`                                 | The machine must not name concrete models: maximum portability, refs resolved by the host or loaded from JSON [config](machines-as-data.md).                               |
 | **`createTextLogic`**: a standalone request value                                                                                          | A request that is exported, reused across states or machines, or unit-tested on its own. See [Text requests](text-requests.md#reusable-request-logic-with-createtextlogic). |
 | **`withExecutor`**: `logic.withExecutor(...)`                                                                                              | Binding execution onto one logic rather than the whole host: per-logic host binding or an intentionally unregistered dynamic logic. Registered dynamic spawns inherit through `actors`; see [Multi-agent composition](multi-agent.md#dynamic-binding). |
+
+### Direct execution without runAgent
+
+<!-- withExecutor + createActor, bypassing runAgent's executor slots -->
+
+`.withExecutor(...)` binds execution onto one logic for normal XState use. Provide the bound logic as an actor source and run it with `createActor` directly, bypassing [`runAgent`](hosts.md)'s executor slots:
+
+```ts
+import { parseOutput } from "@statelyai/agent";
+
+const executableDraftText = draftText.withExecutor(async ({ request, signal }) => {
+  const result = await generateText({
+    model: resolveModel(request.model),
+    system: request.system,
+    prompt: request.prompt ?? "",
+    abortSignal: signal,
+  });
+  // `schemas.output` is optional: with none, the request's output is the raw text.
+  return {
+    output: request.outputSchema ? parseOutput(request.outputSchema, result.text) : result.text,
+  };
+});
+
+createActor(machine.provide({ actors: { draftText: executableDraftText } }), { input }).start();
+```
+
+`parseOutput(schema, value)` validates against any [Standard Schema](https://standardschema.dev) and returns the typed value; calling `schema["~standard"].validate(value)` yourself works the same way.
+
+This is the mechanism `runAgent` uses internally to bind executors. The direct form suits a logic that should carry its own execution wherever it is used, independent of the host loop.
 
 ## Transitions
 
@@ -259,6 +304,38 @@ drafting: {
 ```
 
 The `onDone` handler receives the actor's `output`, typed from its output schema. Both `onDone` and `onError` are transition functions too.
+
+### Inline text requests
+
+<!-- inline agent.generateText + runAgent, from src/setup-agent.ts and src/index.ts -->
+
+For a one-off text call, `agent.generateText` is the quick inline path (move it to a named [request](text-requests.md) once it is reused or worth testing):
+
+```ts
+import { parseOutput, runAgent } from "@statelyai/agent";
+
+// ...
+generating: {
+  invoke: {
+    id: "draft", // durable id: how a resumed or replayed run matches the invoke to its onDone
+    src: "agent.generateText",
+    input: ({ context }) => ({
+      model: "openai/gpt-5.4-mini",
+      prompt: context.prompt,
+      outputSchema: resultSchema,
+    }),
+    onDone: ({ output }) => ({
+      target: "done",
+      context: { result: parseOutput(resultSchema, output) },
+    }),
+  },
+},
+
+// ...
+await runAgent(machine, { input, executors: { generateText, streamText } }); // any SDK
+```
+
+Every agent invoke should carry a durable `id`: it is how a resumed or replayed run matches the invoke back to its `onDone`. See [The event log](event-log.md).
 
 ## Final states and output
 
@@ -337,7 +414,7 @@ waiting: {
 How `after` runs depends on the host:
 
 - Under [`runAgent`](hosts.md), the timer runs **live**: a pending `after` is not idle, so `runAgent` waits for it and continues.
-- On the [step path](steps.md), it surfaces in `step.actions` as a **schedulable raise action**: the durable host owns the clock (a workflow sleep, a Temporal timer, a queue delay) and applies the event when it fires.
+- On the [step path](steps.md), it surfaces from `getAgentEffects` as an effect with `kind: "delay"`: the durable host owns the clock (a workflow sleep, a Temporal timer, a queue delay) and applies the event when it fires. See [Steps](steps.md).
 
 ## Where to go next
 

@@ -36,7 +36,6 @@ import {
   setupAgent,
   userMessage,
 } from "@statelyai/agent";
-import { zodAgentMessages } from "@statelyai/agent/zod";
 
 const transcriptTurnSchema = z.object({
   question: z.string(),
@@ -75,7 +74,7 @@ export const twentyQuestionsSchemas = createAgentSchemas({
     maxQuestions: z.number(),
     questionsRemaining: z.number(),
     transcript: z.array(transcriptTurnSchema),
-    messages: zodAgentMessages(),
+    messages: z.custom<AgentMessage[]>((v) => Array.isArray(v)),
     pendingRawAnswer: z.string().nullable(),
     pendingSideQuestion: z.string().nullable(),
     guess: z.string().nullable(),
@@ -116,7 +115,7 @@ const agentSetup = setupAgent({
         input: z.object({
           question: z.string(),
           rawAnswer: z.string(),
-          messages: zodAgentMessages(),
+          messages: z.custom<AgentMessage[]>((v) => Array.isArray(v)),
           transcript: z.array(transcriptTurnSchema),
         }),
         output: answerClassificationSchema,
@@ -168,7 +167,7 @@ const agentSetup = setupAgent({
         input: z.object({
           guess: z.string(),
           rawAnswer: z.string(),
-          messages: zodAgentMessages(),
+          messages: z.custom<AgentMessage[]>((v) => Array.isArray(v)),
         }),
         output: guessFeedbackClassificationSchema,
       },
@@ -191,7 +190,7 @@ const agentSetup = setupAgent({
       schemas: {
         input: z.object({
           rawAnswer: z.string(),
-          messages: zodAgentMessages(),
+          messages: z.custom<AgentMessage[]>((v) => Array.isArray(v)),
         }),
         output: z.object({
           playAgain: z.boolean(),
@@ -507,7 +506,7 @@ export const twentyQuestionsMachine = agentSetup.createMachine({
       }),
     },
 
-    // Reached when chooseAction exhausts its retries (DecisionExhaustedError).
+    // Reached when chooseAction exhausts its retries (AgentDecisionExhaustedError).
     stumped: {
       type: "final",
       output: ({ context }) => ({

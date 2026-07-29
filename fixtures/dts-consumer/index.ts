@@ -11,24 +11,31 @@
 import { z } from "zod";
 import { runAgent, setupAgent } from "@statelyai/agent";
 
-// Something from every subpath — proves each entry's public types resolve
-// from the shipped package, not just source.
+// Something from every entry — proves each entry's public types resolve
+// from the shipped package, not just source. The root block also asserts the
+// WHOLE effect loop is importable in one statement (it used to be split
+// across the removed `/steps` and `/adapter` subpaths).
 export {
+  AGENT_INIT_EVENT_TYPE,
+  executeAgentRequest,
   getAgentEffects,
+  getJsonSchema,
+  initEntry,
+  parseModelRef,
   replay,
   resolveDecision,
   type AgentEffect,
-  type ReplayResult,
-} from "@statelyai/agent/steps";
-export {
-  getJsonSchema,
-  parseModelRef,
   type AgentOutputMode,
+  type ReplayResult,
   type StructuredOutputEnvelope,
-} from "@statelyai/agent/adapter";
+} from "@statelyai/agent";
 export { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-export { createOpenAiCompatExecutors } from "@statelyai/agent/openai-compat";
-export { zodAgentMessages } from "@statelyai/agent/zod";
+export {
+  createSqliteEventLogStore,
+  createSqliteSnapshotStore,
+  type SqliteDatabase,
+  type SqliteEventLogStoreOptions,
+} from "@statelyai/agent/sqlite";
 
 const setup = setupAgent({
   models: { quick: "openai/gpt-5.4-mini" },

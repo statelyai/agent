@@ -34,13 +34,13 @@ import { type LanguageModel } from "ai";
 import { openai } from "@ai-sdk/openai";
 import Ajv from "ajv";
 import {
+  parseModelRef,
   runAgent,
   setupAgent,
   type AgentWorkflowConfig,
   type SchemaCompiler,
   type StandardSchemaV1,
 } from "@statelyai/agent";
-import { parseModelRef } from "@statelyai/agent/adapter";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 // The Ajv-to-StandardSchema recipe: compile the JSON Schema with Ajv, then
@@ -72,7 +72,10 @@ const ajvCompiler: SchemaCompiler = (jsonSchema, name): StandardSchemaV1 => {
 const workflowPath = fileURLToPath(new URL("./workflow.json", import.meta.url));
 export const workflowConfig: AgentWorkflowConfig = JSON.parse(readFileSync(workflowPath, "utf-8"));
 
-export const jsonAgentMachine = setupAgent.fromConfig(workflowConfig, {
+// `fromConfig` returns the machine plus the compiled schema pack — a
+// JSON-authored agent has no TS types, so hosts use `schemas` at runtime (e.g.
+// `parseAgentEvent(snapshot, raw, { events: schemas.events })`).
+export const { machine: jsonAgentMachine } = setupAgent.fromConfig(workflowConfig, {
   compileSchema: ajvCompiler,
 });
 

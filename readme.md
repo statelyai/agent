@@ -26,7 +26,7 @@ Stately Agent 2 is in alpha. APIs may change before the stable release.
 pnpm add @statelyai/agent@alpha xstate@alpha zod ai@^6 @ai-sdk/openai@^3
 ```
 
-Node 22.18 or newer is required. The package is ESM-only and requires XState v6 alpha.25 or newer. Provider packages must match your `ai` major: `@ai-sdk/openai@^3` pairs with `ai@^6` (a bare `@ai-sdk/openai` resolves to `@latest`, which can mismatch the `ai` peer).
+Node 22.18 or newer is required. The package is ESM-first (CommonJS builds are published too, so `require()` works) and requires XState v6 alpha.25 or newer. Provider packages must match your `ai` major: `@ai-sdk/openai@^3` pairs with `ai@^6` (a bare `@ai-sdk/openai` resolves to `@latest`, which can mismatch the `ai` peer).
 
 ## Quick start
 
@@ -152,7 +152,10 @@ See [all examples](examples/README.md).
 - [Decisions](docs/decisions.md)
 - [Human in the loop](docs/human-in-the-loop.md)
 - [Testing and verification](docs/verify.md)
-- [Running on different hosts](docs/hosts.md)
+- [Hosts and executors](docs/hosts.md)
+- [Models and providers](docs/models-and-providers.md)
 - [Use in any stack](docs/any-stack.md)
+- [The event log](docs/event-log.md)
+- [Observability](docs/observability.md)
 - [Agent patterns](docs/patterns.md)
 - [Migrating from a loop](docs/from-a-loop.md)

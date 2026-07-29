@@ -8,9 +8,7 @@
     "url": "https://langchain-ai.github.io/langgraph/how-tos/human_in_the_loop/review-tool-calls/"
   },
   "comparison": {
-    "targets": [
-      "LangGraph"
-    ],
+    "targets": ["LangGraph"],
     "purpose": "LangGraph's interrupt() over a proposed tool call plus Command(resume={...}) to approve, edit-before-run, or reject-with-feedback, here as a first-class idle `reviewing` state resumed by typed APPROVE / EDIT / REJECT events."
   },
   "starters": [

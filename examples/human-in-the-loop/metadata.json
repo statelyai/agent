@@ -11,8 +11,5 @@
     "targets": ["LangGraph"],
     "purpose": "Idle review state with typed meta.interaction, REJECT-with-reason redraft loop, and a JSON snapshot round-trip across two runAgent calls."
   },
-  "starters": [
-    "the new deploy pipeline",
-    "our move to a four-day work week"
-  ]
+  "starters": ["the new deploy pipeline", "our move to a four-day work week"]
 }

@@ -13,7 +13,7 @@ import {
   type AgentPlanOutput,
   type StandardSchemaV1,
 } from "./index.js";
-import { PLAN_DONE_EVENT_TYPE } from "./steps/index.js";
+import { PLAN_DONE_EVENT_TYPE } from "./index.js";
 import * as examples from "../examples/index.js";
 import { humanInTheLoopMachine, jokeMachine, twentyQuestionsMachine } from "../examples/index.js";
 

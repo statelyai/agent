@@ -33,6 +33,7 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 import {
+  type AgentMessage,
   assistantMessage,
   createAgentSchemas,
   runAgent,
@@ -40,7 +41,6 @@ import {
   systemMessage,
   userMessage,
 } from "@statelyai/agent";
-import { zodAgentMessages } from "@statelyai/agent/zod";
 
 // Annotated so the exported const has a portable, nameable type (TS2742).
 export const models = defineModels({
@@ -49,7 +49,7 @@ export const models = defineModels({
 
 export const contextCompactionSchemas = createAgentSchemas({
   context: z.object({
-    messages: zodAgentMessages(),
+    messages: z.custom<AgentMessage[]>((v) => Array.isArray(v)),
     summary: z.string().nullable(),
     turns: z.number(),
     maxMessages: z.number(),
@@ -64,7 +64,7 @@ export const contextCompactionSchemas = createAgentSchemas({
   }),
   output: z.object({
     summary: z.string().nullable(),
-    messages: zodAgentMessages(),
+    messages: z.custom<AgentMessage[]>((v) => Array.isArray(v)),
     turns: z.number(),
   }),
 });
@@ -90,7 +90,7 @@ const agentSetup = setupAgent({
       schemas: {
         input: z.object({
           summary: z.string().nullable(),
-          messages: zodAgentMessages(),
+          messages: z.custom<AgentMessage[]>((v) => Array.isArray(v)),
         }),
         output: z.string(),
       },
@@ -108,7 +108,7 @@ const agentSetup = setupAgent({
       schemas: {
         input: z.object({
           priorSummary: z.string().nullable(),
-          staleMessages: zodAgentMessages(),
+          staleMessages: z.custom<AgentMessage[]>((v) => Array.isArray(v)),
         }),
         output: z.object({ summary: z.string() }),
       },

@@ -21,7 +21,6 @@
  */
 import { initialTransition, transition, type AnyMachineSnapshot, type EventObject } from "xstate";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { type AgentLogEntry, type AgentRequestExecutors } from "@statelyai/agent";
 import {
   createReplayEntry,
   executeAgentRequest,
@@ -29,7 +28,9 @@ import {
   initEntry,
   resolveDecision,
   type AgentEffect,
-} from "@statelyai/agent/steps";
+  type AgentLogEntry,
+  type AgentRequestExecutors,
+} from "@statelyai/agent";
 import {
   gameActors,
   gameMachine,

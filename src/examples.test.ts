@@ -16,7 +16,7 @@ import { runAgent, type AgentTextRequest } from "./index.js";
 // internal now — imported straight from ./steps.js (it backs verify.ts and these
 // example checks); resolveDecision remains on the public /steps subpath.
 import { getAgentRequests, resolveAgentStep, transitionAgentStep } from "./steps.js";
-import { resolveDecision } from "./steps/index.js";
+import { resolveDecision } from "./index.js";
 import { initialTransition } from "xstate";
 
 describe("curated XState setup examples", () => {

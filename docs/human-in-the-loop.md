@@ -136,7 +136,7 @@ Legality comes from the machine, not a system prompt: `getAcceptedEvents` report
 
 ## Persist and resume across processes
 
-Between iterations, persist `result.snapshot` anywhere: a database row, a queue message, `localStorage`, a file. `runAgent` stops its actor on every settle path (`done`, `idle`, `error`), so resume is **always by snapshot**, never by holding a live actor. That makes the pause durable: a crash, a redeploy, or a days-long wait all resume identically. (For a checkpoint after every model call, not only at settle, see [Steps](steps.md).)
+Between iterations, persist `result.snapshot` anywhere: a database row, a queue message, `localStorage`, a file. `runAgent` stops its actor on every settle path (`done`, `idle`, `error`), so resume is **always by snapshot**, never by holding a live actor. That makes the pause durable: a crash, a redeploy, or a days-long wait all resume identically. (To persist after every model call, not only at settle, see [Steps](steps.md).)
 
 The recurring shape: **run to idle → serialize the snapshot to a handle → store it → later, load and resume with an event**. The handle is just the JSON-serialized snapshot; nothing else travels with it, because the snapshot is the whole process state.
 
@@ -161,17 +161,17 @@ const choices = getAcceptedEvents(snapshot); // one descriptor per legal event
 
 ### Illegal resume events throw
 
-<!-- IllegalResumeEventError and onIllegalResumeEvent from src/run-agent.ts -->
+<!-- AgentIllegalResumeEventError and onIllegalResumeEvent from src/run-agent.ts -->
 
-Resuming with an event the restored state cannot take is a programmer error, so `runAgent` throws `IllegalResumeEventError` (carrying `eventType` and `acceptedTypes`) before delivering it: a thrown error, not an `error`-status settle. No need to pre-check legality yourself:
+Resuming with an event the restored state cannot take is a programmer error, so `runAgent` throws `AgentIllegalResumeEventError` (carrying `eventType` and `acceptedTypes`) before delivering it: a thrown error, not an `error`-status settle. No need to pre-check legality yourself:
 
 ```ts
-import { IllegalResumeEventError, runAgent } from "@statelyai/agent";
+import { AgentIllegalResumeEventError, runAgent } from "@statelyai/agent";
 
 try {
   await runAgent(machine, { snapshot, event: { type: "NOPE" }, executors: { generateText } });
 } catch (error) {
-  if (error instanceof IllegalResumeEventError) {
+  if (error instanceof AgentIllegalResumeEventError) {
     // error.acceptedTypes lists what the restored state does accept
   }
 }
@@ -187,7 +187,7 @@ Every settled snapshot carries a plain `agentMeta: { machineId, version }` field
 
 On resume, `runAgent` compares the incoming stamp against the current machine's version. If they differ (a state or transition added, removed, or retargeted since the snapshot was saved):
 
-- `onVersionMismatch: 'throw'` (default) throws `SnapshotVersionMismatchError` with `from`/`to`.
+- `onVersionMismatch: 'throw'` (default) throws `AgentSnapshotVersionMismatchError` with `from`/`to`.
 - `'warn'` logs once and proceeds; `'ignore'` proceeds silently.
 - `migrateSnapshot(snapshot, { from, to })` (when provided) runs instead; its return value is the snapshot resumed from, so you can adapt an old snapshot to the new shape.
 
@@ -197,11 +197,13 @@ An unstamped snapshot (no `agentMeta`) is always accepted. Pass an explicit `mac
 try {
   await runAgent(machine, { snapshot, event, executors: { generateText } });
 } catch (error) {
-  if (error instanceof SnapshotVersionMismatchError) {
+  if (error instanceof AgentSnapshotVersionMismatchError) {
     // error.from / error.to: the machine changed since this snapshot was saved
   }
 }
 ```
+
+> **Branch on `error.code`.** Both errors extend the `AgentError` base class, which carries a `.code` string (`'illegal-resume-event'`, `'snapshot-version-mismatch'`). A host that receives errors across a bundle or process boundary, where `instanceof` is unreliable, can check `error instanceof AgentError && error.code === 'snapshot-version-mismatch'` (or just the code) instead.
 
 ### Reading interaction meta
 
@@ -243,6 +245,44 @@ The handler resolves to a `string` (what the human typed), so `onDone`'s `output
 
 Without a handler, `agent.userInput` becomes a **pending placeholder** instead of an error (next section).
 
+### Implementing agent.userInput
+
+The host owns delivery and resume. Two ways to implement the builtin:
+
+- **`RunAgentOptions.userInput`**, the inline path shown above.
+- **A provided actor source**, for the [step path](steps.md) or when the inline path doesn't fit:
+
+```ts
+import { createAsyncLogic } from "xstate";
+
+const boundMachine = machine.provide({
+  actors: {
+    "agent.userInput": createAsyncLogic({
+      run: async ({ input }) => showFormAndWaitForSubmit(input),
+    }),
+  },
+});
+```
+
+If a machine invokes `agent.userInput` and neither is supplied, `runAgent` fails at bind time, before any model call, naming the actor and recommending the idle-state pattern instead.
+
+Static [machine config](machines-as-data.md) uses the same actor source:
+
+```yaml
+invoke:
+  src: agent.userInput
+  input:
+    prompt: "Who should receive this email?"
+    schema:
+      type: object
+      properties:
+        recipient: { type: string }
+      required: [recipient]
+  onDone:
+    assign:
+      recipient: "{{ event.output.recipient }}"
+```
+
 ## Parallel machines and pending user input
 
 <!-- pending agent.userInput placeholder and pendingUserInputs/persistedSnapshot from src/run-agent.ts -->
@@ -265,7 +305,7 @@ if (first.status === "idle" && first.pendingUserInputs) {
   await runAgent(machine, {
     snapshot: JSON.parse(await store.load()),
     executors: { generateText },
-    userInput: async ({ prompt }) => ({ feedback: await ask(prompt ?? "") }),
+    userInput: async ({ prompt }) => ask(prompt ?? ""),
   });
 }
 ```
@@ -279,5 +319,6 @@ Resuming without a handler settles idle again with the same pending inputs, so a
 
 ## Related
 
-- [Steps](steps.md): durable hosts that checkpoint after every model call.
+- [Steps](steps.md): durable hosts that persist after every model call.
+- [The event log](event-log.md): replaying a run from its recorded external inputs.
 - [Agent machines](machines.md): authoring the states and transitions a waiting state is part of.

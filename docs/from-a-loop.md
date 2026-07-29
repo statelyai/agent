@@ -6,6 +6,20 @@ description: Convert a realistic while-loop tool-calling agent into an agent mac
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
 This page refactors a working `while`-loop agent into an agent machine **without rewriting your model calls**: your SDK calls, tools, and retry logic become the [executors](hosts.md); the machine replaces only the control flow.
 
+The call site stays one line. Where you had:
+
+```ts
+const result = await generateText({ model, prompt, tools });
+```
+
+you end with:
+
+```ts
+const result = await generateResult(machine, { input, executors });
+```
+
+Your `generateText` call did not go away — it moved into the executors. The loop you wrote around it became the machine. And like `generateText`, the result carries metadata alongside the value: `result.output`, plus `result.snapshot`, the replayable `result.events`, and the aggregated `result.usage`.
+
 If you already have a state machine and want to bind LLM work to it, start from [You already have an agent workflow](xstate-as-agent-workflow.md) instead.
 
 ## Start: a hand-rolled loop
@@ -201,12 +215,46 @@ const result = await simulateAgent(machine, {
   input: { request: "Refund my duplicate charge", amount: 5000 },
   script: { decisions: { "agent.decide": [{ type: "REFUND" }] } },
 });
-// The REFUND guard rejects amount > 100, so the run settles idle at awaitingHuman,
-// not refunded: the old loop's `if` is now enforced by construction.
+// The REFUND guard rejects amount > 100, so the run never reaches refunded: it
+// settles idle at deciding. The old loop's `if` is now enforced by construction.
 expect(result.status).toBe("idle");
 ```
 
 `canReach` and `explorePaths` go further: enumerate every branch and prove which outcomes are reachable. See [Testing and verification](verify.md).
+
+## Retrofitting without authoring invokes: `getRequests`
+
+Everything above assumes you write the model calls into the machine as invokes. If you already have a plain XState machine, `getRequests` is the seam that skips that rewrite: it is a `RunAgentOptions` hook, and whenever the machine would otherwise settle idle, it reads the snapshot and returns the model request(s) to run instead. Return nothing and the run settles idle, which is how human-wait states stay human-wait states.
+
+The machine does not change at all. Where the prompts live is your call: state `description`s, `meta`, tags, or a lookup table keyed by state value. Nothing is blessed by the library.
+
+The prompts-in-descriptions recipe, copy-paste and adapt:
+
+```ts
+const result = await runAgent(existingMachine, {
+  executors,
+  getRequests: (snapshot) =>
+    snapshot._nodes
+      .filter((node) => node.description && !node.tags.includes("waiting"))
+      .map((node) => ({
+        model: "writer",
+        prompt: node.description!,
+        kind: node.tags.includes("decision") ? "decision" : "text",
+        // single-outcome states advance deterministically; else `decide`
+        onDone: node.ownEvents.length === 1 ? { type: node.ownEvents[0] } : undefined,
+        allowedEvents: node.ownEvents,
+      })),
+});
+```
+
+Semantics:
+
+- Each request runs per its `kind`, appends to the run's message log (`RunAgentOptions.messages`, read back with `getAgentMessages(snapshot)`), and advances the machine per `onDone`: an explicit event, or a `decide` call when omitted. Always gated by `snapshot.can`.
+- Multiple returned requests run concurrently. For parallel regions, scope each one with `allowedEvents` (the node's `ownEvents` is a good default).
+- A pass that sends no event settles idle.
+- Every model call counts against `maxModelCalls`.
+
+Runnable version: [described-workflow](../examples/described-workflow/index.ts), a plain `createMachine` with no invokes and no `setupAgent`, driven end to end by `getRequests`. For more on this "machine you already have" path, see [You already have an agent workflow](xstate-as-agent-workflow.md).
 
 ## Other starting points
 
@@ -220,6 +268,6 @@ The same conversion works from shapes other than a `while` loop:
 
 ## What you got for free
 
-Same behavior as the loop, plus legality by construction, snapshot resume, step-path [checkpointing](steps.md), and [visualization](machines-as-data.md), none of which the loop gives you without hand-built machinery. The transcript and log bookkeeping you hand-maintained in the loop becomes the ordered [`onTrace`](observability.md) stream: one run/request/chunk/transition ledger for evals, JSONL, and telemetry.
+Same behavior as the loop, plus legality by construction, snapshot resume, the durable [step path](steps.md) and [event log](event-log.md), and [visualization](machines-as-data.md), none of which the loop gives you without hand-built machinery. The transcript and log bookkeeping you hand-maintained in the loop becomes the ordered [`onTrace`](observability.md) stream: one run/request/chunk/transition ledger for evals, JSONL, and telemetry.
 
 If you never need them, the loop was fine. When you do, the machine gives you each one for free.

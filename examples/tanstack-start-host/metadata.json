@@ -12,8 +12,5 @@
     "targets": ["TanStack Start", "server functions"],
     "purpose": "Controlled mode in server functions: startAgent runs a machine to idle/done and persists the snapshot; resumeAgent delivers the human event to finish the run."
   },
-  "starters": [
-    "Our new real-time collaboration feature",
-    "The v2.0 release with dark mode"
-  ]
+  "starters": ["Our new real-time collaboration feature", "The v2.0 release with dark mode"]
 }

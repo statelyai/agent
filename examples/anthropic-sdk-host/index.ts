@@ -43,6 +43,12 @@ import type {
   ToolChoice,
 } from "@anthropic-ai/sdk/resources/messages.js";
 import {
+  buildEnvelopeSchema,
+  getAgentOutputMode,
+  getJsonSchemaSync,
+  isStandardSchema,
+  parseStructuredEnvelope,
+  renderDecisionAttempts,
   runAgent,
   type AgentDecisionExecutor,
   type AgentDecisionRequest,
@@ -54,14 +60,6 @@ import {
   type AgentTools,
   type ChosenEvent,
 } from "@statelyai/agent";
-import { renderDecisionAttempts } from "@statelyai/agent/steps";
-import {
-  buildEnvelopeSchema,
-  getAgentOutputMode,
-  getJsonSchemaSync,
-  isStandardSchema,
-  parseStructuredEnvelope,
-} from "@statelyai/agent/adapter";
 import { triageMachine } from "../triage/index.js";
 import { twentyQuestionsMachine } from "../twenty-questions/index.js";
 

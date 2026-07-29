@@ -120,6 +120,69 @@ export interface AgentTextRequest<TMetadata = Record<string, unknown>> {
 }
 
 /**
+ * Aggregated model-call usage for ONE `runAgent` call — the run-level total
+ * attached to every settled {@link RunAgentResult} (and therefore to
+ * `generateResult`'s `{ output, snapshot, events, usage }`).
+ *
+ * - `modelCalls` counts every model/decision call this run made (each decision
+ *   retry counts separately) — the same seam `maxModelCalls` budgets. Always a
+ *   number, even when no executor reported tokens.
+ * - Token fields are OPTIONAL and are PARTIAL SUMS: each one sums only the
+ *   calls that reported it, and stays `undefined` when NO call reported it.
+ *   Executors that report nothing (custom hosts, test mocks) simply do not
+ *   contribute — a run mixing reporting and non-reporting calls yields a sum
+ *   over the reporting subset, not `undefined`.
+ * - Aggregation is per-run: a resumed run counts only ITS OWN calls, never the
+ *   history behind `snapshot`/`events`. Add prior runs' totals yourself if you
+ *   want a conversation-wide figure.
+ */
+export interface AgentUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  reasoningTokens?: number;
+  cachedInputTokens?: number;
+  /** Model/decision calls made by this run (decision retries count separately). */
+  modelCalls: number;
+}
+
+/** One model call's reported usage — {@link AgentUsage} without the run-level `modelCalls` count. What an executor puts on its result's `usage` field. */
+export type AgentCallUsage = Omit<AgentUsage, "modelCalls">;
+
+/** The token fields {@link AgentUsage} aggregates. @internal */
+export const AGENT_USAGE_TOKEN_FIELDS = [
+  "inputTokens",
+  "outputTokens",
+  "totalTokens",
+  "reasoningTokens",
+  "cachedInputTokens",
+] as const satisfies readonly (keyof AgentCallUsage)[];
+
+/**
+ * Reads a per-call {@link AgentCallUsage} off a raw executor result's `usage`
+ * field, keeping only finite numbers. Returns `undefined` when the result
+ * reports no usage at all. Works for our `{ output, usage }` envelope, for a
+ * raw Vercel AI SDK result (its `LanguageModelUsage` carries the same flat
+ * field names), and for any custom executor that follows the shape.
+ *
+ * @internal
+ */
+export function extractCallUsage(raw: unknown): AgentCallUsage | undefined {
+  const usage = (raw as { usage?: unknown } | null | undefined)?.usage;
+  if (!usage || typeof usage !== "object") {
+    return undefined;
+  }
+  let out: AgentCallUsage | undefined;
+  for (const field of AGENT_USAGE_TOKEN_FIELDS) {
+    const value = (usage as Record<string, unknown>)[field];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      (out ??= {})[field] = value;
+    }
+  }
+  return out;
+}
+
+/**
  * Inline input for the `agent.userInput` builtin actor — a human-input request
  * (CLI prompt, chat reply, …) that resolves to the `string` the human typed.
  * See {@link RunAgentOptions.userInput}. For structured input, parse/classify
@@ -191,7 +254,8 @@ const unknownOutputSchema: StandardSchemaV1<unknown> = {
   },
 };
 
-// String output schema (`agent.streamText`'s builtin output type).
+// String output schema: `agent.streamText`'s builtin output type, and the
+// default a text request's `schemas.output` falls back to when omitted.
 const stringOutputSchema: StandardSchemaV1<string> = {
   "~standard": {
     version: 1,
@@ -200,6 +264,19 @@ const stringOutputSchema: StandardSchemaV1<string> = {
       return typeof value === "string"
         ? { value }
         : { issues: [{ message: "Expected string output" }] };
+    },
+  },
+};
+
+// Default input schema for a text request that declares none: accepts
+// anything (so an incidental input is not an error) and types the invoke's
+// `input` as `undefined`, i.e. not required at the invoke site.
+const noInputSchema: StandardSchemaV1<undefined> = {
+  "~standard": {
+    version: 1,
+    vendor: "statelyai-agent",
+    validate(value: unknown) {
+      return { value: value as undefined };
     },
   },
 };
@@ -333,17 +410,23 @@ export function resolveTextLogicValue<TValue, TInput>(
  * …) is either a static value or a `({ input }) => value` resolver.
  */
 export interface TextLogicConfig<
-  TInputSchema extends StandardSchemaV1,
-  TOutputSchema extends StandardSchemaV1,
+  TInputSchema extends StandardSchemaV1 = StandardSchemaV1<undefined>,
+  TOutputSchema extends StandardSchemaV1 = StandardSchemaV1<string>,
   TMetadata = Record<string, unknown>,
   TModel extends string = string,
 > {
   mode?: AgentRequestMode;
   /** Stamped onto every lowered request as {@link AgentTextRequest.name}. `setupAgent({ requests })` sets this to the request's key. */
   name?: ResolveTextLogicValue<string | undefined, InferOutput<TInputSchema>>;
-  schemas: {
-    input: TInputSchema;
-    output: TOutputSchema;
+  /**
+   * The request's input/output schemas. Both are optional:
+   * - `output` defaults to a string schema (a plain text request).
+   * - `input` defaults to a schema that accepts (and types) `undefined`, so
+   *   the request takes no `input` at the invoke site.
+   */
+  schemas?: {
+    input?: TInputSchema;
+    output?: TOutputSchema;
   };
   model: ResolveTextLogicValue<TModel, InferOutput<TInputSchema>>;
   system?: ResolveTextLogicValue<string | undefined, InferOutput<TInputSchema>>;
@@ -412,18 +495,6 @@ export interface TextLogic<
   ): TextLogic<TInputSchema, TOutputSchema, TMetadata>;
 }
 
-/** Extracts a {@link TextLogic}'s validated input type. */
-export type TextLogicInput<TLogic extends TextLogic> =
-  TLogic extends TextLogic<infer TInputSchema, StandardSchemaV1, infer _TMetadata>
-    ? InferOutput<TInputSchema>
-    : never;
-
-/** Extracts a {@link TextLogic}'s validated output type. */
-export type TextLogicOutput<TLogic extends TextLogic> =
-  TLogic extends TextLogic<StandardSchemaV1, infer TOutputSchema, infer _TMetadata>
-    ? InferOutput<TOutputSchema>
-    : never;
-
 /**
  * Creates reusable, standalone {@link TextLogic}: an actor that, when run,
  * resolves typed input to typed output via a model call. Register the
@@ -445,8 +516,8 @@ export type TextLogicOutput<TLogic extends TextLogic> =
  * ```
  */
 export function createTextLogic<
-  TInputSchema extends StandardSchemaV1,
-  TOutputSchema extends StandardSchemaV1,
+  TInputSchema extends StandardSchemaV1 = StandardSchemaV1<undefined>,
+  TOutputSchema extends StandardSchemaV1 = StandardSchemaV1<string>,
   TMetadata = Record<string, unknown>,
   TModel extends string = string,
 >(
@@ -455,11 +526,14 @@ export function createTextLogic<
 ): TextLogic<TInputSchema, TOutputSchema, TMetadata> {
   type TInput = InferOutput<TInputSchema>;
   type TOutput = InferOutput<TOutputSchema>;
+  // `schemas.input`/`schemas.output` are both optional: an omitted input takes
+  // no invoke input, an omitted output is a plain string (text) request.
+  const schemas = {
+    input: (config.schemas?.input ?? noInputSchema) as StandardSchemaV1<TInput>,
+    output: (config.schemas?.output ?? stringOutputSchema) as StandardSchemaV1<TOutput>,
+  };
   const request = (input: TInput): AgentTextRequest<TMetadata> => {
-    const parsedInput = validateSchemaSync<TInput>(
-      config.schemas.input as StandardSchemaV1<TInput>,
-      input,
-    );
+    const parsedInput = validateSchemaSync<TInput>(schemas.input, input);
     const args = { input: parsedInput };
 
     return {
@@ -470,7 +544,7 @@ export function createTextLogic<
       messages: resolveTextLogicValue(config.messages, args),
       tools: resolveTextLogicValue(config.tools, args),
       toolChoice: resolveTextLogicValue(config.toolChoice, args),
-      outputSchema: config.schemas.output,
+      outputSchema: schemas.output,
       reasoning: resolveTextLogicValue(config.reasoning, args),
       temperature: resolveTextLogicValue(config.temperature, args),
       maxOutputTokens: resolveTextLogicValue(config.maxOutputTokens, args),
@@ -509,17 +583,14 @@ export function createTextLogic<
         { request: resolvedRequest },
       );
 
-      return validateSchemaSync<TOutput>(
-        config.schemas.output as StandardSchemaV1<TOutput>,
-        output,
-      );
+      return validateSchemaSync<TOutput>(schemas.output, output);
     },
   });
 
   const textLogic = Object.assign(logic, {
     kind: "statelyai.textLogic" as const,
     mode: config.mode ?? "generate",
-    schemas: config.schemas,
+    schemas,
     request,
     async execute(input: TInput, executors: AgentRequestExecutors) {
       const { output } = await executeAgentTextRequest(
@@ -529,10 +600,7 @@ export function createTextLogic<
         executors,
       );
 
-      return validateSchemaSync<TOutput>(
-        config.schemas.output as StandardSchemaV1<TOutput>,
-        output,
-      );
+      return validateSchemaSync<TOutput>(schemas.output, output);
     },
     withExecutor(nextExecute: TextLogicExecutor<TInputSchema, TOutputSchema, TMetadata>) {
       return createTextLogic(config, nextExecute);
@@ -594,12 +662,19 @@ export function isTextLogic(value: unknown): value is TextLogic {
 /**
  * The envelope an {@link AgentRequestExecutor} must return: `{ output }` where
  * `output` is the request's value (a text string or a structured object).
- * Passthrough fields (usage, toolCalls, finishReason, raw, …) are allowed
- * alongside `output` and preserved on the raw result. {@link normalizeGeneratorResult}
+ * Passthrough fields (toolCalls, finishReason, raw, …) are allowed alongside
+ * `output` and preserved on the raw result. {@link normalizeGeneratorResult}
  * unwraps `output`; a non-envelope return is a runtime error.
+ *
+ * `usage` is the one passthrough field core reads: report this call's tokens
+ * there and `runAgent` folds them into the run's aggregated
+ * {@link AgentUsage}. Optional — an executor that reports nothing still counts
+ * toward `modelCalls`.
  */
 export type AgentRequestExecutorResult<TOutput = unknown> = {
   output: TOutput;
+  /** This call's token usage, aggregated into the run result's {@link AgentUsage}. */
+  usage?: AgentCallUsage;
   [key: string]: unknown;
 };
 

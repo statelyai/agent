@@ -11,8 +11,5 @@
     "targets": ["supervisor", "router-worker"],
     "purpose": "A router model dispatches one request to one of several typed specialist workers; the parent composes the result."
   },
-  "starters": [
-    "Write a haiku about databases.",
-    "What is a 15% tip on an $84 dinner bill?"
-  ]
+  "starters": ["Write a haiku about databases.", "What is a 15% tip on an $84 dinner bill?"]
 }

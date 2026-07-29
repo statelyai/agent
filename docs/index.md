@@ -95,7 +95,7 @@ The API changed completely in 2.0 and is still settling. Expect breaking changes
 
 Explicitly not shipped yet:
 
-- **Database storage adapters.** Core ships persistence contracts and an in-memory event-log store, but no SQLite, Postgres, or Redis adapter packages.
+- **Postgres and Redis storage adapters.** Core ships the persistence contracts, an in-memory event-log store, and SQLite stores on `node:sqlite` ([`@statelyai/agent/sqlite`](event-log.md#sqlite-stores)), but nothing for other databases.
 - **OpenTelemetry exporter.** Build your own from the observation callbacks on `runAgent`.
 - **SSE/WebSocket transport helpers.** Host your own stream over what `onChunk` gives you.
 - **Agent-specific dynamic fan-out helper.** Dynamic fan-out works today through XState `spawn(...)` or `Promise.all(...)` inside a host actor; core has no higher-level helper for branch binding and progress.
@@ -106,21 +106,24 @@ If something here blocks you, or the API surface feels wrong, open an issue. Thi
 ## Documentation map
 
 - [Quickstart](quickstart.md): install and run your first agent machine end to end.
-- [Use in any stack](any-stack.md): one machine runs locally, behind an HTTP route, or on the edge, with zero machine changes.
+- [Use in any stack](any-stack.md): one machine runs locally, behind an HTTP route, or on the edge, with zero machine changes, plus the Express and Cloudflare walkthroughs.
 - [Scope and ecosystem boundaries](scope.md): what portable machine logic owns, what the host owns, and where specialized libraries fit.
-- [Express host](express-host.md): drive an agent machine from an HTTP route.
-- [Cloudflare host](cloudflare-host.md): run an agent machine on the edge with Durable Object persistence.
-- [Agent machines](machines.md): `setupAgent`, states, invokes, typed context, and guards.
+- [Agent machines](machines.md): `setupAgent`, states, invokes, typed context, built-in actor sources, and guards.
 - [Decisions](decisions.md): the model choosing exactly one currently-legal machine event.
 - [Plans](plans.md): the multi-event decision, `agent.plan`.
 - [Text requests](text-requests.md): typed text and structured-output model calls.
 - [Messages](messages.md): the parts-based `AgentMessage` model.
 - [Human in the loop](human-in-the-loop.md): idle-first pauses and resuming by snapshot.
-- [Hosts](hosts.md): executors, the AI SDK adapter, and writing your own.
-- [Observability](observability.md): the Stately Inspector locally, and the trace stream to OpenTelemetry in production.
+- [Hosts and executors](hosts.md): the executor contract, the AI SDK adapter, and writing your own.
+- [Observability](observability.md): the trace stream and observation callbacks, the Stately Inspector locally, and OpenTelemetry in production.
+- [Models and providers](models-and-providers.md): raw SDK functions as executors, other AI frameworks, OpenAI-compatible endpoints, and reference hosts per provider.
 - [Steps](steps.md): the lower-level step path for durable hosts.
+- [The event log](event-log.md): append events, replay deterministically, fork and time travel, and the SQLite stores.
 - [Machines as data](machines-as-data.md): authoring an agent machine as JSON.
+- [Testing and verification](verify.md): lint, simulate, and explore agent machines with no API keys or model calls.
 - [Multi-agent](multi-agent.md): sub-agents and child actors.
 - [Migrating from a loop](from-a-loop.md): convert a hand-rolled `while` loop into an agent machine.
-- [Agent patterns](patterns.md): ReAct, reflection, RAG, supervisor, and more as copy-paste machines.
-- [Examples](examples.md): a curated index of runnable examples.
+- [Coming from LangGraph](from-langgraph.md): a term-by-term translation of LangGraph concepts onto agent machines.
+- [You already have an agent workflow](xstate-as-agent-workflow.md): the same machine graph run by `runAgent`, by hand, or with prompts mapped in from outside.
+- [Agent patterns](patterns.md): ReAct, reflection, RAG, supervisor, and more as copy-paste machines, and the full runnable example catalog.
+- [Post-alpha roadmap](roadmap.md): what gates 2.0 stable, and what is deliberately deferred past it.

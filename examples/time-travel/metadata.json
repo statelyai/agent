@@ -8,9 +8,7 @@
     "url": "https://langchain-ai.github.io/langgraph/how-tos/human_in_the_loop/time-travel/"
   },
   "comparison": {
-    "targets": [
-      "LangGraph"
-    ],
+    "targets": ["LangGraph"],
     "purpose": "View checkpoint history, rewind to a past checkpoint, and fork a divergent branch — as a list of persisted XState snapshots resumed with different events."
   },
   "starters": [

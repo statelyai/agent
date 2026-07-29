@@ -8,7 +8,7 @@ import {
   initEntry,
   resolveDecision,
   type AgentEffect,
-} from "./steps/index.js";
+} from "./index.js";
 import type {
   AgentDecisionExecutor,
   AgentRequestExecutor,

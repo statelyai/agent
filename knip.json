@@ -1,6 +1,15 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "entry": ["examples/**/*.ts"],
-  "project": ["src/**/*.ts"],
-  "ignoreDependencies": ["tsx"]
+  "ignoreExportsUsedInFile": true,
+  "ignoreWorkspaces": ["demo"],
+  "workspaces": {
+    ".": {
+      "entry": [
+        "src/**/*.test.ts",
+        "examples/**/*.ts",
+        "fixtures/dts-consumer/index.ts"
+      ],
+      "project": ["src/**/*.ts", "examples/**/*.ts"]
+    }
+  }
 }

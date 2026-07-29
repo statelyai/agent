@@ -16,6 +16,7 @@ import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 import {
+  type AgentMessage,
   assistantMessage,
   createAgentSchemas,
   createTextLogic,
@@ -25,7 +26,6 @@ import {
   setupAgent,
   userMessage,
 } from "@statelyai/agent";
-import { zodAgentMessages } from "@statelyai/agent/zod";
 
 const promptAssessmentSchema = z.object({
   satisfied: z.boolean(),
@@ -86,7 +86,7 @@ const contextSchema = z.object({
   assessment: promptAssessmentSchema.nullable(),
   draft: emailDraftSchema.nullable(),
   sentEmails: z.array(emailDraftSchema),
-  messages: zodAgentMessages(),
+  messages: z.custom<AgentMessage[]>((v) => Array.isArray(v)),
 });
 
 const eventSchemas = {
@@ -121,7 +121,7 @@ export const draftEmail = createTextLogic({
   schemas: {
     input: z.object({
       prompt: z.string(),
-      messages: zodAgentMessages(),
+      messages: z.custom<AgentMessage[]>((v) => Array.isArray(v)),
     }),
     output: emailDraftSchema,
   },

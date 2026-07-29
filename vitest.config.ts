@@ -13,13 +13,7 @@ export default {
     // clobbers the subpath imports.
     alias: [
       { find: "@statelyai/agent/ai-sdk", replacement: src("ai-sdk/index.ts") },
-      {
-        find: "@statelyai/agent/openai-compat",
-        replacement: src("openai-compat/index.ts"),
-      },
-      { find: "@statelyai/agent/steps", replacement: src("steps/index.ts") },
-      { find: "@statelyai/agent/adapter", replacement: src("adapter/index.ts") },
-      { find: "@statelyai/agent/zod", replacement: src("zod/index.ts") },
+      { find: "@statelyai/agent/sqlite", replacement: src("sqlite/index.ts") },
       { find: /^@statelyai\/agent$/, replacement: src("index.ts") },
     ],
   },

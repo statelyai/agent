@@ -17,9 +17,10 @@ import {
 import {
   createAgentSchemas,
   createTextLogic,
-  DecisionExhaustedError,
+  AgentDecisionExhaustedError,
   getAcceptedEvents,
   messagesSchema,
+  parseAgentEvent,
   runAgent,
   setupAgent,
   toolMessage,
@@ -32,8 +33,9 @@ import {
   type SchemaCompiler,
   type StandardSchemaV1,
 } from "./index.js";
-import { executeAgentRequest, resolveDecision, type AgentRequest } from "./steps/index.js";
-import { getAgentOutputMode, isStructuredOutputSchema, parseOutput } from "./adapter/index.js";
+import { executeAgentRequest, resolveDecision, type AgentRequest } from "./index.js";
+import { getAgentOutputMode, parseOutput } from "./index.js";
+import { isStructuredOutputSchema } from "./text-logic.js";
 
 /**
  * ~15-line Ajv-to-StandardSchema adapter — the recipe for a real
@@ -1624,7 +1626,7 @@ describe("setupAgent", () => {
   });
 
   test("fromConfig + Ajv compileSchema: real JSON Schema validation runs end to end", async () => {
-    const machine = setupAgent.fromConfig(
+    const { machine } = setupAgent.fromConfig(
       {
         id: "ajv-answer",
         schemas: {
@@ -1709,14 +1711,14 @@ describe("setupAgent", () => {
       states: { done: { type: "final" as const, output: { email: "{{ context.email }}" } } },
     };
 
-    const ajvMachine = setupAgent.fromConfig(configWithPattern, {
+    const { machine: ajvMachine } = setupAgent.fromConfig(configWithPattern, {
       compileSchema: ajvCompiler(),
     });
     expect(() => initialAgentStep(ajvMachine, { email: "not-an-email" })).toThrow();
   });
 
   test("fromConfig lowers static request workflows to agent machine steps", async () => {
-    const machine = setupAgent.fromConfig(
+    const { machine } = setupAgent.fromConfig(
       {
         id: "static-answer",
         schemas: {
@@ -1830,7 +1832,7 @@ describe("setupAgent", () => {
   });
 
   test("fromConfig lowers JSON choice states and emitted events", async () => {
-    const machine = setupAgent.fromConfig(
+    const { machine } = setupAgent.fromConfig(
       {
         id: "json-choice-emits",
         schemas: {
@@ -1899,7 +1901,7 @@ describe("setupAgent", () => {
   });
 
   test("fromConfig + runAgent: pure-JSON text request workflow runs end to end", async () => {
-    const machine = setupAgent.fromConfig(
+    const { machine } = setupAgent.fromConfig(
       {
         id: "static-answer-run-agent",
         schemas: {
@@ -1979,7 +1981,7 @@ describe("setupAgent", () => {
   test("fromConfig + runAgent: JSON agent.decide invoke completes via the decided event", async () => {
     const receivedInputs: unknown[] = [];
 
-    const machine = setupAgent.fromConfig(
+    const { machine } = setupAgent.fromConfig(
       {
         id: "static-decide-run-agent",
         schemas: {
@@ -2048,7 +2050,7 @@ describe("setupAgent", () => {
   });
 
   test("fromConfig + runAgent: JSON event-waiting state settles idle, resumes with { snapshot, event }", async () => {
-    const machine = setupAgent.fromConfig(
+    const { machine } = setupAgent.fromConfig(
       {
         id: "static-idle-run-agent",
         schemas: {
@@ -2123,6 +2125,53 @@ describe("setupAgent", () => {
 
     expect(second.status).toBe("done");
     expect(second.status === "done" && second.output).toEqual({ draft: "Hello world." });
+  });
+
+  test("fromConfig returns the compiled schema pack alongside the machine", async () => {
+    const { machine, schemas } = setupAgent.fromConfig(
+      {
+        id: "from-config-schemas",
+        schemas: {
+          context: { type: "object", properties: { draft: { type: "string" } } },
+          events: {
+            APPROVE: {
+              type: "object",
+              properties: { note: { type: "string" } },
+              required: ["note"],
+            },
+          },
+          output: {
+            type: "object",
+            properties: { draft: { type: "string" } },
+            required: ["draft"],
+          },
+        },
+        context: { draft: "Hello world." },
+        initial: "reviewing",
+        states: {
+          reviewing: { on: { APPROVE: { target: "done" } } },
+          done: { type: "final", output: { draft: "{{ context.draft }}" } },
+        },
+      },
+      { compileSchema: ajvCompiler() },
+    );
+
+    expect(Object.keys(schemas)).toEqual(
+      expect.arrayContaining(["context", "events", "input", "output", "meta"]),
+    );
+
+    const first = await runAgent(machine, { executors: {} });
+    expect(first.status).toBe("idle");
+    const snapshot = first.status === "idle" ? first.snapshot : undefined;
+
+    // The compiled event schemas validate an inbound raw event, which is the
+    // whole point of handing them back for a JSON-authored agent.
+    expect(
+      parseAgentEvent(snapshot!, { type: "APPROVE", note: "ship it" }, { events: schemas.events }),
+    ).toEqual({ type: "APPROVE", note: "ship it" });
+    expect(() =>
+      parseAgentEvent(snapshot!, { type: "APPROVE" }, { events: schemas.events }),
+    ).toThrow(/APPROVE/);
   });
 
   test("fromConfig: an onDone on an agent.decide invoke is rejected, naming the state", () => {
@@ -2254,7 +2303,7 @@ describe("setupAgent", () => {
         },
         { compileSchema: ajvCompiler() },
       )
-      .provide({
+      .machine.provide({
         actors: {
           "agent.userInput": createAsyncLogic({
             run: async ({ input }) => {
@@ -2283,7 +2332,7 @@ describe("setupAgent", () => {
   });
 
   test("fromConfig lowers transition-level `actions` (emit fires; entry emit still works)", async () => {
-    const machine = setupAgent.fromConfig(
+    const { machine } = setupAgent.fromConfig(
       {
         id: "json-transition-actions",
         schemas: {
@@ -2381,7 +2430,7 @@ describe("setupAgent", () => {
 
   test("fromConfig resolves named guard references against options.guards", () => {
     const guardCalls: unknown[] = [];
-    const machine = setupAgent.fromConfig(
+    const { machine } = setupAgent.fromConfig(
       {
         id: "named-guards",
         schemas: {
@@ -2449,7 +2498,7 @@ describe("setupAgent", () => {
   });
 
   test("fromConfig lowers a state-level onDone to the state's done transition", async () => {
-    const machine = setupAgent.fromConfig(
+    const { machine } = setupAgent.fromConfig(
       {
         id: "state-ondone",
         schemas: {
@@ -2481,7 +2530,7 @@ describe("setupAgent", () => {
 
   test("fromConfig resolves named action types against options.actions", () => {
     const notified: unknown[] = [];
-    const machine = setupAgent.fromConfig(
+    const { machine } = setupAgent.fromConfig(
       {
         id: "named-actions",
         schemas: {
@@ -2599,16 +2648,16 @@ describe("resolveDecision", () => {
         async () => ({ event: { type: "ATTACK" } }), // missing required `target`
         { maxRetries: 0 },
       ),
-    ).rejects.toThrow(DecisionExhaustedError);
+    ).rejects.toThrow(AgentDecisionExhaustedError);
 
     try {
       await resolveDecision(request, async () => ({ event: { type: "ATTACK" } }), {
         maxRetries: 0,
       });
-      expect.fail("expected DecisionExhaustedError");
+      expect.fail("expected AgentDecisionExhaustedError");
     } catch (error) {
-      expect(error).toBeInstanceOf(DecisionExhaustedError);
-      const attempts = (error as DecisionExhaustedError).attempts;
+      expect(error).toBeInstanceOf(AgentDecisionExhaustedError);
+      const attempts = (error as AgentDecisionExhaustedError).attempts;
       expect(attempts).toHaveLength(1);
       expect(attempts[0]!.failure).toBe("invalid-payload");
     }
@@ -2622,10 +2671,10 @@ describe("resolveDecision", () => {
         maxRetries: 0,
         canTake: () => false,
       });
-      expect.fail("expected DecisionExhaustedError");
+      expect.fail("expected AgentDecisionExhaustedError");
     } catch (error) {
-      expect(error).toBeInstanceOf(DecisionExhaustedError);
-      const attempts = (error as DecisionExhaustedError).attempts;
+      expect(error).toBeInstanceOf(AgentDecisionExhaustedError);
+      const attempts = (error as AgentDecisionExhaustedError).attempts;
       expect(attempts).toHaveLength(1);
       expect(attempts[0]).toEqual(
         expect.objectContaining({
@@ -2636,17 +2685,17 @@ describe("resolveDecision", () => {
     }
   });
 
-  test("throws DecisionExhaustedError with the full attempts array once the budget is exhausted", async () => {
+  test("throws AgentDecisionExhaustedError with the full attempts array once the budget is exhausted", async () => {
     const request = makeRequest();
 
     try {
       await resolveDecision(request, async () => ({ event: { type: "UNKNOWN" } }), {
         maxRetries: 2,
       });
-      expect.fail("expected DecisionExhaustedError");
+      expect.fail("expected AgentDecisionExhaustedError");
     } catch (error) {
-      expect(error).toBeInstanceOf(DecisionExhaustedError);
-      const attempts: DecisionAttempt[] = (error as DecisionExhaustedError).attempts;
+      expect(error).toBeInstanceOf(AgentDecisionExhaustedError);
+      const attempts: DecisionAttempt[] = (error as AgentDecisionExhaustedError).attempts;
       expect(attempts).toHaveLength(3);
       expect(attempts.every((attempt) => attempt.failure === "unknown-event")).toBe(true);
     }
@@ -2808,7 +2857,7 @@ describe("decision live path (runAgent auto-delivery)", () => {
     expect(result.status === "done" && result.snapshot.value).toBe("done-state");
   });
 
-  test("surfaces a DecisionExhaustedError via onError when the executor returns a disallowed event", async () => {
+  test("surfaces a AgentDecisionExhaustedError via onError when the executor returns a disallowed event", async () => {
     const { machine, chooseMove } = buildMachine();
 
     const actor = createActor(
@@ -2825,7 +2874,7 @@ describe("decision live path (runAgent auto-delivery)", () => {
             onError: {
               target: "fumbled",
               actions: ({ event }: { event: { error: unknown } }) => {
-                expect(event.error).toBeInstanceOf(DecisionExhaustedError);
+                expect(event.error).toBeInstanceOf(AgentDecisionExhaustedError);
               },
             },
           },
@@ -3120,6 +3169,69 @@ describe("per-state context schemas (setupAgent({ states }))", () => {
       states: { done: {} },
     });
     expect(machine).toBeDefined();
+  });
+
+  test("throws when a narrowing key does not name a state in the machine config", () => {
+    const agent = setupAgent({
+      schemas: createAgentSchemas({
+        context: z.object({ topic: z.string(), answer: z.string().nullable() }),
+        input: z.object({ topic: z.string() }),
+      }),
+      states: {
+        // Typo: the machine's state is `done`.
+        dnoe: { context: { answer: z.string() } },
+      } as never,
+    });
+
+    expect(() =>
+      agent.createMachine({
+        context: { topic: "t", answer: null },
+        initial: "done",
+        states: { done: {}, working: {} },
+      }),
+    ).toThrow(
+      /'states' key 'dnoe'.*Valid child states: done, working.*setupAgent\(\{ states \}\)/s,
+    );
+  });
+
+  test("throws when a nested narrowing key does not name a child state", () => {
+    const agent = setupAgent({
+      schemas: createAgentSchemas({
+        context: z.object({ topic: z.string(), answer: z.string().nullable() }),
+        input: z.object({ topic: z.string() }),
+      }),
+      states: {
+        outer: { context: { answer: z.string() }, states: { inrer: {} } },
+      } as never,
+    });
+
+    expect(() =>
+      agent.createMachine({
+        context: { topic: "t", answer: null },
+        initial: "outer",
+        states: { outer: { initial: "inner", states: { inner: {} } } },
+      }),
+    ).toThrow(/'states' key 'outer\.inrer'.*of state 'outer': inner/s);
+  });
+
+  test("valid narrowing keys, nested included, do not throw", () => {
+    const agent = setupAgent({
+      schemas: createAgentSchemas({
+        context: z.object({ topic: z.string(), answer: z.string().nullable() }),
+        input: z.object({ topic: z.string() }),
+      }),
+      states: {
+        outer: { context: { answer: z.string() }, states: { inner: {} } },
+      } as never,
+    });
+
+    expect(() =>
+      agent.createMachine({
+        context: { topic: "t", answer: null },
+        initial: "outer",
+        states: { outer: { initial: "inner", states: { inner: {} } } },
+      }),
+    ).not.toThrow();
   });
 });
 

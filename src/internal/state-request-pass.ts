@@ -3,8 +3,10 @@ import type { AgentMessage, AgentTools, ChosenEvent } from "../types.js";
 import { assistantMessage, userMessage } from "../utils.js";
 import { getAcceptedEvents, type AgentSchemas } from "../events.js";
 import {
+  extractCallUsage,
   INTERPRET_SOURCE,
   normalizeGeneratorResult,
+  type AgentCallUsage,
   type AgentRequestExecutor,
   type AgentTextRequest,
 } from "../text-logic.js";
@@ -81,6 +83,8 @@ type StateRequestTraceEvent =
       raw: unknown;
       /** Lifted off the raw executor result when it carries a string `reasoning` (structured-output envelope opt-in) — parity with the invoke-driven text path. */
       reasoning?: string;
+      /** This call's reported token usage — parity with the invoke-driven text path. */
+      usage?: AgentCallUsage;
     }
   | { type: "request.error"; request: AgentStepRequest; error: unknown };
 
@@ -99,6 +103,8 @@ export interface StateRequestPassDeps {
   decide?: AgentDecisionExecutor;
   /** Budget hook for text calls (decide calls count inside `decide` itself). */
   consumeModelCall(): void;
+  /** Folds a text call's reported usage into the run's aggregated `AgentUsage` (decide calls record inside `decide` itself). */
+  recordUsage?(usage: AgentCallUsage): void;
   /** Durable per-request id factory (`interpret_<n>` in runAgent). */
   nextRequestId(): string;
   onTrace?(event: StateRequestTraceEvent): void;
@@ -173,6 +179,10 @@ async function runTextPhase(
     // trace — never into the log or machine (same as the invoke text path).
     const rawReasoning = (raw as { reasoning?: unknown } | null | undefined)?.reasoning;
     const reasoning = typeof rawReasoning === "string" ? rawReasoning : undefined;
+    const usage = extractCallUsage(raw);
+    if (usage) {
+      deps.recordUsage?.(usage);
+    }
     deps.onResult?.(agentRequest, { output, raw });
     deps.onTrace?.({
       type: "request.end",
@@ -180,6 +190,7 @@ async function runTextPhase(
       output,
       raw,
       ...(reasoning !== undefined ? { reasoning } : {}),
+      ...(usage !== undefined ? { usage } : {}),
     });
   } catch (error) {
     deps.onTrace?.({ type: "request.error", request: agentRequest, error });

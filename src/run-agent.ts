@@ -16,6 +16,7 @@ import {
   type SnapshotFrom,
 } from "xstate";
 import type { AgentMessage, AgentTools, ChosenEvent } from "./types.js";
+import { AgentError } from "./errors.js";
 import {
   findNonSerializableContextPaths,
   getAgentMessages,
@@ -30,9 +31,13 @@ import {
 export type { AgentStateRequest } from "./internal/state-request-pass.js";
 import { getAcceptedEvents, sanitizeEventToolName, type AgentSchemas } from "./events.js";
 import {
+  AGENT_USAGE_TOKEN_FIELDS,
+  extractCallUsage,
   isTextLogic,
   normalizeGeneratorResult,
   USER_INPUT_ACTOR,
+  type AgentCallUsage,
+  type AgentUsage,
   type AgentRequestExecutor,
   type AgentRequestExecutors,
   type AgentTextRequest,
@@ -41,7 +46,7 @@ import {
 } from "./text-logic.js";
 import {
   advancePlanLedger,
-  DecisionExhaustedError,
+  AgentDecisionExhaustedError,
   initialPlanLedger,
   isDecisionLogic,
   isPlanLogic,
@@ -61,8 +66,8 @@ import {
   getRegisteredAgentExecutionOptions,
   isUnboundPlaceholder,
 } from "./internal/registry.js";
-import { createReplayEntry, initEntry, ReplayMachineMismatchError } from "./effects.js";
-import { assertAgentLogEntry, type AgentLogEntry } from "./event-log-store.js";
+import { createReplayEntry, initEntry, AgentReplayMachineMismatchError } from "./effects.js";
+import { assertAgentLogEntry, type AgentLogEntry, type JsonValue } from "./event-log-store.js";
 
 // ─── runAgent (createActor wrapper) ───
 //
@@ -82,15 +87,16 @@ import { assertAgentLogEntry, type AgentLogEntry } from "./event-log-store.js";
  * machine simply takes no transition). Opt out with
  * {@link RunAgentOptions.onIllegalResumeEvent} `'ignore'`.
  */
-export class IllegalResumeEventError extends Error {
+export class AgentIllegalResumeEventError extends AgentError {
   readonly eventType: string;
   readonly acceptedTypes: string[];
   constructor(eventType: string, acceptedTypes: string[]) {
     super(
+      "illegal-resume-event",
       `runAgent: cannot resume with event '${eventType}' — the restored state does not accept ` +
         `it. Accepted event types: ${acceptedTypes.length > 0 ? acceptedTypes.join(", ") : "(none)"}.`,
     );
-    this.name = "IllegalResumeEventError";
+    this.name = "AgentIllegalResumeEventError";
     this.eventType = eventType;
     this.acceptedTypes = acceptedTypes;
   }
@@ -105,18 +111,19 @@ export class IllegalResumeEventError extends Error {
  * the snapshot may no longer resume cleanly. `from` is the snapshot's version,
  * `to` the current machine's.
  */
-export class SnapshotVersionMismatchError extends Error {
+export class AgentSnapshotVersionMismatchError extends AgentError {
   readonly from: string;
   readonly to: string;
   readonly machineId: string;
   constructor(from: string, to: string, machineId: string) {
     super(
+      "snapshot-version-mismatch",
       `runAgent: cannot resume snapshot stamped with machine version '${from}' against ` +
         `machine '${machineId}' at version '${to}' — the machine's structure changed since ` +
         `the snapshot was persisted. Provide options.migrateSnapshot to adapt it, or set ` +
         `options.onVersionMismatch to 'warn'/'ignore' to proceed anyway.`,
     );
-    this.name = "SnapshotVersionMismatchError";
+    this.name = "AgentSnapshotVersionMismatchError";
     this.from = from;
     this.to = to;
     this.machineId = machineId;
@@ -124,18 +131,19 @@ export class SnapshotVersionMismatchError extends Error {
 }
 
 /**
- * Thrown by {@link runAgentToCompletion} when the run settles `idle` instead of
+ * Thrown by {@link generateResult} when the run settles `idle` instead of
  * `done`: the machine paused for external input. Carries the idle `snapshot`
  * and `acceptedTypes` (the event types that could resume it, via
  * {@link getAcceptedEvents}). Use {@link runAgent} directly when idle is an
  * expected outcome you handle.
  */
-export class AgentIdleError extends Error {
+export class AgentIdleError extends AgentError {
   readonly snapshot: AnyMachineSnapshot;
   readonly acceptedTypes: string[];
   constructor(snapshot: AnyMachineSnapshot, acceptedTypes: string[]) {
     super(
-      `runAgentToCompletion: the machine paused (idle) instead of completing. Resume it by ` +
+      "agent-idle",
+      `generateResult: the machine paused (idle) instead of completing. Resume it by ` +
         `calling runAgent with one of these events: ${
           acceptedTypes.length > 0 ? acceptedTypes.join(", ") : "(none)"
         }.`,
@@ -211,6 +219,10 @@ export type AgentTraceEvent<TMachine extends AnyStateMachine = AnyStateMachine> 
        * request opted into the structured-output envelope's `reasoning` field.
        * Present only when the executor surfaced a string `reasoning`. */
       reasoning?: string;
+      /** This call's token usage, lifted off the raw executor result's `usage`.
+       * Present only when the executor reported it. The run-level total is
+       * {@link RunAgentResult.usage}. */
+      usage?: AgentCallUsage;
     }
   | { type: "request.error"; request: AgentStepRequest; error: unknown }
   | { type: "stream.chunk"; request: AgentRequest; chunk: string }
@@ -245,6 +257,184 @@ export type AgentTraceEvent<TMachine extends AnyStateMachine = AnyStateMachine> 
         }
     )
 );
+
+/**
+ * The JSON-safe projection of an {@link AgentTraceEvent} produced by
+ * {@link serializeTraceEvent}: the envelope fields are unchanged, and every
+ * payload field that can hold a live object (snapshots, machine events, request
+ * objects, raw SDK results, errors) is narrowed to a {@link JsonValue}. Safe to
+ * hand straight to `JSON.stringify` for a JSONL trace file.
+ */
+export type JsonSerializableTraceEvent = {
+  schemaVersion: typeof AGENT_TRACE_SCHEMA_VERSION;
+  runId: string;
+  seq: number;
+  timestamp: string;
+  machineId: string;
+  machineVersion: string;
+} & (
+  | { type: "run.start"; input?: JsonValue; snapshot?: JsonValue; event?: JsonValue }
+  | { type: "request.start"; request: JsonValue }
+  | {
+      type: "request.end";
+      request: JsonValue;
+      output: JsonValue;
+      /** Present only when `includeRaw` was set; the raw executor result, sanitized. */
+      raw?: JsonValue;
+      reasoning?: string;
+      /** Present only when the executor reported it; plain numbers, passed through as-is. */
+      usage?: JsonValue;
+    }
+  | { type: "request.error"; request: JsonValue; error: JsonValue }
+  | { type: "stream.chunk"; request: JsonValue; chunk: string }
+  | { type: "machine.transition"; snapshot: JsonValue; event: JsonValue; eventId?: string }
+  | { type: "emit"; event: JsonValue }
+  | { type: "run.end"; status: "done"; output: JsonValue; snapshot: JsonValue }
+  | {
+      type: "run.end";
+      status: "idle";
+      snapshot: JsonValue;
+      pendingUserInputs?: JsonValue;
+      persistedSnapshot?: JsonValue;
+    }
+  | {
+      type: "run.end";
+      status: "error";
+      cause: RunAgentErrorCause;
+      error: JsonValue;
+      snapshot: JsonValue;
+    }
+);
+
+// Envelope fields copied verbatim by serializeTraceEvent; every other field is sanitized.
+const TRACE_ENVELOPE_KEYS = [
+  "schemaVersion",
+  "runId",
+  "seq",
+  "timestamp",
+  "machineId",
+  "machineVersion",
+  "type",
+  "status",
+  "cause",
+  "eventId",
+  "reasoning",
+  "chunk",
+] as const;
+
+/**
+ * Best-effort JSON projection of an arbitrary value. Never throws: functions,
+ * symbols, `undefined`, and cyclic back-references are DROPPED (array holes
+ * become `null`), non-finite numbers become `null`, `bigint`s become strings,
+ * `Error`s become `{ name, message, stack?, code? }`, and anything with a
+ * `toJSON()` (e.g. `Date`) is projected through it — the same losses a
+ * `JSON.parse(JSON.stringify(...))` round-trip incurs, minus the throws.
+ */
+function toJsonValue(value: unknown, ancestors: readonly object[]): JsonValue | undefined {
+  if (value === null) {
+    return null;
+  }
+  const type = typeof value;
+  if (type === "string" || type === "boolean") {
+    return value as JsonValue;
+  }
+  if (type === "number") {
+    return Number.isFinite(value as number) ? (value as number) : null;
+  }
+  if (type === "bigint") {
+    return (value as bigint).toString();
+  }
+  if (type !== "object") {
+    // undefined, function, symbol
+    return undefined;
+  }
+
+  const object = value as object;
+  if (ancestors.includes(object)) {
+    return undefined;
+  }
+  const nextAncestors = [...ancestors, object];
+
+  if (object instanceof Error) {
+    const serialized: Record<string, JsonValue> = {
+      name: object.name,
+      message: object.message,
+    };
+    if (typeof object.stack === "string") {
+      serialized.stack = object.stack;
+    }
+    const code = (object as { code?: unknown }).code;
+    if (typeof code === "string") {
+      serialized.code = code;
+    }
+    const cause = toJsonValue((object as { cause?: unknown }).cause, nextAncestors);
+    if (cause !== undefined) {
+      serialized.cause = cause;
+    }
+    return serialized;
+  }
+
+  const toJSON = (object as { toJSON?: unknown }).toJSON;
+  if (typeof toJSON === "function") {
+    return toJsonValue((toJSON as () => unknown).call(object), nextAncestors);
+  }
+
+  if (Array.isArray(object)) {
+    return object.map((item) => toJsonValue(item, nextAncestors) ?? null);
+  }
+
+  const out: Record<string, JsonValue> = {};
+  for (const [key, item] of Object.entries(object)) {
+    const serializedItem = toJsonValue(item, nextAncestors);
+    if (serializedItem !== undefined) {
+      out[key] = serializedItem;
+    }
+  }
+  return out;
+}
+
+/**
+ * Projects an {@link AgentTraceEvent} into a guaranteed JSON-safe envelope —
+ * the form the trace stream is actually sold for (one `JSON.stringify` per line
+ * in a JSONL file). Live values are sanitized rather than trusted:
+ *
+ * - Snapshots (`run.start`, `machine.transition`, `run.end`) go through the
+ *   same JSON round-trip as {@link persistSnapshot}, so what lands on disk is
+ *   what a resume would see.
+ * - `request.end`'s `raw` (a provider SDK object, frequently cyclic) is DROPPED
+ *   unless `includeRaw` is set, in which case it is sanitized like everything
+ *   else.
+ * - Non-serializable values anywhere (functions, symbols, `undefined`, cyclic
+ *   back-references) are dropped; `Error`s become `{ name, message, stack?,
+ *   code? }` instead of `{}`. Nothing throws.
+ *
+ * @example
+ * ```ts
+ * await appendFile('trace.jsonl', JSON.stringify(serializeTraceEvent(event)) + '\n');
+ * ```
+ */
+export function serializeTraceEvent(
+  event: AgentTraceEvent,
+  options: { includeRaw?: boolean } = {},
+): JsonSerializableTraceEvent {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(event)) {
+    if (key === "raw" && !options.includeRaw) {
+      continue;
+    }
+    if ((TRACE_ENVELOPE_KEYS as readonly string[]).includes(key)) {
+      if (value !== undefined) {
+        out[key] = value;
+      }
+      continue;
+    }
+    const serialized = toJsonValue(value, []);
+    if (serialized !== undefined) {
+      out[key] = serialized;
+    }
+  }
+  return out as JsonSerializableTraceEvent;
+}
 
 type AgentTraceEventPayload<TMachine extends AnyStateMachine = AnyStateMachine> =
   AgentTraceEvent<TMachine> extends infer TEvent
@@ -295,7 +485,7 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
   /**
    * How to handle a resume `event` the restored state cannot accept (a
    * type-level check via {@link getAcceptedEvents}, only applied when resuming
-   * from a `snapshot`). `'throw'` (default) throws {@link IllegalResumeEventError}
+   * from a `snapshot`). `'throw'` (default) throws {@link AgentIllegalResumeEventError}
    * before delivering the event; `'ignore'` restores the older silent behavior
    * (the event is sent and the machine drops it). A type-legal event a guard
    * rejects is never an illegal resume event.
@@ -314,7 +504,7 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
   /**
    * How to handle a resume `snapshot` whose stamped `agentMeta.version` differs
    * from the current machine's version. `'throw'` (default) throws
-   * {@link SnapshotVersionMismatchError} with `from`/`to`; `'warn'`
+   * {@link AgentSnapshotVersionMismatchError} with `from`/`to`; `'warn'`
    * `console.warn`s once and proceeds; `'ignore'` proceeds silently. Ignored
    * when {@link migrateSnapshot} is provided (that runs instead), and never
    * triggers for an unstamped snapshot (no `agentMeta`).
@@ -357,10 +547,8 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
    * settles idle immediately, without the `setTimeout` heuristic. It does NOT
    * force-settle while agent work is in flight, and whole-machine idle semantics
    * are unchanged; a machine with no predicate falls back to the heuristic
-   * exactly as before. Declare your own signal, e.g.
-   * `(s) => s.hasTag('awaiting-review')`.
-   *
-   * Provisional name — may change before 2.0.
+   * exactly as before (with a one-time dev warning suggesting a predicate).
+   * Declare your own signal, e.g. `(s) => s.hasTag('awaiting-review')`.
    */
   isSuspended?: (snapshot: AnyMachineSnapshot) => boolean;
 
@@ -540,6 +728,16 @@ export type RunAgentResult<TMachine extends AnyStateMachine> = RunAgentOutcome<T
    * retain a self-contained history.
    */
   events: AgentLogEntry[];
+  /**
+   * Aggregated model-call usage for THIS run — `modelCalls` plus the token
+   * fields every executor reported (see {@link AgentUsage} for the
+   * partial-sum rule). Present on all three variants: an `idle` or `error`
+   * result accounts for the calls made before the run settled.
+   *
+   * A resumed run counts only its own calls, not the history behind
+   * `snapshot`/`events`.
+   */
+  usage: AgentUsage;
 };
 
 /**
@@ -547,11 +745,11 @@ export type RunAgentResult<TMachine extends AnyStateMachine> = RunAgentOutcome<T
  * - `'aborted'` — the run's `signal` fired.
  * - `'max-model-calls'` — the `maxModelCalls` budget was exceeded.
  * - `'decision-exhausted'` — the machine reached an error state whose error is
- *   (or wraps) a {@link DecisionExhaustedError} that no `onError` handled.
+ *   (or wraps) a {@link AgentDecisionExhaustedError} that no `onError` handled.
  * - `'machine'` — any other machine error state.
  * - `'stopped'` — the actor was stopped externally (`status === 'stopped'`).
  */
-type RunAgentErrorCause =
+export type RunAgentErrorCause =
   | "aborted"
   | "max-model-calls"
   | "decision-exhausted"
@@ -561,20 +759,20 @@ type RunAgentErrorCause =
 // Thrown internally by consumeModelCall() past the budget; caught by runAgent's settle loop to produce a 'max-model-calls' error result.
 let nextRunAgentTraceId = 1;
 
-class MaxModelCallsExceededError extends Error {
+class AgentMaxModelCallsExceededError extends AgentError {
   constructor() {
-    super("runAgent exceeded maxModelCalls.");
-    this.name = "MaxModelCallsExceededError";
+    super("max-model-calls-exceeded", "runAgent exceeded maxModelCalls.");
+    this.name = "AgentMaxModelCallsExceededError";
   }
 }
 
-// True when `error` is a DecisionExhaustedError or wraps one via its `cause`
+// True when `error` is a AgentDecisionExhaustedError or wraps one via its `cause`
 // chain (an onError re-throw, or a machine error that carries the original as
 // its cause). Bounded so a cyclic cause chain can't loop forever.
 function wrapsDecisionExhausted(error: unknown): boolean {
   let current: unknown = error;
   for (let depth = 0; depth < 10 && current != null; depth++) {
-    if (current instanceof DecisionExhaustedError) {
+    if (current instanceof AgentDecisionExhaustedError) {
       return true;
     }
     current = (current as { cause?: unknown }).cause;
@@ -897,6 +1095,8 @@ interface RunAgentBindContext {
    */
   onTrace?: (event: AgentTraceEventPayload, self?: unknown) => void;
   consumeModelCall: () => void;
+  /** Folds one completed call's reported usage into the run-level {@link AgentUsage}. No-op off the runAgent path (nothing settles there). */
+  recordUsage?: (usage: AgentCallUsage) => void;
   /** Assigned right after createActor (§2.6); read lazily by decision wraps. */
   actorHolder: { actorRef: AnyActorRef | undefined };
   /** Registered `setupAgent` schemas (for event `inputSchema`s), if any. */
@@ -981,6 +1181,13 @@ function wrapTextLogicForRunAgent(logic: TextLogic, runCtx: RunAgentBindContext)
       const rawReasoning = (raw as { reasoning?: unknown } | null | undefined)?.reasoning;
       const reasoning = typeof rawReasoning === "string" ? rawReasoning : undefined;
 
+      // Fold this call's reported tokens into the run-level AgentUsage, and
+      // surface them per-call on the request.end trace.
+      const usage = extractCallUsage(raw);
+      if (usage) {
+        runCtx.recordUsage?.(usage);
+      }
+
       runCtx.onResult?.(agentRequest, { output, raw });
       runCtx.onTrace?.(
         {
@@ -989,6 +1196,7 @@ function wrapTextLogicForRunAgent(logic: TextLogic, runCtx: RunAgentBindContext)
           output,
           raw,
           ...(reasoning !== undefined ? { reasoning } : {}),
+          ...(usage !== undefined ? { usage } : {}),
         },
         self,
       );
@@ -1011,6 +1219,10 @@ function createCountingDecide(runCtx: RunAgentBindContext, self: unknown): Agent
     runCtx.onTrace?.({ type: "request.start", request: attemptRequest }, self);
     try {
       const result = await runCtx.decide!(attemptRequest);
+      const usage = extractCallUsage(result);
+      if (usage) {
+        runCtx.recordUsage?.(usage);
+      }
       runCtx.onResult?.(attemptRequest, { output: result.event, raw: result });
       runCtx.onTrace?.(
         {
@@ -1018,6 +1230,7 @@ function createCountingDecide(runCtx: RunAgentBindContext, self: unknown): Agent
           request: attemptRequest,
           output: result.event,
           raw: result,
+          ...(usage !== undefined ? { usage } : {}),
         },
         self,
       );
@@ -1526,6 +1739,7 @@ export async function runAgent<TMachine extends AnyStateMachine>(
   // Dev-only serialization guard: warn at most once per run when idle context
   // holds values that won't survive snapshot persist/resume (see settleIdle).
   let warnedNonSerializable = false;
+  let warnedHeuristicIdle = false;
   const runId = `run_${nextRunAgentTraceId++}`;
   let traceSeq = 0;
 
@@ -1555,14 +1769,30 @@ export async function runAgent<TMachine extends AnyStateMachine>(
 
   const consumeModelCall = () => {
     if (budgetExceeded) {
-      throw new MaxModelCallsExceededError();
+      throw new AgentMaxModelCallsExceededError();
+    }
+    // Count only calls the budget actually admits, so `usage.modelCalls`
+    // reports calls MADE (the rejected attempt never reaches an executor).
+    if (modelCallCount + 1 > maxModelCalls) {
+      budgetExceeded = true;
+      throw new AgentMaxModelCallsExceededError();
     }
     modelCallCount += 1;
-    if (modelCallCount > maxModelCalls) {
-      budgetExceeded = true;
-      throw new MaxModelCallsExceededError();
+  };
+
+  // Run-level usage aggregation: every executor-reported per-call usage folds
+  // in here (see AgentUsage). Token fields are partial sums — a field stays
+  // undefined until some call reports it. Scoped to THIS run only.
+  const tokenTotals: Partial<Record<keyof AgentCallUsage, number>> = {};
+  const recordUsage = (usage: AgentCallUsage) => {
+    for (const field of AGENT_USAGE_TOKEN_FIELDS) {
+      const value = usage[field];
+      if (typeof value === "number" && Number.isFinite(value)) {
+        tokenTotals[field] = (tokenTotals[field] ?? 0) + value;
+      }
     }
   };
+  const runUsage = (): AgentUsage => ({ ...tokenTotals, modelCalls: modelCallCount });
 
   // Dev-only: on idle settle, warn once if the snapshot's context holds values
   // that won't round-trip through JSON persistence. Skipped in production and
@@ -1619,6 +1849,7 @@ export async function runAgent<TMachine extends AnyStateMachine>(
     onResult: options.onResult,
     onTrace: onTrace as RunAgentBindContext["onTrace"],
     consumeModelCall,
+    recordUsage,
     actorHolder,
     schemas: getRegisteredAgentExecutionOptions(machine).schemas,
   };
@@ -1697,8 +1928,8 @@ export async function runAgent<TMachine extends AnyStateMachine>(
   // (`setupAgent({ isSuspended })`, read off the original machine so it survives
   // the provide/rebind above) → the timing heuristic (`() => false` here — the
   // inspect handler falls through to `scheduleIdleCheck`).
-  const isSuspended =
-    options.isSuspended ?? getMachineSuspensionPredicate(machine) ?? (() => false);
+  const declaredSuspensionPredicate = options.isSuspended ?? getMachineSuspensionPredicate(machine);
+  const isSuspended = declaredSuspensionPredicate ?? (() => false);
 
   // Version stamping (§ item 2): when resuming, compare the incoming snapshot's
   // stamped version against this machine's. A mismatch runs `migrateSnapshot`
@@ -1717,7 +1948,7 @@ export async function runAgent<TMachine extends AnyStateMachine>(
       } else {
         const mode = options.onVersionMismatch ?? "throw";
         if (mode === "throw") {
-          throw new SnapshotVersionMismatchError(from, machineVersion, machineId);
+          throw new AgentSnapshotVersionMismatchError(from, machineVersion, machineId);
         }
         if (mode === "warn") {
           console.warn(
@@ -1772,7 +2003,7 @@ export async function runAgent<TMachine extends AnyStateMachine>(
     );
     const eventType = (options.event as { type: string }).type;
     if (!acceptedTypes.includes(eventType)) {
-      throw new IllegalResumeEventError(eventType, acceptedTypes);
+      throw new AgentIllegalResumeEventError(eventType, acceptedTypes);
     }
   }
 
@@ -1788,7 +2019,7 @@ export async function runAgent<TMachine extends AnyStateMachine>(
       );
     }
     if (entry.machineId !== machineId || entry.machineVersion !== machineVersion) {
-      throw new ReplayMachineMismatchError(
+      throw new AgentReplayMachineMismatchError(
         entry.id,
         entry.index,
         { machineId, machineVersion },
@@ -1839,7 +2070,11 @@ export async function runAgent<TMachine extends AnyStateMachine>(
         return;
       }
       settled = true;
-      const result = { ...outcome, events: [...replayEvents] } as RunAgentResult<TMachine>;
+      const result = {
+        ...outcome,
+        events: [...replayEvents],
+        usage: runUsage(),
+      } as RunAgentResult<TMachine>;
       if (idleTimer !== undefined) {
         clearTimeout(idleTimer);
       }
@@ -1942,6 +2177,7 @@ export async function runAgent<TMachine extends AnyStateMachine>(
       generateText: runCtx.generateText,
       decide: runCtx.decide ? createCountingDecide(runCtx, undefined) : undefined,
       consumeModelCall,
+      recordUsage,
       nextRequestId: () => `interpret_${++interpretSeq}`,
       onTrace,
       onResult: runCtx.onResult,
@@ -2014,6 +2250,20 @@ export async function runAgent<TMachine extends AnyStateMachine>(
         const current = actor.getSnapshot() as AnyMachineSnapshot;
         if (isIdleSnapshot(current, { ignoreUserInputChildren: userInputIsPlaceholder })) {
           if (!maybeInterpret(current)) {
+            if (
+              !declaredSuspensionPredicate &&
+              current.status === "active" &&
+              !warnedHeuristicIdle &&
+              process.env.NODE_ENV !== "production"
+            ) {
+              warnedHeuristicIdle = true;
+              console.warn(
+                `[@statelyai/agent] runAgent settled idle via the timing heuristic (no ` +
+                  `suspension predicate declared). This is best-effort; for deterministic ` +
+                  `idle detection, declare setupAgent({ isSuspended }) or pass ` +
+                  `runAgent(machine, { isSuspended }), e.g. (s) => s.hasTag('waiting').`,
+              );
+            }
             settleIdle(current);
           }
         }
@@ -2081,7 +2331,7 @@ export async function runAgent<TMachine extends AnyStateMachine>(
         if (snapshot.status === "error") {
           // Reaching an error state means no `onError` transition handled the
           // failure (a handled one transitions away instead of erroring). So a
-          // DecisionExhaustedError surfacing here is genuinely unhandled.
+          // AgentDecisionExhaustedError surfacing here is genuinely unhandled.
           settle({
             status: "error",
             cause: runErrorCause(snapshot.error),
@@ -2172,10 +2422,24 @@ export async function runAgent<TMachine extends AnyStateMachine>(
 }
 
 /**
- * Runs an agent machine to a **final state** and returns its output, for
- * run-to-done flows where an idle pause is unexpected. Wraps {@link runAgent}:
+ * The resolved value of {@link generateResult}: the `done`-narrowed
+ * {@link RunAgentResult} — `output` plus run metadata (`snapshot`, replayable
+ * `events`, aggregated `usage`), mirroring how the AI SDK's `generateText`
+ * resolves `text` alongside its call metadata.
+ */
+export type GenerateResult<TMachine extends AnyStateMachine> = Extract<
+  RunAgentResult<TMachine>,
+  { status: "done" }
+>;
+
+/**
+ * Runs an agent machine to a **final state**, for run-to-done flows where an
+ * idle pause is unexpected. Wraps {@link runAgent}:
  *
- * - `done` → resolves with `result.output` (the machine's `OutputFrom`).
+ * - `done` → resolves with the done result: `result.output` (the machine's
+ *   `OutputFrom`) plus metadata — `result.snapshot`, the replayable
+ *   `result.events`, and the aggregated `result.usage` — the same shape
+ *   `generateText` users expect (`text` + call metadata).
  * - `idle` → throws {@link AgentIdleError} carrying the idle snapshot and the
  *   event types that could resume it.
  * - `error` → throws `result.error` when it is an `Error`; otherwise wraps it
@@ -2183,16 +2447,16 @@ export async function runAgent<TMachine extends AnyStateMachine>(
  *   `.error` is the raw thrown value.
  *
  * Use {@link runAgent} directly when idle is an expected outcome you handle
- * (human-in-the-loop, resumable flows); use `runAgentToCompletion` when the
+ * (human-in-the-loop, resumable flows); use `generateResult` when the
  * machine is meant to run straight through to a final state.
  */
-export async function runAgentToCompletion<TMachine extends AnyStateMachine>(
+export async function generateResult<TMachine extends AnyStateMachine>(
   machine: TMachine,
   options: RunAgentOptions<TMachine>,
-): Promise<OutputFrom<TMachine>> {
+): Promise<GenerateResult<TMachine>> {
   const result = await runAgent(machine, options);
   if (result.status === "done") {
-    return result.output;
+    return result;
   }
   if (result.status === "idle") {
     const acceptedTypes = getAcceptedEvents(result.snapshot as AnyMachineSnapshot, {
@@ -2204,7 +2468,7 @@ export async function runAgentToCompletion<TMachine extends AnyStateMachine>(
   if (result.error instanceof Error) {
     throw result.error;
   }
-  const wrapped = new Error(`runAgentToCompletion: run failed with cause '${result.cause}'.`);
+  const wrapped = new Error(`generateResult: run failed with cause '${result.cause}'.`);
   (wrapped as { cause?: unknown }).cause = result.cause;
   (wrapped as { error?: unknown }).error = result.error;
   throw wrapped;

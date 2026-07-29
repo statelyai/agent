@@ -8,11 +8,7 @@
     "url": "https://github.com/langchain-ai/open_deep_research"
   },
   "comparison": {
-    "targets": [
-      "Open Deep Research",
-      "Gemini Fullstack LangGraph",
-      "local-deep-researcher"
-    ],
+    "targets": ["Open Deep Research", "Gemini Fullstack LangGraph", "local-deep-researcher"],
     "purpose": "Plan three complementary queries, research concurrently, reflect on coverage, perform one targeted follow-up round, then synthesize a sourced report. Search providers remain host-owned."
   },
   "starters": [

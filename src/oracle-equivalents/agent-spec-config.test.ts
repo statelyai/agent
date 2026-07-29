@@ -37,7 +37,7 @@ describe("Oracle Agent Spec-style static workflows", () => {
     // Adapted from Oracle Agent Spec
     // pyagentspec/tests/agentspec_configs/example_serialized_flow_with_branching_node.yaml
     // Oracle Agent Spec is distributed under Apache-2.0 or UPL-1.0.
-    const machine = setupAgent.fromConfig(
+    const { machine } = setupAgent.fromConfig(
       {
         id: "oracle-branching-equivalent",
         schemas: {
@@ -296,7 +296,7 @@ describe("Oracle Agent Spec-style static workflows", () => {
         },
         { compileSchema: ajvCompiler() },
       )
-      .provide({
+      .machine.provide({
         actors: {
           node12: createAsyncLogic({
             run: async () => ({

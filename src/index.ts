@@ -1,16 +1,33 @@
+export { AgentError } from "./errors.js";
 export { appendMessages, messagesSchema } from "./messages.js";
 export { createAgentSchemas, setupAgent } from "./setup-agent.js";
-export { DecisionExhaustedError } from "./decision.js";
+export {
+  AgentDecisionExhaustedError,
+  PLAN_DONE_EVENT_TYPE,
+  renderDecisionAttempts,
+  resolveDecision,
+} from "./decision.js";
 export { getAcceptedEvents, parseAgentEvent } from "./events.js";
-export { createTextLogic } from "./text-logic.js";
+export {
+  bindRequestExecutor,
+  buildEnvelopeSchema,
+  createTextLogic,
+  getAgentOutputMode,
+  parseModelRef,
+  parseOutput,
+  parseStructuredEnvelope,
+} from "./text-logic.js";
+export { executeAgentRequest } from "./steps.js";
+export type { AgentPlanRequest, AgentRequest, AgentStepRequest } from "./steps.js";
 export {
   AGENT_TRACE_SCHEMA_VERSION,
   AgentIdleError,
-  IllegalResumeEventError,
+  AgentIllegalResumeEventError,
   inspectTransitions,
   runAgent,
-  runAgentToCompletion,
-  SnapshotVersionMismatchError,
+  generateResult,
+  AgentSnapshotVersionMismatchError,
+  serializeTraceEvent,
   traceTransitions,
 } from "./run-agent.js";
 export { createAgentRun } from "./agent-run.js";
@@ -25,7 +42,15 @@ export {
   lintAgentMachine,
   simulateAgent,
 } from "./verify.js";
-export { getAgentMessages, getStateMeta, persistSnapshot } from "./utils.js";
+export {
+  getAgentMessages,
+  getJsonSchema,
+  getJsonSchemaSync,
+  getMachineStructuralHash,
+  getStateMeta,
+  isStandardSchema,
+  persistSnapshot,
+} from "./utils.js";
 export { assistantMessage, systemMessage, toolMessage, userMessage } from "./utils.js";
 export {
   AGENT_EVENT_SCHEMA_VERSION,
@@ -44,8 +69,8 @@ export type {
 } from "./event-log-store.js";
 export {
   AGENT_INIT_EVENT_TYPE,
-  ReplayDivergenceError,
-  ReplayMachineMismatchError,
+  AgentReplayDivergenceError,
+  AgentReplayMachineMismatchError,
   createReplayEntry,
   diffEventLogs,
   getAgentEffects,
@@ -70,10 +95,13 @@ export type {
   AgentDecisionExecutor,
   AgentPlanInput,
   AgentPlanOutput,
+  DecisionLogicConfig,
+  ResolveDecisionOptions,
 } from "./decision.js";
 export type {
-  AgentModelMap,
   AgentModelRef,
+  AgentOutputMode,
+  StructuredOutputEnvelope,
   AgentTextRequest,
   AiSdkShapedStreamResult,
   AiSdkShapedTextResult,
@@ -81,14 +109,13 @@ export type {
   AgentRequestExecutorInfo,
   AgentRequestExecutorResult,
   AgentRequestExecutors,
-  AgentRequestMode,
+  AgentUsage,
+  AgentCallUsage,
   AgentUserInput,
   TextLogic,
   TextLogicConfig,
   TextLogicExecuteArgs,
   TextLogicExecutor,
-  TextLogicInput,
-  TextLogicOutput,
 } from "./text-logic.js";
 export type {
   AgentRequestOptions,
@@ -103,9 +130,12 @@ export type {
   AgentTraceEvent,
   AgentUserInputExecutor,
   InspectedActorRef,
+  JsonSerializableTraceEvent,
   PendingUserInput,
   RunAgentOptions,
+  GenerateResult,
   RunAgentResult,
+  RunAgentErrorCause,
 } from "./run-agent.js";
 export type {
   AgentLintDiagnostic,
@@ -130,47 +160,34 @@ export type {
   AgentWorkflowRequestConfig,
   AgentWorkflowTransitionConfig,
   FromConfigOptions,
+  FromConfigResult,
   SchemaCompiler,
 } from "./workflow-config.js";
-export type {
-  AgentMachine,
-  AgentMachineConfig,
-  AgentRequestConfig,
-  AgentSchemaPack,
-  AgentSetupStateSchema,
-  AgentStateNarrowing,
-} from "./setup-agent.js";
-export type { DecisionAttempt, DecisionLogic, PlanLogic } from "./decision.js";
+export type { AgentSchemaPack } from "./setup-agent.js";
+// `PlanLogic` is re-exported not for direct use (its constructor is `@internal`)
+// but because it appears in the inferred type of a machine using `agent.plan`;
+// without it, consumers' declaration emit fails with TS4023 "cannot be named".
+export type { DecisionAttempt, PlanLogic } from "./decision.js";
 
 export type {
-  AgentEventSchemaInput,
-  AgentEventSchemaInputMap,
   AgentMessage,
   AgentSnapshotStore,
   AgentTool,
   AgentToolChoice,
   AgentToolDescriptor,
   AgentToolExecute,
-  AgentToolSchema,
   AgentTools,
-  AllowedEventPattern,
   AllowedEvents,
   AssistantMessage,
   ChosenEvent,
-  DataContent,
-  EventPayload,
-  EventUnion,
   FilePart,
   ImagePart,
   InferOutput,
-  NormalizedEventSchemas,
-  ProviderOptions,
   StandardSchemaV1,
   SystemMessage,
   TextPart,
   ToolCallPart,
   ToolMessage,
-  ToolResultOutput,
   ToolResultPart,
   UserMessage,
 } from "./types.js";

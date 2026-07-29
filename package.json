@@ -27,44 +27,14 @@
         "default": "./dist/ai-sdk.cjs"
       }
     },
-    "./openai-compat": {
+    "./sqlite": {
       "import": {
-        "types": "./dist/openai-compat.d.mts",
-        "default": "./dist/openai-compat.mjs"
+        "types": "./dist/sqlite.d.mts",
+        "default": "./dist/sqlite.mjs"
       },
       "require": {
-        "types": "./dist/openai-compat.d.cts",
-        "default": "./dist/openai-compat.cjs"
-      }
-    },
-    "./steps": {
-      "import": {
-        "types": "./dist/steps.d.mts",
-        "default": "./dist/steps.mjs"
-      },
-      "require": {
-        "types": "./dist/steps.d.cts",
-        "default": "./dist/steps.cjs"
-      }
-    },
-    "./adapter": {
-      "import": {
-        "types": "./dist/adapter.d.mts",
-        "default": "./dist/adapter.mjs"
-      },
-      "require": {
-        "types": "./dist/adapter.d.cts",
-        "default": "./dist/adapter.cjs"
-      }
-    },
-    "./zod": {
-      "import": {
-        "types": "./dist/zod.d.mts",
-        "default": "./dist/zod.mjs"
-      },
-      "require": {
-        "types": "./dist/zod.d.cts",
-        "default": "./dist/zod.cjs"
+        "types": "./dist/sqlite.d.cts",
+        "default": "./dist/sqlite.cjs"
       }
     },
     "./agent-workflow.json": "./schemas/agent-workflow.json"
@@ -145,14 +115,10 @@
   },
   "peerDependencies": {
     "ai": "^6.0.67",
-    "xstate": ">=6.0.0-alpha.25 <6.0.0",
-    "zod": "^3.25.0 || ^4.0.0"
+    "xstate": ">=6.0.0-alpha.25 <6.0.0"
   },
   "peerDependenciesMeta": {
     "ai": {
-      "optional": true
-    },
-    "zod": {
       "optional": true
     }
   },

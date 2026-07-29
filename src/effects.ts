@@ -39,6 +39,7 @@ import {
   type JsonValue,
 } from "./event-log-store.js";
 import { getMachineStructuralHash } from "./utils.js";
+import { AgentError } from "./errors.js";
 import {
   getRegisteredAgentExecutionOptions,
   type AgentExecutionOptions,
@@ -559,7 +560,7 @@ export interface ReplayOptions extends Partial<AgentExecutionOptions> {
   verify?: boolean | "strict";
 }
 
-export class ReplayMachineMismatchError extends Error {
+export class AgentReplayMachineMismatchError extends AgentError {
   constructor(
     readonly eventId: string,
     readonly index: number,
@@ -567,15 +568,16 @@ export class ReplayMachineMismatchError extends Error {
     readonly actual: { machineId: string; machineVersion: string },
   ) {
     super(
+      "replay-machine-mismatch",
       `Replay entry '${eventId}' at index ${index} targets machine ` +
         `'${actual.machineId}'@'${actual.machineVersion}', expected ` +
         `'${expected.machineId}'@'${expected.machineVersion}'.`,
     );
-    this.name = "ReplayMachineMismatchError";
+    this.name = "AgentReplayMachineMismatchError";
   }
 }
 
-export class ReplayDivergenceError extends Error {
+export class AgentReplayDivergenceError extends AgentError {
   constructor(
     readonly eventId: string,
     readonly index: number,
@@ -584,12 +586,13 @@ export class ReplayDivergenceError extends Error {
     readonly actual?: string,
   ) {
     super(
+      "replay-divergence",
       kind === "missing-verification"
         ? `Replay entry '${eventId}' at index ${index} has no verification hashes.`
         : `Replay diverged after '${eventId}' at index ${index} (${kind}): ` +
             `expected '${expected}', got '${actual}'.`,
     );
-    this.name = "ReplayDivergenceError";
+    this.name = "AgentReplayDivergenceError";
   }
 }
 
@@ -650,7 +653,7 @@ export function replay<TMachine extends AnyStateMachine>(
     }
     eventIds.add(entry.id);
     if (entry.machineId !== machineId || entry.machineVersion !== machineVersion) {
-      throw new ReplayMachineMismatchError(
+      throw new AgentReplayMachineMismatchError(
         entry.id,
         entry.index,
         { machineId, machineVersion },
@@ -746,13 +749,13 @@ function verifyEntry(
   }
   if (!entry.verification) {
     if (mode === "strict") {
-      throw new ReplayDivergenceError(entry.id, entry.index, "missing-verification");
+      throw new AgentReplayDivergenceError(entry.id, entry.index, "missing-verification");
     }
     return;
   }
   const actual = replayVerification(snapshot, effects);
   if (actual.stateHash !== entry.verification.stateHash) {
-    throw new ReplayDivergenceError(
+    throw new AgentReplayDivergenceError(
       entry.id,
       entry.index,
       "state",
@@ -761,7 +764,7 @@ function verifyEntry(
     );
   }
   if (actual.effectsHash !== entry.verification.effectsHash) {
-    throw new ReplayDivergenceError(
+    throw new AgentReplayDivergenceError(
       entry.id,
       entry.index,
       "effects",

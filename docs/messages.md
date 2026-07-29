@@ -63,18 +63,21 @@ const messages = [
 
 ## Store messages in context
 
-Messages are plain context state. Declare a `messages` field validated by `messagesSchema`, and grow it over transitions:
+Messages are plain context state. Declare the `messages` field with `z.custom<AgentMessage[]>`, and grow it over transitions:
 
 ```ts
-import { messagesSchema, setupAgent } from "@statelyai/agent";
+import { setupAgent, type AgentMessage } from "@statelyai/agent";
+import { z } from "zod";
 
 const agentSetup = setupAgent({
   context: z.object({
     prompt: z.string(),
-    messages: messagesSchema,
+    messages: z.custom<AgentMessage[]>((value) => Array.isArray(value)),
   }),
 });
 ```
+
+`z.custom` keeps the exact `AgentMessage[]` type at author time with a shallow runtime check, which is enough when the array is built from the helpers above. Do not put `messagesSchema` inside a `z.object`: it is a Standard Schema value, not a Zod type, so Zod infers the field as `unknown`.
 
 Append with `appendMessages`, which returns a transition result adding one or more messages. Pass a message, an array, or a function of `{ context, event }`:
 
@@ -89,20 +92,21 @@ on: {
 
 A request that needs history sends it through `messages` instead of a bare `prompt`. [examples/email-drafter/index.ts](../examples/email-drafter/index.ts) keeps a running `messages` array in context and feeds it to a `createTextLogic` request.
 
-### A lightweight messages field
+### Validating messages with messagesSchema
 
-The `messagesSchema` validator gives full structural validation of each part. When the array comes from library helpers you already trust, a shallow `Array.isArray` check is enough: use `zodAgentMessages()` from `@statelyai/agent/zod` (optional `zod` peer), which returns a `z.ZodType<AgentMessage[]>` with the exact type at author time.
+`messagesSchema` (root export) is a `StandardSchemaV1<AgentMessage[]>` that checks every message has a known `role` and that `content` is a string or an array of known parts. Use it as a **standalone** validator, on messages arriving from outside your process (an HTTP body, a stored transcript, a client resume payload):
 
 ```ts
-import { zodAgentMessages } from '@statelyai/agent/zod';
+import { messagesSchema, type AgentMessage } from "@statelyai/agent";
 
-// inside setupAgent context
-context: z.object({
-  messages: zodAgentMessages(),
-}),
+const result = messagesSchema["~standard"].validate(await request.json());
+if (result.issues) {
+  throw new Error(result.issues.map((issue) => issue.message).join("; "));
+}
+const messages: AgentMessage[] = result.value;
 ```
 
-The no-dependency fallback is the same recipe inline: `messages: z.custom<AgentMessage[]>((v) => Array.isArray(v))`.
+It is also usable directly as a schema wherever a Standard Schema is accepted (a `createAgentSchemas` pack field, a `createTextLogic` input schema of its own). Just never nest it inside `z.object`.
 
 ## Persisting messages
 

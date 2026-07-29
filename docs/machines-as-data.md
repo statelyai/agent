@@ -12,8 +12,13 @@ An agent machine can be pure data. Describe it as a JSON or YAML config and hand
 ```ts
 import { setupAgent } from "@statelyai/agent";
 
-const machine = setupAgent.fromConfig(config, { compileSchema });
+const { machine, schemas } = setupAgent.fromConfig(config, { compileSchema });
 ```
+
+`fromConfig(...)` returns two things:
+
+- `machine`: the runnable XState machine, ready for `runAgent(...)`.
+- `schemas`: the compiled `AgentSchemaPack` (`context`, `events`, `emitted`, `input`, `output`, `meta` as Standard Schema validators), for host-side validation and tooling.
 
 A config is portable: generate it from a model, store it in a database row, or edit it in a visual builder, and it runs exactly like a hand-authored [machine](machines.md).
 
@@ -31,7 +36,7 @@ Point an editor, form generator, or validation step at it to catch a malformed c
 
 ## Example: a support ticket config
 
-This config drives the examples below: the model triages a ticket (escalate or reply), drafts a reply, then waits for a human to approve or reject. It is a real `.json` file at [examples/json-agent/workflow.json](../examples/json-agent/workflow.json), run by [examples/json-agent/index.ts](../examples/json-agent/index.ts). As YAML for readability:
+This config drives the examples below: the model triages a ticket (escalate or reply), drafts a reply, then waits for a human to approve or reject. The example ships the equivalent JSON at [examples/json-agent/workflow.json](../examples/json-agent/workflow.json), run by [examples/json-agent/index.ts](../examples/json-agent/index.ts). As YAML for readability:
 
 ```yaml
 id: support-ticket-json
@@ -155,8 +160,67 @@ const ajvCompileSchema: SchemaCompiler = (jsonSchema, name): StandardSchemaV1 =>
   };
 };
 
-const machine = setupAgent.fromConfig(config, { compileSchema: ajvCompileSchema });
+const { machine } = setupAgent.fromConfig(config, { compileSchema: ajvCompileSchema });
 ```
+
+## Requests: tools and reasoning
+
+<!-- Request shape from schemas/agent-workflow.json $defs.Request -->
+
+A `requests` entry can also declare:
+
+- `tools`: a map of tool name to `{ description?, inputSchema?, outputSchema? }` (JSON Schemas), passed to the model alongside the request.
+- `toolChoice`: `"auto"`, `"none"`, `"required"`, or `{ type: "tool", name }`.
+- `reasoning: true`: opts into the structured-output envelope's `reasoning` field.
+
+```yaml
+requests:
+  lookupOrder:
+    model: openai/gpt-5.4-mini
+    prompt: "{{ context.ticket }}"
+    reasoning: true
+    toolChoice: auto
+    tools:
+      searchOrders:
+        description: Find orders by customer email.
+        inputSchema:
+          type: object
+          properties: { email: { type: string } }
+          required: [email]
+        outputSchema:
+          type: object
+          properties: { orderIds: { type: array, items: { type: string } } }
+    input: { type: object, properties: { ticket: { type: string } } }
+    output: { type: object, properties: { summary: { type: string } } }
+```
+
+## Named guards and actions
+
+<!-- FromConfigOptions.guards / .actions from src/workflow-config.ts -->
+
+A config cannot carry functions, so anything beyond a truthy dot-path guard goes through a named reference plus a host implementation.
+
+- A string `guard` **without** `{{ }}` is a named guard reference. Implement it in `fromConfig(config, { guards })`, called with `{ context, event }`, returning a boolean.
+- An action `{ type, params }` is a named action reference. Implement it in `fromConfig(config, { actions })`, called with the template-resolved `params` as its only argument. Pull context/event data in via `{{ }}` templates on `params`.
+
+```yaml
+awaitingApproval:
+  on:
+    APPROVE:
+      target: resolved
+      guard: isReady
+      actions: { type: notify, params: { ticket: "{{ context.ticket }}" } }
+```
+
+```ts
+const { machine } = setupAgent.fromConfig(config, {
+  compileSchema: ajvCompileSchema,
+  guards: { isReady: ({ context }) => Boolean(context.reply) },
+  actions: { notify: (params) => console.log("approved", params.ticket) },
+});
+```
+
+A named reference with no implementation is a build-time error, never a silently dropped guard or action.
 
 ## Running a config
 
@@ -191,6 +255,8 @@ result = await runAgent(machine, { snapshot, event: { type: "APPROVE" }, executo
 ## Expressions
 
 The config is data, not code. Any value is a JSON literal or a whole-string `"{{ }}"` expression: a dot path resolved against `input`, `context`, and `event`. For example, `"{{ context.ticket }}"` reads `context.ticket`. No code, no `eval`: the resolver walks the path and returns the value. Because an expression can only read, a config from a model, database, or visual editor cannot do anything a hand-authored machine could not.
+
+Two fields are exempt: state, invoke, and transition `meta` and a request's `toolChoice` are passed through verbatim, not template-evaluated. A `{{ }}` string there stays a literal string.
 
 ## Decisions from JSON
 
@@ -241,10 +307,11 @@ Declare emitted event payloads under `schemas.emitted`. Hosts receive them throu
 The data form is narrower than TypeScript authoring, by design:
 
 - Expressions are simple dot paths (`{{ context.foo.bar }}`), not arbitrary JavaScript.
-- Guard expressions are **truthy-only**: no `!=`, no comparisons, no boolean operators.
-- Function-valued fields (`allowedEvents`, `guard`, `input` as functions) cannot appear in JSON.
+- Guard expressions are **truthy-only**: no `!=`, no comparisons, no boolean operators. For anything else, use a named guard (above).
+- Function-valued fields (`allowedEvents`, `input` as functions) cannot appear in JSON.
+- `meta` and `toolChoice` are not template-evaluated.
 
-For comparisons, computed guards, or function-valued fields, author in TypeScript with `setupAgent(...)` and Zod (or any Standard Schema).
+For comparisons or function-valued fields with no named-reference escape hatch, author in TypeScript with `setupAgent(...)` and Zod (or any Standard Schema).
 
 ## Verifying a generated machine
 

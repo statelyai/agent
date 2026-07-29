@@ -1,4 +1,5 @@
 import type { EventObject } from "xstate";
+import { AgentError } from "./errors.js";
 
 /** The durable replay-entry envelope version. */
 export const AGENT_EVENT_SCHEMA_VERSION = 1 as const;
@@ -51,12 +52,15 @@ export interface AgentLogEntry {
 }
 
 /** A precise failure when an entry would not survive a JSON round-trip. */
-export class NonSerializableAgentEventError extends TypeError {
+export class NonSerializableAgentEventError extends AgentError {
   readonly path: string;
   readonly valueType: string;
 
   constructor(path: string, valueType: string) {
-    super(`Agent event field '${path}' is not JSON-serializable (${valueType}).`);
+    super(
+      "non-serializable-event",
+      `Agent event field '${path}' is not JSON-serializable (${valueType}).`,
+    );
     this.name = "NonSerializableAgentEventError";
     this.path = path;
     this.valueType = valueType;
@@ -280,13 +284,14 @@ export interface AgentEventLogStore {
  * length is not the `expectedIndex` the writer held — a concurrent writer
  * appended first. `actualLength` is the length core found.
  */
-export class AgentEventLogConflictError extends Error {
+export class AgentEventLogConflictError extends AgentError {
   readonly threadId: string;
   readonly expectedIndex: number;
   readonly actualLength: number;
 
   constructor(threadId: string, expectedIndex: number, actualLength: number) {
     super(
+      "event-log-conflict",
       `AgentEventLogStore.append: length conflict on thread "${threadId}": ` +
         `expected length ${expectedIndex} but found ${actualLength} — a concurrent writer won.`,
     );

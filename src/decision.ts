@@ -13,10 +13,12 @@ import type {
   StandardSchemaV1,
 } from "./types.js";
 import { userMessage, validateSchemaSync } from "./utils.js";
+import { AgentError } from "./errors.js";
 import {
   DECIDE_ACTOR,
   PLAN_ACTOR,
   resolveTextLogicValue,
+  type AgentCallUsage,
   type ResolveTextLogicValue,
 } from "./text-logic.js";
 import { isEventPattern, sanitizeEventToolName, type AgentEventDescriptor } from "./events.js";
@@ -473,7 +475,7 @@ export function createDecisionLogic<
       // Omitted allowedEvents means "all currently-legal events," but with
       // no snapshot that set is unknowable here — fail fast instead of
       // silently resolving to an empty candidate list (guaranteed
-      // DecisionExhaustedError).
+      // AgentDecisionExhaustedError).
       if (
         resolveAllowedEventTypes(config.allowedEvents as AllowedEvents | undefined, input) ===
         undefined
@@ -591,15 +593,16 @@ export interface DecisionAttempt {
  * diagnostics; a machine typically routes this via the decision invoke's
  * `onError`.
  */
-export class DecisionExhaustedError extends Error {
-  attempts: DecisionAttempt[];
+export class AgentDecisionExhaustedError extends AgentError {
+  readonly attempts: DecisionAttempt[];
 
   constructor(attempts: DecisionAttempt[]) {
     super(
+      "decision-exhausted",
       `Decision exhausted after ${attempts.length} attempt${attempts.length === 1 ? "" : "s"}: ` +
         attempts.map((attempt) => attempt.reason).join("; "),
     );
-    this.name = "DecisionExhaustedError";
+    this.name = "AgentDecisionExhaustedError";
     this.attempts = attempts;
   }
 }
@@ -635,12 +638,18 @@ export function renderDecisionAttempts(
  * adapter business; core only validates and retries the returned choice (see
  * {@link resolveDecision}). The optional `reason` is carried through to
  * `onResult`/event-sourcing but never affects validation. Like text
- * executors' `{ output, ...extras }` envelope, any extra keys (usage, finish
- * reason, …) flow untouched to `onResult`'s `raw`.
+ * executors' `{ output, ...extras }` envelope, any extra keys (finish reason,
+ * …) flow untouched to `onResult`'s `raw`; `usage` is the one core reads —
+ * report this attempt's tokens there and `runAgent` folds them into the run's
+ * aggregated {@link AgentUsage}.
  */
-export type AgentDecisionExecutor = (
-  request: AgentDecisionRequest,
-) => PromiseLike<{ event: ChosenEvent; reason?: string; [key: string]: unknown }>;
+export type AgentDecisionExecutor = (request: AgentDecisionRequest) => PromiseLike<{
+  event: ChosenEvent;
+  reason?: string;
+  /** This attempt's token usage, aggregated into the run result's {@link AgentUsage}. */
+  usage?: AgentCallUsage;
+  [key: string]: unknown;
+}>;
 
 /**
  * Options for {@link resolveDecision}. The `TEvent` parameter (the machine's
@@ -682,7 +691,7 @@ export interface ResolveDecisionOptions<TEvent extends ChosenEvent = ChosenEvent
  * the next attempt via `request.attempts`, so an adapter can render "your
  * last choice failed because X — try again" into the next model call; core
  * never rewrites the request itself. Exhausting all attempts throws
- * {@link DecisionExhaustedError} with the full attempts list.
+ * {@link AgentDecisionExhaustedError} with the full attempts list.
  *
  * @example
  * ```ts
@@ -771,5 +780,5 @@ export async function resolveDecision<TEvent extends ChosenEvent = ChosenEvent>(
     return validatedEvent as TEvent;
   }
 
-  throw new DecisionExhaustedError(attempts);
+  throw new AgentDecisionExhaustedError(attempts);
 }

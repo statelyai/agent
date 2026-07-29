@@ -82,6 +82,51 @@ describe("createAiSdkExecutors with core runAgent", () => {
       runAgent(machine, { input: {}, executors: createAiSdkExecutors({ models }) }),
     ).resolves.toMatchObject({ status: "done" });
   });
+
+  test("the adapter's LanguageModelUsage lands in the run result's aggregated usage", async () => {
+    const usageResponse = {
+      content: [{ type: "text" as const, text: "hello" }],
+      finishReason: { unified: "stop" as const, raw: "stop" },
+      usage: {
+        inputTokens: { total: 7, noCache: 5, cacheRead: 2, cacheWrite: 0 },
+        outputTokens: { total: 3, text: 2, reasoning: 1 },
+      },
+      warnings: [],
+    };
+    const models = defineModels({ quick: new MockLanguageModelV3({ doGenerate: usageResponse }) });
+    const agent = setupAgent({ context: z.object({}), input: z.object({}), models });
+    const machine = agent.createMachine({
+      context: ({ input }) => input,
+      initial: "writing",
+      states: {
+        writing: {
+          invoke: {
+            src: "agent.generateText",
+            input: { model: "quick", prompt: "hi" },
+            onDone: { target: "done" },
+          },
+        },
+        done: { type: "final" },
+      },
+    });
+
+    const result = await runAgent(machine, {
+      input: {},
+      executors: createAiSdkExecutors({ models }),
+    });
+
+    expect(result.status).toBe("done");
+    // LanguageModelUsage -> AgentUsage: the flat token fields are folded in,
+    // plus the run's own modelCalls count.
+    expect(result.usage).toEqual({
+      inputTokens: 7,
+      outputTokens: 3,
+      totalTokens: 10,
+      reasoningTokens: 1,
+      cachedInputTokens: 2,
+      modelCalls: 1,
+    });
+  });
 });
 
 describe("toAiSdkTools", () => {

@@ -12,7 +12,7 @@
  *     `runAgent({ snapshot, event })`.
  *
  * The machine owns legality/state; the Flue agent converses. Illegal resumes
- * are refused by `runAgent` itself (IllegalResumeEventError), so no hand-rolled
+ * are refused by `runAgent` itself (AgentIllegalResumeEventError), so no hand-rolled
  * legality checks live in the tools.
  *
  * NOT a full Flue project — @flue/runtime is not a repo dependency, so

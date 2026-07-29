@@ -16,6 +16,7 @@
  */
 import type { AnyActorLogic, AnyMachineSnapshot, AnyStateMachine } from "xstate";
 import type { ChosenEvent } from "./types.js";
+import { AgentError } from "./errors.js";
 import { getJsonSchemaSync } from "./utils.js";
 import { getAcceptedEvents } from "./events.js";
 import { isDecisionLogic, isPlanLogic, PLAN_DONE_EVENT_TYPE } from "./decision.js";
@@ -695,14 +696,15 @@ export interface AssertAgentMachineOptions extends LintAgentMachineOptions {
  * `diagnostics` holds the findings; the message lists them one per finding,
  * so a test runner's failure output reads like the CLI's lint report.
  */
-export class AgentLintError extends Error {
-  public diagnostics: AgentLintDiagnostic[];
+export class AgentLintError extends AgentError {
+  readonly diagnostics: AgentLintDiagnostic[];
   constructor(machineId: string, diagnostics: AgentLintDiagnostic[]) {
     const lines = diagnostics.map(
       (d) =>
         `  ${d.severity === "error" ? "error" : "warn "}  ${d.code}  ${d.path}\n         ${d.message}`,
     );
     super(
+      "lint-failed",
       `Agent machine '${machineId}' failed lint (${diagnostics.length} finding(s)):\n${lines.join("\n")}`,
     );
     this.name = "AgentLintError";

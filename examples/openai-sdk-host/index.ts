@@ -1,13 +1,6 @@
 /**
  * Raw `openai` npm package host for XState agent machines.
  *
- * NOTE: for the OpenAI Chat Completions *wire* format (Groq, Together, Ollama,
- * vLLM, OpenRouter, LM Studio, OpenAI itself), the shipped
- * `@statelyai/agent/openai-compat` adapter (`createOpenAiCompatExecutors`) is
- * the batteries-included path — a complete `{ generateText, streamText, decide }`
- * set over raw `fetch`, zero dependencies. This example stays as the
- * hand-rolled-against-the-official-`openai`-SDK teaching artifact.
- *
  * Implements the framework's `{ generateText, streamText, decide }` executor
  * contract directly against the raw `openai` package's Chat Completions API
  * (not the `responses` API — chat.completions is the canonical/stable
@@ -34,6 +27,13 @@ import type {
   ChatCompletionToolChoiceOption,
 } from "openai/resources/chat/completions/completions.js";
 import {
+  buildEnvelopeSchema,
+  getAgentOutputMode,
+  getJsonSchema,
+  getJsonSchemaSync,
+  isStandardSchema,
+  parseStructuredEnvelope,
+  renderDecisionAttempts,
   runAgent,
   type AgentDecisionExecutor,
   type AgentDecisionRequest,
@@ -44,15 +44,6 @@ import {
   type AgentTools,
   type ChosenEvent,
 } from "@statelyai/agent";
-import { renderDecisionAttempts } from "@statelyai/agent/steps";
-import {
-  buildEnvelopeSchema,
-  getAgentOutputMode,
-  getJsonSchema,
-  getJsonSchemaSync,
-  isStandardSchema,
-  parseStructuredEnvelope,
-} from "@statelyai/agent/adapter";
 import { triageMachine } from "../triage/index.js";
 import { twentyQuestionsMachine } from "../twenty-questions/index.js";
 

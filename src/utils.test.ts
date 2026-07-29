@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import { createActor } from "xstate";
 import { getStateMeta, persistSnapshot, setupAgent } from "./index.js";
-import { getJsonSchema, getJsonSchemaSync, getMachineStructuralHash } from "./adapter/index.js";
+import { getJsonSchema, getJsonSchemaSync, getMachineStructuralHash } from "./index.js";
 import { findNonSerializableContextPaths } from "./utils.js";
 import type { StandardSchemaV1 } from "./types.js";
 

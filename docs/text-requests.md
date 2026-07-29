@@ -37,11 +37,12 @@ const agentSetup = setupAgent({
 ```
 
 - Each schema field accepts any [Standard Schema](https://standardschema.dev) validator.
+- Both slots are optional: omit `output` and the request resolves to `string`; omit `input` and the invoke needs no `input`. A request with neither writes `schemas: {}` (the key itself stays required on `requests` entries; standalone `createTextLogic` can omit `schemas` entirely).
 - Each request-shaping field (`system`, `prompt`, `messages`, `temperature`, `maxOutputTokens`, and the rest) is a static value or a `({ input }) => value` function.
 
 ### Model references
 
-Prefer a `models` registry (canonical): it narrows `model` to the map's keys (`model: "quick"` is typed as `"quick" | "careful"`), so a typo is a compile error and one alias map is shared between authoring and the host adapter. A bare `model` string (any string, passed through to your [host](hosts.md) to resolve) is the alternative for a machine that must not name concrete models. See [Which authoring form when](machines.md#which-authoring-form-when).
+Prefer a `models` registry (canonical): the map's keys autocomplete on `model`, and one alias map is shared between authoring and the host adapter. Unregistered strings still typecheck (the type keeps a `string` arm so hosts can resolve refs the machine does not know), so a typo surfaces as a run-time resolution error. A bare `model` string (any string, passed through to your [host](hosts.md) to resolve) is the alternative for a machine that must not name concrete models. See [Which authoring form when](machines.md#which-authoring-form-when).
 
 ## Invoke a request from a state
 
@@ -68,7 +69,7 @@ In `onDone`, `output` is already validated against the request's output schema a
 The `parseOutput(schema, output)` helper validates a value against a schema and returns it parsed, throwing on mismatch. Use it in host code holding a raw, still-untyped output (from a persisted snapshot, or an inline `agent.generateText` result typed `unknown`). Never needed inside `onDone`.
 
 ```ts
-import { parseOutput } from "@statelyai/agent/adapter";
+import { parseOutput } from "@statelyai/agent";
 
 const answer = parseOutput(answerSchema, rawOutput); // typed as { answer: string }
 ```
@@ -195,11 +196,14 @@ export const research = createTextLogic({
 Inline `requests:` (above) is the default. Reach for `createTextLogic` when a request should be standalone (exported, tested on its own, or shared across machines) and registered under `actors`. Each `requests` entry is exactly what `setupAgent` builds internally from `createTextLogic`, so the two are interchangeable. See [Which authoring form when](machines.md#which-authoring-form-when).
 
 ```ts
-import { createTextLogic, setupAgent } from "@statelyai/agent";
+import { createTextLogic, setupAgent, type AgentMessage } from "@statelyai/agent";
 
 export const draftEmail = createTextLogic({
   schemas: {
-    input: z.object({ prompt: z.string(), messages: messagesSchema }),
+    input: z.object({
+      prompt: z.string(),
+      messages: z.custom<AgentMessage[]>((value) => Array.isArray(value)),
+    }),
     output: z.object({ to: z.string(), subject: z.string(), body: z.string() }),
   },
   model: "emailDrafter",

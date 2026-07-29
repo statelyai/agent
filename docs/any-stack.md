@@ -7,7 +7,7 @@ description: One agent machine runs unchanged in a local script, an HTTP route, 
 
 An agent machine is a portable blueprint: **the machine decides, the host executes.** The machine never names a provider, a server, or a runtime, so the same definition runs unchanged locally, behind an HTTP route, or on the edge. The only host-specific part is the [executors](hosts.md), the functions that call a model.
 
-This page authors one machine and runs it both ways a host can; the [host guides](#host-guides) then drop the same machine into real stacks.
+This page authors one machine, runs it both ways a host can, then drops it into two real stacks.
 
 ## The machine (authored once)
 
@@ -122,14 +122,112 @@ actor.subscribe((snapshot) => {
 actor.start();
 ```
 
-## Host guides
+## Host walkthroughs
 
-The same machine, dropped into real stacks with zero machine changes:
+The same machine, dropped into real stacks with zero machine changes.
 
-- [Express host](express-host.md): controlled. Idle settle plus a persisted snapshot is human-in-the-loop over HTTP. The same shape ports to [Hono](../examples/hono-host/index.ts), [Next.js](../examples/next-host), and [TanStack Start](../examples/tanstack-start-host).
-- [Cloudflare Durable Object host](cloudflare-host.md): uncontrolled. The Durable Object owns the actor; the snapshot survives hibernation.
+### Express (controlled)
 
-Across every host, the machine is **imported, never edited**. Only three things change per host:
+`runAgent` per request. The process holds no live actor between requests, so any worker can pick up the resume: an idle settle plus a persisted snapshot **is** human-in-the-loop over HTTP.
+
+```ts
+import express from "express";
+import { getAcceptedEvents, persistSnapshot, runAgent } from "@statelyai/agent";
+import type { Snapshot } from "xstate";
+import { announceMachine } from "./announce-machine.js";
+import { executors } from "./executors.js"; // as built above
+
+const snapshots = new Map<string, Snapshot<unknown>>();
+const app = express();
+app.use(express.json());
+
+// Start a run. Settles idle (draft ready) or done.
+app.post("/agent", async (req, res) => {
+  const result = await runAgent(announceMachine, {
+    input: { topic: String(req.body?.topic ?? "the new deploy pipeline") },
+    executors,
+  });
+  if (result.status === "idle") {
+    const id = crypto.randomUUID();
+    snapshots.set(id, persistSnapshot(result.snapshot));
+    const { draft } = result.snapshot.context;
+    const accepted = getAcceptedEvents(result.snapshot).map((e) => e.type);
+    return res.status(202).json({ id, draft, acceptedEvents: accepted });
+  }
+  if (result.status === "done") return res.json({ output: result.output });
+  return res.status(500).json({ status: result.status });
+});
+
+// Resume a persisted run with a human event.
+app.post("/agent/:id/resume", async (req, res) => {
+  const snapshot = snapshots.get(String(req.params.id));
+  if (!snapshot) return res.status(404).json({ error: "unknown run id" });
+  const result = await runAgent(announceMachine, {
+    snapshot,
+    event: req.body?.event,
+    executors,
+  });
+  if (result.status === "done") return res.json({ output: result.output });
+  return res.status(202).json({ draft: result.snapshot.context.draft });
+});
+
+app.listen(3000);
+```
+
+The full reference, with revision loops and typed state meta, is [examples/express-host](../examples/express-host/index.ts). The same shape ports directly to [Hono](../examples/hono-host/index.ts), [Next.js](../examples/next-host), and [TanStack Start](../examples/tanstack-start-host).
+
+### Cloudflare Durable Object (uncontrolled)
+
+A Durable Object already owns a long-lived actor and its own persistence, so bind executors with `provideExecutors` and run a plain `createActor`. The persisted snapshot lives in Durable Object state, so a run survives hibernation and resumes where it left off. Model resolution is injected from the environment binding, so the class stays provider-agnostic.
+
+```ts
+import { Agent, type Connection } from "agents";
+import { createActor, type Actor, type Snapshot } from "xstate";
+import { parseAgentEvent, provideExecutors } from "@statelyai/agent";
+import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createWorkersAI } from "workers-ai-provider";
+import { announceMachine } from "./announce-machine.js";
+
+interface Env { AI: Ai }
+interface State { snapshot?: Snapshot<unknown> }
+
+export class AnnounceAgent extends Agent<Env, State> {
+  initialState: State = {};
+  #actor: Actor<typeof announceMachine> | undefined;
+
+  onStart() {
+    const workersai = createWorkersAI({ binding: this.env.AI });
+    const models = defineModels({ writer: workersai("@cf/meta/llama-3.1-8b-instruct") });
+    const machine = provideExecutors(announceMachine, createAiSdkExecutors({ models }));
+
+    // Restore from the persisted snapshot if the DO was evicted mid-run.
+    this.#actor = createActor(machine, {
+      snapshot: this.state.snapshot,
+      input: { topic: "the new deploy pipeline" },
+    });
+    this.#actor.subscribe((snapshot) => {
+      // Durable persistence on every transition.
+      this.setState({ snapshot: this.#actor!.getPersistedSnapshot() });
+      this.broadcast(JSON.stringify({ type: "state", value: snapshot.value }));
+    });
+    this.#actor.start();
+  }
+
+  onMessage(connection: Connection, message: string) {
+    // Client messages are machine events; parseAgentEvent validates them
+    // against the snapshot's accepted events before they reach the actor.
+    const snapshot = this.#actor?.getSnapshot();
+    if (!snapshot) return;
+    this.#actor?.send(parseAgentEvent(snapshot, JSON.parse(message)));
+  }
+}
+```
+
+The shipped [cloudflare-agent-host](../examples/cloudflare-agent-host/index.ts) is a drop-in Durable Object class, with the `wrangler.toml` and subclass wiring spelled out. For one-turn-per-request Workers, [cloudflare-workers-ai-host](../examples/cloudflare-workers-ai-host/index.ts) drives the lower-level [step path](steps.md) against a raw Workers AI binding.
+
+## What changes per host
+
+The machine is **imported, never edited**. Only three things change:
 
 - how executors are built (AI SDK locally, injected model resolution on the edge);
 - controlled (`runAgent`) or uncontrolled (`provideExecutors` + `createActor`);
@@ -139,5 +237,5 @@ Across every host, the machine is **imported, never edited**. Only three things 
 
 - [Hosts and executors](hosts.md): the executor contract, the shipped adapters, and writing your own.
 - [Agent patterns](patterns.md): copy-paste machines for ReAct, RAG, supervisor, and more; each runs in any host this same way.
-- [Human in the loop](human-in-the-loop.md): the idle-first pause and snapshot resume shown in the Express host.
+- [Human in the loop](human-in-the-loop.md): the idle-first pause and snapshot resume, in depth.
 - [The step path](steps.md): the lower-level per-model-call loop for durable hosts.

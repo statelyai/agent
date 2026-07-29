@@ -8,10 +8,7 @@
     "url": "https://github.com/TauricResearch/TradingAgents"
   },
   "comparison": {
-    "targets": [
-      "TradingAgents",
-      "organizational multi-agent workflows"
-    ],
+    "targets": ["TradingAgents", "organizational multi-agent workflows"],
     "purpose": "Parallel specialist analysis, a multi-round bull/bear debate that alternates rebuttals into a typed transcript, a trader proposal, and a risk review that can reject and force one bounded revision before a final approve-or-reject decision. Market data and execution remain host-owned."
   },
   "starters": [

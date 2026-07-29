@@ -17,151 +17,194 @@ npm install @statelyai/agent@alpha xstate@alpha zod ai@^6 @ai-sdk/openai@^3
 - `xstate` is the one required peer. The library requires **XState v6 alpha.25 or newer**.
 - `ai` (the Vercel AI SDK) and `@ai-sdk/openai` back the shipped adapter, `createAiSdkExecutors`. Core has no runtime dependency besides `xstate`.
 - Provider packages must match your `ai` major. `@ai-sdk/openai@^3` pairs with `ai@^6`; a bare `@ai-sdk/openai` resolves to `@latest`, whose `LanguageModel` spec version may not match your `ai` peer.
-- The package is **ESM-only** and the examples use top-level `await`. Set `"type": "module"` in `package.json` (or use `.mts` files).
+- The package is **ESM-first**; every entry also ships a CommonJS build, so `require()` works. The examples use top-level `await`, which needs ESM: set `"type": "module"` in `package.json` (or use `.mts` files).
 
-## Describe your models and schemas
+## Your first agent
 
-<!-- quickstart walkthrough -->
-
-Declare a **models registry** and the machine's schemas. Model keys stay explicit in requests; the AI SDK host resolves them to provider models.
+A comment moderator. The model reads a comment and picks one of three events; the machine owns the trust threshold that decides whether publishing is even legal.
 
 ```ts
-import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { defineModels } from "@statelyai/agent/ai-sdk";
+import { runAgent, setupAgent } from "@statelyai/agent";
+import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { z } from "zod";
 
-// Use any model your provider offers.
-const models = defineModels({ quick: openai("gpt-5.4-mini") });
+const models = defineModels({ fast: openai("gpt-5.4-mini") });
 
-const answerSchema = z.object({ answer: z.string() });
-```
-
-## Set up the agent
-
-`setupAgent` takes your models, schemas, `requests`, and `events`, and returns a **setup** (not a running agent) you author machines from, like XState's `setup()`. Three things compose in one call:
-
-- A **text request** (`answerQuestion`) is a typed model call: it names a `model`, declares input/output schemas, and builds a prompt from its input.
-- **Events** the model may choose (`ANSWER`, `PASS`).
-- Machines authored from the setup can invoke `agent.decide` to let the model pick one of those events.
-
-```ts
-import { setupAgent } from "@statelyai/agent";
+const outcomeSchema = z.enum(["published", "flagged", "blocked"]);
 
 const agentSetup = setupAgent({
   models,
-  context: z.object({ prompt: z.string(), answer: z.string().nullable() }),
-  input: z.object({ prompt: z.string() }),
-  output: answerSchema,
+  context: z.object({
+    comment: z.string(),
+    trust: z.number(),
+    outcome: outcomeSchema,
+    reason: z.string().nullable(),
+  }),
+  input: z.object({ comment: z.string(), trust: z.number() }),
+  output: z.object({ outcome: outcomeSchema, reason: z.string().nullable() }),
   events: {
-    ANSWER: {}, // {} is shorthand for a payload-less event
-    PASS: {},
-  },
-  requests: {
-    answerQuestion: {
-      schemas: { input: z.object({ prompt: z.string() }), output: answerSchema },
-      model: "quick",
-      prompt: ({ input }) => input.prompt,
-    },
+    PUBLISH: {}, // `{}` is shorthand for a payload-less event
+    FLAG: z.object({ reason: z.string() }),
+    BLOCK: {},
   },
 });
-```
 
-The `model` value is a key into the `models` registry, so a typo is a compile error. For a machine that must not name concrete models, use string refs the host resolves at run time. See [Which authoring form when](machines.md#which-authoring-form-when).
-
-## Author the machine
-
-`agentSetup.createMachine` builds a typed XState machine. First the model decides whether to answer; if it chooses `ANSWER`, the `answering` state invokes `answerQuestion` and writes the validated result into context.
-
-```ts
-const machine = agentSetup.createMachine({
-  context: ({ input }) => ({ prompt: input.prompt, answer: null }),
-  initial: "deciding",
+const moderationMachine = agentSetup.createMachine({
+  // Comments start flagged; only the machine can clear one.
+  context: ({ input }) => ({ ...input, outcome: "flagged", reason: null }),
+  output: ({ context }) => ({ outcome: context.outcome, reason: context.reason }),
+  initial: "reviewing",
   states: {
-    deciding: {
+    reviewing: {
       invoke: {
-        id: "decide",
         src: "agent.decide",
         input: ({ context }) => ({
-          model: "quick",
-          system: "ANSWER if you know it, else PASS.",
-          prompt: context.prompt,
-          allowedEvents: ["ANSWER", "PASS"],
+          model: "fast",
+          system: "PUBLISH harmless comments, FLAG borderline ones with a reason, BLOCK abuse.",
+          prompt: `Comment: ${context.comment}\nAuthor trust score: ${context.trust}`,
+          allowedEvents: ["PUBLISH", "FLAG", "BLOCK"],
         }),
       },
       on: {
-        ANSWER: { target: "answering" },
-        PASS: { target: "done" },
+        // The guard owns the threshold, not the model: under 50 this returns
+        // undefined, so PUBLISH is illegal and the model has to choose again.
+        PUBLISH: ({ context }) =>
+          context.trust >= 50
+            ? { target: "published", context: { outcome: "published" } }
+            : undefined,
+        FLAG: ({ event }) => ({ target: "flagged", context: { reason: event.reason } }),
+        BLOCK: () => ({ target: "blocked", context: { outcome: "blocked" } }),
       },
     },
-    answering: {
-      invoke: {
-        id: "answer",
-        src: "answerQuestion",
-        input: ({ context }) => ({ prompt: context.prompt }),
-        onDone: ({ output }) => ({ target: "done", context: { answer: output.answer } }),
+    published: { type: "final" },
+    flagged: { type: "final" },
+    blocked: { type: "final" },
+  },
+});
+
+const result = await runAgent(moderationMachine, {
+  input: { comment: "honestly this update is terrible", trust: 20 },
+  executors: createAiSdkExecutors({ models }),
+});
+
+if (result.status === "done") {
+  console.log(result.output); // { outcome: 'flagged', reason: '…' }
+}
+```
+
+What the machine does that a prompt call cannot:
+
+- **The model only ever picks a legal event.** `allowedEvents` is intersected with the events the current state actually accepts, so the choice set moves with the machine.
+- **A guard can overrule the model.** A `PUBLISH` on a low-trust author is rejected before it reaches state (`failure: 'rejected-by-guard'`) and the decision retries with that feedback. The threshold lives in one place and cannot be prompted away.
+- **The outcome is a state, not a parsed string.** Every path ends in a known final state with schema-checked output, and the whole graph renders as a diagram.
+
+## What `setupAgent` gives you
+
+`setupAgent` returns a **setup** (not a running agent) you author machines from, like XState's `setup()`. Context, input, output, and event payloads are Standard Schemas, so Zod works directly and the machine's types come from them.
+
+The `model` value is a key into the `models` registry, so registered keys autocomplete. Unregistered strings are still allowed (the host may resolve refs at run time), so a typo surfaces at run time. See [Which authoring form when](machines.md#which-authoring-form-when).
+
+Every machine can invoke these built-in actor sources. They are reserved `src` strings; the invoke's `input` shapes each call.
+
+| `src`                | Purpose                                                   |
+| -------------------- | --------------------------------------------------------- |
+| `agent.generateText` | Inline one-shot text (or structured-output) model call.    |
+| `agent.streamText`   | Same, streamed chunk by chunk through `onChunk`.           |
+| `agent.decide`       | Model picks exactly one currently-legal event.             |
+| `agent.plan`         | Model applies many legal events in a row until it stops.   |
+| `agent.userInput`    | Gather human input mid-run without settling.               |
+
+### Named requests
+
+A **request** is a typed, reusable model call: named schemas, a model, and a prompt built from its input. It is the testable counterpart to an inline `agent.generateText`.
+
+```ts
+const agentSetup = setupAgent({
+  models,
+  // …schemas as above
+  requests: {
+    moderatorNote: {
+      schemas: {
+        input: z.object({ comment: z.string() }),
+        output: z.object({ note: z.string() }),
       },
-    },
-    done: {
-      type: "final",
-      output: ({ context }) => ({ answer: context.answer ?? "" }),
+      model: "fast",
+      prompt: ({ input }) => `Write a one-line moderator note for: ${input.comment}`,
     },
   },
 });
 ```
 
-The machine now fully describes the agent, but nothing has called a model yet. That is the host's job.
-
-## Built-in `agent.*` actor sources
-
-`setupAgent` registers a set of built-in actor sources every machine can invoke. They are reserved `src` strings; a request's `input` shapes each call.
-
-| `src`                  | Purpose                                                     |
-| ---------------------- | ---------------------------------------------------------- |
-| `agent.generateText`   | Inline one-shot text (or structured-output) model call.    |
-| `agent.streamText`     | Same, streamed chunk by chunk through `onChunk`.           |
-| `agent.decide`         | Model picks exactly one currently-legal event.             |
-| `agent.plan`           | Model applies many legal events in a row until it stops.   |
-| `agent.userInput`      | Gather human input mid-run without settling.               |
-
-Named `requests:` (like `answerQuestion`) are the reusable, testable counterpart to inline `agent.generateText`/`agent.streamText`.
-
-## Run it against a host
-
-The `runAgent` function from core drives the machine, calling your **executors** whenever the machine needs a model. The `createAiSdkExecutors` helper builds that set from the AI SDK.
+Each request key becomes an invocable `src`:
 
 ```ts
-import { runAgent } from "@statelyai/agent";
-import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-
-const result = await runAgent(machine, {
-  input: { prompt: "Why state machines?" },
-  executors: createAiSdkExecutors({ models }),
-});
+blocked: {
+  invoke: {
+    src: "moderatorNote",
+    input: ({ context }) => ({ comment: context.comment }),
+    onDone: ({ output }) => ({ target: "done", context: { reason: output.note } }),
+  },
+},
 ```
 
-`runAgent` settles with a `status`:
+See [Text requests](text-requests.md) for tools, streaming, and messages.
 
-- `done`: the machine reached a final state; `result.output` matches your output schema.
-- `idle`: the machine is waiting on a human. See [Human in the loop](human-in-the-loop.md).
+## Running it
+
+`runAgent` drives the machine and calls your **executors** whenever it needs a model. It settles with a `status`:
+
+- `done`: reached a final state; `result.output` matches your output schema.
+- `idle`: waiting on a human. See [Human in the loop](human-in-the-loop.md).
 - `error`: something threw.
 
-Every variant also carries `result.events`, a versioned, JSON-safe `AgentLogEntry[]` around the replayable external inputs. Each entry includes identity, timestamp, machine version, and state/effect verification hashes. Pass it to `replay(machine, result.events)` to reconstruct the final snapshot without executing model or tool calls; use `verifyReplay` to require every hash. See [The event log](checkpoints.md#export-events-from-runagent).
+Every variant carries `result.events`, a versioned, JSON-safe `AgentLogEntry[]` of the replayable external inputs (identity, timestamp, machine version, state/effect hashes). Pass it to `replay(machine, result.events)` to reconstruct the final snapshot without re-running model or tool calls; `verifyReplay` requires every hash. See [The event log](event-log.md#export-events-from-runagent).
+
+For a run that must go straight through to a final state, `generateResult(machine, options)` resolves with the done result — `result.output` plus metadata (`result.snapshot`, replayable `result.events`, aggregated `result.usage`), like `generateText`'s `text` + call metadata — and throws `AgentIdleError` if the machine pauses.
+
+### Without `runAgent`
+
+`provideExecutors` binds every agent source in one call, returning a machine you drive with a plain `createActor`. No run loop, no idle settling.
 
 ```ts
-if (result.status === "done") {
-  console.log(result.output.answer);
-}
+import { createActor } from "xstate";
+import { provideExecutors } from "@statelyai/agent";
+
+const executors = createAiSdkExecutors({ models });
+const actor = createActor(provideExecutors(moderationMachine, executors), {
+  input: { comment: "honestly this update is terrible", trust: 20 },
+});
+actor.subscribe((s) => s.status === "done" && console.log(s.output));
+actor.start();
 ```
 
-Use `runAgent` when an idle pause is expected and you handle it. For a run meant to go straight through to a final state, `runAgentToCompletion(machine, options)` returns the output directly and throws `AgentIdleError` if the machine pauses.
+`agent.userInput` is left unbound (supply it via the third argument, `{ actors }`), and invoked child machines are not descended into. Use `runAgent` for idle handling and child rebinding.
+
+### Testing without an API key
+
+Executors are plain functions, so mocks are plain objects: `generateText`/`streamText` resolve `{ output }`, `decide` resolves `{ event }`. Each entry on `agentSetup.requests` is also a `TextLogic` you can bind individually with `.withExecutor(...)`.
+
+```ts
+const testMachine = provideExecutors(
+  moderationMachine,
+  { decide: async () => ({ event: { type: "FLAG", reason: "Borderline tone." } }) },
+  {
+    actors: {
+      moderatorNote: agentSetup.requests.moderatorNote.withExecutor(async () => ({
+        output: { note: "Repeat offender." },
+      })),
+    },
+  },
+);
+
+createActor(testMachine, { input: { comment: "…", trust: 20 } }).start();
+```
+
+The same mocks work with `runAgent(machine, { input, executors: { decide } })`. See [Testing and verification](verify.md).
 
 ### See it run
 
-Watch the machine light up state by state in the [Stately Inspector](https://stately.ai/docs/inspector) while it runs. Add the inspector package and pass its handler to `runAgent`'s `inspect` option:
-
-```bash
-pnpm add @statelyai/inspect
-```
+Watch the machine light up state by state in the [Stately Inspector](https://stately.ai/docs/inspector). Add `@statelyai/inspect` and pass its handler to `runAgent`'s `inspect` option:
 
 ```ts
 import { createInspectorServer } from "@statelyai/inspect/server";
@@ -170,58 +213,14 @@ import { createWebSocketInspector } from "@statelyai/inspect";
 const server = createInspectorServer({ port: 8080, url: "https://editor.stately.ai" });
 const inspector = createWebSocketInspector({ url: "ws://localhost:8080" });
 
-await runAgent(machine, {
-  input: { prompt: "Why state machines?" },
+await runAgent(moderationMachine, {
+  input: { comment: "honestly this update is terrible", trust: 20 },
   executors: createAiSdkExecutors({ models }),
   inspect: inspector.inspect, // opens the diagram and lights it up live
 });
 ```
 
-It's the same machine you authored, so it renders as a live diagram in the Inspector, in [Stately Studio](https://stately.ai/editor), and in the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=statelyai.stately-vscode). See [Observability](observability.md) for production tracing to OpenTelemetry.
-
-## Run it yourself (plain XState)
-
-You do not need `runAgent` at all. `provideExecutors` binds every agent source to your executors in one call, returning a machine you drive with a plain `createActor`. No run loop, no idle settling: the machine drives itself.
-
-```ts
-import { createActor } from "xstate";
-import { provideExecutors } from "@statelyai/agent";
-
-const { generateText, streamText, decide } = createAiSdkExecutors({ models });
-
-const actor = createActor(
-  provideExecutors(machine, { generateText, streamText, decide }),
-  { input: { prompt: "Why state machines?" } },
-);
-actor.subscribe((s) => {
-  if (s.status === "done") console.log(s.output.answer);
-});
-actor.start();
-```
-
-The `agent.userInput` source is left unbound (supply it via `provideExecutors`'s third argument, `{ actors }`), and invoked child machines are not descended into. Use `runAgent` when you want idle handling and child rebinding for free.
-
-### Mocking in a test
-
-Executors are plain functions, so mocks are plain objects: `generateText`/`streamText` resolve `{ output }`, and `decide` resolves `{ event }` (the chosen event object). Each entry on `agentSetup.requests` is also a `TextLogic` actor you can bind individually with `.withExecutor(...)`. No network, fully deterministic:
-
-```ts
-const testMachine = provideExecutors(
-  machine,
-  { decide: async () => ({ event: { type: "ANSWER" } }) },
-  {
-    actors: {
-      answerQuestion: agentSetup.requests.answerQuestion.withExecutor(async () => ({
-        output: { answer: "Because they make illegal states unreachable." },
-      })),
-    },
-  },
-);
-
-createActor(testMachine, { input: { prompt: "Why state machines?" } }).start();
-```
-
-The same executor mocks work with `runAgent(machine, { input, executors: { decide, generateText } })`.
+It is the same machine you authored, so it also renders in [Stately Studio](https://stately.ai/editor) and the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=statelyai.stately-vscode). See [Observability](observability.md) for production tracing.
 
 ## Next steps
 

@@ -70,6 +70,24 @@ test("happy path settles done", async () => {
 
 Guards stay in force throughout: `canReach` and `simulateAgent` walk the same step path `runAgent` uses, so a graph path that is guard-illegal never counts as reachable. These tests pin the shape as prompts and models change.
 
+## Testing with deterministic executors
+
+Executors are plain functions, so a test supplies scripted ones and never touches the network. Bind them onto a logic with `.withExecutor(...)`:
+
+```ts
+const machine = emailDrafter.provide({
+  actors: {
+    draftEmail: draftEmail.withExecutor(async ({ request }) => {
+      return { output: { to: "sam@example.com", subject: "Hello", body: "Hi Sam!" } };
+    }),
+  },
+});
+```
+
+[examples/email-drafter/index.ts](../examples/email-drafter/index.ts) drives a full run this way: fixed values, deterministic, no model called.
+
+Use this when the test should exercise the real `runAgent` path with canned model output; use `simulateAgent` below when a scripted playthrough on the pure step path is enough.
+
 ## Simulating a playthrough
 
 The `simulateAgent(machine, { input, script, maxSteps? })` call runs a deterministic, model-free playthrough on the pure step path (async: it drives plan steps through the real durable protocol). The `script` supplies responses by invoke `src` (FIFO queues), so runs are reproducible:

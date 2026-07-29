@@ -10,8 +10,8 @@ import {
   type AgentTextRequest,
   type AgentTools,
 } from "./index.js";
-import { bindRequestExecutor, parseModelRef, parseStructuredEnvelope } from "./adapter/index.js";
-import { type AgentRequest } from "./steps/index.js";
+import { bindRequestExecutor, parseModelRef, parseStructuredEnvelope } from "./index.js";
+import { type AgentRequest } from "./index.js";
 import {
   buildEnvelopeSchema,
   executeAgentTextRequest,
@@ -475,5 +475,166 @@ describe("parseStructuredEnvelope", () => {
     expect(() => parseStructuredEnvelope({ outputSchema: undefined }, { result: 1 })).toThrow(
       /outputSchema/,
     );
+  });
+});
+
+// `schemas.output` defaults to a string schema and `schemas.input` to "no
+// input", so a plain text request needs neither.
+describe("createTextLogic schema defaults", () => {
+  test("an omitted output schema validates and returns a string", async () => {
+    const tellJoke = createTextLogic(
+      {
+        schemas: { input: z.object({ topic: z.string() }) },
+        model: "test-model",
+        prompt: ({ input }) => `Joke about ${input.topic}.`,
+      },
+      ({ request }) => ({ output: `joke: ${request.prompt}` }),
+    );
+
+    const output = await toPromise(createActor(tellJoke, { input: { topic: "actors" } }).start());
+    // typed as `string` — assigning to a string binding is the compile check
+    const text: string = output;
+
+    expect(text).toBe("joke: Joke about actors.");
+    expect(tellJoke.request({ topic: "actors" }).outputSchema).toBe(tellJoke.schemas.output);
+  });
+
+  test("an omitted output schema rejects a non-string executor result", async () => {
+    const broken = createTextLogic(
+      {
+        schemas: { input: z.object({ topic: z.string() }) },
+        model: "test-model",
+        prompt: () => "hi",
+      },
+      () => ({ output: { not: "a string" } as unknown as string }),
+    );
+
+    await expect(
+      toPromise(createActor(broken, { input: { topic: "actors" } }).start()),
+    ).rejects.toThrow(/Expected string output/);
+  });
+
+  test("a request with no schemas at all takes no input and returns a string", async () => {
+    const randomTopic = createTextLogic(
+      {
+        model: "test-model",
+        prompt: "Give me a topic.",
+      },
+      () => ({ output: "otters" }),
+    );
+
+    expect(randomTopic.request(undefined).prompt).toBe("Give me a topic.");
+    expect(await toPromise(createActor(randomTopic).start())).toBe("otters");
+  });
+
+  test("setupAgent({ requests }) runs a request with an omitted output schema end to end", async () => {
+    const agent = setupAgent({
+      schemas: createAgentSchemas({
+        context: z.object({ topic: z.string(), joke: z.string().nullable() }),
+        output: z.object({ joke: z.string() }),
+      }),
+      requests: {
+        tellJoke: {
+          schemas: { input: z.object({ topic: z.string() }) },
+          model: "test-model",
+          prompt: ({ input }) => `Joke about ${input.topic}.`,
+        },
+        // no schemas of its own: no invoke input, string output
+        randomTopic: {
+          schemas: {},
+          model: "test-model",
+          prompt: "Give me a topic.",
+        },
+      },
+    });
+
+    const machine = agent.createMachine({
+      context: { topic: "", joke: null },
+      initial: "topic",
+      states: {
+        topic: {
+          invoke: {
+            src: "randomTopic",
+            onDone: ({ output }) => ({ context: { topic: output }, target: "joking" }),
+          },
+        },
+        joking: {
+          invoke: {
+            src: "tellJoke",
+            input: ({ context }) => ({ topic: context.topic }),
+            onDone: ({ output }) => ({ context: { joke: output }, target: "done" }),
+          },
+        },
+        done: { type: "final", output: ({ context }) => ({ joke: context.joke! }) },
+      },
+    });
+
+    const result = await runAgent(machine, {
+      executors: {
+        generateText: (request) =>
+          request.name === "randomTopic"
+            ? { output: "otters" }
+            : { output: `joke: ${request.prompt}` },
+      },
+    });
+
+    expect(result.status === "done" && result.output).toEqual({
+      joke: "joke: Joke about otters.",
+    });
+  });
+});
+
+// Compile-only: the schema defaults must keep `onDone`'s `output` inference
+// exact — `string` when `schemas.output` is omitted, the schema's type when
+// it is present. Nothing here runs; `tsc` fails if inference regresses.
+describe("createTextLogic schema default typing", () => {
+  test("omitted output infers string, declared output infers the schema type", () => {
+    const setupWithDefaults = setupAgent({
+      schemas: createAgentSchemas({
+        context: z.object({ topic: z.string(), score: z.number() }),
+      }),
+      requests: {
+        tellJoke: {
+          schemas: { input: z.object({ topic: z.string() }) },
+          model: "test-model",
+          prompt: ({ input }) => `Joke about ${input.topic}.`,
+        },
+        rateJoke: {
+          schemas: {
+            input: z.object({ joke: z.string() }),
+            output: z.object({ score: z.number() }),
+          },
+          model: "test-model",
+          prompt: ({ input }) => `Rate ${input.joke}.`,
+        },
+      },
+    });
+
+    setupWithDefaults.createMachine({
+      context: { topic: "", score: 0 },
+      initial: "joking",
+      states: {
+        joking: {
+          invoke: {
+            src: "tellJoke",
+            input: ({ context }) => ({ topic: context.topic }),
+            onDone: ({ output }) => ({
+              // @ts-expect-error an omitted output schema infers `string`, not an object
+              context: { score: output.score },
+            }),
+          },
+        },
+        rating: {
+          invoke: {
+            src: "rateJoke",
+            input: ({ context }) => ({ joke: context.topic }),
+            // a declared output schema still infers its own type
+            onDone: ({ output }) => ({ context: { score: output.score } }),
+          },
+        },
+      },
+    });
+
+    expect(typeof setupWithDefaults.requests.tellJoke.execute).toBe("function");
   });
 });

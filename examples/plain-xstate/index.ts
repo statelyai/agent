@@ -32,8 +32,12 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createActor, createAsyncLogic, setup, waitFor } from "xstate";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
-import { getAcceptedEvents, userMessage, type AgentRequestExecutors } from "@statelyai/agent";
-import { resolveDecision } from "@statelyai/agent/steps";
+import {
+  getAcceptedEvents,
+  resolveDecision,
+  userMessage,
+  type AgentRequestExecutors,
+} from "@statelyai/agent";
 
 export const models = defineModels({
   writer: openai("gpt-5.4-mini"),
@@ -173,7 +177,7 @@ export async function runPlainXstateExample(
     );
     if (snapshot.status === "done") break;
 
-    const events = getAcceptedEvents(snapshot); // [{ type: "APPROVE" }, { type: "REVISE" }]
+    const events = getAcceptedEvents(snapshot); // [{ type: "APPROVE", toolName: "send_event_APPROVE" }, { type: "REVISE", toolName: "send_event_REVISE" }]
     const chosen = await resolveDecision<{ type: "APPROVE" } | { type: "REVISE" }>(
       {
         kind: "decision",

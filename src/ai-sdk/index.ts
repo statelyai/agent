@@ -143,6 +143,9 @@ export type AiSdkGenerateResult = {
    * `reasoning: true` and the model produced it (see the structured-output
    * envelope in {@link buildEnvelopeSchema}). Never enters machine context/output. */
   reasoning?: string;
+  /** The call's token usage. Its flat `inputTokens`/`outputTokens`/`totalTokens`/
+   * `reasoningTokens`/`cachedInputTokens` fields are what `runAgent` folds into
+   * the run result's aggregated `AgentUsage`. */
   usage: LanguageModelUsage;
   finishReason: FinishReason;
   toolCalls: TypedToolCall<ToolSet>[];
@@ -151,12 +154,14 @@ export type AiSdkGenerateResult = {
 /** Raw result shape from {@link AiSdkExecutors.streamText} — the `{ output }` envelope carrying the fully-accumulated text once the stream finishes (chunks are delivered separately via `onChunk`), plus the stream's final usage/finish metadata for `onResult`. */
 export type AiSdkStreamResult = {
   output: string;
+  /** The stream's final (awaited) usage; aggregated into the run result's `AgentUsage`. */
   usage: LanguageModelUsage;
   finishReason: FinishReason;
 };
 /** Raw result shape from {@link AiSdkExecutors.decide} — the chosen event plus the AI SDK call metadata, delivered per decision attempt to `onResult`. */
 export type AiSdkDecideResult = {
   event: ChosenEvent;
+  /** This attempt's usage; aggregated into the run result's `AgentUsage`. */
   usage: LanguageModelUsage;
   finishReason: FinishReason;
 };

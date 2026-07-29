@@ -4,7 +4,7 @@
  * machine to the next pause or to done.
  *
  * No hand-rolled legality check: `runAgent` refuses an event the restored state
- * can't take (throws IllegalResumeEventError), so the machine stays the single
+ * can't take (throws AgentIllegalResumeEventError), so the machine stays the single
  * source of truth for what's allowed.
  */
 import { z } from "zod";

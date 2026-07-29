@@ -66,7 +66,7 @@ The `allowedEvents` option (on both `agent.decide` and `agent.plan`) accepts a s
 
 Delivery is automatic: when the decision resolves, the `agent.decide` actor sends the chosen event to the machine, and the matching `on:` transition runs. You handle the outcome with ordinary transitions, no special decision plumbing.
 
-> **Note:** The chosen event's transition typically exits the invoking state, cancelling the invoke, so `onDone` normally never fires (same as `agent.plan`). Declare `onDone` only when the chosen event's transition stays in-state; the invoke then completes with the chosen event as output. `onError` (retries exhausted, `DecisionExhaustedError`) is unaffected.
+> **Note:** The chosen event's transition typically exits the invoking state, cancelling the invoke, so `onDone` normally never fires (same as `agent.plan`). Declare `onDone` only when the chosen event's transition stays in-state; the invoke then completes with the chosen event as output. `onError` (retries exhausted, `AgentDecisionExhaustedError`) is unaffected.
 
 ## Guard enforcement
 
@@ -75,6 +75,8 @@ A candidate event's guard is its transition function returning `undefined` (see 
 Guards may read the event payload, so candidates cannot be filtered upfront: a decision offers the full `allowedEvents` set (intersected with what the state statically accepts), and legality is checked **after** the model picks. `runAgent` and the step path handle this for you. When calling `resolveDecision` directly (uncontrolled mode), thread the check via `canTake`:
 
 ```ts
+import { resolveDecision } from "@statelyai/agent";
+
 const event = await resolveDecision(request, executors.decide, {
   canTake: (e) => snapshot.can(e),
 });
@@ -94,7 +96,7 @@ Retry behavior:
 
 - Default 2 retries, so up to 3 attempts. Set `maxRetries` on the decide input to change it.
 - Prior failed attempts ride on `request.attempts`, so the host can render "your last choice failed because X" into the next call. Core never rewrites the prompt itself; see [Hosts](hosts.md).
-- Exhausting retries throws `DecisionExhaustedError` (carrying the attempts list), caught by the invoke's `onError`.
+- Exhausting retries throws `AgentDecisionExhaustedError` (carrying the attempts list), caught by the invoke's `onError`.
 
 ## Coercion
 

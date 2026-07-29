@@ -67,7 +67,7 @@ function disambiguateEventToolName(
  * segment (`'todo.*'` matches `'todo.add'` and `'todo.list.clear'`, not
  * `'todo'` itself — mirroring xstate's partial wildcard events).
  */
-export function matchesEventPattern(eventType: string, pattern: string): boolean {
+function matchesEventPattern(eventType: string, pattern: string): boolean {
   if (pattern === "*") {
     return true;
   }
@@ -104,17 +104,6 @@ export interface AgentRequestOptions {
   eventToolName?: AgentEventToolNameResolver;
 }
 
-/**
- * Lists the events a snapshot can currently accept, as {@link AgentEventDescriptor}s
- * a model can be offered (via `resolveDecision`/an adapter's tool-per-event
- * mapping). **Filters by event TYPE only** — it does not evaluate guards, so
- * a type-legal-but-guard-rejected event can still appear here. Guard
- * legality is checked separately, at decision-resolution time, via
- * `snapshot.can(event)` (the `canTake` option of {@link resolveDecision} /
- * {@link ResolveDecisionOptions}). Pass `eventTypes` to further narrow to a
- * declared `allowedEvents` set — entries may be exact types or wildcard
- * patterns (`'*'`, `'todo.*'`; see {@link matchesEventPattern}).
- */
 /** Recovers a machine's event union from its snapshot type, so {@link parseAgentEvent} returns the machine-typed event without a downstream cast. @internal */
 export type EventFromSnapshot<TSnapshot> =
   TSnapshot extends MachineSnapshot<any, infer TEvent, any, any, any, any, any, any>
@@ -176,6 +165,17 @@ export function parseAgentEvent<TSnapshot extends AnyMachineSnapshot>(
   return event as EventFromSnapshot<TSnapshot>;
 }
 
+/**
+ * Lists the events a snapshot can currently accept, as {@link AgentEventDescriptor}s
+ * a model can be offered (via `resolveDecision`/an adapter's tool-per-event
+ * mapping). **Filters by event TYPE only** — it does not evaluate guards, so
+ * a type-legal-but-guard-rejected event can still appear here. Guard
+ * legality is checked separately, at decision-resolution time, via
+ * `snapshot.can(event)` (the `canTake` option of {@link resolveDecision} /
+ * {@link ResolveDecisionOptions}). Pass `eventTypes` to further narrow to a
+ * declared `allowedEvents` set — entries may be exact types or wildcard
+ * patterns (`'*'`, `'todo.*'`; see {@link matchesEventPattern}).
+ */
 export function getAcceptedEvents(
   snapshot: AnyMachineSnapshot,
   options: Pick<AgentRequestOptions, "events" | "schemas" | "eventToolName"> & {

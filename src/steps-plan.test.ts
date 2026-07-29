@@ -13,7 +13,7 @@ import {
   type AgentDecisionRequest,
   type AgentPlanRequest,
   type AgentLogEntry,
-} from "./steps/index.js";
+} from "./index.js";
 import type { AgentDecisionExecutor, AgentRequestExecutors, ChosenEvent } from "./index.js";
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -597,7 +597,7 @@ describe("thin loop: concurrent text effects (host responsibility)", () => {
   }
 
   // Resolve a `text` effect via the public `executeAgentRequest` resolver.
-  function resolveText(effect: Extract<import("./steps/index.js").AgentEffect, { kind: "text" }>) {
+  function resolveText(effect: Extract<import("./index.js").AgentEffect, { kind: "text" }>) {
     return (executors: Partial<AgentRequestExecutors>) =>
       executeAgentRequest(
         {

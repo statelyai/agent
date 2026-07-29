@@ -8,9 +8,7 @@
     "url": "https://github.com/langchain-ai/langgraph/blob/23961cff61a42b52525f3b20b4094d8d2fba1744/docs/docs/tutorials/chatbot-simulation-evaluation/agent-simulation-evaluation.ipynb"
   },
   "comparison": {
-    "targets": [
-      "LangGraph chatbot simulation"
-    ],
+    "targets": ["LangGraph chatbot simulation"],
     "purpose": "A chatbot and simulated user alternate under a turn bound, then an independent evaluator scores the transcript. LangSmith dataset and experiment services are intentionally omitted."
   },
   "starters": [

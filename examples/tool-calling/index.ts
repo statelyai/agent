@@ -1,5 +1,6 @@
 /**
  * Tool calling: tools are part of the request, not machine states.
+ * This is the DEFAULT pattern for tool use — start here, not at react-agent.
  *
  * Tools are whatever your SDK produces. Here each tool is a native AI SDK
  * `tool({...})` — with a `description`, a Zod `inputSchema`, and a typed

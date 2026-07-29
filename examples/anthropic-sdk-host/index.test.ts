@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { Message } from "@anthropic-ai/sdk/resources/messages.js";
 import { runAgent } from "@statelyai/agent";
-import { getJsonSchemaSync } from "@statelyai/agent/adapter";
+import { getJsonSchemaSync } from "@statelyai/agent";
 import type { AgentMessage } from "@statelyai/agent";
 import {
   createAnthropicExecutors,

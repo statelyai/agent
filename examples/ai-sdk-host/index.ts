@@ -23,12 +23,13 @@
 import { type LanguageModel } from "ai";
 import { openai } from "@ai-sdk/openai";
 import {
+  bindRequestExecutor,
+  parseModelRef,
   runAgent,
   type AgentRequestExecutor,
   type StandardSchemaV1,
   type TextLogic,
 } from "@statelyai/agent";
-import { bindRequestExecutor, parseModelRef } from "@statelyai/agent/adapter";
 import { createAiSdkExecutors, type AiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import { jokeMachine, models as jokeModels, tellJoke } from "../joke/index.js";
 import { models as triageModels, triageMachine } from "../triage/index.js";
@@ -121,19 +122,16 @@ export async function runStreamingDemo(
     onChunk: (chunk) => process.stdout.write(chunk),
   }),
 ) {
-  const result = await runAgent(
-    jokeMachine.provide({ actors: { tellJoke: streamingTellJoke } }),
-    {
-      input: { topic },
-      // Rate the streamed joke; the decision then ends the loop after one joke.
-      // The chosen END event is delivered to the machine automatically.
-      executors: {
-        generateText: async () => ({ output: { rating: 9, explanation: "solid pun" } }),
-        decide: async () => ({ event: { type: "END" as const } }),
-      },
-      onTransition: (snapshot) => console.log("\n  state ->", JSON.stringify(snapshot.value)),
+  const result = await runAgent(jokeMachine.provide({ actors: { tellJoke: streamingTellJoke } }), {
+    input: { topic },
+    // Rate the streamed joke; the decision then ends the loop after one joke.
+    // The chosen END event is delivered to the machine automatically.
+    executors: {
+      generateText: async () => ({ output: { rating: 9, explanation: "solid pun" } }),
+      decide: async () => ({ event: { type: "END" as const } }),
     },
-  );
+    onTransition: (snapshot) => console.log("\n  state ->", JSON.stringify(snapshot.value)),
+  });
   process.stdout.write("\n");
   if (result.status !== "done") {
     throw new Error(`runStreamingDemo did not complete: ${result.status}`);

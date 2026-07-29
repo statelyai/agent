@@ -37,13 +37,13 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 import {
+  type AgentMessage,
   assistantMessage,
   runAgent,
   setupAgent,
   userMessage,
   type AgentRequestExecutors,
 } from "@statelyai/agent";
-import { zodAgentMessages } from "@statelyai/agent/zod";
 
 export const models = defineModels({
   // One generator model, re-invoked each round over the growing transcript —
@@ -70,7 +70,7 @@ const agentSetup = setupAgent({
     // Accumulating transcript: task + every draft (assistant) + every critique
     // (role-flipped to user, as the tutorial does so the writer treats the
     // reflection as feedback to act on).
-    messages: zodAgentMessages(),
+    messages: z.custom<AgentMessage[]>((v) => Array.isArray(v)),
     // The critic's latest structured verdict (drives the early-exit guard).
     critique: critiqueSchema.nullable(),
     // Completed revision rounds — the typed loop bound, replacing LangGraph's
@@ -106,7 +106,7 @@ const agentSetup = setupAgent({
     // draft and every rewrite — exactly one generate node, re-invoked.
     writeEssay: {
       schemas: {
-        input: z.object({ messages: zodAgentMessages() }),
+        input: z.object({ messages: z.custom<AgentMessage[]>((v) => Array.isArray(v)) }),
         output: z.string(),
       },
       model: "writer",

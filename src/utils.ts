@@ -248,8 +248,7 @@ export function getAgentMessages(snapshot: unknown): AgentMessage[] {
  * Structural guard for a {@link StandardSchemaV1}: `true` when `value` carries
  * the `~standard` marker. Used to tell an already-schema'd tool `inputSchema`
  * (a Zod/Valibot/… schema) apart from an SDK-specific schema wrapper that core
- * can't read directly — see the `ai-sdk` tool pass-through and `openai-compat`
- * tool serialization.
+ * can't read directly — see the `ai-sdk` tool pass-through.
  */
 export function isStandardSchema(value: unknown): value is StandardSchemaV1 {
   return typeof value === "object" && value !== null && "~standard" in value;

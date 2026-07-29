@@ -3,7 +3,6 @@ import {
   type AnyActorLogic,
   type AnyMachineSnapshot,
   type AnySetupConfig,
-  type AnyStateMachine,
   type AsyncActorLogic,
   type EventObject,
   type MachineContext,
@@ -40,6 +39,7 @@ import {
   setupAgentFromConfig,
   type AgentWorkflowConfig,
   type FromConfigOptions,
+  type FromConfigResult,
 } from "./workflow-config.js";
 
 // ─── setupAgent ───
@@ -180,43 +180,72 @@ export function createAgentSchemas<
   };
 }
 
-// One `setupAgent({ requests })` entry's config. Identical to a standalone
-// `createTextLogic(...)` config (`mode` included): a request entry lowers to
-// exactly that, with `name` defaulted from the map key.
-export type AgentRequestConfig<
-  TInputSchema extends StandardSchemaV1 = StandardSchemaV1,
-  TOutputSchema extends StandardSchemaV1 = StandardSchemaV1,
-  TMetadata = Record<string, unknown>,
-  TModel extends string = string,
-> = TextLogicConfig<TInputSchema, TOutputSchema, TMetadata, TModel>;
-
 // Maps request keys to their input/output schema pair — the shape `setupAgent({ requests })` and `AgentRequestInput` are keyed by.
 //
 // This indirection looks removable (why not infer the request map directly
 // from the config?) but is load-bearing: `AgentRequestInput` anchors inference
 // on `schemas: TRequestSchemas[K]`, which is what gives the `({ input }) =>`
 // resolvers (`prompt`, `system`, `model`, …) their parameter types. Inferring
-// a `Record<string, AgentRequestConfig>` straight from the literal instead
+// a `Record<string, TextLogicConfig>` straight from the literal instead
 // makes every resolver's `input` an implicit `any`.
 export type AgentRequestSchemaMap = Record<
   string,
   {
-    input: StandardSchemaV1;
-    output: StandardSchemaV1;
+    input?: StandardSchemaV1;
+    output?: StandardSchemaV1;
   }
 >;
 
-// The full `setupAgent({ requests })` map: one AgentRequestConfig per schema-map entry, each carrying its own schemas.
+// Resolves a request entry's (optional) schema slot to the declared schema, or
+// to `TFallback` when the entry omits it. Reads the slot by INDEXED ACCESS
+// (`TRequestSchemas[K]["output"]`) rather than by `extends { output?: infer S }`:
+// the entry types here come from reverse-mapped-type inference on the
+// `requests` literal, and a shape test against one of those resolves as if the
+// omitted-in-some-entries slot were absent everywhere (every request then types
+// as the fallback). Tuples keep an optional slot (`Schema | undefined`) from
+// distributing into a union of "the schema" and "the fallback".
+type ResolvedRequestSchema<TSchema, TFallback> = [NonNullable<TSchema>] extends [never]
+  ? TFallback
+  : [NonNullable<TSchema>] extends [StandardSchemaV1]
+    ? NonNullable<TSchema>
+    : TFallback;
+
+// A request entry's input schema, defaulting to the no-input schema (the
+// request takes no invoke `input`) when the entry declares none.
+type RequestInputSchema<TSchemas extends { input?: StandardSchemaV1 }> = ResolvedRequestSchema<
+  TSchemas["input"],
+  StandardSchemaV1<undefined>
+>;
+
+// A request entry's output schema, defaulting to a string schema (a plain
+// text request) when the entry declares none.
+type RequestOutputSchema<TSchemas extends { output?: StandardSchemaV1 }> = ResolvedRequestSchema<
+  TSchemas["output"],
+  StandardSchemaV1<string>
+>;
+
+// The full `setupAgent({ requests })` map: one entry per schema-map entry, each
+// carrying its own schemas. An entry's config is identical to a standalone
+// `createTextLogic(...)` config (`mode` included): a request entry lowers to
+// exactly that, with `name` defaulted from the map key.
 export type AgentRequestInput<
   TRequestSchemas extends AgentRequestSchemaMap,
   TModel extends string = string,
 > = {
-  [K in keyof TRequestSchemas]: AgentRequestConfig<
-    TRequestSchemas[K]["input"],
-    TRequestSchemas[K]["output"],
-    Record<string, unknown>,
-    TModel
+  [K in keyof TRequestSchemas]: Omit<
+    TextLogicConfig<
+      RequestInputSchema<TRequestSchemas[K]>,
+      RequestOutputSchema<TRequestSchemas[K]>,
+      Record<string, unknown>,
+      TModel
+    >,
+    "schemas"
   > & {
+    // Required (even when empty: `schemas: {}`), unlike a standalone
+    // `createTextLogic` config's optional `schemas`. An entry that omits the
+    // key entirely defeats the reverse-mapped-type inference this map relies
+    // on, silently typing EVERY request's input/output as `unknown`; keeping
+    // it required turns that into a compile error instead.
     schemas: TRequestSchemas[K];
   };
 };
@@ -224,8 +253,8 @@ export type AgentRequestInput<
 // The TextLogic actors createRequestActors builds from an AgentRequestInput — one per request key.
 type RequestActors<TRequestSchemas extends AgentRequestSchemaMap> = {
   [K in keyof TRequestSchemas]: TextLogic<
-    TRequestSchemas[K]["input"],
-    TRequestSchemas[K]["output"]
+    RequestInputSchema<TRequestSchemas[K]>,
+    RequestOutputSchema<TRequestSchemas[K]>
   >;
 };
 
@@ -611,46 +640,6 @@ type SetupAgentResult<
   >;
 };
 
-/** Typed machine config used by convenience authoring layers built on `setupAgent`. */
-export type AgentMachineConfig<
-  TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
-  TInputSchema extends StandardSchemaV1,
-  TEventSchemas extends AgentEventSchemaInputMap = {},
-  TOutputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
-  TModels extends AgentModelMap = {},
-> = Parameters<
-  SetupAgentResult<
-    TContextSchema,
-    TEventSchemas,
-    {},
-    {},
-    TInputSchema,
-    TOutputSchema,
-    StandardSchemaV1<MetaObject>,
-    TModels
-  >["createMachine"]
->[0];
-
-/** Machine produced from {@link AgentMachineConfig}. */
-export type AgentMachine<
-  TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
-  TInputSchema extends StandardSchemaV1,
-  TEventSchemas extends AgentEventSchemaInputMap = {},
-  TOutputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
-  TModels extends AgentModelMap = {},
-> = ReturnType<
-  SetupAgentResult<
-    TContextSchema,
-    TEventSchemas,
-    {},
-    {},
-    TInputSchema,
-    TOutputSchema,
-    StandardSchemaV1<MetaObject>,
-    TModels
-  >["createMachine"]
->;
-
 /**
  * Schema-first `setup(...)` for agent machines — the standard entry point
  * for authoring a machine (the blueprint) that this library then runs (via
@@ -773,18 +762,24 @@ export namespace setupAgent {
    * the library bundles no JSON Schema engine itself; bring Ajv,
    * @cfworker/json-schema, or another compiler that returns Standard Schema.
    *
+   * Returns the built `machine` plus the compiled `schemas` pack (context,
+   * events, input, output, meta, emitted) — a JSON-authored agent has no
+   * TypeScript types, so hosts need the runtime schemas for things like
+   * validating an inbound raw event with `parseAgentEvent`.
+   *
    * @example
    * ```ts
-   * const machine = setupAgent.fromConfig(workflowConfig, {
+   * const { machine, schemas } = setupAgent.fromConfig(workflowConfig, {
    *   compileSchema,
    * });
    * const result = await runAgent(machine, { input: { ticket }, executors: { generateText, decide } });
+   * const event = parseAgentEvent(result.snapshot, raw, { events: schemas.events });
    * ```
    */
   export function fromConfig(
     config: AgentWorkflowConfig,
     options: FromConfigOptions,
-  ): AnyStateMachine {
+  ): FromConfigResult {
     return setupAgentFromConfig(config, options);
   }
 }
@@ -906,6 +901,50 @@ function assertNoActorKeyCollisions(
         );
       }
       seenIn.set(key, groupName);
+    }
+  }
+}
+
+/**
+ * Runtime guard: every key of the `setupAgent({ states })` narrowing map must
+ * name a real state node in the machine config. A typo'd key is otherwise a
+ * silent no-op — the narrowing simply never applies — so fail fast at
+ * `createMachine` time. Walks nested `states` maps in parallel with the
+ * machine config, since narrowing entries nest the same way.
+ */
+function assertStateSchemaKeysExist(
+  stateSchemas: Record<string, AgentSetupStateSchema> | undefined,
+  machineStates: Record<string, any> | undefined,
+  path: readonly string[] = [],
+): void {
+  if (!stateSchemas) {
+    return;
+  }
+
+  for (const [key, stateSchema] of Object.entries(stateSchemas)) {
+    const machineState = machineStates?.[key];
+    if (!machineState || typeof machineState !== "object") {
+      const validKeys = Object.keys(machineStates ?? {});
+      const parent = path.length > 0 ? ` of state '${path.join(".")}'` : "";
+      throw new Error(
+        `setupAgent: 'states' key '${[...path, key].join(".")}' does not name a state in the ` +
+          `machine config, so its context narrowing would silently never apply. Valid child ` +
+          `states${parent}: ${validKeys.join(", ") || "(none)"}. Fix the key to match a state ` +
+          `in createMachine({ states }), or remove it from setupAgent({ states }).`,
+      );
+    }
+
+    if (
+      stateSchema &&
+      typeof stateSchema === "object" &&
+      "states" in stateSchema &&
+      stateSchema.states
+    ) {
+      assertStateSchemaKeysExist(
+        stateSchema.states as Record<string, AgentSetupStateSchema>,
+        machineState.states as Record<string, any> | undefined,
+        [...path, key],
+      );
     }
   }
 }
@@ -1156,6 +1195,10 @@ function createSetupAgent<
 
   return Object.assign(base, {
     createMachine(machineConfig: Parameters<typeof base.createMachine>[0]) {
+      assertStateSchemaKeysExist(
+        config.states,
+        (machineConfig as { states?: Record<string, any> } | undefined)?.states,
+      );
       const machine = createBaseMachine(withRootOutputFromSingleFinal(machineConfig) as never);
       agentExecutionOptions.set(machine as object, machineOptions);
       // Carry the wait-state predicate on the machine's root `config` (shared by

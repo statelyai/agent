@@ -233,7 +233,7 @@ export async function resumeTool(
 }
 
 // Illegal events are refused up front by `runAgent` itself: `resumeTool`'s
-// `runAgent(refundMachine, { snapshot, event })` throws `IllegalResumeEventError`
+// `runAgent(refundMachine, { snapshot, event })` throws `AgentIllegalResumeEventError`
 // when the restored state can't take the event, so the harness needs no
 // hand-rolled legality check before resuming.
 

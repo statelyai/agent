@@ -15,7 +15,7 @@ import {
   getAgentEffects,
   initEntry,
   replay,
-  ReplayDivergenceError,
+  AgentReplayDivergenceError,
   verifyReplay,
   type AgentEffect,
 } from "./effects.js";
@@ -445,7 +445,7 @@ describe("replay — envelope verification", () => {
       verification: { ...entries[1]!.verification!, stateHash: "deadbeef" },
     };
 
-    expect(() => verifyReplay(machine, entries)).toThrow(ReplayDivergenceError);
+    expect(() => verifyReplay(machine, entries)).toThrow(AgentReplayDivergenceError);
     try {
       verifyReplay(machine, entries);
     } catch (error) {
