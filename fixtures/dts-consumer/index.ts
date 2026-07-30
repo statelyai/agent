@@ -31,6 +31,10 @@ export {
 } from "@statelyai/agent";
 export { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 export {
+  createToolLoopMachine,
+  type CreateRouterMachineConfig,
+} from "@statelyai/agent/machines";
+export {
   createSqliteEventLogStore,
   createSqliteSnapshotStore,
   type SqliteDatabase,

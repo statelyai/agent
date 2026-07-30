@@ -27,6 +27,16 @@
         "default": "./dist/ai-sdk.cjs"
       }
     },
+    "./machines": {
+      "import": {
+        "types": "./dist/machines.d.mts",
+        "default": "./dist/machines.mjs"
+      },
+      "require": {
+        "types": "./dist/machines.d.cts",
+        "default": "./dist/machines.cjs"
+      }
+    },
     "./sqlite": {
       "import": {
         "types": "./dist/sqlite.d.mts",
@@ -88,7 +98,7 @@
     "@changesets/cli": "^2.27.9",
     "@cloudflare/workers-types": "^4.20260702.1",
     "@inquirer/prompts": "^8.5.2",
-    "@statelyai/inspect": "^0.7.2",
+    "@statelyai/sdk": "^0.15.0",
     "@types/express": "^5.0.6",
     "@types/node": "^20.16.10",
     "@types/react": "^19.2.17",

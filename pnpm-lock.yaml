@@ -26,9 +26,9 @@ importers:
       '@inquirer/prompts':
         specifier: ^8.5.2
         version: 8.5.2(@types/node@20.19.30)
-      '@statelyai/inspect':
-        specifier: ^0.7.2
-        version: 0.7.2(xstate@6.0.0-alpha.25)
+      '@statelyai/sdk':
+        specifier: ^0.15.0
+        version: 0.15.0(cytoscape@3.34.0)(d3-force@3.0.0)(zod@4.3.6)
       '@types/express':
         specifier: ^5.0.6
         version: 5.0.6
@@ -40,7 +40,7 @@ importers:
         version: 19.2.17
       agents:
         specifier: 0.11.5
-        version: 0.11.5(@babel/core@7.29.0)(@babel/runtime@7.29.7)(@cloudflare/workers-types@4.20260702.1)(ai@6.0.67(zod@4.3.6))(react@19.2.7)(rolldown@1.2.0)(zod@4.3.6)
+        version: 0.11.5(@babel/core@7.29.0)(@babel/runtime@7.29.7)(@cloudflare/workers-types@4.20260702.1)(ai@6.0.67(zod@4.3.6))(react@19.2.7)(rolldown@1.2.0)(vite@7.3.6(@types/node@20.19.30)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0))(zod@4.3.6)
       ai:
         specifier: ^6.0.67
         version: 6.0.67(zod@4.3.6)
@@ -61,7 +61,7 @@ importers:
         version: 6.24.0
       openai:
         specifier: ^6.45.0
-        version: 6.45.0(ws@8.21.0)(zod@4.3.6)
+        version: 6.45.0(ws@8.21.1)(zod@4.3.6)
       oxfmt:
         specifier: 0.57.0
         version: 0.57.0
@@ -2564,13 +2564,11 @@ packages:
       zod:
         optional: true
 
-  '@statelyai/inspect@0.7.2':
-    resolution: {integrity: sha512-axuXSEBsI8pQ89rP2DWq+kHLjABiXpe2qYDOo6+jVLJ+9NPOTjutMnmDd+XcJjn76d+RH6sfHa0XkFIYPUHDOw==, tarball: https://registry.npmjs.org/@statelyai/inspect/-/inspect-0.7.2.tgz}
-    peerDependencies:
-      xstate: ^5.5.1
-
   '@statelyai/sdk@0.14.0':
     resolution: {integrity: sha512-3OrmGMCerak0fzIYV5zGxxt3bulreah/Uo3KYYkdS2WUinPvTq53YOaLL8YnytnyebypXaEdLw/aWPZ1XL4xMA==, tarball: https://registry.npmjs.org/@statelyai/sdk/-/sdk-0.14.0.tgz}
+
+  '@statelyai/sdk@0.15.0':
+    resolution: {integrity: sha512-yvzEj22DgcIJa9MkVsjzhPpR/hJtUQyAcvWpqH4usL5xcpVEm2vTpuuUr5EYb92nElSz32jBGcL5mKk3qA7Tmg==, tarball: https://registry.npmjs.org/@statelyai/sdk/-/sdk-0.15.0.tgz}
 
   '@tailwindcss/node@4.3.3':
     resolution: {integrity: sha512-/T8IKEsf9VTU6tLjgC7+sv2mOPtQxzE2jMw7u4Tt40Tx+QSZxpzh95/H6cMKoja9XuW7iMdLJYBB0o9G1CaAgg==, tarball: https://registry.npmjs.org/@tailwindcss/node/-/node-4.3.3.tgz}
@@ -3290,10 +3288,6 @@ packages:
     resolution: {integrity: sha512-yki5XnKuf750l50uGTllt6kKILY4nQ1eNIQatoXEByZ5dWgnKqbnqmTrBE5B4N7lrMJKQ2ytWMiTO2o0v6Ew/w==, tarball: https://registry.npmjs.org/cookie/-/cookie-0.7.2.tgz}
     engines: {node: '>= 0.6'}
 
-  copy-anything@3.0.5:
-    resolution: {integrity: sha512-yCEafptTtb4bk7GLEQoM8KVJpxAfdBJYaXyzQEgQQQgYrZiDp8SJmGKlYza6CYjEDNstAdNdKA3UuoULlEbS6w==, tarball: https://registry.npmjs.org/copy-anything/-/copy-anything-3.0.5.tgz}
-    engines: {node: '>=12.13'}
-
   core-js-pure@3.49.0:
     resolution: {integrity: sha512-XM4RFka59xATyJv/cS3O3Kml72hQXUeGRuuTmMYFxwzc9/7C8OYTaIR/Ji+Yt8DXzsFLNhat15cE/JP15HrCgw==, tarball: https://registry.npmjs.org/core-js-pure/-/core-js-pure-3.49.0.tgz}
 
@@ -3689,10 +3683,6 @@ packages:
   event-target-polyfill@0.0.4:
     resolution: {integrity: sha512-Gs6RLjzlLRdT8X9ZipJdIZI/Y6/HhRLyq9RdDlCsnpxr/+Nn6bU2EFGuC94GjxqhM+Nmij2Vcq98yoHrU8uNFQ==, tarball: https://registry.npmjs.org/event-target-polyfill/-/event-target-polyfill-0.0.4.tgz}
 
-  event-target-shim@6.0.2:
-    resolution: {integrity: sha512-8q3LsZjRezbFZ2PN+uP+Q7pnHUMmAOziU2vA2OwoFaKIXxlxl38IylhSSgUorWu/rf4er67w0ikBqjBFk/pomA==, tarball: https://registry.npmjs.org/event-target-shim/-/event-target-shim-6.0.2.tgz}
-    engines: {node: '>=10.13.0'}
-
   eventsource-parser@3.0.6:
     resolution: {integrity: sha512-Vo1ab+QXPzZ4tCa8SwIHJFaSzy4R6SHf7BY79rFBDf0idraZWAkYrDjDj8uWaSm3S2TK+hJ7/t1CEmZ7jXw+pg==, tarball: https://registry.npmjs.org/eventsource-parser/-/eventsource-parser-3.0.6.tgz}
     engines: {node: '>=18.0.0'}
@@ -3730,9 +3720,6 @@ packages:
   fast-glob@3.3.3:
     resolution: {integrity: sha512-7MptL8U0cqcFdzIzwOTHoilX9x5BrNqye7Z/LuC7kCMRio1EMSyqRK3BEAUD7sXRq4iT4AzTVuZdhgQ2TCvYLg==, tarball: https://registry.npmjs.org/fast-glob/-/fast-glob-3.3.3.tgz}
     engines: {node: '>=8.6.0'}
-
-  fast-safe-stringify@2.1.1:
-    resolution: {integrity: sha512-W+KJc2dmILlPplD/H4K9l9LcAHAfPtP6BY84uVLXQ6Evcz9Lcg33Y2z1IVblT6xdY54PXYVHEv+0Wpq8Io6zkA==, tarball: https://registry.npmjs.org/fast-safe-stringify/-/fast-safe-stringify-2.1.1.tgz}
 
   fast-sha256@1.3.0:
     resolution: {integrity: sha512-n11RGP/lrWEFI/bWdygLxhI+pVeo1ZYIVwvvPkW7azl/rOy+F3HYRZ2K5zeE9mmkhQppyv9sQFx0JM9UabnpPQ==, tarball: https://registry.npmjs.org/fast-sha256/-/fast-sha256-1.3.0.tgz}
@@ -4013,10 +4000,6 @@ packages:
     resolution: {integrity: sha512-2AT6j+gXe/1ueqbW6fLZJiIw3F8iXGJtt0yDrZaBhAZEG1raiTxKWU+IPqMCzQAXOUCKdA4UDMgacKH25XG2Cw==, tarball: https://registry.npmjs.org/is-subdir/-/is-subdir-1.2.0.tgz}
     engines: {node: '>=4'}
 
-  is-what@4.1.16:
-    resolution: {integrity: sha512-ZhMwEosbFJkA0YhFnNDgTM4ZxDRsS6HqTo7qsZM08fehyRYIYa0yHu5R6mgo1n/8MgaPBXiPimPD77baVFYg+A==, tarball: https://registry.npmjs.org/is-what/-/is-what-4.1.16.tgz}
-    engines: {node: '>=12.13'}
-
   is-windows@1.0.2:
     resolution: {integrity: sha512-eXK1UInq2bPmjyX6e3VHIzMLobc4J94i4AWn+Hpq3OU5KkrRC96OAcR3PRJ/pGu6m8TRnBHP9dkXQVsT/COVIA==, tarball: https://registry.npmjs.org/is-windows/-/is-windows-1.0.2.tgz}
     engines: {node: '>=0.10.0'}
@@ -4027,11 +4010,6 @@ packages:
 
   isexe@2.0.0:
     resolution: {integrity: sha512-RHxMLp9lnKHGHRng9QFhRCMbYAcVpn69smSGcq3f36xjgVVWThj4qqLbTLlq7Ssj8B+fIQ1EuCEGI2lKsyQeIw==, tarball: https://registry.npmjs.org/isexe/-/isexe-2.0.0.tgz}
-
-  isomorphic-ws@5.0.0:
-    resolution: {integrity: sha512-muId7Zzn9ywDsyXgTIafTry2sV3nySZeUDe6YedVd1Hvuuep5AsIlqK+XefWpYTyJG5e503F2xIuT2lcU6rCSw==, tarball: https://registry.npmjs.org/isomorphic-ws/-/isomorphic-ws-5.0.0.tgz}
-    peerDependencies:
-      ws: '*'
 
   jiti@2.7.0:
     resolution: {integrity: sha512-AC/7JofJvZGrrneWNaEnJeOLUx+JlGt7tNa0wZiRPT4MY1wmfKjt2+6O2p2uz2+skll8OZZmJMNqeke7kKbNgQ==, tarball: https://registry.npmjs.org/jiti/-/jiti-2.7.0.tgz}
@@ -4586,9 +4564,6 @@ packages:
     peerDependencies:
       '@cloudflare/workers-types': ^4.20240729.0
 
-  partysocket@0.0.25:
-    resolution: {integrity: sha512-1oCGA65fydX/FgdnsiBh68buOvfxuteoZVSb3Paci2kRp/7lhF0HyA8EDb5X/O6FxId1e+usPTQNRuzFEvkJbQ==, tarball: https://registry.npmjs.org/partysocket/-/partysocket-0.0.25.tgz}
-
   partysocket@1.1.18:
     resolution: {integrity: sha512-SyuvH9VavWOSa14v6dYdp3yfSUDII4BQB1+TkGOFBkjfZKjnDBiba4fhdhwBlqGBkqw4ea3gTA1DYhSffX24Wg==, tarball: https://registry.npmjs.org/partysocket/-/partysocket-1.1.18.tgz}
     peerDependencies:
@@ -4879,10 +4854,6 @@ packages:
   safe-content-frame@0.0.23:
     resolution: {integrity: sha512-iIxZS0aEyYXp2CazwEeu1qhvar4sOctzjZQSlfvXzeGEqIpeCThXW1dV2t6HJ3FiixgWiDqdFMKzBq0mOCDmEQ==, tarball: https://registry.npmjs.org/safe-content-frame/-/safe-content-frame-0.0.23.tgz}
 
-  safe-stable-stringify@2.5.0:
-    resolution: {integrity: sha512-b3rppTKm9T+PsVCBEOUR46GWI7fdOs00VKZ1+9c1EWDaDMvjQc6tUwuFyIprgGgTcWoVHSKrU8H31ZHA2e0RHA==, tarball: https://registry.npmjs.org/safe-stable-stringify/-/safe-stable-stringify-2.5.0.tgz}
-    engines: {node: '>=10'}
-
   safer-buffer@2.1.2:
     resolution: {integrity: sha512-YZo3K82SD7Riyi0E1EQPojLz7kpepnSQI9IyPbHHg1XXXevb5dJI7tpyN2ADxGcQbHG7vcyRHk0cbwqcQriUtg==, tarball: https://registry.npmjs.org/safer-buffer/-/safer-buffer-2.1.2.tgz}
 
@@ -5044,10 +5015,6 @@ packages:
 
   stylis@4.4.0:
     resolution: {integrity: sha512-5Z9ZpRzfuH6l/UAvCPAPUo3665Nk2wLaZU3x+TLHKVzIz33+sbJqbtrYoC3KD4/uVOr2Zp+L0LySezP9OHV9yA==, tarball: https://registry.npmjs.org/stylis/-/stylis-4.4.0.tgz}
-
-  superjson@1.13.3:
-    resolution: {integrity: sha512-mJiVjfd2vokfDxsQPOwJ/PtanO87LhpYY88ubI5dUB1Ab58Txbyje3+jpm+/83R/fevaq/107NNhtYBLuoTrFg==, tarball: https://registry.npmjs.org/superjson/-/superjson-1.13.3.tgz}
-    engines: {node: '>=10'}
 
   tailwind-merge@3.6.0:
     resolution: {integrity: sha512-uxL7qAVQriqRQPAyK3pj66VqskWqoZ37PW94jwOTwNfq/z9oyu1V+eqrZqtR2+fCiXdYOZe/Modt8GtvqNzu+w==, tarball: https://registry.npmjs.org/tailwind-merge/-/tailwind-merge-3.6.0.tgz}
@@ -5541,18 +5508,6 @@ packages:
 
   wrappy@1.0.2:
     resolution: {integrity: sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==, tarball: https://registry.npmjs.org/wrappy/-/wrappy-1.0.2.tgz}
-
-  ws@8.21.0:
-    resolution: {integrity: sha512-Vsp28b7DRcimFQvrqu2Wek3z1iYxDCWqHYB8Qsnk/S4RfaCQzPGPyBNuVjJV3cd6UiKtUtp6sNM77gWvzcCH+g==, tarball: https://registry.npmjs.org/ws/-/ws-8.21.0.tgz}
-    engines: {node: '>=10.0.0'}
-    peerDependencies:
-      bufferutil: ^4.0.1
-      utf-8-validate: '>=5.0.2'
-    peerDependenciesMeta:
-      bufferutil:
-        optional: true
-      utf-8-validate:
-        optional: true
 
   ws@8.21.1:
     resolution: {integrity: sha512-+0NTnW77fFN/DjQi6k/Sq/Yvk4Sgajw7urW8V+asjXnRgDs9gyGkdb7EzgfhA4goXsRIZKE28fzIXBHEzhuiWw==, tarball: https://registry.npmjs.org/ws/-/ws-8.21.1.tgz}
@@ -7636,13 +7591,14 @@ snapshots:
   '@rolldown/binding-win32-x64-msvc@1.2.0':
     optional: true
 
-  '@rolldown/plugin-babel@0.2.3(@babel/core@7.29.0)(@babel/runtime@7.29.7)(rolldown@1.2.0)':
+  '@rolldown/plugin-babel@0.2.3(@babel/core@7.29.0)(@babel/runtime@7.29.7)(rolldown@1.2.0)(vite@7.3.6(@types/node@20.19.30)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0))':
     dependencies:
       '@babel/core': 7.29.0
       picomatch: 4.0.4
       rolldown: 1.2.0
     optionalDependencies:
       '@babel/runtime': 7.29.7
+      vite: 7.3.6(@types/node@20.19.30)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0)
 
   '@rolldown/pluginutils@1.0.0-rc.12': {}
 
@@ -7769,28 +7725,35 @@ snapshots:
 
   '@standard-schema/spec@1.1.0': {}
 
+  '@statelyai/graph@1.0.0(cytoscape@3.34.0)(d3-force@3.0.0)(zod@4.3.6)':
+    optionalDependencies:
+      cytoscape: 3.34.0
+      d3-force: 3.0.0
+      zod: 4.3.6
+
   '@statelyai/graph@1.0.0(cytoscape@3.34.0)(d3-force@3.0.0)(zod@4.4.3)':
     optionalDependencies:
       cytoscape: 3.34.0
       d3-force: 3.0.0
       zod: 4.4.3
 
-  '@statelyai/inspect@0.7.2(xstate@6.0.0-alpha.25)':
-    dependencies:
-      fast-safe-stringify: 2.1.1
-      isomorphic-ws: 5.0.0(ws@8.21.0)
-      partysocket: 0.0.25
-      safe-stable-stringify: 2.5.0
-      superjson: 1.13.3
-      ws: 8.21.0
-      xstate: 6.0.0-alpha.25
-    transitivePeerDependencies:
-      - bufferutil
-      - utf-8-validate
-
   '@statelyai/sdk@0.14.0(cytoscape@3.34.0)(d3-force@3.0.0)(zod@4.4.3)':
     dependencies:
       '@statelyai/graph': 1.0.0(cytoscape@3.34.0)(d3-force@3.0.0)(zod@4.4.3)
+      esbuild: 0.27.7
+      typescript: 5.9.3
+      xstate: 5.32.5
+    transitivePeerDependencies:
+      - cytoscape
+      - d3-force
+      - dotparser
+      - elkjs
+      - fast-xml-parser
+      - zod
+
+  '@statelyai/sdk@0.15.0(cytoscape@3.34.0)(d3-force@3.0.0)(zod@4.3.6)':
+    dependencies:
+      '@statelyai/graph': 1.0.0(cytoscape@3.34.0)(d3-force@3.0.0)(zod@4.3.6)
       esbuild: 0.27.7
       typescript: 5.9.3
       xstate: 5.32.5
@@ -8402,12 +8365,12 @@ snapshots:
       mime-types: 3.0.2
       negotiator: 1.0.0
 
-  agents@0.11.5(@babel/core@7.29.0)(@babel/runtime@7.29.7)(@cloudflare/workers-types@4.20260702.1)(ai@6.0.67(zod@4.3.6))(react@19.2.7)(rolldown@1.2.0)(zod@4.3.6):
+  agents@0.11.5(@babel/core@7.29.0)(@babel/runtime@7.29.7)(@cloudflare/workers-types@4.20260702.1)(ai@6.0.67(zod@4.3.6))(react@19.2.7)(rolldown@1.2.0)(vite@7.3.6(@types/node@20.19.30)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0))(zod@4.3.6):
     dependencies:
       '@babel/plugin-proposal-decorators': 7.29.0(@babel/core@7.29.0)
       '@cfworker/json-schema': 4.1.1
       '@modelcontextprotocol/sdk': 1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6)
-      '@rolldown/plugin-babel': 0.2.3(@babel/core@7.29.0)(@babel/runtime@7.29.7)(rolldown@1.2.0)
+      '@rolldown/plugin-babel': 0.2.3(@babel/core@7.29.0)(@babel/runtime@7.29.7)(rolldown@1.2.0)(vite@7.3.6(@types/node@20.19.30)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0))
       ai: 6.0.67(zod@4.3.6)
       cron-schedule: 6.0.0
       mimetext: 3.0.28
@@ -8417,6 +8380,8 @@ snapshots:
       react: 19.2.7
       yargs: 18.0.0
       zod: 4.3.6
+    optionalDependencies:
+      vite: 7.3.6(@types/node@20.19.30)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0)
     transitivePeerDependencies:
       - '@babel/core'
       - '@babel/plugin-transform-runtime'
@@ -8619,10 +8584,6 @@ snapshots:
   cookie-signature@1.2.2: {}
 
   cookie@0.7.2: {}
-
-  copy-anything@3.0.5:
-    dependencies:
-      is-what: 4.1.16
 
   core-js-pure@3.49.0: {}
 
@@ -8987,8 +8948,6 @@ snapshots:
 
   event-target-polyfill@0.0.4: {}
 
-  event-target-shim@6.0.2: {}
-
   eventsource-parser@3.0.6: {}
 
   eventsource@3.0.7:
@@ -9050,8 +9009,6 @@ snapshots:
       glob-parent: 5.1.2
       merge2: 1.4.1
       micromatch: 4.0.8
-
-  fast-safe-stringify@2.1.1: {}
 
   fast-sha256@1.3.0: {}
 
@@ -9371,17 +9328,11 @@ snapshots:
     dependencies:
       better-path-resolve: 1.0.0
 
-  is-what@4.1.16: {}
-
   is-windows@1.0.2: {}
 
   isbot@5.2.1: {}
 
   isexe@2.0.0: {}
-
-  isomorphic-ws@5.0.0(ws@8.21.0):
-    dependencies:
-      ws: 8.21.0
 
   jiti@2.7.0: {}
 
@@ -10029,9 +9980,9 @@ snapshots:
       regex: 5.1.1
       regex-recursion: 5.1.1
 
-  openai@6.45.0(ws@8.21.0)(zod@4.3.6):
+  openai@6.45.0(ws@8.21.1)(zod@4.3.6):
     optionalDependencies:
-      ws: 8.21.0
+      ws: 8.21.1
       zod: 4.3.6
 
   outdent@0.5.0: {}
@@ -10171,10 +10122,6 @@ snapshots:
     dependencies:
       '@cloudflare/workers-types': 4.20260702.1
       nanoid: 5.1.9
-
-  partysocket@0.0.25:
-    dependencies:
-      event-target-shim: 6.0.2
 
   partysocket@1.1.18(react@19.2.7):
     dependencies:
@@ -10570,8 +10517,6 @@ snapshots:
 
   safe-content-frame@0.0.23: {}
 
-  safe-stable-stringify@2.5.0: {}
-
   safer-buffer@2.1.2: {}
 
   scheduler@0.27.0: {}
@@ -10755,10 +10700,6 @@ snapshots:
       inline-style-parser: 0.2.7
 
   stylis@4.4.0: {}
-
-  superjson@1.13.3:
-    dependencies:
-      copy-anything: 3.0.5
 
   tailwind-merge@3.6.0: {}
 
@@ -11125,8 +11066,6 @@ snapshots:
       strip-ansi: 7.2.0
 
   wrappy@1.0.2: {}
-
-  ws@8.21.0: {}
 
   ws@8.21.1: {}
 

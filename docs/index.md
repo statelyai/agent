@@ -109,6 +109,7 @@ If something here blocks you, or the API surface feels wrong, open an issue. Thi
 - [Use in any stack](any-stack.md): one machine runs locally, behind an HTTP route, or on the edge, with zero machine changes, plus the Express and Cloudflare walkthroughs.
 - [Scope and ecosystem boundaries](scope.md): what portable machine logic owns, what the host owns, and where specialized libraries fit.
 - [Agent machines](machines.md): `setupAgent`, states, invokes, typed context, built-in actor sources, and guards.
+- [Preset machines](machines-presets.md): factories for proven agent shapes (tool loop, router, supervisor, handoff, and more), each an ordinary machine you can eject from.
 - [Decisions](decisions.md): the model choosing exactly one currently-legal machine event.
 - [Plans](plans.md): the multi-event decision, `agent.plan`.
 - [Text requests](text-requests.md): typed text and structured-output model calls.

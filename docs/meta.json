@@ -6,6 +6,7 @@
     "any-stack",
     "scope",
     "machines",
+    "machines-presets",
     "decisions",
     "plans",
     "text-requests",

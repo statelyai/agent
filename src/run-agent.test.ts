@@ -2089,7 +2089,7 @@ describe("inspect passthrough (system-wide visibility)", () => {
 
     const seen: string[] = [];
     const result = await runAgent(machine, {
-      // The @statelyai/inspect shape: an observer, not a function.
+      // The observer shape ({ next }), not a function.
       inspect: { next: (event) => seen.push(event.type) },
       executors: { generateText: async () => ({ output: "" }) },
     });
@@ -2704,6 +2704,387 @@ describe("generateResult", () => {
 });
 
 // ─── Snapshot version stamping + migrate hook (item 2) ───
+describe("restore semantics: pending requests and events-only resume", () => {
+  // Shared two-phase machine: a request, an idle gate, then a second request.
+  const buildMachine = () => {
+    const agentSetup = setupAgent({
+      context: z.object({ a: z.string().nullable(), b: z.string().nullable() }),
+      input: z.object({}),
+      output: z.object({ a: z.string(), b: z.string() }),
+      events: { GO: {} },
+    });
+    return agentSetup.createMachine({
+      context: () => ({ a: null, b: null }),
+      initial: "first",
+      states: {
+        first: {
+          invoke: {
+            src: "agent.generateText",
+            input: () => ({ model: "m", prompt: "one" }),
+            onDone: ({ event }) => ({
+              target: "waiting",
+              context: { a: String(event.output) },
+            }),
+          },
+        },
+        waiting: { on: { GO: { target: "second" } } },
+        second: {
+          invoke: {
+            src: "agent.generateText",
+            input: () => ({ model: "m", prompt: "two" }),
+            onDone: ({ event }) => ({
+              target: "done",
+              context: { b: String(event.output) },
+            }),
+          },
+        },
+        done: {
+          type: "final",
+          output: ({ context }) => ({ a: context.a ?? "", b: context.b ?? "" }),
+        },
+      },
+    });
+  };
+
+  test("a pending request round-trips through the persisted snapshot and re-executes idempotently on restore", async () => {
+    const machine = buildMachine();
+    const calls: string[] = [];
+
+    // Capture a mid-flight persisted snapshot with a hanging executor.
+    const bound = (await import("./index.js")).provideExecutors(machine, {
+      generateText: async (request) => {
+        calls.push(request.prompt ?? "");
+        return new Promise(() => {}) as never;
+      },
+    });
+    const actor = createActor(bound, { input: {} });
+    actor.start();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const persisted = actor.getPersistedSnapshot();
+    actor.stop();
+    expect(calls).toEqual(["one"]);
+
+    // JSON round-trip, then restore with a resolving executor: the pending
+    // request re-executes (XState restarts restored pending async logic).
+    const resolving = {
+      generateText: async (request: AgentTextRequest & { tools: AgentTools }) => {
+        calls.push(`retry:${request.prompt}`);
+        return { output: `ok:${request.prompt}` };
+      },
+    };
+    const restored = await runAgent(machine, {
+      snapshot: JSON.parse(JSON.stringify(persisted)),
+      executors: resolving,
+    });
+    // First leg's call re-executed exactly once; run settled at the idle gate.
+    expect(calls).toEqual(["one", "retry:one"]);
+    expect(restored.status).toBe("idle");
+
+    const finished = await runAgent(machine, {
+      snapshot: restored.snapshot,
+      event: { type: "GO" },
+      executors: resolving,
+    });
+    expect(calls).toEqual(["one", "retry:one", "retry:two"]);
+    expect(finished.status).toBe("done");
+    expect(finished.status === "done" ? finished.output : undefined).toEqual({
+      a: "ok:one",
+      b: "ok:two",
+    });
+  });
+
+  test("events-only resume: continues from the log alone without re-executing recorded calls", async () => {
+    const machine = buildMachine();
+    const calls: string[] = [];
+    const executors = {
+      generateText: async (request: AgentTextRequest & { tools: AgentTools }) => {
+        calls.push(request.prompt ?? "");
+        return { output: `ok:${request.prompt}` };
+      },
+    };
+
+    const first = await runAgent(machine, { input: {}, executors });
+    expect(first.status).toBe("idle");
+    expect(calls).toEqual(["one"]);
+
+    // No snapshot: resume purely from the replayable log (JSON round-tripped).
+    const resumed = await runAgent(machine, {
+      events: JSON.parse(JSON.stringify(first.events)),
+      event: { type: "GO" },
+      executors,
+    });
+    expect(resumed.status).toBe("done");
+    expect(resumed.status === "done" ? resumed.output : undefined).toEqual({
+      a: "ok:one",
+      b: "ok:two",
+    });
+    // The recorded first call was NOT re-executed.
+    expect(calls).toEqual(["one", "two"]);
+    // The resumed log extends the original history (init entry retained).
+    expect(resumed.events[0]?.event.type).toBe("@agent.init");
+    expect(resumed.events.map((entry) => entry.event.type)).toContain("GO");
+    // The full log still replays to the same final state.
+    expect(replay(machine, resumed.events).snapshot.status).toBe("done");
+  });
+
+  test("events-only resume: a request in flight when the log ended re-executes and the run completes (crash recovery)", async () => {
+    const machine = buildMachine();
+    const calls: string[] = [];
+    const abort = new AbortController();
+
+    // First leg to the idle gate, then a second leg that hangs on call two and
+    // aborts — simulating a crash mid-second-invoke with the log persisted.
+    const hangingExecutors = {
+      generateText: async (request: AgentTextRequest & { tools: AgentTools }) => {
+        calls.push(request.prompt ?? "");
+        if (request.prompt === "two") {
+          setTimeout(() => abort.abort(new Error("simulated crash")), 10);
+          return new Promise(() => {}) as never;
+        }
+        return { output: `ok:${request.prompt}` };
+      },
+    };
+    const first = await runAgent(machine, { input: {}, executors: hangingExecutors });
+    expect(first.status).toBe("idle");
+    const crashed = await runAgent(machine, {
+      snapshot: first.snapshot,
+      events: first.events,
+      event: { type: "GO" },
+      executors: hangingExecutors,
+      signal: abort.signal,
+    });
+    expect(crashed.status).toBe("error");
+    expect(calls).toEqual(["one", "two"]);
+
+    // Recovery: resume from the crashed run's log alone. Only the in-flight
+    // request re-executes.
+    const recovered = await runAgent(machine, {
+      events: JSON.parse(JSON.stringify(crashed.events)),
+      executors: {
+        generateText: async (request) => {
+          calls.push(`retry:${request.prompt}`);
+          return { output: `ok:${request.prompt}` };
+        },
+      },
+    });
+    expect(recovered.status).toBe("done");
+    expect(recovered.status === "done" ? recovered.output : undefined).toEqual({
+      a: "ok:one",
+      b: "ok:two",
+    });
+    expect(calls).toEqual(["one", "two", "retry:two"]);
+  });
+
+  test("executors receive runId and requestId correlation info", async () => {
+    const machine = buildMachine();
+    const seen: Array<{ runId?: string; requestId?: string }> = [];
+    const result = await runAgent(machine, {
+      input: {},
+      executors: {
+        generateText: async (request, info) => {
+          seen.push({ runId: info?.runId, requestId: info?.requestId });
+          return { output: `ok:${request.prompt}` };
+        },
+      },
+    });
+    expect(result.status).toBe("idle");
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.runId).toMatch(/^run_\d+$/);
+    expect(seen[0]?.requestId).toContain("first");
+  });
+
+  test("events without an init entry and without a snapshot remain history-only (fresh start)", async () => {
+    const machine = buildMachine();
+    const calls: string[] = [];
+    const executors = {
+      generateText: async (request: AgentTextRequest & { tools: AgentTools }) => {
+        calls.push(request.prompt ?? "");
+        return { output: `ok:${request.prompt}` };
+      },
+    };
+    const first = await runAgent(machine, { input: {}, executors });
+    // Drop the init entry: no longer a self-contained log. But entry indices
+    // must be contiguous from 0, so this malformed prefix throws loudly rather
+    // than silently starting fresh.
+    const withoutInit = first.events.slice(1);
+    await expect(
+      runAgent(machine, { events: withoutInit, event: { type: "GO" }, executors }),
+    ).rejects.toThrow(/contiguous/);
+  });
+});
+
+describe("createAgentActor (session mode)", () => {
+  const buildMachine = () => {
+    const agentSetup = setupAgent({
+      context: z.object({ a: z.string().nullable(), b: z.string().nullable() }),
+      input: z.object({}),
+      output: z.object({ a: z.string(), b: z.string() }),
+      events: { GO: {} },
+    });
+    return agentSetup.createMachine({
+      context: () => ({ a: null, b: null }),
+      initial: "first",
+      states: {
+        first: {
+          invoke: {
+            src: "agent.generateText",
+            input: () => ({ model: "m", prompt: "one" }),
+            onDone: ({ event }) => ({
+              target: "waiting",
+              context: { a: String(event.output) },
+            }),
+          },
+        },
+        waiting: { on: { GO: { target: "second" } } },
+        second: {
+          invoke: {
+            src: "agent.generateText",
+            input: () => ({ model: "m", prompt: "two" }),
+            onDone: ({ event }) => ({
+              target: "done",
+              context: { b: String(event.output) },
+            }),
+          },
+        },
+        done: {
+          type: "final",
+          output: ({ context }) => ({ a: context.a ?? "", b: context.b ?? "" }),
+        },
+      },
+    });
+  };
+
+  const executors = {
+    generateText: async (request: AgentTextRequest & { tools: AgentTools }) => ({
+      output: `ok:${request.prompt}`,
+      usage: { totalTokens: 7 },
+    }),
+  };
+
+  test("actor survives an idle settle; the next event re-opens the cycle on one cumulative log", async () => {
+    const machine = buildMachine();
+    const { createAgentActor } = await import("./index.js");
+    const session = createAgentActor(machine, { input: {}, executors });
+
+    const first = await session.settled();
+    expect(first.status).toBe("idle");
+    expect(first.usage.modelCalls).toBe(1);
+
+    // Same live actor, no snapshot round-trip: send the next turn's event.
+    session.actor.send({ type: "GO" });
+    const second = await session.settled();
+    expect(second.status).toBe("done");
+    expect(second.status === "done" ? second.output : undefined).toEqual({
+      a: "ok:one",
+      b: "ok:two",
+    });
+
+    // One replayable log spanning both cycles: init, first done, GO, second done.
+    expect(session.events.map((entry) => entry.event.type)).toEqual([
+      "@agent.init",
+      "xstate.done.actor",
+      "GO",
+      "xstate.done.actor",
+    ]);
+    expect(replay(machine, [...session.events]).snapshot.status).toBe("done");
+
+    // Usage is cumulative across cycles.
+    expect(session.usage().modelCalls).toBe(2);
+    expect(session.usage().totalTokens).toBe(14);
+
+    // done is final: settled() keeps resolving with the final result.
+    const again = await session.settled();
+    expect(again.status).toBe("done");
+  });
+
+  test("settled() called while idle resolves immediately with the current result", async () => {
+    const machine = buildMachine();
+    const { createAgentActor } = await import("./index.js");
+    const session = createAgentActor(machine, { input: {}, executors });
+    const first = await session.settled();
+    expect(first.status).toBe("idle");
+    // A second call with no new events resolves with the same idle result.
+    const sameCycle = await session.settled();
+    expect(sameCycle.status).toBe("idle");
+    expect(sameCycle.snapshot).toBe(first.snapshot);
+    session.stop();
+  });
+
+  test("runAgent one-shot behavior is unchanged: idle settle stops the actor", async () => {
+    const machine = buildMachine();
+    const result = await runAgent(machine, { input: {}, executors });
+    expect(result.status).toBe("idle");
+    // The one-shot path resumes by snapshot, not by live actor.
+    const resumed = await runAgent(machine, {
+      snapshot: result.snapshot,
+      event: { type: "GO" },
+      executors,
+    });
+    expect(resumed.status).toBe("done");
+  });
+});
+
+describe("machine version prop (createMachine({ version }))", () => {
+  const buildVersioned = (version: string) => {
+    const agentSetup = setupAgent({
+      context: z.object({}),
+      input: z.object({}),
+      output: z.object({}),
+      events: { GO: {} },
+      isSuspended: (snapshot) => snapshot.hasTag("waiting"),
+    });
+    return agentSetup.createMachine({
+      version,
+      context: () => ({}),
+      initial: "waiting",
+      states: {
+        waiting: { tags: ["waiting"], on: { GO: { target: "done" } } },
+        done: { type: "final", output: () => ({}) },
+      },
+    });
+  };
+
+  test("machine.version is the default machineVersion and a live snapshot resumes under it", async () => {
+    const machine = buildVersioned("3");
+    const first = await runAgent(machine, { input: {} });
+    expect(first.status).toBe("idle");
+    expect(first.events.every((entry) => entry.machineVersion === "3")).toBe(true);
+    // JSON round-trip of the LIVE snapshot (no XState `version` field): the
+    // aligned restore must not trip XState's own restoreSnapshot version throw.
+    const resumed = await runAgent(machine, {
+      snapshot: JSON.parse(JSON.stringify(first.snapshot)),
+      event: { type: "GO" },
+    });
+    expect(resumed.status).toBe("done");
+  });
+
+  test("a snapshot persisted under v1 refuses to resume under v2 (via the XState version field)", async () => {
+    const machineV1 = buildVersioned("1");
+    const first = await runAgent(machineV1, { input: {} });
+    expect(first.status).toBe("idle");
+    // Strip our agentMeta stamp: only XState's persisted `version` field
+    // remains, exercising the gate's fallback.
+    const persisted = JSON.parse(
+      JSON.stringify(first.status === "idle" ? first.snapshot : undefined),
+    ) as Record<string, unknown>;
+    delete persisted.agentMeta;
+    persisted.version = "1";
+
+    const machineV2 = buildVersioned("2");
+    await expect(
+      runAgent(machineV2, { snapshot: persisted as never, event: { type: "GO" } }),
+    ).rejects.toThrow(AgentSnapshotVersionMismatchError);
+
+    // migrateSnapshot adapts it instead of throwing.
+    const migrated = await runAgent(machineV2, {
+      snapshot: persisted as never,
+      event: { type: "GO" },
+      migrateSnapshot: (snapshot) => snapshot,
+    });
+    expect(migrated.status).toBe("done");
+  });
+});
+
 describe("snapshot version stamping", () => {
   const versionSchemas = () =>
     createAgentSchemas({

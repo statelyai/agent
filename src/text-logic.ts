@@ -686,6 +686,20 @@ export type AgentRequestExecutorResult<TOutput = unknown> = {
 export interface AgentRequestExecutorInfo {
   onChunk?: (chunk: string) => void;
   signal?: AbortSignal;
+  /**
+   * The `runAgent` run this call belongs to (`run_<n>`, matching trace
+   * events). Undefined off the runAgent path (bare `provideExecutors` /
+   * direct `TextLogic.execute`). Lets executor middleware (caching, rate
+   * limits, span parenting) correlate calls without side channels.
+   */
+  runId?: string;
+  /**
+   * The durable invoke id of the request making this call (e.g.
+   * `'0.(machine).asking'`) — stable across resume/replay, and it encodes the
+   * invoking state, so per-state middleware can key on it. Undefined when the
+   * call has no invoking actor.
+   */
+  requestId?: string;
 }
 
 /**

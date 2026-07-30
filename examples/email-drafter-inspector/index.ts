@@ -3,27 +3,27 @@
  * the standalone `ai-xstate-email-example` CLI. Instead of the `runAgent`
  * loop (which stops and resumes the actor per idle settle), this host keeps
  * one live `createActor` actor for the whole session and wires
- * `createWebSocketInspector` into it, so the full prompt → evaluate → draft →
- * review → send flow is visible as a single actor in the inspector.
+ * `createInspector`'s `inspect` callback into it, so the full prompt →
+ * evaluate → draft → review → send flow is visible as a single actor in the
+ * inspector.
  *
  * Like the original, it works without OPENAI_API_KEY: heuristic fallbacks
  * assess and draft from the prompt text, and any failed AI call warns and
  * falls back the same way.
  *
- * `createInspectorServer` starts a local WebSocket bridge and opens the
- * inspector page in your browser; the inspector connects to it over
- * `ws://localhost:<port>`.
+ * `createInspector` from `@statelyai/sdk` connects to a Stately inspection
+ * relay over WebSocket; once the relay connects, it opens the inspector
+ * session in your browser (the Node process needs no Stately API key).
  *
  * Run: npx tsx examples/email-drafter-inspector/index.ts
  * Env: OPENAI_API_KEY (optional; enables real model calls),
- * STATELY_INSPECT_PORT (default 8080), STATELY_INSPECT_URL (inspector page
- * to embed, default https://editor.stately.ai), STATELY_INSPECT_NO_OPEN=1 to
- * skip auto-opening the browser.
+ * STATELY_INSPECT_URL (WebSocket URL of the inspection relay, default
+ * ws://localhost:4242), STATELY_INSPECT_NO_OPEN=1 to skip auto-opening the
+ * browser.
  */
 import { z } from "zod";
 import { createActor, createAsyncLogic, waitFor } from "xstate";
-import { createWebSocketInspector } from "@statelyai/inspect";
-import { createInspectorServer } from "@statelyai/inspect/server";
+import { createInspector } from "@statelyai/sdk";
 import { confirm, input as textInput, select } from "@inquirer/prompts";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import { getStateMeta, parseAgentEvent } from "@statelyai/agent";
@@ -131,15 +131,10 @@ async function promptInteraction(interaction: Interaction): Promise<DrafterEvent
 }
 
 export async function main() {
-  const inspectPort = Number(process.env.STATELY_INSPECT_PORT ?? 8080);
-  const inspectUrl = process.env.STATELY_INSPECT_URL ?? "https://editor.stately.ai";
-  const server = createInspectorServer({
-    port: inspectPort,
-    url: inspectUrl,
+  const inspector = createInspector({
+    url: process.env.STATELY_INSPECT_URL, // default ws://localhost:4242
+    name: "email-drafter",
     autoOpen: !process.env.STATELY_INSPECT_NO_OPEN,
-  });
-  const inspector = createWebSocketInspector({
-    url: `ws://localhost:${inspectPort}`,
   });
 
   const actor = createActor(inspectedEmailDrafter, {
@@ -191,8 +186,7 @@ export async function main() {
     }
   } finally {
     actor.stop();
-    inspector.stop();
-    server.stop();
+    inspector.destroy();
     // The WebSocket keeps the event loop alive briefly; exit once flushed.
     setTimeout(() => process.exit(0), 0);
   }

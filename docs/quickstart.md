@@ -180,6 +180,8 @@ actor.start();
 
 `agent.userInput` is left unbound (supply it via the third argument, `{ actors }`), and invoked child machines are not descended into. Use `runAgent` for idle handling and child rebinding.
 
+For a **long-lived session** (chat turns, device events, sockets) that should keep `runAgent`'s event log, budgets, and traces without settling-and-restoring every turn, use `createAgentActor` instead: the same engine, but the actor survives idle settles — `session.actor.send(event)` re-opens the cycle and `await session.settled()` resolves at the next quiescence, all on one replayable log.
+
 ### Testing without an API key
 
 Executors are plain functions, so mocks are plain objects: `generateText`/`streamText` resolve `{ output }`, `decide` resolves `{ event }`. Each entry on `agentSetup.requests` is also a `TextLogic` you can bind individually with `.withExecutor(...)`.
@@ -204,14 +206,14 @@ The same mocks work with `runAgent(machine, { input, executors: { decide } })`. 
 
 ### See it run
 
-Watch the machine light up state by state in the [Stately Inspector](https://stately.ai/docs/inspector). Add `@statelyai/inspect` and pass its handler to `runAgent`'s `inspect` option:
+Watch the machine light up state by state in the [Stately Inspector](https://stately.ai/docs/inspector). Add `@statelyai/sdk` and pass its handler to `runAgent`'s `inspect` option — it works from Node (no in-browser machine needed) and opens the inspector UI for you once connected to an inspection relay:
 
 ```ts
-import { createInspectorServer } from "@statelyai/inspect/server";
-import { createWebSocketInspector } from "@statelyai/inspect";
+import { createInspector } from "@statelyai/sdk";
 
-const server = createInspectorServer({ port: 8080, url: "https://editor.stately.ai" });
-const inspector = createWebSocketInspector({ url: "ws://localhost:8080" });
+// Point `url` at your Stately inspection relay (defaults to ws://localhost:4242;
+// see the @statelyai/sdk docs for running one).
+const inspector = createInspector();
 
 await runAgent(moderationMachine, {
   input: { comment: "honestly this update is terrible", trust: 20 },

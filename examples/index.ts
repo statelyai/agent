@@ -74,6 +74,12 @@ export {
 export { createSseMachine, createSseServer, runMachineStream } from "./sse-transport/index.js";
 export { timeTravelMachine, runTimeTravelExample, CheckpointHistory } from "./time-travel/index.js";
 export {
+  crashRecoveryMachine,
+  runUntilCrash,
+  recover as recoverFromCrash,
+} from "./crash-recovery/index.js";
+export { sessionQuizMachine, runSession as runSessionActorExample } from "./session-actor/index.js";
+export {
   aiSdkUiStreamMachine,
   agentRunToUIMessageStream,
   handleChatRequest,

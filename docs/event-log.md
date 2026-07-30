@@ -54,7 +54,7 @@ interface AgentLogEntry {
 }
 ```
 
-`recordedAt` is acceptance metadata, never semantic machine time. If a transition needs time, put it in the machine event itself. `machineVersion` is the explicit run option or the machine's structural hash. The verification hashes pin the logical state and still-owed effects after each entry.
+`recordedAt` is acceptance metadata, never semantic machine time. If a transition needs time, put it in the machine event itself. `machineVersion` is the explicit run option, else the machine's own `version` (`createMachine({ version })`), else its structural hash. The verification hashes pin the logical state and still-owed effects after each entry.
 
 XState v6 uses stable category event types with identity in payload fields. Preserve the whole object: an invoke completion is `{ type: "xstate.done.actor", actorId, sessionId, output }`; a timer firing is `{ type: "xstate.timer", id }`. `replay` rebinds logged actor sessions to the new actor system, so globally unique runtime IDs do not make the log machine-specific.
 
@@ -93,6 +93,25 @@ const result = await runAgent(machine, {
 `onEvent` fires once per newly observed envelope, including the `@agent.init` entry on a fresh run. It does not re-emit history supplied through `events`. Unlike `onTransition`, it excludes raised and internal events, so its output can be passed directly to `replay`.
 
 `runAgent` owns a live XState actor. Its `onEvent` callback observes an event after XState accepted it and cannot await an asynchronous store before the transition. It is useful for export/write-through recording, but is not an append-before-transition crash-safety guarantee. For that guarantee use the [pure step path](steps.md#durable-append-before-continue).
+
+## Resume from the log alone (crash recovery)
+
+<!-- events-only resume from src/run-agent.ts (options.events + replay + getPersistedSnapshot); tests in src/run-agent.test.ts "restore semantics" -->
+
+With no `snapshot` and a self-contained log (a reserved `@agent.init` first entry, which every fresh `runAgent` log has), `runAgent` derives the resume snapshot from the log itself:
+
+```ts
+const recovered = await runAgent(machine, {
+  events: persistedEntries, // no snapshot
+  executors,
+});
+```
+
+- Recorded results are replayed, never re-executed: a model call whose completion is in the log runs zero times during recovery.
+- A request that was **in flight** when the log ended (its completion was never recorded) round-trips as a pending child and re-executes idempotently on restore — XState v6 restarts restored pending invokes.
+- The recovered result's `events` extends the same log, so the whole history stays replayable.
+
+This is the crash-recovery path for hosts that persist entries as they happen (`onEvent` or an event-log store): after a process death mid-run, resume from the log alone. Because restart is at-least-once for the in-flight request, executors with non-idempotent side effects should dedupe by their own idempotency key. See [`examples/crash-recovery`](../examples/crash-recovery/index.ts).
 
 ## JSON is the wire contract
 

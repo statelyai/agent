@@ -569,6 +569,15 @@ export interface AgentDecisionRequest {
    * `info.signal`). Runtime-only — never serialized into a provider request.
    */
   signal?: AbortSignal;
+  /**
+   * The `runAgent` run this decision belongs to (`run_<n>`, matching trace
+   * events), injected by runAgent like `signal` (symmetric with the text
+   * executors' `info.runId`). Runtime-only correlation for executor
+   * middleware; unset off the runAgent path. Per-attempt context is already
+   * on the request: `id` is the durable invoke id and `attempts.length` is
+   * the current attempt index.
+   */
+  runId?: string;
 }
 
 /**

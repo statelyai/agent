@@ -25,11 +25,13 @@ export {
   AgentIllegalResumeEventError,
   inspectTransitions,
   runAgent,
+  createAgentActor,
   generateResult,
   AgentSnapshotVersionMismatchError,
   serializeTraceEvent,
   traceTransitions,
 } from "./run-agent.js";
+export type { AgentActorSession } from "./run-agent.js";
 export { createAgentRun } from "./agent-run.js";
 export type { AgentRun } from "./agent-run.js";
 export { provideExecutors } from "./provide-executors.js";

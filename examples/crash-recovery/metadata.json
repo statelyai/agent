@@ -1,0 +1,15 @@
+{
+  "name": "crash-recovery",
+  "title": "Crash Recovery",
+  "kind": "agent-workflow",
+  "origin": {
+    "type": "stately-agent",
+    "source": "Events-only resume: recover a crashed run from its persisted event log alone",
+    "url": null
+  },
+  "comparison": {
+    "targets": ["LangGraph checkpointer"],
+    "purpose": "Durable recovery without a checkpoint: persist replayable log entries as they happen, then resume with runAgent({ events }) — recorded results replay, the in-flight request re-executes idempotently."
+  },
+  "starters": []
+}

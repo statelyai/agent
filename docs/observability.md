@@ -25,7 +25,7 @@ The `onTrace` callback fires a single ordered stream of `AgentTraceEvent`s. Ever
 | `seq` | Monotonic within a `runId`, so events are re-orderable after the fact. |
 | `timestamp` | ISO string, set when the event is produced. |
 | `machineId` | The machine's `id`. |
-| `machineVersion` | `machineVersion` option, else the machine's structural hash. Same identity stamped onto settled snapshots as `agentMeta`. |
+| `machineVersion` | `machineVersion` option, else the machine's own `version` (`createMachine({ version })`), else its structural hash. Same identity stamped onto settled snapshots as `agentMeta`. |
 
 The `schemaVersion` is bumped **only** on a breaking change to the envelope or any payload shape, so a consumer can gate on it. It is identical across `runAgent`, `provideExecutors`, and `traceTransitions`.
 
@@ -172,15 +172,16 @@ Emitted events are fire-and-forget observation, not control flow: they never tar
 
 ## Watch it locally
 
-Point a run at the Stately Inspector through `runAgent`'s `inspect` option (a raw XState inspection passthrough: system-wide, children included). `createInspectorServer` opens the inspector page; `createWebSocketInspector` bridges to it:
+Point a run at the Stately Inspector through `runAgent`'s `inspect` option (a raw XState inspection passthrough: system-wide, children included). Use `createInspector` from [`@statelyai/sdk`](https://www.npmjs.com/package/@statelyai/sdk) — it works from Node and other server runtimes (no in-browser machine required), normalizes XState v5 and v6 inspection events, and by default opens the inspector UI in your browser once connected:
 
 ```ts
-import { createInspectorServer } from "@statelyai/inspect/server";
-import { createWebSocketInspector } from "@statelyai/inspect";
+import { createInspector } from "@statelyai/sdk";
 import { runAgent } from "@statelyai/agent";
 
-const server = createInspectorServer({ port: 8080, url: "https://editor.stately.ai" });
-const inspector = createWebSocketInspector({ url: "ws://localhost:8080" });
+const inspector = createInspector({
+  // WebSocket URL of your Stately inspection relay; defaults to ws://localhost:4242.
+  // See the @statelyai/sdk docs for hosted and self-hosted relay options.
+});
 
 await runAgent(machine, {
   input,
@@ -188,9 +189,10 @@ await runAgent(machine, {
   inspect: inspector.inspect, // the machine lights up in the inspector
 });
 
-inspector.stop();
-server.stop();
+inspector.destroy();
 ```
+
+Set `autoOpen: false` for headless jobs. For serverless/edge runtimes (e.g. Cloudflare Workers/Durable Objects), `@statelyai/sdk/relay` ships `createInspectionRelay` — a runtime-neutral relay with bounded late-join replay that a Durable Object can host directly, so per-request lifetimes and hibernation don't break the stream.
 
 The inspector renders the running actor as the same diagram you author, so the whole flow is visible as one live machine. See [`examples/email-drafter-inspector`](../examples/email-drafter-inspector/index.ts) for a full session (it keeps one long-lived actor instead of the `runAgent` loop, but the wiring is identical).
 

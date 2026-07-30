@@ -1,0 +1,15 @@
+{
+  "name": "session-actor",
+  "title": "Session Actor",
+  "kind": "agent-workflow",
+  "origin": {
+    "type": "stately-agent",
+    "source": "createAgentActor session mode: one live actor across turns with a single replayable log",
+    "url": null
+  },
+  "comparison": {
+    "targets": ["hand-rolled session loops", "Cloudflare Agents"],
+    "purpose": "Long-lived agent sessions (chat turns, device events) without per-turn snapshot restores: the actor survives idle settles, events re-open the cycle, and the whole session shares one event log and usage total."
+  },
+  "starters": []
+}

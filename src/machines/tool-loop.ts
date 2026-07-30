@@ -1,0 +1,108 @@
+import type { AnyStateMachine } from "xstate";
+import { setupAgent } from "../setup-agent.js";
+import type { AgentTools, StandardSchemaV1 } from "../types.js";
+import { GENERATE_TEXT_SRC, jsonAny, jsonString, objectSchema } from "./internal.js";
+
+/** Config for {@link createToolLoopMachine}. */
+export interface CreateToolLoopMachineConfig {
+  /** Model ref, or an alias from the host's `models` registry. */
+  model: string;
+  /** System prompt. */
+  instructions?: string;
+  /** Tools the host runs inside the one request. */
+  tools?: AgentTools;
+  /** Structured output schema. Omitted means the output is plain text. */
+  outputSchema?: StandardSchemaV1;
+  /** Bounds the host-side tool loop — lowered to `metadata.maxSteps`. */
+  maxTurns?: number;
+  /**
+   * Tool names the host should gate before executing. Lowered to
+   * `metadata.interruptOn`, which only a host that implements gating reads —
+   * the preset itself stays a single state and never pauses. For a real
+   * approval gate as machine states, eject to `examples/review-tool-calls`.
+   */
+  interruptOn?: readonly string[];
+}
+
+/** Context of a {@link createToolLoopMachine} machine. */
+export type ToolLoopContext = {
+  prompt: string;
+  result: unknown;
+};
+
+const contextSchema = objectSchema<ToolLoopContext>({ prompt: jsonString, result: jsonAny }, [
+  "prompt",
+]);
+const inputSchema = objectSchema<{ prompt: string }>({ prompt: jsonString }, ["prompt"]);
+const outputSchema = objectSchema<{ result: unknown }>({ result: jsonAny }, ["result"]);
+
+/**
+ * The single-state tool loop: one text request carries the `tools`, and the
+ * host runs the tool loop inside it (`maxTurns` bounds it). Selecting and
+ * executing tools is the model + host's business, not machine states.
+ *
+ * States: `answering` → `done`.
+ *
+ * ```ts
+ * const machine = createToolLoopMachine({
+ *   model: "quick",
+ *   instructions: "Answer using the tools.",
+ *   tools: { calculate },
+ *   maxTurns: 5,
+ * });
+ *
+ * const result = await runAgent(machine, {
+ *   input: { prompt: "What is 42 * 17?" },
+ *   executors,
+ * });
+ * // Snapshots and log entries carry machine.version ("1") automatically.
+ * ```
+ */
+export function createToolLoopMachine(config: CreateToolLoopMachineConfig): AnyStateMachine {
+  const { model, instructions, tools, outputSchema: resultSchema, maxTurns, interruptOn } = config;
+
+  const metadata = {
+    ...(maxTurns !== undefined ? { maxSteps: maxTurns } : {}),
+    ...(interruptOn && interruptOn.length > 0 ? { interruptOn: [...interruptOn] } : {}),
+  };
+
+  const agentSetup = setupAgent({
+    context: contextSchema,
+    input: inputSchema,
+    output: outputSchema,
+  });
+
+  const machine = agentSetup.createMachine({
+    id: "tool-loop",
+    // The machine's own version (XState `createMachine({ version })`), stamped
+    // by runAgent onto snapshots/logs instead of the structural hash. Bumped
+    // only on a topology change a persisted snapshot could not resume into.
+    version: "1",
+    context: ({ input }) => ({ prompt: input.prompt, result: null }),
+    initial: "answering",
+    states: {
+      answering: {
+        invoke: {
+          id: "answer",
+          src: GENERATE_TEXT_SRC,
+          input: ({ context }) => ({
+            name: "answer",
+            model,
+            ...(instructions ? { system: instructions } : {}),
+            prompt: context.prompt,
+            ...(tools ? { tools } : {}),
+            ...(resultSchema ? { outputSchema: resultSchema } : {}),
+            ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
+          }),
+          onDone: ({ output }) => ({ target: "done", context: { result: output } }),
+        },
+      },
+      done: {
+        type: "final",
+        output: ({ context }) => ({ result: context.result }),
+      },
+    },
+  });
+
+  return machine as unknown as AnyStateMachine;
+}

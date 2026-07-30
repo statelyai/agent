@@ -6,3 +6,4 @@ allowBuilds:
   esbuild: false
 minimumReleaseAgeExclude:
   - xstate
+  - '@statelyai/sdk'
