@@ -29,6 +29,7 @@ import {
 import { getAgentRequestsWith, getInvokeEffectMetadata, type AgentPlanRequest } from "./steps.js";
 import { isDecisionLogic, isPlanLogic, type AgentDecisionRequest } from "./decision.js";
 import {
+  extractCallUsage,
   isTextLogic,
   type AgentCallUsage,
   type AgentRequestMode,
@@ -155,6 +156,24 @@ export interface AgentUsageEvent extends EventObject {
   model?: string;
   /** The reporting text request's registered `name`, when it declared one. */
   name?: string;
+}
+
+/**
+ * Reads a settled call's token usage off a RAW executor result — the same
+ * normalization `runAgent` applies before it delivers
+ * {@link AGENT_USAGE_EVENT_TYPE}. Returns `undefined` when the executor
+ * reported none.
+ *
+ * The seam for the step-loop path, where the host holds the raw result itself:
+ *
+ * ```ts
+ * const { output, raw } = await executeAgentRequest(request, executors, { verbose: true });
+ * const usage = getCallUsage(raw);
+ * if (usage) step = resolveAgentStep(step, { type: AGENT_USAGE_EVENT_TYPE, usage });
+ * ```
+ */
+export function getCallUsage(raw: unknown): AgentCallUsage | undefined {
+  return extractCallUsage(raw);
 }
 
 /** Options controlling the durable envelope created by {@link createReplayEntry}. */

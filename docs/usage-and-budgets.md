@@ -150,7 +150,7 @@ Rules worth knowing before you wire it:
 - **Declare it machine-level.** A root `on: { '@agent.usage': … }` catches every call whatever state made it. A state-scoped handler only catches calls made while that state is active, which silently drops the rest.
 - **Never model-facing.** The `@agent.*` namespace is excluded from `getAcceptedEvents` and `parseAgentEvent`, so `@agent.usage` is never offered as a decision candidate (not even under an `allowedEvents: ['*']` wildcard) and cannot be forged from a wire message.
 - **It rides the event log.** A delivered `@agent.usage` is journaled like any other external input, so events-only recovery (`runAgent({ events })`) replays the folded tokens without re-calling a model.
-- **A crash between the usage and its call's result is healed.** Usage is journaled when the call settles, before the call's own result, so the guard sees the tokens in the same step that consumes the result. A log truncated inside that window would otherwise replay the tokens AND re-execute the pending call. Events-only recovery therefore drops a trailing usage entry whose call is still pending in the folded state: the re-executed call reports its own tokens, counted once.
+- **Usage entries are spend records.** When the event is reported the cost already happened: the tokens were burned at call time, whether or not the result made it back. So usage entries are durable, append-only facts. Replay folds every one of them, and a call re-executed by crash recovery journals its own usage on top — a recovered total therefore reflects the true cumulative cost, including the call whose result the crash lost. That is the budget-correct number: you really did spend it.
 - **Stragglers are dropped, not delivered.** A call that settles after the run's cycle has resolved (an idle settle, a `done`/`error` settle, an abort) still folds into `result.usage`, but its machine event is dropped — the same on `runAgent` and `createAgentActor`, so a late arrival can never re-open an already-returned idle result. Watch for `usage.dropped` on `onTrace` if a counter looks short.
 - **Delivered to the run's root machine**, including usage from requests inside an invoked child machine. Attribute those with the event's `id`/`src`/`model`.
 - **Only what your executor reports.** No `usage` on the executor result means no event. In particular, [`simulateAgent`](verify.md) scripts return no usage, so a token counter stays `0` under simulation. Simulate the shape of the loop; test the budget itself with `runAgent` and a usage-reporting mock, as the library's own tests do.
@@ -353,6 +353,86 @@ deciding: {
     SUMMARIZE: { target: 'summarizing' },
   },
 }
+```
+
+## Usage without runAgent
+
+`runAgent` delivers `@agent.usage` for you. The other two ways to drive an agent machine reach the same place, with the same opt-in rule (the machine must declare an `'@agent.usage'` transition explicitly).
+
+### Uncontrolled: `provideExecutors` + `createActor`
+
+Built in, nothing to wire. A source bound by [`provideExecutors`](hosts.md) delivers `@agent.usage` to the machine actor that invoked it as soon as the call settles, with the same payload `runAgent` sends:
+
+```ts
+import { createActor, toPromise } from "xstate";
+import { provideExecutors } from "@statelyai/agent";
+
+// `machine` declares `on: { '@agent.usage': … }` as above.
+const actor = createActor(provideExecutors(machine, { generateText }), {
+  input: { topic: "otters", maxTokens: 1500 },
+});
+actor.start();
+
+const output = await toPromise(actor); // stoppedBy: 'tokens'
+```
+
+Boundary: delivery follows the binding boundary. `provideExecutors` does not descend into invoked child machines, so a child with its own agent invokes needs its own `provideExecutors(...)` — and until it has one, its calls report no usage anywhere. (Under `runAgent`, which rebinds children, child usage is reported to the root.) There is no run cycle here, so there are no dropped stragglers either.
+
+### Step path: apply it as an ordinary event
+
+On [the step path](steps.md) the host holds the raw executor result, so it applies the event itself. `getCallUsage(raw)` is the same normalization `runAgent` uses:
+
+```ts
+import { AGENT_USAGE_EVENT_TYPE, executeAgentRequest, getCallUsage } from "@statelyai/agent";
+
+const { output, raw } = await executeAgentRequest(effect, executors, { verbose: true });
+
+// Apply usage BEFORE the call's own result, so a guard sees the tokens in the
+// same step that consumes it — and journal it like any other external input.
+const usage = getCallUsage(raw);
+if (usage) {
+  append({ type: AGENT_USAGE_EVENT_TYPE, usage });
+}
+append(effect.toDoneEvent(output));
+```
+
+Because the entry is journaled, `replay` reproduces the folded counter exactly. Add `kind`/`id`/`src`/`model` to the event if you want the same attribution `runAgent` stamps.
+
+### Plain XState: send it by hand
+
+In a hand-rolled loop over `actor.send`, the event is just an event:
+
+```ts
+const result = await generateText(request);
+if (result.usage) {
+  actor.send({ type: "@agent.usage", usage: result.usage });
+}
+```
+
+A `setupAgent` machine already declares `'@agent.usage'` in its event union. A machine built with a plain `setup()` declares it itself:
+
+```ts
+import { z } from "zod";
+import { createActor, setup } from "xstate";
+
+const machine = setup({
+  schemas: {
+    context: z.object({ tokens: z.number() }),
+    events: {
+      // The reserved type, declared by hand.
+      "@agent.usage": z.object({ usage: z.object({ totalTokens: z.number().optional() }) }),
+      GO: z.object({}),
+    },
+  },
+}).createMachine({
+  context: { tokens: 0 },
+  on: {
+    "@agent.usage": ({ context, event }) => ({
+      context: { tokens: context.tokens + (event.usage.totalTokens ?? 0) },
+    }),
+  },
+  // …states
+});
 ```
 
 ## Estimating cost

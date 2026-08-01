@@ -120,6 +120,28 @@ Per-effect resolution, by kind:
 
 For the durable, resume-by-replay flavor of this same loop (persist nothing but the event log, rebuild the frontier with `replay` each turn), see [examples/cloudflare-workers-ai-host/index.ts](../examples/cloudflare-workers-ai-host/index.ts). That example simulates durability: its `entries` array lives in process memory for the duration of one run. It shows the shape a real Worker would use, with a real store (KV, D1, a Durable Object) in place of the array.
 
+### Token usage on this path
+
+The loop above throws the raw executor result away. Ask for it (`{ verbose: true }`) when you want a token budget in the machine: `getCallUsage(raw)` normalizes it, and the reserved [`@agent.usage`](usage-and-budgets.md#the-agentusage-event) event is applied as an ordinary event in the fold — journaled like any other external input, so replay reproduces the counter.
+
+```ts
+import { AGENT_USAGE_EVENT_TYPE, executeAgentRequest, getCallUsage } from "@statelyai/agent";
+
+if (effect.kind === "text") {
+  const { output, raw } = await executeAgentRequest(effect, executors, { verbose: true });
+
+  // Apply usage BEFORE the call's own result, so a budget guard reads the
+  // tokens in the same step that consumes the output (runAgent's ordering).
+  const usage = getCallUsage(raw);
+  if (usage) {
+    append({ type: AGENT_USAGE_EVENT_TYPE, usage });
+  }
+  append(effect.toDoneEvent(output));
+}
+```
+
+Where `append(event)` is the loop's own `entries.push(createReplayEntry(machine, entries, event))` plus `transition(...)`. Add `kind`/`id`/`src`/`model` to the event for the attribution `runAgent` stamps. Same opt-in rule as everywhere: a machine that declares no `'@agent.usage'` transition takes nothing, so only append it when the machine declares one.
+
 ### Resolving decisions standalone
 
 `getAgentEffects` surfaces a decision effect whose request's `events` field holds only the events legal from the current snapshot ([`allowedEvents`](decisions.md) intersected with XState guards). Resolve it to the chosen, validated event with `resolveDecision`, without running the whole loop:

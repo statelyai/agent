@@ -1,7 +1,13 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
+import { initialTransition, transition, type AnyMachineSnapshot, type EventObject } from "xstate";
 import {
   AGENT_USAGE_EVENT_TYPE,
+  createReplayEntry,
+  executeAgentRequest,
+  getAgentEffects,
+  getCallUsage,
+  initEntry,
   createAgentActor,
   createAgentSchemas,
   createTextLogic,
@@ -474,7 +480,7 @@ describe("@agent.usage (reserved per-call usage event)", () => {
     expect(usageEntries(result.events)).toHaveLength(1);
   });
 
-  test("a log truncated between a usage entry and its call's result recovers without double-counting", async () => {
+  test("a log truncated between a usage entry and its call's result keeps BOTH spends", async () => {
     const resumable = agent.createMachine({
       context: ({ input }) => ({ notes: [], tokens: 0, maxTokens: input.maxTokens, seen: [] }),
       on: {
@@ -528,9 +534,14 @@ describe("@agent.usage (reserved per-call usage event)", () => {
     });
 
     expect(recovered.status).toBe("idle");
-    // The re-executed call reports its tokens once — not once per crash.
-    expect(recovered.snapshot.context.tokens).toBe(first.snapshot.context.tokens);
-    expect(usageEntries(recovered.events)).toHaveLength(1);
+    // SPEND RECORDS, not bookkeeping: the lost call's tokens were burned at
+    // call time — losing its RESULT to the crash does not un-spend them — and
+    // the recovery's re-execution is additional real spend. So the recovered
+    // total is the sum of both calls (400 + 400), and both usage entries stand
+    // in the log. That is the budget-guard-correct number: you really did pay
+    // for two calls.
+    expect(recovered.snapshot.context.tokens).toBe(800);
+    expect(usageEntries(recovered.events)).toHaveLength(2);
   });
 
   test("the session actor path behaves identically to runAgent", async () => {
@@ -635,5 +646,55 @@ describe("@agent.usage registration (declared by setupAgent, not by the machine)
         events: { [AGENT_USAGE_EVENT_TYPE]: z.object({ usage: z.object({}) }) },
       }),
     ).toThrow(/reserved '@agent\.' namespace/);
+  });
+});
+
+describe("@agent.usage on the step path (host-applied, journaled like any event)", () => {
+  test("a hand-driven step loop folds the same token counter runAgent does", async () => {
+    const executors = {
+      generateText: async () => ({
+        output: "a fact",
+        usage: { totalTokens: 400, inputTokens: 300 },
+      }),
+    };
+    const input = { maxTokens: 1000 };
+
+    const entries = [initEntry(budgetMachine, input)];
+    let [snapshot, actions] = initialTransition(budgetMachine, input);
+
+    const append = (event: EventObject) => {
+      entries.push(createReplayEntry(budgetMachine, entries, event));
+      [snapshot, actions] = transition(budgetMachine, snapshot, event as never);
+    };
+
+    while (snapshot.status === "active") {
+      const effects = getAgentEffects(budgetMachine, snapshot as AnyMachineSnapshot, actions, {
+        history: entries,
+      });
+      const effect = effects.find((candidate) => candidate.kind === "text");
+      if (!effect) {
+        break;
+      }
+
+      // Execute the effect verbosely so the RAW executor result is in hand.
+      const { output, raw } = await executeAgentRequest(effect, executors, { verbose: true });
+
+      // The recipe: usage is an ordinary host-applied event, journaled like any
+      // other external input — applied BEFORE the call's own result, so a guard
+      // sees the tokens in the same step that consumes it.
+      const usage = getCallUsage(raw);
+      if (usage) {
+        append({ type: AGENT_USAGE_EVENT_TYPE, usage } as EventObject);
+      }
+      append(effect.toDoneEvent(output) as EventObject);
+    }
+
+    // 3 calls x 400 = 1200 >= 1000, identical to the runAgent path.
+    expect(snapshot.status).toBe("done");
+    expect((snapshot as AnyMachineSnapshot).context.tokens).toBe(1200);
+    expect(usageEntries(entries)).toHaveLength(3);
+
+    // Journaled, so a pure replay of the log reproduces the counter.
+    expect(replay(budgetMachine, entries).snapshot.context.tokens).toBe(1200);
   });
 });

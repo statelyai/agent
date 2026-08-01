@@ -1130,10 +1130,14 @@ interface RunAgentBindContext {
    * Folds one completed call's reported usage into the run-level
    * {@link AgentUsage} AND — when the machine declares a transition for it —
    * delivers the reserved {@link AGENT_USAGE_EVENT_TYPE} event carrying
-   * `usage` plus `source` as attribution. No-op off the runAgent path
-   * (nothing settles there).
+   * `usage` plus `source` as attribution.
+   *
+   * `self` is the settling request's own actor ref; the `provideExecutors`
+   * path reads the invoking machine actor off it (`self._parent`) because it
+   * has no run-scoped root actor. `runAgent` ignores it and delivers to the
+   * run's root.
    */
-  recordUsage?: (usage: AgentCallUsage, source?: AgentUsageEventSource) => void;
+  recordUsage?: (usage: AgentCallUsage, source?: AgentUsageEventSource, self?: unknown) => void;
   /** The owning run's id (`run_<n>`), threaded to executors as `info.runId`. Unset off the runAgent path. */
   runId?: string;
   /** Assigned right after createActor (§2.6); read lazily by decision wraps. */
@@ -1157,65 +1161,6 @@ function declaresUsageTransition(snapshot: AnyMachineSnapshot): boolean {
   return getNextTransitions(snapshot).some(
     (transition) => transition.eventType === AGENT_USAGE_EVENT_TYPE,
   );
-}
-
-/**
- * True when the call a `@agent.usage` entry reports is STILL PENDING in the
- * folded state — i.e. its invoke is an active child that an events-only
- * recovery will restart, so its tokens are about to be reported a second time.
- * An entry with no invoke identity (a `getRequests` interpret-pass call) counts
- * as pending: that pass re-runs at the next idle. @internal
- */
-function usageEntryCallIsPending(snapshot: AnyMachineSnapshot, event: AgentUsageEvent): boolean {
-  if (snapshot.status !== "active") {
-    return false;
-  }
-  if (event.id === undefined) {
-    return true;
-  }
-  const children = snapshot.children as Record<string, AnyActorRef | undefined>;
-  return children[event.id] !== undefined;
-}
-
-/**
- * Heals the crash window in a durable log before an events-only recovery.
- *
- * `@agent.usage` is journaled the moment a call SETTLES — before the call's
- * own result reaches the machine — because that ordering is what lets a budget
- * guard see the tokens in the same step that consumes the result. A log
- * truncated inside that window therefore holds the usage entry but NOT the
- * result: replaying it folds the tokens in, and the still-pending call
- * re-executes and reports them again (verified: 400 → 800).
- *
- * The fix is at recovery, where the ambiguity is resolvable: drop the trailing
- * `@agent.usage` entries whose reporting call is still pending in the state the
- * remaining log folds to. Truncation now drops the usage and its result
- * together, and the re-executed call re-journals its own usage — one entry, one
- * count. Trailing usage whose call is NOT pending (the machine reached a final
- * state, or the invoke is gone) is a complete record and is kept. @internal
- */
-function healPendingUsageEntries(
-  machine: AnyStateMachine,
-  events: readonly AgentLogEntry[],
-  machineVersion: string,
-): readonly AgentLogEntry[] {
-  let end = events.length;
-  while (end > 0 && events[end - 1]!.event.type === AGENT_USAGE_EVENT_TYPE) {
-    let folded: AnyMachineSnapshot;
-    try {
-      folded = replay(machine, events.slice(0, end - 1), { machineVersion })
-        .snapshot as AnyMachineSnapshot;
-    } catch {
-      // A prefix that will not fold is not something to heal — let the normal
-      // replay below surface the real error.
-      break;
-    }
-    if (!usageEntryCallIsPending(folded, events[end - 1]!.event as AgentUsageEvent)) {
-      break;
-    }
-    end -= 1;
-  }
-  return end === events.length ? events : events.slice(0, end);
 }
 
 /** Reads the durable invoke id/src off the async actor's own ref (`self`). */
@@ -1302,13 +1247,17 @@ function wrapTextLogicForRunAgent(logic: TextLogic, runCtx: RunAgentBindContext)
       // surface them per-call on the request.end trace.
       const usage = extractCallUsage(raw);
       if (usage) {
-        runCtx.recordUsage?.(usage, {
-          kind: "text",
-          ...(id !== "" ? { id } : {}),
-          ...(src !== "" ? { src } : {}),
-          model: request.model,
-          ...(request.name !== undefined ? { name: request.name } : {}),
-        });
+        runCtx.recordUsage?.(
+          usage,
+          {
+            kind: "text",
+            ...(id !== "" ? { id } : {}),
+            ...(src !== "" ? { src } : {}),
+            model: request.model,
+            ...(request.name !== undefined ? { name: request.name } : {}),
+          },
+          self,
+        );
       }
 
       runCtx.onResult?.(agentRequest, { output, raw });
@@ -1355,12 +1304,16 @@ function createCountingDecide(
       const usage = extractCallUsage(result);
       if (usage) {
         const { src } = selfIdAndSrc(self);
-        runCtx.recordUsage?.(usage, {
-          kind,
-          ...(attemptRequest.id ? { id: attemptRequest.id } : {}),
-          ...(src !== "" ? { src } : {}),
-          model: attemptRequest.model,
-        });
+        runCtx.recordUsage?.(
+          usage,
+          {
+            kind,
+            ...(attemptRequest.id ? { id: attemptRequest.id } : {}),
+            ...(src !== "" ? { src } : {}),
+            model: attemptRequest.model,
+          },
+          self,
+        );
       }
       runCtx.onResult?.(attemptRequest, { output: result.event, raw: result });
       runCtx.onTrace?.(
@@ -1708,6 +1661,10 @@ export interface ProvideBindOptions {
  * actor off `self._parent`, always present under a live `createActor` tree.
  * `onTrace` (when given) mints a per-root-actor envelope. `schemas` come from
  * the machine's registered `setupAgent` execution options.
+ *
+ * `recordUsage` has no run-level aggregate to fold into here (there is no
+ * run), so it does one thing: deliver the reserved `@agent.usage` event, gated
+ * exactly like runAgent's — see {@link deliverUsageToInvokingActor}.
  */
 function provideBindContext(
   machine: AnyStateMachine,
@@ -1721,9 +1678,50 @@ function provideBindContext(
     onChunk: options.onChunk ? (chunk) => options.onChunk!(chunk) : undefined,
     onTrace: provideTraceSink(options.onTrace),
     consumeModelCall: () => {},
+    recordUsage: (usage, source, self) => {
+      deliverUsageToInvokingActor(usage, source ?? {}, self);
+    },
     actorHolder: { actorRef: undefined },
     schemas: getRegisteredAgentExecutionOptions(machine).schemas,
   };
+}
+
+/**
+ * `provideExecutors`' counterpart to runAgent's `deliverUsageEvent`: after a
+ * bound call settles with reported usage, send the reserved
+ * `@agent.usage` event to the machine actor that INVOKED the request — read
+ * off the settling request actor's `self._parent`, which under a live
+ * `createActor` tree is always the invoking machine (there is no run-scoped
+ * root actor on this path).
+ *
+ * Gated identically to runAgent: the invoking snapshot must be active, must
+ * declare an `'@agent.usage'` transition EXPLICITLY (see
+ * {@link declaresUsageTransition} — a catch-all `on: { '*' }` is not an opt-in),
+ * and must be able to take the event. There is no cycle to settle in
+ * uncontrolled mode, so there are no dropped stragglers.
+ *
+ * Delivery follows `provideExecutors`' binding boundary: only sources IT bound
+ * report here, so an invoked child machine that was not itself passed through
+ * `provideExecutors` reports nothing. @internal
+ */
+function deliverUsageToInvokingActor(
+  usage: AgentCallUsage,
+  source: AgentUsageEventSource,
+  self: unknown,
+): void {
+  const actorRef = (self as { _parent?: AnyActorRef } | undefined)?._parent;
+  if (!actorRef) {
+    return;
+  }
+  const snapshot = actorRef.getSnapshot() as AnyMachineSnapshot;
+  if (snapshot?.status !== "active" || !declaresUsageTransition(snapshot)) {
+    return;
+  }
+  const event: AgentUsageEvent = { type: AGENT_USAGE_EVENT_TYPE, ...source, usage };
+  if (!snapshot.can(event as never)) {
+    return;
+  }
+  actorRef.send(event as never);
 }
 
 /**
@@ -2233,17 +2231,17 @@ function createAgentSession<TMachine extends AnyStateMachine>(
   // a crashed run resumes from its log alone. `replay` validates entry
   // contiguity and machine identity/version itself.
   //
-  // The log is healed first (see healPendingUsageEntries): a crash between a
-  // `@agent.usage` entry and its call's result entry would otherwise fold the
-  // tokens AND re-execute the still-pending call, double-counting them.
-  let resumeEvents = options.events;
+  // `@agent.usage` entries are SPEND RECORDS: the tokens were burned at call
+  // time, so a crash that lost the call's result does not un-spend them. Every
+  // usage entry in the log folds in as-is, and a re-executed call journals its
+  // own usage on top — the recovered total is the true cumulative cost.
+  const resumeEvents = options.events;
   if (
     effectiveSnapshot === undefined &&
     options.events !== undefined &&
     options.events[0]?.event.type === AGENT_INIT_EVENT_TYPE
   ) {
-    resumeEvents = healPendingUsageEntries(machine, options.events, machineVersion);
-    const { snapshot: replayedSnapshot } = replay(machine, resumeEvents, { machineVersion });
+    const { snapshot: replayedSnapshot } = replay(machine, resumeEvents!, { machineVersion });
     effectiveSnapshot = machine.getPersistedSnapshot(
       replayedSnapshot as never,
     ) as Snapshot<unknown>;

@@ -53,7 +53,7 @@ const executors = {
 
 The `ai` package is an optional peer dependency, imported only by this subpath. The root's one runtime peer is `xstate`. You supply the model resolver, so no provider package becomes a dependency either.
 
-The package ships four entry points and no others: `@statelyai/agent`, `@statelyai/agent/ai-sdk`, `@statelyai/agent/sqlite`, and the JSON Schema at `@statelyai/agent/agent-workflow.json`. Every host helper (`getJsonSchema`, `buildEnvelopeSchema`, `parseStructuredEnvelope`, `parseOutput`, `getAgentOutputMode`, `renderDecisionAttempts`, `resolveDecision`, `executeAgentRequest`, ...) is a root export.
+The package ships five entry points: `@statelyai/agent`, `@statelyai/agent/ai-sdk`, `@statelyai/agent/machines`, `@statelyai/agent/sqlite`, and the JSON Schema at `@statelyai/agent/agent-workflow.json`. Every host helper (`getJsonSchema`, `buildEnvelopeSchema`, `parseStructuredEnvelope`, `parseOutput`, `getAgentOutputMode`, `renderDecisionAttempts`, `resolveDecision`, `executeAgentRequest`, ...) is a root export.
 
 ### Typed model aliases
 

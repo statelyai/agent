@@ -84,6 +84,7 @@ export {
   createReplayEntry,
   diffEventLogs,
   getAgentEffects,
+  getCallUsage,
   initEntry,
   replay,
   verifyReplay,

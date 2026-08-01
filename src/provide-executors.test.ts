@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createActor, toPromise } from "xstate";
 import {
   AGENT_TRACE_SCHEMA_VERSION,
+  AGENT_USAGE_EVENT_TYPE,
   createAgentSchemas,
   createTextLogic,
   provideExecutors,
@@ -10,6 +11,7 @@ import {
   setupAgent,
   traceTransitions,
   type AgentTraceEvent,
+  type ChosenEvent,
 } from "./index.js";
 
 /** Drops the versioned envelope fields, leaving only the trace payload. */
@@ -351,5 +353,166 @@ describe("provideExecutors onTrace / traceTransitions", () => {
         .sort((a, b) => a - b);
       expect(seqs).toEqual(Array.from({ length: seqs.length }, (_, i) => i + 1));
     }
+  });
+});
+
+describe("provideExecutors + '@agent.usage'", () => {
+  const usageSchemas = createAgentSchemas({
+    input: z.object({ maxTokens: z.number() }),
+    context: z.object({
+      notes: z.array(z.string()),
+      tokens: z.number(),
+      maxTokens: z.number(),
+      seen: z.array(z.string()),
+    }),
+    output: z.object({ notes: z.array(z.string()), tokens: z.number() }),
+  });
+  const researchStep = createTextLogic({
+    name: "researchStep",
+    schemas: { input: z.object({ turn: z.number() }), output: z.string() },
+    model: "test-model",
+    prompt: ({ input }) => `Turn ${input.turn}.`,
+  });
+  const usageAgent = setupAgent({ schemas: usageSchemas, actors: { researchStep } });
+
+  const buildBudgetMachine = (declareUsage: boolean) =>
+    usageAgent.createMachine({
+      context: ({ input }) => ({ notes: [], tokens: 0, maxTokens: input.maxTokens, seen: [] }),
+      on: declareUsage
+        ? {
+            [AGENT_USAGE_EVENT_TYPE]: ({ context, event }) => ({
+              context: {
+                tokens: context.tokens + (event.usage.totalTokens ?? 0),
+                seen: [
+                  ...context.seen,
+                  `${event.kind ?? "?"}:${event.id ?? "?"}:${event.model ?? "?"}`,
+                ],
+              },
+            }),
+          }
+        : {
+            "*": ({ context, event }) => ({ context: { seen: [...context.seen, event.type] } }),
+          },
+      initial: "researching",
+      states: {
+        researching: {
+          invoke: {
+            id: "research",
+            src: "researchStep",
+            input: ({ context }) => ({ turn: context.notes.length + 1 }),
+            onDone: ({ context, output }) => ({
+              target: "checkingBudget",
+              context: { notes: [...context.notes, output] },
+            }),
+          },
+        },
+        checkingBudget: {
+          always: ({ context }) =>
+            context.tokens >= context.maxTokens ? { target: "done" } : { target: "researching" },
+        },
+        done: {
+          type: "final",
+          output: ({ context }) => ({ notes: context.notes, tokens: context.tokens }),
+        },
+      },
+    });
+
+  const usageExecutors = {
+    generateText: async () => ({ output: "a fact", usage: { totalTokens: 400, inputTokens: 300 } }),
+  };
+
+  test("delivers a settled call's usage to the invoking machine actor, so a guard can stop it", async () => {
+    const bound = provideExecutors(buildBudgetMachine(true), usageExecutors);
+    const actor = createActor(bound, { input: { maxTokens: 1000 } });
+    actor.start();
+    const output = await toPromise(actor);
+
+    // 3 calls x 400 tokens = 1200 >= 1000: the budget guard stopped the loop.
+    expect(output).toEqual({ notes: ["a fact", "a fact", "a fact"], tokens: 1200 });
+    // Same attribution payload runAgent delivers.
+    expect(actor.getSnapshot().context.seen).toEqual([
+      "text:research:test-model",
+      "text:research:test-model",
+      "text:research:test-model",
+    ]);
+  });
+
+  test("a wildcard-only machine never receives it (same opt-in gate as runAgent)", async () => {
+    const wildcardSchemas = createAgentSchemas({
+      context: z.object({ tokens: z.number(), seen: z.array(z.string()) }),
+      output: z.object({ tokens: z.number(), seen: z.array(z.string()) }),
+    });
+    const wildcardAgent = setupAgent({ schemas: wildcardSchemas, actors: { researchStep } });
+    const wildcardMachine = wildcardAgent.createMachine({
+      context: { tokens: 0, seen: [] },
+      on: {
+        "*": ({ context, event }) => ({ context: { seen: [...context.seen, event.type] } }),
+      },
+      initial: "researching",
+      states: {
+        researching: {
+          invoke: {
+            id: "research",
+            src: "researchStep",
+            input: { turn: 1 },
+            onDone: { target: "done" },
+          },
+        },
+        done: {
+          type: "final",
+          output: ({ context }) => ({ tokens: context.tokens, seen: context.seen }),
+        },
+      },
+    });
+
+    const actor = createActor(provideExecutors(wildcardMachine, usageExecutors));
+    actor.start();
+    const output = await toPromise(actor);
+
+    expect(output.seen).not.toContain(AGENT_USAGE_EVENT_TYPE);
+    expect(output.tokens).toBe(0);
+  });
+
+  test("a decision call's usage reaches the machine too", async () => {
+    const decisionSchemas = createAgentSchemas({
+      context: z.object({ tokens: z.number(), kinds: z.array(z.string()) }),
+      output: z.object({ tokens: z.number(), kinds: z.array(z.string()) }),
+      events: { GO: z.object({}) },
+    });
+    const decisionAgent = setupAgent({ schemas: decisionSchemas });
+    const machine = decisionAgent.createMachine({
+      context: () => ({ tokens: 0, kinds: [] }),
+      on: {
+        [AGENT_USAGE_EVENT_TYPE]: ({ context, event }) => ({
+          context: {
+            tokens: context.tokens + (event.usage.totalTokens ?? 0),
+            kinds: [...context.kinds, `${event.kind ?? "?"}:${event.id ?? "?"}`],
+          },
+        }),
+      },
+      initial: "deciding",
+      states: {
+        deciding: {
+          invoke: {
+            id: "choose",
+            src: "agent.decide",
+            input: { model: "test-model", prompt: "pick", allowedEvents: ["GO"] as const },
+          },
+          on: { GO: { target: "done" } },
+        },
+        done: {
+          type: "final",
+          output: ({ context }) => ({ tokens: context.tokens, kinds: context.kinds }),
+        },
+      },
+    });
+
+    const bound = provideExecutors(machine, {
+      decide: async () => ({ event: { type: "GO" } as ChosenEvent, usage: { totalTokens: 77 } }),
+    });
+    const actor = createActor(bound);
+    actor.start();
+
+    expect(await toPromise(actor)).toEqual({ tokens: 77, kinds: ["decision:choose"] });
   });
 });
