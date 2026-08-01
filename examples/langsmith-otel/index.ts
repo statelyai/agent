@@ -1,42 +1,50 @@
 /**
- * LangSmith over OpenTelemetry: shipping `runAgent`'s trace stream to any
- * OTLP backend, LangSmith here.
+ * LangSmith over OpenTelemetry — a real, one-step vendor config.
  *
- * The whole integration is one `onTrace` handler that maps the versioned
- * `AgentTraceEvent` stream onto OTel spans:
- *   - run.start        -> a root span for the run
- *   - request.start    -> a child span per model call
- *   - request.end      -> attributes (state, src, output sizes) + end
- *   - request.error    -> recordException + ERROR status + end
- *   - run.end          -> status + end the root span
+ * There is no adapter and no shim here. `@statelyai/agent/otel` turns the
+ * versioned `AgentTraceEvent` stream into GenAI-semconv spans; everything else
+ * is stock OpenTelemetry (`NodeTracerProvider` + `OTLPTraceExporter`). Pointing
+ * the same run at Braintrust, Langfuse, Honeycomb, or Grafana Tempo is a
+ * different `url` + `headers` on the exporter, nothing else.
  *
- * No prompt or response bodies are attached by default (see OPT_IN_BODIES).
+ * Two modes, chosen by env:
+ *   - `LANGSMITH_API_KEY` set: OTLP/HTTP export to LangSmith
+ *     (`https://api.smith.langchain.com/otel/v1/traces`, headers `x-api-key`
+ *     and optional `Langsmith-Project`). Endpoint and header names verified
+ *     against https://docs.langchain.com/langsmith/trace-with-opentelemetry on
+ *     2026-08-01. HONEST CAVEAT: this example is written and tested without a
+ *     LangSmith account, so the config matches the published docs but the live
+ *     upload has never been executed. Check your LangSmith project after the
+ *     first run.
+ *   - no key: spans go to an in-memory exporter and the finished span tree is
+ *     printed, so a keyless run still shows the whole shape of what would be
+ *     uploaded.
  *
- * Env-gated, dual mode:
- *   - WITH `LANGSMITH_API_KEY`: builds a NodeSDK + OTLP exporter pointed at
- *     LangSmith's OTel endpoint and ships spans there.
- *   - WITHOUT it: prints each trace event to stdout instead, so the example
- *     runs clean with no keys and no network.
- *
- * Model calls are mocked, so no OPENAI_API_KEY is needed either; the point is
- * the trace wiring, not the generation.
+ * Model calls are scripted (`createScriptedExecutors`), so no provider key is
+ * needed either — the subject is the trace wiring, not the generation.
  *
  * Run: npx tsx examples/langsmith-otel/index.ts
- * Env: LANGSMITH_API_KEY (enables real OTLP export),
- *      LANGSMITH_PROJECT (target project; default "default").
+ * Env: LANGSMITH_API_KEY (enables real OTLP export), LANGSMITH_PROJECT,
+ *      LANGSMITH_OTEL_ENDPOINT (override for EU/APAC/AWS hosts).
  */
-import { z } from "zod";
-import { runAgent, setupAgent, type AgentTraceEvent } from "@statelyai/agent";
-import type { AgentRequestExecutors } from "@statelyai/agent";
-// In a real project these come from @opentelemetry/{api,sdk-node,exporter-trace-otlp-http}.
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import {
-  context,
-  NodeSDK,
-  OTLPTraceExporter,
-  SpanStatusCode,
-  trace,
-  type Span,
-} from "./otel-shims.js";
+  BatchSpanProcessor,
+  InMemorySpanExporter,
+  NodeTracerProvider,
+  SimpleSpanProcessor,
+  type ReadableSpan,
+} from "@opentelemetry/sdk-trace-node";
+import { z } from "zod";
+import { createScriptedExecutors, runAgent, setupAgent } from "@statelyai/agent";
+import { createOtelTraceHandler, type OtelTraceHandler } from "@statelyai/agent/otel";
+
+/**
+ * LangSmith's OTLP/HTTP trace endpoint (US, the default host). Swap the host
+ * for another region: `eu.api.smith.langchain.com`, `apac.api.smith.langchain.com`,
+ * or `aws.api.smith.langchain.com`.
+ */
+const LANGSMITH_TRACES_URL = "https://api.smith.langchain.com/otel/v1/traces";
 
 // ─── A small agent: decide whether to write, then write ───
 
@@ -86,146 +94,149 @@ export const blurbMachine = agentSetup.createMachine({
   },
 });
 
-// ─── Keyless mock executors (the demo is about tracing, not the model) ───
-
-const mockExecutors: Partial<AgentRequestExecutors> = {
-  generateText: async () => ({ output: "State machines make illegal states unreachable." }),
-  decide: async () => ({ event: { type: "WRITE" } }),
-};
-
-// Attach prompt/response bodies to spans? Off by default, since bodies can be
-// large and sensitive. Flip to true (or gate on an env var) to opt in.
-const OPT_IN_BODIES = false;
-
-// ─── onTrace -> OTel spans ───
-
-/**
- * Builds an `onTrace` handler that maps the trace stream onto OTel spans, plus
- * a `shutdown` that flushes the exporter. `tracer` comes from the caller's
- * existing OTel SDK setup; this recipe never owns the SDK lifecycle beyond the
- * flush.
- */
-function createTraceToOtel(tracer: ReturnType<typeof trace.getTracer>) {
-  const runSpans = new Map<string, Span>();
-  const requestSpans = new Map<string, Span>();
-
-  const onTrace = (event: AgentTraceEvent) => {
-    switch (event.type) {
-      case "run.start": {
-        const span = tracer.startSpan("agent.run", {
-          attributes: {
-            "agent.run_id": event.runId,
-            "agent.machine_id": event.machineId,
-            "agent.machine_version": event.machineVersion,
-          },
-        });
-        runSpans.set(event.runId, span);
-        break;
-      }
-      case "request.start": {
-        const request = event.request;
-        // A decision request carries `model`; text/plan carry `src`.
-        const src = "src" in request ? request.src : request.model;
-        const parent = runSpans.get(event.runId);
-        const ctx = parent ? trace.setSpan(context.active(), parent) : context.active();
-        const span = tracer.startSpan(
-          `agent.request ${src}`,
-          {
-            attributes: {
-              "agent.run_id": event.runId,
-              "agent.request_src": src,
-              "agent.request_id": request.id,
-              "agent.request_kind": request.kind,
-            },
-          },
-          ctx,
-        );
-        if (OPT_IN_BODIES && "input" in request && request.input) {
-          span.setAttribute("agent.request_input", JSON.stringify(request.input));
-        }
-        requestSpans.set(request.id, span);
-        break;
-      }
-      case "request.end": {
-        const span = requestSpans.get(event.request.id);
-        if (!span) break;
-        // Sizes, not bodies: a cheap, non-sensitive signal by default.
-        span.setAttribute("agent.output_length", JSON.stringify(event.output ?? "").length);
-        if (OPT_IN_BODIES) {
-          span.setAttribute("agent.output", JSON.stringify(event.output ?? ""));
-        }
-        span.setStatus({ code: SpanStatusCode.OK });
-        span.end();
-        requestSpans.delete(event.request.id);
-        break;
-      }
-      case "request.error": {
-        const span = requestSpans.get(event.request.id);
-        if (!span) break;
-        span.recordException(event.error);
-        span.setStatus({ code: SpanStatusCode.ERROR });
-        span.end();
-        requestSpans.delete(event.request.id);
-        break;
-      }
-      case "run.end": {
-        const span = runSpans.get(event.runId);
-        if (!span) break;
-        span.setAttribute("agent.status", event.status);
-        span.setStatus({
-          code: event.status === "error" ? SpanStatusCode.ERROR : SpanStatusCode.OK,
-        });
-        span.end();
-        runSpans.delete(event.runId);
-        break;
-      }
-      // stream.chunk / machine.transition / emit: skipped here. seq + timestamp
-      // on every event make them re-orderable if you'd rather ship them as span
-      // events on the run span.
-    }
-  };
-
-  return { onTrace };
-}
-
-export async function main() {
-  const apiKey = process.env.LANGSMITH_API_KEY;
-
-  let sdk: NodeSDK | undefined;
-  let onTrace: (event: AgentTraceEvent) => void;
-
-  if (apiKey) {
-    // Your existing OTel setup: an OTLP exporter pointed at LangSmith. The
-    // exporter appends /v1/traces to the base endpoint. Headers per LangSmith's
-    // OTel ingestion docs: x-api-key + Langsmith-Project.
-    const exporter = new OTLPTraceExporter({
-      url: "https://api.smith.langchain.com/otel/v1/traces",
-      headers: {
-        "x-api-key": apiKey,
-        "Langsmith-Project": process.env.LANGSMITH_PROJECT ?? "default",
-      },
-    });
-    sdk = new NodeSDK({ traceExporter: exporter });
-    sdk.start();
-    onTrace = createTraceToOtel(trace.getTracer("statelyai-agent")).onTrace;
-  } else {
-    // Keyless: just print the trace stream, no OTel and no network.
-    onTrace = (event) => console.log(`[trace] ${event.type} seq=${event.seq}`);
-  }
-
-  const result = await runAgent(blurbMachine, {
-    input: { topic: "why state machines for agents" },
-    executors: mockExecutors,
-    onTrace,
+/** Keyless, deterministic stand-in for a model host. */
+export const scriptedExecutors = () =>
+  createScriptedExecutors({
+    decisions: [{ type: "WRITE" }],
+    text: ["State machines make illegal states unreachable."],
   });
 
-  if (result.status === "done") {
-    console.log(`\nBlurb: ${result.output.blurb}`);
-  } else {
-    console.log(`\nRun settled: ${result.status}`);
+// ─── OpenTelemetry setup: the whole vendor integration ───
+
+/** What {@link createTracing} hands back: a handler, a sink, and a shutdown. */
+export interface Tracing {
+  /** Pass straight to `runAgent`'s `onTrace`. Dispose it when the run settles. */
+  onTrace: OtelTraceHandler;
+  /** Where spans went, for the summary line. */
+  destination: string;
+  /**
+   * The finished spans, in keyless mode only, valid after `shutdown()`.
+   * Snapshotted there because shutting an `InMemorySpanExporter` down clears it.
+   */
+  readonly spans: ReadableSpan[];
+  /** Flushes the exporter and stops the provider. */
+  shutdown(): Promise<void>;
+}
+
+/**
+ * Builds the tracer provider, the exporter, and the bridge handler.
+ *
+ * The keyed branch is the part worth copying: a stock `OTLPTraceExporter` with
+ * the vendor's URL and headers, and `createOtelTraceHandler` on top of the
+ * provider's tracer. Nothing about the agent changes per vendor.
+ */
+export function createTracing(env: NodeJS.ProcessEnv = process.env): Tracing {
+  const apiKey = env.LANGSMITH_API_KEY;
+  const collected = apiKey ? undefined : new InMemorySpanExporter();
+
+  const processor = apiKey
+    ? new BatchSpanProcessor(
+        new OTLPTraceExporter({
+          url: env.LANGSMITH_OTEL_ENDPOINT ?? LANGSMITH_TRACES_URL,
+          headers: {
+            "x-api-key": apiKey,
+            ...(env.LANGSMITH_PROJECT ? { "Langsmith-Project": env.LANGSMITH_PROJECT } : {}),
+          },
+        }),
+      )
+    : // Keyless: keep the spans in process so the run can print them.
+      new SimpleSpanProcessor(collected!);
+
+  const provider = new NodeTracerProvider({ spanProcessors: [processor] });
+
+  const onTrace = createOtelTraceHandler({
+    // A tracer straight off the provider — no global registration needed, since
+    // the bridge parents its own spans explicitly.
+    tracer: provider.getTracer("langsmith-otel-example"),
+    agentName: "blurb-writer",
+    providerName: "openai",
+    attributes: { "deployment.environment.name": env.NODE_ENV ?? "development" },
+  });
+
+  const spans: ReadableSpan[] = [];
+
+  return {
+    onTrace,
+    spans,
+    destination: apiKey
+      ? `LangSmith (${env.LANGSMITH_OTEL_ENDPOINT ?? LANGSMITH_TRACES_URL})`
+      : "in-memory exporter (no LANGSMITH_API_KEY)",
+    shutdown: async () => {
+      await provider.forceFlush();
+      spans.push(...(collected?.getFinishedSpans() ?? []));
+      await provider.shutdown();
+    },
+  };
+}
+
+// ─── Printing the span tree ───
+
+const spanId = (span: ReadableSpan) => span.spanContext().spanId;
+const durationMs = (span: ReadableSpan) => span.duration[0] * 1e3 + span.duration[1] / 1e6;
+
+/**
+ * Renders finished spans as an indented tree: the same parent/child shape a
+ * vendor UI draws, so a keyless run shows exactly what would be uploaded.
+ */
+export function formatSpanTree(spans: readonly ReadableSpan[]): string {
+  const byParent = new Map<string | undefined, ReadableSpan[]>();
+  for (const span of spans) {
+    const parent = span.parentSpanContext?.spanId;
+    // A parent outside this batch is a root as far as the rendering goes.
+    const key = parent && spans.some((other) => spanId(other) === parent) ? parent : undefined;
+    byParent.set(key, [...(byParent.get(key) ?? []), span]);
   }
 
-  await sdk?.shutdown();
+  const lines: string[] = [];
+  const walk = (parent: string | undefined, depth: number) => {
+    const children = [...(byParent.get(parent) ?? [])].sort(
+      (a, b) => a.startTime[0] - b.startTime[0] || a.startTime[1] - b.startTime[1],
+    );
+    for (const span of children) {
+      const indent = "  ".repeat(depth);
+      lines.push(
+        `${indent}${depth > 0 ? "└─ " : ""}${span.name}  (${durationMs(span).toFixed(1)}ms)`,
+      );
+      const model = span.attributes["gen_ai.request.model"];
+      const operation = span.attributes["gen_ai.operation.name"];
+      lines.push(`${indent}   ${operation}${model ? ` · model=${String(model)}` : ""}`);
+      for (const event of span.events) {
+        lines.push(
+          `${indent}   • ${event.name} ${String(event.attributes?.["agent.event_type"] ?? "")}`,
+        );
+      }
+      walk(spanId(span), depth + 1);
+    }
+  };
+  walk(undefined, 0);
+  return lines.join("\n");
+}
+
+export async function main(env: NodeJS.ProcessEnv = process.env) {
+  const tracing = createTracing(env);
+  console.log(`Exporting spans to: ${tracing.destination}\n`);
+
+  let result;
+  try {
+    result = await runAgent(blurbMachine, {
+      input: { topic: "why state machines for agents" },
+      executors: scriptedExecutors(),
+      onTrace: tracing.onTrace,
+    });
+  } finally {
+    // Closes any span still open, even on a throw; then flush the exporter.
+    tracing.onTrace.dispose();
+    await tracing.shutdown();
+  }
+
+  console.log(
+    result.status === "done" ? `Blurb: ${result.output.blurb}` : `Run settled: ${result.status}`,
+  );
+
+  if (tracing.spans.length > 0) {
+    console.log(`\nSpan tree (${tracing.spans.length} spans):\n`);
+    console.log(formatSpanTree(tracing.spans));
+  }
 }
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.

@@ -8,7 +8,7 @@ description: Watch an agent run locally in the Stately Inspector, ship its versi
 Two ways to observe a run:
 
 - **Locally**, watch it live in the [Stately Inspector](https://stately.ai/docs/inspector): the machine you author renders as a diagram that lights up state by state.
-- **In production**, ship the versioned trace stream to any [OpenTelemetry](https://opentelemetry.io) backend (Honeycomb, Langfuse, LangSmith, Grafana, …) with a copy-paste `onTrace` handler.
+- **In production**, ship the versioned trace stream to any [OpenTelemetry](https://opentelemetry.io) backend (Honeycomb, Langfuse, LangSmith, Braintrust, Datadog, Grafana, …) with the [`@statelyai/agent/otel`](#send-it-to-otel) bridge: one handler, GenAI-semconv spans, your exporter.
 
 No hosted platform, no adapter to install. Every trace pairs with a replayable event log and settled snapshot, so a traced run can be reproduced and resumed.
 
@@ -18,29 +18,29 @@ No hosted platform, no adapter to install. Every trace pairs with a replayable e
 
 The `onTrace` callback fires a single ordered stream of `AgentTraceEvent`s. Every event carries the same envelope:
 
-| Field | Meaning |
-| --- | --- |
-| `schemaVersion` | The `AGENT_TRACE_SCHEMA_VERSION` the event was produced with. |
-| `runId` | Scopes one run; `run_<n>` (controlled) or minted per root actor (uncontrolled). |
-| `seq` | Monotonic within a `runId`, so events are re-orderable after the fact. |
-| `timestamp` | ISO string, set when the event is produced. |
-| `machineId` | The machine's `id`. |
+| Field            | Meaning                                                                                                                                                                          |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schemaVersion`  | The `AGENT_TRACE_SCHEMA_VERSION` the event was produced with.                                                                                                                    |
+| `runId`          | Scopes one run; `run_<n>` (controlled) or minted per root actor (uncontrolled).                                                                                                  |
+| `seq`            | Monotonic within a `runId`, so events are re-orderable after the fact.                                                                                                           |
+| `timestamp`      | ISO string, set when the event is produced.                                                                                                                                      |
+| `machineId`      | The machine's `id`.                                                                                                                                                              |
 | `machineVersion` | `machineVersion` option, else the machine's own `version` (`createMachine({ version })`), else its structural hash. Same identity stamped onto settled snapshots as `agentMeta`. |
 
 The `schemaVersion` is bumped **only** on a breaking change to the envelope or any payload shape, so a consumer can gate on it. It is identical across `runAgent`, `provideExecutors`, and `traceTransitions`.
 
 The payload is a discriminated union on `type`:
 
-| `type` | Key fields | Notes |
-| --- | --- | --- |
-| `run.start` | `input?`, `snapshot?`, `event?` | Run boundary; controlled path only. |
-| `request.start` | `request` | One per model call (text, decision, or plan). |
-| `request.end` | `request`, `output`, `raw`, `reasoning?`, `usage?` | `raw` is your executor's verbatim result (usage, tool calls); `reasoning` and `usage` present only when the executor surfaced them. |
-| `request.error` | `request`, `error` | The model call threw. |
-| `stream.chunk` | `request`, `chunk` | Each streamed chunk of a `mode: 'stream'` request. |
-| `machine.transition` | `snapshot`, `event`, `eventId?` | Root-machine transition. `eventId` links a logged external input to its `AgentLogEntry`; raised/internal transitions have no id. |
-| `emit` | `event` | An event the machine emitted with `enq.emit(...)`; controlled path only. |
-| `run.end` | `status` (`done` \| `idle` \| `error`) + variant fields | `done`: `output`, `snapshot`. `idle`: `snapshot`, `pendingUserInputs?`, `persistedSnapshot?`. `error`: `cause`, `error`, `snapshot`. Run boundary; controlled path only. |
+| `type`               | Key fields                                              | Notes                                                                                                                                                                    |
+| -------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `run.start`          | `input?`, `snapshot?`, `event?`                         | Run boundary; controlled path only.                                                                                                                                      |
+| `request.start`      | `request`                                               | One per model call (text, decision, or plan).                                                                                                                            |
+| `request.end`        | `request`, `output`, `raw`, `reasoning?`, `usage?`      | `raw` is your executor's verbatim result (usage, tool calls); `reasoning` and `usage` present only when the executor surfaced them.                                      |
+| `request.error`      | `request`, `error`                                      | The model call threw.                                                                                                                                                    |
+| `stream.chunk`       | `request`, `chunk`                                      | Each streamed chunk of a `mode: 'stream'` request.                                                                                                                       |
+| `machine.transition` | `snapshot`, `event`, `eventId?`                         | Root-machine transition. `eventId` links a logged external input to its `AgentLogEntry`; raised/internal transitions have no id.                                         |
+| `emit`               | `event`                                                 | An event the machine emitted with `enq.emit(...)`; controlled path only.                                                                                                 |
+| `run.end`            | `status` (`done` \| `idle` \| `error`) + variant fields | `done`: `output`, `snapshot`. `idle`: `snapshot`, `pendingUserInputs?`, `persistedSnapshot?`. `error`: `cause`, `error`, `snapshot`. Run boundary; controlled path only. |
 
 Each `request` is an `AgentStepRequest`: text and plan requests carry `src`; a decision carries `model` instead. All three carry `id` and `kind`.
 
@@ -53,17 +53,12 @@ Trace `timestamp` records when an observation was emitted. Replay-entry `recorde
 On `runAgent`, `onTrace` emits the full stream, run boundary included:
 
 ```ts
-import {
-  runAgent,
-  serializeTraceEvent,
-  type AgentTraceEvent,
-} from "@statelyai/agent";
+import { runAgent, serializeTraceEvent, type AgentTraceEvent } from "@statelyai/agent";
 
 await runAgent(machine, {
   input,
   executors,
-  onTrace: (event: AgentTraceEvent) =>
-    jsonl.write(JSON.stringify(serializeTraceEvent(event))),
+  onTrace: (event: AgentTraceEvent) => jsonl.write(JSON.stringify(serializeTraceEvent(event))),
 });
 ```
 
@@ -108,8 +103,7 @@ import {
   type AgentTraceEvent,
 } from "@statelyai/agent";
 
-const onTrace = (event: AgentTraceEvent) =>
-  jsonl.write(JSON.stringify(serializeTraceEvent(event)));
+const onTrace = (event: AgentTraceEvent) => jsonl.write(JSON.stringify(serializeTraceEvent(event)));
 
 const bound = provideExecutors(machine, executors, { onTrace });
 const actor = createActor(bound, { inspect: traceTransitions(onTrace) });
@@ -198,74 +192,168 @@ The inspector renders the running actor as the same diagram you author, so the w
 
 ## Send it to OTel
 
-For production, map `onTrace` onto OpenTelemetry spans. This uses only the stable `@opentelemetry/api` surface and a `tracer` from **your existing SDK setup**; the library ships no exporter and owns no SDK lifecycle:
+`@statelyai/agent/otel` maps the trace stream onto [OpenTelemetry GenAI](https://github.com/open-telemetry/semantic-conventions-genai) spans. It is the whole integration: pass a `tracer` from **your existing SDK setup** and hand the handler to `onTrace`.
 
-```ts
-import { trace, context, SpanStatusCode, type Span } from "@opentelemetry/api";
-import type { AgentTraceEvent } from "@statelyai/agent";
-
-const tracer = trace.getTracer("statelyai-agent");
-const runSpans = new Map<string, Span>();
-const reqSpans = new Map<string, Span>();
-
-const onTrace = (event: AgentTraceEvent) => {
-  switch (event.type) {
-    case "run.start": {
-      runSpans.set(
-        event.runId,
-        tracer.startSpan("agent.run", {
-          attributes: {
-            "agent.run_id": event.runId,
-            "agent.machine_id": event.machineId,
-            "agent.machine_version": event.machineVersion,
-          },
-        }),
-      );
-      break;
-    }
-    case "request.start": {
-      const req = event.request;
-      const src = "src" in req ? req.src : req.model; // decisions carry `model`
-      const parent = runSpans.get(event.runId);
-      const ctx = parent ? trace.setSpan(context.active(), parent) : context.active();
-      reqSpans.set(
-        req.id,
-        tracer.startSpan(`agent.request ${src}`, {
-          attributes: { "agent.request_src": src, "agent.request_kind": req.kind },
-        }, ctx),
-      );
-      break;
-    }
-    case "request.end": {
-      const span = reqSpans.get(event.request.id);
-      // Sizes, not bodies (see below): a cheap, non-sensitive signal by default.
-      span?.setAttribute("agent.output_length", JSON.stringify(event.output ?? "").length);
-      span?.setStatus({ code: SpanStatusCode.OK });
-      span?.end();
-      break;
-    }
-    case "request.error": {
-      const span = reqSpans.get(event.request.id);
-      span?.recordException(event.error);
-      span?.setStatus({ code: SpanStatusCode.ERROR });
-      span?.end();
-      break;
-    }
-    case "run.end": {
-      const span = runSpans.get(event.runId);
-      span?.setAttribute("agent.status", event.status);
-      span?.setStatus({ code: event.status === "error" ? SpanStatusCode.ERROR : SpanStatusCode.OK });
-      span?.end();
-      break;
-    }
-  }
-};
+```sh
+npm install @opentelemetry/api
 ```
 
-- **No prompt or response bodies by default.** The recipe records output *sizes*, not contents, since bodies can be large and sensitive. Opt in by adding `span.setAttribute("agent.output", JSON.stringify(event.output))` (and the `request.input` on `request.start`) once you've decided that data belongs in your traces.
-- **`seq` and `timestamp` make events re-orderable.** If you'd rather not hold spans open across async work, ship each event as a span *event* on the run span instead and sort by `seq` downstream.
+```ts
+import { trace } from "@opentelemetry/api";
+import { runAgent } from "@statelyai/agent";
+import { createOtelTraceHandler } from "@statelyai/agent/otel";
 
-**Bring your own exporter and backend.** Any OTLP-capable backend works: Honeycomb, Langfuse, Grafana Tempo, or LangSmith via their OTel endpoints. For LangSmith, an `OTLPTraceExporter` pointed at `https://api.smith.langchain.com/otel/v1/traces` with `x-api-key` and `Langsmith-Project` headers is the whole integration; see [`examples/langsmith-otel`](../examples/langsmith-otel/index.ts) for a runnable end-to-end wiring (env-gated so it prints the trace stream without keys).
+const onTrace = createOtelTraceHandler({
+  tracer: trace.getTracer("my-app"),
+  providerName: "openai", // gen_ai.provider.name, when the run targets one provider
+});
+
+try {
+  await runAgent(machine, { input, executors, onTrace });
+} finally {
+  onTrace.dispose(); // closes any span still open
+}
+```
+
+**Ships no exporter, owns no SDK lifecycle.** `@opentelemetry/api` is an optional peer dependency, the `Tracer` is yours, and where the spans go is your exporter's business. Nothing else is installed at runtime.
+
+The run span nests under whatever span is active when the run starts, so an agent run inside an HTTP handler lands in that request's trace.
+
+### What the bridge does
+
+| Trace event          | OTel                                                                                                                                             |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `run.start`          | Opens the run span: `invoke_agent <machineId>`, `INTERNAL`.                                                                                      |
+| `request.start`      | Opens a child span per model call: `chat <model>` (`CLIENT`) for text and decision requests, `plan <machineId>` (`INTERNAL`) for a plan request. |
+| `request.end`        | Token usage onto the request span, status `OK`, span ends.                                                                                       |
+| `request.error`      | `recordException` + `error.type`, status `ERROR`, span ends.                                                                                     |
+| `stream.chunk`       | Counted; lands as `agent.stream_chunks` on the request span.                                                                                     |
+| `machine.transition` | Span event `agent.transition` on the run span (`agent.event_type`, `agent.state`, `agent.event_id?`).                                            |
+| `emit`               | Span event `agent.emit` on the run span.                                                                                                         |
+| `usage.dropped`      | Span event `agent.usage.dropped` with the reason and the dropped call's tokens.                                                                  |
+| `run.end`            | `agent.status` + span status (`ERROR` records the cause), run span ends.                                                                         |
+
+Attributes follow the [GenAI semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-agent-spans.md) (Development stability, tracking core semconv v1.43.0):
+
+| Attribute                                                                                 | From                                                                                      |
+| ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `gen_ai.operation.name`                                                                   | `invoke_agent` (run), `chat` or `plan` (request).                                         |
+| `gen_ai.agent.name` / `gen_ai.agent.version`                                              | `machineId` (or the `agentName` option) / `machineVersion`.                               |
+| `gen_ai.request.model`                                                                    | The model ref the request targets.                                                        |
+| `gen_ai.provider.name`                                                                    | The `providerName` option. Not inferable from a model ref, so unset unless you pass it.   |
+| `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`                                 | `request.end`'s `usage`, when the executor reported it.                                   |
+| `gen_ai.usage.reasoning.output_tokens`, `gen_ai.usage.cache_read.input_tokens`            | Same, for `reasoningTokens` / `cachedInputTokens`.                                        |
+| `agent.run_id`, `agent.machine_id`, `agent.machine_version`, `agent.trace_schema_version` | The trace envelope.                                                                       |
+| `agent.request_id`, `agent.request_kind`, `agent.request_src`, `agent.request_attempt`    | The request. `request_src` is absent on a decision; `request_attempt` appears on a retry. |
+| `agent.seq`                                                                               | Every span event, so events stay re-orderable downstream.                                 |
+
+- **No prompt or response bodies by default.** Semconv marks message content opt-in, and bodies are large and frequently sensitive, so the bridge records output _sizes_ (`agent.output_length`) instead. Pass `captureContent: true` for JSON-stringified `gen_ai.input.messages`, `gen_ai.output.messages`, and `gen_ai.system_instructions`.
+- **`dispose()` is not optional.** It ends any span still open, which is how a run that never emitted `run.end` (a crash, an uncontrolled actor) stops leaking one.
+- **`attributes`** sets the same key/values on every span the bridge creates: deployment, tenant, eval id.
+
+### Uncontrolled mode
+
+On the [uncontrolled path](#uncontrolled-provideexecutors--tracetransitions) there is no `run.start` / `run.end`, so the run span opens on the **first** event of a `runId` and stays open until you dispose. Same handler, same tree:
+
+```ts
+const onTrace = createOtelTraceHandler({ tracer });
+const bound = provideExecutors(machine, executors, { onTrace });
+const actor = createActor(bound, { inspect: traceTransitions(onTrace) });
+
+actor.subscribe({ complete: () => onTrace.dispose() });
+actor.start();
+```
+
+Those run spans carry `agent.unfinished: true` (no settle event ever confirmed how they ended) and no `agent.status`. One handler per long-lived actor, disposed when the actor stops, keeps handler state bounded.
+
+### Vendors in one step
+
+Because the bridge emits plain OTel spans, a vendor is a **URL and a set of headers** on your own exporter. Nothing in the wiring above changes per vendor, and no vendor SDK enters your machine.
+
+```sh
+npm install @opentelemetry/sdk-trace-node @opentelemetry/exporter-trace-otlp-http
+```
+
+Endpoints and header names below were checked against each vendor's OTLP docs on 2026-08-01; they do drift, so the linked page is the authority.
+
+#### LangSmith
+
+Endpoint `https://api.smith.langchain.com/otel/v1/traces`. Headers: `x-api-key`, optional `Langsmith-Project`. Regional hosts swap the subdomain (`eu.`, `apac.`, `aws.`). [Docs](https://docs.langchain.com/langsmith/trace-with-opentelemetry)
+
+```ts
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import { BatchSpanProcessor, NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
+import { createOtelTraceHandler } from "@statelyai/agent/otel";
+
+const exporter = new OTLPTraceExporter({
+  url: "https://api.smith.langchain.com/otel/v1/traces",
+  headers: { "x-api-key": process.env.LANGSMITH_API_KEY!, "Langsmith-Project": "agent" },
+});
+const provider = new NodeTracerProvider({ spanProcessors: [new BatchSpanProcessor(exporter)] });
+const onTrace = createOtelTraceHandler({ tracer: provider.getTracer("my-app") });
+```
+
+#### Braintrust
+
+Endpoint `https://api.braintrust.dev/otel/v1/traces` (EU: `https://api-eu.braintrust.dev/otel/v1/traces`). Headers: `Authorization: Bearer <key>`, `x-bt-parent` as `project_id:<id>` (also accepts `project_name:<name>`). [Docs](https://www.braintrust.dev/docs/integrations/sdk-integrations/opentelemetry)
+
+```ts
+const exporter = new OTLPTraceExporter({
+  url: "https://api.braintrust.dev/otel/v1/traces",
+  headers: {
+    Authorization: `Bearer ${process.env.BRAINTRUST_API_KEY}`,
+    "x-bt-parent": "project_name:agent",
+  },
+});
+const provider = new NodeTracerProvider({ spanProcessors: [new BatchSpanProcessor(exporter)] });
+const onTrace = createOtelTraceHandler({ tracer: provider.getTracer("my-app") });
+```
+
+Braintrust also runs the offline scoring side; see [Evals](evals.md) for scoring the same runs from `runAgent`'s output and event log.
+
+#### Langfuse
+
+Endpoint `https://cloud.langfuse.com/api/public/otel/v1/traces` (US `us.`, JP `jp.`, HIPAA `hipaa.`, or your self-hosted host). Headers: `Authorization: Basic <base64(publicKey:secretKey)>`, plus `x-langfuse-ingestion-version: 4` for the v4 data model. [Docs](https://langfuse.com/integrations/native/opentelemetry)
+
+```ts
+const auth = Buffer.from(
+  `${process.env.LANGFUSE_PUBLIC_KEY}:${process.env.LANGFUSE_SECRET_KEY}`,
+).toString("base64");
+const exporter = new OTLPTraceExporter({
+  url: "https://cloud.langfuse.com/api/public/otel/v1/traces",
+  headers: { Authorization: `Basic ${auth}`, "x-langfuse-ingestion-version": "4" },
+});
+const provider = new NodeTracerProvider({ spanProcessors: [new BatchSpanProcessor(exporter)] });
+const onTrace = createOtelTraceHandler({ tracer: provider.getTracer("my-app") });
+```
+
+#### Honeycomb
+
+Endpoint `https://api.honeycomb.io/v1/traces` (EU: `https://api.eu1.honeycomb.io/v1/traces`). Header: `x-honeycomb-team`. `x-honeycomb-dataset` is required only on Honeycomb Classic. [Docs](https://docs.honeycomb.io/send-data/opentelemetry/)
+
+```ts
+const exporter = new OTLPTraceExporter({
+  url: "https://api.honeycomb.io/v1/traces",
+  headers: { "x-honeycomb-team": process.env.HONEYCOMB_API_KEY! },
+});
+const provider = new NodeTracerProvider({ spanProcessors: [new BatchSpanProcessor(exporter)] });
+const onTrace = createOtelTraceHandler({ tracer: provider.getTracer("my-app") });
+```
+
+#### Datadog
+
+Datadog documents direct OTLP intake (no Agent or Collector) over `http/protobuf` or `http/json` at the `/v1/traces` path, with the header `dd-api-key`. **The host is site-dependent and we could not confirm a literal traces host** in the current docs: the trace page renders a site-switched placeholder, while the metrics page shows `https://otlp.datadoghq.com/v1/metrics`. Read your site's endpoint off the [OTLP intake docs](https://docs.datadoghq.com/opentelemetry/setup/otlp_ingest/) rather than copying the URL below blind; Datadog also still recommends the Agent or Collector for production. The Agent's `trace.agent.datadoghq.com` intake is proprietary, not OTLP.
+
+```ts
+const exporter = new OTLPTraceExporter({
+  url: "https://otlp.datadoghq.com/v1/traces", // US1; check your Datadog site
+  headers: { "dd-api-key": process.env.DD_API_KEY! },
+});
+const provider = new NodeTracerProvider({ spanProcessors: [new BatchSpanProcessor(exporter)] });
+const onTrace = createOtelTraceHandler({ tracer: provider.getTracer("my-app") });
+```
+
+See [`examples/langsmith-otel`](../examples/langsmith-otel/index.ts) for the full runnable wiring: real OTel SDK, real OTLP exporter, keyless run that prints the exported span tree.
 
 ### Model spans via AI SDK telemetry
 
@@ -294,7 +382,7 @@ const executors = {
 await runAgent(machine, { input, executors });
 ```
 
-Trade-off: raw `ai` executors do structured output best-effort (`JSON.parse` + validate), so keep `createAiSdkExecutors`' `generateText` for reliable structured requests and add telemetry per-request via a wrapper only where you need the provider spans. The AI SDK's spans nest under whatever span is active when the executor runs, so they slot beneath the `request.start` span from the recipe above.
+Trade-off: raw `ai` executors do structured output best-effort (`JSON.parse` + validate), so keep `createAiSdkExecutors`' `generateText` for reliable structured requests and add telemetry per-request via a wrapper only where you need the provider spans. The AI SDK's spans nest under whatever span is active when the executor runs, so they slot beneath the bridge's `chat` span for that request.
 
 ## Replay what you traced
 

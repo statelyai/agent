@@ -124,6 +124,7 @@ If something here blocks you, or the API surface feels wrong, open an issue. Thi
 - [Machines as data](machines-as-data.md): authoring an agent machine as JSON.
 - [Generating machines with an LLM](generate-machines.md): have a model author the config, then validate, lint, and simulate it before running.
 - [Testing and verification](verify.md): lint, simulate, and explore agent machines with no API keys or model calls.
+- [Evals](evals.md): score runs on output, trajectory, and token budget with plain vitest or Braintrust.
 - [Multi-agent](multi-agent.md): sub-agents and child actors.
 - [Migrating from a loop](from-a-loop.md): convert a hand-rolled `while` loop into an agent machine.
 - [Coming from LangGraph](from-langgraph.md): a term-by-term translation of LangGraph concepts onto agent machines.

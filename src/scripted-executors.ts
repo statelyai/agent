@@ -100,6 +100,23 @@ function isTextEnvelope(value: Record<string, unknown>): boolean {
 }
 
 /**
+ * Resolves ONE scripted text entry to an executor result: a function entry is
+ * called with the request, and the value is taken as the raw envelope only when
+ * it is one (see {@link isTextEnvelope}). Shared with `runSeam`, whose routed
+ * queues follow the same entry conventions. @internal
+ */
+export async function resolveScriptedTextEntry(
+  entry: ScriptedTextEntry,
+  request: AgentTextRequest,
+  info?: AgentRequestExecutorInfo,
+): Promise<{ output: unknown; usage?: AgentCallUsage }> {
+  const value = typeof entry === "function" ? await entry(request, info) : entry;
+  return isRecord(value) && isTextEnvelope(value)
+    ? (value as { output: unknown; usage?: AgentCallUsage })
+    : { output: value };
+}
+
+/**
  * Keyless executors that replay a script instead of calling a model. Every
  * slot is provided, so any machine binds; a request with no entry left throws a
  * descriptive error naming what was pending.
@@ -141,11 +158,7 @@ export function createScriptedExecutors(
           "Add another entry to the script's `text` queue.",
       );
     }
-    const entry = text.shift();
-    const value = typeof entry === "function" ? await entry(request, info) : entry;
-    return isRecord(value) && isTextEnvelope(value)
-      ? (value as { output: unknown; usage?: AgentCallUsage })
-      : { output: value };
+    return resolveScriptedTextEntry(text.shift()!, request, info);
   };
 
   return {

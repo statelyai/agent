@@ -37,6 +37,16 @@
         "default": "./dist/machines.cjs"
       }
     },
+    "./otel": {
+      "import": {
+        "types": "./dist/otel.d.mts",
+        "default": "./dist/otel.mjs"
+      },
+      "require": {
+        "types": "./dist/otel.d.cts",
+        "default": "./dist/otel.cjs"
+      }
+    },
     "./sqlite": {
       "import": {
         "types": "./dist/sqlite.d.mts",
@@ -103,17 +113,26 @@
     "@earendil-works/pi-ai": "0.83.0",
     "@flue/runtime": "2.0.0",
     "@inquirer/prompts": "^8.5.2",
+    "@langchain/core": "^1.2.4",
+    "@langchain/openai": "^1.5.5",
     "@mastra/core": "^1.54.0",
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/context-async-hooks": "^2.10.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.221.0",
+    "@opentelemetry/sdk-trace-base": "^2.10.0",
+    "@opentelemetry/sdk-trace-node": "^2.10.0",
     "@statelyai/sdk": "^0.15.0",
     "@types/express": "^5.0.6",
     "@types/node": "^20.16.10",
     "@types/react": "^19.2.17",
     "ai": "^6.0.67",
     "ajv": "^8.20.0",
+    "braintrust": "^3.25.0",
     "dotenv": "^16.4.5",
     "express": "^5.2.1",
     "hono": "^4.12.30",
     "knip": "6.24.0",
+    "langchain": "^1.5.4",
     "openai": "^6.45.0",
     "oxfmt": "0.57.0",
     "oxlint": "1.72.0",
@@ -130,10 +149,14 @@
     "access": "public"
   },
   "peerDependencies": {
+    "@opentelemetry/api": "^1",
     "ai": "^6.0.67",
     "xstate": ">=6.0.0-alpha.25 <6.0.0"
   },
   "peerDependenciesMeta": {
+    "@opentelemetry/api": {
+      "optional": true
+    },
     "ai": {
       "optional": true
     }

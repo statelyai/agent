@@ -35,6 +35,11 @@ export {
   type CreateRouterMachineConfig,
 } from "@statelyai/agent/machines";
 export {
+  createOtelTraceHandler,
+  type OtelTraceHandler,
+  type OtelTraceHandlerOptions,
+} from "@statelyai/agent/otel";
+export {
   createSqliteEventLogStore,
   createSqliteSnapshotStore,
   type SqliteDatabase,

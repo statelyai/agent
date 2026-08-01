@@ -38,7 +38,7 @@ npx tsx examples/preset-machine/index.ts
 - A plain, invoke-less machine run as an agent via `getRequests` (prompts in state descriptions): [`described-workflow/index.ts`](described-workflow/index.ts)
 - A library-unaware `setup(...)` machine driven as an agent by hand (no `setupAgent`), with `getAcceptedEvents` + `resolveDecision`: [`plain-xstate/index.ts`](plain-xstate/index.ts)
 - Hosts and executors guide: [`../docs/hosts.md`](../docs/hosts.md)
-- Tracing a run to LangSmith over OpenTelemetry (the `onTrace` → span recipe, env-gated to print keylessly): [`langsmith-otel/index.ts`](langsmith-otel/index.ts)
+- Tracing a run to LangSmith over OpenTelemetry (real OTel SDK + OTLP exporter via `@statelyai/agent/otel`; keyless it exports to memory and prints the span tree): [`langsmith-otel/index.ts`](langsmith-otel/index.ts)
 - Framework comparison examples: [`supervisor/index.ts`](supervisor/index.ts), [`plan-and-execute/index.ts`](plan-and-execute/index.ts), [`rag/index.ts`](rag/index.ts), [`tool-calling/index.ts`](tool-calling/index.ts)
 
 ## XState Examples
@@ -97,6 +97,7 @@ These use `setupAgent(...)` (or plain XState `setup(...)` plus `createTextLogic(
 - [`guardrails/index.ts`](guardrails/index.ts): input/output guardrails as explicit gate states: validate the question before generating (refuse out-of-scope pre-generation), verify the answer after, revise at most once, never silently return unverified content (gating, vs. evaluator-optimizer's refining)
 - [`lats/index.ts`](lats/index.ts): Language Agent Tree Search as bounded UCB-style selection → candidate expansion → reflection scoring until solved or out of rollout budget
 - [`simulated-user-evaluation/index.ts`](simulated-user-evaluation/index.ts): bounded chatbot ↔ simulated-user loop followed by an independent transcript judge, without LangSmith services
+- [`braintrust-evals/index.ts`](braintrust-evals/index.ts): Braintrust `Eval()` over the unmodified email-drafter machine — a dataset, a simulated user answering whatever interaction the machine waits on, and scorers over `result.output`, the state path, the `result.events` trajectory, and `result.usage`; runs keyless and offline (`noSendLogs` + scripted executors), `OPENAI_API_KEY` scores the real model, `BRAINTRUST_API_KEY` uploads the experiment. See [Evals](../docs/evals.md)
 - [`trading-team/index.ts`](trading-team/index.ts): TradingAgents-style composite of parallel analysts → a bounded multi-round bull/bear debate → trader proposal → risk review that can reject and force one revision → final approve-or-reject decision, with data and execution host-owned
 
 ## Framework Hosts
@@ -113,6 +114,7 @@ The same agent machine served from real app frameworks, in both modes: controlle
 - [`flue-host/index.ts`](flue-host/index.ts): Flue 2 (hooks-based `defineAgent`), two ways (local `@flue/runtime` shims). [`machine-owned.ts`](flue-host/machine-owned.ts): the email-drafter machine owns the workflow; the agent gets `start_workflow`/`resume_workflow` bridge tools over `runAgent`. [`flue-owned.ts`](flue-host/flue-owned.ts): Flue's hooks own per-step model/skills/tools; a ~10-line steps machine replaces the blog's `usePersistentState('step', ...)` string, making transitions declared, the step switch exhaustive, and events inferred (`EventFromLogic`)
 - [`eve-host/agent.ts`](eve-host/agent.ts): the same start/resume tool bridge in Eve's folder convention (`instructions.md` + `agent.ts` + `tools/start_workflow.ts` / `tools/resume_workflow.ts`); the machine owns draft legality, the Eve agent converses (local `eve` shims)
 - [`mastra-host/index.ts`](mastra-host/index.ts): the same bridge on the real `@mastra/core` (`createTool` + `Agent`, no shims); snapshots persisted in a `Map` keyed by handle, and the event to resume with is derived from the machine's own `meta.interaction`
+- [`langchain-host/index.ts`](langchain-host/index.ts): LangChain and machine-owned control flow together, both directions — `createLangChainExecutors` wraps any LangChain `BaseChatModel` into the `{ generateText, streamText, decide }` contract (your model config, callbacks, and env-var LangSmith tracing keep working), and `start_workflow`/`resume_workflow` hand a LangChain 1.x `createAgent` loop the email-drafter machine as two tools; real `@langchain/core` + `@langchain/openai` + `langchain`, keyless via a scripted LangChain model
 
 ## Comparison Examples
 

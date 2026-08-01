@@ -21,6 +21,7 @@
     "machines-as-data",
     "generate-machines",
     "verify",
+    "evals",
     "multi-agent",
     "from-a-loop",
     "from-langgraph",

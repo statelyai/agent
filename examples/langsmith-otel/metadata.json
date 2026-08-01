@@ -5,12 +5,13 @@
   "manual": true,
   "origin": {
     "type": "observability-recipe",
-    "source": "runAgent onTrace mapped onto OpenTelemetry spans, shipped to LangSmith's OTLP endpoint; typechecks standalone with local @opentelemetry/* shims (OTel is not a repo dependency)",
+    "source": "Real @opentelemetry/sdk-trace-node + @opentelemetry/exporter-trace-otlp-http (no shims): createOtelTraceHandler from @statelyai/agent/otel feeds a NodeTracerProvider, exported over OTLP/HTTP to LangSmith when LANGSMITH_API_KEY is set, and to an in-memory exporter otherwise; runs keyless with scripted executors and prints the finished span tree",
     "url": "https://docs.langchain.com/langsmith/trace-with-opentelemetry"
   },
   "comparison": {
     "targets": ["LangSmith", "OpenTelemetry", "OTLP backends"],
-    "purpose": "Map the versioned AgentTraceEvent stream onto OTel spans (run.start -> root span, request.start/end -> child spans, request.error -> exception, run.end -> status) and export to LangSmith via OTLP; env-gated so it prints the trace stream to stdout without keys."
+    "purpose": "Shipping a run to a vendor is one exporter config, not an adapter: @statelyai/agent/otel maps the versioned AgentTraceEvent stream onto GenAI-semconv spans, and the vendor is a URL plus headers on a stock OTLPTraceExporter. Braintrust, Langfuse, Honeycomb, or Grafana Tempo change those two fields and nothing else.",
+    "requires": "A LangSmith account (LANGSMITH_API_KEY, optional LANGSMITH_PROJECT) only to upload spans; the keyless run exports to memory and prints the span tree. The LangSmith endpoint and header names follow the linked docs (checked 2026-08-01) but the live upload has not been executed against a real account."
   },
   "starters": [
     "why state machines make agents debuggable",

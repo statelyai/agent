@@ -1,0 +1,19 @@
+{
+  "name": "langchain-host",
+  "title": "LangChain Host (both directions)",
+  "kind": "host-adapter",
+  "manual": true,
+  "origin": {
+    "type": "platform-adapter",
+    "source": "Real @langchain/core + @langchain/openai + langchain 1.x (not shims): a BaseChatModel wrapped into the { generateText, streamText, decide } executor contract, and DynamicStructuredTool bridge tools driven by LangChain 1.x createAgent",
+    "url": "https://docs.langchain.com/oss/javascript/langchain/agents"
+  },
+  "comparison": {
+    "targets": ["LangChain", "LangGraph", "LangSmith", "tool-calling agents"],
+    "purpose": "Coexistence, not migration: Direction A wraps any LangChain chat model into the machine's three executor slots (so model config, callbacks, and env-var-driven LangSmith tracing keep working); Direction B hands a LangChain createAgent loop start_workflow/resume_workflow tools over the email-drafter machine. LangChain makes every model call; the machine owns control flow and legality."
+  },
+  "starters": [
+    "Tell the team the deploy pipeline is twice as fast, then send it.",
+    "Email the design review notes to the product team."
+  ]
+}
