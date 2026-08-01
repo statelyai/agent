@@ -19,6 +19,9 @@ export default {
   },
   test: {
     testTimeout: 10000, // Global timeout of 10000ms for all tests
+    // Blanks provider API keys that `dotenv.config()` above pulled in, so the
+    // suite can never bill a real provider. Opt in with `LIVE_TESTS=1`.
+    setupFiles: [fileURLToPath(new URL("./vitest.setup.ts", import.meta.url))],
     // The demo app has its own vitest config (and `@` alias) — run its tests
     // with `pnpm --dir demo test`.
     exclude: ["**/node_modules/**", "demo/**"],

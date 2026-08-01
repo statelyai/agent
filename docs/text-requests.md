@@ -214,7 +214,7 @@ export const draftEmail = createTextLogic({
 const agentSetup = setupAgent({ models, context, input, output, actors: { draftEmail } });
 ```
 
-Because `draftEmail` is a value, a test can import it and drive it with a fake executor, no machine required. [examples/email-drafter/index.ts](../examples/email-drafter/index.ts) shows structured, streaming, and message-based `createTextLogic` requests across a multi-state workflow.
+Because `draftEmail` is a value, a test can import it and drive it with a fake executor, no machine required. [examples/email-drafter/agent-logic.ts](../examples/email-drafter/agent-logic.ts) shows structured, streaming, and message-based `createTextLogic` requests across a multi-state workflow.
 
 ## Related
 

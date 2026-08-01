@@ -9,11 +9,11 @@
  * snapshot is the entire pause point, so human-in-the-loop works across the
  * stateless request boundary.
  *
- * NOT a full Next project — Next is not a dependency of this repo, so the web
- * `Request`/`Response` types below are MINIMAL LOCAL SHIMS (see ./next-shims)
- * so this file typechecks standalone. In a real app you delete those shims: the
- * globals are already typed, and you'd typically return `NextResponse.json(...)`
- * from `next/server`. Everything else is unchanged.
+ * A real workspace package depending on real `next`, so `NextRequest` and
+ * `NextResponse` below are the published types and CI catches Next API drift.
+ * Drop these two files into `app/api/agent/` of an actual app and they run.
+ * `pnpm dev` boots the package on port 3005; ../../page.tsx drives this flow
+ * from a browser.
  *
  * The snapshot store here is a module-level Map for illustration. A real
  * deployment (serverless, multiple instances) needs a shared store — Redis, a
@@ -26,16 +26,17 @@ import {
   persistSnapshot,
   runAgent,
   setupAgent,
-  type AgentRequestExecutors,
 } from "@statelyai/agent";
 import type { Snapshot } from "xstate";
-import { json, type RouteRequest, type RouteResponse } from "../../../next-shims.js";
+import { NextResponse, type NextRequest } from "next/server";
+import { models, resolveExecutors, maybeCreateRunInspection } from "../../../agent-runtime";
 
 // ─── The machine: draft → idle review → publish ───
 
 const contextSchema = z.object({ topic: z.string(), draft: z.string().nullable() });
 
 const agentSetup = setupAgent({
+  models,
   context: contextSchema,
   input: z.object({ topic: z.string() }),
   output: z.object({ published: z.boolean(), draft: z.string() }),
@@ -85,28 +86,25 @@ export const announceMachine = agentSetup.createMachine({
   },
 });
 
-// Shared, module-scoped store + executors — see ./store.ts (imported by the
-// resume route too). Kept here inline for a single-file read.
+// Shared, module-scoped store — imported by the resume route too. Kept here
+// inline for a single-file read. Executors and inspection live in
+// ../../../agent-runtime.ts, which both handlers share.
 export const snapshots = new Map<string, Snapshot<unknown>>();
 
-/** Keyless mock so the handler runs with no API key. Swap for createAiSdkExecutors. */
-export const executors: Partial<AgentRequestExecutors> = {
-  generateText: async () => ({ output: "Big news: the deploy pipeline just got faster." }),
-};
-
 /** POST /api/agent — start a run; settle idle (draft) or done. */
-export async function POST(request: RouteRequest): Promise<RouteResponse> {
+export async function POST(request: NextRequest): Promise<NextResponse> {
   const body = (await request.json().catch(() => ({}))) as { topic?: string };
   const result = await runAgent(announceMachine, {
     input: { topic: body.topic ?? "the new deploy pipeline" },
-    executors,
+    executors: resolveExecutors(),
+    inspect: await maybeCreateRunInspection(),
   });
 
   if (result.status === "idle") {
     const id = crypto.randomUUID();
     snapshots.set(id, persistSnapshot(result.snapshot));
     const { interaction } = getStateMeta(result.snapshot);
-    return json(
+    return NextResponse.json(
       {
         id,
         status: "idle",
@@ -117,6 +115,6 @@ export async function POST(request: RouteRequest): Promise<RouteResponse> {
       { status: 202 },
     );
   }
-  if (result.status === "done") return json({ status: "done", output: result.output });
-  return json({ status: result.status }, { status: 500 });
+  if (result.status === "done") return NextResponse.json({ status: "done", output: result.output });
+  return NextResponse.json({ status: result.status }, { status: 500 });
 }

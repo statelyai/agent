@@ -92,9 +92,7 @@ describe("createToolLoopMachine", () => {
 
     expect(new Set(events)).toEqual(new Set(["1"]));
     expect(result.events.every((entry) => entry.machineVersion === "1")).toBe(true);
-    expect((result.snapshot as { agentMeta?: { version?: string } }).agentMeta?.version).toBe(
-      "1",
-    );
+    expect((result.snapshot as { agentMeta?: { version?: string } }).agentMeta?.version).toBe("1");
   });
 
   test("an explicit machineVersion option still overrides the machine-carried version", async () => {
@@ -458,5 +456,3 @@ describe("createHandoffMachine", () => {
     ).toThrow(/defaultActiveAgent 'b' is not a declared agent/);
   });
 });
-
-

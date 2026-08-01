@@ -15,6 +15,7 @@
     "paths": {
       "@statelyai/agent": ["./src/index.ts"],
       "@statelyai/agent/ai-sdk": ["./src/ai-sdk/index.ts"],
+      "@statelyai/agent/machines": ["./src/machines/index.ts"],
       "@statelyai/agent/sqlite": ["./src/sqlite/index.ts"]
     }
   },

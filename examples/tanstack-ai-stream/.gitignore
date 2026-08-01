@@ -1,0 +1,6 @@
+dist/
+.output/
+.tanstack/
+.nitro/
+.vite/
+node_modules/

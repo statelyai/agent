@@ -56,7 +56,7 @@ The core ideas: text requests, decisions, messages, and JSON authoring.
 
 - [twenty-questions](../examples/twenty-questions/index.ts): a decision loop where the model picks one legal event (ASK or GUESS) per turn; guard-enforced legality, machine-held score, play-again reset.
 - [joke](../examples/joke/index.ts): a minimal streaming text workflow.
-- [email-drafter](../examples/email-drafter/index.ts): reusable text logic, parts-based [messages](messages.md), schema-typed state and transition meta.
+- [email-drafter](../examples/email-drafter/agent-logic.ts): reusable text logic, parts-based [messages](messages.md), schema-typed state and transition meta.
 - [game-agent](../examples/game-agent/index.ts): `allowedEvents` narrowed as a function of input, gating moves by HP.
 - [go-fish](../examples/go-fish/index.ts): hidden-information play with a checking-win → agent → human loop; the model chooses requests, the machine enforces the rules.
 - [json-agent](../examples/json-agent/index.ts): a full workflow (decision, text request, idle human step) authored as a real `.json` file. See [Machines as data](machines-as-data.md).

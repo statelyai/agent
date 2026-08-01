@@ -1,0 +1,19 @@
+{
+  "name": "mastra-host",
+  "title": "Mastra Host",
+  "kind": "host-adapter",
+  "manual": true,
+  "origin": {
+    "type": "platform-adapter",
+    "source": "Real @mastra/core (not a shim): createTool from @mastra/core/tools + Agent from @mastra/core/agent calling runAgent, with an in-memory snapshot store keyed by handle",
+    "url": "https://mastra.ai/docs/agents/using-tools"
+  },
+  "comparison": {
+    "targets": ["Mastra", "tool-calling agents", "durable agent frameworks"],
+    "purpose": "The Mastra LLM agent gets two tools bridging to the email-drafter machine: start_workflow runs runAgent to idle/done and returns a JSON-safe handle + the machine's typed interaction; resume_workflow reloads the persisted snapshot and delivers the human's event. The machine owns legality; the agent converses."
+  },
+  "starters": [
+    "Tell the team the deploy pipeline is twice as fast now.",
+    "Email the design review notes to the product team."
+  ]
+}

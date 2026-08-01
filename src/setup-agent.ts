@@ -33,6 +33,7 @@ import {
   type TextLogicConfig,
 } from "./text-logic.js";
 import { createDecideActor, createPlanActor } from "./decision.js";
+import { AGENT_USAGE_EVENT_TYPE, type AgentUsageEvent } from "./effects.js";
 import { appendMessages } from "./messages.js";
 import { agentExecutionOptions, machineSuspensionPredicates } from "./internal/registry.js";
 import {
@@ -127,6 +128,101 @@ const emptyEventSchema: StandardSchemaV1<Record<string, never>> = {
   },
 };
 
+/**
+ * The payload of the reserved `'@agent.usage'` event — {@link AgentUsageEvent}
+ * without its `type`. It is what a machine's `'@agent.usage'` handler receives
+ * alongside `type`, since event schemas describe payloads only.
+ */
+export type AgentUsageEventPayload = Omit<AgentUsageEvent, "type">;
+
+const USAGE_TOKEN_FIELDS = [
+  "inputTokens",
+  "outputTokens",
+  "totalTokens",
+  "reasoningTokens",
+  "cachedInputTokens",
+] as const;
+const USAGE_ATTRIBUTION_FIELDS = ["id", "src", "model", "name"] as const;
+const USAGE_KINDS = ["text", "decision", "plan"];
+
+/**
+ * Standard Schema for the reserved `'@agent.usage'` payload. Hand-rolled (no
+ * validation-library dependency in core) and deliberately permissive about
+ * unknown fields, so a newer runtime adding an attribution field cannot fail
+ * an older machine's validation.
+ */
+const agentUsageEventSchema: StandardSchemaV1<AgentUsageEventPayload> = {
+  "~standard": {
+    version: 1,
+    vendor: "statelyai-agent",
+    validate(value: unknown) {
+      const issues: Array<{ message: string; path?: unknown[] }> = [];
+      if (!value || typeof value !== "object") {
+        return { issues: [{ message: "Expected an '@agent.usage' payload object" }] };
+      }
+      const event = value as Record<string, unknown>;
+      const usage = event.usage;
+      if (!usage || typeof usage !== "object") {
+        issues.push({ message: "Expected 'usage' to be an object", path: ["usage"] });
+      } else {
+        for (const field of USAGE_TOKEN_FIELDS) {
+          const token = (usage as Record<string, unknown>)[field];
+          if (token !== undefined && (typeof token !== "number" || !Number.isFinite(token))) {
+            issues.push({ message: `Expected a finite number`, path: ["usage", field] });
+          }
+        }
+      }
+      if (event.kind !== undefined && !USAGE_KINDS.includes(event.kind as string)) {
+        issues.push({ message: `Expected one of ${USAGE_KINDS.join(", ")}`, path: ["kind"] });
+      }
+      for (const field of USAGE_ATTRIBUTION_FIELDS) {
+        if (event[field] !== undefined && typeof event[field] !== "string") {
+          issues.push({ message: "Expected a string", path: [field] });
+        }
+      }
+      return issues.length > 0 ? { issues } : { value: event as AgentUsageEventPayload };
+    },
+  },
+};
+
+/**
+ * An authored event schema map with the reserved `'@agent.usage'` entry added —
+ * every agent machine's event union includes it, so `on: { '@agent.usage': … }`
+ * is typed (and autocompletes) without the machine declaring anything.
+ * Idempotent: re-applying it to an already-registered map is a no-op.
+ */
+export type WithAgentUsageEvent<T extends AgentEventSchemaInputMap> = Omit<
+  T,
+  typeof AGENT_USAGE_EVENT_TYPE
+> & {
+  [AGENT_USAGE_EVENT_TYPE]: StandardSchemaV1<AgentUsageEventPayload>;
+};
+
+/**
+ * Adds the reserved `'@agent.usage'` schema to an authored event map. A
+ * user-declared entry under that key is rejected: the `@agent.*` namespace
+ * belongs to the library (same rule as the reserved `agent.*` actor keys), and
+ * a custom payload schema would silently disagree with what `runAgent`
+ * delivers.
+ */
+function withAgentUsageEventSchema<T extends AgentEventSchemaInputMap>(
+  events: T | undefined,
+): WithAgentUsageEvent<T> {
+  const declared = events?.[AGENT_USAGE_EVENT_TYPE];
+  if (declared !== undefined && declared !== agentUsageEventSchema) {
+    throw new Error(
+      `setupAgent: event type '${AGENT_USAGE_EVENT_TYPE}' is in the reserved '@agent.' ` +
+        `namespace and cannot be declared in 'events' — setupAgent registers it for you with ` +
+        `the usage payload schema. Remove it from 'events'; to receive it, declare a ` +
+        `transition instead: on: { '${AGENT_USAGE_EVENT_TYPE}': … }.`,
+    );
+  }
+  return {
+    ...events,
+    [AGENT_USAGE_EVENT_TYPE]: agentUsageEventSchema,
+  } as WithAgentUsageEvent<T>;
+}
+
 function normalizeEventSchemas<T extends AgentEventSchemaInputMap>(
   events: T,
 ): NormalizedEventSchemas<T> {
@@ -164,7 +260,7 @@ export function createAgentSchemas<
   >,
 ): AgentSchemaPack<
   TContextSchema,
-  TEventSchemas,
+  WithAgentUsageEvent<TEventSchemas>,
   TInputSchema,
   TOutputSchema,
   TMetaSchema,
@@ -172,7 +268,9 @@ export function createAgentSchemas<
 > {
   return {
     context: schemas.context,
-    events: normalizeEventSchemas(schemas.events ?? {}) as NormalizedEventSchemas<TEventSchemas>,
+    events: normalizeEventSchemas(
+      withAgentUsageEventSchema(schemas.events),
+    ) as NormalizedEventSchemas<WithAgentUsageEvent<TEventSchemas>>,
     input: schemas.input as TInputSchema,
     output: schemas.output as TOutputSchema,
     meta: schemas.meta as TMetaSchema,
@@ -264,19 +362,15 @@ type AgentAllActors<
   TRequestSchemas extends AgentRequestSchemaMap,
 > = TActors & RequestActors<TRequestSchemas>;
 
-// Emit the `events` schema key ONLY when there are event schemas. When
-// `TEventSchemas` is empty (`{}`), the key is omitted entirely so xstate falls
-// back to its `createMachine`-level event inference. Passing a present-but-
-// empty `events: {}` makes `SetupEvents` compute `InferEvents<{}>` → `never`,
-// which sets the machine's `TEvent` to `never` and cascades into `context`
-// collapsing to `never` too (this reproduces with *raw* `setup({ schemas: {
-// context, events: {} } })`, so it is an xstate-alpha behavior we route
-// around by matching how hand-written setup omits an empty `events`).
-type AgentSetupEventsSchema<TEventSchemas extends AgentEventSchemaInputMap> = [
-  keyof TEventSchemas,
-] extends [never]
-  ? {}
-  : { events: NormalizedEventSchemas<TEventSchemas> };
+// The `events` schemas handed to xstate's setup: the machine's declared events
+// PLUS the reserved `'@agent.usage'` entry, which every agent machine gets by
+// default so its handler is typed without being declared. The map is therefore
+// never empty — which also sidesteps the xstate-alpha behavior where a
+// present-but-empty `events: {}` makes `InferEvents<{}>` → `never`, setting the
+// machine's `TEvent` (and, cascading, its `context`) to `never`.
+type AgentSetupEventsSchema<TEventSchemas extends AgentEventSchemaInputMap> = {
+  events: NormalizedEventSchemas<WithAgentUsageEvent<TEventSchemas>>;
+};
 
 // Same omit-when-empty routing as AgentSetupEventsSchema, for `emitted`
 // schemas: only a non-empty declared map reaches xstate's setup schemas, so
@@ -324,7 +418,9 @@ type AgentSetupXStateConfig<
   actors: SetupActors<
     AgentSetupActors<
       AgentAllActors<TActors, TRequestSchemas>,
-      keyof TEventSchemas & string,
+      // Reserved `@agent.*` types are never model-facing, so they stay out of
+      // the `allowedEvents` candidate union the decide/plan builtins type.
+      Exclude<keyof TEventSchemas & string, typeof AGENT_USAGE_EVENT_TYPE>,
       AgentModelRef<TModels>
     >
   >;
@@ -610,10 +706,10 @@ type SetupAgentResult<
     TEmittedSchemas,
     TStateSchemas
   >["createMachine"];
-  /** The retained schema pack ({@link AgentSchemaPack}) for host-side validation and tooling. */
+  /** The retained schema pack ({@link AgentSchemaPack}) for host-side validation and tooling. Its `events` include the reserved `'@agent.usage'` entry setupAgent registers by default. */
   schemas: AgentSchemaPack<
     TContextSchema,
-    TEventSchemas,
+    WithAgentUsageEvent<TEventSchemas>,
     TInputSchema,
     TOutputSchema,
     TMetaSchema,
@@ -635,7 +731,7 @@ type SetupAgentResult<
   ): ReturnType<
     typeof appendMessages<
       ContextOf<TContextSchema> & { messages: AgentMessage[] },
-      EventsOf<TEventSchemas>
+      EventsOf<WithAgentUsageEvent<TEventSchemas>>
     >
   >;
 };
@@ -834,14 +930,22 @@ function normalizeAgentSchemas<
       >,
 ): AgentSchemaPack<
   TContextSchema,
-  TEventSchemas,
+  WithAgentUsageEvent<TEventSchemas>,
   TInputSchema,
   TOutputSchema,
   TMetaSchema,
   TEmittedSchemas
 > {
   if ("schemas" in config && config.schemas) {
-    return config.schemas;
+    // A pack built by `createAgentSchemas` already carries the reserved
+    // `'@agent.usage'` entry; a hand-built one gets it here (and is rejected if
+    // it declares its own).
+    return {
+      ...config.schemas,
+      events: normalizeEventSchemas(
+        withAgentUsageEventSchema(config.schemas.events),
+      ) as NormalizedEventSchemas<WithAgentUsageEvent<TEventSchemas>>,
+    };
   }
   const loose = config as AgentSchemaConfig<
     TContextSchema,
@@ -1034,7 +1138,7 @@ function createAgentSetupConfig<
 >(
   schemas: AgentSchemaPack<
     TContextSchema,
-    TEventSchemas,
+    WithAgentUsageEvent<TEventSchemas>,
     TInputSchema,
     TOutputSchema,
     TMetaSchema,
@@ -1043,7 +1147,7 @@ function createAgentSetupConfig<
   actors: SetupActors<
     AgentSetupActors<
       AgentAllActors<TActors, TRequestSchemas>,
-      keyof TEventSchemas & string,
+      Exclude<keyof TEventSchemas & string, typeof AGENT_USAGE_EVENT_TYPE>,
       AgentModelRef<TModels>
     >
   >,
@@ -1183,7 +1287,13 @@ function createSetupAgent<
     TModels,
     TEmittedSchemas,
     TStateSchemas
-  >(schemas, actors, config);
+  >(
+    schemas,
+    // `createAgentActors` builds with a widened `string` event union; the setup
+    // config narrows it to the declared (non-reserved) event types.
+    actors as Parameters<typeof createAgentSetupConfig>[1] as never,
+    config,
+  );
   const base = setup(setupConfig);
   const createBaseMachine = base.createMachine.bind(base);
   const models = (config.models ?? {}) as TModels;

@@ -90,7 +90,7 @@ on: {
 }
 ```
 
-A request that needs history sends it through `messages` instead of a bare `prompt`. [examples/email-drafter/index.ts](../examples/email-drafter/index.ts) keeps a running `messages` array in context and feeds it to a `createTextLogic` request.
+A request that needs history sends it through `messages` instead of a bare `prompt`. [examples/email-drafter/agent-logic.ts](../examples/email-drafter/agent-logic.ts) keeps a running `messages` array in context and feeds it to a `createTextLogic` request.
 
 ### Validating messages with messagesSchema
 

@@ -5,7 +5,7 @@
   "manual": true,
   "origin": {
     "type": "platform-adapter",
-    "source": "TanStack Start server functions calling runAgent; typechecked standalone with a local createServerFn shim (@tanstack/react-start is not a repo dependency)",
+    "source": "TanStack Start server functions calling runAgent; a bootable workspace app on real `@tanstack/react-start`, so createServerFn is the published builder and CI catches API drift",
     "url": "https://tanstack.com/start/latest/docs/framework/react/server-functions"
   },
   "comparison": {

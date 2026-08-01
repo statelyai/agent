@@ -1,0 +1,14 @@
+---
+"@statelyai/agent": minor
+---
+
+Reserved `@agent.usage` event: per-call model usage now reaches machine context, so a token budget is an ordinary guard.
+
+- After every settled model call that reported usage — text, decision, and each plan step — `runAgent` delivers `{ type: '@agent.usage', usage, kind, id, src, model, name }` to the running machine. New `AGENT_USAGE_EVENT_TYPE` constant and `AgentUsageEvent` type.
+- `setupAgent`/`createAgentSchemas` (and `setupAgent.fromConfig`) register `'@agent.usage'` in a machine's events **by default**, with the real usage payload schema. It appears in `schemas.events` for hosts introspecting the pack, and it is part of the machine's event union — `on: { '@agent.usage': ({ event }) => … }` autocompletes and `event.usage` is typed with nothing declared. Declaring `'@agent.usage'` yourself in `events` now throws: the `@agent.` namespace is reserved (same rule as the builtin `agent.*` actor keys).
+- Delivery is opt-in by construction: the event is sent only when the machine's active states declare a transition for `'@agent.usage'` **explicitly**. A catch-all `on: { '*': … }` does not count as an opt-in and never receives it. A machine that declares no explicit handler sees no extra transition, no extra trace event, and no extra event-log entry. Declare it machine-level (`on`) to catch every call.
+- **Breaking note:** the whole `@agent.` prefix is now a reserved namespace. Hosts cannot send events into it — `parseAgentEvent` rejects them and `getAcceptedEvents` drops them before any `allowedEvents` matching, so `@agent.usage` and `@agent.init` are never offered as decision candidates (not even under a `'*'` wildcard). Rename any machine event of your own that starts with `@agent.`.
+- A delivered `@agent.usage` rides the event log like any other external input, so events-only recovery (`runAgent({ events })`) replays the folded tokens without re-calling a model. Durable ordering is guaranteed across a crash: usage is journaled when a call settles, _before_ the call's result, and an events-only recovery drops a trailing usage entry whose call is still pending — so a log truncated inside that window recovers with the tokens counted exactly once instead of twice.
+- A call that settles after the run's cycle has already resolved is a straggler: its tokens still fold into `result.usage`, but the machine event is dropped (identically on the `runAgent` and `createAgentActor` paths, so a late arrival can never re-open a returned idle result) and surfaced on `onTrace` as `usage.dropped`.
+- Usage from a request inside an invoked child machine is reported to the run's root machine, attributed by the event's `id`/`src`/`model`.
+- Scripted `simulateAgent` runs report no usage, so a token counter stays `0` under simulation — simulate the loop's shape, and test the budget itself with a usage-reporting mock executor.

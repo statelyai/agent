@@ -1,0 +1,26 @@
+{
+  "name": "@statelyai/example-cloudflare-agent-host",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --port 3009",
+    "dev:live": "node ./dev-vars.mjs && wrangler dev --port 3009",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^3.0.25",
+    "@statelyai/agent": "workspace:*",
+    "agents": "^0.11.5",
+    "ai": "^6.0.67",
+    "xstate": "6.0.0-alpha.25",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.12.21",
+    "@cloudflare/workers-types": "^4.20260702.1",
+    "vitest": "^3.2.6",
+    "wrangler": "^4.116.0"
+  }
+}

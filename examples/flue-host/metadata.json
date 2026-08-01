@@ -1,16 +1,19 @@
 {
   "name": "flue-host",
-  "title": "Flue Host",
+  "title": "Flue 2 Host",
   "kind": "host-adapter",
   "manual": true,
   "origin": {
     "type": "platform-adapter",
-    "source": "Flue defineAgent + defineTool (Valibot input/output, run({ input, signal })) calling runAgent; typechecks standalone via local flue-shims mirroring flueframework.com/docs as of 2026-07 (@flue/runtime is not a repo dependency)",
-    "url": "https://flueframework.com/docs/guide/tools/"
+    "source": "Real @flue/runtime@2 (not a shim): the agent is the exported function returning its instructions, composed by hooks (useModel/useSkill/useTool/usePersistentState) with Valibot tool input/output and run({ data }); booted in-process with start() from @flue/runtime/node and driven via init()/dispatch()/read(), keyless through pi's fauxProvider",
+    "url": "https://flueframework.com/docs/guide/agent-hooks"
   },
   "comparison": {
-    "targets": ["Flue", "durable agent frameworks", "tool-calling agents"],
-    "purpose": "The Flue LLM agent gets two tools bridging to a statelyai/agent machine: start_workflow runs runAgent to idle/done and returns a JSON-safe handle + interaction label; resume_workflow revives the handle with the human's decision. The machine owns legality; the agent converses."
+    "targets": ["Flue 2", "hooks-based agents", "durable agent frameworks"],
+    "purpose": "Two ways to pair Flue 2 with a state machine. machine-owned.ts: the email-drafter machine owns model calls, branches, pauses, and legality; the Flue agent is a conversational shell with start_workflow/resume_workflow bridge tools. flue-owned.ts: Flue's hooks own per-step model, skills, tools, and persistent state, and a ~10-line steps machine replaces the docs' usePersistentState('step', ...) string — transitions become declared, the step switch exhaustive, and events inferred via EventFromLogic."
   },
-  "starters": []
+  "starters": [
+    "Draft an email telling the team the deploy pipeline is twice as fast, then send it.",
+    "Write a note to the design team asking for feedback on the new onboarding flow."
+  ]
 }

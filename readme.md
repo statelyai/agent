@@ -114,6 +114,19 @@ When the machine reaches `refunded`, the result is:
 
 The model chooses between the events allowed in `deciding`. The `AUTO_REFUND` transition only works when the amount is at most $100. If the model chooses it for a larger amount, the guard rejects the choice and the decision is tried again.
 
+**Run it with no API key.** `createScriptedExecutors` plays back canned answers through the same executor contract, so the machine above runs end to end before a model is involved:
+
+```ts
+import { createScriptedExecutors } from "@statelyai/agent";
+
+const result = await runAgent(refundMachine, {
+  input: { request: "I was charged twice for the same order.", amount: 75 },
+  executors: createScriptedExecutors({ decisions: [{ type: "AUTO_REFUND" }] }),
+});
+```
+
+Swap in `createAiSdkExecutors({ models })` when you want a real model. The scripted set is what your tests keep using.
+
 ## The state machine
 
 <!-- Add the state machine illustration here. -->
@@ -152,10 +165,13 @@ See [all examples](examples/README.md).
 - [Decisions](docs/decisions.md)
 - [Human in the loop](docs/human-in-the-loop.md)
 - [Testing and verification](docs/verify.md)
+- [Generating machines with an LLM](docs/generate-machines.md)
 - [Hosts and executors](docs/hosts.md)
 - [Models and providers](docs/models-and-providers.md)
 - [Use in any stack](docs/any-stack.md)
 - [The event log](docs/event-log.md)
 - [Observability](docs/observability.md)
+- [Usage and budgets](docs/usage-and-budgets.md)
 - [Agent patterns](docs/patterns.md)
 - [Migrating from a loop](docs/from-a-loop.md)
+- [LangGraph vs agent machines](docs/langgraph-comparison.md)

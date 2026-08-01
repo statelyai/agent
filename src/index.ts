@@ -44,6 +44,13 @@ export {
   lintAgentMachine,
   simulateAgent,
 } from "./verify.js";
+export { createScriptedExecutors } from "./scripted-executors.js";
+export type {
+  ScriptedDecisionEntry,
+  ScriptedDecisionValue,
+  ScriptedExecutorsScript,
+  ScriptedTextEntry,
+} from "./scripted-executors.js";
 export {
   getAgentMessages,
   getJsonSchema,
@@ -71,6 +78,7 @@ export type {
 } from "./event-log-store.js";
 export {
   AGENT_INIT_EVENT_TYPE,
+  AGENT_USAGE_EVENT_TYPE,
   AgentReplayDivergenceError,
   AgentReplayMachineMismatchError,
   createReplayEntry,
@@ -85,6 +93,7 @@ export type {
   AgentEventLogDiff,
   AgentEffect,
   AgentLogPatchOperation,
+  AgentUsageEvent,
   CreateReplayEntryOptions,
   GetAgentEffectsOptions,
   ReplayOptions,
@@ -165,7 +174,14 @@ export type {
   FromConfigResult,
   SchemaCompiler,
 } from "./workflow-config.js";
-export type { AgentSchemaPack } from "./setup-agent.js";
+export type {
+  AgentSchemaPack,
+  // Both appear in `setupAgent`'s inferred result type (its event schemas
+  // always carry the reserved `'@agent.usage'` entry), so consumers' declaration
+  // emit needs them nameable.
+  AgentUsageEventPayload,
+  WithAgentUsageEvent,
+} from "./setup-agent.js";
 // `PlanLogic` is re-exported not for direct use (its constructor is `@internal`)
 // but because it appears in the inferred type of a machine using `agent.plan`;
 // without it, consumers' declaration emit fails with TS4023 "cannot be named".

@@ -80,7 +80,7 @@ A prompt chain: one state per step, each step's output feeding the next. A step'
 
 ### `createRouterMachine`
 
-One `agent.decide` picks exactly one declared route (`ROUTE_<name>`), then the machine runs it. Undeclared routes have no event, no state, and no transition, so they cannot be taken. Add `fallback` to land somewhere when the decision fails; without it, a failed decision errors the run.
+One `agent.decide` picks exactly one declared route (`ROUTE_<name>`; build the string with `routeEventType(name)` when sending or asserting these events), then the machine runs it. Undeclared routes have no event, no state, and no transition, so they cannot be taken. Add `fallback` to land somewhere when the decision fails; without it, a failed decision errors the run.
 
 ### `createParallelMachine`
 
@@ -92,11 +92,11 @@ A bounded repeat: run `body`, check `until` over `{ prompt, iterations, results,
 
 ### `createSupervisorMachine`
 
-Each turn, one `agent.decide` picks a worker (`DELEGATE_<name>`) or `FINISH`. Results accumulate in context and are rendered back into the next decision. A spent `maxTurns` budget removes every delegate from the candidate set and a guard rejects one anyway.
+Each turn, one `agent.decide` picks a worker (`DELEGATE_<name>`, via `delegateEventType(name)`) or `FINISH` (`FINISH_EVENT_TYPE`). Results accumulate in context and are rendered back into the next decision. A spent `maxTurns` budget removes every delegate from the candidate set and a guard rejects one anyway.
 
 ### `createHandoffMachine`
 
-Peer swarm: `context.activeAgent` holds the mic, runs one turn, and the machine settles idle in `waiting`. A `transfer_to_<name>` event moves the mic and re-routes. There is no final state: the conversation ends when the host stops resuming it. Persist the idle snapshot between turns.
+Peer swarm: `context.activeAgent` holds the mic, runs one turn, and the machine settles idle in `waiting`. A `transfer_to_<name>` event (via `transferEventType(name)`) moves the mic and re-routes. There is no final state: the conversation ends when the host stops resuming it. Persist the idle snapshot between turns.
 
 ## Versioning
 

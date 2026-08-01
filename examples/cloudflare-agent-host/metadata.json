@@ -5,12 +5,12 @@
   "manual": true,
   "origin": {
     "type": "platform-adapter",
-    "source": "Cloudflare Agents integration, typechecked against agents + @cloudflare/workers-types",
+    "source": "Cloudflare Agents integration; a workspace package with a real wrangler project, booted locally with `wrangler dev` and tested in workerd via @cloudflare/vitest-pool-workers",
     "url": "https://developers.cloudflare.com/agents/"
   },
   "comparison": {
     "targets": ["Cloudflare Agents", "durable agent runtimes"],
-    "purpose": "Shows persisted XState actor snapshots inside a Cloudflare Agent host."
+    "purpose": "Persists XState actor snapshots in Durable Object state, so a conversation survives eviction; keyless scripted executors by default, live AI SDK models when OPENAI_API_KEY is bound."
   },
   "starters": []
 }

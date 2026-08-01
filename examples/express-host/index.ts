@@ -15,13 +15,14 @@
  * process holds no live actor between requests — the snapshot is the whole
  * state, so any worker can pick up the resume.
  *
- * Executors are injected (default: a keyless mock, so nothing hits the network
- * at import). Swap in `createAiSdkExecutors({ models })` for real generations.
+ * Executors are injected and key-gated: a real model when `OPENAI_API_KEY` is
+ * set, a keyless mock otherwise, so nothing hits the network at import.
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/express-host/index.ts
  */
 import express, { type Express, type Request, type Response } from "express";
 import { z } from "zod";
+import { openai } from "@ai-sdk/openai";
 import {
   getAcceptedEvents,
   getStateMeta,
@@ -30,13 +31,19 @@ import {
   setupAgent,
   type AgentRequestExecutors,
 } from "@statelyai/agent";
+import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 import type { Snapshot } from "xstate";
+
+export const models = defineModels({
+  writer: openai("gpt-5.4-mini"),
+});
 
 // ─── The machine: draft → idle review → publish ───
 
 const contextSchema = z.object({ topic: z.string(), draft: z.string().nullable() });
 
 const agentSetup = setupAgent({
+  models,
   context: contextSchema,
   input: z.object({ topic: z.string() }),
   output: z.object({ published: z.boolean(), draft: z.string() }),
@@ -98,7 +105,12 @@ const mockExecutors: Partial<AgentRequestExecutors> = {
   generateText: async () => ({ output: "Big news: the deploy pipeline just got faster." }),
 };
 
-export function createApp(executors: Partial<AgentRequestExecutors> = mockExecutors): Express {
+/** Real models when `OPENAI_API_KEY` is set, the keyless mock otherwise. */
+export function resolveExecutors(): Partial<AgentRequestExecutors> {
+  return process.env.OPENAI_API_KEY ? createAiSdkExecutors({ models }) : mockExecutors;
+}
+
+export function createApp(executors: Partial<AgentRequestExecutors> = resolveExecutors()): Express {
   const app = express();
   app.use(express.json());
 

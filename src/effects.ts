@@ -28,7 +28,12 @@ import {
 } from "xstate";
 import { getAgentRequestsWith, getInvokeEffectMetadata, type AgentPlanRequest } from "./steps.js";
 import { isDecisionLogic, isPlanLogic, type AgentDecisionRequest } from "./decision.js";
-import { isTextLogic, type AgentRequestMode, type AgentTextRequest } from "./text-logic.js";
+import {
+  isTextLogic,
+  type AgentCallUsage,
+  type AgentRequestMode,
+  type AgentTextRequest,
+} from "./text-logic.js";
 import { getAcceptedEvents } from "./events.js";
 import {
   AGENT_EVENT_SCHEMA_VERSION,
@@ -104,6 +109,53 @@ export type AgentEffect =
  * own event vocabulary. Consumed by {@link replay}; never fed to `transition`.
  */
 export const AGENT_INIT_EVENT_TYPE = "@agent.init" as const;
+
+/**
+ * The reserved event type `runAgent` delivers to the running machine after
+ * every settled model call that reported usage — the one seam that puts a
+ * call's tokens in reach of ordinary `context` and guards, so a token budget
+ * is a plain machine transition instead of host bookkeeping.
+ *
+ * Like {@link AGENT_INIT_EVENT_TYPE} it lives in the reserved `@agent.*`
+ * namespace: it can never collide with a machine's own vocabulary, and
+ * `getAcceptedEvents`/`parseAgentEvent` never offer it — a model can neither
+ * be shown it as a decision candidate nor forge one.
+ *
+ * Delivery is opt-in BY CONSTRUCTION: the event is sent only when the live
+ * snapshot can currently take it (i.e. the machine declares an
+ * `'@agent.usage'` transition, usually machine-level `on`). A machine without
+ * one sees no extra transition, no extra trace event, and no extra log entry.
+ * When it IS taken it rides the event log like any other external input, so
+ * events-only recovery (`runAgent({ events })`) replays the folded tokens
+ * without re-calling a model.
+ */
+export const AGENT_USAGE_EVENT_TYPE = "@agent.usage" as const;
+
+/**
+ * The payload of the reserved {@link AGENT_USAGE_EVENT_TYPE} event: the
+ * settled call's normalized usage plus enough attribution to bill it (per
+ * model, per request). Every field is JSON-safe, so the event round-trips
+ * through the durable event log unchanged.
+ *
+ * Attribution fields are optional because not every call site has them — a
+ * `getRequests` interpret-pass call reports usage with no invoke identity at
+ * all, and only text requests carry a registered `name`.
+ */
+export interface AgentUsageEvent extends EventObject {
+  type: typeof AGENT_USAGE_EVENT_TYPE;
+  /** The settled call's token usage, as reported by the executor. */
+  usage: AgentCallUsage;
+  /** Which kind of request reported it. */
+  kind?: "text" | "decision" | "plan";
+  /** The reporting request's durable invoke id. */
+  id?: string;
+  /** The reporting request's invoke `src`. */
+  src?: string;
+  /** The model ref the request targeted. */
+  model?: string;
+  /** The reporting text request's registered `name`, when it declared one. */
+  name?: string;
+}
 
 /** Options controlling the durable envelope created by {@link createReplayEntry}. */
 export interface CreateReplayEntryOptions {

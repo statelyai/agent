@@ -36,7 +36,7 @@ import {
   models,
   type Interaction,
   type DrafterEvent,
-} from "../email-drafter/index.js";
+} from "../email-drafter/agent-logic.js";
 import {
   assessPromptFallback,
   draftEmailFallback,
@@ -179,10 +179,17 @@ export async function main() {
       actor.send(parseAgentEvent(snapshot, event, { events: emailDrafterSchemas.events }));
     }
 
-    if (actor.getSnapshot().status === "done") {
-      console.log("Done.");
-    } else if (actor.getSnapshot().status === "error") {
-      console.error("Run failed:", actor.getSnapshot().error);
+    const final = actor.getSnapshot();
+    if (final.status === "done") {
+      // `failed` is a final state too, so a "done" status can still mean the
+      // machine gave up (every model attempt failed) with nothing sent.
+      if (final.matches("failed")) {
+        console.error("Run failed: the machine reached `failed` and sent no email.");
+      } else {
+        console.log("Done.");
+      }
+    } else if (final.status === "error") {
+      console.error("Run failed:", final.error);
     }
   } finally {
     actor.stop();

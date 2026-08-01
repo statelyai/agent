@@ -13,9 +13,9 @@ description: Install @statelyai/agent and run your first agent machine end to en
 npm install @statelyai/agent@alpha xstate@alpha zod ai@^6 @ai-sdk/openai@^3
 ```
 
-- Pin the alpha: the API is still settling.
+- The `@alpha` tag floats. Install it once, then pin what it resolved to (`npm ls @statelyai/agent`) so a later alpha cannot change the API under you.
 - `xstate` is the one required peer. The library requires **XState v6 alpha.25 or newer**.
-- `ai` (the Vercel AI SDK) and `@ai-sdk/openai` back the shipped adapter, `createAiSdkExecutors`. Core has no runtime dependency besides `xstate`.
+- `ai` (the Vercel AI SDK) and `@ai-sdk/openai` back the shipped adapter, `createAiSdkExecutors`. Core has no runtime dependency besides `xstate`, and the first run below needs neither the adapter nor an API key.
 - Provider packages must match your `ai` major. `@ai-sdk/openai@^3` pairs with `ai@^6`; a bare `@ai-sdk/openai` resolves to `@latest`, whose `LanguageModel` spec version may not match your `ai` peer.
 - The package is **ESM-first**; every entry also ships a CommonJS build, so `require()` works. The examples use top-level `await`, which needs ESM: set `"type": "module"` in `package.json` (or use `.mts` files).
 
@@ -23,18 +23,15 @@ npm install @statelyai/agent@alpha xstate@alpha zod ai@^6 @ai-sdk/openai@^3
 
 A comment moderator. The model reads a comment and picks one of three events; the machine owns the trust threshold that decides whether publishing is even legal.
 
-```ts
-import { openai } from "@ai-sdk/openai";
-import { runAgent, setupAgent } from "@statelyai/agent";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
-import { z } from "zod";
+This first version runs with **no API key**: `createScriptedExecutors` is a keyless executor set that plays back canned answers, so the machine runs end to end before a model is involved.
 
-const models = defineModels({ fast: openai("gpt-5.4-mini") });
+```ts
+import { createScriptedExecutors, runAgent, setupAgent } from "@statelyai/agent";
+import { z } from "zod";
 
 const outcomeSchema = z.enum(["published", "flagged", "blocked"]);
 
 const agentSetup = setupAgent({
-  models,
   context: z.object({
     comment: z.string(),
     trust: z.number(),
@@ -85,13 +82,51 @@ const moderationMachine = agentSetup.createMachine({
 
 const result = await runAgent(moderationMachine, {
   input: { comment: "honestly this update is terrible", trust: 20 },
-  executors: createAiSdkExecutors({ models }),
+  executors: createScriptedExecutors({
+    decisions: [{ type: "FLAG", reason: "Borderline tone." }],
+  }),
 });
 
 if (result.status === "done") {
-  console.log(result.output); // { outcome: 'flagged', reason: '…' }
+  console.log(result.output); // { outcome: 'flagged', reason: 'Borderline tone.' }
 }
 ```
+
+Save it as `agent.ts` in a project with `"type": "module"` in its `package.json`, then run it:
+
+```bash
+npx tsx agent.ts
+```
+
+It prints `{ outcome: 'flagged', reason: 'Borderline tone.' }`. The scripted decision took the place of a model call; everything else — the guard, the retry, the final state, the schema-checked output — is the real machine.
+
+### Connect a real model
+
+Swap the executors. The machine does not change: add a `models` registry (which also types the `model:` keys), and hand `runAgent` the AI SDK adapter instead of the script.
+
+```ts
+import { openai } from "@ai-sdk/openai";
+import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+
+const models = defineModels({ fast: openai("gpt-5.4-mini") });
+
+const agentSetup = setupAgent({
+  models, // adds typed `model` keys; everything else is unchanged
+  // …the same schemas and events
+});
+
+const result = await runAgent(moderationMachine, {
+  input: { comment: "honestly this update is terrible", trust: 20 },
+  executors: createAiSdkExecutors({ models }),
+});
+```
+
+```bash
+export OPENAI_API_KEY=sk-...
+npx tsx agent.ts
+```
+
+Now the model picks the event, and `reason` is whatever it wrote. Keep the scripted set around: it is what your tests run against (see [Testing without an API key](#testing-without-an-api-key)).
 
 What the machine does that a prompt call cannot:
 
@@ -184,7 +219,27 @@ For a **long-lived session** (chat turns, device events, sockets) that should ke
 
 ### Testing without an API key
 
-Executors are plain functions, so mocks are plain objects: `generateText`/`streamText` resolve `{ output }`, `decide` resolves `{ event }`. Each entry on `agentSetup.requests` is also a `TextLogic` you can bind individually with `.withExecutor(...)`.
+`createScriptedExecutors` is the same helper the first run used: FIFO queues of scripted answers, one entry consumed per model call. `decisions` feeds `agent.decide` (and `agent.plan`), `text` feeds every text request.
+
+```ts
+const executors = createScriptedExecutors({
+  decisions: [{ type: "FLAG", reason: "Borderline tone." }],
+  text: [{ note: "Repeat offender." }],
+});
+
+const result = await runAgent(moderationMachine, {
+  input: { comment: "…", trust: 20 },
+  executors,
+});
+
+expect(result.output).toEqual({ outcome: "flagged", reason: "Borderline tone." });
+```
+
+- An entry may be a **function of the request**, for branching or looping machines: `(request) => request.name === "moderatorNote" ? … : …`.
+- A `PUBLISH` rejected by the guard consumes an entry and retries with the next one, so scripts assert retry behavior directly.
+- Running dry throws an error naming the pending request.
+
+Executors are plain functions, so a hand-written mock is still just an object (`generateText`/`streamText` resolve `{ output }`, `decide` resolves `{ event }`), and each entry on `agentSetup.requests` is a `TextLogic` you can bind individually with `.withExecutor(...)`:
 
 ```ts
 const testMachine = provideExecutors(
@@ -199,10 +254,16 @@ const testMachine = provideExecutors(
   },
 );
 
-createActor(testMachine, { input: { comment: "…", trust: 20 } }).start();
+const actor = createActor(testMachine, { input: { comment: "…", trust: 20 } });
+actor.subscribe((snapshot) => {
+  if (snapshot.status === "done") {
+    console.log(snapshot.output); // { outcome: 'flagged', reason: 'Borderline tone.' }
+  }
+});
+actor.start();
 ```
 
-The same mocks work with `runAgent(machine, { input, executors: { decide } })`. See [Testing and verification](verify.md).
+To assert the whole playthrough without a run loop at all, `simulateAgent` walks the pure step path from a by-`src` script. See [Testing and verification](verify.md).
 
 ### See it run
 

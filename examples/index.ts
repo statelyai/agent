@@ -113,6 +113,7 @@ export {
   runJsonAgentDemo,
   workflowConfig as jsonAgentWorkflowConfig,
 } from "./json-agent/index.js";
+export { codeReviewMachine, scriptedReviewer } from "./preset-machine/index.js";
 export { createFanOutMachine, runFanOutExample } from "./fan-out/index.js";
 export {
   describeMachine,

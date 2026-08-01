@@ -92,6 +92,31 @@ A text request runs a single model call by default. Set `metadata.maxSteps` on t
 
 Request `metadata` is the host-owned per-call channel: core leaves it uninterpreted except for adapter conventions like `maxSteps`. A host that doesn't understand a key ignores it, so requests stay portable. It differs from XState `meta` (state-node/transition metadata for tooling); request `metadata` is runtime input passed to the executor. See [Text requests](text-requests.md#tools-and-multi-step-loops).
 
+## Scripted executors (no API key)
+
+<!-- createScriptedExecutors surface from src/scripted-executors.ts -->
+
+`createScriptedExecutors` is the keyless executor set: a full `{ generateText, streamText, decide }` that plays back scripted answers from FIFO queues instead of calling a model. It is a root export (no dependencies), so a machine runs end to end with nothing installed but core.
+
+```ts
+import { createScriptedExecutors, runAgent } from "@statelyai/agent";
+
+const result = await runAgent(moderationMachine, {
+  input: { comment: "honestly this update is terrible", trust: 20 },
+  executors: createScriptedExecutors({
+    decisions: [{ type: "FLAG", reason: "Borderline tone." }],
+    text: ["a scripted draft"],
+  }),
+});
+```
+
+- `decisions` answers `decide` (and `agent.plan`); `text` answers every text request, `generateText` and `streamText` sharing the one queue.
+- Entries are values or functions of the request — route on `request.name`, on the decision's candidate `events`, or on prior `attempts`.
+- An entry may be the raw envelope (`{ output, usage }` / `{ event, usage }`), so scripted runs can exercise usage aggregation.
+- A dry queue throws an error naming the pending request. Queues are copied, so one script object seeds many runs.
+
+For a playthrough with no run loop at all, `simulateAgent` scripts the pure step path by invoke `src`. See [Testing and verification](verify.md).
+
 ## Writing your own executors
 
 The contract is three plain functions, so a raw `fetch` is enough:

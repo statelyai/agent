@@ -1,9 +1,24 @@
 packages:
   - demo
+  # Host examples for frameworks published on npm: real deps, so CI catches API
+  # drift. Every other example stays a plain file in `examples/`.
+  - examples/next-host
+  - examples/tanstack-start-host
+  - examples/tanstack-ai-stream
+  # Cloudflare hosts: real Workers projects (wrangler + workerd), run and tested
+  # locally with `wrangler dev` and @cloudflare/vitest-pool-workers.
+  - examples/cloudflare-agent-host
+  - examples/cloudflare-workers-ai-host
 
 allowBuilds:
   core-js-pure: false
   esbuild: false
+  # workerd's postinstall unpacks the platform binary that `wrangler dev` and
+  # @cloudflare/vitest-pool-workers run the Cloudflare examples on.
+  workerd: true
 minimumReleaseAgeExclude:
   - xstate
   - '@statelyai/sdk'
+  # Flue 2.0 and the pi runtime under it, for examples/flue-host.
+  - '@flue/runtime'
+  - '@earendil-works/pi-ai'

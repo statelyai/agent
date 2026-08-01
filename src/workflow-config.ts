@@ -1,3 +1,16 @@
+/**
+ * The machines-as-data lowering: `setupAgent(...).fromConfig(config, options)`.
+ *
+ * Takes a serializable `AgentWorkflowConfig` (the JSON form of an agent
+ * machine — published schema at `schemas/agent-workflow.json`, docs at
+ * docs/machines-as-data.md), compiles its embedded JSON Schemas with the
+ * host-provided `compileSchema`, resolves named guards/actions/actors from
+ * `options`, and lowers the whole thing to an ordinary XState machine plus its
+ * schema pack. This is what makes LLM-generated and stored-as-JSON machines
+ * first-class: the config validates against the shipped schema before any
+ * model call, and the resulting machine lints, simulates, and runs like a
+ * hand-authored one.
+ */
 import {
   createMachineFromConfig,
   type AnyActorLogic,
@@ -9,7 +22,11 @@ import {
 import type { AgentMessage, AgentToolChoice, AgentTools, StandardSchemaV1 } from "./types.js";
 import { validateSchemaSync } from "./utils.js";
 import { type AgentRequestMode } from "./text-logic.js";
-import { agentExecutionOptions, missingActor } from "./internal/registry.js";
+import {
+  agentExecutionOptions,
+  machineStaticTransitionTargets,
+  missingActor,
+} from "./internal/registry.js";
 import {
   createAgentActors,
   createAgentSchemas,
@@ -312,9 +329,9 @@ function createRequestsFromWorkflowConfig(
           request.maxOutputTokens === undefined
             ? undefined
             : ({ input }) =>
-                evaluateWorkflowConfigValue(request.maxOutputTokens, { input }) as
-                  | number
-                  | undefined,
+                evaluateWorkflowConfigValue(request.maxOutputTokens, {
+                  input,
+                }) as number | undefined,
         topP:
           request.topP === undefined
             ? undefined
@@ -334,9 +351,9 @@ function createRequestsFromWorkflowConfig(
           request.stopSequences === undefined
             ? undefined
             : ({ input }) =>
-                evaluateWorkflowConfigValue(request.stopSequences, { input }) as
-                  | string[]
-                  | undefined,
+                evaluateWorkflowConfigValue(request.stopSequences, {
+                  input,
+                }) as string[] | undefined,
         metadata:
           request.metadata === undefined
             ? undefined
@@ -437,6 +454,10 @@ type WorkflowTranslation = {
   // Function-valued config guards (JS-built configs), registered under
   // generated names so they survive the JSON layer.
   syntheticGuards: Record<string, (args: { context: any; event: any }) => boolean>;
+  // Every transition target the config declares, by dotted state path. The JSON
+  // layer erases targets from transitions that carry a context patch (they
+  // become opaque resolver functions), so lint reads reachability from here.
+  transitionTargets: Record<string, string[]>;
 };
 
 // Translates a transition's `guard` into a ConditionJSON: `{{ }}` template →
@@ -485,7 +506,10 @@ function translateWorkflowAction(
   location: string,
 ): Record<string, unknown> {
   if (action.assign !== undefined) {
-    return { type: "@xstate.assign", context: toWorkflowExpression(action.assign) };
+    return {
+      type: "@xstate.assign",
+      context: toWorkflowExpression(action.assign),
+    };
   }
   if (action.emit !== undefined) {
     return { type: "@xstate.emit", event: toWorkflowExpression(action.emit) };
@@ -618,22 +642,29 @@ function translateWorkflowInvoke(
       ? { input: toWorkflowExpression(invokeConfig.input) }
       : {}),
     ...(invokeConfig.onDone !== undefined
-      ? { onDone: translateWorkflowTransitions(invokeConfig.onDone, translation, location) }
+      ? {
+          onDone: translateWorkflowTransitions(invokeConfig.onDone, translation, location),
+        }
       : {}),
     ...(invokeConfig.onError !== undefined
-      ? { onError: translateWorkflowTransitions(invokeConfig.onError, translation, location) }
+      ? {
+          onError: translateWorkflowTransitions(invokeConfig.onError, translation, location),
+        }
       : {}),
   };
 }
 
 // Config-level structural lint: a plain-string transition `target` must name a
 // state at the same level (a sibling key). Relative (`.child`) and absolute
-// (`#id`) references are left to xstate to resolve.
+// (`#id`) references are left to xstate to resolve. Every declared target is
+// also pushed onto `declaredTargets` (for the static reachability metadata lint
+// reads back), including the relative/absolute forms this check skips.
 function assertValidTransitionTargets(
   stateKey: string,
   location: string,
   transitionConfig: AgentWorkflowTransitionConfig | AgentWorkflowTransitionConfig[] | undefined,
   siblingKeys: Set<string>,
+  declaredTargets: string[],
 ): void {
   if (!transitionConfig) {
     return;
@@ -647,7 +678,11 @@ function assertValidTransitionTargets(
           ? transition.target
           : [transition.target];
     for (const target of targets) {
-      if (typeof target !== "string" || target.startsWith("#") || target.startsWith(".")) {
+      if (typeof target !== "string") {
+        continue;
+      }
+      declaredTargets.push(target);
+      if (target.startsWith("#") || target.startsWith(".")) {
         continue;
       }
       const head = target.split(".")[0]!;
@@ -663,30 +698,75 @@ function assertValidTransitionTargets(
   }
 }
 
-// Validates every sibling-resolved transition target declared on one state.
+// Validates every sibling-resolved transition target declared on one state, and
+// returns every target it declares (for the static reachability metadata).
 function assertStateTransitionTargets(
   stateKey: string,
   stateConfig: AgentWorkflowStateConfig,
   siblingKeys: Set<string>,
-): void {
+): string[] {
+  const declaredTargets: string[] = [];
   for (const [eventType, transition] of Object.entries(stateConfig.on ?? {})) {
-    assertValidTransitionTargets(stateKey, `'on.${eventType}'`, transition, siblingKeys);
+    assertValidTransitionTargets(
+      stateKey,
+      `'on.${eventType}'`,
+      transition,
+      siblingKeys,
+      declaredTargets,
+    );
   }
   for (const [delay, transition] of Object.entries(stateConfig.after ?? {})) {
-    assertValidTransitionTargets(stateKey, `'after.${delay}'`, transition, siblingKeys);
+    assertValidTransitionTargets(
+      stateKey,
+      `'after.${delay}'`,
+      transition,
+      siblingKeys,
+      declaredTargets,
+    );
   }
-  assertValidTransitionTargets(stateKey, "'always'", stateConfig.always, siblingKeys);
-  assertValidTransitionTargets(stateKey, "'onDone'", stateConfig.onDone, siblingKeys);
-  assertValidTransitionTargets(stateKey, "'choice'", stateConfig.choice, siblingKeys);
+  assertValidTransitionTargets(
+    stateKey,
+    "'always'",
+    stateConfig.always,
+    siblingKeys,
+    declaredTargets,
+  );
+  assertValidTransitionTargets(
+    stateKey,
+    "'onDone'",
+    stateConfig.onDone,
+    siblingKeys,
+    declaredTargets,
+  );
+  assertValidTransitionTargets(
+    stateKey,
+    "'choice'",
+    stateConfig.choice,
+    siblingKeys,
+    declaredTargets,
+  );
   const invokes = stateConfig.invoke
     ? Array.isArray(stateConfig.invoke)
       ? stateConfig.invoke
       : [stateConfig.invoke]
     : [];
   for (const invoke of invokes) {
-    assertValidTransitionTargets(stateKey, "invoke 'onDone'", invoke.onDone, siblingKeys);
-    assertValidTransitionTargets(stateKey, "invoke 'onError'", invoke.onError, siblingKeys);
+    assertValidTransitionTargets(
+      stateKey,
+      "invoke 'onDone'",
+      invoke.onDone,
+      siblingKeys,
+      declaredTargets,
+    );
+    assertValidTransitionTargets(
+      stateKey,
+      "invoke 'onError'",
+      invoke.onError,
+      siblingKeys,
+      declaredTargets,
+    );
   }
+  return declaredTargets;
 }
 
 // Recursively translates one AgentWorkflowStateConfig into a StateNodeJSON.
@@ -700,10 +780,24 @@ function translateWorkflowState(
   path: string[],
   translation: WorkflowTranslation,
 ): Record<string, unknown> {
-  assertStateTransitionTargets(stateKey, stateConfig, siblingKeys);
   const location = `state '${stateKey}'`;
+  // State paths are '.'-joined here (transition-target keys, the synthetic
+  // `@state.<path>` done id), so a key containing a '.' would be indistinguishable
+  // from a nested path — mis-keying static targets and false-flagging the
+  // reachability lint. Reject it at build time instead.
+  if (stateKey.includes(".")) {
+    throw new Error(
+      `setupAgent.fromConfig: state key '${stateKey}' contains a '.', which is reserved as the ` +
+        `state-path separator. Rename the state (e.g. '${stateKey.replace(/\./g, "_")}').`,
+    );
+  }
   const childKeys = new Set(Object.keys(stateConfig.states ?? {}));
   const childPath = [...path, stateKey];
+  translation.transitionTargets[childPath.join(".")] = assertStateTransitionTargets(
+    stateKey,
+    stateConfig,
+    siblingKeys,
+  );
 
   // The JSON layer has no state-level `onDone`; translate it to the state's
   // own done event, keyed by an explicit synthetic id (the `@state.` prefix
@@ -781,7 +875,9 @@ function translateWorkflowState(
       : {}),
     ...(Object.keys(translatedOn).length ? { on: translatedOn } : {}),
     ...(stateConfig.always !== undefined
-      ? { always: translateWorkflowTransitions(stateConfig.always, translation, location) }
+      ? {
+          always: translateWorkflowTransitions(stateConfig.always, translation, location),
+        }
       : {}),
     ...(stateConfig.after !== undefined
       ? {
@@ -895,20 +991,22 @@ export function setupAgentFromConfig(
     guards: options.guards ?? {},
     actions: options.actions ?? {},
     syntheticGuards: {},
+    transitionTargets: {},
   };
   const json = translateWorkflowConfig(config, translation);
 
   const machine = createMachineFromConfig(json, {
     guards: Object.fromEntries(
-      Object.entries({ ...translation.guards, ...translation.syntheticGuards }).map(
-        ([name, implementation]) => [
-          name,
-          // xstate calls guard implementations with its full guard-args object;
-          // narrow to the documented fromConfig guard scope.
-          (args: { context: unknown; event: unknown }) =>
-            Boolean(implementation({ context: args.context, event: args.event })),
-        ],
-      ),
+      Object.entries({
+        ...translation.guards,
+        ...translation.syntheticGuards,
+      }).map(([name, implementation]) => [
+        name,
+        // xstate calls guard implementations with its full guard-args object;
+        // narrow to the documented fromConfig guard scope.
+        (args: { context: unknown; event: unknown }) =>
+          Boolean(implementation({ context: args.context, event: args.event })),
+      ]),
     ),
     ...(options.actions ? { actions: options.actions } : {}),
     // createMachineFromConfig embeds `sources.actors[src]` as the
@@ -926,6 +1024,12 @@ export function setupAgentFromConfig(
   // What setupAgent's wrapped createMachine registers for runAgent: the
   // schemas/actors this machine executes with.
   agentExecutionOptions.set(machine as object, { schemas, actors, models: {} });
+  // The config's transition targets, which the JSON layer erases from
+  // `machine.config` whenever a transition carries a context patch. Keyed on the
+  // root config object so lint still sees them after `machine.provide(...)`.
+  if (machine.config) {
+    machineStaticTransitionTargets.set(machine.config as object, translation.transitionTargets);
+  }
   return { machine, schemas };
 }
 

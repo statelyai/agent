@@ -5,7 +5,7 @@
   "manual": true,
   "origin": {
     "type": "platform-adapter",
-    "source": "Next.js App Router route handlers calling runAgent; typechecked standalone with local web Request/Response shims (Next is not a repo dependency)",
+    "source": "Next.js App Router route handlers calling runAgent; a workspace package depending on real `next`, so NextRequest/NextResponse are the published types and CI catches API drift",
     "url": "https://nextjs.org/docs/app/building-your-application/routing/route-handlers"
   },
   "comparison": {

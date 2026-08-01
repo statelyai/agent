@@ -34,6 +34,28 @@ export function getMachineSuspensionPredicate(
   return config ? machineSuspensionPredicates.get(config) : undefined;
 }
 
+/**
+ * Lint-reachability sidecar for `fromConfig` machines.
+ *
+ * Static transition targets declared by the source config of a
+ * `setupAgent.fromConfig` machine, as `dotted state path → declared target
+ * strings` (every `on`/`always`/`after`/`onDone`/`choice` target plus each
+ * invoke's `onDone`/`onError`). The JSON layer folds a transition that carries a
+ * context patch into an opaque resolver function, erasing its target from
+ * `machine.config` — so `lintAgentMachine`'s reachability walk reads the
+ * targets from here instead. Keyed on the machine's root `config` object (like
+ * {@link machineSuspensionPredicates}) so it survives `machine.provide(...)`.
+ */
+export const machineStaticTransitionTargets = new WeakMap<object, Record<string, string[]>>();
+
+/** Reads the {@link machineStaticTransitionTargets} map carried by `machine` (via its root `config`), if any. */
+export function getMachineStaticTransitionTargets(
+  machine: AnyStateMachine,
+): Record<string, string[]> | undefined {
+  const config = (machine as { config?: object }).config;
+  return config ? machineStaticTransitionTargets.get(config) : undefined;
+}
+
 // Actor logic objects that are unbound placeholders (no host execution) and
 // carry no `kind` marker of their own — `agent.userInput` and workflow-config
 // actor stubs. runAgent's bind-time walk (§3.2) checks membership here to

@@ -71,7 +71,9 @@ import {
   initEntry,
   replay,
   AGENT_INIT_EVENT_TYPE,
+  AGENT_USAGE_EVENT_TYPE,
   AgentReplayMachineMismatchError,
+  type AgentUsageEvent,
 } from "./effects.js";
 import { assertAgentLogEntry, type AgentLogEntry, type JsonValue } from "./event-log-store.js";
 
@@ -240,6 +242,15 @@ export type AgentTraceEvent<TMachine extends AnyStateMachine = AnyStateMachine> 
       eventId?: string;
     }
   | { type: "emit"; event: EmittedFrom<TMachine> }
+  | {
+      /** A reserved `@agent.usage` event the run declined to deliver. The
+       * tokens still fold into {@link RunAgentResult.usage}; only the machine
+       * event is dropped. */
+      type: "usage.dropped";
+      event: AgentUsageEvent;
+      /** `'settled'`: the call settled after the run's cycle had resolved. */
+      reason: "settled";
+    }
   | (
       | {
           type: "run.end";
@@ -295,6 +306,7 @@ export type JsonSerializableTraceEvent = {
   | { type: "stream.chunk"; request: JsonValue; chunk: string }
   | { type: "machine.transition"; snapshot: JsonValue; event: JsonValue; eventId?: string }
   | { type: "emit"; event: JsonValue }
+  | { type: "usage.dropped"; event: JsonValue; reason: "settled" }
   | { type: "run.end"; status: "done"; output: JsonValue; snapshot: JsonValue }
   | {
       type: "run.end";
@@ -1094,6 +1106,9 @@ function unrebindableChildRequestError(
   );
 }
 
+/** Attribution a call site attaches to the reserved `@agent.usage` event it reports — everything on {@link AgentUsageEvent} except the type and the tokens. @internal */
+type AgentUsageEventSource = Omit<AgentUsageEvent, "type" | "usage">;
+
 // Shared state closed over by every wrapped actor source in one runAgent call: executors, observation callbacks, and the shared model-call budget/actor ref.
 /** @internal */
 interface RunAgentBindContext {
@@ -1111,14 +1126,96 @@ interface RunAgentBindContext {
    */
   onTrace?: (event: AgentTraceEventPayload, self?: unknown) => void;
   consumeModelCall: () => void;
-  /** Folds one completed call's reported usage into the run-level {@link AgentUsage}. No-op off the runAgent path (nothing settles there). */
-  recordUsage?: (usage: AgentCallUsage) => void;
+  /**
+   * Folds one completed call's reported usage into the run-level
+   * {@link AgentUsage} AND — when the machine declares a transition for it —
+   * delivers the reserved {@link AGENT_USAGE_EVENT_TYPE} event carrying
+   * `usage` plus `source` as attribution. No-op off the runAgent path
+   * (nothing settles there).
+   */
+  recordUsage?: (usage: AgentCallUsage, source?: AgentUsageEventSource) => void;
   /** The owning run's id (`run_<n>`), threaded to executors as `info.runId`. Unset off the runAgent path. */
   runId?: string;
   /** Assigned right after createActor (§2.6); read lazily by decision wraps. */
   actorHolder: { actorRef: AnyActorRef | undefined };
   /** Registered `setupAgent` schemas (for event `inputSchema`s), if any. */
   schemas?: AgentSchemas;
+}
+
+/**
+ * True when the snapshot's active states declare a transition for the reserved
+ * `'@agent.usage'` type EXPLICITLY. A catch-all `on: { '*': … }` deliberately
+ * does not count: a wildcard is a machine's own event vocabulary, not an
+ * opt-in to a library-reserved event, and `snapshot.can(event)` alone cannot
+ * tell the two apart (it answers "would this event be taken?", which a
+ * wildcard makes true for everything). Gating delivery on the explicit
+ * declaration is what keeps `@agent.usage` opt-in by construction — and keeps
+ * a wildcard machine's context and event log byte-identical to a run without
+ * the feature. @internal
+ */
+function declaresUsageTransition(snapshot: AnyMachineSnapshot): boolean {
+  return getNextTransitions(snapshot).some(
+    (transition) => transition.eventType === AGENT_USAGE_EVENT_TYPE,
+  );
+}
+
+/**
+ * True when the call a `@agent.usage` entry reports is STILL PENDING in the
+ * folded state — i.e. its invoke is an active child that an events-only
+ * recovery will restart, so its tokens are about to be reported a second time.
+ * An entry with no invoke identity (a `getRequests` interpret-pass call) counts
+ * as pending: that pass re-runs at the next idle. @internal
+ */
+function usageEntryCallIsPending(snapshot: AnyMachineSnapshot, event: AgentUsageEvent): boolean {
+  if (snapshot.status !== "active") {
+    return false;
+  }
+  if (event.id === undefined) {
+    return true;
+  }
+  const children = snapshot.children as Record<string, AnyActorRef | undefined>;
+  return children[event.id] !== undefined;
+}
+
+/**
+ * Heals the crash window in a durable log before an events-only recovery.
+ *
+ * `@agent.usage` is journaled the moment a call SETTLES — before the call's
+ * own result reaches the machine — because that ordering is what lets a budget
+ * guard see the tokens in the same step that consumes the result. A log
+ * truncated inside that window therefore holds the usage entry but NOT the
+ * result: replaying it folds the tokens in, and the still-pending call
+ * re-executes and reports them again (verified: 400 → 800).
+ *
+ * The fix is at recovery, where the ambiguity is resolvable: drop the trailing
+ * `@agent.usage` entries whose reporting call is still pending in the state the
+ * remaining log folds to. Truncation now drops the usage and its result
+ * together, and the re-executed call re-journals its own usage — one entry, one
+ * count. Trailing usage whose call is NOT pending (the machine reached a final
+ * state, or the invoke is gone) is a complete record and is kept. @internal
+ */
+function healPendingUsageEntries(
+  machine: AnyStateMachine,
+  events: readonly AgentLogEntry[],
+  machineVersion: string,
+): readonly AgentLogEntry[] {
+  let end = events.length;
+  while (end > 0 && events[end - 1]!.event.type === AGENT_USAGE_EVENT_TYPE) {
+    let folded: AnyMachineSnapshot;
+    try {
+      folded = replay(machine, events.slice(0, end - 1), { machineVersion })
+        .snapshot as AnyMachineSnapshot;
+    } catch {
+      // A prefix that will not fold is not something to heal — let the normal
+      // replay below surface the real error.
+      break;
+    }
+    if (!usageEntryCallIsPending(folded, events[end - 1]!.event as AgentUsageEvent)) {
+      break;
+    }
+    end -= 1;
+  }
+  return end === events.length ? events : events.slice(0, end);
 }
 
 /** Reads the durable invoke id/src off the async actor's own ref (`self`). */
@@ -1205,7 +1302,13 @@ function wrapTextLogicForRunAgent(logic: TextLogic, runCtx: RunAgentBindContext)
       // surface them per-call on the request.end trace.
       const usage = extractCallUsage(raw);
       if (usage) {
-        runCtx.recordUsage?.(usage);
+        runCtx.recordUsage?.(usage, {
+          kind: "text",
+          ...(id !== "" ? { id } : {}),
+          ...(src !== "" ? { src } : {}),
+          model: request.model,
+          ...(request.name !== undefined ? { name: request.name } : {}),
+        });
       }
 
       runCtx.onResult?.(agentRequest, { output, raw });
@@ -1232,8 +1335,14 @@ function wrapTextLogicForRunAgent(logic: TextLogic, runCtx: RunAgentBindContext)
 // Wraps runCtx's `decide` executor with model-call budgeting and tracing —
 // shared by the decision and plan wrappers. `self` is the invoking decision/plan
 // leaf actor, threaded to `onTrace` so the provide path can attribute the event
-// to its root actor.
-function createCountingDecide(runCtx: RunAgentBindContext, self: unknown): AgentDecisionExecutor {
+// to its root actor. `kind` distinguishes the two callers on the reserved
+// `@agent.usage` event (a plan's per-step calls are decision calls, but a
+// budget guard wants to see which invoke they belong to).
+function createCountingDecide(
+  runCtx: RunAgentBindContext,
+  self: unknown,
+  kind: "decision" | "plan" = "decision",
+): AgentDecisionExecutor {
   return async (attemptRequest) => {
     runCtx.consumeModelCall();
     runCtx.onTrace?.({ type: "request.start", request: attemptRequest }, self);
@@ -1245,7 +1354,13 @@ function createCountingDecide(runCtx: RunAgentBindContext, self: unknown): Agent
       );
       const usage = extractCallUsage(result);
       if (usage) {
-        runCtx.recordUsage?.(usage);
+        const { src } = selfIdAndSrc(self);
+        runCtx.recordUsage?.(usage, {
+          kind,
+          ...(attemptRequest.id ? { id: attemptRequest.id } : {}),
+          ...(src !== "" ? { src } : {}),
+          model: attemptRequest.model,
+        });
       }
       runCtx.onResult?.(attemptRequest, { output: result.event, raw: result });
       runCtx.onTrace?.(
@@ -1377,7 +1492,7 @@ function createRunAgentPlanLogic(logic: PlanLogic, runCtx: RunAgentBindContext):
       }
       const { id } = selfIdAndSrc(self);
       const stopOn = new Set<string>(input.stopOn ?? []);
-      const countingDecide = createCountingDecide(runCtx, self);
+      const countingDecide = createCountingDecide(runCtx, self, "plan");
       const base = logic.request(input);
 
       // All bookkeeping (applied trail + remaining budget) rides the shared
@@ -1872,17 +1987,66 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     modelCallCount += 1;
   };
 
+  const tokenTotals: Partial<Record<keyof AgentCallUsage, number>> = {};
+
+  // Bridges the session closure's `settled` flag (declared further down, once
+  // the actor exists) to the usage delivery below, which is defined before it.
+  // Nothing has resolved before the run starts.
+  const cycleGate = { isResolved: () => false };
+
+  // Reserved `@agent.usage` delivery — the seam that puts a settled call's
+  // tokens in reach of the machine's own context and guards (see
+  // AGENT_USAGE_EVENT_TYPE). Opt-in BY CONSTRUCTION: sent only when the live
+  // root snapshot DECLARES the reserved type explicitly (machine-level `on`
+  // catches every call; a state-scoped one only catches calls made while that
+  // state is active). A catch-all `on: { '*': … }` does NOT count as opt-in —
+  // see declaresUsageTransition. A machine without an explicit declaration
+  // gets no extra transition, no `machine.transition` trace, and no extra
+  // event-log entry — existing runs are byte-identical.
+  //
+  // Root actor only: it is the actor whose external inputs the run journals
+  // (see the inspect handler), so delivering here is what makes the folded
+  // tokens survive an events-only replay. Usage from a request inside an
+  // INVOKED CHILD machine is therefore reported to the root too, attributed by
+  // the event's `id`/`src`/`model`.
+  //
+  // A call that settles AFTER the run's current cycle has resolved is a
+  // straggler: its tokens still fold into the run-level aggregate, but the
+  // event is DROPPED rather than delivered — identical on both the one-shot
+  // and the session (`createAgentActor`) path, so a late arrival can never
+  // re-open an already-returned idle result. Dropped stragglers are visible on
+  // `onTrace` as `usage.dropped`.
+  const deliverUsageEvent = (usage: AgentCallUsage, source: AgentUsageEventSource): void => {
+    const actorRef = actorHolder.actorRef;
+    if (!actorRef) {
+      return;
+    }
+    const event: AgentUsageEvent = { type: AGENT_USAGE_EVENT_TYPE, ...source, usage };
+    const snapshot = actorRef.getSnapshot() as AnyMachineSnapshot;
+    if (snapshot?.status !== "active" || !declaresUsageTransition(snapshot)) {
+      return;
+    }
+    if (cycleGate.isResolved()) {
+      onTrace({ type: "usage.dropped", event, reason: "settled" });
+      return;
+    }
+    if (!snapshot.can(event as never)) {
+      return;
+    }
+    actorRef.send(event as never);
+  };
+
   // Run-level usage aggregation: every executor-reported per-call usage folds
   // in here (see AgentUsage). Token fields are partial sums — a field stays
   // undefined until some call reports it. Scoped to THIS run only.
-  const tokenTotals: Partial<Record<keyof AgentCallUsage, number>> = {};
-  const recordUsage = (usage: AgentCallUsage) => {
+  const recordUsage = (usage: AgentCallUsage, source: AgentUsageEventSource = {}) => {
     for (const field of AGENT_USAGE_TOKEN_FIELDS) {
       const value = usage[field];
       if (typeof value === "number" && Number.isFinite(value)) {
         tokenTotals[field] = (tokenTotals[field] ?? 0) + value;
       }
     }
+    deliverUsageEvent(usage, source);
   };
   const runUsage = (): AgentUsage => ({ ...tokenTotals, modelCalls: modelCallCount });
 
@@ -2068,12 +2232,18 @@ function createAgentSession<TMachine extends AnyStateMachine>(
   // idempotently on restore (XState restarts restored pending async logic), so
   // a crashed run resumes from its log alone. `replay` validates entry
   // contiguity and machine identity/version itself.
+  //
+  // The log is healed first (see healPendingUsageEntries): a crash between a
+  // `@agent.usage` entry and its call's result entry would otherwise fold the
+  // tokens AND re-execute the still-pending call, double-counting them.
+  let resumeEvents = options.events;
   if (
     effectiveSnapshot === undefined &&
     options.events !== undefined &&
     options.events[0]?.event.type === AGENT_INIT_EVENT_TYPE
   ) {
-    const { snapshot: replayedSnapshot } = replay(machine, options.events, { machineVersion });
+    resumeEvents = healPendingUsageEntries(machine, options.events, machineVersion);
+    const { snapshot: replayedSnapshot } = replay(machine, resumeEvents, { machineVersion });
     effectiveSnapshot = machine.getPersistedSnapshot(
       replayedSnapshot as never,
     ) as Snapshot<unknown>;
@@ -2148,7 +2318,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     }
   }
 
-  const replayEvents: AgentLogEntry[] = [...(options.events ?? [])];
+  const replayEvents: AgentLogEntry[] = [...(resumeEvents ?? [])];
   const replayEventIds = new Set<string>();
   for (let index = 0; index < replayEvents.length; index++) {
     const entry = replayEvents[index]!;
@@ -2202,6 +2372,9 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     // stopped and the result is permanent.
     let settled = false;
     let finalized = false;
+    // A call settling after the cycle resolved is a straggler (see
+    // deliverUsageEvent): dropped identically on both lifecycle paths.
+    cycleGate.isResolved = () => settled;
     let lastResult: RunAgentResult<TMachine> | undefined;
     const waiters: Array<(result: RunAgentResult<TMachine>) => void> = [];
     let idleTimer: ReturnType<typeof setTimeout> | undefined;

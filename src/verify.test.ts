@@ -11,11 +11,18 @@ import {
   simulateAgent,
   type AgentLintDiagnostic,
   type AgentPlanOutput,
+  type AgentWorkflowConfig,
+  type SchemaCompiler,
   type StandardSchemaV1,
 } from "./index.js";
 import { PLAN_DONE_EVENT_TYPE } from "./index.js";
 import * as examples from "../examples/index.js";
-import { humanInTheLoopMachine, jokeMachine, twentyQuestionsMachine } from "../examples/index.js";
+import {
+  humanInTheLoopMachine,
+  jokeMachine,
+  jsonAgentMachine,
+  twentyQuestionsMachine,
+} from "../examples/index.js";
 
 // A refund machine mirroring the README's keyless example: an `agent.decide`
 // that may AUTO_APPROVE (guarded to amount <= 100) or NEEDS_REVIEW, then a human
@@ -165,6 +172,116 @@ describe("lintAgentMachine — the lint corpus stays quiet", () => {
       }
     }
     expect(tripped).toEqual([]);
+  });
+
+  test("a hand-authored function target still over-approximates rather than false-flag", () => {
+    // Unchanged behavior for TS-authored machines: `b` is only ever entered by a
+    // dynamic transition, which lint cannot read, so it must stay quiet.
+    const agent = setupAgent({
+      context: z.object({ n: z.number() }),
+      events: { E: z.object({}) },
+    });
+    const machine = agent.createMachine({
+      context: () => ({ n: 0 }),
+      initial: "a",
+      states: {
+        a: { on: { E: ({ context }) => (context.n > 0 ? { target: "b" } : undefined) } },
+        b: { type: "final" },
+      },
+    });
+
+    expect(lintAgentMachine(machine).filter((d) => d.code === "unreachable-state")).toEqual([]);
+  });
+});
+
+// A pass-through `compileSchema` for `fromConfig` lint tests: it validates
+// nothing, but exposes the JSON Schema, which is all the lint checks read.
+const passthroughCompiler: SchemaCompiler = (jsonSchema): StandardSchemaV1 => ({
+  "~standard": {
+    version: 1,
+    vendor: "verify-test",
+    validate: (value: unknown) => ({ value }),
+    jsonSchema: { input: () => jsonSchema },
+  } as never,
+});
+
+const fromConfigMachine = (config: AgentWorkflowConfig) =>
+  setupAgent.fromConfig(config, { compileSchema: passthroughCompiler }).machine;
+
+describe("lintAgentMachine — fromConfig machines lint on their declared graph", () => {
+  test("json-agent (targets folded behind context patches) is completely clean", () => {
+    // Regression: xstate's JSON layer rewrites a transition that carries an
+    // `assign` into an opaque `to` resolver with no `target`. Every state here
+    // but `drafting` is entered that way, so reachability used to see no edges
+    // and flag `awaitingApproval`/`resolved` unreachable plus `missing-final`.
+    expect(lintAgentMachine(jsonAgentMachine)).toEqual([]);
+  });
+
+  test("the retained targets survive machine.provide(...)", () => {
+    expect(lintAgentMachine(jsonAgentMachine.provide({}))).toEqual([]);
+  });
+
+  test("a config machine whose transitions carry emit actions still lints clean", () => {
+    // Regression companion to the json-agent case: an `emit` in a transition
+    // folds the target behind a resolver the same way `assign` does.
+    const machine = fromConfigMachine({
+      id: "emit-config",
+      schemas: {
+        context: { type: "object", properties: {} },
+        events: { GO: { type: "object" } },
+        emitted: { MOVED: { type: "object", properties: {} } },
+      },
+      initial: "a",
+      states: {
+        a: { on: { GO: { target: "b", actions: { emit: { type: "MOVED" } } } } },
+        b: { type: "final" },
+      },
+    } as AgentWorkflowConfig);
+
+    expect(lintAgentMachine(machine)).toEqual([]);
+  });
+
+  test("a config state nothing targets is still reported unreachable", () => {
+    const machine = fromConfigMachine({
+      id: "orphan-config",
+      schemas: { context: { type: "object", properties: {} }, events: { GO: { type: "object" } } },
+      initial: "a",
+      states: {
+        a: { on: { GO: { target: "b", assign: { seen: true } } } },
+        b: { type: "final" },
+        orphan: {},
+      },
+    } as AgentWorkflowConfig);
+
+    const diagnostics = lintAgentMachine(machine);
+    expect(diagnostics).toContainEqual(
+      expect.objectContaining({ code: "unreachable-state", severity: "error", path: "orphan" }),
+    );
+    // The `assign`-carrying edge into the final state is still seen, so
+    // reachability is exact here, not over-approximated to "everything".
+    expect(diagnostics.filter((d) => d.code === "unreachable-state")).toHaveLength(1);
+    expect(diagnostics.some((d) => d.code === "missing-final")).toBe(false);
+  });
+
+  test("nested and choice targets are retained too", () => {
+    const machine = fromConfigMachine({
+      id: "nested-config",
+      schemas: { context: { type: "object", properties: {} } },
+      initial: "outer",
+      states: {
+        outer: {
+          initial: "pick",
+          states: {
+            pick: { type: "choice", choice: [{ target: "chosen", assign: { picked: true } }] },
+            chosen: { type: "final" },
+          },
+          onDone: { target: "settled", assign: { settled: true } },
+        },
+        settled: { type: "final" },
+      },
+    } as AgentWorkflowConfig);
+
+    expect(lintAgentMachine(machine).filter((d) => d.code === "unreachable-state")).toEqual([]);
   });
 });
 

@@ -184,6 +184,18 @@ describe("schemas/agent-workflow.json", () => {
     ).not.toEqual([]);
   });
 
+  test("rejects a state key containing a '.', the reserved path separator", () => {
+    expect(() =>
+      setupAgent.fromConfig(
+        {
+          initial: "a.b",
+          states: { "a.b": { type: "final" } },
+        } as unknown as AgentWorkflowConfig,
+        { compileSchema: ajvCompiler() },
+      ),
+    ).toThrow(/state key 'a\.b' contains a '\.'/);
+  });
+
   test("schema-valid configs are accepted by setupAgent.fromConfig", () => {
     expect(() =>
       setupAgent.fromConfig(exampleWorkflow, { compileSchema: ajvCompiler() }),

@@ -1,0 +1,24 @@
+{
+  "name": "@statelyai/example-next-host",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --port 3005",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^3.0.25",
+    "@statelyai/agent": "workspace:*",
+    "@statelyai/sdk": "^0.15.0",
+    "@tanstack/react-query": "^5.101.4",
+    "@xstate/store": "^4.2.2",
+    "@xstate/store-react": "^2.0.0",
+    "ai": "^6.0.67",
+    "next": "^16.2.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "xstate": "6.0.0-alpha.25",
+    "zod": "^4.3.6"
+  }
+}

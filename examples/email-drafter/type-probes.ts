@@ -8,7 +8,7 @@
  * via `examples/tsconfig.json` (`include: ["."]`).
  */
 import { assistantMessage, setupAgent } from "@statelyai/agent";
-import { emailDrafterActors, emailDrafterSchemas, models } from "./index.js";
+import { emailDrafterActors, emailDrafterSchemas, models } from "./agent-logic.js";
 
 // Rebuild the same setup the runnable machine uses. Rebuilt (not imported) so
 // index.ts need not export the setup — exporting its full inferred type trips

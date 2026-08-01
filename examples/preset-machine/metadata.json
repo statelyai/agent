@@ -1,0 +1,15 @@
+{
+  "name": "preset-machine",
+  "title": "Preset Machine (Parallel Review)",
+  "kind": "agent-workflow",
+  "origin": {
+    "type": "stately-agent",
+    "source": "Preset factories in @statelyai/agent/machines",
+    "url": null
+  },
+  "comparison": {
+    "targets": ["LangGraph", "CrewAI"],
+    "purpose": "Shows a preset factory returning an ordinary XState machine: a static fan-out joined by branch name."
+  },
+  "starters": []
+}

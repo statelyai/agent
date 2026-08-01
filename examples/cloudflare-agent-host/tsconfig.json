@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "declaration": false,
+    "types": ["@cloudflare/workers-types", "@cloudflare/vitest-pool-workers"],
+    // Clear the root path-map: this package resolves `@statelyai/agent` through
+    // its workspace link, i.e. against the BUILT `dist` + exports map, the same
+    // way a published consumer does. Run `pnpm build` first.
+    "paths": {}
+  },
+  "include": ["."],
+  "exclude": ["node_modules"]
+}

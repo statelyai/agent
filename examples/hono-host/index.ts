@@ -12,12 +12,14 @@
  *                                         `onChunk` is piped into the HTTP
  *                                         response body as it arrives.
  *
- * Executors are injected (default: a keyless mock — no network at import).
+ * Executors are injected and key-gated: a real model when `OPENAI_API_KEY` is
+ * set, a keyless mock otherwise (no network at import).
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/hono-host/index.ts
  */
 import { Hono } from "hono";
 import { z } from "zod";
+import { openai } from "@ai-sdk/openai";
 import {
   getAcceptedEvents,
   getStateMeta,
@@ -26,13 +28,19 @@ import {
   setupAgent,
   type AgentRequestExecutors,
 } from "@statelyai/agent";
+import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 import type { Snapshot } from "xstate";
+
+export const models = defineModels({
+  writer: openai("gpt-5.4-mini"),
+});
 
 // ─── Controlled machine: draft → idle review → publish ───
 
 const contextSchema = z.object({ topic: z.string(), draft: z.string().nullable() });
 
 const reviewSetup = setupAgent({
+  models,
   context: contextSchema,
   input: z.object({ topic: z.string() }),
   output: z.object({ published: z.boolean(), draft: z.string() }),
@@ -85,6 +93,7 @@ export const announceMachine = reviewSetup.createMachine({
 // ─── Streaming machine: one `mode: 'stream'` request, then done ───
 
 const streamSetup = setupAgent({
+  models,
   context: z.object({ topic: z.string(), text: z.string().nullable() }),
   input: z.object({ topic: z.string() }),
   output: z.object({ text: z.string() }),
@@ -129,7 +138,12 @@ const mockExecutors: Partial<AgentRequestExecutors> = {
   },
 };
 
-export function createApp(executors: Partial<AgentRequestExecutors> = mockExecutors): Hono {
+/** Real models when `OPENAI_API_KEY` is set, the keyless mock otherwise. */
+export function resolveExecutors(): Partial<AgentRequestExecutors> {
+  return process.env.OPENAI_API_KEY ? createAiSdkExecutors({ models }) : mockExecutors;
+}
+
+export function createApp(executors: Partial<AgentRequestExecutors> = resolveExecutors()): Hono {
   const app = new Hono();
 
   app.post("/agent", async (c) => {
@@ -193,15 +207,37 @@ export function createApp(executors: Partial<AgentRequestExecutors> = mockExecut
   return app;
 }
 
-// Direct run via @hono/node-server if installed; otherwise this file just
-// typechecks. Try it with:
+// Direct run. `app.fetch` is the whole contract — Bun/Deno/Workers call it
+// directly, and a real Node project uses `serve` from @hono/node-server. Neither
+// is a dependency here, so the block below adapts node:http to `app.fetch` in a
+// few lines. Try it with:
 //   curl -sX POST localhost:3000/agent -d '{"topic":"CI speedups"}'
 //   curl -N -X POST localhost:3000/agent/stream -d '{"topic":"CI speedups"}'
 if (import.meta.url === new URL(process.argv[1] ?? "", "file:").href) {
+  const { createServer } = await import("node:http");
   const port = Number(process.env.PORT ?? 3000);
   const app = createApp();
-  // `serve` lives in @hono/node-server (not a dependency here). Wire it up in a
-  // real project; the fetch handler below is what any runtime calls.
-  console.log(`hono-host app ready. Serve app.fetch with your runtime on :${port}.`);
-  void app;
+
+  createServer((req, res) => {
+    const chunks: Buffer[] = [];
+    req.on("data", (chunk: Buffer) => chunks.push(chunk));
+    req.on("end", () => {
+      void (async () => {
+        const request = new Request(`http://localhost:${port}${req.url ?? "/"}`, {
+          method: req.method,
+          headers: req.headers as Record<string, string>,
+          body: chunks.length > 0 ? Buffer.concat(chunks) : undefined,
+        });
+        const response = await app.fetch(request);
+        res.writeHead(response.status, Object.fromEntries(response.headers));
+        // Write chunks as they arrive so /agent/stream streams end to end.
+        if (response.body) {
+          for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+            res.write(chunk);
+          }
+        }
+        res.end();
+      })();
+    });
+  }).listen(port, () => console.log(`hono-host listening on :${port}`));
 }

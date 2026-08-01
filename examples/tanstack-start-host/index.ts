@@ -8,37 +8,68 @@
  * snapshot IS the pause point, so the two server functions can run in different
  * requests (or different instances with a shared store).
  *
- * NOT a full TanStack Start project — `@tanstack/react-start` is not a
- * dependency of this repo, so `createServerFn` is a MINIMAL LOCAL SHIM (see
- * ./tanstack-shims). In a real app you delete the shim and
- * `import { createServerFn } from '@tanstack/react-start'`; the handler bodies
- * below are unchanged.
+ * A real, bootable Start app: `pnpm --dir examples/tanstack-start-host dev`
+ * serves `src/routes/index.tsx`, which calls the two server functions below
+ * over Start's RPC endpoint. This file holds the machine and the server
+ * functions; the route is only the browser half.
  *
  * The snapshot store is a module-level Map for illustration; a real deployment
  * needs a shared store keyed by run id (see ../file-snapshot-store).
  */
+import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
 import {
+  createScriptedExecutors,
   getAcceptedEvents,
   getStateMeta,
   persistSnapshot,
   runAgent,
   setupAgent,
   type AgentRequestExecutors,
+  type AgentTextRequest,
 } from "@statelyai/agent";
+import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 import type { Snapshot } from "xstate";
-import { createServerFn } from "./tanstack-shims.js";
+import { createServerFn } from "@tanstack/react-start";
 
 // ─── The machine: draft → idle review → publish ───
 
-const contextSchema = z.object({ topic: z.string(), draft: z.string().nullable() });
+const contextSchema = z.object({
+  topic: z.string(),
+  draft: z.string().nullable(),
+});
+
+/** The machine's event payloads. Single source: fed to `setupAgent` below AND to `eventUnionSchema` for the wire schema, so the two cannot drift. */
+const eventSchemas = {
+  APPROVE: z.object({}),
+  REJECT: z.object({ reason: z.string() }),
+};
+
+/**
+ * Builds the wire schema (`{ type, ...payload }`) for a `setupAgent({ events })`
+ * map. `setupAgent` keeps the payload schemas keyed by type (`agentSetup.schemas.events`),
+ * which is what the runtime needs; a host that validates an inbound event body
+ * wants the discriminated union of the same schemas — this derives one from the other.
+ */
+function eventUnionSchema<TEvents extends Record<string, z.ZodObject>>(events: TEvents) {
+  const members = Object.entries(events).map(([type, schema]) =>
+    schema.extend({ type: z.literal(type) }),
+  ) as unknown as [z.ZodObject, ...z.ZodObject[]];
+
+  return z.discriminatedUnion("type", members) as unknown as z.ZodType<
+    { [K in keyof TEvents & string]: { type: K } & z.infer<TEvents[K]> }[keyof TEvents & string]
+  >;
+}
+
+/** APPROVE | REJECT, derived from `eventSchemas` — use it to validate inbound event bodies. */
+export const announceEventSchema = eventUnionSchema(eventSchemas);
 
 const agentSetup = setupAgent({
   context: contextSchema,
   input: z.object({ topic: z.string() }),
   output: z.object({ published: z.boolean(), draft: z.string() }),
   meta: z.object({ interaction: z.object({ label: z.string() }).optional() }),
-  events: { APPROVE: z.object({}), REJECT: z.object({ reason: z.string() }) },
+  events: eventSchemas,
   isSuspended: (snapshot) => snapshot.hasTag("awaiting-review"),
   requests: {
     writeDraft: {
@@ -62,17 +93,24 @@ export const announceMachine = agentSetup.createMachine({
       invoke: {
         src: "writeDraft",
         input: ({ context }) => ({ topic: context.topic }),
-        onDone: ({ output }) => ({ target: "reviewing", context: { draft: output } }),
+        onDone: ({ output }) => ({
+          target: "reviewing",
+          context: { draft: output },
+        }),
       },
     },
     reviewing: {
       tags: ["awaiting-review"],
-      meta: { interaction: { label: "Approve to publish, or reject with a reason." } },
+      meta: {
+        interaction: { label: "Approve to publish, or reject with a reason." },
+      },
       on: {
         APPROVE: { target: "published" },
         REJECT: ({ context, event }) => ({
           target: "drafting",
-          context: { topic: `${context.topic}\nRevision requested: ${event.reason}` },
+          context: {
+            topic: `${context.topic}\nRevision requested: ${event.reason}`,
+          },
         }),
       },
     },
@@ -87,52 +125,88 @@ export const announceMachine = agentSetup.createMachine({
 
 const snapshots = new Map<string, Snapshot<unknown>>();
 
-/** Keyless mock so the server functions run with no API key. */
-const executors: Partial<AgentRequestExecutors> = {
-  generateText: async () => ({ output: "Big news: the deploy pipeline just got faster." }),
+/** The machine's `writeDraft` request asks for model `"writer"`; map it here. */
+const models = defineModels({ writer: openai("gpt-5.4-mini") });
+
+/** The scripted stand-in for `writeDraft`, so a keyless `pnpm dev` still runs. */
+const writeDraft = (request: AgentTextRequest): string => {
+  const topic = (request.prompt ?? "").replace(/^Write a short announcement about:\s*/, "");
+  return `Big news: ${topic.split("\n")[0]} just shipped.`;
 };
 
-/** Server function: start a run, settle idle (draft) or done. */
+/**
+ * Real models when `OPENAI_API_KEY` is set, scripted playback otherwise.
+ *
+ * Fresh executors per call: the scripted queues are consumed FIFO, so a
+ * module-level singleton would run dry on the second run. Four answers so a
+ * REJECT (which sends the machine back to `drafting`) still has one waiting.
+ */
+function resolveExecutors(): Partial<AgentRequestExecutors> {
+  return process.env.OPENAI_API_KEY
+    ? createAiSdkExecutors({ models })
+    : createScriptedExecutors({ text: [writeDraft, writeDraft, writeDraft, writeDraft] });
+}
+
+type Settled =
+  | {
+      id: string;
+      status: "idle";
+      draft: string | null;
+      prompt: string | undefined;
+      acceptedEvents: string[];
+    }
+  | { status: "done"; output: { published: boolean; draft: string } };
+
+/**
+ * Fold a settled run into the wire shape the route renders. An idle run stores
+ * (or restores) its snapshot under `id` — that snapshot IS the pause point, so
+ * the next request can be served by a different instance.
+ */
+function settle(result: Awaited<ReturnType<typeof runAgent<typeof announceMachine>>>, id: string) {
+  if (result.status === "idle") {
+    snapshots.set(id, persistSnapshot(result.snapshot));
+    const { interaction } = getStateMeta(result.snapshot);
+    return {
+      id,
+      status: "idle" as const,
+      draft: result.snapshot.context.draft,
+      prompt: interaction?.label,
+      acceptedEvents: getAcceptedEvents(result.snapshot).map((e) => e.type),
+    } satisfies Settled;
+  }
+  if (result.status === "done") {
+    snapshots.delete(id);
+    return { status: "done" as const, output: result.output } satisfies Settled;
+  }
+  throw new Error(`agent errored: ${result.status}`);
+}
+
+/** Server function: start a run, settle idle (draft ready for review) or done. */
 export const startAgent = createServerFn({ method: "POST" })
   .validator((input: unknown) => z.object({ topic: z.string() }).parse(input))
-  .handler(async ({ data }) => {
-    const result = await runAgent(announceMachine, { input: { topic: data.topic }, executors });
-    if (result.status === "idle") {
-      const id = crypto.randomUUID();
-      snapshots.set(id, persistSnapshot(result.snapshot));
-      const { interaction } = getStateMeta(result.snapshot);
-      return {
-        id,
-        status: "idle" as const,
-        draft: result.snapshot.context.draft,
-        prompt: interaction?.label,
-        acceptedEvents: getAcceptedEvents(result.snapshot).map((e) => e.type),
-      };
-    }
-    if (result.status === "done") return { status: "done" as const, output: result.output };
-    throw new Error(`agent errored: ${result.status}`);
+  .handler(async ({ data }): Promise<Settled> => {
+    const result = await runAgent(announceMachine, {
+      input: { topic: data.topic },
+      executors: resolveExecutors(),
+    });
+    return settle(result, crypto.randomUUID());
   });
 
-/** Server function: resume a persisted run with the human's event. */
+/**
+ * Server function: resume a persisted run with the human's event. APPROVE
+ * finishes it; REJECT redrafts and comes back idle under the same run id.
+ */
 export const resumeAgent = createServerFn({ method: "POST" })
   .validator((input: unknown) =>
-    z
-      .object({
-        id: z.string(),
-        event: z.discriminatedUnion("type", [
-          z.object({ type: z.literal("APPROVE") }),
-          z.object({ type: z.literal("REJECT"), reason: z.string() }),
-        ]),
-      })
-      .parse(input),
+    z.object({ id: z.string(), event: announceEventSchema }).parse(input),
   )
-  .handler(async ({ data }) => {
+  .handler(async ({ data }): Promise<Settled> => {
     const snapshot = snapshots.get(data.id);
     if (!snapshot) throw new Error("unknown run id");
-    const result = await runAgent(announceMachine, { snapshot, event: data.event, executors });
-    if (result.status === "done") {
-      snapshots.delete(data.id);
-      return { status: "done" as const, output: result.output };
-    }
-    throw new Error(`agent did not complete: ${result.status}`);
+    const result = await runAgent(announceMachine, {
+      snapshot,
+      event: data.event,
+      executors: resolveExecutors(),
+    });
+    return settle(result, data.id);
   });

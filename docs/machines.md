@@ -377,7 +377,7 @@ See [examples/sql-agent/index.ts](../examples/sql-agent/index.ts).
 
 ## State and transition meta
 
-<!-- typed meta protocol from examples/email-drafter/index.ts -->
+<!-- typed meta protocol from examples/email-drafter/agent-logic.ts -->
 
 The `meta` field attaches typed data to a state or transition. With a `meta` schema on `setupAgent`, hosts read a typed interaction protocol instead of `Record<string, unknown>`:
 
@@ -398,7 +398,7 @@ prompting: {
 }
 ```
 
-A `meta` value that does not match the schema is a compile error. See [examples/email-drafter/index.ts](../examples/email-drafter/index.ts).
+A `meta` value that does not match the schema is a compile error. See [examples/email-drafter/agent-logic.ts](../examples/email-drafter/agent-logic.ts).
 
 ## Delayed transitions
 

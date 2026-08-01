@@ -117,14 +117,17 @@ If something here blocks you, or the API surface feels wrong, open an issue. Thi
 - [Human in the loop](human-in-the-loop.md): idle-first pauses and resuming by snapshot.
 - [Hosts and executors](hosts.md): the executor contract, the AI SDK adapter, and writing your own.
 - [Observability](observability.md): the trace stream and observation callbacks, the Stately Inspector locally, and OpenTelemetry in production.
+- [Usage and budgets](usage-and-budgets.md): reading token usage off a run, capping it with `maxModelCalls`, and enforcing turn and token budgets as machine guards.
 - [Models and providers](models-and-providers.md): raw SDK functions as executors, other AI frameworks, OpenAI-compatible endpoints, and reference hosts per provider.
 - [Steps](steps.md): the lower-level step path for durable hosts.
 - [The event log](event-log.md): append events, replay deterministically, fork and time travel, and the SQLite stores.
 - [Machines as data](machines-as-data.md): authoring an agent machine as JSON.
+- [Generating machines with an LLM](generate-machines.md): have a model author the config, then validate, lint, and simulate it before running.
 - [Testing and verification](verify.md): lint, simulate, and explore agent machines with no API keys or model calls.
 - [Multi-agent](multi-agent.md): sub-agents and child actors.
 - [Migrating from a loop](from-a-loop.md): convert a hand-rolled `while` loop into an agent machine.
 - [Coming from LangGraph](from-langgraph.md): a term-by-term translation of LangGraph concepts onto agent machines.
+- [LangGraph vs agent machines](langgraph-comparison.md): the same agent built both ways, dimension by dimension.
 - [You already have an agent workflow](xstate-as-agent-workflow.md): the same machine graph run by `runAgent`, by hand, or with prompts mapped in from outside.
 - [Agent patterns](patterns.md): ReAct, reflection, RAG, supervisor, and more as copy-paste machines, and the full runnable example catalog.
 - [Post-alpha roadmap](roadmap.md): what gates 2.0 stable, and what is deliberately deferred past it.

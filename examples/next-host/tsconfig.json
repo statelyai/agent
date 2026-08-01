@@ -1,0 +1,33 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "declaration": false,
+    "jsx": "react-jsx",
+    // Override the root path-map instead of merely clearing it: this package
+    // resolves `@statelyai/agent` through its workspace link, i.e. against the
+    // BUILT `dist` + exports map, the same way a published consumer does. Run
+    // `pnpm build` first.
+    //
+    // An empty `paths` is enough for `tsc` (a child's value replaces the
+    // parent's) but not for every bundler that reads tsconfig — Turbopack keeps
+    // the inherited `../../src/*` mapping and compiles the library from source,
+    // where the `.js` specifiers it cannot resolve then blow up. Mapping each
+    // entry back at the installed package is unambiguous for both.
+    "baseUrl": ".",
+    //
+    // Subpaths need their own entry pointing at the built file: the wildcard
+    // below maps `@statelyai/agent/ai-sdk` at a path that does not exist on
+    // disk (the package publishes it through its exports map as
+    // `dist/ai-sdk.mjs`). `tsc` recovers by falling back to normal resolution,
+    // but Turbopack falls back to the inherited `../../src/*` mapping and
+    // compiles the library from source, where the `.js` specifiers blow up.
+    // The `.mjs` target also gives `tsc` its types, via the sibling `.d.mts`.
+    "paths": {
+      "@statelyai/agent": ["./node_modules/@statelyai/agent"],
+      "@statelyai/agent/ai-sdk": ["./node_modules/@statelyai/agent/dist/ai-sdk"],
+      "@statelyai/agent/*": ["./node_modules/@statelyai/agent/*"]
+    }
+  },
+  "include": ["."],
+  "exclude": ["node_modules"]
+}

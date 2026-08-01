@@ -18,20 +18,16 @@
  *
  * Running this
  * -------------
- * The `default { fetch }` export below is a complete Worker (it runs one game
- * turn per request), but it needs the Workers runtime and an `AI` binding, so
- * it cannot run under `tsx`. Add a `wrangler.toml` next to a Worker entry that
- * imports this file, with the AI binding:
+ * The `default { fetch }` export below is a complete Worker: one game turn per
+ * request, against the `AI` binding declared in `wrangler.jsonc`. It needs the
+ * Workers runtime, so it cannot run under `tsx`.
  *
- *   name = "workers-ai-game-host"
- *   main = "examples/cloudflare-workers-ai-host/index.ts"
- *   compatibility_date = "2025-01-01"
- *   [ai]
- *   binding = "AI"
+ *   pnpm --filter @statelyai/example-cloudflare-workers-ai-host dev
+ *   curl localhost:3010
  *
- * Then: `npx wrangler dev` and `curl localhost:8787`. `model` on the game
- * machine's requests must name a Workers AI model id (e.g.
- * `@cf/meta/llama-3.1-8b-instruct`). Requires the `wrangler` dev dependency.
+ * `wrangler dev` runs the Worker locally but proxies the `AI` binding to the
+ * logged-in Cloudflare account, so a local run performs real inference. Run
+ * `npx wrangler login` first if the account is not connected.
  */
 import { type EventObject } from "xstate";
 import {
@@ -48,10 +44,43 @@ import {
 } from "@statelyai/agent";
 import { gameActors, gameMachine, gameSchemas } from "../game-agent/index.js";
 
-interface Env {
+export interface Env {
   AI: {
     run(model: string, input: Record<string, unknown>): Promise<unknown>;
   };
+}
+
+/**
+ * The game machine names its models symbolically (`defineModels` keys), which
+ * is the point: the machine stays provider-free and the HOST decides what each
+ * ref means. Here every ref maps to a Workers AI model id; an unknown ref is
+ * passed through, so a machine can also name a `@cf/...` id directly.
+ */
+const workersAiModels: Record<string, string> = {
+  moveChooser: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+  turnSummarizer: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+};
+
+const resolveWorkersAiModel = (modelRef: string) => workersAiModels[modelRef] ?? modelRef;
+
+/**
+ * Workers AI models have no JSON mode and no tool calling, so they answer in
+ * prose ("Here you go: ```json {...}```"). Take the first JSON object in the
+ * text rather than demanding the whole response be JSON — a plain
+ * `JSON.parse(text)` fails on most real completions.
+ */
+function parseJsonFromText(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+    const candidate =
+      fenced?.[1]?.trim() ?? text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
+    if (!candidate) {
+      throw new SyntaxError(`No JSON object found in response: ${text.slice(0, 200)}`);
+    }
+    return JSON.parse(candidate);
+  }
 }
 
 async function runWorkersAiPrompt(
@@ -64,18 +93,22 @@ async function runWorkersAiPrompt(
     maxOutputTokens?: number;
   },
 ): Promise<string> {
-  const response = (await env.AI.run(args.model, {
+  const response = (await env.AI.run(resolveWorkersAiModel(args.model), {
     system: args.system,
     prompt: args.prompt,
     temperature: args.temperature,
     max_tokens: args.maxOutputTokens,
-  })) as { response?: string } | string | Record<string, unknown>;
+  })) as { response?: unknown } | string;
 
-  return typeof response === "string"
-    ? response
-    : typeof response.response === "string"
-      ? response.response
-      : JSON.stringify(response);
+  // Response shapes vary by model: a bare string, `{ response: "text" }`, or —
+  // on newer models that pre-parse JSON output — `{ response: { ... } }` inside
+  // a full completion envelope. Normalize to the text the caller asked for,
+  // never the envelope around it.
+  if (typeof response === "string") return response;
+  const inner = response.response;
+  if (typeof inner === "string") return inner;
+  if (inner !== undefined && inner !== null) return JSON.stringify(inner);
+  return JSON.stringify(response);
 }
 
 /** Text effect: structured output serialized into the prompt, JSON parsed back out. */
@@ -101,7 +134,7 @@ async function runWorkersAiTextRequest(env: Env, request: AgentTextRequest) {
   // response, retry once telling the model what went wrong, then surface the
   // raw text if it still fails to parse.
   try {
-    return JSON.parse(text);
+    return parseJsonFromText(text);
   } catch (firstError) {
     const retryText = await ask(
       [
@@ -112,7 +145,7 @@ async function runWorkersAiTextRequest(env: Env, request: AgentTextRequest) {
       ].join("\n"),
     );
     try {
-      return JSON.parse(retryText);
+      return parseJsonFromText(retryText);
     } catch (retryError) {
       throw new Error(
         `Workers AI structured response was not valid JSON: ${String(retryError)}\nRaw text: ${retryText}`,
@@ -136,10 +169,12 @@ async function runWorkersAiDecision(env: Env, request: AgentDecisionRequest): Pr
         attemptRequest.prompt ?? "",
         attemptFeedback,
         "",
-        "Choose exactly one legal event and respond as JSON.",
+        "Choose exactly one legal event.",
         "Legal events:",
         legalEvents,
-        'Example: {"type":"ATTACK","target":"goblin"}',
+        "",
+        "Reply with ONLY a JSON object and no other text, no explanation, no prose.",
+        'Example reply: {"type":"ATTACK","target":"goblin"}',
       ]
         .filter(Boolean)
         .join("\n");
@@ -152,7 +187,15 @@ async function runWorkersAiDecision(env: Env, request: AgentDecisionRequest): Pr
         maxOutputTokens: attemptRequest.maxOutputTokens,
       });
 
-      return { event: JSON.parse(text) as ChosenEvent };
+      try {
+        return { event: parseJsonFromText(text) as ChosenEvent };
+      } catch (error) {
+        // Not JSON at all. Hand back an event type that cannot match, so
+        // `resolveDecision` records an `unknown-event` attempt and re-asks with
+        // that feedback in `request.attempts` — rather than throwing out of the
+        // whole turn on one malformed response.
+        return { event: { type: `<unparsed response: ${String(error)}>` } };
+      }
     },
     { maxRetries: 2 },
   );
@@ -206,7 +249,12 @@ export async function runCloudflareGameTurn(env: Env, input = { playerHp: 20, en
 
 export default {
   async fetch(_request: Request, env: Env) {
-    const output = await runCloudflareGameTurn(env);
-    return Response.json(output);
+    try {
+      return Response.json(await runCloudflareGameTurn(env));
+    } catch (error) {
+      // Workers AI failures (entitlement, model id, rate limit) surface here —
+      // report them as-is rather than as an opaque 500.
+      return Response.json({ error: (error as Error).message }, { status: 502 });
+    }
   },
 };

@@ -32,12 +32,13 @@ For a one-liner that throws instead of returning findings, use `assertAgentMachi
 
 | Code                       | Severity | Fires when                                                                                                                                                                                                                                                                          |
 | -------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `unreachable-state`        | error    | A state no transition/`always`/`choice`/`onDone`/`onError` can reach from the initial state. Conservative: dynamic (function) transitions over-approximate, so it never false-flags.                                                                                                |
+| `unreachable-state`        | error    | A state no transition/`always`/`choice`/`onDone`/`onError` can reach from the initial state. Conservative: dynamic (function) transitions over-approximate, so it never false-flags. Exact for `fromConfig` machines, whose declared targets the lowering retains.                     |
 | `decide-without-events`    | error    | A state invokes `agent.decide`/`agent.plan` but neither it nor any ancestor handles any event, so the chosen event can never be delivered.                                                                                                                                            |
 | `unserializable-context`   | warning  | The context schema exposes no JSON schema (e.g. a `z.custom` messages array), so its fields can't be statically checked for JSON persist/resume.                                                                                                                                    |
 | `direct-object-src`        | warning  | An invoke `src` is a direct object/machine value that can't be rebound by `runAgent`, so it inherits no host executors.                                                                                                                                                             |
 | `final-without-output`     | error    | The machine declares an output schema but a top-level final state has no `output`.                                                                                                                                                                                                  |
 | `final-output-reads-event` | warning  | A top-level final state's `output` function reads the entering `event`. Final `output` fns are evaluated more than once with different events, so `event` is unreliable. Read `context` only, capturing what you need into context in the transition that targets the final state. |
+| `undeclared-event`         | warning  | A state handles an event in `on:` that isn't declared in `schemas.events` and isn't a builtin/wildcard pattern. Its payload stays unvalidated; usually a typo. Skipped entirely when the machine declares no events.                                                                 |
 | `missing-final`            | warning  | No reachable final state; the machine can only idle/loop (legal, but flagged).                                                                                                                                                                                                     |
 
 ## Asserting in tests
@@ -84,7 +85,7 @@ const machine = emailDrafter.provide({
 });
 ```
 
-[examples/email-drafter/index.ts](../examples/email-drafter/index.ts) drives a full run this way: fixed values, deterministic, no model called.
+[examples/email-drafter/agent-logic.ts](../examples/email-drafter/agent-logic.ts) drives a full run this way: fixed values, deterministic, no model called.
 
 Use this when the test should exercise the real `runAgent` path with canned model output; use `simulateAgent` below when a scripted playthrough on the pure step path is enough.
 
@@ -165,6 +166,4 @@ import { machine } from "./machine";
 assertAgentMachine(machine); // throws AgentLintError on error-severity findings
 ```
 
-For machines authored as data (see [machines as data](machines-as-data.md)), compile the config first: `assertAgentMachine(setupAgent.fromConfig(config, { compileSchema }))`.
-
-> **Note:** Because `fromConfig` lowers every transition to a function, `unreachable-state` is over-approximated for config machines. The other checks are unaffected.
+For machines authored as data (see [machines as data](machines-as-data.md)), compile the config first: `assertAgentMachine(setupAgent.fromConfig(config, { compileSchema }).machine)`. Every check applies, reachability included: the lowering keeps the config's transition targets, so `unreachable-state` reads the real graph even where the JSON layer folds a target into a resolver function.

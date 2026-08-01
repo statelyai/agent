@@ -1,111 +1,117 @@
 /// <reference types="@cloudflare/workers-types" />
 /**
- * Cloudflare Agents host for XState setup machines.
+ * Cloudflare Agents host for XState agent machines — a complete, runnable Worker.
  *
  * The shape:
  * - The Agent (a Durable Object) hosts the XState actor.
  * - The persisted snapshot lives in Agent state, so the machine survives
  *   hibernation/eviction and resumes exactly where it left off.
- * - Clients send machine events over WebSocket; provider/runtime details stay
- *   in the host actor implementations.
+ * - Clients drive the machine with plain machine events, over HTTP
+ *   (`onRequest`) or WebSocket (`onMessage`) — provider/runtime details stay in
+ *   the host, never in the machine.
  *
- * Model resolution is injected via `resolveModel` (an AI SDK `LanguageModel`
- * resolver — same shape as `../ai-sdk-host/index.ts`) rather than hardcoded
- * to a specific provider package, since this repo does not depend on any one
- * Cloudflare AI binding provider. In a real deployment, wire the
- * `workers-ai-provider` package's `createWorkersAI({ binding: this.env.AI })`
- * here for Workers AI, or any other AI SDK provider for an external model.
+ * Executors are resolved per Durable Object, not at import: Workers have no
+ * ambient `process.env`, so the provider is constructed from the `env` binding.
+ * With `OPENAI_API_KEY` set (via `.dev.vars` locally, `wrangler secret` in
+ * production) the run is live; without it the host falls back to keyless
+ * `createScriptedExecutors`, so the example boots and completes with no
+ * credentials at all.
  *
- * Running this
- * -------------
- * This file is a *drop-in Durable Object class*, not a complete Worker — it
- * cannot run under `tsx` (it needs the Workers runtime + DO storage). To run
- * it, drop it into a Worker project and provide three things:
+ * HTTP protocol (one Agent instance per `:name`, i.e. one conversation):
+ *   GET  /agents/email-drafter/:name        -> current view (state, interaction,
+ *                                              accepted events, draft, output)
+ *   POST /agents/email-drafter/:name        -> body is a machine event
+ *                                              (`{"type":"PROMPT_SUBMITTED", ...}`),
+ *                                              validated, sent, then awaited
+ *                                              until the machine is idle again
  *
- * 1. A concrete subclass that supplies `resolveModel` with a real binding.
- *    With the `workers-ai-provider` package and an `AI` binding:
+ * Run:
+ *   pnpm --filter @statelyai/example-cloudflare-agent-host dev        # keyless
+ *   pnpm --filter @statelyai/example-cloudflare-agent-host dev:live   # real model
  *
- *      import { createWorkersAI } from 'workers-ai-provider';
- *      export class EmailDrafter extends EmailDrafterAgent {
- *        resolveModel = (modelRef: string) =>
- *          createWorkersAI({ binding: this.env.AI })(
- *            modelRef as Parameters<ReturnType<typeof createWorkersAI>>[0],
- *          );
- *      }
- *
- * 2. A `wrangler.toml` binding that class as a Durable Object and adds the AI
- *    binding (fill in `main` with your Worker entry that routes to the Agent):
- *
- *      name = "email-drafter"
- *      main = "src/index.ts"
- *      compatibility_date = "2025-01-01"
- *      [ai]
- *      binding = "AI"
- *      [[durable_objects.bindings]]
- *      name = "EmailDrafter"
- *      class_name = "EmailDrafter"
- *      [[migrations]]
- *      tag = "v1"
- *      new_sqlite_classes = ["EmailDrafter"]
- *
- * 3. Dependencies the host app must add: `agents`, `wrangler`,
- *    `workers-ai-provider` (only `agents` is a dependency of this repo).
- *
- * Then: `npx wrangler dev` (local) or `npx wrangler deploy`.
+ *   curl -X POST localhost:3009/agents/email-drafter/demo \
+ *     -d '{"type":"PROMPT_SUBMITTED","prompt":"Email ana@x.com about Friday'\''s launch"}'
+ *   curl -X POST localhost:3009/agents/email-drafter/demo -d '{"type":"SEND"}'
+ *   curl -X POST localhost:3009/agents/email-drafter/demo -d '{"type":"END"}'
  */
-import { Agent, type Connection } from "agents";
-import { createActor, type Actor, type Snapshot } from "xstate";
-import type { LanguageModel } from "ai";
-import { parseAgentEvent } from "@statelyai/agent";
+import { Agent, routeAgentRequest, type Connection } from "agents";
+import { createActor, type Actor, type AnyMachineSnapshot, type Snapshot } from "xstate";
+import { createOpenAI } from "@ai-sdk/openai";
 import {
-  draftEmail,
-  emailDrafter,
-  emailDrafterSchemas,
-  evaluatePrompt,
-} from "../email-drafter/index.js";
-import { createAiSdkTextActor } from "../ai-sdk-host/index.js";
+  createScriptedExecutors,
+  getAcceptedEvents,
+  getStateMeta,
+  parseAgentEvent,
+  provideExecutors,
+  type AgentRequestExecutors,
+  type AgentTextRequest,
+} from "@statelyai/agent";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
+import { emailDrafter, emailDrafterSchemas } from "../email-drafter/agent-logic.js";
 
 interface Env {
-  AI: Ai;
+  EmailDrafter: DurableObjectNamespace<EmailDrafter>;
+  /** Optional: set it and the run is live, leave it unset and the run is scripted. */
+  OPENAI_API_KEY?: string;
 }
 
 interface EmailDrafterState {
   snapshot?: Snapshot<unknown>;
 }
 
-export abstract class EmailDrafterAgent extends Agent<Env, EmailDrafterState> {
+/**
+ * Keyless answers, routed on the request's model ref (`model: 'promptEvaluator'`
+ * / `'emailDrafter'` in `../email-drafter/agent-logic.ts`) so an entry is valid
+ * wherever it lands in the queue. Queues are FIFO and finite; this one is sized
+ * for a handful of drafting rounds.
+ */
+const scriptedAnswer = (request: AgentTextRequest) => {
+  switch (request.model) {
+    case "promptEvaluator":
+      return { satisfied: true, missing: [], questions: [] };
+    case "emailDrafter":
+      return {
+        to: "ana@example.com",
+        subject: "Friday's launch",
+        body: "Hi Ana — we ship Friday at 9am. Shout if anything is still open on your side.",
+      };
+    default:
+      throw new Error(`No scripted answer for model ref '${request.model}'.`);
+  }
+};
+
+/** Live executors when the DO has a key, scripted (keyless) otherwise. */
+function resolveExecutors(env: Env): AgentRequestExecutors {
+  if (!env.OPENAI_API_KEY) {
+    return createScriptedExecutors({ text: Array.from({ length: 12 }, () => scriptedAnswer) });
+  }
+
+  // Bind the provider to the Worker's env: `openai(...)` from the module scope
+  // would look for a `process.env` key that does not exist in workerd.
+  const openai = createOpenAI({ apiKey: env.OPENAI_API_KEY });
+  return createAiSdkExecutors({
+    models: {
+      promptEvaluator: openai("gpt-5.4-mini"),
+      emailDrafter: openai("gpt-5.4-mini"),
+    },
+  });
+}
+
+/** Idle = the machine is waiting on a human (it declares an interaction) or finished. */
+function isSettled(snapshot: AnyMachineSnapshot): boolean {
+  return snapshot.status !== "active" || Boolean(getStateMeta(snapshot).interaction);
+}
+
+export class EmailDrafter extends Agent<Env, EmailDrafterState> {
   initialState: EmailDrafterState = {};
   #actor: Actor<typeof emailDrafter> | undefined;
 
-  /**
-   * Resolves a machine's `model` string to an AI SDK `LanguageModel`.
-   *
-   * Declared `abstract` so a concrete deployment subclass *must* supply it —
-   * a compile-time requirement rather than a runtime throw. The Durable Object
-   * constructor is fixed by the runtime `(ctx, env)`, so the resolver can't be
-   * a constructor parameter; making it abstract is how the requirement is
-   * enforced at the type level. Wire a real provider in the subclass, e.g.:
-   *   resolveModel = (modelRef: string) =>
-   *     createWorkersAI({ binding: this.env.AI })(modelRef as Parameters<typeof workersai>[0]);
-   */
-  abstract resolveModel(modelRef: string): LanguageModel;
-
   onStart() {
-    const machine = emailDrafter.provide({
-      actors: {
-        evaluatePrompt: createAiSdkTextActor(evaluatePrompt, {
-          resolveModel: this.resolveModel,
-        }),
-        draftEmail: createAiSdkTextActor(draftEmail, {
-          resolveModel: this.resolveModel,
-        }),
-      },
-    });
+    // Executors are provided by the host; the machine only names its requests.
+    const machine = provideExecutors(emailDrafter, resolveExecutors(this.env));
 
     // Restore from the persisted snapshot if the DO was evicted mid-run.
-    this.#actor = createActor(machine, {
-      snapshot: this.state.snapshot,
-    });
+    this.#actor = createActor(machine, { snapshot: this.state.snapshot });
 
     this.#actor.subscribe((snapshot) => {
       // Durable persistence on every transition: this is the journal the
@@ -127,18 +133,9 @@ export abstract class EmailDrafterAgent extends Agent<Env, EmailDrafterState> {
 
   onMessage(connection: Connection, message: string) {
     // Client messages are machine events (PROMPT_SUBMITTED, SEND, ...).
-    // `parseAgentEvent` validates the event against the snapshot's accepted
-    // events and the registered payload schemas before it hits the actor.
     const event = JSON.parse(message) as { type: string; [key: string]: unknown };
-    const snapshot = this.#actor?.getSnapshot();
-    if (!snapshot) {
-      return;
-    }
-    let parsed;
     try {
-      parsed = parseAgentEvent(snapshot, event, {
-        events: emailDrafterSchemas.events,
-      });
+      this.#send(event);
     } catch (error) {
       connection.send(
         JSON.stringify({
@@ -146,8 +143,106 @@ export abstract class EmailDrafterAgent extends Agent<Env, EmailDrafterState> {
           issues: [{ message: (error as Error).message }],
         }),
       );
-      return;
     }
-    this.#actor?.send(parsed);
+  }
+
+  async onRequest(request: Request): Promise<Response> {
+    if (request.method === "GET") {
+      return Response.json(this.#view());
+    }
+    if (request.method !== "POST") {
+      return Response.json(
+        { error: "Use GET to read state, POST to send an event." },
+        {
+          status: 405,
+        },
+      );
+    }
+
+    const event = (await request.json().catch(() => null)) as
+      | ({ type: string } & Record<string, unknown>)
+      | null;
+    if (!event?.type) {
+      return Response.json(
+        { error: "POST a machine event: { type, ...payload }" },
+        { status: 400 },
+      );
+    }
+
+    try {
+      this.#send(event);
+    } catch (error) {
+      return Response.json({ error: (error as Error).message, ...this.#view() }, { status: 400 });
+    }
+
+    // Hold the request open across the machine's async work, so one POST maps
+    // to one settled turn: the response is always an idle (or final) state.
+    await this.#settle();
+    return Response.json(this.#view());
+  }
+
+  /** Validates the event against the snapshot's accepted events + payload schemas, then sends it. */
+  #send(event: { type: string } & Record<string, unknown>) {
+    const snapshot = this.#actor?.getSnapshot();
+    if (!snapshot) {
+      throw new Error("Agent actor is not running.");
+    }
+    this.#actor!.send(parseAgentEvent(snapshot, event, { events: emailDrafterSchemas.events }));
+  }
+
+  /** Resolves once the machine is waiting on a human again, or is done. */
+  #settle(timeoutMs = 60_000): Promise<void> {
+    const actor = this.#actor!;
+    if (isSettled(actor.getSnapshot())) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        subscription.unsubscribe();
+        reject(new Error(`Machine did not settle within ${timeoutMs}ms.`));
+      }, timeoutMs);
+      const subscription = actor.subscribe((snapshot) => {
+        if (!isSettled(snapshot)) return;
+        clearTimeout(timer);
+        subscription.unsubscribe();
+        resolve();
+      });
+    });
+  }
+
+  /** The wire view of the machine: what a client needs to render the next step. */
+  #view() {
+    const snapshot = this.#actor!.getSnapshot();
+    const { display, interaction } = getStateMeta(snapshot);
+    return {
+      status: snapshot.status,
+      state: snapshot.value,
+      display,
+      interaction,
+      acceptedEvents: getAcceptedEvents(snapshot, { events: emailDrafterSchemas.events }).map(
+        (candidate) => candidate.type,
+      ),
+      draft: snapshot.context.draft,
+      output: snapshot.status === "done" ? snapshot.output : undefined,
+    };
   }
 }
+
+const usage = [
+  "Cloudflare Agents host for the email drafter machine.",
+  "",
+  "  GET  /agents/email-drafter/:name   read the current state",
+  "  POST /agents/email-drafter/:name   send a machine event, e.g.",
+  '       {"type":"PROMPT_SUBMITTED","prompt":"Email ana@example.com about Friday\'s launch"}',
+  "",
+  "Each :name is its own Durable Object, i.e. its own conversation.",
+].join("\n");
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    return (
+      (await routeAgentRequest(request, env)) ??
+      new Response(usage, { status: 404, headers: { "content-type": "text/plain" } })
+    );
+  },
+};

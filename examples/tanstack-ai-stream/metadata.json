@@ -1,0 +1,16 @@
+{
+  "name": "tanstack-ai-stream",
+  "title": "TanStack AI Stream",
+  "kind": "host-adapter",
+  "manual": true,
+  "origin": {
+    "type": "platform-adapter",
+    "source": "TanStack Start API route bridging runAgent's streaming seams to TanStack AI's AG-UI wire protocol, consumed by a useChat client; a workspace package depending on real `@tanstack/ai` and `@tanstack/ai-react`, so CI catches API drift",
+    "url": "https://tanstack.com/ai/latest/docs/getting-started/quick-start"
+  },
+  "comparison": {
+    "targets": ["TanStack AI", "useChat", "AG-UI"],
+    "purpose": "Streaming a machine run to a UI: onChunk becomes TEXT_MESSAGE_CONTENT deltas, transitions become STEP_STARTED/STEP_FINISHED, and toServerSentEventsResponse serves it to an unmodified useChat client."
+  },
+  "starters": ["Why state machines for agents?", "What is an actor?"]
+}

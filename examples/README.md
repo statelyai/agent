@@ -4,17 +4,31 @@
 
 Each example lives in a flat `examples/*` directory with an `index.ts` or `index.mts` entrypoint and a `metadata.json` file describing its origin and comparison purpose.
 
-Every example is dual-mode: run it directly against a real model with `OPENAI_API_KEY=... npx tsx examples/<name>/index.ts`, while its tests use injected mocks. Exceptions to the `OPENAI_API_KEY` + `tsx` default:
+Every example is dual-mode: run it directly against a real model with `OPENAI_API_KEY=... npx tsx examples/<name>/index.ts`, while its tests use injected mocks. Nothing auto-loads `.env`; copy `.env.template` to `.env` and pass it explicitly (Node 22+):
+
+```bash
+npx tsx --env-file=.env examples/<name>/index.ts
+```
+
+Exceptions to the `OPENAI_API_KEY` + `tsx` default:
 
 - `anthropic-sdk-host` runs against the raw `@anthropic-ai/sdk` and needs `ANTHROPIC_API_KEY` instead.
 - `cloudflare-workers-ai-host` and `cloudflare-agent-host` target a Cloudflare Workers runtime (Durable Objects / Workers AI bindings), not Node/`tsx` — see each example's notes.
 
 ## Start Here
 
+**No API key needed.** Three examples run fully scripted, in about a second each, with no key and no network:
+
+```bash
+npx tsx examples/crash-recovery/index.ts
+npx tsx examples/session-actor/index.ts
+npx tsx examples/preset-machine/index.ts
+```
+
 - Decisions: the model choosing exactly one legal machine event: [`twenty-questions/index.ts`](twenty-questions/index.ts)
 - Hidden information + human play + machine-enforced rules: [`go-fish/index.ts`](go-fish/index.ts)
 - Minimal streaming text workflow: [`joke/index.ts`](joke/index.ts)
-- Authoring reusable requests, parts-based messages, and schema-typed state meta: [`email-drafter/index.ts`](email-drafter/index.ts)
+- Authoring reusable requests, parts-based messages, and schema-typed state meta: [`email-drafter/agent-logic.ts`](email-drafter/agent-logic.ts)
 - Human-in-the-loop, the idle-first way: [`human-in-the-loop/index.ts`](human-in-the-loop/index.ts)
 - Checkpoint history, rewind, and forking an alternative branch over persisted snapshots: [`time-travel/index.ts`](time-travel/index.ts)
 - Retrofitting a hand-rolled `while`-loop agent into a machine, one shippable step at a time: [`retrofit/index.ts`](retrofit/index.ts)
@@ -32,12 +46,13 @@ Every example is dual-mode: run it directly against a real model with `OPENAI_AP
 These use `setupAgent(...)` (or plain XState `setup(...)` plus `createTextLogic(...)`) from `@statelyai/agent`. The runtime is flexible: use `runAgent(...)`/`createActor(...)` locally, provide different host actors in apps, or persist XState snapshots in a platform adapter.
 
 - [`twenty-questions/index.ts`](twenty-questions/index.ts): decision loop with machine-held context, typed model aliases, final-turn guess enforcement, scoring, play-again reset, and machine-owned user prompts
-- [`email-drafter/index.ts`](email-drafter/index.ts): typed email workflow with independently testable requests
-- [`email-drafter-inspector/index.ts`](email-drafter-inspector/index.ts): the email-drafter machine run as one live `createActor` session wired to `createWebSocketInspector`, so the whole flow is visible in the Stately Inspector (works without an API key via heuristic fallbacks)
+- [`email-drafter/agent-logic.ts`](email-drafter/agent-logic.ts): typed email workflow with independently testable requests
+- [`email-drafter-inspector/index.ts`](email-drafter-inspector/index.ts): the email-drafter machine run as one live `createActor` session wired to `createInspector`, so the whole flow is visible in the Stately Inspector (works without an API key via heuristic fallbacks)
 - [`game-agent/index.ts`](game-agent/index.ts): games as machines, two lessons in one file — a turn-based combat agent with decision `allowedEvents` computed from context (HEAL only when low on HP), and a rock-paper-scissors agent (`rpsMachine`) that reduces each round's events into a `context.history` log the decide prompt reads back, so the saved event history is the only way the model can infer the opponent's pattern and win
 - [`go-fish/index.ts`](go-fish/index.ts): two-player hidden-information game with a checking-win → agent → human loop; the machine owns the deck, shows the human their hand, validates moves, and forms books
 - [`joke/index.ts`](joke/index.ts): minimal streaming text workflow
 - [`triage/index.ts`](triage/index.ts): structured-output support ticket triage
+- [`preset-machine/index.ts`](preset-machine/index.ts): `createParallelMachine` from `@statelyai/agent/machines` — two review branches run concurrently as regions of one parallel state and join keyed by branch name; the factory returns an ordinary machine, and a scripted executor keeps the run keyless
 - [`json-agent/index.ts`](json-agent/index.ts): `setupAgent.fromConfig(...)` lowering a support-ticket workflow authored as a real `.json` file (decision, text request, idle human approval step)
 - [`described-workflow/index.ts`](described-workflow/index.ts): a plain `createMachine` with zero invokes run as an agent via `runAgent({ getRequests })`, prompts read from state descriptions/meta, message log stamped on `snapshot.messages`
 - [`plain-xstate/index.ts`](plain-xstate/index.ts): a normal XState v6 `setup(...)` machine (a promise-shaped invoke, an `on: { APPROVE, REVISE }` decision state with a guarded transition, a final state, and zero knowledge of `@statelyai/agent`) adopted as an agent without `setupAgent`: bind the actor via `machine.provide(...)`, then drive the decision with `getAcceptedEvents(snapshot)` + `resolveDecision(...)` gated by `snapshot.can(event)`
@@ -91,11 +106,13 @@ The same agent machine served from real app frameworks, in both modes: controlle
 - [`express-host/index.ts`](express-host/index.ts): controlled mode over HTTP: an Express route runs/resumes an agent via `runAgent`; idle + persisted snapshot = human-in-the-loop across requests
 - [`hono-host/index.ts`](hono-host/index.ts): the express-host shape in Hono, plus a streaming endpoint piping `onChunk` into the response body
 - [`ai-sdk-ui-stream/index.ts`](ai-sdk-ui-stream/index.ts): bridge a run to the Vercel AI SDK v6 UI message stream (text parts + `data-agent-state` parts) behind a `POST /api/chat` handler a `useChat` client consumes unchanged — the UI-protocol sibling of `sse-transport`
-- [`next-host/app/api/agent/route.ts`](next-host/app/api/agent/route.ts): Next.js App Router route handlers running an agent; snapshot persisted across the stateless request boundary (typechecks standalone via local shims)
-- [`tanstack-start-host/index.ts`](tanstack-start-host/index.ts): TanStack Start server functions (`startAgent`/`resumeAgent`) invoking `runAgent` (local `createServerFn` shim)
+- [`next-host/app/api/agent/route.ts`](next-host/app/api/agent/route.ts): Next.js App Router route handlers running an agent; snapshot persisted across the stateless request boundary (workspace package with a real `next` dependency)
+- [`tanstack-start-host/index.ts`](tanstack-start-host/index.ts): TanStack Start server functions (`startAgent`/`resumeAgent`) invoking `runAgent` (workspace package with a real `@tanstack/react-start` dependency)
 - [`react-uncontrolled/index.tsx`](react-uncontrolled/index.tsx): uncontrolled mode: `createActor(provideExecutors(machine, executors))` drives itself; React observes snapshots, sends user events, and renders streamed text
-- [`flue-host/index.ts`](flue-host/index.ts): a Flue (`defineAgent` + `defineTool`) LLM agent with two tools bridging to a machine: `start_workflow` runs `runAgent` to idle/done and returns a JSON-safe handle, `resume_workflow` revives it with the human's decision (local `@flue/runtime` shims)
-- [`eve-host/agent.ts`](eve-host/agent.ts): the same start/resume tool bridge in Eve's folder convention (`instructions.md` + `agent.ts` + `tools/start_workflow.ts` / `tools/resume_workflow.ts`); the machine owns refund legality, the Eve agent converses (local `eve` shims)
+- [`tanstack-ai-stream/index.ts`](tanstack-ai-stream/index.ts): stream a machine run to a UI: a TanStack Start API route bridges `runAgent`'s seams to TanStack AI's AG-UI wire protocol (`onChunk` becomes `TEXT_MESSAGE_CONTENT` deltas, transitions become `STEP_STARTED`/`STEP_FINISHED`) served over SSE to an unmodified `useChat` client (workspace package with real `@tanstack/ai` and `@tanstack/ai-react` dependencies)
+- [`flue-host/index.ts`](flue-host/index.ts): Flue 2 (hooks-based `defineAgent`), two ways (local `@flue/runtime` shims). [`machine-owned.ts`](flue-host/machine-owned.ts): the email-drafter machine owns the workflow; the agent gets `start_workflow`/`resume_workflow` bridge tools over `runAgent`. [`flue-owned.ts`](flue-host/flue-owned.ts): Flue's hooks own per-step model/skills/tools; a ~10-line steps machine replaces the blog's `usePersistentState('step', ...)` string, making transitions declared, the step switch exhaustive, and events inferred (`EventFromLogic`)
+- [`eve-host/agent.ts`](eve-host/agent.ts): the same start/resume tool bridge in Eve's folder convention (`instructions.md` + `agent.ts` + `tools/start_workflow.ts` / `tools/resume_workflow.ts`); the machine owns draft legality, the Eve agent converses (local `eve` shims)
+- [`mastra-host/index.ts`](mastra-host/index.ts): the same bridge on the real `@mastra/core` (`createTool` + `Agent`, no shims); snapshots persisted in a `Map` keyed by handle, and the event to resume with is derived from the machine's own `meta.interaction`
 
 ## Comparison Examples
 

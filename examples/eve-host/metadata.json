@@ -5,12 +5,15 @@
   "manual": true,
   "origin": {
     "type": "platform-adapter",
-    "source": "Eve (Vercel's agent framework) folder convention — agent.ts + tools/<snake_case>.ts calling runAgent; typechecks standalone via local eve-shims mirroring eve.dev/docs as of 2026-07 (Eve is not a repo dependency)",
+    "source": "Eve (Vercel's agent framework) folder convention (agent.ts + tools/<snake_case>.ts) calling runAgent; typechecks standalone via local eve-shims mirroring eve.dev/docs as of 2026-07 (Eve is not a repo dependency)",
     "url": "https://eve.dev/docs/getting-started"
   },
   "comparison": {
     "targets": ["Eve", "Vercel agent framework", "tool-calling agents"],
-    "purpose": "The Eve LLM agent gets two tools bridging to a statelyai/agent machine: start_workflow runs runAgent to idle/done and returns a JSON-safe handle + typed interaction; resume_workflow revives the handle with the human's event. The machine owns legality; the agent converses."
+    "purpose": "The Eve LLM agent gets two tools bridging to the shared email-draft machine: start_workflow runs runAgent to the first human pause and returns a handle, the draft, and the machine's typed interaction; resume_workflow reloads the snapshot and delivers the human's choice, deriving the payload field from meta.interaction. The machine owns legality; the agent converses."
   },
-  "starters": []
+  "starters": [
+    "Draft an email telling the team the deploy pipeline is twice as fast.",
+    "Ask for changes to the draft, then send it."
+  ]
 }

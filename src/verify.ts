@@ -21,7 +21,11 @@ import { getJsonSchemaSync } from "./utils.js";
 import { getAcceptedEvents } from "./events.js";
 import { isDecisionLogic, isPlanLogic, PLAN_DONE_EVENT_TYPE } from "./decision.js";
 import { isTextLogic } from "./text-logic.js";
-import { executorBoundLogics, getRegisteredAgentExecutionOptions } from "./internal/registry.js";
+import {
+  executorBoundLogics,
+  getMachineStaticTransitionTargets,
+  getRegisteredAgentExecutionOptions,
+} from "./internal/registry.js";
 import {
   getInvokeEffectMetadata,
   initialAgentStep,
@@ -182,11 +186,19 @@ function collectTransitionTargets(
     return;
   }
   if (typeof value === "object") {
-    const target = (value as { target?: unknown }).target;
+    const { target, to } = value as { target?: unknown; to?: unknown };
     if (target !== undefined) {
       collectTransitionTargets(target, fromNode, index, out);
+      return;
     }
-    // An object with no `target` stays in-state (no edge).
+    // xstate's JSON layer folds a transition that carries a context patch into a
+    // single `to` resolver, erasing its `target`. Treat it as opaque rather than
+    // as a targetless (in-state) transition, which would under-approximate.
+    if (to !== undefined) {
+      collectTransitionTargets(to, fromNode, index, out);
+      return;
+    }
+    // An object with neither stays in-state (no edge).
   }
 }
 
@@ -217,12 +229,26 @@ function resolveTargetString(
 
 // All outgoing edges from a state node: `on`/`always`/`after`/`onDone`
 // transitions plus each invoke's `onDone`/`onError`.
+//
+// `staticTargets` (present for `setupAgent.fromConfig` machines) is the source
+// config's own targets by state path. It is complete — the lowering records
+// every declared target, including the ones the JSON layer later folds into
+// opaque resolver functions — so when it is present it fully replaces the scan
+// over `machine.config`, and reachability is exact rather than approximated.
 function outgoingTargets(
   node: StateNode,
   index: Map<string, StateNode>,
+  staticTargets?: Record<string, string[]>,
 ): { targets: string[]; opaque: boolean } {
   const out = { targets: [] as string[], opaque: false };
   const { config } = node;
+
+  if (staticTargets) {
+    for (const target of staticTargets[node.path] ?? []) {
+      resolveTargetString(target, node, index, out);
+    }
+    return out;
+  }
 
   for (const value of Object.values(config.on ?? {})) {
     collectTransitionTargets(value, node, index, out);
@@ -247,8 +273,13 @@ function outgoingTargets(
 // and unresolved targets over-approximate by marking every sibling reachable,
 // so a state is only reported unreachable when NO static or over-approximated
 // path leads to it. Never a false positive; may miss (false negative) a truly
-// dead state hidden behind a dynamic transition.
-function computeReachable(rootConfig: AnyConfig, index: Map<string, StateNode>): Set<string> {
+// dead state hidden behind a dynamic transition. `staticTargets` (see
+// {@link outgoingTargets}) makes the walk exact for config-lowered machines.
+function computeReachable(
+  rootConfig: AnyConfig,
+  index: Map<string, StateNode>,
+  staticTargets?: Record<string, string[]>,
+): Set<string> {
   const reachable = new Set<string>();
   const queue: string[] = [];
 
@@ -296,7 +327,7 @@ function computeReachable(rootConfig: AnyConfig, index: Map<string, StateNode>):
     if (!node) {
       continue;
     }
-    const { targets, opaque } = outgoingTargets(node, index);
+    const { targets, opaque } = outgoingTargets(node, index, staticTargets);
     for (const target of targets) {
       enter(target);
     }
@@ -591,10 +622,13 @@ function isBuiltinOrWildcardEvent(eventType: string): boolean {
 // typed events, and never blocks a run.
 function checkUndeclaredEvents(ctx: LintContext): AgentLintDiagnostic[] {
   const declared = ctx.schemas?.events;
-  if (!declared || Object.keys(declared).length === 0) {
+  // The reserved `@agent.*` entries setupAgent registers by default (e.g.
+  // `'@agent.usage'`) don't count as "the machine declares typed events" — a
+  // machine that declared none should stay unlinted here.
+  const declaredTypes = new Set(Object.keys(declared ?? {}));
+  if ([...declaredTypes].every((type) => type.startsWith("@agent."))) {
     return [];
   }
-  const declaredTypes = new Set(Object.keys(declared));
   const out: AgentLintDiagnostic[] = [];
   for (const node of ctx.index.values()) {
     for (const eventType of Object.keys(node.config.on ?? {})) {
@@ -667,7 +701,7 @@ export function lintAgentMachine(
 ): AgentLintDiagnostic[] {
   const config = (machine as { config?: AnyConfig }).config ?? {};
   const index = buildStateIndex(config);
-  const reachable = computeReachable(config, index);
+  const reachable = computeReachable(config, index, getMachineStaticTransitionTargets(machine));
   const registered = getRegisteredAgentExecutionOptions(machine);
   const ctx: LintContext = {
     machine,

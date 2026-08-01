@@ -77,6 +77,19 @@ function matchesEventPattern(eventType: string, pattern: string): boolean {
   return eventType === pattern;
 }
 
+/**
+ * The namespace reserved for events the library itself delivers to a machine
+ * (`@agent.init`, `@agent.usage`). A machine may declare transitions on them,
+ * but they are never model-facing: {@link getAcceptedEvents} drops them before
+ * any `allowedEvents` matching, so they cannot be offered as a decision
+ * candidate (not even under a `'*'` wildcard) and {@link parseAgentEvent}
+ * rejects them — a model or a wire message must not be able to forge one.
+ * Matched as a prefix rather than a list so this module stays free of an import
+ * cycle back to `effects.ts`, where the constants live.
+ * @internal
+ */
+const RESERVED_AGENT_EVENT_PREFIX = "@agent.";
+
 /** True when an `allowedEvents` entry is a wildcard pattern rather than a concrete event type. @internal */
 export function isEventPattern(entry: string): boolean {
   return entry === "*" || entry.endsWith(".*");
@@ -175,6 +188,11 @@ export function parseAgentEvent<TSnapshot extends AnyMachineSnapshot>(
  * {@link ResolveDecisionOptions}). Pass `eventTypes` to further narrow to a
  * declared `allowedEvents` set — entries may be exact types or wildcard
  * patterns (`'*'`, `'todo.*'`; see {@link matchesEventPattern}).
+ *
+ * XState-internal (`xstate.*`) and library-reserved
+ * ({@link RESERVED_AGENT_EVENT_PREFIX}) event types are always excluded, before
+ * any `allowedEvents` matching — a machine that handles `'@agent.usage'` still
+ * never offers it to a model.
  */
 export function getAcceptedEvents(
   snapshot: AnyMachineSnapshot,
@@ -193,6 +211,7 @@ export function getAcceptedEvents(
       !eventType ||
       eventType === "*" ||
       eventType.startsWith("xstate.") ||
+      eventType.startsWith(RESERVED_AGENT_EVENT_PREFIX) ||
       (eventTypes && !eventTypes.some((pattern) => matchesEventPattern(eventType, pattern))) ||
       seen.has(eventType)
     ) {

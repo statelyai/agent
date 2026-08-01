@@ -5,5 +5,16 @@
     "jsx": "react-jsx"
   },
   "include": ["."],
-  "exclude": []
+  // These are real workspace packages with real framework deps; each has its
+  // own tsconfig and typechecks against the built package, not `src/`. The
+  // Cloudflare ones also need Workers types (`cloudflare:test`, workerd
+  // globals), which only their own tsconfigs pull in.
+  // See the root `typecheck:example-packages` script.
+  "exclude": [
+    "next-host",
+    "tanstack-start-host",
+    "tanstack-ai-stream",
+    "cloudflare-agent-host",
+    "cloudflare-workers-ai-host"
+  ]
 }

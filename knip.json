@@ -6,10 +6,31 @@
     ".": {
       "entry": [
         "src/**/*.test.ts",
-        "examples/**/*.ts",
+        "examples/**/*.{ts,tsx}",
         "fixtures/dts-consumer/index.ts"
       ],
-      "project": ["src/**/*.ts", "examples/**/*.ts"]
+      "project": ["src/**/*.ts", "examples/**/*.{ts,tsx}"]
+    },
+    "examples/next-host": {
+      "entry": ["app/**/route.ts", "app/**/*.tsx"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "examples/tanstack-start-host": {
+      "entry": ["index.ts", "src/**/*.tsx"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "examples/tanstack-ai-stream": {
+      "entry": ["index.ts", "chat.tsx"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "examples/cloudflare-agent-host": {
+      "entry": ["test/**/*.workers-test.ts", "*.mjs"],
+      "project": ["**/*.ts"],
+      "ignoreDependencies": ["cloudflare"]
+    },
+    "examples/cloudflare-workers-ai-host": {
+      "entry": ["test/**/*.workers-test.ts"],
+      "project": ["**/*.ts"]
     }
   }
 }
