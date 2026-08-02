@@ -2,4 +2,14 @@
 "@statelyai/agent": minor
 ---
 
-Commit the `isSuspended` option name (no longer provisional). When a run settles idle via the timing heuristic because no suspension predicate was declared (neither `setupAgent({ isSuspended })` nor `runAgent(machine, { isSuspended })`), runAgent now emits a one-time dev warning suggesting a deterministic predicate such as `(s) => s.hasTag('waiting')`. No behavior change otherwise; suppressed when `NODE_ENV === "production"`.
+**Committed the `isSuspended` option name (no longer provisional), and added a dev warning when a run falls back to the timing heuristic.**
+
+```ts
+await runAgent(machine, {
+  input,
+  executors,
+  isSuspended: (snapshot) => snapshot.hasTag("waiting"),
+});
+```
+
+Declare the predicate on `setupAgent({ isSuspended })` or per-run on `runAgent(machine, { isSuspended })`; the run-level option wins. When a run settles idle via the timing heuristic because neither was declared, `runAgent` now emits a one-time warning suggesting a deterministic predicate. No behavior change otherwise, and the warning is suppressed when `NODE_ENV === "production"`.

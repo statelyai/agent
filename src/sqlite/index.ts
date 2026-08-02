@@ -56,8 +56,11 @@ function openDatabase(path: string): SqliteDatabase {
   return new sqlite.DatabaseSync(path);
 }
 
-/** A store that owns nothing unless it opened the file itself. */
-interface Closable {
+/** A store that owns nothing unless it opened the file itself.
+ *
+ * Exported because it appears in the store factories' return types — without
+ * it, consumers' declaration emit fails with TS4058 "cannot be named". */
+export interface Closable {
   /**
    * Closes the underlying database — but only when this store opened it from a
    * path. When a `DatabaseSync` handle was passed in, the caller owns it and

@@ -2,14 +2,27 @@
 "@statelyai/agent": minor
 ---
 
-Reserved `@agent.usage` event: per-call model usage now reaches machine context, so a token budget is an ordinary guard.
+**Token budgets are now ordinary state machine logic.** Every settled model call that reports usage delivers a reserved `@agent.usage` event to the running machine, so spend lives in context and a budget is just a transition.
 
-- After every settled model call that reported usage — text, decision, and each plan step — `runAgent` delivers `{ type: '@agent.usage', usage, kind, id, src, model, name }` to the running machine. New `AGENT_USAGE_EVENT_TYPE` constant and `AgentUsageEvent` type.
-- `setupAgent`/`createAgentSchemas` (and `setupAgent.fromConfig`) register `'@agent.usage'` in a machine's events **by default**, with the real usage payload schema. It appears in `schemas.events` for hosts introspecting the pack, and it is part of the machine's event union — `on: { '@agent.usage': ({ event }) => … }` autocompletes and `event.usage` is typed with nothing declared. Declaring `'@agent.usage'` yourself in `events` now throws: the `@agent.` namespace is reserved (same rule as the builtin `agent.*` actor keys).
-- Delivery is opt-in by construction: the event is sent only when the machine's active states declare a transition for `'@agent.usage'` **explicitly**. A catch-all `on: { '*': … }` does not count as an opt-in and never receives it. A machine that declares no explicit handler sees no extra transition, no extra trace event, and no extra event-log entry. Declare it machine-level (`on`) to catch every call.
-- **Breaking note:** the whole `@agent.` prefix is now a reserved namespace. Hosts cannot send events into it — `parseAgentEvent` rejects them and `getAcceptedEvents` drops them before any `allowedEvents` matching, so `@agent.usage` and `@agent.init` are never offered as decision candidates (not even under a `'*'` wildcard). Rename any machine event of your own that starts with `@agent.`.
-- A delivered `@agent.usage` rides the event log like any other external input, so events-only recovery (`runAgent({ events })`) replays the folded tokens without re-calling a model. Usage entries are **spend records**: when the event is reported the cost already happened, so they are durable, append-only facts. Replay folds every one, and a call re-executed by crash recovery journals its own usage on top — a recovered total therefore includes both the call whose result the crash lost and the retry, which is the true cumulative cost.
-- A call that settles after the run's cycle has already resolved is a straggler: its tokens still fold into `result.usage`, but the machine event is dropped (identically on the `runAgent` and `createAgentActor` paths, so a late arrival can never re-open a returned idle result) and surfaced on `onTrace` as `usage.dropped`.
-- Usage from a request inside an invoked child machine is reported to the run's root machine, attributed by the event's `id`/`src`/`model`.
-- Scripted `simulateAgent` runs report no usage, so a token counter stays `0` under simulation — simulate the loop's shape, and test the budget itself with a usage-reporting mock executor.
-- Usage delivery works off the `runAgent` path too. `provideExecutors` (uncontrolled `createActor`) delivers `@agent.usage` to the machine actor that invoked the bound request, with the same payload and the same explicit-declaration opt-in; delivery follows `provideExecutors`' binding boundary, so an invoked child machine needs its own `provideExecutors(...)`. On the step path, new root export `getCallUsage(raw)` normalizes a raw executor result's usage so a host can apply `{ type: '@agent.usage', usage }` as an ordinary journaled event. Docs: a "Usage without runAgent" section covering all three.
+```ts
+const machine = setup.createMachine({
+  // Declaring the transition IS the opt-in; `event.usage` is typed already.
+  on: {
+    "@agent.usage": ({ context, event }) => {
+      const tokens = context.tokens + (event.usage.totalTokens ?? 0);
+      return tokens > 50_000 ? { target: ".done", context: { tokens } } : { context: { tokens } };
+    },
+  },
+  // ...
+});
+```
+
+- Delivered after every settled text, decision, and plan-step call as `{ type: '@agent.usage', usage, kind, id, src, model, name }`. New `AGENT_USAGE_EVENT_TYPE` constant and `AgentUsageEvent` type.
+- `setupAgent` / `createAgentSchemas` / `setupAgent.fromConfig` register `'@agent.usage'` **by default**, so the handler autocompletes and `event.usage` types with nothing declared. It also shows up in `schemas.events` for hosts introspecting the pack.
+- **Delivery is gated on an explicit transition.** The event is sent only when an active state declares `'@agent.usage'` by name. A catch-all `on: { '*': … }` does not count and never receives it; a machine with no handler sees no extra transition, trace event, or log entry. Declare it machine-level to catch every call.
+- **Breaking: `@agent.` is a reserved namespace.** Declaring `'@agent.usage'` in your own `events` throws. Hosts cannot send into the namespace either — `parseAgentEvent` rejects it and `getAcceptedEvents` drops it before `allowedEvents` matching, so `@agent.usage` and `@agent.init` are never decision candidates (not even under a `'*'` wildcard). Rename any event of yours starting with `@agent.`.
+- **Usage entries are spend records.** When the event is reported the cost already happened, so entries are durable, append-only facts — there is no dedupe or rollback. Replay folds every one, and a call re-executed by crash recovery journals its own usage on top, so a recovered total covers both the lost call and its retry. That is the true cumulative spend.
+- A call that settles after the run's cycle resolved is a straggler: its tokens still fold into `result.usage`, but the machine event is dropped (identically on the `runAgent` and `createAgentActor` paths) and surfaced on `onTrace` as `usage.dropped`.
+- Usage from a request inside an invoked child machine reports to the run's root machine, attributed by `id`/`src`/`model`.
+- Scripted `simulateAgent` runs report no usage, so a counter stays `0` under simulation. Test the budget itself with a usage-reporting mock executor.
+- **Works without `runAgent`.** On the uncontrolled `provideExecutors` path the event reaches the machine actor that invoked the bound request, with the same explicit-declaration gate; delivery follows `provideExecutors`' binding boundary, so an invoked child machine needs its own `provideExecutors(...)`. On the step path, new root export `getCallUsage(raw)` normalizes a raw executor result's usage so a host can journal the event itself (the typed event union carries the attribution fields alongside `usage`). See the "Usage without runAgent" docs section.

@@ -2,9 +2,17 @@
 "@statelyai/agent": minor
 ---
 
-**`createAgentRun(machine, options)`**: a canonical run-stream handle over a single `runAgent` call. Returns `{ events, result }`:
+**`createAgentRun(machine, options)`: a run's trace events as an async stream.** Returns `{ events, result }` — the canonical handle for an SSE endpoint, a JSONL logger, or a progress UI.
 
-- `events` is a single-consumer `AsyncIterableIterator<AgentTraceEvent>` that yields the run's trace events in `runAgent`'s emission order (`run.start` → request/chunk/transition/emit events → `run.end`) and completes once `run.end` is delivered. Events are buffered unboundedly, so a slow or absent consumer never blocks the run — `for await` over them, or await `result` first and drain them after.
-- `result` is the same `Promise<RunAgentResult>` `runAgent` returns, with identical resolution/rejection behavior. A run-level failure still resolves with `{ status: 'error' }`; only `runAgent`'s bind-time programmer errors reject.
+```ts
+const run = createAgentRun(machine, { input, executors });
+for await (const event of run.events) {
+  if (event.type === "request.end") console.log(event.type);
+}
+const result = await run.result;
+```
 
-The run starts immediately (on the call, not on first iteration). A supplied `options.onTrace` is composed, not replaced — it still fires for every event. Options pass straight through, so resuming from a persisted `snapshot` (+ resume `event`) streams that run identically. Breaking out of `events` early stops delivery but does not cancel the run (`result` still settles); run cancellation is future work — pass `options.signal` to abort.
+- `events` is a single-consumer `AsyncIterableIterator<AgentTraceEvent>` yielding in `runAgent`'s emission order (`run.start` → request/chunk/transition/emit → `run.end`), completing once `run.end` is delivered. Buffered unboundedly, so a slow or absent consumer never blocks the run — iterate, or await `result` first and drain after.
+- `result` is the same promise `runAgent` returns, with identical settle behavior: a run-level failure resolves `{ status: 'error' }`, and only bind-time programmer errors reject.
+- The run starts on the call, not on first iteration. A supplied `options.onTrace` is composed, not replaced. Options pass straight through, so resuming from a persisted `snapshot` (+ resume `event`) streams that run identically.
+- Breaking out of `events` early stops delivery but does not cancel the run (`result` still settles). Pass `options.signal` to abort.

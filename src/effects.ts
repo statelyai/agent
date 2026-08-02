@@ -167,10 +167,13 @@ export interface AgentUsageEvent extends EventObject {
  * The seam for the step-loop path, where the host holds the raw result itself:
  *
  * ```ts
- * const { output, raw } = await executeAgentRequest(request, executors, { verbose: true });
+ * const { output, raw } = await executeAgentRequest(effect, executors, { verbose: true });
  * const usage = getCallUsage(raw);
- * if (usage) step = resolveAgentStep(step, { type: AGENT_USAGE_EVENT_TYPE, usage });
+ * if (usage) append({ type: AGENT_USAGE_EVENT_TYPE, usage }); // journal + transition, like any event
+ * append(effect.toDoneEvent(output));
  * ```
+ *
+ * See "Token usage on this path" in docs/steps.md for the full loop.
  */
 export function getCallUsage(raw: unknown): AgentCallUsage | undefined {
   return extractCallUsage(raw);

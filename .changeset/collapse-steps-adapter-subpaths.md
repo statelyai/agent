@@ -2,7 +2,9 @@
 "@statelyai/agent": minor
 ---
 
-Removed the `@statelyai/agent/steps` and `@statelyai/agent/adapter` subpaths. Everything they exported is now on the root barrel — import from `@statelyai/agent`. Remaining entries: `.`, `./ai-sdk`, `./sqlite`, `./agent-workflow.json`.
+**Removed the `@statelyai/agent/steps` and `@statelyai/agent/adapter` subpaths.** Everything they exported is now on the root barrel — import from `@statelyai/agent`.
+
+The package's entry points are now `.`, `./ai-sdk`, `./machines`, `./otel`, `./sqlite`, and `./agent-workflow.json`.
 
 Newly on the root barrel:
 

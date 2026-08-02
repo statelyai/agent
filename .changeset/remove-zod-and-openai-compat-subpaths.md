@@ -2,9 +2,9 @@
 "@statelyai/agent": minor
 ---
 
-**Breaking:** the `@statelyai/agent/zod` and `@statelyai/agent/openai-compat` subpath exports are removed.
+**Breaking: removed the `@statelyai/agent/zod` and `@statelyai/agent/openai-compat` subpaths.**
 
-- **`./zod`.** `zodAgentMessages()` is gone. It was a one-line convenience over `z.custom`, not worth a public entry point. Declare the field inline instead:
+- **`./zod`.** `zodAgentMessages()` is gone — a one-line convenience over `z.custom`, not worth a public entry point. Declare the field inline instead:
 
   ```ts
   import { z } from "zod";
