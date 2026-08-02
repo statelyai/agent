@@ -142,13 +142,13 @@ The `model` value is a key into the `models` registry, so registered keys autoco
 
 Every machine can invoke these built-in actor sources. They are reserved `src` strings; the invoke's `input` shapes each call.
 
-| `src`                | Purpose                                                   |
-| -------------------- | --------------------------------------------------------- |
-| `agent.generateText` | Inline one-shot text (or structured-output) model call.    |
-| `agent.streamText`   | Same, streamed chunk by chunk through `onChunk`.           |
-| `agent.decide`       | Model picks exactly one currently-legal event.             |
-| `agent.plan`         | Model applies many legal events in a row until it stops.   |
-| `agent.userInput`    | Gather human input mid-run without settling.               |
+| `src`                | Purpose                                                  |
+| -------------------- | -------------------------------------------------------- |
+| `agent.generateText` | Inline one-shot text (or structured-output) model call.  |
+| `agent.streamText`   | Same, streamed chunk by chunk through `onChunk`.         |
+| `agent.decide`       | Model picks exactly one currently-legal event.           |
+| `agent.plan`         | Model applies many legal events in a row until it stops. |
+| `agent.userInput`    | Gather human input mid-run without settling.             |
 
 ### Named requests
 

@@ -42,15 +42,15 @@ Three questions separate the seven presets:
 - **Who picks the next unit?** The author (`sequential`, `parallel`, `loop`) or the model (`router`, `supervisor`, `handoff`).
 - **Does control come back?** Delegation returns (`supervisor`); routing ends the run (`router`); handoff transfers for good (`handoff`).
 
-| Preset | Shape | Model chooses | Control returns |
-| --- | --- | --- | --- |
-| `createToolLoopMachine` | One request, host-run tool loop | tools | n/a |
-| `createSequentialMachine` | Prompt chain, step by step | nothing | n/a |
-| `createRouterMachine` | One decision picks one destination | the route | no, the run ends there |
-| `createParallelMachine` | Static fan-out, joined | nothing | yes, at the join |
-| `createLoopMachine` | Bounded repeat | nothing | yes, each iteration |
-| `createSupervisorMachine` | Delegate, accumulate, repeat | the worker, or `FINISH` | yes, every turn |
-| `createHandoffMachine` | Peer swarm, `activeAgent` holds the mic | n/a (host sends `transfer_to_*`) | no, transfer is final |
+| Preset                    | Shape                                   | Model chooses                    | Control returns        |
+| ------------------------- | --------------------------------------- | -------------------------------- | ---------------------- |
+| `createToolLoopMachine`   | One request, host-run tool loop         | tools                            | n/a                    |
+| `createSequentialMachine` | Prompt chain, step by step              | nothing                          | n/a                    |
+| `createRouterMachine`     | One decision picks one destination      | the route                        | no, the run ends there |
+| `createParallelMachine`   | Static fan-out, joined                  | nothing                          | yes, at the join       |
+| `createLoopMachine`       | Bounded repeat                          | nothing                          | yes, each iteration    |
+| `createSupervisorMachine` | Delegate, accumulate, repeat            | the worker, or `FINISH`          | yes, every turn        |
+| `createHandoffMachine`    | Peer swarm, `activeAgent` holds the mic | n/a (host sends `transfer_to_*`) | no, transfer is final  |
 
 ## Config names
 

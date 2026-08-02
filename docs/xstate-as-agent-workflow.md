@@ -145,7 +145,13 @@ The host owns the loop over an append-only event log of external inputs. At each
 
 ```ts
 import { initialTransition, transition, type AnyMachineSnapshot } from "xstate";
-import { createReplayEntry, executeAgentRequest, getAgentEffects, initEntry, resolveDecision } from "@statelyai/agent";
+import {
+  createReplayEntry,
+  executeAgentRequest,
+  getAgentEffects,
+  initEntry,
+  resolveDecision,
+} from "@statelyai/agent";
 
 const executors = createAiSdkExecutors({ models });
 const input = { topic: "state machines" };
@@ -245,8 +251,15 @@ import { resolveDecision } from "@statelyai/agent";
 const events = getAcceptedEvents(snapshot);
 
 const event = await resolveDecision(
-  { kind: "decision", id: "judge", model: "judge", system: "You are a poetry judge.",
-    prompt: `Judge:\n${haiku}`, events, attempts: [] },
+  {
+    kind: "decision",
+    id: "judge",
+    model: "judge",
+    system: "You are a poetry judge.",
+    prompt: `Judge:\n${haiku}`,
+    events,
+    attempts: [],
+  },
   executors.decide!,
   { canTake: (e) => snapshot.can(e) },
 );

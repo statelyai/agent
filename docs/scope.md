@@ -13,19 +13,19 @@ That boundary is deliberate. A machine should run unchanged with a different mod
 
 <!-- ownership boundaries derived from src/run-agent.ts, src/steps.ts, src/types.ts, and the host/example adapters -->
 
-| Concern | Owner | Stately Agent integration point |
-| --- | --- | --- |
-| Workflow states, branching, loops, parallelism, retries, approval gates | Machine | XState machine configuration |
-| Model calls and structured output | Host or model SDK | `AgentRequestExecutors` |
-| Tools and tool loops | Host or model SDK | request `tools` and `metadata` |
-| Search, RAG, crawling, data APIs | Specialized library or service | tool, executor, or `actors` implementation |
-| Long-term and semantic memory | Database or memory library | load into machine input; expose reads/writes as actors or tools |
-| Sandboxes, filesystems, generated artifacts | Sandbox or workspace library | host actors and artifact handles in machine context |
-| MCP discovery, auth, sessions, and transport | MCP client or host framework | pass discovered tool descriptors into requests |
-| Evaluation datasets, scorers, experiments, and dashboards | Evaluation library | consume `onTrace`, `onResult`, snapshots, and machine outputs |
-| Snapshot persistence | Host store | `AgentSnapshotStore` and `persistSnapshot(...)` |
-| Queues, schedules, leases, deployment, HTTP/SSE/WebSocket | Runtime or application framework | step API, snapshots, callbacks, emitted events |
-| Telemetry export | Observability library | `onTrace` and `inspect` |
+| Concern                                                                 | Owner                            | Stately Agent integration point                                 |
+| ----------------------------------------------------------------------- | -------------------------------- | --------------------------------------------------------------- |
+| Workflow states, branching, loops, parallelism, retries, approval gates | Machine                          | XState machine configuration                                    |
+| Model calls and structured output                                       | Host or model SDK                | `AgentRequestExecutors`                                         |
+| Tools and tool loops                                                    | Host or model SDK                | request `tools` and `metadata`                                  |
+| Search, RAG, crawling, data APIs                                        | Specialized library or service   | tool, executor, or `actors` implementation                      |
+| Long-term and semantic memory                                           | Database or memory library       | load into machine input; expose reads/writes as actors or tools |
+| Sandboxes, filesystems, generated artifacts                             | Sandbox or workspace library     | host actors and artifact handles in machine context             |
+| MCP discovery, auth, sessions, and transport                            | MCP client or host framework     | pass discovered tool descriptors into requests                  |
+| Evaluation datasets, scorers, experiments, and dashboards               | Evaluation library               | consume `onTrace`, `onResult`, snapshots, and machine outputs   |
+| Snapshot persistence                                                    | Host store                       | `AgentSnapshotStore` and `persistSnapshot(...)`                 |
+| Queues, schedules, leases, deployment, HTTP/SSE/WebSocket               | Runtime or application framework | step API, snapshots, callbacks, emitted events                  |
+| Telemetry export                                                        | Observability library            | `onTrace` and `inspect`                                         |
 
 The repository includes examples for the orchestration shape, not replacement implementations of those systems. For example, [deep research](../examples/deep-research/index.ts) models planning, concurrent research, reflection, and synthesis; its search implementation still belongs to the host. [Trading team](../examples/trading-team/index.ts) models parallel analysts, debate, risk review, and approval; market feeds and order execution remain external.
 

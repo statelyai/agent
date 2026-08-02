@@ -56,7 +56,12 @@ const messages = [
     { type: "tool-call", toolCallId: "call_1", toolName: "getWeather", input: { city: "Paris" } },
   ]),
   toolMessage([
-    { type: "tool-result", toolCallId: "call_1", toolName: "getWeather", output: { type: "json", value: { tempC: 18 } } },
+    {
+      type: "tool-result",
+      toolCallId: "call_1",
+      toolName: "getWeather",
+      output: { type: "json", value: { tempC: 18 } },
+    },
   ]),
 ];
 ```

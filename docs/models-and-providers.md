@@ -119,12 +119,12 @@ The `decide` executor maps each machine event to a forced tool call, and that ma
 
 Runnable hosts, one per provider stack:
 
-| Example                                                                                                   | Backing                                                                                                            |
-| --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| [ai-sdk-host](../examples/ai-sdk-host/index.ts)                                                             | Vercel AI SDK, through the shipped adapter                                                                           |
-| [openai-sdk-host](../examples/openai-sdk-host/index.ts)                                                     | raw `openai` (Chat Completions); structured via `response_format`, decisions via `tool_choice: 'required'`            |
-| [anthropic-sdk-host](../examples/anthropic-sdk-host/index.ts)                                               | raw `@anthropic-ai/sdk` (Messages); structured via forced tool call, decisions via `tool_choice: { type: 'any' }`     |
-| [cloudflare-agent-host](../examples/cloudflare-agent-host/index.ts)                                         | Durable Object                                                                                                       |
-| [cloudflare-workers-ai-host](../examples/cloudflare-workers-ai-host/index.ts)                               | Workers AI binding                                                                                                   |
+| Example                                                                       | Backing                                                                                                           |
+| ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| [ai-sdk-host](../examples/ai-sdk-host/index.ts)                               | Vercel AI SDK, through the shipped adapter                                                                        |
+| [openai-sdk-host](../examples/openai-sdk-host/index.ts)                       | raw `openai` (Chat Completions); structured via `response_format`, decisions via `tool_choice: 'required'`        |
+| [anthropic-sdk-host](../examples/anthropic-sdk-host/index.ts)                 | raw `@anthropic-ai/sdk` (Messages); structured via forced tool call, decisions via `tool_choice: { type: 'any' }` |
+| [cloudflare-agent-host](../examples/cloudflare-agent-host/index.ts)           | Durable Object                                                                                                    |
+| [cloudflare-workers-ai-host](../examples/cloudflare-workers-ai-host/index.ts) | Workers AI binding                                                                                                |
 
 Package entry points are `@statelyai/agent` (root), `@statelyai/agent/ai-sdk`, `@statelyai/agent/machines`, `@statelyai/agent/sqlite`, and `@statelyai/agent/agent-workflow.json`. Everything a hand-written host needs (`buildEnvelopeSchema`, `getJsonSchema`, `parseOutput`, `parseStructuredEnvelope`, `getAgentOutputMode`, `resolveDecision`, `renderDecisionAttempts`) comes from the root.

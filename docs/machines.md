@@ -93,7 +93,9 @@ const models = defineModels({
 
 const agentSetup = setupAgent({
   models,
-  context, input, output,
+  context,
+  input,
+  output,
   requests: {
     answerQuestion: {
       schemas: { input: z.object({ prompt: z.string() }), output: answerSchema },
@@ -157,13 +159,13 @@ const agentSetup = setupAgent({
 
 `setupAgent` also registers reserved `src` strings on every machine, for ad-hoc model work that doesn't warrant a named request. The invoke's `input` shapes each call:
 
-| `src`                | Invoke `input`                                            | `onDone` output                                   | Reference                             |
-| -------------------- | --------------------------------------------------------- | ------------------------------------------------- | ------------------------------------- |
-| `agent.generateText` | `model`, `prompt` or `messages`, optional `system`, `outputSchema`, `tools` | text, or the value parsed from `outputSchema`     | [Text requests](text-requests.md)     |
-| `agent.streamText`   | same as `agent.generateText`                               | same, with chunks delivered to the host as they arrive | [Text requests](text-requests.md)     |
-| `agent.decide`       | `model`, `prompt`, optional `system`, `allowedEvents`      | the one chosen event, applied to the machine      | [Decisions](decisions.md)             |
-| `agent.plan`         | same as `agent.decide`                                     | several legal events applied in a row             | [Plans](plans.md)                     |
-| `agent.userInput`    | `prompt`, optional `schema`                                | the human's value                                 | [Human in the loop](human-in-the-loop.md) |
+| `src`                | Invoke `input`                                                              | `onDone` output                                        | Reference                                 |
+| -------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------ | ----------------------------------------- |
+| `agent.generateText` | `model`, `prompt` or `messages`, optional `system`, `outputSchema`, `tools` | text, or the value parsed from `outputSchema`          | [Text requests](text-requests.md)         |
+| `agent.streamText`   | same as `agent.generateText`                                                | same, with chunks delivered to the host as they arrive | [Text requests](text-requests.md)         |
+| `agent.decide`       | `model`, `prompt`, optional `system`, `allowedEvents`                       | the one chosen event, applied to the machine           | [Decisions](decisions.md)                 |
+| `agent.plan`         | same as `agent.decide`                                                      | several legal events applied in a row                  | [Plans](plans.md)                         |
+| `agent.userInput`    | `prompt`, optional `schema`                                                 | the human's value                                      | [Human in the loop](human-in-the-loop.md) |
 
 Named `requests` stay the default (typed, reusable, testable); the builtins are the inline escape hatch. Both are executed by the host, so a machine using either still names no SDK.
 
@@ -201,12 +203,12 @@ const machine = agentSetup.createMachine({
 
 The canonical form covers most machines. Each alternate handles one specific need:
 
-| Form                                                                                                                                        | Reach for it when                                                                                                                                                           |
-| ------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Canonical**: `models` registry + flat schema fields on `setupAgent`, `model: 'quick'` keys, host with `createAiSdkExecutors({ models })` | Default. A single machine whose models are known at author time.                                                                                                            |
-| **`createAgentSchemas` pack**: `setupAgent({ schemas })`                                                                                   | Sharing one schema set across several machines or the [step helpers](steps.md).                                                                                             |
-| **String refs + `resolveModel`**: `model: 'openai/gpt-5.4-mini'`, `createAiSdkExecutors({ resolveModel })`                                 | The machine must not name concrete models: maximum portability, refs resolved by the host or loaded from JSON [config](machines-as-data.md).                               |
-| **`createTextLogic`**: a standalone request value                                                                                          | A request that is exported, reused across states or machines, or unit-tested on its own. See [Text requests](text-requests.md#reusable-request-logic-with-createtextlogic). |
+| Form                                                                                                                                       | Reach for it when                                                                                                                                                                                                                                      |
+| ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Canonical**: `models` registry + flat schema fields on `setupAgent`, `model: 'quick'` keys, host with `createAiSdkExecutors({ models })` | Default. A single machine whose models are known at author time.                                                                                                                                                                                       |
+| **`createAgentSchemas` pack**: `setupAgent({ schemas })`                                                                                   | Sharing one schema set across several machines or the [step helpers](steps.md).                                                                                                                                                                        |
+| **String refs + `resolveModel`**: `model: 'openai/gpt-5.4-mini'`, `createAiSdkExecutors({ resolveModel })`                                 | The machine must not name concrete models: maximum portability, refs resolved by the host or loaded from JSON [config](machines-as-data.md).                                                                                                           |
+| **`createTextLogic`**: a standalone request value                                                                                          | A request that is exported, reused across states or machines, or unit-tested on its own. See [Text requests](text-requests.md#reusable-request-logic-with-createtextlogic).                                                                            |
 | **`withExecutor`**: `logic.withExecutor(...)`                                                                                              | Binding execution onto one logic rather than the whole host: per-logic host binding or an intentionally unregistered dynamic logic. Registered dynamic spawns inherit through `actors`; see [Multi-agent composition](multi-agent.md#dynamic-binding). |
 
 ### Direct execution without runAgent

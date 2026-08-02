@@ -94,12 +94,19 @@ const machine = agentSetup.createMachine({
 The first `runAgent` runs the draft, reaches `reviewing`, settles `idle`. Persist the snapshot, wait for the human, resume with `{ snapshot, event }`:
 
 ```ts
-const first = await runAgent(machine, { input: { topic: "release notes" }, executors: { generateText } });
+const first = await runAgent(machine, {
+  input: { topic: "release notes" },
+  executors: { generateText },
+});
 // first.status === 'idle'
 const persisted = persistSnapshot(first.snapshot);
 
 // ...later, possibly a different process, the human approved...
-const second = await runAgent(machine, { snapshot: persisted, event: { type: "APPROVE" }, executors: { generateText } });
+const second = await runAgent(machine, {
+  snapshot: persisted,
+  event: { type: "APPROVE" },
+  executors: { generateText },
+});
 // second.status === 'done'
 ```
 
@@ -119,7 +126,11 @@ let result = await runAgent(machine, { input, executors: { generateText } });
 while (result.status === "idle") {
   const choices = getAcceptedEvents(result.snapshot);
   const event = await promptUser(choices);
-  result = await runAgent(machine, { snapshot: result.snapshot, event, executors: { generateText } });
+  result = await runAgent(machine, {
+    snapshot: result.snapshot,
+    event,
+    executors: { generateText },
+  });
 }
 ```
 

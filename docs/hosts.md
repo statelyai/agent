@@ -13,11 +13,11 @@ A **host** runs an agent machine and supplies the functions that call a model. T
 
 Those functions are the **executors**, typed as `AgentRequestExecutors`. Each is a plain async function taking a plain request object, so any SDK or a raw `fetch` can back it:
 
-| Executor | Returns | Required when |
-| --- | --- | --- |
+| Executor                      | Returns                                                                                                     | Required when                            |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
 | `generateText(request, info)` | `{ output }` (text string or structured object; optional passthrough fields like `usage` allowed alongside) | machine has a generate-mode text request |
-| `streamText(request, info)` | `{ output }` (accumulated text; chunks stream through `info.onChunk`) | machine has a streaming request |
-| `decide(request)` | `{ event }` (the one event the model chose) | machine has a decision |
+| `streamText(request, info)`   | `{ output }` (accumulated text; chunks stream through `info.onChunk`)                                       | machine has a streaming request          |
+| `decide(request)`             | `{ event }` (the one event the model chose)                                                                 | machine has a decision                   |
 
 At bind time, before any actor runs, `runAgent` checks the required executors, so a machine that needs `decide` without one fails immediately rather than mid-run. A machine with only plain actors needs no executors.
 

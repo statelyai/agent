@@ -188,8 +188,12 @@ import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 import { createWorkersAI } from "workers-ai-provider";
 import { announceMachine } from "./announce-machine.js";
 
-interface Env { AI: Ai }
-interface State { snapshot?: Snapshot<unknown> }
+interface Env {
+  AI: Ai;
+}
+interface State {
+  snapshot?: Snapshot<unknown>;
+}
 
 export class AnnounceAgent extends Agent<Env, State> {
   initialState: State = {};

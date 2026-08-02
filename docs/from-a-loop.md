@@ -4,7 +4,7 @@ description: Convert a realistic while-loop tool-calling agent into an agent mac
 ---
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
-This page refactors a working `while`-loop agent into an agent machine **without rewriting your model calls**: your SDK calls, tools, and retry logic become the [executors](hosts.md); the machine replaces only the control flow.
+> This page refactors a working `while`-loop agent into an agent machine **without rewriting your model calls**: your SDK calls, tools, and retry logic become the [executors](hosts.md); the machine replaces only the control flow.
 
 The call site stays one line. Where you had:
 
@@ -27,17 +27,17 @@ If you already have a state machine and want to bind LLM work to it, start from 
 A realistic refund agent as a `while` loop with any SDK. It works: the model calls tools until it stops, a `$100` limit is enforced inline, and anything bigger pauses for a human.
 
 ```ts
-import { generateText, tool } from 'ai';
-import { openai } from '@ai-sdk/openai';
-import { z } from 'zod';
+import { generateText, tool } from "ai";
+import { openai } from "@ai-sdk/openai";
+import { z } from "zod";
 
 async function runRefundAgent(request: string) {
-  const messages: any[] = [{ role: 'user', content: request }];
+  const messages: any[] = [{ role: "user", content: request }];
   let refunded = false;
 
   while (true) {
     const { toolCalls } = await generateText({
-      model: openai('gpt-5.4-mini'),
+      model: openai("gpt-5.4-mini"),
       messages,
       tools: {
         lookupOrder: tool({ inputSchema: z.object({ id: z.string() }) }),
@@ -48,7 +48,7 @@ async function runRefundAgent(request: string) {
     if (!toolCalls?.length) return { refunded };
 
     for (const call of toolCalls) {
-      if (call.toolName === 'issueRefund') {
+      if (call.toolName === "issueRefund") {
         if (call.input.amount > 100) return { pending: true }; // ...now what?
         refunded = true;
       }
@@ -95,24 +95,24 @@ The phases become `deciding`, `awaitingHuman`, `refunded`, `denied`.
 ```ts
 const machine = agentSetup.createMachine({
   context: ({ input }) => ({ ...input, refunded: false }),
-  initial: 'deciding',
+  initial: "deciding",
   states: {
     deciding: {
       invoke: {
-        src: 'agent.decide',
+        src: "agent.decide",
         input: ({ context }) => ({
-          model: 'quick',
-          system: 'Decide whether this refund can be issued directly.',
+          model: "quick",
+          system: "Decide whether this refund can be issued directly.",
           prompt: `${context.request} (amount: $${context.amount})`,
-          allowedEvents: ['REFUND', 'ESCALATE'], // typo = compile error
+          allowedEvents: ["REFUND", "ESCALATE"], // typo = compile error
         }),
       },
       on: {
         // Guard owns the limit: REFUND above $100 returns undefined, so the
         // model is rejected and re-asked with typed feedback.
         REFUND: ({ context }) =>
-          context.amount <= 100 ? { target: 'refunded', context: { refunded: true } } : undefined,
-        ESCALATE: { target: 'awaitingHuman' },
+          context.amount <= 100 ? { target: "refunded", context: { refunded: true } } : undefined,
+        ESCALATE: { target: "awaitingHuman" },
       },
     },
     // ...
@@ -148,18 +148,18 @@ With `runAgent` owning the loop, the `while (true)` is gone; you supply executor
 const executors = createAiSdkExecutors({ models });
 
 const result = await runAgent(machine, {
-  input: { request: 'Refund my duplicate charge', amount: 5000 },
+  input: { request: "Refund my duplicate charge", amount: 5000 },
   executors,
 });
 
-if (result.status === 'idle') {
+if (result.status === "idle") {
   // Persist result.snapshot anywhere (plain JSON), then resume in any process:
   const resumed = await runAgent(machine, {
     snapshot: result.snapshot,
-    event: { type: 'APPROVE' },
+    event: { type: "APPROVE" },
     executors,
   });
-  if (resumed.status === 'done') console.log(resumed.output); // { refunded: true }
+  if (resumed.status === "done") console.log(resumed.output); // { refunded: true }
 }
 ```
 

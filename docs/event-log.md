@@ -161,7 +161,7 @@ const next = await store.length("session-1"); // the next expectedIndex
 ```
 
 - `append` is atomic and rejects stale writers with `AgentEventLogConflictError` (`threadId`, `expectedIndex`, `actualLength`), so two hosts resuming one thread resolve to exactly one winner. Event ids must also be unique within a thread.
-- `read`/`length` are the whole history API: the log *is* the history.
+- `read`/`length` are the whole history API: the log _is_ the history.
 - `fork({ threadId, newThreadId, upToIndex })` copies an exclusive index prefix; `atEventId` is the inclusive event-id form. Forked entries retain their ids. Rewind and diverge by appending different envelopes to the new thread.
 
 Every entry carries optional host-owned `metadata`, stored verbatim.
@@ -203,11 +203,7 @@ await store.fork({
   atEventId: "evt_00000007",
 });
 
-const diff = diffEventLogs(
-  machine,
-  await store.read("session-1"),
-  await store.read("candidate"),
-);
+const diff = diffEventLogs(machine, await store.read("session-1"), await store.read("candidate"));
 ```
 
 `diffEventLogs` returns the exact common prefix, parent-only and fork-only tails, both replay results, JSON Patch-style logical-state changes, and added/removed/changed frontier effects. It is structural only; semantic quality belongs to an evaluator.
