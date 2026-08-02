@@ -1,4 +1,7 @@
 packages:
+  # The root is the published @statelyai/agent package itself — it must be a
+  # workspace member so changesets can version it.
+  - .
   - demo
   # Host examples for frameworks published on npm: real deps, so CI catches API
   # drift. Every other example stays a plain file in `examples/`.
