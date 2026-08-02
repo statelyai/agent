@@ -136,6 +136,8 @@ type InteractionHints = {
   label?: string;
   events?: Record<string, { label?: string; style?: string }>;
   textEvent?: string;
+  /** Custom composer renderer for this state ("rating", "cards", …). */
+  component?: string;
 };
 
 function interactionHints(snapshot: AnyMachineSnapshot): InteractionHints {
@@ -175,6 +177,7 @@ export function describeIdle(machine: AnyStateMachine, snapshot: AnyMachineSnaps
     prompt: typeof hints.label === "string" ? hints.label : null,
     events,
     textEvent: chosen && field ? { type: chosen.type, field } : null,
+    component: typeof hints.component === "string" && hints.component ? hints.component : null,
   };
 }
 

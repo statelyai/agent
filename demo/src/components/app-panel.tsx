@@ -1,12 +1,12 @@
 import type { ReactNode } from "react";
-import { ArrowRight, Bot, Check, CircleAlert, LoaderCircle, RefreshCcw, UserRound } from "lucide-react";
+import { ArrowUp, Bot, RefreshCcw, UserRound } from "lucide-react";
 import { Streamdown } from "streamdown";
-import { Bubble, BubbleContent } from "@/components/ui/bubble";
-import { Button } from "@/components/ui/button";
 import { EventActions, StartFormCard } from "@/components/event-actions";
-import { Message, MessageAvatar, MessageContent } from "@/components/ui/message";
+import { Bubble, BubbleContent } from "@/components/ui/bubble";
+import { Message, MessageAvatar, MessageContent, MessageFooter } from "@/components/ui/message";
 import {
   MessageScroller,
+  MessageScrollerButton,
   MessageScrollerContent,
   MessageScrollerItem,
   MessageScrollerProvider,
@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/message-scroller";
 import type { TraceEntry } from "@/lib/agent-runner";
 import type { ChatIdle, JsonObject } from "@/lib/machine-ui";
-import { traceSteps, type TraceStep } from "@/lib/trace-view";
+import { stateValueLabel, traceSteps, type TraceStep } from "@/lib/trace-view";
 
 /** The common shape of a settled run, scenario or library example alike. */
 export type ChatTurnResult = {
@@ -29,6 +29,8 @@ export type Turn = {
   id: number;
   input: string;
   role: "user" | "action";
+  /** For "action" turns: the event type echoed beside the chip, when known. */
+  eventType?: string;
   /** "ignored": free text the machine's current state doesn't consume. */
   status: "loading" | "ready" | "error" | "ignored";
   result?: ChatTurnResult;
@@ -45,7 +47,8 @@ export type TextPolicy = {
 };
 
 type AppPanelProps = {
-  title: string;
+  /** Accepted and ignored: the panel no longer renders a heading. */
+  title?: string;
   /** Empty-state content shown before the first turn. */
   intro: ReactNode;
   turns: Turn[];
@@ -60,90 +63,52 @@ type AppPanelProps = {
   textPolicy: TextPolicy;
 };
 
-/** The event token: `EVENT_TYPE  →  targetState · payload`, styled like a trace-log line. */
+/** The state that produced this answer: the last committed transition target. */
+function resultState(result: ChatTurnResult): string {
+  const committed = result.trace.filter(
+    (entry) => entry.event.type !== "xstate.init" && entry.event.type !== "@xstate.init",
+  );
+  const last = committed[committed.length - 1];
+  return last ? stateValueLabel(last.value) : result.mode;
+}
+
+/** A committed transition, as a compact log line: `EVENT → target`. */
 function TraceStepRow({ step }: { step: TraceStep }) {
   const eventType = step.title.replace(/\s[✓✗]$/, "");
   const target = step.detail.replace(/^→\s*/, "");
-  const isError = step.kind === "error";
   return (
-    <div className="trace-step" data-kind={step.kind}>
-      <span className="trace-step__dot" aria-hidden="true" />
-      <code className="trace-step__event">{eventType}</code>
-      <ArrowRight className="trace-step__arrow" size={13} aria-hidden="true" />
-      <code className="trace-step__target">{target}</code>
-      {isError ? (
-        <CircleAlert className="trace-step__status trace-step__status--error" size={14} aria-label="Error" />
-      ) : (
-        <Check className="trace-step__status trace-step__status--ok" size={14} aria-label="Transition committed" />
-      )}
-    </div>
-  );
-}
-
-function PendingRow() {
-  return (
-    <div className="trace-step trace-step--pending" role="status">
-      <span className="trace-step__dot" aria-hidden="true" />
-      <code className="trace-step__event">runAgent</code>
-      <span className="trace-step__running">running the machine…</span>
-      <LoaderCircle className="trace-step__status trace-step__spinner" size={14} aria-label="Running" />
-    </div>
-  );
-}
-
-function RunMode({ result }: { result: ChatTurnResult }) {
-  const script = result.mode === "script";
-  return (
-    <span className="run-mode" data-script={script || undefined}>
-      <span className="run-mode__tag">{script ? "Script · keyless" : `Live · ${result.model}`}</span>
-      <span className="run-mode__note">
-        {script ? "same machine, injected executors, no API calls" : "model-driven run"}
+    <div className="chat-trace__row" data-kind={step.kind}>
+      <span className="chat-trace__event">{eventType}</span>
+      <span className="chat-trace__arrow" aria-hidden="true">
+        →
       </span>
-    </span>
+      <span className="chat-trace__target">{target}</span>
+    </div>
   );
 }
 
-function UserMessage({ text, role }: { text: string; role: Turn["role"] }) {
+/** Left-aligned "the machine is waiting for you" affordance. */
+function WaitingIndicator({ idle }: { idle: ChatIdle }) {
   return (
-    <Message align="end">
-      <MessageAvatar className="message-avatar" aria-hidden="true">
-        {role === "action" ? <Check size={14} /> : <UserRound size={15} />}
-      </MessageAvatar>
-      <MessageContent>
-        <Bubble align="end">
-          <BubbleContent>{text}</BubbleContent>
-        </Bubble>
-      </MessageContent>
-    </Message>
-  );
-}
-
-function AssistantMessage({ result }: { result: ChatTurnResult }) {
-  return (
-    <Message>
-      <MessageAvatar className="message-avatar" aria-hidden="true">
-        <Bot size={15} />
-      </MessageAvatar>
-      <MessageContent>
-        <Bubble variant="ghost">
-          <BubbleContent>
-            <Streamdown className="assistant-markdown">{result.response}</Streamdown>
-          </BubbleContent>
-        </Bubble>
-        <RunMode result={result} />
-      </MessageContent>
-    </Message>
+    <div className="chat-waiting" role="status">
+      <div className="chat-waiting__row">
+        <span className="chat-waiting__dot" aria-hidden="true" />
+        <span className="chat-waiting__label">machine is waiting for you</span>
+        {idle.component ? <span className="chat-waiting__state">{idle.component}</span> : null}
+      </div>
+      {idle.prompt ? <p className="chat-waiting__prompt">{idle.prompt}</p> : null}
+    </div>
   );
 }
 
 /**
- * The unified chat panel. Works for any machine: free text starts a run or
- * maps to the idle state's text event; accepted events render as buttons via
- * `EventActions` (with schema-generated payload dialogs); out-of-place
- * messages are kept in the log but marked ignored.
+ * The unified chat panel: message list plus composer. Works for any machine —
+ * free text starts a run or maps to the idle state's text event, accepted
+ * events render as buttons in the composer (with schema-generated payload
+ * forms and optional custom renderers), and out-of-place messages stay in the
+ * log marked ignored.
  */
 export function AppPanel({
-  title,
   intro,
   turns,
   pendingIdle,
@@ -159,36 +124,11 @@ export function AppPanel({
   const started = turns.length > 0;
   const lastReady = [...turns].reverse().find((turn) => turn.status === "ready")?.result;
   const finished = !pendingIdle && !loading && started && lastReady && lastReady.status !== "idle";
-
-  const status: "ready" | "running" | "awaiting" | "done" = pendingIdle
-    ? "awaiting"
-    : loading
-      ? "running"
-      : finished
-        ? "done"
-        : "ready";
-  const stateLabel = pendingIdle
-    ? "idle · awaiting input"
-    : loading
-      ? "running"
-      : lastReady
-        ? lastReady.status
-        : "ready";
+  const textDisabled = loading || !textPolicy.visible;
 
   return (
-    <section className="work-panel app-panel" aria-labelledby="app-panel-title">
-      <div className="panel-heading">
-        <div>
-          <span className="panel-kicker">Running app</span>
-          <h2 id="app-panel-title">{title}</h2>
-        </div>
-        <span className="state-pill" data-status={status}>
-          <span className="state-pill__dot" aria-hidden="true" />
-          {stateLabel}
-        </span>
-      </div>
-
-      <MessageScrollerProvider autoScroll defaultScrollPosition="end">
+    <section className="work-panel app-panel" aria-label="Running app">
+      <MessageScrollerProvider autoScroll defaultScrollPosition="last-anchor">
         <MessageScroller>
           <MessageScrollerViewport aria-label="Agent conversation">
             <MessageScrollerContent className="chat-content" aria-live="polite">
@@ -202,26 +142,71 @@ export function AppPanel({
 
               {turns.map((turn) => (
                 <MessageScrollerItem key={turn.id} messageId={`turn-${turn.id}`} scrollAnchor>
-                  <div className="conversation-turn">
-                    <UserMessage text={turn.input} role={turn.role} />
-                    {turn.status === "loading" ? <PendingRow /> : null}
-                    {turn.status === "ignored" ? (
-                      <p className="ignored-note" role="status">
-                        Not an accepted event in the current state — the machine ignored it.
+                  <div className="chat-turn">
+                    {turn.role === "action" ? (
+                      <div className="chat-echo">
+                        <span className="chat-echo__chip">{turn.input}</span>
+                        {turn.eventType ? (
+                          <span className="chat-echo__type">{turn.eventType}</span>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <Message align="end">
+                        <MessageAvatar className="chat-avatar">
+                          <UserRound size={15} aria-hidden="true" />
+                        </MessageAvatar>
+                        <MessageContent>
+                          <Bubble align="end">
+                            <BubbleContent>{turn.input}</BubbleContent>
+                          </Bubble>
+                        </MessageContent>
+                      </Message>
+                    )}
+
+                    {turn.status === "loading" ? (
+                      <p className="chat-system" role="status">
+                        running the machine…
                       </p>
                     ) : null}
+
+                    {turn.status === "ignored" ? (
+                      <p className="chat-system" role="status">
+                        not an accepted event in the current state — the machine ignored it
+                      </p>
+                    ) : null}
+
                     {turn.status === "ready" && turn.result ? (
                       <>
                         {traceSteps(turn.result.trace).length ? (
-                          <div className="trace-log" aria-label="Machine transitions">
+                          <div className="chat-trace" aria-label="Machine transitions">
                             {traceSteps(turn.result.trace).map((step, index) => (
                               <TraceStepRow key={index} step={step} />
                             ))}
                           </div>
                         ) : null}
-                        <AssistantMessage result={turn.result} />
+                        <Message>
+                          <MessageAvatar className="chat-avatar">
+                            <Bot size={15} aria-hidden="true" />
+                          </MessageAvatar>
+                          <MessageContent>
+                            <Bubble variant="muted">
+                              <BubbleContent>
+                                <Streamdown className="assistant-markdown">
+                                  {turn.result.response}
+                                </Streamdown>
+                              </BubbleContent>
+                            </Bubble>
+                            <MessageFooter className="chat-state-tag">
+                              {resultState(turn.result)}
+                            </MessageFooter>
+                          </MessageContent>
+                        </Message>
+                        {turn.result.status === "done" ? (
+                          <p className="chat-system">machine reached final state</p>
+                        ) : null}
                       </>
                     ) : null}
+
                     {turn.status === "error" ? (
                       <Bubble variant="destructive">
                         <BubbleContent>{turn.error}</BubbleContent>
@@ -232,47 +217,68 @@ export function AppPanel({
               ))}
 
               {pendingIdle && !loading ? (
-                <MessageScrollerItem messageId="event-actions">
-                  <EventActions idle={pendingIdle} onSendEvent={onSendEvent} />
+                <MessageScrollerItem messageId="waiting">
+                  <WaitingIndicator idle={pendingIdle} />
                 </MessageScrollerItem>
               ) : null}
             </MessageScrollerContent>
           </MessageScrollerViewport>
+          <MessageScrollerButton />
         </MessageScroller>
       </MessageScrollerProvider>
 
-      {finished ? (
-        <div className="run-again">
-          <Button variant="ghost" size="sm" onClick={onRestart}>
-            <RefreshCcw size={15} />
-            Run again
-          </Button>
-        </div>
-      ) : textPolicy.visible ? (
-        <form
-          className="prompt-input"
-          onSubmit={(event) => {
-            event.preventDefault();
-            onSubmit(input);
-          }}
-        >
-          <textarea
-            className="prompt-input__textarea"
-            name="message"
-            rows={2}
-            value={input}
-            onChange={(event) => onInputChange(event.target.value)}
-            placeholder={textPolicy.placeholder}
-            maxLength={2000}
-            disabled={loading}
-            aria-label="Message"
-          />
-          <Button type="submit" variant="primary" size="sm" disabled={!input.trim() || loading}>
-            {loading ? "Running…" : textPolicy.submitLabel}
-          </Button>
-        </form>
-      ) : null}
-      {textPolicy.note ? <p className="composer-note">{textPolicy.note}</p> : null}
+      <div className="chat-composer">
+        {pendingIdle && !loading ? (
+          <EventActions idle={pendingIdle} onSendEvent={onSendEvent} />
+        ) : null}
+
+        {finished ? (
+          <div className="chat-composer__footer">
+            <button className="chat-restart" onClick={onRestart}>
+              <RefreshCcw size={14} aria-hidden="true" />
+              Run again
+            </button>
+          </div>
+        ) : (
+          <form
+            className="chat-input"
+            data-disabled={textDisabled || undefined}
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (textDisabled) return;
+              onSubmit(input);
+            }}
+          >
+            <textarea
+              className="chat-input__textarea"
+              name="message"
+              rows={2}
+              value={textDisabled ? "" : input}
+              onChange={(event) => onInputChange(event.target.value)}
+              placeholder={
+                loading
+                  ? "Agent is working…"
+                  : textPolicy.visible
+                    ? textPolicy.placeholder
+                    : "The machine isn't accepting free text right now — use the controls above"
+              }
+              maxLength={2000}
+              disabled={textDisabled}
+              aria-label="Message"
+            />
+            <button
+              className="chat-send"
+              type="submit"
+              aria-label={textPolicy.submitLabel || "Send"}
+              disabled={textDisabled || !input.trim()}
+            >
+              <ArrowUp size={17} aria-hidden="true" />
+            </button>
+          </form>
+        )}
+
+        {textPolicy.note ? <p className="chat-composer__note">{textPolicy.note}</p> : null}
+      </div>
     </section>
   );
 }

@@ -1,10 +1,8 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { Braces, Menu, X } from "lucide-react";
-import { AppPanel, type ChatTurnResult, type TextPolicy, type Turn } from "@/components/app-panel";
+import { useSelector } from "@xstate/store-react";
+import { AppPanel, type TextPolicy, type Turn } from "@/components/app-panel";
 import { ExampleIntro, ScenarioIntro, type StarterAction } from "@/components/chat-intros";
-import { CodePanel } from "@/components/code-panel";
-import { ExamplesSidebar } from "@/components/examples-sidebar";
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
+import { SiteHeader } from "@/components/site-header";
 import { VizPanel } from "@/components/viz-panel";
 import { useTracePlayer } from "@/hooks/use-trace-player";
 import {
@@ -17,12 +15,17 @@ import {
   type ExampleSummary,
   type InspectionInfo,
 } from "@/lib/example-library";
-import { humanizeEventType, type ChatIdle, type Json } from "@/lib/machine-ui";
+import { humanizeEventType, type Json } from "@/lib/machine-ui";
 import { resumeScenario, startScenario } from "@/lib/run-demo-agent";
-import { getScenario, scenarioSource, scenarioVizConfig } from "@/lib/scenarios";
+import { getScenario, scenarioSource, scenarioVizConfig, scenarios } from "@/lib/scenarios";
 import type { Selection } from "@/lib/selection";
+import {
+  createShellStore,
+  persistTheme,
+  readStoredTheme,
+  type AnyRunResult,
+} from "@/lib/shell-store";
 
-type MobileView = "app" | "machine" | "code";
 const mobileQuery = "(max-width: 800px)";
 
 function subscribeToMobileQuery(callback: () => void) {
@@ -34,8 +37,20 @@ function getMobileSnapshot() {
   return window.matchMedia(mobileQuery).matches;
 }
 
-/** A settled result from either run path (curated scenario or library example). */
-type AnyRunResult = ChatTurnResult & { idle?: ChatIdle & { snapshot: Json } };
+/** Deep link: `#scenario:refund` or `#example:joke`. */
+function selectionFromHash(): Selection | null {
+  if (typeof window === "undefined") return null;
+  const hash = window.location.hash.replace(/^#/, "");
+  const [type, id] = hash.split(":");
+  if (type === "example" && id) return { type: "example", id };
+  const scenario = type === "scenario" ? scenarios.find((entry) => entry.id === id) : undefined;
+  if (scenario) return { type: "scenario", id: scenario.id };
+  return null;
+}
+
+function hashFromSelection(selection: Selection) {
+  return `#${selection.type}:${selection.id}`;
+}
 
 /**
  * Optional full /inspect page (VITE_VIZ_INSPECT_URL). The hosted route is
@@ -47,19 +62,21 @@ type AnyRunResult = ChatTurnResult & { idle?: ChatIdle & { snapshot: Json } };
 const inspectOverride = import.meta.env.VITE_VIZ_INSPECT_URL || null;
 
 export function DemoShell() {
-  const [selection, setSelection] = useState<Selection>({ type: "scenario", id: "refund" });
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [mobileView, setMobileView] = useState<MobileView>("app");
-  const [input, setInput] = useState("");
-  const [turns, setTurns] = useState<Turn[]>([]);
-  const [pendingIdle, setPendingIdle] = useState<ChatIdle | null>(null);
+  const [store] = useState(() =>
+    createShellStore(selectionFromHash() ?? { type: "scenario", id: "refund" }, readStoredTheme()),
+  );
+  const selection = useSelector(store, (s) => s.context.selection);
+  const machineIndex = useSelector(store, (s) => s.context.machineIndex);
+  const theme = useSelector(store, (s) => s.context.theme);
+  const codeOpen = useSelector(store, (s) => s.context.codeOpen);
+  const mobileView = useSelector(store, (s) => s.context.mobileView);
+  const input = useSelector(store, (s) => s.context.input);
+  const turns = useSelector(store, (s) => s.context.turns);
+  const pendingIdle = useSelector(store, (s) => s.context.pendingIdle);
+
   const [examples, setExamples] = useState<ExampleSummary[]>([]);
   const [exampleDetail, setExampleDetail] = useState<ExampleDetail | null>(null);
   const [exampleError, setExampleError] = useState<string | null>(null);
-  const [machineIndex, setMachineIndex] = useState(0);
-  const requestRef = useRef(0);
-  const idleSnapshotRef = useRef<Json | null>(null);
   const detailCache = useRef(new Map<string, ExampleDetail>());
   const isMobile = useSyncExternalStore(subscribeToMobileQuery, getMobileSnapshot, () => false);
 
@@ -77,6 +94,37 @@ export function DemoShell() {
     ? ((scenarioVizConfig[scenario.id] as { initial?: string }).initial ?? null)
     : (activeMachine?.initial ?? null);
   const player = useTracePlayer(machineKey, initialValue);
+
+  // Apply the persisted theme attribute on mount (SSR renders light).
+  useEffect(() => {
+    persistTheme(store.getSnapshot().context.theme);
+  }, [store]);
+
+  // Deep-link: selection ↔ URL hash.
+  useEffect(() => {
+    window.history.replaceState(null, "", hashFromSelection(selection));
+  }, [selection]);
+  useEffect(() => {
+    function onHashChange() {
+      const fromHash = selectionFromHash();
+      const current = store.getSnapshot().context.selection;
+      if (fromHash && (fromHash.type !== current.type || fromHash.id !== current.id)) {
+        store.trigger.exampleSelected({ selection: fromHash });
+        player.reset();
+      }
+    }
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, [player, store]);
+
+  // Escape closes the code drawer (the switcher popover handles its own).
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") store.trigger.codeClosed();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [store]);
 
   // Live inspection: boot the local WS relay and remember how to connect.
   const [inspection, setInspection] = useState<InspectionInfo | null>(null);
@@ -145,100 +193,88 @@ export function DemoShell() {
   }, [selection]);
 
   const resetRun = () => {
-    requestRef.current += 1;
-    setInput("");
-    setTurns([]);
-    setPendingIdle(null);
-    idleSnapshotRef.current = null;
+    store.trigger.runReset();
     player.reset();
   };
 
   const select = (next: Selection) => {
-    resetRun();
-    setMachineIndex(0);
-    setSelection(next);
-    setMobileMenuOpen(false);
-    setMobileView("app");
+    store.trigger.exampleSelected({ selection: next });
+    player.reset();
   };
 
   const selectMachine = (index: number) => {
-    resetRun();
-    setMachineIndex(index);
+    store.trigger.machineSelected({ index });
+    player.reset();
   };
 
-  const settle = (requestId: number, turnId: number, result: AnyRunResult) => {
-    if (requestRef.current !== requestId) return;
-    setTurns((current) =>
-      current.map((turn) => (turn.id === turnId ? { ...turn, status: "ready", result } : turn)),
-    );
+  const settle = (epoch: number, turnId: number, result: AnyRunResult) => {
+    store.trigger.turnSettled({ epoch, id: turnId, result });
     // With live inspection the viz already showed the run in real time; the
     // trace replay only backs the no-relay fallback.
-    if (!inspection) player.play(result.trace);
-    if (result.status === "idle" && result.idle) {
-      const { snapshot, ...idle } = result.idle;
-      idleSnapshotRef.current = snapshot;
-      setPendingIdle(idle);
-    } else {
-      idleSnapshotRef.current = null;
-      setPendingIdle(null);
-    }
+    if (!inspection && store.getSnapshot().context.epoch === epoch) player.play(result.trace);
   };
 
-  const fail = (requestId: number, turnId: number, error: unknown) => {
-    if (requestRef.current !== requestId) return;
+  const fail = (epoch: number, turnId: number, error: unknown) => {
     const message = error instanceof Error ? error.message : "Agent request failed";
-    setTurns((current) =>
-      current.map((turn) => (turn.id === turnId ? { ...turn, status: "error", error: message } : turn)),
-    );
+    store.trigger.turnFailed({ epoch, id: turnId, message });
   };
 
   const loading = turns.some((turn) => turn.status === "loading");
   const started = turns.length > 0;
   const interpretMode = isScenario && scenario.id === "approval" && pendingIdle !== null;
 
-  const pushTurn = (text: string, role: Turn["role"], status: Turn["status"]): number => {
-    const requestId = ++requestRef.current;
-    setTurns((current) => [...current, { id: requestId, input: text, role, status }]);
-    return requestId;
+  /** Appends a turn and returns its id + the epoch it belongs to. */
+  const pushTurn = (
+    text: string,
+    role: Turn["role"],
+    status: Turn["status"],
+    eventType?: string,
+  ) => {
+    const { epoch, nextTurnId } = store.getSnapshot().context;
+    store.trigger.turnPushed({ id: nextTurnId, input: text, role, status, eventType });
+    return { id: nextTurnId, epoch };
   };
 
   /** Starts a library-example run with the given machine input. */
   const startExampleRun = (label: string, machineInput: Record<string, unknown>) => {
     if (!activeMachine || loading) return;
-    const requestId = pushTurn(label, "user", "loading");
+    const { id, epoch } = pushTurn(label, "user", "loading");
     void startExample({
-      data: { id: selection.type === "example" ? selection.id : "", exportName: activeMachine.exportName, input: machineInput },
+      data: {
+        id: selection.type === "example" ? selection.id : "",
+        exportName: activeMachine.exportName,
+        input: machineInput,
+      },
     }).then(
-      (result) => settle(requestId, requestId, result),
-      (error) => fail(requestId, requestId, error),
+      (result) => settle(epoch, id, result),
+      (error) => fail(epoch, id, error),
     );
   };
 
   /** Delivers a typed event to the idle machine (either run path). */
   const sendEvent = (event: { type: string; [key: string]: unknown }) => {
-    const snapshot = idleSnapshotRef.current;
-    if (!snapshot || loading) return;
-    const descriptor = pendingIdle?.events.find((candidate) => candidate.type === event.type);
+    const { idleSnapshot, pendingIdle: idle } = store.getSnapshot().context;
+    if (!idleSnapshot || loading) return;
+    const descriptor = idle?.events.find((candidate) => candidate.type === event.type);
     const { type: _type, ...payload } = event;
     const payloadNote = Object.keys(payload).length
       ? ` · ${JSON.stringify(payload).slice(0, 60)}`
       : "";
     const label = `${descriptor?.label ?? humanizeEventType(event.type)}${payloadNote}`;
-    const requestId = pushTurn(label, "action", "loading");
-    setPendingIdle(null);
+    const { id, epoch } = pushTurn(label, "action", "loading", event.type);
     const deliver = isScenario
-      ? resumeScenario({ data: { scenarioId: scenario.id, snapshot: snapshot as never, event } })
+      ? resumeScenario({ data: { scenarioId: scenario.id, snapshot: idleSnapshot as never, event } })
       : resumeExample({
           data: {
             id: selection.type === "example" ? selection.id : "",
             exportName: activeMachine?.exportName ?? "",
-            snapshot: snapshot as never,
+            snapshot: idleSnapshot as never,
             event,
           },
         });
     void deliver.then(
-      (result) => settle(requestId, requestId, result as AnyRunResult),
-      (error) => fail(requestId, requestId, error),
+      (result) => settle(epoch, id, result as AnyRunResult),
+      (error) => fail(epoch, id, error),
     );
   };
 
@@ -246,26 +282,26 @@ export function DemoShell() {
   const submit = (raw: string) => {
     const text = raw.trim();
     if (!text || loading) return;
-    setInput("");
+    const { idleSnapshot } = store.getSnapshot().context;
 
     // Approval scenario while idle → model-interpreted free-text review.
-    if (interpretMode && idleSnapshotRef.current) {
-      const requestId = pushTurn(text, "user", "loading");
+    if (interpretMode && idleSnapshot) {
+      const { id, epoch } = pushTurn(text, "user", "loading");
       void resumeScenario({
         data: {
           scenarioId: scenario.id,
-          snapshot: idleSnapshotRef.current as never,
+          snapshot: idleSnapshot as never,
           event: { kind: "interpret", text },
         },
       }).then(
-        (result) => settle(requestId, requestId, result),
-        (error) => fail(requestId, requestId, error),
+        (result) => settle(epoch, id, result),
+        (error) => fail(epoch, id, error),
       );
       return;
     }
 
     // Idle with a text-mapped event → typed event carrying the message.
-    if (pendingIdle?.textEvent && idleSnapshotRef.current) {
+    if (pendingIdle?.textEvent && idleSnapshot) {
       sendEvent({ type: pendingIdle.textEvent.type, [pendingIdle.textEvent.field]: text });
       return;
     }
@@ -273,10 +309,10 @@ export function DemoShell() {
     // Not started → the prompt starts the run.
     if (!started) {
       if (isScenario) {
-        const requestId = pushTurn(text, "user", "loading");
+        const { id, epoch } = pushTurn(text, "user", "loading");
         void startScenario({ data: { scenarioId: scenario.id, prompt: text } }).then(
-          (result) => settle(requestId, requestId, result),
-          (error) => fail(requestId, requestId, error),
+          (result) => settle(epoch, id, result),
+          (error) => fail(epoch, id, error),
         );
       } else if (activeMachine?.promptField) {
         startExampleRun(text, { [activeMachine.promptField]: text });
@@ -358,7 +394,8 @@ export function DemoShell() {
             return [{ label: starter, onStart: () => startExampleRun(starter, { [field]: starter }) }];
           }
           const firstString = Object.values(starter).find((value) => typeof value === "string");
-          const label = typeof firstString === "string" ? firstString : JSON.stringify(starter).slice(0, 80);
+          const label =
+            typeof firstString === "string" ? firstString : JSON.stringify(starter).slice(0, 80);
           return [{ label, onStart: () => startExampleRun(label, starter) }];
         });
 
@@ -379,13 +416,12 @@ export function DemoShell() {
 
   const appPanel = (
     <AppPanel
-      title={headerName}
       intro={intro}
       turns={turns}
       pendingIdle={pendingIdle}
       startForm={startForm}
       input={input}
-      onInputChange={setInput}
+      onInputChange={(value) => store.trigger.inputChanged({ value })}
       onSubmit={submit}
       onSendEvent={sendEvent}
       onRestart={resetRun}
@@ -399,138 +435,73 @@ export function DemoShell() {
       : null;
   const liveWs = inspection ? { wsUrl: inspection.wsUrl, session: inspection.session } : null;
 
-  const vizProps = {
-    title: headerName,
-    machineKey,
-    vizConfig: isScenario
-      ? (scenarioVizConfig[scenario.id] as Record<string, unknown>)
-      : exampleDetail
-        ? (activeMachine?.vizConfig ?? null)
-        : null,
-    frame: player.frame,
-    liveWs,
-    liveUrl,
-  };
-
-  const codeProps = isScenario
-    ? {
-        fileLabel: `src/agents/${scenario.id}.ts`,
-        source: scenarioSource[scenario.id],
-        cacheKey: `scenario:${scenario.id}`,
+  const vizPanel = (
+    <VizPanel
+      title={headerName}
+      machineKey={machineKey}
+      vizConfig={
+        isScenario
+          ? (scenarioVizConfig[scenario.id] as Record<string, unknown>)
+          : exampleDetail
+            ? (activeMachine?.vizConfig ?? null)
+            : null
       }
-    : {
-        fileLabel: `examples/${selection.id}/index.ts`,
-        source: exampleDetail?.source ?? "// Loading…",
-        // The placeholder must not be cached under the example's key.
-        cacheKey: exampleDetail ? `example:${selection.id}` : `example:${selection.id}:loading`,
-      };
+      frame={player.frame}
+      liveWs={liveWs}
+      liveUrl={liveUrl}
+      theme={theme}
+      codeOpen={codeOpen}
+      onToggleCode={() => store.trigger.codeToggled()}
+      code={
+        isScenario
+          ? {
+              fileLabel: `src/agents/${scenario.id}.ts`,
+              source: scenarioSource[scenario.id],
+              cacheKey: `scenario:${scenario.id}`,
+            }
+          : {
+              fileLabel: `examples/${selection.id}/index.ts`,
+              source: exampleDetail?.source ?? "// Loading…",
+              // The placeholder must not be cached under the example's key.
+              cacheKey: exampleDetail ? `example:${selection.id}` : `example:${selection.id}:loading`,
+            }
+      }
+    />
+  );
 
   return (
     <div className="demo-shell">
-      <header className="site-header">
-        <button
-          className="icon-button site-header__menu"
-          onClick={() => setMobileMenuOpen(true)}
-          aria-label="Open examples"
-        >
-          <Menu size={18} />
-        </button>
-        <a className="brand" href="/" aria-label="Stately Agent Lab home">
-          <span className="brand__mark" aria-hidden="true">
-            <Braces size={16} strokeWidth={2.2} />
-          </span>
-          <strong>Stately Agent Lab</strong>
-        </a>
-        <span className="header-divider" aria-hidden="true" />
-        <span className="header-example">{headerName}</span>
-        <a
-          className="header-code-link"
-          href="https://github.com/statelyai/agent"
-          target="_blank"
-          rel="noreferrer"
-        >
-          <Braces size={14} />
-          View code
-        </a>
-      </header>
+      <SiteHeader store={store} examples={examples} currentTitle={headerName} onSelect={select} />
 
-      <div className="mobile-tabs" role="tablist" aria-label="Demo view">
-        <button role="tab" aria-selected={mobileView === "app"} onClick={() => setMobileView("app")}>
-          App
-        </button>
-        <button role="tab" aria-selected={mobileView === "machine"} onClick={() => setMobileView("machine")}>
-          Machine
-        </button>
-        <button role="tab" aria-selected={mobileView === "code"} onClick={() => setMobileView("code")}>
-          Code
-        </button>
-      </div>
-
-      <main className="workspace">
-        {!isMobile && (
-          <>
-            <div className="desktop-sidebar" data-open={sidebarOpen || undefined}>
-              <ExamplesSidebar
-                open={sidebarOpen}
-                onOpenChange={setSidebarOpen}
-                selection={selection}
-                onSelect={select}
-                examples={examples}
-              />
-            </div>
-            <div className="desktop-workspace">
-              <ResizablePanelGroup orientation="horizontal">
-                <ResizablePanel defaultSize={34} minSize={26}>
-                  {appPanel}
-                </ResizablePanel>
-                <ResizableHandle />
-                <ResizablePanel defaultSize={44} minSize={30}>
-                  <VizPanel {...vizProps} />
-                </ResizablePanel>
-                <ResizableHandle />
-                <ResizablePanel defaultSize={22} minSize={16}>
-                  <CodePanel {...codeProps} />
-                </ResizablePanel>
-              </ResizablePanelGroup>
-            </div>
-          </>
-        )}
-
-        {isMobile && (
-          <div className="mobile-workspace">
-            {mobileView === "app" ? appPanel : null}
-            {mobileView === "machine" ? <VizPanel {...vizProps} /> : null}
-            {mobileView === "code" ? <CodePanel {...codeProps} /> : null}
-          </div>
-        )}
-      </main>
-
-      {mobileMenuOpen && (
-        <div className="mobile-drawer" role="dialog" aria-modal="true" aria-label="Examples">
+      {isMobile && (
+        <div className="mobile-tabs" role="tablist" aria-label="Demo view">
           <button
-            className="mobile-drawer__backdrop"
-            onClick={() => setMobileMenuOpen(false)}
-            aria-label="Close examples"
-          />
-          <div className="mobile-drawer__sheet">
-            <button
-              className="icon-button mobile-drawer__close"
-              onClick={() => setMobileMenuOpen(false)}
-              aria-label="Close examples"
-            >
-              <X size={18} />
-            </button>
-            <ExamplesSidebar
-              mobile
-              open
-              onOpenChange={() => setMobileMenuOpen(false)}
-              selection={selection}
-              onSelect={select}
-              examples={examples}
-            />
-          </div>
+            role="tab"
+            aria-selected={mobileView === "app"}
+            onClick={() => store.trigger.mobileViewChanged({ view: "app" })}
+          >
+            Chat
+          </button>
+          <button
+            role="tab"
+            aria-selected={mobileView === "machine"}
+            onClick={() => store.trigger.mobileViewChanged({ view: "machine" })}
+          >
+            Machine
+          </button>
         </div>
       )}
+
+      <main className="workspace">
+        {!isMobile ? (
+          <>
+            <div className="chat-pane">{appPanel}</div>
+            <div className="viz-pane">{vizPanel}</div>
+          </>
+        ) : (
+          <div className="mobile-workspace">{mobileView === "app" ? appPanel : vizPanel}</div>
+        )}
+      </main>
     </div>
   );
 }

@@ -15,11 +15,13 @@ export default defineConfig({
   // The examples library lazily imports every `examples/*` module on the
   // server. The `agents` package (cloudflare-agent-host) uses `cloudflare:`
   // protocol imports that esbuild can't optimize — keep it external.
+  // `@mastra/core` (mastra-host) pulls execa → npm-run-path, whose browser
+  // export of `unicorn-magic` breaks esbuild's dep optimization — external too.
   optimizeDeps: {
-    exclude: ["agents"],
+    exclude: ["agents", "@mastra/core", "execa", "npm-run-path"],
   },
   ssr: {
-    external: ["agents"],
+    external: ["agents", "@mastra/core", "execa", "npm-run-path"],
   },
   plugins: [
     nitro(),

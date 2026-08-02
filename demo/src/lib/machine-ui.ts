@@ -22,6 +22,9 @@
  *        // Free chat text becomes this event (payload from its single
  *        // string field). Without it, out-of-place text is not sent.
  *        textEvent: "REJECT",
+ *        // Optional custom composer renderer for this state ("rating",
+ *        // "cards"). Unknown names fall back to the schema form.
+ *        component: "rating",
  *      },
  *    }
  *    ```
@@ -55,6 +58,12 @@ export type ChatIdle = {
    * when exactly one accepted event takes exactly one string field.
    */
   textEvent: { type: string; field: string } | null;
+  /**
+   * Optional custom composer renderer name from
+   * `meta.interaction.component` (e.g. "rating", "cards"). Null when the
+   * state declares none; unknown names fall back to the schema form.
+   */
+  component: string | null;
 };
 
 /** "AUTO_REFUND" → "Auto refund". */

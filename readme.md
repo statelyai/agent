@@ -1,8 +1,8 @@
 # Stately Agent
 
-**The logic layer for AI agents.**
+**Make invalid agent actions impossible.**
 
-Build agents as state machines to control exactly what the agent can do. The machine owns control flow; the model only ever picks a legal event. Testing, inspection, and visualization fall out for free.
+Agent logic as state machines: deterministic, inspectable, resumable, runs anywhere. The machine owns control flow; the model only ever picks a legal event. Testing, inspection, and visualization fall out for free.
 
 Stately Agent adds model requests and decisions to XState. The state machine defines what the agent can do. Your application chooses the model, runs the requests, and stores the state.
 
@@ -165,6 +165,7 @@ See [all examples](examples/README.md).
 - [Decisions](docs/decisions.md)
 - [Human in the loop](docs/human-in-the-loop.md)
 - [Testing and verification](docs/verify.md)
+- [Evals](docs/evals.md)
 - [Generating machines with an LLM](docs/generate-machines.md)
 - [Hosts and executors](docs/hosts.md)
 - [Models and providers](docs/models-and-providers.md)

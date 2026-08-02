@@ -303,6 +303,7 @@ function startResumeIdleEcho(
             ]
           : [],
       textEvent: null,
+      component: null,
     },
   };
 }

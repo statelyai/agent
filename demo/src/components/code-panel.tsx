@@ -1,20 +1,19 @@
 import { useEffect, useRef, useState } from "react";
-import { FileCode2 } from "lucide-react";
 
-type CodePanelProps = {
-  /** Path label shown in the heading, e.g. `src/agents/refund.ts`. */
-  fileLabel: string;
+type CodeSourceProps = {
   source: string;
   /** Stable cache key for the highlighted output (scenario or example id). */
   cacheKey: string;
+  /** Class applied to the scrolling wrapper. */
+  className?: string;
 };
 
 /**
- * Shows a machine's actual source (imported verbatim via Vite `?raw` or served
- * by the examples library), highlighted lazily on the client with Shiki so SSR
- * stays simple.
+ * Renders a machine's actual source (imported verbatim via Vite `?raw` or
+ * served by the examples library), highlighted lazily on the client with Shiki
+ * so SSR stays simple. Chrome-free: callers own the surrounding frame.
  */
-export function CodePanel({ fileLabel, source, cacheKey }: CodePanelProps) {
+export function CodeSource({ source, cacheKey, className = "code-scroll" }: CodeSourceProps) {
   const [html, setHtml] = useState<string | null>(null);
   const cache = useRef(new Map<string, string>());
 
@@ -47,24 +46,14 @@ export function CodePanel({ fileLabel, source, cacheKey }: CodePanelProps) {
   }, [cacheKey, source]);
 
   return (
-    <section className="work-panel code-panel" aria-labelledby="code-panel-title">
-      <div className="panel-heading">
-        <div>
-          <span className="panel-kicker">Machine source</span>
-          <h2 id="code-panel-title">
-            <FileCode2 size={15} aria-hidden="true" /> {fileLabel}
-          </h2>
-        </div>
-      </div>
-      <div className="code-scroll">
-        {html ? (
-          <div className="code-shiki" dangerouslySetInnerHTML={{ __html: html }} />
-        ) : (
-          <pre className="code-plain">
-            <code>{source}</code>
-          </pre>
-        )}
-      </div>
-    </section>
+    <div className={className}>
+      {html ? (
+        <div className="code-shiki" dangerouslySetInnerHTML={{ __html: html }} />
+      ) : (
+        <pre className="code-plain">
+          <code>{source}</code>
+        </pre>
+      )}
+    </div>
   );
 }

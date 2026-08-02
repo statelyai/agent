@@ -7,7 +7,7 @@ export const Route = createRootRoute({
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Stately Agent Lab" },
+      { title: "Stately Agent" },
       {
         name: "description",
         content: "See AI behavior and the state machine controlling it, live.",

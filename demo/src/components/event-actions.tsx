@@ -1,86 +1,182 @@
-import { useState } from "react";
-import { Dialog } from "@base-ui/react/dialog";
-import { UserRound } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { useEffect, useState } from "react";
 import { SchemaForm } from "@/components/ui/schema-form";
-import type { AcceptedEvent, ChatIdle } from "@/lib/machine-ui";
+import { schemaFields, type AcceptedEvent, type ChatIdle, type SchemaField } from "@/lib/machine-ui";
 
 type EventActionsProps = {
   idle: ChatIdle;
   onSendEvent: (event: { type: string; [key: string]: unknown }) => void;
 };
 
-function buttonVariant(style: AcceptedEvent["style"]): "primary" | "secondary" {
-  return style === "primary" ? "primary" : "secondary";
+/** The event's single field, when its payload schema is exactly one field. */
+function singleField(event: AcceptedEvent): SchemaField | null {
+  const fields = event.jsonSchema ? schemaFields(event.jsonSchema) : null;
+  return fields && fields.length === 1 ? fields[0] : null;
 }
 
 /**
- * The generic human-in-the-loop card: one button per accepted event. Events
- * whose payload schema declares fields open a schema-generated dialog; the
- * rest send immediately. Labels and emphasis come from the machine's
- * `meta.interaction` hints when present.
+ * The human-in-the-loop controls, rendered inside the composer: one button per
+ * accepted event, an inline schema-generated form for events that need a
+ * payload, and optional custom renderers declared by the state's
+ * `meta.interaction.component`.
  */
 export function EventActions({ idle, onSendEvent }: EventActionsProps) {
-  const [openEvent, setOpenEvent] = useState<AcceptedEvent | null>(null);
+  const [openType, setOpenType] = useState<string | null>(null);
+
+  // A new idle state means new accepted events — drop any open payload form.
+  useEffect(() => {
+    setOpenType(null);
+  }, [idle]);
 
   if (idle.events.length === 0) return null;
 
-  return (
-    <div className="approval-card" role="group" aria-label="Machine is waiting for input">
-      <div className="approval-card__ribbon">
-        <UserRound size={13} aria-hidden="true" />
-        Waiting for your input
+  const openEvent = idle.events.find((event) => event.type === openType) ?? null;
+  const only = idle.events.length === 1 ? idle.events[0] : null;
+  const field = only ? singleField(only) : null;
+
+  // Custom renderers replace the button row when the state declares one and
+  // the accepted-event shape fits (single event, single field).
+  if (idle.component && only) {
+    if (idle.component === "rating" && field?.kind.type === "number") {
+      return (
+        <RatingControl
+          title={idle.prompt ?? "Rate this resolution"}
+          onPick={(value) => onSendEvent({ type: only.type, [field.name]: value })}
+        />
+      );
+    }
+    if (idle.component === "cards" && (field?.kind.type === "string" || field?.kind.type === "enum")) {
+      return (
+        <CardsControl
+          title={idle.prompt ?? "Your hand — pick a rank to ask for"}
+          ranks={rankOptions(only)}
+          onPick={(rank) => onSendEvent({ type: only.type, [field.name]: rank })}
+        />
+      );
+    }
+    return (
+      <div className="chat-form-card">
+        <p className="chat-form-card__note">
+          unknown renderer &quot;{idle.component}&quot; — fell back to schema form
+        </p>
+        <SchemaForm
+          schema={only.jsonSchema ?? { type: "object" }}
+          submitLabel={only.label}
+          onSubmit={(values) => onSendEvent({ type: only.type, ...values })}
+        />
       </div>
-      <div className="approval-card__body">
-        <p>{idle.prompt ?? "The machine is idle. Choose an event to continue."}</p>
-        <div className="approval-card__actions">
-          {idle.events.map((event) => (
-            <Button
-              key={event.type}
-              variant={buttonVariant(event.style)}
-              size="sm"
-              data-style={event.style === "danger" ? "danger" : undefined}
-              onClick={() =>
-                event.needsPayload ? setOpenEvent(event) : onSendEvent({ type: event.type })
-              }
-            >
-              {event.label}
-              {event.needsPayload ? "…" : ""}
-            </Button>
-          ))}
-        </div>
-        {idle.textEvent ? (
-          <p className="approval-card__text-hint">
-            Or type a message — it is sent as <code>{idle.textEvent.type}</code>.
-          </p>
-        ) : null}
+    );
+  }
+
+  return (
+    <div className="chat-actions" role="group" aria-label="Machine is waiting for input">
+      <div className="chat-actions__row">
+        {idle.events.map((event) => (
+          <button
+            key={event.type}
+            className="chat-action"
+            data-kind={event.style}
+            data-open={event.type === openType || undefined}
+            onClick={() =>
+              event.needsPayload
+                ? setOpenType(event.type === openType ? null : event.type)
+                : onSendEvent({ type: event.type })
+            }
+          >
+            {event.label}
+            {event.needsPayload ? "…" : ""}
+          </button>
+        ))}
       </div>
 
-      <Dialog.Root open={openEvent !== null} onOpenChange={(open) => !open && setOpenEvent(null)}>
-        <Dialog.Portal>
-          <Dialog.Backdrop className="dialog-backdrop" />
-          <Dialog.Popup className="dialog-popup">
-            {openEvent ? (
-              <>
-                <Dialog.Title className="dialog-title">{openEvent.label}</Dialog.Title>
-                <Dialog.Description className="dialog-description">
-                  Payload for <code>{openEvent.type}</code>, generated from the machine's event
-                  schema.
-                </Dialog.Description>
-                <SchemaForm
-                  schema={openEvent.jsonSchema ?? { type: "object" }}
-                  submitLabel={`Send ${openEvent.type}`}
-                  onCancel={() => setOpenEvent(null)}
-                  onSubmit={(values) => {
-                    setOpenEvent(null);
-                    onSendEvent({ type: openEvent.type, ...values });
-                  }}
-                />
-              </>
-            ) : null}
-          </Dialog.Popup>
-        </Dialog.Portal>
-      </Dialog.Root>
+      {openEvent ? (
+        <div className="chat-form-card">
+          <p className="chat-form-card__title">
+            Payload for <code>{openEvent.type}</code>
+          </p>
+          <SchemaForm
+            schema={openEvent.jsonSchema ?? { type: "object" }}
+            submitLabel={`Send ${openEvent.type}`}
+            onCancel={() => setOpenType(null)}
+            onSubmit={(values) => {
+              setOpenType(null);
+              onSendEvent({ type: openEvent.type, ...values });
+            }}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// ─── custom renderers ───
+
+function RatingControl({ title, onPick }: { title: string; onPick: (value: number) => void }) {
+  const [hover, setHover] = useState(0);
+  return (
+    <div className="chat-form-card chat-rating">
+      <span className="chat-form-card__title">{title}</span>
+      <div className="chat-rating__stars" onMouseLeave={() => setHover(0)}>
+        {[1, 2, 3, 4, 5].map((value) => (
+          <button
+            key={value}
+            className="chat-rating__star"
+            data-on={value <= hover || undefined}
+            aria-label={`${value} out of 5`}
+            onMouseEnter={() => setHover(value)}
+            onFocus={() => setHover(value)}
+            onClick={() => onPick(value)}
+          >
+            ★
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const DEFAULT_RANKS = ["A", "K", "Q", "J", "10"];
+const SUITS = ["♠", "♥", "♦", "♣"];
+
+/** Ranks offered by the event's single string field (its enum), else a default hand. */
+function rankOptions(event: AcceptedEvent): string[] {
+  const field = singleField(event);
+  if (field && field.kind.type === "enum") return field.kind.options.slice(0, 8);
+  return DEFAULT_RANKS;
+}
+
+function CardsControl({
+  title,
+  ranks,
+  onPick,
+}: {
+  title: string;
+  ranks: string[];
+  onPick: (rank: string) => void;
+}) {
+  const hand = ranks.length ? ranks : DEFAULT_RANKS;
+  return (
+    <div className="chat-form-card chat-hand">
+      <span className="chat-form-card__title">{title}</span>
+      <div className="chat-hand__cards">
+        {hand.map((rank, index) => {
+          const suit = SUITS[index % SUITS.length];
+          const offset = index - (hand.length - 1) / 2;
+          return (
+            <button
+              key={rank}
+              className="chat-hand__card"
+              data-red={suit === "♥" || suit === "♦" || undefined}
+              style={{
+                transform: `rotate(${offset * 3}deg) translateY(${Math.abs(offset) * 2.2}px)`,
+              }}
+              onClick={() => onPick(rank)}
+            >
+              <span>{rank}</span>
+              <span>{suit}</span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -94,15 +190,9 @@ type StartFormCardProps = {
 /** Start card for machines whose input is structured rather than a single prompt. */
 export function StartFormCard({ schema, onStart }: StartFormCardProps) {
   return (
-    <div className="approval-card" role="group" aria-label="Machine input">
-      <div className="approval-card__ribbon">
-        <UserRound size={13} aria-hidden="true" />
-        Machine input
-      </div>
-      <div className="approval-card__body">
-        <p>This machine takes structured input, generated from its input schema.</p>
-        <SchemaForm schema={schema as never} submitLabel="Start run" onSubmit={onStart} />
-      </div>
+    <div className="chat-form-card" role="group" aria-label="Machine input">
+      <span className="chat-form-card__title">Machine input</span>
+      <SchemaForm schema={schema as never} submitLabel="Start run" onSubmit={onStart} />
     </div>
   );
 }

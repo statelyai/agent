@@ -1,8 +1,9 @@
 import { describe, expect, test } from "vitest";
+import { createActor, createMachine, type AnyStateMachine } from "xstate";
 import { z } from "zod";
 import { startScenarioRun } from "./agent-runner";
 import { getExampleMachine } from "./example-library.server";
-import { describeMachineInput, jsonSchemaOf } from "./machine-chat.server";
+import { describeIdle, describeMachineInput, jsonSchemaOf } from "./machine-chat.server";
 import { schemaFields, schemaNeedsPayload, singleStringField } from "./machine-ui";
 import { scriptedExecutorsFor } from "./scripted-executors";
 
@@ -42,6 +43,33 @@ describe("accepted-event descriptors (unified chat)", () => {
     expect(fields?.map((field) => field.name)).toEqual(["reason"]);
     // Exactly one accepted event takes a single string → free text maps to it.
     expect(result.idle!.textEvent).toEqual({ type: "REJECT", field: "reason" });
+    // No custom renderer declared on that state.
+    expect(result.idle!.component).toBeNull();
+  });
+});
+
+describe("meta.interaction.component (custom composer renderer)", () => {
+  const machineWith = (interaction: Record<string, unknown>): AnyStateMachine =>
+    createMachine({
+      initial: "waiting",
+      states: {
+        waiting: { meta: { interaction }, on: { RATE: "done" } },
+        done: { type: "final" },
+      },
+    } as never) as AnyStateMachine;
+
+  const idleOf = (machine: AnyStateMachine) =>
+    describeIdle(machine, createActor(machine).start().getSnapshot() as never);
+
+  test("a declared component name flows into the ChatIdle descriptor", () => {
+    expect(idleOf(machineWith({ component: "rating" })).component).toBe("rating");
+    expect(idleOf(machineWith({ component: "cards", label: "Pick a rank" })).component).toBe("cards");
+  });
+
+  test("states without one (or with a non-string one) report null", () => {
+    expect(idleOf(machineWith({ label: "Choose" })).component).toBeNull();
+    expect(idleOf(machineWith({ component: 42 })).component).toBeNull();
+    expect(idleOf(machineWith({ component: "" })).component).toBeNull();
   });
 });
 

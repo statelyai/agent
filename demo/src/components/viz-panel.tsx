@@ -1,14 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSelector } from "@xstate/store-react";
-import { ExternalLink, RefreshCcw } from "lucide-react";
+import { ExternalLink, RefreshCcw, X } from "lucide-react";
 import { getTargetOrigin, isTrustedVizMessage } from "@/lib/viz-transport";
 import { createVizPanelStore, type SystemMessage } from "@/lib/viz-panel-store";
-import { Button } from "@/components/ui/button";
+import { CodeSource } from "@/components/code-panel";
 import type { VizFrame } from "@/hooks/use-trace-player";
 
 const defaultVizUrl = "https://editor.stately.ai/embed?auth=message";
 
 export type LiveWs = { wsUrl: string; session: string };
+
+export type VizCode = {
+  /** Path label shown in the drawer header, e.g. `src/agents/refund.ts`. */
+  fileLabel: string;
+  source: string;
+  /** Stable cache key for the highlighted output (scenario or example id). */
+  cacheKey: string;
+};
 
 type VizPanelProps = {
   /** Display name of the machine being inspected. */
@@ -30,30 +38,39 @@ type VizPanelProps = {
    * page cannot connect directly to the demo's local `ws://` relay.
    */
   liveUrl: string | null;
+  /** Page theme, forwarded into the embed init payload. */
+  theme: "light" | "dark";
+  /** Code drawer visibility (parent-owned; parent also handles Escape). */
+  codeOpen: boolean;
+  onToggleCode: () => void;
+  /** Source shown in the code drawer, or null when none is available. */
+  code: VizCode | null;
 };
 
-export function VizPanel({ title, machineKey, vizConfig, frame, liveWs, liveUrl }: VizPanelProps) {
+export function VizPanel({
+  title,
+  machineKey,
+  vizConfig,
+  frame,
+  liveWs,
+  liveUrl,
+  theme,
+  codeOpen,
+  onToggleCode,
+  code,
+}: VizPanelProps) {
   if (liveUrl) {
     return (
-      <section className="work-panel viz-panel" aria-labelledby="viz-panel-title">
-        <div className="panel-heading viz-heading">
-          <div>
-            <span className="panel-kicker">Live machine</span>
-            <h2 id="viz-panel-title">Statechart</h2>
-          </div>
-          <div className="live-status" data-ready>
-            <span aria-hidden="true" />
-            live inspection
-          </div>
-        </div>
-        <div className="viz-frame-wrap">
+      <section className="viz-shell" aria-label={`Live statechart for ${title}`}>
+        <div className="viz-canvas">
           <iframe
-            className="viz-frame"
+            className="viz-embed"
             data-ready
             title={`Live inspection for ${title}`}
             src={liveUrl}
             referrerPolicy="strict-origin"
           />
+          <CodeDrawer open={codeOpen} code={code} onClose={onToggleCode} />
         </div>
       </section>
     );
@@ -65,16 +82,20 @@ export function VizPanel({ title, machineKey, vizConfig, frame, liveWs, liveUrl 
       vizConfig={vizConfig}
       frame={frame}
       liveWs={liveWs}
+      theme={theme}
+      codeOpen={codeOpen}
+      onToggleCode={onToggleCode}
+      code={code}
     />
   );
 }
 
-function createInitMessage(machine: unknown): SystemMessage {
+function createInitMessage(machine: unknown, theme: "light" | "dark"): SystemMessage {
   return {
     type: "@statelyai.init",
     machine,
     mode: "inspecting",
-    theme: "light",
+    theme,
     readOnly: true,
     capabilities: {
       edit: false,
@@ -100,8 +121,12 @@ function createFrameMessage(frame: VizFrame): SystemMessage {
   };
 }
 
-function createStaticMessages(vizConfig: Record<string, unknown> | null, frame: VizFrame) {
-  return vizConfig ? [createInitMessage(vizConfig), createFrameMessage(frame)] : [];
+function createStaticMessages(
+  vizConfig: Record<string, unknown> | null,
+  frame: VizFrame,
+  theme: "light" | "dark",
+) {
+  return vizConfig ? [createInitMessage(vizConfig, theme), createFrameMessage(frame)] : [];
 }
 
 function EmbedVizPanel({
@@ -110,19 +135,22 @@ function EmbedVizPanel({
   vizConfig,
   frame,
   liveWs,
+  theme,
+  codeOpen,
+  onToggleCode,
+  code,
 }: Omit<VizPanelProps, "liveUrl">) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const latestRef = useRef({ vizConfig, frame });
+  const latestRef = useRef({ vizConfig, frame, theme });
   const [store] = useState(createVizPanelStore);
   const status = useSelector(store, (snapshot) => snapshot.context.status);
   const frameKey = useSelector(store, (snapshot) => snapshot.context.frameKey);
-  const liveEvent = useSelector(store, (snapshot) => snapshot.context.liveEvent);
   const ready = status === "ready";
   const timedOut = status === "timedOut";
   const vizUrl = import.meta.env.VITE_VIZ_URL || defaultVizUrl;
   const targetOrigin = useMemo(() => getTargetOrigin(vizUrl), [vizUrl]);
 
-  latestRef.current = { vizConfig, frame };
+  latestRef.current = { vizConfig, frame, theme };
 
   const post = useCallback(
     (message: Record<string, unknown>) => {
@@ -143,7 +171,7 @@ function EmbedVizPanel({
       if (event.data?.type === "@statelyai.ready") {
         const latest = latestRef.current;
         store.trigger.iframeReady({
-          fallbackMessages: createStaticMessages(latest.vizConfig, latest.frame),
+          fallbackMessages: createStaticMessages(latest.vizConfig, latest.frame, latest.theme),
         });
       }
     }
@@ -154,10 +182,24 @@ function EmbedVizPanel({
   // Reset live inspection only when the selected machine changes. In
   // particular, do not clear observations when the iframe becomes ready.
   useEffect(() => {
-    store.trigger.machineChanged({ initMessage: vizConfig ? createInitMessage(vizConfig) : null });
+    store.trigger.machineChanged({
+      initMessage: vizConfig ? createInitMessage(vizConfig, latestRef.current.theme) : null,
+    });
     // machineKey identifies the machine; vizConfig is its (stable) payload.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [machineKey, store]);
+
+  // Theme lives in the embed's init payload, so a flip means re-initing the
+  // embed and replaying whatever it was already showing.
+  const previousTheme = useRef(theme);
+  useEffect(() => {
+    if (previousTheme.current === theme) return;
+    previousTheme.current = theme;
+    store.trigger.themeChanged({
+      initMessage: vizConfig ? createInitMessage(vizConfig, theme) : null,
+      fallbackMessages: createStaticMessages(vizConfig, latestRef.current.frame, theme),
+    });
+  }, [store, theme, vizConfig]);
 
   // Fallback replay frames (only used when live inspection is unavailable).
   useEffect(() => {
@@ -207,55 +249,32 @@ function EmbedVizPanel({
     return () => window.clearTimeout(timeout);
   }, [frameKey, store, vizUrl]);
 
-  const statusLabel = !ready
-    ? "connecting"
-    : liveWs
-      ? liveEvent
-        ? `live · ${liveEvent}`
-        : "live inspection"
-      : frame.event
-        ? `event · ${frame.event.type}`
-        : "connected";
-
   return (
-    <section className="work-panel viz-panel" aria-labelledby="viz-panel-title">
-      <div className="panel-heading viz-heading">
-        <div>
-          <span className="panel-kicker">Live machine</span>
-          <h2 id="viz-panel-title">Statechart</h2>
-        </div>
-        <div className="live-status" data-ready={ready || undefined}>
-          <span aria-hidden="true" />
-          {statusLabel}
-        </div>
-      </div>
-
-      <div className="viz-frame-wrap">
+    <section className="viz-shell" aria-label={`Live statechart for ${title}`}>
+      <div className="viz-canvas">
         {!vizConfig ? (
-          <div className="viz-error">
-            <span className="offline-mark" aria-hidden="true" />
+          <div className="viz-state" role="status">
             <strong>No machine to inspect</strong>
             <p>This example does not export a state machine from its index.ts.</p>
           </div>
         ) : (
           <>
             {!ready && !timedOut && (
-              <div className="viz-loading" aria-label="Connecting to Stately Viz">
-                <span className="viz-loading__mark" />
-                <span>Connecting to Viz…</span>
+              <div className="viz-state" aria-label="Connecting to Stately Viz">
+                <span className="viz-state__spinner" aria-hidden="true" />
+                <p>Connecting to Viz…</p>
               </div>
             )}
             {timedOut && !ready && (
-              <div className="viz-error">
-                <span className="offline-mark" aria-hidden="true" />
+              <div className="viz-state" role="status">
                 <strong>Viz did not connect</strong>
                 <p>Check the embed URL or run the local Viz app.</p>
-                <div>
-                  <Button size="sm" onClick={() => store.trigger.retry()}>
-                    <RefreshCcw size={14} /> Retry
-                  </Button>
-                  <a href={vizUrl} target="_blank" rel="noreferrer">
-                    Open Viz <ExternalLink size={13} />
+                <div className="viz-state__actions">
+                  <button type="button" className="viz-chip" onClick={() => store.trigger.retry()}>
+                    <RefreshCcw size={13} aria-hidden="true" /> Retry
+                  </button>
+                  <a className="viz-chip" href={vizUrl} target="_blank" rel="noreferrer">
+                    Open Viz <ExternalLink size={12} aria-hidden="true" />
                   </a>
                 </div>
               </div>
@@ -263,7 +282,7 @@ function EmbedVizPanel({
             <iframe
               key={frameKey}
               ref={iframeRef}
-              className="viz-frame"
+              className="viz-embed"
               data-ready={ready || undefined}
               title={`Live statechart for ${title}`}
               src={vizUrl}
@@ -272,7 +291,44 @@ function EmbedVizPanel({
             />
           </>
         )}
+
+        <CodeDrawer open={codeOpen} code={code} onClose={onToggleCode} />
       </div>
     </section>
+  );
+}
+
+function CodeDrawer({
+  open,
+  code,
+  onClose,
+}: {
+  open: boolean;
+  code: VizCode | null;
+  onClose: () => void;
+}) {
+  return (
+    <aside className="viz-drawer" data-open={open || undefined} aria-hidden={!open} inert={!open}>
+      {code ? (
+        <>
+          <div className="viz-drawer__header">
+            <span className="viz-drawer__file">{code.fileLabel}</span>
+            <button
+              type="button"
+              className="viz-drawer__close"
+              onClick={onClose}
+              aria-label="Close code"
+            >
+              <X size={14} aria-hidden="true" />
+            </button>
+          </div>
+          <CodeSource
+            source={code.source}
+            cacheKey={code.cacheKey}
+            className="viz-drawer__body"
+          />
+        </>
+      ) : null}
+    </aside>
   );
 }
