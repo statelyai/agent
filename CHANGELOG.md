@@ -1,5 +1,436 @@
 # @statelyai/agent
 
+## 2.0.0-alpha.12
+
+### Minor Changes
+
+- [`6454a4f`](https://github.com/statelyai/agent/commit/6454a4f6189262ca8c8f1ff4610c51868184f960) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **One error base class with stable codes, and JSON-safe trace events.**
+
+  ```ts
+  try {
+    await generateResult(machine, { input, executors });
+  } catch (error) {
+    if (error instanceof AgentError && error.code === "agent-idle") {
+      // branch on the code — no instanceof ladder, survives bundle boundaries
+    }
+  }
+  ```
+
+  - New exported `AgentError` base class: every error the package throws extends it and carries a stable kebab-case `code` — `agent-idle`, `illegal-resume-event`, `snapshot-version-mismatch`, `decision-exhausted`, `lint-failed`, `event-log-conflict`, `non-serializable-event`, `replay-machine-mismatch`, `replay-divergence`, `max-model-calls-exceeded`, `scripted-executors-exhausted`, `seam-script-exhausted`.
+  - **Breaking (alpha)** renames for prefix consistency, no aliases: `IllegalResumeEventError` → `AgentIllegalResumeEventError`, `SnapshotVersionMismatchError` → `AgentSnapshotVersionMismatchError`, `DecisionExhaustedError` → `AgentDecisionExhaustedError`, `ReplayMachineMismatchError` → `AgentReplayMachineMismatchError`, `ReplayDivergenceError` → `AgentReplayDivergenceError`. `AgentLintError.diagnostics` is now `readonly`.
+  - New `serializeTraceEvent(event, { includeRaw? })` projects an `AgentTraceEvent` into a `JSON.stringify`-safe `JsonSerializableTraceEvent` for JSONL traces. Snapshots take the same JSON round-trip as `persistSnapshot`; `request.end`'s raw SDK object is dropped unless `includeRaw`; functions, `undefined`, symbols and cyclic back-references are dropped; `Error`s serialize as `{ name, message, stack?, code? }` instead of `{}`. Never throws.
+  - `RunAgentErrorCause` is now exported (it was already reachable through `result.cause`).
+
+- [`466f3ff`](https://github.com/statelyai/agent/commit/466f3ffd67690b383182d91e601dfc9046a00257) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **Token budgets are now ordinary state machine logic.** Every settled model call that reports usage delivers a reserved `@agent.usage` event to the running machine, so spend lives in context and a budget is just a transition.
+
+  ```ts
+  const machine = setup.createMachine({
+    // Declaring the transition IS the opt-in; `event.usage` is typed already.
+    on: {
+      "@agent.usage": ({ context, event }) => {
+        const tokens = context.tokens + (event.usage.totalTokens ?? 0);
+        return tokens > 50_000
+          ? { target: ".done", context: { tokens } }
+          : { context: { tokens } };
+      },
+    },
+    // ...
+  });
+  ```
+
+  - Delivered after every settled text, decision, and plan-step call as `{ type: '@agent.usage', usage, kind, id, src, model, name }`. New `AGENT_USAGE_EVENT_TYPE` constant and `AgentUsageEvent` type.
+  - `setupAgent` / `createAgentSchemas` / `setupAgent.fromConfig` register `'@agent.usage'` **by default**, so the handler autocompletes and `event.usage` types with nothing declared. It also shows up in `schemas.events` for hosts introspecting the pack.
+  - **Delivery is gated on an explicit transition.** The event is sent only when an active state declares `'@agent.usage'` by name. A catch-all `on: { '*': … }` does not count and never receives it; a machine with no handler sees no extra transition, trace event, or log entry. Declare it machine-level to catch every call.
+  - **Breaking: `@agent.` is a reserved namespace.** Declaring `'@agent.usage'` in your own `events` throws. Hosts cannot send into the namespace either — `parseAgentEvent` rejects it and `getAcceptedEvents` drops it before `allowedEvents` matching, so `@agent.usage` and `@agent.init` are never decision candidates (not even under a `'*'` wildcard). Rename any event of yours starting with `@agent.`.
+  - **Usage entries are spend records.** When the event is reported the cost already happened, so entries are durable, append-only facts — there is no dedupe or rollback. Replay folds every one, and a call re-executed by crash recovery journals its own usage on top, so a recovered total covers both the lost call and its retry. That is the true cumulative spend.
+  - A call that settles after the run's cycle resolved is a straggler: its tokens still fold into `result.usage`, but the machine event is dropped (identically on the `runAgent` and `createAgentActor` paths) and surfaced on `onTrace` as `usage.dropped`.
+  - Usage from a request inside an invoked child machine reports to the run's root machine, attributed by `id`/`src`/`model`.
+  - Scripted `simulateAgent` runs report no usage, so a counter stays `0` under simulation. Test the budget itself with a usage-reporting mock executor.
+  - **Works without `runAgent`.** On the uncontrolled `provideExecutors` path the event reaches the machine actor that invoked the bound request, with the same explicit-declaration gate; delivery follows `provideExecutors`' binding boundary, so an invoked child machine needs its own `provideExecutors(...)`. On the step path, new root export `getCallUsage(raw)` normalizes a raw executor result's usage so a host can journal the event itself (the typed event union carries the attribution fields alongside `usage`). See the "Usage without runAgent" docs section.
+
+- [`6454a4f`](https://github.com/statelyai/agent/commit/6454a4f6189262ca8c8f1ff4610c51868184f960) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **Every run result now reports what it spent.** `usage` is on all three `RunAgentResult` variants (`done`, `idle`, `error`), so a run's cost needs no side-channel.
+
+  ```ts
+  const result = await runAgent(machine, { input, executors });
+  console.log(
+    `${result.usage.modelCalls} calls, ${result.usage.totalTokens ?? 0} tokens`
+  );
+  ```
+
+  - New `AgentUsage` type (and per-call `AgentCallUsage`): `inputTokens`, `outputTokens`, `totalTokens`, `reasoningTokens`, `cachedInputTokens`, plus an always-present `modelCalls`.
+  - `generateResult(...)` resolves `{ output, snapshot, events, usage }` — the shape `generateText` users expect.
+  - Executors report per-call usage on their result: `{ output, usage }` for text, `{ event, usage }` for `decide`. The AI SDK's `LanguageModelUsage` already fits, so `createAiSdkExecutors` needs no wiring.
+  - Token fields are partial sums: each sums only the calls that reported it and stays `undefined` when none did. Only `modelCalls` is always present, and it counts every call (decision retries separately). Aggregation is per-run — a resumed run counts its own calls only.
+  - `request.end` trace events carry the optional per-call `usage` on both the `runAgent` and `provideExecutors` paths; `serializeTraceEvent` passes it through.
+
+- [`6454a4f`](https://github.com/statelyai/agent/commit/6454a4f6189262ca8c8f1ff4610c51868184f960) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **Removed the `@statelyai/agent/steps` and `@statelyai/agent/adapter` subpaths.** Everything they exported is now on the root barrel — import from `@statelyai/agent`.
+
+  The package's entry points are now `.`, `./ai-sdk`, `./machines`, `./otel`, `./sqlite`, and `./agent-workflow.json`.
+
+  Newly on the root barrel:
+
+  - From `/steps`: `executeAgentRequest`, `resolveDecision`, `renderDecisionAttempts`, `PLAN_DONE_EVENT_TYPE`, plus `AgentRequest`, `AgentPlanRequest`, `AgentStepRequest`, `DecisionLogicConfig`, `ResolveDecisionOptions`, `AgentRequestSource`.
+  - From `/adapter`: `bindRequestExecutor`, `buildEnvelopeSchema`, `getAgentOutputMode`, `parseStructuredEnvelope`, `parseModelRef`, `parseOutput`, `getJsonSchema`, `getJsonSchemaSync`, `isStandardSchema`, `getMachineStructuralHash`, plus `AgentOutputMode`, `StructuredOutputEnvelope`.
+
+  Not carried over (no longer public; the functions remain internal): `matchesEventPattern`, `validateSchemaSync`, `isStructuredOutputSchema`.
+
+- [`6454a4f`](https://github.com/statelyai/agent/commit/6454a4f6189262ca8c8f1ff4610c51868184f960) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **Committed the `isSuspended` option name (no longer provisional), and added a dev warning when a run falls back to the timing heuristic.**
+
+  ```ts
+  await runAgent(machine, {
+    input,
+    executors,
+    isSuspended: (snapshot) => snapshot.hasTag("waiting"),
+  });
+  ```
+
+  Declare the predicate on `setupAgent({ isSuspended })` or per-run on `runAgent(machine, { isSuspended })`; the run-level option wins. When a run settles idle via the timing heuristic because neither was declared, `runAgent` now emits a one-time warning suggesting a deterministic predicate. No behavior change otherwise, and the warning is suppressed when `NODE_ENV === "production"`.
+
+- [`99ff897`](https://github.com/statelyai/agent/commit/99ff897c183071ca3dc3e5a1a037c36f9a471f4c) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **`createAgentRun(machine, options)`: a run's trace events as an async stream.** Returns `{ events, result }` — the canonical handle for an SSE endpoint, a JSONL logger, or a progress UI.
+
+  ```ts
+  const run = createAgentRun(machine, { input, executors });
+  for await (const event of run.events) {
+    if (event.type === "request.end") console.log(event.type);
+  }
+  const result = await run.result;
+  ```
+
+  - `events` is a single-consumer `AsyncIterableIterator<AgentTraceEvent>` yielding in `runAgent`'s emission order (`run.start` → request/chunk/transition/emit → `run.end`), completing once `run.end` is delivered. Buffered unboundedly, so a slow or absent consumer never blocks the run — iterate, or await `result` first and drain after.
+  - `result` is the same promise `runAgent` returns, with identical settle behavior: a run-level failure resolves `{ status: 'error' }`, and only bind-time programmer errors reject.
+  - The run starts on the call, not on first iteration. A supplied `options.onTrace` is composed, not replaced. Options pass straight through, so resuming from a persisted `snapshot` (+ resume `event`) streams that run identically.
+  - Breaking out of `events` early stops delivery but does not cancel the run (`result` still settles). Pass `options.signal` to abort.
+
+- [`99ff897`](https://github.com/statelyai/agent/commit/99ff897c183071ca3dc3e5a1a037c36f9a471f4c) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **`getAgentEffects` / `replay`: the two primitives over the append-only event log.** Fold a journal of external inputs through xstate's pure `initialTransition`/`transition` and the whole machine lifecycle — crash recovery, fork resume, time travel — becomes deterministic replay, because the journaled completion order IS the serialization.
+
+  ```ts
+  const { snapshot, effects } = replay(machine, entries); // pure: executes nothing
+  for (const effect of effects) {
+    if (effect.kind === "text") {
+      const output = await executeAgentRequest(effect, executors);
+      entries.push(
+        createReplayEntry(machine, entries, effect.toDoneEvent(output))
+      );
+    }
+  }
+  ```
+
+  - `getAgentEffects(machine, snapshot, actions, { history })` maps a transition's ORDERED executable actions — reconciled with the still-owed effects visible only on the snapshot — into an `AgentEffect[]` a host starts at the frontier. Kinds mirror what one transition can start: `text` / `decision` / `plan` (agent invokes), `task` (any other host-run invoke), `delay` (an `after(...)` timer), and `execute` (a fire-and-forget action — custom entry action, `sendTo`, `cancel` — run once, never journaled). Document order within a transition is preserved; snapshot-owed effects (a re-surfacing `agent.plan`, children spawned earlier and still pending) append after.
+  - Each `requestId` is `${siteId}#${n}`, `n` the 1-based occurrence derived from the journal (done AND error both count), so the same log yields identical requestIds on every replay.
+  - `text` and `task` effects carry `toDoneEvent(output)` / `toErrorEvent(error)`, which mint the exact `xstate.done.actor.<id>` / `xstate.error.actor.<id>` events xstate's actor system would deliver — pushing them into the journal and calling `transition` is indistinguishable from a live run.
+  - `replay(machine, entries, { input })` folds an `AgentLogEntry[]` WITHOUT executing anything and returns `{ snapshot, effects }`: the final snapshot plus the effects still owed at the frontier. Entries are validated with `assertAgentLogEntry`.
+  - `initEntry(machine, input?)` builds the reserved first journal entry (`{ type: '@agent.init', input }`) that makes a log self-contained. `replay` consumes it to recover the machine input with no side-channel, preferring it over an explicit `options.input`.
+
+- [`99ff897`](https://github.com/statelyai/agent/commit/99ff897c183071ca3dc3e5a1a037c36f9a471f4c) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **`AgentEventLogStore`: the append-only event log is now the authoritative durability artifact.** The journal of external inputs (effect completions, user events, timer firings) is the source of truth; deterministic replay derives every snapshot from it, a fork is a copied log prefix, and the type-only `AgentSnapshotStore` becomes a mere idle-point compaction cache over what the log already implies.
+
+  ```ts
+  const store = createInMemoryEventLogStore();
+  await store.append({ threadId: "t1", expectedIndex: 0, entries });
+  const next = await store.length("t1"); // the next expectedIndex
+  await store.fork({ threadId: "t1", newThreadId: "t1-branch", upToIndex: 1 });
+  const all = await store.read("t1", { from: 0 });
+  ```
+
+  - `append({ threadId, expectedIndex, entries })` commits contiguous entries under optimistic concurrency, rejecting with `AgentEventLogConflictError` (carrying `threadId`, `expectedIndex`, `actualLength`) when a concurrent writer got there first — two hosts racing on one thread resolve to exactly one winner.
+  - `read(threadId, { from })` catches up incrementally, `length(threadId)` gives the next `expectedIndex`, and `fork({ threadId, newThreadId, upToIndex })` copies a prefix onto a fresh thread for time travel or a divergent branch (`atEventId` is the alternative, mutually exclusive cutoff).
+  - `createInMemoryEventLogStore()` is a deep-copying reference implementation.
+  - `assertEventLogStoreConformance(create)` is a single-tier, runner-agnostic conformance suite validating any store against the reference's semantics. See `@statelyai/agent/sqlite` for a durable one.
+
+- [`99ff897`](https://github.com/statelyai/agent/commit/99ff897c183071ca3dc3e5a1a037c36f9a471f4c) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **`setupAgent.fromConfig(...)` now accepts host implementations for guards and actions**, lowering configs onto XState v6's `createMachineFromConfig` JSON layer. A JSON-authored agent can finally branch on real logic.
+
+  ```ts
+  const { machine } = setupAgent.fromConfig(config, {
+    compileSchema,
+    guards: { isFromHuman: ({ context }) => context.sender === "human" },
+    actions: { notify: (params) => console.log(params.who) },
+  });
+  ```
+
+  - **`guards`**: a guard string without `{{ }}` is a named guard reference resolved against `fromConfig(config, { guards })`, called with `{ context, event }`. Previously a bare-string guard was evaluated as a truthy literal, so the transition fired unconditionally. An unresolvable named guard is now a build-time error.
+  - **`actions`**: named action types (`{ type, params }`) resolve against `fromConfig(config, { actions })`, in transition actions as well as `entry`/`exit`, and receive the template-resolved `params`. Unresolvable names are a build-time error (previously transition-level named actions threw and entry/exit ones were silently unwired).
+  - `{{ }}` template expressions, choice states, emitted events, request lowering, `agent.decide` validation, and sibling-target linting are unchanged.
+
+  Breaking edges of the rewrite: a `choice` branch can no longer carry `actions` (use `assign` or the target state's `entry`; this throws at build time); a state key containing `.` now throws, since the dot is reserved as the state-path separator; and invoke-level `meta` is accepted by the type but dropped rather than carried onto the machine.
+
+- [`54866c2`](https://github.com/statelyai/agent/commit/54866c21280adc3875156e76291bc1922734d757) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **New `@statelyai/agent/machines` subpath: preset machine factories.** Seven factories for the agent shapes every framework converges on, each a thin composition over `setupAgent(...).createMachine(...)` that returns an ordinary, fully inspectable machine (executors are still supplied separately to `runAgent`).
+
+  ```ts
+  import { createToolLoopMachine } from "@statelyai/agent/machines";
+
+  const machine = createToolLoopMachine({
+    model: "openai/gpt-5.4-mini",
+    instructions: "Answer using the tools available.",
+    maxTurns: 8,
+  });
+  const result = await runAgent(machine, { input, executors });
+  ```
+
+  - `createToolLoopMachine({ model, instructions?, tools?, outputSchema?, maxTurns?, interruptOn? })`: one request, host-run tool loop, `maxTurns` lowered to `metadata.maxSteps`.
+  - `createSequentialMachine({ model, steps })`: a prompt chain, one state per step, each step's output feeding the next.
+  - `createRouterMachine({ model, instructions?, routes, fallback? })`: one `agent.decide` picks one declared route; undeclared routes have no event, state, or transition.
+  - `createParallelMachine({ model, branches })`: static fan-out, joined into a keyed result object.
+  - `createLoopMachine({ model, body, until, maxIterations })`: bounded repeat with a guard-enforced iteration budget.
+  - `createSupervisorMachine({ model, instructions?, workers, maxTurns? })`: delegate to a worker or `FINISH` each turn, results accumulating.
+  - `createHandoffMachine({ agents, defaultActiveAgent, model? })`: peer swarm where `transfer_to_<name>` moves the mic and control does not return.
+
+  Each preset carries `version: "1"` (XState's standard `createMachine({ version })` prop), so persisted snapshots and event logs are stamped by topology with nothing to pass — a topology change bumps the machine version (`"2"`), a minor package release at most. The `machineVersion` resolution that makes this work ships in `session-actor-crash-recovery`. See `docs/machines-presets.md` and `examples/preset-machine`.
+
+- [`09bf309`](https://github.com/statelyai/agent/commit/09bf309255f07eeb619a13cf92b0596ed1dcb9da) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **New `@statelyai/agent/otel`: agent traces as OpenTelemetry GenAI spans.** `createOtelTraceHandler` maps the versioned `AgentTraceEvent` stream onto GenAI-semconv spans, so any OTLP-ingesting backend (Braintrust, Langfuse, LangSmith, Honeycomb, Datadog, Grafana Tempo) is an endpoint and headers away.
+
+  ```ts
+  import { createOtelTraceHandler } from "@statelyai/agent/otel";
+
+  const onTrace = createOtelTraceHandler({ tracer, providerName: "openai" });
+  const result = await runAgent(machine, { input, executors, onTrace });
+  onTrace.dispose(); // required on the uncontrolled path, where no run.end arrives
+  ```
+
+  - One `invoke_agent` span per run, one child `chat`/`plan` span per model call, transitions/emissions/dropped usage as span events.
+  - `gen_ai.*` attributes: operation name, request model, provider name, agent name/version, token usage. Pass `tracer` **or** `tracerProvider`; set `providerName` yourself, since the trace stream carries only a model ref and the bridge cannot infer it. `agentName` defaults to the machine's `id`, and `attributes` adds your own to every span.
+  - Prompt and output bodies are **off by default** (semconv marks message content opt-in); pass `captureContent: true` for `gen_ai.input.messages` / `gen_ai.output.messages`. Sizes are always recorded.
+  - Ships no exporter and owns no SDK lifecycle: `@opentelemetry/api` is an optional peer dependency and you bring the `Tracer`.
+  - Works on both paths. `runAgent`'s `onTrace` gives the full run boundary; on the uncontrolled `provideExecutors` + `traceTransitions` path the run span opens on the first event and closes on `dispose()`.
+
+- [`6454a4f`](https://github.com/statelyai/agent/commit/6454a4f6189262ca8c8f1ff4610c51868184f960) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **Pruned dead root type exports and made a `setupAgent({ states })` typo a build error.**
+
+  - Removed root type exports no consumer could use: `AgentMachine`, `AgentMachineConfig`, `AgentRequestConfig` (a pure alias of `TextLogicConfig`), `DecisionLogic`, `AgentSetupStateSchema`, `AgentStateNarrowing`, `TextLogicInput`, `TextLogicOutput`, `AgentRequestMode`, `AgentModelMap`, `EventPayload`, `EventUnion`, `NormalizedEventSchemas`, `AgentEventSchemaInput`, `AgentEventSchemaInputMap`, `AllowedEventPattern`, `DataContent`, `ProviderOptions`, `ToolResultOutput`, `AgentToolSchema`. `AgentMachine`, `AgentMachineConfig`, `AgentRequestConfig`, `TextLogicInput` and `TextLogicOutput` are gone from the source too — the first two hardcoded `TActors = {}` and so could not describe a real machine.
+  - `setupAgent({ states })` now throws at `createMachine` time when a narrowing key does not name a state in the machine config, naming the bad key and listing the valid ones. A typo was previously a silent no-op. Keys are matched literally against each nesting level, so a narrowing key is a single state name, never a dotted path.
+  - Moved the `getAcceptedEvents` JSDoc onto the function it documents.
+
+  Separately, `setupAgent.fromConfig` rejects a dotted state key outright — see the `from-config-host-guards` changeset — and lint's reachability for config machines is fixed in `lint-reachability-from-config`.
+
+- [`6454a4f`](https://github.com/statelyai/agent/commit/6454a4f6189262ca8c8f1ff4610c51868184f960) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **Breaking: removed the `@statelyai/agent/zod` and `@statelyai/agent/openai-compat` subpaths.**
+
+  - **`./zod`.** `zodAgentMessages()` is gone — a one-line convenience over `z.custom`, not worth a public entry point. Declare the field inline instead:
+
+    ```ts
+    import { z } from "zod";
+    import type { AgentMessage } from "@statelyai/agent";
+
+    const context = z.object({
+      messages: z.custom<AgentMessage[]>((v) => Array.isArray(v)),
+    });
+    ```
+
+    With the subpath gone, `zod` is no longer a peer dependency of the package.
+
+  - **`./openai-compat`.** `createOpenAiCompatExecutors` and its mappers are gone. The executor contract is three plain functions — write them against whatever client you use. `examples/openai-sdk-host` shows the hand-rolled version against the official `openai` package; `@statelyai/agent/ai-sdk` remains the supported batteries-included adapter.
+
+- [`6454a4f`](https://github.com/statelyai/agent/commit/6454a4f6189262ca8c8f1ff4610c51868184f960) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **Renamed `runAgentToCompletion` to `generateResult`, and it now resolves the whole done result instead of the bare output** — `result.output` plus run metadata (`result.snapshot`, replayable `result.events`, `result.usage`), mirroring `generateText`'s text-plus-metadata shape. Still throws `AgentIdleError` on an unexpected idle. New exported type `GenerateResult<TMachine>`.
+
+  ```ts
+  // Before
+  const output = await runAgentToCompletion(machine, { input, executors });
+  // After
+  const result = await generateResult(machine, { input, executors });
+  result.output;
+  ```
+
+- [`6454a4f`](https://github.com/statelyai/agent/commit/6454a4f6189262ca8c8f1ff4610c51868184f960) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **Text requests no longer need `output: z.string()` on every plain request, and `setupAgent.fromConfig` now returns `{ machine, schemas }`.**
+
+  ```ts
+  const draft = createTextLogic({
+    schemas: { input: z.object({ topic: z.string() }) }, // output defaults to string
+    model: "openai/gpt-5.4-mini",
+    prompt: ({ input }) => `Draft about ${input.topic}.`,
+  });
+  ```
+
+  - A text request's `schemas.output` is now optional and defaults to a string schema. `schemas.input` is optional too — a request that declares none takes no invoke `input`. `onDone`'s `output` still infers exactly: `string` when `output` is omitted, the schema's type when present.
+  - `setupAgent({ requests })` entries keep their `schemas` key (use `schemas: {}` for a request with neither) — an entry dropping it entirely defeats the map's type inference, so it stays a compile error. Standalone `createTextLogic(...)` configs may omit `schemas` outright.
+  - **Breaking (alpha):** `setupAgent.fromConfig(config, options)` returns `{ machine, schemas }` instead of the bare machine. Update call sites to `const { machine } = setupAgent.fromConfig(...)`. `schemas` is the compiled `AgentSchemaPack` (`context`, `events`, `input`, `output`, `meta`, `emitted`) — a JSON-authored agent has no TypeScript types, so hosts need it at runtime, e.g. `parseAgentEvent(snapshot, raw, { events: schemas.events })`.
+
+- [`ea78056`](https://github.com/statelyai/agent/commit/ea780560ece5f6de8a9ae0bd58ab52a6f73f34d9) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **Every `runAgent` result now carries `events`: the replayable log of the run.** A versioned, strictly JSON-safe `AgentLogEntry[]` that reproduces the run without executing a single model or tool call.
+
+  ```ts
+  const saved: AgentLogEntry[] = [];
+  await runAgent(machine, {
+    input,
+    executors,
+    onEvent: (entry) => saved.push(entry),
+  });
+  // After a crash the log alone is enough — no snapshot, no re-called models.
+  const resumed = await runAgent(machine, { events: saved, executors });
+  ```
+
+  - Entries carry identity, acceptance time, machine identity/version, and state/effect verification hashes. Capture them in flight with `onEvent`, or pass a preceding result's `events` back when resuming by snapshot to keep one complete replay history across runs.
+  - Strict replay verification, event-id forking, and structural event-log diffs: replay rejects machine mismatches and reports the first state/effect divergence (`verifyReplay`, `diffEventLogs`, `createReplayEntry`).
+  - **Requires XState `6.0.0-alpha.25` or newer.** Agent APIs match XState's renamed source surface: use `actors`, `machine.sources.actors`, and callback `actors` instead of `actorSources` / `machine.implementations.actorSources`.
+  - Replay uses XState's canonical internal event protocol: actor completions carry `actorId`/`sessionId`, delayed work replays from `xstate.timer` events, and globally unique actor sessions are rebound when folding the log through a new actor system.
+
+- [`09bf309`](https://github.com/statelyai/agent/commit/09bf309255f07eeb619a13cf92b0596ed1dcb9da) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **`runSeam`: seam evals as one root export.** It runs a machine end to end with every model call scripted except one, and returns that call's answer plus the trajectory slices around it — the recipe that previously took ~200 lines of routing, driving and slicing in every eval.
+
+  ```ts
+  const run = await runSeam(emailDrafter, {
+    scripts: { promptEvaluator: [vague, complete], emailDrafter: [draft] },
+    seam: { request: "evaluatePrompt" }, // or { model: 'promptEvaluator', occurrence: 0 }
+    candidate: createAiSdkExecutors({ models }).generateText, // omit for a keyless run
+    respond: ({ state }) =>
+      state === "prompting"
+        ? { type: "PROMPT_SUBMITTED", prompt }
+        : { type: "SEND" },
+  });
+
+  matchesTrajectory(run.after.statePath, ["needsMoreInfo", "drafting"]);
+  matchesTrajectory(run.after.events, ["MORE_INFO", "SEND", "END"]);
+  ```
+
+  - The seam is addressed by request `name` or by `model` key, plus a 0-based `occurrence`, so "the second `draftEmail` call" is a value. A `scripts` key is a request `name` when one is scripted under it, else a `model` key.
+  - `scripts` follows `createScriptedExecutors` entry conventions (values, `{ output, usage }` envelopes, functions of the request). Each queue's last entry repeats, so a live seam that branches down a longer path never runs dry.
+  - `respond` is the reactive simulated user, called at every idle pause with `{ snapshot, state, meta, turn, result }`. Supply `executors` for a machine that also decides; text slots are always owned by the routing.
+  - `candidate` is just an executor, so a live model, a candidate prompt or a fine-tune all plug in; without one the whole run is keyless.
+  - The result is `{ result, seamOutput, callsBeforeSeam, before, after }`, where `before` / `after` are `{ statePath, events }` pairs ready for `matchesTrajectory`. The split is the seam's own effect completion, so `after` is exactly the branch the seam caused. Note `result.events` covers the whole run while `result.usage` accounts only for the last leg.
+
+- [`466f3ff`](https://github.com/statelyai/agent/commit/466f3ffd67690b383182d91e601dfc9046a00257) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **`createScriptedExecutors`: run any agent machine with no API key.** A keyless, dependency-free executor set (root export) that plays back a script instead of calling a model, so `runAgent` / `provideExecutors` work end to end with nothing installed but core. The quickstart's first run is now keyless.
+
+  ```ts
+  const result = await runAgent(moderationMachine, {
+    input: { comment: "honestly this update is terrible", trust: 20 },
+    executors: createScriptedExecutors({
+      // Plain values play back FIFO. An entry can also be a function of the
+      // request, which says where it was called from: `request.id` is the invoke
+      // id, `request.events` the state's legal candidates, `request.name` the
+      // text request's name.
+      decisions: [(request) => ({ type: request.events[0]!.type })],
+      text: ["a scripted draft"],
+    }),
+  });
+  ```
+
+  - Supplies all three slots (`generateText`, `streamText`, `decide`). `decisions` answers decisions and `agent.plan`; `text` answers text requests, with `generateText` and `streamText` sharing one FIFO queue.
+  - Entries are plain values or functions of the request, so one script serves a branching or looping machine: route on `request.name`, on a decision's candidate `events`, or on its prior failed `attempts`.
+  - An entry may be the raw executor envelope (`{ output, usage }` / `{ event, reason, usage }`), so scripted runs exercise usage aggregation too. A text entry counts as the envelope only when its own keys are `output` plus optionally `usage` / `raw`; an object owning any other key (`{ output: 'draft', confidence: 0.9 }`) is the output value, siblings intact. For a structured request whose output really is `{ output }`, wrap it once more: `{ output: { output: '…' } }`.
+  - A dry queue throws a descriptive error naming the pending request (and, for decisions, the candidate events). Queues are copied on creation, so one script object seeds many independent runs.
+
+  New exported types: `ScriptedExecutorsScript`, `ScriptedDecisionEntry`, `ScriptedDecisionValue`, `ScriptedTextEntry`.
+
+- [`54866c2`](https://github.com/statelyai/agent/commit/54866c21280adc3875156e76291bc1922734d757) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **`createAgentActor`: a long-lived agent session, plus events-only crash recovery.** The live actor survives idle settles, so a multi-turn conversation is one actor and one event log instead of a snapshot round-trip per turn.
+
+  ```ts
+  const session = createAgentActor(machine, { input, executors });
+  await session.settled(); // resolves at the next quiescence
+  session.actor.send({ type: "SEND" }); // re-opens the cycle
+  await session.settled();
+  session.usage().totalTokens; // cumulative across every turn
+  session.events; // one replayable log for the whole session
+  session.stop();
+  ```
+
+  - **`createAgentActor(machine, options)`** is runAgent's engine with a session lifecycle; `runAgent` is now the one-shot wrapper over the same engine. See `examples/session-actor`.
+  - **Events-only resume**: `runAgent(machine, { events })` with no snapshot derives the resume state from a self-contained log. Recorded results replay rather than re-execute, and a request that was still in flight when the log ended re-executes idempotently on restore. See `examples/crash-recovery` and the event-log docs.
+  - **Machine `version` respected**: `machineVersion` resolves as explicit option → the machine's own `createMachine({ version })` → structural hash, and the version gate also reads XState's persisted `version` field. After the gate decides (`throw` / `warn` / `ignore`, or `migrateSnapshot`, which takes precedence), the snapshot's `version` is aligned before restore so XState's own mismatch throw never double-fires — a live `result.snapshot` JSON round-trip resumes cleanly under a versioned machine. The preset machines in `@statelyai/agent/machines` are the payoff (see that changeset).
+  - **Executor correlation**: text executors receive `info.runId` and `info.requestId` (the durable invoke id); decision requests carry `runId` alongside `signal`. Non-breaking, and it makes caching, rate-limit and span middleware plain executor composition.
+
+- [`466f3ff`](https://github.com/statelyai/agent/commit/466f3ffd67690b383182d91e601dfc9046a00257) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **The `generate-machine` agent skill now ships in the package.** Point a coding agent at `node_modules/@statelyai/agent/skills/generate-machine/` instead of copying it out of the repo.
+
+  `skills/generate-machine/SKILL.md` teaches the full machine-authoring loop: read the shipped `agent-workflow.json` schema, author an `AgentWorkflowConfig`, validate it with Ajv, lower it via `setupAgent.fromConfig`, check with `assertAgentMachine` / `lintAgentMachine`, dry-run with `simulateAgent`, and repair on errors. See `docs/generate-machines.md`.
+
+- [`6454a4f`](https://github.com/statelyai/agent/commit/6454a4f6189262ca8c8f1ff4610c51868184f960) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **New `@statelyai/agent/sqlite`: durable persistence on Node's built-in `node:sqlite`** — zero new dependencies, Node-only (>= 22.18).
+
+  ```ts
+  import { createSqliteEventLogStore } from "@statelyai/agent/sqlite";
+
+  const log = createSqliteEventLogStore({ database: "./agent.db" });
+  await log.append({ threadId: "thread-1", expectedIndex: 0, entries });
+  log.close();
+  ```
+
+  - `createSqliteEventLogStore({ database, tableName? })` is a durable `AgentEventLogStore` that passes `assertEventLogStoreConformance`. Entries live in one table keyed by `(thread_id, idx)` with a unique `(thread_id, entry_id)` index; `append` runs its length check and inserts inside a single `BEGIN IMMEDIATE` transaction, so racing appends resolve to exactly one winner and a stale `expectedIndex` rejects with `AgentEventLogConflictError`.
+  - `createSqliteSnapshotStore({ database, tableName? })` is an `AgentSnapshotStore` upsert over a `key -> JSON` table.
+  - `database` takes a file path (or `':memory:'`) to open, or an existing `node:sqlite` `DatabaseSync` handle so both stores can share one connection. `close()` closes only a handle the store opened itself; a passed-in handle stays the caller's to close.
+
+- [`99ff897`](https://github.com/statelyai/agent/commit/99ff897c183071ca3dc3e5a1a037c36f9a471f4c) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **Dropped the `AgentStep` envelope in favor of the thin effect/replay loop.** A host now drives an agent machine directly over the append-only journal with `getAgentEffects` + `replay`, resolving each frontier effect itself — no opaque step object in between.
+
+  No longer public: `initialAgentStep`, `transitionAgentStep`, `resolveAgentStep`, `resolveAgentRequests` (and `ResolveAgentRequestsOptions`), `getAgentRequests`, and the `AgentStep` type. They remain internal implementation detail.
+
+  What you use instead (all on the root barrel, since `/steps` is gone too): the effect/replay primitives `getAgentEffects`, `replay`, `initEntry`, `createReplayEntry` (`+ AGENT_INIT_EVENT_TYPE`, `AgentEffect`, `GetAgentEffectsOptions`, `ReplayOptions`, `ReplayResult`); the per-effect resolvers `executeAgentRequest` (a `text` effect) and `resolveDecision` (a `decision`/`plan` step); the decision helpers `renderDecisionAttempts` / `PLAN_DONE_EVENT_TYPE`; and the request/effect types.
+
+  Two things become host responsibility (the envelope used to bake them in):
+
+  - **Concurrency.** `resolveAgentRequests` resolved a step's parallel text requests with `Promise.all` and applied outputs in request-array order. The thin loop resolves one frontier effect per fold; a host that wants concurrency runs `Promise.all` over the frontier's `text` effects and folds the outputs in effect-array order.
+  - **Plan stepping.** Driving an `agent.plan` invoke (per-step decision request, the applied trail, the four stop reasons) is a small host loop over the re-surfacing `plan` effect + `resolveDecision`. The applied trail is derived from the journal — it is not folded onto the re-surfaced effect under pure replay.
+
+  Migration (a text/decision run):
+
+  ```ts
+  import { initialTransition, transition } from "xstate";
+  import {
+    createReplayEntry,
+    executeAgentRequest,
+    getAgentEffects,
+    initEntry,
+    resolveDecision,
+  } from "@statelyai/agent";
+
+  const entries = [initEntry(machine, input)];
+  let [snapshot, actions] = initialTransition(machine, input);
+  while (snapshot.status === "active") {
+    const effects = getAgentEffects(machine, snapshot, actions, {
+      history: entries,
+    });
+    let next;
+    for (const effect of effects) {
+      if (effect.kind === "execute") {
+        effect.exec();
+        continue;
+      }
+      if (effect.kind === "text") {
+        next = effect.toDoneEvent(await executeAgentRequest(effect, executors));
+        break;
+      }
+      if (effect.kind === "decision") {
+        next = await resolveDecision(effect.request, executors.decide!, {
+          canTake: (event) => snapshot.can(event),
+        });
+        break;
+      }
+    }
+    if (!next) break; // idle: persist `entries`, resume later via `replay`
+    entries.push(createReplayEntry(machine, entries, next));
+    [snapshot, actions] = transition(machine, snapshot, next);
+  }
+  return snapshot.output;
+  ```
+
+  `runAgent` is unchanged; only the low-level step path moved.
+
+- [`09bf309`](https://github.com/statelyai/agent/commit/09bf309255f07eeb619a13cf92b0596ed1dcb9da) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **`matchesTrajectory`: the trajectory matcher for machine agents.** Root export, dependency-free, and it scores either a state path or an event log with the same call.
+
+  ```ts
+  const path = matchesTrajectory(statePath, ["prompting", "drafting", "sent"]);
+  expect(path.matched, JSON.stringify(path.firstMiss)).toBe(true);
+
+  matchesTrajectory(result.events, [
+    "PROMPT_SUBMITTED",
+    { type: "MORE_INFO" },
+    "SEND",
+  ]);
+  ```
+
+  It compares a run's trajectory against an expected one as an ordered subsequence (gaps allowed, order enforced), with `{ exact: true }` for strict equality. Both trajectories may be state values from `onTransition` (strings, dot paths like `'review.editing'`, or the nested value XState reports) or events from `result.events` (`AgentLogEntry[]`, bare event objects, or event types).
+
+  The result serves tests and eval scorers alike: `matched`, `matchedCount` / `expectedCount`, a `score` (0..1) for partial credit, and a JSON-safe `firstMiss` of `{ index, expected, searchedFrom }` saying where the run diverged.
+
+### Patch Changes
+
+- [`466f3ff`](https://github.com/statelyai/agent/commit/466f3ffd67690b383182d91e601dfc9046a00257) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **Fixed `lintAgentMachine` falsely reporting every state of a `setupAgent.fromConfig(...)` machine as dead.** `unreachable-state` and `missing-final` no longer fire on config-built machines.
+
+  XState's JSON layer folds a transition carrying a context patch (`assign`) into a single opaque `to` resolver, dropping its `target` from `machine.config` — so the static reachability walk saw no edges into those states and reported them, and every final state with them, as unreachable. The lowering now retains the config's declared transition targets (`on` / `always` / `after` / `onDone` / `choice`, plus each invoke's `onDone` / `onError`) alongside the machine, and lint reads reachability from those. Reachability is now exact for config machines rather than approximated: a genuinely orphaned state is still reported.
+
+  - `lintAgentMachine(machine)` works as-is on `fromConfig` machines — no API change — and the retained targets survive `machine.provide(...)`.
+  - Config-built machines no longer need `{ disable: ["unreachable-state", "missing-final"] }` as a workaround. The shipped `generate-machine` skill's guidance stands: do not disable checks.
+  - Hand-authored machines are unchanged: a dynamic (function) transition still over-approximates rather than false-flag, and a transition object carrying only a `to` resolver is now treated as opaque instead of as a targetless in-state transition.
+
+- [`6454a4f`](https://github.com/statelyai/agent/commit/6454a4f6189262ca8c8f1ff4610c51868184f960) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **`schemas/agent-workflow.json` now matches what `setupAgent.fromConfig(...)` actually accepts.** The published schema had drifted, rejecting valid configs and accepting ones the lowering throws on. `src/workflow-config-schema.test.ts` validates it against the JSON agent example plus a config exercising every fixed area.
+
+  - **`guard` accepts a bare named-guard string**: `guard: "isFromHuman"` (resolved against `fromConfig`'s `guards`) was runtime-supported but schema-invalid. The `{ type, params }` object form — which the lowering throws on — was schema-valid; it is now removed.
+  - **Root `actors` added**: placeholder actor sources were supported by the type and the lowering but absent from the schema, so `additionalProperties: false` rejected valid configs.
+  - **`requests.*.reasoning` added** (structured-output envelope opt-in).
+  - **Tool schemas renamed to `inputSchema` / `outputSchema`**, matching `AgentToolDescriptor` (the schema had `input` / `output`).
+  - **`toolChoice` no longer accepts a `{{ }}` expression**: it is passed to the provider verbatim, never template-evaluated.
+  - **`invoke.meta` removed**: the translation drops it (xstate's `InvokeJSON` has no `meta`), so the schema no longer advertises it.
+  - **State and transition `meta` are plain JSON**, not expression objects: both pass through verbatim without template evaluation.
+
 ## 2.0.0-alpha.11
 
 ### Minor Changes
