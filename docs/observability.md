@@ -173,8 +173,8 @@ import { createInspector } from "@statelyai/sdk";
 import { runAgent } from "@statelyai/agent";
 
 const inspector = createInspector({
-  // WebSocket URL of your Stately inspection relay; defaults to ws://localhost:4242.
-  // See the @statelyai/sdk docs for hosted and self-hosted relay options.
+  // Optional: WebSocket URL of a self-hosted inspection relay.
+  // Without it, the SDK uses Stately's hosted relay.
 });
 
 await runAgent(machine, {
@@ -186,7 +186,7 @@ await runAgent(machine, {
 inspector.destroy();
 ```
 
-Set `autoOpen: false` for headless jobs. For serverless/edge runtimes (e.g. Cloudflare Workers/Durable Objects), `@statelyai/sdk/relay` ships `createInspectionRelay` — a runtime-neutral relay with bounded late-join replay that a Durable Object can host directly, so per-request lifetimes and hibernation don't break the stream.
+Set `autoOpen: false` for headless jobs. `inspector.roomId`, `relayUrl`, and `inspectorUrl` describe the negotiated room; let the SDK construct them instead of hand-writing registration messages or actor identifiers. For serverless/edge runtimes (e.g. Cloudflare Workers/Durable Objects), `@statelyai/sdk/relay` ships `createInspectionRelay` — a runtime-neutral relay with bounded late-join replay that a Durable Object can host directly, so per-request lifetimes and hibernation don't break the stream.
 
 The inspector renders the running actor as the same diagram you author, so the whole flow is visible as one live machine. See [`examples/email-drafter-inspector`](../examples/email-drafter-inspector/index.ts) for a full session (it keeps one long-lived actor instead of the `runAgent` loop, but the wiring is identical).
 

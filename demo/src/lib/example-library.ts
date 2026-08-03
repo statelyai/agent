@@ -19,16 +19,15 @@ export const listExamples = createServerFn({ method: "GET" }).handler(async () =
   return listExampleSummaries();
 });
 
-export type InspectionInfo = { wsUrl: string; session: string };
+export type InspectionInfo = { relayUrl: string; roomId: string };
 
 /** Starts the local inspection relay and returns its connection info. */
 export const getInspection = createServerFn({ method: "GET" }).handler(
   async (): Promise<InspectionInfo> => {
-    const { ensureInspectionRelay, inspectionWsUrl, INSPECTION_SESSION } = await import(
-      "./inspection.server"
-    );
+    const { ensureInspectionRelay, inspectionRelayUrl, INSPECTION_ROOM_ID } =
+      await import("./inspection.server");
     await ensureInspectionRelay();
-    return { wsUrl: inspectionWsUrl(), session: INSPECTION_SESSION };
+    return { relayUrl: inspectionRelayUrl(), roomId: INSPECTION_ROOM_ID };
   },
 );
 

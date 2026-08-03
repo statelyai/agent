@@ -272,8 +272,7 @@ Watch the machine light up state by state in the [Stately Inspector](https://sta
 ```ts
 import { createInspector } from "@statelyai/sdk";
 
-// Point `url` at your Stately inspection relay (defaults to ws://localhost:4242;
-// see the @statelyai/sdk docs for running one).
+// Uses Stately's hosted relay by default. Pass `url` for a self-hosted relay.
 const inspector = createInspector();
 
 await runAgent(moderationMachine, {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createWebSocketTransport } from "@statelyai/sdk";
 import { useSelector } from "@xstate/store-react";
 import { ExternalLink, RefreshCcw, X } from "lucide-react";
 import { getTargetOrigin, isTrustedVizMessage } from "@/lib/viz-transport";
@@ -8,7 +9,7 @@ import type { VizFrame } from "@/hooks/use-trace-player";
 
 const defaultVizUrl = "https://editor.stately.ai/embed?auth=message";
 
-export type LiveWs = { wsUrl: string; session: string };
+export type LiveWs = { relayUrl: string; roomId: string };
 
 export type VizCode = {
   /** Path label shown in the drawer header, e.g. `src/agents/refund.ts`. */
@@ -144,9 +145,11 @@ function EmbedVizPanel({
   const latestRef = useRef({ vizConfig, frame, theme });
   const [store] = useState(createVizPanelStore);
   const status = useSelector(store, (snapshot) => snapshot.context.status);
+  const transportError = useSelector(store, (snapshot) => snapshot.context.error);
   const frameKey = useSelector(store, (snapshot) => snapshot.context.frameKey);
   const ready = status === "ready";
   const timedOut = status === "timedOut";
+  const failed = status === "failed";
   const vizUrl = import.meta.env.VITE_VIZ_URL || defaultVizUrl;
   const targetOrigin = useMemo(() => getTargetOrigin(vizUrl), [vizUrl]);
 
@@ -210,39 +213,36 @@ function EmbedVizPanel({
   // ─── live bridge: relay WS → embed postMessage ───
   //
   // The demo page plays the role the viz /inspect route would: it joins the
-  // relay session as a "viz" peer and forwards the full streamed system
+  // inspection room as a viewer and forwards the full streamed system
   // protocol into the (auth-free) embed. The local HTTP parent owns the ws://
   // connection, avoiding mixed content in the hosted HTTPS iframe.
   useEffect(() => {
     if (!liveWs) return;
-    let connectedAt = 0;
-    const socket = new WebSocket(liveWs.wsUrl);
-    socket.onopen = () => {
-      connectedAt = Date.now();
-      socket.send(
-        JSON.stringify({ type: "@statelyai.register", role: "viz", sessionId: liveWs.session }),
-      );
-    };
-    socket.onmessage = (messageEvent) => {
-      let message: SystemMessage;
-      try {
-        message = JSON.parse(String(messageEvent.data)) as SystemMessage;
-      } catch {
-        return;
-      }
-      // A `system.init` right after connecting is relay replay of an older
-      // session — ignore it so the static preview isn't clobbered on page
-      // load. A LATER init is the node inspector's fresh connect (first run
-      // in a server process): adopt its root machine.
+    const transport = createWebSocketTransport({
+      url: liveWs.relayUrl,
+      role: "viewer",
+      metadata: { name: "Stately Agent Lab" },
+    });
+    const unsubscribeMessage = transport.onMessage((protocolMessage) => {
+      const message = protocolMessage as SystemMessage;
       if (message.type === "@statelyai.system.init" && Array.isArray(message.actors)) {
-        if (Date.now() - connectedAt < 1000) return;
         store.trigger.systemInit({ message });
       } else if (message.type.startsWith("@statelyai.system.")) {
         store.trigger.systemMessage({ message });
+      } else if (message.type === "@statelyai.error") {
+        const detail = typeof message.message === "string" ? message.message : "Unknown error";
+        store.trigger.transportFailed({ message: detail });
       }
+    });
+    const unsubscribeError = transport.onError?.((failure) => {
+      store.trigger.transportFailed({ message: failure.message });
+    });
+    return () => {
+      unsubscribeMessage();
+      unsubscribeError?.();
+      transport.destroy();
     };
-    return () => socket.close();
-  }, [liveWs?.wsUrl, liveWs?.session, store]);
+  }, [frameKey, liveWs?.relayUrl, store]);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => store.trigger.timeout(), 9000);
@@ -265,10 +265,10 @@ function EmbedVizPanel({
                 <p>Connecting to Viz…</p>
               </div>
             )}
-            {timedOut && !ready && (
+            {(timedOut || failed) && !ready && (
               <div className="viz-state" role="status">
                 <strong>Viz did not connect</strong>
-                <p>Check the embed URL or run the local Viz app.</p>
+                <p>{transportError ?? "Check the embed URL or run the local Viz app."}</p>
                 <div className="viz-state__actions">
                   <button type="button" className="viz-chip" onClick={() => store.trigger.retry()}>
                     <RefreshCcw size={13} aria-hidden="true" /> Retry
@@ -322,11 +322,7 @@ function CodeDrawer({
               <X size={14} aria-hidden="true" />
             </button>
           </div>
-          <CodeSource
-            source={code.source}
-            cacheKey={code.cacheKey}
-            className="viz-drawer__body"
-          />
+          <CodeSource source={code.source} cacheKey={code.cacheKey} className="viz-drawer__body" />
         </>
       ) : null}
     </aside>

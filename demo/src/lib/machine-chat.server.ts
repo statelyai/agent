@@ -294,7 +294,7 @@ export async function startMachineChat(
     input: input as never,
     executors: live.executors,
     onTransition,
-    inspect: maybeCreateRunInspection(),
+    inspect: maybeCreateRunInspection(machine),
   });
   return toChatResult(machine, live.model, result as RunAgentResult<AnyStateMachine>, trace);
 }
@@ -334,7 +334,7 @@ export async function resumeMachineChat(
     event: parsed as never,
     executors: live.executors,
     onTransition,
-    inspect: maybeCreateRunInspection(),
+    inspect: maybeCreateRunInspection(machine),
   });
   return toChatResult(machine, live.model, result as RunAgentResult<AnyStateMachine>, trace);
 }

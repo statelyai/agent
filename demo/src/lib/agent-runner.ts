@@ -30,7 +30,7 @@ import { retryMachine } from "@/agents/retry";
 import { toolsMachine } from "@/agents/tools";
 import { reflectionMachine } from "@/agents/reflection";
 import { scriptedExecutorsFor, scriptedReviewVerdict } from "./scripted-executors";
-import type { ScenarioId } from "./scenarios";
+import { scenarioSource, type ScenarioId } from "./scenarios";
 
 export type RunMode = "live" | "script";
 
@@ -201,11 +201,12 @@ export async function startScenarioRun(
   executors: Partial<AgentRequestExecutors>,
 ): Promise<ScenarioResult> {
   const { trace, onTransition } = createTraceRecorder();
-  const result = await runAgent(machineFor(scenarioId), {
+  const machine = machineFor(scenarioId);
+  const result = await runAgent(machine, {
     input: inputFor(scenarioId, prompt),
     executors,
     onTransition,
-    inspect: maybeCreateRunInspection(),
+    inspect: maybeCreateRunInspection(machine, scenarioSource[scenarioId]),
   });
   return toResult(scenarioId, mode, model, result as RunAgentResult<AnyStateMachine>, trace);
 }
@@ -220,14 +221,15 @@ export async function resumeScenarioRun(
   executors: Partial<AgentRequestExecutors>,
 ): Promise<ScenarioResult> {
   const { trace, onTransition } = createTraceRecorder();
+  const machine = machineFor(scenarioId);
   // `onIllegalResumeEvent: "throw"` (the default) rejects an event the restored
   // state cannot accept — the snapshot-level validation the task requires.
-  const result = await runAgent(machineFor(scenarioId), {
+  const result = await runAgent(machine, {
     snapshot,
     event,
     executors,
     onTransition,
-    inspect: maybeCreateRunInspection(),
+    inspect: maybeCreateRunInspection(machine, scenarioSource[scenarioId]),
   });
   return toResult(scenarioId, mode, model, result as RunAgentResult<AnyStateMachine>, trace);
 }
