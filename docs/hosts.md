@@ -51,9 +51,11 @@ const executors = {
 };
 ```
 
-The `ai` package is an optional peer dependency, imported only by this subpath. The root's one runtime peer is `xstate`. You supply the model resolver, so no provider package becomes a dependency either.
+<!-- peer dependencies and entry points from package.json#peerDependencies and package.json#exports -->
 
-The package ships five entry points: `@statelyai/agent`, `@statelyai/agent/ai-sdk`, `@statelyai/agent/machines`, `@statelyai/agent/sqlite`, and the JSON Schema at `@statelyai/agent/agent-workflow.json`. Every host helper (`getJsonSchema`, `buildEnvelopeSchema`, `parseStructuredEnvelope`, `parseOutput`, `getAgentOutputMode`, `renderDecisionAttempts`, `resolveDecision`, `executeAgentRequest`, ...) is a root export.
+The `ai` package is an optional peer dependency, imported only by this subpath. Core's runtime peer is `xstate`; the OTel bridge also has an optional `@opentelemetry/api` peer. You supply the model resolver, so no provider package becomes a dependency either.
+
+The package ships `@statelyai/agent`, `@statelyai/agent/ai-sdk`, `@statelyai/agent/machines`, `@statelyai/agent/otel`, `@statelyai/agent/sqlite`, and the JSON Schema at `@statelyai/agent/agent-workflow.json`. Every host helper (`getJsonSchema`, `buildEnvelopeSchema`, `parseStructuredEnvelope`, `parseOutput`, `getAgentOutputMode`, `renderDecisionAttempts`, `resolveDecision`, `executeAgentRequest`, ...) is a root export.
 
 ### Typed model aliases
 

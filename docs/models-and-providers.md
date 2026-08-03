@@ -127,4 +127,6 @@ Runnable hosts, one per provider stack:
 | [cloudflare-agent-host](../examples/cloudflare-agent-host/index.ts)           | Durable Object                                                                                                    |
 | [cloudflare-workers-ai-host](../examples/cloudflare-workers-ai-host/index.ts) | Workers AI binding                                                                                                |
 
-Package entry points are `@statelyai/agent` (root), `@statelyai/agent/ai-sdk`, `@statelyai/agent/machines`, `@statelyai/agent/sqlite`, and `@statelyai/agent/agent-workflow.json`. Everything a hand-written host needs (`buildEnvelopeSchema`, `getJsonSchema`, `parseOutput`, `parseStructuredEnvelope`, `getAgentOutputMode`, `resolveDecision`, `renderDecisionAttempts`) comes from the root.
+<!-- package entry points from package.json#exports -->
+
+Package entry points are `@statelyai/agent` (root), `@statelyai/agent/ai-sdk`, `@statelyai/agent/machines`, `@statelyai/agent/otel`, `@statelyai/agent/sqlite`, and `@statelyai/agent/agent-workflow.json`. Everything a hand-written host needs (`buildEnvelopeSchema`, `getJsonSchema`, `parseOutput`, `parseStructuredEnvelope`, `getAgentOutputMode`, `resolveDecision`, `renderDecisionAttempts`) comes from the root.

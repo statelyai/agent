@@ -35,7 +35,9 @@ Each pattern is a single self-contained `index.ts`: no shared harness, no local 
 
 4. Run it: `OPENAI_API_KEY=... npx tsx index.ts` (or swap in [any host](hosts.md)).
 
-Peer ranges (from `@statelyai/agent`): `ai@^6.0.67`, `xstate@>=6.0.0-alpha.25 <6.0.0`, `zod@^3.25 || ^4`. `@statelyai/agent` is alpha; pin the exact version.
+<!-- peer ranges from package.json#peerDependencies and example schema dependency from package.json#devDependencies -->
+
+Peer ranges (from `@statelyai/agent`): `ai@^6.0.67`, `xstate@>=6.0.0-alpha.25 <6.0.0`, and optional `@opentelemetry/api@^1`. The examples use Zod 4 directly. `@statelyai/agent` is alpha; pin the exact version.
 
 ## Running them from the repo
 
