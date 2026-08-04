@@ -121,7 +121,7 @@
     "@opentelemetry/exporter-trace-otlp-http": "^0.221.0",
     "@opentelemetry/sdk-trace-base": "^2.10.0",
     "@opentelemetry/sdk-trace-node": "^2.10.0",
-    "@statelyai/sdk": "^0.15.0",
+    "@statelyai/sdk": "^0.16.2",
     "@types/express": "^5.0.6",
     "@types/node": "^20.16.10",
     "@types/react": "^19.2.17",

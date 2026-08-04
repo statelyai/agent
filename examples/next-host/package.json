@@ -10,7 +10,7 @@
   "dependencies": {
     "@ai-sdk/openai": "^3.0.25",
     "@statelyai/agent": "workspace:*",
-    "@statelyai/sdk": "^0.15.0",
+    "@statelyai/sdk": "^0.16.2",
     "@tanstack/react-query": "^5.101.4",
     "@xstate/store": "^4.2.2",
     "@xstate/store-react": "^2.0.0",

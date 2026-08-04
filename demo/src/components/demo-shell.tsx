@@ -61,6 +61,13 @@ function hashFromSelection(selection: Selection) {
  */
 const inspectOverride = import.meta.env.VITE_VIZ_INSPECT_URL || null;
 
+function createLiveInspectUrl(baseUrl: string, inspection: InspectionInfo): string {
+  const url = new URL(baseUrl);
+  url.searchParams.set("ws", inspection.relayUrl);
+  url.searchParams.set("r", inspection.roomId);
+  return url.toString();
+}
+
 export function DemoShell() {
   const [store] = useState(() =>
     createShellStore(selectionFromHash() ?? { type: "scenario", id: "refund" }, readStoredTheme()),
@@ -263,7 +270,9 @@ export function DemoShell() {
     const label = `${descriptor?.label ?? humanizeEventType(event.type)}${payloadNote}`;
     const { id, epoch } = pushTurn(label, "action", "loading", event.type);
     const deliver = isScenario
-      ? resumeScenario({ data: { scenarioId: scenario.id, snapshot: idleSnapshot as never, event } })
+      ? resumeScenario({
+          data: { scenarioId: scenario.id, snapshot: idleSnapshot as never, event },
+        })
       : resumeExample({
           data: {
             id: selection.type === "example" ? selection.id : "",
@@ -333,9 +342,9 @@ export function DemoShell() {
         visible: true,
         placeholder: interpretMode
           ? "Say “looks good” or “that’s no good”…"
-          : (pendingIdle?.textEvent
-              ? `Message becomes ${pendingIdle.textEvent.type} (${pendingIdle.textEvent.field})`
-              : scenario.placeholder),
+          : pendingIdle?.textEvent
+            ? `Message becomes ${pendingIdle.textEvent.type} (${pendingIdle.textEvent.field})`
+            : scenario.placeholder,
         submitLabel: interpretMode ? "Interpret review" : started ? "Send" : scenario.startLabel,
       };
     }
@@ -391,7 +400,9 @@ export function DemoShell() {
           if (typeof starter === "string") {
             const field = activeMachine.promptField;
             if (!field) return [];
-            return [{ label: starter, onStart: () => startExampleRun(starter, { [field]: starter }) }];
+            return [
+              { label: starter, onStart: () => startExampleRun(starter, { [field]: starter }) },
+            ];
           }
           const firstString = Object.values(starter).find((value) => typeof value === "string");
           const label =
@@ -431,9 +442,9 @@ export function DemoShell() {
 
   const liveUrl =
     inspection && inspectOverride && started
-      ? `${inspectOverride}?ws=${encodeURIComponent(inspection.wsUrl)}&session=${encodeURIComponent(inspection.session)}`
+      ? createLiveInspectUrl(inspectOverride, inspection)
       : null;
-  const liveWs = inspection ? { wsUrl: inspection.wsUrl, session: inspection.session } : null;
+  const liveWs = inspection;
 
   const vizPanel = (
     <VizPanel
@@ -463,7 +474,9 @@ export function DemoShell() {
               fileLabel: `examples/${selection.id}/index.ts`,
               source: exampleDetail?.source ?? "// Loading…",
               // The placeholder must not be cached under the example's key.
-              cacheKey: exampleDetail ? `example:${selection.id}` : `example:${selection.id}:loading`,
+              cacheKey: exampleDetail
+                ? `example:${selection.id}`
+                : `example:${selection.id}:loading`,
             }
       }
     />

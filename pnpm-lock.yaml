@@ -54,8 +54,8 @@ importers:
         specifier: ^2.10.0
         version: 2.10.0(@opentelemetry/api@1.9.1)
       '@statelyai/sdk':
-        specifier: ^0.15.0
-        version: 0.15.0(cytoscape@3.34.0)(d3-force@3.0.0)(zod@4.3.6)
+        specifier: ^0.16.2
+        version: 0.16.2(cytoscape@3.34.0)(d3-force@3.0.0)(zod@4.3.6)
       '@types/express':
         specifier: ^5.0.6
         version: 5.0.6
@@ -144,8 +144,8 @@ importers:
         specifier: workspace:*
         version: link:..
       '@statelyai/sdk':
-        specifier: ^0.15.0
-        version: 0.15.0(cytoscape@3.34.0)(d3-force@3.0.0)(zod@4.4.3)
+        specifier: ^0.16.2
+        version: 0.16.2(cytoscape@3.34.0)(d3-force@3.0.0)(zod@4.4.3)
       '@tanstack/react-router':
         specifier: ^1.170.6
         version: 1.170.18(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -294,8 +294,8 @@ importers:
         specifier: workspace:*
         version: link:../..
       '@statelyai/sdk':
-        specifier: ^0.15.0
-        version: 0.15.0(cytoscape@3.34.0)(d3-force@3.0.0)(zod@4.4.3)
+        specifier: ^0.16.2
+        version: 0.16.2(cytoscape@3.34.0)(d3-force@3.0.0)(zod@4.4.3)
       '@tanstack/react-query':
         specifier: ^5.101.4
         version: 5.101.4(react@19.2.7)
@@ -333,8 +333,8 @@ importers:
         specifier: workspace:*
         version: link:../..
       '@statelyai/sdk':
-        specifier: ^0.15.0
-        version: 0.15.0(cytoscape@3.34.0)(d3-force@3.0.0)(zod@4.4.3)
+        specifier: ^0.16.2
+        version: 0.16.2(cytoscape@3.34.0)(d3-force@3.0.0)(zod@4.4.3)
       '@tanstack/ai':
         specifier: ^0.42.0
         version: 0.42.0(@opentelemetry/api@1.9.1)
@@ -3339,8 +3339,10 @@ packages:
       zod:
         optional: true
 
-  '@statelyai/sdk@0.15.0':
-    resolution: {integrity: sha512-yvzEj22DgcIJa9MkVsjzhPpR/hJtUQyAcvWpqH4usL5xcpVEm2vTpuuUr5EYb92nElSz32jBGcL5mKk3qA7Tmg==, tarball: https://registry.npmjs.org/@statelyai/sdk/-/sdk-0.15.0.tgz}
+  '@statelyai/sdk@0.16.2':
+    resolution: {integrity: sha512-ifykuiQLV7IWeAo68j2ohLFRdn6E/FR5BBrLEI1tKyQFutc6HLxNJuAFUE8oXW6OflZfgvaESmQuowzoggdtTQ==, tarball: https://registry.npmjs.org/@statelyai/sdk/-/sdk-0.16.2.tgz}
+    engines: {node: '>=22.4'}
+    hasBin: true
 
   '@swc/helpers@0.5.15':
     resolution: {integrity: sha512-JQ5TuMi45Owi4/BIMAJBoSQoOJu12oOk/gADqlcUL9JEdHB8vyjUSsxqeNXnmXHjYKMi2WcYtezGEEhqUI/E2g==, tarball: https://registry.npmjs.org/@swc/helpers/-/helpers-0.5.15.tgz}
@@ -9433,32 +9435,38 @@ snapshots:
       d3-force: 3.0.0
       zod: 4.4.3
 
-  '@statelyai/sdk@0.15.0(cytoscape@3.34.0)(d3-force@3.0.0)(zod@4.3.6)':
+  '@statelyai/sdk@0.16.2(cytoscape@3.34.0)(d3-force@3.0.0)(zod@4.3.6)':
     dependencies:
       '@statelyai/graph': 1.0.0(cytoscape@3.34.0)(d3-force@3.0.0)(zod@4.3.6)
       esbuild: 0.27.7
       typescript: 5.9.3
+      ws: 8.21.1
       xstate: 5.32.5
     transitivePeerDependencies:
+      - bufferutil
       - cytoscape
       - d3-force
       - dotparser
       - elkjs
       - fast-xml-parser
+      - utf-8-validate
       - zod
 
-  '@statelyai/sdk@0.15.0(cytoscape@3.34.0)(d3-force@3.0.0)(zod@4.4.3)':
+  '@statelyai/sdk@0.16.2(cytoscape@3.34.0)(d3-force@3.0.0)(zod@4.4.3)':
     dependencies:
       '@statelyai/graph': 1.0.0(cytoscape@3.34.0)(d3-force@3.0.0)(zod@4.4.3)
       esbuild: 0.27.7
       typescript: 5.9.3
+      ws: 8.21.1
       xstate: 5.32.5
     transitivePeerDependencies:
+      - bufferutil
       - cytoscape
       - d3-force
       - dotparser
       - elkjs
       - fast-xml-parser
+      - utf-8-validate
       - zod
 
   '@swc/helpers@0.5.15':

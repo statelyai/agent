@@ -3,26 +3,28 @@ import { createStore } from "@xstate/store";
 export type SystemMessage = Record<string, unknown> & {
   type: string;
   actors?: Array<{
+    sessionId: string;
     actorId: string;
-    parentActorId: string | null;
-    machineConfig?: unknown;
+    parentSessionId: string | null;
     machine?: unknown;
     snapshot?: unknown;
   }>;
   actorId?: string;
-  parentActorId?: string | null;
+  sessionId?: string;
+  parentSessionId?: string | null;
   machine?: unknown;
   snapshot?: unknown;
   event?: unknown;
 };
 
-type VizPanelStatus = "connecting" | "ready" | "timedOut";
+type VizPanelStatus = "connecting" | "ready" | "timedOut" | "failed";
 
 type VizPanelContext = {
   status: VizPanelStatus;
+  error: string | null;
   frameKey: number;
   liveMessages: SystemMessage[];
-  selectedActorId: string | null;
+  selectedSessionId: string | null;
   liveEvent: string | null;
   /** Flattened state value of the selected actor, from live inspection. */
   liveStateLabel: string | null;
@@ -31,6 +33,7 @@ type VizPanelContext = {
 type VizPanelEvents = {
   retry: {};
   timeout: {};
+  transportFailed: { message: string };
   iframeReady: { fallbackMessages: SystemMessage[] };
   machineChanged: { initMessage: SystemMessage | null };
   /** Re-init the embed (e.g. theme flip), then replay what it was showing. */
@@ -50,8 +53,7 @@ function rootActor(message: SystemMessage) {
   return Array.isArray(message.actors)
     ? ([...message.actors]
         .reverse()
-        .find((actor) => actor.parentActorId == null && (actor.machineConfig ?? actor.machine)) ??
-        null)
+        .find((actor) => actor.parentSessionId == null && actor.machine) ?? null)
     : null;
 }
 
@@ -83,9 +85,10 @@ export function createVizPanelStore() {
   return createStore<VizPanelContext, VizPanelEvents, VizPanelEmitted>({
     context: {
       status: "connecting",
+      error: null,
       frameKey: 0,
       liveMessages: [],
-      selectedActorId: null,
+      selectedSessionId: null,
       liveEvent: null,
       liveStateLabel: null,
     },
@@ -93,15 +96,21 @@ export function createVizPanelStore() {
       retry: (context) => ({
         ...context,
         status: "connecting",
+        error: null,
         frameKey: context.frameKey + 1,
       }),
       timeout: (context) =>
         context.status === "connecting" ? { ...context, status: "timedOut" } : context,
+      transportFailed: (context, event) => ({
+        ...context,
+        status: "failed",
+        error: event.message,
+      }),
       iframeReady: (context, event, enqueue) => {
         const messages =
           context.liveMessages.length > 0 ? context.liveMessages : event.fallbackMessages;
         for (const message of messages) enqueue.emit.post({ message });
-        return { ...context, status: "ready" };
+        return { ...context, status: "ready", error: null };
       },
       machineChanged: (context, event, enqueue) => {
         if (context.status === "ready" && event.initMessage) {
@@ -110,7 +119,7 @@ export function createVizPanelStore() {
         return {
           ...context,
           liveMessages: [],
-          selectedActorId: null,
+          selectedSessionId: null,
           liveEvent: null,
           liveStateLabel: null,
         };
@@ -137,28 +146,28 @@ export function createVizPanelStore() {
         return {
           ...context,
           liveMessages: [event.message],
-          selectedActorId: root?.actorId ?? null,
+          selectedSessionId: root?.sessionId ?? null,
           liveEvent: null,
           liveStateLabel: snapshotStateLabel(root?.snapshot),
         };
       },
       systemMessage: (context, event, enqueue) => {
         const message = event.message;
-        let selectedActorId = context.selectedActorId;
+        let selectedSessionId = context.selectedSessionId;
         let liveEvent = context.liveEvent;
         let liveStateLabel = context.liveStateLabel;
 
         if (
           message.type === "@statelyai.system.actorRegistered" &&
-          message.parentActorId == null &&
+          message.parentSessionId == null &&
           message.machine &&
-          message.actorId
+          message.sessionId
         ) {
-          selectedActorId = message.actorId;
+          selectedSessionId = message.sessionId;
           liveStateLabel = snapshotStateLabel(message.snapshot) ?? liveStateLabel;
         } else if (
           message.type === "@statelyai.system.actorEvent" &&
-          message.actorId === selectedActorId
+          message.sessionId === selectedSessionId
         ) {
           const eventType = (message.event as { type?: string } | null | undefined)?.type;
           if (typeof eventType === "string" && !eventType.startsWith("@xstate.")) {
@@ -166,7 +175,7 @@ export function createVizPanelStore() {
           }
         } else if (
           message.type === "@statelyai.system.actorSnapshot" &&
-          message.actorId === selectedActorId
+          message.sessionId === selectedSessionId
         ) {
           // Internal lifecycle events (@xstate.init / @xstate.stop) would
           // clobber the run's real last event — keep them off the label.
@@ -178,13 +187,13 @@ export function createVizPanelStore() {
         }
 
         if (context.liveMessages.length === 0) {
-          return { ...context, selectedActorId, liveEvent, liveStateLabel };
+          return { ...context, selectedSessionId, liveEvent, liveStateLabel };
         }
         if (context.status === "ready") enqueue.emit.post({ message });
         return {
           ...context,
           liveMessages: appendLiveMessage(context.liveMessages, message),
-          selectedActorId,
+          selectedSessionId,
           liveEvent,
           liveStateLabel,
         };

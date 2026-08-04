@@ -10,14 +10,18 @@
  *   plugs straight into `runAgent({ inspect })`. Stopped actors are retained,
  *   so a settled run stays on screen.
  *
- * One fixed session ("agent-demo") — the demo is a single-user local app; the
- * viz side connects once and every run streams into it.
+ * One fixed room ("agent-demo") and producer — the demo is a single-user
+ * local app; the viz side connects once and every run replaces that producer's
+ * replay checkpoint.
  */
 import { createInspectionRelay } from "@statelyai/sdk/relay";
 import { createInspector, type Inspector } from "@statelyai/sdk/inspect";
+import { createInspectionRoomUrls, getInspectionRoomId } from "@statelyai/sdk";
+import type { AnyStateMachine } from "xstate";
 import { toVizConfig } from "./scenarios";
 
-export const INSPECTION_SESSION = "agent-demo";
+export const INSPECTION_ROOM_ID = "agent-demo";
+const INSPECTION_PRODUCER_ID = "agent-demo-runner";
 
 const DEFAULT_PORT = 4243;
 
@@ -28,6 +32,13 @@ function inspectionPort(): number {
 
 export function inspectionWsUrl(): string {
   return process.env.DEMO_INSPECT_WS_URL || `ws://localhost:${inspectionPort()}`;
+}
+
+export function inspectionRelayUrl(): string {
+  return createInspectionRoomUrls({
+    url: inspectionWsUrl(),
+    roomId: INSPECTION_ROOM_ID,
+  }).relayUrl;
 }
 
 // Singletons must survive Vite SSR module reloads (HMR re-evaluates this
@@ -50,7 +61,12 @@ export async function ensureInspectionRelay(): Promise<void> {
   const relay = createInspectionRelay();
   const wss = new WebSocketServer({ port: inspectionPort(), host: "127.0.0.1" });
   const sockets = new Map<string, InstanceType<typeof WebSocket>>();
-  wss.on("connection", (ws) => {
+  wss.on("connection", (ws, request) => {
+    const roomId = getInspectionRoomId(new URL(request.url ?? "/", inspectionWsUrl()));
+    if (roomId !== INSPECTION_ROOM_ID) {
+      ws.close(1008, "Unknown inspection room");
+      return;
+    }
     const peerId = randomUUID();
     sockets.set(peerId, ws as never);
     ws.on("message", (raw) => {
@@ -77,6 +93,16 @@ function isMachineConfig(config: unknown): config is Record<string, unknown> {
   return !!config && typeof config === "object" && ("states" in config || "initial" in config);
 }
 
+export function machineForInspection(
+  actor: { logic?: { config?: unknown } },
+  primaryMachine: AnyStateMachine,
+  primarySource?: string,
+): unknown {
+  if (actor.logic === primaryMachine && primarySource) return primarySource;
+  const config = actor.logic?.config;
+  return isMachineConfig(config) ? toVizConfig({ config } as never) : null;
+}
+
 /**
  * Inspection hook for a run — `inspector.inspect` is an xstate inspect-option
  * callback — or undefined when no viz client ever asked for live inspection
@@ -89,20 +115,34 @@ function isMachineConfig(config: unknown): config is Record<string, unknown> {
  * `system.init` carrying the run's machine; the previous one is destroyed
  * (the relay retains its replay for late-joining viz peers).
  */
-export function maybeCreateRunInspection(): ((event: unknown) => void) | undefined {
+export function maybeCreateRunInspection(
+  primaryMachine: AnyStateMachine,
+  primarySource?: string,
+): ((event: unknown) => void) | undefined {
   if (!state.relayStarted) return undefined;
   state.inspector?.destroy();
   state.inspector = createInspector({
     url: inspectionWsUrl(),
-    sessionId: INSPECTION_SESSION,
+    roomId: INSPECTION_ROOM_ID,
+    producerId: INSPECTION_PRODUCER_ID,
     autoOpen: false,
     name: "Stately Agent Lab",
-    // Same serializer the embed uses: static JSON, functions stripped.
-    // Non-machine actors (model-call promises, tools) show as generic nodes.
-    extractMachineConfig: (actor: { logic?: { config?: unknown } }) => {
-      const config = actor?.logic?.config;
-      return isMachineConfig(config) ? toVizConfig({ config } as never) : null;
+    readOnly: true,
+    panels: { leftPanels: [], rightPanels: [], activePanels: [] },
+    capabilities: {
+      edit: false,
+      export: false,
+      ai: false,
+      simulate: false,
+      inspect: true,
+      navigateHierarchy: false,
+      maxDepth: 2,
+      panels: [],
     },
+    // Source preserves guards, inputs, and outputs for the primary machine.
+    // Non-machine actors (model-call promises, tools) show as generic nodes.
+    extractMachineConfig: (actor: { logic?: { config?: unknown } }) =>
+      machineForInspection(actor, primaryMachine, primarySource),
   });
   return state.inspector.inspect as (event: unknown) => void;
 }

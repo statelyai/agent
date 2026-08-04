@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { createVizPanelStore, type SystemMessage } from "./viz-panel-store";
 
-const init = (actorId = "root"): SystemMessage => ({
+const init = (sessionId = "root-session"): SystemMessage => ({
   type: "@statelyai.system.init",
-  actors: [{ actorId, parentActorId: null, machine: {} }],
+  protocolVersion: 2,
+  actors: [{ sessionId, actorId: "root", parentSessionId: null, machine: {} }],
 });
 
 describe("viz panel store", () => {
@@ -25,12 +26,24 @@ describe("viz panel store", () => {
     expect(store.getSnapshot().context.status).toBe("ready");
   });
 
+  it("surfaces transport and protocol failures", () => {
+    const store = createVizPanelStore();
+
+    store.trigger.transportFailed({ message: "Unsupported inspection protocol" });
+
+    expect(store.getSnapshot().context).toMatchObject({
+      status: "failed",
+      error: "Unsupported inspection protocol",
+    });
+  });
+
   it("replays buffered live messages in order when the iframe becomes ready", () => {
     const store = createVizPanelStore();
     const post = vi.fn();
     const snapshot: SystemMessage = {
       type: "@statelyai.system.actorSnapshot",
-      actorId: "root",
+      sessionId: "root-session",
+      snapshot: { value: "reviewing" },
       event: { type: "approve" },
     };
     store.on("post", ({ message }) => post(message));
@@ -43,6 +56,7 @@ describe("viz panel store", () => {
 
     expect(post.mock.calls.map(([message]) => message)).toEqual([init(), snapshot]);
     expect(store.getSnapshot().context.liveEvent).toBe("approve");
+    expect(store.getSnapshot().context.liveStateLabel).toBe("reviewing");
   });
 
   it("initializes the static preview when no live stream exists", () => {
@@ -62,7 +76,7 @@ describe("viz panel store", () => {
     store.trigger.systemMessage({
       message: {
         type: "@statelyai.system.actorEvent",
-        actorId: "root",
+        sessionId: "root-session",
         event: { type: "approve" },
       },
     });
@@ -71,8 +85,61 @@ describe("viz panel store", () => {
 
     expect(store.getSnapshot().context).toMatchObject({
       liveMessages: [],
-      selectedActorId: null,
+      selectedSessionId: null,
       liveEvent: null,
     });
+  });
+
+  it("keeps the selected actor and final state after it stops", () => {
+    const store = createVizPanelStore();
+    store.trigger.systemInit({
+      message: {
+        ...init(),
+        actors: [
+          {
+            sessionId: "root-session",
+            actorId: "root",
+            parentSessionId: null,
+            machine: {},
+            snapshot: { value: "drafting" },
+          },
+        ],
+      },
+    });
+    store.trigger.systemMessage({
+      message: {
+        type: "@statelyai.system.actorSnapshot",
+        sessionId: "root-session",
+        snapshot: { value: "published", status: "done" },
+      },
+    });
+
+    store.trigger.systemMessage({
+      message: { type: "@statelyai.system.actorStopped", sessionId: "root-session" },
+    });
+
+    expect(store.getSnapshot().context).toMatchObject({
+      selectedSessionId: "root-session",
+      liveStateLabel: "published",
+    });
+  });
+
+  it("tracks every snapshot for the selected v2 session", () => {
+    const store = createVizPanelStore();
+    store.trigger.systemInit({ message: init() });
+    const observed: Array<string | null> = [];
+
+    for (const value of ["drafting", "evaluating", "checking", "done"]) {
+      store.trigger.systemMessage({
+        message: {
+          type: "@statelyai.system.actorSnapshot",
+          sessionId: "root-session",
+          snapshot: { value },
+        },
+      });
+      observed.push(store.getSnapshot().context.liveStateLabel);
+    }
+
+    expect(observed).toEqual(["drafting", "evaluating", "checking", "done"]);
   });
 });

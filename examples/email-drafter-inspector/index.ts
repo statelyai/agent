@@ -132,7 +132,8 @@ async function promptInteraction(interaction: Interaction): Promise<DrafterEvent
 
 export async function main() {
   const inspector = createInspector({
-    url: process.env.STATELY_INSPECT_URL, // default ws://localhost:4242
+    // Defaults to the hosted Stately relay; set this for a self-hosted relay.
+    url: process.env.STATELY_INSPECT_URL,
     name: "email-drafter",
     autoOpen: !process.env.STATELY_INSPECT_NO_OPEN,
   });
