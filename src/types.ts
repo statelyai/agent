@@ -35,6 +35,35 @@ export interface StandardSchemaV1<Input = unknown, Output = Input> {
 /** The validated output type of a {@link StandardSchemaV1}. */
 export type InferOutput<T> = T extends StandardSchemaV1<any, infer O> ? O : never;
 
+/**
+ * The *pre*-validation input type of a {@link StandardSchemaV1}: what a caller
+ * passes in, before defaults are filled and transforms applied. Standard Schema
+ * carries both sides (`~standard.types.input` / `.output`), so a schema
+ * declaring a defaulted field makes that field optional here and required in
+ * {@link InferOutput} — which is exactly the split between what `runAgent`
+ * accepts as machine `input` and what the `context` factory then sees.
+ */
+export type InferInput<T> = T extends StandardSchemaV1<infer I, any> ? I : never;
+
+/**
+ * Phantom brand carrying a machine's declared input schema on the machine type.
+ *
+ * XState resolves `schemas.input` to a single type and uses it for both
+ * `createActor`'s `input` option and the `context: ({ input })` factory, so the
+ * caller-facing and factory-facing sides cannot differ there. `setupAgent`'s
+ * `createMachine` brands the machine's input type with the schema itself, which
+ * lets `AgentInputFrom` recover the looser input side for `runAgent` while the
+ * `context` factory keeps the strict validated side.
+ *
+ * The key is a `~`-prefixed phantom property (the same convention Standard
+ * Schema uses for `~standard`) rather than a `unique symbol`: a symbol would
+ * have to be exported as a runtime value for declaration emit to name it in
+ * every machine type it touches.
+ */
+export type WithAgentInputSchema<TInputSchema> = {
+  readonly "~agent.inputSchema"?: TInputSchema;
+};
+
 /** An event schema's output, widened to `unknown` when it validates an empty object (no payload fields). */
 export type EventPayload<T> = T extends Record<string, never> ? unknown : T;
 

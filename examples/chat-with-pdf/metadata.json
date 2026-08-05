@@ -1,0 +1,35 @@
+{
+  "name": "chat-with-pdf",
+  "title": "Chat with PDF (quiz mode)",
+  "kind": "agent-workflow",
+  "machine": "chatWithPdfMachine",
+  "origin": {
+    "type": "port",
+    "source": "agentcn chat-with-pdf recipe, quiz mode (registry/*/chat-with-pdf/instructions.md)",
+    "url": "https://github.com/shadcn-labs/agentcn/tree/main/registry/langgraph/chat-with-pdf"
+  },
+  "comparison": {
+    "targets": ["agentcn", "LangGraph", "Mastra"],
+    "purpose": "The same quiz recipe agentcn ships as prose instructions, with the sequencing moved into the machine: one question per state entry, a refresh guard instead of \"after 3-4 questions\", covered pages excluded by the query instead of remembered, documentId in context, and page hints read off the retrieved chunk. Voice and question formatting stay in the prompt."
+  },
+  "starters": [
+    {
+      "label": "Statecharts, 6 questions",
+      "input": { "documentId": "statecharts", "maxQuestions": 6, "refreshEvery": 3 }
+    },
+    {
+      "label": "Retrieval, pages 1-4",
+      "input": {
+        "documentId": "retrieval",
+        "pageStart": 1,
+        "pageEnd": 4,
+        "maxQuestions": 4,
+        "refreshEvery": 2
+      }
+    },
+    {
+      "label": "Pick a document first",
+      "input": { "maxQuestions": 4 }
+    }
+  ]
+}

@@ -15,9 +15,11 @@ import type {
   AgentEventSchemaInputMap,
   AgentMessage,
   EventUnion,
+  InferInput,
   InferOutput,
   NormalizedEventSchemas,
   StandardSchemaV1,
+  WithAgentInputSchema,
 } from "./types.js";
 import {
   builtinTextActors,
@@ -392,6 +394,30 @@ type AgentSetupEmittedSchema<TEmittedSchemas extends Record<string, StandardSche
 // (no `& SetupSchemas` intersection) keeps `keyof events` as the literal key
 // union, so payloads survive and `on:` transition fns narrow correctly.
 // (Repro: a state's `({ event }) => event.n` lost `n` under the old alias.)
+/**
+ * The input schema as handed to xstate's `setup(...)`, with the machine's input
+ * type branded by the schema it came from.
+ *
+ * XState resolves `schemas.input` to a single type used both by
+ * `createActor`'s `input` option and by the `context: ({ input })` factory —
+ * and it never validates, so a schema default reads as a required field at the
+ * call site while being absent at runtime. `runAgent` validates the input
+ * (filling defaults) and reads this brand back through `AgentInputFrom` to
+ * accept the schema's looser *input* side, while the factory keeps seeing the
+ * validated *output* side.
+ *
+ * Only object-shaped input is branded: with no declared input schema the
+ * resolved type is xstate's `NonReducibleUnknown` (a union including `null`),
+ * and intersecting a brand into that collapses members to `never`.
+ */
+type BrandedInputSchema<TInputSchema extends StandardSchemaV1> =
+  InferOutput<TInputSchema> extends Record<string, unknown>
+    ? StandardSchemaV1<
+        InferInput<TInputSchema>,
+        InferOutput<TInputSchema> & WithAgentInputSchema<TInputSchema>
+      >
+    : TInputSchema;
+
 type AgentSetupXStateConfig<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
   TEventSchemas extends AgentEventSchemaInputMap,
@@ -406,7 +432,7 @@ type AgentSetupXStateConfig<
 > = {
   schemas: {
     context: TContextSchema;
-    input: TInputSchema;
+    input: BrandedInputSchema<TInputSchema>;
     output: TOutputSchema;
     meta: TMetaSchema;
   } & AgentSetupEventsSchema<TEventSchemas> &

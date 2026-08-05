@@ -144,6 +144,7 @@ export type {
   AgentRequestSource,
 } from "./events.js";
 export type {
+  AgentInputFrom,
   AgentMessageInfo,
   AgentRunMeta,
   AgentStateRequest,
@@ -206,6 +207,7 @@ export type {
   ChosenEvent,
   FilePart,
   ImagePart,
+  InferInput,
   InferOutput,
   StandardSchemaV1,
   SystemMessage,
