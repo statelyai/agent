@@ -5,8 +5,6 @@ test("expands and evaluates a tree until a solved candidate appears", async () =
   let rollout = 0;
   const output = await runLatsExample({
     problem: "retry policy",
-    maxRollouts: 4,
-    maxDepth: 3,
     generateText: async (request) => {
       if (request.model === "generator") {
         rollout++;
@@ -38,8 +36,6 @@ test("expands and evaluates a tree until a solved candidate appears", async () =
 test("rollout budget returns the best candidate", async () => {
   const output = await runLatsExample({
     problem: "retry policy",
-    maxRollouts: 1,
-    maxDepth: 3,
     generateText: async (request) =>
       request.model === "generator"
         ? { output: { candidates: ["weak", "better"] } }

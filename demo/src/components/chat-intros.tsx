@@ -3,32 +3,11 @@ import type { Scenario } from "@/lib/scenarios";
 
 export type StarterAction = { label: string; onStart: () => void };
 
-/** One-click pre-baked inputs: click a chip and the run starts with it. */
-export function StarterChips({ starters }: { starters: StarterAction[] }) {
-  if (starters.length === 0) return null;
-  return (
-    <div className="chat-starters" role="group" aria-label="Try an example input">
-      {starters.map((starter, index) => (
-        <button key={index} className="chat-starter" onClick={starter.onStart}>
-          {starter.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-export function ScenarioIntro({
-  scenario,
-  starters,
-}: {
-  scenario: Scenario;
-  starters: StarterAction[];
-}) {
+export function ScenarioIntro({ scenario }: { scenario: Scenario }) {
   return (
     <div className="chat-intro">
       <h2 className="chat-intro__title">{scenario.name}</h2>
       <p className="chat-intro__purpose">{scenario.description}</p>
-      <StarterChips starters={starters} />
     </div>
   );
 }
@@ -39,7 +18,6 @@ type ExampleIntroProps = {
   error: string | null;
   machineIndex: number;
   onSelectMachine: (index: number) => void;
-  starters: StarterAction[];
 };
 
 /** Empty-state for a library example: title, purpose, machine picker, starters. */
@@ -49,7 +27,6 @@ export function ExampleIntro({
   error,
   machineIndex,
   onSelectMachine,
-  starters,
 }: ExampleIntroProps) {
   return (
     <div className="chat-intro">
@@ -80,11 +57,7 @@ export function ExampleIntro({
         </div>
       ) : null}
 
-      <StarterChips starters={starters} />
-
-      {detail ? (
-        <p className="chat-intro__run">pnpm tsx examples/{summary.id}/index.ts</p>
-      ) : null}
+      {detail ? <p className="chat-intro__run">pnpm tsx examples/{summary.id}/index.ts</p> : null}
     </div>
   );
 }

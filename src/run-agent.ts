@@ -2,6 +2,7 @@ import {
   createActor,
   createAsyncLogic,
   getNextTransitions,
+  isMachineSnapshot,
   type AnyActorLogic,
   type AnyActorRef,
   type AnyMachineSnapshot,
@@ -46,19 +47,12 @@ import {
   type TextLogic,
 } from "./text-logic.js";
 import {
-  advancePlanLedger,
   AgentDecisionExhaustedError,
-  initialPlanLedger,
   isDecisionLogic,
-  isPlanLogic,
-  PLAN_DONE_EVENT_TYPE,
   resolveDecision,
   type AgentDecisionExecutor,
   type AgentDecisionRequest,
-  type AgentPlanInput,
-  type AgentPlanOutput,
   type DecisionLogic,
-  type PlanLogic,
 } from "./decision.js";
 import type { AgentRequest, AgentStepRequest } from "./steps.js";
 import {
@@ -571,7 +565,7 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
    * runAgent uses to settle idle. Resolution order: this option (host override)
    * → the machine-carried predicate declared via `setupAgent({ isSuspended })`
    * → the timing heuristic (when neither is present). When the resolved
-   * predicate returns true and nothing is in flight (no live requests/plans/
+   * predicate returns true and nothing is in flight (no live requests/
    * invokes; the `agent.userInput` placeholder exemption still applies), runAgent
    * settles idle immediately, without the `setTimeout` heuristic. It does NOT
    * force-settle while agent work is in flight, and whole-machine idle semantics
@@ -730,12 +724,13 @@ type RunAgentOutcome<TMachine extends AnyStateMachine> =
       /** Present when the machine is waiting on unhandled `agent.userInput` invokes: one entry per pending invoke. */
       pendingUserInputs?: PendingUserInput[];
       /**
-       * Present alongside `pendingUserInputs`: the JSON-serializable persisted
-       * snapshot (in-flight children included). Persist THIS one and resume
-       * with `runAgent(machine, { snapshot: persistedSnapshot, userInput })` —
-       * the live `snapshot` above cannot round-trip active children.
+       * The JSON-serializable persisted snapshot (in-flight children included,
+       * WITH their own state). Persist THIS one and resume with
+       * `runAgent(machine, { snapshot: persistedSnapshot, ... })` — the live
+       * `snapshot` above cannot round-trip active children, so resuming from
+       * it restarts every invoked child from scratch.
        */
-      persistedSnapshot?: Snapshot<unknown>;
+      persistedSnapshot: Snapshot<unknown>;
     }
   | {
       status: "error";
@@ -931,10 +926,7 @@ function assertMachineBindable(
       // string-keyed sources can be rebound by runAgent; direct objects
       // cannot. Only a problem if it's an agent logic that still needs
       // execution (no executor of its own).
-      if (
-        (isTextLogic(src) || isDecisionLogic(src) || isPlanLogic(src)) &&
-        !executorBoundLogics.has(src as object)
-      ) {
+      if ((isTextLogic(src) || isDecisionLogic(src)) && !executorBoundLogics.has(src as object)) {
         throw new Error(
           `runAgent: ${where} '${stateName}' invokes a direct-object actor logic ` +
             `(kind: '${(src as TextLogic | DecisionLogic).kind}'). Direct-object invoke ` +
@@ -983,20 +975,6 @@ function assertMachineBindable(
       if (!options.hasDecide) {
         throw new Error(
           `runAgent: ${where} '${stateName}' invokes decision source '${src}' but no ` +
-            `'decide' executor was provided to runAgent(...).`,
-        );
-      }
-      continue;
-    }
-
-    if (isPlanLogic(logic)) {
-      // Plans resolve steps through the same `decide` executor.
-      if (!ctx.rebindable) {
-        throw unrebindableChildRequestError(ctx.childPath, stateName, src, "plan");
-      }
-      if (!options.hasDecide) {
-        throw new Error(
-          `runAgent: ${where} '${stateName}' invokes plan source '${src}' but no ` +
             `'decide' executor was provided to runAgent(...).`,
         );
       }
@@ -1093,7 +1071,7 @@ function unrebindableChildRequestError(
   childPath: string,
   stateName: string,
   requestSrc: string,
-  kind: "text" | "streaming text" | "decision" | "plan",
+  kind: "text" | "streaming text" | "decision",
 ): Error {
   return new Error(
     `runAgent: child machine '${childPath}' (state '${stateName}') invokes ${kind} ` +
@@ -1174,11 +1152,11 @@ function selfIdAndSrc(self: unknown): { id: string; src: string } {
 }
 
 /**
- * The machine actor that INVOKED a decision/plan request — the actor whose
+ * The machine actor that INVOKED a decision request — the actor whose
  * live snapshot supplies the candidate events and drives `canTake`/`send`.
  * For a top-level request this is the root actor (identity-equal to
  * `runCtx.actorHolder.actorRef`); for a request inside an invoked child
- * machine it is that child's actor, so a child decision/plan reads and drives
+ * machine it is that child's actor, so a child decision reads and drives
  * the CHILD's snapshot — not the root's. Read off `self._parent`, with the
  * root actor as a fallback.
  */
@@ -1282,16 +1260,13 @@ function wrapTextLogicForRunAgent(logic: TextLogic, runCtx: RunAgentBindContext)
   });
 }
 
-// Wraps runCtx's `decide` executor with model-call budgeting and tracing —
-// shared by the decision and plan wrappers. `self` is the invoking decision/plan
-// leaf actor, threaded to `onTrace` so the provide path can attribute the event
-// to its root actor. `kind` distinguishes the two callers on the reserved
-// `@agent.usage` event (a plan's per-step calls are decision calls, but a
-// budget guard wants to see which invoke they belong to).
+// Wraps runCtx's `decide` executor with model-call budgeting and tracing.
+// `self` is the invoking decision leaf actor, threaded to `onTrace` so the
+// provide path can attribute the event to its root actor.
 function createCountingDecide(
   runCtx: RunAgentBindContext,
   self: unknown,
-  kind: "decision" | "plan" = "decision",
+  kind: "decision" = "decision",
 ): AgentDecisionExecutor {
   return async (attemptRequest) => {
     runCtx.consumeModelCall();
@@ -1344,8 +1319,8 @@ function createCountingDecide(
  * logic here that calls `resolveDecision` itself, reusing `logic.request(...)`
  * to build the request the same way the original logic would have.
  *
- * On success it SENDS the chosen event to the invoking actor (auto-delivery,
- * mirroring {@link createRunAgentPlanLogic}) and then completes with that event
+ * On success it SENDS the chosen event to the invoking actor (auto-delivery)
+ * and then completes with that event
  * as its output — so callers never wire an `onDone` to deliver it. See the
  * send-then-complete note inside `run` for how exit-cancels-invoke interacts
  * with `onDone`.
@@ -1397,12 +1372,10 @@ function createRunAgentDecisionLogic(
           actorRef ? (actorRef.getSnapshot() as AnyMachineSnapshot).can(event) : true,
       });
 
-      // Auto-deliver (mirrors createRunAgentPlanLogic): send the chosen event
-      // to the invoking actor, then complete with it as output. The delivered
-      // event's transition typically EXITS the invoking state, which cancels
-      // this invoke — so `onDone` never fires on that path (same semantics as a
-      // plan whose applied event exits the state). If the transition stays
-      // in-state instead, the invoke completes and `onDone` (if any) observes
+      // Auto-deliver: send the chosen event to the invoking actor, then
+      // complete with it as output. The delivered event's transition typically
+      // EXITS the invoking state, which cancels this invoke — so `onDone` never
+      // fires on that path. If the transition stays in-state instead, the invoke completes and `onDone` (if any) observes
       // `chosen` as its output. The send happens in this actor's own async
       // `run` — not a re-evaluated transition function — so it fires exactly
       // once regardless of v6-alpha transition re-evaluation.
@@ -1422,136 +1395,6 @@ function createRunAgentDecisionLogic(
     withExecutor: (nextExecute: AgentDecisionExecutor) =>
       createRunAgentDecisionLogic(logic.withExecutor(nextExecute), runCtx),
   }) as DecisionLogic;
-}
-
-/**
- * Builds the plan actor logic runAgent installs in place of the `agent.plan`
- * builtin: iterated {@link resolveDecision}. Each step re-reads the live
- * snapshot (so the candidate set reflects everything applied so far), asks
- * the `decide` executor for one legal event with the same validation/retry
- * loop a decision gets, and sends it to the machine. The loop ends on a
- * `stopOn` event, at `maxSteps`, when no legal candidate remains, or when an
- * applied event exits the invoking state (xstate cancels this invoke — the
- * machine simply moves on and the pending output is discarded).
- *
- * The invoke's `input` is resolved once, so the prompt cannot re-render
- * context between steps; instead the applied trail is appended to the prompt
- * each step so the model can see plan progress.
- */
-function createRunAgentPlanLogic(logic: PlanLogic, runCtx: RunAgentBindContext): PlanLogic {
-  const planLogic = createAsyncLogic<AgentPlanOutput, AgentPlanInput>({
-    run: async ({ input, signal, self }) => {
-      if (!runCtx.decide) {
-        throw new Error("runAgent: no 'decide' executor provided.");
-      }
-      const { id } = selfIdAndSrc(self);
-      const stopOn = new Set<string>(input.stopOn ?? []);
-      const countingDecide = createCountingDecide(runCtx, self, "plan");
-      const base = logic.request(input);
-
-      // All bookkeeping (applied trail + remaining budget) rides the shared
-      // plan ledger — the SAME driver the step path uses on the invoke child's
-      // own snapshot. Here it is a local ledger the host advances by hand.
-      let ledger = initialPlanLedger(logic, input);
-      const end = (stopped: AgentPlanOutput["stopped"]): AgentPlanOutput => {
-        ledger = advancePlanLedger(logic, ledger, { type: "plan.ended", stopped });
-        return ledger.output as AgentPlanOutput;
-      };
-
-      // Same microtask yield as the decision wrapper: let the invoking
-      // transition commit before the first snapshot read.
-      await Promise.resolve();
-
-      // The invoking machine actor (child at any depth, else root) — its
-      // snapshot drives candidates/canTake, and each chosen event is sent to
-      // it, so a plan inside a child machine drives the CHILD.
-      const invokingActor = invokingActorOf(self, runCtx);
-
-      while (ledger.context.stepsRemaining > 0) {
-        const actorRef = invokingActor;
-        if (!actorRef || signal.aborted) {
-          break;
-        }
-        const snapshot = actorRef.getSnapshot() as AnyMachineSnapshot;
-        const machineEvents = getAcceptedEvents(snapshot, {
-          schemas: runCtx.schemas,
-          eventTypes: logic.allowedEventTypes(input),
-        });
-        if (machineEvents.length === 0) {
-          return end("no-legal-events");
-        }
-        // Every step also offers the built-in "done" move: an explicit "no
-        // further action needed" the model can choose instead of being forced
-        // to pick some machine event. Never sent to the machine.
-        const doneDescriptor = {
-          type: PLAN_DONE_EVENT_TYPE,
-          toolName: sanitizeEventToolName(PLAN_DONE_EVENT_TYPE),
-        };
-        const events = machineEvents.some((event) => event.type === PLAN_DONE_EVENT_TYPE)
-          ? machineEvents
-          : [...machineEvents, doneDescriptor];
-
-        const applied = ledger.context.applied;
-        const trail =
-          applied.length === 0
-            ? ""
-            : `\n\nEvents already applied in this plan, in order:\n${applied
-                .map((step) => JSON.stringify(step))
-                .join("\n")}\nContinue from here; do not repeat applied events.`;
-        const doneHint = `\n\nWhen the request is fully handled (or no action is needed), choose '${PLAN_DONE_EVENT_TYPE}'.`;
-        const request: AgentDecisionRequest = {
-          ...base,
-          id: `${id}[${applied.length}]`,
-          events,
-          prompt: `${base.prompt ?? ""}${trail}${doneHint}`,
-          attempts: [],
-        };
-
-        const chosen = await resolveDecision(request, countingDecide, {
-          maxRetries: input.maxRetries ?? logic.maxRetries,
-          signal,
-          canTake: (event) => {
-            // The built-in done move and stopOn events terminate the plan
-            // rather than driving a transition — a pure no-op handler
-            // (`NOTHING: {}`) makes `snapshot.can(...)` false, so exempt
-            // both from the guard check.
-            if (event.type === PLAN_DONE_EVENT_TYPE || stopOn.has(event.type)) {
-              return true;
-            }
-            return invokingActor
-              ? (invokingActor.getSnapshot() as AnyMachineSnapshot).can(event)
-              : true;
-          },
-        });
-
-        if (chosen.type === PLAN_DONE_EVENT_TYPE) {
-          return end("done");
-        }
-
-        actorRef.send(chosen as never);
-        ledger = advancePlanLedger(logic, ledger, { type: "plan.applied", event: chosen });
-        // Let the applied transition commit before the next snapshot read
-        // (and let xstate cancel this invoke if the event exited the state).
-        await Promise.resolve();
-
-        if (stopOn.has(chosen.type)) {
-          return end("stop-event");
-        }
-      }
-
-      return end("max-steps");
-    },
-  });
-
-  // runAgent owns async: the invoke child is this async wrapper, not the
-  // createLogic ledger (the ledger is internal bookkeeping). The `kind` marker
-  // is what isPlanLogic keys on; the transition-shape mismatch is expected.
-  return Object.assign(planLogic, {
-    kind: "statelyai.planLogic" as const,
-    maxRetries: logic.maxRetries,
-    request: logic.request,
-    allowedEventTypes: logic.allowedEventTypes,
-  }) as unknown as PlanLogic;
 }
 
 /**
@@ -1756,23 +1599,9 @@ export function bindDecisionForProvide(
 }
 
 /**
- * Host-binds one `agent.plan` source for {@link provideExecutors}: runAgent's
- * plan wrapper (iterated snapshot-driven decisions, auto-delivery) with the same
- * request-level tracing runAgent emits, minus run-scoped counting. @internal
- */
-export function bindPlanForProvide(
-  machine: AnyStateMachine,
-  logic: PlanLogic,
-  executors: Partial<AgentRequestExecutors>,
-  options: ProvideBindOptions,
-): PlanLogic {
-  return createRunAgentPlanLogic(logic, provideBindContext(machine, executors, options));
-}
-
-/**
  * Recursively rebinds an invoked child machine's own agent sources with the
  * SAME host-backed wrappers runAgent applies to the top-level machine, so a
- * child's text/stream/decision/plan requests inherit runAgent's executors and
+ * child's text/stream/decision requests inherit runAgent's executors and
  * participate in maxModelCalls counting, onTrace/onChunk/onResult exactly like
  * parent requests. Returns the child machine to invoke: a `.provide`-rebound
  * copy when any inner source needed wrapping, else the original untouched.
@@ -1800,10 +1629,6 @@ function rebindChildMachine(
       if (!executorBoundLogics.has(logic as object)) {
         wrapped[key] = createRunAgentDecisionLogic(logic, runCtx);
       }
-      continue;
-    }
-    if (isPlanLogic(logic)) {
-      wrapped[key] = createRunAgentPlanLogic(logic, runCtx);
       continue;
     }
     if (isTextLogic(logic)) {
@@ -2147,11 +1972,6 @@ function createAgentSession<TMachine extends AnyStateMachine>(
       continue;
     }
 
-    if (isPlanLogic(logic)) {
-      wrappedSources[key] = createRunAgentPlanLogic(logic, runCtx);
-      continue;
-    }
-
     if (isTextLogic(logic)) {
       // A text logic that already carries its own executor (`.withExecutor`)
       // runs itself — leave it untouched. Only unbound builtins/logics get a
@@ -2440,12 +2260,8 @@ function createAgentSession<TMachine extends AnyStateMachine>(
       settle({
         status: "idle",
         snapshot: current as SnapshotFrom<TMachine>,
-        ...(pendingUserInputs.length > 0
-          ? {
-              pendingUserInputs,
-              persistedSnapshot: actor.getPersistedSnapshot() as Snapshot<unknown>,
-            }
-          : {}),
+        persistedSnapshot: actor.getPersistedSnapshot() as Snapshot<unknown>,
+        ...(pendingUserInputs.length > 0 ? { pendingUserInputs } : {}),
       });
     };
 
@@ -2697,9 +2513,26 @@ function createAgentSession<TMachine extends AnyStateMachine>(
           isSuspended(snapshot) &&
           isIdleSnapshot(snapshot, { ignoreUserInputChildren: userInputIsPlaceholder })
         ) {
-          if (!maybeInterpret(snapshot)) {
-            settleIdle(snapshot);
-          }
+          // Not settled synchronously: the event that reached this suspended
+          // state may have come from an invoked child mid-flush (child →
+          // parent, whose handler sendTo's the child back). A sync settle
+          // would persist — and, one-shot, stop — the child before its
+          // mailbox drains, losing those deliveries. The flush is
+          // synchronous, so one microtask is still deterministic.
+          queueMicrotask(() => {
+            if (settled) {
+              return;
+            }
+            const current = actor.getSnapshot() as AnyMachineSnapshot;
+            if (
+              isSuspended(current) &&
+              isIdleSnapshot(current, { ignoreUserInputChildren: userInputIsPlaceholder })
+            ) {
+              if (!maybeInterpret(current)) {
+                settleIdle(current);
+              }
+            }
+          });
           return;
         }
 
@@ -2922,7 +2755,19 @@ function isIdleSnapshot(
     ) {
       return false;
     }
-    return ref?.getSnapshot?.()?.status === "active";
+    const childSnapshot = ref?.getSnapshot?.();
+    if (childSnapshot?.status !== "active") {
+      return false;
+    }
+    // An active child machine that is itself idle (no busy descendants, no
+    // pending eventless/after work) is waiting for events, not doing work —
+    // e.g. a long-lived agent invoked across substates. It must not block an
+    // idle settle. Non-machine children (promises, decide invokes) that are
+    // active are always in-flight work.
+    if (isMachineSnapshot(childSnapshot)) {
+      return !isIdleSnapshot(childSnapshot, { ignoreUserInputChildren });
+    }
+    return true;
   });
   if (childrenBusy) {
     return false;

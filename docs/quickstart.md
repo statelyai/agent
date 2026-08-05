@@ -150,7 +150,6 @@ Every machine can invoke these built-in actor sources. They are reserved `src` s
 | `agent.generateText` | Inline one-shot text (or structured-output) model call.  |
 | `agent.streamText`   | Same, streamed chunk by chunk through `onChunk`.         |
 | `agent.decide`       | Model picks exactly one currently-legal event.           |
-| `agent.plan`         | Model applies many legal events in a row until it stops. |
 | `agent.userInput`    | Gather human input mid-run without settling.             |
 
 ### Named requests
@@ -222,7 +221,7 @@ For a **long-lived session** (chat turns, device events, sockets) that should ke
 
 ### Testing without an API key
 
-`createScriptedExecutors` is the same helper the first run used: FIFO queues of scripted answers, one entry consumed per model call. `decisions` feeds `agent.decide` (and `agent.plan`), `text` feeds every text request.
+`createScriptedExecutors` is the same helper the first run used: FIFO queues of scripted answers, one entry consumed per model call. `decisions` feeds `agent.decide`, `text` feeds every text request.
 
 ```ts
 const executors = createScriptedExecutors({

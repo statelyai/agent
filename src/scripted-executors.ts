@@ -65,7 +65,7 @@ export type ScriptedTextEntry =
 
 /** The script {@link createScriptedExecutors} plays back. */
 export interface ScriptedExecutorsScript {
-  /** Answers for `decide` (and `agent.plan`) requests, consumed in order. */
+  /** Answers for `decide` requests, consumed in order. */
   decisions?: ScriptedDecisionEntry[];
   /** Answers for text requests, consumed in order. `generateText` and `streamText` share this one queue. */
   text?: ScriptedTextEntry[];

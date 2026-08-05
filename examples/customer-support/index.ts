@@ -125,7 +125,25 @@ const agentSetup = setupAgent({
   context: contextSchema,
   input: z.object({ query: z.string() }),
   output: z.object({ resolution: resolutionSchema, message: z.string() }),
-  meta: z.object({ interaction: z.object({ label: z.string() }).optional() }),
+  // Typed interaction meta: the pause's `label`, a button `label`/`style` per
+  // accepted event, and `textEvent` naming the ONE event free text goes to.
+  meta: z.object({
+    interaction: z
+      .object({
+        label: z.string(),
+        events: z
+          .record(
+            z.string(),
+            z.object({
+              label: z.string().optional(),
+              style: z.enum(["primary", "danger", "default"]).optional(),
+            }),
+          )
+          .optional(),
+        textEvent: z.string().optional(),
+      })
+      .optional(),
+  }),
   events: {
     APPROVE: z.object({}),
     DENY: z.object({ reason: z.string() }),
@@ -278,7 +296,15 @@ export const customerSupportMachine = agentSetup.createMachine({
       meta: {
         interaction: {
           label:
-            "This action modifies a booking and needs your approval. Reply APPROVE to proceed or DENY (with a reason) to skip it.",
+            "This action modifies a booking and needs your approval. " +
+            "Approve it, or type a reason to skip it.",
+          events: {
+            APPROVE: { label: "Approve booking change", style: "primary" },
+            DENY: { label: "Skip this action", style: "danger" },
+          },
+          // Without this, free text would silently DENY (its `reason` is the
+          // only single-string payload here).
+          textEvent: "DENY",
         },
       },
       on: {

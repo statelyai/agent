@@ -1,6 +1,6 @@
 {
   "name": "code-assistant",
-  "title": "Self-correcting code assistant",
+  "title": "Write code, run it, fix it until tests pass",
   "kind": "agent-workflow",
   "origin": {
     "type": "langgraph",
@@ -8,37 +8,74 @@
     "url": "https://langchain-ai.github.io/langgraph/tutorials/code_assistant/langgraph_code_assistant/"
   },
   "comparison": {
-    "targets": ["LangGraph"],
-    "purpose": "Self-correcting code generation as explicit machine states: generate → sandboxed execute/check → (pass | reflect on failures → regenerate), bounded by a retry budget."
+    "targets": [
+      "LangGraph"
+    ],
+    "purpose": "Generates a function, actually runs it against the given checks, and reflects on failures to rewrite it \u2014 repeating within a retry budget."
   },
   "starters": [
     {
-      "spec": "Return the nth Fibonacci number (0-indexed).",
-      "functionName": "fib",
-      "checks": [
-        {
-          "args": [0],
-          "expected": 0
-        },
-        {
-          "args": [7],
-          "expected": 13
-        }
-      ]
+      "label": "Fibonacci",
+      "input": {
+        "spec": "Return the nth Fibonacci number (0-indexed).",
+        "functionName": "fib",
+        "checks": [
+          {
+            "args": [
+              0
+            ],
+            "expected": 0
+          },
+          {
+            "args": [
+              7
+            ],
+            "expected": 13
+          }
+        ]
+      }
     },
     {
-      "spec": "Return true if the string is a palindrome, ignoring case.",
-      "functionName": "isPalindrome",
-      "checks": [
-        {
-          "args": ["Racecar"],
-          "expected": true
-        },
-        {
-          "args": ["hello"],
-          "expected": false
-        }
-      ]
+      "label": "Palindrome check",
+      "input": {
+        "spec": "Return true if the string is a palindrome, ignoring case.",
+        "functionName": "isPalindrome",
+        "checks": [
+          {
+            "args": [
+              "Racecar"
+            ],
+            "expected": true
+          },
+          {
+            "args": [
+              "hello"
+            ],
+            "expected": false
+          }
+        ]
+      }
+    },
+    {
+      "label": "Roman numerals",
+      "input": {
+        "spec": "Convert an integer from 1 to 3999 into a Roman numeral string.",
+        "functionName": "toRoman",
+        "checks": [
+          {
+            "args": [
+              4
+            ],
+            "expected": "IV"
+          },
+          {
+            "args": [
+              1987
+            ],
+            "expected": "MCMLXXXVII"
+          }
+        ]
+      }
     }
   ]
 }

@@ -50,8 +50,20 @@ type Accounts = z.infer<typeof accountsSchema>;
 
 const welcomePacketSchema = z.object({ packetId: z.string() });
 
+// The pause's `label`, plus a button `label`/`style` per accepted event so a
+// host can render each gate without knowing the state names.
 const interactionSchema = z.object({
   label: z.string(),
+  events: z
+    .record(
+      z.string(),
+      z.object({
+        label: z.string().optional(),
+        style: z.enum(["primary", "danger", "default"]).optional(),
+      }),
+    )
+    .optional(),
+  textEvent: z.string().optional(),
 });
 
 const provisionIt = createAsyncLogic({
@@ -192,7 +204,9 @@ export const longRunningOnboardingMachine = coordinatorSetup.createMachine({
       // `meta.interaction` is this machine's wait signal (see setupAgent above).
       meta: {
         interaction: {
-          label: "Wait until the employee signs onboarding documents.",
+          // `{employee}` fields resolve against context when the label is shown.
+          label: "Waiting for the signed onboarding documents. Mark them signed to continue.",
+          events: { DOCS_SIGNED: { label: "Mark documents signed", style: "primary" } },
         },
       },
       on: {
@@ -215,7 +229,8 @@ export const longRunningOnboardingMachine = coordinatorSetup.createMachine({
     waitingForHardware: {
       meta: {
         interaction: {
-          label: "Wait until the laptop is delivered.",
+          label: "Waiting on hardware delivery. Mark the laptop delivered to continue.",
+          events: { HARDWARE_DELIVERED: { label: "Mark laptop delivered", style: "primary" } },
         },
       },
       on: {

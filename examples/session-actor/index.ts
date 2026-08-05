@@ -19,7 +19,29 @@ import { z } from "zod";
 import { createAgentActor, setupAgent } from "@statelyai/agent";
 import type { AgentRequestExecutor } from "@statelyai/agent";
 
+// Typed interaction meta for the idle answer gate: the pause's `label`, a
+// button `label`/`style` per accepted event, and `textEvent` naming the ONE
+// event free-typed text is delivered to (here, the player's answer).
+const metaSchema = z.object({
+  interaction: z
+    .object({
+      label: z.string(),
+      events: z
+        .record(
+          z.string(),
+          z.object({
+            label: z.string().optional(),
+            style: z.enum(["primary", "danger", "default"]).optional(),
+          }),
+        )
+        .optional(),
+      textEvent: z.string().optional(),
+    })
+    .optional(),
+});
+
 const sessionQuizSetup = setupAgent({
+  meta: metaSchema,
   context: z.object({
     question: z.string().nullable(),
     rounds: z.number(),
@@ -51,6 +73,18 @@ export const sessionQuizMachine = sessionQuizSetup.createMachine({
     },
     waitingForAnswer: {
       tags: ["waiting"],
+      meta: {
+        interaction: {
+          // `{question}` resolves against context when the label is shown.
+          label: "{question}",
+          events: {
+            ANSWER: { label: "Submit answer", style: "primary" },
+            QUIT: { label: "End the quiz" },
+          },
+          // Whatever the player types is their answer.
+          textEvent: "ANSWER",
+        },
+      },
       on: {
         ANSWER: ({ context, event }) => ({
           target: "grading",

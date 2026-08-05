@@ -186,64 +186,6 @@ describe("@agent.usage (reserved per-call usage event)", () => {
     });
   });
 
-  test("a plan reports each step's usage with kind 'plan'", async () => {
-    const planSchemas = createAgentSchemas({
-      context: z.object({ tokens: z.number(), kinds: z.array(z.string()) }),
-      output: z.object({ tokens: z.number(), kinds: z.array(z.string()) }),
-      events: {
-        NOTE: z.object({}),
-      },
-    });
-    const planAgent = setupAgent({ schemas: planSchemas });
-    const machine = planAgent.createMachine({
-      context: () => ({ tokens: 0, kinds: [] }),
-      on: {
-        [AGENT_USAGE_EVENT_TYPE]: ({ context, event }) => ({
-          context: {
-            tokens: context.tokens + (event.usage.totalTokens ?? 0),
-            kinds: [...context.kinds, event.kind ?? "?"],
-          },
-        }),
-      },
-      initial: "planning",
-      states: {
-        planning: {
-          invoke: {
-            id: "plan",
-            src: "agent.plan",
-            input: () => ({
-              model: "test-model",
-              prompt: "go",
-              allowedEvents: ["NOTE"] as const,
-              maxSteps: 2,
-            }),
-            onDone: { target: "done" },
-          },
-          on: { NOTE: ({ context: _context }) => ({ context: {} }) },
-        },
-        done: {
-          type: "final",
-          output: ({ context }) => ({ tokens: context.tokens, kinds: context.kinds }),
-        },
-      },
-    });
-
-    const result = await runAgent(machine, {
-      executors: {
-        decide: async () => ({
-          event: { type: "NOTE" } as ChosenEvent,
-          usage: { totalTokens: 10 },
-        }),
-      },
-    });
-
-    expect(result.status).toBe("done");
-    expect(result.status === "done" ? result.output : undefined).toEqual({
-      tokens: 20,
-      kinds: ["plan", "plan"],
-    });
-  });
-
   test("a machine that declares no handler is untouched: no event, no log entry", async () => {
     const plainSchemas = createAgentSchemas({
       context: z.object({ note: z.string() }),
@@ -585,7 +527,7 @@ describe("@agent.usage registration (declared by setupAgent, not by the machine)
         // `events` anywhere in this file.
         [AGENT_USAGE_EVENT_TYPE]: ({ event }) => {
           const total: number | undefined = event.usage.totalTokens;
-          const kind: "text" | "decision" | "plan" | undefined = event.kind;
+          const kind: "text" | "decision" | undefined = event.kind;
           const name: string | undefined = event.name;
           void total;
           void kind;

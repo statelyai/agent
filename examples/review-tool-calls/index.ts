@@ -87,7 +87,25 @@ const agentSetup = setupAgent({
     call: refundCallSchema.nullable(),
     edited: z.boolean(),
   }),
-  meta: z.object({ interaction: z.object({ label: z.string() }).optional() }),
+  // Typed interaction meta: the pause's `label`, a button `label`/`style` per
+  // accepted event, and `textEvent` naming the ONE event free text goes to.
+  meta: z.object({
+    interaction: z
+      .object({
+        label: z.string(),
+        events: z
+          .record(
+            z.string(),
+            z.object({
+              label: z.string().optional(),
+              style: z.enum(["primary", "danger", "default"]).optional(),
+            }),
+          )
+          .optional(),
+        textEvent: z.string().optional(),
+      })
+      .optional(),
+  }),
   events: {
     APPROVE: z.object({}),
     // Partial override merged over the proposal: `override` carries any subset of
@@ -171,7 +189,16 @@ export const reviewToolCallsMachine = agentSetup.createMachine({
       meta: {
         interaction: {
           label:
-            "Review the proposed refund: APPROVE to run it as-is, EDIT to change its arguments before running, or REJECT with feedback for a revised proposal.",
+            "Review the proposed refund: run it as-is, edit its arguments first, " +
+            "or type feedback to get a revised proposal.",
+          events: {
+            APPROVE: { label: "Run refund as proposed", style: "primary" },
+            EDIT: { label: "Edit arguments first" },
+            REJECT: { label: "Reject with feedback", style: "danger" },
+          },
+          // REJECT's `feedback` is the only single-string payload, so free text
+          // would land there anyway — say so, and say so in the label too.
+          textEvent: "REJECT",
         },
       },
       on: {

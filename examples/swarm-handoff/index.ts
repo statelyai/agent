@@ -33,8 +33,31 @@ export const models = defineModels({
   food: openai("gpt-5.4-mini"),
 });
 
+// Typed interaction meta for the idle turn boundary: the pause's `label` plus a
+// button `label`/`style` per accepted event. No `textEvent` here — HANDOFF
+// carries two fields (`to` and `message`), so there is no single string field
+// for free text to land in, and a host must collect both.
+const metaSchema = z.object({
+  interaction: z
+    .object({
+      label: z.string(),
+      events: z
+        .record(
+          z.string(),
+          z.object({
+            label: z.string().optional(),
+            style: z.enum(["primary", "danger", "default"]).optional(),
+          }),
+        )
+        .optional(),
+      textEvent: z.string().optional(),
+    })
+    .optional(),
+});
+
 const agentSetup = setupAgent({
   models,
+  meta: metaSchema,
   context: z.object({
     message: z.string(),
     activeAgent: agentName,
@@ -115,6 +138,13 @@ export const swarmHandoffMachine = agentSetup.createMachine({
     // No invoke: runAgent settles idle here. A HANDOFF switches the active
     // agent and re-routes; the host persists the snapshot in between.
     waiting: {
+      meta: {
+        interaction: {
+          // `{activeAgent}` resolves against context when the label is shown.
+          label: "The {activeAgent} concierge answered. Hand the mic over with your next message.",
+          events: { HANDOFF: { label: "Hand off to the other concierge", style: "primary" } },
+        },
+      },
       on: {
         HANDOFF: ({ event }) => ({
           target: "routing",

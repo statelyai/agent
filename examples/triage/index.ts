@@ -16,6 +16,12 @@ export const triageSchema = z.object({
   reply: z.string(),
 });
 
+/** Machine output: a readable summary first, then the structured fields. */
+export const triageOutputSchema = z.object({
+  summary: z.string(),
+  ...triageSchema.shape,
+});
+
 const contextSchema = z.object({
   ticket: z.string(),
   triage: triageSchema.nullable(),
@@ -24,7 +30,7 @@ const contextSchema = z.object({
 const schemas = createAgentSchemas({
   context: contextSchema,
   input: z.object({ ticket: z.string() }),
-  output: triageSchema,
+  output: triageOutputSchema,
 });
 
 export const models = defineModels({
@@ -76,7 +82,12 @@ export const triageMachine = triageAgentSetup.createMachine({
     },
     done: {
       type: "final",
-      output: ({ context }) => context.triage,
+      output: ({ context }) => ({
+        summary:
+          `This ${context.triage.category} ticket reads as ${context.triage.sentiment}. ` +
+          `Drafted reply: ${context.triage.reply}`,
+        ...context.triage,
+      }),
     },
   },
 });

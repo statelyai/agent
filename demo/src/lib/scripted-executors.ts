@@ -24,6 +24,13 @@ const REFLECTION_DRAFT_A = "The tide pulls the shoreline thin, then hands it bac
 const REFLECTION_DRAFT_B =
   "At dusk the tide unstitches the shoreline; by dawn it has quietly sewn every grain back into place.";
 
+const ROUTING_REASONS: Record<string, string> = {
+  BILLING: "The request mentions a charge, invoice, or payment.",
+  ACCOUNT: "The request is about sign-in or profile access.",
+  TECHNICAL: "The request reports a product error or failure.",
+  UNCLEAR: "The request names no billing, access, or failure signal to route on.",
+};
+
 /** Best-effort dollar-amount extraction from free text (matches the live path's intent). */
 function extractAmount(text: string): number | null {
   const match =
@@ -69,7 +76,9 @@ export function scriptedExecutorsFor(scenarioId: ScenarioId): Executors {
               : /error|bug|broken|crash|fail|technical/.test(text)
                 ? "TECHNICAL"
                 : "UNCLEAR";
-          return { event: pick(request, type) };
+          // The machine requires a justification on every route event, so the
+          // scripted decision supplies one too — no-key mode stays runnable.
+          return { event: { ...pick(request, type), reason: ROUTING_REASONS[type] } };
         },
       };
 
@@ -140,7 +149,7 @@ export function scriptedExecutorsFor(scenarioId: ScenarioId): Executors {
           return {
             output: isRevision
               ? { score: 9, feedback: "Vivid and complete." }
-              : { score: 6, feedback: "Too plain — add a concrete image and a sense of time." },
+              : { score: 6, feedback: "Too plain. Add a concrete image and a sense of time." },
           };
         },
       };

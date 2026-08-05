@@ -1,6 +1,6 @@
 {
   "name": "session-actor",
-  "title": "Session Actor",
+  "title": "Trivia quiz (live session)",
   "kind": "agent-workflow",
   "origin": {
     "type": "stately-agent",

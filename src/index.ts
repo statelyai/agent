@@ -3,7 +3,6 @@ export { appendMessages, messagesSchema } from "./messages.js";
 export { createAgentSchemas, setupAgent } from "./setup-agent.js";
 export {
   AgentDecisionExhaustedError,
-  PLAN_DONE_EVENT_TYPE,
   renderDecisionAttempts,
   resolveDecision,
 } from "./decision.js";
@@ -18,7 +17,7 @@ export {
   parseStructuredEnvelope,
 } from "./text-logic.js";
 export { executeAgentRequest } from "./steps.js";
-export type { AgentPlanRequest, AgentRequest, AgentStepRequest } from "./steps.js";
+export type { AgentRequest, AgentStepRequest } from "./steps.js";
 export {
   AGENT_TRACE_SCHEMA_VERSION,
   AgentIdleError,
@@ -115,8 +114,6 @@ export type {
   AgentDecisionInput,
   AgentDecisionRequest,
   AgentDecisionExecutor,
-  AgentPlanInput,
-  AgentPlanOutput,
   DecisionLogicConfig,
   ResolveDecisionOptions,
 } from "./decision.js";
@@ -194,10 +191,7 @@ export type {
   AgentUsageEventPayload,
   WithAgentUsageEvent,
 } from "./setup-agent.js";
-// `PlanLogic` is re-exported not for direct use (its constructor is `@internal`)
-// but because it appears in the inferred type of a machine using `agent.plan`;
-// without it, consumers' declaration emit fails with TS4023 "cannot be named".
-export type { DecisionAttempt, PlanLogic } from "./decision.js";
+export type { DecisionAttempt } from "./decision.js";
 
 export type {
   AgentMessage,

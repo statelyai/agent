@@ -4,8 +4,18 @@
  * The model sees its hand, public books, and request history, but never the
  * human's hand. It chooses AGENT_ASK; the machine rejects ranks it does not
  * hold, transfers cards, draws from a deterministic deck, forms books, and
- * alternates turns. The human's turn uses `agent.userInput` and shows their
- * current hand.
+ * alternates turns.
+ *
+ * Interaction model: the human's turn is a plain idle state (no invoke). The
+ * run settles there and a host resumes it with a real machine event —
+ * `ASK { rank }` — carrying the typed rank. The state's `meta.interaction`
+ * tells the host how to render it: a label with `{handSummary}` interpolated
+ * from context, and `textEvent: "ASK"` so free chat text becomes the event's
+ * single string field. Illegal asks (a rank not in the human's hand) return
+ * `undefined` from the transition, so the machine simply stays idle — the same
+ * guard pattern that rejects the agent's illegal `AGENT_ASK`.
+ *
+ * Resume with `runAgent(machine, { snapshot: result.persistedSnapshot, event })`.
  *
  * This uses a compact deck (A–6, four of each) so a CLI game finishes quickly.
  *
@@ -13,8 +23,15 @@
  */
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
+import type { SnapshotFrom } from "xstate";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
-import { createAgentSchemas, runAgent, setupAgent } from "@statelyai/agent";
+import {
+  createAgentSchemas,
+  getStateMeta,
+  runAgent,
+  setupAgent,
+  type AgentDecisionExecutor,
+} from "@statelyai/agent";
 
 export const ranks = ["A", "2", "3", "4", "5", "6"] as const;
 const rankSchema = z.enum(ranks);
@@ -27,7 +44,30 @@ const turnSchema = z.object({
   count: z.number(),
 });
 
+/**
+ * Typed `meta.interaction` hints. Hosts read them off the idle snapshot to
+ * label the prompt and route free chat text to an event.
+ */
+const metaSchema = z.object({
+  interaction: z
+    .object({
+      label: z.string(),
+      events: z
+        .record(
+          z.string(),
+          z.object({
+            label: z.string().optional(),
+            style: z.enum(["primary", "danger", "default"]).optional(),
+          }),
+        )
+        .optional(),
+      textEvent: z.string().optional(),
+    })
+    .optional(),
+});
+
 export const goFishSchemas = createAgentSchemas({
+  meta: metaSchema,
   context: z.object({
     deck: z.array(rankSchema),
     agentHand: z.array(rankSchema),
@@ -35,7 +75,8 @@ export const goFishSchemas = createAgentSchemas({
     agentBooks: z.array(rankSchema),
     humanBooks: z.array(rankSchema),
     history: z.array(turnSchema),
-    pendingHumanRank: z.string().nullable(),
+    /** Rendered human hand, interpolated into the interaction label. */
+    handSummary: z.string(),
     notice: z.string(),
     turn: z.enum(["agent", "human"]),
     turns: z.number(),
@@ -55,6 +96,8 @@ export const goFishSchemas = createAgentSchemas({
   }),
   events: {
     AGENT_ASK: z.object({ rank: rankSchema }),
+    /** The human's ask, sent by a host as free text ("3", "a", "ace"). */
+    ASK: z.object({ rank: z.string() }),
   },
 });
 
@@ -96,7 +139,7 @@ interface GameContext {
   agentBooks: Rank[];
   humanBooks: Rank[];
   history: z.infer<typeof turnSchema>[];
-  pendingHumanRank: string | null;
+  handSummary: string;
   notice: string;
   turn: "agent" | "human";
   turns: number;
@@ -115,6 +158,7 @@ function settle(context: GameContext): GameContext {
     humanHand: humanRefill.hand,
     agentBooks: agent.books,
     humanBooks: human.books,
+    handSummary: humanRefill.hand.join(" ") || "(empty)",
   };
 }
 
@@ -126,7 +170,7 @@ function deal(deck: Rank[], maxTurns: number): GameContext {
     agentBooks: [],
     humanBooks: [],
     history: [],
-    pendingHumanRank: null,
+    handSummary: "",
     notice: "Game started. Agent goes first.",
     turn: "agent",
     turns: 0,
@@ -164,7 +208,6 @@ function playAsk(context: GameContext, player: "agent" | "human", rank: Rank) {
     [askerKey]: askerHand,
     [targetKey]: targetHand,
     deck,
-    pendingHumanRank: null,
     notice,
     turns: context.turns + 1,
     history: [...context.history, { player, rank, result, count: matches.length }],
@@ -203,8 +246,10 @@ function finalOutput(context: GameContext, reason?: "decision-failed") {
   } as const;
 }
 
+/** Free text ("3", " a ", "ace") to a rank, if it names one. */
 function parseRank(raw: string): Rank | undefined {
   const normalized = raw.trim().toUpperCase();
+  if (normalized === "ACE") return "A";
   return ranks.find((rank) => rank === normalized);
 }
 
@@ -220,21 +265,12 @@ function renderAgentPrompt(context: GameContext) {
   ].join("\n");
 }
 
-function renderHumanPrompt(context: GameContext) {
-  return [
-    context.notice,
-    `Your hand: ${context.humanHand.join(" ")}`,
-    `Your books: ${context.humanBooks.join(" ") || "none"}`,
-    `Agent cards: ${context.agentHand.length}; agent books: ${context.agentBooks.join(" ") || "none"}`,
-    `Deck cards: ${context.deck.length}`,
-    `Public history: ${JSON.stringify(context.history)}`,
-    "Ask for a rank in your hand:",
-  ].join("\n");
-}
-
 export const goFishMachine = setupAgent({
   schemas: goFishSchemas,
   models,
+  // Deterministic idle detection: the run settles whenever it is waiting on the
+  // human, instead of falling back to the timing heuristic.
+  isSuspended: (snapshot) => snapshot.hasTag("waiting"),
 }).createMachine({
   id: "go-fish",
   context: ({ input }) => deal(input.deck ?? shuffledDeck(input.seed), input.maxTurns),
@@ -270,33 +306,27 @@ export const goFishMachine = setupAgent({
         },
       },
     },
+    // No invoke: the run settles idle here and a host resumes it with `ASK`.
     humanTurn: {
-      invoke: {
-        src: "agent.userInput",
-        input: ({ context }) => ({ prompt: renderHumanPrompt(context) }),
-        onDone: ({ output }) => ({
-          target: "resolvingHumanAsk",
-          context: { pendingHumanRank: output },
-        }),
+      tags: ["waiting"],
+      meta: {
+        interaction: {
+          label: "Your hand: {handSummary}. Ask for a rank.",
+          textEvent: "ASK",
+          events: { ASK: { label: "Ask", style: "primary" } },
+        },
       },
-    },
-    resolvingHumanAsk: {
-      type: "choice",
-      choice: ({ context }) => {
-        const rank = parseRank(context.pendingHumanRank ?? "");
-        if (!rank || !context.humanHand.includes(rank)) {
+      on: {
+        // Illegal asks (unknown rank, or one not in hand) are rejected the same
+        // way the agent's are: the transition returns `undefined`.
+        ASK: ({ context, event }) => {
+          const rank = parseRank(event.rank);
+          if (!rank || !context.humanHand.includes(rank)) return undefined;
           return {
-            target: "humanTurn",
-            context: {
-              pendingHumanRank: null,
-              notice: `Invalid rank. Choose one of: ${[...new Set(context.humanHand)].join(" ")}.`,
-            },
+            target: "checkingWin",
+            context: { ...playAsk(context, "human", rank), turn: "agent" },
           };
-        }
-        return {
-          target: "checkingWin",
-          context: { ...playAsk(context, "human", rank), turn: "agent" },
-        };
+        },
       },
     },
     finished: {
@@ -310,22 +340,84 @@ export const goFishMachine = setupAgent({
   },
 });
 
-export async function main() {
+type GoFishSnapshot = SnapshotFrom<typeof goFishMachine>;
+
+/** `{key}` placeholders in interaction labels resolve against context. */
+export function resolveInteractionLabel(label: string, context: Record<string, unknown>): string {
+  return label
+    .replace(/\{(\w+)\}/g, (_, key: string) => {
+      const value = context[key];
+      return typeof value === "string" || typeof value === "number" ? String(value) : "";
+    })
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** The label a host shows on an idle human turn. */
+export function idleLabel(snapshot: GoFishSnapshot): string {
+  const interaction = getStateMeta(snapshot).interaction;
+  return resolveInteractionLabel(interaction?.label ?? "Ask for a rank.", snapshot.context);
+}
+
+/**
+ * Dual-mode runner: the test injects a decide executor and scripted asks (so CI
+ * stays keyless); the direct run below uses a real model and stdin.
+ */
+export async function runGoFishExample(options?: {
+  input?: { seed?: number; maxTurns?: number; deck?: Rank[] };
+  decide?: AgentDecisionExecutor;
+  /** Scripted human asks, consumed in order on each idle settle. */
+  asks?: string[];
+  /** Or decide per idle snapshot; falls back to `asks`, then stdin. */
+  nextAsk?: (snapshot: GoFishSnapshot) => string | undefined;
+  onNotice?: (notice: string) => void;
+}) {
   let lastNotice = "";
-  const result = await runAgent(goFishMachine, {
-    input: { seed: 7, maxTurns: 100 },
-    executors: createAiSdkExecutors({ models }),
-    userInput: async ({ prompt }) => promptLine(`${prompt ?? ">"} `),
-    onTransition: (snapshot) => {
+  const queued = [...(options?.asks ?? [])];
+
+  const shared = {
+    executors: options?.decide
+      ? { decide: options.decide }
+      : createAiSdkExecutors({ models }),
+    onTransition: (snapshot: GoFishSnapshot) => {
       if (snapshot.context.notice !== lastNotice) {
         lastNotice = snapshot.context.notice;
-        console.log(`[game] ${lastNotice}`);
+        options?.onNotice?.(lastNotice);
       }
     },
+  };
+
+  let result = await runAgent(goFishMachine, {
+    input: {
+      seed: options?.input?.seed ?? 7,
+      maxTurns: options?.input?.maxTurns ?? 100,
+      ...(options?.input?.deck ? { deck: options.input.deck } : {}),
+    },
+    ...shared,
   });
 
+  // Each human turn settles the run idle. Resume from `persistedSnapshot`.
+  while (result.status === "idle") {
+    const rank =
+      options?.nextAsk?.(result.snapshot) ??
+      queued.shift() ??
+      (await promptLine(`${idleLabel(result.snapshot)}\n> `));
+    result = await runAgent(goFishMachine, {
+      snapshot: result.persistedSnapshot,
+      event: { type: "ASK", rank },
+      ...shared,
+    });
+  }
+
   if (result.status !== "done") throw new Error(`Go Fish did not complete: ${result.status}`);
-  console.log(result.output);
+  return result.output;
+}
+
+export async function main() {
+  const output = await runGoFishExample({
+    onNotice: (notice) => console.log(`[game] ${notice}`),
+  });
+  console.log(output);
 }
 
 /** Prompt once on stdin and resolve the trimmed reply. */

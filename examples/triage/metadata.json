@@ -1,6 +1,6 @@
 {
   "name": "triage",
-  "title": "Support Ticket Triage",
+  "title": "Sort a support ticket and draft a reply",
   "kind": "agent-workflow",
   "origin": {
     "type": "stately-agent",
@@ -8,11 +8,15 @@
     "url": null
   },
   "comparison": {
-    "targets": ["CrewAI", "LangGraph"],
-    "purpose": "Shows a structured-output classification workflow as a normal XState machine."
+    "targets": [
+      "CrewAI",
+      "LangGraph"
+    ],
+    "purpose": "Classifies an incoming ticket by category and urgency, then drafts the response that fits."
   },
   "starters": [
     "I cannot log in and my password reset email never arrives.",
-    "How do I upgrade to the annual plan?"
+    "How do I upgrade to the annual plan?",
+    "You charged my card twice this month. Fix it."
   ]
 }

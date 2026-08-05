@@ -282,7 +282,7 @@ function EmbedVizPanel({
               </div>
             )}
             <iframe
-              key={frameKey}
+              key={`${frameKey}:${theme}`}
               ref={iframeRef}
               className="viz-embed"
               data-ready={ready || undefined}

@@ -1,6 +1,6 @@
 {
   "name": "guardrails",
-  "title": "Guardrails",
+  "title": "Refuse-or-answer with checks",
   "kind": "agent-workflow",
   "origin": {
     "type": "stately-agent",
@@ -8,16 +8,15 @@
     "url": null
   },
   "comparison": {
-    "targets": ["input/output guardrails", "evaluator-optimizer"],
-    "purpose": "An input/output guardrail chain authored as explicit gate states: validate the question (answerable? in scope?) before generating, answer, verify the answer, then revise-or-fail. Contrasts with evaluator-optimizer's refinement loop: guardrails gate rather than refine — an out-of-scope question is refused before any answer is generated, and an unsupported answer is revised at most once then flagged as unverified, never silently returned."
+    "targets": [
+      "input/output guardrails",
+      "evaluator-optimizer"
+    ],
+    "purpose": "Scoped to geography: checks the question before answering and checks the answer before returning it. Off-topic questions are refused up front, and an unsupported answer gets one revision, then is flagged rather than returned as fact."
   },
   "starters": [
-    {
-      "question": "What is the capital of Australia?"
-    },
-    {
-      "question": "How do I reset my database password?",
-      "topic": "our internal admin tooling"
-    }
+    "What is the capital of Australia?",
+    "Which river is longer, the Nile or the Amazon?",
+    "Write me a poem about my ex."
   ]
 }

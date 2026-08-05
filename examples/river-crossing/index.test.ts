@@ -34,8 +34,19 @@ describe("river-crossing", () => {
     expect(result.output.solved).toBe(true);
     expect(result.output.moves).toBe(7);
     expect(result.output.log).toHaveLength(7);
-    expect(result.output.log[0]).toBe("Farmer crosses left → right with the goat");
-    expect(result.output.log.at(-1)).toBe("Farmer crosses left → right with the goat");
+    // Each log line narrates the crossing and the resulting bank contents.
+    expect(result.output.log[0]).toBe(
+      "Farmer crosses left → right with the goat. Left: wolf, cabbage | Right: farmer, goat",
+    );
+    expect(result.output.log.at(-1)).toBe(
+      "Farmer crosses left → right with the goat. Left: (empty) | Right: farmer, wolf, goat, cabbage",
+    );
+
+    // The headline output is readable prose, not a raw object.
+    expect(result.output.summary).toContain("Solved the river crossing in 7 moves.");
+    expect(result.output.summary).toContain("1. Farmer crosses left → right with the goat.");
+    expect(result.output.summary).toContain("7. Farmer crosses left → right with the goat.");
+    expect(result.output.summary.split("\n").filter((line) => /^\d+\. /.test(line))).toHaveLength(7);
   });
 
   test("illegal move is rejected-by-guard, then the legal retry proceeds", async () => {
@@ -66,7 +77,9 @@ describe("river-crossing", () => {
     // deciding state, and TAKE_GOAT applied.
     expect(requestsSeen[1]!.attempts.at(-1)!.failure).toBe("rejected-by-guard");
     expect(result.output.solved).toBe(true);
-    expect(result.output.log[0]).toBe("Farmer crosses left → right with the goat");
+    // The rejected opener never made it into the narration.
+    expect(result.output.log[0]).toContain("left → right with the goat");
+    expect(result.output.summary).not.toContain("1. Farmer crosses left → right alone");
   });
 
   test("exceeding maxMoves reaches failed", async () => {
@@ -82,6 +95,9 @@ describe("river-crossing", () => {
     if (result.status !== "done") throw new Error("expected done");
     expect(result.output.solved).toBe(false);
     expect(result.output.moves).toBe(3);
+    // The failure narration is readable too.
+    expect(result.output.summary).toContain("Not solved — stopped after 3 of 3 allowed moves.");
+    expect(result.output.summary).toContain("3. Farmer crosses");
   });
 
   test("describeMachine renders states, events, and rules into markdown", () => {

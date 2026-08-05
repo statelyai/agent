@@ -75,7 +75,6 @@ export function DemoShell() {
   const machineIndex = useSelector(store, (s) => s.context.machineIndex);
   const theme = useSelector(store, (s) => s.context.theme);
   const mobileView = useSelector(store, (s) => s.context.mobileView);
-  const input = useSelector(store, (s) => s.context.input);
   const turns = useSelector(store, (s) => s.context.turns);
   const pendingIdle = useSelector(store, (s) => s.context.pendingIdle);
 
@@ -386,21 +385,23 @@ export function DemoShell() {
     : !exampleDetail?.runnable || !activeMachine
       ? []
       : (exampleSummary?.starters ?? []).flatMap((starter) => {
-          if (typeof starter === "string") {
+          if (starter.kind === "text") {
             const field = activeMachine.promptField;
             if (!field) return [];
             return [
-              { label: starter, onStart: () => startExampleRun(starter, { [field]: starter }) },
+              {
+                label: starter.label,
+                onStart: () => startExampleRun(starter.text, { [field]: starter.text }),
+              },
             ];
           }
-          const firstString = Object.values(starter).find((value) => typeof value === "string");
-          const label =
-            typeof firstString === "string" ? firstString : JSON.stringify(starter).slice(0, 80);
-          return [{ label, onStart: () => startExampleRun(label, starter) }];
+          return [
+            { label: starter.label, onStart: () => startExampleRun(starter.label, starter.input) },
+          ];
         });
 
   const intro = isScenario ? (
-    <ScenarioIntro scenario={scenario} starters={starters} />
+    <ScenarioIntro scenario={scenario} />
   ) : exampleSummary ? (
     <ExampleIntro
       summary={exampleSummary}
@@ -408,7 +409,6 @@ export function DemoShell() {
       error={exampleError}
       machineIndex={machineIndex}
       onSelectMachine={selectMachine}
-      starters={starters}
     />
   ) : null;
 
@@ -417,11 +417,10 @@ export function DemoShell() {
   const appPanel = (
     <AppPanel
       intro={intro}
+      starters={starters}
       turns={turns}
       pendingIdle={pendingIdle}
       startForm={startForm}
-      input={input}
-      onInputChange={(value) => store.trigger.inputChanged({ value })}
       onSubmit={submit}
       onSendEvent={sendEvent}
       onRestart={resetRun}

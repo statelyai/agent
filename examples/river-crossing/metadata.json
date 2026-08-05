@@ -1,6 +1,6 @@
 {
   "name": "river-crossing",
-  "title": "River Crossing",
+  "title": "River crossing puzzle",
   "kind": "agent-workflow",
   "origin": {
     "type": "stately-agent",
@@ -9,14 +9,20 @@
   },
   "comparison": {
     "targets": ["LangGraph", "Burr"],
-    "purpose": "Shows the machine as a ground-truth environment for constraint solving: the model only proposes moves, guards enforce legality (illegal choices are rejected-by-guard and retried), and a describeMachine helper renders the machine's rules/states/events into the decide context."
+    "purpose": "The machine is ground truth for a constraint puzzle: the model only proposes crossings, guards reject illegal ones, and the run narrates every move bank by bank."
   },
   "starters": [
     {
-      "maxMoves": 12
+      "label": "Solve (max 12 moves)",
+      "input": { "maxMoves": 12 }
     },
     {
-      "maxMoves": 7
+      "label": "Tight budget (max 7 moves)",
+      "input": { "maxMoves": 7 }
+    },
+    {
+      "label": "Watch it fail (max 4 moves)",
+      "input": { "maxMoves": 4 }
     }
   ]
 }

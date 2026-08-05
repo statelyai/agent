@@ -14,7 +14,7 @@ test("drafts, settles idle for review, survives snapshot round-trip, resumes on 
 
   expect(result.draft).toBe("Announcement: Write a short announcement about: release notes");
   // Typed meta.interaction surfaced from the idle state.
-  expect(result.interactionLabel).toContain("Review the draft");
+  expect(result.interactionLabel).toContain("Approve the draft");
   expect(result.legalEvents).toEqual(["APPROVE", "REJECT"]);
   // Resumed second runAgent call published.
   expect(result.published).toBe(true);

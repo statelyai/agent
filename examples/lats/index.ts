@@ -25,6 +25,10 @@ const treeNodeSchema = z.object({
 
 type TreeNode = z.infer<typeof treeNodeSchema>;
 
+/** Search bounds. Hardcoded so the machine input is just the problem statement. */
+const DEFAULT_MAX_ROLLOUTS = 4;
+const DEFAULT_MAX_DEPTH = 3;
+
 export const models = defineModels({
   generator: openai("gpt-5.4-mini"),
   evaluator: openai("gpt-5.4-mini"),
@@ -55,8 +59,6 @@ const setup = setupAgent({
   }),
   input: z.object({
     problem: z.string(),
-    maxRollouts: z.number().default(4),
-    maxDepth: z.number().default(3),
   }),
   output: z.object({
     answer: z.string(),
@@ -107,8 +109,8 @@ export const latsMachine = setup.createMachine({
     selectedId: "root",
     candidates: [],
     rollout: 0,
-    maxRollouts: input.maxRollouts,
-    maxDepth: input.maxDepth,
+    maxRollouts: DEFAULT_MAX_ROLLOUTS,
+    maxDepth: DEFAULT_MAX_DEPTH,
   }),
   output: ({ context }) => {
     const best = context.nodes.reduce((left, right) => {
@@ -202,8 +204,6 @@ export const latsMachine = setup.createMachine({
 
 export interface RunLatsOptions {
   problem?: string;
-  maxRollouts?: number;
-  maxDepth?: number;
   /** Injected for tests; direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
   /** Observes each machine transition. */
@@ -213,13 +213,11 @@ export interface RunLatsOptions {
 export async function runLatsExample(options: RunLatsOptions = {}) {
   const {
     problem = "Design a safe retry policy for a payment workflow.",
-    maxRollouts = 4,
-    maxDepth = 3,
     generateText,
     onProgress,
   } = options;
   const result = await runAgent(latsMachine, {
-    input: { problem, maxRollouts, maxDepth },
+    input: { problem },
     ...(generateText
       ? { executors: { generateText } }
       : { executors: createAiSdkExecutors({ models }) }),

@@ -39,7 +39,7 @@ The payload is a discriminated union on `type`:
 | `type`               | Key fields                                              | Notes                                                                                                                                                                    |
 | -------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `run.start`          | `input?`, `snapshot?`, `event?`                         | Run boundary; controlled path only.                                                                                                                                      |
-| `request.start`      | `request`                                               | One per model call (text, decision, or plan).                                                                                                                            |
+| `request.start`      | `request`                                               | One per model call (text or decision).                                                                                                                            |
 | `request.end`        | `request`, `output`, `raw`, `reasoning?`, `usage?`      | `raw` is your executor's verbatim result (usage, tool calls); `reasoning` and `usage` present only when the executor surfaced them.                                      |
 | `request.error`      | `request`, `error`                                      | The model call threw.                                                                                                                                                    |
 | `stream.chunk`       | `request`, `chunk`                                      | Each streamed chunk of a `mode: 'stream'` request.                                                                                                                       |
@@ -47,7 +47,7 @@ The payload is a discriminated union on `type`:
 | `emit`               | `event`                                                 | An event the machine emitted with `enq.emit(...)`; controlled path only.                                                                                                 |
 | `run.end`            | `status` (`done` \| `idle` \| `error`) + variant fields | `done`: `output`, `snapshot`. `idle`: `snapshot`, `pendingUserInputs?`, `persistedSnapshot?`. `error`: `cause`, `error`, `snapshot`. Run boundary; controlled path only. |
 
-Each `request` is an `AgentStepRequest`: text and plan requests carry `src`; a decision carries `model` instead. All three carry `id` and `kind`.
+Each `request` is an `AgentStepRequest`: a text request carries `src`; a decision carries `model` instead. Both carry `id` and `kind`.
 
 Two timestamps, neither of them machine time:
 
@@ -248,7 +248,7 @@ The run span nests under whatever span is active when the run starts, so an agen
 | Trace event          | OTel                                                                                                                                             |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `run.start`          | Opens the run span: `invoke_agent <machineId>`, `INTERNAL`.                                                                                      |
-| `request.start`      | Opens a child span per model call: `chat <model>` (`CLIENT`) for text and decision requests, `plan <machineId>` (`INTERNAL`) for a plan request. |
+| `request.start`      | Opens a child span per model call: `chat <model>` (`CLIENT`) for text and decision requests. |
 | `request.end`        | Token usage onto the request span, status `OK`, span ends.                                                                                       |
 | `request.error`      | `recordException` + `error.type`, status `ERROR`, span ends.                                                                                     |
 | `stream.chunk`       | Counted; lands as `agent.stream_chunks` on the request span.                                                                                     |
@@ -261,7 +261,7 @@ Attributes follow the [GenAI semantic conventions](https://github.com/open-telem
 
 | Attribute                                                                                 | From                                                                                      |
 | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `gen_ai.operation.name`                                                                   | `invoke_agent` (run), `chat` or `plan` (request).                                         |
+| `gen_ai.operation.name`                                                                   | `invoke_agent` (run), `chat` (request).                                         |
 | `gen_ai.agent.name` / `gen_ai.agent.version`                                              | `machineId` (or the `agentName` option) / `machineVersion`.                               |
 | `gen_ai.request.model`                                                                    | The model ref the request targets.                                                        |
 | `gen_ai.provider.name`                                                                    | The `providerName` option. Not inferable from a model ref, so unset unless you pass it.   |

@@ -11,8 +11,8 @@ test("pauses twice and resumes from JSON snapshots", async () => {
 
   expect(result.idleStates).toEqual(["waitingForSignedDocs", "waitingForHardware"]);
   expect(result.idlePrompts).toEqual([
-    "Wait until the employee signs onboarding documents.",
-    "Wait until the laptop is delivered.",
+    "Waiting for the signed onboarding documents. Mark them signed to continue.",
+    "Waiting on hardware delivery. Mark the laptop delivered to continue.",
   ]);
   expect(result.idleEventTypes).toEqual([["DOCS_SIGNED"], ["HARDWARE_DELIVERED"]]);
   expect(result.output).toMatchObject({

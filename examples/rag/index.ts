@@ -136,7 +136,6 @@ const agentSetup = setupAgent({
   context: ragContextSchema,
   input: z.object({
     question: z.string(),
-    memory: z.array(z.string()).default([]),
   }),
   output: z.object({
     answer: z.string(),
@@ -187,7 +186,8 @@ export const ragMachine = agentSetup.createMachine({
     question: input.question,
     documents: [],
     answer: null,
-    memory: input.memory,
+    // Conversational memory starts empty and accumulates across turns.
+    memory: [],
   }),
   initial: "retrieving",
   states: {
@@ -232,7 +232,6 @@ export const ragMachine = agentSetup.createMachine({
 
 export interface RunRAGOptions {
   question?: string;
-  memory?: string[];
   /** Injected for tests; direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
   /** Direct run passes this to narrate state; tests leave it undefined (quiet). */
@@ -249,13 +248,12 @@ export interface RAGResult {
 export async function runRAGExample(options: RunRAGOptions = {}): Promise<RAGResult> {
   const {
     question = "What is context in a state machine?",
-    memory = [],
     generateText,
     onTransition,
   } = options;
 
   const result = await runAgent(ragMachine, {
-    input: { question, memory },
+    input: { question },
     ...(generateText
       ? { executors: { generateText } }
       : { executors: createAiSdkExecutors({ models }) }),

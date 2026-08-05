@@ -1,6 +1,6 @@
 {
   "name": "rag",
-  "title": "Retrieval-Augmented Generation",
+  "title": "Answer questions from a document set",
   "kind": "pattern",
   "origin": {
     "type": "stately-agent",
@@ -8,15 +8,15 @@
     "url": null
   },
   "comparison": {
-    "targets": ["LangGraph", "Burr"],
-    "purpose": "Retrieval as a typed plain actor (honest keyword scoring over a sample corpus), a grounded answer request, and conversational memory accumulating in machine context."
+    "targets": [
+      "LangGraph",
+      "Burr"
+    ],
+    "purpose": "Looks up relevant passages in a small corpus, answers only from what it found, and remembers the conversation across turns."
   },
   "starters": [
-    {
-      "question": "What do the documents say about retrieval quality?"
-    },
-    {
-      "question": "Summarize the tradeoffs the corpus mentions about caching."
-    }
+    "What do the documents say about retrieval quality?",
+    "Summarize the tradeoffs the corpus mentions about caching.",
+    "What does the corpus say about chunk size?"
   ]
 }

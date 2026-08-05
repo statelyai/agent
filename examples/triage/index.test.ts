@@ -29,8 +29,12 @@ describe("ticket-triage", () => {
 
     // The invoke input threaded the raw ticket text into the model prompt.
     expect(prompts).toEqual([TICKET]);
-    // The structured triage output is what the final state emits.
-    expect(result.output).toEqual(classification);
+    // A readable summary leads, with the structured triage fields alongside it.
+    expect(result.output).toEqual({
+      summary: expect.stringContaining("refund"),
+      ...classification,
+    });
+    expect(Object.keys(result.output)[0]).toBe("summary");
     expect(result.output.category).toBe("billing");
     expect(result.output.sentiment).toBe("negative");
     expect(result.output.reply).toContain("refund");

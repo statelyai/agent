@@ -72,7 +72,25 @@ const schemas = createAgentSchemas({
     APPROVE: z.object({}),
     DENY: z.object({ reason: z.string() }),
   },
-  meta: z.object({ interaction: z.object({ label: z.string() }).optional() }),
+  // Typed interaction meta: the pause's `label`, a button `label`/`style` per
+  // accepted event, and `textEvent` naming the ONE event free text goes to.
+  meta: z.object({
+    interaction: z
+      .object({
+        label: z.string(),
+        events: z
+          .record(
+            z.string(),
+            z.object({
+              label: z.string().optional(),
+              style: z.enum(["primary", "danger", "default"]).optional(),
+            }),
+          )
+          .optional(),
+        textEvent: z.string().optional(),
+      })
+      .optional(),
+  }),
 });
 
 const agentSetup = setupAgent({
@@ -192,8 +210,18 @@ export const supportMachine = agentSetup.createMachine({
       tags: ["awaiting-approval"],
       meta: {
         interaction: {
+          // `{pendingRefund}` resolves against the snapshot's context when the
+          // label is shown (host convention; the meta itself is static).
           label:
-            "This refund exceeds the limit and needs approval. APPROVE or DENY (with a reason).",
+            "The ${pendingRefund} refund exceeds the limit and needs approval. " +
+            "Approve it, or type a reason to deny it.",
+          events: {
+            APPROVE: { label: "Approve refund of ${pendingRefund}", style: "primary" },
+            DENY: { label: "Deny and escalate", style: "danger" },
+          },
+          // Without this, free text would silently DENY (its `reason` is the
+          // only single-string payload here).
+          textEvent: "DENY",
         },
       },
       on: {

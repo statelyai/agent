@@ -1,6 +1,6 @@
 {
   "name": "plain-xstate",
-  "title": "Plain XState (no setupAgent)",
+  "title": "Launch blurb writer (plain XState)",
   "kind": "agent-workflow",
   "origin": {
     "type": "stately-agent",
@@ -8,17 +8,15 @@
     "url": null
   },
   "comparison": {
-    "targets": ["LangGraph", "hand-rolled loop"],
-    "purpose": "A normal XState v6 machine authored with plain `setup(...)` — a promise-shaped invoke, an `on: { APPROVE, REVISE }` decision state with a guarded function transition, a final state, and zero knowledge of @statelyai/agent — is driven as an agent: bind the actor with `machine.provide(...)`, enumerate legal events with `getAcceptedEvents(snapshot)`, and choose with `resolveDecision(...)` gated by `snapshot.can(event)`. No setupAgent, no agent.decide."
+    "targets": [
+      "LangGraph",
+      "hand-rolled loop"
+    ],
+    "purpose": "Writes and revises a product launch blurb using an ordinary XState machine that knows nothing about the agent library \u2014 the runtime picks the next event from the ones the machine accepts."
   },
   "starters": [
-    {
-      "topic": "a CLI that turns shell history into a changelog",
-      "maxRevisions": 2
-    },
-    {
-      "topic": "a solar-powered backyard weather station",
-      "maxRevisions": 3
-    }
+    "a CLI that turns shell history into a changelog",
+    "a solar-powered backyard weather station",
+    "a note app that deletes anything you have not opened in a year"
   ]
 }

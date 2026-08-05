@@ -1,6 +1,6 @@
 {
   "name": "file-snapshot-store",
-  "title": "File Snapshot Store",
+  "title": "Durable drafts (file snapshot store)",
   "kind": "agent-workflow",
   "origin": {
     "type": "stately-agent",
@@ -11,5 +11,8 @@
     "targets": [],
     "purpose": "Durable HITL checkpoints in a file-backed snapshot store: each idle settle writes JSON to disk and a fresh runAgent call resumes across multiple turns."
   },
-  "starters": ["Launch of our new snapshot store.", "Q3 roadmap highlights for the platform team."]
+  "starters": [
+    "Launch of our new snapshot store.",
+    "Q3 roadmap highlights for the platform team."
+  ]
 }

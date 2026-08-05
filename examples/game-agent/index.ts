@@ -1,17 +1,26 @@
 /**
  * Games as machines — two lessons in one example:
  *
- * 1. Context-computed `allowedEvents` (the combat agent, `gameMachine`): each
- *    turn the model decides one legal move (`agent.decide`, whose chosen event
- *    is auto-delivered), the move updates HP, and a text request narrates the
+ * 1. Context-computed `allowedEvents` (the combat machine, `gameMachine`): the
+ *    model decides one legal move (`agent.decide`, whose chosen event is
+ *    auto-delivered), the move updates HP, and a text request narrates the
  *    result. `allowedEvents` widens to include HEAL only when the player is low
- *    on HP — the legal move set is COMPUTED from context.
+ *    on HP — the legal move set is COMPUTED from context. The machine keeps a
+ *    `log: string[]` blow-by-blow and its output `summary` is that narration as
+ *    readable text, not a bare data dump.
  *
- * 2. Reducing the event log into context (the RPS agent, `rpsMachine`): the
- *    machine appends every round's throws + result to `context.history`, and
- *    the decide prompt renders that log back. The saved event history is the
- *    ONLY way the model can infer the opponent's pattern and win — context IS
- *    the agent's memory.
+ * 2. Reducing the event log into context (the RPS machine, `rpsMachine`): YOU
+ *    play rock-paper-scissors against the model, first to 3. Each round the
+ *    machine appends both throws and the result to `context.history`, and the
+ *    model's decide prompt renders that log back. The saved history is the ONLY
+ *    way the model can spot your habits and counter them — context IS the
+ *    agent's memory.
+ *
+ * Your throws are gated machine events (`HUMAN_ROCK` / `HUMAN_PAPER` /
+ * `HUMAN_SCISSORS`) hinted through `meta.interaction`, so hosts and demos
+ * render them as buttons: the run settles idle on `awaitingHumanThrow` and
+ * resumes with `runAgent(rpsMachine, { snapshot: persistedSnapshot, event })`.
+ * `metadata.json` nominates `rpsMachine` as the machine a host should drive.
  *
  * The combat turn runs ONE turn end-to-end via `runAgent`. For the multi-turn,
  * host-driven step loop — where the host re-enters the machine each turn and
@@ -23,7 +32,37 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
-import { createAgentSchemas, createTextLogic, runAgent, setupAgent } from "@statelyai/agent";
+import {
+  createAgentSchemas,
+  createTextLogic,
+  getStateMeta,
+  runAgent,
+  setupAgent,
+  type AgentDecisionExecutor,
+} from "@statelyai/agent";
+import type { SnapshotFrom } from "xstate";
+
+/**
+ * Typed `meta.interaction` hints. Hosts read them off the idle snapshot to
+ * label buttons and route free chat text to an event.
+ */
+const metaSchema = z.object({
+  interaction: z
+    .object({
+      label: z.string(),
+      events: z
+        .record(
+          z.string(),
+          z.object({
+            label: z.string().optional(),
+            style: z.enum(["primary", "danger", "default"]).optional(),
+          }),
+        )
+        .optional(),
+      textEvent: z.string().optional(),
+    })
+    .optional(),
+});
 
 export const turnSummarySchema = z.object({
   summary: z.string(),
@@ -37,6 +76,9 @@ export const gameSchemas = createAgentSchemas({
     enemyHp: z.number(),
     defended: z.boolean(),
     lastSummary: z.string().nullable(),
+    // Blow-by-blow narration, appended as the turn plays out. The output's
+    // `summary` is this log rendered as text.
+    log: z.array(z.string()),
   }),
   input: z.object({
     playerHp: z.number().default(20),
@@ -108,6 +150,20 @@ export const gameActors = {
   summarizeTurn,
 };
 
+/** Renders the combat log plus how the encounter ended, as readable text. */
+export function renderCombat(log: string[], outcome: string): string {
+  const lines = log.length === 0 ? ["Nothing happened."] : log;
+  const ending =
+    outcome === "won"
+      ? "The enemy falls. You win."
+      : outcome === "lost"
+        ? "You go down. The goblin wins."
+        : outcome === "fled"
+          ? "You break off and run."
+          : "The fight goes on.";
+  return [...lines, ending].join("\n");
+}
+
 // `summarizing` always sets `lastSummary` before any of these states is
 // reached (either via the summarize onDone, or FLEE's own context patch), so
 // it's narrowed non-null on every path in.
@@ -136,6 +192,7 @@ export const gameMachine = gameAgentSetup.createMachine({
     enemyHp: input.enemyHp,
     defended: false,
     lastSummary: null,
+    log: [`You face a goblin. You ${input.playerHp} HP, goblin ${input.enemyHp} HP.`],
   }),
   initial: "choosingMove",
   states: {
@@ -146,30 +203,45 @@ export const gameMachine = gameAgentSetup.createMachine({
         onError: { target: "fumbled" },
       },
       on: {
-        ATTACK: ({ context }) => ({
-          target: "summarizing",
-          context: {
-            enemyHp: Math.max(0, context.enemyHp - 6),
-            defended: false,
-          },
-        }),
-        DEFEND: {
-          target: "summarizing",
-          context: { defended: true },
+        ATTACK: ({ context, event }) => {
+          const enemyHp = Math.max(0, context.enemyHp - 6);
+          return {
+            target: "summarizing",
+            context: {
+              enemyHp,
+              defended: false,
+              log: [
+                ...context.log,
+                `You attack the ${event.target} for 6 (goblin ${context.enemyHp} → ${enemyHp}).`,
+              ],
+            },
+          };
         },
-        HEAL: ({ context, event }) => ({
+        DEFEND: ({ context }) => ({
           target: "summarizing",
           context: {
-            playerHp: Math.min(20, context.playerHp + event.amount),
-            defended: false,
+            defended: true,
+            log: [...context.log, "You raise your guard and brace for the next blow."],
           },
         }),
-        FLEE: {
+        HEAL: ({ context, event }) => {
+          const playerHp = Math.min(20, context.playerHp + event.amount);
+          return {
+            target: "summarizing",
+            context: {
+              playerHp,
+              defended: false,
+              log: [...context.log, `You heal ${event.amount} (you ${context.playerHp} → ${playerHp}).`],
+            },
+          };
+        },
+        FLEE: ({ context }) => ({
           target: "fled",
           context: {
             lastSummary: "You fled the encounter.",
+            log: [...context.log, "You disengage and back away."],
           },
-        },
+        }),
       },
     },
     summarizing: {
@@ -181,12 +253,17 @@ export const gameMachine = gameAgentSetup.createMachine({
           enemyHp: context.enemyHp,
           defended: context.defended,
         }),
-        onDone: ({ output }) => ({
+        onDone: ({ context, output }) => ({
           target: "checkingOutcome",
           context: {
             playerHp: output.playerHp,
             enemyHp: output.enemyHp,
             lastSummary: output.summary,
+            log: [
+              ...context.log,
+              output.summary,
+              `End of turn: you ${output.playerHp} HP, goblin ${output.enemyHp} HP.`,
+            ],
           },
         }),
       },
@@ -207,7 +284,7 @@ export const gameMachine = gameAgentSetup.createMachine({
       type: "final",
       output: ({ context }) => ({
         outcome: "continue",
-        summary: context.lastSummary,
+        summary: renderCombat(context.log, "continue"),
         playerHp: context.playerHp,
         enemyHp: context.enemyHp,
       }),
@@ -216,7 +293,7 @@ export const gameMachine = gameAgentSetup.createMachine({
       type: "final",
       output: ({ context }) => ({
         outcome: "won",
-        summary: context.lastSummary,
+        summary: renderCombat(context.log, "won"),
         playerHp: context.playerHp,
         enemyHp: context.enemyHp,
       }),
@@ -225,7 +302,7 @@ export const gameMachine = gameAgentSetup.createMachine({
       type: "final",
       output: ({ context }) => ({
         outcome: "lost",
-        summary: context.lastSummary,
+        summary: renderCombat(context.log, "lost"),
         playerHp: context.playerHp,
         enemyHp: context.enemyHp,
       }),
@@ -234,7 +311,7 @@ export const gameMachine = gameAgentSetup.createMachine({
       type: "final",
       output: ({ context }) => ({
         outcome: "fled",
-        summary: context.lastSummary,
+        summary: renderCombat(context.log, "fled"),
         playerHp: context.playerHp,
         enemyHp: context.enemyHp,
       }),
@@ -246,7 +323,11 @@ export const gameMachine = gameAgentSetup.createMachine({
       type: "final",
       output: ({ context }) => ({
         outcome: "continue" as const,
-        summary: context.lastSummary ?? "The hero fumbled and the moment passed.",
+        summary: renderCombat(
+          [...context.log, "The hero fumbled and the moment passed."],
+          "continue",
+        ),
+        log: [...context.log, "The hero fumbled and the moment passed."],
         playerHp: context.playerHp,
         enemyHp: context.enemyHp,
       }),
@@ -256,32 +337,40 @@ export const gameMachine = gameAgentSetup.createMachine({
 
 // ─── Lesson 2: reducing the event log into context (rock-paper-scissors) ───
 //
-// The opponent plays a fixed repeating pattern. Every round the machine appends
-// what happened — both throws and the result — to `context.history`. The decide
-// prompt renders that log, so the model's only path to winning is the event
-// history the machine saved: each round in isolation is a coin flip, but the
-// log exposes the opponent's cycle. No runAgent plumbing needed — context IS
-// the agent's memory.
+// You throw; the model throws back. Every round the machine appends what
+// happened — both throws and the result — to `context.history`. The decide
+// prompt renders that log, so the model's only edge is the event history the
+// machine saved: each round in isolation is a coin flip, but the log exposes
+// whatever habits you fall into. No extra plumbing needed — context IS the
+// agent's memory.
 
 const moveSchema = z.enum(["rock", "paper", "scissors"]);
 type Move = z.infer<typeof moveSchema>;
 
 const roundSchema = z.object({
   round: z.number(),
+  /** Your throw. */
   player: moveSchema,
+  /** The model's throw. */
   opponent: moveSchema,
+  /** Result from your point of view. */
   result: z.enum(["win", "loss", "tie"]),
 });
 type Round = z.infer<typeof roundSchema>;
 
 export const rpsSchemas = createAgentSchemas({
+  meta: metaSchema,
   context: z.object({
     targetWins: z.number(),
     round: z.number(),
     playerScore: z.number(),
     opponentScore: z.number(),
+    /** Your throw for the round in progress, waiting on the model's reply. */
+    pendingThrow: moveSchema.nullable(),
+    /** Line shown above the buttons: what just happened. */
+    notice: z.string(),
     // The event log: every round's throws and result, in order. This is what
-    // the decide prompt reads to find the opponent's pattern.
+    // the decide prompt reads to find your pattern.
     history: z.array(roundSchema),
   }),
   input: z.object({
@@ -289,11 +378,17 @@ export const rpsSchemas = createAgentSchemas({
   }),
   output: z.object({
     outcome: z.enum(["won", "lost"]),
+    summary: z.string(),
     playerScore: z.number(),
     opponentScore: z.number(),
     history: z.array(roundSchema),
   }),
   events: {
+    /** Your throws — gated machine events a host renders as buttons. */
+    HUMAN_ROCK: z.object({}),
+    HUMAN_PAPER: z.object({}),
+    HUMAN_SCISSORS: z.object({}),
+    /** The model's throw, chosen by `agent.decide`. */
     THROW_ROCK: z.object({}),
     THROW_PAPER: z.object({}),
     THROW_SCISSORS: z.object({}),
@@ -304,25 +399,31 @@ export const rpsModels = defineModels({
   movePicker: openai("gpt-5.4-mini"),
 });
 
-// The opponent's script: rock, rock, paper, repeating. Deterministic so the
-// log is genuinely predictive.
-const OPPONENT_PATTERN: Move[] = ["rock", "rock", "paper"];
-
 const BEATS: Record<Move, Move> = {
   rock: "scissors",
   paper: "rock",
   scissors: "paper",
 };
 
-function playRound(context: { round: number; history: Round[] }, player: Move) {
-  const opponent = OPPONENT_PATTERN[context.round % OPPONENT_PATTERN.length]!;
+/** Resolves the round once both throws are in. */
+function resolveRound(
+  context: { round: number; history: Round[]; pendingThrow: Move | null },
+  opponent: Move,
+) {
+  const player = context.pendingThrow ?? "rock";
   const result: Round["result"] =
     player === opponent ? "tie" : BEATS[player] === opponent ? "win" : "loss";
+  const round = context.round + 1;
   return {
     target: "checkingScore" as const,
     context: {
-      round: context.round + 1,
-      history: [...context.history, { round: context.round + 1, player, opponent, result }],
+      round,
+      pendingThrow: null,
+      history: [...context.history, { round, player, opponent, result }],
+      notice:
+        result === "tie"
+          ? `Round ${round}: you both threw ${player}. Tie.`
+          : `Round ${round}: you threw ${player}, the agent threw ${opponent} — you ${result === "win" ? "win" : "lose"} it.`,
     },
   };
 }
@@ -335,15 +436,38 @@ export function renderHistory(history: Round[]): string {
   return history
     .map(
       (entry) =>
-        `Round ${entry.round}: you threw ${entry.player}, opponent threw ${entry.opponent} — ${entry.result}`,
+        `Round ${entry.round}: human threw ${entry.player}, you threw ${entry.opponent} — human ${entry.result}`,
     )
     .join("\n");
+}
+
+/** Readable end-of-match recap. */
+export function renderMatch(
+  history: Round[],
+  outcome: "won" | "lost",
+  playerScore: number,
+  opponentScore: number,
+): string {
+  const lines = history.map(
+    (entry) =>
+      `Round ${entry.round}: you ${entry.player} vs agent ${entry.opponent} — ${
+        entry.result === "tie" ? "tie" : entry.result === "win" ? "you win" : "agent wins"
+      }`,
+  );
+  return [
+    ...lines,
+    `You ${outcome} the match ${playerScore}-${opponentScore}.`,
+  ].join("\n");
 }
 
 const rpsSetup = setupAgent({
   schemas: rpsSchemas,
   models: rpsModels,
+  // Deterministic idle detection: the run settles as soon as the machine is in
+  // the tagged waiting-for-you state, no timing heuristic involved.
+  isSuspended: (snapshot) => snapshot.hasTag("waiting"),
   states: {
+    awaitingHumanThrow: {},
     choosingThrow: {},
     checkingScore: {},
     won: {},
@@ -358,33 +482,59 @@ export const rpsMachine = rpsSetup.createMachine({
     round: 0,
     playerScore: 0,
     opponentScore: 0,
+    pendingThrow: null,
+    notice: `First to ${input.targetWins} wins. Throw something.`,
     history: [],
   }),
-  initial: "choosingThrow",
+  initial: "awaitingHumanThrow",
   states: {
+    // No invoke: the run settles idle here and a host resumes with one of the
+    // accepted events. `meta.interaction` labels them as buttons; `{notice}`
+    // resolves against the snapshot context when the label is shown.
+    awaitingHumanThrow: {
+      tags: ["waiting"],
+      meta: {
+        interaction: {
+          label: "{notice}",
+          events: {
+            HUMAN_ROCK: { label: "Rock", style: "primary" },
+            HUMAN_PAPER: { label: "Paper", style: "primary" },
+            HUMAN_SCISSORS: { label: "Scissors", style: "primary" },
+          },
+        },
+      },
+      on: {
+        HUMAN_ROCK: { target: "choosingThrow", context: { pendingThrow: "rock" as const } },
+        HUMAN_PAPER: { target: "choosingThrow", context: { pendingThrow: "paper" as const } },
+        HUMAN_SCISSORS: {
+          target: "choosingThrow",
+          context: { pendingThrow: "scissors" as const },
+        },
+      },
+    },
     choosingThrow: {
       invoke: {
         src: "agent.decide",
         // The payoff line: the prompt is built FROM the saved event log. The
-        // model sees every prior round and can extrapolate the cycle.
+        // model sees every prior round and can extrapolate the human's habits.
         input: ({ context }) => ({
           model: "movePicker",
           system: [
-            "You are playing rock-paper-scissors. The opponent follows a",
-            "repeating pattern. Study the round history, infer the pattern,",
-            "predict the opponent's next throw, and throw what beats it.",
+            "You are playing rock-paper-scissors against a human.",
+            "Study the round history for the human's habits, predict their next",
+            "throw, and throw what beats it.",
           ].join(" "),
           prompt: [
             renderHistory(context.history),
-            `Score: you ${context.playerScore}, opponent ${context.opponentScore}.`,
+            `Score: human ${context.playerScore}, you ${context.opponentScore}.`,
             "Choose your next throw.",
           ].join("\n"),
         }),
       },
       on: {
-        THROW_ROCK: ({ context }) => playRound(context, "rock"),
-        THROW_PAPER: ({ context }) => playRound(context, "paper"),
-        THROW_SCISSORS: ({ context }) => playRound(context, "scissors"),
+        THROW_ROCK: ({ context }) => resolveRound(context, "rock"),
+        THROW_PAPER: ({ context }) => resolveRound(context, "paper"),
+        THROW_SCISSORS: ({ context }) => resolveRound(context, "scissors"),
       },
     },
     checkingScore: {
@@ -398,14 +548,22 @@ export const rpsMachine = rpsSetup.createMachine({
             ? ("won" as const)
             : opponentScore >= context.targetWins
               ? ("lost" as const)
-              : ("choosingThrow" as const);
-        return { target, context: { playerScore, opponentScore } };
+              : ("awaitingHumanThrow" as const);
+        return {
+          target,
+          context: {
+            playerScore,
+            opponentScore,
+            notice: `${context.notice} Score: you ${playerScore}, agent ${opponentScore}.`,
+          },
+        };
       },
     },
     won: {
       type: "final",
       output: ({ context }) => ({
-        outcome: "won",
+        outcome: "won" as const,
+        summary: renderMatch(context.history, "won", context.playerScore, context.opponentScore),
         playerScore: context.playerScore,
         opponentScore: context.opponentScore,
         history: context.history,
@@ -414,7 +572,8 @@ export const rpsMachine = rpsSetup.createMachine({
     lost: {
       type: "final",
       output: ({ context }) => ({
-        outcome: "lost",
+        outcome: "lost" as const,
+        summary: renderMatch(context.history, "lost", context.playerScore, context.opponentScore),
         playerScore: context.playerScore,
         opponentScore: context.opponentScore,
         history: context.history,
@@ -422,6 +581,92 @@ export const rpsMachine = rpsSetup.createMachine({
     },
   },
 });
+
+/** What a host (or the test) sends to unblock the idle RPS machine. */
+export type HumanThrowEvent = { type: "HUMAN_ROCK" | "HUMAN_PAPER" | "HUMAN_SCISSORS" };
+
+type RpsSnapshot = SnapshotFrom<typeof rpsMachine>;
+
+/** Turns free text ("rock", "r", "paper") into the event the idle state accepts. */
+export function toThrowEvent(text: string): HumanThrowEvent {
+  const value = text.trim().toLowerCase();
+  if (value.startsWith("p")) return { type: "HUMAN_PAPER" };
+  if (value.startsWith("s")) return { type: "HUMAN_SCISSORS" };
+  return { type: "HUMAN_ROCK" };
+}
+
+/** `{key}` placeholders in interaction labels resolve against context. */
+export function resolveInteractionLabel(label: string, context: Record<string, unknown>): string {
+  return label
+    .replace(/\{(\w+)\}/g, (_, key: string) => {
+      const value = context[key];
+      return typeof value === "string" || typeof value === "number" ? String(value) : "";
+    })
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Plays a full RPS match, settling idle on every one of your throws and
+ * resuming from `result.persistedSnapshot`. The test passes mock executors and
+ * scripted throws, so CI stays keyless.
+ */
+export async function runRpsExample(options?: {
+  input?: { targetWins?: number };
+  decide?: AgentDecisionExecutor;
+  /** Scripted throws, consumed in order on each idle settle. */
+  humanThrows?: HumanThrowEvent[];
+  /** Or decide per idle snapshot; falls back to `humanThrows`, then stdin. */
+  nextHumanThrow?: (snapshot: RpsSnapshot) => HumanThrowEvent | undefined;
+  onNotice?: (notice: string) => void;
+}) {
+  const queued = [...(options?.humanThrows ?? [])];
+  const shared = {
+    executors: options?.decide
+      ? { decide: options.decide }
+      : createAiSdkExecutors({ models: rpsModels }),
+    maxModelCalls: 30,
+  };
+
+  let result = await runAgent(rpsMachine, {
+    input: { targetWins: options?.input?.targetWins ?? 3 },
+    ...shared,
+  });
+
+  // Every throw settles the run idle. Resume from `persistedSnapshot`.
+  while (result.status === "idle") {
+    const label = resolveInteractionLabel(
+      getStateMeta(result.snapshot).interaction?.label ?? "Your throw?",
+      result.snapshot.context,
+    );
+    options?.onNotice?.(label);
+    const event =
+      options?.nextHumanThrow?.(result.snapshot) ??
+      queued.shift() ??
+      toThrowEvent(await promptLine(`${label}\n(rock/paper/scissors) > `));
+    result = await runAgent(rpsMachine, {
+      snapshot: result.persistedSnapshot,
+      event,
+      ...shared,
+    });
+  }
+
+  if (result.status !== "done") {
+    throw new Error(`Match did not finish: ${result.status}`);
+  }
+  return result.output;
+}
+
+/** Prompt once on stdin and resolve the trimmed reply. */
+async function promptLine(query: string): Promise<string> {
+  const { createInterface } = await import("node:readline/promises");
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return (await rl.question(query)).trim();
+  } finally {
+    rl.close();
+  }
+}
 
 export async function main() {
   // Lesson 1: one combat turn, decided move narrated.
@@ -434,24 +679,12 @@ export async function main() {
   if (result.status !== "done") {
     throw new Error(`Game turn did not complete: ${result.status}`);
   }
-  const { outcome, summary, playerHp, enemyHp } = result.output;
-  console.log(`Outcome: ${outcome}`);
-  console.log(`Player HP: ${playerHp}  Enemy HP: ${enemyHp}`);
-  console.log(summary);
+  console.log(result.output.summary);
 
-  // Lesson 2: a full RPS match won purely off the saved event log.
+  // Lesson 2: play the model, first to 3, off the saved event log.
   console.log("\n--- Rock-paper-scissors (event log in context) ---");
-  const rps = await runAgent(rpsMachine, {
-    input: { targetWins: 3 },
-    executors: createAiSdkExecutors({ models: rpsModels }),
-    maxModelCalls: 30,
-  });
-
-  if (rps.status !== "done") {
-    throw new Error(`Match did not finish: ${rps.status}`);
-  }
-  console.log(renderHistory(rps.output.history));
-  console.log(`\nYou ${rps.output.outcome} ${rps.output.playerScore}-${rps.output.opponentScore}.`);
+  const rps = await runRpsExample();
+  console.log(`\n${rps.summary}`);
 }
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.

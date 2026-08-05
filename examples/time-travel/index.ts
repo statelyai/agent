@@ -59,8 +59,30 @@ const contextSchema = z.object({
   maxRevisions: z.number(),
 });
 
+// Typed interaction meta for the idle review gate: the pause's `label`, a
+// button `label`/`style` per accepted event, and `textEvent` naming the ONE
+// event free-typed text is delivered to.
+const metaSchema = z.object({
+  interaction: z
+    .object({
+      label: z.string(),
+      events: z
+        .record(
+          z.string(),
+          z.object({
+            label: z.string().optional(),
+            style: z.enum(["primary", "danger", "default"]).optional(),
+          }),
+        )
+        .optional(),
+      textEvent: z.string().optional(),
+    })
+    .optional(),
+});
+
 const agentSetup = setupAgent({
   models,
+  meta: metaSchema,
   context: contextSchema,
   input: z.object({ question: z.string(), maxRevisions: z.number() }),
   output: z.object({ answer: z.string(), revisions: z.number() }),
@@ -121,6 +143,21 @@ export const timeTravelMachine = agentSetup.createMachine({
     // spent, REVISE stops redrafting and stays for review, leaving only APPROVE.
     reviewing: {
       tags: ["awaiting-review"],
+      meta: {
+        interaction: {
+          // `{revisions}` / `{maxRevisions}` resolve against context when shown.
+          label:
+            "Approve this answer, or type the revision you want " +
+            "({revisions} of {maxRevisions} revisions used).",
+          events: {
+            APPROVE: { label: "Approve answer", style: "primary" },
+            REVISE: { label: "Request a revision", style: "danger" },
+          },
+          // Without this, free text would silently REVISE (its `feedback` is
+          // the only single-string payload here).
+          textEvent: "REVISE",
+        },
+      },
       on: {
         APPROVE: { target: "done" },
         REVISE: ({ context, event }) =>

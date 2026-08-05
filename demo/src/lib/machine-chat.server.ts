@@ -24,6 +24,7 @@ import { z } from "zod";
 import { maybeCreateRunInspection } from "./inspection.server";
 import {
   humanizeEventType,
+  humanizeFieldName,
   schemaNeedsPayload,
   singleStringField,
   type AcceptedEvent,
@@ -145,6 +146,38 @@ function interactionHints(snapshot: AnyMachineSnapshot): InteractionHints {
   return meta.interaction && typeof meta.interaction === "object" ? meta.interaction : {};
 }
 
+/**
+ * Resolve `{key}` placeholders in an interaction label against the snapshot's
+ * context, so static `meta` can still surface runtime state (e.g.
+ * `"{notice} Another round?"`). Missing or non-primitive keys resolve to "".
+ */
+export function resolveLabel(label: string, context: unknown): string {
+  const source = context && typeof context === "object" ? (context as Record<string, unknown>) : {};
+  return label
+    .replace(/\{(\w+)\}/g, (_, key: string) => {
+      const value = source[key];
+      return typeof value === "string" || typeof value === "number" || typeof value === "boolean"
+        ? String(value)
+        : "";
+    })
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * The deepest active state node's `description`, when authored. Machines that
+ * never opted into `meta.interaction` still document themselves this way, so
+ * it is the next-best idle prompt.
+ */
+function activeDescription(snapshot: AnyMachineSnapshot): string | null {
+  const nodes = (snapshot as { _nodes?: Array<{ description?: string }> })._nodes ?? [];
+  for (let index = nodes.length - 1; index >= 0; index -= 1) {
+    const description = nodes[index]?.description;
+    if (typeof description === "string" && description.trim()) return description;
+  }
+  return null;
+}
+
 /** What an idle snapshot is waiting on, ready for the chat UI. */
 export function describeIdle(machine: AnyStateMachine, snapshot: AnyMachineSnapshot): ChatIdle {
   const schemas = machineSchemas(machine);
@@ -157,7 +190,9 @@ export function describeIdle(machine: AnyStateMachine, snapshot: AnyMachineSnaps
     const hint = hints.events?.[descriptor.type] ?? {};
     return {
       type: descriptor.type,
-      label: hint.label ?? humanizeEventType(descriptor.type),
+      label: hint.label
+        ? resolveLabel(hint.label, snapshot.context)
+        : humanizeEventType(descriptor.type),
       style: hint.style === "primary" || hint.style === "danger" ? hint.style : "default",
       jsonSchema,
       needsPayload: schemaNeedsPayload(jsonSchema),
@@ -173,8 +208,12 @@ export function describeIdle(machine: AnyStateMachine, snapshot: AnyMachineSnaps
   const chosen = declared ?? (inferable.length === 1 ? inferable[0] : undefined);
   const field = chosen ? singleStringField(chosen.jsonSchema) : null;
 
+  // Prompt: the interaction label, else the active state node's description.
+  // Both go through resolveLabel so `{key}` placeholders resolve either way.
+  const rawPrompt = typeof hints.label === "string" ? hints.label : activeDescription(snapshot);
+
   return {
-    prompt: typeof hints.label === "string" ? hints.label : null,
+    prompt: rawPrompt ? resolveLabel(rawPrompt, snapshot.context) : null,
     events,
     textEvent: chosen && field ? { type: chosen.type, field } : null,
     component: typeof hints.component === "string" && hints.component ? hints.component : null,
@@ -206,13 +245,32 @@ export type MachineChatResult = {
   idle?: ChatIdle & { snapshot: Json };
 };
 
-/** Output → chat text: strings pass through; single-string objects unwrap; else pretty JSON. */
-function renderOutput(output: unknown): string {
+/**
+ * Output → chat text. Strings pass through. Object outputs read as prose: the
+ * longest string field becomes the body, remaining primitives a compact
+ * "Key: value" list under it. The untouched value still ships as
+ * `MachineChatResult.output` for anything that wants the raw JSON.
+ */
+export function renderOutput(output: unknown): string {
   if (typeof output === "string") return output;
   if (output && typeof output === "object" && !Array.isArray(output)) {
     const entries = Object.entries(output as Record<string, unknown>);
-    const strings = entries.filter(([, value]) => typeof value === "string");
-    if (entries.length === 1 && strings.length === 1) return strings[0][1] as string;
+    const strings = entries.filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].trim() !== "",
+    );
+    if (strings.length) {
+      const [bodyKey, body] = strings.reduce((longest, entry) =>
+        entry[1].length > longest[1].length ? entry : longest,
+      );
+      const rest = entries.filter(
+        ([key, value]) =>
+          key !== bodyKey &&
+          (typeof value === "string" || typeof value === "number" || typeof value === "boolean"),
+      );
+      if (!rest.length) return body;
+      const list = rest.map(([key, value]) => `${humanizeFieldName(key)}: ${String(value)}`);
+      return `${body}\n\n${list.join("\n")}`;
+    }
   }
   try {
     return "```json\n" + JSON.stringify(output, null, 2) + "\n```";
@@ -245,7 +303,10 @@ function toChatResult(
       status: "idle",
       trace,
       response: idle.prompt ?? "The machine is idle, waiting for input.",
-      idle: { ...idle, snapshot: persistSnapshot(result.snapshot) as unknown as Json },
+      // Resume from the run's persisted snapshot, not the live one — it
+      // round-trips invoked children WITH their state (a long-lived agent
+      // keeps its context across chat turns).
+      idle: { ...idle, snapshot: persistSnapshot(result.persistedSnapshot) as unknown as Json },
     };
   }
   const error = (result as { error?: unknown }).error;

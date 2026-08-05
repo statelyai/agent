@@ -27,20 +27,7 @@ import {
   type AgentRequestMode,
   type AgentTextRequest,
 } from "./text-logic.js";
-import {
-  advancePlanLedger,
-  isDecisionLogic,
-  isPlanLogic,
-  resolveDecision,
-  PLAN_DONE_EVENT_TYPE,
-  type AgentDecisionRequest,
-  type AgentPlanInput,
-  type AgentPlanOutput,
-  type PlanLedgerContext,
-  type PlanLedgerEvent,
-  type PlanLedgerSnapshot,
-  type PlanLogic,
-} from "./decision.js";
+import { isDecisionLogic, resolveDecision, type AgentDecisionRequest } from "./decision.js";
 import type { ChosenEvent } from "./types.js";
 import {
   getAcceptedEvents,
@@ -71,51 +58,8 @@ export interface AgentRequest<TInput extends AgentTextRequest = AgentTextRequest
   events: AgentEventDescriptor[];
 }
 
-/**
- * A pending **plan** request re-surfaced by step discovery: the machine
- * invoked `agent.plan`, which applies an ordered sequence of legal events
- * (each one a decision) rather than a single one. Unlike text/decision
- * requests — surfaced once and resolved once — a plan request **re-surfaces on
- * every step** while the plan is in flight, its `events`/`applied`/
- * `stepsRemaining` updated each time, until it terminates.
- *
- * All fields are plain serializable data. Resolve ONE decision per step from
- * `events` (via {@link resolveDecision}, wiring `canTake` to
- * `snapshot.can` exactly like a single decision) then apply it: a real machine
- * event advances the plan (the next step re-surfaces this request); the
- * reserved `agent.plan.done` move, a `stopOn` event, an exhausted budget, or no
- * legal events completes it (its invoke resolves with `{ steps, stopped }`).
- * {@link resolveAgentRequests} does all of this natively — one decision (or one
- * completion) per call.
- *
- * The in-progress plan state (`applied` trail + remaining budget) lives in the
- * plan invoke child's own `createLogic` snapshot `context`
- * (`children.<id>.snapshot.context`), so it survives a full JSON
- * `getPersistedSnapshot` → restore round-trip: a host that persists the step
- * after every event and reloads resumes the plan identically.
- */
-export interface AgentPlanRequest {
-  kind: "plan";
-  /** Durable invoke id of the `agent.plan` invoke. */
-  id: string;
-  /** Invoke src (`'agent.plan'` or a registered plan-logic source name). */
-  src: AgentRequestSource;
-  /** The resolved plan input (`model`/`system`/`prompt`/`allowedEvents`/`stopOn`/`maxSteps`/…). */
-  input: AgentPlanInput;
-  /**
-   * The legal candidates for the NEXT plan step: the currently
-   * snapshot-legal machine events (∩ declared `allowedEvents`) plus the
-   * reserved `agent.plan.done` move.
-   */
-  events: AgentEventDescriptor[];
-  /** The events applied so far in this plan, in order (the trail). */
-  applied: ChosenEvent[];
-  /** How many more events the plan may apply (`maxSteps - applied.length`). */
-  stepsRemaining: number;
-}
-
-/** `AgentStep.requests` element: a text, decision, or plan request. */
-export type AgentStepRequest = AgentRequest | AgentDecisionRequest | AgentPlanRequest;
+/** `AgentStep.requests` element: a text or decision request. */
+export type AgentStepRequest = AgentRequest | AgentDecisionRequest;
 
 interface InvokeEffectMetadata {
   id?: unknown;
@@ -237,90 +181,7 @@ export function getAgentRequestsWith(
     ];
   });
 
-  // Plan requests are discovered from the live snapshot's children, not the
-  // actions: an `agent.plan` invoke is spawned once but its request must
-  // RE-SURFACE on every step until the plan terminates, and after the first
-  // step its spawn no longer appears in `actions`. See getActivePlanRequests.
-  return [...fromActions, ...getActivePlanRequests(options)];
-}
-
-/**
- * Scans the live snapshot's children for active `agent.plan` (plan-logic)
- * invokes and lowers each into an {@link AgentPlanRequest} — the re-surfacing
- * half of plan discovery. Reads the applied-event trail and remaining budget
- * from the child's own ledger `context` ({@link PlanLedgerContext}), recomputes
- * the currently-legal candidates (∩ declared `allowedEvents`) plus the reserved
- * `agent.plan.done` move, and takes `stepsRemaining` from the ledger (falling
- * back to `maxSteps - applied.length` for a snapshot with no context yet).
- * Returns `[]` when no snapshot is available (candidates need a live snapshot).
- *
- * @internal
- */
-function getActivePlanRequests(options: AgentRequestOptions): AgentPlanRequest[] {
-  const snapshot = options.snapshot;
-  if (!snapshot) {
-    return [];
-  }
-  const children = (snapshot as AnyMachineSnapshot & { children?: Record<string, unknown> })
-    .children;
-  if (!children) {
-    return [];
-  }
-
-  const requests: AgentPlanRequest[] = [];
-  for (const [id, child] of Object.entries(children)) {
-    const ref = child as
-      | {
-          src?: unknown;
-          logic?: unknown;
-          getSnapshot?: () => { status?: unknown; input?: unknown; context?: unknown };
-        }
-      | undefined;
-    if (typeof ref?.getSnapshot !== "function") {
-      continue;
-    }
-    const src = typeof ref.src === "string" ? ref.src : undefined;
-    const logic = (src ? options.actors?.[src] : undefined) ?? ref.logic;
-    if (!isPlanLogic(logic)) {
-      continue;
-    }
-    const childSnapshot = ref.getSnapshot();
-    if (childSnapshot?.status !== "active") {
-      continue;
-    }
-
-    // The in-progress plan state lives in the child ledger's own `context`.
-    const input = (childSnapshot.input ?? {}) as unknown as AgentPlanInput;
-    const maxSteps = input.maxSteps ?? 8;
-    const ledger = (childSnapshot.context ?? {}) as Partial<PlanLedgerContext>;
-    const applied = ledger.applied ?? [];
-    const stepsRemaining = ledger.stepsRemaining ?? maxSteps - applied.length;
-
-    const machineEvents = getAcceptedEvents(snapshot, {
-      events: options.events,
-      schemas: options.schemas,
-      eventTypes: logic.allowedEventTypes(input as never) ?? undefined,
-      eventToolName: options.eventToolName,
-    });
-    // Every step also offers the built-in "done" move (mirrors runAgent).
-    const events = machineEvents.some((event) => event.type === PLAN_DONE_EVENT_TYPE)
-      ? machineEvents
-      : [
-          ...machineEvents,
-          { type: PLAN_DONE_EVENT_TYPE, toolName: sanitizeEventToolName(PLAN_DONE_EVENT_TYPE) },
-        ];
-
-    requests.push({
-      kind: "plan",
-      id,
-      src: src ?? "",
-      input,
-      events,
-      applied,
-      stepsRemaining: Math.max(0, stepsRemaining),
-    });
-  }
-  return requests;
+  return fromActions;
 }
 
 /**
@@ -569,18 +430,8 @@ interface ResolveAgentRequestsOptions extends Partial<AgentExecutionOptions> {
  * after each application — the machine may advance and its `requests` change —
  * so this always resolves against the live step, never a stale list.
  *
- * A `kind: 'plan'` request (`agent.plan`) is resolved natively too: one plan
- * step per call. It resolves a single decision from `request.events` (wiring
- * `canTake` to `step.snapshot.can`, exempting the reserved `agent.plan.done`
- * move and `stopOn` events), then either applies the chosen machine event and
- * lets the next step re-surface the plan, or completes the plan (feeding its
- * `{ steps, stopped }` output back) on the done move / a `stopOn` event / an
- * exhausted budget / no legal events. The plan's applied trail is carried in
- * the invoke child's snapshot, so persisting the step between calls resumes the
- * plan identically.
- *
  * Missing the executor a request needs throws a clear error
- * (`generateText`/`streamText` for text, `decide` for decisions and plans).
+ * (`generateText`/`streamText` for text, `decide` for decisions).
  *
  * A complete durable host is two lines:
  *
@@ -593,9 +444,9 @@ interface ResolveAgentRequestsOptions extends Partial<AgentExecutionOptions> {
  * (`Promise.all`) — parallel statechart regions are genuinely concurrent, so
  * their model calls run concurrently — then their outputs apply in
  * **request-array order** (deterministic for durable replay regardless of which
- * call finishes first). Decisions and plans stay **one at a time**: applying
- * either changes the set of legal candidates for what follows, so they cannot be
- * resolved against a stale snapshot. A host that instead wants strictly
+ * call finishes first). Decisions stay **one at a time**: applying one changes
+ * the set of legal candidates for what follows, so they cannot be resolved
+ * against a stale snapshot. A host that instead wants strictly
  * sequential text resolution loops the manual per-request helpers
  * ({@link executeAgentRequest} + {@link resolveAgentStep}) one at a time.
  */
@@ -623,11 +474,7 @@ export async function resolveAgentRequests<TMachine extends AnyActorLogic>(
     return transitionAgentStep(machine, step, chosenEvent as EventFromLogic<TMachine>, options);
   }
 
-  if (request.kind === "plan") {
-    return resolvePlanRequest(machine, step, request, executors, options);
-  }
-
-  // Text requests. Decisions/plans above already returned, so every remaining
+  // Text requests. Decisions above already returned, so every remaining
   // request here is text. Parallel statechart regions are concurrent, so all
   // pending text requests resolve in parallel; outputs then apply in
   // request-array order (deterministic for replay regardless of finish order).
@@ -661,145 +508,6 @@ function assertTextExecutor(
       `this step's text request '${request.src}' needs a '${kind}' executor but none was provided.`,
     );
   }
-}
-
-// Resolves ONE plan step: a terminal pre-check (budget/no-legal-events) or a
-// single decision, then applies the chosen event and either re-surfaces the
-// plan (next step) or completes it. See AgentPlanRequest for the protocol.
-async function resolvePlanRequest<TMachine extends AnyActorLogic>(
-  machine: TMachine,
-  step: AgentStep<SnapshotFrom<TMachine>>,
-  request: AgentPlanRequest,
-  executors: Partial<AgentRequestExecutors>,
-  options?: ResolveAgentRequestsOptions,
-): Promise<AgentStep<SnapshotFrom<TMachine>>> {
-  if (!executors.decide) {
-    throw new Error(
-      `this step's plan request '${request.src}' needs a 'decide' executor but none was provided.`,
-    );
-  }
-  const stopOn = new Set<string>(request.input.stopOn ?? []);
-
-  // Terminal pre-checks (no model call) — mirror runAgent's loop-top guards.
-  if (request.stepsRemaining <= 0) {
-    return completePlan(machine, step, request.id, request.applied, "max-steps", options);
-  }
-  const machineEvents = request.events.filter((event) => event.type !== PLAN_DONE_EVENT_TYPE);
-  if (machineEvents.length === 0) {
-    return completePlan(machine, step, request.id, request.applied, "no-legal-events", options);
-  }
-
-  const chosen = await resolveDecision(planStepDecisionRequest(request), executors.decide, {
-    maxRetries: options?.maxRetries,
-    canTake: (event: ChosenEvent) => {
-      // The built-in done move and stopOn events terminate the plan rather
-      // than driving a transition, so exempt both from the guard check.
-      if (event.type === PLAN_DONE_EVENT_TYPE || stopOn.has(event.type)) {
-        return true;
-      }
-      return (step.snapshot as AnyMachineSnapshot).can(event as never);
-    },
-  });
-
-  if (chosen.type === PLAN_DONE_EVENT_TYPE) {
-    return completePlan(machine, step, request.id, request.applied, "done", options);
-  }
-
-  const applied = [...request.applied, chosen];
-  // Advance the plan child's own ledger (context) BEFORE the transition, so the
-  // same (carried-forward) child ref re-surfaces the plan request with the
-  // updated trail/budget on the next step.
-  advancePlanChildLedger(step.snapshot as AnyMachineSnapshot, request.id, {
-    type: "plan.applied",
-    event: chosen,
-  });
-  const next = transitionAgentStep(machine, step, chosen as EventFromLogic<TMachine>, options);
-
-  if (stopOn.has(chosen.type)) {
-    // The stopOn event was applied; complete the plan — unless the event exited
-    // the invoking state, which already canceled the invoke (onDone never fires).
-    if (isPlanActive(next.snapshot as AnyMachineSnapshot, request.id)) {
-      return completePlan(machine, next, request.id, applied, "stop-event", options);
-    }
-  }
-  return next;
-}
-
-// Completes a plan by feeding its `{ steps, stopped }` output back as the
-// invoke's done event (fires the machine's onDone, exactly like a text result).
-function completePlan<TMachine extends AnyActorLogic>(
-  machine: TMachine,
-  step: AgentStep<SnapshotFrom<TMachine>>,
-  id: string,
-  steps: ChosenEvent[],
-  stopped: AgentPlanOutput["stopped"],
-  options?: ResolveAgentRequestsOptions,
-): AgentStep<SnapshotFrom<TMachine>> {
-  const output: AgentPlanOutput = { steps, stopped };
-  return resolveAgentStep(machine, step, { id }, output, options);
-}
-
-// Builds the per-step decision request from a plan request: mirrors runAgent's
-// createRunAgentPlanLogic — id `${id}[n]`, the trail appended to the prompt, and
-// the built-in done-move hint.
-function planStepDecisionRequest(request: AgentPlanRequest): AgentDecisionRequest {
-  const { input, applied, events, id } = request;
-  const trail =
-    applied.length === 0
-      ? ""
-      : `\n\nEvents already applied in this plan, in order:\n${applied
-          .map((step) => JSON.stringify(step))
-          .join("\n")}\nContinue from here; do not repeat applied events.`;
-  const doneHint = `\n\nWhen the request is fully handled (or no action is needed), choose '${PLAN_DONE_EVENT_TYPE}'.`;
-  return {
-    kind: "decision",
-    id: `${id}[${applied.length}]`,
-    model: input.model,
-    system: input.system,
-    prompt: `${input.prompt ?? ""}${trail}${doneHint}`,
-    messages: input.messages,
-    events,
-    attempts: [],
-    temperature: input.temperature,
-    maxOutputTokens: input.maxOutputTokens,
-    topP: input.topP,
-    topK: input.topK,
-    seed: input.seed,
-    stopSequences: input.stopSequences,
-    metadata: input.metadata,
-  };
-}
-
-// Advances the plan invoke child's own ledger snapshot in place: reads the
-// child's current `createLogic` snapshot, applies one PlanLedgerEvent via the
-// shared driver, and writes the result back onto the same snapshot reference
-// (which xstate's Actor.getSnapshot() returns by identity, so the carried-
-// forward child ref re-surfaces the plan with the updated context). The child's
-// serialized `context` is the JSON-round-trippable carrier for in-progress plan
-// state. No-op if the child/logic is missing.
-function advancePlanChildLedger(
-  snapshot: AnyMachineSnapshot,
-  id: string,
-  event: PlanLedgerEvent,
-): void {
-  const child = (snapshot as AnyMachineSnapshot & { children?: Record<string, unknown> })
-    .children?.[id] as { logic?: unknown; getSnapshot?: () => unknown } | undefined;
-  const childSnapshot = child?.getSnapshot?.();
-  if (!isPlanLogic(child?.logic) || !childSnapshot || typeof childSnapshot !== "object") {
-    return;
-  }
-  Object.assign(
-    childSnapshot,
-    advancePlanLedger(child.logic as PlanLogic, childSnapshot as PlanLedgerSnapshot, event),
-  );
-}
-
-// True when the plan invoke child `id` is still active on `snapshot` (an
-// applied event that exited its state removes/stops it).
-function isPlanActive(snapshot: AnyMachineSnapshot, id: string): boolean {
-  const child = (snapshot as AnyMachineSnapshot & { children?: Record<string, unknown> })
-    .children?.[id] as { getSnapshot?: () => { status?: unknown } } | undefined;
-  return child?.getSnapshot?.()?.status === "active";
 }
 
 // Assembles an AgentStep from a snapshot + actions: applies single-final-state output, then discovers pending requests.

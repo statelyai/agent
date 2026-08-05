@@ -30,5 +30,5 @@ v2 leaves alpha only when its durable formats can be promised. Changing a persis
 
 - **Managed thin-loop helper.** A collapsed driver over the [step path](steps.md) loop. Deferred because the loop is ~15 lines of host-owned code by design.
 - **Idle persist/revive helper.** The persist, return handle, resume-with-event recipe (see [human in the loop](human-in-the-loop.md)) is a documented pattern each host rewrites; a helper lands once real stores show the common shape.
-- **Plan executor.** `agent.plan` ships (see [plans](plans.md)); the executor layer that simulates a proposed plan up front and replans on divergence is next, as a documented pattern first.
+- **Plan executor.** Multi-event commands are an explicit [decide loop](decisions.md#multi-event-commands-the-decide-loop) today; the executor layer that simulates a proposed plan up front and replans on divergence is next, as a documented pattern first.
 - **Live-path mid-flight resume for fan-out.** Event-log [replay](event-log.md) already re-derives still-owed spawned effects; restoring a live `runAgent` snapshot persisted mid-flight still drops frozen children.

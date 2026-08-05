@@ -1,6 +1,6 @@
 {
   "name": "described-workflow",
-  "title": "Described Workflow (state interpretation)",
+  "title": "Write a launch blurb from state descriptions",
   "kind": "agent-workflow",
   "origin": {
     "type": "stately-agent",
@@ -8,8 +8,16 @@
     "url": null
   },
   "comparison": {
-    "targets": ["LangGraph", "hand-rolled loop"],
-    "purpose": "A plain XState machine with zero invokes — prompts live in state descriptions/meta — runs unmodified as an agent via runAgent({ getRequests }), with the message log aggregated by the runtime onto snapshot.messages."
+    "targets": [
+      "LangGraph",
+      "hand-rolled loop"
+    ],
+    "purpose": "A plain XState machine with no invokes: each state's description is the prompt, and the runtime turns the workflow into an agent run without touching the machine."
   },
-  "starters": []
+  "starters": [
+    {
+      "label": "Write the Statechart Studio launch blurb",
+      "input": {}
+    }
+  ]
 }

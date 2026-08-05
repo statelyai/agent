@@ -96,7 +96,7 @@ test("mock run: large refund settles idle, then APPROVE resumes to refunded", as
   expect(result.settledIdle).toBe(true);
   expect(result.progress).toContain("awaitingApproval");
   expect(result.legalEvents).toEqual(expect.arrayContaining(["APPROVE", "DENY"]));
-  expect(result.interactionLabel).toContain("needs approval");
+  expect(result.interactionLabel).toContain("exceeds the limit and needs approval");
   expect(result.refunded).toBe(true);
   expect(result.resolution).toContain("after approval");
   expect(result.progress.at(-1)).toBe("refunded");

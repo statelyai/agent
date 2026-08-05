@@ -35,6 +35,9 @@ const models = defineModels({
   quick: openai("gpt-5.4-mini"),
 });
 
+/** Scope the input guardrail enforces. Hardcoded so input is just the question. */
+const DEFAULT_TOPIC = "geography";
+
 const guardrailsContextSchema = z.object({
   question: z.string(),
   topic: z.string().nullable(),
@@ -53,7 +56,6 @@ export const guardrailsSchemas = createAgentSchemas({
   context: guardrailsContextSchema,
   input: z.object({
     question: z.string(),
-    topic: z.string().optional(),
   }),
   output: z.object({
     status: z.enum(["answered", "refused", "unverified"]),
@@ -147,7 +149,7 @@ export const guardrailsMachine = agentSetup.createMachine({
   id: "guardrails",
   context: ({ input }) => ({
     question: input.question,
-    topic: input.topic ?? null,
+    topic: DEFAULT_TOPIC,
     answer: null,
     reason: "",
     critique: "",
@@ -288,7 +290,6 @@ export async function main() {
   const result = await runAgent(guardrailsMachine, {
     input: {
       question: "What is the capital of France?",
-      topic: "geography",
     },
     executors,
     onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),

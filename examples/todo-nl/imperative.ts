@@ -6,7 +6,7 @@
  * a zod discriminated union of actions, a hand-written multi-action `while`
  * loop, a manual `switch`, and manual validity checks. It exists purely to
  * compare against the machine version, which drives the same multi-action
- * command through a single `agent.plan` invoke.
+ * command through an explicit `agent.decide` loop in the statechart.
  *
  * Read the two side by side. What the machine (`index.ts`) buys you that this
  * file has to do by hand — or can't do at all:
@@ -14,23 +14,26 @@
  *   - Typed events: in the machine, `ADD_TODO`/`TOGGLE_TODO`/… are the event
  *     schema. Here the action union and the `switch` are two separate things
  *     that must be kept in sync manually; a missed case is a silent no-op.
- *   - The multi-action loop, for free: "add X and Y" needs two events. Here we
- *     hand-write the `while` loop below — call the model, apply, feed back
- *     what was applied, repeat until `nothing`, with a manual `maxSteps` cap.
- *     `index.ts` gets the identical behaviour from one `agent.plan` invoke: the
- *     built-in done move ends it, `maxSteps` caps it, and the applied trail is
- *     appended automatically.
+ *   - The multi-action loop, as visible control flow: "add X and Y" needs two
+ *     events. Here the `while` loop below is buried in a function — call the
+ *     model, apply, feed back what was applied, repeat until `nothing`.
+ *     `index.ts` gets the identical behaviour from a loop in the statechart:
+ *     `planning` decides one event, `applying` loops back, and the explicit
+ *     `DONE` event exits — every step inspectable in the machine.
  *   - Guard rejection + retry: the machine rejects a TOGGLE/DELETE on a
  *     nonexistent id (`rejected-by-guard`) and re-asks the model with that
- *     feedback, mid-plan. Here (see `applyAction`) a bad id is just *silently
+ *     feedback, mid-loop. Here (see `applyAction`) a bad id is just *silently
  *     ignored* — the model never learns it was wrong, so it can't self-correct.
- *   - Resumable snapshot: the machine's state is a serializable XState
- *     snapshot you can persist and resume. Here the state is local `while`-loop
- *     variables that vanish when the function returns.
- *   - Testable without mocking your own loop: the machine is driven by
- *     injected `decide`/`userInput` executors (see index.test.ts). Here the
- *     loop, the model call, and the mutation are fused, so testing means
- *     mocking `generateObject` and re-implementing the loop's expectations.
+ *   - Resumable snapshot: the machine pauses in an idle `awaitingCommand`
+ *     state whose serializable snapshot you persist and resume with a
+ *     `COMMAND` event — a host drives it with no prompt callback at all. Here
+ *     the state is local `while`-loop variables that vanish when the function
+ *     returns, and input can only come from this file's own stdin prompt.
+ *   - Testable without mocking your own loop: the machine is driven by an
+ *     injected `decide` executor plus scripted `COMMAND` events (see
+ *     index.test.ts). Here the loop, the model call, and the mutation are
+ *     fused, so testing means mocking `generateObject` and re-implementing the
+ *     loop's expectations.
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/todo-nl/imperative.ts
  */
@@ -156,8 +159,8 @@ async function interpretCommand(
     const summary = applyAction(state, action);
     if (summary === null) {
       // Bad id (or other no-op): nothing to feed back, and looping again would
-      // just repeat. Give up on this command. The machine's `agent.plan`
-      // instead retries the same step with a 'rejected-by-guard' reason.
+      // just repeat. Give up on this command. The machine instead retries the
+      // same decide step with a 'rejected-by-guard' reason.
       return true;
     }
     applied.push(summary);

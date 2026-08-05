@@ -6,7 +6,7 @@ import {
   evaluatePrompt,
   draftEmail,
   gameMachine,
-  rpsMachine,
+  runRpsExample,
   jokeMachine,
   rateJoke as rateJokeLogic,
   tellJoke as tellJokeLogic,
@@ -164,47 +164,38 @@ describe("curated XState setup examples", () => {
     });
 
     expect(finalStep.done).toBe(true);
-    expect(finalStep.snapshot.output).toEqual({
+    // The summary is a narrated log; the model's line is embedded in it.
+    expect(finalStep.snapshot.output).toMatchObject({
       outcome: "continue",
-      summary: "You strike the goblin.",
       playerHp: 20,
       enemyHp: 9,
     });
+    expect((finalStep.snapshot.output as { summary: string }).summary).toContain(
+      "You strike the goblin.",
+    );
   });
 
   test("event-log game feeds the saved round history back into each decide prompt", async () => {
     const prompts: string[] = [];
-    // The mock player uses ONLY the rendered history in the prompt: count the
-    // rounds it shows, look up the opponent's scripted pattern (rock, rock,
-    // paper), and throw the counter. Winning 3-0 proves the event log the
-    // machine saved to context round-trips into the model's prompt.
-    const pattern = ["ROCK", "ROCK", "PAPER"] as const;
-    const counters = { ROCK: "PAPER", PAPER: "SCISSORS", SCISSORS: "ROCK" } as const;
-
-    const result = await runAgent(rpsMachine, {
+    // The human always throws rock. The mock model uses ONLY the rendered
+    // history in the prompt: after round 1 it sees "human threw rock" and
+    // counters with paper every time. Winning from round 2 on proves the event
+    // log the machine saved to context round-trips into the model's prompt.
+    const result = await runRpsExample({
       input: { targetWins: 3 },
-      executors: {
-        generateText: async () => ({ output: "" }),
-        decide: async (request) => {
-          prompts.push(request.prompt ?? "");
-          const roundsPlayed = (request.prompt?.match(/^Round \d+/gm) ?? []).length;
-          const predicted = pattern[roundsPlayed % pattern.length]!;
-          return { event: { type: `THROW_${counters[predicted]}` } };
-        },
+      humanThrows: Array.from({ length: 8 }, () => ({ type: "HUMAN_ROCK" as const })),
+      decide: async (request) => {
+        prompts.push(request.prompt ?? "");
+        const humanThrewRock = request.prompt?.includes("human threw rock");
+        return { event: { type: humanThrewRock ? "THROW_PAPER" : "THROW_SCISSORS" } };
       },
-      maxModelCalls: 10,
     });
 
     expect(prompts[0]).toContain("No rounds played yet.");
-    expect(prompts[1]).toContain("Round 1: you threw paper, opponent threw rock — win");
-    expect(result.status).toBe("done");
-    if (result.status !== "done") {
-      throw new Error("unreachable");
-    }
-    expect(result.output.outcome).toBe("won");
-    expect(result.output.playerScore).toBe(3);
-    expect(result.output.opponentScore).toBe(0);
-    expect(result.output.history).toHaveLength(3);
+    expect(prompts[1]).toContain("Round 1: human threw rock, you threw scissors — human win");
+    expect(result.outcome).toBe("lost");
+    expect(result.opponentScore).toBe(3);
+    expect(result.playerScore).toBe(1);
   });
 
   test("joke workflow loops until the decision ends it", async () => {
@@ -235,7 +226,7 @@ describe("curated XState setup examples", () => {
 
     expect(jokes).toBe(2);
     expect(result.status).toBe("done");
-    expect(result.status === "done" && result.output).toEqual({
+    expect(result.status === "done" && result.output).toMatchObject({
       topic: "state machines",
       jokes: ["joke 1 about state machines", "joke 2 about state machines"],
       lastRating: 9,

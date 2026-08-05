@@ -5,7 +5,6 @@ test("plans, researches in parallel, reflects, and writes", async () => {
   const calls: string[] = [];
   const output = await runDeepResearchExample({
     question: "durability",
-    maxRounds: 2,
     generateText: async (request) => {
       calls.push(request.model);
       if (request.model === "planner") {
@@ -27,7 +26,6 @@ test("runs one targeted follow-up round when reflection finds a gap", async () =
   let reflections = 0;
   const output = await runDeepResearchExample({
     question: "durability",
-    maxRounds: 2,
     generateText: async (request) => {
       if (request.model === "planner") {
         return { output: { queries: ["one", "two", "three"] } };

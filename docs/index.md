@@ -110,7 +110,7 @@ if (result.status === "done") console.log(result.output.answer);
 - [Use in any stack](any-stack.md): one machine, run locally, behind an HTTP route, or on the edge.
 - [Testing and verification](verify.md): lint, simulate, and explore agent machines with no API keys.
 
-Everything else is in the sidebar: [text requests](text-requests.md), [tools](tools.md), [plans](plans.md), [messages](messages.md), [debugging](debugging.md), [human in the loop](human-in-the-loop.md), [observability](observability.md), [usage and budgets](usage-and-budgets.md), [the event log](event-log.md), [multi-agent](multi-agent.md), [evals](evals.md), [scope](scope.md), and the [roadmap](roadmap.md).
+Everything else is in the sidebar: [text requests](text-requests.md), [tools](tools.md), [messages](messages.md), [debugging](debugging.md), [human in the loop](human-in-the-loop.md), [observability](observability.md), [usage and budgets](usage-and-budgets.md), [the event log](event-log.md), [multi-agent](multi-agent.md), [evals](evals.md), [scope](scope.md), and the [roadmap](roadmap.md).
 
 ## Alpha status
 

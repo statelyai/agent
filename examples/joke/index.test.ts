@@ -42,6 +42,7 @@ describe("joke-teller", () => {
     if (result.status !== "done") throw new Error("expected done");
     expect(seenTopics).toEqual(["penguins"]);
     expect(result.output.topic).toBe("penguins");
+    expect(result.output.joke).toBe("A joke about penguins.");
     expect(result.output.jokes).toEqual(["A joke about penguins."]);
     expect(result.output.lastRating).toBe(9);
   });

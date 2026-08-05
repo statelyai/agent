@@ -37,7 +37,7 @@ describe("flue-host (machine-owned)", () => {
     expect(result.handle).toMatch(/^draft-\d+$/);
     // The machine drove itself past the prompt and both model calls to the
     // human review pause; the host never named a state to get there.
-    expect(result.label).toBe("Next");
+    expect(result.label).toContain("Send the draft");
     expect(result.choices).toContain("SEND (Send)");
     expect(result.draft).toContain("Deploy pipeline is faster");
   });
@@ -47,7 +47,7 @@ describe("flue-host (machine-owned)", () => {
 
     const sent = await resume(started.handle!, "SEND");
     expect(sent.status).toBe("pending");
-    expect(sent.label).toBe("Send another?");
+    expect(sent.label).toContain("Draft another one?");
 
     const finished = await resume(started.handle!, "END");
     expect(finished.status).toBe("done");
@@ -61,7 +61,7 @@ describe("flue-host (machine-owned)", () => {
     // from `meta.interaction` rather than hardcoding the event's payload shape.
     const revised = await resume(started.handle!, "REQUEST_CHANGES", "Make it shorter.");
     expect(revised.status).toBe("pending");
-    expect(revised.label).toBe("Next");
+    expect(revised.label).toContain("Send the draft");
     expect(revised.draft).toContain("Deploy pipeline is faster");
   });
 

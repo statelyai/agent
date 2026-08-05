@@ -52,10 +52,10 @@ const setup = setupAgent({
   }),
   input: z.object({ question: z.string() }),
   output: z.object({
+    answer: z.string(),
     route: routeSchema,
     query: z.string(),
     documents: z.array(z.string()),
-    answer: z.string(),
     retries: z.number(),
   }),
   actors: {
@@ -126,10 +126,10 @@ export const adaptiveRagMachine = setup.createMachine({
     retries: 0,
   }),
   output: ({ context }) => ({
+    answer: context.answer ?? "",
     route: context.route ?? "local",
     query: context.query,
     documents: context.documents,
-    answer: context.answer ?? "",
     retries: context.retries,
   }),
   initial: "routing",

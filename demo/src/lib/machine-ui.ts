@@ -14,6 +14,10 @@
  *    ```ts
  *    meta: {
  *      interaction: {
+ *        // Labels may reference runtime context with `{key}` placeholders,
+ *        // resolved against `snapshot.context` when the state is presented
+ *        // (e.g. "{notice} Another round?"). XState `meta` is static, so this
+ *        // is how a label surfaces runtime state.
  *        label: "Amount exceeds the limit. Approve or deny.",
  *        events: {
  *          APPROVE: { label: "Approve refund", style: "primary" },
@@ -72,6 +76,30 @@ export function humanizeEventType(type: string): string {
   return words ? words[0].toUpperCase() + words.slice(1) : type;
 }
 
+/**
+ * Field/property name → readable label: splits camelCase, snake_case and
+ * kebab-case, preserving ALL-CAPS acronyms ("maxRounds" → "Max rounds",
+ * "playerHP" → "Player HP").
+ */
+export function humanizeFieldName(name: string): string {
+  const tokens = name
+    .replace(/[_.-]+/g, " ")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!tokens.length) return name;
+  return tokens
+    .map((token, index) => {
+      // Keep acronyms as authored ("HP", "URL"); otherwise sentence-case.
+      if (token.length > 1 && token === token.toUpperCase() && /[A-Z]/.test(token)) return token;
+      const lower = token.toLowerCase();
+      return index === 0 ? lower[0].toUpperCase() + lower.slice(1) : lower;
+    })
+    .join(" ");
+}
+
 export type SchemaField = {
   name: string;
   label: string;
@@ -119,7 +147,7 @@ export function schemaFields(schema: JsonObject): SchemaField[] | null {
   const required = new Set(Array.isArray(schema.required) ? (schema.required as string[]) : []);
   return Object.entries(properties).map(([name, property]) => ({
     name,
-    label: humanizeEventType(name),
+    label: humanizeFieldName(name),
     required: required.has(name),
     description: typeof property.description === "string" ? property.description : null,
     kind: fieldKind(property ?? {}),

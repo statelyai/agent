@@ -31,11 +31,16 @@ describe("ai-sdk-host", () => {
 
     const output = await runTriageDemo("I was charged twice.", generateText);
 
-    expect(output).toEqual({
+    // The machine's final output composes a `summary` around the structured
+    // fields, so match the fields the model produced rather than exact equality.
+    expect(output).toMatchObject({
       sentiment: "negative",
       category: "billing",
       reply: "We are sorry about the duplicate charge and will refund it.",
     });
+    expect((output as { summary: string }).summary).toContain(
+      "We are sorry about the duplicate charge and will refund it.",
+    );
     // The machine lowered the ticket into a single text request's prompt.
     expect(tickets).toEqual(["I was charged twice."]);
   });

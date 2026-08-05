@@ -140,7 +140,7 @@ function describeResult(scenarioId: ScenarioId, result: RunAgentResult<AnyStateM
       case "approval":
         return output.published ? `Published:\n${output.draft}` : `Not published:\n${output.draft}`;
       case "routing":
-        return `Routed to the ${output.queue} queue.`;
+        return `Routed to the ${output.queue} queue: ${output.reason ?? "no reason given"}`;
       case "research":
         return String(output.synthesis || "Synthesis complete.");
       case "pipeline":
@@ -160,7 +160,7 @@ function describeResult(scenarioId: ScenarioId, result: RunAgentResult<AnyStateM
   if (result.status === "idle") {
     const context = result.snapshot.context as Record<string, unknown>;
     if (scenarioId === "approval") return String(context.draft ?? "Draft ready for review.");
-    if (scenarioId === "refund") return "Amount exceeds the auto-refund limit — awaiting approval.";
+    if (scenarioId === "refund") return "Amount exceeds the auto-refund limit. Awaiting approval.";
     return "Waiting for input.";
   }
   return "The run ended with an error.";
@@ -293,7 +293,7 @@ function startResumeIdleEcho(
     model,
     status: "idle",
     trace: [],
-    response: "Could not confidently interpret that review — approve or reject explicitly.",
+    response: "Could not confidently interpret that review. Approve or reject explicitly.",
     idle: {
       snapshot: snapshot as unknown as Json,
       prompt: "Review the draft: approve to publish, or reject with a reason.",

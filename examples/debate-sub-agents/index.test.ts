@@ -30,7 +30,7 @@ describe("debate-sub-agents", () => {
     const { generateText, requests } = createMockModel();
 
     const output = await runDebateSubAgentsExample({
-      input: { question: "Should agents be modeled as actors?", rounds: 3 },
+      input: { question: "Should agents be modeled as actors?" },
       generateText,
     });
 
@@ -70,15 +70,23 @@ describe("debate-sub-agents", () => {
     expect(output.conclusion).toContain("negative-argument");
   });
 
-  test("round count is honored — 1 round is a single A/B exchange", async () => {
+  test("default round count is applied to any question", async () => {
     const { generateText, requests } = createMockModel();
 
     const output = await runDebateSubAgentsExample({
-      input: { question: "Tabs or spaces?", rounds: 1 },
+      input: { question: "Tabs or spaces?" },
       generateText,
     });
 
-    expect(output.transcript.map((t) => t.stance)).toEqual(["affirmative", "negative"]);
-    expect(requests.filter((r) => r.model !== "facilitator")).toHaveLength(2);
+    // Default is 3 rounds → 6 alternating turns.
+    expect(output.transcript.map((t) => t.stance)).toEqual([
+      "affirmative",
+      "negative",
+      "affirmative",
+      "negative",
+      "affirmative",
+      "negative",
+    ]);
+    expect(requests.filter((r) => r.model !== "facilitator")).toHaveLength(6);
   });
 });

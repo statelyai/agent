@@ -2142,6 +2142,128 @@ describe("Feature A: explicit suspension detection (isSuspended)", () => {
     expect(second.status === "done" ? second.output : undefined).toEqual({ approved: true });
   });
 
+  test("a declared-suspension settle preserves invoked-child context written during the settling flush", async () => {
+    // Regression: the settle-triggering root event comes FROM the invoked
+    // child (child → parent), and the parent's handler sendTo's the child
+    // back while the child's mailbox is mid-flush. A synchronous settle in
+    // the inspect handler captured (and stopped) the child before that
+    // delivery, so the persisted snapshot lost the child's context update.
+    const childAgent = setupAgent({
+      context: z.object({ notes: z.array(z.string()) }),
+      events: {
+        OBSERVE: z.object({ note: z.string() }),
+        POKE: z.object({}),
+      },
+      requests: {
+        tick: {
+          schemas: { input: z.object({}), output: z.string() },
+          model: "m",
+          prompt: () => "tick",
+        },
+      },
+    });
+    const childMachine = childAgent.createMachine({
+      id: "note-taker",
+      context: { notes: [] },
+      on: {
+        OBSERVE: ({ context, event }) => ({
+          context: { notes: [...context.notes, event.note] },
+        }),
+      },
+      initial: "boot",
+      states: {
+        boot: {
+          // Child-initiated event, sent as an action while the child is
+          // processing its invoke's done event — so the child's own mailbox
+          // flush is the active one when the parent handles READY.
+          invoke: {
+            src: "tick",
+            input: {},
+            onDone: ({ parent }, enq) => {
+              if (parent) enq.sendTo(parent, { type: "READY" });
+              return { target: "watching" };
+            },
+          },
+        },
+        watching: {
+          on: {
+            POKE: { target: "boot" },
+          },
+        },
+      },
+    });
+
+    const agent = setupAgent({
+      context: z.object({ readies: z.number() }),
+      input: z.object({}),
+      events: {
+        READY: z.object({}),
+        CONTINUE: z.object({}),
+      },
+      actors: { child: childMachine },
+      isSuspended: (snapshot) => snapshot.hasTag("waiting"),
+    });
+    const machine = agent.createMachine({
+      context: { readies: 0 },
+      initial: "running",
+      states: {
+        running: {
+          invoke: { id: "child", src: "child" },
+          initial: "starting",
+          states: {
+            starting: {
+              on: {
+                READY: ({ context, children }, enq) => {
+                  enq.sendTo(children.child, {
+                    type: "OBSERVE",
+                    note: `ready-${context.readies + 1}`,
+                  });
+                  return { target: "waiting", context: { readies: context.readies + 1 } };
+                },
+              },
+            },
+            waiting: {
+              tags: ["waiting"],
+              on: {
+                CONTINUE: ({ children }, enq) => {
+                  enq.sendTo(children.child, { type: "POKE" });
+                  return { target: "starting" };
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const executors = { generateText: async () => ({ output: "tick" }) };
+
+    const first = await runAgent(machine, { input: {}, executors });
+    expect(first.status).toBe("idle");
+    if (first.status !== "idle") throw new Error("expected idle");
+    const persistedNotes = (
+      first.persistedSnapshot as {
+        children?: { child?: { snapshot?: { context?: { notes?: string[] } } } };
+      }
+    ).children?.child?.snapshot?.context?.notes;
+    expect(persistedNotes).toEqual(["ready-1"]);
+
+    // Resume from the persisted snapshot: the child keeps accumulating.
+    const second = await runAgent(machine, {
+      snapshot: first.persistedSnapshot,
+      event: { type: "CONTINUE" },
+      executors,
+    });
+    expect(second.status).toBe("idle");
+    if (second.status !== "idle") throw new Error("expected idle");
+    const secondNotes = (
+      second.persistedSnapshot as {
+        children?: { child?: { snapshot?: { context?: { notes?: string[] } } } };
+      }
+    ).children?.child?.snapshot?.context?.notes;
+    expect(secondNotes).toEqual(["ready-1", "ready-2"]);
+  });
+
   test("a suspended region does not settle early while a sibling still has work in flight", async () => {
     const agent = setupAgent({
       context: z.object({ summary: z.string().nullable() }),

@@ -41,6 +41,25 @@ type EmailDraft = z.infer<typeof emailDraftSchema>;
 
 // State/transition meta is schema-typed: hosts get a typed interaction
 // protocol instead of Record<string, unknown>.
+// Every variant also carries the host-neutral chat vocabulary — an `events` map
+// of button label + style per accepted event, and `textEvent` naming the ONE
+// event free-typed text is delivered to. A chat host renders from those three
+// fields (`label` / `events` / `textEvent`) and ignores the CLI-only
+// `type`/`choices`/`field` details; the CLI renderer in `./index.ts` and the
+// framework hosts keep using those. Same meta, two renderers.
+const chatInteractionFields = {
+  events: z
+    .record(
+      z.string(),
+      z.object({
+        label: z.string().optional(),
+        style: z.enum(["primary", "danger", "default"]).optional(),
+      }),
+    )
+    .optional(),
+  textEvent: z.string().optional(),
+};
+
 export const metaSchema = z.object({
   display: z.array(z.string()).optional(),
   interaction: z
@@ -50,6 +69,7 @@ export const metaSchema = z.object({
         label: z.string(),
         eventType: z.string(),
         field: z.string(),
+        ...chatInteractionFields,
       }),
       z.object({
         type: z.literal("select"),
@@ -67,6 +87,7 @@ export const metaSchema = z.object({
               .optional(),
           }),
         ),
+        ...chatInteractionFields,
       }),
       z.object({
         type: z.literal("confirm"),
@@ -74,6 +95,7 @@ export const metaSchema = z.object({
         default: z.boolean().optional(),
         trueEventType: z.string(),
         falseEventType: z.string(),
+        ...chatInteractionFields,
       }),
     ])
     .optional(),
@@ -175,9 +197,11 @@ export const emailDrafter = agentSetup.createMachine({
       meta: {
         interaction: {
           type: "text",
-          label: "Email draft request",
+          label: "What email should I write? Who is it to, and what should it say?",
           eventType: "PROMPT_SUBMITTED",
           field: "prompt",
+          events: { PROMPT_SUBMITTED: { label: "Draft it", style: "primary" } },
+          textEvent: "PROMPT_SUBMITTED",
         },
       },
       on: {
@@ -218,7 +242,7 @@ export const emailDrafter = agentSetup.createMachine({
       meta: {
         interaction: {
           type: "select",
-          label: "Next",
+          label: "Some details are missing. Type them in, or draft anyway.",
           choices: [
             {
               label: "Add details",
@@ -227,6 +251,11 @@ export const emailDrafter = agentSetup.createMachine({
             },
             { label: "Draft anyway", eventType: "DRAFT_ANYWAY" },
           ],
+          events: {
+            MORE_INFO: { label: "Add details", style: "primary" },
+            DRAFT_ANYWAY: { label: "Draft anyway" },
+          },
+          textEvent: "MORE_INFO",
         },
       },
       on: {
@@ -278,7 +307,7 @@ export const emailDrafter = agentSetup.createMachine({
       meta: {
         interaction: {
           type: "select",
-          label: "Next",
+          label: "Send the draft, or type the changes you want.",
           choices: [
             {
               label: "Request changes",
@@ -291,6 +320,12 @@ export const emailDrafter = agentSetup.createMachine({
             },
             { label: "Send", eventType: "SEND" },
           ],
+          events: {
+            SEND: { label: "Send email", style: "primary" },
+            REQUEST_CHANGES: { label: "Request changes" },
+          },
+          // Free text is a revision request, never a send.
+          textEvent: "REQUEST_CHANGES",
         },
       },
       on: {
@@ -324,10 +359,14 @@ export const emailDrafter = agentSetup.createMachine({
         display: ["Email sent."],
         interaction: {
           type: "confirm",
-          label: "Send another?",
+          label: "Email sent. Draft another one?",
           default: false,
           trueEventType: "ANOTHER",
           falseEventType: "END",
+          events: {
+            ANOTHER: { label: "Draft another", style: "primary" },
+            END: { label: "Finish up" },
+          },
         },
       },
       on: {

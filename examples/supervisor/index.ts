@@ -44,9 +44,9 @@ const agentSetup = setupAgent({
   }),
   input: z.object({ request: z.string() }),
   output: z.object({
+    answer: z.string(),
     specialist: specialistSchema,
     reason: z.string(),
-    answer: z.string(),
   }),
   requests: {
     routeRequest: {
@@ -104,9 +104,9 @@ export const supervisorMachine = agentSetup.createMachine({
     answer: null,
   }),
   output: ({ context }) => ({
+    answer: context.answer ?? "",
     specialist: context.specialist ?? "researcher",
     reason: context.reason ?? "",
-    answer: context.answer ?? "",
   }),
   initial: "routing",
   states: {

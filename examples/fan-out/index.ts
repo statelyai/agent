@@ -62,9 +62,9 @@ const agentSetup = setupAgent({
   context: fanOutContextSchema,
   input: z.object({ topic: z.string() }),
   output: z.object({
+    digest: z.string(),
     subtopics: z.array(z.string()),
     summaries: z.record(z.string(), z.string()),
-    digest: z.string(),
   }),
   // reducing always sets `digest` before `done` reads it — narrow it non-null there.
   // Every machine state must be declared here once any per-state schema is;
@@ -201,9 +201,9 @@ export const fanOutMachine = agentSetup.createMachine({
     done: {
       type: "final",
       output: ({ context }) => ({
+        digest: context.digest,
         subtopics: context.subtopics,
         summaries: context.summaries,
-        digest: context.digest,
       }),
     },
   },

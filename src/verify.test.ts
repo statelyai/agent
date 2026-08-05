@@ -10,12 +10,10 @@ import {
   setupAgent,
   simulateAgent,
   type AgentLintDiagnostic,
-  type AgentPlanOutput,
   type AgentWorkflowConfig,
   type SchemaCompiler,
   type StandardSchemaV1,
 } from "./index.js";
-import { PLAN_DONE_EVENT_TYPE } from "./index.js";
 import * as examples from "../examples/index.js";
 import {
   humanInTheLoopMachine,
@@ -71,74 +69,6 @@ function createRefundMachine() {
       },
       refunded: { type: "final", output: () => ({ refunded: true }) },
       denied: { type: "final", output: () => ({ refunded: false }) },
-    },
-  });
-}
-
-// A minimal `agent.plan` machine: one `planning` state whose plan drives
-// STEP_A/STEP_B (each appends to `applied`) plus an always-illegal GUARDED
-// candidate (guard returns undefined), then settles on the plan's done move.
-// The final state copies the plan's `{ steps, stopped }` output into its own.
-function createPlanMachine() {
-  const agent = setupAgent({
-    context: z.object({
-      applied: z.array(z.string()),
-      // The plan's own onDone output, captured so the final state can expose it.
-      planStopped: z.string().nullable(),
-      planStepCount: z.number(),
-    }),
-    output: z.object({
-      applied: z.array(z.string()),
-      stopped: z.string().nullable(),
-      stepCount: z.number(),
-    }),
-    events: {
-      STEP_A: z.object({}),
-      STEP_B: z.object({}),
-      GUARDED: z.object({}),
-    },
-  });
-
-  return agent.createMachine({
-    context: () => ({ applied: [], planStopped: null, planStepCount: 0 }),
-    initial: "planning",
-    states: {
-      planning: {
-        invoke: {
-          id: "plan",
-          src: "agent.plan",
-          input: () => ({
-            model: "quick",
-            allowedEvents: ["STEP_A", "STEP_B", "GUARDED"] as const,
-            maxSteps: 8,
-          }),
-          // Capture the plan's { steps, stopped } output into context so the
-          // final state can expose it (the final output fn is re-evaluated for
-          // the root machine-done event, which no longer carries plan output).
-          onDone: ({ event }) => {
-            const output = (event as { output: AgentPlanOutput }).output;
-            return {
-              target: "done",
-              context: { planStopped: output.stopped, planStepCount: output.steps.length },
-            };
-          },
-        },
-        on: {
-          STEP_A: ({ context }) => ({ context: { applied: [...context.applied, "A"] } }),
-          STEP_B: ({ context }) => ({ context: { applied: [...context.applied, "B"] } }),
-          // Always illegal: returning undefined makes the transition guard-reject,
-          // so a plan candidate for GUARDED is pruned (exploration) / retried (run).
-          GUARDED: () => undefined,
-        },
-      },
-      done: {
-        type: "final",
-        output: ({ context }) => ({
-          applied: context.applied,
-          stopped: context.planStopped,
-          stepCount: context.planStepCount,
-        }),
-      },
     },
   });
 }
@@ -513,54 +443,31 @@ describe("lintAgentMachine — each check fires on a crafted bad machine", () =>
 });
 
 describe("simulateAgent — keyless deterministic playthrough", () => {
-  test("drives twenty-questions to done with scripted decisions/inputs", async () => {
+  // Player turns in twenty-questions are idle states resumed by external
+  // events, and `SimulationScript` has no channel for delivering those, so a
+  // scripted playthrough settles at the first player turn. `canReach` covers
+  // the rest of the path (it forks on externally-accepted events).
+  test("drives twenty-questions through scripted decisions to the first player turn", async () => {
     const result = await simulateAgent(twentyQuestionsMachine, {
-      input: { questionsRemaining: 20 },
+      input: { questionsRemaining: 1 },
       script: {
         decisions: { "agent.decide": [{ type: "GUESS", guess: "a cat" }] },
-        invokes: { "agent.userInput": ["yes", "no"] },
-        text: {
-          classifyGuessFeedback: [{ correct: true, reasoning: "matched" }],
-          classifyPlayAgain: [{ playAgain: false, reasoning: "stop" }],
-        },
       },
     });
 
-    expect(result.status).toBe("done");
-    expect((result.snapshot.output as { guess: string }).guess).toBe("a cat");
-    expect(result.trail.length).toBeGreaterThan(0);
+    expect(result.status).toBe("idle");
+    expect(result.snapshot.value).toBe("awaitingGuessFeedback");
+    expect(result.snapshot.context.guess).toBe("a cat");
+    expect(result.trail).toContainEqual(
+      expect.objectContaining({ appliedEvent: { type: "GUESS", guess: "a cat" } }),
+    );
   });
 
-  test("drives an agent.plan invoke keylessly to done via scripted plan decisions", async () => {
-    const result = await simulateAgent(createPlanMachine(), {
-      script: {
-        // A plan step IS a decision: scripted chosen events keyed by the plan
-        // invoke's src, ending with the reserved done move.
-        decisions: {
-          "agent.plan": [{ type: "STEP_A" }, { type: "STEP_B" }, { type: PLAN_DONE_EVENT_TYPE }],
-        },
-      },
+  test("the scripted playthrough's idle turn can still reach gameOver", async () => {
+    const result = await canReach(twentyQuestionsMachine, "gameOver", {
+      input: { questionsRemaining: 1 },
     });
-
-    expect(result.status).toBe("done");
-    // The two machine events applied, in order.
-    expect((result.snapshot.context as { applied: string[] }).applied).toEqual(["A", "B"]);
-    // The plan's onDone output ({ steps, stopped: 'done' }) landed per the
-    // machine's own final-state handling.
-    const output = result.snapshot.output as {
-      applied: string[];
-      stopped: string;
-      stepCount: number;
-    };
-    expect(output.stopped).toBe("done");
-    expect(output.stepCount).toBe(2);
-    expect(output.applied).toEqual(["A", "B"]);
-    // Trail: one entry per applied plan step plus the completing done move.
-    expect(result.trail.map((entry) => entry.appliedEvent?.type)).toEqual([
-      "STEP_A",
-      "STEP_B",
-      PLAN_DONE_EVENT_TYPE,
-    ]);
+    expect(result.canReach).toBe(true);
   });
 
   test("throws a descriptive error when the script runs dry", async () => {
@@ -596,45 +503,6 @@ describe("explorePaths — enumerates decision + human branches", () => {
     });
     expect(report.prunedByGuard).toBe(0);
     expect(report.terminals.some((terminal) => terminal.state === "refunded")).toBe(true);
-  });
-});
-
-describe("explorePaths — forks plan candidates like decisions", () => {
-  test("a plan machine forks per candidate incl. the done move, pruning a guarded candidate", async () => {
-    const report = await explorePaths(createPlanMachine(), { maxDepth: 6 });
-
-    // The plan's done move (chosen at any step, incl. immediately) completes the
-    // plan → the machine reaches its 'done' final state.
-    const doneTerminals = report.terminals.filter((terminal) => terminal.status === "done");
-    expect(doneTerminals.length).toBeGreaterThan(0);
-    expect(doneTerminals.every((terminal) => terminal.state === "done")).toBe(true);
-
-    // The immediate done-move branch is terminal on its own (a plan that applies
-    // nothing then ends): a single-event path of just the reserved done move.
-    expect(
-      report.terminals.some(
-        (terminal) =>
-          terminal.status === "done" &&
-          terminal.path.length === 1 &&
-          terminal.path[0]?.type === PLAN_DONE_EVENT_TYPE,
-      ),
-    ).toBe(true);
-
-    // Per-event branches were explored too: STEP_A / STEP_B each appear as the
-    // first applied plan step on some path.
-    const firstSteps = new Set(report.terminals.map((terminal) => terminal.path[0]?.type));
-    expect(firstSteps.has("STEP_A")).toBe(true);
-    expect(firstSteps.has("STEP_B")).toBe(true);
-
-    // GUARDED is a type-legal plan candidate whose guard always rejects it, so
-    // every plan step prunes it — counted, never explored.
-    expect(report.prunedByGuard).toBeGreaterThan(0);
-    // The always-illegal GUARDED never lands as an applied step on any path.
-    expect(
-      report.terminals.every((terminal) =>
-        terminal.path.every((event) => event.type !== "GUARDED"),
-      ),
-    ).toBe(true);
   });
 });
 

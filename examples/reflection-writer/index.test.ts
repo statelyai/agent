@@ -28,7 +28,6 @@ test("reflection loop runs to the revision bound then stops (LangGraph should_co
   // only thing that stops the loop, exactly like LangGraph's message-count edge.
   const result = await runReflectionWriterExample({
     topic: "The little prince",
-    maxRevisions: 3,
     generateText: scriptedGenerateText({
       writer: ["draft 1", "draft 2", "draft 3", "draft 4"],
       critic: [
@@ -52,11 +51,10 @@ test("reflection loop runs to the revision bound then stops (LangGraph should_co
 });
 
 test("early exit when the critic is satisfied (improves on the fixed-count tutorial)", async () => {
-  // Critic signs off after the 2nd draft, well under maxRevisions=5 — the
+  // Critic signs off after the 2nd draft, under the revision bound — the
   // `satisfied` branch of the checking guard ends the loop early.
   const result = await runReflectionWriterExample({
     topic: "The little prince",
-    maxRevisions: 5,
     generateText: scriptedGenerateText({
       writer: ["draft 1", "draft 2", "draft 3"],
       critic: [

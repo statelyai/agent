@@ -33,7 +33,7 @@ For a one-liner that throws instead of returning findings, use `assertAgentMachi
 | Code                       | Severity | Fires when                                                                                                                                                                                                                                                                         |
 | -------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `unreachable-state`        | error    | A state no transition/`always`/`choice`/`onDone`/`onError` can reach from the initial state. Conservative: dynamic (function) transitions over-approximate, so it never false-flags. Exact for `fromConfig` machines, whose declared targets the lowering retains.                 |
-| `decide-without-events`    | error    | A state invokes `agent.decide`/`agent.plan` but neither it nor any ancestor handles any event, so the chosen event can never be delivered.                                                                                                                                         |
+| `decide-without-events`    | error    | A state invokes `agent.decide` but neither it nor any ancestor handles any event, so the chosen event can never be delivered.                                                                                                                                         |
 | `unserializable-context`   | warning  | The context schema exposes no JSON schema (e.g. a `z.custom` messages array), so its fields can't be statically checked for JSON persist/resume.                                                                                                                                   |
 | `direct-object-src`        | warning  | An invoke `src` is a direct object/machine value that can't be rebound by `runAgent`, so it inherits no host executors.                                                                                                                                                            |
 | `final-without-output`     | error    | The machine declares an output schema but a top-level final state has no `output`.                                                                                                                                                                                                 |
@@ -91,9 +91,9 @@ Use this when the test should exercise the real `runAgent` path with canned mode
 
 ## Scripted playthroughs
 
-The `simulateAgent(machine, { input, script, maxSteps? })` call runs a deterministic, model-free playthrough on the pure step path (async: it drives plan steps through the real durable protocol). The `script` supplies responses by invoke `src` (FIFO queues), so runs are reproducible:
+The `simulateAgent(machine, { input, script, maxSteps? })` call runs a deterministic, model-free playthrough on the pure step path. The `script` supplies responses by invoke `src` (FIFO queues), so runs are reproducible:
 
-- `decisions`: the `ChosenEvent` to apply per decision (keyed by decision src, usually `agent.decide`). A plan step is a decision too: key its chosen events by the plan src (`agent.plan`) and end with the reserved `agent.plan.done` move to complete the plan;
+- `decisions`: the `ChosenEvent` to apply per decision (keyed by decision src, usually `agent.decide`);
 - `text`: output values for text requests (keyed by request src);
 - `invokes`: answers for `agent.userInput` invokes.
 
@@ -126,11 +126,10 @@ if (result.status === "done") {
 
 ## Branch exploration
 
-The `explorePaths(machine, { input, maxDepth?, textOutputs? })` call enumerates decision and external-event branches, model-free, and reports coverage (async: plan branches advance through the real plan protocol).
+The `explorePaths(machine, { input, maxDepth?, textOutputs? })` call enumerates decision and external-event branches, model-free, and reports coverage.
 
 - At each decision it forks one branch per candidate event. Guard-rejected candidates count in `prunedByGuard` and are not explored.
 - At an idle wait it forks per externally-accepted event.
-- An `agent.plan` request forks the same way (including the reserved `agent.plan.done` move, always legal), so a single plan can consume several depth units.
 - Text/`userInput` invokes resolve from `textOutputs` (a by-src canned-output map); a missing src halts that branch with a `needs-output` terminal instead of throwing.
 
 ```ts

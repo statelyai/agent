@@ -24,7 +24,6 @@ import {
   createTextLogic,
   userInputActor,
   DECIDE_ACTOR,
-  PLAN_ACTOR,
   USER_INPUT_ACTOR,
   type AgentModelMap,
   type AgentModelRef,
@@ -32,7 +31,7 @@ import {
   type TextLogic,
   type TextLogicConfig,
 } from "./text-logic.js";
-import { createDecideActor, createPlanActor } from "./decision.js";
+import { createDecideActor } from "./decision.js";
 import { AGENT_USAGE_EVENT_TYPE, type AgentUsageEvent } from "./effects.js";
 import { appendMessages } from "./messages.js";
 import { agentExecutionOptions, machineSuspensionPredicates } from "./internal/registry.js";
@@ -143,7 +142,7 @@ const USAGE_TOKEN_FIELDS = [
   "cachedInputTokens",
 ] as const;
 const USAGE_ATTRIBUTION_FIELDS = ["id", "src", "model", "name"] as const;
-const USAGE_KINDS = ["text", "decision", "plan"];
+const USAGE_KINDS = ["text", "decision"];
 
 /**
  * Standard Schema for the reserved `'@agent.usage'` payload. Hand-rolled (no
@@ -419,7 +418,7 @@ type AgentSetupXStateConfig<
     AgentSetupActors<
       AgentAllActors<TActors, TRequestSchemas>,
       // Reserved `@agent.*` types are never model-facing, so they stay out of
-      // the `allowedEvents` candidate union the decide/plan builtins type.
+      // the `allowedEvents` candidate union the decide builtin types.
       Exclude<keyof TEventSchemas & string, typeof AGENT_USAGE_EVENT_TYPE>,
       AgentModelRef<TModels>
     >
@@ -744,7 +743,7 @@ type SetupAgentResult<
  * state/transition meta are all standard schemas — no `{} as Type` casts —
  * and are retained on `result.schemas` for runtime validation. Also
  * registers the `agent.generateText`/`agent.streamText`/`agent.userInput`/
- * `agent.decide`/`agent.plan` builtin actors and lowers `requests`/`actors` into the
+ * `agent.decide` builtin actors and lowers `requests`/`actors` into the
  * machine's actor sources. The result is the xstate `setup(...)` object with
  * a wrapped `result.createMachine(...)` plus `result.schemas`/`models`/
  * `requests`/`appendMessages` attached. Also has a
@@ -1059,14 +1058,13 @@ const RESERVED_AGENT_ACTOR_KEYS: readonly string[] = [
   ...Object.keys(builtinTextActors),
   USER_INPUT_ACTOR,
   DECIDE_ACTOR,
-  PLAN_ACTOR,
 ];
 
 /**
  * Rejects a user-supplied `actors`/`requests` key in the reserved
  * `agent.*` builtin namespace. Without this, the builtins-first spread in
  * {@link createAgentActors} lets such a key overwrite the builtin
- * (`agent.decide`, `agent.plan`, …) silently. Deliberate override of a builtin
+ * (`agent.decide`, …) silently. Deliberate override of a builtin
  * is still possible after the machine is created, via
  * `machine.provide({ actors: { 'agent.decide': ... } })`.
  */
@@ -1092,7 +1090,7 @@ function assertNoReservedAgentKeys(
   }
 }
 
-// Merges the five builtin `agent.*` actors with user `actors` and generated request actors, after checking for key collisions. Exported for workflow-config's fromConfig lowering. @internal
+// Merges the builtin `agent.*` actors with user `actors` and generated request actors, after checking for key collisions. Exported for workflow-config's fromConfig lowering. @internal
 export function createAgentActors<
   TActors extends { [K in keyof TActors]: AnyActorLogic },
   TRequestSchemas extends AgentRequestSchemaMap,
@@ -1114,7 +1112,6 @@ export function createAgentActors<
     ...builtinTextActors,
     [USER_INPUT_ACTOR]: userInputActor,
     [DECIDE_ACTOR]: createDecideActor(),
-    [PLAN_ACTOR]: createPlanActor(),
     ...actors,
     ...requestActors,
   } as SetupActors<AgentSetupActors<AgentAllActors<TActors, TRequestSchemas>, string, TModel>>;

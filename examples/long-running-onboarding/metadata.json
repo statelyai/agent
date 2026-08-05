@@ -1,6 +1,6 @@
 {
   "name": "long-running-onboarding",
-  "title": "Long-Running Onboarding",
+  "title": "Employee onboarding that pauses for days",
   "kind": "pattern",
   "origin": {
     "type": "article",
@@ -8,17 +8,25 @@
     "url": "https://x.com/GoogleCloudTech/status/2074940791277932742"
   },
   "comparison": {
-    "targets": ["Google ADK", "durable agents", "human-in-the-loop", "multi-agent delegation"],
+    "targets": [
+      "Google ADK",
+      "durable agents",
+      "human-in-the-loop",
+      "multi-agent delegation"
+    ],
     "purpose": "Ports the article's onboarding coordinator shape into Stately Agent: explicit durable state, event-driven idle gates, snapshot resume across days, and delegated IT provisioning."
   },
   "starters": [
     {
-      "employee": {
-        "id": "emp-001",
-        "name": "Jordan Rivera",
-        "role": "Backend Engineer",
-        "startDate": "2026-08-03",
-        "equipment": "MacBook Pro 16"
+      "label": "Onboard Jordan Rivera (Backend Engineer)",
+      "input": {
+        "employee": {
+          "id": "emp-001",
+          "name": "Jordan Rivera",
+          "role": "Backend Engineer",
+          "startDate": "2026-08-03",
+          "equipment": "MacBook Pro 16"
+        }
       }
     }
   ]

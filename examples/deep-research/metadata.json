@@ -1,6 +1,6 @@
 {
   "name": "deep-research",
-  "title": "Deep Research",
+  "title": "Research a question and write a sourced report",
   "kind": "agent-workflow",
   "origin": {
     "type": "langgraph",
@@ -8,15 +8,16 @@
     "url": "https://github.com/langchain-ai/open_deep_research"
   },
   "comparison": {
-    "targets": ["Open Deep Research", "Gemini Fullstack LangGraph", "local-deep-researcher"],
-    "purpose": "Plan three complementary queries, research concurrently, reflect on coverage, perform one targeted follow-up round, then synthesize a sourced report. Search providers remain host-owned."
+    "targets": [
+      "Open Deep Research",
+      "Gemini Fullstack LangGraph",
+      "local-deep-researcher"
+    ],
+    "purpose": "Plans several complementary searches, runs them at the same time, checks what is still missing, does one follow-up round, then writes a report with its sources."
   },
   "starters": [
-    {
-      "question": "What are the leading approaches to long-context LLMs in 2026?"
-    },
-    {
-      "question": "How do carbon-capture startups actually remove CO2?"
-    }
+    "What are the leading approaches to long-context LLMs in 2026?",
+    "How do carbon-capture startups actually remove CO2?",
+    "What is the state of solid-state batteries for EVs?"
   ]
 }

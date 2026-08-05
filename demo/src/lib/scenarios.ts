@@ -47,13 +47,13 @@ export const scenarios: Scenario[] = [
     id: "refund",
     name: "Refund guard",
     eyebrow: "Guarded decision",
-    description: "The model proposes a refund; a policy state — not the model — enforces the $100 limit.",
+    description: "The model proposes a refund; a policy state, not the model, enforces the $100 limit.",
     placeholder: "I need a $184 refund for a damaged delivery.",
     startLabel: "Assess refund",
     starters: [
       "I need a $184 refund for a damaged delivery.",
       "Please refund $42 for a duplicate charge.",
-      "My order arrived broken — I want my money back.",
+      "My order arrived broken. I want my money back.",
     ],
   },
   {
@@ -72,7 +72,8 @@ export const scenarios: Scenario[] = [
     id: "routing",
     name: "Intent routing",
     eyebrow: "Typed model event",
-    description: "The model picks one typed event. The machine owns every routing destination.",
+    description:
+      "The model picks one typed event and must justify it. The machine owns every routing destination.",
     placeholder: "I was charged twice and cannot download my latest invoice.",
     startLabel: "Route request",
     starters: [

@@ -34,7 +34,7 @@ const agentSetup = setupAgent({
     poem: z.string().nullable(),
   }),
   input: z.object({ topic: z.string() }),
-  output: z.object({ analysis: z.string(), poem: z.string() }),
+  output: z.object({ summary: z.string(), analysis: z.string(), poem: z.string() }),
   requests: {
     thinker: {
       mode: "stream",
@@ -65,6 +65,8 @@ export const parallelStreamsMachine = agentSetup.createMachine({
   id: "parallel-streams",
   context: ({ input }) => ({ topic: input.topic, analysis: null, poem: null }),
   output: ({ context }) => ({
+    // Primary human-readable field: both streams composed into one prose block.
+    summary: `Analysis of ${context.topic}:\n${context.analysis ?? ""}\n\nPoem about ${context.topic}:\n${context.poem ?? ""}`,
     analysis: context.analysis ?? "",
     poem: context.poem ?? "",
   }),

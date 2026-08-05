@@ -7,12 +7,7 @@ import type {
   StandardSchemaV1,
 } from "./types.js";
 import { validateSchemaSync } from "./utils.js";
-import type {
-  AgentDecisionExecutor,
-  AgentDecisionInput,
-  AgentPlanInput,
-  PlanLogic,
-} from "./decision.js";
+import type { AgentDecisionExecutor, AgentDecisionInput } from "./decision.js";
 import type { ChosenEvent } from "./types.js";
 import { executorBoundLogics, unboundPlaceholderLogics } from "./internal/registry.js";
 
@@ -24,8 +19,6 @@ export const GENERATE_TEXT_ACTOR = "agent.generateText" as const;
 export const STREAM_TEXT_ACTOR = "agent.streamText" as const;
 // Well-known invoke `src` for the builtin decision actor.
 export const DECIDE_ACTOR = "agent.decide" as const;
-// Well-known invoke `src` for the builtin multi-event plan actor.
-export const PLAN_ACTOR = "agent.plan" as const;
 
 /** Synthetic `src` stamped on trace requests produced by `getRequests` state interpretation — NOT a registered actor source (nothing is invoked; the pass makes the call directly). */
 export const INTERPRET_SOURCE = "agent.interpret" as const;
@@ -194,7 +187,7 @@ export interface AgentUserInput<TMetadata = Record<string, unknown>> {
   metadata?: TMetadata;
 }
 
-/** The five `agent.*` builtin actor logics every setupAgent-built machine registers. @internal */
+/** The four `agent.*` builtin actor logics every setupAgent-built machine registers. @internal */
 export type BuiltinAgentActors<TEvent extends string = string, TModel extends string = string> = {
   [GENERATE_TEXT_ACTOR]: AsyncActorLogic<unknown, AgentTextRequest>;
   [STREAM_TEXT_ACTOR]: AsyncActorLogic<unknown, AgentTextRequest>;
@@ -202,9 +195,6 @@ export type BuiltinAgentActors<TEvent extends string = string, TModel extends st
   [DECIDE_ACTOR]: AsyncActorLogic<
     ChosenEvent,
     AgentDecisionInput<TEvent, Record<string, unknown>, TModel>
-  >;
-  [PLAN_ACTOR]: PlanLogic<
-    StandardSchemaV1<AgentPlanInput<TEvent, Record<string, unknown>, TModel>>
   >;
 };
 
@@ -801,7 +791,7 @@ export type AgentRequestExecutor<
  * with — passed to `runAgent`, `executeAgentRequest`, and
  * `TextLogic.execute`. Every slot is optional: `generateText` is needed only
  * if the machine has a `mode: 'generate'` text request, `streamText` only for
- * a `mode: 'stream'` request, and `decide` only for a decision/plan — omitting
+ * a `mode: 'stream'` request, and `decide` only for a decision — omitting
  * a slot the machine actually needs is a clear bind-time error (see `runAgent`
  * and `provideExecutors`). Adapter result sets (`AiSdkExecutors`,
  * `OpenAiCompatExecutors`) re-require all three.

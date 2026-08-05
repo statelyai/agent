@@ -1,6 +1,6 @@
 {
   "name": "human-in-the-loop",
-  "title": "Human in the Loop",
+  "title": "Approve or reject a draft",
   "kind": "pattern",
   "origin": {
     "type": "stately-agent",

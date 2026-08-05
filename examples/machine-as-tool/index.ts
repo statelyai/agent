@@ -34,24 +34,28 @@ import {
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 // Typed interaction protocol handed to the harness. Schema-typed meta means
-// the host gets a real contract, not Record<string, unknown>. This is a
-// subset-compatible variant of the email-drafter interaction vocabulary: a
-// `select` with choices, each optionally carrying a follow-up text `input`
-// (here, REJECT's `reason`). One vocabulary, modeled across both examples.
+// the host gets a real contract, not Record<string, unknown>.
+//
+// The shape is the standard one hosts render: a `label` for the pause, an
+// `events` map giving each accepted event a button label and style, and
+// `textEvent` naming the ONE event free-typed text is delivered to. Declaring
+// `textEvent` matters here: without it, a host that auto-maps text to "the only
+// event with a single string field" would silently reject the refund whenever
+// the operator types anything.
 const metaSchema = z.object({
   interaction: z
     .object({
-      type: z.literal("select"),
       label: z.string(),
-      choices: z.array(
-        z.object({
-          label: z.string(),
-          eventType: z.string(),
-          input: z
-            .object({ type: z.literal("text"), label: z.string(), field: z.string() })
-            .optional(),
-        }),
-      ),
+      events: z
+        .record(
+          z.string(),
+          z.object({
+            label: z.string().optional(),
+            style: z.enum(["primary", "danger", "default"]).optional(),
+          }),
+        )
+        .optional(),
+      textEvent: z.string().optional(),
     })
     .optional(),
 });
@@ -123,16 +127,15 @@ export const refundMachine = agentSetup.createMachine({
       // typed contract the harness renders as a tool result.
       meta: {
         interaction: {
-          type: "select",
-          label: "Approve this refund?",
-          choices: [
-            { label: "Approve", eventType: "APPROVE" },
-            {
-              label: "Reject",
-              eventType: "REJECT",
-              input: { type: "text", label: "Reason", field: "reason" },
-            },
-          ],
+          // `{amount}` / `{orderId}` resolve against the snapshot's context when
+          // the label is shown (host convention; the meta itself is static).
+          label: "Approve the ${amount} refund on order {orderId}, or type a reason to reject it.",
+          events: {
+            APPROVE: { label: "Approve refund of ${amount}", style: "primary" },
+            REJECT: { label: "Reject refund", style: "danger" },
+          },
+          // Free text is a rejection reason, never a silent approval.
+          textEvent: "REJECT",
         },
       },
       on: {
@@ -242,8 +245,8 @@ export async function runMachineAsToolExample() {
   const started = await startTool({ amount: 42, orderId: "ord-1" });
   assert.equal(started.status, "pending");
   assert.deepEqual(
-    started.status === "pending" ? started.interaction?.label : undefined,
-    "Approve this refund?",
+    started.status === "pending" ? Object.keys(started.interaction?.events ?? {}) : undefined,
+    ["APPROVE", "REJECT"],
   );
 
   const finished =
@@ -272,8 +275,8 @@ export async function main() {
 
   // What a human operator would see rendered from the typed interaction.
   console.log(`\n${started.interaction?.label}`);
-  for (const choice of started.interaction?.choices ?? []) {
-    console.log(`  - ${choice.label} (${choice.eventType})`);
+  for (const [eventType, button] of Object.entries(started.interaction?.events ?? {})) {
+    console.log(`  - ${button.label ?? eventType} (${eventType})`);
   }
   console.log("\n[harness auto-approves]\n");
 

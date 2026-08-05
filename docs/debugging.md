@@ -70,7 +70,7 @@ const result = await runAgent(machine, {
 });
 ```
 
-- `decisions` feeds `agent.decide` and `agent.plan`; `text` feeds every text request.
+- `decisions` feeds `agent.decide`; `text` feeds every text request.
 - An entry can be a function of the request, so branching machines script per `request.name`.
 - A guard-rejected decision consumes an entry and retries with the next one, which is how you reproduce a retry loop exactly.
 - Running dry throws `ScriptedExecutorsError` (`code: 'scripted-executors-exhausted'`) naming the pending request, which is itself a useful signal: the machine asked for more model calls than you expected.

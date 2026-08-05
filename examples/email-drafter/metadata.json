@@ -1,6 +1,6 @@
 {
   "name": "email-drafter",
-  "title": "Email Drafter",
+  "title": "Draft and send an email",
   "kind": "agent-workflow",
   "origin": {
     "type": "stately-agent",
@@ -11,5 +11,8 @@
     "targets": ["LangGraph", "Burr"],
     "purpose": "Shows an XState-authored agent with reusable text logic, message history, human review, and typed outputs."
   },
-  "starters": []
+  "starters": [
+    "Email Priya to reschedule Thursday's design review to Friday at 10am.",
+    "Write a short note to the team announcing that the API migration is done."
+  ]
 }

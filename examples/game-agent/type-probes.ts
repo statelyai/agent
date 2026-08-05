@@ -39,6 +39,7 @@ gameAgentSetup.createMachine({
     enemyHp: 15,
     defended: false,
     lastSummary: null,
+    log: [],
   },
   // @ts-expect-error root machine output must match gameSchemas.output
   output: () => ({ wrong: true }),

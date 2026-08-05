@@ -24,6 +24,12 @@
  *     rules into compact markdown that is injected into the decide prompt — the
  *     model is handed knowledge of the whole machine it is driving.
  *
+ * Runs autonomously: no human input, no tools. The output's headline is
+ * `summary`, a readable move-by-move narration ("Farmer crosses left → right
+ * with the goat. Left: wolf, cabbage | Right: farmer, goat"), built from the
+ * `log: string[]` the machine appends to on every applied move. `solved`,
+ * `moves`, and `log` ride along as structured fields.
+ *
  * Run: OPENAI_API_KEY=... npx tsx examples/river-crossing/index.ts
  */
 import { z } from "zod";
@@ -58,6 +64,8 @@ export const riverCrossingSchemas = createAgentSchemas({
     maxMoves: z.number().default(12),
   }),
   output: z.object({
+    // Headline: a human-readable move-by-move narration of the crossing.
+    summary: z.string(),
     solved: z.boolean(),
     moves: z.number(),
     log: z.array(z.string()),
@@ -123,9 +131,38 @@ function worldOf(context: { farmer: Bank; wolf: Bank; goat: Bank; cabbage: Bank 
   };
 }
 
-function moveLabel(item: Items | null, from: Bank): string {
-  const carried = item ? `the ${item}` : "alone";
-  return `Farmer crosses ${from} → ${opposite(from)} with ${carried}`;
+/** "farmer, goat" / "(empty)" — everyone standing on `bank` in `state`. */
+function bankContents(state: WorldState, bank: Bank): string {
+  const names = (["farmer", "wolf", "goat", "cabbage"] as const).filter(
+    (who) => state[who] === bank,
+  );
+  return names.length === 0 ? "(empty)" : names.join(", ");
+}
+
+/**
+ * One narration line: the crossing plus the resulting contents of both banks,
+ * e.g. `Farmer crosses left → right with the goat. Left: wolf, cabbage |
+ * Right: farmer, goat`.
+ */
+function moveLabel(item: Items | null, from: Bank, next: WorldState): string {
+  const carried = item ? `with the ${item}` : "alone";
+  return (
+    `Farmer crosses ${from} → ${opposite(from)} ${carried}. ` +
+    `Left: ${bankContents(next, "left")} | Right: ${bankContents(next, "right")}`
+  );
+}
+
+/** Joins the log into readable prose for the machine output. */
+function narrate(context: Pick<RiverContext, "log" | "moves" | "maxMoves"> & WorldState): string {
+  const solved = allOnRight(context);
+  const headline = solved
+    ? `Solved the river crossing in ${context.moves} move${context.moves === 1 ? "" : "s"}.`
+    : `Not solved — stopped after ${context.moves} of ${context.maxMoves} allowed moves.`;
+  const body =
+    context.log.length === 0
+      ? "No moves were made."
+      : context.log.map((entry, i) => `${i + 1}. ${entry}`).join("\n");
+  return `${headline}\n\n${body}`;
 }
 
 // ─── Agent + machine ───
@@ -211,7 +248,7 @@ function moveTransition(item: Items | null) {
         goat: next.goat,
         cabbage: next.cabbage,
         moves: context.moves + 1,
-        log: [...context.log, moveLabel(item, context.farmer)],
+        log: [...context.log, moveLabel(item, context.farmer, next)],
       },
     };
   };
@@ -239,8 +276,9 @@ export const riverCrossingMachine = agentSetup.createMachine({
     maxMoves: input.maxMoves,
     log: [],
   }),
-  // Reports whether the puzzle was solved.
+  // Headline output is the narration; the structured fields ride along.
   output: ({ context }) => ({
+    summary: narrate(context),
     solved: allOnRight(context),
     moves: context.moves,
     log: context.log,
@@ -289,6 +327,7 @@ export const riverCrossingMachine = agentSetup.createMachine({
     failed: {
       type: "final",
       output: ({ context }: { context: RiverContext }) => ({
+        summary: narrate(context),
         solved: false,
         moves: context.moves,
         log: context.log,
@@ -314,13 +353,8 @@ export async function runRiverCrossingExample(
   return result.output;
 }
 
-function printOutcome(output: { solved: boolean; moves: number; log: string[] }) {
-  console.log(
-    output.solved ? `Solved in ${output.moves} moves:` : `Failed after ${output.moves} moves:`,
-  );
-  for (const [i, entry] of output.log.entries()) {
-    console.log(`  ${i + 1}. ${entry}`);
-  }
+function printOutcome(output: { summary: string }) {
+  console.log(output.summary);
 }
 
 // The model must plan from the machine description alone. It often stumbles

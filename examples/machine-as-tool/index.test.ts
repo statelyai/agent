@@ -16,8 +16,12 @@ test("happy path: start → idle handle with interaction → approve → done", 
 
   expect(started.status).toBe("pending");
   if (started.status !== "pending") return;
-  expect(started.interaction?.label).toBe("Approve this refund?");
-  expect(started.interaction?.choices.map((c) => c.eventType)).toEqual(["APPROVE", "REJECT"]);
+  expect(started.interaction?.label).toContain("Approve the ${amount} refund");
+  expect(Object.keys(started.interaction?.events ?? {})).toEqual(["APPROVE", "REJECT"]);
+  // Free text must land on REJECT, never on the approve path.
+  expect(started.interaction?.textEvent).toBe("REJECT");
+  expect(started.interaction?.events?.APPROVE?.style).toBe("primary");
+  expect(started.interaction?.events?.REJECT?.style).toBe("danger");
   // Handle is a JSON string — proves the snapshot round-trips through a store.
   expect(typeof started.handle).toBe("string");
 

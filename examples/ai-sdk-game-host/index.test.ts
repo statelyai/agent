@@ -48,12 +48,9 @@ describe("ai-sdk-game-host", () => {
       executors,
     );
 
-    expect(output).toEqual({
-      outcome: "continue",
-      summary: "The hero strikes the goblin.",
-      playerHp: 20,
-      enemyHp: 9,
-    });
+    // The summary is now a narrated log; the model's line is embedded in it.
+    expect(output).toMatchObject({ outcome: "continue", playerHp: 20, enemyHp: 9 });
+    expect(output?.summary).toContain("The hero strikes the goblin.");
     // Host owned the loop: it chose a move, then narrated the turn, in order.
     expect(calls).toEqual(["decide", "summarize"]);
     // The step callback saw the machine pass through choosing → summarizing.
@@ -69,12 +66,8 @@ describe("ai-sdk-game-host", () => {
 
     const output = await runAiSdkGameTurn({ playerHp: 18, enemyHp: 4 }, undefined, executors);
 
-    expect(output).toEqual({
-      outcome: "won",
-      summary: "The goblin falls.",
-      playerHp: 18,
-      enemyHp: 0,
-    });
+    expect(output).toMatchObject({ outcome: "won", playerHp: 18, enemyHp: 0 });
+    expect(output?.summary).toContain("The goblin falls.");
   });
 
   test("FLEE ends the turn without a summary request", async () => {
@@ -84,7 +77,7 @@ describe("ai-sdk-game-host", () => {
 
     expect(output).toBeDefined();
     expect(output?.outcome).toBe("fled");
-    expect(output?.summary).toBe("You fled the encounter.");
+    expect(output?.summary).toContain("You disengage and back away.");
     // Fleeing skips summarizing entirely.
     expect(calls).toEqual(["decide"]);
     expect(calls).not.toContain("summarize");

@@ -1,10 +1,10 @@
 import { describe, expect, test } from "vitest";
 import { runAgent } from "@statelyai/agent";
-import type { AgentDecisionRequest, AgentUserInput, ChosenEvent } from "@statelyai/agent";
-import { todoMachine } from "./index.js";
+import type { AgentDecisionRequest, ChosenEvent } from "@statelyai/agent";
+import { idlePrompt, runTodoNlExample, todoMachine } from "./index.js";
 
 // A scripted decide executor: pops one event per call off `events`. The
-// `agent.plan` invoke calls it once per plan step (and again per retry).
+// `planning` loop calls it once per step (and again per retry).
 function scriptedDecide(events: ChosenEvent[]) {
   const seen: AgentDecisionRequest[] = [];
   const decide = async (request: AgentDecisionRequest): Promise<{ event: ChosenEvent }> => {
@@ -16,74 +16,53 @@ function scriptedDecide(events: ChosenEvent[]) {
   return { decide, seen };
 }
 
-// A scripted userInput executor: pops one command per prompt off `commands`.
-function scriptedUserInput(commands: string[]) {
-  const prompts: string[] = [];
-  const userInput = async (input: AgentUserInput) => {
-    prompts.push(input.prompt ?? "");
-    const command = commands.shift();
-    if (command === undefined) throw new Error("scriptedUserInput ran out of commands");
-    return command;
-  };
-  return { userInput, prompts };
-}
-
 describe("todo-nl", () => {
-  test("one command → several plan steps applied in order → the done move ends the plan", async () => {
-    // A single command drives multiple events in one `agent.plan` invoke:
-    // two adds, a toggle, then the built-in done move to end.
+  test("one command → several decide steps applied in order → DONE ends the loop", async () => {
+    // A single command drives multiple events through the decide loop:
+    // two adds, a toggle, then DONE to leave the loop.
     const { decide, seen } = scriptedDecide([
       { type: "ADD_TODO", title: "pick up laundry" },
       { type: "ADD_TODO", title: "do groceries" },
       { type: "TOGGLE_TODO", id: 1 },
-      { type: "agent.plan.done" },
+      { type: "DONE" },
       { type: "QUIT" },
     ]);
-    const { userInput } = scriptedUserInput([
-      "add pick up laundry and do groceries, then mark laundry done",
-      "quit",
-    ]);
 
-    const result = await runAgent(todoMachine, {
+    const output = await runTodoNlExample({
       input: { todos: [] },
-      executors: { decide },
-      userInput,
+      decide,
+      commands: ["add pick up laundry and do groceries, then mark laundry done", "quit"],
     });
 
-    expect(result.status).toBe("done");
-    if (result.status !== "done") throw new Error("expected done");
     // Applied in order: both added, #1 toggled done.
-    expect(result.output.todos).toEqual([
+    expect(output.todos).toEqual([
       { id: 1, title: "pick up laundry", done: true },
       { id: 2, title: "do groceries", done: false },
     ]);
-    // The first plan step re-reads the live snapshot each iteration; later
-    // steps carry the applied trail appended to the prompt.
-    const planRequests = seen.filter((r) => r.prompt?.includes("User command:"));
-    expect(planRequests[0]!.prompt).toContain("pick up laundry and do groceries");
-    expect(planRequests[1]!.prompt).toContain("Events already applied in this plan");
+    // Each loop step re-reads the live snapshot; later steps carry the applied
+    // trail from context in the prompt.
+    const stepRequests = seen.filter((r) => r.prompt?.includes("User command:"));
+    expect(stepRequests[0]!.prompt).toContain("pick up laundry and do groceries");
+    expect(stepRequests[1]!.prompt).toContain("Events already applied for this command");
   });
 
-  test("a bad id mid-plan is rejected by guard, the plan retries the step with a good id", async () => {
-    // First plan step uses a nonexistent id (99) → rejected-by-guard; the
-    // plan retries the same step and the second attempt uses the real id (1).
+  test("a bad id mid-loop is rejected by guard, the step retries with a good id", async () => {
+    // The first decide step uses a nonexistent id (99) → rejected-by-guard; the
+    // step retries and the second attempt uses the real id (1).
     const { decide, seen } = scriptedDecide([
       { type: "TOGGLE_TODO", id: 99 },
       { type: "TOGGLE_TODO", id: 1 },
-      { type: "agent.plan.done" },
+      { type: "DONE" },
       { type: "QUIT" },
     ]);
-    const { userInput } = scriptedUserInput(["mark the first one done", "quit"]);
 
-    const result = await runAgent(todoMachine, {
+    const output = await runTodoNlExample({
       input: { todos: [{ id: 1, title: "write tests", done: false }] },
-      executors: { decide },
-      userInput,
+      decide,
+      commands: ["mark the first one done", "quit"],
     });
 
-    expect(result.status).toBe("done");
-    if (result.status !== "done") throw new Error("expected done");
-    expect(result.output.todos).toEqual([{ id: 1, title: "write tests", done: true }]);
+    expect(output.todos).toEqual([{ id: 1, title: "write tests", done: true }]);
 
     // The retry request carried a 'rejected-by-guard' attempt for id 99, seen
     // by the mock decide.
@@ -91,20 +70,42 @@ describe("todo-nl", () => {
     expect(retryRequest?.attempts.at(-1)?.failure).toBe("rejected-by-guard");
   });
 
-  test("QUIT applied mid-plan exits the state and produces final output", async () => {
-    // QUIT exits `planning`, cancelling the plan invoke (its onDone never
-    // runs); the machine moves straight to `done`.
+  test("QUIT applied mid-loop exits the state and produces final output", async () => {
+    // QUIT exits `planning`, cancelling the pending decide invoke; the machine
+    // moves straight to `done`.
     const { decide } = scriptedDecide([{ type: "QUIT" }]);
-    const { userInput } = scriptedUserInput(["I'm done here"]);
 
-    const result = await runAgent(todoMachine, {
+    const output = await runTodoNlExample({
       input: { todos: [{ id: 1, title: "existing", done: true }] },
-      executors: { decide },
-      userInput,
+      decide,
+      commands: ["I'm done here"],
     });
 
-    expect(result.status).toBe("done");
-    if (result.status !== "done") throw new Error("expected done");
-    expect(result.output.todos).toEqual([{ id: 1, title: "existing", done: true }]);
+    expect(output.todos).toEqual([{ id: 1, title: "existing", done: true }]);
+  });
+
+  test("the machine settles idle in awaitingCommand with an interpolated prompt", async () => {
+    const { decide } = scriptedDecide([]);
+
+    // No commands: the very first run settles idle waiting for COMMAND.
+    const result = await runAgent(todoMachine, {
+      input: { todos: [{ id: 1, title: "existing", done: false }] },
+      executors: { decide },
+    });
+
+    expect(result.status).toBe("idle");
+    if (result.status !== "idle") throw new Error("expected idle");
+    expect(result.snapshot.value).toBe("awaitingCommand");
+    // `{todosSummary}` resolved against the live context.
+    expect(idlePrompt(result.snapshot)).toBe("What should I do with your list? (1 todo, 1 open)");
+
+    // Resuming from the persisted snapshot with COMMAND enters the loop.
+    const { decide: decide2 } = scriptedDecide([{ type: "QUIT" }]);
+    const resumed = await runAgent(todoMachine, {
+      snapshot: result.persistedSnapshot,
+      event: { type: "COMMAND", text: "quit" },
+      executors: { decide: decide2 },
+    });
+    expect(resumed.status).toBe("done");
   });
 });

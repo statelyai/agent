@@ -61,6 +61,9 @@ const critiqueSchema = z.object({
   satisfied: z.boolean(),
 });
 
+/** Hard upper bound on revision rounds (the tutorial's loop bound). */
+const MAX_REVISIONS = 3;
+
 const agentSetup = setupAgent({
   models,
   context: z.object({
@@ -80,7 +83,6 @@ const agentSetup = setupAgent({
   }),
   input: z.object({
     topic: z.string(),
-    maxRevisions: z.number().default(3),
   }),
   output: z.object({
     essay: z.string(),
@@ -146,7 +148,7 @@ export const reflectionWriterMachine = agentSetup.createMachine({
     messages: [userMessage(`Write an essay on the following topic:\n${input.topic}`)],
     critique: null,
     revisions: 0,
-    maxRevisions: input.maxRevisions,
+    maxRevisions: MAX_REVISIONS,
   }),
   initial: "drafting",
   states: {
@@ -223,7 +225,6 @@ export const reflectionWriterMachine = agentSetup.createMachine({
 
 export interface RunReflectionWriterOptions {
   topic?: string;
-  maxRevisions?: number;
   /** Injected for tests; direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
   /** Observes each machine transition (the visible reflect loop). */
@@ -244,14 +245,13 @@ export async function runReflectionWriterExample(
 ): Promise<ReflectionWriterResult> {
   const {
     topic = "Why the little prince is relevant to modern childhood",
-    maxRevisions = 3,
     generateText,
     onProgress,
   } = options;
 
   const progress: string[] = [];
   const result = await runAgent(reflectionWriterMachine, {
-    input: { topic, maxRevisions },
+    input: { topic },
     ...(generateText
       ? { executors: { generateText } }
       : { executors: createAiSdkExecutors({ models }) }),

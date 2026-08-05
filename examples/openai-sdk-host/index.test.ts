@@ -159,15 +159,16 @@ describe("createOpenAiExecutors + runAgent (stubbed client, no network)", () => 
 
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");
-    expect(result.output).toEqual({
+    // `done`'s output composes a `summary` string around the structured fields.
+    expect(result.output).toMatchObject({
       sentiment: "negative",
       category: "billing",
       reply: "Sorry about that — we will fix your invoice.",
     });
+    expect(result.output.summary).toContain("Sorry about that — we will fix your invoice.");
   });
 
   test("decide: tool_choice required, tool call maps back to a machine event", async () => {
-    const answers = ["for sure", "yes"];
     const stubClient = {
       chat: {
         completions: {
@@ -217,11 +218,25 @@ describe("createOpenAiExecutors + runAgent (stubbed client, no network)", () => 
     };
 
     const { generateText, decide } = createOpenAiExecutors({ client: stubClient as never });
-    const result = await runAgent(twentyQuestionsMachine, {
+    const executors = { generateText, decide };
+
+    // The decide round-trip (tool_choice required → machine event) leaves the
+    // run idle on a player turn; scripted button events resume it to done.
+    let result = await runAgent(twentyQuestionsMachine, {
       input: { questionsRemaining: 1 },
-      executors: { generateText, decide },
-      userInput: async () => answers.shift() ?? "no",
+      executors,
     });
+    expect(result.status).toBe("idle");
+
+    const playerEvents = [{ type: "GUESS_RIGHT" }, { type: "PLAY_AGAIN_NO" }] as const;
+    for (const event of playerEvents) {
+      if (result.status !== "idle") throw new Error(`expected idle, got ${result.status}`);
+      result = await runAgent(twentyQuestionsMachine, {
+        snapshot: result.persistedSnapshot,
+        event,
+        executors,
+      });
+    }
 
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");

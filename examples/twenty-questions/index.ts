@@ -1,6 +1,6 @@
 /**
- * Twenty Questions — decision loop + guard-enforced legality + machine-owned
- * human input.
+ * Twenty Questions — decision loop + guard-enforced legality + human turns as
+ * gated machine events.
  *
  * The agent asks yes/no questions to narrow down a secret, then guesses.
  * Showcases:
@@ -13,25 +13,33 @@
  *     returning `undefined` when illegal). If the model chooses ASK on the
  *     final turn, `resolveDecision`'s mode-3 `canTake` check rejects it
  *     (`failure: 'rejected-by-guard'`) and retries.
- *   - Machine-owned input prompts: states that need the user invoke
- *     `agent.userInput` with prompt data derived from context, so the host can
- *     just insert the machine and press play.
- *   - Side-question detour: the player's reply to a yes/no question may itself
- *     be a question ("is a lizard considered domestic?"). `classifyAnswer`
- *     returns a discriminated union — a yes/no answer OR a side question — and
- *     the side-question branch answers it (without revealing the secret), emits
- *     the answer (`SIDE_ANSWER`), and re-asks the SAME pending question. No
- *     turn is consumed and the transcript entry is untouched.
+ *   - Human turns as idle states with `meta.interaction` hints. States waiting
+ *     on the player have no invoke, so the run settles `idle`; the hints tell a
+ *     host which buttons to render (`ANSWER_YES` / `ANSWER_NO`, …) and which
+ *     event free chat text becomes (`textEvent`). Labels interpolate
+ *     `{question}` against the snapshot context, so the button row is captioned
+ *     with whatever the agent just asked. Resume with
+ *     `runAgent(machine, { snapshot: result.persistedSnapshot, event })`.
+ *   - Two paths into the same state: button events are deterministic (no model
+ *     call), free text goes through a classifier request instead.
+ *   - Side-question detour: the player's free-text reply to a yes/no question
+ *     may itself be a question ("is a lizard considered domestic?").
+ *     `classifyAnswer` returns a discriminated union — a yes/no answer OR a side
+ *     question — and the side-question branch answers it (without revealing the
+ *     secret), emits the answer (`SIDE_ANSWER`), and re-asks the SAME pending
+ *     question. No turn is consumed and the transcript entry is untouched.
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/twenty-questions/index.ts
  */
 import { z } from "zod";
+import type { SnapshotFrom } from "xstate";
 import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 import {
   type AgentMessage,
   assistantMessage,
   createAgentSchemas,
+  getStateMeta,
   runAgent,
   setupAgent,
   userMessage,
@@ -69,8 +77,33 @@ const models = defineModels({
   quick: openai("gpt-5.4-mini"),
 });
 
+/**
+ * Typed `meta.interaction` hints. Hosts read them off the idle snapshot to
+ * label buttons and route free chat text to an event.
+ */
+const metaSchema = z.object({
+  interaction: z
+    .object({
+      label: z.string(),
+      events: z
+        .record(
+          z.string(),
+          z.object({
+            label: z.string().optional(),
+            style: z.enum(["primary", "danger", "default"]).optional(),
+          }),
+        )
+        .optional(),
+      textEvent: z.string().optional(),
+    })
+    .optional(),
+});
+
 export const twentyQuestionsSchemas = createAgentSchemas({
+  meta: metaSchema,
   context: z.object({
+    /** What the agent is currently waiting on; `{question}` in idle labels. */
+    question: z.string(),
     maxQuestions: z.number(),
     questionsRemaining: z.number(),
     transcript: z.array(transcriptTurnSchema),
@@ -95,9 +128,17 @@ export const twentyQuestionsSchemas = createAgentSchemas({
   events: {
     ASK: z.object({ question: z.string() }),
     GUESS: z.object({ guess: z.string() }),
+    /** Free-text player replies (the `textEvent` of each idle state). */
     ANSWER: z.object({ rawAnswer: z.string() }),
     GUESS_FEEDBACK: z.object({ rawAnswer: z.string() }),
     PLAY_AGAIN: z.object({ rawAnswer: z.string() }),
+    /** Button replies: deterministic, no classifier call. */
+    ANSWER_YES: z.object({}),
+    ANSWER_NO: z.object({}),
+    GUESS_RIGHT: z.object({}),
+    GUESS_WRONG: z.object({}),
+    PLAY_AGAIN_YES: z.object({}),
+    PLAY_AGAIN_NO: z.object({}),
   },
   emitted: {
     // The agent's brief answer to a player's side question, surfaced so the
@@ -109,6 +150,10 @@ export const twentyQuestionsSchemas = createAgentSchemas({
 const agentSetup = setupAgent({
   schemas: twentyQuestionsSchemas,
   models,
+  // Deterministic idle detection: the states waiting on the player are exactly
+  // the ones tagged `waiting`, so runAgent does not fall back to its timing
+  // heuristic.
+  isSuspended: (snapshot) => snapshot.hasTag("waiting"),
   requests: {
     classifyAnswer: {
       schemas: {
@@ -249,9 +294,64 @@ function renderTranscriptPrompt(context: {
   ].join("\n");
 }
 
+const PLAY_AGAIN_PROMPT = "Do you want to play another round?";
+
+/** Record a yes/no answer against the pending transcript entry. */
+function withAnswer(
+  context: {
+    transcript: { question: string; answer: "yes" | "no"; rawAnswer: string }[];
+    messages: AgentMessage[];
+  },
+  answer: "yes" | "no",
+  rawAnswer: string,
+) {
+  return {
+    transcript: [
+      ...context.transcript.slice(0, -1),
+      { ...context.transcript.at(-1)!, answer, rawAnswer },
+    ],
+    messages: [...context.messages, userMessage(rawAnswer)],
+    pendingRawAnswer: null,
+  };
+}
+
+/** Apply guess feedback to the score and queue the play-again prompt. */
+function withGuessFeedback(
+  context: { agentScore: number; userScore: number; messages: AgentMessage[] },
+  correct: boolean,
+  rawAnswer: string,
+) {
+  return {
+    agentScore: context.agentScore + (correct ? 1 : 0),
+    userScore: context.userScore + (correct ? 0 : 1),
+    messages: [
+      ...context.messages,
+      userMessage(rawAnswer),
+      assistantMessage(PLAY_AGAIN_PROMPT),
+    ],
+    pendingRawAnswer: null,
+    question: PLAY_AGAIN_PROMPT,
+  };
+}
+
+/** Reset for another round; scores and round count carry over. */
+function freshRound(context: { maxQuestions: number; round: number }) {
+  return {
+    questionsRemaining: context.maxQuestions,
+    transcript: [],
+    messages: [],
+    pendingRawAnswer: null,
+    pendingSideQuestion: null,
+    guess: null,
+    question: "",
+    round: context.round + 1,
+  };
+}
+
 export const twentyQuestionsMachine = agentSetup.createMachine({
   id: "twenty-questions",
   context: ({ input }) => ({
+    question: "",
     maxQuestions: input.questionsRemaining,
     questionsRemaining: input.questionsRemaining,
     transcript: [],
@@ -290,6 +390,7 @@ export const twentyQuestionsMachine = agentSetup.createMachine({
             ? {
                 target: "awaitingAnswer",
                 context: {
+                  question: event.question,
                   transcript: [
                     ...context.transcript,
                     {
@@ -307,6 +408,7 @@ export const twentyQuestionsMachine = agentSetup.createMachine({
           target: "awaitingGuessFeedback",
           context: {
             guess: event.guess,
+            question: `My guess is ${event.guess}. Was I right?`,
             messages: [
               ...context.messages,
               assistantMessage(`My guess is ${event.guess}. Was I right?`),
@@ -316,17 +418,34 @@ export const twentyQuestionsMachine = agentSetup.createMachine({
       },
     },
 
+    // No invoke: the run settles idle here and a host resumes with one of the
+    // accepted events. Buttons answer directly; free text goes to ANSWER and
+    // gets classified (which is also how side questions are detected).
     awaitingAnswer: {
-      invoke: {
-        src: "agent.userInput",
-        input: ({ context }) => ({
-          prompt: context.transcript.at(-1)?.question ?? "Answer yes or no.",
-        }),
-        onDone: ({ output }) => ({
-          target: "classifyingAnswer",
-          context: {
-            pendingRawAnswer: output,
+      tags: ["waiting"],
+      meta: {
+        interaction: {
+          label: "{question}",
+          events: {
+            ANSWER_YES: { label: "Yes", style: "primary" },
+            ANSWER_NO: { label: "No" },
+            ANSWER: { label: "Reply" },
           },
+          textEvent: "ANSWER",
+        },
+      },
+      on: {
+        ANSWER_YES: ({ context }) => ({
+          target: "deciding",
+          context: withAnswer(context, "yes", "yes"),
+        }),
+        ANSWER_NO: ({ context }) => ({
+          target: "deciding",
+          context: withAnswer(context, "no", "no"),
+        }),
+        ANSWER: ({ event }) => ({
+          target: "classifyingAnswer",
+          context: { pendingRawAnswer: event.rawAnswer },
         }),
       },
     },
@@ -408,14 +527,30 @@ export const twentyQuestionsMachine = agentSetup.createMachine({
     },
 
     awaitingGuessFeedback: {
-      invoke: {
-        src: "agent.userInput",
-        input: ({ context }) => ({
-          prompt: `My guess is ${context.guess}. Was I right?`,
+      tags: ["waiting"],
+      meta: {
+        interaction: {
+          label: "{question}",
+          events: {
+            GUESS_RIGHT: { label: "Got it", style: "primary" },
+            GUESS_WRONG: { label: "Nope", style: "danger" },
+            GUESS_FEEDBACK: { label: "Reply" },
+          },
+          textEvent: "GUESS_FEEDBACK",
+        },
+      },
+      on: {
+        GUESS_RIGHT: ({ context }) => ({
+          target: "awaitingPlayAgain",
+          context: withGuessFeedback(context, true, "correct"),
         }),
-        onDone: ({ output }) => ({
+        GUESS_WRONG: ({ context }) => ({
+          target: "awaitingPlayAgain",
+          context: withGuessFeedback(context, false, "wrong"),
+        }),
+        GUESS_FEEDBACK: ({ event }) => ({
           target: "classifyingGuessFeedback",
-          context: { pendingRawAnswer: output },
+          context: { pendingRawAnswer: event.rawAnswer },
         }),
       },
     },
@@ -430,30 +565,44 @@ export const twentyQuestionsMachine = agentSetup.createMachine({
         }),
         onDone: ({ context, output }) => ({
           target: "awaitingPlayAgain",
-          context: {
-            agentScore: context.agentScore + (output.correct ? 1 : 0),
-            userScore: context.userScore + (output.correct ? 0 : 1),
-            messages: [
-              ...context.messages,
-              userMessage(context.pendingRawAnswer ?? ""),
-              assistantMessage("Do you want to play another round?"),
-            ],
-            pendingRawAnswer: null,
-          },
+          context: withGuessFeedback(context, output.correct, context.pendingRawAnswer ?? ""),
         }),
-        onError: { target: "awaitingPlayAgain" },
+        onError: {
+          target: "awaitingPlayAgain",
+          context: { question: PLAY_AGAIN_PROMPT },
+        },
       },
     },
 
     awaitingPlayAgain: {
-      invoke: {
-        src: "agent.userInput",
-        input: {
-          prompt: "Do you want to play another round?",
+      tags: ["waiting"],
+      meta: {
+        interaction: {
+          label: "{question}",
+          events: {
+            PLAY_AGAIN_YES: { label: "Play again", style: "primary" },
+            PLAY_AGAIN_NO: { label: "Stop here" },
+            PLAY_AGAIN: { label: "Reply" },
+          },
+          textEvent: "PLAY_AGAIN",
         },
-        onDone: ({ output }) => ({
+      },
+      on: {
+        PLAY_AGAIN_YES: ({ context }) => ({
+          target: "deciding",
+          context: freshRound(context),
+        }),
+        PLAY_AGAIN_NO: ({ context }) => ({
+          target: "gameOver",
+          context: {
+            messages: [...context.messages, userMessage("no")],
+            pendingRawAnswer: null,
+            guess: context.guess ?? "",
+          },
+        }),
+        PLAY_AGAIN: ({ event }) => ({
           target: "classifyingPlayAgain",
-          context: { pendingRawAnswer: output },
+          context: { pendingRawAnswer: event.rawAnswer },
         }),
       },
     },
@@ -467,18 +616,7 @@ export const twentyQuestionsMachine = agentSetup.createMachine({
         }),
         onDone: ({ context, output }) =>
           output.playAgain
-            ? {
-                target: "deciding",
-                context: {
-                  questionsRemaining: context.maxQuestions,
-                  transcript: [],
-                  messages: [],
-                  pendingRawAnswer: null,
-                  pendingSideQuestion: null,
-                  guess: null,
-                  round: context.round + 1,
-                },
-              }
+            ? { target: "deciding", context: freshRound(context) }
             : {
                 target: "gameOver",
                 context: {
@@ -522,16 +660,67 @@ export const twentyQuestionsMachine = agentSetup.createMachine({
 
 const executors = createAiSdkExecutors({ models });
 
+type TwentyQuestionsSnapshot = SnapshotFrom<typeof twentyQuestionsMachine>;
+
+/** What a host (or the test) sends to unblock an idle machine. */
+export type PlayerEvent =
+  | { type: "ANSWER_YES" }
+  | { type: "ANSWER_NO" }
+  | { type: "GUESS_RIGHT" }
+  | { type: "GUESS_WRONG" }
+  | { type: "PLAY_AGAIN_YES" }
+  | { type: "PLAY_AGAIN_NO" }
+  | { type: "ANSWER"; rawAnswer: string }
+  | { type: "GUESS_FEEDBACK"; rawAnswer: string }
+  | { type: "PLAY_AGAIN"; rawAnswer: string };
+
+/** `{key}` placeholders in interaction labels resolve against context. */
+export function resolveInteractionLabel(label: string, context: Record<string, unknown>): string {
+  return label
+    .replace(/\{(\w+)\}/g, (_, key: string) => {
+      const value = context[key];
+      return typeof value === "string" || typeof value === "number" ? String(value) : "";
+    })
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Prompt for whatever the idle state is waiting on, from its meta hint. */
+export function idlePrompt(snapshot: TwentyQuestionsSnapshot): string {
+  const interaction = getStateMeta(snapshot).interaction;
+  return resolveInteractionLabel(interaction?.label ?? "?", snapshot.context);
+}
+
+/** Route free text to the idle state's `textEvent`. */
+export function toPlayerEvent(snapshot: TwentyQuestionsSnapshot, text: string): PlayerEvent {
+  const textEvent = getStateMeta(snapshot).interaction?.textEvent ?? "ANSWER";
+  return { type: textEvent, rawAnswer: text } as PlayerEvent;
+}
+
 export async function main() {
-  const result = await runAgent(twentyQuestionsMachine, {
-    input: { questionsRemaining: 20 },
+  const shared = {
     executors,
-    userInput: async ({ prompt }) => promptLine(`${prompt ?? ">"} `),
     on: {
-      SIDE_ANSWER: ({ answer }) => console.log(`[side answer] ${answer}`),
+      SIDE_ANSWER: ({ answer }: { answer: string }) => console.log(`[side answer] ${answer}`),
     },
-    onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
+    onTransition: (snapshot: TwentyQuestionsSnapshot) =>
+      console.log("[state]", JSON.stringify(snapshot.value)),
+  };
+
+  let result = await runAgent(twentyQuestionsMachine, {
+    input: { questionsRemaining: 20 },
+    ...shared,
   });
+
+  // Every player turn settles the run idle. Resume from `persistedSnapshot`.
+  while (result.status === "idle") {
+    const text = await promptLine(`${idlePrompt(result.snapshot)}\n> `);
+    result = await runAgent(twentyQuestionsMachine, {
+      snapshot: result.persistedSnapshot,
+      event: toPlayerEvent(result.snapshot, text),
+      ...shared,
+    });
+  }
 
   if (result.status !== "done") {
     throw new Error(`Twenty questions did not complete: ${result.status}`);

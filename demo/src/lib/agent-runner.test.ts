@@ -66,7 +66,11 @@ describe("scenario outcomes (keyless)", () => {
   test("routing picks a typed queue", async () => {
     const result = await start("routing", "I was charged twice and cannot download my invoice.");
     expect(result.status).toBe("done");
-    expect((result.output as { queue: string }).queue).toBe("billing");
+    const output = result.output as { queue: string; reason: string };
+    expect(output.queue).toBe("billing");
+    // The model must justify the route, and the justification reaches the chat.
+    expect(output.reason).not.toBe("");
+    expect(result.response).toContain(output.reason);
   });
 
   test("research runs both regions then synthesizes", async () => {

@@ -1,13 +1,12 @@
 import { describe, expect, test } from "vitest";
-import { runAgent } from "@statelyai/agent";
+import { getStateMeta, runAgent } from "@statelyai/agent";
 import type {
   AgentDecisionRequest,
   AgentMessage,
   AgentRequestExecutor,
-  AgentUserInput,
   ChosenEvent,
 } from "@statelyai/agent";
-import { twentyQuestionsMachine } from "./index.js";
+import { idlePrompt, twentyQuestionsMachine, type PlayerEvent } from "./index.js";
 
 function textContent(message: AgentMessage | undefined) {
   return typeof message?.content === "string" ? message.content : "";
@@ -62,13 +61,66 @@ function createClassifier(seenModels: string[] = []): AgentRequestExecutor {
   };
 }
 
+interface PlayOptions {
+  input?: { questionsRemaining: number };
+  decide: (request: AgentDecisionRequest) => Promise<{ event: ChosenEvent }>;
+  generateText?: AgentRequestExecutor;
+  /** Consumed in order on each idle settle. */
+  playerEvents: PlayerEvent[];
+  on?: Record<string, (payload: never) => void>;
+}
+
+/**
+ * Drives the machine through its idle-resume loop, recording the interaction
+ * hint shown at each idle settle.
+ */
+async function play(options: PlayOptions) {
+  const queued = [...options.playerEvents];
+  const prompts: string[] = [];
+  const interactions: { events: string[]; textEvent?: string }[] = [];
+  const shared = {
+    executors: {
+      generateText: options.generateText ?? createClassifier(),
+      decide: options.decide,
+    },
+    ...(options.on ? { on: options.on as never } : {}),
+  };
+
+  let result = await runAgent(twentyQuestionsMachine, {
+    input: options.input ?? { questionsRemaining: 20 },
+    ...shared,
+  });
+
+  while (result.status === "idle") {
+    // Every idle state must advertise how a host can unblock it.
+    const interaction = getStateMeta(result.snapshot).interaction;
+    expect(interaction, `no interaction meta on ${JSON.stringify(result.snapshot.value)}`).toBeDefined();
+    prompts.push(idlePrompt(result.snapshot));
+    interactions.push({
+      events: Object.keys(interaction!.events ?? {}),
+      textEvent: interaction!.textEvent,
+    });
+
+    const event = queued.shift();
+    if (!event) throw new Error(`ran out of player events at: ${prompts.at(-1)}`);
+    // Buttons and free text alike are ordinary machine events the state accepts.
+    expect(result.snapshot.can(event as never)).toBe(true);
+
+    result = await runAgent(twentyQuestionsMachine, {
+      snapshot: result.persistedSnapshot,
+      event,
+      ...shared,
+    });
+  }
+
+  return { result, prompts, interactions };
+}
+
 describe("twenty-questions", () => {
-  test("press-play flow: machine owns context, user prompts, and event validation", async () => {
+  test("press-play flow: machine owns context, idle interaction hints, and event validation", async () => {
     let askCount = 0;
     const decisionModels: string[] = [];
     const textModels: string[] = [];
-    const prompts: string[] = [];
-    const answers = ["mhm", "for sure", "no", "no"];
 
     const decide = async (request: AgentDecisionRequest): Promise<{ event: ChosenEvent }> => {
       decisionModels.push(request.model);
@@ -79,13 +131,15 @@ describe("twenty-questions", () => {
       return { event: { type: "GUESS", guess: "a cat" } };
     };
 
-    const result = await runAgent(twentyQuestionsMachine, {
-      input: { questionsRemaining: 20 },
-      executors: { generateText: createClassifier(textModels), decide },
-      userInput: async (input: AgentUserInput) => {
-        prompts.push(input.prompt ?? "");
-        return answers.shift() ?? "no";
-      },
+    const { result, prompts, interactions } = await play({
+      decide,
+      generateText: createClassifier(textModels),
+      playerEvents: [
+        { type: "ANSWER", rawAnswer: "mhm" },
+        { type: "ANSWER", rawAnswer: "for sure" },
+        { type: "GUESS_FEEDBACK", rawAnswer: "no" },
+        { type: "PLAY_AGAIN", rawAnswer: "no" },
+      ],
     });
 
     expect(result.status).toBe("done");
@@ -97,14 +151,54 @@ describe("twenty-questions", () => {
       agentScore: 0,
       roundsPlayed: 1,
     });
+    // Labels interpolate `{question}` against the snapshot context.
     expect(prompts).toEqual([
       "Is it question 1?",
       "Is it question 2?",
       "My guess is a cat. Was I right?",
       "Do you want to play another round?",
     ]);
+    expect(interactions).toEqual([
+      { events: ["ANSWER_YES", "ANSWER_NO", "ANSWER"], textEvent: "ANSWER" },
+      { events: ["ANSWER_YES", "ANSWER_NO", "ANSWER"], textEvent: "ANSWER" },
+      { events: ["GUESS_RIGHT", "GUESS_WRONG", "GUESS_FEEDBACK"], textEvent: "GUESS_FEEDBACK" },
+      { events: ["PLAY_AGAIN_YES", "PLAY_AGAIN_NO", "PLAY_AGAIN"], textEvent: "PLAY_AGAIN" },
+    ]);
     expect(decisionModels).toEqual(["quick", "quick", "quick"]);
     expect(textModels).toEqual(["quick", "quick", "quick", "quick"]);
+  });
+
+  test("button events answer deterministically, without a classifier call", async () => {
+    const textModels: string[] = [];
+    let askCount = 0;
+
+    const { result, prompts } = await play({
+      generateText: createClassifier(textModels),
+      decide: async () => {
+        askCount += 1;
+        return askCount === 1
+          ? { event: { type: "ASK", question: "Is it an animal?" } }
+          : { event: { type: "GUESS", guess: "a cat" } };
+      },
+      playerEvents: [{ type: "ANSWER_YES" }, { type: "GUESS_RIGHT" }, { type: "PLAY_AGAIN_NO" }],
+    });
+
+    expect(result.status).toBe("done");
+    if (result.status !== "done") throw new Error("expected done");
+    expect(result.output).toEqual({
+      guess: "a cat",
+      questionsUsed: 1,
+      userScore: 0,
+      agentScore: 1,
+      roundsPlayed: 1,
+    });
+    expect(prompts).toEqual([
+      "Is it an animal?",
+      "My guess is a cat. Was I right?",
+      "Do you want to play another round?",
+    ]);
+    // No request executor ran: every reply came from a button.
+    expect(textModels).toEqual([]);
   });
 
   test("guard rejects ASK on the final turn; resolveDecision retries through runAgent", async () => {
@@ -119,10 +213,13 @@ describe("twenty-questions", () => {
       return { event: { type: "GUESS", guess: "a dog" } };
     };
 
-    const result = await runAgent(twentyQuestionsMachine, {
+    const { result } = await play({
       input: { questionsRemaining: 1 },
-      executors: { generateText: createClassifier(), decide },
-      userInput: async () => "correct",
+      decide,
+      playerEvents: [
+        { type: "GUESS_FEEDBACK", rawAnswer: "correct" },
+        { type: "PLAY_AGAIN", rawAnswer: "no" },
+      ],
     });
 
     expect(result.status).toBe("done");
@@ -140,21 +237,18 @@ describe("twenty-questions", () => {
 
   test("can play another round without host-side accepted-event branching", async () => {
     const guesses = ["a fish", "a piano"];
-    const answers = ["correct", "yes", "wrong", "no"];
-    const prompts: string[] = [];
 
-    const result = await runAgent(twentyQuestionsMachine, {
+    const { result, prompts } = await play({
       input: { questionsRemaining: 1 },
-      executors: {
-        generateText: createClassifier(),
-        decide: async () => ({
-          event: { type: "GUESS", guess: guesses.shift() ?? "unknown" },
-        }),
-      },
-      userInput: async ({ prompt }) => {
-        prompts.push(prompt ?? "");
-        return answers.shift() ?? "no";
-      },
+      decide: async () => ({
+        event: { type: "GUESS", guess: guesses.shift() ?? "unknown" },
+      }),
+      playerEvents: [
+        { type: "GUESS_FEEDBACK", rawAnswer: "correct" },
+        { type: "PLAY_AGAIN", rawAnswer: "yes" },
+        { type: "GUESS_FEEDBACK", rawAnswer: "wrong" },
+        { type: "PLAY_AGAIN", rawAnswer: "no" },
+      ],
     });
 
     expect(result.status).toBe("done");
@@ -175,11 +269,7 @@ describe("twenty-questions", () => {
   });
 
   test("side-question detour: answers it, emits SIDE_ANSWER, re-asks the SAME question without consuming a turn", async () => {
-    const prompts: string[] = [];
     const sideAnswers: { question: string; answer: string }[] = [];
-    // Reply 1 is a side question; reply 2 answers the re-asked question; then
-    // guess feedback and play-again wrap up.
-    const answers = ["is a lizard considered domestic?", "mhm", "correct", "no"];
 
     let decisions = 0;
     const decide = async (): Promise<{ event: ChosenEvent }> => {
@@ -190,17 +280,19 @@ describe("twenty-questions", () => {
       return { event: { type: "GUESS", guess: "a lizard" } };
     };
 
-    const result = await runAgent(twentyQuestionsMachine, {
-      input: { questionsRemaining: 20 },
-      executors: { generateText: createClassifier(), decide },
-      userInput: async ({ prompt }: AgentUserInput) => {
-        prompts.push(prompt ?? "");
-        return answers.shift() ?? "no";
-      },
+    const { result, prompts } = await play({
+      decide,
+      // Reply 1 is a side question; reply 2 answers the re-asked question.
+      playerEvents: [
+        { type: "ANSWER", rawAnswer: "is a lizard considered domestic?" },
+        { type: "ANSWER", rawAnswer: "mhm" },
+        { type: "GUESS_FEEDBACK", rawAnswer: "correct" },
+        { type: "PLAY_AGAIN", rawAnswer: "no" },
+      ],
       on: {
-        SIDE_ANSWER: ({ question, answer }) => {
+        SIDE_ANSWER: (({ question, answer }: { question: string; answer: string }) => {
           sideAnswers.push({ question, answer });
-        },
+        }) as never,
       },
     });
 

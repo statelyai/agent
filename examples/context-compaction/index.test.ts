@@ -1,19 +1,14 @@
 import { describe, expect, test } from "vitest";
-import { runAgent } from "@statelyai/agent";
-import type { AgentMessage, AgentRequestExecutor, AgentUserInput } from "@statelyai/agent";
-import { contextCompactionMachine } from "./index.js";
+import type { AgentMessage, AgentRequestExecutor } from "@statelyai/agent";
+import { getStateMeta, runAgent } from "@statelyai/agent";
+import {
+  contextCompactionMachine,
+  idlePrompt,
+  runContextCompactionExample,
+} from "./index.js";
 
 function textContent(message: AgentMessage | undefined): string {
   return typeof message?.content === "string" ? message.content : "";
-}
-
-/**
- * Scripts the human side: answers each `agent.userInput` from a queue, then
- * types "exit" once the queue is drained to end the loop.
- */
-function scriptedUserInput(answers: string[]): (input: AgentUserInput) => Promise<string> {
-  let i = 0;
-  return async () => answers[i++] ?? "exit";
 }
 
 /**
@@ -42,10 +37,10 @@ describe("context-compaction", () => {
 
     // maxMessages=4, keepRecent=2. Each turn adds 2 messages (user + assistant),
     // so after turn 3 (6 messages) the window overflows and compaction runs.
-    const result = await runAgent(contextCompactionMachine, {
+    const result = await runContextCompactionExample({
       input: { maxMessages: 4, keepRecent: 2 },
-      executors: { generateText },
-      userInput: scriptedUserInput(["q1", "q2", "q3"]),
+      generateText,
+      userMessages: ["q1", "q2", "q3"],
     });
 
     expect(result.status).toBe("done");
@@ -65,10 +60,10 @@ describe("context-compaction", () => {
     const { generateText, respondCalls } = createModel();
 
     // Same overflow-then-one-more-turn script: turn 4 runs after compaction.
-    await runAgent(contextCompactionMachine, {
+    await runContextCompactionExample({
       input: { maxMessages: 4, keepRecent: 2 },
-      executors: { generateText },
-      userInput: scriptedUserInput(["q1", "q2", "q3", "q4"]),
+      generateText,
+      userMessages: ["q1", "q2", "q3", "q4"],
     });
 
     // Turns 1–3 ran before any summary existed; turn 4 ran after compaction.
@@ -84,11 +79,11 @@ describe("context-compaction", () => {
   test("'exit' ends with output containing turns and summary", async () => {
     const { generateText } = createModel();
 
-    const result = await runAgent(contextCompactionMachine, {
+    const result = await runContextCompactionExample({
       input: { maxMessages: 8, keepRecent: 4 },
-      executors: { generateText },
+      generateText,
       // One real turn, then exit immediately.
-      userInput: scriptedUserInput(["hello", "exit"]),
+      userMessages: ["hello", "exit"],
     });
 
     expect(result.status).toBe("done");
@@ -98,5 +93,36 @@ describe("context-compaction", () => {
     // No overflow with maxMessages=8, so no compaction ran: summary stays null.
     expect(result.output.summary).toBeNull();
     expect(result.output).toHaveProperty("messages");
+  });
+
+  test("settles idle in awaitingUser with interaction meta a host can drive", async () => {
+    const { generateText } = createModel();
+
+    const first = await runAgent(contextCompactionMachine, {
+      input: { maxMessages: 4, keepRecent: 2 },
+      executors: { generateText },
+    });
+
+    // No invoke on `awaitingUser`, so the run settles idle there.
+    expect(first.status).toBe("idle");
+    if (first.status !== "idle") return;
+
+    const interaction = getStateMeta(first.snapshot).interaction;
+    expect(interaction?.textEvent).toBe("USER_MESSAGE");
+    expect(interaction?.events?.USER_MESSAGE).toBeDefined();
+    // Labels interpolate `{contextKey}` against the snapshot context.
+    expect(idlePrompt(first.snapshot)).toContain("turn 0");
+
+    // Resuming from `persistedSnapshot` with the text event advances one turn.
+    const second = await runAgent(contextCompactionMachine, {
+      snapshot: first.persistedSnapshot,
+      event: { type: "USER_MESSAGE", text: "hello" },
+      executors: { generateText },
+    });
+
+    expect(second.status).toBe("idle");
+    if (second.status !== "idle") return;
+    expect(second.snapshot.context.turns).toBe(1);
+    expect(textContent(second.snapshot.context.messages.at(-1))).toBe("reply 1");
   });
 });

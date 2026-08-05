@@ -18,6 +18,7 @@ export {
   turnSummarySchema,
   rpsMachine,
   rpsSchemas,
+  runRpsExample,
   renderHistory as renderRpsHistory,
 } from "./game-agent/index.js";
 export { jokeActors, jokeMachine, jokeSchemas, rateJoke, tellJoke } from "./joke/index.js";

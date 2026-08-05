@@ -1,6 +1,6 @@
 {
   "name": "joke",
-  "title": "Joke Teller",
+  "title": "Tell jokes until one lands",
   "kind": "agent-workflow",
   "origin": {
     "type": "stately-agent",
@@ -8,11 +8,15 @@
     "url": null
   },
   "comparison": {
-    "targets": ["Vercel AI SDK", "LangGraph"],
-    "purpose": "Machine-owned tell -> rate -> decide loop: a joke streams, gets rated 1-10, and the model decides (via agent.decide) whether to tell another or stop."
+    "targets": [
+      "Vercel AI SDK",
+      "LangGraph"
+    ],
+    "purpose": "Tells a joke, rates it out of 10, and decides for itself whether to try another one or stop."
   },
   "starters": [
     "Tell me a joke about penguins reviewing code.",
-    "Tell me a joke about a state machine that won't transition."
+    "Tell me a joke about a state machine that won't transition.",
+    "Tell me a joke about a database that trusts no one."
   ]
 }

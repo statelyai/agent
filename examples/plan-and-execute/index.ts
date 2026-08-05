@@ -44,8 +44,8 @@ const agentSetup = setupAgent({
   context: planAndExecuteContextSchema,
   input: z.object({ goal: z.string() }),
   output: z.object({
-    steps: z.array(stepSchema),
     answer: z.string(),
+    steps: z.array(stepSchema),
     evidence: z.record(z.string(), z.string()),
   }),
   // solveTask always sets `answer` before `done` reads it — narrow it non-null there.
@@ -171,8 +171,8 @@ export const planAndExecuteMachine = agentSetup.createMachine({
     done: {
       type: "final",
       output: ({ context }) => ({
-        steps: context.steps,
         answer: context.answer,
+        steps: context.steps,
         evidence: context.evidence,
       }),
     },

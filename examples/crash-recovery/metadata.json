@@ -1,6 +1,6 @@
 {
   "name": "crash-recovery",
-  "title": "Crash Recovery",
+  "title": "Resume a run that crashed mid-way",
   "kind": "agent-workflow",
   "origin": {
     "type": "stately-agent",
@@ -8,8 +8,14 @@
     "url": null
   },
   "comparison": {
-    "targets": ["LangGraph checkpointer"],
-    "purpose": "Durable recovery without a checkpoint: persist replayable log entries as they happen, then resume with runAgent({ events }) — recorded results replay, the in-flight request re-executes idempotently."
+    "targets": [
+      "LangGraph checkpointer"
+    ],
+    "purpose": "Writes an article in two steps while logging every result, then restarts from the log alone: finished steps replay instantly and only the interrupted one runs again."
   },
-  "starters": []
+  "starters": [
+    "state machines",
+    "the history of the fax machine",
+    "why builds are slow"
+  ]
 }

@@ -17,8 +17,11 @@ test("sql agent plans, awaits approval, executes the local engine, and summarize
   const { interaction, output } = await runSqlAgentExample({ executors: { generateText } });
 
   // The idle approval state exposed a typed interaction.
-  assert.equal(interaction?.type, "select");
   assert.equal(interaction?.label, "Run this query against the orders table?");
+  assert.deepEqual(interaction?.events, {
+    APPROVE: { label: "Approve", style: "primary" },
+    REJECT: { label: "Reject", style: "danger" },
+  });
 
   // The local engine really ran: electronics amounts are 250 + 90 = 340.
   assert.deepEqual(output.plan, {

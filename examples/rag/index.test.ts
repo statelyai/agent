@@ -25,13 +25,10 @@ test("accumulates conversational memory across a turn", async () => {
 
   const result = await runRAGExample({
     question: "What is a guard?",
-    memory: ["Q: earlier question", "A: earlier answer"],
     generateText,
   });
 
   expect(result.memory).toEqual([
-    "Q: earlier question",
-    "A: earlier answer",
     "Q: What is a guard?",
     "A: a guard is a condition",
   ]);

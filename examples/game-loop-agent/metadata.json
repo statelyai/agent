@@ -1,0 +1,24 @@
+{
+  "name": "game-loop-agent",
+  "title": "Game loop agent",
+  "kind": "agent-workflow",
+  "origin": {
+    "type": "stately-agent",
+    "source": "Created in this repository",
+    "url": null
+  },
+  "comparison": {
+    "targets": ["LangGraph", "Burr", "Flowise"],
+    "purpose": "Shows an invoked agent that receives pushed game events and acts only on its turn, with human moves as gated machine events (HUMAN_ROLL / HUMAN_BANK / ROUND_REPLY) hinted through meta.interaction, plus natural-language round control."
+  },
+  "starters": [
+    {
+      "seed": 11
+    },
+    {
+      "seed": 3,
+      "target": 30,
+      "maxRounds": 2
+    }
+  ]
+}

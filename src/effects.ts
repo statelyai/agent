@@ -26,8 +26,8 @@ import {
   type ExecutableActionObject,
   type SnapshotFrom,
 } from "xstate";
-import { getAgentRequestsWith, getInvokeEffectMetadata, type AgentPlanRequest } from "./steps.js";
-import { isDecisionLogic, isPlanLogic, type AgentDecisionRequest } from "./decision.js";
+import { getAgentRequestsWith, getInvokeEffectMetadata } from "./steps.js";
+import { isDecisionLogic, type AgentDecisionRequest } from "./decision.js";
 import {
   extractCallUsage,
   isTextLogic,
@@ -62,8 +62,6 @@ import {
  * - `decision` — an `agent.decide`/`DecisionLogic` invoke. Resolve with
  *   `resolveDecision` and journal the CHOSEN machine event directly (a decision
  *   has no output value of its own; the chosen event advances the machine).
- * - `plan` — an `agent.plan` invoke (multi-event). Drive it a step at a time
- *   (see `resolveAgentRequests`), journaling each applied event.
  * - `task` — any other invoke/spawn: a plain host-run task keyed by `src` +
  *   `input`. Run it, then journal `toDoneEvent`/`toErrorEvent`.
  * - `delay` — an `after(...)` timer. Schedule it; when it fires, journal
@@ -83,7 +81,6 @@ export type AgentEffect =
       toErrorEvent(error: unknown): EventObject;
     }
   | { kind: "decision"; requestId: string; request: AgentDecisionRequest }
-  | { kind: "plan"; requestId: string; request: AgentPlanRequest }
   | {
       kind: "task";
       requestId: string;
@@ -147,7 +144,7 @@ export interface AgentUsageEvent extends EventObject {
   /** The settled call's token usage, as reported by the executor. */
   usage: AgentCallUsage;
   /** Which kind of request reported it. */
-  kind?: "text" | "decision" | "plan";
+  kind?: "text" | "decision";
   /** The reporting request's durable invoke id. */
   id?: string;
   /** The reporting request's invoke `src`. */
@@ -377,7 +374,7 @@ interface RawAction {
   params?: unknown;
 }
 
-// Builds a text/decision/plan/task effect for one invoke site. Prefers a
+// Builds a text/decision/task effect for one invoke site. Prefers a
 // pre-shaped request (from getAgentRequestsWith, which resolves prompts /
 // schemas / decision candidate events exactly as the step path does); falls
 // back to classifying the logic directly for a snapshot-owed child that no
@@ -407,14 +404,11 @@ function buildInvokeEffect(
   if (mapped?.kind === "decision") {
     return { kind: "decision", requestId, request: mapped };
   }
-  if (mapped?.kind === "plan") {
-    return { kind: "plan", requestId, request: mapped };
-  }
 
   // No pre-shaped request (a dynamic spawn, or a snapshot-owed child) —
   // classify the logic directly.
   const logic =
-    isTextLogic(meta.logic) || isDecisionLogic(meta.logic) || isPlanLogic(meta.logic)
+    isTextLogic(meta.logic) || isDecisionLogic(meta.logic)
       ? meta.logic
       : typeof meta.src === "string"
         ? options.actors?.[meta.src]
@@ -465,8 +459,8 @@ function buildInvokeEffect(
  * Ordering is load-bearing: a single transition's actions are emitted in
  * document order (a custom entry action, a spawn, and a `sendTo` in that order
  * yield `execute`, then `task`/agent effect, then `execute` — never a
- * reordered set). Effects visible only on the snapshot (an `agent.plan` that
- * re-surfaces every step, and children spawned by an EARLIER transition that
+ * reordered set). Effects visible only on the snapshot (children spawned by
+ * an EARLIER transition that
  * have not completed yet — the fan-out / crash-resume case) are appended after
  * the action-derived effects, deduped by site id.
  *
@@ -486,8 +480,8 @@ export function getAgentEffects(
   const resolved = getRegisteredAgentExecutionOptions(machine, options);
   const events = toEvents(options.history);
 
-  // Pre-shape text/decision requests (in action order) plus any re-surfacing
-  // plan requests (from snapshot children) exactly as the step path does.
+  // Pre-shape text/decision requests (in action order) exactly as the step
+  // path does.
   const requests = getAgentRequestsWith(actions as unknown as readonly RawAction[], {
     ...resolved,
     snapshot,
@@ -571,20 +565,7 @@ export function getAgentEffects(
     }
   }
 
-  // 2. Re-surfacing plan requests (an `agent.plan` invoke re-surfaces every
-  // step from snapshot children, not the action list, after its first step).
-  for (const request of requests) {
-    if (request.kind === "plan" && !emitted.has(request.id)) {
-      effects.push({
-        kind: "plan",
-        requestId: `${request.id}#${invokeOccurrence(events, request.id)}`,
-        request,
-      });
-      emitted.add(request.id);
-    }
-  }
-
-  // 3. Snapshot-owed children: spawned by an earlier transition and not yet
+  // 2. Snapshot-owed children: spawned by an earlier transition and not yet
   // completed. Alpha.24 prunes matching completions from the snapshot; the
   // history check additionally protects older/restored snapshots.
   const children = (snapshot as AnyMachineSnapshot & { children?: Record<string, unknown> })

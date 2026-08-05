@@ -27,10 +27,26 @@ describe("example library auto-discovery", () => {
     const summaries = listExampleSummaries();
     const joke = summaries.find((summary) => summary.id === "joke");
     expect(joke?.starters.length).toBeGreaterThan(0);
-    expect(typeof joke?.starters[0]).toBe("string");
+    expect(joke?.starters[0]).toMatchObject({ kind: "text", label: expect.any(String) });
     // Most runnable examples should ship at least one starter.
     const withStarters = summaries.filter((summary) => summary.starters.length > 0);
     expect(withStarters.length).toBeGreaterThan(30);
+  });
+
+  it("excludes examples flagged manual in metadata.json", () => {
+    const ids = listExampleSummaries().map((summary) => summary.id);
+    // Host adapters and CLI-only scripts have nothing the demo can run.
+    expect(ids).not.toContain("langchain-host");
+    expect(ids).not.toContain("mastra-host");
+  });
+
+  it("normalizes starter shapes", () => {
+    const starters = listExampleSummaries().flatMap((summary) => summary.starters);
+    for (const starter of starters) {
+      expect(starter.label.length).toBeGreaterThan(0);
+      // Labels never leak raw JSON braces onto a chip.
+      expect(starter.label.startsWith("{")).toBe(false);
+    }
   });
 
   it("rejects unknown example ids", async () => {

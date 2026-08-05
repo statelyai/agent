@@ -47,7 +47,7 @@ export function EventActions({ idle, onSendEvent }: EventActionsProps) {
     if (idle.component === "cards" && (field?.kind.type === "string" || field?.kind.type === "enum")) {
       return (
         <CardsControl
-          title={idle.prompt ?? "Your hand — pick a rank to ask for"}
+          title={idle.prompt ?? "Your hand: pick a rank to ask for"}
           ranks={rankOptions(only)}
           onPick={(rank) => onSendEvent({ type: only.type, [field.name]: rank })}
         />
@@ -56,7 +56,7 @@ export function EventActions({ idle, onSendEvent }: EventActionsProps) {
     return (
       <div className="chat-form-card">
         <p className="chat-form-card__note">
-          unknown renderer &quot;{idle.component}&quot; — fell back to schema form
+          Unknown renderer &quot;{idle.component}&quot;. Using the schema form instead.
         </p>
         <SchemaForm
           schema={only.jsonSchema ?? { type: "object" }}

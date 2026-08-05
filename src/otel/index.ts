@@ -102,24 +102,15 @@ function usageAttributes(usage: AgentCallUsage | undefined): Attributes {
   return attributes;
 }
 
-/** The model ref a request targets: text/plan carry it on `input`, a decision inline. */
+/** The model ref a request targets: text carries it on `input`, a decision inline. */
 function requestModel(request: AgentStepRequest): string | undefined {
   const model = request.kind === "decision" ? request.model : request.input?.model;
   return typeof model === "string" ? model : undefined;
 }
 
-/** The `src` a text/plan invoke was declared with; a decision has none. */
+/** The `src` a text invoke was declared with; a decision has none. */
 function requestSrc(request: AgentStepRequest): string | undefined {
   return "src" in request && typeof request.src === "string" ? request.src : undefined;
-}
-
-/**
- * `gen_ai.operation.name` for a request. A plan request drives the machine
- * through a sequence of events, which semconv names `plan`; text and decision
- * requests are both single chat completions.
- */
-function operationName(request: AgentStepRequest): "chat" | "plan" {
-  return request.kind === "plan" ? "plan" : "chat";
 }
 
 /** Best-effort JSON, never throws — content capture must not break a run. */
@@ -251,14 +242,13 @@ export function createOtelTraceHandler(options: OtelTraceHandlerOptions): OtelTr
 
       case "request.start": {
         const request = event.request;
-        // A decision retry and each plan step re-use the durable invoke id.
+        // A decision retry re-uses the durable invoke id.
         // Close any span still open under it rather than leaking or colliding.
         endRequest(request.id, () => {});
         const model = requestModel(request);
-        const operation = operationName(request);
         const attributes: Attributes = {
           ...baseAttributes,
-          "gen_ai.operation.name": operation,
+          "gen_ai.operation.name": "chat",
           "agent.run_id": event.runId,
           "agent.request_id": request.id,
           "agent.request_kind": request.kind,
@@ -289,15 +279,11 @@ export function createOtelTraceHandler(options: OtelTraceHandlerOptions): OtelTr
             attributes["gen_ai.input.messages"] = json;
           }
         }
-        // Plan spans are internal orchestration; text/decision spans wrap the
-        // executor's provider call, which semconv names CLIENT.
-        const name =
-          operation === "plan"
-            ? `plan ${options.agentName ?? event.machineId}`
-            : `chat ${model ?? request.kind}`;
+        // A text/decision span wraps the executor's provider call, which
+        // semconv names CLIENT.
         const span = tracer.startSpan(
-          name,
-          { kind: operation === "plan" ? SpanKind.INTERNAL : SpanKind.CLIENT, attributes },
+          `chat ${model ?? request.kind}`,
+          { kind: SpanKind.CLIENT, attributes },
           runFor(event).context,
         );
         requests.set(request.id, { span, chunks: 0 });

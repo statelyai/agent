@@ -1,9 +1,9 @@
 /**
  * Declaration-emission canary (see tsconfig.json). Imports the package BY NAME
  * (resolved to the built dist/ .d.ts via package.json `exports`), builds a
- * machine with `agent.plan` + `agent.decide` + a text request, and RE-EXPORTS
+ * machine with `agent.decide` + a text request, and RE-EXPORTS
  * it. Emitting `machine`'s declaration forces TS to name every type its
- * inferred type references (PlanLogic/DecisionLogic/TextLogic and friends) — if
+ * inferred type references (DecisionLogic/TextLogic and friends) — if
  * any leaked-but-unexported symbol remains, tsc raises TS4023 here.
  *
  * Run with a built dist present: `pnpm build && pnpm check:dts`.
@@ -63,24 +63,13 @@ const setup = setupAgent({
   },
 });
 
-// PlanLogic (agent.plan) + DecisionLogic (agent.decide) + TextLogic (summarize)
-// all leak into this machine's inferred type — the TS4023 surface.
+// DecisionLogic (agent.decide) + TextLogic (summarize) both leak into this
+// machine's inferred type — the TS4023 surface.
 export const machine = setup.createMachine({
   id: "dts-consumer",
   context: ({ input }) => ({ topic: input.topic, summary: null }),
-  initial: "planning",
+  initial: "deciding",
   states: {
-    planning: {
-      invoke: {
-        src: "agent.plan",
-        input: ({ context }) => ({
-          model: "quick" as const,
-          prompt: `Manage: ${context.topic}`,
-          maxSteps: 4,
-        }),
-        onDone: { target: "deciding" },
-      },
-    },
     deciding: {
       invoke: {
         src: "agent.decide",

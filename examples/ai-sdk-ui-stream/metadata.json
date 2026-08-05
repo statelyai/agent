@@ -1,6 +1,6 @@
 {
   "name": "ai-sdk-ui-stream",
-  "title": "AI SDK UI Message Stream",
+  "title": "Write a tagline, then a pitch (streamed)",
   "kind": "host-adapter",
   "origin": {
     "type": "ai-sdk",
@@ -8,11 +8,15 @@
     "url": "https://ai-sdk.dev/docs/ai-sdk-ui/chatbot"
   },
   "comparison": {
-    "targets": ["LangGraph", "AI SDK"],
-    "purpose": "Bridges a runAgent run to the AI SDK v6 UI message stream (text parts + data-agent-state parts) so a useChat client consumes it unchanged."
+    "targets": [
+      "LangGraph",
+      "AI SDK"
+    ],
+    "purpose": "Streams a two-step run to the browser over the AI SDK v6 UI message stream, so a plain useChat client renders the text and the live machine state unchanged."
   },
   "starters": [
     "A keyboard-first task manager for developers.",
-    "Noise-cancelling earbuds that translate 40 languages live."
+    "Noise-cancelling earbuds that translate 40 languages live.",
+    "A coffee subscription that learns your taste from one rating a week."
   ]
 }

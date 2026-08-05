@@ -3,7 +3,8 @@
 @import "tailwindcss";
 @import "./styles/chat.css";
 @import "./styles/viz.css";
-@source "../node_modules/streamdown/dist/*.js";
+@import "tw-shimmer";
+@custom-variant dark (&:where(html[data-dark], html[data-dark] *));
 
 @theme inline {
   --color-background: var(--background);
@@ -18,6 +19,28 @@
   --color-destructive: var(--danger);
   --color-ring: var(--primary);
   --color-card: var(--background);
+  --color-card-foreground: var(--ink);
+  --color-popover: var(--background);
+  --color-popover-foreground: var(--ink);
+  --color-accent: var(--surface);
+  --color-accent-foreground: var(--ink);
+  --color-input: var(--line);
+  @keyframes collapsible-down {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(--radix-collapsible-content-height, var(--collapsible-panel-height, auto));
+    }
+  }
+  @keyframes collapsible-up {
+    from {
+      height: var(--radix-collapsible-content-height, var(--collapsible-panel-height, auto));
+    }
+    to {
+      height: 0;
+    }
+  }
 }
 
 :root {
@@ -117,10 +140,10 @@ a {
   -webkit-tap-highlight-color: transparent;
 }
 
-button:focus-visible,
 a:focus-visible,
 [role="separator"]:focus-visible,
-textarea:focus-visible {
+button:not([class*="aui-"]):focus-visible,
+textarea:not(.aui-composer-input):focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: -2px;
   border-radius: 8px;
@@ -571,3 +594,7 @@ button:disabled {
     height: 100%;
   }
 }
+
+@custom-variant data-open (&:where([data-state="open"], [data-open]:not([data-open="false"])));
+
+@custom-variant data-closed (&:where([data-state="closed"], [data-closed]:not([data-closed="false"])));

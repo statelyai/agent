@@ -19,7 +19,7 @@ import type { ChosenEvent } from "./types.js";
 import { AgentError } from "./errors.js";
 import { getJsonSchemaSync } from "./utils.js";
 import { getAcceptedEvents } from "./events.js";
-import { isDecisionLogic, isPlanLogic, PLAN_DONE_EVENT_TYPE } from "./decision.js";
+import { isDecisionLogic } from "./decision.js";
 import { isTextLogic } from "./text-logic.js";
 import {
   executorBoundLogics,
@@ -29,7 +29,6 @@ import {
 import {
   getInvokeEffectMetadata,
   initialAgentStep,
-  resolveAgentRequests,
   resolveAgentStep,
   transitionAgentStep,
   type AgentStep,
@@ -39,7 +38,6 @@ import {
 // Well-known builtin invoke srcs (kept local to avoid widening the public
 // surface of text-logic/decision internals).
 const DECIDE_SRC = "agent.decide";
-const PLAN_SRC = "agent.plan";
 
 // ─── Diagnostics ───
 
@@ -372,29 +370,21 @@ function hasNonEmptyOn(config: AnyConfig): boolean {
   return !!config.on && Object.keys(config.on).length > 0;
 }
 
-// Classifies an invoke src as a decision/plan (needs event handling) — by
-// builtin src string or by a registered/direct-object DecisionLogic/PlanLogic.
+// Classifies an invoke src as a decision (needs event handling) — by builtin
+// src string or by a registered/direct-object DecisionLogic.
 function decisionKindOf(
   src: unknown,
   actors: Record<string, AnyActorLogic>,
-): "decision" | "plan" | undefined {
+): "decision" | undefined {
   if (typeof src === "string") {
     if (src === DECIDE_SRC) return "decision";
-    if (src === PLAN_SRC) return "plan";
-    const logic = actors[src];
-    if (isDecisionLogic(logic)) return "decision";
-    if (isPlanLogic(logic)) return "plan";
-    return undefined;
+    return isDecisionLogic(actors[src]) ? "decision" : undefined;
   }
-  if (isDecisionLogic(src)) return "decision";
-  if (isPlanLogic(src)) return "plan";
-  return undefined;
+  return isDecisionLogic(src) ? "decision" : undefined;
 }
 
 function isAgentLogicNeedingBinding(src: object): boolean {
-  return (
-    (isTextLogic(src) || isDecisionLogic(src) || isPlanLogic(src)) && !executorBoundLogics.has(src)
-  );
+  return (isTextLogic(src) || isDecisionLogic(src)) && !executorBoundLogics.has(src);
 }
 
 // Reports true when a schema exposes a synchronous JSON Schema (so its fields
@@ -899,21 +889,6 @@ export async function simulateAgent(
         trail.push({ state: step.snapshot.value, appliedEvent: taken.value });
         continue;
       }
-      if (request.kind === "plan") {
-        // A plan step IS a decision: consume the next scripted chosen event
-        // (keyed by the plan invoke's src) and advance through the SAME
-        // protocol durable hosts use — resolveAgentRequests with a decide
-        // executor that returns the scripted choice. Validation, the reserved
-        // done-move, stop reasons, and ledger bookkeeping all apply unchanged.
-        const taken = takeFromQueue(script.decisions, request.src);
-        if (!taken.found) {
-          throw scriptDryError("decision", request.src, request.id, request);
-        }
-        const event = taken.value;
-        step = await resolveAgentRequests(machine, step, { decide: async () => ({ event }) });
-        trail.push({ state: step.snapshot.value, appliedEvent: taken.value });
-        continue;
-      }
       // Text request.
       const taken = takeFromQueue(script.text, request.src);
       if (!taken.found) {
@@ -1065,9 +1040,7 @@ async function explore(
         recordState(current.snapshot);
         continue;
       }
-      if (request && (request.kind === "decision" || request.kind === "plan")) {
-        // A plan request is a branch point (fork per candidate in visit), just
-        // like a decision — settle here and let visit enumerate its candidates.
+      if (request && request.kind === "decision") {
         return { step: current };
       }
       // No request: maybe a pending scripted invoke (userInput), else a wait.
@@ -1120,15 +1093,11 @@ async function explore(
       return;
     }
 
-    // Branch point: a decision/plan request's candidates, or an idle wait's
-    // externally-accepted events. A plan forks like a decision — one branch per
-    // candidate — but each branch is advanced through `resolveAgentRequests`
-    // (exact ledger/budget/stop semantics) and its candidate list includes the
-    // reserved `agent.plan.done` move.
+    // Branch point: a decision request's candidates, or an idle wait's
+    // externally-accepted events.
     const request = settled.requests[0] as AgentStepRequest | undefined;
-    const isPlan = request?.kind === "plan";
     const branchEvents: BranchEvent[] =
-      request?.kind === "decision" || request?.kind === "plan"
+      request?.kind === "decision"
         ? request.events.map((descriptor) => ({ type: descriptor.type }))
         : getAcceptedEvents(settled.snapshot).map((descriptor) => ({ type: descriptor.type }));
 
@@ -1150,17 +1119,12 @@ async function explore(
         if (pathsExplored >= maxPaths) hitPathCap = true;
         return;
       }
-      // Guard legality: a type-legal-but-guard-rejected candidate is a pruned
-      // branch. The plan's reserved done move terminates the plan rather than
-      // driving a transition, so it is always legal (never guard-checked).
-      const isDoneMove = isPlan && event.type === PLAN_DONE_EVENT_TYPE;
-      if (!isDoneMove && !(settled.snapshot as AnyMachineSnapshot).can(event as never)) {
+      // Guard legality: a type-legal-but-guard-rejected candidate is a pruned branch.
+      if (!(settled.snapshot as AnyMachineSnapshot).can(event as never)) {
         prunedByGuard++;
         continue;
       }
-      const next = isPlan
-        ? await resolveAgentRequests(machine, settled, { decide: async () => ({ event }) })
-        : transitionAgentStep(machine, settled, event as never);
+      const next = transitionAgentStep(machine, settled, event as never);
       recordState(next.snapshot);
       await visit(next, [...path, event as ChosenEvent], depth + 1);
     }
@@ -1188,10 +1152,7 @@ async function explore(
  * depth, model-free, and reports which states are reached and how each path
  * terminates. At each decision request it forks one branch per candidate event
  * (guard-rejected candidates are counted in `prunedByGuard`, not explored); at
- * an idle wait it forks per externally-accepted event. A `agent.plan` request
- * forks the same way — one branch per candidate, including the reserved
- * `agent.plan.done` move — advancing each branch through the real plan protocol
- * (`resolveAgentRequests`), so a plan can consume several depth units. Text/`userInput` invokes
+ * an idle wait it forks per externally-accepted event. Text/`userInput` invokes
  * are resolved from `textOutputs` (a by-src canned-output map) — a missing src
  * halts that branch with a `needs-output` terminal rather than throwing.
  *

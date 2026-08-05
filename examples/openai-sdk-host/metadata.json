@@ -8,8 +8,12 @@
     "url": "https://github.com/openai/openai-node"
   },
   "comparison": {
-    "targets": ["OpenAI SDK", "SDK-neutral host adapters"],
+    "targets": [
+      "OpenAI SDK",
+      "SDK-neutral host adapters"
+    ],
     "purpose": "Shows the generateText/streamText/decide executor contract implemented directly against the raw openai package's Chat Completions API, with no Vercel AI SDK in between."
   },
-  "starters": []
+  "starters": [],
+  "manual": true
 }

@@ -1,6 +1,6 @@
 {
   "name": "machine-as-tool",
-  "title": "Machine as Tool",
+  "title": "Refund approval (machine as tool)",
   "kind": "agent-workflow",
   "origin": {
     "type": "stately-agent",
@@ -13,12 +13,12 @@
   },
   "starters": [
     {
-      "amount": 129.99,
-      "orderId": "ORD-4471"
+      "label": "Small refund ($129.99) — auto-approvable",
+      "input": { "amount": 129.99, "orderId": "ORD-4471" }
     },
     {
-      "amount": 780,
-      "orderId": "ORD-9002"
+      "label": "Large refund ($780) — over the approval limit",
+      "input": { "amount": 780, "orderId": "ORD-9002" }
     }
   ]
 }

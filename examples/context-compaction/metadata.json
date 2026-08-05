@@ -9,12 +9,11 @@
   },
   "comparison": {
     "targets": ["LangGraph", "Vercel AI SDK"],
-    "purpose": "Context-window management: a chat loop that compacts its own history. When the message array exceeds a threshold, a dedicated `compacting` state summarizes the stale messages (folding in the prior summary) and keeps only the last N turns, then feeds the summary back as context. Compaction is an explicit, inspectable machine state rather than hidden middleware."
+    "purpose": "Chat with an agent that compacts its own history in an explicit `compacting` state: once the window overflows, stale turns fold into a running summary that is fed back as context."
   },
   "starters": [
-    {
-      "maxMessages": 6,
-      "keepRecent": 2
-    }
+    "Tell me about state machines",
+    "Summarize what we've talked about so far",
+    "What's the difference between a state and a context?"
   ]
 }

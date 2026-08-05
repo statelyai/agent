@@ -3,8 +3,19 @@ import { createActor, createMachine, type AnyStateMachine } from "xstate";
 import { z } from "zod";
 import { startScenarioRun } from "./agent-runner";
 import { getExampleMachine } from "./example-library.server";
-import { describeIdle, describeMachineInput, jsonSchemaOf } from "./machine-chat.server";
-import { schemaFields, schemaNeedsPayload, singleStringField } from "./machine-ui";
+import {
+  describeIdle,
+  describeMachineInput,
+  jsonSchemaOf,
+  renderOutput,
+} from "./machine-chat.server";
+import {
+  humanizeEventType,
+  humanizeFieldName,
+  schemaFields,
+  schemaNeedsPayload,
+  singleStringField,
+} from "./machine-ui";
 import { scriptedExecutorsFor } from "./scripted-executors";
 
 describe("accepted-event descriptors (unified chat)", () => {
@@ -99,5 +110,57 @@ describe("json schema helpers", () => {
     expect(singleStringField(schema)).toBeNull();
     expect(singleStringField(jsonSchemaOf(z.object({ reason: z.string() })))).toBe("reason");
     expect(schemaNeedsPayload(jsonSchemaOf(z.object({})))).toBe(false);
+  });
+});
+
+describe("field label humanizer", () => {
+  test("splits camelCase and separators, keeping acronyms", () => {
+    expect(humanizeFieldName("maxRounds")).toBe("Max rounds");
+    expect(humanizeFieldName("player_hp")).toBe("Player hp");
+    expect(humanizeFieldName("playerHP")).toBe("Player HP");
+    expect(humanizeFieldName("topic")).toBe("Topic");
+    // Event-type humanizing is unchanged.
+    expect(humanizeEventType("AUTO_REFUND")).toBe("Auto refund");
+  });
+
+  test("schema form fields use the humanized name", () => {
+    const fields = schemaFields(jsonSchemaOf(z.object({ maxRounds: z.number() }))!)!;
+    expect(fields[0].label).toBe("Max rounds");
+  });
+});
+
+describe("idle prompt fallbacks", () => {
+  test("falls back to the active state node's description", async () => {
+    const machine = createMachine({
+      initial: "waiting",
+      context: { who: "Ada" },
+      states: {
+        // No meta.interaction — the description carries the prompt, and
+        // `{key}` placeholders still resolve against context.
+        waiting: { description: "Your move, {who}.", on: { GO: "done" } },
+        done: { type: "final" },
+      },
+    } as never) as AnyStateMachine;
+    const actor = createActor(machine).start();
+    expect(describeIdle(machine, actor.getSnapshot() as never).prompt).toBe("Your move, Ada.");
+  });
+});
+
+describe("run output rendering", () => {
+  test("object output reads as prose plus a compact field list", () => {
+    const text = renderOutput({
+      queue: "billing",
+      reason: "The request names a duplicate charge and an invoice the customer cannot open.",
+      confident: true,
+    });
+    expect(text.startsWith("The request names")).toBe(true);
+    expect(text).toContain("Queue: billing");
+    expect(text).toContain("Confident: true");
+    expect(text).not.toContain("```");
+  });
+
+  test("plain strings and non-string objects are unchanged", () => {
+    expect(renderOutput("done")).toBe("done");
+    expect(renderOutput({ score: 9 })).toContain("```json");
   });
 });

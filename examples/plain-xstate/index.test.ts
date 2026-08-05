@@ -8,7 +8,6 @@ describe("plain-xstate", () => {
         generateText: async () => ({ output: "A crisp, concrete launch blurb." }),
         decide: async () => ({ event: { type: "APPROVE" } }),
       },
-      { maxRevisions: 2 },
     );
 
     expect(result.decisions).toEqual(["APPROVE"]);
@@ -27,7 +26,6 @@ describe("plain-xstate", () => {
           return { event: { type: judged <= 2 ? "REVISE" : "APPROVE" } };
         },
       },
-      { maxRevisions: 2 },
     );
 
     // draft → judge(REVISE) → draft → judge(REVISE) → draft → judge(APPROVE)

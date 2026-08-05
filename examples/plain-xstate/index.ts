@@ -46,6 +46,9 @@ export const models = defineModels({
 
 // ─── The plain machine: only `xstate`, no `@statelyai/agent` ───
 
+/** Revision rounds allowed before only APPROVE remains legal. */
+const MAX_REVISIONS = 2;
+
 const contextSchema = z.object({
   topic: z.string(),
   maxRevisions: z.number(),
@@ -71,7 +74,7 @@ export const plainWriterMachine = setup({
   schemas: {
     context: contextSchema,
     events: eventSchemas,
-    input: z.object({ topic: z.string(), maxRevisions: z.number() }),
+    input: z.object({ topic: z.string() }),
     output: z.object({ draft: z.string(), attempts: z.number() }),
   },
   actors: {
@@ -89,7 +92,7 @@ export const plainWriterMachine = setup({
   id: "plain-writer",
   context: ({ input }) => ({
     topic: input.topic,
-    maxRevisions: input.maxRevisions,
+    maxRevisions: MAX_REVISIONS,
     attempts: 0,
     draft: "",
   }),
@@ -138,9 +141,9 @@ export interface PlainXstateResult {
 export async function runPlainXstateExample(
   // Tests inject mocks; a direct run builds real executors from `models`.
   executors: Partial<AgentRequestExecutors> = createAiSdkExecutors({ models }),
-  options: { topic?: string; maxRevisions?: number } = {},
+  options: { topic?: string } = {},
 ): Promise<PlainXstateResult> {
-  const { topic = "Statechart Studio, a visual workflow builder", maxRevisions = 2 } = options;
+  const { topic = "Statechart Studio, a visual workflow builder" } = options;
   const { generateText, decide } = executors;
   if (!generateText) throw new Error("runPlainXstateExample needs a 'generateText' executor.");
   if (!decide) throw new Error("runPlainXstateExample needs a 'decide' executor.");
@@ -163,7 +166,7 @@ export async function runPlainXstateExample(
     },
   });
 
-  const actor = createActor(boundMachine, { input: { topic, maxRevisions } });
+  const actor = createActor(boundMachine, { input: { topic } });
   const decisions: string[] = [];
   actor.start();
 

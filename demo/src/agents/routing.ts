@@ -11,21 +11,38 @@
 import { z } from "zod";
 import { setupAgent } from "@statelyai/agent";
 
+const reasonSchema = z
+  .string()
+  .describe("One short sentence naming the signals in the request that justify this queue.");
+
 const agentSetup = setupAgent({
-  context: z.object({ query: z.string(), queue: z.string().nullable() }),
+  context: z.object({
+    query: z.string(),
+    queue: z.string().nullable(),
+    reason: z.string().nullable(),
+  }),
   input: z.object({ query: z.string() }),
-  output: z.object({ queue: z.string() }),
+  output: z.object({ queue: z.string(), reason: z.string() }),
+  // Every route carries the WHY: the model must justify its pick, and the
+  // justification is typed payload, not prose the machine has to parse.
   events: {
-    BILLING: z.object({}),
-    TECHNICAL: z.object({}),
-    ACCOUNT: z.object({}),
-    UNCLEAR: z.object({}),
+    BILLING: z.object({ reason: reasonSchema }),
+    TECHNICAL: z.object({ reason: reasonSchema }),
+    ACCOUNT: z.object({ reason: reasonSchema }),
+    UNCLEAR: z.object({ reason: reasonSchema }),
   },
 });
 
+function routed(
+  context: { queue: string | null; reason: string | null },
+  fallback: string,
+): { queue: string; reason: string } {
+  return { queue: context.queue ?? fallback, reason: context.reason ?? "No reason given." };
+}
+
 export const routingMachine = agentSetup.createMachine({
   id: "routing",
-  context: ({ input }) => ({ query: input.query, queue: null }),
+  context: ({ input }) => ({ query: input.query, queue: null, reason: null }),
   initial: "classifying",
   states: {
     classifying: {
@@ -41,17 +58,30 @@ export const routingMachine = agentSetup.createMachine({
           allowedEvents: ["BILLING", "TECHNICAL", "ACCOUNT", "UNCLEAR"],
         }),
       },
-      // Static targets — the machine, not the model, owns each queue.
+      // Static targets — the machine, not the model, owns each queue. The
+      // model only supplies the justification it must carry on the event.
       on: {
-        BILLING: { target: "billingQueue", context: { queue: "billing" } },
-        TECHNICAL: { target: "technicalQueue", context: { queue: "technical" } },
-        ACCOUNT: { target: "accountQueue", context: { queue: "account" } },
-        UNCLEAR: { target: "needsClarification", context: { queue: "unclear" } },
+        BILLING: ({ event }) => ({
+          target: "billingQueue",
+          context: { queue: "billing", reason: event.reason },
+        }),
+        TECHNICAL: ({ event }) => ({
+          target: "technicalQueue",
+          context: { queue: "technical", reason: event.reason },
+        }),
+        ACCOUNT: ({ event }) => ({
+          target: "accountQueue",
+          context: { queue: "account", reason: event.reason },
+        }),
+        UNCLEAR: ({ event }) => ({
+          target: "needsClarification",
+          context: { queue: "unclear", reason: event.reason },
+        }),
       },
     },
-    billingQueue: { type: "final", output: ({ context }) => ({ queue: context.queue ?? "billing" }) },
-    technicalQueue: { type: "final", output: ({ context }) => ({ queue: context.queue ?? "technical" }) },
-    accountQueue: { type: "final", output: ({ context }) => ({ queue: context.queue ?? "account" }) },
-    needsClarification: { type: "final", output: ({ context }) => ({ queue: context.queue ?? "unclear" }) },
+    billingQueue: { type: "final", output: ({ context }) => routed(context, "billing") },
+    technicalQueue: { type: "final", output: ({ context }) => routed(context, "technical") },
+    accountQueue: { type: "final", output: ({ context }) => routed(context, "account") },
+    needsClarification: { type: "final", output: ({ context }) => routed(context, "unclear") },
   },
 });

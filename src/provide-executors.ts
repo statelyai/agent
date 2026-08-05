@@ -1,9 +1,8 @@
 import type { AnyActorLogic, AnyStateMachine } from "xstate";
 import { isTextLogic, USER_INPUT_ACTOR, type AgentRequestExecutors } from "./text-logic.js";
-import { isDecisionLogic, isPlanLogic } from "./decision.js";
+import { isDecisionLogic } from "./decision.js";
 import {
   bindDecisionForProvide,
-  bindPlanForProvide,
   bindTextForProvide,
   getConfiguredInvokeSrcs,
   type AgentTraceEvent,
@@ -56,7 +55,6 @@ export interface ProvideExecutorsOptions<TMachine extends AnyStateMachine = AnyS
  * - decision / `agent.decide` source → `executors.decide` (snapshot-driven
  *   candidate events, guard `canTake`, and auto-delivery of the chosen event,
  *   mirroring `runAgent` but without its model-call counting)
- * - `agent.plan` source → `executors.decide` (iterated, same semantics)
  *
  * Pass `options.onTrace` to observe request-level trace events (identical in
  * shape to `runAgent`'s); pair it with {@link traceTransitions} on the actor's
@@ -114,17 +112,6 @@ export function provideExecutors<TMachine extends AnyStateMachine>(
         continue;
       }
       wrappedSources[key] = bindDecisionForProvide(provided, logic, executors, bindOptions);
-      continue;
-    }
-
-    if (isPlanLogic(logic)) {
-      if (!executors.decide) {
-        if (invokedSrcs.has(key)) {
-          throw missingExecutorError(key, "plan", "decide");
-        }
-        continue;
-      }
-      wrappedSources[key] = bindPlanForProvide(provided, logic, executors, bindOptions);
       continue;
     }
 

@@ -112,6 +112,15 @@
     },
     "awaitingApproval": {
       "description": "Idle: nothing left to do until a human approves or rejects the drafted reply.",
+      "meta": {
+        "interaction": {
+          "label": "Nothing left to do until you approve or reject the drafted reply.",
+          "events": {
+            "APPROVE": { "label": "Send reply", "style": "primary" },
+            "REJECT": { "label": "Reject and escalate", "style": "danger" }
+          }
+        }
+      },
       "on": {
         "APPROVE": { "target": "resolved", "assign": { "resolution": "replied" } },
         "REJECT": { "target": "resolved", "assign": { "resolution": "escalated" } }

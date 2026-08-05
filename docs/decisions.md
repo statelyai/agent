@@ -55,7 +55,7 @@ The `allowedEvents` list is strongly typed against the machine's event schema, s
 
 ### `allowedEvents` patterns
 
-The `allowedEvents` option (on both `agent.decide` and `agent.plan`) accepts a single string or an array. Entries are exact event types or wildcard patterns, and the two can mix (`['todo.*', 'reset']`):
+The `allowedEvents` option accepts a single string or an array. Entries are exact event types or wildcard patterns, and the two can mix (`['todo.*', 'reset']`):
 
 - `['ASK', 'GUESS']`: exact types, typed against the event-schema keys (typo = compile error).
 - `'ASK'`: a single string, shorthand for a one-entry array.
@@ -66,7 +66,7 @@ The `allowedEvents` option (on both `agent.decide` and `agent.plan`) accepts a s
 
 Delivery is automatic: when the decision resolves, the `agent.decide` actor sends the chosen event to the machine, and the matching `on:` transition runs. You handle the outcome with ordinary transitions, no special decision plumbing.
 
-> **Note:** The chosen event's transition typically exits the invoking state, cancelling the invoke, so `onDone` normally never fires (same as `agent.plan`). Declare `onDone` only when the chosen event's transition stays in-state; the invoke then completes with the chosen event as output. `onError` (retries exhausted, `AgentDecisionExhaustedError`) is unaffected.
+> **Note:** The chosen event's transition typically exits the invoking state, cancelling the invoke, so `onDone` normally never fires. Declare `onDone` only when the chosen event's transition stays in-state; the invoke then completes with the chosen event as output. `onError` (retries exhausted, `AgentDecisionExhaustedError`) is unaffected.
 
 ## Guard enforcement
 
@@ -104,13 +104,40 @@ Core validates and retries; it never talks to a model. Coercing the model into c
 
 > **Note:** Decisions are state-local: author them inline on the invoke. There is no reusable decision-logic object, because a decision's candidates and legality depend on the state it runs in.
 
-## Plans (multi-event decisions)
+## Multi-event commands: the decide loop
 
-A decision is one event; a **plan** is many. The `agent.plan` builtin iterates a decision against the live snapshot, applying legal events one at a time until the model decides to stop. Every step gets this page's validation/retry loop. See [Plans](plans.md).
+A decision is one event. When one command needs several ("add X and Y" → two `ADD_TODO`), loop the decision in the machine — the loop, its exit, and the applied trail stay visible in the statechart:
+
+- A `planning` state invokes `agent.decide` for **one** event.
+- Applying that event targets a turnaround state that immediately re-enters `planning`, starting the next step.
+- An explicit machine event (e.g. `DONE`) is among `allowedEvents` and targets somewhere outside the loop, so the model can end it.
+- The trail of applied events lives in context and is appended to each step's prompt.
+
+```ts no-check
+planning: {
+  invoke: {
+    src: 'agent.decide',
+    input: ({ context }) => ({
+      model: 'quick',
+      prompt: `${context.command}\n\nAlready applied: ${context.applied.join(', ')}`,
+      allowedEvents: ['ADD_TODO', 'TOGGLE_TODO', 'DONE'],
+    }),
+  },
+  on: {
+    ADD_TODO: ({ context, event }) => ({
+      target: 'applying',
+      context: { applied: [...context.applied, `ADD_TODO ${event.title}`] },
+    }),
+    DONE: { target: 'awaitingCommand' },
+  },
+},
+applying: { always: { target: 'planning' } },
+```
+
+Every step gets this page's validation/retry loop. Full example: [examples/todo-nl/index.ts](../examples/todo-nl/index.ts).
 
 ## Where to go next
 
 - [Agent machines](machines.md): transitions, guards, and event schemas.
-- [Plans](plans.md): the multi-event form, `agent.plan`.
 - [Hosts](hosts.md): the decide executor and how the model is coerced into one event.
 - [Machines as data](machines-as-data.md): authoring decisions from JSON.

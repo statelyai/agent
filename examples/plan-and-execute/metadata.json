@@ -1,6 +1,6 @@
 {
   "name": "plan-and-execute",
-  "title": "Plan and Execute",
+  "title": "Break a question into steps, then answer it",
   "kind": "pattern",
   "origin": {
     "type": "pattern",
@@ -8,11 +8,15 @@
     "url": "https://github.com/langchain-ai/langgraphjs/tree/main/examples"
   },
   "comparison": {
-    "targets": ["plan-and-execute", "ReWOO"],
-    "purpose": "A planner produces a typed step list, an explicit index loop gathers per-step evidence, and a solver composes the answer from the evidence map."
+    "targets": [
+      "plan-and-execute",
+      "ReWOO"
+    ],
+    "purpose": "A planner writes out the steps, each step is worked through in order, and a solver composes the final answer from what was gathered."
   },
   "starters": [
     "Plan a 3-day food tour of Tokyo on a $200 budget.",
-    "Figure out how many tennis balls fit inside a school bus."
+    "Figure out how many tennis balls fit inside a school bus.",
+    "Work out whether a heat pump makes sense for a 1920s house."
   ]
 }

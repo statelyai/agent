@@ -3256,7 +3256,7 @@ describe("setupAgent reserved agent.* actor keys", () => {
       setupAgent({
         schemas,
         requests: {
-          "agent.plan": { schemas: { input: z.object({}), output: z.object({}) }, model: "m" },
+          "agent.decide": { schemas: { input: z.object({}), output: z.object({}) }, model: "m" },
         } as never,
       }),
     ).toThrow(/reserved builtin agent actor/);

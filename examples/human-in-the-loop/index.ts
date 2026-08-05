@@ -49,7 +49,26 @@ const agentSetup = setupAgent({
   context: contextSchema,
   input: z.object({ topic: z.string() }),
   output: z.object({ published: z.boolean(), draft: z.string() }),
-  meta: z.object({ interaction: z.object({ label: z.string() }).optional() }),
+  // Typed interaction meta: the pause's `label`, a button `label`/`style` per
+  // accepted event, and `textEvent` naming the ONE event free-typed text is
+  // delivered to.
+  meta: z.object({
+    interaction: z
+      .object({
+        label: z.string(),
+        events: z
+          .record(
+            z.string(),
+            z.object({
+              label: z.string().optional(),
+              style: z.enum(["primary", "danger", "default"]).optional(),
+            }),
+          )
+          .optional(),
+        textEvent: z.string().optional(),
+      })
+      .optional(),
+  }),
   events: {
     APPROVE: z.object({}),
     REJECT: z.object({ reason: z.string() }),
@@ -100,7 +119,14 @@ export const humanInTheLoopMachine = agentSetup.createMachine({
       tags: ["awaiting-review"],
       meta: {
         interaction: {
-          label: "Review the draft: approve to publish, or reject with a reason.",
+          label: "Approve the draft to publish it, or type what you want changed.",
+          events: {
+            APPROVE: { label: "Approve draft", style: "primary" },
+            REJECT: { label: "Request changes", style: "danger" },
+          },
+          // Without this, a host that maps free text to "the only event with a
+          // single string field" would silently REJECT whatever you typed.
+          textEvent: "REJECT",
         },
       },
       on: {

@@ -55,7 +55,6 @@ test("budget exhaustion — best-effort answer, no throw", async () => {
   // loop when stepsRemaining hits 0 (the LangGraph recursion_limit analogue).
   const result = await runReactAgentExample({
     question: "Loop forever?",
-    maxSteps: 2,
     generateText: scriptedGenerateText([
       {
         type: "tool",
@@ -66,8 +65,8 @@ test("budget exhaustion — best-effort answer, no throw", async () => {
     ]),
   });
 
-  // 2 model turns allowed, then exhausted.
-  expect(result.progress.filter((s) => s === "reasoning")).toHaveLength(2);
+  // The hardcoded 5-step budget is spent, then exhausted.
+  expect(result.progress.filter((s) => s === "reasoning")).toHaveLength(5);
   expect(result.progress.at(-1)).toBe("exhausted");
   // Best-effort: falls back to the last assistant message rather than throwing.
   expect(result.answer.length).toBeGreaterThan(0);

@@ -66,9 +66,17 @@ export function executeQuery(plan: QueryPlan, table: Order[] = orders): number {
 const metaSchema = z.object({
   interaction: z
     .object({
-      type: z.literal("select"),
       label: z.string(),
-      choices: z.array(z.object({ label: z.string(), eventType: z.string() })),
+      events: z
+        .record(
+          z.string(),
+          z.object({
+            label: z.string().optional(),
+            style: z.enum(["primary", "danger", "default"]).optional(),
+          }),
+        )
+        .optional(),
+      textEvent: z.string().optional(),
     })
     .optional(),
 });
@@ -178,12 +186,11 @@ export const sqlAgentMachine = agentSetup.createMachine({
     awaitingApproval: {
       meta: {
         interaction: {
-          type: "select",
           label: "Run this query against the orders table?",
-          choices: [
-            { label: "Approve", eventType: "APPROVE" },
-            { label: "Reject", eventType: "REJECT" },
-          ],
+          events: {
+            APPROVE: { label: "Approve", style: "primary" },
+            REJECT: { label: "Reject", style: "danger" },
+          },
         },
       },
       on: {

@@ -33,7 +33,29 @@ import type { AgentSnapshotStore } from "@statelyai/agent";
 
 const draftContextSchema = z.object({ topic: z.string(), draft: z.string().nullable() });
 
+// Typed interaction meta for the idle review gate: the pause's `label`, a
+// button `label`/`style` per accepted event, and `textEvent` naming the ONE
+// event free-typed text is delivered to.
+const metaSchema = z.object({
+  interaction: z
+    .object({
+      label: z.string(),
+      events: z
+        .record(
+          z.string(),
+          z.object({
+            label: z.string().optional(),
+            style: z.enum(["primary", "danger", "default"]).optional(),
+          }),
+        )
+        .optional(),
+      textEvent: z.string().optional(),
+    })
+    .optional(),
+});
+
 const agentSetup = setupAgent({
+  meta: metaSchema,
   context: draftContextSchema,
   input: z.object({ topic: z.string() }),
   output: z.object({ draft: z.string() }),
@@ -80,6 +102,18 @@ export const draftMachine = agentSetup.createMachine({
       },
     },
     reviewing: {
+      meta: {
+        interaction: {
+          label: "Approve the draft to publish it, or type the revision you want.",
+          events: {
+            APPROVE: { label: "Approve draft", style: "primary" },
+            REJECT: { label: "Request a revision", style: "danger" },
+          },
+          // Without this, free text would silently REJECT (its `reason` is the
+          // only single-string payload here).
+          textEvent: "REJECT",
+        },
+      },
       on: {
         APPROVE: { target: "published" },
         REJECT: ({ context, event }) => ({

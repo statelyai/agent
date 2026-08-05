@@ -1,6 +1,6 @@
 {
   "name": "ai-sdk-orchestrator-worker",
-  "title": "Vercel AI SDK Orchestrator-Worker",
+  "title": "Plan a feature, then write the file changes",
   "kind": "comparison",
   "origin": {
     "type": "docs",
@@ -8,11 +8,15 @@
     "url": "https://ai-sdk.dev/docs/agents/workflows#orchestrator-worker"
   },
   "comparison": {
-    "targets": ["Vercel AI SDK", "orchestrator-worker"],
-    "purpose": "Ports AI SDK orchestrator-worker into an explicit XState machine."
+    "targets": [
+      "Vercel AI SDK",
+      "orchestrator-worker"
+    ],
+    "purpose": "An orchestrator plans which files a feature touches, then a worker writes the change for each file in turn."
   },
   "starters": [
     "Add a dark mode toggle persisted to localStorage.",
-    "Add CSV export to the reports page."
+    "Add CSV export to the reports page.",
+    "Add rate limiting to the public API routes."
   ]
 }

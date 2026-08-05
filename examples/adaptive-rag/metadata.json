@@ -1,6 +1,6 @@
 {
   "name": "adaptive-rag",
-  "title": "Adaptive RAG",
+  "title": "Answer questions, with fact-checking",
   "kind": "agent-workflow",
   "origin": {
     "type": "langgraph",
@@ -8,11 +8,16 @@
     "url": "https://github.com/langchain-ai/langgraph/tree/main/examples/rag"
   },
   "comparison": {
-    "targets": ["LangGraph adaptive RAG", "Self-RAG", "agentic RAG"],
-    "purpose": "Routing, retrieval grading, query rewriting, answer generation, and bounded groundedness/usefulness verification as explicit states."
+    "targets": [
+      "LangGraph adaptive RAG",
+      "Self-RAG",
+      "agentic RAG"
+    ],
+    "purpose": "Routes each question to the corpus or to web search, grades what comes back, rewrites the query when it is weak, and checks the final answer is grounded before returning it."
   },
   "starters": [
     "What are the trade-offs of optimistic vs pessimistic locking?",
-    "Who won the 2026 Super Bowl and by how much?"
+    "Who won the 2026 Super Bowl and by how much?",
+    "How should I size a connection pool?"
   ]
 }

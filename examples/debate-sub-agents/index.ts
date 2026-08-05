@@ -1,7 +1,7 @@
 /**
  * Debate sub-agents — a neutral facilitator schedules two debater sub-agents
  * (affirmative + negative), each a child agent machine invoked as one actor.
- * The facilitator alternates turns (A, B, A, B, …) over `rounds` rounds,
+ * The facilitator alternates turns (A, B, A, B, …) over a fixed number of rounds,
  * requesting one argument per turn via a typed event, collects the transcript,
  * then runs a `concludeDebate` request that summarizes both sides.
  *
@@ -149,7 +149,7 @@ const facilitatorContextSchema = z.object({
 
 const facilitatorAgentSetup = setupAgent({
   context: facilitatorContextSchema,
-  input: z.object({ question: z.string(), rounds: z.number().default(DEFAULT_ROUNDS) }),
+  input: z.object({ question: z.string() }),
   output: z.object({ conclusion: z.string(), transcript: transcriptSchema }),
   events: { "DEBATE.ARGUMENT_SUBMITTED": transcriptEntrySchema },
   actors: { affirmative: debaterMachine, negative: debaterMachine },
@@ -188,7 +188,7 @@ export const debateMachine = facilitatorAgentSetup.createMachine({
   id: "debate-facilitator",
   context: ({ input }) => ({
     question: input.question,
-    rounds: input.rounds,
+    rounds: DEFAULT_ROUNDS,
     transcript: [],
     conclusion: null,
   }),
@@ -252,14 +252,13 @@ export const debateMachine = facilitatorAgentSetup.createMachine({
 });
 
 export async function runDebateSubAgentsExample(options?: {
-  input?: { question: string; rounds?: number };
+  input?: { question: string };
   generateText?: AgentRequestExecutor;
   onTransition?: (value: unknown) => void;
 }) {
   const result = await runAgent(debateMachine, {
     input: {
       question: options?.input?.question ?? "Should agents be modeled as actors?",
-      rounds: options?.input?.rounds ?? DEFAULT_ROUNDS,
     },
     ...(options?.generateText
       ? { executors: { generateText: options.generateText } }

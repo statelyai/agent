@@ -16,7 +16,6 @@ type ShellContext = {
   switcherOpen: boolean;
   switcherQuery: string;
   mobileView: MobileView;
-  input: string;
   turns: Turn[];
   pendingIdle: ChatIdle | null;
   /** Snapshot to resume from while the machine idles awaiting human input. */
@@ -38,7 +37,6 @@ type ShellEvents = {
   switcherClosed: {};
   switcherQueryChanged: { query: string };
   mobileViewChanged: { view: MobileView };
-  inputChanged: { value: string };
   runReset: {};
   /** Appends a loading turn. The id to use is `context.nextTurnId` (read before triggering). */
   turnPushed: {
@@ -70,7 +68,6 @@ export function persistTheme(theme: Theme) {
 function resetRunState(context: ShellContext): ShellContext {
   return {
     ...context,
-    input: "",
     turns: [],
     pendingIdle: null,
     idleSnapshot: null,
@@ -87,7 +84,6 @@ export function createShellStore(initialSelection: Selection, initialTheme: Them
       switcherOpen: false,
       switcherQuery: "",
       mobileView: "app",
-      input: "",
       turns: [],
       pendingIdle: null,
       idleSnapshot: null,
@@ -121,11 +117,9 @@ export function createShellStore(initialSelection: Selection, initialTheme: Them
         context.switcherOpen ? { ...context, switcherOpen: false, switcherQuery: "" } : context,
       switcherQueryChanged: (context, event) => ({ ...context, switcherQuery: event.query }),
       mobileViewChanged: (context, event) => ({ ...context, mobileView: event.view }),
-      inputChanged: (context, event) => ({ ...context, input: event.value }),
       runReset: resetRunState,
       turnPushed: (context, event) => ({
         ...context,
-        input: event.role === "user" ? "" : context.input,
         nextTurnId: Math.max(context.nextTurnId, event.id) + 1,
         turns: [
           ...context.turns,

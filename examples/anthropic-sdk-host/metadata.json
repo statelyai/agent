@@ -8,8 +8,13 @@
     "url": "https://github.com/anthropics/anthropic-sdk-typescript"
   },
   "comparison": {
-    "targets": ["Anthropic SDK", "Vercel AI SDK", "OpenAI SDK"],
+    "targets": [
+      "Anthropic SDK",
+      "Vercel AI SDK",
+      "OpenAI SDK"
+    ],
     "purpose": "Shows the same XState agent request/decision contract mapped directly onto the raw Anthropic Messages API, with no Vercel AI SDK in between."
   },
-  "starters": []
+  "starters": [],
+  "manual": true
 }

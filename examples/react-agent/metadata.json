@@ -1,6 +1,6 @@
 {
   "name": "react-agent",
-  "title": "ReAct Agent",
+  "title": "Reason and use tools, one step at a time",
   "kind": "pattern",
   "origin": {
     "type": "stately-agent",
@@ -8,16 +8,14 @@
     "url": null
   },
   "comparison": {
-    "targets": ["LangGraph"],
-    "purpose": "LangGraph's createReactAgent(model, tools) as an explicit machine: one reasonOrAct request per iteration returns a discriminated union (call a tool or answer), typed tool actors (calculator, knowledge lookup) genuinely execute, and a typed step-budget guard breaks the loop with a best-effort answer — the loop is states, not a black box."
+    "targets": [
+      "LangGraph"
+    ],
+    "purpose": "Each loop the model either calls a real tool (calculator, lookup) or answers, with every step visible as machine state and a step budget that forces a best-effort answer."
   },
   "starters": [
-    {
-      "question": "What is 17% of 340, and who wrote Hamlet?"
-    },
-    {
-      "question": "Compute 128 * 47, then tell me the capital of Australia.",
-      "maxSteps": 6
-    }
+    "What is 17% of 340, and who wrote Hamlet?",
+    "Compute 128 * 47, then tell me the capital of Australia.",
+    "How many minutes are in a leap year?"
   ]
 }

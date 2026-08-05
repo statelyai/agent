@@ -1,5 +1,5 @@
 {
-  "//": "Declaration-emission canary. Imports @statelyai/agent BY NAME (resolving to dist via package.json exports — no tsconfig paths), so it exercises the SHIPPED .d.ts the way an external consumer does. Emitting declarations here surfaces TS4023 'cannot be named' if any inferred type (e.g. PlanLogic in a createMachine) leaks an unexported symbol. Kept out of the main typecheck program (tsconfig.json includes only src).",
+  "//": "Declaration-emission canary. Imports @statelyai/agent BY NAME (resolving to dist via package.json exports — no tsconfig paths), so it exercises the SHIPPED .d.ts the way an external consumer does. Emitting declarations here surfaces TS4023 'cannot be named' if any inferred type (e.g. DecisionLogic in a createMachine) leaks an unexported symbol. Kept out of the main typecheck program (tsconfig.json includes only src).",
   "compilerOptions": {
     "target": "es2022",
     "module": "esnext",

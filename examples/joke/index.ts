@@ -49,6 +49,7 @@ export const jokeSchemas = createAgentSchemas({
   }),
   input: z.object({ topic: z.string().default(DEFAULT_TOPIC) }),
   output: z.object({
+    joke: z.string(),
     topic: z.string(),
     jokes: z.array(z.string()),
     lastRating: z.number().nullable(),
@@ -157,6 +158,7 @@ export const jokeMachine = jokeAgentSetup.createMachine({
     done: {
       type: "final",
       output: ({ context }) => ({
+        joke: context.jokes.at(-1) ?? "",
         topic: context.topic,
         jokes: context.jokes,
         lastRating: context.lastRating,

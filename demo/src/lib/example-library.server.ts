@@ -12,22 +12,30 @@
 import type { AnyStateMachine } from "xstate";
 import { toVizConfig } from "./scenarios";
 import { describeMachineInput, hasLiveExecutors } from "./machine-chat.server";
-import type { JsonObject } from "./machine-ui";
+import { humanizeFieldName, type JsonObject } from "./machine-ui";
 
 /** JSON-safe value — server fns must return serializable data. */
 export type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+
+/**
+ * A one-click "Try" chip, normalized from metadata.json `starters`.
+ *
+ * Metadata entries may be:
+ * - `"some prompt"` — plain text for single-prompt machines (`kind: "text"`)
+ * - `{ maxRounds: 3 }` — the machine input verbatim (`kind: "input"`)
+ * - `{ label: "Short game", input: { maxRounds: 3 } }` — labelled input
+ */
+export type ExampleStarter =
+  | { kind: "text"; label: string; text: string }
+  | { kind: "input"; label: string; input: JsonObject };
 
 export type ExampleSummary = {
   id: string;
   title: string;
   kind: string;
   purpose: string | null;
-  /**
-   * Pre-baked inputs from metadata.json `starters`: strings for single-prompt
-   * machines, input-shaped objects for structured machines. Rendered as
-   * one-click "Try" chips in the chat.
-   */
-  starters: Array<string | JsonObject>;
+  /** Pre-baked starters rendered as one-click chips in the chat. */
+  starters: ExampleStarter[];
 };
 
 export type ExampleMachine = {
@@ -47,6 +55,11 @@ export type ExampleDetail = ExampleSummary & {
   importError: string | null;
   /** False when the demo server has no API key, so runs are disabled. */
   runnable: boolean;
+  /**
+   * True for examples the demo cannot drive: `"manual": true` in metadata
+   * (CLI-only scripts, host adapters) or a module that exports no machine.
+   */
+  manual: boolean;
 };
 
 type ExampleMetadata = {
@@ -55,6 +68,10 @@ type ExampleMetadata = {
   kind?: string;
   comparison?: { purpose?: string };
   starters?: unknown;
+  /** Opt out of the demo library: CLI-only scripts and host adapters. */
+  manual?: boolean;
+  /** Export name of the machine to list first / preselect. */
+  machine?: string;
 };
 
 const metadataModules = import.meta.glob("../../../examples/*/metadata.json", {
@@ -98,13 +115,34 @@ function isMachine(value: unknown): boolean {
   return !!config && typeof config === "object" && ("states" in config || "initial" in config);
 }
 
-function startersOf(metadata: ExampleMetadata): Array<string | JsonObject> {
+const isPlainObject = (value: unknown): value is JsonObject =>
+  !!value && typeof value === "object" && !Array.isArray(value);
+
+/** `{ maxRounds: 3, seed: "x" }` → "Max rounds 3, Seed x" (chip label fallback). */
+function describeInput(input: JsonObject): string {
+  const parts = Object.entries(input)
+    .filter(([, value]) => value != null && typeof value !== "object")
+    .map(([key, value]) => `${humanizeFieldName(key)} ${String(value)}`);
+  return parts.length ? parts.join(", ") : "Run";
+}
+
+function startersOf(metadata: ExampleMetadata): ExampleStarter[] {
   if (!Array.isArray(metadata.starters)) return [];
-  return metadata.starters.filter(
-    (entry): entry is string | JsonObject =>
-      (typeof entry === "string" && entry.trim().length > 0) ||
-      (!!entry && typeof entry === "object" && !Array.isArray(entry)),
-  );
+  const out: ExampleStarter[] = [];
+  for (const entry of metadata.starters) {
+    if (typeof entry === "string") {
+      if (entry.trim()) out.push({ kind: "text", label: entry, text: entry });
+      continue;
+    }
+    if (!isPlainObject(entry)) continue;
+    // Labelled form: { label, input }.
+    if (typeof entry.label === "string" && isPlainObject(entry.input)) {
+      out.push({ kind: "input", label: entry.label, input: entry.input });
+      continue;
+    }
+    out.push({ kind: "input", label: describeInput(entry), input: entry });
+  }
+  return out;
 }
 
 function summaryFor(id: string): ExampleSummary {
@@ -120,9 +158,11 @@ function summaryFor(id: string): ExampleSummary {
 
 export function listExampleSummaries(): ExampleSummary[] {
   // Every example folder with an index.ts is included; metadata.json refines it.
+  // `"manual": true` opts an example out — CLI-only scripts and host adapters
+  // have nothing the demo can run, so listing them only looks broken.
   const ids = new Set([...moduleById.keys(), ...metadataById.keys()]);
   return [...ids]
-    .filter((id) => sourceById.has(id))
+    .filter((id) => sourceById.has(id) && metadataById.get(id)?.manual !== true)
     .map(summaryFor)
     .sort((a, b) => a.title.localeCompare(b.title));
 }
@@ -167,7 +207,23 @@ async function loadDetail(id: string): Promise<ExampleDetail> {
     }
   }
 
-  return { ...summaryFor(id), source, machines, importError, runnable: hasLiveExecutors() };
+  // metadata.json `"machine"` nominates the default: the client preselects
+  // machines[0], so the nominated export sorts first.
+  const preferred = metadataById.get(id)?.machine;
+  if (preferred) {
+    const index = machines.findIndex((machine) => machine.exportName === preferred);
+    if (index > 0) machines.unshift(...machines.splice(index, 1));
+  }
+
+  return {
+    ...summaryFor(id),
+    source,
+    machines,
+    importError,
+    runnable: hasLiveExecutors(),
+    // No machine export means nothing to drive from chat, same as `manual`.
+    manual: metadataById.get(id)?.manual === true || machines.length === 0,
+  };
 }
 
 /** The live machine object for a run — never serialized to the client. */

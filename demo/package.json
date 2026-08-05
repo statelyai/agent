@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "@ai-sdk/openai": "^3.0.25",
+    "@assistant-ui/react": "^0.15.4",
+    "@assistant-ui/react-markdown": "^0.14.8",
     "@base-ui/react": "^1.5.0",
     "@fontsource-variable/geist": "^5.2.8",
     "@fontsource-variable/geist-mono": "^5.3.0",
@@ -24,13 +26,17 @@
     "@xstate/store-react": "^2.0.0",
     "ai": "^6.0.67",
     "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
     "lucide-react": "^0.545.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "streamdown": "^2.5.0",
+    "remark-gfm": "^4.0.1",
+    "tailwind-merge": "^3.6.0",
+    "tw-shimmer": "^0.4.12",
     "ws": "^8.21.1",
     "xstate": "6.0.0-alpha.25",
-    "zod": "^4.3.6"
+    "zod": "^4.3.6",
+    "zustand": "^5.0.14"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.0",

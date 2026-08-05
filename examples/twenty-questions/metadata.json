@@ -9,14 +9,20 @@
   },
   "comparison": {
     "targets": ["LangGraph", "Burr", "Flowise"],
-    "purpose": "Shows the decision loop with machine-held context, guard-enforced legality, typed model aliases, answer/guess feedback classification, scoring, play-again reset, and machine-owned user prompts."
+    "purpose": "Shows a decision loop with guard-enforced legality (the final turn must be a GUESS) where every player turn is an idle state with meta.interaction hints — Yes/No buttons plus free text routed to a classifier, including a side-question detour that costs no turn."
   },
   "starters": [
     {
-      "questionsRemaining": 20
+      "label": "Full game (20 questions)",
+      "input": { "questionsRemaining": 20 }
     },
     {
-      "questionsRemaining": 10
+      "label": "Short game (10 questions)",
+      "input": { "questionsRemaining": 10 }
+    },
+    {
+      "label": "Hard mode (5 questions)",
+      "input": { "questionsRemaining": 5 }
     }
   ]
 }

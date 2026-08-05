@@ -1,6 +1,6 @@
 {
   "name": "ai-sdk-evaluator-optimizer",
-  "title": "Vercel AI SDK Evaluator-Optimizer",
+  "title": "Translate, then critique the translation",
   "kind": "comparison",
   "origin": {
     "type": "docs",
@@ -8,17 +8,33 @@
     "url": "https://ai-sdk.dev/docs/agents/workflows#evaluator-optimizer"
   },
   "comparison": {
-    "targets": ["Vercel AI SDK", "evaluator-optimizer"],
-    "purpose": "Ports AI SDK evaluator-optimizer into an explicit XState machine."
+    "targets": [
+      "Vercel AI SDK",
+      "evaluator-optimizer"
+    ],
+    "purpose": "Translates a phrase, has a critic grade the result, and revises until it passes \u2014 the AI SDK evaluator-optimizer loop as an explicit XState machine."
   },
   "starters": [
     {
-      "text": "The early bird catches the worm.",
-      "targetLanguage": "Japanese"
+      "label": "Proverb into Japanese",
+      "input": {
+        "text": "The early bird catches the worm.",
+        "targetLanguage": "Japanese"
+      }
     },
     {
-      "text": "Break a leg out there tonight!",
-      "targetLanguage": "French"
+      "label": "Idiom into French",
+      "input": {
+        "text": "Break a leg out there tonight!",
+        "targetLanguage": "French"
+      }
+    },
+    {
+      "label": "Slogan into Spanish",
+      "input": {
+        "text": "Ship it before the coffee gets cold.",
+        "targetLanguage": "Spanish"
+      }
     }
   ]
 }

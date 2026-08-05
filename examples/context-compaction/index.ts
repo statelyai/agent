@@ -24,6 +24,12 @@
  * messages is the simplest trigger; to use a token budget instead, swap the
  * `checkingWindow` predicate for a token estimate — nothing else moves.
  *
+ * Human turns are machine events, not `agent.userInput`: `awaitingUser` has no
+ * invoke, so the run settles **idle** there and a host (demo UI, test, or the
+ * stdin loop below) resumes it with `USER_MESSAGE { text }`. The state carries
+ * `meta.interaction` so hosts know what to label the input and where to route
+ * free chat text (`textEvent`). Labels support `{contextKey}` interpolation.
+ *
  * Type `exit` to end; the machine outputs the final summary, recent messages,
  * and turn count.
  *
@@ -32,15 +38,40 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import type { SnapshotFrom } from "xstate";
 import {
   type AgentMessage,
+  type AgentRequestExecutor,
   assistantMessage,
   createAgentSchemas,
+  getStateMeta,
   runAgent,
   setupAgent,
   systemMessage,
   userMessage,
 } from "@statelyai/agent";
+
+/**
+ * Typed `meta.interaction` hints. Hosts read them off the idle snapshot to
+ * label the input box and route free chat text to an event.
+ */
+const metaSchema = z.object({
+  interaction: z
+    .object({
+      label: z.string(),
+      events: z
+        .record(
+          z.string(),
+          z.object({
+            label: z.string().optional(),
+            style: z.enum(["primary", "danger", "default"]).optional(),
+          }),
+        )
+        .optional(),
+      textEvent: z.string().optional(),
+    })
+    .optional(),
+});
 
 // Annotated so the exported const has a portable, nameable type (TS2742).
 export const models = defineModels({
@@ -55,7 +86,14 @@ export const contextCompactionSchemas = createAgentSchemas({
     maxMessages: z.number(),
     keepRecent: z.number(),
     pendingInput: z.string().nullable(),
+    // Human-readable window state, interpolated into the interaction label.
+    windowStatus: z.string(),
   }),
+  meta: metaSchema,
+  events: {
+    /** One human chat turn. The idle `awaitingUser` state waits for this. */
+    USER_MESSAGE: z.object({ text: z.string() }),
+  },
   input: z.object({
     // Compact once history grows past this many messages...
     maxMessages: z.number().default(8),
@@ -84,6 +122,9 @@ const SUMMARIZE_SYSTEM =
 const agentSetup = setupAgent({
   schemas: contextCompactionSchemas,
   models,
+  // Deterministic idle detection: the run settles whenever the machine is
+  // parked in the tagged waiting-for-a-human state.
+  isSuspended: (snapshot) => snapshot.hasTag("waiting"),
   requests: {
     // Chat reply. Rendered as: [summary-as-system?] + recent messages.
     respond: {
@@ -141,16 +182,27 @@ export const contextCompactionMachine = agentSetup.createMachine({
     maxMessages: input.maxMessages,
     keepRecent: input.keepRecent,
     pendingInput: null,
+    windowStatus: "0 messages in the window, no summary yet",
   }),
   initial: "awaitingUser",
   states: {
+    // No invoke: the run settles idle here and a host resumes it with
+    // `USER_MESSAGE`. `meta.interaction.textEvent` tells the host that free
+    // chat text becomes that event's single string field (`text`).
     awaitingUser: {
-      invoke: {
-        src: "agent.userInput",
-        input: { prompt: "You:" },
-        onDone: ({ event }) => ({
+      tags: ["waiting"],
+      meta: {
+        interaction: {
+          // `{turns}` / `{windowStatus}` resolve against the snapshot context.
+          label: "Say something (turn {turns} — {windowStatus}). Type 'exit' to finish.",
+          textEvent: "USER_MESSAGE",
+          events: { USER_MESSAGE: { label: "Send", style: "primary" } },
+        },
+      },
+      on: {
+        USER_MESSAGE: ({ event }) => ({
           target: "routingInput",
-          context: { pendingInput: String(event.output ?? "") },
+          context: { pendingInput: event.text },
         }),
       },
     },
@@ -172,18 +224,24 @@ export const contextCompactionMachine = agentSetup.createMachine({
           summary: context.summary,
           messages: [...context.messages, userMessage(context.pendingInput ?? "")],
         }),
-        onDone: ({ context, output }) => ({
-          target: "checkingWindow",
-          context: {
-            messages: [
-              ...context.messages,
-              userMessage(context.pendingInput ?? ""),
-              assistantMessage(output),
-            ],
-            turns: context.turns + 1,
-            pendingInput: null,
-          },
-        }),
+        onDone: ({ context, output }) => {
+          const messages = [
+            ...context.messages,
+            userMessage(context.pendingInput ?? ""),
+            assistantMessage(output),
+          ];
+          return {
+            target: "checkingWindow",
+            context: {
+              messages,
+              turns: context.turns + 1,
+              pendingInput: null,
+              windowStatus: `${messages.length}/${context.maxMessages} messages${
+                context.summary ? ", summary active" : ", no summary yet"
+              }`,
+            },
+          };
+        },
         // On a failed reply, drop back to the prompt rather than stalling.
         onError: { target: "awaitingUser", context: { pendingInput: null } },
       },
@@ -211,6 +269,7 @@ export const contextCompactionMachine = agentSetup.createMachine({
           context: {
             summary: output.summary,
             messages: context.messages.slice(-context.keepRecent),
+            windowStatus: `compacted to ${context.keepRecent} recent messages, summary active`,
           },
         }),
         // If summarization fails, keep going without dropping history.
@@ -229,13 +288,74 @@ export const contextCompactionMachine = agentSetup.createMachine({
   },
 });
 
-const executors = createAiSdkExecutors({ models });
+type CompactionSnapshot = SnapshotFrom<typeof contextCompactionMachine>;
+
+/** `{key}` placeholders in interaction labels resolve against context. */
+export function resolveInteractionLabel(label: string, context: Record<string, unknown>): string {
+  return label
+    .replace(/\{(\w+)\}/g, (_, key: string) => {
+      const value = context[key];
+      return typeof value === "string" || typeof value === "number" ? String(value) : "";
+    })
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** The prompt a host shows while the machine sits idle in `awaitingUser`. */
+export function idlePrompt(snapshot: CompactionSnapshot): string {
+  const label = getStateMeta(snapshot).interaction?.label ?? "You:";
+  return resolveInteractionLabel(label, snapshot.context);
+}
+
+/**
+ * Dual-mode runner. The test passes mocked executors and a scripted message
+ * queue (so CI stays keyless); the direct run below uses real models + stdin.
+ */
+export async function runContextCompactionExample(options?: {
+  input?: { maxMessages?: number; keepRecent?: number };
+  generateText?: AgentRequestExecutor;
+  /** Scripted chat turns, consumed in order on each idle settle. */
+  userMessages?: string[];
+  onTransition?: (snapshot: CompactionSnapshot) => void;
+}) {
+  const queued = [...(options?.userMessages ?? [])];
+  const shared = {
+    executors: options?.generateText
+      ? { generateText: options.generateText }
+      : createAiSdkExecutors({ models }),
+    ...(options?.onTransition ? { onTransition: options.onTransition } : {}),
+  };
+
+  let result = await runAgent(contextCompactionMachine, {
+    input: {
+      maxMessages: options?.input?.maxMessages ?? 8,
+      keepRecent: options?.input?.keepRecent ?? 4,
+    },
+    ...shared,
+  });
+
+  // Each chat turn settles the run idle. Resume from `persistedSnapshot`.
+  while (result.status === "idle") {
+    const text = queued.length
+      ? (queued.shift() as string)
+      : options?.userMessages
+        ? "exit"
+        : await promptLine(`${idlePrompt(result.snapshot)}\n> `);
+    result = await runAgent(contextCompactionMachine, {
+      snapshot: result.persistedSnapshot,
+      event: { type: "USER_MESSAGE", text },
+      ...shared,
+    });
+  }
+
+  if (result.status !== "done") {
+    throw new Error(`Context compaction did not complete: ${result.status}`);
+  }
+  return result;
+}
 
 export async function main() {
-  const result = await runAgent(contextCompactionMachine, {
-    input: { maxMessages: 8, keepRecent: 4 },
-    executors,
-    userInput: async ({ prompt }) => promptLine(`${prompt ?? "You:"} `),
+  const result = await runContextCompactionExample({
     onTransition: (snapshot) => {
       console.log("[state]", JSON.stringify(snapshot.value));
       if (snapshot.value === "compacting") {
@@ -249,10 +369,6 @@ export async function main() {
       }
     },
   });
-
-  if (result.status !== "done") {
-    throw new Error(`Context compaction did not complete: ${result.status}`);
-  }
 
   console.log(`\nTurns: ${result.output.turns}`);
   console.log(`Kept ${result.output.messages.length} recent messages.`);

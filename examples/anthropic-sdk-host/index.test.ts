@@ -341,11 +341,25 @@ describe("createAnthropicExecutors + runAgent", () => {
     });
 
     const { generateText, decide } = createAnthropicExecutors({ client });
-    const result = await runAgent(twentyQuestionsMachine, {
+    const executors = { generateText, decide };
+
+    // Player turns are idle states now: the decide round-trip settles the run
+    // at `awaitingGuessFeedback`, and scripted button events resume it to done.
+    let result = await runAgent(twentyQuestionsMachine, {
       input: { questionsRemaining: 1 },
-      executors: { generateText, decide },
-      userInput: async () => "correct",
+      executors,
     });
+    expect(result.status).toBe("idle");
+
+    const playerEvents = [{ type: "GUESS_RIGHT" }, { type: "PLAY_AGAIN_NO" }] as const;
+    for (const event of playerEvents) {
+      if (result.status !== "idle") throw new Error(`expected idle, got ${result.status}`);
+      result = await runAgent(twentyQuestionsMachine, {
+        snapshot: result.persistedSnapshot,
+        event,
+        executors,
+      });
+    }
 
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");

@@ -143,7 +143,7 @@ const result = await runAgent(moderationMachine, {
 });
 ```
 
-- `decisions` answers `decide` (and `agent.plan`); `text` answers every text request, `generateText` and `streamText` sharing the one queue.
+- `decisions` answers `decide`; `text` answers every text request, `generateText` and `streamText` sharing the one queue.
 - Entries are values or functions of the request — route on `request.name`, on the decision's candidate `events`, or on prior `attempts`.
 - An entry may be the raw envelope (`{ output, usage }` / `{ event, usage }`), so scripted runs can exercise usage aggregation.
 - A dry queue throws an error naming the pending request. Queues are copied, so one script object seeds many runs.

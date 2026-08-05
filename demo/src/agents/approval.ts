@@ -28,7 +28,7 @@ const agentSetup = setupAgent({
     writeDraft: {
       schemas: { input: z.object({ topic: z.string() }), output: z.string() },
       model: "writer",
-      system: "You write short, punchy internal announcements — two or three sentences.",
+      system: "You write short, punchy internal announcements in two or three sentences.",
       prompt: ({ input }) => `Write a short announcement about: ${input.topic}`,
     },
   },

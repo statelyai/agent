@@ -63,6 +63,9 @@ export const KNOWLEDGE_BASE: Record<string, string> = {
   "moon distance": "384,400 kilometers (average from Earth)",
 };
 
+/** Model turns allowed before the loop-breaker gives a best-effort answer. */
+const MAX_STEPS = 5;
+
 const toolResultSchema = z.object({
   summary: z.string(),
   value: z.number().nullable(),
@@ -112,7 +115,6 @@ const agentSetup = setupAgent({
   }),
   input: z.object({
     question: z.string(),
-    maxSteps: z.number().default(5),
   }),
   output: z.object({
     answer: z.string(),
@@ -192,7 +194,7 @@ export const reactAgentMachine = agentSetup.createMachine({
   context: ({ input }) => ({
     question: input.question,
     messages: [userMessage(input.question)],
-    stepsRemaining: input.maxSteps,
+    stepsRemaining: MAX_STEPS,
     next: null,
     answer: null,
   }),
@@ -311,7 +313,6 @@ export const reactAgentMachine = agentSetup.createMachine({
 
 export interface RunReactAgentOptions {
   question?: string;
-  maxSteps?: number;
   /** Injected for tests; direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
   /** Observes each machine transition (the visible loop). */
@@ -330,14 +331,13 @@ export async function runReactAgentExample(
 ): Promise<ReactAgentResult> {
   const {
     question = "How many seconds are there in 3 days?",
-    maxSteps = 5,
     generateText,
     onProgress,
   } = options;
 
   const progress: string[] = [];
   const result = await runAgent(reactAgentMachine, {
-    input: { question, maxSteps },
+    input: { question },
     ...(generateText
       ? { executors: { generateText } }
       : { executors: createAiSdkExecutors({ models }) }),

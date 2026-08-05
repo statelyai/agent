@@ -30,6 +30,9 @@ export const models = defineModels({
 
 const BRANCH_PREFIX = "research-";
 
+/** Reflection rounds before the report is written no matter what. */
+const MAX_ROUNDS = 2;
+
 const setup = setupAgent({
   models,
   context: z.object({
@@ -43,7 +46,7 @@ const setup = setupAgent({
     maxRounds: z.number(),
     report: z.string().nullable(),
   }),
-  input: z.object({ question: z.string(), maxRounds: z.number().default(2) }),
+  input: z.object({ question: z.string() }),
   output: z.object({
     report: z.string(),
     rounds: z.number(),
@@ -113,7 +116,7 @@ export const deepResearchMachine = setup.createMachine({
     expected: 0,
     feedback: null,
     round: 0,
-    maxRounds: input.maxRounds,
+    maxRounds: MAX_ROUNDS,
     report: null,
   }),
   output: ({ context }) => ({
@@ -200,7 +203,6 @@ export const deepResearchMachine = setup.createMachine({
 
 export interface RunDeepResearchOptions {
   question?: string;
-  maxRounds?: number;
   /** Injected for tests; direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
   /** Observes each machine transition. */
@@ -210,12 +212,11 @@ export interface RunDeepResearchOptions {
 export async function runDeepResearchExample(options: RunDeepResearchOptions = {}) {
   const {
     question = "What makes durable AI workflows reliable?",
-    maxRounds = 2,
     generateText,
     onProgress,
   } = options;
   const result = await runAgent(deepResearchMachine, {
-    input: { question, maxRounds },
+    input: { question },
     ...(generateText
       ? { executors: { generateText } }
       : { executors: createAiSdkExecutors({ models }) }),

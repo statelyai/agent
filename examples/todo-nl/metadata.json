@@ -1,6 +1,6 @@
 {
   "name": "todo-nl",
-  "title": "Natural-Language Todo Manager",
+  "title": "Todo list you talk to",
   "kind": "agent-workflow",
   "origin": {
     "type": "stately-agent",
@@ -9,25 +9,11 @@
   },
   "comparison": {
     "targets": ["LangGraph", "Burr"],
-    "purpose": "One `agent.plan` invoke maps a free-text command onto a sequence of a real app's machine events (ADD/TOGGLE/DELETE/QUIT): a multi-action command drives several plan steps in order, the built-in done move ends the plan (no machine sentinel), and guard-enforced honesty rejects nonexistent ids mid-plan with a retry. Ships a with/without-machine A/B pair (index.ts vs imperative.ts) so agent.plan's typed events, mid-plan guard rejection+retry, and resumable snapshot can be compared against a hand-rolled generateObject while-loop."
+    "purpose": "Turns one free-text command into a sequence of typed machine events via an explicit decide loop, pausing on an idle state for the next thing you say."
   },
   "starters": [
-    {
-      "todos": []
-    },
-    {
-      "todos": [
-        {
-          "id": 1,
-          "title": "Buy groceries",
-          "done": false
-        },
-        {
-          "id": 2,
-          "title": "Email the team",
-          "done": true
-        }
-      ]
-    }
+    "add milk and eggs",
+    "mark the first one done",
+    "delete anything about groceries"
   ]
 }

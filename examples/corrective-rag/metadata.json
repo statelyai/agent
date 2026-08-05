@@ -1,6 +1,6 @@
 {
   "name": "corrective-rag",
-  "title": "Corrective RAG (CRAG)",
+  "title": "Retrieval that grades and corrects itself",
   "kind": "agent-workflow",
   "origin": {
     "type": "langgraph",
@@ -8,11 +8,14 @@
     "url": "https://langchain-ai.github.io/langgraph/tutorials/rag/langgraph_crag/"
   },
   "comparison": {
-    "targets": ["LangGraph"],
-    "purpose": "Self-correcting retrieval as explicit machine states: retrieve → grade → decide → (generate | rewrite → web-search → generate)."
+    "targets": [
+      "LangGraph"
+    ],
+    "purpose": "Retrieves documents, grades whether they actually answer the question, and falls back to a rewritten web search before answering."
   },
   "starters": [
     "How does the Raft consensus algorithm elect a leader?",
-    "What is the latest stable release of Node.js?"
+    "What is the latest stable release of Node.js?",
+    "What causes write amplification in LSM-tree stores?"
   ]
 }

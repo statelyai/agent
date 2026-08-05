@@ -18,5 +18,8 @@
     "ui": "@/components/ui",
     "lib": "@/lib",
     "hooks": "@/hooks"
+  },
+  "registries": {
+    "@assistant-ui": "https://r.assistant-ui.com/styles/{style}/{name}.json"
   }
 }

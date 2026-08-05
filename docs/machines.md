@@ -75,7 +75,7 @@ Both `enq.emit({ type: 'EVALUATED', ... })` and the host-side `on: { EVALUATED: 
 
 Beyond schemas, `setupAgent` takes your models plus optional `requests` and `actors`, and returns a **setup** whose `createMachine` builds the machine. Like XState's `setup()`, the return value is the typed foundation, not a running agent, so name it accordingly (`agentSetup`, `gameSetup`).
 
-The builtins `agent.generateText`, `agent.streamText`, `agent.decide`, `agent.plan`, and `agent.userInput` are registered automatically; invoke them by name.
+The builtins `agent.generateText`, `agent.streamText`, `agent.decide`, and `agent.userInput` are registered automatically; invoke them by name.
 
 ### Models
 
@@ -163,7 +163,6 @@ const agentSetup = setupAgent({
 | `agent.generateText` | `model`, `prompt` or `messages`, optional `system`, `outputSchema`, `tools` | text, or the value parsed from `outputSchema`          | [Text requests](text-requests.md)         |
 | `agent.streamText`   | same as `agent.generateText`                                                | same, with chunks delivered to the host as they arrive | [Text requests](text-requests.md)         |
 | `agent.decide`       | `model`, `prompt`, optional `system`, `allowedEvents`                       | the one chosen event, applied to the machine           | [Decisions](decisions.md)                 |
-| `agent.plan`         | same as `agent.decide`                                                      | several legal events applied in a row                  | [Plans](plans.md)                         |
 | `agent.userInput`    | `prompt`, optional `schema`                                                 | the human's value                                      | [Human in the loop](human-in-the-loop.md) |
 
 Named `requests` stay the default (typed, reusable, testable); the builtins are the inline escape hatch. Both are executed by the host, so a machine using either still names no SDK.

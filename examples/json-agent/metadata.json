@@ -1,6 +1,6 @@
 {
   "name": "json-agent",
-  "title": "JSON Agent",
+  "title": "Support ticket agent authored as JSON",
   "kind": "agent-workflow",
   "origin": {
     "type": "stately-agent",
@@ -8,8 +8,10 @@
     "url": null
   },
   "comparison": {
-    "targets": ["Flowise"],
-    "purpose": "Shows a full agent workflow — decision, text request, idle human-in-the-loop step — authored as a real .json file and lowered by setupAgent.fromConfig(...) into the same runnable XState machine as TS authoring."
+    "targets": [
+      "Flowise"
+    ],
+    "purpose": "Shows a full agent workflow \u2014 decision, text request, idle human-in-the-loop step \u2014 authored as a real .json file and lowered by setupAgent.fromConfig(...) into the same runnable XState machine as TS authoring."
   },
   "starters": [
     "My invoice charged me twice this month. Please fix it.",

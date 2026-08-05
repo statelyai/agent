@@ -217,8 +217,8 @@ export type AllowedEventPattern<TEvent extends string = string> =
   | EventWildcardsOf<TEvent>;
 
 /**
- * Candidate event types for a decision or plan (declared on the
- * `agent.decide`/`agent.plan` builtins' `allowedEvents` input). A single
+ * Candidate event types for a decision (declared on the `agent.decide`
+ * builtin's `allowedEvents` input). A single
  * entry or an array; entries are exact event types or wildcard patterns
  * (`'*'` for every event, `'todo.*'` for a dotted namespace). The effective
  * candidate set offered to the model is this declaration **intersected with

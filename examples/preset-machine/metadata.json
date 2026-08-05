@@ -1,6 +1,6 @@
 {
   "name": "preset-machine",
-  "title": "Preset Machine (Parallel Review)",
+  "title": "Parallel code review (preset)",
   "kind": "agent-workflow",
   "origin": {
     "type": "stately-agent",
@@ -8,8 +8,15 @@
     "url": null
   },
   "comparison": {
-    "targets": ["LangGraph", "CrewAI"],
-    "purpose": "Shows a preset factory returning an ordinary XState machine: a static fan-out joined by branch name."
+    "targets": [
+      "LangGraph",
+      "CrewAI"
+    ],
+    "purpose": "Two reviewers read the same diff at the same time and their notes join into one result \u2014 built from a one-call preset factory instead of hand-written parallel states."
   },
-  "starters": []
+  "starters": [
+    "const user = db.query(`SELECT * FROM users WHERE id = ${req.params.id}`)",
+    "for (const post of user.posts) { post.author = db.query(...) }",
+    "app.post('/pay', (req, res) => charge(req.body.card, req.body.amount))"
+  ]
 }

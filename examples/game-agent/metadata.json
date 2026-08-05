@@ -1,7 +1,8 @@
 {
   "name": "game-agent",
-  "title": "Games as Machines (allowedEvents + event log in context)",
+  "title": "Turn-based combat & rock-paper-scissors",
   "kind": "agent-workflow",
+  "machine": "rpsMachine",
   "origin": {
     "type": "stately-agent",
     "source": "Created in this repository",
@@ -9,16 +10,20 @@
   },
   "comparison": {
     "targets": ["LangGraph", "Burr", "Flowise"],
-    "purpose": "Two lessons in one: a combat agent whose decision `allowedEvents` are computed from context (HEAL only when low HP), and a rock-paper-scissors agent that reduces its own round events into a context-held history log the decide prompt reads back, so the model can only win by using the saved event history."
+    "purpose": "Play rock-paper-scissors against the model, first to 3 — it reads the round history saved in context to counter your habits; a narrated combat turn shows the same machine computing its legal moves from HP."
   },
   "starters": [
     {
-      "playerHp": 20,
-      "enemyHp": 15
+      "label": "Play a match (first to 3)",
+      "input": { "targetWins": 3 }
     },
     {
-      "playerHp": 6,
-      "enemyHp": 15
+      "label": "Quick match (first to 2)",
+      "input": { "targetWins": 2 }
+    },
+    {
+      "label": "Long match (first to 5)",
+      "input": { "targetWins": 5 }
     }
   ]
 }

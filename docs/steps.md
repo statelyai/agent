@@ -197,7 +197,7 @@ This pure driver is the strict durability path. `runAgent` owns a live XState ac
 
 ## Ordering guarantee
 
-`getAgentEffects` emits a single transition's effects in **document order**. An entry action, then a `spawn`, then a `sendTo` to that spawned child yields `execute`, `task`, `execute` in that order, never a reordered set. This is load-bearing: the `sendTo` must run after the child it targets is started. Effects visible only on the snapshot (a re-surfacing `agent.plan`, children spawned by an earlier transition still pending) append after the action-derived effects, deduped by site id.
+`getAgentEffects` emits a single transition's effects in **document order**. An entry action, then a `spawn`, then a `sendTo` to that spawned child yields `execute`, `task`, `execute` in that order, never a reordered set. This is load-bearing: the `sendTo` must run after the child it targets is started. Effects visible only on the snapshot (children spawned by an earlier transition still pending) append after the action-derived effects, deduped by site id.
 
 ## requestId and idempotency
 
@@ -223,19 +223,11 @@ const { snapshot, effects } = replay(gameMachine, entries, options);
 
 **Compaction.** A snapshot taken mid-flight cannot carry in-flight effect state; the event log can. So snapshot only at **quiescent / idle** points. Resume from an idle snapshot plus the entries appended since, or replay the whole log from index 0. Both yield the identical state. See [The event log](event-log.md) for the `AgentEventLogStore` protocol and the snapshot-as-compaction cache.
 
-## Plans
-
-An [`agent.plan`](plans.md) invoke applies an ordered sequence of legal events (each a decision), not one. On the step path it surfaces as a `kind: 'plan'` effect that **re-surfaces on every frontier** while the plan is in flight, its candidates recomputed from the live snapshot.
-
-Per frontier, the host resolves **one** decision from `request.events` (via `resolveDecision`, wiring `canTake` to `snapshot.can`, plus the reserved done move and any `stopOn` events) and appends the chosen machine event. The next frontier re-surfaces the plan effect. The plan **completes** on the reserved `agent.plan.done` move (`PLAN_DONE_EVENT_TYPE`), a `stopOn` event, an exhausted `maxSteps` budget, or no legal events. Completion is recorded as `xstate.done.actor` carrying the invoke's `actorId`, `sessionId`, and `{ steps, stopped }` output, which fires its `onDone`.
-
-The re-surfaced effect's own `applied` / `stepsRemaining` are **not** folded under pure replay (the thin loop records bare machine events, not the invoke child's ledger mutations), so the host **derives the applied trail from the event log itself**. A single applied event that exits the invoking state cancels the invoke (`onDone` never fires), identical to `runAgent`. The full host-side plan driver, and parity with `runAgent` across all four stop reasons, is pinned in `src/steps-plan.test.ts`.
-
 ## Event log exclusions
 
 `execute` effects (fire-and-forget custom actions, `sendTo`, `cancel`) run once at the frontier and are **skipped on replay** (replay re-derives them). They are not durable state.
 
-Anything that must survive a crash has to be an **invoke or spawn of a registered actor source**, so it surfaces as a `text` / `decision` / `plan` / `task` effect whose completion is recorded (the completion-event rule). A side effect written as a plain fire-and-forget action is not recoverable; model it as an invoke if its result must be replayed.
+Anything that must survive a crash has to be an **invoke or spawn of a registered actor source**, so it surfaces as a `text` / `decision` / `task` effect whose completion is recorded (the completion-event rule). A side effect written as a plain fire-and-forget action is not recoverable; model it as an invoke if its result must be replayed.
 
 ## Known limits
 

@@ -11,5 +11,6 @@
     "targets": [],
     "purpose": "Runs the email-drafter machine as one live createActor session wired to @statelyai/sdk's createInspector, so the whole agent flow is visible in the Stately Inspector."
   },
-  "starters": []
+  "starters": [],
+  "manual": true
 }

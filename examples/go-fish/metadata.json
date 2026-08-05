@@ -9,15 +9,20 @@
   },
   "comparison": {
     "targets": ["LangGraph", "Burr", "Flowise"],
-    "purpose": "Shows hidden information, human input, model decisions, and machine-enforced game rules."
+    "purpose": "Shows hidden information and machine-enforced game rules, with the human's turn as an idle state resumed by a free-text ASK event hinted through meta.interaction."
   },
   "starters": [
     {
-      "seed": 42
+      "label": "Deal a hand",
+      "input": { "seed": 42 }
     },
     {
-      "seed": 7,
-      "maxTurns": 20
+      "label": "Long game (20 turns)",
+      "input": { "seed": 7, "maxTurns": 20 }
+    },
+    {
+      "label": "Quick game (8 turns)",
+      "input": { "seed": 3, "maxTurns": 8 }
     }
   ]
 }
