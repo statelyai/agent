@@ -1,5 +1,20 @@
 # @statelyai/agent
 
+## 2.0.0-alpha.14
+
+### Minor Changes
+
+- [`333e93e`](https://github.com/statelyai/agent/commit/333e93ee4b2f53874c639c985476db1eebb8b108) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Long-lived invoked children now work with the idle/resume host path:
+
+  - `runAgent` idle detection no longer treats an invoked child machine that is itself idle (waiting for events, no busy descendants, no pending eventless/after work) as in-flight work, so machines with a long-lived invoked agent can settle idle instead of hanging.
+  - Idle results always include `persistedSnapshot` (previously only alongside pending user inputs). Resume from it — `runAgent(machine, { snapshot: result.persistedSnapshot, event })` — to restore invoked children with their accumulated state; resuming from the live `snapshot` restarts children fresh.
+
+- [`333e93e`](https://github.com/statelyai/agent/commit/333e93ee4b2f53874c639c985476db1eebb8b108) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Remove the `agent.plan` builtin; use an explicit `agent.decide` loop (see todo-nl example).
+
+  A multi-event command is now authored as a loop in the machine: a `planning` state invokes `agent.decide` for one event, applying it re-enters `planning` for the next step, and an explicit machine event (e.g. `DONE`) exits the loop. The applied trail lives in context and is appended to each step's prompt. Control flow stays visible in the statechart.
+
+  Removed: the `agent.plan` invoke src, `PLAN_DONE_EVENT_TYPE`, `PlanLogic`, `AgentPlanInput`, `AgentPlanOutput`, `AgentPlanRequest`, and the `kind: 'plan'` request/effect/usage variants.
+
 ## 2.0.0-alpha.13
 
 ### Patch Changes

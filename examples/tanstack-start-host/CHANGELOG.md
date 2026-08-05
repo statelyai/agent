@@ -1,5 +1,12 @@
 # @statelyai/example-tanstack-start-host
 
+## 0.0.1-alpha.2
+
+### Patch Changes
+
+- Updated dependencies [[`333e93e`](https://github.com/statelyai/agent/commit/333e93ee4b2f53874c639c985476db1eebb8b108), [`333e93e`](https://github.com/statelyai/agent/commit/333e93ee4b2f53874c639c985476db1eebb8b108)]:
+  - @statelyai/agent@2.0.0-alpha.14
+
 ## 0.0.1-alpha.1
 
 ### Patch Changes

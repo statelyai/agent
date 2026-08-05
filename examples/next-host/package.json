@@ -1,6 +1,6 @@
 {
   "name": "@statelyai/example-next-host",
-  "version": "0.0.1-alpha.1",
+  "version": "0.0.1-alpha.2",
   "private": true,
   "type": "module",
   "scripts": {
