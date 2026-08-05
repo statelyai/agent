@@ -49,6 +49,7 @@
     "otel-bridge",
     "plan-steps-concurrent",
     "prune-type-exports-and-validate-state-keys",
+    "raw-ai-sdk-executors-assignable",
     "remove-zod-and-openai-compat-subpaths",
     "rename-generate-result",
     "request-name-on-text-requests",
