@@ -16,12 +16,21 @@ import {
   type Snapshot,
   type SnapshotFrom,
 } from "xstate";
-import type { AgentMessage, AgentTools, ChosenEvent } from "./types.js";
+import type {
+  AgentMessage,
+  AgentTools,
+  ChosenEvent,
+  InferInput,
+  StandardSchemaV1,
+  WithAgentInputSchema,
+} from "./types.js";
 import { AgentError } from "./errors.js";
 import {
   findNonSerializableContextPaths,
   getAgentMessages,
   getMachineStructuralHash,
+  isStandardSchema,
+  validateSchemaSync,
 } from "./utils.js";
 import {
   runStateRequestPass,
@@ -480,8 +489,15 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
    */
   executors?: Partial<AgentRequestExecutors>;
 
-  /** Machine input, passed straight to `createActor(machine, { input })`. Omit when resuming via `snapshot`. */
-  input?: InputFrom<TMachine>;
+  /**
+   * Machine input. Validated against the machine's declared input schema —
+   * defaults filled, transforms applied — before it reaches
+   * `createActor(machine, { input })` and the replayable event log; invalid
+   * input throws an {@link AgentError} with code `invalid-machine-input`.
+   * Typed as {@link AgentInputFrom}, so fields the schema defaults are optional
+   * here. Omit when resuming via `snapshot`.
+   */
+  input?: AgentInputFrom<TMachine>;
 
   // resume
   /** A previously-settled run's `result.snapshot`, to resume from instead of starting fresh. Pair with `event` to deliver the event that unblocks the resumed idle state. */
@@ -1595,6 +1611,52 @@ export function bindDecisionForProvide(
 }
 
 /**
+ * The machine input a run accepts, which is the schema's *pre*-validation side.
+ *
+ * XState's `schemas` are types only — it never validates, and it resolves
+ * `schemas.input` to one type shared by `createActor`'s `input` option and the
+ * `context: ({ input })` factory. A schema field declared with a default
+ * therefore reads as required at the call site even though the caller is meant
+ * to omit it. `setupAgent` brands the machine's input type with its own schema
+ * ({@link WithAgentInputSchema}), so this recovers the looser caller-facing
+ * side while the factory keeps seeing the validated one. Machines with no
+ * declared input schema — and machines reached through `.provide(...)`, which
+ * drops the brand — fall back to xstate's `InputFrom`.
+ */
+export type AgentInputFrom<TMachine extends AnyStateMachine> =
+  InputFrom<TMachine> extends WithAgentInputSchema<infer TInputSchema>
+    ? [TInputSchema] extends [StandardSchemaV1]
+      ? InferInput<TInputSchema>
+      : InputFrom<TMachine>
+    : InputFrom<TMachine>;
+
+/**
+ * Validates `input` against the machine's registered input schema, returning
+ * the schema's output — so defaults are filled and transforms applied before
+ * the value reaches `createActor` or the replayable event log.
+ *
+ * Standard Schema only (no validation library is referenced), so this works for
+ * whatever the machine was declared with. Omitted input stays omitted rather
+ * than being validated as `{}`: "started with no input" keeps meaning what it
+ * has always meant, instead of newly failing schemas with required fields.
+ */
+function resolveMachineInput(machine: AnyStateMachine, input: unknown): unknown {
+  if (input === undefined) return input;
+  const schema = getRegisteredAgentExecutionOptions(machine).schemas?.input;
+  if (!isStandardSchema(schema)) return input;
+  try {
+    return validateSchemaSync(schema, input);
+  } catch (error) {
+    throw new AgentError(
+      "invalid-machine-input",
+      `runAgent: machine input failed validation against the declared input ` +
+        `schema: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+}
+
+/**
  * Recursively rebinds an invoked child machine's own agent sources with the
  * SAME host-backed wrappers runAgent applies to the top-level machine, so a
  * child's text/stream/decision requests inherit runAgent's executors and
@@ -1763,6 +1825,11 @@ function createAgentSession<TMachine extends AnyStateMachine>(
   let warnedHeuristicIdle = false;
   const runId = `run_${nextRunAgentTraceId++}`;
   let traceSeq = 0;
+  // Validated once, then used everywhere `options.input` would have been: the
+  // actor, the replayable init entry, and the `run.start` trace all see the
+  // same post-defaults value, so a replay reproduces this run exactly even if a
+  // schema default is computed rather than constant.
+  const resolvedInput = resolveMachineInput(machine, options.input);
 
   // Version stamping (§ item 2): every settled snapshot carries a plain,
   // enumerable `agentMeta` field so it survives JSON persist/resume, and an
@@ -2174,7 +2241,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     return entry;
   };
   if (replayEvents.length === 0 && effectiveSnapshot === undefined) {
-    const entry = initEntry(machine, options.input, { machineVersion });
+    const entry = initEntry(machine, resolvedInput, { machineVersion });
     replayEventIds.add(entry.id);
     replayEvents.push(entry);
     options.onEvent?.(entry);
@@ -2409,7 +2476,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     };
 
     actor = createActor(boundMachine, {
-      input: options.input as never,
+      input: resolvedInput as never,
       snapshot: effectiveSnapshot,
       inspect: (event: InspectionEvent) => {
         // System-wide passthrough (children included) before runAgent's own
@@ -2593,7 +2660,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
 
     onTrace({
       type: "run.start",
-      ...(options.input !== undefined ? { input: options.input } : {}),
+      ...(resolvedInput !== undefined ? { input: resolvedInput as InputFrom<TMachine> } : {}),
       ...(effectiveSnapshot !== undefined ? { snapshot: effectiveSnapshot } : {}),
       ...(options.event !== undefined ? { event: options.event } : {}),
     });

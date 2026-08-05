@@ -4,6 +4,7 @@ import { createActor, createAsyncLogic, setup, toPromise } from "xstate";
 import { createDecisionLogic } from "./decision.js";
 import {
   AGENT_TRACE_SCHEMA_VERSION,
+  AgentError,
   AgentIdleError,
   createAgentSchemas,
   createTextLogic,
@@ -3704,5 +3705,122 @@ describe("runAgent usage aggregation", () => {
 
     expect(result.status).toBe("done");
     expect(result.usage).toEqual({ inputTokens: 8, outputTokens: 2, modelCalls: 1 });
+  });
+});
+
+describe("machine input validation", () => {
+  // A machine whose input schema defaults every field except `topic`, and whose
+  // context simply mirrors what the factory was handed.
+  const buildMachine = () =>
+    setupAgent({
+      schemas: createAgentSchemas({
+        context: z.object({ topic: z.string(), rounds: z.number(), tone: z.string() }),
+        input: z.object({
+          topic: z.string(),
+          rounds: z.number().default(3),
+          tone: z.string().default("neutral"),
+        }),
+        output: z.object({ topic: z.string(), rounds: z.number(), tone: z.string() }),
+      }),
+    }).createMachine({
+      id: "input-defaults",
+      context: ({ input }) => ({ topic: input.topic, rounds: input.rounds, tone: input.tone }),
+      initial: "done",
+      states: {
+        done: {
+          type: "final",
+          output: ({ context }) => context,
+        },
+      },
+    });
+
+  test("fills schema defaults before the context factory runs", async () => {
+    const result = await runAgent(buildMachine(), { input: { topic: "otters" } });
+
+    expect(result.status).toBe("done");
+    if (result.status !== "done") throw new Error("expected done");
+    // `rounds`/`tone` were never passed; the schema supplied them.
+    expect(result.output).toEqual({ topic: "otters", rounds: 3, tone: "neutral" });
+  });
+
+  test("defaulted fields are optional at the call site, required ones are not", async () => {
+    // Compile-time half: `{ topic }` alone type-checks above because `rounds`
+    // and `tone` are defaulted, while `topic` (no default) stays required.
+    await expect(
+      runAgent(buildMachine(), {
+        // @ts-expect-error `topic` has no default, so it cannot be omitted
+        input: { rounds: 1 },
+      }),
+    ).rejects.toThrow(AgentError);
+  });
+
+  test("explicit values win over defaults", async () => {
+    const result = await runAgent(buildMachine(), {
+      input: { topic: "otters", rounds: 9 },
+    });
+
+    if (result.status !== "done") throw new Error("expected done");
+    expect(result.output).toEqual({ topic: "otters", rounds: 9, tone: "neutral" });
+  });
+
+  test("the replayable init entry carries post-default input, so a replay reproduces the run", async () => {
+    const result = await runAgent(buildMachine(), { input: { topic: "otters" } });
+
+    const init = result.events[0] as AgentLogEntry & { event?: { input?: unknown } };
+    expect(init.event?.input).toEqual({ topic: "otters", rounds: 3, tone: "neutral" });
+  });
+
+  test("invalid input rejects with an AgentError, like a bad resume snapshot", async () => {
+    // Thrown, not settled: the actor never starts, so this is a bad call rather
+    // than a machine failure (same shape as AgentSnapshotVersionMismatchError).
+    await expect(
+      runAgent(buildMachine(), {
+        // `rounds` is not a number.
+        input: { topic: "otters", rounds: "nine" } as never,
+      }),
+    ).rejects.toThrow(AgentError);
+
+    const error: unknown = await runAgent(buildMachine(), {
+      input: { topic: "otters", rounds: "nine" } as never,
+    }).catch((caught: unknown) => caught);
+    expect((error as AgentError).code).toBe("invalid-machine-input");
+  });
+
+  test("omitted input stays omitted rather than being validated as {}", async () => {
+    // A machine that tolerates no input at all: omitting it must not start
+    // failing just because a schema with required fields is declared.
+    const machine = setupAgent({
+      schemas: createAgentSchemas({
+        context: z.object({ topic: z.string() }),
+        input: z.object({ topic: z.string() }),
+        output: z.object({ topic: z.string() }),
+      }),
+    }).createMachine({
+      id: "no-input",
+      context: ({ input }) => ({ topic: input?.topic ?? "(none)" }),
+      initial: "done",
+      states: { done: { type: "final", output: ({ context }) => context } },
+    });
+
+    const result = await runAgent(machine, {});
+
+    if (result.status !== "done") throw new Error("expected done");
+    expect(result.output).toEqual({ topic: "(none)" });
+  });
+
+  test("a machine with no declared input schema passes input through untouched", async () => {
+    const machine = setup({
+      schemas: { context: z.object({ seen: z.unknown() }) },
+    }).createMachine({
+      id: "plain",
+      context: ({ input }) => ({ seen: input }),
+      initial: "done",
+      states: { done: { type: "final", output: ({ context }) => context.seen } },
+    });
+
+    const result = await runAgent(machine, { input: { anything: 1 } as never });
+
+    if (result.status !== "done") throw new Error("expected done");
+    expect(result.output).toEqual({ anything: 1 });
   });
 });

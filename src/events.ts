@@ -102,9 +102,11 @@ export interface AgentEventDescriptor {
   inputSchema?: StandardSchemaV1;
 }
 
-/** Registered event payload schemas, as attached to a machine by `setupAgent`/`createAgentSchemas`. */
+/** Registered schemas, as attached to a machine by `setupAgent`/`createAgentSchemas`. */
 export interface AgentSchemas {
   events?: Record<string, StandardSchemaV1>;
+  /** Machine input schema; `runAgent` validates `options.input` against it. */
+  input?: StandardSchemaV1;
 }
 
 /** Shared options threaded through step discovery ({@link getAgentRequests}/{@link getAcceptedEvents}) — snapshot for event legality, event schemas for payload validation/tool schemas, and registered actor source logics. */
