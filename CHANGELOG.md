@@ -1,5 +1,11 @@
 # @statelyai/agent
 
+## 2.0.0-alpha.13
+
+### Patch Changes
+
+- [`25c940c`](https://github.com/statelyai/agent/commit/25c940c3300d290a34c43b3fc3aeae63d0eaef61) Thanks [@davidkpiano](https://github.com/davidkpiano)! - The raw Vercel AI SDK `generateText`/`streamText` functions now typecheck when passed directly as executors (`executors: { generateText, streamText }`) — no casts needed. `AgentRequestExecutor` now receives an `AgentExecutorTextRequest` (exported): the same runtime object as before, typed so it is assignable to `ai`'s call options (`prompt`/`messages` mutually exclusive; `tools`/`toolChoice`/`messages` widened). Hand-written executors annotating `AgentTextRequest & { tools: AgentTools }` remain assignable unchanged. `AiSdkShapedTextResult`/`AiSdkShapedStreamResult` swap their index signatures for explicit optional passthrough fields so `ai`'s result interfaces are admitted.
+
 ## 2.0.0-alpha.12
 
 ### Minor Changes
