@@ -15,7 +15,6 @@ type ShellContext = {
   theme: Theme;
   switcherOpen: boolean;
   switcherQuery: string;
-  codeOpen: boolean;
   mobileView: MobileView;
   input: string;
   turns: Turn[];
@@ -38,8 +37,6 @@ type ShellEvents = {
   switcherToggled: {};
   switcherClosed: {};
   switcherQueryChanged: { query: string };
-  codeToggled: {};
-  codeClosed: {};
   mobileViewChanged: { view: MobileView };
   inputChanged: { value: string };
   runReset: {};
@@ -89,7 +86,6 @@ export function createShellStore(initialSelection: Selection, initialTheme: Them
       theme: initialTheme,
       switcherOpen: false,
       switcherQuery: "",
-      codeOpen: false,
       mobileView: "app",
       input: "",
       turns: [],
@@ -124,8 +120,6 @@ export function createShellStore(initialSelection: Selection, initialTheme: Them
       switcherClosed: (context) =>
         context.switcherOpen ? { ...context, switcherOpen: false, switcherQuery: "" } : context,
       switcherQueryChanged: (context, event) => ({ ...context, switcherQuery: event.query }),
-      codeToggled: (context) => ({ ...context, codeOpen: !context.codeOpen }),
-      codeClosed: (context) => (context.codeOpen ? { ...context, codeOpen: false } : context),
       mobileViewChanged: (context, event) => ({ ...context, mobileView: event.view }),
       inputChanged: (context, event) => ({ ...context, input: event.value }),
       runReset: resetRunState,

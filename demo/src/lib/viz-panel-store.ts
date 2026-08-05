@@ -53,8 +53,16 @@ function rootActor(message: SystemMessage) {
   return Array.isArray(message.actors)
     ? ([...message.actors]
         .reverse()
-        .find((actor) => actor.parentSessionId == null && actor.machine) ?? null)
+        .find((actor) => actor.parentSessionId == null) ?? null)
     : null;
+}
+
+function inspectSnapshot(snapshot: unknown, event: unknown): SystemMessage {
+  return {
+    type: "@statelyai.inspectSnapshot",
+    snapshot,
+    event,
+  };
 }
 
 /**
@@ -107,9 +115,10 @@ export function createVizPanelStore() {
         error: event.message,
       }),
       iframeReady: (context, event, enqueue) => {
-        const messages =
-          context.liveMessages.length > 0 ? context.liveMessages : event.fallbackMessages;
-        for (const message of messages) enqueue.emit.post({ message });
+        // The authored machine is stable across persisted run/resume systems.
+        // Always initialize it once, then layer buffered live snapshots on top.
+        for (const message of event.fallbackMessages) enqueue.emit.post({ message });
+        for (const message of context.liveMessages) enqueue.emit.post({ message });
         return { ...context, status: "ready", error: null };
       },
       machineChanged: (context, event, enqueue) => {
@@ -141,11 +150,14 @@ export function createVizPanelStore() {
         return context;
       },
       systemInit: (context, event, enqueue) => {
-        if (context.status === "ready") enqueue.emit.post({ message: event.message });
         const root = rootActor(event.message);
+        const frame = root?.snapshot
+          ? inspectSnapshot(root.snapshot, { type: "@xstate.init" })
+          : null;
+        if (context.status === "ready" && frame) enqueue.emit.post({ message: frame });
         return {
           ...context,
-          liveMessages: [event.message],
+          liveMessages: frame ? [frame] : [],
           selectedSessionId: root?.sessionId ?? null,
           liveEvent: null,
           liveStateLabel: snapshotStateLabel(root?.snapshot),
@@ -156,6 +168,7 @@ export function createVizPanelStore() {
         let selectedSessionId = context.selectedSessionId;
         let liveEvent = context.liveEvent;
         let liveStateLabel = context.liveStateLabel;
+        let frame: SystemMessage | null = null;
 
         if (
           message.type === "@statelyai.system.actorRegistered" &&
@@ -165,6 +178,9 @@ export function createVizPanelStore() {
         ) {
           selectedSessionId = message.sessionId;
           liveStateLabel = snapshotStateLabel(message.snapshot) ?? liveStateLabel;
+          if (message.snapshot) {
+            frame = inspectSnapshot(message.snapshot, { type: "@xstate.init" });
+          }
         } else if (
           message.type === "@statelyai.system.actorEvent" &&
           message.sessionId === selectedSessionId
@@ -184,15 +200,15 @@ export function createVizPanelStore() {
             liveEvent = eventType;
           }
           liveStateLabel = snapshotStateLabel(message.snapshot) ?? liveStateLabel;
+          frame = inspectSnapshot(message.snapshot, message.event ?? null);
         }
 
-        if (context.liveMessages.length === 0) {
-          return { ...context, selectedSessionId, liveEvent, liveStateLabel };
-        }
-        if (context.status === "ready") enqueue.emit.post({ message });
+        if (context.status === "ready" && frame) enqueue.emit.post({ message: frame });
         return {
           ...context,
-          liveMessages: appendLiveMessage(context.liveMessages, message),
+          liveMessages: frame
+            ? appendLiveMessage(context.liveMessages, frame)
+            : context.liveMessages,
           selectedSessionId,
           liveEvent,
           liveStateLabel,

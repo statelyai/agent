@@ -15,7 +15,7 @@ import {
   type ExampleSummary,
   type InspectionInfo,
 } from "@/lib/example-library";
-import { humanizeEventType, type Json } from "@/lib/machine-ui";
+import { humanizeEventType } from "@/lib/machine-ui";
 import { resumeScenario, startScenario } from "@/lib/run-demo-agent";
 import { getScenario, scenarioSource, scenarioVizConfig, scenarios } from "@/lib/scenarios";
 import type { Selection } from "@/lib/selection";
@@ -54,10 +54,9 @@ function hashFromSelection(selection: Selection) {
 
 /**
  * Optional full /inspect page (VITE_VIZ_INSPECT_URL). The hosted route is
- * login-free now, but an https page cannot open a ws:// connection to the
- * local relay (mixed content), so it only works with a local (http) viz app
- * or a wss relay. Default: the embed + WS bridge inside VizPanel, which
- * connects from this (http) page and forwards live messages via postMessage.
+ * login-free now. Default: the embed + WS bridge inside VizPanel, which
+ * connects to hosted Stately Sky and forwards live messages via postMessage.
+ * A local ws:// relay still needs an http viewer to avoid mixed content.
  */
 const inspectOverride = import.meta.env.VITE_VIZ_INSPECT_URL || null;
 
@@ -75,7 +74,6 @@ export function DemoShell() {
   const selection = useSelector(store, (s) => s.context.selection);
   const machineIndex = useSelector(store, (s) => s.context.machineIndex);
   const theme = useSelector(store, (s) => s.context.theme);
-  const codeOpen = useSelector(store, (s) => s.context.codeOpen);
   const mobileView = useSelector(store, (s) => s.context.mobileView);
   const input = useSelector(store, (s) => s.context.input);
   const turns = useSelector(store, (s) => s.context.turns);
@@ -124,16 +122,7 @@ export function DemoShell() {
     return () => window.removeEventListener("hashchange", onHashChange);
   }, [player, store]);
 
-  // Escape closes the code drawer (the switcher popover handles its own).
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") store.trigger.codeClosed();
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [store]);
-
-  // Live inspection: boot the local WS relay and remember how to connect.
+  // Live inspection: use Sky by default; boot a local relay only when opted in.
   const [inspection, setInspection] = useState<InspectionInfo | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -445,6 +434,23 @@ export function DemoShell() {
       ? createLiveInspectUrl(inspectOverride, inspection)
       : null;
   const liveWs = inspection;
+  const vizDocuments = isScenario
+    ? [
+        {
+          path: `src/agents/${scenario.id}.ts`,
+          content: scenarioSource[scenario.id],
+        },
+        {
+          path: `docs/${scenario.id}.md`,
+          content: `# ${scenario.name}\n\n${scenario.description}`,
+        },
+      ]
+    : [
+        {
+          path: `examples/${selection.id}/index.ts`,
+          content: exampleDetail?.source ?? "// Loading…",
+        },
+      ];
 
   const vizPanel = (
     <VizPanel
@@ -452,7 +458,7 @@ export function DemoShell() {
       machineKey={machineKey}
       vizConfig={
         isScenario
-          ? (scenarioVizConfig[scenario.id] as Record<string, unknown>)
+          ? scenarioSource[scenario.id]
           : exampleDetail
             ? (activeMachine?.vizConfig ?? null)
             : null
@@ -461,24 +467,7 @@ export function DemoShell() {
       liveWs={liveWs}
       liveUrl={liveUrl}
       theme={theme}
-      codeOpen={codeOpen}
-      onToggleCode={() => store.trigger.codeToggled()}
-      code={
-        isScenario
-          ? {
-              fileLabel: `src/agents/${scenario.id}.ts`,
-              source: scenarioSource[scenario.id],
-              cacheKey: `scenario:${scenario.id}`,
-            }
-          : {
-              fileLabel: `examples/${selection.id}/index.ts`,
-              source: exampleDetail?.source ?? "// Loading…",
-              // The placeholder must not be cached under the example's key.
-              cacheKey: exampleDetail
-                ? `example:${selection.id}`
-                : `example:${selection.id}:loading`,
-            }
-      }
+      documents={vizDocuments}
     />
   );
 

@@ -1,6 +1,8 @@
+import { generateText as aiGenerateText, streamText as aiStreamText } from "ai";
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import {
+  type AgentRequestExecutors,
   createAgentSchemas,
   createTextLogic,
   runAgent,
@@ -170,5 +172,16 @@ describe("blessed AI SDK executors", () => {
     expect(String(result.status === "error" ? result.error : "")).toMatch(
       /must return\s+\{ output \}/,
     );
+  });
+
+  test("the real `ai` generateText/streamText are assignable as executors (type-level)", () => {
+    // Assignment alone is the assertion: if `ai`'s functions stop satisfying
+    // `AgentRequestExecutors`, this file fails typecheck. Nothing is invoked.
+    const executors: AgentRequestExecutors = {
+      generateText: aiGenerateText,
+      streamText: aiStreamText,
+    };
+    expect(executors.generateText).toBe(aiGenerateText);
+    expect(executors.streamText).toBe(aiStreamText);
   });
 });

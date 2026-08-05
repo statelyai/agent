@@ -56,7 +56,8 @@
 
   --shadow-panel: 0 8px 32px rgba(0, 0, 0, 0.1);
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, "SF Mono", "SFMono-Regular", monospace;
+  --font-mono:
+    "Geist Mono Variable", "Geist Mono", ui-monospace, "SF Mono", "SFMono-Regular", monospace;
   --header-height: 52px;
 }
 
@@ -226,31 +227,6 @@ button:disabled {
   flex: 1;
 }
 
-.header-code-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 10px;
-  color: var(--muted);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: transparent;
-  font-size: 12px;
-  cursor: pointer;
-  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
-}
-
-.header-code-toggle:hover {
-  color: var(--ink);
-  border-color: var(--line-strong);
-}
-
-.header-code-toggle[aria-pressed="true"] {
-  color: var(--on-primary);
-  border-color: var(--primary);
-  background: var(--primary);
-}
-
 .kbd-chip {
   padding: 4px 8px;
   color: var(--muted);
@@ -260,7 +236,9 @@ button:disabled {
   font-family: var(--font-mono);
   font-size: 11px;
   cursor: pointer;
-  transition: color 120ms ease, border-color 120ms ease;
+  transition:
+    color 120ms ease,
+    border-color 120ms ease;
 }
 
 .kbd-chip:hover {
@@ -336,7 +314,9 @@ button:disabled {
   background: transparent;
   text-align: left;
   cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
 }
 
 .switcher-row:hover,
@@ -445,7 +425,10 @@ button:disabled {
   font-weight: 580;
   white-space: nowrap;
   cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
 }
 
 .button:hover {
@@ -496,48 +479,6 @@ button:disabled {
   min-height: 30px;
   padding-inline: 10px;
   font-size: 11px;
-}
-
-/* ---------- Code source (shiki) ---------- */
-.code-scroll {
-  min-width: 0;
-  min-height: 0;
-  overflow: auto;
-  background: var(--surface-sunken);
-  scrollbar-width: thin;
-  scrollbar-color: var(--line-strong) transparent;
-}
-
-.code-shiki,
-.code-plain {
-  min-width: min-content;
-  margin: 0;
-  padding: 16px 18px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.65;
-  tab-size: 2;
-}
-
-.code-shiki pre,
-.code-plain {
-  margin: 0;
-  background: transparent !important;
-}
-
-.code-shiki code,
-.code-plain code {
-  font-family: var(--font-mono);
-  font-size: 12px;
-}
-
-/* Shiki light/dark dual theme — force the light variables (page is light). */
-.code-shiki pre {
-  color: var(--shiki-light, inherit);
-  background: transparent !important;
-}
-.code-shiki span {
-  color: var(--shiki-light, inherit);
 }
 
 /* ---------- Motion ---------- */

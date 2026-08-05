@@ -7,6 +7,7 @@ import {
   INTERPRET_SOURCE,
   normalizeGeneratorResult,
   type AgentCallUsage,
+  type AgentExecutorTextRequest,
   type AgentRequestExecutor,
   type AgentTextRequest,
 } from "../text-logic.js";
@@ -173,7 +174,9 @@ async function runTextPhase(
   deps.onTrace?.({ type: "request.start", request: agentRequest });
   let output: unknown;
   try {
-    const raw = await deps.generateText(request, { signal: deps.signal });
+    const raw = await deps.generateText(request as AgentExecutorTextRequest, {
+      signal: deps.signal,
+    });
     output = await normalizeGeneratorResult(raw, id, { request });
     // Lift `reasoning` off the raw executor result onto the request.end
     // trace — never into the log or machine (same as the invoke text path).

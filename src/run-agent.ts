@@ -38,6 +38,7 @@ import {
   USER_INPUT_ACTOR,
   type AgentCallUsage,
   type AgentUsage,
+  type AgentExecutorTextRequest,
   type AgentRequestExecutor,
   type AgentRequestExecutors,
   type AgentTextRequest,
@@ -1221,7 +1222,7 @@ function wrapTextLogicForRunAgent(logic: TextLogic, runCtx: RunAgentBindContext)
     runCtx.consumeModelCall();
     runCtx.onTrace?.({ type: "request.start", request: agentRequest }, self);
     try {
-      const raw = await executor(requestWithTools, {
+      const raw = await executor(requestWithTools as AgentExecutorTextRequest, {
         onChunk: (chunk: string) => {
           runCtx.onTrace?.({ type: "stream.chunk", request: agentRequest, chunk }, self);
           runCtx.onChunk?.(chunk, { request: agentRequest });

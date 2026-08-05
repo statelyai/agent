@@ -1,10 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
 import { createVizPanelStore, type SystemMessage } from "./viz-panel-store";
 
-const init = (sessionId = "root-session"): SystemMessage => ({
+const init = (sessionId = "root-session", value = "drafting"): SystemMessage => ({
   type: "@statelyai.system.init",
   protocolVersion: 2,
-  actors: [{ sessionId, actorId: "root", parentSessionId: null, machine: {} }],
+  actors: [
+    {
+      sessionId,
+      actorId: "root",
+      parentSessionId: null,
+      machine: {},
+      snapshot: { value, status: "active" },
+    },
+  ],
 });
 
 describe("viz panel store", () => {
@@ -37,9 +45,10 @@ describe("viz panel store", () => {
     });
   });
 
-  it("replays buffered live messages in order when the iframe becomes ready", () => {
+  it("keeps the static machine and replays live snapshots when the iframe becomes ready", () => {
     const store = createVizPanelStore();
     const post = vi.fn();
+    const fallback: SystemMessage = { type: "@statelyai.init", machine: "source" };
     const snapshot: SystemMessage = {
       type: "@statelyai.system.actorSnapshot",
       sessionId: "root-session",
@@ -52,11 +61,43 @@ describe("viz panel store", () => {
     store.trigger.systemMessage({ message: snapshot });
     expect(post).not.toHaveBeenCalled();
 
-    store.trigger.iframeReady({ fallbackMessages: [] });
+    store.trigger.iframeReady({ fallbackMessages: [fallback] });
 
-    expect(post.mock.calls.map(([message]) => message)).toEqual([init(), snapshot]);
+    expect(post.mock.calls.map(([message]) => message)).toEqual([
+      fallback,
+      {
+        type: "@statelyai.inspectSnapshot",
+        snapshot: { value: "drafting", status: "active" },
+        event: { type: "@xstate.init" },
+      },
+      {
+        type: "@statelyai.inspectSnapshot",
+        snapshot: { value: "reviewing" },
+        event: { type: "approve" },
+      },
+    ]);
     expect(store.getSnapshot().context.liveEvent).toBe("approve");
     expect(store.getSnapshot().context.liveStateLabel).toBe("reviewing");
+  });
+
+  it("does not reinitialize the machine when a resumed run registers a new root", () => {
+    const store = createVizPanelStore();
+    const post = vi.fn();
+    store.on("post", ({ message }) => post(message));
+    store.trigger.iframeReady({
+      fallbackMessages: [{ type: "@statelyai.init", machine: "source" }],
+    });
+    post.mockClear();
+
+    store.trigger.systemInit({ message: init("resumed-root", "reviewing") });
+
+    expect(post.mock.calls.map(([message]) => message)).toEqual([
+      {
+        type: "@statelyai.inspectSnapshot",
+        snapshot: { value: "reviewing", status: "active" },
+        event: { type: "@xstate.init" },
+      },
+    ]);
   });
 
   it("initializes the static preview when no live stream exists", () => {

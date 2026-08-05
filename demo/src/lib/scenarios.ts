@@ -1,7 +1,7 @@
 /**
  * Scenario registry (client-facing): display metadata, the real machines'
  * serialized config for the statechart embed, and each machine's source for the
- * Code tab. The machines themselves are authored in `src/agents/*`.
+ * Documents panel. The machines themselves are authored in `src/agents/*`.
  */
 import type { AnyStateMachine } from "xstate";
 import { refundMachine } from "@/agents/refund";

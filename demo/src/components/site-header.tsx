@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useSelector } from "@xstate/store-react";
 import { Popover } from "@base-ui/react/popover";
-import { Braces, Check, ChevronDown, Moon, Sun } from "lucide-react";
+import { Check, ChevronDown, Moon, Sun } from "lucide-react";
 import { scenarios } from "@/lib/scenarios";
 import type { ExampleSummary } from "@/lib/example-library";
 import type { Selection } from "@/lib/selection";
@@ -97,7 +97,6 @@ export function SiteHeader({ store, examples, currentTitle, onSelect }: SiteHead
   const open = useSelector(store, (s) => s.context.switcherOpen);
   const query = useSelector(store, (s) => s.context.switcherQuery);
   const theme = useSelector(store, (s) => s.context.theme);
-  const codeOpen = useSelector(store, (s) => s.context.codeOpen);
   const listRef = useRef<HTMLDivElement>(null);
 
   const keyless = selection.type === "scenario";
@@ -117,7 +116,9 @@ export function SiteHeader({ store, examples, currentTitle, onSelect }: SiteHead
   }, [store]);
 
   const moveFocus = (delta: 1 | -1) => {
-    const items = [...(listRef.current?.querySelectorAll<HTMLButtonElement>(".switcher-row") ?? [])];
+    const items = [
+      ...(listRef.current?.querySelectorAll<HTMLButtonElement>(".switcher-row") ?? []),
+    ];
     if (items.length === 0) return;
     const active = document.activeElement;
     const index = items.findIndex((item) => item === active);
@@ -155,7 +156,9 @@ export function SiteHeader({ store, examples, currentTitle, onSelect }: SiteHead
                 autoFocus
                 placeholder={`Search ${total} examples…`}
                 value={query}
-                onChange={(event) => store.trigger.switcherQueryChanged({ query: event.target.value })}
+                onChange={(event) =>
+                  store.trigger.switcherQueryChanged({ query: event.target.value })
+                }
                 onKeyDown={(event) => {
                   if (event.key === "ArrowDown") {
                     event.preventDefault();
@@ -214,15 +217,6 @@ export function SiteHeader({ store, examples, currentTitle, onSelect }: SiteHead
 
       <span className="site-header__spacer" />
 
-      <button
-        className="header-code-toggle"
-        aria-pressed={codeOpen}
-        aria-expanded={codeOpen}
-        onClick={() => store.trigger.codeToggled()}
-      >
-        <Braces size={13} aria-hidden="true" />
-        Code
-      </button>
       <button
         className="kbd-chip"
         onClick={() => store.trigger.switcherToggled()}

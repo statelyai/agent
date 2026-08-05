@@ -642,7 +642,7 @@ export function bindRequestExecutor<
 ): TextLogic<TInputSchema, TOutputSchema, TMetadata> {
   return logic.withExecutor(async ({ request, signal }) => {
     const { output } = await executor(
-      { ...request, tools: request.tools ?? {} } as AgentTextRequest & { tools: AgentTools },
+      { ...request, tools: request.tools ?? {} } as AgentExecutorTextRequest,
       { signal, onChunk: info?.onChunk },
     );
     return { output } as AgentRequestExecutorResult<InferOutput<TOutputSchema>>;
@@ -713,7 +713,16 @@ export interface AgentRequestExecutorInfo {
  */
 export type AiSdkShapedTextResult = {
   text: string | PromiseLike<string>;
-  [key: string]: unknown;
+  // Optional passthrough fields (NOT an index signature — `ai`'s result
+  // interfaces have no index signature, so one would break their
+  // assignability) so callers of a widened executor can still read the
+  // envelope/raw fields without narrowing first.
+  output?: unknown;
+  usage?: unknown;
+  reasoning?: unknown;
+  finishReason?: unknown;
+  toolCalls?: unknown;
+  toolResults?: unknown;
 };
 
 /**
@@ -728,23 +737,58 @@ export type AiSdkShapedTextResult = {
 export type AiSdkShapedStreamResult = {
   textStream: AsyncIterable<string>;
   text?: PromiseLike<string>;
-  [key: string]: unknown;
+  // Same optional passthrough fields as {@link AiSdkShapedTextResult}.
+  output?: unknown;
+  usage?: unknown;
+  reasoning?: unknown;
+  finishReason?: unknown;
+  toolCalls?: unknown;
+  toolResults?: unknown;
 };
 
 /**
+ * The lowered request as an {@link AgentRequestExecutor} receives it. At
+ * runtime this is exactly the {@link AgentTextRequest} core built (plus the
+ * merged `tools` map); the TYPE is deliberately shaped so the Vercel AI SDK's
+ * own `generateText`/`streamText` are directly assignable as executors
+ * (function parameters are contravariant, so this type must be assignable to
+ * `ai`'s options type):
+ *
+ * - `prompt`/`messages` are mutually exclusive, matching `ai`'s `Prompt`
+ *   union (core always sets exactly one).
+ * - `tools`, `toolChoice`, and `messages` are widened to `any` — their
+ *   portable shapes ({@link AgentTools}, {@link AgentToolChoice},
+ *   {@link AgentMessage}) are structural supersets of `ai`'s branded types
+ *   and would otherwise fail the contravariant check.
+ *
+ * Hand-written executors that want the precise shapes can annotate their
+ * parameter as `AgentTextRequest & { tools: AgentTools }` — that wider
+ * parameter type keeps the executor assignable.
+ */
+export type AgentExecutorTextRequest<TMetadata = Record<string, unknown>> = Omit<
+  AgentTextRequest<TMetadata>,
+  "prompt" | "messages" | "tools" | "toolChoice"
+> & {
+  tools: any;
+  toolChoice?: any;
+} & ({ prompt: string; messages?: undefined } | { prompt?: undefined; messages: any[] });
+
+/**
  * Host implementation of one text call (`generateText` or `streamText`) —
- * resolves a lowered {@link AgentTextRequest} to an `{ output }` envelope (see
- * {@link AgentRequestExecutorResult}), unwrapped by
- * {@link normalizeGeneratorResult}. The return type is widened to also admit the
- * raw Vercel AI SDK shapes ({@link AiSdkShapedTextResult} /
- * {@link AiSdkShapedStreamResult}) so `ai`'s own `generateText`/`streamText`
- * pass through without a cast; `normalizeGeneratorResult` checks for `{ output }`
- * first, then falls back to those shapes at runtime.
+ * resolves a lowered {@link AgentExecutorTextRequest} to an `{ output }`
+ * envelope (see {@link AgentRequestExecutorResult}), unwrapped by
+ * {@link normalizeGeneratorResult}. Both sides are shaped so `ai`'s own
+ * `generateText`/`streamText` pass through without a cast: the request
+ * parameter is assignable to `ai`'s options (see
+ * {@link AgentExecutorTextRequest}), and the return type is widened to also
+ * admit the raw Vercel AI SDK shapes ({@link AiSdkShapedTextResult} /
+ * {@link AiSdkShapedStreamResult}) — `normalizeGeneratorResult` checks for
+ * `{ output }` first, then falls back to those shapes at runtime.
  */
 export type AgentRequestExecutor<
   TResult extends AgentRequestExecutorResult = AgentRequestExecutorResult,
 > = (
-  request: AgentTextRequest & { tools: AgentTools },
+  request: AgentExecutorTextRequest,
   info?: AgentRequestExecutorInfo,
 ) =>
   | PromiseLike<TResult | AiSdkShapedTextResult | AiSdkShapedStreamResult>
@@ -948,7 +992,10 @@ export async function executeAgentTextRequest(
     );
   }
 
-  const raw = await executor(request, info);
+  // The runtime object is a plain lowered request; the cast bridges to the
+  // executor-facing type (see AgentExecutorTextRequest — prompt/messages are
+  // typed as mutually exclusive there, which core guarantees at runtime).
+  const raw = await executor(request as AgentExecutorTextRequest, info);
   return {
     output: await normalizeGeneratorResult(raw, id, {
       request,

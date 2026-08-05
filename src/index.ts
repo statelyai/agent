@@ -124,6 +124,7 @@ export type {
   AgentModelRef,
   AgentOutputMode,
   StructuredOutputEnvelope,
+  AgentExecutorTextRequest,
   AgentTextRequest,
   AiSdkShapedStreamResult,
   AiSdkShapedTextResult,

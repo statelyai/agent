@@ -21,13 +21,13 @@ export const listExamples = createServerFn({ method: "GET" }).handler(async () =
 
 export type InspectionInfo = { relayUrl: string; roomId: string };
 
-/** Starts the local inspection relay and returns its connection info. */
+/** Returns hosted inspection info, starting a local relay only when opted in. */
 export const getInspection = createServerFn({ method: "GET" }).handler(
   async (): Promise<InspectionInfo> => {
-    const { ensureInspectionRelay, inspectionRelayUrl, INSPECTION_ROOM_ID } =
+    const { ensureInspectionRelay, inspectionRelayUrl, inspectionRoomId } =
       await import("./inspection.server");
     await ensureInspectionRelay();
-    return { relayUrl: inspectionRelayUrl(), roomId: INSPECTION_ROOM_ID };
+    return { relayUrl: inspectionRelayUrl(), roomId: inspectionRoomId() };
   },
 );
 
@@ -74,5 +74,9 @@ export const resumeExample = createServerFn({ method: "POST" })
       import("./machine-chat.server"),
     ]);
     const machine = await getExampleMachine(data.id, data.exportName);
-    return resumeMachineChat(machine, data.snapshot, data.event as { type: string } & Record<string, unknown>);
+    return resumeMachineChat(
+      machine,
+      data.snapshot,
+      data.event as { type: string } & Record<string, unknown>,
+    );
   });

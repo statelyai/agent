@@ -34,6 +34,7 @@ import type { RunAgentOptions, RunAgentResult } from "./run-agent.js";
 import { resolveScriptedTextEntry } from "./scripted-executors.js";
 import type { ScriptedTextEntry } from "./scripted-executors.js";
 import type {
+  AgentExecutorTextRequest,
   AgentRequestExecutorInfo,
   AgentRequestExecutorResult,
   AgentRequestExecutors,
@@ -309,7 +310,7 @@ export async function runSeam<TMachine extends AnyStateMachine>(
       return scripted;
     }
 
-    const result = await candidate(request, info);
+    const result = await candidate(request as AgentExecutorTextRequest, info);
     seamOutput = await seamOutputOf(result, request);
     return result;
   };

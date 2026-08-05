@@ -419,9 +419,19 @@
 }
 
 .chat-form-card__title {
+  margin: 0;
   color: var(--ink);
   font-size: 12.5px;
   font-weight: 550;
+}
+
+.chat-form-card__title code {
+  padding: 2px 5px;
+  border-radius: 5px;
+  background: var(--surface-sunken);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
 }
 
 .chat-form-card__note {
@@ -429,6 +439,86 @@
   color: var(--quiet);
   font-family: var(--font-mono);
   font-size: 10.5px;
+}
+
+.schema-form {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.schema-form__field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.schema-form__label {
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 550;
+}
+
+.schema-form__label em {
+  color: var(--danger);
+  font-style: normal;
+}
+
+.schema-form input:not([type="checkbox"]),
+.schema-form select,
+.schema-form textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  outline: none;
+  background: var(--background);
+  font-size: 12.5px;
+  line-height: 1.45;
+  transition: border-color 120ms ease;
+}
+
+.schema-form input:not([type="checkbox"]):focus,
+.schema-form select:focus,
+.schema-form textarea:focus {
+  border-color: var(--primary);
+}
+
+.schema-form textarea {
+  min-height: 78px;
+  resize: vertical;
+}
+
+.schema-form__checkbox {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.schema-form__hint,
+.schema-form__error {
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.schema-form__hint {
+  color: var(--quiet);
+}
+
+.schema-form__error {
+  color: var(--danger);
+}
+
+.schema-form__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
 }
 
 .chat-rating__stars {

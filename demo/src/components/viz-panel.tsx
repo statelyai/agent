@@ -1,22 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createWebSocketTransport } from "@statelyai/sdk";
 import { useSelector } from "@xstate/store-react";
-import { ExternalLink, RefreshCcw, X } from "lucide-react";
+import { ExternalLink, RefreshCcw } from "lucide-react";
 import { getTargetOrigin, isTrustedVizMessage } from "@/lib/viz-transport";
 import { createVizPanelStore, type SystemMessage } from "@/lib/viz-panel-store";
-import { CodeSource } from "@/components/code-panel";
 import type { VizFrame } from "@/hooks/use-trace-player";
 
 const defaultVizUrl = "https://editor.stately.ai/embed?auth=message";
 
 export type LiveWs = { relayUrl: string; roomId: string };
 
-export type VizCode = {
-  /** Path label shown in the drawer header, e.g. `src/agents/refund.ts`. */
-  fileLabel: string;
-  source: string;
-  /** Stable cache key for the highlighted output (scenario or example id). */
-  cacheKey: string;
+export type VizDocument = {
+  path: string;
+  content: string;
+  language?: "markdown" | "typescript" | "javascript" | "json" | "xml" | "mermaid" | "text";
 };
 
 type VizPanelProps = {
@@ -24,28 +21,25 @@ type VizPanelProps = {
   title: string;
   /** Stable key for the current machine — a change re-inits the embed. */
   machineKey: string;
-  /** Serialized machine config for the embed, or null when none is available. */
-  vizConfig: Record<string, unknown> | null;
+  /** Machine source or serialized config for the embed, or null when unavailable. */
+  vizConfig: unknown | null;
   frame: VizFrame;
   /**
-   * Live inspection relay. When set, the panel connects to the local WS relay
+   * Live inspection relay. When set, the panel connects to Sky or a local relay
    * and bridges `@statelyai.system.*` messages into the embed as they happen —
    * transitions render in REAL TIME during a run, not as a post-hoc replay.
    */
   liveWs: LiveWs | null;
   /**
    * Full viz `/inspect` page URL (VITE_VIZ_INSPECT_URL). When set it replaces
-   * the embed entirely. Use a local HTTP viz app or a WSS relay; a hosted HTTPS
-   * page cannot connect directly to the demo's local `ws://` relay.
+   * the embed entirely. Hosted Sky works directly; a local `ws://` relay needs
+   * a local HTTP viz app to avoid mixed content.
    */
   liveUrl: string | null;
   /** Page theme, forwarded into the embed init payload. */
   theme: "light" | "dark";
-  /** Code drawer visibility (parent-owned; parent also handles Escape). */
-  codeOpen: boolean;
-  onToggleCode: () => void;
-  /** Source shown in the code drawer, or null when none is available. */
-  code: VizCode | null;
+  /** Read-only source and explanation documents shown inside Viz. */
+  documents: VizDocument[];
 };
 
 export function VizPanel({
@@ -56,9 +50,7 @@ export function VizPanel({
   liveWs,
   liveUrl,
   theme,
-  codeOpen,
-  onToggleCode,
-  code,
+  documents,
 }: VizPanelProps) {
   if (liveUrl) {
     return (
@@ -71,7 +63,6 @@ export function VizPanel({
             src={liveUrl}
             referrerPolicy="strict-origin"
           />
-          <CodeDrawer open={codeOpen} code={code} onClose={onToggleCode} />
         </div>
       </section>
     );
@@ -84,14 +75,16 @@ export function VizPanel({
       frame={frame}
       liveWs={liveWs}
       theme={theme}
-      codeOpen={codeOpen}
-      onToggleCode={onToggleCode}
-      code={code}
+      documents={documents}
     />
   );
 }
 
-function createInitMessage(machine: unknown, theme: "light" | "dark"): SystemMessage {
+function createInitMessage(
+  machine: unknown,
+  theme: "light" | "dark",
+  documents: VizDocument[],
+): SystemMessage {
   return {
     type: "@statelyai.init",
     machine,
@@ -106,11 +99,12 @@ function createInitMessage(machine: unknown, theme: "light" | "dark"): SystemMes
       inspect: true,
       navigateHierarchy: false,
       maxDepth: 2,
-      panels: [],
+      panels: ["documents"],
     },
-    leftPanels: [],
+    documents,
+    leftPanels: ["documents"],
     rightPanels: [],
-    activePanels: [],
+    activePanels: ["documents"],
   };
 }
 
@@ -123,11 +117,14 @@ function createFrameMessage(frame: VizFrame): SystemMessage {
 }
 
 function createStaticMessages(
-  vizConfig: Record<string, unknown> | null,
+  vizConfig: unknown | null,
   frame: VizFrame,
   theme: "light" | "dark",
+  documents: VizDocument[],
 ) {
-  return vizConfig ? [createInitMessage(vizConfig, theme), createFrameMessage(frame)] : [];
+  return vizConfig
+    ? [createInitMessage(vizConfig, theme, documents), createFrameMessage(frame)]
+    : [];
 }
 
 function EmbedVizPanel({
@@ -137,12 +134,10 @@ function EmbedVizPanel({
   frame,
   liveWs,
   theme,
-  codeOpen,
-  onToggleCode,
-  code,
+  documents,
 }: Omit<VizPanelProps, "liveUrl">) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const latestRef = useRef({ vizConfig, frame, theme });
+  const latestRef = useRef({ vizConfig, frame, theme, documents });
   const [store] = useState(createVizPanelStore);
   const status = useSelector(store, (snapshot) => snapshot.context.status);
   const transportError = useSelector(store, (snapshot) => snapshot.context.error);
@@ -153,7 +148,7 @@ function EmbedVizPanel({
   const vizUrl = import.meta.env.VITE_VIZ_URL || defaultVizUrl;
   const targetOrigin = useMemo(() => getTargetOrigin(vizUrl), [vizUrl]);
 
-  latestRef.current = { vizConfig, frame, theme };
+  latestRef.current = { vizConfig, frame, theme, documents };
 
   const post = useCallback(
     (message: Record<string, unknown>) => {
@@ -174,7 +169,12 @@ function EmbedVizPanel({
       if (event.data?.type === "@statelyai.ready") {
         const latest = latestRef.current;
         store.trigger.iframeReady({
-          fallbackMessages: createStaticMessages(latest.vizConfig, latest.frame, latest.theme),
+          fallbackMessages: createStaticMessages(
+            latest.vizConfig,
+            latest.frame,
+            latest.theme,
+            latest.documents,
+          ),
         });
       }
     }
@@ -186,7 +186,9 @@ function EmbedVizPanel({
   // particular, do not clear observations when the iframe becomes ready.
   useEffect(() => {
     store.trigger.machineChanged({
-      initMessage: vizConfig ? createInitMessage(vizConfig, latestRef.current.theme) : null,
+      initMessage: vizConfig
+        ? createInitMessage(vizConfig, latestRef.current.theme, latestRef.current.documents)
+        : null,
     });
     // machineKey identifies the machine; vizConfig is its (stable) payload.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -199,10 +201,10 @@ function EmbedVizPanel({
     if (previousTheme.current === theme) return;
     previousTheme.current = theme;
     store.trigger.themeChanged({
-      initMessage: vizConfig ? createInitMessage(vizConfig, theme) : null,
-      fallbackMessages: createStaticMessages(vizConfig, latestRef.current.frame, theme),
+      initMessage: vizConfig ? createInitMessage(vizConfig, theme, documents) : null,
+      fallbackMessages: createStaticMessages(vizConfig, latestRef.current.frame, theme, documents),
     });
-  }, [store, theme, vizConfig]);
+  }, [documents, store, theme, vizConfig]);
 
   // Fallback replay frames (only used when live inspection is unavailable).
   useEffect(() => {
@@ -291,40 +293,7 @@ function EmbedVizPanel({
             />
           </>
         )}
-
-        <CodeDrawer open={codeOpen} code={code} onClose={onToggleCode} />
       </div>
     </section>
-  );
-}
-
-function CodeDrawer({
-  open,
-  code,
-  onClose,
-}: {
-  open: boolean;
-  code: VizCode | null;
-  onClose: () => void;
-}) {
-  return (
-    <aside className="viz-drawer" data-open={open || undefined} aria-hidden={!open} inert={!open}>
-      {code ? (
-        <>
-          <div className="viz-drawer__header">
-            <span className="viz-drawer__file">{code.fileLabel}</span>
-            <button
-              type="button"
-              className="viz-drawer__close"
-              onClick={onClose}
-              aria-label="Close code"
-            >
-              <X size={14} aria-hidden="true" />
-            </button>
-          </div>
-          <CodeSource source={code.source} cacheKey={code.cacheKey} className="viz-drawer__body" />
-        </>
-      ) : null}
-    </aside>
   );
 }
