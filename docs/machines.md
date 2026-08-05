@@ -15,14 +15,14 @@ Author a machine in three steps:
 2. Pass them to `setupAgent` with your requests and actor sources.
 3. Build with `agentSetup.createMachine`.
 
-## Declare schemas
+## Schema declarations
 
 <!-- flat schema fields on setupAgent from src/setup-agent.ts -->
 
-Pass your schema fields directly to `setupAgent` to type the machine's context, event payloads, input, output, and state meta:
+Pass schema fields directly to `setupAgent` to type context, event payloads, input, output, and state meta:
 
 - `context` (required), `input`, `output`: context, input, and output shapes.
-- `events`: per-event payload types (see below).
+- `events`: per-event payload types.
 - `meta`: typed state/transition metadata.
 
 Every schema is a [Standard Schema](https://standardschema.dev) (Zod, Valibot, ArkType, or a hand-written validator), retained on the agent for runtime validation, so context and events are typed without `{} as Type` casts.
@@ -43,7 +43,7 @@ To keep conversation history in context, add a `messages` field with the `z.cust
 
 **Event schemas** type event payloads. Declare one schema per event type under `events`:
 
-```ts
+```ts no-check
 // setupAgent({ ... })
 events: {
   ATTACK: z.object({ target: z.string().default('goblin') }),
@@ -57,7 +57,7 @@ In a `HEAL` transition, `event.amount` is a `number`; reading a field the event 
 
 **Emitted event schemas** type the progress events a machine emits with `enq.emit(...)`, received by hosts via [`runAgent`'s `on` handlers](observability.md#observation-callbacks). Declare them under `emitted`:
 
-```ts
+```ts no-check
 // setupAgent({ ... })
 emitted: {
   EVALUATED: z.object({ qualityScore: z.number(), iteration: z.number() }),
@@ -67,20 +67,19 @@ emitted: {
 
 Both `enq.emit({ type: 'EVALUATED', ... })` and the host-side `on: { EVALUATED: handler }` are then typed; an undeclared type or wrong payload is a compile error.
 
-> **Sharing a schema pack.** To reuse one schema set across machines or the step helpers, declare it once with `createAgentSchemas({ context, input, output, events })` and pass it as `setupAgent({ schemas })`. Equivalent to the inline form. See [Which authoring form when](#which-authoring-form-when).
+> **Sharing a schema pack.** To reuse one schema set across machines or the step helpers, declare it once with `createAgentSchemas({ context, input, output, events })` and pass it as `setupAgent({ schemas })`. Equivalent to the inline form. See [Authoring forms](#authoring-forms).
 
-## Set up the agent
+## Agent setup
 
 <!-- setupAgent config surface (models, requests, actors, builtins) from src/setup-agent.ts -->
 
 Beyond schemas, `setupAgent` takes your models plus optional `requests` and `actors`, and returns a **setup** whose `createMachine` builds the machine. Like XState's `setup()`, the return value is the typed foundation, not a running agent, so name it accordingly (`agentSetup`, `gameSetup`).
 
-- The builtins `agent.generateText`, `agent.streamText`, `agent.decide`, `agent.plan`, `agent.userInput` are registered automatically; invoke them by name.
-- Prefer inline schema fields; reach for the `createAgentSchemas` pack form only to share one schema set. See [Which authoring form when](#which-authoring-form-when).
+The builtins `agent.generateText`, `agent.streamText`, `agent.decide`, `agent.plan`, and `agent.userInput` are registered automatically; invoke them by name.
 
 ### Models
 
-The `models` map pairs a short alias with a resolved model. When present, request and decision `model:` values autocomplete its keys (unregistered strings are still accepted, so a typo fails at run time rather than compile time), and app code shares one alias map between `setupAgent` and the host adapter.
+The `models` map pairs a short alias with a resolved model. Request and decision `model:` values then autocomplete its keys (unregistered strings are still accepted, so a typo fails at run time rather than compile time), and app code shares one alias map between `setupAgent` and the host adapter.
 
 ```ts
 import { openai } from "@ai-sdk/openai";
@@ -106,13 +105,13 @@ const agentSetup = setupAgent({
 });
 ```
 
-Aliases are optional: a request can carry any `model:` string (like `'openai/gpt-5.4-mini'`) that the host resolves at run time. See [Which authoring form when](#which-authoring-form-when) and [Hosts](hosts.md).
+Aliases are optional: a request can carry any `model:` string (like `'openai/gpt-5.4-mini'`) that the host resolves at run time. See [Authoring forms](#authoring-forms) and [Hosts](hosts.md).
 
 ### Requests
 
 The `requests` map declares named text requests inline. Each entry carries its own input/output schemas, a model, and a `prompt` (or `messages`) built from typed input, and becomes an actor you invoke by its key.
 
-```ts
+```ts no-check
 // setupAgent({ ... })
 requests: {
   classifyAnswer: {
@@ -157,7 +156,7 @@ const agentSetup = setupAgent({
 
 <!-- builtin src reference, from src/setup-agent.ts -->
 
-`setupAgent` also registers reserved `src` strings on every machine, for ad-hoc model work that doesn't warrant a named request. The invoke's `input` shapes each call:
+`setupAgent` registers reserved `src` strings on every machine, for ad-hoc model work that doesn't warrant a named request. The invoke's `input` shapes each call:
 
 | `src`                | Invoke `input`                                                              | `onDone` output                                        | Reference                                 |
 | -------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------ | ----------------------------------------- |
@@ -169,11 +168,11 @@ const agentSetup = setupAgent({
 
 Named `requests` stay the default (typed, reusable, testable); the builtins are the inline escape hatch. Both are executed by the host, so a machine using either still names no SDK.
 
-## Create the machine
+## Machine creation
 
-The `agentSetup.createMachine` method is XState's `createMachine` with the agent's schemas and actors already bound. It registers the machine so the step helpers and [`runAgent`](hosts.md) resolve its schemas and actors without re-passing them.
+`agentSetup.createMachine` is XState's `createMachine` with the agent's schemas and actors already bound. It registers the machine so the step helpers and [`runAgent`](hosts.md) resolve its schemas and actors without re-passing them.
 
-```ts
+```ts no-check
 const machine = agentSetup.createMachine({
   context: ({ input }) => ({ prompt: input.prompt, answer: null }),
   initial: "answering",
@@ -197,27 +196,49 @@ const machine = agentSetup.createMachine({
 });
 ```
 
-## Which authoring form when
+## Per-state context narrowing
+
+A context field that starts `null` and is assigned mid-run forces a `?? fallback` at every later read. When a state is reachable **only** after that field is set, narrow it non-null under `setupAgent({ states })`. Declare just the fields that change; the narrowed type flows into that state's invoke `input`, transition functions, and `output`, so the coalesce disappears:
+
+```ts
+const context = z.object({ question: z.string(), plan: planSchema.nullable() });
+
+const agentSetup = setupAgent({
+  context,
+  // `planning` assigns `plan` before `executing` and `done` run, so narrow it there.
+  states: {
+    executing: { context: { plan: planSchema } },
+    done: { context: { plan: planSchema } },
+  },
+});
+```
+
+The field-level form is sugar for XState's full form, `executing: { schemas: { context: context.extend({ plan: planSchema }) } }`, which also works.
+
+> **Note:** Narrow only where every path into the state has assigned the field. A state also reachable on an error or refusal route (field still `null`) must keep its nullable handling. This narrows the _type_ only; runtime behavior is unchanged.
+
+See [examples/sql-agent/index.ts](../examples/sql-agent/index.ts).
+
+## Authoring forms
 
 <!-- canonical form vs the supported escape hatches -->
 
-The canonical form covers most machines. Each alternate handles one specific need:
+**Canonical form** covers most machines: a `models` registry, flat schema fields on `setupAgent`, `model: 'quick'` alias keys, and a host with `createAiSdkExecutors({ models })`. Use it whenever the models are known at author time.
 
-| Form                                                                                                                                       | Reach for it when                                                                                                                                                                                                                                      |
-| ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Canonical**: `models` registry + flat schema fields on `setupAgent`, `model: 'quick'` keys, host with `createAiSdkExecutors({ models })` | Default. A single machine whose models are known at author time.                                                                                                                                                                                       |
-| **`createAgentSchemas` pack**: `setupAgent({ schemas })`                                                                                   | Sharing one schema set across several machines or the [step helpers](steps.md).                                                                                                                                                                        |
-| **String refs + `resolveModel`**: `model: 'openai/gpt-5.4-mini'`, `createAiSdkExecutors({ resolveModel })`                                 | The machine must not name concrete models: maximum portability, refs resolved by the host or loaded from JSON [config](machines-as-data.md).                                                                                                           |
-| **`createTextLogic`**: a standalone request value                                                                                          | A request that is exported, reused across states or machines, or unit-tested on its own. See [Text requests](text-requests.md#reusable-request-logic-with-createtextlogic).                                                                            |
-| **`withExecutor`**: `logic.withExecutor(...)`                                                                                              | Binding execution onto one logic rather than the whole host: per-logic host binding or an intentionally unregistered dynamic logic. Registered dynamic spawns inherit through `actors`; see [Multi-agent composition](multi-agent.md#dynamic-binding). |
+Each alternate handles one specific need:
 
-### Direct execution without runAgent
+- **`createAgentSchemas` pack** (`setupAgent({ schemas })`): share one schema set across several machines or the [step helpers](steps.md).
+- **String refs + `resolveModel`** (`model: 'openai/gpt-5.4-mini'`, `createAiSdkExecutors({ resolveModel })`): the machine must not name concrete models, for portability or refs loaded from JSON [config](machines-as-data.md).
+- **`createTextLogic`** (a standalone request value): a request that is exported, reused across states or machines, or unit-tested on its own. See [Text requests](text-requests.md#reusable-request-logic-with-createtextlogic).
+- **`withExecutor`** (`logic.withExecutor(...)`): bind execution onto one logic instead of the whole host, for per-logic binding or an intentionally unregistered dynamic logic. Registered dynamic spawns inherit through `actors`; see [Multi-agent composition](multi-agent.md#dynamic-binding).
+
+### Direct execution without `runAgent`
 
 <!-- withExecutor + createActor, bypassing runAgent's executor slots -->
 
 `.withExecutor(...)` binds execution onto one logic for normal XState use. Provide the bound logic as an actor source and run it with `createActor` directly, bypassing [`runAgent`](hosts.md)'s executor slots:
 
-```ts
+```ts no-check
 import { parseOutput } from "@statelyai/agent";
 
 const executableDraftText = draftText.withExecutor(async ({ request, signal }) => {
@@ -238,7 +259,7 @@ createActor(machine.provide({ actors: { draftText: executableDraftText } }), { i
 
 `parseOutput(schema, value)` validates against any [Standard Schema](https://standardschema.dev) and returns the typed value; calling `schema["~standard"].validate(value)` yourself works the same way.
 
-This is the mechanism `runAgent` uses internally to bind executors. The direct form suits a logic that should carry its own execution wherever it is used, independent of the host loop.
+This is the mechanism `runAgent` uses internally. The direct form suits a logic that should carry its own execution wherever it is used, independent of the host loop.
 
 ## Transitions
 
@@ -246,7 +267,7 @@ This is the mechanism `runAgent` uses internally to bind executors. The direct f
 
 A **transition** is a function of `{ context, event }` returning the next `target` and a `context` update (a **partial** update: omitted fields keep their values). You return updates rather than assigning them with `assign()`. The `event` is typed from the event schema.
 
-```ts
+```ts no-check
 // inside a state
 on: {
   ATTACK: ({ context, event }) => ({
@@ -258,7 +279,7 @@ on: {
 
 > **Guards are a return value, not a `guard:` field.** Returning `undefined` from a transition function makes that transition **illegal** for the current snapshot. Because the condition and the resulting transition share one function they can never disagree, the check is visible at the transition it protects, and `snapshot.can(event)` (which powers [decision](decisions.md) legality) derives from the same code path. If you know XState's `guard:`, read "returns `undefined`" wherever you'd expect one.
 
-```ts
+```ts no-check
 // inside a state
 on: {
   // ASK is only legal before the final turn.
@@ -273,7 +294,7 @@ This matters for [decisions](decisions.md): a model choosing an event whose tran
 
 A transition can also be a plain object. Its `context` is a static patch or a mapper function receiving the same args (including `output` on `onDone`):
 
-```ts
+```ts no-check
 // inside a state
 on: {
   SEND: { target: 'sending' },
@@ -289,11 +310,11 @@ onDone: {
 
 Use the full function form when the `target` is conditional (guards) or you need `enq` to enqueue effects; use the object form otherwise.
 
-## Invoke a request or actor
+## Request and actor invokes
 
 A state invokes an actor by `src` (a request key, a registered actor, or a builtin like `agent.decide` or `agent.userInput`), passing typed `input` and handling `onDone`/`onError`.
 
-```ts
+```ts no-check
 // inside states: { ... }
 drafting: {
   invoke: {
@@ -313,7 +334,7 @@ The `onDone` handler receives the actor's `output`, typed from its output schema
 
 For a one-off text call, `agent.generateText` is the quick inline path (move it to a named [request](text-requests.md) once it is reused or worth testing):
 
-```ts
+```ts no-check
 import { parseOutput, runAgent } from "@statelyai/agent";
 
 // ...
@@ -343,7 +364,7 @@ Every agent invoke should carry a durable `id`: it is how a resumed or replayed 
 
 A final state ends the machine (or a region). Its `output` is typed against the machine's output schema:
 
-```ts
+```ts no-check
 done: {
   type: 'final',
   output: ({ context }) => ({ answer: context.answer ?? '' }),
@@ -354,36 +375,13 @@ When the root declares no `output` and exactly one final state does, `createMach
 
 > **Note:** Read `context` in a final `output` function, never the entering `event`. A final `output` function is evaluated more than once with different events, so `event` is unreliable there. Capture what you need into `context` in the transition targeting the final state, then read it back. The `lintAgentMachine` check `final-output-reads-event` flags this.
 
-### Narrow context per state
-
-A context field that starts `null` and is assigned mid-run forces a `?? fallback` at every later read. When a state is reachable **only** after that field is set, narrow it non-null under `setupAgent({ states })`. Declare just the fields that change; the narrowed type flows into that state's invoke `input`, transition functions, and `output`, so the coalesce disappears:
-
-```ts
-const context = z.object({ question: z.string(), plan: planSchema.nullable() });
-
-const agentSetup = setupAgent({
-  context,
-  // `planning` assigns `plan` before `executing` and `done` run, so narrow it there.
-  states: {
-    executing: { context: { plan: planSchema } },
-    done: { context: { plan: planSchema } },
-  },
-});
-```
-
-The field-level form is sugar for XState's full form, `executing: { schemas: { context: context.extend({ plan: planSchema }) } }`, which also works.
-
-> **Note:** Narrow only where every path into the state has assigned the field. A state also reachable on an error or refusal route (field still `null`) must keep its nullable handling. This narrows the _type_ only; runtime behavior is unchanged.
-
-See [examples/sql-agent/index.ts](../examples/sql-agent/index.ts).
-
 ## State and transition meta
 
 <!-- typed meta protocol from examples/email-drafter/agent-logic.ts -->
 
 The `meta` field attaches typed data to a state or transition. With a `meta` schema on `setupAgent`, hosts read a typed interaction protocol instead of `Record<string, unknown>`:
 
-```ts
+```ts no-check
 // inside states: { ... }
 prompting: {
   meta: {
@@ -406,7 +404,7 @@ A `meta` value that does not match the schema is a compile error. See [examples/
 
 A delayed transition (`after`) fires after a delay with no external event, keyed by milliseconds or by a named delay from `setupAgent`'s `delays`:
 
-```ts
+```ts no-check
 // inside states: { ... }
 waiting: {
   after: { 20: { target: 'done' } },
@@ -418,7 +416,7 @@ How `after` runs depends on the host:
 - Under [`runAgent`](hosts.md), the timer runs **live**: a pending `after` is not idle, so `runAgent` waits for it and continues.
 - On the [step path](steps.md), it surfaces from `getAgentEffects` as an effect with `kind: "delay"`: the durable host owns the clock (a workflow sleep, a Temporal timer, a queue delay) and applies the event when it fires. See [Steps](steps.md).
 
-## Where to go next
+## Next steps
 
 - [Decisions](decisions.md): let the model choose exactly one currently-legal event.
 - [Text requests](text-requests.md): the full request surface, streaming, and structured output.

@@ -5,7 +5,7 @@ description: Declare typed model calls on an agent machine and invoke them from 
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
 
-## Declare requests in setupAgent
+## Request declarations in setupAgent
 
 <!-- requests config surface from src/setup-agent.ts and src/text-logic.ts -->
 
@@ -17,6 +17,7 @@ import { setupAgent } from "@statelyai/agent";
 import { defineModels } from "@statelyai/agent/ai-sdk";
 import { openai } from "@ai-sdk/openai";
 
+// Model IDs here are illustrative; substitute your provider's current models.
 const models = defineModels({ quick: openai("gpt-5.4-mini") });
 const answerSchema = z.object({ answer: z.string() });
 
@@ -42,13 +43,19 @@ const agentSetup = setupAgent({
 
 ### Model references
 
-Prefer a `models` registry (canonical): the map's keys autocomplete on `model`, and one alias map is shared between authoring and the host adapter. Unregistered strings still typecheck (the type keeps a `string` arm so hosts can resolve refs the machine does not know), so a typo surfaces as a run-time resolution error. A bare `model` string (any string, passed through to your [host](hosts.md) to resolve) is the alternative for a machine that must not name concrete models. See [Which authoring form when](machines.md#which-authoring-form-when).
+Prefer a `models` registry (canonical):
 
-## Invoke a request from a state
+- The map's keys autocomplete on `model`, and one alias map is shared between authoring and the host adapter.
+- Unregistered strings still typecheck (the type keeps a `string` arm so hosts can resolve refs the machine does not know), so a typo surfaces as a run-time resolution error.
+- A bare `model` string (any string, passed through to your [host](hosts.md) to resolve) is the alternative for a machine that must not name concrete models.
+
+See [Which authoring form when](machines.md#authoring-forms).
+
+## Invoking a request from a state
 
 Invoke by name with `src`, pass `input`, read the typed result in `onDone` (full machine in the [quickstart](quickstart.md)):
 
-```ts
+```ts no-check
 // inside states: { ... }
 answering: {
   invoke: {
@@ -80,7 +87,7 @@ const answer = parseOutput(answerSchema, rawOutput); // typed as { answer: strin
 
 Output is **structured** when the schema describes an object, an array, or a top-level union of them (`z.union`/`z.discriminatedUnion`), and plain text otherwise: `output: z.object({ ... })` returns a validated object, `output: z.string()` returns the model's text.
 
-Every structured request is sent wrapped in the [structured-output envelope](./hosts.md#the-structured-output-envelope): a root object `{ result: <your schema> }` that hosts unwrap before validation. This makes a bare union or array root portable (nested under `result`, so providers that reject a union/array _root_ still accept it). You always declare and receive the bare schema; the envelope is invisible to the machine.
+> **For host implementers: the structured-output envelope.** Every structured request is sent wrapped in the [structured-output envelope](./hosts.md#the-structured-output-envelope): a root object `{ result: <your schema> }` that the host must unwrap before validation. This keeps a bare union or array root portable, since providers that reject a union/array _root_ still accept it nested under `result`. Machine authors always declare and receive the bare schema; the envelope is invisible to the machine.
 
 ```ts
 export const triageTicket = createTextLogic({
@@ -123,7 +130,7 @@ The reasoning never enters machine context or output; it surfaces only on the ra
 
 A request streams when its `mode` is `'stream'`; without `mode` it is single-shot (`'generate'`). A streaming request resolves to the final text, with intermediate chunks delivered to `runAgent`'s `onChunk`.
 
-```ts
+```ts no-check
 export const tellJoke = createTextLogic({
   mode: "stream",
   schemas: { input: z.object({ topic: z.string() }), output: z.string() },
@@ -139,7 +146,11 @@ const result = await runAgent(machine, {
 });
 ```
 
-The `onChunk` callback fires per chunk alongside the request that produced it, so parallel streams stay distinguishable. It is purely observational. A `mode: 'stream'` request needs a `streamText` executor; without one, `runAgent` fails at bind time. See [examples/joke/index.ts](../examples/joke/index.ts).
+- `onChunk` fires per chunk alongside the request that produced it, so parallel streams stay distinguishable.
+- `onChunk` is purely observational.
+- A `mode: 'stream'` request needs a `streamText` executor; without one, `runAgent` fails at bind time.
+
+See [examples/joke/index.ts](../examples/joke/index.ts).
 
 ## Tools and multi-step loops
 
@@ -149,7 +160,7 @@ A text request can carry `tools`: a map of tool name to a tool. **Tools are what
 
 Bring your SDK's tool and it owns the input typing, so `execute`'s argument is typed with no cast:
 
-```ts
+```ts no-check
 import { tool } from 'ai';
 
 // inside a request
@@ -164,7 +175,7 @@ tools: {
 
 For a host with no SDK, the minimal shape is a plain object (or a bare `execute` function). Core reads `description`/`inputSchema` and runs `execute`:
 
-```ts
+```ts no-check
 // inside a request
 tools: {
   getWeather: {
@@ -177,7 +188,7 @@ tools: {
 
 To let one request run a bounded tool-call loop, set `metadata.maxSteps`. The shipped AI SDK adapter forwards it as `stopWhen: stepCountIs(maxSteps)`; a request with no `maxSteps` stays single-step.
 
-```ts
+```ts no-check
 export const research = createTextLogic({
   schemas: { input: z.object({ question: z.string() }), output: z.string() },
   model: "careful",
@@ -193,7 +204,7 @@ export const research = createTextLogic({
 
 <!-- createTextLogic from src/text-logic.ts and examples/email-drafter -->
 
-Inline `requests:` (above) is the default. Reach for `createTextLogic` when a request should be standalone (exported, tested on its own, or shared across machines) and registered under `actors`. Each `requests` entry is exactly what `setupAgent` builds internally from `createTextLogic`, so the two are interchangeable. See [Which authoring form when](machines.md#which-authoring-form-when).
+Inline `requests:` (above) is the default. Reach for `createTextLogic` when a request should be standalone (exported, tested on its own, or shared across machines) and registered under `actors`. Each `requests` entry is exactly what `setupAgent` builds internally from `createTextLogic`, so the two are interchangeable. See [Which authoring form when](machines.md#authoring-forms).
 
 ```ts
 import { createTextLogic, setupAgent, type AgentMessage } from "@statelyai/agent";
@@ -218,6 +229,7 @@ Because `draftEmail` is a value, a test can import it and drive it with a fake e
 
 ## Related
 
+- [Tools](tools.md): defining tools, attaching them to a request, and how the host runs the tool loop.
 - [Hosts](hosts.md): the executors that run text requests and how model aliases reach a provider.
 - [Messages](messages.md): the `messages` field a request can send instead of a bare `prompt`.
 - [Decisions](decisions.md): the other request kind, choosing a legal machine event instead of producing text.

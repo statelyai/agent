@@ -8,7 +8,7 @@ description: Convert a realistic while-loop tool-calling agent into an agent mac
 
 The call site stays one line. Where you had:
 
-```ts
+```ts no-check
 const result = await generateText({ model, prompt, tools });
 ```
 
@@ -37,6 +37,7 @@ async function runRefundAgent(request: string) {
 
   while (true) {
     const { toolCalls } = await generateText({
+      // Model IDs here are illustrative; substitute your provider's current models.
       model: openai("gpt-5.4-mini"),
       messages,
       tools: {
@@ -49,7 +50,7 @@ async function runRefundAgent(request: string) {
 
     for (const call of toolCalls) {
       if (call.toolName === "issueRefund") {
-        if (call.input.amount > 100) return { pending: true }; // ...now what?
+        if ((call.input as { amount: number }).amount > 100) return { pending: true }; // ...now what?
         refunded = true;
       }
       // push tool result onto messages, continue the loop
@@ -60,7 +61,7 @@ async function runRefundAgent(request: string) {
 
 Three things are quietly wrong: the `$100` rule is an `if` the model could be prompted around, nothing stops `issueRefund` before `lookupOrder`, and the human pause returns `{ pending: true }`, **throwing away all the loop's state** with no way to resume.
 
-## Step 1: make the implicit phases explicit states
+## Step 1: implicit phases as explicit states
 
 The loop already has phases: deciding, doing, then finishing or waiting on a human. Name them as states. Declare schemas and setup with the flat `setupAgent` form.
 
@@ -88,11 +89,11 @@ const agentSetup = setupAgent({
 
 The phases become `deciding`, `awaitingHuman`, `refunded`, `denied`.
 
-## Step 2: the tool-choice becomes a decision with `allowedEvents` + guards
+## Step 2: tool choice as a guarded decision
 
 "Which tool" was a model output you validated after the fact. Make it a **decision**: the model chooses exactly one currently-legal event, and a **guard** owns the `$100` limit so no prompt can talk past it.
 
-```ts
+```ts no-check
 const machine = agentSetup.createMachine({
   context: ({ input }) => ({ ...input, refunded: false }),
   initial: "deciding",
@@ -122,11 +123,11 @@ const machine = agentSetup.createMachine({
 
 A chosen `REFUND` for `$5000` can no longer slip through: the guard returns `undefined` and the decision retries. The `system` and `prompt` are yours; how the model is coerced into picking one event is the host executor's job and swappable (see [Decisions](decisions.md) and [Coercion](decisions.md#coercion)).
 
-## Step 3: the pause becomes an idle state with snapshot persistence
+## Step 3: the pause as an idle state
 
 The loop's `return { pending: true }` becomes a real waiting **state** with no invoke. `runAgent` settles `idle` there instead of losing everything; the snapshot is plain JSON you persist anywhere.
 
-```ts
+```ts no-check
     // ...
     awaitingHuman: {
       // No invoke: runAgent settles { status: 'idle', snapshot } here.
@@ -140,7 +141,7 @@ The loop's `return { pending: true }` becomes a real waiting **state** with no i
     // ...
 ```
 
-## Step 4: run it with `runAgent`
+## Step 4: the run with `runAgent`
 
 With `runAgent` owning the loop, the `while (true)` is gone; you supply executors built from the same `models` map.
 
@@ -180,13 +181,19 @@ const resumed = await runAgent(machine, {
 // resumed.status === 'done', resumed.output === { refunded: true }
 ```
 
-Those executors are your existing model code. The `createAiSdkExecutors` adapter wraps the AI SDK, but the `generateText`/`streamText` slots accept the raw AI SDK functions directly, and any other SDK or a raw `fetch` backs them just as well. The tools, retry logic, and provider calls you already wrote move into the executors unchanged; only the `while` loop is gone. See [Hosts](hosts.md).
+Those executors are your existing model code:
 
-## Drop it into your existing server
+- The `createAiSdkExecutors` adapter wraps the AI SDK.
+- The `generateText`/`streamText` slots also accept the raw AI SDK functions directly, and any other SDK or a raw `fetch` backs them just as well.
+- The tools, retry logic, and provider calls you already wrote move in unchanged.
+
+Only the `while` loop is gone. See [Hosts](hosts.md).
+
+## Existing server integration
 
 The machine is host-agnostic, so it runs wherever your loop ran. For a straight-through request handler that owns its own actor, bind executors with `provideExecutors` and run a plain XState actor, no `runAgent`:
 
-```ts
+```ts no-check
 import { createActor } from "xstate";
 import { provideExecutors } from "@statelyai/agent";
 
@@ -203,7 +210,7 @@ app.post("/refund", async (req, res) => {
 
 For the idle human pause (the `$100` escalation above) over HTTP, persist the snapshot with `runAgent` and resume on a later request. [Use in any stack](any-stack.md) drops one machine into local, Express, and Cloudflare hosts with zero machine changes.
 
-## Prove the refactor preserved behavior
+## Behavior-preservation proof
 
 Before shipping, pin the new machine's behavior with a deterministic, model-free playthrough. `simulateAgent` scripts the decisions and runs the same step path `runAgent` uses, no API key, no network:
 
@@ -222,7 +229,7 @@ expect(result.status).toBe("idle");
 
 `canReach` and `explorePaths` go further: enumerate every branch and prove which outcomes are reachable. See [Testing and verification](verify.md).
 
-## Retrofitting without authoring invokes: `getRequests`
+## Retrofit with `getRequests`
 
 Everything above assumes you write the model calls into the machine as invokes. If you already have a plain XState machine, `getRequests` is the seam that skips that rewrite: it is a `RunAgentOptions` hook, and whenever the machine would otherwise settle idle, it reads the snapshot and returns the model request(s) to run instead. Return nothing and the run settles idle, which is how human-wait states stay human-wait states.
 
@@ -230,7 +237,7 @@ The machine does not change at all. Where the prompts live is your call: state `
 
 The prompts-in-descriptions recipe, copy-paste and adapt:
 
-```ts
+```ts no-check
 const result = await runAgent(existingMachine, {
   executors,
   getRequests: (snapshot) =>
@@ -266,7 +273,7 @@ The same conversion works from shapes other than a `while` loop:
 - [described-workflow](../examples/described-workflow/index.ts): prompts written as state `description`s, run via `runAgent`'s `getRequests` option.
 - [todo-nl](../examples/todo-nl/index.ts): natural-language commands mapped onto machine events.
 
-## What you got for free
+## Free wins
 
 Same behavior as the loop, plus legality by construction, snapshot resume, the durable [step path](steps.md) and [event log](event-log.md), and [visualization](machines-as-data.md), none of which the loop gives you without hand-built machinery. The transcript and log bookkeeping you hand-maintained in the loop becomes the ordered [`onTrace`](observability.md) stream: one run/request/chunk/transition ledger for evals, JSONL, and telemetry.
 

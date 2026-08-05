@@ -24,7 +24,7 @@ Same four moving parts in both: a model call, a pause, a loop, and a bound on th
 
 ## In LangGraph
 
-```ts
+```ts no-check
 import { z } from "zod";
 import {
   Command,
@@ -39,6 +39,7 @@ import {
 } from "@langchain/langgraph";
 import { ChatOpenAI } from "@langchain/openai";
 
+// Model IDs here are illustrative; substitute your provider's current models.
 const model = new ChatOpenAI({ model: "gpt-4.1-mini" });
 
 const State = new StateSchema({
@@ -222,18 +223,18 @@ const done = await runAgent(machine, {
 | Offline verification  | Testing a branch generally means running the graph, with the model stubbed by hand.                                                                                                                                                   | `lintAgentMachine`, `canReach`, `explorePaths`, and `simulateAgent` check reachability, dead states, and scripted playthroughs with no API key and no network. See [Testing and verification](verify.md).                   |
 | Ecosystem maturity    | **Clearly ahead.** Years of production use, LangSmith tracing and evals, LangGraph Platform deployment, prebuilt agents and middleware, hundreds of LangChain integrations, a large body of tutorials, and a Python twin with parity. | Alpha. One core dependency (XState v6 alpha), a small shipped executor set, SQLite stores, and a runnable examples directory. No hosted platform, no eval product.                                                          |
 
-## When to prefer LangGraph
+## LangGraph strengths
 
 Pick LangGraph when these matter more than machine-enforced control flow:
 
-- **You want the platform, not just the library.** LangSmith tracing, datasets, and evals, plus LangGraph Platform for deployment and thread management, are real products you would otherwise build.
+- **You want the platform, not just the library.** LangSmith (LangChain's hosted tracing, dataset, and eval product) plus LangGraph Platform for deployment and thread management are real products you would otherwise build.
 - **You are already in LangChain.** Hundreds of integrations, retrievers, and tool wrappers work out of the box, and `createAgent` gets a competent tool-calling agent running in minutes.
 - **Python and JS need parity.** LangGraph ships both with matching concepts. This library is TypeScript only.
 - **Your team already knows it.** Node/edge/checkpoint is a shared vocabulary with a lot of published prior art.
 - **The workflow is mostly linear or mostly free-form.** If control flow is a short pipeline, or if you genuinely want the model to drive with few constraints, a statechart is overhead without much payoff.
 - **You need production maturity today.** `@statelyai/agent` 2.0 is alpha and its APIs can still change.
 
-## When to prefer agent machines
+## Agent machine strengths
 
 - **Constraints must hold regardless of the prompt.** Spend limits, approval gates, retry budgets, ordering rules. A guard cannot be talked around; an `if` in a router node is only as good as the code path that reaches it.
 - **Pausing should not require infrastructure.** Idle plus a JSON snapshot works in a Lambda, a queue worker, or a test, with no checkpointer configured.
@@ -242,7 +243,7 @@ Pick LangGraph when these matter more than machine-enforced control flow:
 - **The workflow is genuinely stateful.** Nested and parallel regions, states that mean something to the business, and a diagram non-engineers can read.
 - **You want provider independence.** The machine has no SDK dependency, so swapping hosts does not touch the agent.
 
-## Where to go next
+## Next steps
 
 - [Coming from LangGraph](from-langgraph.md): the full term-by-term mapping and the ported tutorial examples.
 - [Quickstart](quickstart.md): install and run one machine end to end.

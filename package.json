@@ -67,6 +67,7 @@
   "scripts": {
     "build": "tsdown",
     "proto:prefabs": "tsx .scratch/prefabs/demo.ts",
+    "docs:check": "tsx scripts/check-docs-snippets.ts",
     "typecheck": "pnpm run typecheck:src && pnpm run typecheck:examples && pnpm run typecheck:example-packages",
     "typecheck:src": "tsc --noEmit",
     "typecheck:examples": "tsc -p examples/tsconfig.json --noEmit",
@@ -139,6 +140,7 @@
     "react": "^19.2.7",
     "tsdown": "^0.21.7",
     "tsx": "^4.21.0",
+    "twoslash": "^0.3.9",
     "typescript": "^5.6.2",
     "valibot": "^1.4.2",
     "vitest": "^3.2.6",

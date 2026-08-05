@@ -15,7 +15,7 @@ Each pattern is a single self-contained `index.ts`: no shared harness, no local 
 2. Install the runtime deps (the provider package major must match your installed `ai` major; this repo is on `ai@6`, so `@ai-sdk/openai@3`, not 4):
 
    ```sh
-   pnpm add @statelyai/agent@2.0.0-alpha.11 ai@^6 zod@^4 xstate@6.0.0-alpha.25 @ai-sdk/openai@^3
+   pnpm add @statelyai/agent@alpha ai@^6 zod@^4 xstate@6.0.0-alpha.25 @ai-sdk/openai@^3
    pnpm add -D @types/node typescript tsx
    ```
 
@@ -37,9 +37,13 @@ Each pattern is a single self-contained `index.ts`: no shared harness, no local 
 
 <!-- peer ranges from package.json#peerDependencies and example schema dependency from package.json#devDependencies -->
 
-Peer ranges (from `@statelyai/agent`): `ai@^6.0.67`, `xstate@>=6.0.0-alpha.25 <6.0.0`, and optional `@opentelemetry/api@^1`. The examples use Zod 4 directly. `@statelyai/agent` is alpha; pin the exact version.
+Version notes:
 
-## Running them from the repo
+- Peer ranges (from `@statelyai/agent`): `ai@^6.0.67`, `xstate@>=6.0.0-alpha.25 <6.0.0`, and optional `@opentelemetry/api@^1`.
+- The examples use Zod 4 directly.
+- The `@alpha` tag resolves to the latest prerelease; pin the exact version it installs once you have a build that works.
+
+## Running from the repo
 
 Examples live under `examples/`, one flat directory per example with an `index.ts` entrypoint. Clone the repo, install, then run any one directly:
 
@@ -52,7 +56,7 @@ OPENAI_API_KEY=... npx tsx examples/<name>/index.ts
 - Swap the host without touching the machine (see [Use in any stack](any-stack.md)).
 - The exhaustive index, with framework-comparison notes, is [examples/README.md](../examples/README.md).
 
-## Start here
+## Core ideas
 
 The core ideas: text requests, decisions, messages, and JSON authoring.
 
@@ -144,7 +148,7 @@ The same machines against different SDKs and runtimes. See [Hosts](hosts.md) and
 
 - [simulated-user-evaluation](../examples/simulated-user-evaluation/index.ts): a target chatbot and simulated user alternate under a turn bound, then an independent judge scores the transcript.
 - [retrofit](../examples/retrofit/index.ts): a tangled hand-rolled agent (`before.ts`) refactored stepwise into a machine, each step shippable, with `simulateAgent` tests pinning before/after behavior. The worked proof for [Migrating from a loop](from-a-loop.md).
-- [langsmith-otel](../examples/langsmith-otel/index.ts): `createOtelTraceHandler` from `@statelyai/agent/otel` exporting real spans over OTLP to LangSmith; keyless it exports to memory and prints the span tree. See [Observability](observability.md).
+- [langsmith-otel](../examples/langsmith-otel/index.ts): `createOtelTraceHandler` from `@statelyai/agent/otel` exporting real spans over OTLP to LangSmith (LangChain's hosted tracing product); keyless it exports to memory and prints the span tree. See [Observability](observability.md).
 
 ## Related
 

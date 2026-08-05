@@ -4,15 +4,17 @@
 
 Agent logic as state machines: deterministic, inspectable, resumable, runs anywhere. The machine owns control flow; the model only ever picks a legal event. Testing, inspection, and visualization fall out for free.
 
-Stately Agent adds model requests and decisions to XState. The state machine defines what the agent can do. Your application chooses the model, runs the requests, and stores the state.
+Stately Agent adds model requests and decisions to XState:
 
-Any agent workflow or loop can be modeled as a state machine. Model calls and tools run as effects inside it. The model proposes an event. The machine decides whether it is allowed and what happens next.
+- The machine defines what the agent can do.
+- Your application chooses the model, runs the requests, and stores the state.
+- The model proposes an event; the machine decides whether it is allowed and what happens next.
 
 Stately Agent 2 is in alpha. APIs may change before the stable release.
 
 [Documentation](https://stately.ai/docs/agents) · [Examples](examples/README.md) · [XState](https://github.com/statelyai/xstate)
 
-## Three ways to start
+## Three starting points
 
 - **Author a new agent.** Build a machine from states, decisions, and typed requests; run it locally with `runAgent`, test it with no API key, then use it in any framework or runtime with zero machine changes. See the [Quickstart](docs/quickstart.md) and [Use in any stack](docs/any-stack.md).
 - **Retrofit an existing agent.** Turn a `while` loop into a machine: your SDK calls, tools, and retry code become the executors; the machine replaces only the control flow. See [Migrating from a loop](docs/from-a-loop.md).
@@ -26,7 +28,11 @@ Stately Agent 2 is in alpha. APIs may change before the stable release.
 pnpm add @statelyai/agent@alpha xstate@alpha zod ai@^6 @ai-sdk/openai@^3
 ```
 
-Node 22.18 or newer is required. The package is ESM-first (CommonJS builds are published too, so `require()` works) and requires XState v6 alpha.25 or newer. Provider packages must match your `ai` major: `@ai-sdk/openai@^3` pairs with `ai@^6` (a bare `@ai-sdk/openai` resolves to `@latest`, which can mismatch the `ai` peer).
+Requirements:
+
+- Node 22.18 or newer, and XState v6 alpha.25 or newer.
+- The package is ESM-first. CommonJS builds are published too, so `require()` works.
+- Provider packages must match your `ai` major: `@ai-sdk/openai@^3` pairs with `ai@^6`. A bare `@ai-sdk/openai` resolves to `@latest`, which can mismatch the `ai` peer.
 
 ## Quick start
 
@@ -114,7 +120,7 @@ When the machine reaches `refunded`, the result is:
 
 The model chooses between the events allowed in `deciding`. The `AUTO_REFUND` transition only works when the amount is at most $100. If the model chooses it for a larger amount, the guard rejects the choice and the decision is tried again.
 
-**Run it with no API key.** `createScriptedExecutors` plays back canned answers through the same executor contract, so the machine above runs end to end before a model is involved:
+`createScriptedExecutors` plays back canned answers through the same executor contract, so the machine above runs end to end before a model is involved. **No API key needed:**
 
 ```ts
 import { createScriptedExecutors } from "@statelyai/agent";
@@ -127,11 +133,21 @@ const result = await runAgent(refundMachine, {
 
 Swap in `createAiSdkExecutors({ models })` when you want a real model. The scripted set is what your tests keep using.
 
-## The state machine
+## Architecture
 
-<!-- Add the state machine illustration here. -->
+```mermaid
+flowchart LR
+  M["Agent machine<br/>states · guards · requests"] -->|request| R["runAgent"]
+  R -->|executor call| E["Host executors<br/>generateText · streamText · decide"]
+  E -->|API call| L["Model"]
+  L -->|result| E
+  E -->|result| R
+  R -->|event or output| M
+```
 
-The example has one model decision and two final outcomes. Real machines can add approval states, retries, parallel work, child agents, and long-running waits without changing how the control flow is represented.
+The machine never talks to a model directly, so swapping `createAiSdkExecutors` for `createScriptedExecutors` (or your own functions) changes nothing about the agent.
+
+The example above has one model decision and two final outcomes. Real machines add approval states, retries, parallel work, child agents, and long-running waits without changing how control flow is represented.
 
 ## Core concepts
 

@@ -28,18 +28,14 @@ result.usage.modelCalls; // number, always present
 result.usage.totalTokens; // number | undefined (only calls that reported it)
 ```
 
-| Field               | Meaning                                                                                         |
-| ------------------- | ----------------------------------------------------------------------------------------------- |
-| `modelCalls`        | Model and decision calls this run made. Always a number. Each decision retry counts separately. |
-| `inputTokens`       | Partial sum, see below.                                                                         |
-| `outputTokens`      | Partial sum.                                                                                    |
-| `totalTokens`       | Partial sum.                                                                                    |
-| `reasoningTokens`   | Partial sum.                                                                                    |
-| `cachedInputTokens` | Partial sum.                                                                                    |
+| Field                                                                                | Meaning                                                                                        |
+| ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| `modelCalls`                                                                         | Model and decision calls this run made. Always a number. Each decision retry counts separately. |
+| `inputTokens`, `outputTokens`, `totalTokens`, `reasoningTokens`, `cachedInputTokens` | Partial sums, see below.                                                                       |
 
-Caveats worth internalizing:
+Caveats:
 
-- **Partial sums.** Each token field sums only the calls that reported it, and is `undefined` only when _no_ call reported it. A run mixing a real SDK executor (reports usage) with a scripted mock (does not) yields a sum over the reporting subset, not `undefined`. Do not read a token total as "the whole run" unless every executor reports.
+- **Partial sums.** Each token field sums only the calls that reported it, and is `undefined` only when _no_ call reported it. A run mixing a real SDK executor (reports usage) with a scripted mock (does not) yields a sum over the reporting subset. Do not read a token total as "the whole run" unless every executor reports.
 - **`modelCalls` is always there**, even when nothing reports tokens. It is the one number you can trust unconditionally.
 - **Per run, not per conversation.** A resumed run counts only its own calls, never the history behind `snapshot`/`events`. Add prior results' totals yourself for a conversation-wide figure.
 - **Usage comes from your executor.** `runAgent` reads `usage` off the raw executor result: our `{ output, usage }` envelope, a Vercel AI SDK result (same flat field names), or any custom executor following that shape. Non-finite values are dropped.
@@ -107,31 +103,37 @@ if (result.status === "error" && result.cause === "max-model-calls") {
 
 Treat it as the runaway-loop backstop. Anything the machine's own logic should react to belongs in a guard.
 
-## Budgets as guards
+## Retries and executor budgets
 
-A budget is data, not a runtime feature:
+Transport-level retries (429s, timeouts, backoff) belong in the executor or the SDK it wraps, not the machine. The AI SDK's `maxRetries` (and the OpenAI/Anthropic client equivalents) handles them; a raw-`fetch` executor adds its own loop. The machine never sees a transient network failure. Machine-level retry is different: an authored `onError` transition re-entering a state after a _semantic_ failure (a validation rejection, an exhausted decision) is control flow you model explicitly.
 
-- **Limits enter via `input`** and land in `context` (`maxTurns`, `maxTokens`, `maxDollars`).
-- **Counters live in `context`**, folded in by the transitions that carry the data.
-- **Guards are ordinary transition functions**: over budget, return a transition into a final `outOfBudget` state, or return `undefined` so the expensive event is not takeable at all.
+For finer budgets than `maxModelCalls` (a token cap, a per-request-`src` call count), wrap the executors. A child machine's requests inherit the parent's executors, so one wrapper counts the whole tree:
 
-Nothing here is agent-specific. It is the same [guard](machines.md#transitions) mechanism the rest of the machine uses, which is why it composes with decisions: a candidate event whose transition returns `undefined` is never offered to the model.
+```ts
+function withBudget(base: AgentRequestExecutors, maxCalls: number): AgentRequestExecutors {
+  const calls = new Map<string, number>();
+  return {
+    ...base,
+    generateText: async (request, info) => {
+      const name = request.name ?? "(anonymous)";
+      const n = (calls.get(name) ?? 0) + 1;
+      calls.set(name, n);
+      if (n > maxCalls) throw new Error(`Budget exceeded for '${name}'`);
+      return base.generateText!(request, info);
+    },
+  };
+}
 
-### What reaches the machine
+await runAgent(machine, { input, executors: withBudget(executors, 20) });
+```
 
-Important, because it decides which counters you can keep:
+A wrapper is still host-side: the machine cannot read the remaining budget or react to it. For that, use `@agent.usage` and a guard.
 
-- A **text invoke's `onDone` output is the normalized output only**. The runner returns `{ output }` and drops the rest of the executor envelope, so `usage` on the envelope does not appear in `onDone` (`src/run-agent.ts`).
-- A **decision delivers only the chosen event**. `resolveDecision` returns the validated event; the executor's `usage` is dropped (`src/decision.ts`).
-- **`@agent.usage` carries the tokens instead.** After every settled model call that reported usage, `runAgent` delivers a reserved `@agent.usage` event to the machine, so `context` can fold it and guards can read it.
-
-So turn counters and token counters are both free: increment turns in `onDone`, fold tokens in `@agent.usage`.
-
-### The `@agent.usage` event
+## The `@agent.usage` event
 
 <!-- AGENT_USAGE_EVENT_TYPE and AgentUsageEvent from src/effects.ts -->
 
-```ts
+```ts no-check
 {
   type: '@agent.usage',
   usage: { inputTokens?, outputTokens?, totalTokens?, reasoningTokens?, cachedInputTokens? },
@@ -143,21 +145,32 @@ So turn counters and token counters are both free: increment turns in `onDone`, 
 }
 ```
 
-Rules worth knowing before you wire it:
+### Rationale
 
-- **Declared for you.** `setupAgent`/`createAgentSchemas` register `'@agent.usage'` (with the payload schema above) in every agent's events, so it shows up in `schemas.events` and its handler is typed — `event.usage.totalTokens` narrows — without declaring anything. Declaring it yourself in `events` is an error: the `@agent.` namespace is reserved.
-- **Opt-in by construction.** The event is delivered only when the machine's active states declare a `'@agent.usage'` transition **explicitly**. Declare none and nothing changes: no extra transition, no extra trace event, no extra event-log entry. A catch-all `on: { '*': … }` is not an opt-in — it never receives the event, so a wildcard machine's context and event log are byte-identical to a run without the feature.
-- **Declare it machine-level.** A root `on: { '@agent.usage': … }` catches every call whatever state made it. A state-scoped handler only catches calls made while that state is active, which silently drops the rest.
-- **Never model-facing.** The `@agent.*` namespace is excluded from `getAcceptedEvents` and `parseAgentEvent`, so `@agent.usage` is never offered as a decision candidate (not even under an `allowedEvents: ['*']` wildcard) and cannot be forged from a wire message.
-- **It rides the event log.** A delivered `@agent.usage` is journaled like any other external input, so events-only recovery (`runAgent({ events })`) replays the folded tokens without re-calling a model.
-- **Usage entries are spend records.** When the event is reported the cost already happened: the tokens were burned at call time, whether or not the result made it back. So usage entries are durable, append-only facts. Replay folds every one of them, and a call re-executed by crash recovery journals its own usage on top — a recovered total therefore reflects the true cumulative cost, including the call whose result the crash lost. That is the budget-correct number: you really did spend it.
-- **Stragglers are dropped, not delivered.** A call that settles after the run's cycle has resolved (an idle settle, a `done`/`error` settle, an abort) still folds into `result.usage`, but its machine event is dropped — the same on `runAgent` and `createAgentActor`, so a late arrival can never re-open an already-returned idle result. Watch for `usage.dropped` on `onTrace` if a counter looks short.
-- **Delivered to the run's root machine**, including usage from requests inside an invoked child machine. Attribute those with the event's `id`/`src`/`model`.
-- **Only what your executor reports.** No `usage` on the executor result means no event. In particular, [`simulateAgent`](verify.md) scripts return no usage, so a token counter stays `0` under simulation. Simulate the shape of the loop; test the budget itself with `runAgent` and a usage-reporting mock, as the library's own tests do.
+Model-call results reach the machine stripped of usage:
 
-Opt in with a transition — nothing to declare in `events`:
+- A **text invoke's `onDone` output is the normalized output only**. The runner returns `{ output }` and drops the rest of the executor envelope (`src/run-agent.ts`).
+- A **decision delivers only the chosen event**. `resolveDecision` returns the validated event; the executor's `usage` is dropped (`src/decision.ts`).
 
-```ts
+`@agent.usage` carries the tokens instead: after every settled model call that reported usage, `runAgent` delivers it to the machine, so `context` can fold it and guards can read it. Turn counters and token counters are therefore both free: increment turns in `onDone`, fold tokens in `@agent.usage`.
+
+### Rules
+
+| Area              | Rule                                                                                                                                                                                                                                                                                                        |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Declaration**   | `setupAgent`/`createAgentSchemas` register `'@agent.usage'` and its payload schema in every agent's events, so the handler is typed (`event.usage.totalTokens` narrows) with nothing to declare. Declaring it yourself is an error: the `@agent.` namespace is reserved.                                      |
+| **Opt-in**        | Delivered only when an active state declares a `'@agent.usage'` transition **explicitly**. Declare none and nothing changes: no transition, no trace event, no event-log entry. A catch-all `on: { '*': … }` never receives it, so a wildcard machine is byte-identical to a run without the feature.         |
+| **Placement**     | Declare it machine-level. A root `on: { '@agent.usage': … }` catches every call whatever state made it; a state-scoped handler silently drops calls made elsewhere.                                                                                                                                          |
+| **Not model-facing** | The `@agent.*` namespace is excluded from `getAcceptedEvents` and `parseAgentEvent`, so it is never a decision candidate (not even under `allowedEvents: ['*']`) and cannot be forged from a wire message.                                                                                                |
+| **Durability**    | Journaled like any other external input, so events-only recovery (`runAgent({ events })`) replays the folded tokens without re-calling a model.                                                                                                                                                              |
+| **Spend records** | The cost already happened when the event is reported, so entries are append-only facts. Replay folds every one, and a call re-executed by crash recovery journals its own usage on top. A recovered total reflects true cumulative cost, including the call whose result the crash lost. You really did spend it. |
+| **Stragglers**    | A call settling after the run's cycle resolved (idle settle, `done`/`error` settle, abort) still folds into `result.usage`, but its machine event is dropped, on both `runAgent` and `createAgentActor`, so a late arrival cannot re-open a returned idle result. Watch `usage.dropped` on `onTrace` if a counter looks short. |
+| **Scope**         | Delivered to the run's root machine, including usage from requests inside an invoked child machine. Attribute those with `id`/`src`/`model`.                                                                                                                                                                 |
+| **Coverage**      | Only what your executor reports. No `usage` on the result means no event. [`simulateAgent`](verify.md) scripts return no usage, so a token counter stays `0` under simulation: test budgets with `runAgent` and a usage-reporting mock.                                                                       |
+
+Opt in with a transition, nothing to declare in `events`:
+
+```ts no-check
 import { AGENT_USAGE_EVENT_TYPE, setupAgent } from "@statelyai/agent";
 
 const agent = setupAgent({ schemas });
@@ -172,6 +185,16 @@ const machine = agent.createMachine({
   },
 });
 ```
+
+## Budgets as guards
+
+A budget is data, not a runtime feature:
+
+- **Limits enter via `input`** and land in `context` (`maxTurns`, `maxTokens`, `maxDollars`).
+- **Counters live in `context`**, folded in by the transitions that carry the data.
+- **Guards are ordinary transition functions**: over budget, return a transition into a final `outOfBudget` state, or return `undefined` so the expensive event is not takeable at all.
+
+Nothing here is agent-specific. It is the same [guard](machines.md#transitions) mechanism the rest of the machine uses, which is why it composes with decisions: a candidate event whose transition returns `undefined` is never offered to the model.
 
 ### Recipe: turn and token budget
 
@@ -293,49 +316,11 @@ Two things to note about the shape:
 - The loop goes `researching -> checkingBudget -> researching`. A transition targeting its own state does **not** re-enter it, so a self-targeting `onDone` would not re-run the invoke. Bounce through a check state.
 - The tokens land **between** the call settling and its `onDone`, so `checkingBudget` always reads a counter that includes the call it just made.
 
-### Alternative: fold usage into the request's output
-
-Before `@agent.usage` this was the only way to get tokens into `context`, and it still has a use: the tokens arrive **inside** `onDone`, in the same transition as the output, and they survive `simulateAgent` because a script can return them.
-
-Give the request an output shape that carries usage, and have the executor fill it:
-
-```ts
-const researchStep = createTextLogic({
-  schemas: {
-    input: z.object({ topic: z.string() }),
-    output: z.object({ note: z.string(), usage: z.object({ totalTokens: z.number() }) }),
-  },
-  model: "openai/gpt-5.4-mini",
-  prompt: ({ input }) => `Research ${input.topic}. One new fact.`,
-});
-
-const executors = {
-  generateText: async () => {
-    const usage = { totalTokens: 520 };
-    return {
-      output: { note: "otters raft", usage }, // reaches onDone
-      usage, // aggregated into result.usage
-    };
-  },
-};
-
-// …then in the machine:
-onDone: ({ context, output }) => ({
-  target: "checkingBudget",
-  context: {
-    notes: [...context.notes, output.note],
-    tokens: context.tokens + output.usage.totalTokens,
-  },
-});
-```
-
-The cost is that it only works for output shapes you own: a shared request or a third-party executor cannot be reshaped, and a decision has no output to reshape at all. `@agent.usage` covers all three. With a real host, wrap your existing executor rather than writing one: call it, then return `{ output: { ...yourOutput, usage: result.usage }, usage: result.usage }`.
-
 ### Guarding a decision
 
 The same guard makes an over-budget choice **impossible**, not merely discouraged. An event whose transition returns `undefined` is not a legal candidate, so the model is never offered it:
 
-```ts
+```ts no-check
 deciding: {
   invoke: {
     id: 'chooseNext',
@@ -363,7 +348,7 @@ deciding: {
 
 Built in, nothing to wire. A source bound by [`provideExecutors`](hosts.md) delivers `@agent.usage` to the machine actor that invoked it as soon as the call settles, with the same payload `runAgent` sends:
 
-```ts
+```ts no-check
 import { createActor, toPromise } from "xstate";
 import { provideExecutors } from "@statelyai/agent";
 
@@ -376,9 +361,9 @@ actor.start();
 const output = await toPromise(actor); // stoppedBy: 'tokens'
 ```
 
-Boundary: delivery follows the binding boundary. `provideExecutors` does not descend into invoked child machines, so a child with its own agent invokes needs its own `provideExecutors(...)` — and until it has one, its calls report no usage anywhere. (Under `runAgent`, which rebinds children, child usage is reported to the root.) There is no run cycle here, so there are no dropped stragglers either.
+Delivery follows the binding boundary. `provideExecutors` does not descend into invoked child machines, so a child with its own agent invokes needs its own `provideExecutors(...)`; until it has one, its calls report no usage anywhere. (Under `runAgent`, which rebinds children, child usage is reported to the root.) There is no run cycle here, so there are no dropped stragglers either.
 
-### Step path: apply it as an ordinary event
+### Step path: an ordinary event
 
 On [the step path](steps.md) the host holds the raw executor result, so it applies the event itself. `getCallUsage(raw)` is the same normalization `runAgent` uses:
 
@@ -396,9 +381,9 @@ if (usage) {
 append(effect.toDoneEvent(output));
 ```
 
-Because the entry is journaled, `replay` reproduces the folded counter exactly. Add `kind`/`id`/`src`/`model` to the event if you want the same attribution `runAgent` stamps.
+Because the entry is journaled, `replay` reproduces the folded counter exactly. Add `kind`/`id`/`src`/`model` to the event for the same attribution `runAgent` stamps.
 
-### Plain XState: send it by hand
+### Plain XState: manual send
 
 In a hand-rolled loop over `actor.send`, the event is just an event:
 
@@ -460,7 +445,7 @@ estimateCost("openai/gpt-5.4-mini", result.usage);
 
 `result.usage` is aggregated across every model the run used, so a per-model figure needs per-call attribution:
 
-```ts
+```ts no-check
 let spentUsd = 0;
 
 await runAgent(machine, {
@@ -478,9 +463,47 @@ await runAgent(machine, {
 });
 ```
 
-`@agent.usage` carries the same `model` attribution, so the machine can keep a per-model spend counter in `context` — and guard on it — rather than only reporting one from the host.
+`@agent.usage` carries the same `model` attribution, so the machine can keep a per-model spend counter in `context` and guard on it, rather than only reporting one from the host.
 
-Cached input tokens are usually billed at a discount rather than free; subtracting them as above is a floor, not an exact invoice. Reconcile against your provider's billing, and treat these numbers as budget signals.
+Cached input tokens are usually billed at a discount rather than free; subtracting them as above is a floor, not an exact invoice. Reconcile against your provider's billing and treat these numbers as budget signals.
+
+## Legacy: usage in the request output
+
+Before `@agent.usage` this was the only way to get tokens into `context`. Prefer `@agent.usage`. It still has two narrow uses: the tokens arrive **inside** `onDone`, in the same transition as the output, and they survive `simulateAgent` because a script can return them.
+
+Give the request an output shape that carries usage, and have the executor fill it:
+
+```ts no-check
+const researchStep = createTextLogic({
+  schemas: {
+    input: z.object({ topic: z.string() }),
+    output: z.object({ note: z.string(), usage: z.object({ totalTokens: z.number() }) }),
+  },
+  model: "openai/gpt-5.4-mini",
+  prompt: ({ input }) => `Research ${input.topic}. One new fact.`,
+});
+
+const executors = {
+  generateText: async () => {
+    const usage = { totalTokens: 520 };
+    return {
+      output: { note: "otters raft", usage }, // reaches onDone
+      usage, // aggregated into result.usage
+    };
+  },
+};
+
+// …then in the machine:
+onDone: ({ context, output }) => ({
+  target: "checkingBudget",
+  context: {
+    notes: [...context.notes, output.note],
+    tokens: context.tokens + output.usage.totalTokens,
+  },
+});
+```
+
+It only works for output shapes you own: a shared request or a third-party executor cannot be reshaped, and a decision has no output to reshape at all. `@agent.usage` covers all three. With a real host, wrap your existing executor rather than writing one: call it, then return `{ output: { ...yourOutput, usage: result.usage }, usage: result.usage }`.
 
 ## Related
 
@@ -489,3 +512,4 @@ Cached input tokens are usually billed at a discount rather than free; subtracti
 - [Machines](machines.md#transitions): guards as return values.
 - [Decisions](decisions.md): why a guarded-out event is never offered to the model.
 - [Human in the loop](human-in-the-loop.md): pausing and resuming across run boundaries.
+- [Hosts](hosts.md): where executors, and executor-level budgets, are supplied.

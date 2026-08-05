@@ -28,7 +28,11 @@ generate → validate (Ajv) → lower (fromConfig) → lint → simulate → run
 | Simulate | `simulateAgent`                           | no path settles; a loop                                           |
 | Run      | `runAgent`                                | runtime only                                                      |
 
-Every gate but the last runs with no API key, and each throws a message naming the offending field, state, or path. So a failed gate feeds straight back to the model as a repair prompt instead of surfacing to a user. Cap the repair loop at ~3 attempts: a config that fails three schema-shaped repairs is usually asking for something the data form cannot express, so [author it in TypeScript](machines.md) instead.
+How the gates behave:
+
+- Every gate but the last runs with no API key.
+- Each throws a message naming the offending field, state, or path, so a failed gate feeds straight back to the model as a repair prompt instead of surfacing to a user.
+- Cap the repair loop at ~3 attempts. A config that fails three schema-shaped repairs is usually asking for something the data form cannot express, so [author it in TypeScript](machines.md) instead.
 
 ## The skill
 
@@ -45,9 +49,9 @@ Honest constraints on generated machines:
 - **Named guards and actions are host-resolved.** A config cannot carry functions. A model can emit `guard: "isReady"`, but the implementation lives in the `guards` passed to `fromConfig(...)`, and an unresolved name is a build-time throw. Either list the names your host implements in the prompt, or forbid them.
 - **Ajv validity is not semantic validity.** The schema constrains shape, not meaning: a config can validate and still reference a request that does not exist, or route to a state that solves nothing. That is what the lint and simulate gates are for.
 - **A dry run covers one path.** The simulation follows the script you gave it. Use `explorePaths` when the generated branch structure matters.
-- **Model refs and tool names are unchecked strings.** They resolve at run time, in the host. Generated machines carry string refs (`"openai/gpt-5.4-mini"`), so pass `createAiSdkExecutors({ resolveModel })` — see [models and providers](models-and-providers.md).
+- **Model refs and tool names are unchecked strings.** They resolve at run time, in the host. Generated machines carry string refs (`"openai/gpt-5.4-mini"` here is illustrative; substitute your provider's current models), so pass `createAiSdkExecutors({ resolveModel })` — see [models and providers](models-and-providers.md).
 
-## Where this fits
+## Related
 
 - [Machines as data](machines-as-data.md): the config format, its expressions, and its limits.
 - [Verify](verify.md): every check and simulation API in full.

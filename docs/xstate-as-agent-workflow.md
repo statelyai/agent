@@ -12,6 +12,11 @@ Two independent choices drive the same machine graph:
 - **Where prompts live:** embedded in the machine, or mapped in from outside.
 - **How you drive it:** hand the machine to `runAgent`, or step it yourself in a `while` loop.
 
+|                     | `runAgent`                                                            | Step it yourself                                                    |
+| ------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| **Prompts embedded** | [The default](#embedded-prompts)                    | [Pure-function loop](#pure-function-loop)       |
+| **Prompts mapped**   | [`actors` option](#mapped-prompts)                   | Same loop, same mapped `actors`                                     |
+
 The sections below walk each combination, then show the same graph running as a plain XState machine with no `setupAgent`.
 
 One version requirement: the machine must be built with the `xstate` installation this package peers on (v6 alpha). Machines authored for XState v5 typically port with little or no change, but a machine object imported from a separate `xstate@5` install will not bind.
@@ -22,7 +27,7 @@ A deliberately rough spec: **1.** write a haiku → **2.** validate (determinist
 
 The model only ever does two things: **produce a value** (text) or **choose an event** (a decision). Everything else (`validate`, `send`) is plain code, treated uniformly.
 
-## Prompts embedded, run with `runAgent`
+## Embedded prompts
 
 The default. Prompts live next to the states that use them.
 
@@ -32,6 +37,7 @@ import { openai } from "@ai-sdk/openai";
 import { createTextLogic, runAgent, setupAgent } from "@statelyai/agent";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 
+// Model IDs here are illustrative; substitute your provider's current models.
 const models = defineModels({
   writer: openai("gpt-5.4-mini"),
   judge: openai("gpt-5.4-mini"),
@@ -118,9 +124,9 @@ const haikuMachine = agentSetup.createMachine({
       invoke: {
         src: "reviseHaiku",
         input: ({ context }) => ({ haiku: context.haiku ?? "", critique: context.critique ?? "" }),
-        onDone: ({ output }) => ({
+        onDone: ({ context, output }) => ({
           target: "validating",
-          context: { haiku: output, revisions: ({ context }) => context.revisions + 1 },
+          context: { haiku: output, revisions: context.revisions + 1 },
         }),
       },
     },
@@ -137,7 +143,7 @@ if (result.status === "done") console.log(result.output.haiku);
 
 At run time, `runAgent` walks the machine, binds each `agent.*` / text / decision source to your executors, and settles `done | idle | error`. The `REVISE` guard returning `undefined` does real work: it makes `REVISE` illegal past 3 revisions, the decision core sees that via its `canTake` check, records `rejected-by-guard`, and retries the model. The machine's guards constrain the model. That is the whole point.
 
-## Driving the machine as a pure function
+## Pure-function loop
 
 The machine can be a **next-step decider** instead of a runner: you own the loop, the machine tells you what to do next. This is what durable hosts (Temporal, queues, Workflows) want: one model call per log append, everything resumable.
 
@@ -192,7 +198,7 @@ console.log((snapshot.output as { haiku: string }).haiku);
 
 Same machine, same executors, zero changes to the definition. `runAgent` **is** this loop with an actor and idle-detection wrapped around it. Reach for the step path when you need to persist between calls, inject a human, or run inside someone else's scheduler. See [The step path](steps.md).
 
-## Mapping prompts in from outside
+## Mapped prompts
 
 Strip every prompt out of the machine, leaving only **structure** (state names, bare `src` strings). Prompts live in a separate map, bound at the boundary. Only the sources change; the machine graph is identical to the embedded version:
 
@@ -204,7 +210,7 @@ const prompts = {
   writeHaiku: {
     schemas: { input: z.object({ topic: z.string() }), output: z.string() },
     system: "You write haiku. Three lines, 5-7-5.",
-    prompt: ({ input }) => `Write a haiku about ${input.topic}.`,
+    prompt: ({ input }: { input: { topic: string } }) => `Write a haiku about ${input.topic}.`,
   },
   reviseHaiku: {
     schemas: {
@@ -212,7 +218,8 @@ const prompts = {
       output: z.string(),
     },
     system: "You revise haiku.",
-    prompt: ({ input }) => `Revise:\n${input.haiku}\n\nCritique:\n${input.critique}`,
+    prompt: ({ input }: { input: { haiku: string; critique: string } }) =>
+      `Revise:\n${input.haiku}\n\nCritique:\n${input.critique}`,
   },
 };
 
@@ -230,9 +237,15 @@ const result = await runAgent(haikuMachine, {
 });
 ```
 
-The `writeHaiku`/`reviseHaiku` invokes still name the same bare `src` strings, but nothing about the prompts lives in the machine; the `judge` decision stays state-local (`src: 'agent.decide'`), so its prompt lives on the invoke's `input`. The `actors` option on `runAgent` is shorthand for `machine.provide({ actors })` (you can also `provide` them permanently, or pass them to the step helpers unchanged). Use this form when prompts are versioned separately, edited by non-engineers, or A/B tested.
+What changed and what did not:
 
-## Running a plain machine without `setupAgent`
+- The `writeHaiku`/`reviseHaiku` invokes still name the same bare `src` strings, but nothing about the prompts lives in the machine.
+- The `judge` decision stays state-local (`src: 'agent.decide'`), so its prompt lives on the invoke's `input`.
+- The `actors` option on `runAgent` is shorthand for `machine.provide({ actors })`. You can also `provide` them permanently, or pass them to the step helpers unchanged.
+
+Use this form when prompts are versioned separately, edited by non-engineers, or A/B tested.
+
+## Plain machines without `setupAgent`
 
 The strongest form of the claim: the machine need not know about this library **at all**. Any machine whose invokes resolve to values, and whose events you can enumerate, is drivable.
 
@@ -275,7 +288,7 @@ A machine with **no invokes at all** (prompts written as state `description`s, `
 
 The shape carries no LLM assumptions, so the same definition round-trips through non-code representations. `setupAgent.fromConfig` builds a machine from serializable JSON, the kind a database, visual editor, or LLM could emit:
 
-```ts
+```ts no-check
 const { machine, schemas } = setupAgent.fromConfig(workflowJson, { compileSchema });
 await runAgent(machine, { input, executors });
 ```

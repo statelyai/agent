@@ -12,8 +12,12 @@ An agent machine can be pure data. Describe it as a JSON or YAML config and hand
 ```ts
 import { setupAgent } from "@statelyai/agent";
 
-const { machine, schemas } = setupAgent.fromConfig(config, { compileSchema });
+const { machine, schemas } = setupAgent.fromConfig(config, {
+  compileSchema: ajvCompileSchema,
+});
 ```
+
+> **Bring your own `compileSchema`.** The library bundles no JSON Schema engine, so `fromConfig(...)` will not run without a `compileSchema` you supply (Ajv, `@cfworker/json-schema`, or anything returning Standard Schema). See [Schema compilation](#schema-compilation).
 
 `fromConfig(...)` returns two things:
 
@@ -36,7 +40,7 @@ Point an editor, form generator, or validation step at it to catch a malformed c
 
 ## Example: a support ticket config
 
-This config drives the examples below: the model triages a ticket (escalate or reply), drafts a reply, then waits for a human to approve or reject. The example ships the equivalent JSON at [examples/json-agent/workflow.json](../examples/json-agent/workflow.json), run by [examples/json-agent/index.ts](../examples/json-agent/index.ts). As YAML for readability:
+This config drives the examples below: the model triages a ticket (escalate or reply), drafts a reply, then waits for a human to approve or reject. The example ships the equivalent JSON at [examples/json-agent/workflow.json](../examples/json-agent/workflow.json), run by [examples/json-agent/index.ts](../examples/json-agent/index.ts). Model IDs below are illustrative; substitute your provider's current models. As YAML for readability:
 
 ```yaml
 id: support-ticket-json
@@ -131,7 +135,13 @@ states:
 
 <!-- compileSchema requirement and SchemaCompiler from src/workflow-config.ts -->
 
-The `fromConfig` call requires a `compileSchema` option. A config carries JSON Schemas (context, events, input, output, and each request's input/output) that need a runtime validator, and the library bundles no JSON Schema engine. Supply a `compileSchema` that takes a JSON Schema object plus a name and returns a Standard Schema validator; `fromConfig(...)` calls it once per schema. Use Ajv, @cfworker/json-schema, or any compiler that returns Standard Schema. Ajv:
+The `fromConfig` call requires a `compileSchema` option:
+
+- A config carries JSON Schemas (context, events, input, output, and each request's input/output) that need a runtime validator, and the library bundles no JSON Schema engine.
+- `compileSchema` takes a JSON Schema object plus a name and returns a Standard Schema validator. `fromConfig(...)` calls it once per schema.
+- Use Ajv, `@cfworker/json-schema`, or any compiler that returns Standard Schema.
+
+With Ajv:
 
 ```ts
 import Ajv from "ajv";
@@ -163,7 +173,7 @@ const ajvCompileSchema: SchemaCompiler = (jsonSchema, name): StandardSchemaV1 =>
 const { machine } = setupAgent.fromConfig(config, { compileSchema: ajvCompileSchema });
 ```
 
-## Requests: tools and reasoning
+## Request tools and reasoning
 
 <!-- Request shape from schemas/agent-workflow.json $defs.Request -->
 
@@ -226,7 +236,7 @@ A named reference with no implementation is a build-time error, never a silently
 
 A lowered machine runs through `runAgent(...)` like any other agent machine. Pass the machine input, the host `executors`, and `on` handlers for emitted events:
 
-```ts
+```ts no-check
 const result = await runAgent(machine, {
   input: { ticket: "My download link 404s." },
   executors: { decide, generateText },
@@ -244,7 +254,7 @@ A run settles one of two ways:
 - `{ status: 'done', output }`: reached a final state.
 - `{ status: 'idle', snapshot }`: paused at an idle state. Persist `snapshot`, then resume when the event arrives:
 
-```ts
+```ts no-check
 result = await runAgent(machine, { snapshot, event: { type: "APPROVE" }, executors });
 ```
 

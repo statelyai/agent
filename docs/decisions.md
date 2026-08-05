@@ -23,7 +23,7 @@ Author a decision inline with the builtin `agent.decide` actor source, on the in
 - `allowedEvents` (optional): the candidate events (exact types or [patterns](#allowedevents-patterns)). Defaults to all currently-legal events.
 - `maxRetries` (optional): retries after an invalid choice. Default 2.
 
-```ts
+```ts no-check
 // ...
 deciding: {
   invoke: {

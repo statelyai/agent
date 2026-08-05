@@ -7,7 +7,17 @@ description: What Stately Agent owns, what the host owns, and where specialized 
 
 `@statelyai/agent` is a portable control-flow tool, not an agent framework. It owns the executable machine: states, legal transitions, typed requests, decisions, composition, suspension, resume, and deterministic testing. The host owns every external capability.
 
-That boundary is deliberate. A machine should run unchanged with a different model SDK, search provider, memory store, sandbox, transport, or evaluation system.
+That boundary is what makes a machine portable. Agent frameworks that bundle a model client, a search client, a memory store, and a server all at once tie your control flow to those choices. Here the machine only ever describes work; the host decides how it happens, so the same machine runs against a different SDK, provider, or database with no edits.
+
+In practice the machine says *what*:
+
+```ts no-check
+searching: {
+  invoke: { src: "searchWeb", input: ({ context }) => ({ query: context.query }) },
+}
+```
+
+and the host says *how*, binding `searchWeb` to whichever search client, cache, and auth it uses.
 
 ## Ownership boundary
 
@@ -27,9 +37,12 @@ That boundary is deliberate. A machine should run unchanged with a different mod
 | Queues, schedules, leases, deployment, HTTP/SSE/WebSocket               | Runtime or application framework | step API, snapshots, callbacks, emitted events                  |
 | Telemetry export                                                        | Observability library            | `onTrace` and `inspect`                                         |
 
-The repository includes examples for the orchestration shape, not replacement implementations of those systems. For example, [deep research](../examples/deep-research/index.ts) models planning, concurrent research, reflection, and synthesis; its search implementation still belongs to the host. [Trading team](../examples/trading-team/index.ts) models parallel analysts, debate, risk review, and approval; market feeds and order execution remain external.
+The repository includes examples for the orchestration shape, not replacement implementations of those systems:
 
-## What belongs in core
+- [Deep research](../examples/deep-research/index.ts) models planning, concurrent research, reflection, and synthesis. Its search implementation still belongs to the host.
+- [Trading team](../examples/trading-team/index.ts) models parallel analysts, debate, risk review, and approval. Market feeds and order execution remain external.
+
+## Core criteria
 
 A feature belongs in core when portable machine intent cannot otherwise be expressed or handed to an arbitrary host without framework-specific glue. Good core candidates improve one of these seams:
 
@@ -42,7 +55,7 @@ A feature belongs in core when portable machine intent cannot otherwise be expre
 
 A feature does not belong in core merely because popular agent applications need it. Search clients, vector stores, browser automation, code sandboxes, skills, prompt registries, eval scorers, and deployment servers are useful precisely because specialized libraries can evolve them independently.
 
-## How to integrate specialized libraries
+## Integration recipes
 
 - Wrap an async capability as an XState actor and provide it through `actors`.
 - Pass SDK-native tools through a request's `tools` map.

@@ -7,7 +7,7 @@ description: A term-by-term translation of LangGraph concepts onto agent machine
 
 If you already think in graphs, nodes, edges, and checkpoints, most of what you know transfers directly. This page is a translation guide: LangGraph term on the left, the equivalent here on the right, and the example that shows it running.
 
-**You don't have to choose.** [examples/langchain-host](../examples/langchain-host/index.ts) keeps LangChain for model calls, callbacks, LangSmith tracing, and the agent loop while the machine owns control flow: wrap any `BaseChatModel` as executors, or hand a `createAgent` loop the machine as tools.
+**You don't have to choose.** [examples/langchain-host](../examples/langchain-host/index.ts) keeps LangChain for model calls, callbacks, tracing through LangSmith (LangChain's hosted observability product), and the agent loop while the machine owns control flow: wrap any `BaseChatModel` as executors, or hand a `createAgent` loop the machine as tools.
 
 ## Term mapping
 
@@ -38,7 +38,7 @@ Each pair below is the LangGraph code first (`@langchain/langgraph` 1.x), then t
 
 **A conditional edge becomes a guarded transition.** In LangGraph, a node produces a literal and a router function turns it into a node name. The rewrite bound is an `if` inside that router:
 
-```ts
+```ts no-check
 import {
   END,
   START,
@@ -83,7 +83,7 @@ const graph = new StateGraph(State)
 
 Here, the router is a decision the model makes over named events; the branch is the event's transition, and a guard returning `undefined` makes that branch unavailable:
 
-```ts
+```ts no-check
 grading: {
   invoke: {
     src: "agent.decide",
@@ -111,7 +111,7 @@ The model never sees a routing string it can typo. It picks a named event, and t
 
 **An interrupt becomes a state that waits.** In LangGraph, the pause is a runtime call inside a node, and it only works if a checkpointer and a `thread_id` are configured. Resuming re-enters the node from the top:
 
-```ts
+```ts no-check
 import { Command, MemorySaver, interrupt, type GraphNode } from "@langchain/langgraph";
 
 const review: GraphNode<typeof State> = (state) => {
@@ -134,7 +134,7 @@ const done = await graph.invoke(new Command({ resume: { type: "approve" } }), co
 
 Here, no checkpointer is configured; the run settles and gives you a snapshot:
 
-```ts
+```ts no-check
 // inside states: { ... }, invokes nothing, so the run settles idle here
 reviewing: {
   on: {
@@ -164,7 +164,7 @@ const resumed = await runAgent(machine, {
 
 The `key` is whatever your app already uses; there is no separate thread registry to configure.
 
-## What is structurally different
+## Structural differences
 
 Three differences are worth knowing up front, because they change how you design rather than just how you spell things.
 
@@ -192,7 +192,7 @@ Several LangGraph tutorials and how-tos exist here as runnable examples, so you 
 - [`deep-research`](../examples/deep-research/index.ts): plan queries, research in parallel, reflect, synthesize.
 - [`lats`](../examples/lats/index.ts): Language Agent Tree Search with a rollout budget.
 
-## Where to go next
+## Next steps
 
 - [LangGraph vs agent machines](langgraph-comparison.md): one agent built both ways, with an honest dimension table and when to prefer LangGraph.
 - [Quickstart](quickstart.md): install and run one machine end to end.

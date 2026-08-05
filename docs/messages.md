@@ -22,7 +22,9 @@ The `content` field is a string or an array of typed parts, depending on `role`:
 - **`assistant`**: a string, or `TextPart` / `FilePart` / `ToolCallPart` / `ToolResultPart` parts.
 - **`tool`**: an array of `ToolResultPart`.
 
-## Build messages
+> **Warning:** `ImagePart` and `FilePart` can hold binary data or a `URL` instance, which are not JSON-serializable. Use base64 strings and URL strings if the messages will be persisted. See [Persisting messages](#persisting-messages).
+
+## Message builders
 
 <!-- message builder helpers from src/utils.ts -->
 
@@ -86,7 +88,7 @@ const agentSetup = setupAgent({
 
 Append with `appendMessages`, which returns a transition result adding one or more messages. Pass a message, an array, or a function of `{ context, event }`:
 
-```ts
+```ts no-check
 import { appendMessages, userMessage } from '@statelyai/agent';
 
 // inside a state
@@ -104,9 +106,9 @@ A request that needs history sends it through `messages` instead of a bare `prom
 ```ts
 import { messagesSchema, type AgentMessage } from "@statelyai/agent";
 
-const result = messagesSchema["~standard"].validate(await request.json());
+const result = await messagesSchema["~standard"].validate(await request.json());
 if (result.issues) {
-  throw new Error(result.issues.map((issue) => issue.message).join("; "));
+  throw new Error(result.issues.map((issue: { message: string }) => issue.message).join("; "));
 }
 const messages: AgentMessage[] = result.value;
 ```

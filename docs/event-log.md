@@ -54,7 +54,9 @@ interface AgentLogEntry {
 }
 ```
 
-`recordedAt` is acceptance metadata, never semantic machine time. If a transition needs time, put it in the machine event itself. `machineVersion` is the explicit run option, else the machine's own `version` (`createMachine({ version })`), else its structural hash. The verification hashes pin the logical state and still-owed effects after each entry.
+- `recordedAt` is acceptance metadata, never semantic machine time. If a transition needs time, put it in the machine event itself.
+- `machineVersion` is the explicit run option, else the machine's own `version` (`createMachine({ version })`), else its structural hash.
+- `verification` pins the logical state and still-owed effects after each entry.
 
 XState v6 uses stable category event types with identity in payload fields. Preserve the whole object: an invoke completion is `{ type: "xstate.done.actor", actorId, sessionId, output }`; a timer firing is `{ type: "xstate.timer", id }`. `replay` rebinds logged actor sessions to the new actor system, so globally unique runtime IDs do not make the log machine-specific.
 
@@ -90,11 +92,13 @@ const result = await runAgent(machine, {
 });
 ```
 
-`onEvent` fires once per newly observed envelope, including the `@agent.init` entry on a fresh run. It does not re-emit history supplied through `events`. Unlike `onTransition`, it excludes raised and internal events, so its output can be passed directly to `replay`.
+- Fires once per newly observed envelope, including the `@agent.init` entry on a fresh run.
+- Does not re-emit history supplied through `events`.
+- Excludes raised and internal events, unlike `onTransition`, so its output goes straight to `replay`.
 
 `runAgent` owns a live XState actor. Its `onEvent` callback observes an event after XState accepted it and cannot await an asynchronous store before the transition. It is useful for export/write-through recording, but is not an append-before-transition crash-safety guarantee. For that guarantee use the [pure step path](steps.md#durable-append-before-continue).
 
-## Resume from the log alone (crash recovery)
+## Log-only resume (crash recovery)
 
 <!-- events-only resume from src/run-agent.ts (options.events + replay + getPersistedSnapshot); tests in src/run-agent.test.ts "restore semantics" -->
 
@@ -113,7 +117,7 @@ const recovered = await runAgent(machine, {
 
 This is the crash-recovery path for hosts that persist entries as they happen (`onEvent` or an event-log store): after a process death mid-run, resume from the log alone. Because restart is at-least-once for the in-flight request, executors with non-idempotent side effects should dedupe by their own idempotency key. See [`examples/crash-recovery`](../examples/crash-recovery/index.ts).
 
-## JSON is the wire contract
+## The JSON wire contract
 
 `createReplayEntry`, `initEntry`, every built-in store append, and `replay` validate the complete envelope. Values that JSON would drop or coerce are rejected with `NonSerializableAgentEventError` carrying the exact `path`: `undefined`, functions, symbols, bigint, non-finite numbers, negative zero, sparse arrays, hidden properties, cycles, `Date`, `Map`, `Set`, and class instances. Framework error events normalize `Error` values to plain `{ name, message, cause? }` records before storage.
 
@@ -135,7 +139,10 @@ try {
 }
 ```
 
-`kind: "state"` means the current machine derived different logical state. `kind: "effects"` means it owed different work: a changed prompt, model, tool set, task input, or timer. `kind: "missing-verification"` means an entry carried no hashes at all. `AgentReplayMachineMismatchError` rejects an envelope stamped for another machine id/version before folding it.
+- `kind: "state"`: the current machine derived different logical state.
+- `kind: "effects"`: it owed different work, from a changed prompt, model, tool set, task input, or timer.
+- `kind: "missing-verification"`: an entry carried no hashes at all.
+- `AgentReplayMachineMismatchError` rejects an envelope stamped for another machine id/version before folding it.
 
 Every framework error extends `AgentError` and carries a stable `.code` (`"replay-divergence"`, `"event-log-conflict"`, `"non-serializable-event"`, …), so a host can branch on the code instead of on `instanceof`. The other durability-adjacent errors: `AgentIllegalResumeEventError`, `AgentSnapshotVersionMismatchError`, `AgentDecisionExhaustedError`.
 
@@ -178,7 +185,7 @@ Every entry carries optional host-owned `metadata`, stored verbatim.
 - `close()` only closes a database the store opened itself; a passed-in handle stays the caller's to close.
 - `options.tableName` defaults to `agent_event_log` and `agent_snapshots`. Tables are created on demand.
 
-```ts
+```ts no-check
 import { DatabaseSync } from "node:sqlite";
 import { createSqliteEventLogStore, createSqliteSnapshotStore } from "@statelyai/agent/sqlite";
 
@@ -208,7 +215,7 @@ const diff = diffEventLogs(machine, await store.read("session-1"), await store.r
 
 `diffEventLogs` returns the exact common prefix, parent-only and fork-only tails, both replay results, JSON Patch-style logical-state changes, and added/removed/changed frontier effects. It is structural only; semantic quality belongs to an evaluator.
 
-## Conform your own store
+## Store conformance
 
 `createInMemoryEventLogStore()` is the reference implementation and the conformance baseline. An append-only log with a unique `(threadId, index)` constraint is a natural fit for any database; prove yours matches the reference on races, isolation, ordering, and fork semantics:
 
@@ -220,7 +227,7 @@ await assertEventLogStoreConformance(() => createMyStore());
 
 Each assertion throws a descriptive `Error` on the first violation, so any runner (or a plain script) can drive it. The SQLite store passes the same suite.
 
-## Snapshots are compaction, not truth
+## Snapshots as compaction
 
 [`AgentSnapshotStore`](human-in-the-loop.md) remains useful as an **idle-point cache**: at a quiescent point (an idle state with no in-flight effects), persist the snapshot and resume from it plus the events appended since, instead of replaying from index 0. Compact only at quiescent points; a snapshot taken mid-flight cannot carry in-flight effect state, but the log can.
 

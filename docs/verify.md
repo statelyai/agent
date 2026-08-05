@@ -13,9 +13,9 @@ Three APIs check an agent machine before it runs, with no API key or model call:
 
 Use them to prove an LLM-generated machine is legal before you run it ([authoring from scratch](quickstart.md)), or to pin that a refactor preserved behavior, so a machine converted [from a loop](from-a-loop.md) is safe to ship.
 
-> **Note:** Everything on this page runs on `machine.config` and the pure step path: no provider, no network, no keys. It is deterministic, so these are ordinary vitest/jest unit tests and CI checks.
+> **Note:** Everything on this page runs on `machine.config` and the pure step path: no provider, no network, no keys. It is deterministic, so these are ordinary unit tests in any test runner (vitest, jest) and CI checks.
 
-## Linting a machine
+## Machine linting
 
 The `lintAgentMachine(machine, options?)` function runs static structural checks over a built machine, for TS-authored (`setupAgent(...).createMachine(...)`) and `setupAgent.fromConfig(...)`-compiled machines alike. It returns `AgentLintDiagnostic[]` (`{ code, severity, path, message }`), empty when clean.
 
@@ -41,11 +41,11 @@ For a one-liner that throws instead of returning findings, use `assertAgentMachi
 | `undeclared-event`         | warning  | A state handles an event in `on:` that isn't declared in `schemas.events` and isn't a builtin/wildcard pattern. Its payload stays unvalidated; usually a typo. Skipped entirely when the machine declares no events.                                                               |
 | `missing-final`            | warning  | No reachable final state; the machine can only idle/loop (legal, but flagged).                                                                                                                                                                                                     |
 
-## Asserting in tests
+## Test assertions
 
 Every check is a plain function, so assert structural soundness, reachability, and scripted playthroughs directly in vitest/jest:
 
-```ts
+```ts no-check
 import { assertAgentMachine, canReach, simulateAgent } from "@statelyai/agent";
 import { supportMachine } from "./support-machine";
 
@@ -71,11 +71,11 @@ test("happy path settles done", async () => {
 
 Guards stay in force throughout: `canReach` and `simulateAgent` walk the same step path `runAgent` uses, so a graph path that is guard-illegal never counts as reachable. These tests pin the shape as prompts and models change.
 
-## Testing with deterministic executors
+## Deterministic executors
 
 Executors are plain functions, so a test supplies scripted ones and never touches the network. Bind them onto a logic with `.withExecutor(...)`:
 
-```ts
+```ts no-check
 const machine = emailDrafter.provide({
   actors: {
     draftEmail: draftEmail.withExecutor(async ({ request }) => {
@@ -89,7 +89,7 @@ const machine = emailDrafter.provide({
 
 Use this when the test should exercise the real `runAgent` path with canned model output; use `simulateAgent` below when a scripted playthrough on the pure step path is enough.
 
-## Simulating a playthrough
+## Scripted playthroughs
 
 The `simulateAgent(machine, { input, script, maxSteps? })` call runs a deterministic, model-free playthrough on the pure step path (async: it drives plan steps through the real durable protocol). The `script` supplies responses by invoke `src` (FIFO queues), so runs are reproducible:
 
@@ -124,9 +124,14 @@ if (result.status === "done") {
 
 > **Note:** When the script runs dry mid-request, `simulateAgent` throws a descriptive error naming the pending request's kind, src, and id, so a missing response is obvious.
 
-## Exploring every branch
+## Branch exploration
 
-The `explorePaths(machine, { input, maxDepth?, textOutputs? })` call enumerates decision and external-event branches, model-free, and reports coverage (async: plan branches advance through the real plan protocol). At each decision it forks one branch per candidate event (guard-rejected candidates count in `prunedByGuard`, not explored); at an idle wait it forks per externally-accepted event. An `agent.plan` request forks the same way (including the reserved `agent.plan.done` move, always legal), so a single plan can consume several depth units. Text/`userInput` invokes resolve from `textOutputs` (a by-src canned-output map); a missing src halts that branch with a `needs-output` terminal instead of throwing.
+The `explorePaths(machine, { input, maxDepth?, textOutputs? })` call enumerates decision and external-event branches, model-free, and reports coverage (async: plan branches advance through the real plan protocol).
+
+- At each decision it forks one branch per candidate event. Guard-rejected candidates count in `prunedByGuard` and are not explored.
+- At an idle wait it forks per externally-accepted event.
+- An `agent.plan` request forks the same way (including the reserved `agent.plan.done` move, always legal), so a single plan can consume several depth units.
+- Text/`userInput` invokes resolve from `textOutputs` (a by-src canned-output map); a missing src halts that branch with a `needs-output` terminal instead of throwing.
 
 ```ts
 import { explorePaths } from "@statelyai/agent";
@@ -141,7 +146,7 @@ const report = await explorePaths(refundMachine, {
 
 Exploration is bounded by `maxDepth` (default 8) and `maxPaths` (default 200; `report.hitPathCap` flags a partial report).
 
-## Checking reachability
+## Reachability checks
 
 The `canReach(machine, statePath, opts)` call wraps `explorePaths` to answer "can this state be reached?" with a witness path (async).
 
@@ -154,11 +159,11 @@ const { canReach: ok, witness } = await canReach(refundMachine, "denied", {
 // ok → true; witness → [{ type: 'NEEDS_REVIEW' }, { type: 'DENY' }]
 ```
 
-## Checking machines in CI
+## CI checks
 
 Everything on this page runs without an API key, so a small script is enough for CI or a generation loop:
 
-```ts
+```ts no-check
 // check.ts (run with: npx tsx check.ts)
 import { assertAgentMachine } from "@statelyai/agent";
 import { machine } from "./machine";

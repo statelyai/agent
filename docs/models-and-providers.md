@@ -25,15 +25,16 @@ Three ways in, from most to least capable:
 - **OpenAI-compatible endpoints.** Point `createOpenAI({ baseURL })` from `@ai-sdk/openai` at any OpenAI-shaped endpoint (Groq, Ollama, vLLM, Together, LM Studio) and feed the result to the same adapter. Full support, including `decide`.
 - **Raw `ai` functions.** Pass `ai`'s `generateText`/`streamText` as your `executors` set. Text only: `decide` needs an adapter, and structured output is best-effort.
 
-## Recipe: reuse a Mastra model
+## Mastra models
 
-Mastra agents are configured with an AI SDK `LanguageModel`. Reuse that same model object as an executor, no re-config and no second provider setup:
+Mastra is a TypeScript agent framework whose agents are configured with an AI SDK `LanguageModel`. Reuse that same model object as an executor, no re-config and no second provider setup:
 
 ```ts
 import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 // The model you already pass to `new Agent({ model })` in Mastra.
+// Model IDs here are illustrative; substitute your provider's current models.
 const model = openai("gpt-5.4-mini");
 
 await runAgent(machine, {
@@ -44,11 +45,11 @@ await runAgent(machine, {
 
 Anything exposing a `LanguageModel` works the same way, so machine and Mastra share one model definition.
 
-## Recipe: Cloudflare Workers AI
+## Cloudflare Workers AI
 
-The `workers-ai-provider` package turns a Workers AI binding into an AI SDK provider, so its models are ordinary `LanguageModel` objects:
+Workers AI runs models on Cloudflare's edge, reached through a binding on the Worker's `env`. The `workers-ai-provider` package turns that binding into an AI SDK provider, so its models are ordinary `LanguageModel` objects:
 
-```ts
+```ts no-check
 import { createWorkersAI } from "workers-ai-provider";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
@@ -68,9 +69,9 @@ export default {
 
 Pass Cloudflare-specific per-call options through request `metadata`: the host owns it, the machine just carries it.
 
-## Recipe: local Ollama and other OpenAI-compatible endpoints
+## Ollama and OpenAI-compatible endpoints
 
-Ollama serves an OpenAI-compatible API, so the AI SDK's OpenAI provider pointed at the local endpoint is enough. `apiKey` is optional: omit it for keyless local servers.
+Ollama runs models locally and serves them over an OpenAI-compatible HTTP API, so the AI SDK's OpenAI provider pointed at the local endpoint is enough. `apiKey` is optional: omit it for keyless local servers.
 
 ```ts
 import { createOpenAI } from "@ai-sdk/openai";
@@ -105,7 +106,7 @@ An `AgentTextRequest` is spread-compatible with the AI SDK's call options, and r
 - **Structured output is best-effort.** A request with an `outputSchema` has its raw text `JSON.parse`d and validated; a parse failure throws. For reliable structured output, use `createAiSdkExecutors`.
 - **`decide` needs an adapter.** The tool-per-event mapping lives in the adapter; there is no raw AI SDK function for it.
 
-## What each path supports
+## Support by path
 
 | Path                   | `generateText` | `streamText` | `decide` | Structured output |
 | ---------------------- | -------------- | ------------ | -------- | ----------------- |

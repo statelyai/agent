@@ -18,7 +18,14 @@ import { runAgent } from "@statelyai/agent";
 import { createToolLoopMachine } from "@statelyai/agent/machines";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 
+// Model IDs here are illustrative; substitute your provider's current models.
 const models = defineModels({ quick: openai("gpt-5.4-mini") });
+
+const calculate = tool({
+  description: "Evaluate an arithmetic expression.",
+  inputSchema: z.object({ expression: z.string() }),
+  execute: async ({ expression }) => Number(expression),
+});
 
 const machine = createToolLoopMachine({
   model: "quick",
@@ -34,7 +41,7 @@ const result = await runAgent(machine, {
 // Snapshots and log entries carry machine.version ("1") automatically.
 ```
 
-## The taxonomy
+## Preset taxonomy
 
 Three questions separate the seven presets:
 
@@ -100,7 +107,7 @@ Peer swarm: `context.activeAgent` holds the mic, runs one turn, and the machine 
 
 ## Versioning
 
-Every preset machine carries `version: "1"` — XState's standard `createMachine({ version })` prop. `runAgent` reads it automatically (resolution: `options.machineVersion` → `machine.version` → structural hash), so snapshots, event-log entries, and trace events are stamped with `"1"` and stay resumable across releases:
+Every preset machine carries `version: "1"`, XState's standard `createMachine({ version })` prop. This is the machine's own topology version and has nothing to do with the `@statelyai/agent` package version. `runAgent` reads it automatically (resolution: `options.machineVersion` → `machine.version` → structural hash), so snapshots, event-log entries, and trace events are stamped with `"1"` and stay resumable across releases:
 
 ```ts
 const result = await runAgent(machine, { input, executors });
@@ -110,7 +117,7 @@ const result = await runAgent(machine, { input, executors });
 The policy:
 
 - The version identifies the machine's **topology**, not the release that built it. Internals may be refactored (prompt wording, an added `onError`, a renamed internal id) without a bump, so persisted snapshots and event logs stay valid.
-- A topology change that a persisted snapshot could not resume into bumps the machine version (`"2"`) — a minor package release at most. Resume across the bump via `migrateSnapshot`/`onVersionMismatch`.
+- A topology change that a persisted snapshot could not resume into bumps the machine version (`"2"`), a minor package release at most. Resume across the bump via `migrateSnapshot`/`onVersionMismatch`.
 
 The same prop works for your own machines: set `version` in `createMachine(...)` and `runAgent` stamps it instead of the structural hash (which changes on any edit).
 
@@ -118,13 +125,13 @@ The same prop works for your own machines: set `version` in `createMachine(...)`
 
 A preset is a starting point, not a framework. When you need one more state, a human gate, a different bound, or typed context of your own:
 
-- Open the preset's source (`src/machines/<preset>.ts`) — it is one small file of visible states.
+- Open the preset's source (`src/machines/<preset>.ts`): one small file of visible states.
 - Copy it into your project and edit the `setupAgent(...)` call directly.
 - Nothing else changes: the copied machine runs the same way, lints the same way, and persists the same way.
 
 Related examples to eject toward: [react-agent](../examples/react-agent/index.ts) (tool loop as states), [review-tool-calls](../examples/review-tool-calls/index.ts) (approval gate), [fan-out](../examples/fan-out/index.ts) (dynamic N), [reflection-writer](../examples/reflection-writer/index.ts) (critique loop), [supervisor](../examples/supervisor/index.ts), [swarm-handoff](../examples/swarm-handoff/index.ts).
 
-## Where to go next
+## Next steps
 
 - [Agent machines](machines.md): what the presets compose — `setupAgent`, states, invokes, guards.
 - [Agent patterns](patterns.md): the full runnable example catalog.

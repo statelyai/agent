@@ -5,7 +5,9 @@ description: Drive an agent machine one external input at a time over an append-
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
 
-## When to use the step path
+## Step path use cases
+
+Most users should use [`runAgent`](hosts.md). The step path is the low-level alternative for durable hosts that own the loop.
 
 The **step path** is not a separate entry point. It is a set of root exports from `@statelyai/agent` (`getAgentEffects`, `executeAgentRequest`, `resolveDecision`, `replay`, `initEntry`, `createReplayEntry`, ...) for hosts that own the loop and persist between model calls:
 
@@ -37,7 +39,7 @@ The loop is six moves:
 
 Taught from [examples/ai-sdk-game-host/index.ts](../examples/ai-sdk-game-host/index.ts), the canonical thin loop. One host-owned primitive resolves a single frontier effect into the event to append (or `undefined` for a fire-and-forget action):
 
-```ts
+```ts no-check
 import { initialTransition, transition, type AnyMachineSnapshot, type EventObject } from "xstate";
 import {
   createReplayEntry,
@@ -142,15 +144,15 @@ if (effect.kind === "text") {
 
 Where `append(event)` is the loop's own `entries.push(createReplayEntry(machine, entries, event))` plus `transition(...)`. Add `kind`/`id`/`src`/`model` to the event for the attribution `runAgent` stamps. Same opt-in rule as everywhere: a machine that declares no `'@agent.usage'` transition takes nothing, so only append it when the machine declares one.
 
-### Resolving decisions standalone
+### Standalone decision resolution
 
 `getAgentEffects` surfaces a decision effect whose request's `events` field holds only the events legal from the current snapshot ([`allowedEvents`](decisions.md) intersected with XState guards). Resolve it to the chosen, validated event with `resolveDecision`, without running the whole loop:
 
 ```ts
 import { getAgentEffects, resolveDecision } from "@statelyai/agent";
 
-const effects = getAgentEffects(machine, snapshot, actions, { history });
-const effect = effects.find((e) => e.kind === "decision");
+const effects = getAgentEffects(machine, snapshot, actions, { history: entries });
+const effect = effects.find((e) => e.kind === "decision")!;
 
 const event = await resolveDecision(effect.request, decide, {
   canTake: (candidate) => snapshot.can(candidate),
@@ -164,7 +166,7 @@ const event = await resolveDecision(effect.request, decide, {
 
 For an initialized thread, treat the transition after an effect as tentative until its completion envelope commits:
 
-```ts
+```ts no-check
 const entries = await store.read(threadId);
 const { snapshot, effects } = replay(machine, entries);
 const effect = effects.find((effect) => effect.kind !== "execute");
@@ -187,7 +189,9 @@ await store.append({
 const committed = replay(machine, [...entries, entry]);
 ```
 
-The effect must run before its result can be appended, so a crash in that narrow window can retry it. Every owed effect has a replay-stable `requestId`; pass it to the provider/tool as an idempotency key. The event store guarantees one winning control-state append, not exactly-once behavior from an arbitrary external API.
+- The effect must run before its result can be appended, so a crash in that narrow window can retry it.
+- Every owed effect has a replay-stable `requestId`; pass it to the provider or tool as an idempotency key.
+- The event store guarantees one winning control-state append, not exactly-once behavior from an arbitrary external API.
 
 This pure driver is the strict durability path. `runAgent` owns a live XState actor; its `onEvent` sees accepted transitions synchronously and cannot await an asynchronous store before XState advances. A future durable runner can wrap this exact replay/effect/append loop, but passing a store to today's actor-backed runner would only provide write-through recording, not the same guarantee.
 
@@ -227,7 +231,7 @@ Per frontier, the host resolves **one** decision from `request.events` (via `res
 
 The re-surfaced effect's own `applied` / `stepsRemaining` are **not** folded under pure replay (the thin loop records bare machine events, not the invoke child's ledger mutations), so the host **derives the applied trail from the event log itself**. A single applied event that exits the invoking state cancels the invoke (`onDone` never fires), identical to `runAgent`. The full host-side plan driver, and parity with `runAgent` across all four stop reasons, is pinned in `src/steps-plan.test.ts`.
 
-## What the event log does not cover
+## Event log exclusions
 
 `execute` effects (fire-and-forget custom actions, `sendTo`, `cancel`) run once at the frontier and are **skipped on replay** (replay re-derives them). They are not durable state.
 
@@ -235,7 +239,7 @@ Anything that must survive a crash has to be an **invoke or spawn of a registere
 
 ## Known limits
 
-Stated plainly (see `src/effects.ts`):
+See `src/effects.ts`:
 
 - **Every spawn is host-executed on this path.** A spawned machine surfaces as a `task` the host runs, not a live nested child actor. No live nested child machines yet.
 - **Streaming output has no log channel.** A `text` effect carries its `mode` and `executeAgentRequest` dispatches to `streamText`, but chunks are a live-host concern; only the final output lands in the log.

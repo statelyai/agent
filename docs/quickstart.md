@@ -23,7 +23,10 @@ npm install @statelyai/agent@alpha xstate@alpha zod ai@^6 @ai-sdk/openai@^3
 
 A comment moderator. The model reads a comment and picks one of three events; the machine owns the trust threshold that decides whether publishing is even legal.
 
-This first version runs with **no API key**: `createScriptedExecutors` is a keyless executor set that plays back canned answers, so the machine runs end to end before a model is involved.
+Two pieces do the work:
+
+- `setupAgent` declares the schemas and events, then `createMachine` authors the control flow from them.
+- `createScriptedExecutors` plays back canned answers through the executor contract, so this first version runs end to end with **no API key**.
 
 ```ts
 import { createScriptedExecutors, runAgent, setupAgent } from "@statelyai/agent";
@@ -98,13 +101,13 @@ Save it as `agent.ts` in a project with `"type": "module"` in its `package.json`
 npx tsx agent.ts
 ```
 
-It prints `{ outcome: 'flagged', reason: 'Borderline tone.' }`. The scripted decision took the place of a model call; everything else — the guard, the retry, the final state, the schema-checked output — is the real machine.
+It prints `{ outcome: 'flagged', reason: 'Borderline tone.' }`. The scripted decision took the place of a model call. Everything else (the guard, the retry, the final state, the schema-checked output) is the real machine.
 
-### Connect a real model
+### Real model executors
 
-Swap the executors. The machine does not change: add a `models` registry (which also types the `model:` keys), and hand `runAgent` the AI SDK adapter instead of the script.
+Swap the executors. The machine does not change: add a `models` registry (which also types the `model:` keys), then hand `runAgent` the AI SDK adapter instead of the script.
 
-```ts
+```ts no-check
 import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 
@@ -134,11 +137,11 @@ What the machine does that a prompt call cannot:
 - **A guard can overrule the model.** A `PUBLISH` on a low-trust author is rejected before it reaches state (`failure: 'rejected-by-guard'`) and the decision retries with that feedback. The threshold lives in one place and cannot be prompted away.
 - **The outcome is a state, not a parsed string.** Every path ends in a known final state with schema-checked output, and the whole graph renders as a diagram.
 
-## What `setupAgent` gives you
+## The `setupAgent` surface
 
 `setupAgent` returns a **setup** (not a running agent) you author machines from, like XState's `setup()`. Context, input, output, and event payloads are Standard Schemas, so Zod works directly and the machine's types come from them.
 
-The `model` value is a key into the `models` registry, so registered keys autocomplete. Unregistered strings are still allowed (the host may resolve refs at run time), so a typo surfaces at run time. See [Which authoring form when](machines.md#which-authoring-form-when).
+The `model` value is a key into the `models` registry, so registered keys autocomplete. Unregistered strings are still allowed (the host may resolve refs at run time), so a typo surfaces at run time. See [Authoring forms](machines.md#authoring-forms).
 
 Every machine can invoke these built-in actor sources. They are reserved `src` strings; the invoke's `input` shapes each call.
 
@@ -154,7 +157,7 @@ Every machine can invoke these built-in actor sources. They are reserved `src` s
 
 A **request** is a typed, reusable model call: named schemas, a model, and a prompt built from its input. It is the testable counterpart to an inline `agent.generateText`.
 
-```ts
+```ts no-check
 const agentSetup = setupAgent({
   models,
   // …schemas as above
@@ -173,7 +176,7 @@ const agentSetup = setupAgent({
 
 Each request key becomes an invocable `src`:
 
-```ts
+```ts no-check
 blocked: {
   invoke: {
     src: "moderatorNote",
@@ -185,7 +188,7 @@ blocked: {
 
 See [Text requests](text-requests.md) for tools, streaming, and messages.
 
-## Running it
+## Running the machine
 
 `runAgent` drives the machine and calls your **executors** whenever it needs a model. It settles with a `status`:
 
@@ -227,7 +230,7 @@ const executors = createScriptedExecutors({
   text: [{ note: "Repeat offender." }],
 });
 
-const result = await runAgent(moderationMachine, {
+const result = await generateResult(moderationMachine, {
   input: { comment: "…", trust: 20 },
   executors,
 });
@@ -265,9 +268,9 @@ actor.start();
 
 To assert the whole playthrough without a run loop at all, `simulateAgent` walks the pure step path from a by-`src` script. See [Testing and verification](verify.md).
 
-### See it run
+### Live visualization
 
-Watch the machine light up state by state in the [Stately Inspector](https://stately.ai/docs/inspector). Add `@statelyai/sdk` and pass its handler to `runAgent`'s `inspect` option — it works from Node (no in-browser machine needed) and opens the inspector UI for you once connected to an inspection relay:
+The [Stately Inspector](https://stately.ai/docs/inspector) is a web UI that draws a running machine as a diagram and highlights each state as it is entered. Install `@statelyai/sdk`, create an inspector, and pass its handler to `runAgent`'s `inspect` option. The run opens the diagram in your browser and updates it live:
 
 ```ts
 import { createInspector } from "@statelyai/sdk";

@@ -9,7 +9,7 @@ An agent machine is a portable blueprint: **the machine decides, the host execut
 
 This page authors one machine, runs it both ways a host can, then drops it into two real stacks.
 
-## The machine (authored once)
+## Machine definition
 
 A draft-and-review announcer: write a draft, settle idle for a human, publish on approval. Nothing here is host-aware.
 
@@ -68,15 +68,18 @@ export const announceMachine = agentSetup.createMachine({
 
 ## Controlled and uncontrolled
 
-Every host binds executors one of two ways. Same machine, same executors either way.
+Every host binds executors one of two ways:
 
 - **Controlled (`runAgent`):** the library owns the loop. It drives the machine to a settle point (`done` | `idle` | `error`), handles idle pauses, and descends into child machines. Best when the host wants a request/response boundary and snapshot persistence.
 - **Uncontrolled (`provideExecutors` + `createActor`):** you bind executors onto the machine and run it as a plain XState actor. No run loop, no idle settling; the machine drives itself and you observe it. Best when the host already owns an actor lifecycle (a React component, a Durable Object).
+
+Same machine, same executors either way.
 
 ```ts
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 import { openai } from "@ai-sdk/openai";
 
+// Model IDs here are illustrative; substitute your provider's current models.
 const models = defineModels({ writer: openai("gpt-5.4-mini") });
 const executors = createAiSdkExecutors({ models });
 ```
@@ -122,6 +125,8 @@ actor.subscribe((snapshot) => {
 actor.start();
 ```
 
+For fully external control with no live actor at all, XState's pure `transition(…)` / `initialTransition(…)` functions step the machine one event at a time. That is the lowest-level uncontrolled form, and it is what durable hosts build on; see [The step path](steps.md).
+
 ## Host walkthroughs
 
 The same machine, dropped into real stacks with zero machine changes.
@@ -130,7 +135,7 @@ The same machine, dropped into real stacks with zero machine changes.
 
 `runAgent` per request. The process holds no live actor between requests, so any worker can pick up the resume: an idle settle plus a persisted snapshot **is** human-in-the-loop over HTTP.
 
-```ts
+```ts no-check
 import express from "express";
 import { getAcceptedEvents, persistSnapshot, runAgent } from "@statelyai/agent";
 import type { Snapshot } from "xstate";
@@ -180,7 +185,7 @@ The full reference, with revision loops and typed state meta, is [examples/expre
 
 A Durable Object already owns a long-lived actor and its own persistence, so bind executors with `provideExecutors` and run a plain `createActor`. The persisted snapshot lives in Durable Object state, so a run survives hibernation and resumes where it left off. Model resolution is injected from the environment binding, so the class stays provider-agnostic.
 
-```ts
+```ts no-check
 import { Agent, type Connection } from "agents";
 import { createActor, type Actor, type Snapshot } from "xstate";
 import { parseAgentEvent, provideExecutors } from "@statelyai/agent";

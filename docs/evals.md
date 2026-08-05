@@ -9,7 +9,7 @@ An eval is a dataset, a task, and scorers. The hard part is usually the task: ge
 
 A machine gives you both for free. Nothing here is eval-specific instrumentation; it is what `runAgent` already returns.
 
-## Why machines are evaluable
+## Machine evaluability
 
 - **Deterministic replay.** Every run produces `result.events`, a versioned JSON log of every external input it observed. Persist it and the run reproduces. A failing eval row is a file, not a screenshot.
 - **The trajectory is a first-class artifact.** The question "did the agent take the right path?" is not a heuristic over free text. The machine's states and the log's event types answer it directly.
@@ -33,9 +33,9 @@ See [Testing and verification](verify.md) for `simulateAgent`, `explorePaths`, a
 
 ## A dataset runner in plain vitest
 
-No vendor required. A dataset, a task that runs the machine, and scorers that are ordinary functions:
+No vendor required. [Vitest](https://vitest.dev) is a plain JavaScript test runner; an eval here is just a dataset, a task that runs the machine, and scorers that are ordinary functions:
 
-```ts
+```ts no-check
 import { expect, test } from "vitest";
 import { createScriptedExecutors, runAgent } from "@statelyai/agent";
 import { triageMachine } from "./triage-machine.js";
@@ -70,7 +70,7 @@ test.each(dataset)("$name", async ({ input, script, expected }) => {
 
 Swap `createScriptedExecutors` for `createAiSdkExecutors({ models })` and the same rows score a real model. That is the only line that changes.
 
-### Scoring a trajectory
+### Trajectory scoring
 
 Two trajectories are available, and they answer different questions:
 
@@ -83,6 +83,7 @@ Score them as an ordered subsequence rather than an exact match, so an extra ret
 import { matchesTrajectory } from "@statelyai/agent";
 
 // State path: strings, dot paths, or the nested value XState reports.
+const statePath: string[] = [];
 const path = matchesTrajectory(statePath, ["prompting", "drafting", "sent"]);
 expect(path.matched, JSON.stringify(path.firstMiss)).toBe(true);
 
@@ -103,6 +104,8 @@ A machine that pauses for a human settles `idle`. Resume with `{ snapshot, event
 
 ## Braintrust
 
+[Braintrust](https://www.braintrust.dev) is a hosted eval platform: you hand it a dataset, a task function, and scorers, and it tracks scores across experiments.
+
 [`examples/braintrust-evals`](https://github.com/statelyai/agent/tree/main/examples/braintrust-evals) wires the real `braintrust` SDK over the unmodified email-drafter machine: a three-row dataset, a task that drives the machine to done, and four scorers over `result.output`, the state path, the `result.events` trajectory, and summed `result.usage`.
 
 ```ts
@@ -112,7 +115,7 @@ await Eval(
   "statelyai-agent email-drafter",
   {
     data: dataset,
-    task: (input) => runDrafterCase(input, scriptedExecutorsFor(input)),
+    task: (input: unknown) => runDrafterCase(input),
     scores: [scoreOutputStructure, scoreStatePath, scoreEventTrajectory, scoreTokenBudget],
   },
   { noSendLogs: !process.env.BRAINTRUST_API_KEY },
@@ -184,7 +187,7 @@ The email drafter has three seams. Give each its own `Eval()` so a vendor tracks
 | `draft`   | `draftEmail`, first call  | Did the draft reach `reviewing` and get sent?            |
 | `revise`  | `draftEmail`, second call | Did the revision survive review after `REQUEST_CHANGES`? |
 
-```ts
+```ts no-check
 for (const seam of seams) {
   await Eval(`email-drafter seam: ${seam.id}`, {
     data: seam.rows,

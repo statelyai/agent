@@ -5,35 +5,45 @@ description: Author AI agents as typed XState state machines, where the machine 
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
 
-## Overview
+`@statelyai/agent` lets you author an AI agent as a typed XState state machine. The machine is a portable blueprint of what your agent can do; it never talks to a model directly.
 
-`@statelyai/agent` lets you author an AI agent as a typed XState state machine. The machine is a portable blueprint of what your agent can do; it never talks to a model directly. The core idea: **the machine decides, the host executes.**
+- The **machine** declares states, legal transitions and guards, the model calls each state makes, and the events the model may choose right now.
+- The **host** supplies executors: three plain functions (`generateText`, `streamText`, `decide`) taking plain request objects and returning plain results.
+- `runAgent` sits between them, calling an executor whenever the machine needs a model.
 
-The **machine** is the decision layer. It declares:
+**The machine decides, the host executes.**
 
-- which states exist
-- which transitions are legal (enforced by guards)
-- which model calls (**text requests** and **decisions**) each state makes
-- which events the model may choose right now
+```mermaid
+flowchart LR
+  M["Agent machine<br/>states · guards · requests"] -->|request| R["runAgent"]
+  R -->|executor call| E["Host executors<br/>generateText · streamText · decide"]
+  E -->|API call| L["Model"]
+  L -->|result| E
+  E -->|result| R
+  R -->|event or output| M
+```
 
-The **host** is the execution layer. It supplies an executor set: three plain functions (`generateText`, `streamText`, `decide`) that take plain request objects and return plain results. The `runAgent` driver calls them whenever the machine needs a model. Because the machine only knows the executor contract, the same machine runs unchanged against the Vercel AI SDK, Cloudflare Workers AI, a raw provider fetch, or anything else.
+Because the machine only knows the executor contract, the same machine runs unchanged against the Vercel AI SDK, Cloudflare Workers AI, a raw provider fetch, or scripted answers in a test.
 
-A [decision](decisions.md) is where this matters most: the model chooses exactly one **currently-legal** machine event, not free text and not an arbitrary tool call. An illegal choice is rejected before it takes effect, so illegal behavior is impossible by construction, not discouraged by a prompt.
+A [decision](decisions.md) is where this matters most: the model chooses exactly one **currently-legal** machine event, not free text and not an arbitrary tool call. An illegal choice is rejected before it takes effect, so illegal behavior is impossible by construction rather than discouraged by a prompt.
 
-## Why state machines for agents
+## Compared to a plain loop
+
+Most agents start as a `while` loop around a model call. That works until:
+
+- **State goes implicit.** Which step you are on lives in local variables and `if` chains; nothing can enumerate, diagram, or verify the paths.
+- **Legality is prompt-enforced.** Nothing stops the model from calling a tool at the wrong time; you can only ask it nicely.
+- **Pausing means rearchitecting.** Waiting for a human, surviving a deploy, or resuming on another worker requires serializing ad-hoc loop state by hand.
+- **Testing needs the model.** Every branch is buried behind live calls, so tests mock the SDK instead of asserting on structure.
+
+A state machine makes each of these a declared, checkable property instead of a convention. The loop is still there; the library owns it. See [Migrating from a loop](from-a-loop.md) for the mechanical translation.
+
+## Benefits of state machines
 
 - **Legal by construction.** The machine and its guards define every path. The model cannot drive the agent into a state you did not author.
 - **Portable.** No dependency on any model SDK. Swap hosts, not agents.
 - **Inspectable.** States, transitions, and requests are data you can read, diagram, and reason about before anything runs.
-- **Serializable.** Every settle point produces a plain, JSON-serializable snapshot. Persist it anywhere and resume later.
-
-Unlike a hand-rolled `while` loop or a graph framework, control flow is a state machine you can inspect, test, and resume, and the model can only ever pick a legal event.
-
-## Three ways in
-
-- **Author a new agent.** Describe states, decisions, and typed requests, run locally with `runAgent`, then test and inspect it with no API key. Use it in any framework or runtime via `provideExecutors` with zero machine changes. Start at the [Quickstart](quickstart.md), then [Use in any stack](any-stack.md).
-- **Retrofit an existing agent.** Have a `while` loop or tangled control flow? Your existing SDK calls, tools, and retry code become the executors; the machine replaces only the control flow and runs in your existing setup. See [Migrating from a loop](from-a-loop.md).
-- **Copy a known pattern.** ReAct, reflection, plan-and-execute, RAG, supervisor, swarm handoff, and more, each a single runnable file you lift in 60 seconds. Browse [Agent patterns](patterns.md).
+- **Serializable.** Every settle point produces a plain JSON snapshot. Persist it anywhere and resume later.
 
 ## Example
 
@@ -85,11 +95,24 @@ const result = await runAgent(machine, {
 if (result.status === "done") console.log(result.output.answer);
 ```
 
-See the [Quickstart](quickstart.md) for a step-by-step walkthrough.
+## Three starting points
+
+- **Author a new agent.** Describe states, decisions, and typed requests, run locally with `runAgent`, then test and inspect it with no API key. Start at the [Quickstart](quickstart.md).
+- **Retrofit an existing agent.** Your existing SDK calls, tools, and retry code become the executors; the machine replaces only the control flow. See [Migrating from a loop](from-a-loop.md).
+- **Copy a known pattern.** ReAct, reflection, plan-and-execute, RAG, supervisor, swarm handoff, each a single runnable file. Browse [Agent patterns](patterns.md).
+
+## Core pages
+
+- [Quickstart](quickstart.md): install and run your first agent machine end to end.
+- [Agent machines](machines.md): `setupAgent`, states, invokes, typed context, built-in actor sources, and guards.
+- [Decisions](decisions.md): the model choosing exactly one currently-legal machine event.
+- [Hosts and executors](hosts.md): the executor contract, the AI SDK adapter, and writing your own.
+- [Use in any stack](any-stack.md): one machine, run locally, behind an HTTP route, or on the edge.
+- [Testing and verification](verify.md): lint, simulate, and explore agent machines with no API keys.
+
+Everything else is in the sidebar: [text requests](text-requests.md), [tools](tools.md), [plans](plans.md), [messages](messages.md), [debugging](debugging.md), [human in the loop](human-in-the-loop.md), [observability](observability.md), [usage and budgets](usage-and-budgets.md), [the event log](event-log.md), [multi-agent](multi-agent.md), [evals](evals.md), [scope](scope.md), and the [roadmap](roadmap.md).
 
 ## Alpha status
-
-<!-- not-shipped list, consistent with readme.md's alpha note and docs/roadmap.md -->
 
 The API changed completely in 2.0 and is still settling. Expect breaking changes before 2.0 stable.
 
@@ -102,33 +125,3 @@ Explicitly not shipped yet:
 - **Visualization tooling.** Stately Studio and a VS Code extension own diagramming and inspection.
 
 If something here blocks you, or the API surface feels wrong, open an issue. This alpha exists to find that out before 2.0 stable.
-
-## Documentation map
-
-- [Quickstart](quickstart.md): install and run your first agent machine end to end.
-- [Use in any stack](any-stack.md): one machine runs locally, behind an HTTP route, or on the edge, with zero machine changes, plus the Express and Cloudflare walkthroughs.
-- [Scope and ecosystem boundaries](scope.md): what portable machine logic owns, what the host owns, and where specialized libraries fit.
-- [Agent machines](machines.md): `setupAgent`, states, invokes, typed context, built-in actor sources, and guards.
-- [Preset machines](machines-presets.md): factories for proven agent shapes (tool loop, router, supervisor, handoff, and more), each an ordinary machine you can eject from.
-- [Decisions](decisions.md): the model choosing exactly one currently-legal machine event.
-- [Plans](plans.md): the multi-event decision, `agent.plan`.
-- [Text requests](text-requests.md): typed text and structured-output model calls.
-- [Messages](messages.md): the parts-based `AgentMessage` model.
-- [Human in the loop](human-in-the-loop.md): idle-first pauses and resuming by snapshot.
-- [Hosts and executors](hosts.md): the executor contract, the AI SDK adapter, and writing your own.
-- [Observability](observability.md): the trace stream and observation callbacks, the Stately Inspector locally, and OpenTelemetry in production.
-- [Usage and budgets](usage-and-budgets.md): reading token usage off a run, capping it with `maxModelCalls`, and enforcing turn and token budgets as machine guards.
-- [Models and providers](models-and-providers.md): raw SDK functions as executors, other AI frameworks, OpenAI-compatible endpoints, and reference hosts per provider.
-- [Steps](steps.md): the lower-level step path for durable hosts.
-- [The event log](event-log.md): append events, replay deterministically, fork and time travel, and the SQLite stores.
-- [Machines as data](machines-as-data.md): authoring an agent machine as JSON.
-- [Generating machines with an LLM](generate-machines.md): have a model author the config, then validate, lint, and simulate it before running.
-- [Testing and verification](verify.md): lint, simulate, and explore agent machines with no API keys or model calls.
-- [Evals](evals.md): score runs on output, trajectory, and token budget with plain vitest or Braintrust.
-- [Multi-agent](multi-agent.md): sub-agents and child actors.
-- [Migrating from a loop](from-a-loop.md): convert a hand-rolled `while` loop into an agent machine.
-- [Coming from LangGraph](from-langgraph.md): a term-by-term translation of LangGraph concepts onto agent machines.
-- [LangGraph vs agent machines](langgraph-comparison.md): the same agent built both ways, dimension by dimension.
-- [You already have an agent workflow](xstate-as-agent-workflow.md): the same machine graph run by `runAgent`, by hand, or with prompts mapped in from outside.
-- [Agent patterns](patterns.md): ReAct, reflection, RAG, supervisor, and more as copy-paste machines, and the full runnable example catalog.
-- [Post-alpha roadmap](roadmap.md): what gates 2.0 stable, and what is deliberately deferred past it.

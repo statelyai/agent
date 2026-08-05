@@ -30,13 +30,14 @@ const parentAgentSetup = setupAgent({
 });
 
 const subflowsMachine = parentAgentSetup.createMachine({
+  context: ({ input }) => ({ topic: input.topic, research: null }),
   initial: "delegating",
   states: {
     delegating: {
       invoke: {
         id: "child",
         src: "child",
-        input: ({ context }) => ({ topic: context.topic }),
+        input: ({ context }: { context: { topic: string } }) => ({ topic: context.topic }),
         onDone: ({ output }) => ({ target: "done", context: { research: output.research } }),
       },
     },
@@ -62,7 +63,7 @@ The `inspectTransitions(handler)` helper wraps `inspect`: it filters to `@xstate
 import { inspectTransitions, runAgent } from "@statelyai/agent";
 
 await runAgent(parentMachine, {
-  executors: { generateText },
+  executors,
   onTransition: (snapshot) => console.log("parent:", snapshot.value),
   inspect: inspectTransitions((snapshot, actorRef) => {
     console.log(`[${actorRef.id}]`, snapshot.value); // child transitions included
@@ -80,7 +81,7 @@ A sub-agent need not be a machine. Here the machine sees a single text request w
 
 [examples/ai-sdk-sub-agents/index.ts](../examples/ai-sdk-sub-agents/index.ts) exposes `askResearcher` and `askWriter` tools whose `execute` calls a Vercel AI SDK `ToolLoopAgent` worker:
 
-```ts
+```ts no-check
 requests: {
   supervise: {
     schemas: { input: taskInputSchema, output: answerSchema },
@@ -109,7 +110,7 @@ Beyond tools, the host can provide **any async actor**. The machine declares a n
 
 A parent can invoke several child agents at once and pass messages between them, using each child's `on:` handlers as its inbox. [examples/debate-sub-agents/index.ts](../examples/debate-sub-agents/index.ts) runs a debate this way:
 
-```ts
+```ts no-check
 invoke: [
   { id: 'affirmative', src: 'affirmative', input: ({ context }) => ({ stance: 'affirmative', question: context.question }) },
   { id: 'negative', src: 'negative', input: ({ context }) => ({ stance: 'negative', question: context.question }) },
@@ -137,22 +138,30 @@ Each debater idles until it receives `DEBATE.ARGUMENT_REQUESTED`, composes an ar
 
 <!-- nested executor inheritance from src/run-agent.ts and examples/subflows -->
 
-`runAgent` rebinds the executors you pass (`generateText`/`streamText`/`decide`) onto every unbound agent request, **including requests inside invoked child machines, at any depth**. A child request inherits the same host-backed executors as the parent and shares the run's `maxModelCalls` budget, `onTrace`, `onChunk`, and `onResult`. Passing `executors: { generateText }` to `runAgent(parentMachine, ...)` covers both the parent's requests and the child's.
+`runAgent` rebinds the executors you pass (`generateText`/`streamText`/`decide`) onto every unbound agent request, **including requests inside invoked child machines, at any depth**.
+
+- A child request inherits the same host-backed executors as the parent.
+- It shares the run's `maxModelCalls` budget, `onTrace`, `onChunk`, and `onResult`.
+
+One `executors: { generateText }` on `runAgent(parentMachine, ...)` covers the parent's requests and the child's.
 
 The rules:
 
-- **Inheritance is the default.** Any request reached through string-keyed actor sources (invoke `src` strings, registered `actors`) inherits, however deeply nested. Cycles are handled.
-- **Explicit bindings win.** A request already carrying its own executor (via `.withExecutor(...)`, `bindRequestExecutor(...)`, or a child's own `.provide({ actors })`) keeps it; the parent's executors are never called for it.
-- **Missing executors fail fast.** If a reachable request needs an executor kind you didn't pass (e.g. a child's `mode: 'stream'` request but no `streamText`), binding throws before any actor runs, naming the invoke chain and request `src`.
-- **Registered dynamic spawns inherit.** Spawn the current implementation from the action's `actors`, not the original unbound logic. `runAgent` binds that registered source before the machine starts, so every runtime-created branch uses the same executors.
-- **Unregistered logic cannot inherit.** A new logic object constructed inside an action is invisible to both `runAgent` and `provideExecutors`; register it under `actors` or intentionally bind that logic with `.withExecutor(...)`.
-- **Direct-object child machines cannot inherit.** `invoke: { src: childMachine }` gives `runAgent` no string-keyed source to replace. Register the child under `actors` and invoke it by name.
+| Case                                                                       | Inherits? | Why                                                                             |
+| -------------------------------------------------------------------------- | --------- | -------------------------------------------------------------------------------- |
+| Request reached through a string-keyed source (invoke `src`, `actors`)     | Yes       | The default, at any depth. Cycles are handled                                   |
+| Spawn of a registered source (`enq.spawn(actors.worker, ...)`)             | Yes       | `runAgent` binds the source before the machine starts                           |
+| Request with its own executor (`.withExecutor`, `bindRequestExecutor`)     | No        | Explicit bindings win; the parent's executors are never called for it           |
+| Logic object constructed inside an action                                  | No        | Unregistered, so neither `runAgent` nor `provideExecutors` can see it           |
+| Direct-object child machine (`invoke: { src: childMachine }`)              | No        | No string-keyed source to replace. Register it under `actors` and invoke by name |
+
+**Missing executors fail fast.** If a reachable request needs an executor kind you didn't pass (e.g. a child's `mode: 'stream'` request but no `streamText`), binding throws before any actor runs, naming the invoke chain and request `src`.
 
 ### Dynamic binding
 
 This works even though the branch count is known only at runtime:
 
-```ts
+```ts no-check
 const setup = setupAgent({
   // `worker` is registered once; the host supplies its executor later.
   requests: { worker: workerRequest },
@@ -182,7 +191,7 @@ await runAgent(machine, { executors: { generateText } });
 
 This does **not** inherit:
 
-```ts
+```ts no-check
 entry: ({ context }, enq) => {
   // A fresh unregistered logic object: neither binding API can discover it.
   enq.spawn(createTextLogic(workerConfig), { input: { job: context.job } });
@@ -221,7 +230,7 @@ Dynamic spawning itself is equivalent when the spawned source is registered on t
 
 This alpha ships no dedicated fan-out primitive. Use XState dynamic spawn when each branch should be a visible child actor with independent progress and persisted identity:
 
-```ts
+```ts no-check
 entry: ({ context, actors }, enq) => {
   context.jobs.forEach((job, index) => {
     enq.spawn(actors.worker, { id: `worker-${index}`, input: { job } });
