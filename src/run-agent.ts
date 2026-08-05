@@ -1263,11 +1263,7 @@ function wrapTextLogicForRunAgent(logic: TextLogic, runCtx: RunAgentBindContext)
 // Wraps runCtx's `decide` executor with model-call budgeting and tracing.
 // `self` is the invoking decision leaf actor, threaded to `onTrace` so the
 // provide path can attribute the event to its root actor.
-function createCountingDecide(
-  runCtx: RunAgentBindContext,
-  self: unknown,
-  kind: "decision" = "decision",
-): AgentDecisionExecutor {
+function createCountingDecide(runCtx: RunAgentBindContext, self: unknown): AgentDecisionExecutor {
   return async (attemptRequest) => {
     runCtx.consumeModelCall();
     runCtx.onTrace?.({ type: "request.start", request: attemptRequest }, self);
@@ -1283,7 +1279,7 @@ function createCountingDecide(
         runCtx.recordUsage?.(
           usage,
           {
-            kind,
+            kind: "decision",
             ...(attemptRequest.id ? { id: attemptRequest.id } : {}),
             ...(src !== "" ? { src } : {}),
             model: attemptRequest.model,
@@ -2531,6 +2527,11 @@ function createAgentSession<TMachine extends AnyStateMachine>(
               if (!maybeInterpret(current)) {
                 settleIdle(current);
               }
+            } else {
+              // A drained child event started new work (or left suspension)
+              // without a root transition to re-trigger idle detection — fall
+              // back to the timing heuristic so the run still settles.
+              scheduleIdleCheck();
             }
           });
           return;
