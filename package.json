@@ -1,6 +1,6 @@
 {
   "name": "@statelyai/agent",
-  "version": "2.0.0-alpha.14",
+  "version": "2.0.0-alpha.15",
   "description": "Make invalid agent actions impossible. Agent logic as state machines: deterministic, inspectable, resumable, runs anywhere.",
   "type": "module",
   "main": "dist/index.cjs",
