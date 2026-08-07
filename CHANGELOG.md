@@ -1,5 +1,21 @@
 # @statelyai/agent
 
+## 2.0.0-alpha.16
+
+### Minor Changes
+
+- [#90](https://github.com/statelyai/agent/pull/90) [`ff88518`](https://github.com/statelyai/agent/commit/ff8851829fd12056daea8dd1d7a8262c61ecc795) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Simplification pass across the codebase and docs, with a few breaking API cleanups:
+
+  - **Breaking:** `executeAgentRequest(request, executors)` now always returns `Promise<{ output, raw }>`. The `{ verbose: true }` option and the output-only overload are gone; destructure `output` where you previously took the bare return value.
+  - **Breaking:** `ScriptedDecisionValue`'s event-envelope arm no longer carries a `[key: string]: unknown` index signature, so the union discriminates properly. A `ChosenEvent` is still identified by its string `type`, even when its payload has an `event` key.
+  - **Breaking (internal):** `getAgentRequestsWith` merged into `getAgentRequests(actions, options)`; pass `{ machine, snapshot }` in options.
+  - `SeamTurn.meta` is now typed from the machine's own meta schema instead of `Record<string, unknown>`; `MetaOfSnapshot` is exported from utils.
+  - `JsonSerializableTraceEvent` is now derived from `AgentTraceEvent`, so new trace variants can no longer silently miss the JSON-safe side (same shape, alias form in d.ts).
+  - `onChunk`, `onResult`, and `onTransition` are implemented as projections of the `onTrace` stream (documented as sugar; same payloads, order, and timing).
+  - The internal usage reader is unified under the public name `getCallUsage` (implementation was previously duplicated behind `extractCallUsage`).
+  - Bug fix: `simulateAgent` no longer drains the caller's `script.text` queues (they are now copied like `decisions`/`invokes`).
+  - Removed dead code (`resolveAgentRequests`, unused fields, unexported error subclasses, identity wrappers), deduplicated internal helpers, and consolidated docs so each concept has one owning page.
+
 ## 2.0.0-alpha.15
 
 ### Minor Changes
@@ -82,7 +98,9 @@
     on: {
       "@agent.usage": ({ context, event }) => {
         const tokens = context.tokens + (event.usage.totalTokens ?? 0);
-        return tokens > 50_000 ? { target: ".done", context: { tokens } } : { context: { tokens } };
+        return tokens > 50_000
+          ? { target: ".done", context: { tokens } }
+          : { context: { tokens } };
       },
     },
     // ...
@@ -103,7 +121,9 @@
 
   ```ts
   const result = await runAgent(machine, { input, executors });
-  console.log(`${result.usage.modelCalls} calls, ${result.usage.totalTokens ?? 0} tokens`);
+  console.log(
+    `${result.usage.modelCalls} calls, ${result.usage.totalTokens ?? 0} tokens`
+  );
   ```
 
   - New `AgentUsage` type (and per-call `AgentCallUsage`): `inputTokens`, `outputTokens`, `totalTokens`, `reasoningTokens`, `cachedInputTokens`, plus an always-present `modelCalls`.
@@ -157,7 +177,9 @@
   for (const effect of effects) {
     if (effect.kind === "text") {
       const output = await executeAgentRequest(effect, executors);
-      entries.push(createReplayEntry(machine, entries, effect.toDoneEvent(output)));
+      entries.push(
+        createReplayEntry(machine, entries, effect.toDoneEvent(output))
+      );
     }
   }
   ```
@@ -313,7 +335,9 @@
     seam: { request: "evaluatePrompt" }, // or { model: 'promptEvaluator', occurrence: 0 }
     candidate: createAiSdkExecutors({ models }).generateText, // omit for a keyless run
     respond: ({ state }) =>
-      state === "prompting" ? { type: "PROMPT_SUBMITTED", prompt } : { type: "SEND" },
+      state === "prompting"
+        ? { type: "PROMPT_SUBMITTED", prompt }
+        : { type: "SEND" },
   });
 
   matchesTrajectory(run.after.statePath, ["needsMoreInfo", "drafting"]);
@@ -445,7 +469,11 @@
   const path = matchesTrajectory(statePath, ["prompting", "drafting", "sent"]);
   expect(path.matched, JSON.stringify(path.firstMiss)).toBe(true);
 
-  matchesTrajectory(result.events, ["PROMPT_SUBMITTED", { type: "MORE_INFO" }, "SEND"]);
+  matchesTrajectory(result.events, [
+    "PROMPT_SUBMITTED",
+    { type: "MORE_INFO" },
+    "SEND",
+  ]);
   ```
 
   It compares a run's trajectory against an expected one as an ordered subsequence (gaps allowed, order enforced), with `{ exact: true }` for strict equality. Both trajectories may be state values from `onTransition` (strings, dot paths like `'review.editing'`, or the nested value XState reports) or events from `result.events` (`AgentLogEntry[]`, bare event objects, or event types).

@@ -65,6 +65,7 @@
     "setup-agent-actor-sources-and-model-refs",
     "setup-agent-xstate-cutover",
     "ship-generate-machine-skill",
+    "simplify-pass-api-cleanup",
     "sqlite-subpath",
     "subpath-reorg-steps-adapter",
     "thin-step-loop",
