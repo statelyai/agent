@@ -5,6 +5,7 @@
     "index",
     "quickstart",
     "thinking-in-state-machines",
+    "from-a-loop",
     "scope",
     "---Core concepts---",
     "machines",
@@ -34,12 +35,9 @@
     "---Testing---",
     "verify",
     "evals",
-    "---For LangGraph users---",
-    "langgraph-comparison",
-    "from-langgraph",
-    "from-a-loop",
     "---Resources---",
     "patterns",
+    "langgraph-comparison",
     "roadmap"
   ]
 }

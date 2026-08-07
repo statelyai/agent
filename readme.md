@@ -178,4 +178,4 @@ See [all examples](examples/README.md).
 - [Usage and budgets](docs/usage-and-budgets.md)
 - [Agent patterns](docs/patterns.md)
 - [Migrating from a hand-rolled loop](docs/from-a-loop.md)
-- [LangGraph vs agent machines](docs/langgraph-comparison.md)
+- [Coming from LangGraph](docs/langgraph-comparison.md)

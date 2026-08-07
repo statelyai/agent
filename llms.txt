@@ -1,0 +1,43 @@
+# Stately Agent
+
+> Agent logic as typed XState state machines: the machine owns control flow and decides what is legal, the host executes model calls. Deterministic, inspectable, resumable, and runnable in any stack.
+
+`@statelyai/agent` 2.0 is in alpha. Pin an exact version.
+
+## Docs
+
+- [Agents](docs/index.md): Author AI agents as typed XState state machines, where the machine decides and the host executes.
+- [Quickstart](docs/quickstart.md): Install @statelyai/agent and run your first agent machine end to end.
+- [Thinking in state machines](docs/thinking-in-state-machines.md): A design tutorial. Take one hand-rolled agent loop, name the states hiding inside it, and turn them into a machine you can test, resume, and inspect.
+- [Scope and ecosystem boundaries](docs/scope.md): What Stately Agent owns, what the host owns, and where specialized libraries fit.
+- [Agent machines](docs/machines.md): Author an agent machine as a typed XState state machine that decides what your agent can do, while the host executes model calls.
+- [Decisions](docs/decisions.md): Let the model choose one currently-legal machine event, validated and retried by the machine before it is taken.
+- [Text requests](docs/text-requests.md): Declare typed model calls on an agent machine and invoke them from a state, parsing structured or streamed output.
+- [Tools](docs/tools.md): Define tools, attach them to a text request, and let the host run the tool loop while the machine stays in one state.
+- [Messages](docs/messages.md): Build and store conversation history as a parts-based message model that mirrors the AI SDK without depending on it.
+- [Preset machines](docs/machines-presets.md): Factories for proven agent shapes (tool loop, sequential, router, parallel, loop, supervisor, handoff) that return ordinary, inspectable agent machines.
+- [Choosing a run mode](docs/choosing-a-run-mode.md): Three ways to execute the same agent machine, what each one owns, and which to reach for.
+- [Hosts and executors](docs/hosts.md): Give an agent machine the executor functions that call a model, and choose between the shipped AI SDK adapter or your own.
+- [Use in any stack](docs/any-stack.md): One agent machine runs unchanged in a local script, an HTTP route, or an edge runtime. Only the executors are host-specific.
+- [The step path](docs/steps.md): Drive an agent machine one external input at a time over an append-only event log, so a durable host can crash and resume by replay.
+- [Where state lives](docs/persistence.md): The two durable artifacts an agent run produces, what each one holds, and how to restore from them.
+- [The event log](docs/event-log.md): The event log is the source of truth. Append external inputs, replay deterministically, fork and diff, persist to SQLite.
+- [Human in the loop](docs/human-in-the-loop.md): Pause an agent for human input by settling idle, persist the snapshot anywhere, and resume in a different process.
+- [Models and providers](docs/models-and-providers.md): Reuse models and executors from other AI frameworks via AI SDK LanguageModel objects, raw ai functions, and OpenAI-compatible endpoints.
+- [Observability](docs/observability.md): Watch an agent run locally in the Stately Inspector, ship its versioned trace stream to OpenTelemetry, and replay any run from the snapshot it traced.
+- [Usage and budgets](docs/usage-and-budgets.md): Read token usage off a run, cap runaway loops with maxModelCalls, and enforce turn and token budgets as ordinary machine guards.
+- [Debugging](docs/debugging.md): Find out why an agent did the wrong thing, using the inspector, the trace stream, scripted reproduction, and the static linter.
+- [Multi-agent composition](docs/multi-agent.md): Compose agent machines today by invoking them as child actors, exposing sub-agents as host-owned tools, and coordinating siblings through events.
+- [Machines as data](docs/machines-as-data.md): Author an agent machine as a JSON or YAML config and lower it into the same runnable XState machine that setupAgent builds in TypeScript.
+- [Generating machines with an LLM](docs/generate-machines.md): Have a model author the agent workflow itself, then validate, lint, and simulate the generated config before a single model call runs inside it.
+- [Testing and verification](docs/verify.md): Statically lint, simulate, and explore agent machines without any API keys or model calls.
+- [Evals](docs/evals.md): Score agent runs on output, trajectory, and token budget using the seams runAgent already returns, with plain vitest or a vendor harness like Braintrust.
+- [Coming from LangGraph](docs/langgraph-comparison.md): A term-by-term translation of LangGraph concepts, the same agent built both ways, an honest dimension-by-dimension comparison, and the ported examples.
+- [Migrating from a hand-rolled loop](docs/from-a-loop.md): Convert a realistic while-loop tool-calling agent into an agent machine one step at a time, and see what you get for free.
+- [Agent patterns](docs/patterns.md): Common agent patterns (ReAct, reflection, plan-and-execute, RAG, supervisor, and more) as copy-paste XState machines, one runnable file each.
+- [Post-alpha roadmap](docs/roadmap.md): Work deliberately deferred past the 2.0 alpha, and why.
+
+## Examples
+
+- [Examples index](examples/README.md): every runnable example, one flat directory each with an `index.ts` entrypoint, dual-mode against a real model or injected mocks.
+- [Readme](readme.md): the pitch, the install command, and a complete machine that runs with no API key.

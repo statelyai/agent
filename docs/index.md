@@ -121,15 +121,14 @@ A state machine makes each of these a declared, checkable property instead of a 
 
 ## Sidebar map
 
-- **Get started**: [Quickstart](quickstart.md), [Thinking in state machines](thinking-in-state-machines.md), [Scope](scope.md).
+- **Get started**: [Quickstart](quickstart.md), [Thinking in state machines](thinking-in-state-machines.md), [Migrating from a hand-rolled loop](from-a-loop.md), [Scope](scope.md).
 - **Core concepts**: [Agent machines](machines.md), [Decisions](decisions.md), [Text requests](text-requests.md), [Tools](tools.md), [Messages](messages.md), [Preset machines](machines-presets.md).
 - **Running agents**: [Choosing a run mode](choosing-a-run-mode.md), [Hosts and executors](hosts.md), [Use in any stack](any-stack.md), [The step path](steps.md).
 - **State and durability**: [Where state lives](persistence.md), [The event log](event-log.md), [Human in the loop](human-in-the-loop.md).
 - **Production**: [Models and providers](models-and-providers.md), [Observability](observability.md), [Usage and budgets](usage-and-budgets.md), [Debugging](debugging.md), [Multi-agent](multi-agent.md).
 - **Machines as data**: [Machines as data](machines-as-data.md), [Generating machines](generate-machines.md).
 - **Testing**: [Testing and verification](verify.md), [Evals](evals.md).
-- **For LangGraph users**: [Comparison](langgraph-comparison.md), [Migrating](from-langgraph.md), [Migrating from a hand-rolled loop](from-a-loop.md).
-- **Resources**: [Agent patterns](patterns.md), [Post-alpha roadmap](roadmap.md).
+- **Resources**: [Agent patterns](patterns.md), [Coming from LangGraph](langgraph-comparison.md), [Post-alpha roadmap](roadmap.md).
 
 ## Alpha status
 
