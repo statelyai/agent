@@ -191,8 +191,11 @@ export function createScriptedExecutors(
       }
       const entry = decisions.shift()!;
       const value = typeof entry === "function" ? await entry(request) : entry;
-      // The envelope owns an `event`; anything else is the `ChosenEvent` itself.
-      return isRecord(value) && "event" in value
+      // A string `type` wins: chosen events may legitimately carry an `event`
+      // payload field. Only an untyped object owning `event` is the envelope.
+      return isRecord(value) &&
+        typeof (value as Record<string, unknown>)["type"] !== "string" &&
+        "event" in value
         ? (value as { event: ChosenEvent })
         : { event: value as ChosenEvent };
     },

@@ -72,7 +72,7 @@
     "typecheck": "pnpm run typecheck:src && pnpm run typecheck:examples && pnpm run typecheck:example-packages",
     "typecheck:src": "tsc --noEmit",
     "typecheck:examples": "tsc -p examples/tsconfig.json --noEmit",
-    "typecheck:example-packages": "tsc -p examples/next-host --noEmit && tsc -p examples/tanstack-start-host --noEmit && tsc -p examples/tanstack-ai-stream --noEmit && tsc -p examples/cloudflare-agent-host --noEmit && tsc -p examples/cloudflare-workers-ai-host --noEmit",
+    "typecheck:example-packages": "pnpm run build && tsc -p examples/next-host --noEmit && tsc -p examples/tanstack-start-host --noEmit && tsc -p examples/tanstack-ai-stream --noEmit && tsc -p examples/cloudflare-agent-host --noEmit && tsc -p examples/cloudflare-workers-ai-host --noEmit",
     "test:cloudflare": "pnpm --filter @statelyai/example-cloudflare-agent-host test && pnpm --filter @statelyai/example-cloudflare-workers-ai-host test",
     "lint": "oxlint",
     "format": "oxfmt src examples",

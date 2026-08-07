@@ -29,7 +29,6 @@ import {
 import { getAgentRequests, getInvokeEffectMetadata } from "./steps.js";
 import { isDecisionLogic, type AgentDecisionRequest } from "./decision.js";
 import {
-  getCallUsage,
   isTextLogic,
   type AgentCallUsage,
   type AgentRequestMode,
