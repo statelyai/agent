@@ -7,7 +7,6 @@ import { createDecisionLogic } from "./decision.js";
 // from ./steps.js now that they're off the public /steps subpath.
 import {
   getAgentRequests,
-  getAgentRequestsWith,
   initialAgentStep,
   resolveAgentStep,
   transitionAgentStep,
@@ -318,7 +317,7 @@ describe("setupAgent", () => {
     const [_snapshot, actions] = initialTransition(machine, {
       prompt: "Draft it.",
     });
-    const [request] = getAgentRequests(machine, actions);
+    const [request] = getAgentRequests(actions, { machine });
 
     expect(agent.requests.draftEmail.mode).toBe("generate");
     expect(agent.requests.draftEmail.request({ prompt: "Draft it." })).toEqual(
@@ -337,7 +336,7 @@ describe("setupAgent", () => {
       }),
     );
 
-    expect(getAgentRequests(machine, actions)).toEqual([request]);
+    expect(getAgentRequests(actions, { machine })).toEqual([request]);
 
     await expect(
       agent.requests.draftEmail.execute(
@@ -398,7 +397,7 @@ describe("setupAgent", () => {
     const [_generateSnapshot, generateActions] = initialTransition(generateMachine, {
       prompt: "Draft it.",
     });
-    const [generateTask] = getAgentRequests(generateMachine, generateActions);
+    const [generateTask] = getAgentRequests(generateActions, { machine: generateMachine });
 
     await expect(
       executeAgentRequest(asTextRequest(generateTask), {
@@ -414,7 +413,7 @@ describe("setupAgent", () => {
           return { output: { body: "Generated body." } };
         },
       }),
-    ).resolves.toEqual({ body: "Generated body." });
+    ).resolves.toMatchObject({ output: { body: "Generated body." } });
 
     const streamMachine = agent.createMachine({
       context: ({ input }) => ({ prompt: input.prompt, body: null }),
@@ -432,7 +431,7 @@ describe("setupAgent", () => {
     const [_streamSnapshot, streamActions] = initialTransition(streamMachine, {
       prompt: "Revise it.",
     });
-    const [streamTask] = getAgentRequests(streamMachine, streamActions);
+    const [streamTask] = getAgentRequests(streamActions, { machine: streamMachine });
 
     await expect(
       executeAgentRequest(asTextRequest(streamTask), {
@@ -444,7 +443,7 @@ describe("setupAgent", () => {
           return { output: Promise.resolve("Streamed final text.") };
         },
       }),
-    ).resolves.toBe("Streamed final text.");
+    ).resolves.toMatchObject({ output: "Streamed final text." });
   });
 
   test("setupAgent auto-provides built-in generateText and streamText sources", async () => {
@@ -531,7 +530,7 @@ describe("setupAgent", () => {
       }),
     ]);
 
-    const answer = await executeAgentRequest(asTextRequest(step.requests[0]), {
+    const { output: answer } = await executeAgentRequest(asTextRequest(step.requests[0]), {
       generateText: async (request: AgentTextRequest & { tools: AgentTools }) => {
         expect(request.tools).toEqual({});
         return { output: { answer: `Answered ${request.prompt}` } };
@@ -551,7 +550,7 @@ describe("setupAgent", () => {
       }),
     ]);
 
-    const streamed = await executeAgentRequest(asTextRequest(step.requests[0]), {
+    const { output: streamed } = await executeAgentRequest(asTextRequest(step.requests[0]), {
       generateText: async () => {
         throw new Error("generateText should not be used for stream requests");
       },
@@ -568,7 +567,7 @@ describe("setupAgent", () => {
     });
   });
 
-  test("executeAgentRequest returns the normalized value by default and { output, raw } when verbose", async () => {
+  test("executeAgentRequest returns the normalized output alongside the raw result", async () => {
     const schemas = createAgentSchemas({
       context: z.object({ prompt: z.string(), answer: z.string().nullable() }),
       input: z.object({ prompt: z.string() }),
@@ -600,17 +599,10 @@ describe("setupAgent", () => {
     const request = asTextRequest(step.requests[0]);
     const rawResult = { output: { answer: "Because state." } };
 
-    const defaultResult = await executeAgentRequest(request, {
+    const result = await executeAgentRequest(request, {
       generateText: async () => rawResult,
     });
-    expect(defaultResult).toEqual({ answer: "Because state." });
-
-    const verboseResult = await executeAgentRequest(
-      request,
-      { generateText: async () => rawResult },
-      { verbose: true },
-    );
-    expect(verboseResult).toEqual({
+    expect(result).toEqual({
       output: { answer: "Because state." },
       raw: rawResult,
     });
@@ -648,7 +640,9 @@ describe("setupAgent", () => {
     const provided = machine.provide({ actors: {} });
     const step = initialAgentStep(provided, { prompt: "hello" });
 
-    expect(getAgentRequests(provided, step.actions, step.snapshot)).toHaveLength(1);
+    expect(
+      getAgentRequests(step.actions, { machine: provided, snapshot: step.snapshot }),
+    ).toHaveLength(1);
   });
 
   test("agent machine step execution validates request output schemas", async () => {
@@ -1038,7 +1032,7 @@ describe("setupAgent", () => {
     let [snapshot, actions] = initialTransition(machine, {
       article: "State machines make agents inspectable.",
     });
-    const [request] = getAgentRequestsWith(actions, {
+    const [request] = getAgentRequests(actions, {
       actors: { getSummary },
     });
 
@@ -1124,7 +1118,7 @@ describe("setupAgent", () => {
           return { output: "streamed summary" };
         },
       }),
-    ).resolves.toBe("streamed summary");
+    ).resolves.toMatchObject({ output: "streamed summary" });
 
     await expect(
       streamSummary.execute(
@@ -1433,7 +1427,7 @@ describe("setupAgent", () => {
     let [snapshot, actions] = initialTransition(machine, {
       prompt: "why state machines?",
     });
-    const [request] = getAgentRequests(machine, actions);
+    const [request] = getAgentRequests(actions, { machine });
 
     expect(request).toEqual({
       kind: "text",
@@ -1454,7 +1448,7 @@ describe("setupAgent", () => {
       answer: "Because the workflow matters.",
     });
 
-    expect(getAgentRequestsWith(actions)).toEqual([]);
+    expect(getAgentRequests(actions)).toEqual([]);
     expect(snapshot.status).toBe("done");
     expect(snapshot.output).toEqual({
       answer: "Because the workflow matters.",
@@ -1472,7 +1466,7 @@ describe("setupAgent", () => {
       }),
     );
 
-    const output = await executeAgentRequest(asTextRequest(step.requests[0]), {
+    const { output } = await executeAgentRequest(asTextRequest(step.requests[0]), {
       generateText: (request: AgentTextRequest & { tools: AgentTools }) => ({
         output: {
           answer: `Answered: ${request.prompt}`,
@@ -1586,11 +1580,13 @@ describe("setupAgent", () => {
       }),
     ).toEqual([expect.objectContaining({ type: "ATTACK", toolName: "machine_attack" })]);
 
-    const request = getAgentRequests(machine, actions, snapshot)[0];
+    const request = getAgentRequests(actions, { machine, snapshot })[0];
     if (request?.kind !== "decision") {
       throw new Error("Expected a decision request.");
     }
-    const customNamedRequest = getAgentRequests(machine, actions, snapshot, {
+    const customNamedRequest = getAgentRequests(actions, {
+      machine,
+      snapshot,
       eventToolName: ({ eventType }: { eventType: string }) => `machine_${eventType.toLowerCase()}`,
     })[0];
     if (customNamedRequest?.kind !== "decision") {
@@ -1820,7 +1816,7 @@ describe("setupAgent", () => {
       }),
     ).rejects.toThrow();
 
-    const output = await executeAgentRequest(asTextRequest(step.requests[0]), {
+    const { output } = await executeAgentRequest(asTextRequest(step.requests[0]), {
       generateText: async () => ({
         output: { answer: "Because logic matters." },
       }),

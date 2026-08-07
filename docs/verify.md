@@ -170,4 +170,12 @@ import { machine } from "./machine";
 assertAgentMachine(machine); // throws AgentLintError on error-severity findings
 ```
 
-For machines authored as data (see [machines as data](machines-as-data.md)), compile the config first: `assertAgentMachine(setupAgent.fromConfig(config, { compileSchema }).machine)`. Every check applies, reachability included: the lowering keeps the config's transition targets, so `unreachable-state` reads the real graph even where the JSON layer folds a target into a resolver function.
+For machines authored as data (see [Machines as data](machines-as-data.md)), compile the config first: `assertAgentMachine(setupAgent.fromConfig(config, { compileSchema }).machine)`. Every check applies, reachability included: the lowering keeps the config's transition targets, so `unreachable-state` reads the real graph even where the JSON layer folds a target into a resolver function.
+
+## Related
+
+- [Debugging](debugging.md): scripted reproduction and the diagnostic codes in context.
+- [Evals](evals.md): scoring runs on output, trajectory, and budget.
+- [Hosts and executors](hosts.md#scripted-executors): keyless scripted executors for `runAgent`.
+- [Machines as data](machines-as-data.md): verifying a machine lowered from a config.
+- [Migrating from a hand-rolled loop](from-a-loop.md): pinning behavior across a refactor.

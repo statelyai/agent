@@ -26,7 +26,7 @@ const { machine, schemas } = setupAgent.fromConfig(config, {
 
 A config is portable: generate it from a model, store it in a database row, or edit it in a visual builder, and it runs exactly like a hand-authored [machine](machines.md).
 
-## Validating a config
+## Config validation
 
 <!-- schema export path from package.json exports and schemas/agent-workflow.json -->
 
@@ -232,7 +232,7 @@ const { machine } = setupAgent.fromConfig(config, {
 
 A named reference with no implementation is a build-time error, never a silently dropped guard or action.
 
-## Running a config
+## Running configs
 
 A lowered machine runs through `runAgent(...)` like any other agent machine. Pass the machine input, the host `executors`, and `on` handlers for emitted events:
 
@@ -323,6 +323,14 @@ The data form is narrower than TypeScript authoring, by design:
 
 For comparisons or function-valued fields with no named-reference escape hatch, author in TypeScript with `setupAgent(...)` and Zod (or any Standard Schema).
 
-## Verifying a generated machine
+## Generated-machine verification
 
-A machine built from data can be checked before it runs: no API key, no model call. Lint it with `lintAgentMachine`, simulate a scripted playthrough, or enumerate its decision branches, all in a plain script that CI can run. See [Verify](verify.md).
+A machine built from data can be checked before it runs: no API key, no model call. Lint it with `lintAgentMachine`, simulate a scripted playthrough, or enumerate its decision branches, all in a plain script that CI can run.
+
+## Related
+
+- [Testing and verification](verify.md): lint, simulate, and explore a lowered machine.
+- [Generating machines with an LLM](generate-machines.md): the generate → validate → lint → simulate pipeline.
+- [Agent machines](machines.md): the TypeScript authoring form a config lowers to.
+- [Decisions](decisions.md): `agent.decide` from a config.
+- [examples/json-agent](../examples/json-agent/index.ts): a hand-written config, run.

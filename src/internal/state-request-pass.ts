@@ -3,7 +3,7 @@ import type { AgentMessage, AgentTools, ChosenEvent } from "../types.js";
 import { assistantMessage, userMessage } from "../utils.js";
 import { getAcceptedEvents, type AgentSchemas } from "../events.js";
 import {
-  extractCallUsage,
+  getCallUsage,
   INTERPRET_SOURCE,
   normalizeGeneratorResult,
   type AgentCallUsage,
@@ -182,7 +182,7 @@ async function runTextPhase(
     // trace — never into the log or machine (same as the invoke text path).
     const rawReasoning = (raw as { reasoning?: unknown } | null | undefined)?.reasoning;
     const reasoning = typeof rawReasoning === "string" ? rawReasoning : undefined;
-    const usage = extractCallUsage(raw);
+    const usage = getCallUsage(raw);
     if (usage) {
       deps.recordUsage?.(usage);
     }

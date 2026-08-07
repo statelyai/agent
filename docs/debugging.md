@@ -70,10 +70,10 @@ const result = await runAgent(machine, {
 });
 ```
 
-- `decisions` feeds `agent.decide`; `text` feeds every text request.
-- An entry can be a function of the request, so branching machines script per `request.name`.
+Queue semantics are in [Scripted executors](hosts.md#scripted-executors). Two of them matter while debugging:
+
 - A guard-rejected decision consumes an entry and retries with the next one, which is how you reproduce a retry loop exactly.
-- Running dry throws `ScriptedExecutorsError` (`code: 'scripted-executors-exhausted'`) naming the pending request, which is itself a useful signal: the machine asked for more model calls than you expected.
+- Running dry throws with `error.code === 'scripted-executors-exhausted'`, naming the pending request. That is itself a signal: the machine asked for more model calls than you expected.
 
 For a playthrough without the run loop at all, `simulateAgent(machine, { input, script })` walks the pure step path with responses keyed by invoke `src`, returning `{ status, snapshot, trail }`. The `trail` shows every step taken, which answers "why did it end up here" without any async in the way. See [Testing and verification](verify.md).
 
@@ -86,7 +86,7 @@ Some wrong behavior is structural, and `lintAgentMachine(machine)` finds it with
 ```ts
 import { assertAgentMachine, lintAgentMachine } from "@statelyai/agent";
 
-console.log(lintAgentMachine(machine)); // AgentLintDiagnostic[] — { code, severity, path, message }
+console.log(lintAgentMachine(machine)); // AgentLintDiagnostic[]: { code, severity, path, message }
 assertAgentMachine(machine); // throws AgentLintError on any error-severity finding
 ```
 

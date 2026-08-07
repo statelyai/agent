@@ -31,19 +31,13 @@ A [decision](decisions.md) is where this matters most: the model chooses exactly
 
 Most agents start as a `while` loop around a model call. That works until:
 
-- **State goes implicit.** Which step you are on lives in local variables and `if` chains; nothing can enumerate, diagram, or verify the paths.
-- **Legality is prompt-enforced.** Nothing stops the model from calling a tool at the wrong time; you can only ask it nicely.
-- **Pausing means rearchitecting.** Waiting for a human, surviving a deploy, or resuming on another worker requires serializing ad-hoc loop state by hand.
+- **State goes implicit.** Which step you are on lives in local variables and `if` chains; a machine's states, transitions, and requests are data you can read, diagram, and reason about before anything runs.
+- **Legality is prompt-enforced.** Nothing stops the model from calling a tool at the wrong time; a machine and its guards define every path, so the model cannot drive the agent into a state you did not author.
+- **Pausing means rearchitecting.** Waiting for a human, surviving a deploy, or resuming on another worker means serializing ad-hoc loop state by hand; every machine settle point produces a plain JSON snapshot you persist anywhere.
 - **Testing needs the model.** Every branch is buried behind live calls, so tests mock the SDK instead of asserting on structure.
+- **The SDK is baked in.** A loop is written against one provider's API; a machine depends on no model SDK, so you swap hosts, not agents.
 
-A state machine makes each of these a declared, checkable property instead of a convention. The loop is still there; the library owns it. See [Migrating from a loop](from-a-loop.md) for the mechanical translation.
-
-## Benefits of state machines
-
-- **Legal by construction.** The machine and its guards define every path. The model cannot drive the agent into a state you did not author.
-- **Portable.** No dependency on any model SDK. Swap hosts, not agents.
-- **Inspectable.** States, transitions, and requests are data you can read, diagram, and reason about before anything runs.
-- **Serializable.** Every settle point produces a plain JSON snapshot. Persist it anywhere and resume later.
+A state machine makes each of these a declared, checkable property instead of a convention. The loop is still there; the library owns it. See [Migrating from a hand-rolled loop](from-a-loop.md) for the mechanical translation.
 
 ## Example
 
@@ -98,7 +92,7 @@ if (result.status === "done") console.log(result.output.answer);
 ## Three starting points
 
 - **Author a new agent.** Describe states, decisions, and typed requests, run locally with `runAgent`, then test and inspect it with no API key. Start at the [Quickstart](quickstart.md).
-- **Retrofit an existing agent.** Your existing SDK calls, tools, and retry code become the executors; the machine replaces only the control flow. See [Migrating from a loop](from-a-loop.md).
+- **Retrofit an existing agent.** Your existing SDK calls, tools, and retry code become the executors; the machine replaces only the control flow. See [Migrating from a hand-rolled loop](from-a-loop.md).
 - **Copy a known pattern.** ReAct, reflection, plan-and-execute, RAG, supervisor, swarm handoff, each a single runnable file. Browse [Agent patterns](patterns.md).
 
 ## Core pages
@@ -116,12 +110,6 @@ Everything else is in the sidebar: [text requests](text-requests.md), [tools](to
 
 The API changed completely in 2.0 and is still settling. Expect breaking changes before 2.0 stable.
 
-Explicitly not shipped yet:
-
-- **Postgres and Redis storage adapters.** Core ships the persistence contracts, an in-memory event-log store, and SQLite stores on `node:sqlite` ([`@statelyai/agent/sqlite`](event-log.md#sqlite-stores)), but nothing for other databases.
-- **OpenTelemetry exporter.** Build your own from the observation callbacks on `runAgent`.
-- **SSE/WebSocket transport helpers.** Host your own stream over what `onChunk` gives you.
-- **Agent-specific dynamic fan-out helper.** Dynamic fan-out works today through XState `spawn(...)` or `Promise.all(...)` inside a host actor; core has no higher-level helper for branch binding and progress.
-- **Visualization tooling.** Stately Studio and a VS Code extension own diagramming and inspection.
+What is deliberately not shipped yet (storage adapters beyond SQLite, transport helpers, a fan-out helper, and more) is listed on the [Post-alpha roadmap](roadmap.md).
 
 If something here blocks you, or the API surface feels wrong, open an issue. This alpha exists to find that out before 2.0 stable.

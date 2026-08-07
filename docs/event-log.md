@@ -96,7 +96,7 @@ const result = await runAgent(machine, {
 - Does not re-emit history supplied through `events`.
 - Excludes raised and internal events, unlike `onTransition`, so its output goes straight to `replay`.
 
-`runAgent` owns a live XState actor. Its `onEvent` callback observes an event after XState accepted it and cannot await an asynchronous store before the transition. It is useful for export/write-through recording, but is not an append-before-transition crash-safety guarantee. For that guarantee use the [pure step path](steps.md#durable-append-before-continue).
+`runAgent` owns a live XState actor. Its `onEvent` callback observes an event after XState accepted it and cannot await an asynchronous store before the transition. It is useful for export/write-through recording, but is not an append-before-transition crash-safety guarantee. For that guarantee use [the step path](steps.md#durable-append-before-continue).
 
 ## Log-only resume (crash recovery)
 
@@ -112,7 +112,7 @@ const recovered = await runAgent(machine, {
 ```
 
 - Recorded results are replayed, never re-executed: a model call whose completion is in the log runs zero times during recovery.
-- A request that was **in flight** when the log ended (its completion was never recorded) round-trips as a pending child and re-executes idempotently on restore — XState v6 restarts restored pending invokes.
+- A request that was **in flight** when the log ended (its completion was never recorded) round-trips as a pending child and re-executes idempotently on restore: XState v6 restarts restored pending invokes.
 - The recovered result's `events` extends the same log, so the whole history stays replayable.
 
 This is the crash-recovery path for hosts that persist entries as they happen (`onEvent` or an event-log store): after a process death mid-run, resume from the log alone. Because restart is at-least-once for the in-flight request, executors with non-idempotent side effects should dedupe by their own idempotency key. See [`examples/crash-recovery`](../examples/crash-recovery/index.ts).

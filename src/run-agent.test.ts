@@ -1892,6 +1892,79 @@ describe("onTrace stream chunks", () => {
   });
 });
 
+describe("sugar callbacks are projections of onTrace", () => {
+  test("onChunk/onResult/onTransition keep their position around the matching trace event", async () => {
+    const agent = setupAgent({
+      context: z.object({ joke: z.string().nullable() }),
+      output: z.object({ joke: z.string() }),
+      requests: {
+        joke: {
+          schemas: { input: z.object({}), output: z.string() },
+          model: "m",
+          mode: "stream",
+          prompt: () => "joke",
+        },
+      },
+    });
+
+    const machine = agent.createMachine({
+      context: { joke: null },
+      initial: "writing",
+      states: {
+        writing: {
+          invoke: {
+            src: "joke",
+            input: () => ({}),
+            onDone: ({ output }) => ({ target: "done", context: { joke: output } }),
+          },
+        },
+        done: { type: "final", output: ({ context }) => ({ joke: context.joke ?? "" }) },
+      },
+    });
+
+    // One interleaved log: every trace event and every sugar callback, in order.
+    const log: string[] = [];
+    const result = await runAgent(machine, {
+      onTrace: (event) => log.push(`trace:${event.type}`),
+      onChunk: (chunk, info) => log.push(`chunk:${chunk}:${info.request.src}`),
+      onResult: (_request, { output }) => log.push(`result:${String(output)}`),
+      onTransition: (_snapshot, event) => log.push(`transition:${event.type}`),
+      executors: {
+        streamText: async (_request, info) => {
+          info?.onChunk?.("a");
+          info?.onChunk?.("b");
+          return { output: "ab" };
+        },
+      },
+    });
+
+    expect(result.status).toBe("done");
+
+    // onChunk fires immediately AFTER its stream.chunk trace.
+    const chunkTraces = log.flatMap((entry, i) => (entry === "trace:stream.chunk" ? [i] : []));
+    expect(chunkTraces).toHaveLength(2);
+    expect(chunkTraces.map((i) => log[i + 1])).toEqual(["chunk:a:joke", "chunk:b:joke"]);
+
+    // onResult fires immediately BEFORE its request.end trace.
+    const endTraces = log.flatMap((entry, i) => (entry === "trace:request.end" ? [i] : []));
+    expect(endTraces).toHaveLength(1);
+    expect(log[endTraces[0]! - 1]).toBe("result:ab");
+
+    // onTransition fires immediately AFTER its machine.transition trace.
+    const transitionTraces = log.flatMap((entry, i) =>
+      entry === "trace:machine.transition" ? [i] : [],
+    );
+    expect(transitionTraces.length).toBeGreaterThan(0);
+    for (const i of transitionTraces) {
+      expect(log[i + 1]).toMatch(/^transition:/);
+    }
+    // No sugar callback fires without its trace event.
+    expect(log.filter((entry) => entry.startsWith("transition:"))).toHaveLength(
+      transitionTraces.length,
+    );
+  });
+});
+
 describe("onResult raw pass-through", () => {
   test("extra executor-envelope keys (usage, ...) reach onResult.raw verbatim", async () => {
     const agent = setupAgent({

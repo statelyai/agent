@@ -316,7 +316,7 @@ export async function runReviewToolCallsExample(
 }
 
 // Direct run: propose a refund, then let the human APPROVE / EDIT / REJECT at the
-// idle gate. Every resume is fed a persisted snapshot, so the JSON round-trip is
+// idle state. Every resume is fed a persisted snapshot, so the JSON round-trip is
 // exercised on each turn.
 /** Prompt once on stdin and resolve the trimmed reply. */
 async function promptLine(query: string): Promise<string> {

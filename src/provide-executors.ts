@@ -68,7 +68,7 @@ export interface ProvideExecutorsOptions<TMachine extends AnyStateMachine = AnyS
  * Throws at bind time if a source needs an executor kind that `executors` does
  * not provide.
  *
- * v1 does NOT descend into invoked child state machines: a string-keyed child
+ * `provideExecutors` does not descend into invoked child state machines: a string-keyed child
  * machine source is left untouched, so a child with its own agent invokes needs
  * its own `provideExecutors(...)` (or `runAgent`, which does rebind children).
  */
@@ -81,9 +81,10 @@ export function provideExecutors<TMachine extends AnyStateMachine>(
     onChunk: options.onChunk,
     onTrace: options.onTrace as ((event: AgentTraceEvent) => void) | undefined,
   };
-  const provided = (
-    options.actors ? machine.provide({ actors: options.actors as never }) : machine
-  ) as TMachine;
+  const withActors = (target: TMachine, actors: Record<string, AnyActorLogic>): TMachine =>
+    target.provide({ actors: actors as never }) as TMachine;
+
+  const provided = options.actors ? withActors(machine, options.actors) : machine;
 
   const effectiveSources = provided.sources.actors as Record<string, AnyActorLogic>;
   const wrappedSources: Record<string, AnyActorLogic> = {};
@@ -100,48 +101,51 @@ export function provideExecutors<TMachine extends AnyStateMachine>(
       continue;
     }
 
+    let binding: MissingExecutorBinding | undefined;
     if (isDecisionLogic(logic)) {
-      // A decision that already carries its own executor runs itself.
-      if (executorBoundLogics.has(logic as object)) {
-        continue;
-      }
-      if (!executors.decide) {
-        if (invokedSrcs.has(key)) {
-          throw missingExecutorError(key, "decision", "decide");
-        }
-        continue;
-      }
-      wrappedSources[key] = bindDecisionForProvide(provided, logic, executors, bindOptions);
-      continue;
+      binding = {
+        executorKey: "decide",
+        kind: "decision",
+        bind: () => bindDecisionForProvide(provided, logic, executors, bindOptions),
+      };
+    } else if (isTextLogic(logic)) {
+      const streaming = logic.mode === "stream";
+      binding = {
+        executorKey: streaming ? "streamText" : "generateText",
+        kind: streaming ? "streaming text" : "text",
+        bind: () => bindTextForProvide(provided, logic, executors, bindOptions),
+      };
     }
-
-    if (isTextLogic(logic)) {
-      // A text source with its own bound executor (`.withExecutor(...)`) runs itself.
-      if (executorBoundLogics.has(logic as object)) {
-        continue;
-      }
-      const executor = logic.mode === "stream" ? executors.streamText : executors.generateText;
-      if (!executor) {
-        if (invokedSrcs.has(key)) {
-          throw logic.mode === "stream"
-            ? missingExecutorError(key, "streaming text", "streamText")
-            : missingExecutorError(key, "text", "generateText");
-        }
-        continue;
-      }
-      wrappedSources[key] = bindTextForProvide(provided, logic, executors, bindOptions);
-      continue;
-    }
-
     // Invoked child state machines and non-agent actors pass through untouched.
+    if (!binding) {
+      continue;
+    }
+    // A source that already carries its own executor (`.withExecutor(...)`) runs itself.
+    if (executorBoundLogics.has(logic)) {
+      continue;
+    }
+    if (!executors[binding.executorKey]) {
+      if (invokedSrcs.has(key)) {
+        throw missingExecutorError(key, binding.kind, binding.executorKey);
+      }
+      continue;
+    }
+    wrappedSources[key] = binding.bind();
   }
 
-  return provided.provide({ actors: wrappedSources as never }) as TMachine;
+  return withActors(provided, wrappedSources);
+}
+
+/** What one agent source needs: the executor slot, its label, and how to bind it. */
+interface MissingExecutorBinding {
+  executorKey: "generateText" | "streamText" | "decide";
+  kind: "text" | "streaming text" | "decision";
+  bind: () => AnyActorLogic;
 }
 
 function missingExecutorError(
   src: string,
-  kind: "text" | "streaming text" | "decision" | "plan",
+  kind: "text" | "streaming text" | "decision",
   executor: "generateText" | "streamText" | "decide",
 ): Error {
   return new Error(

@@ -1,20 +1,63 @@
 export { AgentError } from "./errors.js";
 export { appendMessages, messagesSchema } from "./messages.js";
 export { createAgentSchemas, setupAgent } from "./setup-agent.js";
+export type {
+  AgentSchemaPack,
+  // Both appear in `setupAgent`'s inferred result type (its event schemas
+  // always carry the reserved `'@agent.usage'` entry), so consumers' declaration
+  // emit needs them nameable.
+  AgentUsageEventPayload,
+  WithAgentUsageEvent,
+} from "./setup-agent.js";
 export {
   AgentDecisionExhaustedError,
   renderDecisionAttempts,
   resolveDecision,
 } from "./decision.js";
+export type {
+  AgentDecisionInput,
+  AgentDecisionRequest,
+  AgentDecisionExecutor,
+  DecisionAttempt,
+  DecisionLogicConfig,
+  ResolveDecisionOptions,
+} from "./decision.js";
 export { getAcceptedEvents, parseAgentEvent } from "./events.js";
+export type {
+  AgentRequestOptions,
+  AgentEventDescriptor,
+  AgentEventToolNameResolver,
+  AgentRequestSource,
+} from "./events.js";
 export {
   bindRequestExecutor,
   buildEnvelopeSchema,
   createTextLogic,
   getAgentOutputMode,
+  getCallUsage,
   parseModelRef,
   parseOutput,
   parseStructuredEnvelope,
+} from "./text-logic.js";
+export type {
+  AgentModelRef,
+  AgentOutputMode,
+  StructuredOutputEnvelope,
+  AgentExecutorTextRequest,
+  AgentTextRequest,
+  AiSdkShapedStreamResult,
+  AiSdkShapedTextResult,
+  AgentRequestExecutor,
+  AgentRequestExecutorInfo,
+  AgentRequestExecutorResult,
+  AgentRequestExecutors,
+  AgentUsage,
+  AgentCallUsage,
+  AgentUserInput,
+  TextLogic,
+  TextLogicConfig,
+  TextLogicExecuteArgs,
+  TextLogicExecutor,
 } from "./text-logic.js";
 export { executeAgentRequest } from "./steps.js";
 export type { AgentRequest, AgentStepRequest } from "./steps.js";
@@ -30,7 +73,22 @@ export {
   serializeTraceEvent,
   traceTransitions,
 } from "./run-agent.js";
-export type { AgentActorSession } from "./run-agent.js";
+export type {
+  AgentActorSession,
+  AgentInputFrom,
+  AgentMessageInfo,
+  AgentRunMeta,
+  AgentStateRequest,
+  AgentTraceEvent,
+  AgentUserInputExecutor,
+  InspectedActorRef,
+  JsonSerializableTraceEvent,
+  PendingUserInput,
+  RunAgentOptions,
+  GenerateResult,
+  RunAgentResult,
+  RunAgentErrorCause,
+} from "./run-agent.js";
 export { createAgentRun } from "./agent-run.js";
 export type { AgentRun } from "./agent-run.js";
 export { provideExecutors } from "./provide-executors.js";
@@ -42,6 +100,20 @@ export {
   explorePaths,
   lintAgentMachine,
   simulateAgent,
+} from "./verify.js";
+export type {
+  AgentLintDiagnostic,
+  AgentLintSeverity,
+  AgentPathReport,
+  AgentPathTerminal,
+  AssertAgentMachineOptions,
+  CanReachResult,
+  ExplorePathsOptions,
+  LintAgentMachineOptions,
+  SimulateAgentOptions,
+  SimulateAgentResult,
+  SimulationScript,
+  SimulationTrailEntry,
 } from "./verify.js";
 export { matchesTrajectory } from "./trajectory.js";
 export type {
@@ -61,6 +133,7 @@ export type {
   ScriptedTextEntry,
 } from "./scripted-executors.js";
 export {
+  assistantMessage,
   getAgentMessages,
   getJsonSchema,
   getJsonSchemaSync,
@@ -68,8 +141,10 @@ export {
   getStateMeta,
   isStandardSchema,
   persistSnapshot,
+  systemMessage,
+  toolMessage,
+  userMessage,
 } from "./utils.js";
-export { assistantMessage, systemMessage, toolMessage, userMessage } from "./utils.js";
 export {
   AGENT_EVENT_SCHEMA_VERSION,
   AgentEventLogConflictError,
@@ -93,7 +168,6 @@ export {
   createReplayEntry,
   diffEventLogs,
   getAgentEffects,
-  getCallUsage,
   initEntry,
   replay,
   verifyReplay,
@@ -109,69 +183,6 @@ export type {
   ReplayOptions,
   ReplayResult,
 } from "./effects.js";
-
-export type {
-  AgentDecisionInput,
-  AgentDecisionRequest,
-  AgentDecisionExecutor,
-  DecisionLogicConfig,
-  ResolveDecisionOptions,
-} from "./decision.js";
-export type {
-  AgentModelRef,
-  AgentOutputMode,
-  StructuredOutputEnvelope,
-  AgentExecutorTextRequest,
-  AgentTextRequest,
-  AiSdkShapedStreamResult,
-  AiSdkShapedTextResult,
-  AgentRequestExecutor,
-  AgentRequestExecutorInfo,
-  AgentRequestExecutorResult,
-  AgentRequestExecutors,
-  AgentUsage,
-  AgentCallUsage,
-  AgentUserInput,
-  TextLogic,
-  TextLogicConfig,
-  TextLogicExecuteArgs,
-  TextLogicExecutor,
-} from "./text-logic.js";
-export type {
-  AgentRequestOptions,
-  AgentEventDescriptor,
-  AgentEventToolNameResolver,
-  AgentRequestSource,
-} from "./events.js";
-export type {
-  AgentInputFrom,
-  AgentMessageInfo,
-  AgentRunMeta,
-  AgentStateRequest,
-  AgentTraceEvent,
-  AgentUserInputExecutor,
-  InspectedActorRef,
-  JsonSerializableTraceEvent,
-  PendingUserInput,
-  RunAgentOptions,
-  GenerateResult,
-  RunAgentResult,
-  RunAgentErrorCause,
-} from "./run-agent.js";
-export type {
-  AgentLintDiagnostic,
-  AgentLintSeverity,
-  AgentPathReport,
-  AgentPathTerminal,
-  AssertAgentMachineOptions,
-  CanReachResult,
-  ExplorePathsOptions,
-  LintAgentMachineOptions,
-  SimulateAgentOptions,
-  SimulateAgentResult,
-  SimulationScript,
-  SimulationTrailEntry,
-} from "./verify.js";
 export type {
   AgentWorkflowActionConfig,
   AgentWorkflowActorConfig,
@@ -184,16 +195,6 @@ export type {
   FromConfigResult,
   SchemaCompiler,
 } from "./workflow-config.js";
-export type {
-  AgentSchemaPack,
-  // Both appear in `setupAgent`'s inferred result type (its event schemas
-  // always carry the reserved `'@agent.usage'` entry), so consumers' declaration
-  // emit needs them nameable.
-  AgentUsageEventPayload,
-  WithAgentUsageEvent,
-} from "./setup-agent.js";
-export type { DecisionAttempt } from "./decision.js";
-
 export type {
   AgentMessage,
   AgentSnapshotStore,

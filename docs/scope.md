@@ -64,4 +64,10 @@ A feature does not belong in core merely because popular agent applications need
 - Persist JSON-safe snapshots and external artifact handles, not live clients or binary resources, in machine context.
 - Feed traces to an evaluation or observability library through `onTrace`; do not make the machine aware of the destination.
 
-See [Hosts and executors](hosts.md), [Use in any stack](any-stack.md), [The step path](steps.md), and [Multi-agent](multi-agent.md) for the concrete contracts.
+## Related
+
+- [Hosts and executors](hosts.md): the executor contract the host implements.
+- [Use in any stack](any-stack.md): the same machine across local, server, and edge hosts.
+- [The step path](steps.md): the per-model-call loop durable hosts own.
+- [Multi-agent composition](multi-agent.md): composing machines without an orchestration layer.
+- [Post-alpha roadmap](roadmap.md): what is deliberately not shipped yet.

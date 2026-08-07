@@ -6,7 +6,7 @@ import type {
   InferOutput,
   StandardSchemaV1,
 } from "./types.js";
-import { validateSchemaSync } from "./utils.js";
+import { getJsonSchemaSync, validateSchemaSync } from "./utils.js";
 import type { AgentDecisionExecutor, AgentDecisionInput } from "./decision.js";
 import type { ChosenEvent } from "./types.js";
 import { executorBoundLogics, unboundPlaceholderLogics } from "./internal/registry.js";
@@ -152,15 +152,26 @@ export const AGENT_USAGE_TOKEN_FIELDS = [
 ] as const satisfies readonly (keyof AgentCallUsage)[];
 
 /**
- * Reads a per-call {@link AgentCallUsage} off a raw executor result's `usage`
- * field, keeping only finite numbers. Returns `undefined` when the result
- * reports no usage at all. Works for our `{ output, usage }` envelope, for a
- * raw Vercel AI SDK result (its `LanguageModelUsage` carries the same flat
- * field names), and for any custom executor that follows the shape.
+ * Reads a settled call's per-call {@link AgentCallUsage} off a RAW executor
+ * result's `usage` field, keeping only finite numbers — the same normalization
+ * `runAgent` applies before it delivers `'@agent.usage'`. Returns `undefined`
+ * when the result reports no usage at all. Works for our `{ output, usage }`
+ * envelope, for a raw Vercel AI SDK result (its `LanguageModelUsage` carries
+ * the same flat field names), and for any custom executor that follows the
+ * shape.
  *
- * @internal
+ * The seam for the step-loop path, where the host holds the raw result itself:
+ *
+ * ```ts
+ * const { output, raw } = await executeAgentRequest(effect, executors);
+ * const usage = getCallUsage(raw);
+ * if (usage) append({ type: AGENT_USAGE_EVENT_TYPE, usage }); // journal + transition, like any event
+ * append(effect.toDoneEvent(output));
+ * ```
+ *
+ * See "Token usage on this path" in docs/steps.md for the full loop.
  */
-export function extractCallUsage(raw: unknown): AgentCallUsage | undefined {
+export function getCallUsage(raw: unknown): AgentCallUsage | undefined {
   const usage = (raw as { usage?: unknown } | null | undefined)?.usage;
   if (!usage || typeof usage !== "object") {
     return undefined;
@@ -233,16 +244,21 @@ const agentTextInputSchema: StandardSchemaV1<AgentTextRequest> = {
   },
 };
 
-// Pass-through output schema (`agent.generateText`'s builtin output type) — accepts anything.
-const unknownOutputSchema: StandardSchemaV1<unknown> = {
+// Accepts anything and returns it untouched. Serves two roles that differ only
+// in the type they assert: `agent.generateText`'s builtin output type, and the
+// default input schema of a text request that declares none (typed `undefined`
+// so `input` is not required at the invoke site).
+const passthroughSchema: StandardSchemaV1<never> = {
   "~standard": {
     version: 1,
     vendor: "statelyai-agent",
     validate(value: unknown) {
-      return { value };
+      return { value: value as never };
     },
   },
 };
+
+const unknownOutputSchema = passthroughSchema as StandardSchemaV1<unknown>;
 
 // String output schema: `agent.streamText`'s builtin output type, and the
 // default a text request's `schemas.output` falls back to when omitted.
@@ -258,18 +274,7 @@ const stringOutputSchema: StandardSchemaV1<string> = {
   },
 };
 
-// Default input schema for a text request that declares none: accepts
-// anything (so an incidental input is not an error) and types the invoke's
-// `input` as `undefined`, i.e. not required at the invoke site.
-const noInputSchema: StandardSchemaV1<undefined> = {
-  "~standard": {
-    version: 1,
-    vendor: "statelyai-agent",
-    validate(value: unknown) {
-      return { value: value as undefined };
-    },
-  },
-};
+const noInputSchema = passthroughSchema as StandardSchemaV1<undefined>;
 
 // Builds the unbound `agent.generateText`/`agent.streamText` builtin actor logic registered by setupAgent.
 function createBuiltinTextActor(
@@ -314,32 +319,30 @@ function createBuiltinTextActor(
         Record<string, unknown>
       >,
     ) {
-      return Object.assign(
-        createTextLogic(
-          {
-            mode,
-            schemas: {
-              input: agentTextInputSchema,
-              output: outputSchema,
-            },
-            name: ({ input }) => input.name,
-            model: ({ input }) => input.model,
-            system: ({ input }) => input.system,
-            prompt: ({ input }) => input.prompt,
-            messages: ({ input }) => input.messages,
-            tools: ({ input }) => input.tools,
-            toolChoice: ({ input }) => input.toolChoice,
-            reasoning: ({ input }) => input.reasoning,
-            temperature: ({ input }) => input.temperature,
-            maxOutputTokens: ({ input }) => input.maxOutputTokens,
-            topP: ({ input }) => input.topP,
-            topK: ({ input }) => input.topK,
-            seed: ({ input }) => input.seed,
-            stopSequences: ({ input }) => input.stopSequences,
-            metadata: ({ input }) => input.metadata,
+      return createTextLogic(
+        {
+          mode,
+          schemas: {
+            input: agentTextInputSchema,
+            output: outputSchema,
           },
-          execute,
-        ),
+          name: ({ input }) => input.name,
+          model: ({ input }) => input.model,
+          system: ({ input }) => input.system,
+          prompt: ({ input }) => input.prompt,
+          messages: ({ input }) => input.messages,
+          tools: ({ input }) => input.tools,
+          toolChoice: ({ input }) => input.toolChoice,
+          reasoning: ({ input }) => input.reasoning,
+          temperature: ({ input }) => input.temperature,
+          maxOutputTokens: ({ input }) => input.maxOutputTokens,
+          topP: ({ input }) => input.topP,
+          topK: ({ input }) => input.topK,
+          seed: ({ input }) => input.seed,
+          stopSequences: ({ input }) => input.stopSequences,
+          metadata: ({ input }) => input.metadata,
+        },
+        execute,
       );
     },
   }) as TextLogic<StandardSchemaV1<AgentTextRequest>, StandardSchemaV1>;
@@ -818,7 +821,9 @@ export type AgentOutputMode = "structured" | "text";
  * as `'text'`.
  */
 export function getAgentOutputMode(schema?: StandardSchemaV1): AgentOutputMode {
-  const jsonSchema = getStandardSchemaJson(schema);
+  const jsonSchema = getJsonSchemaSync(schema) as
+    | { type?: unknown; [key: string]: unknown }
+    | undefined;
   if (!jsonSchema) {
     return "text";
   }
@@ -930,23 +935,6 @@ export function parseStructuredEnvelope(
     reasoning: request.reasoning,
   });
   return validateSchemaSync<StructuredOutputEnvelope>(envelope, value);
-}
-
-// Reads a schema's synchronous `~standard.jsonSchema.input()` JSON Schema, if the vendor implements that extension.
-function getStandardSchemaJson(
-  schema?: StandardSchemaV1,
-): { type?: unknown; [key: string]: unknown } | undefined {
-  const jsonSchema = (
-    schema?.["~standard"] as
-      | {
-          jsonSchema?: { input?: () => { type?: unknown } | Promise<{ type?: unknown }> };
-        }
-      | undefined
-  )?.jsonSchema?.input?.();
-
-  return jsonSchema && !(jsonSchema instanceof Promise)
-    ? (jsonSchema as { type?: unknown; [key: string]: unknown })
-    : undefined;
 }
 
 /**

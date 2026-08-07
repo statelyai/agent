@@ -1,5 +1,5 @@
 ---
-title: You already have an agent workflow
+title: XState machines as agent workflows
 description: A state machine is the portable definition of an agent workflow. Bind the LLM work with whatever stack you use, run it whole or step it by hand.
 ---
 
@@ -14,7 +14,7 @@ Two independent choices drive the same machine graph:
 
 |                     | `runAgent`                                                            | Step it yourself                                                    |
 | ------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| **Prompts embedded** | [The default](#embedded-prompts)                    | [Pure-function loop](#pure-function-loop)       |
+| **Prompts embedded** | [The default](#embedded-prompts)                    | [The step path](#the-step-path)                 |
 | **Prompts mapped**   | [`actors` option](#mapped-prompts)                   | Same loop, same mapped `actors`                                     |
 
 The sections below walk each combination, then show the same graph running as a plain XState machine with no `setupAgent`.
@@ -143,7 +143,7 @@ if (result.status === "done") console.log(result.output.haiku);
 
 At run time, `runAgent` walks the machine, binds each `agent.*` / text / decision source to your executors, and settles `done | idle | error`. The `REVISE` guard returning `undefined` does real work: it makes `REVISE` illegal past 3 revisions, the decision core sees that via its `canTake` check, records `rejected-by-guard`, and retries the model. The machine's guards constrain the model. That is the whole point.
 
-## Pure-function loop
+## The step path
 
 The machine can be a **next-step decider** instead of a runner: you own the loop, the machine tells you what to do next. This is what durable hosts (Temporal, queues, Workflows) want: one model call per log append, everything resumable.
 
@@ -176,7 +176,7 @@ while (snapshot.status === "active") {
     }
     if (effect.kind === "text") {
       // "produce a value" -> log the invoke's done event
-      const output = await executeAgentRequest(effect, executors);
+      const { output } = await executeAgentRequest(effect, executors);
       next = effect.toDoneEvent(output);
       break;
     }
@@ -249,7 +249,7 @@ Use this form when prompts are versioned separately, edited by non-engineers, or
 
 The strongest form of the claim: the machine need not know about this library **at all**. Any machine whose invokes resolve to values, and whose events you can enumerate, is drivable.
 
-- **`setupAgent` is optional.** It registers the five `agent.*` builtins and the schema pack. Without it, use the free functions and bind sources with `machine.provide({ actors: { ... } })`.
+- **`setupAgent` is optional.** It registers the four `agent.*` builtins (`decide`, `userInput`, `generateText`, `streamText`) and the schema pack. Without it, use the free functions and bind sources with `machine.provide({ actors: { ... } })`.
 - **You don't need `agent.decide` either.** Any state that waits on events is a decision point: enumerate legal events with `getAcceptedEvents(snapshot)`, let the model choose one with `resolveDecision`, gated by `snapshot.can(event)`.
 
 ```ts
@@ -282,7 +282,7 @@ The contract is minimal: **invokes return values, states accept events, guards d
 
 > **Guards on event transitions:** write them as function transitions returning `undefined` when blocked (as every example here does). XState v6 drops named string guards on `on:` transitions in favor of this form, which is what makes `snapshot.can(event)` (and therefore `resolveDecision`'s `canTake`) reflect the guard. This library requires XState v6 alpha.25 or newer.
 
-A machine with **no invokes at all** (prompts written as state `description`s, `meta`, or any external lookup) runs unmodified via `runAgent`'s `getRequests` option: whenever the machine would otherwise settle idle, your hook maps the snapshot to the request(s) to run. See [described-workflow](../examples/described-workflow/index.ts).
+A machine with **no invokes at all** (prompts written as state `description`s, `meta`, or any external lookup) runs unmodified via `runAgent`'s `getRequests` option. Full recipe: [Retrofit with `getRequests`](from-a-loop.md#retrofit-with-getrequests), runnable in [described-workflow](../examples/described-workflow/index.ts).
 
 ## Portability
 

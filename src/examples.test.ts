@@ -138,7 +138,7 @@ describe("curated XState setup examples", () => {
       enemyHp: 15,
     });
 
-    const [chooseMove] = getAgentRequests(gameMachine, actions, snapshot);
+    const [chooseMove] = getAgentRequests(actions, { machine: gameMachine, snapshot });
 
     if (chooseMove?.kind !== "decision") {
       throw new Error("Expected a decision request.");

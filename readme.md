@@ -17,7 +17,7 @@ Stately Agent 2 is in alpha. APIs may change before the stable release.
 ## Three starting points
 
 - **Author a new agent.** Build a machine from states, decisions, and typed requests; run it locally with `runAgent`, test it with no API key, then use it in any framework or runtime with zero machine changes. See the [Quickstart](docs/quickstart.md) and [Use in any stack](docs/any-stack.md).
-- **Retrofit an existing agent.** Turn a `while` loop into a machine: your SDK calls, tools, and retry code become the executors; the machine replaces only the control flow. See [Migrating from a loop](docs/from-a-loop.md).
+- **Retrofit an existing agent.** Turn a `while` loop into a machine: your SDK calls, tools, and retry code become the executors; the machine replaces only the control flow. See [Migrating from a hand-rolled loop](docs/from-a-loop.md).
 - **Copy a known pattern.** ReAct, reflection, plan-and-execute, RAG, supervisor, and more, each a single runnable file you lift in 60 seconds. See [Agent patterns](docs/patterns.md).
 
 ## Install
@@ -120,8 +120,6 @@ When the machine reaches `refunded`, the result is:
 
 The model chooses between the events allowed in `deciding`. The `AUTO_REFUND` transition only works when the amount is at most $100. If the model chooses it for a larger amount, the guard rejects the choice and the decision is tried again.
 
-`createScriptedExecutors` plays back canned answers through the same executor contract, so the machine above runs end to end before a model is involved. **No API key needed:**
-
 ```ts
 import { createScriptedExecutors } from "@statelyai/agent";
 
@@ -131,7 +129,7 @@ const result = await runAgent(refundMachine, {
 });
 ```
 
-Swap in `createAiSdkExecutors({ models })` when you want a real model. The scripted set is what your tests keep using.
+Scripted executors run the machine above end to end with no API key; swap in `createAiSdkExecutors({ models })` for a real model. See [Hosts and executors](docs/hosts.md).
 
 ## Architecture
 
@@ -149,18 +147,7 @@ The machine never talks to a model directly, so swapping `createAiSdkExecutors` 
 
 The example above has one model decision and two final outcomes. Real machines add approval states, retries, parallel work, child agents, and long-running waits without changing how control flow is represented.
 
-## Core concepts
-
-<!-- core concepts derived from setupAgent, built-in agent actors, runAgent, and XState snapshots -->
-
-- **Machines own control flow.** States, events, transitions, and guards define what can happen.
-- **Models make bounded decisions.** `agent.decide` asks a model to choose one of the events accepted by the current state.
-- **Requests are typed.** Inputs, outputs, context, and events use Standard Schema. Zod works out of the box.
-- **Your code runs the model.** `runAgent` accepts executor functions. The example uses the Vercel AI SDK adapter, but the machine does not depend on a provider.
-- **Snapshots can be stored.** An agent can stop for human input, save its XState snapshot, and resume later in another process.
-- **Runs export verified replay entries.** Every `runAgent` result carries a JSON-safe `AgentLogEntry[]` with event identity, timestamp, machine version, and state/effect hashes; pass it to `replay` or `verifyReplay` without repeating model or tool calls.
-- **Machines can be checked without model calls.** Lint their structure, simulate scripted decisions, and explore paths without an API key.
-- **Agents are XState machines.** Guards, actors, parallel states, inspection, testing, and visualization work as usual.
+The core concepts (machines owning control flow, bounded model decisions, typed requests, host-run executors, storable snapshots, verified replay entries) are in the [documentation overview](docs/index.md).
 
 ## Examples
 
@@ -174,7 +161,7 @@ The example above has one model decision and two final outcomes. Real machines a
 
 See [all examples](examples/README.md).
 
-## Learn more
+## Related
 
 - [Machines](docs/machines.md)
 - [Text requests](docs/text-requests.md)
@@ -190,5 +177,5 @@ See [all examples](examples/README.md).
 - [Observability](docs/observability.md)
 - [Usage and budgets](docs/usage-and-budgets.md)
 - [Agent patterns](docs/patterns.md)
-- [Migrating from a loop](docs/from-a-loop.md)
+- [Migrating from a hand-rolled loop](docs/from-a-loop.md)
 - [LangGraph vs agent machines](docs/langgraph-comparison.md)

@@ -180,4 +180,4 @@ const machine = createToolLoopMachine({
 - [Text requests](text-requests.md): the request a tool attaches to, and structured/streaming output.
 - [Hosts](hosts.md): executors, model aliases, and writing your own adapter.
 - [Messages](messages.md): the message model tool parts live in.
-- [Machine presets](machines-presets.md): `createToolLoopMachine` and its siblings.
+- [Preset machines](machines-presets.md): `createToolLoopMachine` and its siblings.

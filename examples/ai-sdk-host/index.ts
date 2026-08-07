@@ -13,7 +13,7 @@
  * demo entrypoints accept an injected `generateText`/`streamText` so tests can
  * drive them with mock executors; production wiring supplies the AI SDK set.
  *
- * Compare `../ai-sdk-game-host/index.ts` for the explicit thin-loop wiring
+ * Compare `../ai-sdk-game-host/index.ts` for the explicit step-path wiring
  * (`getAgentEffects` + `executeAgentRequest`/`resolveDecision` over a journal),
  * which is what you reach for when the host — not `runAgent` — owns the loop
  * (e.g. decisions, persistence between steps, a serverless request per turn).

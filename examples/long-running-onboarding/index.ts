@@ -8,7 +8,7 @@
  *
  * Demonstrates:
  *   - durable memory as typed machine context, not raw chat history
- *   - event-driven dormancy gates: idle states wait for DOCS_SIGNED and
+ *   - event-driven idle states: they wait for DOCS_SIGNED and
  *     HARDWARE_DELIVERED, so no thread polls or stays blocked
  *   - multi-agent delegation: the coordinator invokes a specialized IT actor
  *     and stores its output before waiting again

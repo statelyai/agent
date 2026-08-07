@@ -205,6 +205,79 @@ const done = await runAgent(machine, {
 });
 ```
 
+## Conditional edges and guards
+
+The second pair, since routing is where the designs diverge hardest. In LangGraph a node produces a literal and a router function turns it into a node name; the rewrite bound is an `if` inside that router:
+
+```ts no-check
+import {
+  END,
+  START,
+  StateGraph,
+  StateSchema,
+  type ConditionalEdgeRouter,
+  type GraphNode,
+} from "@langchain/langgraph";
+import { z } from "zod";
+
+const State = new StateSchema({
+  question: z.string(),
+  docs: z.string(),
+  grade: z.string().default(""),
+  rewrites: z.number().default(0),
+});
+
+const grade: GraphNode<typeof State> = async (state) => {
+  const res = await model.invoke([
+    {
+      role: "system",
+      content: "Reply GENERATE if the documents answer the question, else REWRITE.",
+    },
+    { role: "user", content: `Question:\n${state.question}\n\nDocuments:\n${state.docs}` },
+  ]);
+  // Whatever the model said, unvalidated, is now the routing key.
+  return { grade: res.text.trim() };
+};
+
+const route: ConditionalEdgeRouter<typeof State, "generate" | "rewrite"> = (state) =>
+  state.grade === "REWRITE" && state.rewrites < 2 ? "rewrite" : "generate";
+
+const graph = new StateGraph(State)
+  .addNode("grade", grade)
+  .addNode("generate", generate)
+  .addNode("rewrite", rewrite)
+  .addEdge(START, "grade")
+  .addConditionalEdges("grade", route, ["generate", "rewrite"])
+  .addEdge("generate", END)
+  .compile();
+```
+
+Here the router is a decision the model makes over named events. The branch is the event's transition, and a guard returning `undefined` makes that branch unavailable:
+
+```ts no-check
+grading: {
+  invoke: {
+    src: "agent.decide",
+    input: ({ context }) => ({
+      model: "grader",
+      system: "GENERATE if the documents answer the question, else REWRITE.",
+      prompt: `Question:\n${context.question}\n\nDocuments:\n${context.docs}`,
+      allowedEvents: ["GENERATE", "REWRITE"],
+    }),
+  },
+  on: {
+    GENERATE: { target: "generating" },
+    // Bound the correction loop: past 2 rewrites, REWRITE is illegal.
+    REWRITE: ({ context }) =>
+      context.rewrites < 2
+        ? { target: "rewriting", context: { rewrites: context.rewrites + 1 } }
+        : undefined,
+  },
+}
+```
+
+There is no routing string to typo and no bound stated as prose. The model picks a named event; if the guard rejects it, the attempt is recorded as `rejected-by-guard` and the model is asked again with that feedback.
+
 ## Dimension by dimension
 
 | Dimension             | LangGraph                                                                                                                                                                                                                             | `@statelyai/agent`                                                                                                                                                                                                          |
@@ -236,14 +309,14 @@ Pick LangGraph when these matter more than machine-enforced control flow:
 
 ## Agent machine strengths
 
-- **Constraints must hold regardless of the prompt.** Spend limits, approval gates, retry budgets, ordering rules. A guard cannot be talked around; an `if` in a router node is only as good as the code path that reaches it.
-- **Pausing should not require infrastructure.** Idle plus a JSON snapshot works in a Lambda, a queue worker, or a test, with no checkpointer configured.
+- **Constraints must hold regardless of the prompt.** Spend limits, approval gates, retry budgets, ordering rules.
+- **Pausing should not require infrastructure.** Idle plus a JSON snapshot works in a Lambda, a queue worker, or a test.
 - **You need to prove behavior before shipping.** Reachability, dead-state, and scripted playthrough checks run in CI without a model.
 - **Replay has to be trustworthy.** Folding an event log through pure transitions reproduces a run exactly, with hashes that catch divergence.
 - **The workflow is genuinely stateful.** Nested and parallel regions, states that mean something to the business, and a diagram non-engineers can read.
 - **You want provider independence.** The machine has no SDK dependency, so swapping hosts does not touch the agent.
 
-## Next steps
+## Related
 
 - [Coming from LangGraph](from-langgraph.md): the full term-by-term mapping and the ported tutorial examples.
 - [Quickstart](quickstart.md): install and run one machine end to end.

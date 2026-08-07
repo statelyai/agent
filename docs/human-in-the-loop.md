@@ -23,7 +23,7 @@ The machine itself is unchanged between the run that settled and the run that re
 
 <!-- setupAgent({ isSuspended }) and RunAgentOptions.isSuspended from src/run-agent.ts, src/setup-agent.ts -->
 
-By default `runAgent` detects a resting state with a timing heuristic. To settle intentional waits deterministically, tell the machine what "suspended" means. There is no built-in tag; you choose the signal (a tag, a `snapshot.matches(...)`, or a `meta` field). Declare it once with `setupAgent({ isSuspended })` and the predicate travels with the machine, including through `machine.provide(...)`:
+By default `runAgent` detects a resting state with a timing heuristic. To settle intentional waits deterministically, tell the machine which states are idle states. (The predicate is named `isSuspended`; the docs call the states themselves idle states.) There is no built-in tag; you choose the signal (a tag, a `snapshot.matches(...)`, or a `meta` field). Declare it once with `setupAgent({ isSuspended })` and the predicate travels with the machine, including through `machine.provide(...)`:
 
 ```ts no-check
 const agentSetup = setupAgent({
@@ -31,7 +31,7 @@ const agentSetup = setupAgent({
   isSuspended: (snapshot) => snapshot.hasTag('awaiting-review'),
 });
 
-// ...then mark the waiting states with the tag you chose:
+// ...then mark the idle states with the tag you chose:
 reviewing: {
   tags: ['awaiting-review'],
   on: { APPROVE: { target: 'published' } },
@@ -42,7 +42,7 @@ A host can override per run by passing `isSuspended` to `runAgent` directly. Res
 
 > The `isSuspended` option name is provisional and may change before 2.0.
 
-## A waiting state
+## An idle state
 
 The `reviewing` state has no invoke. Once reached, nothing happens until a human sends `APPROVE` or `REJECT`:
 
@@ -176,7 +176,7 @@ const snapshot = createActor(machine, { snapshot: JSON.parse(handle) }).getSnaps
 const choices = getAcceptedEvents(snapshot); // one descriptor per legal event
 ```
 
-**Resume cannot re-run earlier work.** A resumed snapshot starts _at_ the waiting state, so earlier states never re-enter: side effects and model calls that ran before the pause run exactly once, however many times you resume. Nothing to isolate. (Contrast inline-interrupt designs, where code before the interrupt call re-executes on resume unless manually isolated in its own node.) Re-running work is always an explicit, authored transition, such as a `REJECT` targeting the drafting state again. Pinned by a test in `src/run-agent.test.ts` ("pre-idle side effects and model calls run exactly once").
+**Resume cannot re-run earlier work.** A resumed snapshot starts _at_ the idle state, so earlier states never re-enter: side effects and model calls that ran before the pause run exactly once, however many times you resume. Nothing to isolate. (Contrast inline-interrupt designs, where code before the interrupt call re-executes on resume unless manually isolated in its own node.) Re-running work is always an explicit, authored transition, such as a `REJECT` targeting the drafting state again. Pinned by a test in `src/run-agent.test.ts` ("pre-idle side effects and model calls run exactly once").
 
 > **Context must be JSON-serializable.** Persisted snapshots round-trip through `JSON.stringify`/`JSON.parse`, so anything in `context` that is not plain JSON silently corrupts on resume: `Date` becomes a string, `Map`/`Set` become `{}`, class instances lose their prototype. Keep non-serializable handles (sessions, db clients, sockets) in closures and store only their serializable ids in `context`; see [threading host context](hosts.md#threading-host-context-into-actors-and-requests).
 
@@ -200,7 +200,7 @@ try {
 
 A type-legal event a **guard** rejects is not an illegal resume event: no transition, and the run settles per normal semantics. To restore the older silent-drop behavior, pass `onIllegalResumeEvent: 'ignore'`.
 
-### Resuming across machine versions
+### Machine-version resume
 
 <!-- agentMeta stamping, onVersionMismatch, migrateSnapshot from src/run-agent.ts -->
 
@@ -331,7 +331,7 @@ if (first.status === "idle" && first.pendingUserInputs) {
 
 Resuming without a handler settles idle again with the same pending inputs, so a host can safely re-enter the loop.
 
-## Choosing a waiting style
+## Waiting styles
 
 - **Idle state** (`on:` handler, no invoke, flagged by your own `isSuspended` signal): the wait is an **event choice**; resume delivers the chosen event. Best for approve/reject flows where `getAcceptedEvents` drives a UI.
 - **`agent.userInput`**: the wait is a **value request** with a prompt and schema; resume supplies the value. Best for free-form input, and the only style that lets sibling parallel regions keep working while a human is pending.
@@ -340,4 +340,4 @@ Resuming without a handler settles idle again with the same pending inputs, so a
 
 - [Steps](steps.md): durable hosts that persist after every model call.
 - [The event log](event-log.md): replaying a run from its recorded external inputs.
-- [Agent machines](machines.md): authoring the states and transitions a waiting state is part of.
+- [Agent machines](machines.md): authoring the states and transitions an idle state is part of.

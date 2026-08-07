@@ -14,6 +14,7 @@
  */
 import type { StateValue } from "xstate";
 import type { AgentLogEntry } from "./event-log-store.js";
+import { isRecord } from "./internal/is-record.js";
 
 /** An event-shaped trajectory item: anything with a string `type`. */
 export interface TrajectoryEvent {
@@ -62,7 +63,10 @@ export interface TrajectoryMatch {
   matchedCount: number;
   /** `expected.length`, so a scorer can compute its own ratio. */
   expectedCount: number;
-  /** Partial credit, 0..1. `1` for an empty expectation. */
+  /**
+   * Partial credit, 0..1. `1` for an empty expectation. Denominator is
+   * `max(expectedCount, actual.length)` in `exact` mode, `expectedCount` otherwise.
+   */
   score: number;
   /** Absent when `matched`. */
   firstMiss?: TrajectoryMiss;
@@ -71,10 +75,6 @@ export interface TrajectoryMatch {
 // ─── Normalization ───
 
 type Normalized = { kind: "event"; event: TrajectoryEvent } | { kind: "state"; value: StateValue };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 /**
  * Classifies one item. Event-shaped things (log entries, events) become events;
@@ -130,7 +130,8 @@ function deepEqual(a: unknown, b: unknown): boolean {
 }
 
 /**
- * Does one actual item satisfy one expected item?
+ * Normalizes ONE expected item into a predicate over actual items, so the
+ * expectation is classified once instead of once per candidate:
  *
  * - A string expectation matches an event's `type`, or a state value it names.
  * - An event expectation matches an event with the same `type` whose other
@@ -138,26 +139,34 @@ function deepEqual(a: unknown, b: unknown): boolean {
  * - A state-value expectation matches structurally.
  * @internal
  */
-function matchesItem(expected: unknown, actual: unknown): boolean {
-  const actualItem = normalize(actual);
-
+function matcherFor(expected: unknown): (actual: unknown) => boolean {
   if (typeof expected === "string") {
-    return actualItem.kind === "event"
-      ? actualItem.event.type === expected
-      : stateMatchesPath(expected, actualItem.value);
+    return (actual) => {
+      const actualItem = normalize(actual);
+      return actualItem.kind === "event"
+        ? actualItem.event.type === expected
+        : stateMatchesPath(expected, actualItem.value);
+    };
   }
 
   const expectedItem = normalize(expected);
-  if (expectedItem.kind !== actualItem.kind) return false;
-  if (expectedItem.kind === "event" && actualItem.kind === "event") {
-    return Object.keys(expectedItem.event).every((key) =>
-      deepEqual(expectedItem.event[key], actualItem.event[key]),
-    );
+  switch (expectedItem.kind) {
+    case "event":
+      return (actual) => {
+        const actualItem = normalize(actual);
+        return (
+          actualItem.kind === "event" &&
+          Object.keys(expectedItem.event).every((key) =>
+            deepEqual(expectedItem.event[key], actualItem.event[key]),
+          )
+        );
+      };
+    case "state":
+      return (actual) => {
+        const actualItem = normalize(actual);
+        return actualItem.kind === "state" && deepEqual(expectedItem.value, actualItem.value);
+      };
   }
-  return deepEqual(
-    (expectedItem as { value: StateValue }).value,
-    (actualItem as { value: StateValue }).value,
-  );
 }
 
 // ─── The matcher ───
@@ -204,57 +213,43 @@ export function matchesTrajectory(
   options: MatchTrajectoryOptions = {},
 ): TrajectoryMatch {
   const expectedCount = expected.length;
-
-  if (options.exact) {
-    let matchedCount = 0;
-    let firstMiss: TrajectoryMiss | undefined;
-    for (let index = 0; index < expectedCount; index++) {
-      if (index < actual.length && matchesItem(expected[index], actual[index])) {
-        matchedCount++;
-        continue;
-      }
-      firstMiss = { index, expected: expected[index]!, searchedFrom: index };
-      break;
-    }
-    const matched = !firstMiss && actual.length === expectedCount;
-    const denominator = Math.max(expectedCount, actual.length);
-    return {
-      matched,
-      matchedCount,
-      expectedCount,
-      score: matched ? 1 : denominator === 0 ? 1 : matchedCount / denominator,
-      ...(firstMiss ? { firstMiss } : {}),
-    };
-  }
+  const exact = options.exact === true;
 
   let cursor = 0;
   let matchedCount = 0;
+  let firstMiss: TrajectoryMiss | undefined;
+
   for (let index = 0; index < expectedCount; index++) {
     const want = expected[index]!;
+    const matches = matcherFor(want);
+    // Exact mode compares position for position; subsequence mode scans forward
+    // from wherever the last match left off.
+    const searchedFrom = exact ? index : cursor;
     let found = -1;
-    for (let at = cursor; at < actual.length; at++) {
-      if (matchesItem(want, actual[at])) {
+    for (let at = searchedFrom; at < actual.length; at++) {
+      if (matches(actual[at])) {
         found = at;
         break;
       }
+      if (exact) break;
     }
     if (found === -1) {
-      return {
-        matched: false,
-        matchedCount,
-        expectedCount,
-        score: matchedCount / expectedCount,
-        firstMiss: { index, expected: want, searchedFrom: cursor },
-      };
+      firstMiss = { index, expected: want, searchedFrom };
+      break;
     }
     matchedCount++;
     cursor = found + 1;
   }
 
+  const matched = !firstMiss && (!exact || actual.length === expectedCount);
+  // Exact mode is scored against the longer of the two trajectories, so extra
+  // actual items cost; subsequence mode scores against the expectation alone.
+  const denominator = exact ? Math.max(expectedCount, actual.length) : expectedCount;
   return {
-    matched: true,
+    matched,
     matchedCount,
     expectedCount,
-    score: 1,
+    score: matched ? 1 : denominator === 0 ? 1 : matchedCount / denominator,
+    ...(firstMiss ? { firstMiss } : {}),
   };
 }

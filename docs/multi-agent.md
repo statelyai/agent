@@ -22,14 +22,14 @@ Register a child machine under `actors:` on the parent's `setupAgent(...)`, then
 [examples/subflows/index.ts](../examples/subflows/index.ts) delegates a topic to a research child this way:
 
 ```ts
-const parentAgentSetup = setupAgent({
+const parentSetup = setupAgent({
   context: z.object({ topic: z.string(), research: z.string().nullable() }),
   input: z.object({ topic: z.string() }),
   output: z.object({ research: z.string() }),
   actors: { child: childMachine },
 });
 
-const subflowsMachine = parentAgentSetup.createMachine({
+const subflowsMachine = parentSetup.createMachine({
   context: ({ input }) => ({ topic: input.topic, research: null }),
   initial: "delegating",
   states: {
@@ -162,13 +162,13 @@ The rules:
 This works even though the branch count is known only at runtime:
 
 ```ts no-check
-const setup = setupAgent({
+const agentSetup = setupAgent({
   // `worker` is registered once; the host supplies its executor later.
   requests: { worker: workerRequest },
   // ...schemas
 });
 
-const machine = setup.createMachine({
+const machine = agentSetup.createMachine({
   // ...
   states: {
     fanningOut: {
@@ -200,20 +200,9 @@ entry: ({ context }, enq) => {
 
 Register the logic and spawn it through `actors`, as above. Use `.withExecutor(...)` only when that one logic should deliberately carry its own host execution.
 
-### `runAgent` versus `provideExecutors`
+### Child binding in uncontrolled mode
 
-`runAgent` recursively binds registered child machines. `provideExecutors` currently binds only the machine passed to it; it does not descend into invoked child machines. Therefore these are not yet recursively equivalent:
-
-```ts
-// Works: runAgent recursively binds `child` and the child's `researchTopic` request.
-await runAgent(parentMachine, { executors });
-
-// Not enough: only the parent's own request sources are bound.
-const boundParent = provideExecutors(parentMachine, executors);
-createActor(boundParent, { input }).start();
-```
-
-For uncontrolled XState execution, bind each machine explicitly and replace the parent's child source with the bound child:
+[Controlled and uncontrolled](any-stack.md#controlled-and-uncontrolled) covers the two ways a host binds executors. The one composition delta: `runAgent` recursively binds registered child machines, `provideExecutors` binds only the machine passed to it. In uncontrolled mode, bind each machine explicitly and replace the parent's child source with the bound child:
 
 ```ts
 const boundChild = provideExecutors(childMachine, executors);
@@ -224,7 +213,7 @@ const boundParent = provideExecutors(parentMachine, executors, {
 createActor(boundParent, { input }).start();
 ```
 
-Dynamic spawning itself is equivalent when the spawned source is registered on the machine being bound: both APIs replace that source before `actors.worker` is read. The difference is recursive traversal into child machines, not whether the branch count is static or dynamic.
+Dynamic spawning is equivalent under both APIs when the spawned source is registered on the machine being bound. The difference is recursive traversal into child machines, not whether the branch count is static or dynamic.
 
 ## Fan-out
 
@@ -240,4 +229,9 @@ entry: ({ context, actors }, enq) => {
 
 Use `Promise.all(...)` inside a host actor or tool when the branches are implementation detail and the machine only needs their combined result. See [fan-out](../examples/fan-out/index.ts) for visible dynamic branches and [deep research](../examples/deep-research/index.ts) for a larger planner-worker-reducer flow.
 
-See [Agent patterns](patterns.md#multi-agent) for the full list of sub-agent and multi-machine examples.
+## Related
+
+- [Agent patterns](patterns.md#multi-agent): the full list of sub-agent and multi-machine examples.
+- [Use in any stack](any-stack.md#controlled-and-uncontrolled): controlled and uncontrolled hosts.
+- [Hosts and executors](hosts.md): the executor contract children inherit.
+- [Preset machines](machines-presets.md): `createSupervisorMachine` and `createHandoffMachine`.

@@ -70,9 +70,9 @@ Delivery is automatic: when the decision resolves, the `agent.decide` actor send
 
 ## Guard enforcement
 
-A candidate event's guard is its transition function returning `undefined` (see [transitions](machines.md#transitions)). Before accepting a choice, the library checks `snapshot.can(event)`, so a chosen `ASK` on the final turn (guard returns `undefined`) is rejected and the model asked again. The machine, not the prompt, is the source of truth for legality.
+Guards are transition functions returning `undefined` (see [transitions](machines.md#transitions)). Because a guard may read the event payload, candidates cannot be filtered upfront: a decision offers the full `allowedEvents` set (intersected with what the state statically accepts), and `snapshot.can(event)` is checked **after** the model picks. A chosen `ASK` on the final turn is rejected and the model asked again.
 
-Guards may read the event payload, so candidates cannot be filtered upfront: a decision offers the full `allowedEvents` set (intersected with what the state statically accepts), and legality is checked **after** the model picks. `runAgent` and the step path handle this for you. When calling `resolveDecision` directly (uncontrolled mode), thread the check via `canTake`:
+`runAgent` and the step path do this for you. When calling `resolveDecision` directly (uncontrolled mode), thread the check via `canTake`:
 
 ```ts
 import { resolveDecision } from "@statelyai/agent";
@@ -106,7 +106,7 @@ Core validates and retries; it never talks to a model. Coercing the model into c
 
 ## Multi-event commands: the decide loop
 
-A decision is one event. When one command needs several ("add X and Y" → two `ADD_TODO`), loop the decision in the machine — the loop, its exit, and the applied trail stay visible in the statechart:
+A decision is one event. When one command needs several ("add X and Y" → two `ADD_TODO`), loop the decision in the machine. The loop, its exit, and the applied trail stay visible in the statechart:
 
 - A `planning` state invokes `agent.decide` for **one** event.
 - Applying that event targets a turnaround state that immediately re-enters `planning`, starting the next step.
@@ -136,7 +136,7 @@ applying: { always: { target: 'planning' } },
 
 Every step gets this page's validation/retry loop. Full example: [examples/todo-nl/index.ts](../examples/todo-nl/index.ts).
 
-## Where to go next
+## Related
 
 - [Agent machines](machines.md): transitions, guards, and event schemas.
 - [Hosts](hosts.md): the decide executor and how the model is coerced into one event.

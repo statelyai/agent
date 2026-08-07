@@ -97,10 +97,8 @@ interface InvokeConfig {
 
 interface StateNode {
   path: string;
-  name: string;
   config: AnyConfig;
   parentPath: string;
-  type?: string;
   isFinal: boolean;
   isParallel: boolean;
   isCompound: boolean;
@@ -124,10 +122,8 @@ function buildStateIndex(rootConfig: AnyConfig): Map<string, StateNode> {
       const hasChildren = !!config.states && Object.keys(config.states).length > 0;
       index.set(path, {
         path,
-        name,
         config,
         parentPath,
-        type: config.type,
         isFinal: config.type === "final",
         isParallel: config.type === "parallel",
         isCompound: hasChildren && config.type !== "parallel",
@@ -344,7 +340,6 @@ function computeReachable(
 // ─── Lint check helpers ───
 
 interface LintContext {
-  machine: AnyStateMachine;
   config: AnyConfig;
   index: Map<string, StateNode>;
   reachable: Set<string>;
@@ -370,57 +365,32 @@ function hasNonEmptyOn(config: AnyConfig): boolean {
   return !!config.on && Object.keys(config.on).length > 0;
 }
 
-// Classifies an invoke src as a decision (needs event handling) — by builtin
-// src string or by a registered/direct-object DecisionLogic.
-function decisionKindOf(
-  src: unknown,
-  actors: Record<string, AnyActorLogic>,
-): "decision" | undefined {
+// True when an invoke src is a decision (and so needs event handling) — by
+// builtin src string or by a registered/direct-object DecisionLogic.
+function isDecisionInvoke(src: unknown, actors: Record<string, AnyActorLogic>): boolean {
   if (typeof src === "string") {
-    if (src === DECIDE_SRC) return "decision";
-    return isDecisionLogic(actors[src]) ? "decision" : undefined;
+    return src === DECIDE_SRC || isDecisionLogic(actors[src]);
   }
-  return isDecisionLogic(src) ? "decision" : undefined;
+  return isDecisionLogic(src);
 }
 
 function isAgentLogicNeedingBinding(src: object): boolean {
   return (isTextLogic(src) || isDecisionLogic(src)) && !executorBoundLogics.has(src);
 }
 
-// Reports true when a schema exposes a synchronous JSON Schema (so its fields
-// can be statically checked for JSON round-tripping).
-function schemaExposesJson(schema: unknown): boolean {
+// A schema's synchronous JSON Schema, or `undefined` when it exposes none (a
+// `z.custom` without the `jsonSchema` extension) or throws producing it. A
+// schema with no JSON Schema cannot be statically inspected at all, so lint
+// checks read this as "nothing to check".
+function readJsonSchema(schema: unknown): Record<string, unknown> | undefined {
   if (!schema) {
-    return false;
+    return undefined;
   }
   try {
-    return getJsonSchemaSync(schema as never) !== undefined;
+    return getJsonSchemaSync(schema as never);
   } catch {
-    return false;
+    return undefined;
   }
-}
-
-// A "real" declared output schema: exposes a JSON object schema with at least
-// one property (as opposed to the pass-through/unknown default).
-function isDeclaredOutputSchema(schema: unknown): boolean {
-  if (!schema) {
-    return false;
-  }
-  let json: Record<string, unknown> | undefined;
-  try {
-    json = getJsonSchemaSync(schema as never);
-  } catch {
-    return false;
-  }
-  if (!json) {
-    return false;
-  }
-  const properties = json.properties as Record<string, unknown> | undefined;
-  const required = json.required as unknown[] | undefined;
-  return (
-    (json.type === "object" && !!properties && Object.keys(properties).length > 0) ||
-    (Array.isArray(required) && required.length > 0)
-  );
 }
 
 // ─── Lint checks (each returns its own diagnostics) ───
@@ -446,8 +416,7 @@ function checkDecideWithoutEvents(ctx: LintContext): AgentLintDiagnostic[] {
   const out: AgentLintDiagnostic[] = [];
   for (const node of ctx.index.values()) {
     for (const invoke of node.invokes) {
-      const kind = decisionKindOf(invoke.src, ctx.actors);
-      if (!kind) {
+      if (!isDecisionInvoke(invoke.src, ctx.actors)) {
         continue;
       }
       const selfHandles = hasNonEmptyOn(node.config);
@@ -466,8 +435,8 @@ function checkDecideWithoutEvents(ctx: LintContext): AgentLintDiagnostic[] {
         severity: "error",
         path: node.path,
         message:
-          `State '${node.path}' invokes ${kind} source '${srcName}', but neither it nor ` +
-          `any ancestor handles any event (no 'on:'), so the ${kind}'s chosen event can ` +
+          `State '${node.path}' invokes decision source '${srcName}', but neither it nor ` +
+          `any ancestor handles any event (no 'on:'), so the decision's chosen event can ` +
           `never be delivered. Add an 'on:' handler for the candidate events.`,
       });
     }
@@ -480,7 +449,7 @@ function checkUnserializableContext(ctx: LintContext): AgentLintDiagnostic[] {
   if (!contextSchema) {
     return [];
   }
-  if (schemaExposesJson(contextSchema)) {
+  if (readJsonSchema(contextSchema)) {
     return [];
   }
   return [
@@ -524,7 +493,16 @@ function checkDirectObjectSrc(ctx: LintContext): AgentLintDiagnostic[] {
 }
 
 function checkFinalWithoutOutput(ctx: LintContext): AgentLintDiagnostic[] {
-  if (!isDeclaredOutputSchema(ctx.schemas?.output)) {
+  // Only a "real" declared output schema (a JSON object schema with at least
+  // one property, or required fields) creates a contract every final must
+  // satisfy — the pass-through/unknown default does not.
+  const outputJson = readJsonSchema(ctx.schemas?.output);
+  const properties = outputJson?.properties as Record<string, unknown> | undefined;
+  const required = outputJson?.required as unknown[] | undefined;
+  const isDeclaredOutputSchema =
+    (outputJson?.type === "object" && !!properties && Object.keys(properties).length > 0) ||
+    (Array.isArray(required) && required.length > 0);
+  if (!isDeclaredOutputSchema) {
     return [];
   }
   // A root `output` (including the single-final-state sugar that copies one
@@ -694,7 +672,6 @@ export function lintAgentMachine(
   const reachable = computeReachable(config, index, getMachineStaticTransitionTargets(machine));
   const registered = getRegisteredAgentExecutionOptions(machine);
   const ctx: LintContext = {
-    machine,
     config,
     index,
     reachable,
@@ -861,7 +838,9 @@ export async function simulateAgent(
 ): Promise<SimulateAgentResult> {
   const maxSteps = options.maxSteps ?? 100;
   const script: SimulationScript = {
-    text: { ...options.script.text },
+    // Each queue is copied, not just the map: `takeFromQueue` shifts entries
+    // off, which would otherwise drain the caller's own arrays.
+    text: mapValues(options.script.text ?? {}, (arr) => [...arr]),
     decisions: mapValues(options.script.decisions ?? {}, (arr) => [...arr]),
     invokes: mapValues(options.script.invokes ?? {}, (arr) => [...arr]),
   };
@@ -985,7 +964,10 @@ export interface AgentPathReport {
   hitPathCap: boolean;
 }
 
-type BranchEvent = { type: string; [key: string]: unknown };
+// Safety bound on the deterministic advance between two branch points: each
+// iteration resolves one text/userInput invoke, so this only trips on a machine
+// that loops through invokes without ever branching or settling.
+const MAX_ADVANCE_STEPS = 1000;
 
 // Shared DFS engine for explorePaths/canReach. When `stopWhen` returns true for
 // a visited snapshot, exploration halts and the witness path is returned.
@@ -1027,7 +1009,7 @@ async function explore(
   const advance = (step: AgentStep): { step: AgentStep; blockedSrc?: string } => {
     let current = step;
     // Bounded loop: each iteration resolves one text/userInput invoke.
-    for (let i = 0; i < 1000; i++) {
+    for (let i = 0; i < MAX_ADVANCE_STEPS; i++) {
       if (current.done) {
         return { step: current };
       }
@@ -1096,7 +1078,7 @@ async function explore(
     // Branch point: a decision request's candidates, or an idle wait's
     // externally-accepted events.
     const request = settled.requests[0] as AgentStepRequest | undefined;
-    const branchEvents: BranchEvent[] =
+    const branchEvents: ChosenEvent[] =
       request?.kind === "decision"
         ? request.events.map((descriptor) => ({ type: descriptor.type }))
         : getAcceptedEvents(settled.snapshot).map((descriptor) => ({ type: descriptor.type }));
@@ -1120,13 +1102,13 @@ async function explore(
         return;
       }
       // Guard legality: a type-legal-but-guard-rejected candidate is a pruned branch.
-      if (!(settled.snapshot as AnyMachineSnapshot).can(event as never)) {
+      if (!(settled.snapshot as AnyMachineSnapshot).can(event)) {
         prunedByGuard++;
         continue;
       }
-      const next = transitionAgentStep(machine, settled, event as never);
+      const next = transitionAgentStep(machine, settled, event);
       recordState(next.snapshot);
-      await visit(next, [...path, event as ChosenEvent], depth + 1);
+      await visit(next, [...path, event], depth + 1);
     }
   };
 

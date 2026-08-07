@@ -8,7 +8,7 @@ description: Watch an agent run locally in the Stately Inspector, ship its versi
 Two ways to observe a run:
 
 - **Locally**, watch it live in the [Stately Inspector](https://stately.ai/docs/inspector), a browser-based viewer that renders a running state machine as a diagram and lights it up state by state.
-- **In production**, ship the versioned trace stream to any [OpenTelemetry](https://opentelemetry.io) backend with the [`@statelyai/agent/otel`](#send-it-to-otel) bridge: one handler, GenAI-semconv spans, your exporter. OpenTelemetry is the vendor-neutral standard for traces; Honeycomb, Langfuse, LangSmith, Braintrust, Datadog, and Grafana all ingest it.
+- **In production**, ship the versioned trace stream to any [OpenTelemetry](https://opentelemetry.io) backend with the [`@statelyai/agent/otel`](#otel-export) bridge: one handler, GenAI-semconv spans, your exporter. OpenTelemetry is the vendor-neutral standard for traces; Honeycomb, Langfuse, LangSmith, Braintrust, Datadog, and Grafana all ingest it.
 
 No hosted platform, no adapter to install. Every trace pairs with a replayable event log and settled snapshot, so a traced run can be reproduced and resumed.
 
@@ -102,7 +102,7 @@ const result = await run.result; // done | idle | error, exactly as runAgent
 
 ### Uncontrolled (`provideExecutors` + `traceTransitions`)
 
-The uncontrolled path binds the machine once, then drives it with a plain `createActor`. `provideExecutors`' `onTrace` emits the request-level events; `traceTransitions` on the actor's `inspect` folds `machine.transition` events into the **same** `runId`/`seq` stream:
+On the [uncontrolled path](any-stack.md#controlled-and-uncontrolled), `provideExecutors`' `onTrace` emits the request-level events; `traceTransitions` on the actor's `inspect` folds `machine.transition` events into the **same** `runId`/`seq` stream:
 
 ```ts
 import { createActor } from "xstate";
@@ -120,12 +120,11 @@ const actor = createActor(bound, { inspect: traceTransitions(onTrace) });
 actor.start();
 ```
 
-Two documented differences from the controlled path:
+The tracing gap, compared to `runAgent`:
 
-- **No `run.start` / `run.end`.** A `createActor` has no run boundary the way `runAgent` does, so the stream starts at the first transition and never emits a settle event.
+- **No `run.start` / `run.end`.** A `createActor` has no run boundary, so the stream starts at the first transition and never emits a settle event.
 - **No `emit` events.** In this XState build, emitted events are delivered through `actor.on(...)`, not the inspection protocol, so an `inspect` handler can't see them. Subscribe with `actor.on('*', ...)` if you need them.
-
-> **Note:** `provideExecutors` does not descend into invoked child state machines. A child machine with its own agent invokes needs its own `provideExecutors(...)` call, and its own trace stream. `runAgent` rebinds children and traces them on the parent stream; the uncontrolled path does not, by design.
+- **No child traces.** `provideExecutors` does not descend into invoked child machines, so a child with its own agent invokes needs its own `provideExecutors(...)` call and its own stream.
 
 ## Observation callbacks
 
@@ -152,7 +151,7 @@ await runAgent(machine, {
 });
 ```
 
-`onEvent` is write-through observation, not transactional durability: the live XState actor has already accepted the event, and this synchronous callback cannot await an asynchronous store before the transition. For append-before-continue crash safety, use the [pure step path](steps.md#durable-append-before-continue), where the host commits each completion envelope before exposing the derived state.
+`onEvent` is write-through observation, not transactional durability: the live XState actor has already accepted the event, and this synchronous callback cannot await an asynchronous store before the transition. For append-before-continue crash safety, use [the step path](steps.md#durable-append-before-continue), where the host commits each completion envelope before exposing the derived state.
 
 `onTrace`, `onTransition`, and `on` differ in level:
 
@@ -214,7 +213,7 @@ For serverless/edge runtimes (Cloudflare Workers/Durable Objects), `@statelyai/s
 
 The inspector renders the running actor as the same diagram you author, so the whole flow is visible as one live machine. See [`examples/email-drafter-inspector`](../examples/email-drafter-inspector/index.ts) for a full session (it keeps one long-lived actor instead of the `runAgent` loop, but the wiring is identical).
 
-## Send it to OTel
+## OTel export
 
 OpenTelemetry models work as **spans**: timed, nested units that carry attributes, which an exporter ships to whatever backend you use. `@statelyai/agent/otel` maps the trace stream onto [OpenTelemetry GenAI](https://github.com/open-telemetry/semantic-conventions-genai) spans, the standard's conventions for model calls and agent runs. That is the whole integration: pass a `tracer` from **your existing SDK setup** and hand the handler to `onTrace`.
 
@@ -299,11 +298,7 @@ The bridge emits plain OTel spans, so a vendor is a **URL and a set of headers**
 npm install @opentelemetry/sdk-trace-node @opentelemetry/exporter-trace-otlp-http
 ```
 
-Endpoints and header names drift, so each vendor's linked OTLP docs page is the authority.
-
-#### LangSmith
-
-Endpoint `https://api.smith.langchain.com/otel/v1/traces`. Headers: `x-api-key`, optional `Langsmith-Project`. Regional hosts swap the subdomain (`eu.`, `apac.`, `aws.`). [Docs](https://docs.langchain.com/langsmith/trace-with-opentelemetry)
+One wiring, with the vendor's URL and headers swapped in:
 
 ```ts
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
@@ -312,75 +307,25 @@ import { createOtelTraceHandler } from "@statelyai/agent/otel";
 
 const exporter = new OTLPTraceExporter({
   url: "https://api.smith.langchain.com/otel/v1/traces",
-  headers: { "x-api-key": process.env.LANGSMITH_API_KEY!, "Langsmith-Project": "agent" },
+  headers: { "x-api-key": process.env.LANGSMITH_API_KEY! },
 });
 const provider = new NodeTracerProvider({ spanProcessors: [new BatchSpanProcessor(exporter)] });
 const onTrace = createOtelTraceHandler({ tracer: provider.getTracer("my-app") });
 ```
 
-#### Braintrust
+Endpoints and header names drift, so each vendor's linked docs page is the authority.
 
-Endpoint `https://api.braintrust.dev/otel/v1/traces` (EU: `https://api-eu.braintrust.dev/otel/v1/traces`). Headers: `Authorization: Bearer <key>`, `x-bt-parent` as `project_id:<id>` (also accepts `project_name:<name>`). [Docs](https://www.braintrust.dev/docs/integrations/sdk-integrations/opentelemetry)
+| Vendor     | Endpoint                                                  | Headers                                                                    | Docs                                                                                     |
+| ---------- | --------------------------------------------------------- | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| LangSmith  | `https://api.smith.langchain.com/otel/v1/traces`          | `x-api-key`, optional `Langsmith-Project`                                  | [Docs](https://docs.langchain.com/langsmith/trace-with-opentelemetry)                    |
+| Braintrust | `https://api.braintrust.dev/otel/v1/traces`               | `Authorization: Bearer <key>`, `x-bt-parent` (`project_name:<name>`)       | [Docs](https://www.braintrust.dev/docs/integrations/sdk-integrations/opentelemetry)      |
+| Langfuse   | `https://cloud.langfuse.com/api/public/otel/v1/traces`    | `Authorization: Basic <base64(publicKey:secretKey)>`, `x-langfuse-ingestion-version: 4` | [Docs](https://langfuse.com/integrations/native/opentelemetry)              |
+| Honeycomb  | `https://api.honeycomb.io/v1/traces`                      | `x-honeycomb-team` (`x-honeycomb-dataset` on Classic only)                 | [Docs](https://docs.honeycomb.io/send-data/opentelemetry/)                               |
+| Datadog    | `https://otlp.datadoghq.com/v1/traces` (US1)              | `dd-api-key`                                                               | [Docs](https://docs.datadoghq.com/opentelemetry/setup/otlp_ingest/)                      |
 
-```ts
-const exporter = new OTLPTraceExporter({
-  url: "https://api.braintrust.dev/otel/v1/traces",
-  headers: {
-    Authorization: `Bearer ${process.env.BRAINTRUST_API_KEY}`,
-    "x-bt-parent": "project_name:agent",
-  },
-});
-const provider = new NodeTracerProvider({ spanProcessors: [new BatchSpanProcessor(exporter)] });
-const onTrace = createOtelTraceHandler({ tracer: provider.getTracer("my-app") });
-```
-
-Braintrust also runs the offline scoring side; see [Evals](evals.md) for scoring the same runs from `runAgent`'s output and event log.
-
-#### Langfuse
-
-Endpoint `https://cloud.langfuse.com/api/public/otel/v1/traces` (US `us.`, JP `jp.`, HIPAA `hipaa.`, or your self-hosted host). Headers: `Authorization: Basic <base64(publicKey:secretKey)>`, plus `x-langfuse-ingestion-version: 4` for the v4 data model. [Docs](https://langfuse.com/integrations/native/opentelemetry)
-
-```ts
-const auth = Buffer.from(
-  `${process.env.LANGFUSE_PUBLIC_KEY}:${process.env.LANGFUSE_SECRET_KEY}`,
-).toString("base64");
-const exporter = new OTLPTraceExporter({
-  url: "https://cloud.langfuse.com/api/public/otel/v1/traces",
-  headers: { Authorization: `Basic ${auth}`, "x-langfuse-ingestion-version": "4" },
-});
-const provider = new NodeTracerProvider({ spanProcessors: [new BatchSpanProcessor(exporter)] });
-const onTrace = createOtelTraceHandler({ tracer: provider.getTracer("my-app") });
-```
-
-#### Honeycomb
-
-Endpoint `https://api.honeycomb.io/v1/traces` (EU: `https://api.eu1.honeycomb.io/v1/traces`). Header: `x-honeycomb-team`. `x-honeycomb-dataset` is required only on Honeycomb Classic. [Docs](https://docs.honeycomb.io/send-data/opentelemetry/)
-
-```ts
-const exporter = new OTLPTraceExporter({
-  url: "https://api.honeycomb.io/v1/traces",
-  headers: { "x-honeycomb-team": process.env.HONEYCOMB_API_KEY! },
-});
-const provider = new NodeTracerProvider({ spanProcessors: [new BatchSpanProcessor(exporter)] });
-const onTrace = createOtelTraceHandler({ tracer: provider.getTracer("my-app") });
-```
-
-#### Datadog
-
-Datadog accepts direct OTLP intake (no Agent or Collector) over `http/protobuf` or `http/json` at the `/v1/traces` path, with the header `dd-api-key`.
-
-- **The host depends on your Datadog site.** Read your endpoint off the [OTLP intake docs](https://docs.datadoghq.com/opentelemetry/setup/otlp_ingest/) rather than copying the URL below.
-- Datadog still recommends the Agent or Collector for production traffic.
-- The Agent's `trace.agent.datadoghq.com` intake is proprietary, not OTLP.
-
-```ts
-const exporter = new OTLPTraceExporter({
-  url: "https://otlp.datadoghq.com/v1/traces", // US1; check your Datadog site
-  headers: { "dd-api-key": process.env.DD_API_KEY! },
-});
-const provider = new NodeTracerProvider({ spanProcessors: [new BatchSpanProcessor(exporter)] });
-const onTrace = createOtelTraceHandler({ tracer: provider.getTracer("my-app") });
-```
+- Regional hosts swap the subdomain: LangSmith `eu.`/`apac.`/`aws.`, Braintrust `api-eu.`, Langfuse `us.`/`jp.`/`hipaa.` or self-hosted, Honeycomb `api.eu1.`.
+- Datadog's host depends on your site, and Datadog still recommends the Agent or Collector for production traffic. Its `trace.agent.datadoghq.com` intake is proprietary, not OTLP.
+- Braintrust also runs the offline scoring side; see [Evals](evals.md) for scoring the same runs from `runAgent`'s output and event log.
 
 See [`examples/langsmith-otel`](../examples/langsmith-otel/index.ts) for the full runnable wiring: real OTel SDK, real OTLP exporter, keyless run that prints the exported span tree.
 

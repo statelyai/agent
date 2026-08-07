@@ -17,7 +17,62 @@ import {
   serializeTraceEvent,
   setupAgent,
   type AgentTraceEvent,
+  type JsonSerializableTraceEvent,
+  type JsonValue,
+  type RunAgentErrorCause,
 } from "./index.js";
+
+// ─── Compile-time pin: the derived JsonSerializableTraceEvent must stay
+// structurally identical to the hand-written union it replaced. Edit this
+// baseline ONLY together with a deliberate AgentTraceEvent shape change.
+type HandWrittenJsonSerializableTraceEvent = {
+  schemaVersion: 1;
+  runId: string;
+  seq: number;
+  timestamp: string;
+  machineId: string;
+  machineVersion: string;
+} & (
+  | { type: "run.start"; input?: JsonValue; snapshot?: JsonValue; event?: JsonValue }
+  | { type: "request.start"; request: JsonValue }
+  | {
+      type: "request.end";
+      request: JsonValue;
+      output: JsonValue;
+      raw?: JsonValue;
+      reasoning?: string;
+      usage?: JsonValue;
+    }
+  | { type: "request.error"; request: JsonValue; error: JsonValue }
+  | { type: "stream.chunk"; request: JsonValue; chunk: string }
+  | { type: "machine.transition"; snapshot: JsonValue; event: JsonValue; eventId?: string }
+  | { type: "emit"; event: JsonValue }
+  | { type: "usage.dropped"; event: JsonValue; reason: "settled" }
+  | { type: "run.end"; status: "done"; output: JsonValue; snapshot: JsonValue }
+  | {
+      type: "run.end";
+      status: "idle";
+      snapshot: JsonValue;
+      pendingUserInputs?: JsonValue;
+      persistedSnapshot?: JsonValue;
+    }
+  | {
+      type: "run.end";
+      status: "error";
+      cause: RunAgentErrorCause;
+      error: JsonValue;
+      snapshot: JsonValue;
+    }
+);
+
+type MutuallyAssignable<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+
+// Both `true` assignments fail to compile if the derived type drifts.
+const _derivedMatchesHandWritten: MutuallyAssignable<
+  JsonSerializableTraceEvent,
+  HandWrittenJsonSerializableTraceEvent
+> = true;
+void _derivedMatchesHandWritten;
 
 // Envelope fields every serialized event keeps verbatim.
 const envelope = {

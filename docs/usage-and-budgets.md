@@ -15,7 +15,7 @@ Three layers, coarsest first:
 
 The first two are observational. Only the third can change what the agent does.
 
-## Reading `result.usage`
+## The usage result
 
 <!-- AgentUsage from src/text-logic.ts; aggregation in src/run-agent.ts -->
 
@@ -137,7 +137,7 @@ A wrapper is still host-side: the machine cannot read the remaining budget or re
 {
   type: '@agent.usage',
   usage: { inputTokens?, outputTokens?, totalTokens?, reasoningTokens?, cachedInputTokens? },
-  kind?: 'text' | 'decision' | 'plan',  // which request reported it
+  kind?: 'text' | 'decision',           // which request reported it
   id?: string,                          // the request's durable invoke id
   src?: string,                         // the request's invoke src
   model?: string,                       // the model ref it targeted
@@ -168,14 +168,14 @@ Model-call results reach the machine stripped of usage:
 | **Scope**         | Delivered to the run's root machine, including usage from requests inside an invoked child machine. Attribute those with `id`/`src`/`model`.                                                                                                                                                                 |
 | **Coverage**      | Only what your executor reports. No `usage` on the result means no event. [`simulateAgent`](verify.md) scripts return no usage, so a token counter stays `0` under simulation: test budgets with `runAgent` and a usage-reporting mock.                                                                       |
 
-Opt in with a transition, nothing to declare in `events`:
+Opt in with a transition:
 
 ```ts no-check
 import { AGENT_USAGE_EVENT_TYPE, setupAgent } from "@statelyai/agent";
 
-const agent = setupAgent({ schemas });
+const agentSetup = setupAgent({ schemas });
 
-const machine = agent.createMachine({
+const machine = agentSetup.createMachine({
   // …context, states
   on: {
     // Typed from the default registration: `event.usage`, `event.kind`, …
@@ -233,12 +233,11 @@ const schemas = createAgentSchemas({
     tokens: z.number(),
     stoppedBy: z.string(),
   }),
-  // No `events` entry for '@agent.usage' — setupAgent declares it for you.
 });
 
-const agent = setupAgent({ schemas, actors: { researchStep } });
+const agentSetup = setupAgent({ schemas, actors: { researchStep } });
 
-const machine = agent.createMachine({
+const machine = agentSetup.createMachine({
   // Limits become plain context data.
   context: ({ input }) => ({
     topic: input.topic,
@@ -261,7 +260,7 @@ const machine = agent.createMachine({
         id: "research",
         src: "researchStep",
         input: ({ context }) => ({ topic: context.topic, turn: context.turns + 1 }),
-        // Only the turn counter here — the tokens already arrived on their own.
+        // Only the turn counter here; the tokens already arrived on their own.
         onDone: ({ context, output }) => ({
           target: "checkingBudget",
           context: { notes: [...context.notes, output], turns: context.turns + 1 },
@@ -289,7 +288,7 @@ const machine = agent.createMachine({
   },
 });
 
-// Scripted, keyless executor. `usage` on the result is all it takes — the same
+// Scripted, keyless executor. `usage` on the result is all it takes: the same
 // field `result.usage` aggregates is the one `@agent.usage` carries.
 let call = 0;
 const executors = {
@@ -342,11 +341,9 @@ deciding: {
 
 ## Usage without runAgent
 
-`runAgent` delivers `@agent.usage` for you. The other two ways to drive an agent machine reach the same place, with the same opt-in rule (the machine must declare an `'@agent.usage'` transition explicitly).
-
 ### Uncontrolled: `provideExecutors` + `createActor`
 
-Built in, nothing to wire. A source bound by [`provideExecutors`](hosts.md) delivers `@agent.usage` to the machine actor that invoked it as soon as the call settles, with the same payload `runAgent` sends:
+Delivery is built in, but it follows the binding boundary: `provideExecutors` does not descend into invoked child machines, so a child with its own agent invokes needs its own `provideExecutors(...)`; until it has one, its calls report no usage anywhere. `runAgent` rebinds children and reports their usage to the root. There is no run cycle on the [uncontrolled path](any-stack.md#controlled-and-uncontrolled), so there are no dropped stragglers either.
 
 ```ts no-check
 import { createActor, toPromise } from "xstate";
@@ -361,27 +358,9 @@ actor.start();
 const output = await toPromise(actor); // stoppedBy: 'tokens'
 ```
 
-Delivery follows the binding boundary. `provideExecutors` does not descend into invoked child machines, so a child with its own agent invokes needs its own `provideExecutors(...)`; until it has one, its calls report no usage anywhere. (Under `runAgent`, which rebinds children, child usage is reported to the root.) There is no run cycle here, so there are no dropped stragglers either.
-
 ### Step path: an ordinary event
 
-On [the step path](steps.md) the host holds the raw executor result, so it applies the event itself. `getCallUsage(raw)` is the same normalization `runAgent` uses:
-
-```ts
-import { AGENT_USAGE_EVENT_TYPE, executeAgentRequest, getCallUsage } from "@statelyai/agent";
-
-const { output, raw } = await executeAgentRequest(effect, executors, { verbose: true });
-
-// Apply usage BEFORE the call's own result, so a guard sees the tokens in the
-// same step that consumes it — and journal it like any other external input.
-const usage = getCallUsage(raw);
-if (usage) {
-  append({ type: AGENT_USAGE_EVENT_TYPE, usage });
-}
-append(effect.toDoneEvent(output));
-```
-
-Because the entry is journaled, `replay` reproduces the folded counter exactly. Add `kind`/`id`/`src`/`model` to the event for the same attribution `runAgent` stamps.
+On [the step path](steps.md#token-usage-on-this-path) the host holds the raw executor result, so it normalizes it with `getCallUsage(raw)` and appends the event itself. Because the entry is journaled, `replay` reproduces the folded counter exactly.
 
 ### Plain XState: manual send
 
@@ -420,7 +399,7 @@ const machine = setup({
 });
 ```
 
-## Estimating cost
+## Cost estimation
 
 The library ships no price data and never estimates cost. Keep a price table in host code:
 
@@ -455,7 +434,7 @@ await runAgent(machine, {
     if (event.type !== "request.end" || !event.usage) {
       return;
     }
-    // A decision carries `model` directly; text and plan requests carry it on `input`.
+    // A decision carries `model` directly; a text request carries it on `input`.
     const model =
       event.request.kind === "decision" ? event.request.model : event.request.input.model;
     spentUsd += estimateCost(model, event.usage);
@@ -469,41 +448,9 @@ Cached input tokens are usually billed at a discount rather than free; subtracti
 
 ## Legacy: usage in the request output
 
-Before `@agent.usage` this was the only way to get tokens into `context`. Prefer `@agent.usage`. It still has two narrow uses: the tokens arrive **inside** `onDone`, in the same transition as the output, and they survive `simulateAgent` because a script can return them.
+Before `@agent.usage`, tokens reached `context` by declaring a `usage` field on a request's own output schema and having the executor fill it. Prefer `@agent.usage`.
 
-Give the request an output shape that carries usage, and have the executor fill it:
-
-```ts no-check
-const researchStep = createTextLogic({
-  schemas: {
-    input: z.object({ topic: z.string() }),
-    output: z.object({ note: z.string(), usage: z.object({ totalTokens: z.number() }) }),
-  },
-  model: "openai/gpt-5.4-mini",
-  prompt: ({ input }) => `Research ${input.topic}. One new fact.`,
-});
-
-const executors = {
-  generateText: async () => {
-    const usage = { totalTokens: 520 };
-    return {
-      output: { note: "otters raft", usage }, // reaches onDone
-      usage, // aggregated into result.usage
-    };
-  },
-};
-
-// …then in the machine:
-onDone: ({ context, output }) => ({
-  target: "checkingBudget",
-  context: {
-    notes: [...context.notes, output.note],
-    tokens: context.tokens + output.usage.totalTokens,
-  },
-});
-```
-
-It only works for output shapes you own: a shared request or a third-party executor cannot be reshaped, and a decision has no output to reshape at all. `@agent.usage` covers all three. With a real host, wrap your existing executor rather than writing one: call it, then return `{ output: { ...yourOutput, usage: result.usage }, usage: result.usage }`.
+The old form still has two narrow uses: the tokens arrive inside `onDone`, in the same transition as the output, and they survive `simulateAgent` because a script can return them. It only works for output shapes you own, so a shared request, a third-party executor, and a decision are all out of reach.
 
 ## Related
 

@@ -470,6 +470,28 @@ describe("simulateAgent — keyless deterministic playthrough", () => {
     expect(result.canReach).toBe(true);
   });
 
+  test("does not drain the caller's scripted queues", async () => {
+    const script = {
+      text: {
+        tellJoke: ["Why did the state cross the transition?"],
+        rateJoke: [{ rating: 9, explanation: "Punchy." }],
+      },
+      decisions: { "agent.decide": [{ type: "END" } as const] },
+    };
+
+    const first = await simulateAgent(jokeMachine, { input: { topic: "states" }, script });
+    expect(first.status).toBe("done");
+
+    // The same script object must still be usable: simulateAgent consumes
+    // copies of every queue, never the caller's arrays.
+    expect(script.text.tellJoke).toHaveLength(1);
+    expect(script.text.rateJoke).toHaveLength(1);
+    expect(script.decisions["agent.decide"]).toHaveLength(1);
+
+    const second = await simulateAgent(jokeMachine, { input: { topic: "states" }, script });
+    expect(second.status).toBe("done");
+  });
+
   test("throws a descriptive error when the script runs dry", async () => {
     await expect(
       simulateAgent(twentyQuestionsMachine, {

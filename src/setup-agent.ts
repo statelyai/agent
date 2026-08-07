@@ -144,7 +144,7 @@ const USAGE_TOKEN_FIELDS = [
   "cachedInputTokens",
 ] as const;
 const USAGE_ATTRIBUTION_FIELDS = ["id", "src", "model", "name"] as const;
-const USAGE_KINDS = ["text", "decision"];
+const USAGE_KINDS = ["text", "decision"] as const;
 
 /**
  * Standard Schema for the reserved `'@agent.usage'` payload. Hand-rolled (no
@@ -173,7 +173,7 @@ const agentUsageEventSchema: StandardSchemaV1<AgentUsageEventPayload> = {
           }
         }
       }
-      if (event.kind !== undefined && !USAGE_KINDS.includes(event.kind as string)) {
+      if (event.kind !== undefined && !USAGE_KINDS.some((kind) => kind === event.kind)) {
         issues.push({ message: `Expected one of ${USAGE_KINDS.join(", ")}`, path: ["kind"] });
       }
       for (const field of USAGE_ATTRIBUTION_FIELDS) {
@@ -845,7 +845,122 @@ export function setupAgent<
   TEmittedSchemas,
   TStateSchemas
 > {
-  return createSetupAgent(config);
+  const schemas = normalizeAgentSchemas<
+    TContextSchema,
+    TEventSchemas,
+    TInputSchema,
+    TOutputSchema,
+    TMetaSchema,
+    TEmittedSchemas
+  >(config);
+  // `requests` is optional; an omitted map is simply empty.
+  const requests = (config.requests ?? {}) as AgentRequestInput<
+    TRequestSchemas,
+    AgentModelRef<TModels>
+  >;
+  const requestActors = createRequestActors<TRequestSchemas, AgentModelRef<TModels>>(requests);
+  const actors = createAgentActors<TActors, TRequestSchemas, AgentModelRef<TModels>>(
+    config.actors,
+    requestActors,
+  );
+  // The plain-object config passed to xstate's setup(...) (see
+  // AgentSetupXStateConfig's note on why it's not SetupConfig<...>).
+  const setupConfig: AgentSetupXStateConfig<
+    TContextSchema,
+    TEventSchemas,
+    TActors,
+    TRequestSchemas,
+    TInputSchema,
+    TOutputSchema,
+    TMetaSchema,
+    TModels,
+    TEmittedSchemas,
+    ResolveAgentStateSchemas<TContextSchema, TStateSchemas>
+  > = {
+    schemas: {
+      context: schemas.context,
+      events: schemas.events,
+      input: schemas.input,
+      output: schemas.output,
+      meta: schemas.meta,
+      // Runtime pass-through mirrors AgentSetupEmittedSchema: only a
+      // non-empty declared map reaches xstate's setup schemas.
+      ...(schemas.emitted && Object.keys(schemas.emitted).length > 0
+        ? { emitted: schemas.emitted }
+        : {}),
+      // The conditional AgentSetup*Schema keys can't be proven from a spread.
+    } as AgentSetupXStateConfig<
+      TContextSchema,
+      TEventSchemas,
+      TActors,
+      TRequestSchemas,
+      TInputSchema,
+      TOutputSchema,
+      TMetaSchema,
+      TModels,
+      TEmittedSchemas,
+      ResolveAgentStateSchemas<TContextSchema, TStateSchemas>
+    >["schemas"],
+    // Resolve the AgentStateNarrowing sugar into xstate's full per-state
+    // schema form (the cast mirrors the type-level ResolveAgentStateSchemas).
+    ...(config.states
+      ? {
+          states: resolveAgentStateSchemas(
+            schemas.context,
+            config.states,
+          ) as ResolveAgentStateSchemas<TContextSchema, TStateSchemas>,
+        }
+      : {}),
+    // `createAgentActors` builds with a widened `string` event union; the setup
+    // config narrows it to the declared (non-reserved) event types.
+    actors: actors as never,
+    actions: config.actions,
+    guards: config.guards,
+    delays: config.delays,
+  };
+  const base = setup(setupConfig);
+  const createBaseMachine = base.createMachine.bind(base);
+  const models = (config.models ?? {}) as TModels;
+  const machineOptions = {
+    schemas,
+    actors,
+    models,
+  };
+
+  return Object.assign(base, {
+    createMachine(machineConfig: Parameters<typeof base.createMachine>[0]) {
+      assertStateSchemaKeysExist(
+        config.states,
+        (machineConfig as { states?: Record<string, any> } | undefined)?.states,
+      );
+      const machine = createBaseMachine(withRootOutputFromSingleFinal(machineConfig) as never);
+      agentExecutionOptions.set(machine as object, machineOptions);
+      // Carry the wait-state predicate on the machine's root `config` (shared by
+      // reference across `.provide`), so it survives provide/executor rebinding.
+      if (config.isSuspended) {
+        const rootConfig = (machine as { config?: object }).config;
+        if (rootConfig) {
+          machineSuspensionPredicates.set(rootConfig, config.isSuspended);
+        }
+      }
+      return machine;
+    },
+    schemas,
+    models,
+    requests: requestActors,
+    appendMessages,
+  }) as unknown as SetupAgentResult<
+    TContextSchema,
+    TEventSchemas,
+    TActors,
+    TRequestSchemas,
+    TInputSchema,
+    TOutputSchema,
+    TMetaSchema,
+    TModels,
+    TEmittedSchemas,
+    TStateSchemas
+  >;
 }
 
 // Recursively collects every reached-final-state's `output` config in a machine config.
@@ -993,47 +1108,6 @@ function normalizeAgentSchemas<
   });
 }
 
-// Defaults an omitted `setupAgent({ requests })` to an empty object.
-function normalizeAgentRequestInput<
-  TRequestSchemas extends AgentRequestSchemaMap,
-  TModel extends string = string,
->(
-  requests: AgentRequestInput<TRequestSchemas, TModel> | undefined,
-): AgentRequestInput<TRequestSchemas, TModel> {
-  return requests ?? ({} as AgentRequestInput<TRequestSchemas, TModel>);
-}
-
-/**
- * Runtime guard: a key appearing in both `actors`/`requests` is almost
- * certainly a mistake (whichever spread applies last would silently win) —
- * fail fast with a clear message rather than let one implementation shadow
- * another.
- */
-function assertNoActorKeyCollisions(
-  actors: Record<string, unknown> | undefined,
-  requests: Record<string, unknown>,
-): void {
-  const seenIn = new Map<string, string>();
-  const groups: [string, Record<string, unknown> | undefined][] = [
-    ["actors", actors],
-    ["requests", requests],
-  ];
-
-  for (const [groupName, group] of groups) {
-    for (const key of Object.keys(group ?? {})) {
-      const existingGroup = seenIn.get(key);
-      if (existingGroup) {
-        throw new Error(
-          `setupAgent: key '${key}' is defined in both '${existingGroup}' and ` +
-            `'${groupName}'. Each actor source key must be unique across ` +
-            `'actors' and 'requests'.`,
-        );
-      }
-      seenIn.set(key, groupName);
-    }
-  }
-}
-
 /**
  * Runtime guard: every key of the `setupAgent({ states })` narrowing map must
  * name a real state node in the machine config. A typo'd key is otherwise a
@@ -1080,31 +1154,38 @@ function assertStateSchemaKeysExist(
 
 // The builtin `agent.*` actor keys — reserved so a user `actors`/
 // `requests` entry cannot silently clobber a builtin via spread order.
-const RESERVED_AGENT_ACTOR_KEYS: readonly string[] = [
-  ...Object.keys(builtinTextActors),
+const RESERVED_AGENT_ACTOR_KEYS = [
+  ...(Object.keys(builtinTextActors) as (keyof typeof builtinTextActors)[]),
   USER_INPUT_ACTOR,
   DECIDE_ACTOR,
-];
+] satisfies readonly (keyof BuiltinAgentActors)[];
 
 /**
- * Rejects a user-supplied `actors`/`requests` key in the reserved
- * `agent.*` builtin namespace. Without this, the builtins-first spread in
- * {@link createAgentActors} lets such a key overwrite the builtin
- * (`agent.decide`, …) silently. Deliberate override of a builtin
- * is still possible after the machine is created, via
- * `machine.provide({ actors: { 'agent.decide': ... } })`.
+ * Runtime guards over the user-supplied `actors`/`requests` keys, in one walk
+ * of both groups:
+ *
+ * 1. A key in the reserved `agent.*` builtin namespace is rejected. Without
+ *    this, the builtins-first spread in {@link createAgentActors} lets such a
+ *    key overwrite the builtin (`agent.decide`, …) silently. Deliberate
+ *    override of a builtin is still possible after the machine is created, via
+ *    `machine.provide({ actors: { 'agent.decide': ... } })`.
+ * 2. A key appearing in BOTH groups is almost certainly a mistake (whichever
+ *    spread applies last would silently win) — fail fast with a clear message
+ *    rather than let one implementation shadow another.
  */
-function assertNoReservedAgentKeys(
+function assertActorKeys(
   actors: Record<string, unknown> | undefined,
   requests: Record<string, unknown>,
 ): void {
+  const seenIn = new Map<string, string>();
   const groups: [string, Record<string, unknown> | undefined][] = [
     ["actors", actors],
     ["requests", requests],
   ];
+
   for (const [groupName, group] of groups) {
     for (const key of Object.keys(group ?? {})) {
-      if (RESERVED_AGENT_ACTOR_KEYS.includes(key)) {
+      if (RESERVED_AGENT_ACTOR_KEYS.some((reserved) => reserved === key)) {
         throw new Error(
           `setupAgent: '${groupName}' key '${key}' is a reserved builtin agent actor and ` +
             `cannot be redefined here (it would silently clobber the builtin). Reserved keys: ` +
@@ -1112,6 +1193,15 @@ function assertNoReservedAgentKeys(
             `on the created machine instead: machine.provide({ actors: { '${key}': ... } }).`,
         );
       }
+      const existingGroup = seenIn.get(key);
+      if (existingGroup) {
+        throw new Error(
+          `setupAgent: key '${key}' is defined in both '${existingGroup}' and ` +
+            `'${groupName}'. Each actor source key must be unique across ` +
+            `'actors' and 'requests'.`,
+        );
+      }
+      seenIn.set(key, groupName);
     }
   }
 }
@@ -1125,11 +1215,7 @@ export function createAgentActors<
   actors: TActors | undefined,
   requestActors: RequestActors<TRequestSchemas>,
 ): SetupActors<AgentSetupActors<AgentAllActors<TActors, TRequestSchemas>, string, TModel>> {
-  assertNoActorKeyCollisions(
-    actors as Record<string, unknown> | undefined,
-    requestActors as Record<string, unknown>,
-  );
-  assertNoReservedAgentKeys(
+  assertActorKeys(
     actors as Record<string, unknown> | undefined,
     requestActors as Record<string, unknown>,
   );
@@ -1141,225 +1227,4 @@ export function createAgentActors<
     ...actors,
     ...requestActors,
   } as SetupActors<AgentSetupActors<AgentAllActors<TActors, TRequestSchemas>, string, TModel>>;
-}
-
-// Assembles the plain-object config passed to xstate's setup(...) (see AgentSetupXStateConfig's note on why it's not SetupConfig<...>).
-function createAgentSetupConfig<
-  TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
-  TEventSchemas extends AgentEventSchemaInputMap,
-  TActors extends { [K in keyof TActors]: AnyActorLogic },
-  TRequestSchemas extends AgentRequestSchemaMap,
-  TInputSchema extends StandardSchemaV1,
-  TOutputSchema extends StandardSchemaV1,
-  TMetaSchema extends StandardSchemaV1,
-  TModels extends AgentModelMap,
-  TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
-  TStateSchemas extends Record<string, AgentSetupStateSchema> = Record<
-    string,
-    AgentSetupStateSchema
-  >,
->(
-  schemas: AgentSchemaPack<
-    TContextSchema,
-    WithAgentUsageEvent<TEventSchemas>,
-    TInputSchema,
-    TOutputSchema,
-    TMetaSchema,
-    TEmittedSchemas
-  >,
-  actors: SetupActors<
-    AgentSetupActors<
-      AgentAllActors<TActors, TRequestSchemas>,
-      Exclude<keyof TEventSchemas & string, typeof AGENT_USAGE_EVENT_TYPE>,
-      AgentModelRef<TModels>
-    >
-  >,
-  config: Pick<
-    SetupAgentBaseConfig<
-      TContextSchema,
-      TEventSchemas,
-      TActors,
-      TInputSchema,
-      TOutputSchema,
-      TMetaSchema,
-      TRequestSchemas,
-      TModels,
-      TEmittedSchemas,
-      TStateSchemas
-    >,
-    "actions" | "guards" | "delays" | "states"
-  >,
-): AgentSetupXStateConfig<
-  TContextSchema,
-  TEventSchemas,
-  TActors,
-  TRequestSchemas,
-  TInputSchema,
-  TOutputSchema,
-  TMetaSchema,
-  TModels,
-  TEmittedSchemas,
-  ResolveAgentStateSchemas<TContextSchema, TStateSchemas>
-> {
-  return {
-    schemas: {
-      context: schemas.context,
-      events: schemas.events,
-      input: schemas.input,
-      output: schemas.output,
-      meta: schemas.meta,
-      // Runtime pass-through mirrors AgentSetupEmittedSchema: only a
-      // non-empty declared map reaches xstate's setup schemas.
-      ...(schemas.emitted && Object.keys(schemas.emitted).length > 0
-        ? { emitted: schemas.emitted }
-        : {}),
-      // The conditional AgentSetup*Schema keys can't be proven from a spread.
-    } as AgentSetupXStateConfig<
-      TContextSchema,
-      TEventSchemas,
-      TActors,
-      TRequestSchemas,
-      TInputSchema,
-      TOutputSchema,
-      TMetaSchema,
-      TModels,
-      TEmittedSchemas,
-      ResolveAgentStateSchemas<TContextSchema, TStateSchemas>
-    >["schemas"],
-    // Resolve the AgentStateNarrowing sugar into xstate's full per-state
-    // schema form (the cast mirrors the type-level ResolveAgentStateSchemas).
-    ...(config.states
-      ? {
-          states: resolveAgentStateSchemas(
-            schemas.context,
-            config.states,
-          ) as ResolveAgentStateSchemas<TContextSchema, TStateSchemas>,
-        }
-      : {}),
-    actors,
-    actions: config.actions,
-    guards: config.guards,
-    delays: config.delays,
-  };
-}
-
-// Implementation backing the public setupAgent(...) function: normalizes schemas/requests, builds actor sources, calls xstate's setup(...), and layers on the agent-specific result extensions (a wrapped createMachine plus schemas/models/requests/appendMessages).
-function createSetupAgent<
-  TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
-  TEventSchemas extends AgentEventSchemaInputMap,
-  TActors extends { [K in keyof TActors]: AnyActorLogic },
-  TRequestSchemas extends AgentRequestSchemaMap,
-  TInputSchema extends StandardSchemaV1,
-  TOutputSchema extends StandardSchemaV1,
-  TMetaSchema extends StandardSchemaV1,
-  TModels extends AgentModelMap,
-  TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
-  TStateSchemas extends Record<string, AgentSetupStateSchema> = Record<
-    string,
-    AgentSetupStateSchema
-  >,
->(
-  config: SetupAgentBaseConfig<
-    TContextSchema,
-    TEventSchemas,
-    TActors,
-    TInputSchema,
-    TOutputSchema,
-    TMetaSchema,
-    TRequestSchemas,
-    TModels,
-    TEmittedSchemas,
-    TStateSchemas
-  >,
-): SetupAgentResult<
-  TContextSchema,
-  TEventSchemas,
-  TActors,
-  TRequestSchemas,
-  TInputSchema,
-  TOutputSchema,
-  TMetaSchema,
-  TModels,
-  TEmittedSchemas,
-  TStateSchemas
-> {
-  const schemas = normalizeAgentSchemas<
-    TContextSchema,
-    TEventSchemas,
-    TInputSchema,
-    TOutputSchema,
-    TMetaSchema,
-    TEmittedSchemas
-  >(config);
-  const requests = normalizeAgentRequestInput<TRequestSchemas, AgentModelRef<TModels>>(
-    config.requests,
-  );
-  const requestActors = createRequestActors<TRequestSchemas, AgentModelRef<TModels>>(requests);
-  const actors = createAgentActors<TActors, TRequestSchemas, AgentModelRef<TModels>>(
-    config.actors,
-    requestActors,
-  );
-  const setupConfig = createAgentSetupConfig<
-    TContextSchema,
-    TEventSchemas,
-    TActors,
-    TRequestSchemas,
-    TInputSchema,
-    TOutputSchema,
-    TMetaSchema,
-    TModels,
-    TEmittedSchemas,
-    TStateSchemas
-  >(
-    schemas,
-    // `createAgentActors` builds with a widened `string` event union; the setup
-    // config narrows it to the declared (non-reserved) event types.
-    actors as Parameters<typeof createAgentSetupConfig>[1] as never,
-    config,
-  );
-  const base = setup(setupConfig);
-  const createBaseMachine = base.createMachine.bind(base);
-  const models = (config.models ?? {}) as TModels;
-  const machineOptions = {
-    schemas,
-    actors,
-    models,
-  };
-
-  return Object.assign(base, {
-    createMachine(machineConfig: Parameters<typeof base.createMachine>[0]) {
-      assertStateSchemaKeysExist(
-        config.states,
-        (machineConfig as { states?: Record<string, any> } | undefined)?.states,
-      );
-      const machine = createBaseMachine(withRootOutputFromSingleFinal(machineConfig) as never);
-      agentExecutionOptions.set(machine as object, machineOptions);
-      // Carry the wait-state predicate on the machine's root `config` (shared by
-      // reference across `.provide`), so it survives provide/executor rebinding.
-      if (config.isSuspended) {
-        const rootConfig = (machine as { config?: object }).config;
-        if (rootConfig) {
-          machineSuspensionPredicates.set(rootConfig, config.isSuspended);
-        }
-      }
-      return machine;
-    },
-    schemas,
-    models,
-    requests: requestActors,
-    appendMessages(resolve: Parameters<typeof appendMessages>[0]) {
-      return appendMessages(resolve);
-    },
-  }) as unknown as SetupAgentResult<
-    TContextSchema,
-    TEventSchemas,
-    TActors,
-    TRequestSchemas,
-    TInputSchema,
-    TOutputSchema,
-    TMetaSchema,
-    TModels,
-    TEmittedSchemas,
-    TStateSchemas
-  >;
 }

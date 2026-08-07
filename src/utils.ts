@@ -155,8 +155,13 @@ function stableStructuralString(value: unknown, seen: WeakSet<object> = new Weak
   return out;
 }
 
-// djb2 → unsigned 32-bit → 8-char hex. No dependencies.
-function djb2Hex(input: string): string {
+/**
+ * djb2 → unsigned 32-bit → 8-char hex. No dependencies. A change detector, not
+ * a cryptographic digest.
+ *
+ * @internal
+ */
+export function djb2Hex(input: string): string {
   let hash = 5381;
   for (let i = 0; i < input.length; i++) {
     hash = ((hash << 5) + hash + input.charCodeAt(i)) | 0;
@@ -190,7 +195,7 @@ export function toolMessage(content: Array<ToolResultPart>): ToolMessage {
 // (`Record<StateId, TMeta | undefined>`). For a schema-typed machine (e.g.
 // `setupAgent({ meta })`), this resolves to the meta schema's output type; for
 // an untyped snapshot it falls back to `MetaObject`.
-type MetaOfSnapshot<TSnapshot extends { getMeta(): Record<string, unknown> }> = NonNullable<
+export type MetaOfSnapshot<TSnapshot extends { getMeta(): Record<string, unknown> }> = NonNullable<
   ReturnType<TSnapshot["getMeta"]>[keyof ReturnType<TSnapshot["getMeta"]>]
 >;
 
