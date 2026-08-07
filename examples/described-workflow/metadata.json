@@ -8,10 +8,7 @@
     "url": null
   },
   "comparison": {
-    "targets": [
-      "LangGraph",
-      "hand-rolled loop"
-    ],
+    "targets": ["LangGraph", "hand-rolled loop"],
     "purpose": "A plain XState machine with no invokes: each state's description is the prompt, and the runtime turns the workflow into an agent run without touching the machine."
   },
   "starters": [

@@ -8,11 +8,7 @@
     "url": "https://github.com/langchain-ai/langgraph/blob/23961cff61a42b52525f3b20b4094d8d2fba1744/docs/docs/tutorials/lats/lats.ipynb"
   },
   "comparison": {
-    "targets": [
-      "LangGraph LATS",
-      "tree search",
-      "reflection"
-    ],
+    "targets": ["LangGraph LATS", "tree search", "reflection"],
     "purpose": "Explores several candidate solutions as a tree, scores each one, and keeps expanding the most promising branch until it finds a good answer or runs out of budget."
   },
   "starters": [

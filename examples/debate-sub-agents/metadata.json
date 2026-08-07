@@ -8,11 +8,7 @@
     "url": "https://stately.ai/docs/actors"
   },
   "comparison": {
-    "targets": [
-      "XState actor model",
-      "event-based sub-agents",
-      "multi-agent debate"
-    ],
+    "targets": ["XState actor model", "event-based sub-agents", "multi-agent debate"],
     "purpose": "A facilitator spins up two debater agents, gives them alternating turns for several rounds, then weighs both sides and writes the conclusion."
   },
   "starters": [

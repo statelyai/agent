@@ -8,10 +8,7 @@
     "url": null
   },
   "comparison": {
-    "targets": [
-      "Vercel AI SDK",
-      "LangGraph"
-    ],
+    "targets": ["Vercel AI SDK", "LangGraph"],
     "purpose": "Tells a joke, rates it out of 10, and decides for itself whether to try another one or stop."
   },
   "starters": [

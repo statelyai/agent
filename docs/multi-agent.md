@@ -147,13 +147,13 @@ One `executors: { generateText }` on `runAgent(parentMachine, ...)` covers the p
 
 The rules:
 
-| Case                                                                       | Inherits? | Why                                                                             |
-| -------------------------------------------------------------------------- | --------- | -------------------------------------------------------------------------------- |
-| Request reached through a string-keyed source (invoke `src`, `actors`)     | Yes       | The default, at any depth. Cycles are handled                                   |
-| Spawn of a registered source (`enq.spawn(actors.worker, ...)`)             | Yes       | `runAgent` binds the source before the machine starts                           |
-| Request with its own executor (`.withExecutor`, `bindRequestExecutor`)     | No        | Explicit bindings win; the parent's executors are never called for it           |
-| Logic object constructed inside an action                                  | No        | Unregistered, so neither `runAgent` nor `provideExecutors` can see it           |
-| Direct-object child machine (`invoke: { src: childMachine }`)              | No        | No string-keyed source to replace. Register it under `actors` and invoke by name |
+| Case                                                                   | Inherits? | Why                                                                              |
+| ---------------------------------------------------------------------- | --------- | -------------------------------------------------------------------------------- |
+| Request reached through a string-keyed source (invoke `src`, `actors`) | Yes       | The default, at any depth. Cycles are handled                                    |
+| Spawn of a registered source (`enq.spawn(actors.worker, ...)`)         | Yes       | `runAgent` binds the source before the machine starts                            |
+| Request with its own executor (`.withExecutor`, `bindRequestExecutor`) | No        | Explicit bindings win; the parent's executors are never called for it            |
+| Logic object constructed inside an action                              | No        | Unregistered, so neither `runAgent` nor `provideExecutors` can see it            |
+| Direct-object child machine (`invoke: { src: childMachine }`)          | No        | No string-keyed source to replace. Register it under `actors` and invoke by name |
 
 **Missing executors fail fast.** If a reachable request needs an executor kind you didn't pass (e.g. a child's `mode: 'stream'` request but no `streamText`), binding throws before any actor runs, naming the invoke chain and request `src`.
 

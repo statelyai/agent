@@ -18,16 +18,16 @@ A machine gives you both for free. Nothing here is eval-specific instrumentation
 
 ## The seams
 
-| Seam                        | What it gives an eval                                                                                                                            |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Seam                        | What it gives an eval                                                                                                                                                                                            |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `createScriptedExecutors`   | Canned model answers from FIFO queues, keyless and deterministic. Entries can report `usage`, so budget scorers have numbers without a model. Full semantics: [Scripted executors](hosts.md#scripted-executors). |
-| `runSeam`                   | One model call under test, the rest scripted. Returns the seam's answer plus `before`/`after` trajectory slices, so a score is per-call instead of per-run. |
-| `simulateAgent`             | A scripted playthrough on the pure step path. Returns a `trail` of state values per step, with no actor and no I/O.                              |
-| `explorePaths` / `canReach` | Enumerate every branch a machine can take. Use it to check dataset coverage: which paths does the dataset never exercise?                        |
-| `result.events`             | The durable trajectory. `AgentLogEntry[]`: machine input, effect completions, user events, timer firings. JSON-safe, ordered, replayable.        |
-| `onTransition`              | The live state path, one call per transition.                                                                                                    |
-| `result.usage`              | `modelCalls` plus token fields, per run. Counts only that run's calls, so sum across resume legs.                                                |
-| `result.output`             | The final state's typed output, schema-validated.                                                                                                |
+| `runSeam`                   | One model call under test, the rest scripted. Returns the seam's answer plus `before`/`after` trajectory slices, so a score is per-call instead of per-run.                                                      |
+| `simulateAgent`             | A scripted playthrough on the pure step path. Returns a `trail` of state values per step, with no actor and no I/O.                                                                                              |
+| `explorePaths` / `canReach` | Enumerate every branch a machine can take. Use it to check dataset coverage: which paths does the dataset never exercise?                                                                                        |
+| `result.events`             | The durable trajectory. `AgentLogEntry[]`: machine input, effect completions, user events, timer firings. JSON-safe, ordered, replayable.                                                                        |
+| `onTransition`              | The live state path, one call per transition.                                                                                                                                                                    |
+| `result.usage`              | `modelCalls` plus token fields, per run. Counts only that run's calls, so sum across resume legs.                                                                                                                |
+| `result.output`             | The final state's typed output, schema-validated.                                                                                                                                                                |
 
 See [Testing and verification](verify.md) for `simulateAgent`, `explorePaths`, and static linting in detail, and [The event log](event-log.md) for the log's envelope.
 
@@ -158,7 +158,7 @@ const run = await runSeam(emailDrafter, {
 ```
 
 - `seam` addresses the call by request `name` (the `setupAgent({ requests })` key, the better handle) or by `model` key, plus a 0-based `occurrence`: `{ request: "draftEmail", occurrence: 1 }` is the revision, not the first draft.
-- `scripts` is the whole call plan, so the seam consumes its slot too: the candidate *replaces* that answer, and every later scripted answer stays lined up. Each queue's **last entry repeats**, so a live seam that branches down a longer path never runs dry.
+- `scripts` is the whole call plan, so the seam consumes its slot too: the candidate _replaces_ that answer, and every later scripted answer stays lined up. Each queue's **last entry repeats**, so a live seam that branches down a longer path never runs dry.
 - `respond` is called at every idle pause with `{ snapshot, state, meta, turn, result }` and returns the event to send, or `null` to stop.
 - `candidate` is just an executor, so a candidate prompt, a fine-tune, or a live model all plug in.
 

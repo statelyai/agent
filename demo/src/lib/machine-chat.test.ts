@@ -31,7 +31,11 @@ describe("accepted-event descriptors (unified chat)", () => {
     const approve = result.idle!.events.find((event) => event.type === "APPROVE");
     const deny = result.idle!.events.find((event) => event.type === "DENY");
     // Hints from `meta.interaction.events`.
-    expect(approve).toMatchObject({ label: "Approve refund", style: "primary", needsPayload: false });
+    expect(approve).toMatchObject({
+      label: "Approve refund",
+      style: "primary",
+      needsPayload: false,
+    });
     expect(deny).toMatchObject({ label: "Deny", style: "danger" });
     // Neither event takes a string payload, so free text has no mapping here.
     expect(result.idle!.textEvent).toBeNull();
@@ -74,7 +78,9 @@ describe("meta.interaction.component (custom composer renderer)", () => {
 
   test("a declared component name flows into the ChatIdle descriptor", () => {
     expect(idleOf(machineWith({ component: "rating" })).component).toBe("rating");
-    expect(idleOf(machineWith({ component: "cards", label: "Pick a rank" })).component).toBe("cards");
+    expect(idleOf(machineWith({ component: "cards", label: "Pick a rank" })).component).toBe(
+      "cards",
+    );
   });
 
   test("states without one (or with a non-string one) report null", () => {

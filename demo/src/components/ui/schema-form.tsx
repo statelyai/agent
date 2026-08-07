@@ -120,7 +120,10 @@ export function SchemaForm({ schema, submitLabel, onSubmit, onCancel }: SchemaFo
                   type="checkbox"
                   checked={values[field.name] === "true"}
                   onChange={(event) =>
-                    setValues((v) => ({ ...v, [field.name]: event.target.checked ? "true" : "false" }))
+                    setValues((v) => ({
+                      ...v,
+                      [field.name]: event.target.checked ? "true" : "false",
+                    }))
                   }
                 />
                 <span>{field.description ?? "Enabled"}</span>
@@ -143,7 +146,9 @@ export function SchemaForm({ schema, submitLabel, onSubmit, onCancel }: SchemaFo
             {field.description && field.kind.type !== "boolean" ? (
               <span className="schema-form__hint">{field.description}</span>
             ) : null}
-            {errors[field.name] ? <span className="schema-form__error">{errors[field.name]}</span> : null}
+            {errors[field.name] ? (
+              <span className="schema-form__error">{errors[field.name]}</span>
+            ) : null}
           </label>
         ))
       )}

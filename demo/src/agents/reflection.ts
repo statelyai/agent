@@ -42,7 +42,8 @@ const agentSetup = setupAgent({
         output: z.string(),
       },
       model: "writer",
-      system: "Write a short, vivid paragraph. If feedback is provided, revise to address every point while keeping what works.",
+      system:
+        "Write a short, vivid paragraph. If feedback is provided, revise to address every point while keeping what works.",
       prompt: ({ input }) =>
         input.feedback
           ? `Topic: ${input.topic}\n\nRevise to address this feedback:\n${input.feedback}`
@@ -51,7 +52,8 @@ const agentSetup = setupAgent({
     evaluate: {
       schemas: { input: z.object({ draft: z.string() }), output: evaluationSchema },
       model: "critic",
-      system: "You are a demanding editor. Score the draft 0-10 and give specific, actionable feedback.",
+      system:
+        "You are a demanding editor. Score the draft 0-10 and give specific, actionable feedback.",
       prompt: ({ input }) => `Score this draft:\n${input.draft}`,
     },
   },
@@ -63,7 +65,13 @@ const agentSetup = setupAgent({
 
 export const reflectionMachine = agentSetup.createMachine({
   id: "reflection",
-  context: ({ input }) => ({ topic: input.topic, draft: "", feedback: null, score: null, revisions: 0 }),
+  context: ({ input }) => ({
+    topic: input.topic,
+    draft: "",
+    feedback: null,
+    score: null,
+    revisions: 0,
+  }),
   initial: "drafting",
   states: {
     drafting: {

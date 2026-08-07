@@ -108,7 +108,9 @@ export function machineSchemas(machine: AnyStateMachine): MachineSchemas {
 /** Standard Schema / Zod → JSON Schema; null when not derivable. */
 export function jsonSchemaOf(schema: unknown): JsonObject | null {
   if (!schema || typeof schema !== "object") return null;
-  const standard = (schema as { "~standard"?: { jsonSchema?: { input?: () => unknown } } })["~standard"];
+  const standard = (schema as { "~standard"?: { jsonSchema?: { input?: () => unknown } } })[
+    "~standard"
+  ];
   const produce = standard?.jsonSchema?.input;
   if (typeof produce === "function") {
     try {

@@ -31,7 +31,8 @@ const agentSetup = setupAgent({
     researchOpportunities: {
       schemas: { input: z.object({ topic: z.string() }), output: z.string() },
       model: "analyst",
-      system: "Analyze only the opportunities and upsides. State uncertainty. One concise paragraph.",
+      system:
+        "Analyze only the opportunities and upsides. State uncertainty. One concise paragraph.",
       prompt: ({ input }) => `Topic: ${input.topic}`,
     },
     synthesize: {
@@ -49,7 +50,12 @@ const agentSetup = setupAgent({
 
 export const researchMachine = agentSetup.createMachine({
   id: "research",
-  context: ({ input }) => ({ topic: input.topic, risks: null, opportunities: null, synthesis: null }),
+  context: ({ input }) => ({
+    topic: input.topic,
+    risks: null,
+    opportunities: null,
+    synthesis: null,
+  }),
   initial: "researching",
   states: {
     // Two regions run at the same time. onDone waits for both.

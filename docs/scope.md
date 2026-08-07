@@ -9,7 +9,7 @@ description: What Stately Agent owns, what the host owns, and where specialized 
 
 That boundary is what makes a machine portable. Agent frameworks that bundle a model client, a search client, a memory store, and a server all at once tie your control flow to those choices. Here the machine only ever describes work; the host decides how it happens, so the same machine runs against a different SDK, provider, or database with no edits.
 
-In practice the machine says *what*:
+In practice the machine says _what_:
 
 ```ts no-check
 searching: {
@@ -17,7 +17,7 @@ searching: {
 }
 ```
 
-and the host says *how*, binding `searchWeb` to whichever search client, cache, and auth it uses.
+and the host says _how_, binding `searchWeb` to whichever search client, cache, and auth it uses.
 
 ## Ownership boundary
 

@@ -60,7 +60,9 @@ const agentSetup = setupAgent({
                 : b === 0
                   ? NaN
                   : a / b;
-        return { summary: Number.isNaN(value) ? "division by zero" : `${a} ${operation} ${b} = ${value}` };
+        return {
+          summary: Number.isNaN(value) ? "division by zero" : `${a} ${operation} ${b} = ${value}`,
+        };
       },
     }),
     lookup: createAsyncLogic<{ summary: string }, { key: string }>({
@@ -73,7 +75,10 @@ const agentSetup = setupAgent({
   requests: {
     // Only used at the cap: compose a final answer from what was gathered.
     forceAnswer: {
-      schemas: { input: z.object({ question: z.string(), observations: z.array(z.string()) }), output: z.string() },
+      schemas: {
+        input: z.object({ question: z.string(), observations: z.array(z.string()) }),
+        output: z.string(),
+      },
       model: "reasoner",
       system: "Give the best final answer you can from the observations gathered so far.",
       prompt: ({ input }) =>
@@ -108,7 +113,7 @@ export const toolsMachine = agentSetup.createMachine({
           model: "reasoner",
           system:
             "You are a ReAct agent. Each turn, either call a tool or FINISH with the answer. " +
-            "Tools: CALCULATE (arithmetic), LOOKUP (retrieve a fact by key, e.g. \"speed of light\"). " +
+            'Tools: CALCULATE (arithmetic), LOOKUP (retrieve a fact by key, e.g. "speed of light"). ' +
             "Prefer answering as soon as you can.",
           prompt:
             `Question: ${context.question}\n\nObservations:\n` +
@@ -163,7 +168,10 @@ export const toolsMachine = agentSetup.createMachine({
     forcedAnswer: {
       invoke: {
         src: "forceAnswer",
-        input: ({ context }) => ({ question: context.question, observations: context.observations }),
+        input: ({ context }) => ({
+          question: context.question,
+          observations: context.observations,
+        }),
         onDone: { target: "done", context: ({ output }) => ({ answer: output }) },
         onError: { target: "done" },
       },

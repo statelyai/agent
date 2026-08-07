@@ -8,10 +8,7 @@
     "url": "https://github.com/langchain-ai/langgraphjs/tree/main/examples"
   },
   "comparison": {
-    "targets": [
-      "subflows",
-      "nested-graphs"
-    ],
+    "targets": ["subflows", "nested-graphs"],
     "purpose": "A parent run invokes an entire second agent machine as one step, passing typed input in and getting typed output back."
   },
   "starters": [

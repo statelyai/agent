@@ -23,6 +23,53 @@ The rule: **external inputs only.** Never log raised/internal events; replay re-
 
 This puts one obligation on machine authors: transitions and effect inputs (prompt builders, spawn inputs) must be pure functions of state and event. No `Date.now()`, no `Math.random()` inside transition code; inject time and randomness as events or input.
 
+## Rules of the event log
+
+<!-- verified against src/run-agent.ts (append filter), src/effects.ts (createReplayEntry, verifyEntry), src/event-log-store.ts (append) -->
+
+Four rules keep a log replayable. Each is enforced somewhere in the library, or detected the moment it is broken.
+
+**Journal external inputs only.** Raised and internal events are re-derived by `replay`; recording them applies them twice. `runAgent` already filters them out, so the rule matters when you build entries yourself.
+
+```ts no-check
+// Wrong: a self-sent event, already re-derived on replay.
+entries.push(createReplayEntry(machine, entries, { type: "RETRY" })); // raised inside the machine
+
+// Right: only what came from outside (effect completions, user events, timers).
+entries.push(createReplayEntry(machine, entries, { type: "APPROVE" })); // sent by a human
+```
+
+**Keep transitions and effect inputs pure.** Nothing statically detects `Date.now()` or `Math.random()` in machine code, but the per-entry `verification` hashes catch it on the next replay as an `AgentReplayDivergenceError`. Inject time and randomness instead.
+
+```ts no-check
+// Wrong: the prompt differs on every replay, so effectsHash diverges.
+input: () => ({ prompt: `Today is ${new Date().toDateString()}` }),
+
+// Right: the value is in context, put there by an event or the run input.
+input: ({ context }) => ({ prompt: `Today is ${context.today}` }),
+```
+
+**Never mutate a journaled entry.** `AgentEventLogStore` has exactly four methods (`append`, `read`, `length`, `fork`): no update, no delete. The in-memory store clones on write and on read, so an edit through a caller's reference does not stick, and a rewritten entry would invalidate every hash after it.
+
+```ts no-check
+// Wrong: the entry is already the source of truth for everything downstream.
+entries[3]!.event = { type: "APPROVE" };
+
+// Right: branch, then append the different event to the new thread.
+await store.fork({ threadId: "session-1", newThreadId: "what-if", upToIndex: 3 });
+await store.append({ threadId: "what-if", expectedIndex: 3, entries: [correctedEntry] });
+```
+
+**Append at the length you read.** `expectedIndex` is optimistic concurrency: a stale writer loses with `AgentEventLogConflictError` rather than interleaving. Entries must also be contiguous from that index, and event ids unique within the thread.
+
+```ts no-check
+// Wrong: guesses the position, so a concurrent writer's entries get clobbered or rejected at random.
+await store.append({ threadId, expectedIndex: 0, entries: newEntries });
+
+// Right: read the frontier, and treat a conflict as "someone else advanced the thread".
+await store.append({ threadId, expectedIndex: await store.length(threadId), entries: newEntries });
+```
+
 ## Export events from `runAgent`
 
 <!-- RunAgentResult.events and RunAgentOptions events/onEvent from src/run-agent.ts; replay from src/effects.ts -->

@@ -54,7 +54,9 @@ export type ScenarioResult = {
   output?: Json;
 };
 
-export type ResumeEvent = { type: string; [key: string]: unknown } | { kind: "interpret"; text: string };
+export type ResumeEvent =
+  | { type: string; [key: string]: unknown }
+  | { kind: "interpret"; text: string };
 
 /** The index signature on the typed-event variant defeats `in` narrowing, so guard explicitly. */
 function isInterpretEvent(event: ResumeEvent): event is { kind: "interpret"; text: string } {
@@ -236,7 +238,10 @@ export async function resumeScenarioRun(
 
 // ─── env-resolving wrappers (used by the server functions) ───
 
-export async function startScenario(scenarioId: ScenarioId, prompt: string): Promise<ScenarioResult> {
+export async function startScenario(
+  scenarioId: ScenarioId,
+  prompt: string,
+): Promise<ScenarioResult> {
   const { mode, model, executors } = await resolveExecutors(scenarioId);
   return startScenarioRun(scenarioId, prompt, mode, model, executors);
 }
@@ -264,10 +269,16 @@ export async function resumeScenario(
 }
 
 /** Interprets a free-text review as a typed verdict (scripted or live). */
-async function interpretReview(text: string, mode: RunMode): Promise<"APPROVE" | "REJECT" | "UNCLEAR"> {
+async function interpretReview(
+  text: string,
+  mode: RunMode,
+): Promise<"APPROVE" | "REJECT" | "UNCLEAR"> {
   if (mode === "script") return scriptedReviewVerdict(text);
   try {
-    const [{ generateText }, { openai }] = await Promise.all([import("ai"), import("@ai-sdk/openai")]);
+    const [{ generateText }, { openai }] = await Promise.all([
+      import("ai"),
+      import("@ai-sdk/openai"),
+    ]);
     const { text: out } = await generateText({
       model: openai(process.env.OPENAI_MODEL || "gpt-5.4-mini"),
       system:
@@ -275,7 +286,11 @@ async function interpretReview(text: string, mode: RunMode): Promise<"APPROVE" |
       prompt: text,
     });
     const verdict = out.trim().toUpperCase();
-    return verdict.includes("APPROVE") ? "APPROVE" : verdict.includes("REJECT") ? "REJECT" : "UNCLEAR";
+    return verdict.includes("APPROVE")
+      ? "APPROVE"
+      : verdict.includes("REJECT")
+        ? "REJECT"
+        : "UNCLEAR";
   } catch {
     return scriptedReviewVerdict(text);
   }
@@ -300,8 +315,20 @@ function startResumeIdleEcho(
       events:
         scenarioId === "approval"
           ? [
-              { type: "APPROVE", label: "Approve", style: "primary", jsonSchema: null, needsPayload: false },
-              { type: "REJECT", label: "Reject", style: "danger", jsonSchema: null, needsPayload: false },
+              {
+                type: "APPROVE",
+                label: "Approve",
+                style: "primary",
+                jsonSchema: null,
+                needsPayload: false,
+              },
+              {
+                type: "REJECT",
+                label: "Reject",
+                style: "danger",
+                jsonSchema: null,
+                needsPayload: false,
+              },
             ]
           : [],
       textEvent: null,

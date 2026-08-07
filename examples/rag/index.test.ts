@@ -28,8 +28,5 @@ test("accumulates conversational memory across a turn", async () => {
     generateText,
   });
 
-  expect(result.memory).toEqual([
-    "Q: What is a guard?",
-    "A: a guard is a condition",
-  ]);
+  expect(result.memory).toEqual(["Q: What is a guard?", "A: a guard is a condition"]);
 });

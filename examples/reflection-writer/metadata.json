@@ -8,9 +8,7 @@
     "url": "https://langchain-ai.github.io/langgraph/tutorials/reflection/reflection/"
   },
   "comparison": {
-    "targets": [
-      "LangGraph"
-    ],
+    "targets": ["LangGraph"],
     "purpose": "A writer drafts an essay, a critic grades it in prose, and the feedback loops back into a revision until the critic is satisfied or the revision budget runs out."
   },
   "starters": [

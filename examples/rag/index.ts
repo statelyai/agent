@@ -246,11 +246,7 @@ export interface RAGResult {
 
 /** Retrieves against the sample corpus and answers grounded on the results. */
 export async function runRAGExample(options: RunRAGOptions = {}): Promise<RAGResult> {
-  const {
-    question = "What is context in a state machine?",
-    generateText,
-    onTransition,
-  } = options;
+  const { question = "What is context in a state machine?", generateText, onTransition } = options;
 
   const result = await runAgent(ragMachine, {
     input: { question },

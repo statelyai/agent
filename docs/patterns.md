@@ -19,29 +19,12 @@ Each pattern is a single self-contained `index.ts`: no shared harness, no local 
    pnpm add -D @types/node typescript tsx
    ```
 
-3. The examples use Node globals (`process`, `console`, `import.meta.url`), so give TypeScript a `tsconfig.json` with `"types": ["node"]`:
-
-   ```json
-   {
-     "compilerOptions": {
-       "module": "nodenext",
-       "moduleResolution": "nodenext",
-       "target": "es2022",
-       "strict": true,
-       "types": ["node"]
-     }
-   }
-   ```
-
+3. The examples use Node globals (`process`, `console`, `import.meta.url`), so give TypeScript a `tsconfig.json` with `"module"`/`"moduleResolution"` set to `nodenext`, `"strict": true`, and `"types": ["node"]`.
 4. Run it: `OPENAI_API_KEY=... npx tsx index.ts` (or swap in [any host](hosts.md)).
 
 <!-- peer ranges from package.json#peerDependencies and example schema dependency from package.json#devDependencies -->
 
-Version notes:
-
-- Peer ranges (from `@statelyai/agent`): `ai@^6.0.67`, `xstate@>=6.0.0-alpha.25 <6.0.0`, and optional `@opentelemetry/api@^1`.
-- The examples use Zod 4 directly.
-- The `@alpha` tag resolves to the latest prerelease; pin the exact version it installs once you have a build that works.
+Peer ranges from `@statelyai/agent`: `ai@^6.0.67`, `xstate@>=6.0.0-alpha.25 <6.0.0`, optional `@opentelemetry/api@^1`. The examples use Zod 4 directly. The `@alpha` tag floats, so pin the exact version it installs once you have a build that works.
 
 ## Running from the repo
 
@@ -53,8 +36,7 @@ OPENAI_API_KEY=... npx tsx examples/<name>/index.ts
 
 - Every example is dual-mode: run it against a real model as above, or drive it with injected mock executors in a test (no key, no network).
 - Most expect `OPENAI_API_KEY`; each file notes what it needs at the top. `anthropic-sdk-host` wants `ANTHROPIC_API_KEY`; the two Cloudflare examples target a Workers runtime, not Node/`tsx`.
-- Swap the host without touching the machine (see [Use in any stack](any-stack.md)).
-- The exhaustive index, with framework-comparison notes, is [examples/README.md](../examples/README.md).
+- Swap the host without touching the machine ([Use in any stack](any-stack.md)). The exhaustive index, with framework-comparison notes, is [examples/README.md](../examples/README.md).
 
 ## Core ideas
 
@@ -68,6 +50,8 @@ The core ideas: text requests, decisions, messages, and JSON authoring.
 - [json-agent](../examples/json-agent/index.ts): a full workflow (decision, text request, idle human step) authored as a real `.json` file. See [Machines as data](machines-as-data.md).
 - [described-workflow](../examples/described-workflow/index.ts): a plain XState machine with zero invokes (prompts live in state `description`s and `meta`), run via `runAgent`'s `getRequests` option.
 
+**Canonical example: [`twenty-questions`](../examples/twenty-questions/index.ts).**
+
 ## Reasoning and tool loops
 
 For tool use, start with **Tool calling**: your SDK runs the tool loop inside one request, in one machine state. **ReAct** is the same loop unrolled into explicit states, for when individual turns need gating (approval before a tool, a spend guard, a snapshot mid-loop).
@@ -80,6 +64,8 @@ For tool use, start with **Tool calling**: your SDK runs the tool loop inside on
 - **Self-correcting codegen** ([code-assistant](../examples/code-assistant/index.ts)): a sandboxed check actor and a `maxAttempts` bound ending in an explicit `failed` outcome.
 - **Tree search (LATS)** ([lats](../examples/lats/index.ts)): selection, expansion, and reflection scoring as separate states under a rollout budget.
 
+**Canonical example: [`react-agent`](../examples/react-agent/index.ts).**
+
 ## Retrieval
 
 - **RAG** ([rag](../examples/rag/index.ts)): retrieve and answer are separate typed states; conversational memory lives in context.
@@ -88,14 +74,56 @@ For tool use, start with **Tool calling**: your SDK runs the tool loop inside on
 - **Deep research** ([deep-research](../examples/deep-research/index.ts)): researchers spawn per query; coverage reflection gates one optional follow-up.
 - **SQL agent** ([sql-agent](../examples/sql-agent/index.ts)): query generation, DB execution, and synthesis are separately testable states.
 
+**Canonical example: [`corrective-rag`](../examples/corrective-rag/index.ts).**
+
 ## Routing and chaining
+
+Routing is one decision state whose legal events are the branches. Each branch is a real state, so an unreachable branch is a lint finding, not a silent dead end.
+
+```mermaid
+flowchart LR
+  C["classifying<br/>agent.decide"] -->|BILLING| B["billing"]
+  C -->|TECHNICAL| T["technical"]
+  C -->|OTHER| O["fallback"]
+  B --> D["answering"]
+  T --> D
+  O --> D
+```
 
 - **Routing** ([ai-sdk-routing](../examples/ai-sdk-routing/index.ts)): the route is a decision over legal events; each branch is its own state.
 - **Prompt chaining** ([ai-sdk-marketing-chain](../examples/ai-sdk-marketing-chain/index.ts)): a linear state sequence, each link independently typed and inspectable.
 - **Parallel review** ([ai-sdk-parallel-review](../examples/ai-sdk-parallel-review/index.ts)): parallel states fan out; the join is a plain aggregation state.
 - **Triage** ([triage](../examples/triage/index.ts)): structured output validated against a schema before it leaves the state.
 
+**Canonical example: [`ai-sdk-routing`](../examples/ai-sdk-routing/index.ts).**
+
 ## Multi-agent
+
+A supervisor is a routing state over typed workers, and the graph is the org chart. One level up, hierarchical teams nest the same shape: each team is a machine with a typed boundary, and the coordinator can send one bounded revision round back down.
+
+```mermaid
+flowchart TB
+  S["supervisor<br/>agent.decide"] -->|RESEARCH| R["research team"]
+  S -->|WRITE| W["writer"]
+  R --> RW["worker loop"] --> R
+  R -->|done| S
+  W -->|done| S
+  S --> F["final"]
+```
+
+Orchestrator-worker fans the same idea out in parallel and joins deterministically. Swarm handoff drops the hub entirely: agents are peers and a handoff is a transition, persisted across turns.
+
+```mermaid
+flowchart LR
+  subgraph OW["Orchestrator-worker"]
+    P["plan"] --> W1["worker 1"] --> J["join"]
+    P --> W2["worker 2"] --> J
+  end
+  subgraph SW["Swarm handoff"]
+    A["triage agent"] -->|HANDOFF| B["refunds agent"]
+    B -->|HANDOFF| A
+  end
+```
 
 - **Supervisor** ([supervisor](../examples/supervisor/index.ts)): a routing request's structured output hands off to a typed worker; the graph is the org chart.
 - **Swarm handoff** ([swarm-handoff](../examples/swarm-handoff/index.ts)): handoffs are transitions between typed child actors, persisted across turns.
@@ -105,7 +133,7 @@ For tool use, start with **Tool calling**: your SDK runs the tool loop inside on
 - **Whole-org workflow** ([trading-team](../examples/trading-team/index.ts)): one composite workflow whose reject-and-revise loop is states, not retries.
 - **Sub-agents** ([subflows](../examples/subflows/index.ts), [ai-sdk-sub-agents](../examples/ai-sdk-sub-agents/index.ts), [debate-sub-agents](../examples/debate-sub-agents/index.ts)): each child keeps its own executor binding; parents stay typed against results.
 
-See [Multi-agent](multi-agent.md) for sub-agents and child actors.
+**Canonical example: [`supervisor`](../examples/supervisor/index.ts).** See [Multi-agent](multi-agent.md) for sub-agents and child actors.
 
 ## Control and safety
 
@@ -119,7 +147,7 @@ Longer pauses and durable threads:
 - [long-running-onboarding](../examples/long-running-onboarding/index.ts): a multi-day coordinator with durable typed state, two idle states, delegated IT provisioning, JSON snapshot resume.
 - [file-snapshot-store](../examples/file-snapshot-store/index.ts): a file-backed snapshot store for durable threads across processes.
 
-See [Human in the loop](human-in-the-loop.md) for the idle-first pause and snapshot resume.
+**Canonical example: [`human-in-the-loop`](../examples/human-in-the-loop/index.ts).** See [Human in the loop](human-in-the-loop.md) for the idle-first pause and snapshot resume.
 
 ## Hosts and runtimes
 
@@ -134,14 +162,19 @@ The same machines against different SDKs and runtimes. See [Hosts](hosts.md) and
 - [parallel-streams](../examples/parallel-streams/index.ts): fan-out over parallel worker streams relayed through a side channel.
 - [sse-transport](../examples/sse-transport/index.ts): relaying provider stream chunks over an SSE transport.
 
+**Canonical example: [`ai-sdk-host`](../examples/ai-sdk-host/index.ts).**
+
 ## Evaluation, migration, observability
 
 - [simulated-user-evaluation](../examples/simulated-user-evaluation/index.ts): a target chatbot and simulated user alternate under a turn bound, then an independent judge scores the transcript.
 - [retrofit](../examples/retrofit/index.ts): a tangled hand-rolled agent (`before.ts`) refactored stepwise into a machine, each step shippable, with `simulateAgent` tests pinning before/after behavior. The worked proof for [Migrating from a loop](from-a-loop.md).
 - [langsmith-otel](../examples/langsmith-otel/index.ts): `createOtelTraceHandler` from `@statelyai/agent/otel` exporting real spans over OTLP to LangSmith (LangChain's hosted tracing product); keyless it exports to memory and prints the span tree. See [Observability](observability.md).
 
+**Canonical example: [`retrofit`](../examples/retrofit/index.ts).**
+
 ## Related
 
 - [examples/README.md](../examples/README.md): the exhaustive example index, including framework-comparison notes.
 - [Use in any stack](any-stack.md): take any of these machines from local `runAgent` to your server or edge runtime, unchanged.
 - [Migrating from a hand-rolled loop](from-a-loop.md): already have a `while` loop? Convert it step by step.
+- [Thinking in state machines](thinking-in-state-machines.md): how to find the states before you pick a pattern.

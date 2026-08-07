@@ -8,10 +8,7 @@
     "url": "https://ai-sdk.dev/docs/agents/workflows#routing"
   },
   "comparison": {
-    "targets": [
-      "Vercel AI SDK",
-      "routing"
-    ],
+    "targets": ["Vercel AI SDK", "routing"],
     "purpose": "Classifies an incoming ticket, then hands it to the matching specialist reply \u2014 the AI SDK routing workflow as an explicit XState machine."
   },
   "starters": [

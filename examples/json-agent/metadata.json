@@ -8,9 +8,7 @@
     "url": null
   },
   "comparison": {
-    "targets": [
-      "Flowise"
-    ],
+    "targets": ["Flowise"],
     "purpose": "Shows a full agent workflow \u2014 decision, text request, idle human-in-the-loop step \u2014 authored as a real .json file and lowered by setupAgent.fromConfig(...) into the same runnable XState machine as TS authoring."
   },
   "starters": [

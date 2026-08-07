@@ -3,12 +3,10 @@ import { plainWriterMachine, runPlainXstateExample } from "./index.js";
 
 describe("plain-xstate", () => {
   test("drives the plain machine to completion when the model approves", async () => {
-    const result = await runPlainXstateExample(
-      {
-        generateText: async () => ({ output: "A crisp, concrete launch blurb." }),
-        decide: async () => ({ event: { type: "APPROVE" } }),
-      },
-    );
+    const result = await runPlainXstateExample({
+      generateText: async () => ({ output: "A crisp, concrete launch blurb." }),
+      decide: async () => ({ event: { type: "APPROVE" } }),
+    });
 
     expect(result.decisions).toEqual(["APPROVE"]);
     expect(result.attempts).toBe(1);
@@ -17,16 +15,14 @@ describe("plain-xstate", () => {
 
   test("loops through REVISE and re-drafts, then approves", async () => {
     let judged = 0;
-    const result = await runPlainXstateExample(
-      {
-        generateText: async () => ({ output: "draft" }),
-        // REVISE the first two rounds, then APPROVE.
-        decide: async () => {
-          judged += 1;
-          return { event: { type: judged <= 2 ? "REVISE" : "APPROVE" } };
-        },
+    const result = await runPlainXstateExample({
+      generateText: async () => ({ output: "draft" }),
+      // REVISE the first two rounds, then APPROVE.
+      decide: async () => {
+        judged += 1;
+        return { event: { type: judged <= 2 ? "REVISE" : "APPROVE" } };
       },
-    );
+    });
 
     // draft → judge(REVISE) → draft → judge(REVISE) → draft → judge(APPROVE)
     expect(result.decisions).toEqual(["REVISE", "REVISE", "APPROVE"]);

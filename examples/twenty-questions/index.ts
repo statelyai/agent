@@ -324,11 +324,7 @@ function withGuessFeedback(
   return {
     agentScore: context.agentScore + (correct ? 1 : 0),
     userScore: context.userScore + (correct ? 0 : 1),
-    messages: [
-      ...context.messages,
-      userMessage(rawAnswer),
-      assistantMessage(PLAY_AGAIN_PROMPT),
-    ],
+    messages: [...context.messages, userMessage(rawAnswer), assistantMessage(PLAY_AGAIN_PROMPT)],
     pendingRawAnswer: null,
     question: PLAY_AGAIN_PROMPT,
   };

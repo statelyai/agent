@@ -8,10 +8,7 @@
     "url": null
   },
   "comparison": {
-    "targets": [
-      "LangGraph",
-      "Burr"
-    ],
+    "targets": ["LangGraph", "Burr"],
     "purpose": "Looks up relevant passages in a small corpus, answers only from what it found, and remembers the conversation across turns."
   },
   "starters": [

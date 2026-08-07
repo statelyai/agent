@@ -8,10 +8,7 @@
     "url": null
   },
   "comparison": {
-    "targets": [
-      "LangGraph",
-      "hand-rolled loop"
-    ],
+    "targets": ["LangGraph", "hand-rolled loop"],
     "purpose": "Writes and revises a product launch blurb using an ordinary XState machine that knows nothing about the agent library \u2014 the runtime picks the next event from the ones the machine accepts."
   },
   "starters": [

@@ -13,13 +13,13 @@ Tools belong to a **request**, not to machine states. The machine decides _when_
 
 `AgentTool` is a minimal structural contract, so tools from any SDK drop in unchanged:
 
-| Field          | Type                                   | Meaning                                          |
-| -------------- | -------------------------------------- | ------------------------------------------------ |
-| `description?` | `string`                               | What the model reads to decide whether to call.  |
-| `inputSchema?` | Standard Schema or any schema object   | Arguments contract.                              |
-| `outputSchema?`| Standard Schema or any schema object   | Result contract, when the host wants one.        |
-| `execute?`     | `(...args) => unknown`                 | The implementation the host runs.                |
-| anything else  | `unknown`                              | Passed through untouched (`providerOptions`, …). |
+| Field           | Type                                 | Meaning                                          |
+| --------------- | ------------------------------------ | ------------------------------------------------ |
+| `description?`  | `string`                             | What the model reads to decide whether to call.  |
+| `inputSchema?`  | Standard Schema or any schema object | Arguments contract.                              |
+| `outputSchema?` | Standard Schema or any schema object | Result contract, when the host wants one.        |
+| `execute?`      | `(...args) => unknown`               | The implementation the host runs.                |
+| anything else   | `unknown`                            | Passed through untouched (`providerOptions`, …). |
 
 - A bare function is shorthand for `execute` (`AgentToolExecute`).
 - `AgentTools` is `Record<string, AgentTool | undefined>`, keyed by tool name.

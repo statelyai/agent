@@ -47,7 +47,8 @@ export const scenarios: Scenario[] = [
     id: "refund",
     name: "Refund guard",
     eyebrow: "Guarded decision",
-    description: "The model proposes a refund; a policy state, not the model, enforces the $100 limit.",
+    description:
+      "The model proposes a refund; a policy state, not the model, enforces the $100 limit.",
     placeholder: "I need a $184 refund for a damaged delivery.",
     startLabel: "Assess refund",
     starters: [
@@ -60,7 +61,8 @@ export const scenarios: Scenario[] = [
     id: "approval",
     name: "Human approval",
     eyebrow: "Human in the loop",
-    description: "The model drafts an update. A person must approve it before the machine can publish.",
+    description:
+      "The model drafts an update. A person must approve it before the machine can publish.",
     placeholder: "Draft a production update about a delayed database migration.",
     startLabel: "Draft update",
     starters: [
@@ -86,7 +88,8 @@ export const scenarios: Scenario[] = [
     id: "research",
     name: "Parallel research",
     eyebrow: "Parallel states",
-    description: "Two model calls run concurrently; the machine waits for both before synthesizing.",
+    description:
+      "Two model calls run concurrently; the machine waits for both before synthesizing.",
     placeholder: "Analyze the risks and opportunities of adopting passkeys.",
     startLabel: "Start research",
     starters: [
@@ -99,7 +102,8 @@ export const scenarios: Scenario[] = [
     name: "Plan, execute, verify",
     eyebrow: "Sequential workflow",
     description: "Three model calls with separate states, outputs, and failure boundaries.",
-    placeholder: "Turn these notes into a launch update: faster sync, safer retries, gradual rollout.",
+    placeholder:
+      "Turn these notes into a launch update: faster sync, safer retries, gradual rollout.",
     startLabel: "Run workflow",
     starters: [
       "Turn these notes into a launch update: faster sync, safer retries, gradual rollout.",
@@ -110,7 +114,8 @@ export const scenarios: Scenario[] = [
     id: "retry",
     name: "Retry & fallback",
     eyebrow: "Bounded recovery",
-    description: "The machine owns the retry budget and switches to a fallback model when the primary fails.",
+    description:
+      "The machine owns the retry budget and switches to a fallback model when the primary fails.",
     placeholder: "Classify this ticket: I was charged twice and cannot open my invoice.",
     startLabel: "Classify ticket",
     starters: [
@@ -122,7 +127,8 @@ export const scenarios: Scenario[] = [
     id: "tools",
     name: "Tool loop",
     eyebrow: "ReAct, capped",
-    description: "The model calls tools or finishes each turn; the machine caps the loop and forces an answer.",
+    description:
+      "The model calls tools or finishes each turn; the machine caps the loop and forces an answer.",
     placeholder: "What is 42 times 17, and what is the speed of light?",
     startLabel: "Run agent",
     starters: [
@@ -134,7 +140,8 @@ export const scenarios: Scenario[] = [
     id: "reflection",
     name: "Reflection",
     eyebrow: "Score & revise",
-    description: "A writer drafts, an evaluator scores; the machine loops until good enough or the budget is spent.",
+    description:
+      "A writer drafts, an evaluator scores; the machine loops until good enough or the budget is spent.",
     placeholder: "Write a vivid one-paragraph description of a tidal shoreline at dusk.",
     startLabel: "Write & refine",
     starters: [

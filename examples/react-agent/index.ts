@@ -329,11 +329,7 @@ export interface ReactAgentResult {
 export async function runReactAgentExample(
   options: RunReactAgentOptions = {},
 ): Promise<ReactAgentResult> {
-  const {
-    question = "How many seconds are there in 3 days?",
-    generateText,
-    onProgress,
-  } = options;
+  const { question = "How many seconds are there in 3 days?", generateText, onProgress } = options;
 
   const progress: string[] = [];
   const result = await runAgent(reactAgentMachine, {

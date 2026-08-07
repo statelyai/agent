@@ -9,7 +9,8 @@ test("viz config is plain JSON with static transition targets, no functions", ()
   const json = JSON.stringify(config);
   expect(json).not.toContain("[fn]");
   // Object-form event transition keeps its static target (draws the edge).
-  const deciding = (config.states as Record<string, { on?: Record<string, { target: string }> }>).deciding;
+  const deciding = (config.states as Record<string, { on?: Record<string, { target: string }> }>)
+    .deciding;
   expect(deciding.on?.AUTO_REFUND.target).toBe("checkingLimit");
   // Idle state carries its human-wait meta through to the embed.
   const awaiting = (config.states as Record<string, { meta?: unknown }>).awaitingApproval;
@@ -27,18 +28,16 @@ test("every scenario has a serializable viz config and raw source", () => {
 });
 
 test("inspection sends the primary machine as raw source", () => {
-  expect(
-    machineForInspection(
-      { logic: refundMachine },
-      refundMachine,
-      scenarioSource.refund,
-    ),
-  ).toBe(scenarioSource.refund);
+  expect(machineForInspection({ logic: refundMachine }, refundMachine, scenarioSource.refund)).toBe(
+    scenarioSource.refund,
+  );
 });
 
 test("viz message trust check matches source frame and origin", () => {
   const frame = {} as Window;
   const origin = getTargetOrigin("https://editor.stately.ai/embed?auth=message");
   expect(isTrustedVizMessage({ origin, source: frame }, frame, origin)).toBe(true);
-  expect(isTrustedVizMessage({ origin: "https://evil.test", source: frame }, frame, origin)).toBe(false);
+  expect(isTrustedVizMessage({ origin: "https://evil.test", source: frame }, frame, origin)).toBe(
+    false,
+  );
 });

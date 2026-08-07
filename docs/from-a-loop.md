@@ -20,7 +20,7 @@ const result = await generateResult(machine, { input, executors });
 
 Your `generateText` call did not go away; it moved into the executors. The loop you wrote around it became the machine. And like `generateText`, the result carries metadata alongside the value: `result.output`, plus `result.snapshot`, the replayable `result.events`, and the aggregated `result.usage`.
 
-If you already have a state machine and want to bind LLM work to it, start from [XState machines as agent workflows](xstate-as-agent-workflow.md) instead.
+For the design move underneath this refactor (how to spot the states hiding in a loop before you write any of them down), read [Thinking in state machines](thinking-in-state-machines.md).
 
 ## Start: a hand-rolled loop
 
@@ -279,4 +279,4 @@ The same conversion works from shapes other than a `while` loop:
 - [plain-xstate](../examples/plain-xstate/index.ts): a bog-standard XState machine driven with no agent-specific setup.
 - [described-workflow](../examples/described-workflow/index.ts): prompts written as state `description`s, run via `runAgent`'s `getRequests` option.
 - [todo-nl](../examples/todo-nl/index.ts): natural-language commands mapped onto machine events.
-- [XState machines as agent workflows](xstate-as-agent-workflow.md): the same path starting from a machine you already have.
+- [Thinking in state machines](thinking-in-state-machines.md): the design tutorial behind this refactor, worked end to end on one triage agent.

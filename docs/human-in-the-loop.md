@@ -122,6 +122,62 @@ const second = await runAgent(machine, {
 
 > **`persistedSnapshot` vs `snapshot`.** An idle result always carries `snapshot`, the live settled snapshot. It also carries `persistedSnapshot` when the settle left pending `agent.userInput` invokes, because the live `snapshot` cannot round-trip active children: persisting it in that case silently drops those invokes, and the loss only surfaces on resume. Persist `result.persistedSnapshot ?? result.snapshot` and both cases are covered.
 
+## Rules of resume
+
+<!-- verified against src/run-agent.ts (resume checks, onIllegalResumeEvent, onVersionMismatch, migrateSnapshot) and src/event-log-store.ts (fork, append) -->
+
+**Resume with an event the restored state accepts.** `runAgent` checks legality before starting the actor and throws `AgentIllegalResumeEventError` (`eventType`, `acceptedTypes`) rather than silently dropping the event.
+
+```ts no-check
+// Wrong: the event the UI showed five minutes ago may no longer be legal.
+await runAgent(machine, { snapshot, event: { type: "APPROVE" }, executors });
+
+// Right: read the legal set off the restored snapshot, or validate at the boundary.
+const choices = getAcceptedEvents(snapshot); // { type, toolName, schema? }[]
+await runAgent(machine, { snapshot, event: parseAgentEvent(snapshot, payload), executors });
+```
+
+**Persist before you surface anything to the human.** `runAgent` owns no store and stops its actor on every settle path, so an unpersisted snapshot is gone the moment the process is. Persist `persistedSnapshot ?? snapshot`, because the live snapshot cannot round-trip pending `agent.userInput` invokes.
+
+```ts no-check
+// Wrong: the notification can outlive the process that holds the only copy.
+notifyReviewer(result.snapshot);
+
+// Right: durable first, then tell the human.
+await store.save(threadId, persistSnapshot(result.persistedSnapshot ?? result.snapshot));
+notifyReviewer(threadId);
+```
+
+**Give a divergent resume its own thread.** Nothing in `runAgent` tracks thread identity, so resuming one persisted snapshot twice just runs it twice. The log layer is where branching is enforced: `fork` demands a `newThreadId` and refuses a thread that already has entries, and `append` rejects duplicate event ids within a thread.
+
+```ts no-check
+// Wrong: two resumes of the same snapshot, both appending to one thread.
+await store.append({ threadId: "session-1", expectedIndex: 7, entries: branchA });
+await store.append({ threadId: "session-1", expectedIndex: 7, entries: branchB }); // conflict
+
+// Right: fork first, then let each branch own its thread.
+await store.fork({ threadId: "session-1", newThreadId: "session-1-alt", upToIndex: 7 });
+await store.append({ threadId: "session-1-alt", expectedIndex: 7, entries: branchB });
+```
+
+**Match the machine version, or migrate deliberately.** A snapshot stamped by an older machine shape resumes into transitions that may no longer exist, so `runAgent` throws `AgentSnapshotVersionMismatchError` (`from`, `to`, `machineId`) by default.
+
+```ts no-check
+// Wrong: silencing the check leaves the snapshot pointing at a state that moved.
+await runAgent(machine, { snapshot, event, executors, onVersionMismatch: "ignore" });
+
+// Right: adapt the old shape, or pin an explicit version you control.
+await runAgent(machine, {
+  snapshot,
+  event,
+  executors,
+  machineVersion: "2025-11-04",
+  migrateSnapshot: (old, { from, to }) => upgradeSnapshot(old, from, to),
+});
+```
+
+Details on the last two: [Illegal resume events](#illegal-resume-events) and [Machine-version resume](#machine-version-resume).
+
 ## The human's choices
 
 <!-- getAcceptedEvents from src/events.ts -->

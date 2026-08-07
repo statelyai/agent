@@ -4,11 +4,7 @@
   "ignoreWorkspaces": ["demo"],
   "workspaces": {
     ".": {
-      "entry": [
-        "src/**/*.test.ts",
-        "examples/**/*.{ts,tsx}",
-        "fixtures/dts-consumer/index.ts"
-      ],
+      "entry": ["src/**/*.test.ts", "examples/**/*.{ts,tsx}", "fixtures/dts-consumer/index.ts"],
       "project": ["src/**/*.ts", "examples/**/*.{ts,tsx}"]
     },
     "examples/next-host": {

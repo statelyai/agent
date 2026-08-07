@@ -94,7 +94,10 @@ async function play(options: PlayOptions) {
   while (result.status === "idle") {
     // Every idle state must advertise how a host can unblock it.
     const interaction = getStateMeta(result.snapshot).interaction;
-    expect(interaction, `no interaction meta on ${JSON.stringify(result.snapshot.value)}`).toBeDefined();
+    expect(
+      interaction,
+      `no interaction meta on ${JSON.stringify(result.snapshot.value)}`,
+    ).toBeDefined();
     prompts.push(idlePrompt(result.snapshot));
     interactions.push({
       events: Object.keys(interaction!.events ?? {}),

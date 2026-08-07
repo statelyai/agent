@@ -39,7 +39,7 @@ The payload is a discriminated union on `type`:
 | `type`               | Key fields                                              | Notes                                                                                                                                                                    |
 | -------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `run.start`          | `input?`, `snapshot?`, `event?`                         | Run boundary; controlled path only.                                                                                                                                      |
-| `request.start`      | `request`                                               | One per model call (text or decision).                                                                                                                            |
+| `request.start`      | `request`                                               | One per model call (text or decision).                                                                                                                                   |
 | `request.end`        | `request`, `output`, `raw`, `reasoning?`, `usage?`      | `raw` is your executor's verbatim result (usage, tool calls); `reasoning` and `usage` present only when the executor surfaced them.                                      |
 | `request.error`      | `request`, `error`                                      | The model call threw.                                                                                                                                                    |
 | `stream.chunk`       | `request`, `chunk`                                      | Each streamed chunk of a `mode: 'stream'` request.                                                                                                                       |
@@ -244,23 +244,23 @@ The run span nests under whatever span is active when the run starts, so an agen
 
 ### Span mapping
 
-| Trace event          | OTel                                                                                                                                             |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `run.start`          | Opens the run span: `invoke_agent <machineId>`, `INTERNAL`.                                                                                      |
-| `request.start`      | Opens a child span per model call: `chat <model>` (`CLIENT`) for text and decision requests. |
-| `request.end`        | Token usage onto the request span, status `OK`, span ends.                                                                                       |
-| `request.error`      | `recordException` + `error.type`, status `ERROR`, span ends.                                                                                     |
-| `stream.chunk`       | Counted; lands as `agent.stream_chunks` on the request span.                                                                                     |
-| `machine.transition` | Span event `agent.transition` on the run span (`agent.event_type`, `agent.state`, `agent.event_id?`).                                            |
-| `emit`               | Span event `agent.emit` on the run span.                                                                                                         |
-| `usage.dropped`      | Span event `agent.usage.dropped` with the reason and the dropped call's tokens.                                                                  |
-| `run.end`            | `agent.status` + span status (`ERROR` records the cause), run span ends.                                                                         |
+| Trace event          | OTel                                                                                                  |
+| -------------------- | ----------------------------------------------------------------------------------------------------- |
+| `run.start`          | Opens the run span: `invoke_agent <machineId>`, `INTERNAL`.                                           |
+| `request.start`      | Opens a child span per model call: `chat <model>` (`CLIENT`) for text and decision requests.          |
+| `request.end`        | Token usage onto the request span, status `OK`, span ends.                                            |
+| `request.error`      | `recordException` + `error.type`, status `ERROR`, span ends.                                          |
+| `stream.chunk`       | Counted; lands as `agent.stream_chunks` on the request span.                                          |
+| `machine.transition` | Span event `agent.transition` on the run span (`agent.event_type`, `agent.state`, `agent.event_id?`). |
+| `emit`               | Span event `agent.emit` on the run span.                                                              |
+| `usage.dropped`      | Span event `agent.usage.dropped` with the reason and the dropped call's tokens.                       |
+| `run.end`            | `agent.status` + span status (`ERROR` records the cause), run span ends.                              |
 
 Attributes follow the [GenAI semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-agent-spans.md) (Development stability, tracking core semconv v1.43.0):
 
 | Attribute                                                                                 | From                                                                                      |
 | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `gen_ai.operation.name`                                                                   | `invoke_agent` (run), `chat` (request).                                         |
+| `gen_ai.operation.name`                                                                   | `invoke_agent` (run), `chat` (request).                                                   |
 | `gen_ai.agent.name` / `gen_ai.agent.version`                                              | `machineId` (or the `agentName` option) / `machineVersion`.                               |
 | `gen_ai.request.model`                                                                    | The model ref the request targets.                                                        |
 | `gen_ai.provider.name`                                                                    | The `providerName` option. Not inferable from a model ref, so unset unless you pass it.   |
@@ -315,13 +315,13 @@ const onTrace = createOtelTraceHandler({ tracer: provider.getTracer("my-app") })
 
 Endpoints and header names drift, so each vendor's linked docs page is the authority.
 
-| Vendor     | Endpoint                                                  | Headers                                                                    | Docs                                                                                     |
-| ---------- | --------------------------------------------------------- | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| LangSmith  | `https://api.smith.langchain.com/otel/v1/traces`          | `x-api-key`, optional `Langsmith-Project`                                  | [Docs](https://docs.langchain.com/langsmith/trace-with-opentelemetry)                    |
-| Braintrust | `https://api.braintrust.dev/otel/v1/traces`               | `Authorization: Bearer <key>`, `x-bt-parent` (`project_name:<name>`)       | [Docs](https://www.braintrust.dev/docs/integrations/sdk-integrations/opentelemetry)      |
-| Langfuse   | `https://cloud.langfuse.com/api/public/otel/v1/traces`    | `Authorization: Basic <base64(publicKey:secretKey)>`, `x-langfuse-ingestion-version: 4` | [Docs](https://langfuse.com/integrations/native/opentelemetry)              |
-| Honeycomb  | `https://api.honeycomb.io/v1/traces`                      | `x-honeycomb-team` (`x-honeycomb-dataset` on Classic only)                 | [Docs](https://docs.honeycomb.io/send-data/opentelemetry/)                               |
-| Datadog    | `https://otlp.datadoghq.com/v1/traces` (US1)              | `dd-api-key`                                                               | [Docs](https://docs.datadoghq.com/opentelemetry/setup/otlp_ingest/)                      |
+| Vendor     | Endpoint                                               | Headers                                                                                 | Docs                                                                                |
+| ---------- | ------------------------------------------------------ | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| LangSmith  | `https://api.smith.langchain.com/otel/v1/traces`       | `x-api-key`, optional `Langsmith-Project`                                               | [Docs](https://docs.langchain.com/langsmith/trace-with-opentelemetry)               |
+| Braintrust | `https://api.braintrust.dev/otel/v1/traces`            | `Authorization: Bearer <key>`, `x-bt-parent` (`project_name:<name>`)                    | [Docs](https://www.braintrust.dev/docs/integrations/sdk-integrations/opentelemetry) |
+| Langfuse   | `https://cloud.langfuse.com/api/public/otel/v1/traces` | `Authorization: Basic <base64(publicKey:secretKey)>`, `x-langfuse-ingestion-version: 4` | [Docs](https://langfuse.com/integrations/native/opentelemetry)                      |
+| Honeycomb  | `https://api.honeycomb.io/v1/traces`                   | `x-honeycomb-team` (`x-honeycomb-dataset` on Classic only)                              | [Docs](https://docs.honeycomb.io/send-data/opentelemetry/)                          |
+| Datadog    | `https://otlp.datadoghq.com/v1/traces` (US1)           | `dd-api-key`                                                                            | [Docs](https://docs.datadoghq.com/opentelemetry/setup/otlp_ingest/)                 |
 
 - Regional hosts swap the subdomain: LangSmith `eu.`/`apac.`/`aws.`, Braintrust `api-eu.`, Langfuse `us.`/`jp.`/`hipaa.` or self-hosted, Honeycomb `api.eu1.`.
 - Datadog's host depends on your site, and Datadog still recommends the Agent or Collector for production traffic. Its `trace.agent.datadoghq.com` intake is proprietary, not OTLP.

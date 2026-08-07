@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { SchemaForm } from "@/components/ui/schema-form";
-import { schemaFields, type AcceptedEvent, type ChatIdle, type SchemaField } from "@/lib/machine-ui";
+import {
+  schemaFields,
+  type AcceptedEvent,
+  type ChatIdle,
+  type SchemaField,
+} from "@/lib/machine-ui";
 
 type EventActionsProps = {
   idle: ChatIdle;
@@ -44,7 +49,10 @@ export function EventActions({ idle, onSendEvent }: EventActionsProps) {
         />
       );
     }
-    if (idle.component === "cards" && (field?.kind.type === "string" || field?.kind.type === "enum")) {
+    if (
+      idle.component === "cards" &&
+      (field?.kind.type === "string" || field?.kind.type === "enum")
+    ) {
       return (
         <CardsControl
           title={idle.prompt ?? "Your hand: pick a rank to ask for"}

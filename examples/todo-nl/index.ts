@@ -230,10 +230,7 @@ export const todoMachine = agentSetup.createMachine({
         // Each applied event goes to `applying`, which loops straight back to
         // `planning` — that re-entry starts the next decide step.
         ADD_TODO: ({ context, event }) => {
-          const todos = [
-            ...context.todos,
-            { id: context.nextId, title: event.title, done: false },
-          ];
+          const todos = [...context.todos, { id: context.nextId, title: event.title, done: false }];
           return {
             target: "applying" as const,
             context: {
@@ -345,9 +342,7 @@ export async function runTodoNlExample(options?: {
   const queued = [...(options?.commands ?? [])];
 
   const shared = {
-    executors: options?.decide
-      ? { decide: options.decide }
-      : createAiSdkExecutors({ models }),
+    executors: options?.decide ? { decide: options.decide } : createAiSdkExecutors({ models }),
     ...(options?.onTransition ? { onTransition: options.onTransition } : {}),
   };
 

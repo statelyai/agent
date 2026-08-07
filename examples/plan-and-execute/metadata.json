@@ -8,10 +8,7 @@
     "url": "https://github.com/langchain-ai/langgraphjs/tree/main/examples"
   },
   "comparison": {
-    "targets": [
-      "plan-and-execute",
-      "ReWOO"
-    ],
+    "targets": ["plan-and-execute", "ReWOO"],
     "purpose": "A planner writes out the steps, each step is worked through in order, and a solver composes the final answer from what was gathered."
   },
   "starters": [

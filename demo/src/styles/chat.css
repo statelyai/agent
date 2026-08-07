@@ -137,7 +137,9 @@
   font-size: 13px;
   text-align: left;
   cursor: pointer;
-  transition: border-color 120ms ease, color 120ms ease;
+  transition:
+    border-color 120ms ease,
+    color 120ms ease;
 }
 
 .chat-starter:hover {
@@ -163,7 +165,6 @@
 .assistant-markdown p:last-child {
   margin-bottom: 0;
 }
-
 
 /* ---------- action echo chip ---------- */
 .chat-echo {
@@ -348,7 +349,9 @@
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  transition: border-color 120ms ease, background 120ms ease;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease;
 }
 
 .chat-restart:hover {
@@ -378,7 +381,10 @@
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    color 120ms ease;
 }
 
 .chat-action:hover {
@@ -564,7 +570,9 @@
   font-family: var(--font-mono);
   font-size: 12px;
   cursor: pointer;
-  transition: translate 120ms ease, border-color 120ms ease;
+  transition:
+    translate 120ms ease,
+    border-color 120ms ease;
 }
 
 .chat-hand__card:hover {

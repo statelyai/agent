@@ -8,10 +8,7 @@
     "url": null
   },
   "comparison": {
-    "targets": [
-      "CrewAI",
-      "LangGraph"
-    ],
+    "targets": ["CrewAI", "LangGraph"],
     "purpose": "Classifies an incoming ticket by category and urgency, then drafts the response that fits."
   },
   "starters": [

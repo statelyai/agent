@@ -7,53 +7,53 @@
 //
 // One declared name per block, please.
 
-import { z } from 'zod';
+import { z } from "zod";
 
-import { generateText } from 'ai';
+import { generateText } from "ai";
 
-import { streamText } from 'ai';
+import { streamText } from "ai";
 
-import { tool } from 'ai';
+import { tool } from "ai";
 
-import type { LanguageModel } from 'ai';
+import type { LanguageModel } from "ai";
 
-import { openai } from '@ai-sdk/openai';
+import { openai } from "@ai-sdk/openai";
 
-import { createActor } from 'xstate';
+import { createActor } from "xstate";
 
-import { setup } from 'xstate';
+import { setup } from "xstate";
 
-import { assign } from 'xstate';
+import { assign } from "xstate";
 
-import { fromPromise } from 'xstate';
+import { fromPromise } from "xstate";
 
-import { sendTo } from 'xstate';
+import { sendTo } from "xstate";
 
-import { raise } from 'xstate';
+import { raise } from "xstate";
 
-import { spawnChild } from 'xstate';
+import { spawnChild } from "xstate";
 
-import type { AnyStateMachine } from 'xstate';
+import type { AnyStateMachine } from "xstate";
 
-import type { AnyActorRef } from 'xstate';
+import type { AnyActorRef } from "xstate";
 
-import type { EventObject } from 'xstate';
+import type { EventObject } from "xstate";
 
-import { test } from 'vitest';
+import { test } from "vitest";
 
-import { expect } from 'vitest';
+import { expect } from "vitest";
 
-import { describe } from 'vitest';
+import { describe } from "vitest";
 
-import { it } from 'vitest';
+import { it } from "vitest";
 
-import { vi } from 'vitest';
+import { vi } from "vitest";
 
-import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
+import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 
-import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-base';
+import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
 
-import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 
 // --- generic placeholders -------------------------------------------------
 

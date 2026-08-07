@@ -8,9 +8,7 @@
     "url": "https://docs.langchain.com/oss/python/langgraph/customer-support"
   },
   "comparison": {
-    "targets": [
-      "LangGraph"
-    ],
+    "targets": ["LangGraph"],
     "purpose": "LangGraph gates sensitive tools with interrupt_before=[\"sensitive_tools\"] and resumes by re-invoking (None to approve, a synthetic ToolMessage to deny). Here the pause is a first-class idle `confirming` state (tags awaiting-approval, typed meta.interaction, pendingAction in context): runAgent settles { status: 'idle', snapshot }, the host persists it, and a second runAgent call resumes with an APPROVE or DENY event. Safe Q&A is one request with real read-only tools; a structured-output classify request routes safe vs sensitive."
   },
   "starters": [

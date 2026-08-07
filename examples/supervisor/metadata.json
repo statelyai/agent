@@ -8,10 +8,7 @@
     "url": "https://github.com/langchain-ai/langgraphjs/tree/main/examples"
   },
   "comparison": {
-    "targets": [
-      "supervisor",
-      "router-worker"
-    ],
+    "targets": ["supervisor", "router-worker"],
     "purpose": "A supervisor reads the request, picks one specialist worker to handle it, and passes the worker's result back up."
   },
   "starters": [

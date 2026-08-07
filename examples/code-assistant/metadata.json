@@ -8,9 +8,7 @@
     "url": "https://langchain-ai.github.io/langgraph/tutorials/code_assistant/langgraph_code_assistant/"
   },
   "comparison": {
-    "targets": [
-      "LangGraph"
-    ],
+    "targets": ["LangGraph"],
     "purpose": "Generates a function, actually runs it against the given checks, and reflects on failures to rewrite it \u2014 repeating within a retry budget."
   },
   "starters": [
@@ -21,15 +19,11 @@
         "functionName": "fib",
         "checks": [
           {
-            "args": [
-              0
-            ],
+            "args": [0],
             "expected": 0
           },
           {
-            "args": [
-              7
-            ],
+            "args": [7],
             "expected": 13
           }
         ]
@@ -42,15 +36,11 @@
         "functionName": "isPalindrome",
         "checks": [
           {
-            "args": [
-              "Racecar"
-            ],
+            "args": ["Racecar"],
             "expected": true
           },
           {
-            "args": [
-              "hello"
-            ],
+            "args": ["hello"],
             "expected": false
           }
         ]
@@ -63,15 +53,11 @@
         "functionName": "toRoman",
         "checks": [
           {
-            "args": [
-              4
-            ],
+            "args": [4],
             "expected": "IV"
           },
           {
-            "args": [
-              1987
-            ],
+            "args": [1987],
             "expected": "MCMLXXXVII"
           }
         ]
