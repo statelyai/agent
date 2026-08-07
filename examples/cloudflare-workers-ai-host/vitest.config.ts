@@ -8,7 +8,10 @@ export default defineWorkersConfig({
     include: ["test/**/*.workers-test.ts"],
     poolOptions: {
       workers: {
-        wrangler: { configPath: "./wrangler.jsonc" },
+        // test/wrangler.jsonc, not ./wrangler.jsonc: the deploy config's `ai`
+        // binding would make wrangler open a remote proxy session (login
+        // required), and the specs stub `env.AI` anyway.
+        wrangler: { configPath: "./test/wrangler.jsonc" },
       },
     },
   },
