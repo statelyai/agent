@@ -96,14 +96,20 @@ export function createAgentRun<TMachine extends AnyStateMachine>(
     }
   };
 
+  // Completes every parked `next()` with `done` — the one way this queue ends,
+  // whether the run closed it or the consumer stopped iterating.
+  const drain = (): void => {
+    while (resolvers.length > 0) {
+      resolvers.shift()!({ value: undefined, done: true });
+    }
+  };
+
   const close = (): void => {
     if (closed) {
       return;
     }
     closed = true;
-    while (resolvers.length > 0) {
-      resolvers.shift()!({ value: undefined, done: true });
-    }
+    drain();
   };
 
   // Compose, don't replace: deliver to the queue, then fan out to the caller's
@@ -148,9 +154,7 @@ export function createAgentRun<TMachine extends AnyStateMachine>(
       // the run untouched — it continues and `result` still settles.
       stopped = true;
       buffer.length = 0;
-      while (resolvers.length > 0) {
-        resolvers.shift()!({ value: undefined, done: true });
-      }
+      drain();
       return Promise.resolve({ value: undefined, done: true });
     },
     [Symbol.asyncIterator]() {

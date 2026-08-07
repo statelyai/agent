@@ -618,8 +618,8 @@ describe("@agent.usage on the step path (host-applied, journaled like any event)
         break;
       }
 
-      // Execute the effect verbosely so the RAW executor result is in hand.
-      const { output, raw } = await executeAgentRequest(effect, executors, { verbose: true });
+      // Executing an effect always hands back the RAW executor result too.
+      const { output, raw } = await executeAgentRequest(effect, executors);
 
       // The recipe: usage is an ordinary host-applied event, journaled like any
       // other external input — applied BEFORE the call's own result, so a guard

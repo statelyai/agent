@@ -13,21 +13,21 @@ A machine gives you both for free. Nothing here is eval-specific instrumentation
 
 - **Deterministic replay.** Every run produces `result.events`, a versioned JSON log of every external input it observed. Persist it and the run reproduces. A failing eval row is a file, not a screenshot.
 - **The trajectory is a first-class artifact.** The question "did the agent take the right path?" is not a heuristic over free text. The machine's states and the log's event types answer it directly.
-- **Keyless runs.** `createScriptedExecutors` swaps canned answers in for the model. Same machine, same executor contract, no API key and no network, so trajectory and budget logic are unit-testable in CI.
+- **Keyless runs.** `createScriptedExecutors` swaps canned answers in for the model, so trajectory and budget logic are unit-testable in CI.
 - **Illegal paths are impossible.** The machine, not the prompt, decides what may happen next, so a scorer never has to check for actions that could not occur.
 
 ## The seams
 
-| Seam                        | What it gives an eval                                                                                                                            |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `createScriptedExecutors`   | Canned model answers from FIFO queues. Keyless, deterministic, free. Entries can report `usage`, so budget scorers have numbers without a model. |
-| `runSeam`                   | One model call under test, the rest scripted. Returns the seam's answer plus `before`/`after` trajectory slices, so a score is per-call instead of per-run. |
-| `simulateAgent`             | A scripted playthrough on the pure step path. Returns a `trail` of state values per step, with no actor and no I/O.                              |
-| `explorePaths` / `canReach` | Enumerate every branch a machine can take. Use it to check dataset coverage: which paths does the dataset never exercise?                        |
-| `result.events`             | The durable trajectory. `AgentLogEntry[]`: machine input, effect completions, user events, timer firings. JSON-safe, ordered, replayable.        |
-| `onTransition`              | The live state path, one call per transition.                                                                                                    |
-| `result.usage`              | `modelCalls` plus token fields, per run. Counts only that run's calls, so sum across resume legs.                                                |
-| `result.output`             | The final state's typed output, schema-validated.                                                                                                |
+| Seam                        | What it gives an eval                                                                                                                                                                                            |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createScriptedExecutors`   | Canned model answers from FIFO queues, keyless and deterministic. Entries can report `usage`, so budget scorers have numbers without a model. Full semantics: [Scripted executors](hosts.md#scripted-executors). |
+| `runSeam`                   | One model call under test, the rest scripted. Returns the seam's answer plus `before`/`after` trajectory slices, so a score is per-call instead of per-run.                                                      |
+| `simulateAgent`             | A scripted playthrough on the pure step path. Returns a `trail` of state values per step, with no actor and no I/O.                                                                                              |
+| `explorePaths` / `canReach` | Enumerate every branch a machine can take. Use it to check dataset coverage: which paths does the dataset never exercise?                                                                                        |
+| `result.events`             | The durable trajectory. `AgentLogEntry[]`: machine input, effect completions, user events, timer firings. JSON-safe, ordered, replayable.                                                                        |
+| `onTransition`              | The live state path, one call per transition.                                                                                                                                                                    |
+| `result.usage`              | `modelCalls` plus token fields, per run. Counts only that run's calls, so sum across resume legs.                                                                                                                |
+| `result.output`             | The final state's typed output, schema-validated.                                                                                                                                                                |
 
 See [Testing and verification](verify.md) for `simulateAgent`, `explorePaths`, and static linting in detail, and [The event log](event-log.md) for the log's envelope.
 
@@ -93,7 +93,7 @@ matchesTrajectory(result.events, ["PROMPT_SUBMITTED", { type: "MORE_INFO" }, "SE
 
 - Ordered subsequence by default; `{ exact: true }` requires equality.
 - `score` is `matchedCount / expectedCount`, so a scorer gets partial credit for free.
-- `firstMiss` is `{ index, expected, searchedFrom }` — where it diverged, JSON-safe, so it doubles as scorer metadata and as a test failure message.
+- `firstMiss` is `{ index, expected, searchedFrom }`: where it diverged, JSON-safe, so it doubles as scorer metadata and as a test failure message.
 
 ### Human-in-the-loop rows
 
@@ -145,7 +145,7 @@ const run = await runSeam(emailDrafter, {
     promptEvaluator: [vagueAssessment, completeAssessment],
     emailDrafter: [draft],
   },
-  // The call under test — by request name, or by model key plus occurrence.
+  // The call under test: by request name, or by model key plus occurrence.
   seam: { model: "promptEvaluator", occurrence: 0 },
   // The seam's executor. Omit it and the seam is scripted too: keyless.
   candidate: createAiSdkExecutors({ models }).generateText,
@@ -157,10 +157,10 @@ const run = await runSeam(emailDrafter, {
 });
 ```
 
-- `seam` addresses the call by request `name` (the `setupAgent({ requests })` key, the better handle) or by `model` key, plus a 0-based `occurrence` — `{ request: "draftEmail", occurrence: 1 }` is the revision, not the first draft.
-- `scripts` is the whole call plan, so the seam consumes its slot too: the candidate *replaces* that answer, and every later scripted answer stays lined up. Each queue's **last entry repeats**, so a live seam that branches down a longer path never runs dry.
-- `respond` is called at every idle pause with `{ snapshot, state, meta, turn, result }` and returns the event to send, or `null` to stop. Drive it off the state or the state's `meta.interaction` — a real model may branch differently, and a reactive policy scores that run instead of crashing on it.
-- `candidate` is just an executor, so a candidate prompt, a fine-tune, or a live model all plug in. Without it the whole run is keyless and deterministic.
+- `seam` addresses the call by request `name` (the `setupAgent({ requests })` key, the better handle) or by `model` key, plus a 0-based `occurrence`: `{ request: "draftEmail", occurrence: 1 }` is the revision, not the first draft.
+- `scripts` is the whole call plan, so the seam consumes its slot too: the candidate _replaces_ that answer, and every later scripted answer stays lined up. Each queue's **last entry repeats**, so a live seam that branches down a longer path never runs dry.
+- `respond` is called at every idle pause with `{ snapshot, state, meta, turn, result }` and returns the event to send, or `null` to stop.
+- `candidate` is just an executor, so a candidate prompt, a fine-tune, or a live model all plug in.
 
 The result carries the seam's own answer and two slices, ready for `matchesTrajectory`:
 
@@ -168,14 +168,14 @@ The result carries the seam's own answer and two slices, ready for `matchesTraje
 run.seamOutput; // what the seam call returned
 run.callsBeforeSeam; // model calls made before it (-1 if never reached)
 run.before; // { statePath, events } up to the seam's completion
-run.after; // { statePath, events } from it onward — the branch the seam caused
+run.after; // { statePath, events } from it onward: the branch the seam caused
 run.result; // the full RunAgentResult; `events` is the whole run's log
 
 matchesTrajectory(run.after.statePath, ["needsMoreInfo", "drafting", "reviewing"]);
 matchesTrajectory(run.after.events, ["MORE_INFO", "SEND", "END"]);
 ```
 
-The state slice splits where the state path stood when the seam answered; the event slice splits at the seam's own effect completion (the first `xstate.done.*` entry appended after the call was made). A run that never reaches the seam scores an empty `after` rather than throwing — that is a real result about the candidate.
+The state slice splits where the state path stood when the seam answered; the event slice splits at the seam's own effect completion (the first `xstate.done.*` entry appended after the call was made). A run that never reaches the seam scores an empty `after` rather than throwing, which is itself a real result about the candidate.
 
 ### One experiment per seam
 
@@ -199,7 +199,7 @@ for (const seam of seams) {
 
 A row is a Braintrust **test case** (Langfuse calls it a **dataset item**): `{ input, expected, metadata }`, where `input` carries the prompt, the simulated user's answers, and the call plan, and `expected` carries the post-seam trajectory.
 
-Keyless-first still holds: with no `candidate`, every seam runs scripted, and the same rows score the real model when a key is present. [`examples/braintrust-evals/seams.ts`](https://github.com/statelyai/agent/tree/main/examples/braintrust-evals) is the working version of all of this — datasets, scorers and `Eval()` wiring, with `runSeam` doing the rest.
+Keyless-first still holds: with no `candidate`, every seam runs scripted, and the same rows score the real model when a key is present. [`examples/braintrust-evals/seams.ts`](https://github.com/statelyai/agent/tree/main/examples/braintrust-evals) is the working version of all of this: datasets, scorers and `Eval()` wiring, with `runSeam` doing the rest.
 
 ## Datasets from event logs
 
@@ -237,4 +237,12 @@ export function seamCasesFrom(machine: typeof emailDrafter, events: AgentLogEntr
 
 ## Pairing with observability
 
-Evals score runs offline; tracing watches them in production. They share the machine's trace stream, so a vendor with an OTLP endpoint (Braintrust, LangSmith, Langfuse, Honeycomb) receives spans from `@statelyai/agent/otel` while the same runs are scored here. Neither side needs the other, and neither requires a vendor-specific adapter in your machine. See [Observability](observability.md).
+Evals score runs offline; tracing watches them in production. They share the machine's trace stream, so a vendor with an OTLP endpoint (Braintrust, LangSmith, Langfuse, Honeycomb) receives spans from `@statelyai/agent/otel` while the same runs are scored here. Neither side needs the other, and neither requires a vendor-specific adapter in your machine.
+
+## Related
+
+- [Testing and verification](verify.md): `simulateAgent`, `explorePaths`, and static linting.
+- [Observability](observability.md): the trace stream and OTel export.
+- [The event log](event-log.md): the log envelope, replay, and `verifyReplay`.
+- [Hosts and executors](hosts.md#scripted-executors): scripted executor semantics.
+- [Usage and budgets](usage-and-budgets.md): what `result.usage` counts.

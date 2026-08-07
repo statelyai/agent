@@ -2,6 +2,27 @@
   "name": "@statelyai/agent",
   "version": "2.0.0-alpha.15",
   "description": "Make invalid agent actions impossible. Agent logic as state machines: deterministic, inspectable, resumable, runs anywhere.",
+  "keywords": [
+    "agent",
+    "ai",
+    "state machine",
+    "statechart"
+  ],
+  "homepage": "https://github.com/statelyai/agent#readme",
+  "bugs": {
+    "url": "https://github.com/statelyai/agent/issues"
+  },
+  "license": "MIT",
+  "author": "David Khourshid <david@stately.ai>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/statelyai/agent.git"
+  },
+  "files": [
+    "dist",
+    "schemas",
+    "skills"
+  ],
   "type": "module",
   "main": "dist/index.cjs",
   "module": "dist/index.mjs",
@@ -59,11 +80,9 @@
     },
     "./agent-workflow.json": "./schemas/agent-workflow.json"
   },
-  "files": [
-    "dist",
-    "schemas",
-    "skills"
-  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsdown",
     "demo": "pnpm --filter @statelyai/agent-demo dev",
@@ -72,7 +91,7 @@
     "typecheck": "pnpm run typecheck:src && pnpm run typecheck:examples && pnpm run typecheck:example-packages",
     "typecheck:src": "tsc --noEmit",
     "typecheck:examples": "tsc -p examples/tsconfig.json --noEmit",
-    "typecheck:example-packages": "tsc -p examples/next-host --noEmit && tsc -p examples/tanstack-start-host --noEmit && tsc -p examples/tanstack-ai-stream --noEmit && tsc -p examples/cloudflare-agent-host --noEmit && tsc -p examples/cloudflare-workers-ai-host --noEmit",
+    "typecheck:example-packages": "pnpm run build && tsc -p examples/next-host --noEmit && tsc -p examples/tanstack-start-host --noEmit && tsc -p examples/tanstack-ai-stream --noEmit && tsc -p examples/cloudflare-agent-host --noEmit && tsc -p examples/cloudflare-workers-ai-host --noEmit",
     "test:cloudflare": "pnpm --filter @statelyai/example-cloudflare-agent-host test && pnpm --filter @statelyai/example-cloudflare-workers-ai-host test",
     "lint": "oxlint",
     "format": "oxfmt src examples",
@@ -87,25 +106,6 @@
     "changeset": "changeset",
     "release": "changeset publish",
     "version": "changeset version"
-  },
-  "keywords": [
-    "ai",
-    "state machine",
-    "agent",
-    "statechart"
-  ],
-  "author": "David Khourshid <david@stately.ai>",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/statelyai/agent.git"
-  },
-  "homepage": "https://github.com/statelyai/agent#readme",
-  "bugs": {
-    "url": "https://github.com/statelyai/agent/issues"
-  },
-  "engines": {
-    "node": ">=22.18.0"
   },
   "devDependencies": {
     "@ai-sdk/openai": "^3.0.25",
@@ -148,9 +148,6 @@
     "xstate": "6.0.0-alpha.25",
     "zod": "^4.3.6"
   },
-  "publishConfig": {
-    "access": "public"
-  },
   "peerDependencies": {
     "@opentelemetry/api": "^1",
     "ai": "^6.0.67",
@@ -163,6 +160,9 @@
     "ai": {
       "optional": true
     }
+  },
+  "engines": {
+    "node": ">=22.18.0"
   },
   "packageManager": "pnpm@10.28.2"
 }

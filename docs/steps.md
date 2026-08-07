@@ -16,11 +16,9 @@ The **step path** is not a separate entry point. It is a set of root exports fro
 
 For a live, in-process run, use [`runAgent`](hosts.md) instead: it owns an actor and settles `done | idle | error`. The step path is the same machine driven by hand, so a crashed process resumes without re-billing model calls.
 
-## The model
+## The loop in six moves
 
-A machine's durable state is not a snapshot. It is the ordered **event log** of external inputs it has received. Because transitions are pure, folding that log through xstate reconstructs the exact snapshot, including which effects are still owed. The log is the source of truth; the snapshot is derived.
-
-The loop is six moves:
+The durability model this path assumes (the log is the source of truth, external inputs only, determinism, concurrency as serialization) is described in [The event log](event-log.md#the-model). The loop that drives it is six moves:
 
 1. Start a log with `initEntry(machine, input)` (the reserved `@agent.init` first envelope carries the machine input, identity, timestamp, and verification hashes).
 2. `initialTransition(machine, input)` gives the first `{ snapshot, actions }`.
@@ -29,15 +27,9 @@ The loop is six moves:
 5. `transition(machine, snapshot, event)` folds the completion back in.
 6. Repeat while `snapshot.status === "active"`. No async effect owed means **idle**: persist the log and resume later.
 
-**Log rule: external inputs only.** The event log holds effect completions (done/error, with the output inline), user-sent events, and timer firings. Never append raised or internal events: replay re-derives them from the machine's own logic, and recording them would double-apply.
+## Loop wiring
 
-**Determinism obligation.** Replay re-runs your transitions, so they must be pure functions of state and event. No `Date.now()`, no `Math.random()` inside transition code or effect-input builders (prompt builders, spawn inputs). Inject time and randomness as events or input.
-
-**Concurrency is serialization.** When parallel regions race, the recorded completion **order** is the serialization. Replay folds completions in that recorded order, so it never re-races: a run that raced live reconstructs identically.
-
-## The loop
-
-Taught from [examples/ai-sdk-game-host/index.ts](../examples/ai-sdk-game-host/index.ts), the canonical thin loop. One host-owned primitive resolves a single frontier effect into the event to append (or `undefined` for a fire-and-forget action):
+Taught from [examples/ai-sdk-game-host/index.ts](../examples/ai-sdk-game-host/index.ts), the canonical wiring for this path. One host-owned primitive resolves a single frontier effect into the event to append (or `undefined` for a fire-and-forget action):
 
 ```ts no-check
 import { initialTransition, transition, type AnyMachineSnapshot, type EventObject } from "xstate";
@@ -66,7 +58,7 @@ async function resolveEffect(
   // its authored `mode`; `executeAgentRequest` dispatches to
   // `generateText`/`streamText` accordingly.
   if (effect.kind === "text") {
-    const output = await executeAgentRequest(effect, executors);
+    const { output } = await executeAgentRequest(effect, executors);
     return effect.toDoneEvent(output);
   }
   // `decision`: pick a legal event (guard-gated by snapshot.can), append it directly.
@@ -120,17 +112,17 @@ Per-effect resolution, by kind:
 
 **Idle.** A frontier that produces no completion event (all `execute`, or nothing owed) means the machine is waiting on an external event or a timer. Persist `entries` and leave the loop; resume later by appending the event and folding it in (or by `replay`).
 
-For the durable, resume-by-replay flavor of this same loop (persist nothing but the event log, rebuild the frontier with `replay` each turn), see [examples/cloudflare-workers-ai-host/index.ts](../examples/cloudflare-workers-ai-host/index.ts). That example simulates durability: its `entries` array lives in process memory for the duration of one run. It shows the shape a real Worker would use, with a real store (KV, D1, a Durable Object) in place of the array.
+For the resume-by-replay flavor of this same loop (persist nothing but the event log, rebuild the frontier with `replay` each turn), see [examples/cloudflare-workers-ai-host/index.ts](../examples/cloudflare-workers-ai-host/index.ts). That example simulates durability: its `entries` array lives in process memory for the duration of one run. It shows the shape a real Worker would use, with a real store (KV, D1, a Durable Object) in place of the array.
 
 ### Token usage on this path
 
-The loop above throws the raw executor result away. Ask for it (`{ verbose: true }`) when you want a token budget in the machine: `getCallUsage(raw)` normalizes it, and the reserved [`@agent.usage`](usage-and-budgets.md#the-agentusage-event) event is applied as an ordinary event in the fold — journaled like any other external input, so replay reproduces the counter.
+`executeAgentRequest` always returns the raw executor result alongside the output. Use it when you want a token budget in the machine: `getCallUsage(raw)` normalizes it, and the reserved [`@agent.usage`](usage-and-budgets.md#the-agentusage-event) event is applied as an ordinary event in the fold: journaled like any other external input, so replay reproduces the counter.
 
 ```ts
 import { AGENT_USAGE_EVENT_TYPE, executeAgentRequest, getCallUsage } from "@statelyai/agent";
 
 if (effect.kind === "text") {
-  const { output, raw } = await executeAgentRequest(effect, executors, { verbose: true });
+  const { output, raw } = await executeAgentRequest(effect, executors);
 
   // Apply usage BEFORE the call's own result, so a budget guard reads the
   // tokens in the same step that consumes the output (runAgent's ordering).
@@ -193,7 +185,7 @@ const committed = replay(machine, [...entries, entry]);
 - Every owed effect has a replay-stable `requestId`; pass it to the provider or tool as an idempotency key.
 - The event store guarantees one winning control-state append, not exactly-once behavior from an arbitrary external API.
 
-This pure driver is the strict durability path. `runAgent` owns a live XState actor; its `onEvent` sees accepted transitions synchronously and cannot await an asynchronous store before XState advances. A future durable runner can wrap this exact replay/effect/append loop, but passing a store to today's actor-backed runner would only provide write-through recording, not the same guarantee.
+This pure driver is what the step path buys a durable host. `runAgent` owns a live XState actor; its `onEvent` sees accepted transitions synchronously and cannot await an asynchronous store before XState advances. A future durable runner can wrap this exact replay/effect/append loop, but passing a store to today's actor-backed runner would only provide write-through recording, not the same guarantee.
 
 ## Ordering guarantee
 

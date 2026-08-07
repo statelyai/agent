@@ -8,14 +8,8 @@
     "url": null
   },
   "comparison": {
-    "targets": [
-      "LangGraph checkpointer"
-    ],
+    "targets": ["LangGraph checkpointer"],
     "purpose": "Writes an article in two steps while logging every result, then restarts from the log alone: finished steps replay instantly and only the interrupted one runs again."
   },
-  "starters": [
-    "state machines",
-    "the history of the fax machine",
-    "why builds are slow"
-  ]
+  "starters": ["state machines", "the history of the fax machine", "why builds are slow"]
 }

@@ -8,9 +8,7 @@
     "url": "https://github.com/langchain-ai/langgraph/blob/23961cff61a42b52525f3b20b4094d8d2fba1744/docs/docs/tutorials/multi_agent/hierarchical_agent_teams.ipynb"
   },
   "comparison": {
-    "targets": [
-      "LangGraph hierarchical teams"
-    ],
+    "targets": ["LangGraph hierarchical teams"],
     "purpose": "Two teams under one coordinator: a research manager keeps assigning searches until it has enough, then a writing team turns the findings into a draft, with one round of revisions allowed."
   },
   "starters": [

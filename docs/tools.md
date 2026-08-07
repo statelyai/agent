@@ -13,13 +13,13 @@ Tools belong to a **request**, not to machine states. The machine decides _when_
 
 `AgentTool` is a minimal structural contract, so tools from any SDK drop in unchanged:
 
-| Field          | Type                                   | Meaning                                          |
-| -------------- | -------------------------------------- | ------------------------------------------------ |
-| `description?` | `string`                               | What the model reads to decide whether to call.  |
-| `inputSchema?` | Standard Schema or any schema object   | Arguments contract.                              |
-| `outputSchema?`| Standard Schema or any schema object   | Result contract, when the host wants one.        |
-| `execute?`     | `(...args) => unknown`                 | The implementation the host runs.                |
-| anything else  | `unknown`                              | Passed through untouched (`providerOptions`, …). |
+| Field           | Type                                 | Meaning                                          |
+| --------------- | ------------------------------------ | ------------------------------------------------ |
+| `description?`  | `string`                             | What the model reads to decide whether to call.  |
+| `inputSchema?`  | Standard Schema or any schema object | Arguments contract.                              |
+| `outputSchema?` | Standard Schema or any schema object | Result contract, when the host wants one.        |
+| `execute?`      | `(...args) => unknown`               | The implementation the host runs.                |
+| anything else   | `unknown`                            | Passed through untouched (`providerOptions`, …). |
 
 - A bare function is shorthand for `execute` (`AgentToolExecute`).
 - `AgentTools` is `Record<string, AgentTool | undefined>`, keyed by tool name.
@@ -180,4 +180,4 @@ const machine = createToolLoopMachine({
 - [Text requests](text-requests.md): the request a tool attaches to, and structured/streaming output.
 - [Hosts](hosts.md): executors, model aliases, and writing your own adapter.
 - [Messages](messages.md): the message model tool parts live in.
-- [Machine presets](machines-presets.md): `createToolLoopMachine` and its siblings.
+- [Preset machines](machines-presets.md): `createToolLoopMachine` and its siblings.

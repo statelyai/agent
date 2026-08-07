@@ -1,13 +1,13 @@
 name: Setup Workflow
 description: Composite action that sets up pnpm
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
     - uses: pnpm/action-setup@v2
     - uses: actions/setup-node@v4
       with:
         node-version: 22.18.0
-        
+
     - name: install pnpm
       run: npm i pnpm@latest -g
       shell: bash

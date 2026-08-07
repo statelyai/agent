@@ -27,27 +27,26 @@ Because the machine only knows the executor contract, the same machine runs unch
 
 A [decision](decisions.md) is where this matters most: the model chooses exactly one **currently-legal** machine event, not free text and not an arbitrary tool call. An illegal choice is rejected before it takes effect, so illegal behavior is impossible by construction rather than discouraged by a prompt.
 
-## Compared to a plain loop
+## Install
 
-Most agents start as a `while` loop around a model call. That works until:
+<!-- install command matching the package prerelease channel and package.json peers -->
 
-- **State goes implicit.** Which step you are on lives in local variables and `if` chains; nothing can enumerate, diagram, or verify the paths.
-- **Legality is prompt-enforced.** Nothing stops the model from calling a tool at the wrong time; you can only ask it nicely.
-- **Pausing means rearchitecting.** Waiting for a human, surviving a deploy, or resuming on another worker requires serializing ad-hoc loop state by hand.
-- **Testing needs the model.** Every branch is buried behind live calls, so tests mock the SDK instead of asserting on structure.
+```bash
+pnpm add @statelyai/agent@alpha xstate@alpha zod ai@^6 @ai-sdk/openai@^3
+```
 
-A state machine makes each of these a declared, checkable property instead of a convention. The loop is still there; the library owns it. See [Migrating from a loop](from-a-loop.md) for the mechanical translation.
+- Node 22.18 or newer, XState v6 alpha.25 or newer. `xstate` is the only required peer.
+- `ai` and `@ai-sdk/openai` back the shipped adapter, `createAiSdkExecutors`. Core has no runtime dependency besides `xstate`.
+- The `@alpha` tag floats: install once, then pin what it resolved to.
+- ESM-first (a CommonJS build ships too). The example below uses top-level `await`, so set `"type": "module"`.
 
-## Benefits of state machines
+Version and peer detail, plus the same agent built up step by step, are in the [Quickstart](quickstart.md).
 
-- **Legal by construction.** The machine and its guards define every path. The model cannot drive the agent into a state you did not author.
-- **Portable.** No dependency on any model SDK. Swap hosts, not agents.
-- **Inspectable.** States, transitions, and requests are data you can read, diagram, and reason about before anything runs.
-- **Serializable.** Every settle point produces a plain JSON snapshot. Persist it anywhere and resume later.
-
-## Example
+## Your first agent
 
 <!-- setup + invoke + run; full walkthrough lives in quickstart.md -->
+
+One request, one state, one run. Save as `agent.ts` and run it with `npx tsx agent.ts`.
 
 ```ts
 import { z } from "zod";
@@ -95,33 +94,46 @@ const result = await runAgent(machine, {
 if (result.status === "done") console.log(result.output.answer);
 ```
 
+That is the whole shape. Everything it does not show has an owning page:
+
+- `setupAgent` and `createMachine`: [Agent machines](machines.md).
+- Named `requests` and their schemas: [Text requests](text-requests.md).
+- Swapping `createAiSdkExecutors` for `createScriptedExecutors` to run with **no API key**, letting the model choose an event, and guards that overrule it: the [Quickstart](quickstart.md).
+- `runAgent` versus `provideExecutors` versus the step path: [Choosing a run mode](choosing-a-run-mode.md).
+
+## Compared to a plain loop
+
+Most agents start as a `while` loop around a model call. That works until:
+
+- **State goes implicit.** Which step you are on lives in local variables and `if` chains; a machine's states, transitions, and requests are data you can read, diagram, and reason about before anything runs.
+- **Legality is prompt-enforced.** Nothing stops the model from calling a tool at the wrong time; a machine and its guards define every path, so the model cannot drive the agent into a state you did not author.
+- **Pausing means rearchitecting.** Waiting for a human, surviving a deploy, or resuming on another worker means serializing ad-hoc loop state by hand; every machine settle point produces a plain JSON snapshot you persist anywhere.
+- **Testing needs the model.** Every branch is buried behind live calls, so tests mock the SDK instead of asserting on structure.
+- **The SDK is baked in.** A loop is written against one provider's API; a machine depends on no model SDK, so you swap hosts, not agents.
+
+A state machine makes each of these a declared, checkable property instead of a convention. The loop is still there; the library owns it. See [Migrating from a hand-rolled loop](from-a-loop.md) for the mechanical translation.
+
 ## Three starting points
 
 - **Author a new agent.** Describe states, decisions, and typed requests, run locally with `runAgent`, then test and inspect it with no API key. Start at the [Quickstart](quickstart.md).
-- **Retrofit an existing agent.** Your existing SDK calls, tools, and retry code become the executors; the machine replaces only the control flow. See [Migrating from a loop](from-a-loop.md).
+- **Retrofit an existing agent.** Your existing SDK calls, tools, and retry code become the executors; the machine replaces only the control flow. See [Migrating from a hand-rolled loop](from-a-loop.md).
 - **Copy a known pattern.** ReAct, reflection, plan-and-execute, RAG, supervisor, swarm handoff, each a single runnable file. Browse [Agent patterns](patterns.md).
 
-## Core pages
+## Sidebar map
 
-- [Quickstart](quickstart.md): install and run your first agent machine end to end.
-- [Agent machines](machines.md): `setupAgent`, states, invokes, typed context, built-in actor sources, and guards.
-- [Decisions](decisions.md): the model choosing exactly one currently-legal machine event.
-- [Hosts and executors](hosts.md): the executor contract, the AI SDK adapter, and writing your own.
-- [Use in any stack](any-stack.md): one machine, run locally, behind an HTTP route, or on the edge.
-- [Testing and verification](verify.md): lint, simulate, and explore agent machines with no API keys.
-
-Everything else is in the sidebar: [text requests](text-requests.md), [tools](tools.md), [messages](messages.md), [debugging](debugging.md), [human in the loop](human-in-the-loop.md), [observability](observability.md), [usage and budgets](usage-and-budgets.md), [the event log](event-log.md), [multi-agent](multi-agent.md), [evals](evals.md), [scope](scope.md), and the [roadmap](roadmap.md).
+- **Get started**: [Quickstart](quickstart.md), [Thinking in state machines](thinking-in-state-machines.md), [Migrating from a hand-rolled loop](from-a-loop.md), [Scope](scope.md).
+- **Core concepts**: [Agent machines](machines.md), [Decisions](decisions.md), [Text requests](text-requests.md), [Tools](tools.md), [Messages](messages.md), [Preset machines](machines-presets.md).
+- **Running agents**: [Choosing a run mode](choosing-a-run-mode.md), [Hosts and executors](hosts.md), [Use in any stack](any-stack.md), [The step path](steps.md).
+- **State and durability**: [Where state lives](persistence.md), [The event log](event-log.md), [Human in the loop](human-in-the-loop.md).
+- **Production**: [Models and providers](models-and-providers.md), [Observability](observability.md), [Usage and budgets](usage-and-budgets.md), [Debugging](debugging.md), [Multi-agent](multi-agent.md).
+- **Machines as data**: [Machines as data](machines-as-data.md), [Generating machines](generate-machines.md).
+- **Testing**: [Testing and verification](verify.md), [Evals](evals.md).
+- **Resources**: [Agent patterns](patterns.md), [Coming from LangGraph](langgraph-comparison.md), [Post-alpha roadmap](roadmap.md).
 
 ## Alpha status
 
 The API changed completely in 2.0 and is still settling. Expect breaking changes before 2.0 stable.
 
-Explicitly not shipped yet:
-
-- **Postgres and Redis storage adapters.** Core ships the persistence contracts, an in-memory event-log store, and SQLite stores on `node:sqlite` ([`@statelyai/agent/sqlite`](event-log.md#sqlite-stores)), but nothing for other databases.
-- **OpenTelemetry exporter.** Build your own from the observation callbacks on `runAgent`.
-- **SSE/WebSocket transport helpers.** Host your own stream over what `onChunk` gives you.
-- **Agent-specific dynamic fan-out helper.** Dynamic fan-out works today through XState `spawn(...)` or `Promise.all(...)` inside a host actor; core has no higher-level helper for branch binding and progress.
-- **Visualization tooling.** Stately Studio and a VS Code extension own diagramming and inspection.
+What is deliberately not shipped yet (storage adapters beyond SQLite, transport helpers, a fan-out helper, and more) is listed on the [Post-alpha roadmap](roadmap.md).
 
 If something here blocks you, or the API surface feels wrong, open an issue. This alpha exists to find that out before 2.0 stable.

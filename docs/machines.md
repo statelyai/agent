@@ -25,7 +25,7 @@ Pass schema fields directly to `setupAgent` to type context, event payloads, inp
 - `events`: per-event payload types.
 - `meta`: typed state/transition metadata.
 
-Every schema is a [Standard Schema](https://standardschema.dev) (Zod, Valibot, ArkType, or a hand-written validator), retained on the agent for runtime validation, so context and events are typed without `{} as Type` casts.
+Every schema is a [Standard Schema](https://standardschema.dev) (Zod, Valibot, ArkType, or a hand-written validator), retained on the agent so context and events are typed without `{} as Type` casts.
 
 ```ts
 import { z } from "zod";
@@ -38,6 +38,14 @@ const agentSetup = setupAgent({
   output: z.object({ answer: z.string() }),
 });
 ```
+
+<!-- machine input validation from src/run-agent.ts and the input schema retained by src/setup-agent.ts -->
+
+`runAgent` and `createAgentActor` validate supplied machine input before the
+actor starts. Defaults and transforms from the input schema reach the context
+factory, event log, and trace; invalid input throws `AgentError` with code
+`invalid-machine-input`. Calling XState's `createActor` directly does not run
+this validation.
 
 To keep conversation history in context, add a `messages` field with the `z.custom<AgentMessage[]>` recipe (see [messages](messages.md#store-messages-in-context)).
 
@@ -79,7 +87,7 @@ The builtins `agent.generateText`, `agent.streamText`, `agent.decide`, and `agen
 
 ### Models
 
-The `models` map pairs a short alias with a resolved model. Request and decision `model:` values then autocomplete its keys (unregistered strings are still accepted, so a typo fails at run time rather than compile time), and app code shares one alias map between `setupAgent` and the host adapter.
+The `models` map pairs a short alias with a resolved model, so request and decision `model:` values autocomplete its keys. The same map goes to the host adapter; see [Typed model aliases](hosts.md#typed-model-aliases).
 
 ```ts
 import { openai } from "@ai-sdk/openai";
@@ -105,7 +113,7 @@ const agentSetup = setupAgent({
 });
 ```
 
-Aliases are optional: a request can carry any `model:` string (like `'openai/gpt-5.4-mini'`) that the host resolves at run time. See [Authoring forms](#authoring-forms) and [Hosts](hosts.md).
+Aliases are optional: a request can carry any `model:` string (like `'openai/gpt-5.4-mini'`) that the host resolves at run time. See [Authoring forms](#authoring-forms).
 
 ### Requests
 
@@ -229,36 +237,7 @@ Each alternate handles one specific need:
 - **`createAgentSchemas` pack** (`setupAgent({ schemas })`): share one schema set across several machines or the [step helpers](steps.md).
 - **String refs + `resolveModel`** (`model: 'openai/gpt-5.4-mini'`, `createAiSdkExecutors({ resolveModel })`): the machine must not name concrete models, for portability or refs loaded from JSON [config](machines-as-data.md).
 - **`createTextLogic`** (a standalone request value): a request that is exported, reused across states or machines, or unit-tested on its own. See [Text requests](text-requests.md#reusable-request-logic-with-createtextlogic).
-- **`withExecutor`** (`logic.withExecutor(...)`): bind execution onto one logic instead of the whole host, for per-logic binding or an intentionally unregistered dynamic logic. Registered dynamic spawns inherit through `actors`; see [Multi-agent composition](multi-agent.md#dynamic-binding).
-
-### Direct execution without `runAgent`
-
-<!-- withExecutor + createActor, bypassing runAgent's executor slots -->
-
-`.withExecutor(...)` binds execution onto one logic for normal XState use. Provide the bound logic as an actor source and run it with `createActor` directly, bypassing [`runAgent`](hosts.md)'s executor slots:
-
-```ts no-check
-import { parseOutput } from "@statelyai/agent";
-
-const executableDraftText = draftText.withExecutor(async ({ request, signal }) => {
-  const result = await generateText({
-    model: resolveModel(request.model),
-    system: request.system,
-    prompt: request.prompt ?? "",
-    abortSignal: signal,
-  });
-  // `schemas.output` is optional: with none, the request's output is the raw text.
-  return {
-    output: request.outputSchema ? parseOutput(request.outputSchema, result.text) : result.text,
-  };
-});
-
-createActor(machine.provide({ actors: { draftText: executableDraftText } }), { input }).start();
-```
-
-`parseOutput(schema, value)` validates against any [Standard Schema](https://standardschema.dev) and returns the typed value; calling `schema["~standard"].validate(value)` yourself works the same way.
-
-This is the mechanism `runAgent` uses internally. The direct form suits a logic that should carry its own execution wherever it is used, independent of the host loop.
+- **`withExecutor`** (`logic.withExecutor(...)`): bind execution onto one logic instead of the whole host, so a plain `createActor` runs it without [`runAgent`](hosts.md#writing-your-own-executors)'s executor slots. Registered dynamic spawns inherit through `actors`; see [Multi-agent composition](multi-agent.md#dynamic-binding).
 
 ## Transitions
 
@@ -415,7 +394,7 @@ How `after` runs depends on the host:
 - Under [`runAgent`](hosts.md), the timer runs **live**: a pending `after` is not idle, so `runAgent` waits for it and continues.
 - On the [step path](steps.md), it surfaces from `getAgentEffects` as an effect with `kind: "delay"`: the durable host owns the clock (a workflow sleep, a Temporal timer, a queue delay) and applies the event when it fires. See [Steps](steps.md).
 
-## Next steps
+## Related
 
 - [Decisions](decisions.md): let the model choose exactly one currently-legal event.
 - [Text requests](text-requests.md): the full request surface, streaming, and structured output.

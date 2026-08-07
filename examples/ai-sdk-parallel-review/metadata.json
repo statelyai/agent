@@ -8,10 +8,7 @@
     "url": "https://ai-sdk.dev/docs/agents/workflows#parallel-processing"
   },
   "comparison": {
-    "targets": [
-      "Vercel AI SDK",
-      "parallel processing"
-    ],
+    "targets": ["Vercel AI SDK", "parallel processing"],
     "purpose": "Security, performance, and maintainability reviewers read the same code concurrently, then one summary combines their findings."
   },
   "starters": [

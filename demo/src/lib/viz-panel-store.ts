@@ -51,9 +51,7 @@ const maxLiveMessages = 200;
 
 function rootActor(message: SystemMessage) {
   return Array.isArray(message.actors)
-    ? ([...message.actors]
-        .reverse()
-        .find((actor) => actor.parentSessionId == null) ?? null)
+    ? ([...message.actors].reverse().find((actor) => actor.parentSessionId == null) ?? null)
     : null;
 }
 

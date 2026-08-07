@@ -33,7 +33,7 @@ For a one-liner that throws instead of returning findings, use `assertAgentMachi
 | Code                       | Severity | Fires when                                                                                                                                                                                                                                                                         |
 | -------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `unreachable-state`        | error    | A state no transition/`always`/`choice`/`onDone`/`onError` can reach from the initial state. Conservative: dynamic (function) transitions over-approximate, so it never false-flags. Exact for `fromConfig` machines, whose declared targets the lowering retains.                 |
-| `decide-without-events`    | error    | A state invokes `agent.decide` but neither it nor any ancestor handles any event, so the chosen event can never be delivered.                                                                                                                                         |
+| `decide-without-events`    | error    | A state invokes `agent.decide` but neither it nor any ancestor handles any event, so the chosen event can never be delivered.                                                                                                                                                      |
 | `unserializable-context`   | warning  | The context schema exposes no JSON schema (e.g. a `z.custom` messages array), so its fields can't be statically checked for JSON persist/resume.                                                                                                                                   |
 | `direct-object-src`        | warning  | An invoke `src` is a direct object/machine value that can't be rebound by `runAgent`, so it inherits no host executors.                                                                                                                                                            |
 | `final-without-output`     | error    | The machine declares an output schema but a top-level final state has no `output`.                                                                                                                                                                                                 |
@@ -170,4 +170,12 @@ import { machine } from "./machine";
 assertAgentMachine(machine); // throws AgentLintError on error-severity findings
 ```
 
-For machines authored as data (see [machines as data](machines-as-data.md)), compile the config first: `assertAgentMachine(setupAgent.fromConfig(config, { compileSchema }).machine)`. Every check applies, reachability included: the lowering keeps the config's transition targets, so `unreachable-state` reads the real graph even where the JSON layer folds a target into a resolver function.
+For machines authored as data (see [Machines as data](machines-as-data.md)), compile the config first: `assertAgentMachine(setupAgent.fromConfig(config, { compileSchema }).machine)`. Every check applies, reachability included: the lowering keeps the config's transition targets, so `unreachable-state` reads the real graph even where the JSON layer folds a target into a resolver function.
+
+## Related
+
+- [Debugging](debugging.md): scripted reproduction and the diagnostic codes in context.
+- [Evals](evals.md): scoring runs on output, trajectory, and budget.
+- [Hosts and executors](hosts.md#scripted-executors): keyless scripted executors for `runAgent`.
+- [Machines as data](machines-as-data.md): verifying a machine lowered from a config.
+- [Migrating from a hand-rolled loop](from-a-loop.md): pinning behavior across a refactor.

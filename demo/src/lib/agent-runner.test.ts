@@ -12,7 +12,14 @@ function start(id: ScenarioId, prompt: string) {
 // The persisted snapshot crosses the wire as opaque JSON; cast it back at the boundary
 // (mirrors the zod-validated server fn) before handing it to runAgent.
 function resume(id: ScenarioId, snapshot: unknown, event: { type: string; [k: string]: unknown }) {
-  return resumeScenarioRun(id, snapshot as Snapshot<unknown>, event, "script", undefined, scriptedExecutorsFor(id));
+  return resumeScenarioRun(
+    id,
+    snapshot as Snapshot<unknown>,
+    event,
+    "script",
+    undefined,
+    scriptedExecutorsFor(id),
+  );
 }
 
 describe("scenario outcomes (keyless)", () => {
@@ -43,7 +50,9 @@ describe("scenario outcomes (keyless)", () => {
   test("resumeScenario rejects an event the snapshot does not accept", async () => {
     const first = await start("refund", "Refund $500 please.");
     expect(first.status).toBe("idle");
-    await expect(resume("refund", first.idle!.snapshot, { type: "NOT_A_REAL_EVENT" })).rejects.toThrow();
+    await expect(
+      resume("refund", first.idle!.snapshot, { type: "NOT_A_REAL_EVENT" }),
+    ).rejects.toThrow();
   });
 
   test("approval drafts, settles idle, then publishes on APPROVE", async () => {
@@ -59,7 +68,10 @@ describe("scenario outcomes (keyless)", () => {
 
   test("approval REJECT loops back to drafting (idle again)", async () => {
     const first = await start("approval", "Announce the outage.");
-    const second = await resume("approval", first.idle!.snapshot, { type: "REJECT", reason: "too vague" });
+    const second = await resume("approval", first.idle!.snapshot, {
+      type: "REJECT",
+      reason: "too vague",
+    });
     expect(second.status).toBe("idle");
   });
 
@@ -83,7 +95,10 @@ describe("scenario outcomes (keyless)", () => {
   });
 
   test("pipeline plans, executes, and verifies", async () => {
-    const result = await start("pipeline", "Write a launch update: faster sync, safer retries, gradual rollout.");
+    const result = await start(
+      "pipeline",
+      "Write a launch update: faster sync, safer retries, gradual rollout.",
+    );
     expect(result.status).toBe("done");
     const output = result.output as { verification: string; failedAt: string | null };
     expect(output.failedAt).toBeNull();

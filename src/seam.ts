@@ -31,7 +31,8 @@ import type { AgentLogEntry } from "./event-log-store.js";
 import { normalizeGeneratorResult } from "./text-logic.js";
 import { runAgent } from "./run-agent.js";
 import type { RunAgentOptions, RunAgentResult } from "./run-agent.js";
-import { resolveScriptedTextEntry } from "./scripted-executors.js";
+import { isRecord } from "./internal/is-record.js";
+import { describeText, emitScriptedChunk, resolveScriptedTextEntry } from "./scripted-executors.js";
 import type { ScriptedTextEntry } from "./scripted-executors.js";
 import type {
   AgentExecutorTextRequest,
@@ -41,7 +42,7 @@ import type {
   AgentTextRequest,
 } from "./text-logic.js";
 import type { AgentTools } from "./types.js";
-import { getStateMeta } from "./utils.js";
+import { getStateMeta, type MetaOfSnapshot } from "./utils.js";
 
 /**
  * Which model call is under test: the Nth call addressed either by request
@@ -76,8 +77,11 @@ export interface SeamTurn<TMachine extends AnyStateMachine> {
   snapshot: SnapshotFrom<TMachine>;
   /** Its state value, for a `switch` on flat machines. */
   state: StateValue;
-  /** The merged `meta` of the active state(s) — e.g. a declared `interaction`. */
-  meta: Record<string, unknown>;
+  /**
+   * The merged `meta` of the active state(s), e.g. a declared `interaction`.
+   * Typed from the machine's own meta schema (`setupAgent({ meta })`).
+   */
+  meta: Partial<MetaOfSnapshot<SnapshotFrom<TMachine>>>;
   /** 0-based index of this pause within the run. */
   turn: number;
   /** The `idle` result that produced the pause. */
@@ -156,28 +160,6 @@ export interface RunSeamResult<TMachine extends AnyStateMachine> {
   after: SeamSlice;
 }
 
-/** Thrown when the call plan runs dry on a request that is not the live seam. */
-class SeamScriptError extends AgentError {
-  constructor(message: string) {
-    super("seam-script-exhausted", message);
-    this.name = "SeamScriptError";
-  }
-}
-
-function seamKeyOf(seam: SeamRef): string {
-  return seam.request ?? seam.model;
-}
-
-function describeRequest(request: AgentTextRequest): string {
-  return request.name
-    ? `'${request.name}' (model '${request.model}')`
-    : `(model '${request.model}')`;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
 /** Whatever a host executor may return — our envelope, or a raw AI SDK result. */
 type ExecutorReturn = Awaited<ReturnType<NonNullable<AgentRequestExecutors["generateText"]>>>;
 
@@ -253,28 +235,40 @@ export async function runSeam<TMachine extends AnyStateMachine>(
   let seamEventAt = 0;
   let liveEvents = 0;
 
+  const queueKeyOf = (request: AgentTextRequest): string =>
+    request.name !== undefined && queues.has(request.name) ? request.name : request.model;
+
+  /**
+   * Consumes this request's slot in the call plan, or resolves `undefined` when
+   * its queue is dry. The LAST entry repeats: a live seam that branches further
+   * still finds an answer instead of running dry.
+   */
+  const takeScriptedSlot = async (
+    request: AgentTextRequest,
+    info: AgentRequestExecutorInfo | undefined,
+  ): Promise<AgentRequestExecutorResult | undefined> => {
+    const queue = queues.get(queueKeyOf(request));
+    if (!queue?.length) {
+      return undefined;
+    }
+    const entry = queue.length === 1 ? queue[0]! : queue.shift()!;
+    return resolveScriptedTextEntry(entry, request, info);
+  };
+
   const scriptedAnswer = async (
     request: AgentTextRequest,
     info: AgentRequestExecutorInfo | undefined,
-    optional: boolean,
-  ): Promise<AgentRequestExecutorResult | undefined> => {
-    const key =
-      request.name !== undefined && queues.has(request.name) ? request.name : request.model;
-    const queue = queues.get(key);
-    if (!queue?.length) {
-      if (optional) {
-        return undefined;
-      }
-      throw new SeamScriptError(
-        `runSeam: no scripted answer left for request ${describeRequest(request)}. Add an entry ` +
-          `to \`scripts.${key}\` — its last entry repeats, so one extra answer covers a ` +
-          "longer branch.",
+  ): Promise<AgentRequestExecutorResult> => {
+    const scripted = await takeScriptedSlot(request, info);
+    if (!scripted) {
+      throw new AgentError(
+        "seam-script-exhausted",
+        `runSeam: no scripted answer left for request ${describeText(request)}. Add an entry ` +
+          `to \`scripts.${queueKeyOf(request)}\` — its last entry repeats, so one extra answer ` +
+          "covers a longer branch.",
       );
     }
-    // The last entry repeats: a live seam that branches further still finds an
-    // answer instead of running dry.
-    const entry = queue.length === 1 ? queue[0]! : queue.shift()!;
-    return resolveScriptedTextEntry(entry, request, info);
+    return scripted;
   };
 
   const route = async (
@@ -286,33 +280,32 @@ export async function runSeam<TMachine extends AnyStateMachine>(
       seam.request !== undefined ? request.name === seam.request : request.model === seam.model;
     const isSeam = keyMatches && seamMatches++ === (seam.occurrence ?? 0);
 
-    // The script is the whole call plan, so the seam consumes its slot too: the
-    // candidate REPLACES that answer rather than skipping it, and every later
-    // scripted answer stays lined up with the plan.
-    const scripted = await scriptedAnswer(request, info, isSeam && candidate !== undefined);
+    if (isSeam && candidate) {
+      // The script is the whole call plan, so the seam consumes its slot too:
+      // the candidate REPLACES that answer rather than skipping it, and every
+      // later scripted answer stays lined up with the plan.
+      await takeScriptedSlot(request, info);
+      seamReached = true;
+      callsBeforeSeam = callIndex;
+      seamStateAt = statePath.length;
+      seamEventAt = liveEvents;
+
+      const result = await candidate(request as AgentExecutorTextRequest, info);
+      seamOutput = await seamOutputOf(result, request);
+      return result;
+    }
+
+    const scripted = await scriptedAnswer(request, info);
     if (!isSeam) {
-      return scripted!;
+      return scripted;
     }
 
     seamReached = true;
     callsBeforeSeam = callIndex;
     seamStateAt = statePath.length;
     seamEventAt = liveEvents;
-
-    if (!candidate) {
-      if (!scripted) {
-        throw new SeamScriptError(
-          `runSeam: the seam '${seamKeyOf(seam)}' has no candidate and no scripted answer. ` +
-            "Pass `candidate`, or script the seam's key.",
-        );
-      }
-      seamOutput = scripted.output;
-      return scripted;
-    }
-
-    const result = await candidate(request as AgentExecutorTextRequest, info);
-    seamOutput = await seamOutputOf(result, request);
-    return result;
+    seamOutput = scripted.output;
+    return scripted;
   };
 
   const executors: Partial<AgentRequestExecutors> = {
@@ -320,11 +313,7 @@ export async function runSeam<TMachine extends AnyStateMachine>(
     generateText: route,
     streamText: async (request, info) => {
       const result = await route(request, info);
-      // Stream semantics with no model: the whole text lands as one chunk.
-      const output = isRecord(result) ? result["output"] : undefined;
-      if (typeof output === "string") {
-        info?.onChunk?.(output);
-      }
+      emitScriptedChunk(result, info);
       return result;
     },
   };
@@ -337,7 +326,7 @@ export async function runSeam<TMachine extends AnyStateMachine>(
 
   for (let turn = 0; turn <= maxTurns; turn++) {
     result = await runAgent(machine, {
-      ...(snapshot ? { snapshot } : { input: options.input as InputFrom<TMachine> }),
+      ...(snapshot ? { snapshot } : { input: options.input }),
       ...(event ? { event } : {}),
       ...(options.isSuspended ? { isSuspended: options.isSuspended } : {}),
       ...(options.actors ? { actors: options.actors } : {}),
@@ -368,7 +357,7 @@ export async function runSeam<TMachine extends AnyStateMachine>(
     const next = options.respond?.({
       snapshot: result.snapshot,
       state: (result.snapshot as AnyMachineSnapshot).value,
-      meta: getStateMeta<SnapshotFrom<TMachine>, Record<string, unknown>>(result.snapshot),
+      meta: getStateMeta(result.snapshot),
       turn,
       result,
     });

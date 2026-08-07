@@ -4,13 +4,13 @@
  *
  * Usage: pnpm docs:check
  */
-import { readFileSync, readdirSync } from 'node:fs';
-import { join, relative } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import ts from 'typescript';
-import { createTwoslasher } from 'twoslash';
+import { readFileSync, readdirSync } from "node:fs";
+import { join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
+import ts from "typescript";
+import { createTwoslasher } from "twoslash";
 
-const root = fileURLToPath(new URL('..', import.meta.url));
+const root = fileURLToPath(new URL("..", import.meta.url));
 
 const COMPILER_OPTIONS: ts.CompilerOptions = {
   target: ts.ScriptTarget.ES2022,
@@ -20,21 +20,21 @@ const COMPILER_OPTIONS: ts.CompilerOptions = {
   esModuleInterop: true,
   skipLibCheck: true,
   noEmit: true,
-  types: ['node'],
+  types: ["node"],
   baseUrl: root,
   paths: {
-    '@statelyai/agent': ['./src/index.ts'],
-    '@statelyai/agent/ai-sdk': ['./src/ai-sdk/index.ts'],
-    '@statelyai/agent/machines': ['./src/machines/index.ts'],
-    '@statelyai/agent/otel': ['./src/otel/index.ts'],
-    '@statelyai/agent/sqlite': ['./src/sqlite/index.ts'],
+    "@statelyai/agent": ["./src/index.ts"],
+    "@statelyai/agent/ai-sdk": ["./src/ai-sdk/index.ts"],
+    "@statelyai/agent/machines": ["./src/machines/index.ts"],
+    "@statelyai/agent/otel": ["./src/otel/index.ts"],
+    "@statelyai/agent/sqlite": ["./src/sqlite/index.ts"],
   },
 };
 
 // Ambient declarations injected only when a block references the name but
 // doesn't declare/import it itself.
-const globalsFile = join(root, 'docs/snippet-globals.ts');
-const globalsSource = readFileSync(globalsFile, 'utf8');
+const globalsFile = join(root, "docs/snippet-globals.ts");
+const globalsSource = readFileSync(globalsFile, "utf8");
 
 type Global = { name: string; text: string };
 
@@ -44,13 +44,10 @@ function parseGlobals(source: string): Global[] {
   // via `declare const X`, `declare function X`, `type X`, or `interface X`.
   for (const block of source.split(/\n{2,}/)) {
     const text = block.trim();
-    if (!text || text.startsWith('//')) continue;
-    const match = text.match(
-      /^import\s+(?:type\s+)?\{\s*([A-Za-z_$][\w$]*)\s*\}/m,
-    ) ??
-      text.match(
-        /(?:declare (?:const|let|function|class)|type|interface)\s+([A-Za-z_$][\w$]*)/,
-      );
+    if (!text || text.startsWith("//")) continue;
+    const match =
+      text.match(/^import\s+(?:type\s+)?\{\s*([A-Za-z_$][\w$]*)\s*\}/m) ??
+      text.match(/(?:declare (?:const|let|function|class)|type|interface)\s+([A-Za-z_$][\w$]*)/);
     if (!match) continue;
     globals.push({ name: match[1]!, text });
   }
@@ -64,11 +61,11 @@ const GLOBALS = parseGlobals(globalsSource);
  * should be imported from. Auto-derived so snippets stay in sync with the API.
  */
 const PACKAGE_ENTRIES: Record<string, string> = {
-  '@statelyai/agent': 'src/index.ts',
-  '@statelyai/agent/ai-sdk': 'src/ai-sdk/index.ts',
-  '@statelyai/agent/machines': 'src/machines/index.ts',
-  '@statelyai/agent/otel': 'src/otel/index.ts',
-  '@statelyai/agent/sqlite': 'src/sqlite/index.ts',
+  "@statelyai/agent": "src/index.ts",
+  "@statelyai/agent/ai-sdk": "src/ai-sdk/index.ts",
+  "@statelyai/agent/machines": "src/machines/index.ts",
+  "@statelyai/agent/otel": "src/otel/index.ts",
+  "@statelyai/agent/sqlite": "src/sqlite/index.ts",
 };
 
 function collectPackageExports(): Map<string, string> {
@@ -123,7 +120,7 @@ function collectDeclaredNames(code: string): Set<string> {
 }
 
 function referencesName(code: string, name: string): boolean {
-  return new RegExp(`\\b${name.replace(/[$]/g, '\\$')}\\b`).test(code);
+  return new RegExp(`\\b${name.replace(/[$]/g, "\\$")}\\b`).test(code);
 }
 
 const PACKAGE_EXPORTS = collectPackageExports();
@@ -142,8 +139,8 @@ function buildPreamble(code: string): string {
       lines.push(g.text);
     }
   }
-  if (!lines.length) return '';
-  return lines.join('\n') + '\n// ---cut---\n';
+  if (!lines.length) return "";
+  return lines.join("\n") + "\n// ---cut---\n";
 }
 
 type Block = {
@@ -155,7 +152,7 @@ type Block = {
 };
 
 function extractBlocks(file: string, source: string): Block[] {
-  const lines = source.split('\n');
+  const lines = source.split("\n");
   const blocks: Block[] = [];
   let i = 0;
   while (i < lines.length) {
@@ -165,19 +162,19 @@ function extractBlocks(file: string, source: string): Block[] {
       continue;
     }
     const [, indent, ticks, infoRaw] = open;
-    const info = (infoRaw ?? '').trim();
+    const info = (infoRaw ?? "").trim();
     const closer = new RegExp(`^${indent}\`{${ticks!.length},}\\s*$`);
     let j = i + 1;
     while (j < lines.length && !closer.test(lines[j]!)) j++;
-    const lang = info.split(/\s+/)[0] ?? '';
-    if (lang === 'ts' || lang === 'typescript') {
+    const lang = info.split(/\s+/)[0] ?? "";
+    if (lang === "ts" || lang === "typescript") {
       blocks.push({
         file,
         line: i + 1,
         code: lines
           .slice(i + 1, j)
           .map((l) => (indent ? l.slice(indent.length) : l))
-          .join('\n'),
+          .join("\n"),
         skip: /\bno-check\b/.test(info),
       });
     }
@@ -189,11 +186,11 @@ function extractBlocks(file: string, source: string): Block[] {
 // Optional CLI args filter which markdown files are checked, by substring.
 const filters = process.argv.slice(2);
 const files = [
-  join(root, 'readme.md'),
-  ...readdirSync(join(root, 'docs'))
-    .filter((f) => f.endsWith('.md'))
+  join(root, "readme.md"),
+  ...readdirSync(join(root, "docs"))
+    .filter((f) => f.endsWith(".md"))
     .sort()
-    .map((f) => join(root, 'docs', f)),
+    .map((f) => join(root, "docs", f)),
 ].filter((f) => !filters.length || filters.some((arg) => f.includes(arg)));
 
 const twoslasher = createTwoslasher({ compilerOptions: COMPILER_OPTIONS });
@@ -204,7 +201,7 @@ const failures: string[] = [];
 
 for (const file of files) {
   const rel = relative(root, file);
-  const source = readFileSync(file, 'utf8');
+  const source = readFileSync(file, "utf8");
   for (const block of extractBlocks(rel, source)) {
     if (block.skip) {
       skipped++;
@@ -214,33 +211,31 @@ for (const file of files) {
     const preamble = buildPreamble(block.code);
     let errors: { line: number; text: string; code: number }[] = [];
     try {
-      const result = twoslasher(preamble + block.code, 'ts', {
+      const result = twoslasher(preamble + block.code, "ts", {
         handbookOptions: { noErrorValidation: true },
       });
       // `result.code` is the snippet with the preamble cut away, and error
       // `start` offsets index into it — so line numbers map straight back to
       // the markdown block.
       errors = result.errors.map((e) => ({
-        line: result.code.slice(0, Math.max(0, e.start ?? 0)).split('\n').length - 1,
+        line: result.code.slice(0, Math.max(0, e.start ?? 0)).split("\n").length - 1,
         text: e.text,
         code: e.code,
       }));
     } catch (error) {
-      errors = [
-        { line: 0, text: error instanceof Error ? error.message : String(error), code: 0 },
-      ];
+      errors = [{ line: 0, text: error instanceof Error ? error.message : String(error), code: 0 }];
     }
     if (!errors.length) continue;
     const detail = errors
       .map((e) => `      ${rel}:${block.line + 1 + e.line}  TS${e.code}: ${e.text}`)
-      .join('\n');
+      .join("\n");
     failures.push(`${rel}:${block.line} (fenced block)\n${detail}`);
   }
 }
 
 if (failures.length) {
-  console.error('\nFailing snippets:\n');
-  for (const f of failures) console.error(f + '\n');
+  console.error("\nFailing snippets:\n");
+  for (const f of failures) console.error(f + "\n");
 }
 
 console.log(

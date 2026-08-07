@@ -73,8 +73,12 @@ type ExpressionScope = {
   context?: unknown;
   event?: unknown;
   input?: unknown;
-  output?: unknown;
 };
+
+// Normalizes the config's `T | T[]` shorthand fields into an array.
+function toArray<T>(value: T | T[]): T[] {
+  return Array.isArray(value) ? value : [value];
+}
 
 // Static workflow configs cannot carry functions, so this tiny expression
 // layer lowers JSON/YAML values into normal JS values before machine creation.
@@ -289,6 +293,13 @@ function createRequestsFromWorkflowConfig(
   config: AgentWorkflowConfig,
   compileSchema: SchemaCompiler,
 ): AgentRequestInput<Record<string, { input: StandardSchemaV1; output: StandardSchemaV1 }>> {
+  // An optional config field becomes an input-scoped template resolver; an
+  // absent one stays absent (so request defaults still apply).
+  const resolver = <T>(value: unknown) =>
+    value === undefined
+      ? undefined
+      : ({ input }: { input: unknown }) => evaluateWorkflowConfigValue(value, { input }) as T;
+
   return Object.fromEntries(
     Object.entries(config.requests ?? {}).map(([key, request]) => [
       key,
@@ -299,65 +310,21 @@ function createRequestsFromWorkflowConfig(
           input: compileSchema(request.input as Record<string, unknown>, `${key}.input`),
           output: compileSchema(request.output as Record<string, unknown>, `${key}.output`),
         },
-        model: ({ input }) => String(evaluateWorkflowConfigValue(request.model, { input }) ?? ""),
-        system:
-          request.system === undefined
-            ? undefined
-            : ({ input }) =>
-                evaluateWorkflowConfigValue(request.system, { input }) as string | undefined,
-        prompt:
-          request.prompt === undefined
-            ? undefined
-            : ({ input }) =>
-                evaluateWorkflowConfigValue(request.prompt, { input }) as string | undefined,
-        messages:
-          request.messages === undefined
-            ? undefined
-            : ({ input }) =>
-                evaluateWorkflowConfigValue(request.messages, { input }) as
-                  | AgentMessage[]
-                  | undefined,
+        model: ({ input }: { input: unknown }) =>
+          String(evaluateWorkflowConfigValue(request.model, { input }) ?? ""),
+        system: resolver<string | undefined>(request.system),
+        prompt: resolver<string | undefined>(request.prompt),
+        messages: resolver<AgentMessage[] | undefined>(request.messages),
         tools: request.tools,
         toolChoice: request.toolChoice as AgentToolChoice | undefined,
         reasoning: request.reasoning,
-        temperature:
-          request.temperature === undefined
-            ? undefined
-            : ({ input }) =>
-                evaluateWorkflowConfigValue(request.temperature, { input }) as number | undefined,
-        maxOutputTokens:
-          request.maxOutputTokens === undefined
-            ? undefined
-            : ({ input }) =>
-                evaluateWorkflowConfigValue(request.maxOutputTokens, {
-                  input,
-                }) as number | undefined,
-        topP:
-          request.topP === undefined
-            ? undefined
-            : ({ input }) =>
-                evaluateWorkflowConfigValue(request.topP, { input }) as number | undefined,
-        topK:
-          request.topK === undefined
-            ? undefined
-            : ({ input }) =>
-                evaluateWorkflowConfigValue(request.topK, { input }) as number | undefined,
-        seed:
-          request.seed === undefined
-            ? undefined
-            : ({ input }) =>
-                evaluateWorkflowConfigValue(request.seed, { input }) as number | undefined,
-        stopSequences:
-          request.stopSequences === undefined
-            ? undefined
-            : ({ input }) =>
-                evaluateWorkflowConfigValue(request.stopSequences, {
-                  input,
-                }) as string[] | undefined,
-        metadata:
-          request.metadata === undefined
-            ? undefined
-            : ({ input }) => evaluateWorkflowConfigValue(request.metadata, { input }),
+        temperature: resolver<number | undefined>(request.temperature),
+        maxOutputTokens: resolver<number | undefined>(request.maxOutputTokens),
+        topP: resolver<number | undefined>(request.topP),
+        topK: resolver<number | undefined>(request.topK),
+        seed: resolver<number | undefined>(request.seed),
+        stopSequences: resolver<string[] | undefined>(request.stopSequences),
+        metadata: resolver<unknown>(request.metadata),
       },
     ]),
   ) as AgentRequestInput<Record<string, { input: StandardSchemaV1; output: StandardSchemaV1 }>>;
@@ -543,11 +510,7 @@ function translateWorkflowTransition(
   translation: WorkflowTranslation,
   location: string,
 ): Record<string, unknown> {
-  const actionConfigs = transitionConfig.actions
-    ? Array.isArray(transitionConfig.actions)
-      ? transitionConfig.actions
-      : [transitionConfig.actions]
-    : [];
+  const actionConfigs = transitionConfig.actions ? toArray(transitionConfig.actions) : [];
   const assignConfigs = [
     ...(transitionConfig.assign !== undefined ? [transitionConfig.assign] : []),
     ...actionConfigs
@@ -669,14 +632,8 @@ function assertValidTransitionTargets(
   if (!transitionConfig) {
     return;
   }
-  const transitions = Array.isArray(transitionConfig) ? transitionConfig : [transitionConfig];
-  for (const transition of transitions) {
-    const targets =
-      transition.target === undefined
-        ? []
-        : Array.isArray(transition.target)
-          ? transition.target
-          : [transition.target];
+  for (const transition of toArray(transitionConfig)) {
+    const targets = transition.target === undefined ? [] : toArray(transition.target);
     for (const target of targets) {
       if (typeof target !== "string") {
         continue;
@@ -706,65 +663,30 @@ function assertStateTransitionTargets(
   siblingKeys: Set<string>,
 ): string[] {
   const declaredTargets: string[] = [];
-  for (const [eventType, transition] of Object.entries(stateConfig.on ?? {})) {
-    assertValidTransitionTargets(
-      stateKey,
-      `'on.${eventType}'`,
-      transition,
-      siblingKeys,
-      declaredTargets,
-    );
-  }
-  for (const [delay, transition] of Object.entries(stateConfig.after ?? {})) {
-    assertValidTransitionTargets(
-      stateKey,
-      `'after.${delay}'`,
-      transition,
-      siblingKeys,
-      declaredTargets,
-    );
-  }
-  assertValidTransitionTargets(
-    stateKey,
-    "'always'",
-    stateConfig.always,
-    siblingKeys,
-    declaredTargets,
-  );
-  assertValidTransitionTargets(
-    stateKey,
-    "'onDone'",
-    stateConfig.onDone,
-    siblingKeys,
-    declaredTargets,
-  );
-  assertValidTransitionTargets(
-    stateKey,
-    "'choice'",
-    stateConfig.choice,
-    siblingKeys,
-    declaredTargets,
-  );
-  const invokes = stateConfig.invoke
-    ? Array.isArray(stateConfig.invoke)
-      ? stateConfig.invoke
-      : [stateConfig.invoke]
-    : [];
-  for (const invoke of invokes) {
-    assertValidTransitionTargets(
-      stateKey,
-      "invoke 'onDone'",
-      invoke.onDone,
-      siblingKeys,
-      declaredTargets,
-    );
-    assertValidTransitionTargets(
-      stateKey,
-      "invoke 'onError'",
-      invoke.onError,
-      siblingKeys,
-      declaredTargets,
-    );
+  const invokes = stateConfig.invoke ? toArray(stateConfig.invoke) : [];
+  const sources: readonly (readonly [
+    string,
+    AgentWorkflowTransitionConfig | AgentWorkflowTransitionConfig[] | undefined,
+  ])[] = [
+    ...Object.entries(stateConfig.on ?? {}).map(
+      ([eventType, transition]) => [`'on.${eventType}'`, transition] as const,
+    ),
+    ...Object.entries(stateConfig.after ?? {}).map(
+      ([delay, transition]) => [`'after.${delay}'`, transition] as const,
+    ),
+    ["'always'", stateConfig.always],
+    ["'onDone'", stateConfig.onDone],
+    ["'choice'", stateConfig.choice],
+    ...invokes.flatMap(
+      (invoke) =>
+        [
+          ["invoke 'onDone'", invoke.onDone],
+          ["invoke 'onError'", invoke.onError],
+        ] as const,
+    ),
+  ];
+  for (const [location, transition] of sources) {
+    assertValidTransitionTargets(stateKey, location, transition, siblingKeys, declaredTargets);
   }
   return declaredTargets;
 }
@@ -839,10 +761,7 @@ function translateWorkflowState(
       : {}),
     ...(stateConfig.choice !== undefined
       ? {
-          choice: (Array.isArray(stateConfig.choice)
-            ? stateConfig.choice
-            : [stateConfig.choice]
-          ).map((branch) => {
+          choice: toArray(stateConfig.choice).map((branch) => {
             if (branch.actions !== undefined) {
               throw new Error(
                 `setupAgent.fromConfig: state '${stateKey}' has a 'choice' branch with ` +
@@ -891,15 +810,15 @@ function translateWorkflowState(
       : {}),
     ...(stateConfig.entry !== undefined
       ? {
-          entry: (Array.isArray(stateConfig.entry) ? stateConfig.entry : [stateConfig.entry]).map(
-            (action) => translateWorkflowAction(action, translation, location),
+          entry: toArray(stateConfig.entry).map((action) =>
+            translateWorkflowAction(action, translation, location),
           ),
         }
       : {}),
     ...(stateConfig.exit !== undefined
       ? {
-          exit: (Array.isArray(stateConfig.exit) ? stateConfig.exit : [stateConfig.exit]).map(
-            (action) => translateWorkflowAction(action, translation, location),
+          exit: toArray(stateConfig.exit).map((action) =>
+            translateWorkflowAction(action, translation, location),
           ),
         }
       : {}),

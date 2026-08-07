@@ -6,11 +6,11 @@
 
 ```ts
 const session = createAgentActor(machine, { input, executors });
-await session.settled();          // resolves at the next quiescence
+await session.settled(); // resolves at the next quiescence
 session.actor.send({ type: "SEND" }); // re-opens the cycle
 await session.settled();
-session.usage().totalTokens;      // cumulative across every turn
-session.events;                   // one replayable log for the whole session
+session.usage().totalTokens; // cumulative across every turn
+session.events; // one replayable log for the whole session
 session.stop();
 ```
 

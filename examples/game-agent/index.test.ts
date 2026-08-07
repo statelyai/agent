@@ -85,11 +85,7 @@ describe("game-agent rock-paper-scissors machine", () => {
     const output = await runRpsExample({
       input: { targetWins: 3 },
       decide,
-      humanThrows: [
-        { type: "HUMAN_PAPER" },
-        { type: "HUMAN_PAPER" },
-        { type: "HUMAN_PAPER" },
-      ],
+      humanThrows: [{ type: "HUMAN_PAPER" }, { type: "HUMAN_PAPER" }, { type: "HUMAN_PAPER" }],
       onNotice: (notice) => idleLabels.push(notice),
     });
 
@@ -116,10 +112,7 @@ describe("game-agent rock-paper-scissors machine", () => {
     const output = await runRpsExample({
       input: { targetWins: 2 },
       decide: alwaysRock,
-      humanThrows: [
-        { type: "HUMAN_SCISSORS" },
-        { type: "HUMAN_SCISSORS" },
-      ],
+      humanThrows: [{ type: "HUMAN_SCISSORS" }, { type: "HUMAN_SCISSORS" }],
     });
 
     expect(output.outcome).toBe("lost");

@@ -218,6 +218,21 @@ describe("createScriptedExecutors", () => {
     expect(result.usage).toMatchObject({ modelCalls: 1, totalTokens: 7 });
   });
 
+  test("a chosen event may carry an `event` payload field", async () => {
+    const choice = { type: "FORWARD", event: { type: "NESTED" } };
+    const executors = createScriptedExecutors({ decisions: [choice] });
+
+    await expect(
+      executors.decide({
+        kind: "decision",
+        id: "forward",
+        model: "fast",
+        events: [{ type: "FORWARD", toolName: "send_event_FORWARD" }],
+        attempts: [],
+      }),
+    ).resolves.toEqual({ event: choice });
+  });
+
   test("structured output is scripted as the object itself", async () => {
     const noteSetup = setupAgent({
       context: z.object({ note: z.string().nullable() }),

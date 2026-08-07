@@ -70,10 +70,10 @@ const result = await runAgent(machine, {
 });
 ```
 
-- `decisions` feeds `agent.decide`; `text` feeds every text request.
-- An entry can be a function of the request, so branching machines script per `request.name`.
+Queue semantics are in [Scripted executors](hosts.md#scripted-executors). Two of them matter while debugging:
+
 - A guard-rejected decision consumes an entry and retries with the next one, which is how you reproduce a retry loop exactly.
-- Running dry throws `ScriptedExecutorsError` (`code: 'scripted-executors-exhausted'`) naming the pending request, which is itself a useful signal: the machine asked for more model calls than you expected.
+- Running dry throws with `error.code === 'scripted-executors-exhausted'`, naming the pending request. That is itself a signal: the machine asked for more model calls than you expected.
 
 For a playthrough without the run loop at all, `simulateAgent(machine, { input, script })` walks the pure step path with responses keyed by invoke `src`, returning `{ status, snapshot, trail }`. The `trail` shows every step taken, which answers "why did it end up here" without any async in the way. See [Testing and verification](verify.md).
 
@@ -86,26 +86,53 @@ Some wrong behavior is structural, and `lintAgentMachine(machine)` finds it with
 ```ts
 import { assertAgentMachine, lintAgentMachine } from "@statelyai/agent";
 
-console.log(lintAgentMachine(machine)); // AgentLintDiagnostic[] — { code, severity, path, message }
+console.log(lintAgentMachine(machine)); // AgentLintDiagnostic[]: { code, severity, path, message }
 assertAgentMachine(machine); // throws AgentLintError on any error-severity finding
 ```
 
 Diagnostic codes worth recognizing:
 
-| Code                      | What it means                                                   |
-| ------------------------- | --------------------------------------------------------------- |
-| `unreachable-state`       | No transition reaches the state; the model can never get there. |
-| `decide-without-events`   | A decision whose candidate set is empty, so it can only fail.   |
-| `undeclared-event`        | A transition on an event the setup never declared.              |
-| `missing-final`           | No final state, so a run cannot settle `done`.                  |
-| `final-without-output`    | A final state that does not satisfy the output contract.        |
-| `unserializable-context`  | Context that cannot be persisted or replayed.                   |
+| Code                     | What it means                                                   |
+| ------------------------ | --------------------------------------------------------------- |
+| `unreachable-state`      | No transition reaches the state; the model can never get there. |
+| `decide-without-events`  | A decision whose candidate set is empty, so it can only fail.   |
+| `undeclared-event`       | A transition on an event the setup never declared.              |
+| `missing-final`          | No final state, so a run cannot settle `done`.                  |
+| `final-without-output`   | A final state that does not satisfy the output contract.        |
+| `unserializable-context` | Context that cannot be persisted or replayed.                   |
+
+## Error codes
+
+<!-- codes and classes from src/errors.ts, src/run-agent.ts, src/decision.ts, src/effects.ts, src/verify.ts, src/event-log-store.ts, src/scripted-executors.ts, src/seam.ts -->
+
+Every framework error extends `AgentError` and carries a stable kebab-case `code`. Branch on the code, not `instanceof`, which is unreliable across bundle and process boundaries:
+
+```ts no-check
+if (error instanceof AgentError && error.code === "decision-exhausted") {
+  // error.attempts
+}
+```
+
+| Code                           | Thrown by                                                  | Meaning                                                                       | First fix                                                                           |
+| ------------------------------ | ---------------------------------------------------------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `agent-idle`                   | `generateResult`                                           | The machine paused for external input instead of completing.                  | Use `runAgent` and handle `status: 'idle'`; `error.acceptedTypes` resumes it.       |
+| `illegal-resume-event`         | `runAgent` (before start, with `snapshot` + `event`)       | The restored state does not accept that event type.                           | Pick from `getAcceptedEvents(snapshot)`, or pass `onIllegalResumeEvent: 'ignore'`.  |
+| `snapshot-version-mismatch`    | `runAgent` (resume)                                        | The snapshot's stamped machine version differs from the current machine's.    | Supply `migrateSnapshot`, or set `onVersionMismatch` to `'warn'` / `'ignore'`.      |
+| `max-model-calls-exceeded`     | `runAgent` internals                                       | The `maxModelCalls` budget (default 100) was exceeded.                        | Raise the budget, or fix the loop guard that never terminates.                      |
+| `decision-exhausted`           | `resolveDecision`                                          | Every attempt (`maxRetries + 1`) failed validation or a guard.                | Read `error.attempts[].failure`; reconcile `allowedEvents`, schema, and guard.      |
+| `lint-failed`                  | `assertAgentMachine`                                       | The machine has at least one error-severity lint finding.                     | Read `error.diagnostics`, or call `lintAgentMachine` for the full list.             |
+| `replay-machine-mismatch`      | `replay` / `verifyReplay`                                  | A log entry is stamped for a different machine id or version.                 | Replay against the machine that wrote the log, or set an explicit `machineVersion`. |
+| `replay-divergence`            | `replay` / `verifyReplay`                                  | Recomputed state, effects, or missing hashes disagree with the entry.         | `error.index` / `error.kind` name the entry; look for impurity at that step.        |
+| `non-serializable-event`       | `createReplayEntry`, `initEntry`, `store.append`, `replay` | A value JSON would drop or coerce (`undefined`, `Date`, `Map`, class, cycle). | `error.path` names the field; store a plain-JSON equivalent instead.                |
+| `event-log-conflict`           | `AgentEventLogStore.append`                                | A concurrent writer already advanced the thread past `expectedIndex`.         | Re-read with `store.length(threadId)` and retry the append.                         |
+| `scripted-executors-exhausted` | `createScriptedExecutors`                                  | The canned script ran dry on a pending request.                               | Add entries, or ask why the machine wanted more model calls than you scripted.      |
+| `seam-script-exhausted`        | `runSeam`                                                  | No scripted answer left for a seam request.                                   | Add an entry to `scripts.<key>`; its last entry repeats.                            |
+
+`result.cause` on an `error` result is a separate, shorter union: `'aborted' | 'max-model-calls' | 'decision-exhausted' | 'machine' | 'stopped'`.
 
 ## Common failure modes
 
 <!-- errors and codes from src/decision.ts, src/run-agent.ts, src/effects.ts, src/verify.ts, src/event-log-store.ts -->
-
-Every error extends `AgentError` and carries a stable kebab-case `code`, so branch on `error.code` rather than `instanceof`.
 
 **The model kept picking an illegal event.** `AgentDecisionExhaustedError` (`decision-exhausted`): every attempt (up to `maxRetries + 1`) failed one of three checks. Read `error.attempts`; each has a `failure`:
 

@@ -8,10 +8,7 @@
     "url": "https://github.com/dinavinter/agents"
   },
   "comparison": {
-    "targets": [
-      "parallel",
-      "streaming"
-    ],
+    "targets": ["parallel", "streaming"],
     "purpose": "Two writing tasks stream at the same time and their text interleaves as it arrives, each chunk tagged with the request it came from."
   },
   "starters": [

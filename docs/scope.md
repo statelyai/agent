@@ -9,7 +9,7 @@ description: What Stately Agent owns, what the host owns, and where specialized 
 
 That boundary is what makes a machine portable. Agent frameworks that bundle a model client, a search client, a memory store, and a server all at once tie your control flow to those choices. Here the machine only ever describes work; the host decides how it happens, so the same machine runs against a different SDK, provider, or database with no edits.
 
-In practice the machine says *what*:
+In practice the machine says _what_:
 
 ```ts no-check
 searching: {
@@ -17,7 +17,7 @@ searching: {
 }
 ```
 
-and the host says *how*, binding `searchWeb` to whichever search client, cache, and auth it uses.
+and the host says _how_, binding `searchWeb` to whichever search client, cache, and auth it uses.
 
 ## Ownership boundary
 
@@ -64,4 +64,10 @@ A feature does not belong in core merely because popular agent applications need
 - Persist JSON-safe snapshots and external artifact handles, not live clients or binary resources, in machine context.
 - Feed traces to an evaluation or observability library through `onTrace`; do not make the machine aware of the destination.
 
-See [Hosts and executors](hosts.md), [Use in any stack](any-stack.md), [The step path](steps.md), and [Multi-agent](multi-agent.md) for the concrete contracts.
+## Related
+
+- [Hosts and executors](hosts.md): the executor contract the host implements.
+- [Use in any stack](any-stack.md): the same machine across local, server, and edge hosts.
+- [The step path](steps.md): the per-model-call loop durable hosts own.
+- [Multi-agent composition](multi-agent.md): composing machines without an orchestration layer.
+- [Post-alpha roadmap](roadmap.md): what is deliberately not shipped yet.

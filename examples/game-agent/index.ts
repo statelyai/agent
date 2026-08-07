@@ -231,7 +231,10 @@ export const gameMachine = gameAgentSetup.createMachine({
             context: {
               playerHp,
               defended: false,
-              log: [...context.log, `You heal ${event.amount} (you ${context.playerHp} → ${playerHp}).`],
+              log: [
+                ...context.log,
+                `You heal ${event.amount} (you ${context.playerHp} → ${playerHp}).`,
+              ],
             },
           };
         },
@@ -454,10 +457,7 @@ export function renderMatch(
         entry.result === "tie" ? "tie" : entry.result === "win" ? "you win" : "agent wins"
       }`,
   );
-  return [
-    ...lines,
-    `You ${outcome} the match ${playerScore}-${opponentScore}.`,
-  ].join("\n");
+  return [...lines, `You ${outcome} the match ${playerScore}-${opponentScore}.`].join("\n");
 }
 
 const rpsSetup = setupAgent({

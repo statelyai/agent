@@ -125,11 +125,11 @@ function buildMachine(session: Session, db: DbClient) {
 }
 ```
 
-## Scripted executors (no API key)
+## Scripted executors
 
 <!-- createScriptedExecutors surface from src/scripted-executors.ts -->
 
-`createScriptedExecutors` is the keyless executor set: a full `{ generateText, streamText, decide }` that plays back scripted answers from FIFO queues instead of calling a model. It is a root export (no dependencies), so a machine runs end to end with nothing installed but core.
+`createScriptedExecutors` is the keyless executor set: a full `{ generateText, streamText, decide }` that plays back scripted answers from FIFO queues instead of calling a model. No API key, no network. It is a root export (no dependencies), so a machine runs end to end with nothing installed but core.
 
 ```ts
 import { createScriptedExecutors, runAgent } from "@statelyai/agent";
@@ -144,9 +144,10 @@ const result = await runAgent(moderationMachine, {
 ```
 
 - `decisions` answers `decide`; `text` answers every text request, `generateText` and `streamText` sharing the one queue.
-- Entries are values or functions of the request — route on `request.name`, on the decision's candidate `events`, or on prior `attempts`.
+- Entries are values or functions of the request: route on `request.name`, on the decision's candidate `events`, or on prior `attempts`.
 - An entry may be the raw envelope (`{ output, usage }` / `{ event, usage }`), so scripted runs can exercise usage aggregation.
-- A dry queue throws an error naming the pending request. Queues are copied, so one script object seeds many runs.
+- A guard-rejected decision consumes an entry and retries with the next one.
+- A dry queue throws with `code: 'scripted-executors-exhausted'`, naming the pending request. Queues are copied, so one script object seeds many runs.
 
 For a playthrough with no run loop at all, `simulateAgent` scripts the pure step path by invoke `src`. See [Testing and verification](verify.md).
 

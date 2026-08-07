@@ -376,9 +376,7 @@ export async function runGoFishExample(options?: {
   const queued = [...(options?.asks ?? [])];
 
   const shared = {
-    executors: options?.decide
-      ? { decide: options.decide }
-      : createAiSdkExecutors({ models }),
+    executors: options?.decide ? { decide: options.decide } : createAiSdkExecutors({ models }),
     onTransition: (snapshot: GoFishSnapshot) => {
       if (snapshot.context.notice !== lastNotice) {
         lastNotice = snapshot.context.notice;

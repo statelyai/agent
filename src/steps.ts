@@ -2,7 +2,7 @@
  * The step envelope: an INTERNAL, per-model-call-checkpoint view of an agent
  * machine (`AgentStep` = snapshot + actions + discovered requests + done). It
  * once backed a public step API; the public step path is now the thin
- * effect/replay loop in `./effects.ts` (re-exported from `@statelyai/agent/steps`).
+ * effect/replay loop in `./effects.ts` (re-exported from `@statelyai/agent`).
  * These helpers survive as internals that `runAgent`, `verify.ts`, and the
  * effect path build on — the only symbol still on the public surface is
  * {@link executeAgentRequest} (the `text`-effect resolver).
@@ -27,11 +27,9 @@ import {
   type AgentRequestMode,
   type AgentTextRequest,
 } from "./text-logic.js";
-import { isDecisionLogic, resolveDecision, type AgentDecisionRequest } from "./decision.js";
-import type { ChosenEvent } from "./types.js";
+import { isDecisionLogic, type AgentDecisionRequest } from "./decision.js";
 import {
   getAcceptedEvents,
-  sanitizeEventToolName,
   type AgentEventDescriptor,
   type AgentRequestOptions,
   type AgentRequestSource,
@@ -94,20 +92,25 @@ export function getInvokeEffectMetadata(action: {
   return undefined;
 }
 
+/** Options accepted by {@link getAgentRequests}. */
+export interface GetAgentRequestsOptions extends AgentRequestOptions {
+  /** Pre-fills `schemas`/`actors` from the machine's registered `setupAgent` options; anything passed here wins. */
+  machine?: AnyActorLogic;
+}
+
 /**
  * Scans a set of executable actions (as returned by xstate's `transition`/
  * `initialTransition`) for spawned `TextLogic`/`DecisionLogic` invokes and
- * lowers each into an {@link AgentStepRequest}. The hand-passed-schemas
- * implementation detail behind the public {@link getAgentRequests} — it needs
- * `schemas`/`actors` passed explicitly, whereas `getAgentRequests`
- * pre-fills them from the machine's registered `setupAgent` options.
+ * lowers each into an {@link AgentStepRequest}. Pass `options.machine` to
+ * pre-fill `schemas`/`actors` from the machine's registered `setupAgent`
+ * options instead of passing them by hand.
  * `options.snapshot` is required to resolve a decision's candidate events
  * (intersecting declared `allowedEvents` with what's currently legal) — omit
  * it and decision requests report an empty `events` list.
  *
  * @internal
  */
-export function getAgentRequestsWith(
+export function getAgentRequests(
   actions: readonly {
     type?: string;
     params?: unknown;
@@ -116,8 +119,12 @@ export function getAgentRequestsWith(
     input?: unknown;
     logic?: unknown;
   }[],
-  options: AgentRequestOptions = {},
+  { machine, ...options }: GetAgentRequestsOptions = {},
 ): AgentStepRequest[] {
+  if (machine) {
+    options = { ...getRegisteredAgentExecutionOptions(machine), ...options };
+  }
+
   const fromActions = actions.flatMap((action): AgentStepRequest[] => {
     const params = getInvokeEffectMetadata(action);
     if (!params || typeof params.src !== "string") {
@@ -312,40 +319,16 @@ export function resolveAgentStep<TMachine extends AnyActorLogic>(
 }
 
 /**
- * Snapshot in, requests out: scans executable actions for spawned agent
- * invokes and lowers each into an {@link AgentStepRequest}, pre-filled with
- * the machine's registered `setupAgent` schemas/actors (so callers
- * don't pass them by hand each call) — merged with any `options` passed here,
- * which take precedence. The step path's public discovery primitive;
- * `initialAgentStep`/`transitionAgentStep`/`resolveAgentStep` call it
- * internally to populate `AgentStep.requests`.
- */
-export function getAgentRequests(
-  machine: AnyActorLogic,
-  actions: readonly { type?: string; params?: unknown }[],
-  snapshot?: AnyMachineSnapshot,
-  options: Pick<AgentRequestOptions, "eventToolName"> & Partial<AgentExecutionOptions> = {},
-): AgentStepRequest[] {
-  const machineOptions = getRegisteredAgentExecutionOptions(machine, options);
-
-  return getAgentRequestsWith(actions, {
-    ...machineOptions,
-    ...options,
-    snapshot,
-  });
-}
-
-/**
  * Resolves one **text** request against a host's {@link AgentRequestExecutors}
  * — merges the request's tools, dispatches to `generateText`/`streamText` per
  * `mode`, and validates the result against the request's `outputSchema` if
- * present. Accepts either a `kind: 'text'` `AgentEffect` (the thin-loop shape
- * from `getAgentEffects`) or a legacy {@link AgentRequest} envelope.
+ * present. Accepts either a `kind: 'text'` `AgentEffect` (the step-path shape
+ * from `getAgentEffects`) or an {@link AgentRequest} envelope.
  * **Text-only**: passing a `kind: 'decision'` request throws, directing the
- * caller to `resolveDecision(request, executors.decide, ...)` instead. By default
- * returns the normalized output; pass `{ verbose: true }` to also get the
- * raw executor result (tool calls, usage, finish reason — needed for
- * observability and event-sourced replay).
+ * caller to `resolveDecision(request, executors.decide, ...)` instead. Always
+ * returns both the normalized `output` and the `raw` executor result (tool
+ * calls, usage, finish reason — needed for observability and event-sourced
+ * replay).
  */
 /** A `kind: 'text'` `AgentEffect` (structural, to avoid an import cycle with effects.ts). */
 interface TextEffectLike {
@@ -355,20 +338,10 @@ interface TextEffectLike {
   mode?: AgentRequestMode;
 }
 
-export function executeAgentRequest(
-  request: AgentRequest | TextEffectLike,
-  executors: Partial<AgentRequestExecutors>,
-): Promise<unknown>;
-export function executeAgentRequest(
-  request: AgentRequest | TextEffectLike,
-  executors: Partial<AgentRequestExecutors>,
-  options: { verbose: true },
-): Promise<{ output: unknown; raw: unknown }>;
 export async function executeAgentRequest(
   requestOrEffect: AgentRequest | TextEffectLike,
   executors: Partial<AgentRequestExecutors>,
-  options?: { verbose?: boolean },
-): Promise<unknown> {
+): Promise<{ output: unknown; raw: unknown }> {
   if ((requestOrEffect as { kind: string }).kind === "decision") {
     throw new Error(
       "executeAgentRequest(...) is text-only. Resolve a 'decision' request with " +
@@ -401,97 +374,12 @@ export async function executeAgentRequest(
     request.tools,
   );
 
-  const normalizedOutput = request.input.outputSchema
-    ? validateSchemaSync(request.input.outputSchema, output)
-    : output;
-
-  return options?.verbose ? { output: normalizedOutput, raw } : normalizedOutput;
-}
-
-/**
- * Options for {@link resolveAgentRequests}. Internal — the step envelope is no
- * longer part of the public surface.
- */
-interface ResolveAgentRequestsOptions extends Partial<AgentExecutionOptions> {
-  /** Retries per decision, passed to `resolveDecision`. Default `2`. */
-  maxRetries?: number;
-}
-
-/**
- * Resolves the current step's pending requests and returns the next
- * {@link AgentStep} — one iteration of the durable step loop, collapsing the
- * manual `request.kind` dispatch a host would otherwise write by hand.
- *
- * For each pending request, in order: a `kind: 'text'` request is run with
- * {@link executeAgentRequest} then fed back via {@link resolveAgentStep}; a
- * `kind: 'decision'` request is resolved with `resolveDecision` (wiring
- * `canTake` to `step.snapshot.can` so guard-rejected choices retry) then
- * applied with {@link transitionAgentStep}. The **current** step is re-read
- * after each application — the machine may advance and its `requests` change —
- * so this always resolves against the live step, never a stale list.
- *
- * Missing the executor a request needs throws a clear error
- * (`generateText`/`streamText` for text, `decide` for decisions).
- *
- * A complete durable host is two lines:
- *
- * ```ts
- * let step = initialAgentStep(machine, input);
- * while (!step.done) step = await resolveAgentRequests(machine, step, executors);
- * ```
- *
- * All pending **text** requests of a step are resolved in parallel
- * (`Promise.all`) — parallel statechart regions are genuinely concurrent, so
- * their model calls run concurrently — then their outputs apply in
- * **request-array order** (deterministic for durable replay regardless of which
- * call finishes first). Decisions stay **one at a time**: applying one changes
- * the set of legal candidates for what follows, so they cannot be resolved
- * against a stale snapshot. A host that instead wants strictly
- * sequential text resolution loops the manual per-request helpers
- * ({@link executeAgentRequest} + {@link resolveAgentStep}) one at a time.
- */
-export async function resolveAgentRequests<TMachine extends AnyActorLogic>(
-  machine: TMachine,
-  step: AgentStep<SnapshotFrom<TMachine>>,
-  executors: Partial<AgentRequestExecutors>,
-  options?: ResolveAgentRequestsOptions,
-): Promise<AgentStep<SnapshotFrom<TMachine>>> {
-  const [request] = step.requests;
-  if (!request) {
-    return step;
-  }
-
-  if (request.kind === "decision") {
-    if (!executors.decide) {
-      throw new Error(
-        `this step's decision request '${request.id}' needs a 'decide' executor but none was provided.`,
-      );
-    }
-    const chosenEvent = await resolveDecision(request, executors.decide, {
-      canTake: (event: ChosenEvent) => (step.snapshot as AnyMachineSnapshot).can(event as never),
-      maxRetries: options?.maxRetries,
-    });
-    return transitionAgentStep(machine, step, chosenEvent as EventFromLogic<TMachine>, options);
-  }
-
-  // Text requests. Decisions above already returned, so every remaining
-  // request here is text. Parallel statechart regions are concurrent, so all
-  // pending text requests resolve in parallel; outputs then apply in
-  // request-array order (deterministic for replay regardless of finish order).
-  const textRequests = step.requests.filter(
-    (candidate): candidate is AgentRequest => candidate.kind === "text",
-  );
-  for (const textRequest of textRequests) {
-    assertTextExecutor(textRequest, executors);
-  }
-  const outputs = await Promise.all(
-    textRequests.map((textRequest) => executeAgentRequest(textRequest, executors)),
-  );
-  let next = step;
-  for (let index = 0; index < textRequests.length; index++) {
-    next = resolveAgentStep(machine, next, textRequests[index]!, outputs[index], options);
-  }
-  return next;
+  return {
+    output: request.input.outputSchema
+      ? validateSchemaSync(request.input.outputSchema, output)
+      : output,
+    raw,
+  };
 }
 
 // Throws the clear per-kind missing-executor error for a text request's mode —
@@ -522,7 +410,7 @@ function createAgentStep<TMachine extends AnyActorLogic>(
   return {
     snapshot,
     actions,
-    requests: getAgentRequestsWith(actions, {
+    requests: getAgentRequests(actions, {
       ...options,
       snapshot: snapshot as AnyMachineSnapshot,
     }),

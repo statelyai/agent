@@ -8,10 +8,7 @@
     "url": "https://github.com/TauricResearch/TradingAgents"
   },
   "comparison": {
-    "targets": [
-      "TradingAgents",
-      "organizational multi-agent workflows"
-    ],
+    "targets": ["TradingAgents", "organizational multi-agent workflows"],
     "purpose": "Specialists analyze a stock in parallel, a bull and a bear argue it out over several rounds, a trader proposes a move, and a risk reviewer can send it back once before the final call."
   },
   "starters": [

@@ -18,7 +18,11 @@ Migration (a text/decision run):
 ```ts
 import { initialTransition, transition } from "xstate";
 import {
-  createReplayEntry, executeAgentRequest, getAgentEffects, initEntry, resolveDecision,
+  createReplayEntry,
+  executeAgentRequest,
+  getAgentEffects,
+  initEntry,
+  resolveDecision,
 } from "@statelyai/agent";
 
 const entries = [initEntry(machine, input)];
@@ -27,7 +31,10 @@ while (snapshot.status === "active") {
   const effects = getAgentEffects(machine, snapshot, actions, { history: entries });
   let next;
   for (const effect of effects) {
-    if (effect.kind === "execute") { effect.exec(); continue; }
+    if (effect.kind === "execute") {
+      effect.exec();
+      continue;
+    }
     if (effect.kind === "text") {
       next = effect.toDoneEvent(await executeAgentRequest(effect, executors));
       break;

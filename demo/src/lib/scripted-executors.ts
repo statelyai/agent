@@ -120,20 +120,33 @@ export function scriptedExecutorsFor(scenarioId: ScenarioId): Executors {
           const calc = question.match(/(\d+)\s*(?:\*|x|times|multiplied by)\s*(\d+)/);
           if (noObservations && calc) {
             return {
-              event: { ...pick(request, "CALCULATE"), operation: "multiply", a: Number(calc[1]), b: Number(calc[2]) },
+              event: {
+                ...pick(request, "CALCULATE"),
+                operation: "multiply",
+                a: Number(calc[1]),
+                b: Number(calc[2]),
+              },
             };
           }
-          if (noObservations && /speed of light|earth radius|seconds per day|moon distance/.test(question)) {
-            const key = ["speed of light", "earth radius", "seconds per day", "moon distance"].find((k) =>
-              question.includes(k),
+          if (
+            noObservations &&
+            /speed of light|earth radius|seconds per day|moon distance/.test(question)
+          ) {
+            const key = ["speed of light", "earth radius", "seconds per day", "moon distance"].find(
+              (k) => question.includes(k),
             )!;
             return { event: { ...pick(request, "LOOKUP"), key } };
           }
           return {
-            event: { ...pick(request, "FINISH"), answer: "Based on the tool results, here is the answer." },
+            event: {
+              ...pick(request, "FINISH"),
+              answer: "Based on the tool results, here is the answer.",
+            },
           };
         },
-        generateText: async () => ({ output: "Best-effort answer from the observations gathered." }),
+        generateText: async () => ({
+          output: "Best-effort answer from the observations gathered.",
+        }),
       };
 
     case "reflection":

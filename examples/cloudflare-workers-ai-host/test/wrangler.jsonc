@@ -1,0 +1,15 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "workers-ai-game-host-test",
+  "main": "../index.ts",
+  "compatibility_date": "2026-01-01",
+  "compatibility_flags": ["nodejs_compat"],
+  // No `ai` binding here, unlike ../wrangler.jsonc: the specs stub `env.AI`
+  // (real inference would be billed and non-deterministic), and declaring the
+  // binding makes wrangler open a remote proxy session, which needs a
+  // logged-in Cloudflare account that CI does not have.
+  "alias": {
+    "@statelyai/agent": "../node_modules/@statelyai/agent/dist/index.mjs",
+    "@statelyai/agent/ai-sdk": "../node_modules/@statelyai/agent/dist/ai-sdk.mjs",
+  },
+}

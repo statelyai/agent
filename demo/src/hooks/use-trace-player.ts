@@ -75,7 +75,12 @@ export function useTracePlayer(machineKey: string, initialValue: string | null) 
     trace.forEach((entry, index) => {
       timers.current.push(
         setTimeout(() => {
-          setFrame({ value: entry.value, status: "active", context: entry.context, event: entry.event });
+          setFrame({
+            value: entry.value,
+            status: "active",
+            context: entry.context,
+            event: entry.event,
+          });
         }, delays[index]),
       );
     });

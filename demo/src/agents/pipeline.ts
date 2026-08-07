@@ -30,19 +30,22 @@ const agentSetup = setupAgent({
     planTask: {
       schemas: { input: z.object({ task: z.string() }), output: z.string() },
       model: "planner",
-      system: "Plan how to complete the writing task: audience, supplied facts, structure. Do not write the artifact yet.",
+      system:
+        "Plan how to complete the writing task: audience, supplied facts, structure. Do not write the artifact yet.",
       prompt: ({ input }) => input.task,
     },
     executeTask: {
       schemas: { input: z.object({ task: z.string(), plan: z.string() }), output: z.string() },
       model: "writer",
-      system: "Execute the plan and write the requested artifact using only supplied facts. Return only the artifact.",
+      system:
+        "Execute the plan and write the requested artifact using only supplied facts. Return only the artifact.",
       prompt: ({ input }) => `Task:\n${input.task}\n\nPlan:\n${input.plan}`,
     },
     verifyTask: {
       schemas: { input: z.object({ task: z.string(), draft: z.string() }), output: z.string() },
       model: "critic",
-      system: "Verify the draft against the task. Flag unsupported claims or missing requirements, then give a concise verdict.",
+      system:
+        "Verify the draft against the task. Flag unsupported claims or missing requirements, then give a concise verdict.",
       prompt: ({ input }) => `Task:\n${input.task}\n\nDraft:\n${input.draft}`,
     },
   },

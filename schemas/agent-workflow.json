@@ -483,10 +483,7 @@
         },
         "guard": {
           "description": "Either a whole-string {{ }} expression evaluated as truthy/falsy, or a named guard reference resolved against the `guards` passed to setupAgent.fromConfig(config, { guards }). Object guards ({ type, params }) are rejected by the lowering.",
-          "anyOf": [
-            { "$ref": "#/$defs/ExpressionString" },
-            { "$ref": "#/$defs/Identifier" }
-          ]
+          "anyOf": [{ "$ref": "#/$defs/ExpressionString" }, { "$ref": "#/$defs/Identifier" }]
         },
         "assign": {
           "description": "Context assignments applied when this transition is taken.",

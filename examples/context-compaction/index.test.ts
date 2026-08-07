@@ -1,11 +1,7 @@
 import { describe, expect, test } from "vitest";
 import type { AgentMessage, AgentRequestExecutor } from "@statelyai/agent";
 import { getStateMeta, runAgent } from "@statelyai/agent";
-import {
-  contextCompactionMachine,
-  idlePrompt,
-  runContextCompactionExample,
-} from "./index.js";
+import { contextCompactionMachine, idlePrompt, runContextCompactionExample } from "./index.js";
 
 function textContent(message: AgentMessage | undefined): string {
   return typeof message?.content === "string" ? message.content : "";

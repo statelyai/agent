@@ -39,10 +39,10 @@ import {
 } from "./internal/state-request-pass.js";
 
 export type { AgentStateRequest } from "./internal/state-request-pass.js";
-import { getAcceptedEvents, sanitizeEventToolName, type AgentSchemas } from "./events.js";
+import { getAcceptedEvents, type AgentSchemas } from "./events.js";
 import {
   AGENT_USAGE_TOKEN_FIELDS,
-  extractCallUsage,
+  getCallUsage,
   isTextLogic,
   normalizeGeneratorResult,
   USER_INPUT_ACTOR,
@@ -74,12 +74,12 @@ import {
   createReplayEntry,
   initEntry,
   replay,
+  validateReplayEntries,
   AGENT_INIT_EVENT_TYPE,
   AGENT_USAGE_EVENT_TYPE,
-  AgentReplayMachineMismatchError,
   type AgentUsageEvent,
 } from "./effects.js";
-import { assertAgentLogEntry, type AgentLogEntry, type JsonValue } from "./event-log-store.js";
+import type { AgentLogEntry, JsonValue } from "./event-log-store.js";
 
 // ─── runAgent (createActor wrapper) ───
 //
@@ -280,53 +280,41 @@ export type AgentTraceEvent<TMachine extends AnyStateMachine = AnyStateMachine> 
 );
 
 /**
+ * Fields a JSON projection keeps VERBATIM: {@link TRACE_ENVELOPE_KEYS} (the
+ * envelope, the `type`/`status`/`cause` discriminants, and the payload fields
+ * that are already plain strings) plus `usage.dropped`'s `reason`, which is a
+ * string literal — sanitizing it is the identity, so it keeps its literal type.
+ * Every other payload field narrows to {@link JsonValue}. @internal
+ */
+type TraceVerbatimKey = (typeof TRACE_ENVELOPE_KEYS)[number] | "reason";
+
+/** One trace variant's JSON projection. Homomorphic, so `?` modifiers survive. @internal */
+type JsonProjectedTraceVariant<TEvent> = {
+  [K in keyof TEvent]: K extends TraceVerbatimKey ? TEvent[K] : JsonValue;
+};
+
+/**
+ * `raw` is written only when `includeRaw` was set, so it is optional on the
+ * JSON side even though the live trace always carries it. @internal
+ */
+type WithOptionalRaw<T> = "raw" extends keyof T ? Omit<T, "raw"> & { raw?: JsonValue } : T;
+
+/**
  * The JSON-safe projection of an {@link AgentTraceEvent} produced by
  * {@link serializeTraceEvent}: the envelope fields are unchanged, and every
  * payload field that can hold a live object (snapshots, machine events, request
  * objects, raw SDK results, errors) is narrowed to a {@link JsonValue}. Safe to
  * hand straight to `JSON.stringify` for a JSONL trace file.
+ *
+ * DERIVED from {@link AgentTraceEvent}, so a new trace variant cannot silently
+ * miss the JSON side. `src/serialize-trace-event.test.ts` pins the result to
+ * the shape this type had when it was hand-maintained.
  */
-export type JsonSerializableTraceEvent = {
-  schemaVersion: typeof AGENT_TRACE_SCHEMA_VERSION;
-  runId: string;
-  seq: number;
-  timestamp: string;
-  machineId: string;
-  machineVersion: string;
-} & (
-  | { type: "run.start"; input?: JsonValue; snapshot?: JsonValue; event?: JsonValue }
-  | { type: "request.start"; request: JsonValue }
-  | {
-      type: "request.end";
-      request: JsonValue;
-      output: JsonValue;
-      /** Present only when `includeRaw` was set; the raw executor result, sanitized. */
-      raw?: JsonValue;
-      reasoning?: string;
-      /** Present only when the executor reported it; plain numbers, passed through as-is. */
-      usage?: JsonValue;
-    }
-  | { type: "request.error"; request: JsonValue; error: JsonValue }
-  | { type: "stream.chunk"; request: JsonValue; chunk: string }
-  | { type: "machine.transition"; snapshot: JsonValue; event: JsonValue; eventId?: string }
-  | { type: "emit"; event: JsonValue }
-  | { type: "usage.dropped"; event: JsonValue; reason: "settled" }
-  | { type: "run.end"; status: "done"; output: JsonValue; snapshot: JsonValue }
-  | {
-      type: "run.end";
-      status: "idle";
-      snapshot: JsonValue;
-      pendingUserInputs?: JsonValue;
-      persistedSnapshot?: JsonValue;
-    }
-  | {
-      type: "run.end";
-      status: "error";
-      cause: RunAgentErrorCause;
-      error: JsonValue;
-      snapshot: JsonValue;
-    }
-);
+export type JsonSerializableTraceEvent = AgentTraceEvent extends infer TEvent
+  ? TEvent extends unknown
+    ? WithOptionalRaw<JsonProjectedTraceVariant<TEvent>>
+    : never
+  : never;
 
 // Envelope fields copied verbatim by serializeTraceEvent; every other field is sanitized.
 const TRACE_ENVELOPE_KEYS = [
@@ -646,9 +634,19 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
   messages?: AgentMessage[] | ((prior: AgentMessage[]) => AgentMessage[]);
 
   // observation — all void; no callback controls the run
-  /** Fires for each streamed chunk of a `mode: 'stream'` text request, alongside the {@link AgentRequest} that produced it (parallel states can interleave multiple streams). Purely observational. */
+  /**
+   * Sugar over {@link onTrace}'s `stream.chunk` events: fires for each streamed
+   * chunk of a `mode: 'stream'` text request, alongside the {@link AgentRequest}
+   * that produced it (parallel states can interleave multiple streams). Purely
+   * observational.
+   */
   onChunk?: (chunk: string, info: { request: AgentRequest }) => void;
-  /** Fires once per resolved text/decision request with its normalized output and the raw executor result (tool calls, usage, …) — the seam for tracing/observability and event-sourced replay logging. */
+  /**
+   * Sugar over {@link onTrace}'s `request.end` events: fires once per resolved
+   * text/decision request with its normalized output and the raw executor
+   * result (tool calls, usage, …) — the seam for tracing/observability and
+   * event-sourced replay logging.
+   */
   onResult?: (request: AgentStepRequest, result: { output: unknown; raw: unknown }) => void;
   /**
    * Fires as each new replayable external input is appended to this run's
@@ -660,8 +658,9 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
   /** Fires a single ordered stream of run/request/chunk/transition/emit/end events. Intended for eval traces, JSONL logs, and adapter-owned telemetry/exporters. */
   onTrace?: (event: AgentTraceEvent<TMachine>) => void;
   /**
-   * Fires on every machine transition (snapshot + causing event). Pure
-   * observation — progress UIs, logging, tracing. Cannot send events.
+   * Sugar over {@link onTrace}'s `machine.transition` events: fires on every
+   * root-machine transition (snapshot + causing event). Pure observation —
+   * progress UIs, logging, tracing. Cannot send events.
    */
   onTransition?: (snapshot: SnapshotFrom<TMachine>, event: EventFromLogic<TMachine>) => void;
   /**
@@ -896,9 +895,9 @@ function isStateMachine(logic: unknown): logic is AnyStateMachine {
 function assertBindable(
   machine: AnyStateMachine,
   effectiveSources: Record<string, AnyActorLogic>,
-  options: { hasGenerateText: boolean; hasDecide: boolean; hasStreamText: boolean },
+  executors: Partial<AgentRequestExecutors>,
 ): void {
-  assertMachineBindable(machine, effectiveSources, options, {
+  assertMachineBindable(machine, effectiveSources, executors, {
     isChild: false,
     childPath: "",
     rebindable: true,
@@ -924,7 +923,7 @@ interface BindWalkContext {
 function assertMachineBindable(
   machine: AnyStateMachine,
   effectiveSources: Record<string, AnyActorLogic>,
-  options: { hasGenerateText: boolean; hasDecide: boolean; hasStreamText: boolean },
+  executors: Partial<AgentRequestExecutors>,
   ctx: BindWalkContext,
 ): void {
   const invokes: Array<{ stateName: string; src: string | AnyActorLogic }> = [];
@@ -936,7 +935,7 @@ function assertMachineBindable(
     if (typeof src !== "string") {
       // Direct-object src.
       if (isStateMachine(src)) {
-        assertChildMachineBindable(src, src, stateName, options, ctx);
+        assertChildMachineBindable(src, src, stateName, executors, ctx);
         continue;
       }
       // string-keyed sources can be rebound by runAgent; direct objects
@@ -966,7 +965,7 @@ function assertMachineBindable(
     }
 
     if (isStateMachine(logic)) {
-      assertChildMachineBindable(logic, src, stateName, options, ctx);
+      assertChildMachineBindable(logic, src, stateName, executors, ctx);
       continue;
     }
 
@@ -988,7 +987,7 @@ function assertMachineBindable(
       if (!ctx.rebindable) {
         throw unrebindableChildRequestError(ctx.childPath, stateName, src, "decision");
       }
-      if (!options.hasDecide) {
+      if (!executors.decide) {
         throw new Error(
           `runAgent: ${where} '${stateName}' invokes decision source '${src}' but no ` +
             `'decide' executor was provided to runAgent(...).`,
@@ -1012,13 +1011,13 @@ function assertMachineBindable(
           logic.mode === "stream" ? "streaming text" : "text",
         );
       }
-      if (logic.mode === "stream" && !options.hasStreamText) {
+      if (logic.mode === "stream" && !executors.streamText) {
         throw new Error(
           `runAgent: ${where} '${stateName}' invokes streaming text source '${src}' but ` +
             `no 'streamText' executor was provided to runAgent(...).`,
         );
       }
-      if (logic.mode !== "stream" && !options.hasGenerateText) {
+      if (logic.mode !== "stream" && !executors.generateText) {
         throw new Error(
           `runAgent: ${where} '${stateName}' invokes text source '${src}' but ` +
             `no 'generateText' executor was provided to runAgent(...).`,
@@ -1045,7 +1044,7 @@ function assertChildMachineBindable(
   childMachine: AnyStateMachine,
   childSrc: string | AnyActorLogic,
   stateName: string,
-  options: { hasGenerateText: boolean; hasDecide: boolean; hasStreamText: boolean },
+  executors: Partial<AgentRequestExecutors>,
   ctx: BindWalkContext,
 ): void {
   // Cycle guard: a machine invoked (transitively) within itself is walked
@@ -1068,7 +1067,7 @@ function assertChildMachineBindable(
   // so nothing under it inherits.
   const rebindable = ctx.rebindable && typeof childSrc === "string";
 
-  assertMachineBindable(childMachine, childSources, options, {
+  assertMachineBindable(childMachine, childSources, executors, {
     isChild: true,
     childPath,
     rebindable,
@@ -1110,16 +1109,16 @@ interface RunAgentBindContext {
   generateText?: AgentRequestExecutor;
   streamText?: AgentRequestExecutor;
   decide?: AgentDecisionExecutor;
-  onChunk?: (chunk: string, info: { request: AgentRequest }) => void;
-  onResult?: (request: AgentStepRequest, result: { output: unknown; raw: unknown }) => void;
   /**
-   * Payload-level trace sink: the shared emission helpers hand it a bare
-   * {@link AgentTraceEventPayload} plus the emitting actor's `self` (the invoked
-   * async leaf). `runAgent` ignores `self` and stamps a run-scoped envelope;
+   * The single observation dispatch point (see {@link createTraceDispatch}):
+   * the shared emission helpers hand it a bare {@link AgentTraceEventPayload}
+   * plus the emitting actor's `self` (the invoked async leaf), and it fans out
+   * to the trace sink and to the sugar callbacks derived from that payload.
+   * `runAgent` ignores `self` and stamps a run-scoped envelope;
    * `provideExecutors` uses it to mint a per-root-actor envelope (see
-   * `provideTraceSink`).
+   * `provideTraceSink`). Undefined when nothing observes.
    */
-  onTrace?: (event: AgentTraceEventPayload, self?: unknown) => void;
+  emitTrace?: TraceDispatch;
   consumeModelCall: () => void;
   /**
    * Folds one completed call's reported usage into the run-level
@@ -1132,7 +1131,11 @@ interface RunAgentBindContext {
    * has no run-scoped root actor. `runAgent` ignores it and delivers to the
    * run's root.
    */
-  recordUsage?: (usage: AgentCallUsage, source?: AgentUsageEventSource, self?: unknown) => void;
+  recordUsage?: (
+    usage: AgentCallUsage,
+    source?: AgentUsageEventSource,
+    self?: BoundActorSelf,
+  ) => void;
   /** The owning run's id (`run_<n>`), threaded to executors as `info.runId`. Unset off the runAgent path. */
   runId?: string;
   /** Assigned right after createActor (§2.6); read lazily by decision wraps. */
@@ -1158,12 +1161,68 @@ function declaresUsageTransition(snapshot: AnyMachineSnapshot): boolean {
   );
 }
 
+/**
+ * The invoked async leaf's own actor ref, as the bind helpers below read it:
+ * xstate types `self` on execute args as `unknown`, so it is cast to this once
+ * at each entry point (the two wrappers) and stays typed from there on. Beyond
+ * a plain ref it carries the parent link (the invoking machine actor) and the
+ * durable invoke `src`. @internal
+ */
+type BoundActorSelf = AnyActorRef & { id?: string; _parent?: AnyActorRef; src?: string };
+
+/** The single observation dispatch point built by {@link createTraceDispatch}. @internal */
+type TraceDispatch = (payload: AgentTraceEventPayload, self?: BoundActorSelf) => void;
+
+/** The observers a {@link TraceDispatch} fans one trace payload out to. @internal */
+interface TraceSinks {
+  /** Envelope-stamping trace sink (run-scoped on the runAgent path, per-root-actor on the provide path). */
+  onTrace?: (payload: AgentTraceEventPayload, self?: BoundActorSelf) => void;
+  onChunk?: (chunk: string, info: { request: AgentRequest }) => void;
+  onResult?: (request: AgentStepRequest, result: { output: unknown; raw: unknown }) => void;
+  onTransition?: (
+    snapshot: SnapshotFrom<AnyStateMachine>,
+    event: EventFromLogic<AnyStateMachine>,
+  ) => void;
+}
+
+/**
+ * Builds the ONE place a trace payload is emitted: it hands the payload to the
+ * envelope-stamping trace sink and, from that same payload, invokes the sugar
+ * callbacks that are projections of it — {@link RunAgentOptions.onChunk},
+ * {@link RunAgentOptions.onResult}, {@link RunAgentOptions.onTransition}. Each
+ * keeps its historical position relative to the trace: `onResult` fires just
+ * BEFORE its `request.end`, `onChunk`/`onTransition` just AFTER their
+ * `stream.chunk`/`machine.transition`. Sugar dispatch never depends on whether
+ * a trace sink is present, and the trace sink is never called when it is
+ * absent — so an `onTrace`-less run still mints no envelope (and advances no
+ * `seq`). @internal
+ */
+function createTraceDispatch(sinks: TraceSinks): TraceDispatch {
+  return (payload, self) => {
+    switch (payload.type) {
+      case "stream.chunk":
+        sinks.onTrace?.(payload, self);
+        sinks.onChunk?.(payload.chunk, { request: payload.request });
+        return;
+      case "request.end":
+        sinks.onResult?.(payload.request, { output: payload.output, raw: payload.raw });
+        sinks.onTrace?.(payload, self);
+        return;
+      case "machine.transition":
+        sinks.onTrace?.(payload, self);
+        sinks.onTransition?.(payload.snapshot, payload.event);
+        return;
+      default:
+        sinks.onTrace?.(payload, self);
+    }
+  };
+}
+
 /** Reads the durable invoke id/src off the async actor's own ref (`self`). */
-function selfIdAndSrc(self: unknown): { id: string; src: string } {
-  const ref = self as { id?: unknown; src?: unknown } | undefined;
+function selfIdAndSrc(self: BoundActorSelf | undefined): { id: string; src: string } {
   return {
-    id: typeof ref?.id === "string" ? ref.id : "",
-    src: typeof ref?.src === "string" ? ref.src : "",
+    id: typeof self?.id === "string" ? self.id : "",
+    src: typeof self?.src === "string" ? self.src : "",
   };
 }
 
@@ -1176,9 +1235,11 @@ function selfIdAndSrc(self: unknown): { id: string; src: string } {
  * the CHILD's snapshot — not the root's. Read off `self._parent`, with the
  * root actor as a fallback.
  */
-function invokingActorOf(self: unknown, runCtx: RunAgentBindContext): AnyActorRef | undefined {
-  const parent = (self as { _parent?: AnyActorRef } | undefined)?._parent;
-  return parent ?? runCtx.actorHolder.actorRef;
+function invokingActorOf(
+  self: BoundActorSelf | undefined,
+  runCtx: RunAgentBindContext,
+): AnyActorRef | undefined {
+  return self?._parent ?? runCtx.actorHolder.actorRef;
 }
 
 /**
@@ -1188,8 +1249,9 @@ function invokingActorOf(self: unknown, runCtx: RunAgentBindContext): AnyActorRe
  * Used by both `runAgent` and `provideExecutors` so the two paths produce
  * identical event shapes by construction. @internal
  */
-function wrapTextLogicForRunAgent(logic: TextLogic, runCtx: RunAgentBindContext): TextLogic {
-  return logic.withExecutor(async ({ request, self, signal }) => {
+function bindTextLogic(logic: TextLogic, runCtx: RunAgentBindContext): TextLogic {
+  return logic.withExecutor(async ({ request, self: selfArg, signal }) => {
+    const self = selfArg as BoundActorSelf | undefined;
     const { id, src } = selfIdAndSrc(self);
     const executor = logic.mode === "stream" ? runCtx.streamText : runCtx.generateText;
     if (!executor) {
@@ -1214,12 +1276,11 @@ function wrapTextLogicForRunAgent(logic: TextLogic, runCtx: RunAgentBindContext)
     };
 
     runCtx.consumeModelCall();
-    runCtx.onTrace?.({ type: "request.start", request: agentRequest }, self);
+    runCtx.emitTrace?.({ type: "request.start", request: agentRequest }, self);
     try {
       const raw = await executor(requestWithTools as AgentExecutorTextRequest, {
         onChunk: (chunk: string) => {
-          runCtx.onTrace?.({ type: "stream.chunk", request: agentRequest, chunk }, self);
-          runCtx.onChunk?.(chunk, { request: agentRequest });
+          runCtx.emitTrace?.({ type: "stream.chunk", request: agentRequest, chunk }, self);
         },
         signal,
         ...(runCtx.runId !== undefined ? { runId: runCtx.runId } : {}),
@@ -1228,8 +1289,7 @@ function wrapTextLogicForRunAgent(logic: TextLogic, runCtx: RunAgentBindContext)
       const output = await normalizeGeneratorResult(raw, id, {
         request,
         onChunk: (chunk: string) => {
-          runCtx.onTrace?.({ type: "stream.chunk", request: agentRequest, chunk }, self);
-          runCtx.onChunk?.(chunk, { request: agentRequest });
+          runCtx.emitTrace?.({ type: "stream.chunk", request: agentRequest, chunk }, self);
         },
       });
 
@@ -1240,7 +1300,7 @@ function wrapTextLogicForRunAgent(logic: TextLogic, runCtx: RunAgentBindContext)
 
       // Fold this call's reported tokens into the run-level AgentUsage, and
       // surface them per-call on the request.end trace.
-      const usage = extractCallUsage(raw);
+      const usage = getCallUsage(raw);
       if (usage) {
         runCtx.recordUsage?.(
           usage,
@@ -1255,8 +1315,7 @@ function wrapTextLogicForRunAgent(logic: TextLogic, runCtx: RunAgentBindContext)
         );
       }
 
-      runCtx.onResult?.(agentRequest, { output, raw });
-      runCtx.onTrace?.(
+      runCtx.emitTrace?.(
         {
           type: "request.end",
           request: agentRequest,
@@ -1270,7 +1329,7 @@ function wrapTextLogicForRunAgent(logic: TextLogic, runCtx: RunAgentBindContext)
 
       return { output };
     } catch (error) {
-      runCtx.onTrace?.({ type: "request.error", request: agentRequest, error }, self);
+      runCtx.emitTrace?.({ type: "request.error", request: agentRequest, error }, self);
       throw error;
     }
   });
@@ -1279,17 +1338,20 @@ function wrapTextLogicForRunAgent(logic: TextLogic, runCtx: RunAgentBindContext)
 // Wraps runCtx's `decide` executor with model-call budgeting and tracing.
 // `self` is the invoking decision leaf actor, threaded to `onTrace` so the
 // provide path can attribute the event to its root actor.
-function createCountingDecide(runCtx: RunAgentBindContext, self: unknown): AgentDecisionExecutor {
+function createCountingDecide(
+  runCtx: RunAgentBindContext,
+  self: BoundActorSelf | undefined,
+): AgentDecisionExecutor {
   return async (attemptRequest) => {
     runCtx.consumeModelCall();
-    runCtx.onTrace?.({ type: "request.start", request: attemptRequest }, self);
+    runCtx.emitTrace?.({ type: "request.start", request: attemptRequest }, self);
     try {
       // `runId` rides on the request like `signal` does: host-injected
       // correlation, never serialized into machine state.
       const result = await runCtx.decide!(
         runCtx.runId !== undefined ? { ...attemptRequest, runId: runCtx.runId } : attemptRequest,
       );
-      const usage = extractCallUsage(result);
+      const usage = getCallUsage(result);
       if (usage) {
         const { src } = selfIdAndSrc(self);
         runCtx.recordUsage?.(
@@ -1303,8 +1365,7 @@ function createCountingDecide(runCtx: RunAgentBindContext, self: unknown): Agent
           self,
         );
       }
-      runCtx.onResult?.(attemptRequest, { output: result.event, raw: result });
-      runCtx.onTrace?.(
+      runCtx.emitTrace?.(
         {
           type: "request.end",
           request: attemptRequest,
@@ -1316,7 +1377,7 @@ function createCountingDecide(runCtx: RunAgentBindContext, self: unknown): Agent
       );
       return result;
     } catch (error) {
-      runCtx.onTrace?.({ type: "request.error", request: attemptRequest, error }, self);
+      runCtx.emitTrace?.({ type: "request.error", request: attemptRequest, error }, self);
       throw error;
     }
   };
@@ -1337,15 +1398,13 @@ function createCountingDecide(runCtx: RunAgentBindContext, self: unknown): Agent
  * send-then-complete note inside `run` for how exit-cancels-invoke interacts
  * with `onDone`.
  */
-function createRunAgentDecisionLogic(
-  logic: DecisionLogic,
-  runCtx: RunAgentBindContext,
-): DecisionLogic {
+function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): DecisionLogic {
   const decisionLogic = createAsyncLogic<ChosenEvent, unknown>({
-    run: async ({ input, signal, self }) => {
+    run: async ({ input, signal, self: selfArg }) => {
       if (!runCtx.decide) {
         throw new Error("runAgent: no 'decide' executor provided.");
       }
+      const self = selfArg as BoundActorSelf | undefined;
       const { id } = selfIdAndSrc(self);
 
       // Rebuild the candidate events from the live snapshot (mirrors the
@@ -1405,7 +1464,7 @@ function createRunAgentDecisionLogic(
     maxRetries: logic.maxRetries,
     request: logic.request,
     withExecutor: (nextExecute: AgentDecisionExecutor) =>
-      createRunAgentDecisionLogic(logic.withExecutor(nextExecute), runCtx),
+      bindDecisionLogic(logic.withExecutor(nextExecute), runCtx),
   }) as DecisionLogic;
 }
 
@@ -1449,15 +1508,12 @@ const rootTraceRegistry = new WeakMap<object, RootTraceState>();
 let nextProvideRunId = 1;
 
 /** Walks `self._parent` from an invoked async leaf actor up to its root actor. */
-function rootActorOf(self: unknown): AnyActorRef | undefined {
-  let ref = self as { _parent?: unknown } | undefined;
-  if (!ref) {
-    return undefined;
+function rootActorOf(self: BoundActorSelf | undefined): AnyActorRef | undefined {
+  let ref = self;
+  while (ref?._parent) {
+    ref = ref._parent as BoundActorSelf;
   }
-  while ((ref as { _parent?: unknown })._parent) {
-    ref = (ref as { _parent?: unknown })._parent as { _parent?: unknown };
-  }
-  return ref as unknown as AnyActorRef;
+  return ref;
 }
 
 /** The per-root envelope state, minted on first use (runId `run_<n>`, matching runAgent). */
@@ -1488,10 +1544,8 @@ function stampRootTrace(root: AnyActorRef, payload: AgentTraceEventPayload): Age
   } as AgentTraceEvent;
 }
 
-/** Adapts a public `onTrace` into the payload-level {@link RunAgentBindContext.onTrace} sink used by the shared emission helpers. */
-function provideTraceSink(
-  onTrace?: (event: AgentTraceEvent) => void,
-): RunAgentBindContext["onTrace"] {
+/** Adapts a public `onTrace` into the payload-level trace sink a {@link TraceDispatch} fans out to. */
+function provideTraceSink(onTrace?: (event: AgentTraceEvent) => void): TraceSinks["onTrace"] {
   if (!onTrace) {
     return undefined;
   }
@@ -1504,7 +1558,7 @@ function provideTraceSink(
 }
 
 /** Options threaded into the `provideExecutors` bind helpers. @internal */
-export interface ProvideBindOptions {
+interface ProvideBindOptions {
   onChunk?: (chunk: string) => void;
   onTrace?: (event: AgentTraceEvent) => void;
 }
@@ -1520,22 +1574,30 @@ export interface ProvideBindOptions {
  *
  * `recordUsage` has no run-level aggregate to fold into here (there is no
  * run), so it does one thing: deliver the reserved `@agent.usage` event, gated
- * exactly like runAgent's — see {@link deliverUsageToInvokingActor}.
+ * exactly like runAgent's — see {@link deliverUsageEvent}.
  */
 function provideBindContext(
   machine: AnyStateMachine,
   executors: Partial<AgentRequestExecutors>,
   options: ProvideBindOptions,
 ): RunAgentBindContext {
+  const traceSink = provideTraceSink(options.onTrace);
+  const onChunk = options.onChunk;
   return {
     generateText: executors.generateText,
     streamText: executors.streamText,
     decide: executors.decide,
-    onChunk: options.onChunk ? (chunk) => options.onChunk!(chunk) : undefined,
-    onTrace: provideTraceSink(options.onTrace),
+    // Built only when something observes, so a bare bind allocates no payloads.
+    emitTrace:
+      traceSink || onChunk
+        ? createTraceDispatch({
+            onTrace: traceSink,
+            onChunk: onChunk ? (chunk) => onChunk(chunk) : undefined,
+          })
+        : undefined,
     consumeModelCall: () => {},
     recordUsage: (usage, source, self) => {
-      deliverUsageToInvokingActor(usage, source ?? {}, self);
+      deliverUsageEvent(usage, source ?? {}, () => self?._parent);
     },
     actorHolder: { actorRef: undefined },
     schemas: getRegisteredAgentExecutionOptions(machine).schemas,
@@ -1543,29 +1605,31 @@ function provideBindContext(
 }
 
 /**
- * `provideExecutors`' counterpart to runAgent's `deliverUsageEvent`: after a
- * bound call settles with reported usage, send the reserved
- * `@agent.usage` event to the machine actor that INVOKED the request — read
- * off the settling request actor's `self._parent`, which under a live
- * `createActor` tree is always the invoking machine (there is no run-scoped
- * root actor on this path).
+ * The single reserved-`@agent.usage` delivery seam, shared by both bind paths:
+ * after a bound call settles with reported usage, send the event to the machine
+ * actor `resolveActorRef` names — the run's root actor on the `runAgent` path,
+ * the settling request actor's `self._parent` (always the invoking machine
+ * under a live `createActor` tree) on the `provideExecutors` path.
  *
- * Gated identically to runAgent: the invoking snapshot must be active, must
- * declare an `'@agent.usage'` transition EXPLICITLY (see
- * {@link declaresUsageTransition} — a catch-all `on: { '*' }` is not an opt-in),
- * and must be able to take the event. There is no cycle to settle in
- * uncontrolled mode, so there are no dropped stragglers.
+ * Gating is identical on both: the target snapshot must be active, must declare
+ * an `'@agent.usage'` transition EXPLICITLY (see {@link declaresUsageTransition}
+ * — a catch-all `on: { '*' }` is not an opt-in), and must be able to take the
+ * event. `onDropped` is the run path's straggler gate: it returns `true` for a
+ * call that settled after the cycle resolved, which drops the event (traced as
+ * `usage.dropped`) rather than delivering it. Uncontrolled mode has no cycle to
+ * settle, so it passes no gate and has no dropped stragglers.
  *
- * Delivery follows `provideExecutors`' binding boundary: only sources IT bound
- * report here, so an invoked child machine that was not itself passed through
+ * Delivery follows each path's binding boundary: only sources IT bound report
+ * here, so an invoked child machine that was not itself passed through
  * `provideExecutors` reports nothing. @internal
  */
-function deliverUsageToInvokingActor(
+function deliverUsageEvent(
   usage: AgentCallUsage,
   source: AgentUsageEventSource,
-  self: unknown,
+  resolveActorRef: () => AnyActorRef | undefined,
+  onDropped?: (event: AgentUsageEvent) => boolean,
 ): void {
-  const actorRef = (self as { _parent?: AnyActorRef } | undefined)?._parent;
+  const actorRef = resolveActorRef();
   if (!actorRef) {
     return;
   }
@@ -1574,6 +1638,9 @@ function deliverUsageToInvokingActor(
     return;
   }
   const event: AgentUsageEvent = { type: AGENT_USAGE_EVENT_TYPE, ...source, usage };
+  if (onDropped?.(event)) {
+    return;
+  }
   if (!snapshot.can(event as never)) {
     return;
   }
@@ -1582,7 +1649,7 @@ function deliverUsageToInvokingActor(
 
 /**
  * Host-binds one text/stream source for {@link provideExecutors} using the SAME
- * emission helper as `runAgent` ({@link wrapTextLogicForRunAgent}), so a bound
+ * emission helper as `runAgent` ({@link bindTextLogic}), so a bound
  * text request emits request.start/stream.chunk/request.end/request.error with
  * identical shapes. @internal
  */
@@ -1592,7 +1659,7 @@ export function bindTextForProvide(
   executors: Partial<AgentRequestExecutors>,
   options: ProvideBindOptions,
 ): TextLogic {
-  return wrapTextLogicForRunAgent(logic, provideBindContext(machine, executors, options));
+  return bindTextLogic(logic, provideBindContext(machine, executors, options));
 }
 
 /**
@@ -1607,7 +1674,7 @@ export function bindDecisionForProvide(
   executors: Partial<AgentRequestExecutors>,
   options: ProvideBindOptions,
 ): DecisionLogic {
-  return createRunAgentDecisionLogic(logic, provideBindContext(machine, executors, options));
+  return bindDecisionLogic(logic, provideBindContext(machine, executors, options));
 }
 
 /**
@@ -1685,13 +1752,13 @@ function rebindChildMachine(
   for (const [key, logic] of Object.entries(sources)) {
     if (isDecisionLogic(logic)) {
       if (!executorBoundLogics.has(logic as object)) {
-        wrapped[key] = createRunAgentDecisionLogic(logic, runCtx);
+        wrapped[key] = bindDecisionLogic(logic, runCtx);
       }
       continue;
     }
     if (isTextLogic(logic)) {
       if (!executorBoundLogics.has(logic as object)) {
-        wrapped[key] = wrapTextLogicForRunAgent(logic, runCtx);
+        wrapped[key] = bindTextLogic(logic, runCtx);
       }
       continue;
     }
@@ -1843,23 +1910,27 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     (machine as { version?: string }).version ??
     getMachineStructuralHash(machine);
   const agentMeta: AgentRunMeta = { machineId, version: machineVersion };
-  const stampAgentMeta = (snapshot: unknown): void => {
-    if (snapshot && typeof snapshot === "object") {
-      (snapshot as { agentMeta?: unknown }).agentMeta = agentMeta;
-    }
-  };
 
-  const onTrace = (event: AgentTraceEventPayload<TMachine>) => {
-    options.onTrace?.({
-      schemaVersion: AGENT_TRACE_SCHEMA_VERSION,
-      runId,
-      seq: ++traceSeq,
-      timestamp: new Date().toISOString(),
-      machineId,
-      machineVersion,
-      ...event,
-    } as AgentTraceEvent<TMachine>);
-  };
+  // The run's single observation dispatch point: every trace payload in this
+  // run goes through `onTrace`, which stamps the run-scoped envelope for
+  // `options.onTrace` and drives the sugar callbacks projected from the same
+  // payload (onChunk/onResult/onTransition).
+  const onTrace = createTraceDispatch({
+    onTrace: (payload) => {
+      options.onTrace?.({
+        schemaVersion: AGENT_TRACE_SCHEMA_VERSION,
+        runId,
+        seq: ++traceSeq,
+        timestamp: new Date().toISOString(),
+        machineId,
+        machineVersion,
+        ...payload,
+      } as AgentTraceEvent<TMachine>);
+    },
+    onChunk: options.onChunk,
+    onResult: options.onResult,
+    onTransition: options.onTransition as TraceSinks["onTransition"],
+  }) as (event: AgentTraceEventPayload<TMachine>) => void;
 
   const consumeModelCall = () => {
     if (budgetExceeded) {
@@ -1903,26 +1974,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
   // and the session (`createAgentActor`) path, so a late arrival can never
   // re-open an already-returned idle result. Dropped stragglers are visible on
   // `onTrace` as `usage.dropped`.
-  const deliverUsageEvent = (usage: AgentCallUsage, source: AgentUsageEventSource): void => {
-    const actorRef = actorHolder.actorRef;
-    if (!actorRef) {
-      return;
-    }
-    const event: AgentUsageEvent = { type: AGENT_USAGE_EVENT_TYPE, ...source, usage };
-    const snapshot = actorRef.getSnapshot() as AnyMachineSnapshot;
-    if (snapshot?.status !== "active" || !declaresUsageTransition(snapshot)) {
-      return;
-    }
-    if (cycleGate.isResolved()) {
-      onTrace({ type: "usage.dropped", event, reason: "settled" });
-      return;
-    }
-    if (!snapshot.can(event as never)) {
-      return;
-    }
-    actorRef.send(event as never);
-  };
-
+  //
   // Run-level usage aggregation: every executor-reported per-call usage folds
   // in here (see AgentUsage). Token fields are partial sums — a field stays
   // undefined until some call reports it. Scoped to THIS run only.
@@ -1933,7 +1985,18 @@ function createAgentSession<TMachine extends AnyStateMachine>(
         tokenTotals[field] = (tokenTotals[field] ?? 0) + value;
       }
     }
-    deliverUsageEvent(usage, source);
+    deliverUsageEvent(
+      usage,
+      source,
+      () => actorHolder.actorRef,
+      (event) => {
+        if (!cycleGate.isResolved()) {
+          return false;
+        }
+        onTrace({ type: "usage.dropped", event, reason: "settled" });
+        return true;
+      },
+    );
   };
   const runUsage = (): AgentUsage => ({ ...tokenTotals, modelCalls: modelCallCount });
 
@@ -1970,11 +2033,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
 
   const effectiveSources = provided.sources.actors as Record<string, AnyActorLogic>;
 
-  assertBindable(provided, effectiveSources, {
-    hasGenerateText: !!options.executors?.generateText,
-    hasDecide: !!options.executors?.decide,
-    hasStreamText: !!options.executors?.streamText,
-  });
+  assertBindable(provided, effectiveSources, options.executors ?? {});
 
   if (options.getRequests && !options.executors?.generateText && !options.executors?.decide) {
     throw new Error(
@@ -1988,9 +2047,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     generateText: options.executors?.generateText,
     streamText: options.executors?.streamText,
     decide: options.executors?.decide,
-    onChunk: options.onChunk,
-    onResult: options.onResult,
-    onTrace: onTrace as RunAgentBindContext["onTrace"],
+    emitTrace: onTrace as TraceDispatch,
     consumeModelCall,
     recordUsage,
     actorHolder,
@@ -2031,7 +2088,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     }
 
     if (isDecisionLogic(logic)) {
-      wrappedSources[key] = createRunAgentDecisionLogic(logic, runCtx);
+      wrappedSources[key] = bindDecisionLogic(logic, runCtx);
       continue;
     }
 
@@ -2040,7 +2097,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
       // runs itself — leave it untouched. Only unbound builtins/logics get a
       // host-backed executor from runAgent's `generateText`/`streamText`.
       if (!executorBoundLogics.has(logic as object)) {
-        wrappedSources[key] = wrapTextLogicForRunAgent(logic, runCtx);
+        wrappedSources[key] = bindTextLogic(logic, runCtx);
       }
       continue;
     }
@@ -2165,16 +2222,20 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     typeof options.messages === "function"
       ? [...options.messages([...priorMessages])]
       : [...priorMessages, ...(options.messages ?? [])];
-  const stampMessages = (snapshot: unknown): void => {
-    // Stamp when this run uses the log — and also when a resumed snapshot
-    // carried one, so a plain invoke-driven resume never silently drops the
-    // conversation that round-tripped in (parity with agentMeta).
+  // Everything a settled snapshot carries out of the run: the `agentMeta`
+  // stamp (read back by the next resume's version check) plus the message log.
+  // Messages are stamped when this run uses the log — and also when a resumed
+  // snapshot carried one, so a plain invoke-driven resume never silently drops
+  // the conversation that round-tripped in (parity with agentMeta).
+  const stampSettledSnapshot = (snapshot: unknown): void => {
+    if (!snapshot || typeof snapshot !== "object") {
+      return;
+    }
+    (snapshot as { agentMeta?: unknown }).agentMeta = agentMeta;
     if (!options.getRequests && !options.messages && messages.length === 0) {
       return;
     }
-    if (snapshot && typeof snapshot === "object") {
-      (snapshot as { messages?: AgentMessage[] }).messages = [...messages];
-    }
+    (snapshot as { messages?: AgentMessage[] }).messages = [...messages];
   };
 
   // Feature B: reject a resume `event` the restored state cannot take. Checked
@@ -2201,31 +2262,10 @@ function createAgentSession<TMachine extends AnyStateMachine>(
   }
 
   const replayEvents: AgentLogEntry[] = [...(resumeEvents ?? [])];
-  const replayEventIds = new Set<string>();
-  for (let index = 0; index < replayEvents.length; index++) {
-    const entry = replayEvents[index]!;
-    assertAgentLogEntry(entry);
-    if (entry.index !== index) {
-      throw new Error(
-        `runAgent events must be contiguous from index 0; found entry.index ${entry.index} ` +
-          `at position ${index}.`,
-      );
-    }
-    if (entry.machineId !== machineId || entry.machineVersion !== machineVersion) {
-      throw new AgentReplayMachineMismatchError(
-        entry.id,
-        entry.index,
-        { machineId, machineVersion },
-        { machineId: entry.machineId, machineVersion: entry.machineVersion },
-      );
-    }
-    if (replayEventIds.has(entry.id)) {
-      throw new Error(`runAgent events contain duplicate event id '${entry.id}'.`);
-    }
-    replayEventIds.add(entry.id);
-  }
+  validateReplayEntries(replayEvents, { machineId, machineVersion }, "runAgent events");
+  const replayEventIds = new Set<string>(replayEvents.map((entry) => entry.id));
   const hasCompleteReplayHistory =
-    replayEvents[0]?.event.type === "@agent.init" ||
+    replayEvents[0]?.event.type === AGENT_INIT_EVENT_TYPE ||
     (effectiveSnapshot === undefined && replayEvents.length === 0);
   const appendReplayEvent = (event: EventObject): AgentLogEntry => {
     const entry = createReplayEntry(machine, replayEvents, event, {
@@ -2247,434 +2287,426 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     options.onEvent?.(entry);
   }
 
-  const session = ((): AgentActorSession<TMachine> => {
-    // One cycle = start (or re-opening event) → next quiescence. `settled`
-    // gates the current cycle; `finalized` marks a terminal settle (one-shot
-    // mode, or done/error/stopped in session mode) after which the actor is
-    // stopped and the result is permanent.
-    let settled = false;
-    let finalized = false;
-    // A call settling after the cycle resolved is a straggler (see
-    // deliverUsageEvent): dropped identically on both lifecycle paths.
-    cycleGate.isResolved = () => settled;
-    let lastResult: RunAgentResult<TMachine> | undefined;
-    const waiters: Array<(result: RunAgentResult<TMachine>) => void> = [];
-    let idleTimer: ReturnType<typeof setTimeout> | undefined;
-    let actor: ReturnType<typeof createActor<TMachine>>;
-    // True only during the resumed actor's initial (restore) transition, while
-    // an `event` is still pending delivery. The restored state may itself be a
-    // suspended/idle snapshot; without this guard, Feature A's immediate settle
-    // would fire during `start()` and settle idle BEFORE the resume event is
-    // sent. Cleared right before `actor.send(options.event)`.
-    let deliveringResumeEvent = options.event !== undefined;
+  // One cycle = start (or re-opening event) → next quiescence. `settled`
+  // gates the current cycle; `finalized` marks a terminal settle (one-shot
+  // mode, or done/error/stopped in session mode) after which the actor is
+  // stopped and the result is permanent.
+  let settled = false;
+  let finalized = false;
+  // A call settling after the cycle resolved is a straggler (see
+  // deliverUsageEvent): dropped identically on both lifecycle paths.
+  cycleGate.isResolved = () => settled;
+  let lastResult: RunAgentResult<TMachine> | undefined;
+  const waiters: Array<(result: RunAgentResult<TMachine>) => void> = [];
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  let actor: ReturnType<typeof createActor<TMachine>>;
+  // True only during the resumed actor's initial (restore) transition, while
+  // an `event` is still pending delivery. The restored state may itself be a
+  // suspended/idle snapshot; without this guard, Feature A's immediate settle
+  // would fire during `start()` and settle idle BEFORE the resume event is
+  // sent. Cleared right before `actor.send(options.event)`.
+  let deliveringResumeEvent = options.event !== undefined;
 
-    const settle = (outcome: RunAgentOutcome<TMachine>) => {
+  const settle = (outcome: RunAgentOutcome<TMachine>) => {
+    if (settled) {
+      return;
+    }
+    settled = true;
+    const result = {
+      ...outcome,
+      events: [...replayEvents],
+      usage: runUsage(),
+    } as RunAgentResult<TMachine>;
+    if (idleTimer !== undefined) {
+      clearTimeout(idleTimer);
+    }
+    // Stamp the settled snapshot(s) with the machine id + version. A plain
+    // enumerable field (snapshots are not frozen), so it survives JSON
+    // persist/resume and is read back on the next resume's version check.
+    stampSettledSnapshot(result.snapshot);
+    if ("persistedSnapshot" in result) {
+      stampSettledSnapshot(result.persistedSnapshot);
+    }
+    onTrace({ type: "run.end", ...outcome } as AgentTraceEventPayload<TMachine>);
+    if (lifecycle.oneShot || result.status !== "idle") {
+      finalized = true;
+      if (options.signal) {
+        options.signal.removeEventListener("abort", onAbort);
+      }
+      actor.stop();
+    }
+    lastResult = result;
+    for (const resolve of waiters.splice(0)) {
+      resolve(result);
+    }
+  };
+
+  const onAbort = () => {
+    settle({
+      status: "error",
+      cause: "aborted",
+      error: options.signal?.reason ?? new Error("Aborted"),
+      snapshot: actor.getSnapshot(),
+    });
+  };
+
+  const settleIdle = (current: AnyMachineSnapshot) => {
+    // Idle is the moment persistence matters: the caller resumes from this
+    // snapshot by JSON round-trip. In dev, walk the context once and warn on
+    // any value that would silently corrupt (Date, Map, Set, function,
+    // undefined, class instance, circular). Never throws.
+    warnNonSerializableContext(current);
+    const pendingUserInputs = userInputIsPlaceholder ? collectPendingUserInputs(current) : [];
+    settle({
+      status: "idle",
+      snapshot: current as SnapshotFrom<TMachine>,
+      persistedSnapshot: actor.getPersistedSnapshot() as Snapshot<unknown>,
+      ...(pendingUserInputs.length > 0 ? { pendingUserInputs } : {}),
+    });
+  };
+
+  // ─── State interpretation (RunAgentOptions.getRequests) ───
+  // Consulted at every would-be idle settle: if the hook returns request(s)
+  // for the current snapshot, run them (model call(s) → message log → one
+  // legal event sent each) instead of settling. The pass logic itself is
+  // extracted (internal/state-request-pass.ts); what lives HERE is only the
+  // glue that must close over this run's mutable state — the live `actor`,
+  // the `settled` flag, the shared log, and the idle scheduler — none of
+  // which exist outside this session closure. `interpreting` blocks a
+  // concurrent idle settle while a pass's model calls are in flight.
+  let interpreting = false;
+  let interpretSeq = 0;
+
+  // Append to the run's message log + notify the live observer (onMessage).
+  const appendToLog = (...items: AgentMessage[]): void => {
+    messages.push(...items);
+    if (options.onMessage) {
+      const info: AgentMessageInfo = { runId, machineId, machineVersion };
+      for (const item of items) {
+        options.onMessage(item, info);
+      }
+    }
+  };
+
+  // The run-level error cause ladder, shared by the interpret settle and
+  // the machine-error settle in the inspect handler.
+  const runErrorCause = (error: unknown): RunAgentErrorCause =>
+    budgetExceeded
+      ? "max-model-calls"
+      : wrapsDecisionExhausted(error)
+        ? "decision-exhausted"
+        : "machine";
+
+  const settleInterpretError = (error: unknown) => {
+    settle({
+      status: "error",
+      cause: runErrorCause(error),
+      error,
+      snapshot: actor.getSnapshot(),
+    });
+  };
+
+  // The pass itself (text phase → ordered advance phase) lives in
+  // internal/state-request-pass.ts, testable against a bare actor. These
+  // deps are runAgent's host seams: the live actor, settle awareness, the
+  // budgeted/traced executors, and the shared log.
+  const passDeps: StateRequestPassDeps = {
+    getSnapshot: () => actor.getSnapshot() as AnyMachineSnapshot,
+    send: (event) => actor.send(event as never),
+    isSettled: () => settled,
+    messages,
+    appendToLog,
+    generateText: runCtx.generateText,
+    decide: runCtx.decide ? createCountingDecide(runCtx, undefined) : undefined,
+    consumeModelCall,
+    recordUsage,
+    nextRequestId: () => `interpret_${++interpretSeq}`,
+    // `onResult` is not wired here: the pass's `request.end` payloads flow
+    // through `onTrace`, which is the dispatch that invokes `options.onResult`.
+    onTrace,
+    schemas: runCtx.schemas,
+    signal: options.signal,
+  };
+
+  // Returns true when the caller must NOT settle idle: a getRequests pass
+  // was started for this snapshot, or one is already in flight.
+  const maybeInterpret = (snapshot: AnyMachineSnapshot): boolean => {
+    if (!options.getRequests || settled) {
+      return false;
+    }
+    if (interpreting) {
+      return true;
+    }
+    let requested: AgentStateRequest | readonly AgentStateRequest[] | undefined;
+    try {
+      requested = options.getRequests(snapshot as SnapshotFrom<TMachine>, { messages });
+    } catch (error) {
+      settleInterpretError(error);
+      return true;
+    }
+    const requests = (Array.isArray(requested) ? requested : requested ? [requested] : []).filter(
+      (stateRequest): stateRequest is AgentStateRequest => Boolean(stateRequest),
+    );
+    if (requests.length === 0) {
+      return false;
+    }
+    interpreting = true;
+    void runStateRequestPass(requests, passDeps)
+      .then(({ sentAny }) => {
+        if (settled || sentAny) {
+          return;
+        }
+        // The whole pass sent no event: settle idle rather than re-running
+        // the same requests forever.
+        const current = actor.getSnapshot() as AnyMachineSnapshot;
+        if (isIdleSnapshot(current, { ignoreUserInputChildren: userInputIsPlaceholder })) {
+          settleIdle(current);
+        }
+      })
+      .catch((error) => settleInterpretError(error))
+      .finally(() => {
+        interpreting = false;
+        // A transition observed DURING this pass (e.g. our own send while
+        // the machine reads as suspended) saw `interpreting` and skipped
+        // both settling and starting a new pass — re-evaluate now so the
+        // run always makes progress (settle, or the next pass).
+        if (!settled) {
+          scheduleIdleCheck();
+        }
+      });
+    return true;
+  };
+
+  // Fallback for untagged machines: defer one macrotask so in-flight work
+  // that starts synchronously with a transition registers first, then settle
+  // idle if the snapshot is at rest. Feature A short-circuits this for
+  // detector-positive (suspended) snapshots — see the inspect handler.
+  const scheduleIdleCheck = () => {
+    if (idleTimer !== undefined) {
+      clearTimeout(idleTimer);
+    }
+    idleTimer = setTimeout(() => {
+      idleTimer = undefined;
       if (settled) {
         return;
       }
-      settled = true;
-      const result = {
-        ...outcome,
-        events: [...replayEvents],
-        usage: runUsage(),
-      } as RunAgentResult<TMachine>;
-      if (idleTimer !== undefined) {
-        clearTimeout(idleTimer);
-      }
-      // Stamp the settled snapshot(s) with the machine id + version. A plain
-      // enumerable field (snapshots are not frozen), so it survives JSON
-      // persist/resume and is read back on the next resume's version check.
-      stampAgentMeta(result.snapshot);
-      stampMessages(result.snapshot);
-      if ("persistedSnapshot" in result) {
-        stampAgentMeta(result.persistedSnapshot);
-        stampMessages(result.persistedSnapshot);
-      }
-      onTrace({ type: "run.end", ...outcome } as AgentTraceEventPayload<TMachine>);
-      if (lifecycle.oneShot || result.status !== "idle") {
-        finalized = true;
-        if (options.signal) {
-          options.signal.removeEventListener("abort", onAbort);
-        }
-        actor.stop();
-      }
-      lastResult = result;
-      for (const resolve of waiters.splice(0)) {
-        resolve(result);
-      }
-    };
-
-    const onAbort = () => {
-      settle({
-        status: "error",
-        cause: "aborted",
-        error: options.signal?.reason ?? new Error("Aborted"),
-        snapshot: actor.getSnapshot(),
-      });
-    };
-
-    const settleIdle = (current: AnyMachineSnapshot) => {
-      // Idle is the moment persistence matters: the caller resumes from this
-      // snapshot by JSON round-trip. In dev, walk the context once and warn on
-      // any value that would silently corrupt (Date, Map, Set, function,
-      // undefined, class instance, circular). Never throws.
-      warnNonSerializableContext(current);
-      const pendingUserInputs = userInputIsPlaceholder ? collectPendingUserInputs(current) : [];
-      settle({
-        status: "idle",
-        snapshot: current as SnapshotFrom<TMachine>,
-        persistedSnapshot: actor.getPersistedSnapshot() as Snapshot<unknown>,
-        ...(pendingUserInputs.length > 0 ? { pendingUserInputs } : {}),
-      });
-    };
-
-    // ─── State interpretation (RunAgentOptions.getRequests) ───
-    // Consulted at every would-be idle settle: if the hook returns request(s)
-    // for the current snapshot, run them (model call(s) → message log → one
-    // legal event sent each) instead of settling. The pass logic itself is
-    // extracted (internal/state-request-pass.ts); what lives HERE is only the
-    // glue that must close over this run's mutable state — the live `actor`,
-    // the `settled` flag, the shared log, and the idle scheduler — none of
-    // which exist outside this promise executor. `interpreting` blocks a
-    // concurrent idle settle while a pass's model calls are in flight.
-    let interpreting = false;
-    let interpretSeq = 0;
-
-    // Append to the run's message log + notify the live observer (onMessage).
-    const appendToLog = (...items: AgentMessage[]): void => {
-      messages.push(...items);
-      if (options.onMessage) {
-        const info: AgentMessageInfo = { runId, machineId, machineVersion };
-        for (const item of items) {
-          options.onMessage(item, info);
+      const current = actor.getSnapshot() as AnyMachineSnapshot;
+      if (isIdleSnapshot(current, { ignoreUserInputChildren: userInputIsPlaceholder })) {
+        if (!maybeInterpret(current)) {
+          if (
+            !declaredSuspensionPredicate &&
+            current.status === "active" &&
+            !warnedHeuristicIdle &&
+            process.env.NODE_ENV !== "production"
+          ) {
+            warnedHeuristicIdle = true;
+            console.warn(
+              `[@statelyai/agent] runAgent settled idle via the timing heuristic (no ` +
+                `suspension predicate declared). This is best-effort; for deterministic ` +
+                `idle detection, declare setupAgent({ isSuspended }) or pass ` +
+                `runAgent(machine, { isSuspended }), e.g. (s) => s.hasTag('waiting').`,
+            );
+          }
+          settleIdle(current);
         }
       }
-    };
+    }, 0);
+  };
 
-    // The run-level error cause ladder, shared by the interpret settle and
-    // the machine-error settle in the inspect handler.
-    const runErrorCause = (error: unknown): RunAgentErrorCause =>
-      budgetExceeded
-        ? "max-model-calls"
-        : wrapsDecisionExhausted(error)
-          ? "decision-exhausted"
-          : "machine";
+  actor = createActor(boundMachine, {
+    input: resolvedInput as never,
+    snapshot: effectiveSnapshot,
+    inspect: (event: InspectionEvent) => {
+      // System-wide passthrough (children included) before runAgent's own
+      // root-transition filtering below. Function or observer, like createActor.
+      if (typeof options.inspect === "function") {
+        options.inspect(event);
+      } else {
+        options.inspect?.next?.(event);
+      }
 
-    const settleInterpretError = (error: unknown) => {
-      settle({
-        status: "error",
-        cause: runErrorCause(error),
-        error,
-        snapshot: actor.getSnapshot(),
+      if (
+        event.type !== "@xstate.transition" ||
+        (event.actorRef as unknown) !== (actor.ref as unknown)
+      ) {
+        return;
+      }
+      if (settled) {
+        if (finalized) {
+          return;
+        }
+        // Session mode: an external event after an idle settle re-opens the
+        // cycle. The journal keeps appending to the same log below, and the
+        // next quiescence resolves the next `settled()` call.
+        settled = false;
+        lastResult = undefined;
+      }
+
+      const snapshot = event.snapshot as AnyMachineSnapshot;
+
+      // The replay journal is deliberately smaller than the trace. A root
+      // transition is an external input when it came from outside the root
+      // actor (a host/user send or child completion). Timer delivery is the
+      // one self-sent input that must be retained. Initial and raised/internal
+      // events are re-derived by initialTransition/transition during replay.
+      let eventId: string | undefined;
+      if (
+        event.event.type !== "@xstate.init" &&
+        (event.sourceRef !== event.actorRef || event.event.type === "xstate.timer")
+      ) {
+        eventId = appendReplayEvent(event.event as EventObject).id;
+      } else if (event.event.type === "@xstate.init") {
+        eventId =
+          replayEvents[0]?.event.type === AGENT_INIT_EVENT_TYPE ? replayEvents[0].id : undefined;
+      }
+
+      onTrace({
+        type: "machine.transition",
+        snapshot: snapshot as SnapshotFrom<TMachine>,
+        event: event.event as EventFromLogic<TMachine>,
+        ...(eventId !== undefined ? { eventId } : {}),
       });
-    };
 
-    // The pass itself (text phase → ordered advance phase) lives in
-    // internal/state-request-pass.ts, testable against a bare actor. These
-    // deps are runAgent's host seams: the live actor, settle awareness, the
-    // budgeted/traced executors, and the shared log.
-    const passDeps: StateRequestPassDeps = {
-      getSnapshot: () => actor.getSnapshot() as AnyMachineSnapshot,
-      send: (event) => actor.send(event as never),
-      isSettled: () => settled,
-      messages,
-      appendToLog,
-      generateText: runCtx.generateText,
-      decide: runCtx.decide ? createCountingDecide(runCtx, undefined) : undefined,
-      consumeModelCall,
-      recordUsage,
-      nextRequestId: () => `interpret_${++interpretSeq}`,
-      onTrace,
-      onResult: runCtx.onResult,
-      schemas: runCtx.schemas,
-      signal: options.signal,
-    };
+      if (snapshot.status === "done") {
+        settle({
+          status: "done",
+          output: snapshot.output as OutputFrom<TMachine>,
+          snapshot: snapshot as SnapshotFrom<TMachine>,
+        });
+        return;
+      }
 
-    // Returns true when the caller must NOT settle idle: a getRequests pass
-    // was started for this snapshot, or one is already in flight.
-    const maybeInterpret = (snapshot: AnyMachineSnapshot): boolean => {
-      if (!options.getRequests || settled) {
-        return false;
+      if (snapshot.status === "error") {
+        // Reaching an error state means no `onError` transition handled the
+        // failure (a handled one transitions away instead of erroring). So a
+        // AgentDecisionExhaustedError surfacing here is genuinely unhandled.
+        settle({
+          status: "error",
+          cause: runErrorCause(snapshot.error),
+          error: snapshot.error,
+          snapshot: snapshot as SnapshotFrom<TMachine>,
+        });
+        return;
       }
-      if (interpreting) {
-        return true;
+
+      if (snapshot.status === "stopped") {
+        settle({
+          status: "error",
+          cause: "stopped",
+          error: new Error("Actor stopped externally."),
+          snapshot: snapshot as SnapshotFrom<TMachine>,
+        });
+        return;
       }
-      let requested: AgentStateRequest | readonly AgentStateRequest[] | undefined;
-      try {
-        requested = options.getRequests(snapshot as SnapshotFrom<TMachine>, { messages });
-      } catch (error) {
-        settleInterpretError(error);
-        return true;
-      }
-      const requests = (Array.isArray(requested) ? requested : requested ? [requested] : []).filter(
-        (stateRequest): stateRequest is AgentStateRequest => Boolean(stateRequest),
-      );
-      if (requests.length === 0) {
-        return false;
-      }
-      interpreting = true;
-      void runStateRequestPass(requests, passDeps)
-        .then(({ sentAny }) => {
-          if (settled || sentAny) {
+
+      // Feature A: an intentional wait (detector-positive) with nothing in
+      // flight settles idle immediately and deterministically — no
+      // setTimeout race. `deliveringResumeEvent` suppresses this during a
+      // resume's restore transition so the pending event is delivered first.
+      // Everything else (untagged machines, or a suspended snapshot with
+      // sibling work still running) falls through to the timing heuristic.
+      if (
+        !deliveringResumeEvent &&
+        isSuspended(snapshot) &&
+        isIdleSnapshot(snapshot, { ignoreUserInputChildren: userInputIsPlaceholder })
+      ) {
+        // Not settled synchronously: the event that reached this suspended
+        // state may have come from an invoked child mid-flush (child →
+        // parent, whose handler sendTo's the child back). A sync settle
+        // would persist — and, one-shot, stop — the child before its
+        // mailbox drains, losing those deliveries. The flush is
+        // synchronous, so one microtask is still deterministic.
+        queueMicrotask(() => {
+          if (settled) {
             return;
           }
-          // The whole pass sent no event: settle idle rather than re-running
-          // the same requests forever.
           const current = actor.getSnapshot() as AnyMachineSnapshot;
-          if (isIdleSnapshot(current, { ignoreUserInputChildren: userInputIsPlaceholder })) {
-            settleIdle(current);
-          }
-        })
-        .catch((error) => settleInterpretError(error))
-        .finally(() => {
-          interpreting = false;
-          // A transition observed DURING this pass (e.g. our own send while
-          // the machine reads as suspended) saw `interpreting` and skipped
-          // both settling and starting a new pass — re-evaluate now so the
-          // run always makes progress (settle, or the next pass).
-          if (!settled) {
+          if (
+            isSuspended(current) &&
+            isIdleSnapshot(current, { ignoreUserInputChildren: userInputIsPlaceholder })
+          ) {
+            if (!maybeInterpret(current)) {
+              settleIdle(current);
+            }
+          } else {
+            // A drained child event started new work (or left suspension)
+            // without a root transition to re-trigger idle detection — fall
+            // back to the timing heuristic so the run still settles.
             scheduleIdleCheck();
           }
         });
-      return true;
-    };
-
-    // Fallback for untagged machines: defer one macrotask so in-flight work
-    // that starts synchronously with a transition registers first, then settle
-    // idle if the snapshot is at rest. Feature A short-circuits this for
-    // detector-positive (suspended) snapshots — see the inspect handler.
-    const scheduleIdleCheck = () => {
-      if (idleTimer !== undefined) {
-        clearTimeout(idleTimer);
+        return;
       }
-      idleTimer = setTimeout(() => {
-        idleTimer = undefined;
-        if (settled) {
-          return;
-        }
-        const current = actor.getSnapshot() as AnyMachineSnapshot;
-        if (isIdleSnapshot(current, { ignoreUserInputChildren: userInputIsPlaceholder })) {
-          if (!maybeInterpret(current)) {
-            if (
-              !declaredSuspensionPredicate &&
-              current.status === "active" &&
-              !warnedHeuristicIdle &&
-              process.env.NODE_ENV !== "production"
-            ) {
-              warnedHeuristicIdle = true;
-              console.warn(
-                `[@statelyai/agent] runAgent settled idle via the timing heuristic (no ` +
-                  `suspension predicate declared). This is best-effort; for deterministic ` +
-                  `idle detection, declare setupAgent({ isSuspended }) or pass ` +
-                  `runAgent(machine, { isSuspended }), e.g. (s) => s.hasTag('waiting').`,
-              );
-            }
-            settleIdle(current);
-          }
-        }
-      }, 0);
-    };
 
-    actor = createActor(boundMachine, {
-      input: resolvedInput as never,
-      snapshot: effectiveSnapshot,
-      inspect: (event: InspectionEvent) => {
-        // System-wide passthrough (children included) before runAgent's own
-        // root-transition filtering below. Function or observer, like createActor.
-        if (typeof options.inspect === "function") {
-          options.inspect(event);
-        } else {
-          options.inspect?.next?.(event);
-        }
+      scheduleIdleCheck();
+    },
+  });
 
-        if (
-          event.type !== "@xstate.transition" ||
-          (event.actorRef as unknown) !== (actor.ref as unknown)
-        ) {
-          return;
-        }
-        if (settled) {
-          if (finalized) {
-            return;
-          }
-          // Session mode: an external event after an idle settle re-opens the
-          // cycle. The journal keeps appending to the same log below, and the
-          // next quiescence resolves the next `settled()` call.
-          settled = false;
-          lastResult = undefined;
-        }
+  actorHolder.actorRef = actor as unknown as AnyActorRef;
 
-        const snapshot = event.snapshot as AnyMachineSnapshot;
+  // Errors are settled via the `inspect` transition stream above (which
+  // observes `snapshot.status === 'error'` regardless of subscribers).
+  // Without a subscriber that has an `error` handler, xstate reports
+  // machine errors as unhandled exceptions (Actor#_error) even though this
+  // run already handles them — subscribe with a no-op to suppress that.
+  actor.subscribe({ error: () => {} });
 
-        // The replay journal is deliberately smaller than the trace. A root
-        // transition is an external input when it came from outside the root
-        // actor (a host/user send or child completion). Timer delivery is the
-        // one self-sent input that must be retained. Initial and raised/internal
-        // events are re-derived by initialTransition/transition during replay.
-        let eventId: string | undefined;
-        if (
-          event.event.type !== "@xstate.init" &&
-          (event.sourceRef !== event.actorRef || event.event.type === "xstate.timer")
-        ) {
-          eventId = appendReplayEvent(event.event as EventObject).id;
-        } else if (event.event.type === "@xstate.init") {
-          eventId = replayEvents[0]?.event.type === "@agent.init" ? replayEvents[0].id : undefined;
-        }
-
-        onTrace({
-          type: "machine.transition",
-          snapshot: snapshot as SnapshotFrom<TMachine>,
-          event: event.event as EventFromLogic<TMachine>,
-          ...(eventId !== undefined ? { eventId } : {}),
-        });
-
-        options.onTransition?.(
-          snapshot as SnapshotFrom<TMachine>,
-          event.event as EventFromLogic<TMachine>,
-        );
-
-        if (snapshot.status === "done") {
-          settle({
-            status: "done",
-            output: snapshot.output as OutputFrom<TMachine>,
-            snapshot: snapshot as SnapshotFrom<TMachine>,
-          });
-          return;
-        }
-
-        if (snapshot.status === "error") {
-          // Reaching an error state means no `onError` transition handled the
-          // failure (a handled one transitions away instead of erroring). So a
-          // AgentDecisionExhaustedError surfacing here is genuinely unhandled.
-          settle({
-            status: "error",
-            cause: runErrorCause(snapshot.error),
-            error: snapshot.error,
-            snapshot: snapshot as SnapshotFrom<TMachine>,
-          });
-          return;
-        }
-
-        if (snapshot.status === "stopped") {
-          settle({
-            status: "error",
-            cause: "stopped",
-            error: new Error("Actor stopped externally."),
-            snapshot: snapshot as SnapshotFrom<TMachine>,
-          });
-          return;
-        }
-
-        // Feature A: an intentional wait (detector-positive) with nothing in
-        // flight settles idle immediately and deterministically — no
-        // setTimeout race. `deliveringResumeEvent` suppresses this during a
-        // resume's restore transition so the pending event is delivered first.
-        // Everything else (untagged machines, or a suspended snapshot with
-        // sibling work still running) falls through to the timing heuristic.
-        if (
-          !deliveringResumeEvent &&
-          isSuspended(snapshot) &&
-          isIdleSnapshot(snapshot, { ignoreUserInputChildren: userInputIsPlaceholder })
-        ) {
-          // Not settled synchronously: the event that reached this suspended
-          // state may have come from an invoked child mid-flush (child →
-          // parent, whose handler sendTo's the child back). A sync settle
-          // would persist — and, one-shot, stop — the child before its
-          // mailbox drains, losing those deliveries. The flush is
-          // synchronous, so one microtask is still deterministic.
-          queueMicrotask(() => {
-            if (settled) {
-              return;
-            }
-            const current = actor.getSnapshot() as AnyMachineSnapshot;
-            if (
-              isSuspended(current) &&
-              isIdleSnapshot(current, { ignoreUserInputChildren: userInputIsPlaceholder })
-            ) {
-              if (!maybeInterpret(current)) {
-                settleIdle(current);
-              }
-            } else {
-              // A drained child event started new work (or left suspension)
-              // without a root transition to re-trigger idle detection — fall
-              // back to the timing heuristic so the run still settles.
-              scheduleIdleCheck();
-            }
-          });
-          return;
-        }
-
-        scheduleIdleCheck();
-      },
-    });
-
-    actorHolder.actorRef = actor as unknown as AnyActorRef;
-
-    // Errors are settled via the `inspect` transition stream above (which
-    // observes `snapshot.status === 'error'` regardless of subscribers).
-    // Without a subscriber that has an `error` handler, xstate reports
-    // machine errors as unhandled exceptions (Actor#_error) even though this
-    // run already handles them — subscribe with a no-op to suppress that.
-    actor.subscribe({ error: () => {} });
-
-    // Emitted-event handlers (`options.on`), registered before start so
-    // events emitted during the initial transition are not missed.
-    actor.on("*", (event) => {
-      onTrace({ type: "emit", event: event as EmittedFrom<TMachine> });
-    });
-    for (const [type, handler] of Object.entries(options.on ?? {})) {
-      if (typeof handler === "function") {
-        actor.on(type as never, handler as never);
-      }
+  // Emitted-event handlers (`options.on`), registered before start so
+  // events emitted during the initial transition are not missed.
+  actor.on("*", (event) => {
+    onTrace({ type: "emit", event: event as EmittedFrom<TMachine> });
+  });
+  for (const [type, handler] of Object.entries(options.on ?? {})) {
+    if (typeof handler === "function") {
+      actor.on(type as never, handler as never);
     }
+  }
 
-    const sessionApi: AgentActorSession<TMachine> = {
-      actor,
-      get events() {
-        return replayEvents;
-      },
-      usage: runUsage,
-      settled: () =>
-        settled && lastResult !== undefined
-          ? Promise.resolve(lastResult)
-          : new Promise<RunAgentResult<TMachine>>((resolve) => {
-              waiters.push(resolve);
-            }),
-      stop: () => {
-        actor.stop();
-      },
-    };
+  const sessionApi: AgentActorSession<TMachine> = {
+    actor,
+    get events() {
+      return replayEvents;
+    },
+    usage: runUsage,
+    settled: () =>
+      settled && lastResult !== undefined
+        ? Promise.resolve(lastResult)
+        : new Promise<RunAgentResult<TMachine>>((resolve) => {
+            waiters.push(resolve);
+          }),
+    stop: () => {
+      actor.stop();
+    },
+  };
 
-    if (options.signal) {
-      if (options.signal.aborted) {
-        settle({
-          status: "error",
-          cause: "aborted",
-          error: options.signal.reason ?? new Error("Aborted"),
-          snapshot: actor.getSnapshot(),
-        });
-        return sessionApi;
-      }
-      options.signal.addEventListener("abort", onAbort);
+  if (options.signal) {
+    if (options.signal.aborted) {
+      settle({
+        status: "error",
+        cause: "aborted",
+        error: options.signal.reason ?? new Error("Aborted"),
+        snapshot: actor.getSnapshot(),
+      });
+      return sessionApi;
     }
+    options.signal.addEventListener("abort", onAbort);
+  }
 
-    onTrace({
-      type: "run.start",
-      ...(resolvedInput !== undefined ? { input: resolvedInput as InputFrom<TMachine> } : {}),
-      ...(effectiveSnapshot !== undefined ? { snapshot: effectiveSnapshot } : {}),
-      ...(options.event !== undefined ? { event: options.event } : {}),
-    });
+  onTrace({
+    type: "run.start",
+    ...(resolvedInput !== undefined ? { input: resolvedInput as InputFrom<TMachine> } : {}),
+    ...(effectiveSnapshot !== undefined ? { snapshot: effectiveSnapshot } : {}),
+    ...(options.event !== undefined ? { event: options.event } : {}),
+  });
 
-    actor.start();
-    if (options.event) {
-      // Restore transition is done; allow the post-event transition to settle.
-      deliveringResumeEvent = false;
-      actor.send(options.event as never);
-    }
+  actor.start();
+  if (options.event) {
+    // Restore transition is done; allow the post-event transition to settle.
+    deliveringResumeEvent = false;
+    actor.send(options.event as never);
+  }
 
-    return sessionApi;
-  })();
-  return session;
+  return sessionApi;
 }
 
 /**

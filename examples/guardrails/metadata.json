@@ -8,10 +8,7 @@
     "url": null
   },
   "comparison": {
-    "targets": [
-      "input/output guardrails",
-      "evaluator-optimizer"
-    ],
+    "targets": ["input/output guardrails", "evaluator-optimizer"],
     "purpose": "Scoped to geography: checks the question before answering and checks the answer before returning it. Off-topic questions are refused up front, and an unsupported answer gets one revision, then is flagged rather than returned as fact."
   },
   "starters": [

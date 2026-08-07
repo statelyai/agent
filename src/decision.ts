@@ -284,10 +284,11 @@ export function createDecisionLogic<
       // no snapshot that set is unknowable here — fail fast instead of
       // silently resolving to an empty candidate list (guaranteed
       // AgentDecisionExhaustedError).
-      if (
-        resolveAllowedEventTypes(config.allowedEvents as AllowedEvents | undefined, input) ===
-        undefined
-      ) {
+      const allowedEventTypes = resolveAllowedEventTypes(
+        config.allowedEvents as AllowedEvents | undefined,
+        input,
+      );
+      if (allowedEventTypes === undefined) {
         throw new Error(
           'Decision logic has omitted `allowedEvents`, which means "all currently-legal ' +
             'events" — but that requires a snapshot-aware host (runAgent or the step ' +
@@ -295,11 +296,7 @@ export function createDecisionLogic<
             "explicitly on this logic to use it here.",
         );
       }
-      if (
-        resolveAllowedEventTypes(config.allowedEvents as AllowedEvents | undefined, input)?.some(
-          isEventPattern,
-        )
-      ) {
+      if (allowedEventTypes.some(isEventPattern)) {
         throw new Error(
           "Decision logic uses wildcard `allowedEvents` patterns, which expand against " +
             "the live snapshot — that requires a snapshot-aware host (runAgent or the " +

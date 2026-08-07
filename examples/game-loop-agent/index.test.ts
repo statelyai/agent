@@ -156,9 +156,7 @@ describe("game-loop-agent", () => {
     // statechart — not just the root's.
     const refToId = new Map(actorEvents.map((e) => [e.actorRef, e.id]));
     const transitionedIds = new Set(
-      events
-        .filter((e) => e.type === "@xstate.transition")
-        .map((e) => refToId.get(e.actorRef)),
+      events.filter((e) => e.type === "@xstate.transition").map((e) => refToId.get(e.actorRef)),
     );
     expect(transitionedIds).toContain("player");
     expect(transitionedIds.size).toBeGreaterThanOrEqual(2);

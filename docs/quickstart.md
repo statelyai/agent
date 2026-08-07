@@ -5,21 +5,22 @@ description: Install @statelyai/agent and run your first agent machine end to en
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
 
+The [overview](index.md) has the copy-paste version; this page builds the same shape up piece by piece.
+
 ## Installation
 
 <!-- pinned alpha install; peers consistent with package.json -->
 
 ```bash
-npm install @statelyai/agent@alpha xstate@alpha zod ai@^6 @ai-sdk/openai@^3
+pnpm add @statelyai/agent@alpha xstate@alpha zod ai@^6 @ai-sdk/openai@^3
 ```
 
 - The `@alpha` tag floats. Install it once, then pin what it resolved to (`npm ls @statelyai/agent`) so a later alpha cannot change the API under you.
-- `xstate` is the one required peer. The library requires **XState v6 alpha.25 or newer**.
-- `ai` (the Vercel AI SDK) and `@ai-sdk/openai` back the shipped adapter, `createAiSdkExecutors`. Core has no runtime dependency besides `xstate`, and the first run below needs neither the adapter nor an API key.
+- `xstate` is the one required peer, at **v6 alpha.25 or newer**. Node 22.18 or newer.
 - Provider packages must match your `ai` major. `@ai-sdk/openai@^3` pairs with `ai@^6`; a bare `@ai-sdk/openai` resolves to `@latest`, whose `LanguageModel` spec version may not match your `ai` peer.
 - The package is **ESM-first**; every entry also ships a CommonJS build, so `require()` works. The examples use top-level `await`, which needs ESM: set `"type": "module"` in `package.json` (or use `.mts` files).
 
-## Your first agent
+## First agent
 
 A comment moderator. The model reads a comment and picks one of three events; the machine owns the trust threshold that decides whether publishing is even legal.
 
@@ -141,16 +142,16 @@ What the machine does that a prompt call cannot:
 
 `setupAgent` returns a **setup** (not a running agent) you author machines from, like XState's `setup()`. Context, input, output, and event payloads are Standard Schemas, so Zod works directly and the machine's types come from them.
 
-The `model` value is a key into the `models` registry, so registered keys autocomplete. Unregistered strings are still allowed (the host may resolve refs at run time), so a typo surfaces at run time. See [Authoring forms](machines.md#authoring-forms).
+The `model` value is a key into the `models` registry, or any string your [host](hosts.md#typed-model-aliases) resolves at run time.
 
 Every machine can invoke these built-in actor sources. They are reserved `src` strings; the invoke's `input` shapes each call.
 
-| `src`                | Purpose                                                  |
-| -------------------- | -------------------------------------------------------- |
-| `agent.generateText` | Inline one-shot text (or structured-output) model call.  |
-| `agent.streamText`   | Same, streamed chunk by chunk through `onChunk`.         |
-| `agent.decide`       | Model picks exactly one currently-legal event.           |
-| `agent.userInput`    | Gather human input mid-run without settling.             |
+| `src`                | Purpose                                                 |
+| -------------------- | ------------------------------------------------------- |
+| `agent.generateText` | Inline one-shot text (or structured-output) model call. |
+| `agent.streamText`   | Same, streamed chunk by chunk through `onChunk`.        |
+| `agent.decide`       | Model picks exactly one currently-legal event.          |
+| `agent.userInput`    | Gather human input mid-run without settling.            |
 
 ### Named requests
 
@@ -187,7 +188,7 @@ blocked: {
 
 See [Text requests](text-requests.md) for tools, streaming, and messages.
 
-## Running the machine
+## Running
 
 `runAgent` drives the machine and calls your **executors** whenever it needs a model. It settles with a `status`:
 
@@ -197,27 +198,11 @@ See [Text requests](text-requests.md) for tools, streaming, and messages.
 
 Every variant carries `result.events`, a versioned, JSON-safe `AgentLogEntry[]` of the replayable external inputs (identity, timestamp, machine version, state/effect hashes). Pass it to `replay(machine, result.events)` to reconstruct the final snapshot without re-running model or tool calls; `verifyReplay` requires every hash. See [The event log](event-log.md#export-events-from-runagent).
 
-For a run that must go straight through to a final state, `generateResult(machine, options)` resolves with the done result — `result.output` plus metadata (`result.snapshot`, replayable `result.events`, aggregated `result.usage`), like `generateText`'s `text` + call metadata — and throws `AgentIdleError` if the machine pauses.
+For a run that must go straight through to a final state, `generateResult(machine, options)` resolves with the done result: `result.output` plus metadata (`result.snapshot`, replayable `result.events`, aggregated `result.usage`), like `generateText`'s `text` + call metadata. It throws `AgentIdleError` if the machine pauses.
 
-### Without `runAgent`
+### Other ways to run the same machine
 
-`provideExecutors` binds every agent source in one call, returning a machine you drive with a plain `createActor`. No run loop, no idle settling.
-
-```ts
-import { createActor } from "xstate";
-import { provideExecutors } from "@statelyai/agent";
-
-const executors = createAiSdkExecutors({ models });
-const actor = createActor(provideExecutors(moderationMachine, executors), {
-  input: { comment: "honestly this update is terrible", trust: 20 },
-});
-actor.subscribe((s) => s.status === "done" && console.log(s.output));
-actor.start();
-```
-
-`agent.userInput` is left unbound (supply it via the third argument, `{ actors }`), and invoked child machines are not descended into. Use `runAgent` for idle handling and child rebinding.
-
-For a **long-lived session** (chat turns, device events, sockets) that should keep `runAgent`'s event log, budgets, and traces without settling-and-restoring every turn, use `createAgentActor` instead: the same engine, but the actor survives idle settles — `session.actor.send(event)` re-opens the cycle and `await session.settled()` resolves at the next quiescence, all on one replayable log.
+`runAgent` is the default, not the only option. `provideExecutors` binds the executors onto the machine and hands it back for a plain `createActor`; the step path lets a durable host own the loop and the persistence. The machine is identical in all three. See [Choosing a run mode](choosing-a-run-mode.md).
 
 ### Testing without an API key
 
@@ -241,31 +226,7 @@ expect(result.output).toEqual({ outcome: "flagged", reason: "Borderline tone." }
 - A `PUBLISH` rejected by the guard consumes an entry and retries with the next one, so scripts assert retry behavior directly.
 - Running dry throws an error naming the pending request.
 
-Executors are plain functions, so a hand-written mock is still just an object (`generateText`/`streamText` resolve `{ output }`, `decide` resolves `{ event }`), and each entry on `agentSetup.requests` is a `TextLogic` you can bind individually with `.withExecutor(...)`:
-
-```ts
-const testMachine = provideExecutors(
-  moderationMachine,
-  { decide: async () => ({ event: { type: "FLAG", reason: "Borderline tone." } }) },
-  {
-    actors: {
-      moderatorNote: agentSetup.requests.moderatorNote.withExecutor(async () => ({
-        output: { note: "Repeat offender." },
-      })),
-    },
-  },
-);
-
-const actor = createActor(testMachine, { input: { comment: "…", trust: 20 } });
-actor.subscribe((snapshot) => {
-  if (snapshot.status === "done") {
-    console.log(snapshot.output); // { outcome: 'flagged', reason: 'Borderline tone.' }
-  }
-});
-actor.start();
-```
-
-To assert the whole playthrough without a run loop at all, `simulateAgent` walks the pure step path from a by-`src` script. See [Testing and verification](verify.md).
+Executors are plain functions, so a hand-written mock is just an object; see [Hosts and executors](hosts.md#scripted-executors). To assert a whole playthrough without a run loop at all, `simulateAgent` walks the step path from a by-`src` script. See [Testing and verification](verify.md).
 
 ### Live visualization
 
@@ -286,8 +247,10 @@ await runAgent(moderationMachine, {
 
 It is the same machine you authored, so it also renders in [Stately Studio](https://stately.ai/editor) and the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=statelyai.stately-vscode). See [Observability](observability.md) for production tracing.
 
-## Next steps
+## Related
 
 - [Agent machines](machines.md): authoring states, transitions, and typed context.
 - [Decisions](decisions.md): let the model choose one of several legal machine events.
 - [Hosts](hosts.md): model aliases, the AI SDK adapter, and writing your own executors.
+- [Choosing a run mode](choosing-a-run-mode.md): `runAgent`, `provideExecutors`, or the step path.
+- [Where state lives](persistence.md): the event log, snapshots, and the shipped stores.

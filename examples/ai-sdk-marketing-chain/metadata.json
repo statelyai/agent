@@ -8,11 +8,7 @@
     "url": "https://ai-sdk.dev/docs/agents/workflows#sequential-processing-chains"
   },
   "comparison": {
-    "targets": [
-      "Vercel AI SDK",
-      "sequential processing",
-      "chains"
-    ],
+    "targets": ["Vercel AI SDK", "sequential processing", "chains"],
     "purpose": "Drafts marketing copy for a product, scores it against quality criteria, and rewrites it once \u2014 a sequential chain as an explicit XState machine."
   },
   "starters": [

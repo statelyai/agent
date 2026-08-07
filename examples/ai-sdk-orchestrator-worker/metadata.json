@@ -8,10 +8,7 @@
     "url": "https://ai-sdk.dev/docs/agents/workflows#orchestrator-worker"
   },
   "comparison": {
-    "targets": [
-      "Vercel AI SDK",
-      "orchestrator-worker"
-    ],
+    "targets": ["Vercel AI SDK", "orchestrator-worker"],
     "purpose": "An orchestrator plans which files a feature touches, then a worker writes the change for each file in turn."
   },
   "starters": [

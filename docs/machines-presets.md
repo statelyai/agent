@@ -1,6 +1,6 @@
 ---
 title: Preset machines
-description: Factories for proven agent shapes — tool loop, sequential, router, parallel, loop, supervisor, handoff — that return ordinary, inspectable agent machines.
+description: Factories for proven agent shapes (tool loop, sequential, router, parallel, loop, supervisor, handoff) that return ordinary, inspectable agent machines.
 ---
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
@@ -121,7 +121,7 @@ The policy:
 
 The same prop works for your own machines: set `version` in `createMachine(...)` and `runAgent` stamps it instead of the structural hash (which changes on any edit).
 
-## Ejecting
+## Ejection
 
 A preset is a starting point, not a framework. When you need one more state, a human gate, a different bound, or typed context of your own:
 
@@ -131,8 +131,8 @@ A preset is a starting point, not a framework. When you need one more state, a h
 
 Related examples to eject toward: [react-agent](../examples/react-agent/index.ts) (tool loop as states), [review-tool-calls](../examples/review-tool-calls/index.ts) (approval gate), [fan-out](../examples/fan-out/index.ts) (dynamic N), [reflection-writer](../examples/reflection-writer/index.ts) (critique loop), [supervisor](../examples/supervisor/index.ts), [swarm-handoff](../examples/swarm-handoff/index.ts).
 
-## Next steps
+## Related
 
-- [Agent machines](machines.md): what the presets compose — `setupAgent`, states, invokes, guards.
+- [Agent machines](machines.md): what the presets compose (`setupAgent`, states, invokes, guards).
 - [Agent patterns](patterns.md): the full runnable example catalog.
 - [The event log](event-log.md): where `machineVersion` is recorded and checked.

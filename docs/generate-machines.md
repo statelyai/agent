@@ -36,7 +36,7 @@ How the gates behave:
 
 ## The skill
 
-The full authoring procedure — schema location, the rules a config must follow, a few-shot config, the Ajv adapter, the lint and simulate calls, and the repair loop — ships as an agent skill:
+The full authoring procedure (schema location, the rules a config must follow, a few-shot config, the Ajv adapter, the lint and simulate calls, and the repair loop) ships as an agent skill:
 
 **[`skills/generate-machine/SKILL.md`](https://github.com/statelyai/agent/blob/main/skills/generate-machine/SKILL.md)**
 
@@ -49,10 +49,10 @@ Honest constraints on generated machines:
 - **Named guards and actions are host-resolved.** A config cannot carry functions. A model can emit `guard: "isReady"`, but the implementation lives in the `guards` passed to `fromConfig(...)`, and an unresolved name is a build-time throw. Either list the names your host implements in the prompt, or forbid them.
 - **Ajv validity is not semantic validity.** The schema constrains shape, not meaning: a config can validate and still reference a request that does not exist, or route to a state that solves nothing. That is what the lint and simulate gates are for.
 - **A dry run covers one path.** The simulation follows the script you gave it. Use `explorePaths` when the generated branch structure matters.
-- **Model refs and tool names are unchecked strings.** They resolve at run time, in the host. Generated machines carry string refs (`"openai/gpt-5.4-mini"` here is illustrative; substitute your provider's current models), so pass `createAiSdkExecutors({ resolveModel })` — see [models and providers](models-and-providers.md).
+- **Model refs and tool names are unchecked strings.** They resolve at run time, in the host. Generated machines carry string refs (`"openai/gpt-5.4-mini"` here is illustrative; substitute your provider's current models), so pass `createAiSdkExecutors({ resolveModel })`; see [Models and providers](models-and-providers.md).
 
 ## Related
 
 - [Machines as data](machines-as-data.md): the config format, its expressions, and its limits.
-- [Verify](verify.md): every check and simulation API in full.
+- [Testing and verification](verify.md): every check and simulation API in full.
 - [examples/json-agent](../examples/json-agent/index.ts): a hand-written config, run.

@@ -6,8 +6,11 @@
  * `provideExecutors`, or a bare `TextLogic.execute`) runs with no API key and no
  * network. It is the fastest way to see a machine run, and the least ceremonial
  * way to test one: same machine, same executor contract, scripted answers.
+ *
+ * @module
  */
 import { AgentError } from "./errors.js";
+import { isRecord } from "./internal/is-record.js";
 import type { AgentDecisionRequest } from "./decision.js";
 import type {
   AgentCallUsage,
@@ -28,7 +31,6 @@ export type ScriptedDecisionValue =
       event: ChosenEvent;
       reason?: string;
       usage?: AgentCallUsage;
-      [key: string]: unknown;
     };
 
 /**
@@ -71,18 +73,6 @@ export interface ScriptedExecutorsScript {
   text?: ScriptedTextEntry[];
 }
 
-/** Thrown when a scripted queue runs dry on a pending request. */
-class ScriptedExecutorsError extends AgentError {
-  constructor(message: string) {
-    super("scripted-executors-exhausted", message);
-    this.name = "ScriptedExecutorsError";
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 /** The only own keys an executor-result envelope carries. @internal */
 const TEXT_ENVELOPE_KEYS = new Set(["output", "usage", "raw"]);
 
@@ -114,6 +104,27 @@ export async function resolveScriptedTextEntry(
   return isRecord(value) && isTextEnvelope(value)
     ? (value as { output: unknown; usage?: AgentCallUsage })
     : { output: value };
+}
+
+/**
+ * Names a pending text request in an error message. Shared with `runSeam`.
+ * @internal
+ */
+export function describeText(request: AgentTextRequest): string {
+  return request.name
+    ? `'${request.name}' (model '${request.model}')`
+    : `(model '${request.model}')`;
+}
+
+/**
+ * Stream semantics with no model: the whole text lands as one chunk. Shared
+ * with `runSeam`, whose scripted answers stream the same way. @internal
+ */
+export function emitScriptedChunk(result: unknown, info?: AgentRequestExecutorInfo): void {
+  const output = isRecord(result) ? result["output"] : undefined;
+  if (typeof output === "string") {
+    info?.onChunk?.(output);
+  }
 }
 
 /**
@@ -153,7 +164,8 @@ export function createScriptedExecutors(
 
   const nextText = async (request: AgentTextRequest, info?: AgentRequestExecutorInfo) => {
     if (text.length === 0) {
-      throw new ScriptedExecutorsError(
+      throw new AgentError(
+        "scripted-executors-exhausted",
         `createScriptedExecutors: script ran dry on a pending text request ${describeText(request)}. ` +
           "Add another entry to the script's `text` queue.",
       );
@@ -165,15 +177,13 @@ export function createScriptedExecutors(
     generateText: nextText,
     streamText: async (request, info) => {
       const result = await nextText(request, info);
-      // Stream semantics with no model: the whole text lands as one chunk.
-      if (typeof result.output === "string") {
-        info?.onChunk?.(result.output);
-      }
+      emitScriptedChunk(result, info);
       return result;
     },
     decide: async (request) => {
       if (decisions.length === 0) {
-        throw new ScriptedExecutorsError(
+        throw new AgentError(
+          "scripted-executors-exhausted",
           `createScriptedExecutors: script ran dry on a pending decision request (id '${request.id}'). ` +
             "Add another entry to the script's `decisions` queue. " +
             `Candidate events: ${request.events.map((event) => event.type).join(", ") || "(none)"}.`,
@@ -181,15 +191,13 @@ export function createScriptedExecutors(
       }
       const entry = decisions.shift()!;
       const value = typeof entry === "function" ? await entry(request) : entry;
-      // A `ChosenEvent` is the event itself (string `type`); anything else is
-      // already the `{ event, ... }` envelope.
-      return typeof (value as ChosenEvent).type === "string"
-        ? { event: value as ChosenEvent }
-        : (value as { event: ChosenEvent });
+      // A string `type` wins: chosen events may legitimately carry an `event`
+      // payload field. Only an untyped object owning `event` is the envelope.
+      return isRecord(value) &&
+        typeof (value as Record<string, unknown>)["type"] !== "string" &&
+        "event" in value
+        ? (value as { event: ChosenEvent })
+        : { event: value as ChosenEvent };
     },
   };
-}
-
-function describeText(request: AgentTextRequest): string {
-  return request.name ? `'${request.name}'` : `(model '${request.model}')`;
 }

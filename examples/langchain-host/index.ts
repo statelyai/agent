@@ -1,7 +1,7 @@
 /**
  * LangChain + XState agent, both directions — the "use them together" example.
  *
- * The migration guide (docs/from-langgraph.md) covers moving *off* LangGraph.
+ * The migration guide (docs/langgraph-comparison.md) covers moving *off* LangGraph.
  * This one is the other answer: keep LangChain, and let a state machine own
  * control flow. Real `@langchain/core` / `@langchain/openai` / `langchain`
  * 1.x, no shims.

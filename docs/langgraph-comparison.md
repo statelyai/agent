@@ -1,15 +1,40 @@
 ---
-title: LangGraph vs agent machines
-description: The same draft-review-revise agent built twice, in LangGraph JS and in @statelyai/agent, with an honest dimension-by-dimension comparison.
+title: Coming from LangGraph
+description: A term-by-term translation of LangGraph concepts, the same agent built both ways, an honest dimension-by-dimension comparison, and the ported examples.
 ---
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
 
 [LangGraph](https://docs.langchain.com/oss/javascript/langgraph) and `@statelyai/agent` solve overlapping problems: both give an LLM workflow explicit structure, both pause for humans, both persist and resume. They disagree about where control flow lives.
 
-This page builds one small agent in both, then compares them dimension by dimension. If you want a term-by-term translation table instead, read [Coming from LangGraph](from-langgraph.md).
+This page starts with a term-by-term translation, builds one small agent in both, compares them dimension by dimension, then lists the LangGraph tutorials ported as runnable examples.
+
+**You don't have to choose.** [examples/langchain-host](../examples/langchain-host/index.ts) keeps LangChain for model calls, callbacks, tracing through LangSmith (LangChain's hosted observability product), and the agent loop while the machine owns control flow: wrap any `BaseChatModel` as executors, or hand a `createAgent` loop the machine as tools.
 
 Code blocks are illustrative and not typechecked in this repo. LangGraph snippets target `@langchain/langgraph` 1.x.
+
+## Term mapping
+
+| LangGraph                              | Here                                               | How it maps                                                                                                                                                                                                                                                                                   |
+| -------------------------------------- | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `StateGraph(State)`                    | `setupAgent({ ... }).createMachine({ ... })`       | `setupAgent` declares the schemas (context, input, output, events) once; `createMachine` builds the typed graph. See [Agent machines](machines.md).                                                                                                                                           |
+| Graph state / reducers                 | `context` + transition functions                   | Context is the typed state object. A transition returns the next `context`, so a reducer becomes an ordinary function of `{ context, event }`.                                                                                                                                                |
+| Node (`add_node`)                      | A state with an `invoke`                           | A node's work is the state's invoked actor: a text request, a decision, or a plain actor. Entering the state starts the work; `onDone` writes the result into context.                                                                                                                        |
+| Edge (`add_edge`)                      | `onDone.target` or an `always` transition          | A fixed edge is the target of the state's completion.                                                                                                                                                                                                                                         |
+| `add_conditional_edges`                | Guarded transitions, or `type: 'choice'`           | A branch is a transition function returning a different target (or `undefined` to block). Deterministic branches use the `choice` pseudo-state; model-chosen branches use `agent.decide`.                                                                                                     |
+| Router node returning a literal        | `agent.decide` with `allowedEvents`                | The model chooses one machine event from the currently legal set; the event's transition is the branch. See [Decisions](decisions.md).                                                                                                                                                        |
+| `interrupt()`                          | An idle state with an `on:` handler                | A pause is a state that invokes nothing and waits for an event. `runAgent` settles `idle`, hands back a snapshot, and the run resumes when you send the event. See [Human in the loop](human-in-the-loop.md).                                                                                 |
+| `Command(resume=...)`                  | The resume event you send                          | Resuming is sending a typed event (`APPROVE`, `EDIT`, `REJECT`) into the restored snapshot. The payload is schema-validated.                                                                                                                                                                  |
+| `interrupt_before` on a tool           | An idle state before the tool state                | Model the approval point as its own state; the tool state is only reachable through it. See [`review-tool-calls`](../examples/review-tool-calls/index.ts).                                                                                                                                    |
+| Checkpointer (`MemorySaver`, Postgres) | `persistSnapshot` or the event log                 | Two options: persist the JSON snapshot yourself, or append the event log and replay it. Neither requires a configured backend to run. See [The event log](event-log.md).                                                                                                                      |
+| `thread_id`                            | Your own key + a log or snapshot per key           | There is no built-in thread registry. Use whatever key your app already has (session id, row id) and store the snapshot or log entries under it.                                                                                                                                              |
+| Time travel / `get_state_history`      | Snapshot list, or `replay` plus the store's `fork` | Rewind by replaying a prefix of the log (or restoring an earlier snapshot); `fork` is a method on the event-log store, not a root export, and copies a prefix into a new thread you then append to. See [`time-travel`](../examples/time-travel/index.ts).                                    |
+| `Send(...)` for map-reduce             | Spawned child actors                               | A planner produces N items and the machine spawns one child branch per item; a reducer state composes the results. See [`fan-out`](../examples/fan-out/index.ts).                                                                                                                             |
+| Subgraphs                              | Child machines invoked as actors                   | A machine is an actor, so a subgraph is an `invoke` of another agent machine with its own typed input/output. See [Multi-agent](multi-agent.md) and [`subflows`](../examples/subflows/index.ts).                                                                                              |
+| `create_agent` / `create_react_agent`  | One request with `tools`, or an explicit loop      | Default: one state, `tools` on the request, your SDK runs the loop (`metadata.maxSteps` bounds it); see [`tool-calling`](../examples/tool-calling/index.ts). When turns need gating or mid-loop persistence, unroll to visible states; see [`react-agent`](../examples/react-agent/index.ts). |
+| Tool binding (`bind_tools`)            | Request-level `tools`, or tool states              | Tools the model calls inside one request are declared on the request; tools that should be their own graph step are states. See [Text requests](text-requests.md#tools-and-multi-step-loops).                                                                                                 |
+| `stream_mode`                          | `onChunk`, `onTransition`, `onTrace`               | Text chunks stream through the request's `onChunk`; state changes through `onTransition`; a structured trace through `onTrace`. See [Observability](observability.md).                                                                                                                        |
+| Provider model object                  | `models` registry + host executors                 | The machine names a model ref; the [host](hosts.md) resolves it. The same machine runs against any provider by swapping executors.                                                                                                                                                            |
 
 ## The agent
 
@@ -205,6 +230,79 @@ const done = await runAgent(machine, {
 });
 ```
 
+## Conditional edges and guards
+
+The second pair, since routing is where the designs diverge hardest. In LangGraph a node produces a literal and a router function turns it into a node name; the rewrite bound is an `if` inside that router:
+
+```ts no-check
+import {
+  END,
+  START,
+  StateGraph,
+  StateSchema,
+  type ConditionalEdgeRouter,
+  type GraphNode,
+} from "@langchain/langgraph";
+import { z } from "zod";
+
+const State = new StateSchema({
+  question: z.string(),
+  docs: z.string(),
+  grade: z.string().default(""),
+  rewrites: z.number().default(0),
+});
+
+const grade: GraphNode<typeof State> = async (state) => {
+  const res = await model.invoke([
+    {
+      role: "system",
+      content: "Reply GENERATE if the documents answer the question, else REWRITE.",
+    },
+    { role: "user", content: `Question:\n${state.question}\n\nDocuments:\n${state.docs}` },
+  ]);
+  // Whatever the model said, unvalidated, is now the routing key.
+  return { grade: res.text.trim() };
+};
+
+const route: ConditionalEdgeRouter<typeof State, "generate" | "rewrite"> = (state) =>
+  state.grade === "REWRITE" && state.rewrites < 2 ? "rewrite" : "generate";
+
+const graph = new StateGraph(State)
+  .addNode("grade", grade)
+  .addNode("generate", generate)
+  .addNode("rewrite", rewrite)
+  .addEdge(START, "grade")
+  .addConditionalEdges("grade", route, ["generate", "rewrite"])
+  .addEdge("generate", END)
+  .compile();
+```
+
+Here the router is a decision the model makes over named events. The branch is the event's transition, and a guard returning `undefined` makes that branch unavailable:
+
+```ts no-check
+grading: {
+  invoke: {
+    src: "agent.decide",
+    input: ({ context }) => ({
+      model: "grader",
+      system: "GENERATE if the documents answer the question, else REWRITE.",
+      prompt: `Question:\n${context.question}\n\nDocuments:\n${context.docs}`,
+      allowedEvents: ["GENERATE", "REWRITE"],
+    }),
+  },
+  on: {
+    GENERATE: { target: "generating" },
+    // Bound the correction loop: past 2 rewrites, REWRITE is illegal.
+    REWRITE: ({ context }) =>
+      context.rewrites < 2
+        ? { target: "rewriting", context: { rewrites: context.rewrites + 1 } }
+        : undefined,
+  },
+}
+```
+
+There is no routing string to typo and no bound stated as prose. The model picks a named event; if the guard rejects it, the attempt is recorded as `rejected-by-guard` and the model is asked again with that feedback.
+
 ## Dimension by dimension
 
 | Dimension             | LangGraph                                                                                                                                                                                                                             | `@statelyai/agent`                                                                                                                                                                                                          |
@@ -236,17 +334,36 @@ Pick LangGraph when these matter more than machine-enforced control flow:
 
 ## Agent machine strengths
 
-- **Constraints must hold regardless of the prompt.** Spend limits, approval gates, retry budgets, ordering rules. A guard cannot be talked around; an `if` in a router node is only as good as the code path that reaches it.
-- **Pausing should not require infrastructure.** Idle plus a JSON snapshot works in a Lambda, a queue worker, or a test, with no checkpointer configured.
+- **Constraints must hold regardless of the prompt.** Spend limits, approval gates, retry budgets, ordering rules.
+- **Pausing should not require infrastructure.** Idle plus a JSON snapshot works in a Lambda, a queue worker, or a test.
 - **You need to prove behavior before shipping.** Reachability, dead-state, and scripted playthrough checks run in CI without a model.
 - **Replay has to be trustworthy.** Folding an event log through pure transitions reproduces a run exactly, with hashes that catch divergence.
 - **The workflow is genuinely stateful.** Nested and parallel regions, states that mean something to the business, and a diagram non-engineers can read.
 - **You want provider independence.** The machine has no SDK dependency, so swapping hosts does not touch the agent.
 
-## Next steps
+## Ported examples
 
-- [Coming from LangGraph](from-langgraph.md): the full term-by-term mapping and the ported tutorial examples.
+Several LangGraph tutorials and how-tos exist here as runnable examples, so you can read the same problem in both shapes. Full list in [examples/README.md](../examples/README.md).
+
+- [`corrective-rag`](../examples/corrective-rag/index.ts): the CRAG tutorial as explicit states (retrieve, grade, rewrite query, web-search fallback, grounded generate).
+- [`adaptive-rag`](../examples/adaptive-rag/index.ts): route local vs web, grade retrieval and generation, bounded rewrite.
+- [`reflection-writer`](../examples/reflection-writer/index.ts): the reflection essay-writer, generate and critique with a typed revision bound.
+- [`code-assistant`](../examples/code-assistant/index.ts): self-correcting code generation with a sandboxed check step and a bounded attempt budget.
+- [`customer-support`](../examples/customer-support/index.ts): the flagship customer-support tutorial, with `interrupt_before` as a real gate state.
+- [`review-tool-calls`](../examples/review-tool-calls/index.ts): `interrupt` + `Command(resume=...)` as approve / edit / reject events over a proposed tool call.
+- [`time-travel`](../examples/time-travel/index.ts): the time-travel how-to as checkpoint history, rewind, and a forked branch.
+- [`tool-calling`](../examples/tool-calling/index.ts): `create_agent`'s job in one state; the SDK runs the tool loop inside a single request.
+- [`react-agent`](../examples/react-agent/index.ts): the same loop unrolled into a visible, budgeted machine when turns need gating.
+- [`fan-out`](../examples/fan-out/index.ts): `Send`-style dynamic map-reduce via spawned child branches.
+- [`supervisor`](../examples/supervisor/index.ts) and [`hierarchical-teams`](../examples/hierarchical-teams/index.ts): supervisor handoff and two-level teams.
+- [`deep-research`](../examples/deep-research/index.ts): plan queries, research in parallel, reflect, synthesize.
+- [`lats`](../examples/lats/index.ts): Language Agent Tree Search with a rollout budget.
+
+## Related
+
 - [Quickstart](quickstart.md): install and run one machine end to end.
+- [Thinking in state machines](thinking-in-state-machines.md): naming the states hiding in an agent loop.
+- [Migrating from a hand-rolled loop](from-a-loop.md): the same conversion starting from `while`-loop code.
 - [Human in the loop](human-in-the-loop.md): the idle-and-resume model in depth.
 - [The event log](event-log.md): verified replay, forking, and the SQLite stores.
 - [Testing and verification](verify.md): what you can check before a model runs.

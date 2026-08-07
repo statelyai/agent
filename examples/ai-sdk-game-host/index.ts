@@ -63,7 +63,7 @@ async function resolveEffect(
     return undefined;
   }
   if (effect.kind === "text") {
-    const output = await executeAgentRequest(effect, executors);
+    const { output } = await executeAgentRequest(effect, executors);
     return effect.toDoneEvent(output);
   }
   if (effect.kind === "decision") {

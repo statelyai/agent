@@ -23,7 +23,7 @@ The machine itself is unchanged between the run that settled and the run that re
 
 <!-- setupAgent({ isSuspended }) and RunAgentOptions.isSuspended from src/run-agent.ts, src/setup-agent.ts -->
 
-By default `runAgent` detects a resting state with a timing heuristic. To settle intentional waits deterministically, tell the machine what "suspended" means. There is no built-in tag; you choose the signal (a tag, a `snapshot.matches(...)`, or a `meta` field). Declare it once with `setupAgent({ isSuspended })` and the predicate travels with the machine, including through `machine.provide(...)`:
+By default `runAgent` detects a resting state with a timing heuristic. To settle intentional waits deterministically, tell the machine which states are idle states. (The predicate is named `isSuspended`; the docs call the states themselves idle states.) There is no built-in tag; you choose the signal (a tag, a `snapshot.matches(...)`, or a `meta` field). Declare it once with `setupAgent({ isSuspended })` and the predicate travels with the machine, including through `machine.provide(...)`:
 
 ```ts no-check
 const agentSetup = setupAgent({
@@ -31,7 +31,7 @@ const agentSetup = setupAgent({
   isSuspended: (snapshot) => snapshot.hasTag('awaiting-review'),
 });
 
-// ...then mark the waiting states with the tag you chose:
+// ...then mark the idle states with the tag you chose:
 reviewing: {
   tags: ['awaiting-review'],
   on: { APPROVE: { target: 'published' } },
@@ -42,7 +42,7 @@ A host can override per run by passing `isSuspended` to `runAgent` directly. Res
 
 > The `isSuspended` option name is provisional and may change before 2.0.
 
-## A waiting state
+## An idle state
 
 The `reviewing` state has no invoke. Once reached, nothing happens until a human sends `APPROVE` or `REJECT`:
 
@@ -122,6 +122,62 @@ const second = await runAgent(machine, {
 
 > **`persistedSnapshot` vs `snapshot`.** An idle result always carries `snapshot`, the live settled snapshot. It also carries `persistedSnapshot` when the settle left pending `agent.userInput` invokes, because the live `snapshot` cannot round-trip active children: persisting it in that case silently drops those invokes, and the loss only surfaces on resume. Persist `result.persistedSnapshot ?? result.snapshot` and both cases are covered.
 
+## Rules of resume
+
+<!-- verified against src/run-agent.ts (resume checks, onIllegalResumeEvent, onVersionMismatch, migrateSnapshot) and src/event-log-store.ts (fork, append) -->
+
+**Resume with an event the restored state accepts.** `runAgent` checks legality before starting the actor and throws `AgentIllegalResumeEventError` (`eventType`, `acceptedTypes`) rather than silently dropping the event.
+
+```ts no-check
+// Wrong: the event the UI showed five minutes ago may no longer be legal.
+await runAgent(machine, { snapshot, event: { type: "APPROVE" }, executors });
+
+// Right: read the legal set off the restored snapshot, or validate at the boundary.
+const choices = getAcceptedEvents(snapshot); // { type, toolName, schema? }[]
+await runAgent(machine, { snapshot, event: parseAgentEvent(snapshot, payload), executors });
+```
+
+**Persist before you surface anything to the human.** `runAgent` owns no store and stops its actor on every settle path, so an unpersisted snapshot is gone the moment the process is. Persist `persistedSnapshot ?? snapshot`, because the live snapshot cannot round-trip pending `agent.userInput` invokes.
+
+```ts no-check
+// Wrong: the notification can outlive the process that holds the only copy.
+notifyReviewer(result.snapshot);
+
+// Right: durable first, then tell the human.
+await store.save(threadId, persistSnapshot(result.persistedSnapshot ?? result.snapshot));
+notifyReviewer(threadId);
+```
+
+**Give a divergent resume its own thread.** Nothing in `runAgent` tracks thread identity, so resuming one persisted snapshot twice just runs it twice. The log layer is where branching is enforced: `fork` demands a `newThreadId` and refuses a thread that already has entries, and `append` rejects duplicate event ids within a thread.
+
+```ts no-check
+// Wrong: two resumes of the same snapshot, both appending to one thread.
+await store.append({ threadId: "session-1", expectedIndex: 7, entries: branchA });
+await store.append({ threadId: "session-1", expectedIndex: 7, entries: branchB }); // conflict
+
+// Right: fork first, then let each branch own its thread.
+await store.fork({ threadId: "session-1", newThreadId: "session-1-alt", upToIndex: 7 });
+await store.append({ threadId: "session-1-alt", expectedIndex: 7, entries: branchB });
+```
+
+**Match the machine version, or migrate deliberately.** A snapshot stamped by an older machine shape resumes into transitions that may no longer exist, so `runAgent` throws `AgentSnapshotVersionMismatchError` (`from`, `to`, `machineId`) by default.
+
+```ts no-check
+// Wrong: silencing the check leaves the snapshot pointing at a state that moved.
+await runAgent(machine, { snapshot, event, executors, onVersionMismatch: "ignore" });
+
+// Right: adapt the old shape, or pin an explicit version you control.
+await runAgent(machine, {
+  snapshot,
+  event,
+  executors,
+  machineVersion: "2025-11-04",
+  migrateSnapshot: (old, { from, to }) => upgradeSnapshot(old, from, to),
+});
+```
+
+Details on the last two: [Illegal resume events](#illegal-resume-events) and [Machine-version resume](#machine-version-resume).
+
 ## The human's choices
 
 <!-- getAcceptedEvents from src/events.ts -->
@@ -176,7 +232,7 @@ const snapshot = createActor(machine, { snapshot: JSON.parse(handle) }).getSnaps
 const choices = getAcceptedEvents(snapshot); // one descriptor per legal event
 ```
 
-**Resume cannot re-run earlier work.** A resumed snapshot starts _at_ the waiting state, so earlier states never re-enter: side effects and model calls that ran before the pause run exactly once, however many times you resume. Nothing to isolate. (Contrast inline-interrupt designs, where code before the interrupt call re-executes on resume unless manually isolated in its own node.) Re-running work is always an explicit, authored transition, such as a `REJECT` targeting the drafting state again. Pinned by a test in `src/run-agent.test.ts` ("pre-idle side effects and model calls run exactly once").
+**Resume cannot re-run earlier work.** A resumed snapshot starts _at_ the idle state, so earlier states never re-enter: side effects and model calls that ran before the pause run exactly once, however many times you resume. Nothing to isolate. (Contrast inline-interrupt designs, where code before the interrupt call re-executes on resume unless manually isolated in its own node.) Re-running work is always an explicit, authored transition, such as a `REJECT` targeting the drafting state again. Pinned by a test in `src/run-agent.test.ts` ("pre-idle side effects and model calls run exactly once").
 
 > **Context must be JSON-serializable.** Persisted snapshots round-trip through `JSON.stringify`/`JSON.parse`, so anything in `context` that is not plain JSON silently corrupts on resume: `Date` becomes a string, `Map`/`Set` become `{}`, class instances lose their prototype. Keep non-serializable handles (sessions, db clients, sockets) in closures and store only their serializable ids in `context`; see [threading host context](hosts.md#threading-host-context-into-actors-and-requests).
 
@@ -200,7 +256,7 @@ try {
 
 A type-legal event a **guard** rejects is not an illegal resume event: no transition, and the run settles per normal semantics. To restore the older silent-drop behavior, pass `onIllegalResumeEvent: 'ignore'`.
 
-### Resuming across machine versions
+### Machine-version resume
 
 <!-- agentMeta stamping, onVersionMismatch, migrateSnapshot from src/run-agent.ts -->
 
@@ -331,7 +387,7 @@ if (first.status === "idle" && first.pendingUserInputs) {
 
 Resuming without a handler settles idle again with the same pending inputs, so a host can safely re-enter the loop.
 
-## Choosing a waiting style
+## Waiting styles
 
 - **Idle state** (`on:` handler, no invoke, flagged by your own `isSuspended` signal): the wait is an **event choice**; resume delivers the chosen event. Best for approve/reject flows where `getAcceptedEvents` drives a UI.
 - **`agent.userInput`**: the wait is a **value request** with a prompt and schema; resume supplies the value. Best for free-form input, and the only style that lets sibling parallel regions keep working while a human is pending.
@@ -340,4 +396,4 @@ Resuming without a handler settles idle again with the same pending inputs, so a
 
 - [Steps](steps.md): durable hosts that persist after every model call.
 - [The event log](event-log.md): replaying a run from its recorded external inputs.
-- [Agent machines](machines.md): authoring the states and transitions a waiting state is part of.
+- [Agent machines](machines.md): authoring the states and transitions an idle state is part of.

@@ -43,13 +43,7 @@ const agentSetup = setupAgent({
 
 ### Model references
 
-Prefer a `models` registry (canonical):
-
-- The map's keys autocomplete on `model`, and one alias map is shared between authoring and the host adapter.
-- Unregistered strings still typecheck (the type keeps a `string` arm so hosts can resolve refs the machine does not know), so a typo surfaces as a run-time resolution error.
-- A bare `model` string (any string, passed through to your [host](hosts.md) to resolve) is the alternative for a machine that must not name concrete models.
-
-See [Which authoring form when](machines.md#authoring-forms).
+`model` is a key into the `models` registry, or any bare string the [host](hosts.md#typed-model-aliases) resolves at run time. See [Authoring forms](machines.md#authoring-forms).
 
 ## Invoking a request from a state
 
@@ -156,35 +150,7 @@ See [examples/joke/index.ts](../examples/joke/index.ts).
 
 <!-- tools and metadata.maxSteps from src/types.ts (AgentTool) and src/ai-sdk/index.ts -->
 
-A text request can carry `tools`: a map of tool name to a tool. **Tools are whatever your SDK produces** - the type is a minimal structural contract (`description?`, `inputSchema?`, `outputSchema?`, `execute?`, plus any extra fields), so an AI SDK `tool({...})`, an MCP-style descriptor, or a plain object all drop in as-is. Extra fields (`providerOptions`, `toModelOutput`, …) pass through untouched.
-
-Bring your SDK's tool and it owns the input typing, so `execute`'s argument is typed with no cast:
-
-```ts no-check
-import { tool } from 'ai';
-
-// inside a request
-tools: {
-  getWeather: tool({
-    description: 'Look up the current weather for a city.',
-    inputSchema: z.object({ city: z.string() }),
-    execute: async ({ city }) => fetchWeather(city), // city: string
-  }),
-}
-```
-
-For a host with no SDK, the minimal shape is a plain object (or a bare `execute` function). Core reads `description`/`inputSchema` and runs `execute`:
-
-```ts no-check
-// inside a request
-tools: {
-  getWeather: {
-    description: 'Look up the current weather for a city.',
-    inputSchema: z.object({ city: z.string() }),
-    execute: async (input) => fetchWeather((input as { city: string }).city),
-  },
-}
-```
+A text request can carry `tools`: a map of tool name to a tool. Tools are whatever your SDK produces, since the type is a minimal structural contract. See [Tools](tools.md) for the contract, attachment, and how the host runs the tool loop.
 
 To let one request run a bounded tool-call loop, set `metadata.maxSteps`. The shipped AI SDK adapter forwards it as `stopWhen: stepCountIs(maxSteps)`; a request with no `maxSteps` stays single-step.
 

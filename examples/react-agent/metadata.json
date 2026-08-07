@@ -8,9 +8,7 @@
     "url": null
   },
   "comparison": {
-    "targets": [
-      "LangGraph"
-    ],
+    "targets": ["LangGraph"],
     "purpose": "Each loop the model either calls a real tool (calculator, lookup) or answers, with every step visible as machine state and a step budget that forces a best-effort answer."
   },
   "starters": [

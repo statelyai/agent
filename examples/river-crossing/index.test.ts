@@ -46,7 +46,9 @@ describe("river-crossing", () => {
     expect(result.output.summary).toContain("Solved the river crossing in 7 moves.");
     expect(result.output.summary).toContain("1. Farmer crosses left → right with the goat.");
     expect(result.output.summary).toContain("7. Farmer crosses left → right with the goat.");
-    expect(result.output.summary.split("\n").filter((line) => /^\d+\. /.test(line))).toHaveLength(7);
+    expect(result.output.summary.split("\n").filter((line) => /^\d+\. /.test(line))).toHaveLength(
+      7,
+    );
   });
 
   test("illegal move is rejected-by-guard, then the legal retry proceeds", async () => {

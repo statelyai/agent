@@ -26,8 +26,7 @@ test("parallel streaming requests are disambiguated by request.id in onChunk", a
   assert.equal(buffers.thinker, "analysis chunk");
   assert.equal(buffers.poet, "poem chunk");
   assert.deepEqual(output, {
-    summary:
-      "Analysis of actors:\nanalysis chunk\n\nPoem about actors:\npoem chunk",
+    summary: "Analysis of actors:\nanalysis chunk\n\nPoem about actors:\npoem chunk",
     analysis: "analysis chunk",
     poem: "poem chunk",
   });

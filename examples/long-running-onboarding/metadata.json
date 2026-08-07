@@ -8,13 +8,8 @@
     "url": "https://x.com/GoogleCloudTech/status/2074940791277932742"
   },
   "comparison": {
-    "targets": [
-      "Google ADK",
-      "durable agents",
-      "human-in-the-loop",
-      "multi-agent delegation"
-    ],
-    "purpose": "Ports the article's onboarding coordinator shape into Stately Agent: explicit durable state, event-driven idle gates, snapshot resume across days, and delegated IT provisioning."
+    "targets": ["Google ADK", "durable agents", "human-in-the-loop", "multi-agent delegation"],
+    "purpose": "Ports the article's onboarding coordinator shape into Stately Agent: explicit durable state, event-driven idle states, snapshot resume across days, and delegated IT provisioning."
   },
   "starters": [
     {

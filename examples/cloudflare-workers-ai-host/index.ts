@@ -1,5 +1,5 @@
 /**
- * Cloudflare Workers AI step host for the game workflow — the DURABLE thin-loop
+ * Cloudflare Workers AI step host for the game workflow — the DURABLE step-path
  * flavor.
  *
  * Unlike `../ai-sdk-game-host/index.ts` (same append-only-log loop, AI SDK

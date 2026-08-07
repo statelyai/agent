@@ -8,10 +8,7 @@
     "url": null
   },
   "comparison": {
-    "targets": [
-      "LangGraph",
-      "CrewAI"
-    ],
+    "targets": ["LangGraph", "CrewAI"],
     "purpose": "Two reviewers read the same diff at the same time and their notes join into one result \u2014 built from a one-call preset factory instead of hand-written parallel states."
   },
   "starters": [

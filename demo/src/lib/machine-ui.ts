@@ -72,7 +72,10 @@ export type ChatIdle = {
 
 /** "AUTO_REFUND" → "Auto refund". */
 export function humanizeEventType(type: string): string {
-  const words = type.replace(/[_.-]+/g, " ").trim().toLowerCase();
+  const words = type
+    .replace(/[_.-]+/g, " ")
+    .trim()
+    .toLowerCase();
   return words ? words[0].toUpperCase() + words.slice(1) : type;
 }
 

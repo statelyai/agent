@@ -26,10 +26,9 @@ import {
   type ExecutableActionObject,
   type SnapshotFrom,
 } from "xstate";
-import { getAgentRequestsWith, getInvokeEffectMetadata } from "./steps.js";
+import { getAgentRequests, getInvokeEffectMetadata } from "./steps.js";
 import { isDecisionLogic, type AgentDecisionRequest } from "./decision.js";
 import {
-  extractCallUsage,
   isTextLogic,
   type AgentCallUsage,
   type AgentRequestMode,
@@ -44,7 +43,7 @@ import {
   type AgentLogVerification,
   type JsonValue,
 } from "./event-log-store.js";
-import { getMachineStructuralHash } from "./utils.js";
+import { djb2Hex, getMachineStructuralHash } from "./utils.js";
 import { AgentError } from "./errors.js";
 import {
   getRegisteredAgentExecutionOptions,
@@ -155,27 +154,6 @@ export interface AgentUsageEvent extends EventObject {
   name?: string;
 }
 
-/**
- * Reads a settled call's token usage off a RAW executor result — the same
- * normalization `runAgent` applies before it delivers
- * {@link AGENT_USAGE_EVENT_TYPE}. Returns `undefined` when the executor
- * reported none.
- *
- * The seam for the step-loop path, where the host holds the raw result itself:
- *
- * ```ts
- * const { output, raw } = await executeAgentRequest(effect, executors, { verbose: true });
- * const usage = getCallUsage(raw);
- * if (usage) append({ type: AGENT_USAGE_EVENT_TYPE, usage }); // journal + transition, like any event
- * append(effect.toDoneEvent(output));
- * ```
- *
- * See "Token usage on this path" in docs/steps.md for the full loop.
- */
-export function getCallUsage(raw: unknown): AgentCallUsage | undefined {
-  return extractCallUsage(raw);
-}
-
 /** Options controlling the durable envelope created by {@link createReplayEntry}. */
 export interface CreateReplayEntryOptions {
   /** Explicit machine version; defaults to the machine's structural hash. */
@@ -211,7 +189,7 @@ export function createReplayEntry<TMachine extends AnyStateMachine>(
     recordedAt: options.recordedAt ?? new Date().toISOString(),
     machineId,
     machineVersion,
-    event: normalizeEventErrors(event),
+    event: normalizeEventErrors(event) as EventObject,
     ...(options.causationId !== undefined ? { causationId: options.causationId } : {}),
     ...(options.correlationId !== undefined ? { correlationId: options.correlationId } : {}),
     ...(options.metadata !== undefined ? { metadata: options.metadata } : {}),
@@ -222,9 +200,10 @@ export function createReplayEntry<TMachine extends AnyStateMachine>(
       machineVersion,
       verify: false,
     });
+    // The only field attached after validation; its hashes are always
+    // non-empty hex, so the envelope stays valid.
     entry.verification = replayVerification(result.snapshot as AnyMachineSnapshot, result.effects);
   }
-  assertAgentLogEntry(entry);
   return entry;
 }
 
@@ -375,13 +354,13 @@ interface RawAction {
 }
 
 // Builds a text/decision/task effect for one invoke site. Prefers a
-// pre-shaped request (from getAgentRequestsWith, which resolves prompts /
+// pre-shaped request (from getAgentRequests, which resolves prompts /
 // schemas / decision candidate events exactly as the step path does); falls
 // back to classifying the logic directly for a snapshot-owed child that no
 // action shaped this frontier.
 function buildInvokeEffect(
   meta: { id?: unknown; src?: unknown; input?: unknown; logic?: unknown },
-  mapped: ReturnType<typeof getAgentRequestsWith>[number] | undefined,
+  mapped: ReturnType<typeof getAgentRequests>[number] | undefined,
   events: readonly EventObject[],
   snapshot: AnyMachineSnapshot,
   options: AgentExecutionOptions,
@@ -479,10 +458,12 @@ export function getAgentEffects(
 ): AgentEffect[] {
   const resolved = getRegisteredAgentExecutionOptions(machine, options);
   const events = toEvents(options.history);
+  // The built-in action objects, read through this pass's structural superset.
+  const rawActions = actions as unknown as readonly RawAction[];
 
   // Pre-shape text/decision requests (in action order) exactly as the step
   // path does.
-  const requests = getAgentRequestsWith(actions as unknown as readonly RawAction[], {
+  const requests = getAgentRequests(rawActions, {
     ...resolved,
     snapshot,
   });
@@ -492,7 +473,7 @@ export function getAgentEffects(
   const emitted = new Set<string>();
 
   // 1. Action-derived effects, in document order.
-  for (const rawAction of actions as unknown as readonly RawAction[]) {
+  for (const rawAction of rawActions) {
     const meta = getInvokeEffectMetadata(rawAction);
     if (meta) {
       const effect = buildInvokeEffect(
@@ -686,6 +667,43 @@ export interface AgentEventLogDiff<TMachine extends AnyStateMachine> {
  * Raised/internal events are never in the journal — replay re-derives them
  * deterministically from the machine's own logic.
  */
+/**
+ * Validates a replay entry sequence: envelope shape, contiguity from index 0,
+ * unique event ids, and machine identity.
+ *
+ * @internal
+ */
+export function validateReplayEntries(
+  entries: readonly AgentLogEntry[],
+  expected: { machineId: string; machineVersion: string },
+  label: string,
+): void {
+  const eventIds = new Set<string>();
+  for (let index = 0; index < entries.length; index++) {
+    const entry = entries[index]!;
+    assertAgentLogEntry(entry);
+    if (entry.index !== index) {
+      throw new Error(
+        `${label} must be contiguous from index 0; found entry.index ${entry.index} ` +
+          `at position ${index}.`,
+      );
+    }
+    if (eventIds.has(entry.id)) {
+      throw new Error(`${label} contain duplicate event id '${entry.id}'.`);
+    }
+    eventIds.add(entry.id);
+    if (
+      entry.machineId !== expected.machineId ||
+      entry.machineVersion !== expected.machineVersion
+    ) {
+      throw new AgentReplayMachineMismatchError(entry.id, entry.index, expected, {
+        machineId: entry.machineId,
+        machineVersion: entry.machineVersion,
+      });
+    }
+  }
+}
+
 export function replay<TMachine extends AnyStateMachine>(
   machine: TMachine,
   entries: readonly AgentLogEntry[],
@@ -693,46 +711,23 @@ export function replay<TMachine extends AnyStateMachine>(
 ): ReplayResult<TMachine> {
   const machineId = (machine.config as { id?: string }).id ?? machine.id ?? "(machine)";
   const machineVersion = options.machineVersion ?? getMachineStructuralHash(machine);
-  const eventIds = new Set<string>();
-  for (let index = 0; index < entries.length; index++) {
-    const entry = entries[index]!;
-    assertAgentLogEntry(entry);
-    if (entry.index !== index) {
-      throw new Error(
-        `Replay entries must be contiguous from index 0; found entry.index ${entry.index} ` +
-          `at position ${index}.`,
-      );
-    }
-    if (eventIds.has(entry.id)) {
-      throw new Error(`Replay entries contain duplicate event id '${entry.id}'.`);
-    }
-    eventIds.add(entry.id);
-    if (entry.machineId !== machineId || entry.machineVersion !== machineVersion) {
-      throw new AgentReplayMachineMismatchError(
-        entry.id,
-        entry.index,
-        { machineId, machineVersion },
-        { machineId: entry.machineId, machineVersion: entry.machineVersion },
-      );
-    }
-  }
+  validateReplayEntries(entries, { machineId, machineVersion }, "Replay entries");
   const events = toEvents(entries);
 
-  let input: unknown = options.input;
-  let journal = events;
-  let journalEntries = entries;
-  if (events[0]?.type === AGENT_INIT_EVENT_TYPE) {
-    input = (events[0] as EventObject & { input?: unknown }).input;
-    journal = events.slice(1);
-    journalEntries = entries.slice(1);
-  }
+  // The reserved init entry, when present, is entry 0: it carries the machine
+  // input rather than a journaled event, so everything downstream is offset by
+  // one.
+  const initOffset = events[0]?.type === AGENT_INIT_EVENT_TYPE ? 1 : 0;
+  const input = initOffset ? (events[0] as EventObject & { input?: unknown }).input : options.input;
+  const journal = events.slice(initOffset);
+  const journalEntries = entries.slice(initOffset);
 
   let [snapshot, actions] = initialTransition(machine, input as never);
   let effects = getAgentEffects(machine, snapshot as AnyMachineSnapshot, actions, {
     ...options,
-    history: entries.slice(0, events[0]?.type === AGENT_INIT_EVENT_TYPE ? 1 : 0),
+    history: entries.slice(0, initOffset),
   });
-  if (events[0]?.type === AGENT_INIT_EVENT_TYPE) {
+  if (initOffset) {
     verifyEntry(entries[0]!, snapshot as AnyMachineSnapshot, effects, options.verify);
   }
   const sessions = new Map<string, string>();
@@ -740,7 +735,7 @@ export function replay<TMachine extends AnyStateMachine>(
     const event = journal[index]!;
     const reboundEvent = rebindActorSession(event, snapshot as AnyMachineSnapshot, sessions);
     [snapshot, actions] = transition(machine, snapshot, reboundEvent as never);
-    const consumed = entries.slice(0, entries.length - journalEntries.length + index + 1);
+    const consumed = entries.slice(0, initOffset + index + 1);
     effects = getAgentEffects(machine, snapshot as AnyMachineSnapshot, actions, {
       ...options,
       history: consumed,
@@ -914,7 +909,10 @@ function canonicalizeForHash(value: unknown, seen: WeakSet<object> = new WeakSet
   return result;
 }
 
-function normalizeEventErrors(value: unknown, seen: WeakMap<object, unknown> = new WeakMap()): any {
+function normalizeEventErrors(
+  value: unknown,
+  seen: WeakMap<object, unknown> = new WeakMap(),
+): unknown {
   if (value instanceof Error) {
     const normalized: Record<string, unknown> = {
       name: value.name,
@@ -960,12 +958,7 @@ function sortJson(value: unknown): unknown {
 }
 
 function hashStableJson(value: unknown): string {
-  const input = stableJson(value);
-  let hash = 5381;
-  for (let index = 0; index < input.length; index++) {
-    hash = ((hash << 5) + hash + input.charCodeAt(index)) | 0;
-  }
-  return (hash >>> 0).toString(16).padStart(8, "0");
+  return djb2Hex(stableJson(value));
 }
 
 function diffJson(before: JsonValue, after: JsonValue, path = ""): AgentLogPatchOperation[] {

@@ -30,7 +30,8 @@ const agentSetup = setupAgent({
       schemas: { input: z.object({ ticket: z.string(), attempt: z.number() }), output: z.string() },
       // Primary model for the first attempts; the fallback once they are spent.
       model: ({ input }) => (input.attempt >= MAX_ATTEMPTS ? "fallback" : "primary"),
-      system: "Classify the support ticket. Return a concise category, priority, and routing recommendation.",
+      system:
+        "Classify the support ticket. Return a concise category, priority, and routing recommendation.",
       prompt: ({ input }) => input.ticket,
     },
   },

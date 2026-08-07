@@ -18,9 +18,9 @@ you end with:
 const result = await generateResult(machine, { input, executors });
 ```
 
-Your `generateText` call did not go away — it moved into the executors. The loop you wrote around it became the machine. And like `generateText`, the result carries metadata alongside the value: `result.output`, plus `result.snapshot`, the replayable `result.events`, and the aggregated `result.usage`.
+Your `generateText` call did not go away; it moved into the executors. The loop you wrote around it became the machine. And like `generateText`, the result carries metadata alongside the value: `result.output`, plus `result.snapshot`, the replayable `result.events`, and the aggregated `result.usage`.
 
-If you already have a state machine and want to bind LLM work to it, start from [You already have an agent workflow](xstate-as-agent-workflow.md) instead.
+For the design move underneath this refactor (how to spot the states hiding in a loop before you write any of them down), read [Thinking in state machines](thinking-in-state-machines.md).
 
 ## Start: a hand-rolled loop
 
@@ -109,8 +109,7 @@ const machine = agentSetup.createMachine({
         }),
       },
       on: {
-        // Guard owns the limit: REFUND above $100 returns undefined, so the
-        // model is rejected and re-asked with typed feedback.
+        // The $100 rule, as a guard.
         REFUND: ({ context }) =>
           context.amount <= 100 ? { target: "refunded", context: { refunded: true } } : undefined,
         ESCALATE: { target: "awaitingHuman" },
@@ -121,7 +120,7 @@ const machine = agentSetup.createMachine({
 });
 ```
 
-A chosen `REFUND` for `$5000` can no longer slip through: the guard returns `undefined` and the decision retries. The `system` and `prompt` are yours; how the model is coerced into picking one event is the host executor's job and swappable (see [Decisions](decisions.md) and [Coercion](decisions.md#coercion)).
+A chosen `REFUND` for `$5000` can no longer slip through: the transition returns `undefined`, so the choice is rejected and the decision retries with typed feedback (see [transitions](machines.md#transitions)). The `system` and `prompt` are yours; how the model is coerced into picking one event is the host executor's job and swappable (see [Decisions](decisions.md) and [Coercion](decisions.md#coercion)).
 
 ## Step 3: the pause as an idle state
 
@@ -261,9 +260,17 @@ Semantics:
 - A pass that sends no event settles idle.
 - Every model call counts against `maxModelCalls`.
 
-Runnable version: [described-workflow](../examples/described-workflow/index.ts), a plain `createMachine` with no invokes and no `setupAgent`, driven end to end by `getRequests`. For more on this "machine you already have" path, see [You already have an agent workflow](xstate-as-agent-workflow.md).
+Runnable version: [described-workflow](../examples/described-workflow/index.ts), a plain `createMachine` with no invokes and no `setupAgent`, driven end to end by `getRequests`.
 
-## Other starting points
+## What the machine adds
+
+Same behavior as the loop, plus three things the loop only gets with hand-built machinery:
+
+- **Legality by construction**, and snapshot resume at every idle state.
+- **Durability**: the [step path](steps.md) and the [event log](event-log.md).
+- **One ordered ledger**: the transcript bookkeeping you hand-maintained becomes [`onTrace`](observability.md), for evals, JSONL, and telemetry.
+
+## Related
 
 A worked end-to-end version of this page's conversion (a genuinely tangled loop, refactored one shippable step at a time with the behavior pinned by tests) lives in [retrofit](../examples/retrofit/index.ts): `before.ts`, then `step1/2/3.ts`, then `index.ts`.
 
@@ -272,9 +279,4 @@ The same conversion works from shapes other than a `while` loop:
 - [plain-xstate](../examples/plain-xstate/index.ts): a bog-standard XState machine driven with no agent-specific setup.
 - [described-workflow](../examples/described-workflow/index.ts): prompts written as state `description`s, run via `runAgent`'s `getRequests` option.
 - [todo-nl](../examples/todo-nl/index.ts): natural-language commands mapped onto machine events.
-
-## Free wins
-
-Same behavior as the loop, plus legality by construction, snapshot resume, the durable [step path](steps.md) and [event log](event-log.md), and [visualization](machines-as-data.md), none of which the loop gives you without hand-built machinery. The transcript and log bookkeeping you hand-maintained in the loop becomes the ordered [`onTrace`](observability.md) stream: one run/request/chunk/transition ledger for evals, JSONL, and telemetry.
-
-If you never need them, the loop was fine. When you do, the machine gives you each one for free.
+- [Thinking in state machines](thinking-in-state-machines.md): the design tutorial behind this refactor, worked end to end on one triage agent.

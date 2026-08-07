@@ -193,13 +193,14 @@ export type ToolMessage = {
 export type AgentMessage = SystemMessage | UserMessage | AssistantMessage | ToolMessage;
 
 /**
- * A schema value on an {@link AgentToolDescriptor}. Core reads it as a
- * {@link StandardSchemaV1} (via `getJsonSchema`/`isStandardSchema`) when it can,
- * but the type is deliberately widened with `object` so an SDK-native tool —
- * whose `inputSchema` is the SDK's own union type (a Zod schema, the SDK's
- * `Schema`, a lazy thunk, …) — assigns structurally with no cast.
+ * A schema value on an {@link AgentToolDescriptor}: deliberately just `object`,
+ * because an SDK-native tool's `inputSchema` is the SDK's own union type (a Zod
+ * schema, the SDK's `Schema`, a lazy thunk, ...) and must assign structurally
+ * with no cast. The contract is runtime, not static: core narrows with
+ * `isStandardSchema` and reads {@link StandardSchemaV1} schemas via
+ * `getJsonSchema`; anything else passes through to the executor untouched.
  */
-export type AgentToolSchema = StandardSchemaV1 | object;
+export type AgentToolSchema = object;
 
 /**
  * A tool exposed to a text request, described for both the model and

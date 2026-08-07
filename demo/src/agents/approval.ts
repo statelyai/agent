@@ -57,7 +57,9 @@ export const approvalMachine = agentSetup.createMachine({
     // `meta.interaction` and the events from getAcceptedEvents.
     reviewing: {
       tags: ["awaiting-review"],
-      meta: { interaction: { label: "Review the draft: approve to publish, or reject with a reason." } },
+      meta: {
+        interaction: { label: "Review the draft: approve to publish, or reject with a reason." },
+      },
       on: {
         APPROVE: { target: "published" },
         REJECT: {
