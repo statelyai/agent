@@ -1,5 +1,5 @@
 import Ajv from "ajv";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { z } from "zod";
 import { createActor, createAsyncLogic, initialTransition, toPromise, waitFor } from "xstate";
 import { createDecisionLogic } from "./decision.js";
@@ -35,6 +35,7 @@ import {
 import { executeAgentRequest, resolveDecision, type AgentRequest } from "./index.js";
 import { getAgentOutputMode, parseOutput } from "./index.js";
 import { isStructuredOutputSchema } from "./text-logic.js";
+import { getMachineSuspensionPredicate } from "./internal/registry.js";
 
 /**
  * ~15-line Ajv-to-StandardSchema adapter — the recipe for a real
@@ -2570,6 +2571,88 @@ describe("setupAgent", () => {
         { compileSchema: ajvCompiler() },
       ),
     ).toThrow(/action type 'notify'.*no\s+implementation/s);
+  });
+
+  // A minimal human-wait config: `reviewing` rests on tags until APPROVE.
+  const suspensionConfig = {
+    schemas: {
+      context: { type: "object", properties: {} },
+      events: { APPROVE: { type: "object", properties: {} } },
+    },
+    context: {},
+    initial: "reviewing",
+    states: {
+      reviewing: {
+        tags: ["waiting"],
+        on: { APPROVE: { target: "done" } },
+      },
+      done: { type: "final" as const },
+    },
+  };
+
+  test("fromConfig lowers suspendedTags into a machine-carried hasTag predicate", () => {
+    const { machine } = setupAgent.fromConfig(
+      { id: "suspended-tags", suspendedTags: ["waiting"], ...suspensionConfig },
+      { compileSchema: ajvCompiler() },
+    );
+
+    const predicate = getMachineSuspensionPredicate(machine);
+    expect(predicate).toBeDefined();
+    // Keyed on the root config, so it survives further `.provide(...)` rebinding.
+    expect(getMachineSuspensionPredicate(machine.provide({}))).toBe(predicate);
+
+    const actor = createActor(machine).start();
+    expect(predicate!(actor.getSnapshot())).toBe(true);
+    actor.send({ type: "APPROVE" });
+    expect(predicate!(actor.getSnapshot())).toBe(false);
+  });
+
+  test("fromConfig registers options.isSuspended, which wins over suspendedTags", () => {
+    const hostPredicate = () => false;
+    const { machine } = setupAgent.fromConfig(
+      { id: "issuspended-option", suspendedTags: ["waiting"], ...suspensionConfig },
+      { compileSchema: ajvCompiler(), isSuspended: hostPredicate },
+    );
+    expect(getMachineSuspensionPredicate(machine)).toBe(hostPredicate);
+  });
+
+  test("fromConfig rejects a suspendedTags entry that no state declares", () => {
+    expect(() =>
+      setupAgent.fromConfig(
+        {
+          id: "bad-suspended-tags",
+          schemas: { context: { type: "object", properties: {} } },
+          context: {},
+          initial: "start",
+          suspendedTags: ["waiting"],
+          states: { start: { type: "final" } },
+        },
+        { compileSchema: ajvCompiler() },
+      ),
+    ).toThrow(/suspendedTags.*'waiting'.*no state declares/s);
+  });
+
+  test("fromConfig + runAgent: suspendedTags settles idle without the heuristic warning", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { machine } = setupAgent.fromConfig(
+        { id: "suspended-tags-run", suspendedTags: ["waiting"], ...suspensionConfig },
+        { compileSchema: ajvCompiler() },
+      );
+
+      const result = await runAgent(machine, { input: {}, executors: {} });
+      expect(result.status).toBe("idle");
+      expect(warn).not.toHaveBeenCalled();
+
+      const resumed = await runAgent(machine, {
+        snapshot: result.status === "idle" ? result.snapshot : undefined,
+        event: { type: "APPROVE" },
+        executors: {},
+      });
+      expect(resumed.status).toBe("done");
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 

@@ -73,6 +73,7 @@
     }
   },
   "initial": "triaging",
+  "suspendedTags": ["awaiting-approval"],
   "states": {
     "triaging": {
       "invoke": {
@@ -112,6 +113,7 @@
     },
     "awaitingApproval": {
       "description": "Idle: nothing left to do until a human approves or rejects the drafted reply.",
+      "tags": ["awaiting-approval"],
       "meta": {
         "interaction": {
           "label": "Nothing left to do until you approve or reject the drafted reply.",

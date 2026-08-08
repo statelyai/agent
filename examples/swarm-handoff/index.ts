@@ -72,6 +72,9 @@ const agentSetup = setupAgent({
     // Hand the mic to the other specialist and give them the next message.
     HANDOFF: z.object({ to: agentName, message: z.string() }),
   },
+  // The machine's own wait signal: the `waiting` tag. `runAgent` settles idle
+  // deterministically at the turn boundary whenever a snapshot carries it.
+  isSuspended: (snapshot) => snapshot.hasTag("waiting"),
   requests: {
     travelReply: {
       schemas: {
@@ -138,6 +141,7 @@ export const swarmHandoffMachine = agentSetup.createMachine({
     // No invoke: runAgent settles idle here. A HANDOFF switches the active
     // agent and re-routes; the host persists the snapshot in between.
     waiting: {
+      tags: ["waiting"],
       meta: {
         interaction: {
           // `{activeAgent}` resolves against context when the label is shown.
