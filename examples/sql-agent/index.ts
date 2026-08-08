@@ -107,6 +107,9 @@ const agentSetup = setupAgent({
     APPROVE: z.object({}),
     REJECT: z.object({}),
   },
+  // The machine's own wait signal: the `awaiting-approval` tag. `runAgent`
+  // settles idle deterministically whenever a resting snapshot carries it.
+  isSuspended: (snapshot) => snapshot.hasTag("awaiting-approval"),
   actors: {
     runQuery: createAsyncLogic<number, { plan: QueryPlan }>({
       run: async ({ input }) => executeQuery(input.plan),
@@ -184,6 +187,7 @@ export const sqlAgentMachine = agentSetup.createMachine({
     // No invoke: runAgent settles idle here. The host reads meta.interaction
     // (via getStateMeta) and resumes with APPROVE / REJECT.
     awaitingApproval: {
+      tags: ["awaiting-approval"],
       meta: {
         interaction: {
           label: "Run this query against the orders table?",

@@ -63,6 +63,9 @@ const agentSetup = setupAgent({
     APPROVE: z.object({}),
     REJECT: z.object({ reason: z.string() }),
   },
+  // The machine's own wait signal: the `awaiting-review` tag. `runAgent` settles
+  // idle deterministically whenever a resting snapshot carries it.
+  isSuspended: (snapshot) => snapshot.hasTag("awaiting-review"),
   requests: {
     writeDraft: {
       schemas: { input: z.object({ topic: z.string() }), output: z.string() },
@@ -102,6 +105,7 @@ export const draftMachine = agentSetup.createMachine({
       },
     },
     reviewing: {
+      tags: ["awaiting-review"],
       meta: {
         interaction: {
           label: "Approve the draft to publish it, or type the revision you want.",
