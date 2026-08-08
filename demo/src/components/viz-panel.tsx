@@ -40,6 +40,11 @@ type VizPanelProps = {
   theme: "light" | "dark";
   /** Read-only source and explanation documents shown inside Viz. */
   documents: VizDocument[];
+  /**
+   * Mirror of the live `@statelyai.system.*` stream, so siblings (the chat's
+   * interleaved transition log) can observe the run without a second socket.
+   */
+  onSystemMessage?: (message: SystemMessage) => void;
 };
 
 export function VizPanel({
@@ -51,6 +56,7 @@ export function VizPanel({
   liveUrl,
   theme,
   documents,
+  onSystemMessage,
 }: VizPanelProps) {
   if (liveUrl) {
     return (
@@ -76,6 +82,7 @@ export function VizPanel({
       liveWs={liveWs}
       theme={theme}
       documents={documents}
+      onSystemMessage={onSystemMessage}
     />
   );
 }
@@ -135,6 +142,7 @@ function EmbedVizPanel({
   liveWs,
   theme,
   documents,
+  onSystemMessage,
 }: Omit<VizPanelProps, "liveUrl">) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const latestRef = useRef({ vizConfig, frame, theme, documents });
@@ -228,8 +236,10 @@ function EmbedVizPanel({
     const unsubscribeMessage = transport.onMessage((protocolMessage) => {
       const message = protocolMessage as SystemMessage;
       if (message.type === "@statelyai.system.init" && Array.isArray(message.actors)) {
+        onSystemMessage?.(message);
         store.trigger.systemInit({ message });
       } else if (message.type.startsWith("@statelyai.system.")) {
+        onSystemMessage?.(message);
         store.trigger.systemMessage({ message });
       } else if (message.type === "@statelyai.error") {
         const detail = typeof message.message === "string" ? message.message : "Unknown error";
@@ -244,7 +254,7 @@ function EmbedVizPanel({
       unsubscribeError?.();
       transport.destroy();
     };
-  }, [frameKey, liveWs?.relayUrl, store]);
+  }, [frameKey, liveWs?.relayUrl, onSystemMessage, store]);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => store.trigger.timeout(), 9000);

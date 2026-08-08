@@ -9,11 +9,32 @@
   },
   "comparison": {
     "targets": ["LangGraph adaptive RAG", "Self-RAG", "agentic RAG"],
-    "purpose": "Routes each question to the corpus or to web search, grades what comes back, rewrites the query when it is weak, and checks the final answer is grounded before returning it."
+    "purpose": "Routes each question to the local corpus or to a sample web index, grades what comes back, rewrites the query when it is weak, and checks the final answer is grounded before returning it."
   },
   "starters": [
-    "What are the trade-offs of optimistic vs pessimistic locking?",
-    "Who won the 2026 Super Bowl and by how much?",
-    "How should I size a connection pool?"
+    {
+      "label": "Local route — how actors resume",
+      "input": {
+        "question": "How do XState actors persist and resume after a crash?"
+      }
+    },
+    {
+      "label": "Local route — what state machines make visible",
+      "input": {
+        "question": "What do state machines make visible about retries and failure paths?"
+      }
+    },
+    {
+      "label": "Web route — weather in the sample index",
+      "input": {
+        "question": "What is the current weather in Lisbon?"
+      }
+    },
+    {
+      "label": "Off-corpus question (expect no evidence)",
+      "input": {
+        "question": "What were the closing prices of gold futures yesterday?"
+      }
+    }
   ]
 }

@@ -21,23 +21,26 @@ import type { AgentLogEntry, AgentRequestExecutor } from "@statelyai/agent";
 
 const crashRecoverySetup = setupAgent({
   context: z.object({
+    // The topic is part of context, so it survives in the log's `@agent.init`
+    // entry and is restored on an events-only resume.
+    topic: z.string(),
     outline: z.string().nullable(),
     article: z.string().nullable(),
   }),
   input: z.object({ topic: z.string() }),
-  output: z.object({ outline: z.string(), article: z.string() }),
+  output: z.object({ topic: z.string(), outline: z.string(), article: z.string() }),
 });
 
 export const crashRecoveryMachine = crashRecoverySetup.createMachine({
-  context: () => ({ outline: null, article: null }),
+  context: ({ input }) => ({ topic: input.topic, outline: null, article: null }),
   initial: "outlining",
   states: {
     outlining: {
       invoke: {
         src: "agent.generateText",
-        input: ({ context: _context }) => ({
+        input: ({ context }) => ({
           model: "writer",
-          prompt: "Outline a short article.",
+          prompt: `Outline a short article about ${context.topic}.`,
         }),
         onDone: ({ event }) => ({
           target: "drafting",
@@ -50,7 +53,7 @@ export const crashRecoveryMachine = crashRecoverySetup.createMachine({
         src: "agent.generateText",
         input: ({ context }) => ({
           model: "writer",
-          prompt: `Write the article for this outline: ${context.outline}`,
+          prompt: `Write the article about ${context.topic} for this outline: ${context.outline}`,
         }),
         onDone: ({ event }) => ({
           target: "done",
@@ -61,6 +64,7 @@ export const crashRecoveryMachine = crashRecoverySetup.createMachine({
     done: {
       type: "final",
       output: ({ context }) => ({
+        topic: context.topic,
         outline: context.outline ?? "",
         article: context.article ?? "",
       }),
@@ -69,7 +73,7 @@ export const crashRecoveryMachine = crashRecoverySetup.createMachine({
 });
 
 /** First process: answers the outline call, hangs on the draft call, then "crashes". */
-export async function runUntilCrash(): Promise<AgentLogEntry[]> {
+export async function runUntilCrash(topic = "state machines"): Promise<AgentLogEntry[]> {
   const persisted: AgentLogEntry[] = [];
   const abort = new AbortController();
 
@@ -79,11 +83,12 @@ export async function runUntilCrash(): Promise<AgentLogEntry[]> {
       setTimeout(() => abort.abort(new Error("process crashed")), 10);
       return new Promise(() => {}) as never;
     }
-    return { output: "1. Intro 2. Body 3. Outro" };
+    // Scripted, but topic-aware: the outline reflects the requested topic.
+    return { output: `1. Intro to ${topic} 2. Body on ${topic} 3. Outro` };
   };
 
   const crashed = await runAgent(crashRecoveryMachine, {
-    input: { topic: "state machines" },
+    input: { topic },
     executors: { generateText },
     onEvent: (entry) => persisted.push(entry), // the durable log
     signal: abort.signal,
@@ -114,6 +119,9 @@ export async function recover(persisted: AgentLogEntry[]) {
   console.log(`recovered with status '${recovered.status}'`);
   console.log(`model calls made during recovery: ${calls.length}`); // 1 — only the draft
   if (recovered.status === "done") {
+    // The topic came back from the log's `@agent.init` input, so the recovered
+    // draft is about the original topic, not a generic article.
+    console.log(`topic: ${recovered.output.topic}`);
     console.log(`article: ${recovered.output.article}`);
   }
   return recovered;

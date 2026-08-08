@@ -17,4 +17,17 @@ describe("crash-recovery", () => {
     // The full recovered log still replays deterministically to done.
     expect(replay(crashRecoveryMachine, recovered.events).snapshot.status).toBe("done");
   });
+
+  test("the topic survives the crash: recovery drafts the original topic", async () => {
+    const log = await runUntilCrash("the history of the fax machine");
+    // The topic lives in `@agent.init` input, so an events-only resume restores it.
+    const recovered = await recover(log);
+
+    expect(recovered.status).toBe("done");
+    if (recovered.status !== "done") return;
+    expect(recovered.output.topic).toBe("the history of the fax machine");
+    expect(recovered.output.outline).toContain("the history of the fax machine");
+    // The draft prompt (and so the article) is topic-specific, not generic.
+    expect(recovered.output.article).toContain("the history of the fax machine");
+  });
 });

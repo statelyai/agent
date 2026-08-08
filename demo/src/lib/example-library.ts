@@ -58,25 +58,33 @@ const resumeExampleInput = machineRef.extend({
 export const startExample = createServerFn({ method: "POST" })
   .validator((input: unknown) => startExampleInput.parse(input))
   .handler(async ({ data }): Promise<MachineChatResult> => {
-    const [{ getExampleMachine }, { startMachineChat }] = await Promise.all([
-      import("./example-library.server"),
-      import("./machine-chat.server"),
-    ]);
+    const [{ getExampleMachine, exampleBudgetMs }, { startMachineChat }, { getRequest }] =
+      await Promise.all([
+        import("./example-library.server"),
+        import("./machine-chat.server"),
+        import("@tanstack/react-start/server"),
+      ]);
     const machine = await getExampleMachine(data.id, data.exportName);
-    return startMachineChat(machine, data.input);
+    return startMachineChat(machine, data.input, {
+      signal: getRequest().signal,
+      budgetMs: exampleBudgetMs(data.id),
+    });
   });
 
 export const resumeExample = createServerFn({ method: "POST" })
   .validator((input: unknown) => resumeExampleInput.parse(input))
   .handler(async ({ data }): Promise<MachineChatResult> => {
-    const [{ getExampleMachine }, { resumeMachineChat }] = await Promise.all([
-      import("./example-library.server"),
-      import("./machine-chat.server"),
-    ]);
+    const [{ getExampleMachine, exampleBudgetMs }, { resumeMachineChat }, { getRequest }] =
+      await Promise.all([
+        import("./example-library.server"),
+        import("./machine-chat.server"),
+        import("@tanstack/react-start/server"),
+      ]);
     const machine = await getExampleMachine(data.id, data.exportName);
     return resumeMachineChat(
       machine,
       data.snapshot,
       data.event as { type: string } & Record<string, unknown>,
+      { signal: getRequest().signal, budgetMs: exampleBudgetMs(data.id) },
     );
   });

@@ -14,6 +14,12 @@
   "starters": [
     "Why cities should ban cars from their downtown cores",
     "The case for a four-day work week",
-    "Whether AI tutors help or hurt students"
+    "Whether AI tutors help or hurt students",
+    {
+      "label": "Hard topic, strict rubric (expect a revision round)",
+      "input": {
+        "topic": "Whether a carbon tax or cap-and-trade better cuts emissions, weighing the strongest objection to your position and citing concrete policy outcomes"
+      }
+    }
   ]
 }

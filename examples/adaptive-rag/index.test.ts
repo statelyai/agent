@@ -1,5 +1,10 @@
+import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import { runAdaptiveRagExample } from "./index.js";
+
+/** The demo's one-click chips come from metadata.json — keep them corpus-aligned. */
+const starters = JSON.parse(readFileSync(new URL("./metadata.json", import.meta.url), "utf8"))
+  .starters as Array<{ label: string; input: { question: string } }>;
 
 test("routes local questions through retrieval and answer grading", async () => {
   const calls: string[] = [];
@@ -65,6 +70,41 @@ test("rewrites weak local retrieval once", async () => {
   expect(output.retries).toBe(1);
   expect(output.query).toBe("XState actors persist snapshots");
   expect(output.documents.length).toBeGreaterThan(0);
+});
+
+test("starters hit the datasource their label advertises", async () => {
+  for (const starter of starters) {
+    const label = starter.label.toLowerCase();
+    const isMiss = label.includes("off-corpus");
+    const route = label.startsWith("local route") ? "local" : "web";
+
+    const output = await runAdaptiveRagExample({
+      question: starter.input.question,
+      // Force the route the label claims, so this test measures retrieval, not
+      // the router's judgment. Grade everything as good so the run ends promptly.
+      generateText: async (request) => {
+        if (request.model === "router") return { output: { route } };
+        if (request.system?.includes("evidence can answer")) return { output: { relevant: true } };
+        if (request.system?.includes("Judge whether")) {
+          return { output: { grounded: true, useful: true } };
+        }
+        return { output: "answer" };
+      },
+    });
+
+    expect(
+      { label: starter.label, hits: output.documents.length > 0 },
+      `starter "${starter.label}"`,
+    ).toEqual({ label: starter.label, hits: !isMiss });
+    if (!isMiss && route === "web") {
+      expect(output.documents.every((doc) => doc.startsWith("[web]"))).toBe(true);
+    }
+  }
+  // Both datasources are demonstrated, plus exactly one labeled miss case.
+  const labels = starters.map((starter) => starter.label.toLowerCase());
+  expect(labels.some((label) => label.startsWith("local route"))).toBe(true);
+  expect(labels.some((label) => label.startsWith("web route"))).toBe(true);
+  expect(labels.filter((label) => label.includes("off-corpus"))).toHaveLength(1);
 });
 
 test("regrade failure on a web route rewrites back into web search", async () => {

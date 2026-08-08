@@ -12,6 +12,7 @@
  */
 import {
   getAcceptedEvents,
+  getAgentSchemas,
   getStateMeta,
   parseAgentEvent,
   persistSnapshot,
@@ -43,16 +44,51 @@ export type TraceEntry = {
   at: number;
 };
 
-/** Collects a run's transitions with real elapsed-time stamps. */
-export function createTraceRecorder(): {
+/**
+ * Collects a run's transitions with real elapsed-time stamps, and tracks which
+ * context keys the run actually changed (most recent first). Values present at
+ * init — or in `baselineContext`, for resumed snapshots — don't count as
+ * changes, so input echoes stay out of the "work produced" set.
+ */
+export function createTraceRecorder(baselineContext?: unknown): {
   trace: TraceEntry[];
   onTransition: (snapshot: AnyMachineSnapshot, event: unknown) => void;
+  changedKeys: () => string[];
+  /** The last full context seen — the "work so far" when a run is cut short. */
+  latestContext: () => unknown;
 } {
   const trace: TraceEntry[] = [];
   const startedAt = Date.now();
+  const lastValues = new Map<string, string>();
+  const changedAt = new Map<string, number>();
+  let step = 0;
+  let latest: unknown = baselineContext;
+
+  const serialize = (value: unknown): string => {
+    try {
+      return JSON.stringify(value) ?? "undefined";
+    } catch {
+      return String(value);
+    }
+  };
+  const observe = (context: unknown, markChanges: boolean) => {
+    if (!context || typeof context !== "object") return;
+    for (const [key, value] of Object.entries(context as Record<string, unknown>)) {
+      const serialized = serialize(value);
+      if (lastValues.get(key) === serialized) continue;
+      lastValues.set(key, serialized);
+      if (markChanges) changedAt.set(key, step);
+    }
+    step += 1;
+  };
+  if (baselineContext !== undefined) observe(baselineContext, false);
+
   return {
     trace,
     onTransition: (snapshot, event) => {
+      const type = String((event as { type?: unknown } | null)?.type ?? "");
+      observe(snapshot.context, type !== "xstate.init" && type !== "@xstate.init");
+      latest = snapshot.context;
       trace.push({
         at: Date.now() - startedAt,
         event: smallEvent(event),
@@ -60,6 +96,9 @@ export function createTraceRecorder(): {
         context: smallContext(snapshot.context),
       });
     },
+    changedKeys: () =>
+      [...changedAt.entries()].sort((a, b) => b[1] - a[1]).map(([key]) => key),
+    latestContext: () => latest,
   };
 }
 
@@ -99,6 +138,11 @@ type MachineSchemas = {
 
 /** The zod/standard schemas `setupAgent` stamped on the machine (if any). */
 export function machineSchemas(machine: AnyStateMachine): MachineSchemas {
+  // Registered by both setupAgent(...) and setupAgent.fromConfig(...) — the
+  // only place a JSON-authored machine's schemas live.
+  const registered = getAgentSchemas(machine);
+  if (registered) return registered as MachineSchemas;
+  // Plain xstate machines: schemas are on the machine/config itself.
   const direct = (machine as { schemas?: MachineSchemas }).schemas;
   if (direct && typeof direct === "object") return direct;
   const config = (machine as { config?: { schemas?: MachineSchemas } }).config;
@@ -237,6 +281,22 @@ export function describeMachineInput(machine: AnyStateMachine): MachineInputInfo
 
 // ─── generic run / resume ───
 
+/** Limits every live run gets: the request's abort signal and a time budget. */
+export type RunLimits = {
+  /** Fires on the user's Cancel or a closed tab (the HTTP request's signal). */
+  signal?: AbortSignal;
+  /** Wall-clock budget for the whole run; examples override via metadata. */
+  budgetMs?: number;
+};
+
+export const DEFAULT_RUN_BUDGET_MS = 120_000;
+
+/** One signal for runAgent: request abort OR time budget, whichever first. */
+export function runSignal(limits: RunLimits): AbortSignal {
+  const budget = AbortSignal.timeout(limits.budgetMs ?? DEFAULT_RUN_BUDGET_MS);
+  return limits.signal ? AbortSignal.any([limits.signal, budget]) : budget;
+}
+
 export type MachineChatResult = {
   mode: "live";
   model?: string;
@@ -281,11 +341,74 @@ export function renderOutput(output: unknown): string {
   }
 }
 
+/**
+ * What the run produced so far, read generically off an idle snapshot: the
+ * context values the run changed (per the trace recorder), most recent first.
+ * Strings render before objects so prose (drafts, answers, SQL) leads; small
+ * non-string values render as fenced JSON. Echoes of what the user just sent
+ * (`omitValues`) and message-history arrays are plumbing, not work — skipped.
+ * Null when the run changed nothing presentable — the idle prompt alone is
+ * then the whole story.
+ */
+export function renderIdleWork(
+  context: unknown,
+  changedKeys: string[],
+  omitValues: string[] = [],
+): string | null {
+  const MAX_SECTIONS = 3;
+  const MAX_STRING = 4000;
+  const MAX_JSON = 1500;
+  if (!context || typeof context !== "object") return null;
+  const source = context as Record<string, unknown>;
+  const omitted = new Set(omitValues.map((value) => value.trim()).filter(Boolean));
+  const isMessageHistory = (value: unknown): boolean =>
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every(
+      (item) => item && typeof item === "object" && "role" in item && "content" in item,
+    );
+
+  const strings: Array<{ key: string; body: string }> = [];
+  const objects: Array<{ key: string; body: string }> = [];
+  for (const key of changedKeys) {
+    const value = source[key];
+    if (isMessageHistory(value)) continue;
+    if (typeof value === "string") {
+      const text = value.trim();
+      if (!text || omitted.has(text)) continue;
+      strings.push({
+        key,
+        body: text.length > MAX_STRING ? `${text.slice(0, MAX_STRING)}…` : text,
+      });
+    } else if (value && typeof value === "object") {
+      let json: string;
+      try {
+        json = JSON.stringify(value, null, 2);
+      } catch {
+        continue;
+      }
+      if (!json || json === "{}" || json === "[]" || json.length > MAX_JSON) continue;
+      objects.push({ key, body: "```json\n" + json + "\n```" });
+    }
+  }
+
+  const sections = [...strings, ...objects].slice(0, MAX_SECTIONS);
+  if (!sections.length) return null;
+  if (sections.length === 1 && strings.length === 1) return sections[0].body;
+  return sections
+    .map((section) => `**${humanizeFieldName(section.key)}**\n\n${section.body}`)
+    .join("\n\n");
+}
+
 function toChatResult(
   machine: AnyStateMachine,
   model: string | undefined,
   result: RunAgentResult<AnyStateMachine>,
   trace: TraceEntry[],
+  changedKeys: string[],
+  omitValues: string[],
+  latestContext?: unknown,
+  limits?: RunLimits,
 ): MachineChatResult {
   if (result.status === "done") {
     return {
@@ -299,12 +422,16 @@ function toChatResult(
   }
   if (result.status === "idle") {
     const idle = describeIdle(machine, result.snapshot);
+    // Show the work the run produced (drafts, answers, queries…) — the idle
+    // prompt ships separately in `idle` and renders in the waiting box, so
+    // approvals aren't asked for sight unseen.
+    const work = renderIdleWork(result.snapshot.context, changedKeys, omitValues);
     return {
       mode: "live",
       model,
       status: "idle",
       trace,
-      response: idle.prompt ?? "The machine is idle, waiting for input.",
+      response: work ?? idle.prompt ?? "The machine is idle, waiting for input.",
       // Resume from the run's persisted snapshot, not the live one — it
       // round-trips invoked children WITH their state (a long-lived agent
       // keeps its context across chat turns).
@@ -312,6 +439,26 @@ function toChatResult(
     };
   }
   const error = (result as { error?: unknown }).error;
+  const cause = (result as { cause?: string }).cause;
+  // A budgeted stop isn't a failure — return the work captured so far.
+  const stopNote =
+    cause === "aborted"
+      ? limits?.signal?.aborted
+        ? "Run cancelled."
+        : `Run stopped at its ${Math.round((limits?.budgetMs ?? DEFAULT_RUN_BUDGET_MS) / 1000)}s time budget.`
+      : cause === "max-model-calls"
+        ? "Run stopped at its model-call budget."
+        : null;
+  if (stopNote) {
+    const work = renderIdleWork(latestContext, changedKeys, omitValues);
+    return {
+      mode: "live",
+      model,
+      status: "error",
+      trace,
+      response: work ? `${stopNote} Work so far:\n\n${work}` : stopNote,
+    };
+  }
   return {
     mode: "live",
     model,
@@ -342,6 +489,7 @@ export function hasLiveExecutors(): boolean {
 export async function startMachineChat(
   machine: AnyStateMachine,
   input: Record<string, unknown>,
+  limits: RunLimits = {},
 ): Promise<MachineChatResult> {
   const live = await liveExecutors();
   if (!live) {
@@ -352,20 +500,36 @@ export async function startMachineChat(
       response: "Running library examples needs OPENAI_API_KEY set for the demo server.",
     };
   }
-  const { trace, onTransition } = createTraceRecorder();
+  const { trace, onTransition, changedKeys, latestContext } = createTraceRecorder();
   const result = await runAgent(machine, {
     input: input as never,
     executors: live.executors,
+    signal: runSignal(limits),
     onTransition,
     inspect: maybeCreateRunInspection(machine),
   });
-  return toChatResult(machine, live.model, result as RunAgentResult<AnyStateMachine>, trace);
+  return toChatResult(
+    machine,
+    live.model,
+    result as RunAgentResult<AnyStateMachine>,
+    trace,
+    changedKeys(),
+    stringValuesOf(input),
+    latestContext(),
+    limits,
+  );
+}
+
+/** The string values of an input/event object — user-typed text to not echo. */
+function stringValuesOf(source: Record<string, unknown>): string[] {
+  return Object.values(source).filter((value): value is string => typeof value === "string");
 }
 
 export async function resumeMachineChat(
   machine: AnyStateMachine,
   snapshot: Snapshot<unknown>,
   event: { type: string } & Record<string, unknown>,
+  limits: RunLimits = {},
 ): Promise<MachineChatResult> {
   const live = await liveExecutors();
   if (!live) {
@@ -376,7 +540,11 @@ export async function resumeMachineChat(
       response: "Running library examples needs OPENAI_API_KEY set for the demo server.",
     };
   }
-  const { trace, onTransition } = createTraceRecorder();
+  // Baseline: context restored from the snapshot is prior turns' work, not
+  // this turn's — only new changes should render as produced output.
+  const { trace, onTransition, changedKeys, latestContext } = createTraceRecorder(
+    (snapshot as { context?: unknown }).context,
+  );
   // Validate the wire event against the restored snapshot's accepted events
   // (and payload schema, when registered) before delivering it. If the
   // snapshot can't be rehydrated for validation, runAgent's own
@@ -396,8 +564,18 @@ export async function resumeMachineChat(
     snapshot,
     event: parsed as never,
     executors: live.executors,
+    signal: runSignal(limits),
     onTransition,
     inspect: maybeCreateRunInspection(machine),
   });
-  return toChatResult(machine, live.model, result as RunAgentResult<AnyStateMachine>, trace);
+  return toChatResult(
+    machine,
+    live.model,
+    result as RunAgentResult<AnyStateMachine>,
+    trace,
+    changedKeys(),
+    stringValuesOf(parsed),
+    latestContext(),
+    limits,
+  );
 }

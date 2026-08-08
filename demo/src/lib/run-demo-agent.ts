@@ -44,12 +44,28 @@ const resumeInput = z.object({
   ]),
 });
 
+/** Request abort (Cancel / closed tab) OR the default time budget. */
+async function requestRunSignal(): Promise<AbortSignal> {
+  const [{ getRequest }, { runSignal }] = await Promise.all([
+    import("@tanstack/react-start/server"),
+    import("./machine-chat.server"),
+  ]);
+  return runSignal({ signal: getRequest().signal });
+}
+
 export const startScenario = createServerFn({ method: "POST" })
   .validator((input: unknown) => startInput.parse(input))
-  .handler(async ({ data }) => startScenarioRun(data.scenarioId as ScenarioId, data.prompt));
+  .handler(async ({ data }) =>
+    startScenarioRun(data.scenarioId as ScenarioId, data.prompt, await requestRunSignal()),
+  );
 
 export const resumeScenario = createServerFn({ method: "POST" })
   .validator((input: unknown) => resumeInput.parse(input))
   .handler(async ({ data }) =>
-    resumeScenarioRun(data.scenarioId as ScenarioId, data.snapshot, data.event as ResumeEvent),
+    resumeScenarioRun(
+      data.scenarioId as ScenarioId,
+      data.snapshot,
+      data.event as ResumeEvent,
+      await requestRunSignal(),
+    ),
   );

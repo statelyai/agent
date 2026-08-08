@@ -4,10 +4,13 @@ import { z } from "zod";
 import { startScenarioRun } from "./agent-runner";
 import { getExampleMachine } from "./example-library.server";
 import {
+  createTraceRecorder,
   describeIdle,
   describeMachineInput,
   jsonSchemaOf,
+  renderIdleWork,
   renderOutput,
+  runSignal,
 } from "./machine-chat.server";
 import {
   humanizeEventType,
@@ -168,5 +171,100 @@ describe("run output rendering", () => {
   test("plain strings and non-string objects are unchanged", () => {
     expect(renderOutput("done")).toBe("done");
     expect(renderOutput({ score: 9 })).toContain("```json");
+  });
+});
+
+describe("idle work rendering (changed context surfaces before approval)", () => {
+  const fakeSnapshot = (context: Record<string, unknown>) =>
+    ({ value: "s", context }) as never;
+
+  test("recorder tracks keys changed after init, most recent first", () => {
+    const recorder = createTraceRecorder();
+    recorder.onTransition(fakeSnapshot({ topic: "cats", draft: "" }), { type: "xstate.init" });
+    recorder.onTransition(fakeSnapshot({ topic: "cats", draft: "A draft." }), { type: "model.done" });
+    recorder.onTransition(fakeSnapshot({ topic: "cats", draft: "A draft.", score: 7 }), {
+      type: "eval.done",
+    });
+    // `topic` was present at init → not "work"; latest change ranks first.
+    expect(recorder.changedKeys()).toEqual(["score", "draft"]);
+  });
+
+  test("a baseline context (resumed snapshot) suppresses prior turns' work", () => {
+    const recorder = createTraceRecorder({ draft: "Old draft", approved: false });
+    recorder.onTransition(fakeSnapshot({ draft: "Old draft", approved: true }), {
+      type: "APPROVE",
+    });
+    expect(recorder.changedKeys()).toEqual(["approved"]);
+  });
+
+  test("a single changed string renders bare; several get humanized headers", () => {
+    expect(renderIdleWork({ draft: "The draft body." }, ["draft"])).toBe("The draft body.");
+    const multi = renderIdleWork(
+      { sqlQuery: "SELECT 1", explanation: "It counts rows." },
+      ["explanation", "sqlQuery"],
+    )!;
+    expect(multi).toContain("**Explanation**");
+    expect(multi).toContain("**Sql query**");
+    expect(multi.indexOf("It counts rows.")).toBeLessThan(multi.indexOf("SELECT 1"));
+  });
+
+  test("strings lead, small objects follow as JSON, noise is skipped", () => {
+    const text = renderIdleWork(
+      { answer: "Jupiter", board: { turn: 2 }, count: 3, empty: "" },
+      ["board", "answer", "count", "empty"],
+    )!;
+    // The prose answer outranks the more recently changed object.
+    expect(text.indexOf("Jupiter")).toBeLessThan(text.indexOf("```json"));
+    expect(text).toContain('"turn": 2');
+    expect(text).not.toContain("Count");
+    expect(renderIdleWork({ n: 1 }, ["n"])).toBeNull();
+    expect(renderIdleWork({ big: "x".repeat(9000) }, ["big"])).toContain("…");
+  });
+
+  test("input echoes and message-history arrays are plumbing, not work", () => {
+    // The user's own text stored into context isn't "produced" output.
+    expect(renderIdleWork({ prompt: "write it", draft: "Dear team…" }, ["prompt", "draft"], [
+      "write it",
+    ])).toBe("Dear team…");
+    // ai-sdk style message logs are skipped even though they changed.
+    expect(
+      renderIdleWork(
+        { messages: [{ role: "user", content: "hi" }], draft: "Dear team…" },
+        ["messages", "draft"],
+      ),
+    ).toBe("Dear team…");
+  });
+});
+
+describe("fromConfig machine schemas", () => {
+  test("a JSON-authored machine exposes its input schema", async () => {
+    const machine = await getExampleMachine("json-agent", "jsonAgentMachine");
+    const info = describeMachineInput(machine);
+    expect(info.jsonSchema).not.toBeNull();
+    expect(info.jsonSchema?.required).toContain("ticket");
+    expect(info.promptField).toBe("ticket");
+  });
+});
+
+describe("run limits (cancel + time budget)", () => {
+  test("runSignal reflects an already-aborted request signal", () => {
+    const controller = new AbortController();
+    controller.abort();
+    expect(runSignal({ signal: controller.signal }).aborted).toBe(true);
+    expect(runSignal({}).aborted).toBe(false);
+  });
+
+  test("a cancelled scenario run settles as an error instead of hanging", async () => {
+    const controller = new AbortController();
+    controller.abort(new Error("user cancelled"));
+    const result = await startScenarioRun(
+      "refund",
+      "I need a $500 refund.",
+      "script",
+      undefined,
+      scriptedExecutorsFor("refund"),
+      controller.signal,
+    );
+    expect(result.status).toBe("error");
   });
 });

@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useSelector } from "@xstate/store-react";
 import { AppPanel, type TextPolicy, type Turn } from "@/components/app-panel";
+import type { SystemMessage } from "@/lib/viz-panel-store";
+import { liveTraceStep, type TraceStep } from "@/lib/trace-view";
 import { ExampleIntro, ScenarioIntro, type StarterAction } from "@/components/chat-intros";
 import { SiteHeader } from "@/components/site-header";
 import { VizPanel } from "@/components/viz-panel";
@@ -187,6 +189,68 @@ export function DemoShell() {
     };
   }, [selection]);
 
+  // ─── run control: one AbortController per in-flight turn + live feed ───
+  //
+  // The controller's signal rides the server-fn request; aborting it (Cancel,
+  // navigation) tears down the HTTP request, whose signal the server passes
+  // into `runAgent` — so cancellation actually stops server-side model calls.
+  // The live feed mirrors the inspection relay (via VizPanel) into TraceSteps
+  // so the chat's transition log fills in while the run is still going.
+  const abortRef = useRef<AbortController | null>(null);
+  const liveRun = useRef<{ sessionId: string | null; startedAt: number } | null>(null);
+  const [liveSteps, setLiveSteps] = useState<TraceStep[]>([]);
+
+  const beginRun = () => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    liveRun.current = { sessionId: null, startedAt: Date.now() };
+    setLiveSteps([]);
+    return controller.signal;
+  };
+  const endRun = () => {
+    abortRef.current = null;
+    liveRun.current = null;
+    setLiveSteps([]);
+  };
+  const cancelRun = () => abortRef.current?.abort();
+
+  const handleSystemMessage = useCallback((message: SystemMessage) => {
+    const run = liveRun.current;
+    if (!run) return; // only observe while a turn is in flight
+    if (message.type === "@statelyai.system.init") {
+      const root = Array.isArray(message.actors)
+        ? [...message.actors].reverse().find((actor) => actor.parentSessionId == null)
+        : null;
+      // A fresh system means a fresh run — drop any replayed leftovers.
+      if (root) {
+        run.sessionId = root.sessionId;
+        setLiveSteps([]);
+      }
+      return;
+    }
+    if (
+      message.type === "@statelyai.system.actorRegistered" &&
+      message.parentSessionId == null &&
+      typeof message.sessionId === "string"
+    ) {
+      run.sessionId = message.sessionId;
+      setLiveSteps([]);
+      return;
+    }
+    if (
+      message.type === "@statelyai.system.actorSnapshot" &&
+      message.sessionId === run.sessionId
+    ) {
+      const step = liveTraceStep(
+        message.event,
+        (message.snapshot as { value?: unknown } | null | undefined)?.value,
+        Date.now() - run.startedAt,
+      );
+      if (step) setLiveSteps((previous) => [...previous, step]);
+    }
+  }, []);
+
   const resetRun = () => {
     store.trigger.runReset();
     player.reset();
@@ -203,6 +267,7 @@ export function DemoShell() {
   };
 
   const settle = (epoch: number, turnId: number, result: AnyRunResult) => {
+    endRun();
     store.trigger.turnSettled({ epoch, id: turnId, result });
     // With live inspection the viz already showed the run in real time; the
     // trace replay only backs the no-relay fallback.
@@ -210,7 +275,14 @@ export function DemoShell() {
   };
 
   const fail = (epoch: number, turnId: number, error: unknown) => {
-    const message = error instanceof Error ? error.message : "Agent request failed";
+    endRun();
+    // An aborted fetch is the user's Cancel, not a failure worth a stack trace.
+    const aborted = error instanceof DOMException && error.name === "AbortError";
+    const message = aborted
+      ? "Run cancelled."
+      : error instanceof Error
+        ? error.message
+        : "Agent request failed";
     store.trigger.turnFailed({ epoch, id: turnId, message });
   };
 
@@ -233,6 +305,7 @@ export function DemoShell() {
   /** Starts a library-example run with the given machine input. */
   const startExampleRun = (label: string, machineInput: Record<string, unknown>) => {
     if (!activeMachine || loading) return;
+    const signal = beginRun();
     const { id, epoch } = pushTurn(label, "user", "loading");
     void startExample({
       data: {
@@ -240,6 +313,7 @@ export function DemoShell() {
         exportName: activeMachine.exportName,
         input: machineInput,
       },
+      signal,
     }).then(
       (result) => settle(epoch, id, result),
       (error) => fail(epoch, id, error),
@@ -256,10 +330,12 @@ export function DemoShell() {
       ? ` · ${JSON.stringify(payload).slice(0, 60)}`
       : "";
     const label = `${descriptor?.label ?? humanizeEventType(event.type)}${payloadNote}`;
+    const signal = beginRun();
     const { id, epoch } = pushTurn(label, "action", "loading", event.type);
     const deliver = isScenario
       ? resumeScenario({
           data: { scenarioId: scenario.id, snapshot: idleSnapshot as never, event },
+          signal,
         })
       : resumeExample({
           data: {
@@ -268,6 +344,7 @@ export function DemoShell() {
             snapshot: idleSnapshot as never,
             event,
           },
+          signal,
         });
     void deliver.then(
       (result) => settle(epoch, id, result as AnyRunResult),
@@ -283,6 +360,7 @@ export function DemoShell() {
 
     // Approval scenario while idle → model-interpreted free-text review.
     if (interpretMode && idleSnapshot) {
+      const signal = beginRun();
       const { id, epoch } = pushTurn(text, "user", "loading");
       void resumeScenario({
         data: {
@@ -290,6 +368,7 @@ export function DemoShell() {
           snapshot: idleSnapshot as never,
           event: { kind: "interpret", text },
         },
+        signal,
       }).then(
         (result) => settle(epoch, id, result),
         (error) => fail(epoch, id, error),
@@ -306,8 +385,9 @@ export function DemoShell() {
     // Not started → the prompt starts the run.
     if (!started) {
       if (isScenario) {
+        const signal = beginRun();
         const { id, epoch } = pushTurn(text, "user", "loading");
-        void startScenario({ data: { scenarioId: scenario.id, prompt: text } }).then(
+        void startScenario({ data: { scenarioId: scenario.id, prompt: text }, signal }).then(
           (result) => settle(epoch, id, result),
           (error) => fail(epoch, id, error),
         );
@@ -419,10 +499,12 @@ export function DemoShell() {
       intro={intro}
       starters={starters}
       turns={turns}
+      liveSteps={liveSteps}
       pendingIdle={pendingIdle}
       startForm={startForm}
       onSubmit={submit}
       onSendEvent={sendEvent}
+      onCancel={cancelRun}
       onRestart={resetRun}
       textPolicy={textPolicy}
     />
@@ -467,6 +549,7 @@ export function DemoShell() {
       liveUrl={liveUrl}
       theme={theme}
       documents={vizDocuments}
+      onSystemMessage={handleSystemMessage}
     />
   );
 

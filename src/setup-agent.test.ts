@@ -1,7 +1,14 @@
 import Ajv from "ajv";
 import { describe, expect, test, vi } from "vitest";
 import { z } from "zod";
-import { createActor, createAsyncLogic, initialTransition, toPromise, waitFor } from "xstate";
+import {
+  createActor,
+  createAsyncLogic,
+  createMachine,
+  initialTransition,
+  toPromise,
+  waitFor,
+} from "xstate";
 import { createDecisionLogic } from "./decision.js";
 // Step-envelope internals (used to drive machines in these tests) come straight
 // from ./steps.js now that they're off the public /steps subpath.
@@ -21,6 +28,7 @@ import {
   messagesSchema,
   parseAgentEvent,
   runAgent,
+  getAgentSchemas,
   setupAgent,
   toolMessage,
   userMessage,
@@ -3352,5 +3360,70 @@ describe("setupAgent reserved agent.* actor keys", () => {
 
   test("a non-reserved actors key is accepted", () => {
     expect(() => setupAgent({ schemas, actors: { myActor: someLogic } })).not.toThrow();
+  });
+});
+
+describe("getAgentSchemas", () => {
+  test("returns the registered pack for a setupAgent machine", () => {
+    const agent = setupAgent({
+      schemas: createAgentSchemas({
+        context: z.object({ topic: z.string() }),
+        events: { APPROVE: z.object({}) },
+        input: z.object({ topic: z.string() }),
+      }),
+    });
+    const machine = agent.createMachine({
+      context: ({ input }) => ({ topic: input.topic }),
+      initial: "idle",
+      states: { idle: {} },
+    });
+
+    const schemas = getAgentSchemas(machine);
+    expect(schemas?.input).toBe(agent.schemas.input);
+    expect(Object.keys(schemas?.events ?? {})).toContain("APPROVE");
+  });
+
+  test("returns the compiled pack for a fromConfig machine", () => {
+    const ajv = new Ajv({ strict: false });
+    const compileSchema: SchemaCompiler = (jsonSchema): StandardSchemaV1 => {
+      const validateFn = ajv.compile(jsonSchema);
+      return {
+        "~standard": {
+          version: 1,
+          vendor: "test",
+          validate: (value: unknown) =>
+            validateFn(value) ? { value } : { issues: [{ message: "invalid" }] },
+          jsonSchema: { input: () => jsonSchema },
+        },
+      } as StandardSchemaV1;
+    };
+
+    const { machine, schemas: returned } = setupAgent.fromConfig(
+      {
+        id: "accessor-from-config",
+        schemas: {
+          context: { type: "object", properties: { ticket: { type: "string" } } },
+          input: {
+            type: "object",
+            properties: { ticket: { type: "string" } },
+            required: ["ticket"],
+          },
+          events: { APPROVE: { type: "object" } },
+        },
+        initial: "idle",
+        states: { idle: {} },
+      },
+      { compileSchema },
+    );
+
+    const schemas = getAgentSchemas(machine);
+    expect(schemas?.input).toBe(returned.input);
+    expect(Object.keys(schemas?.events ?? {})).toContain("APPROVE");
+  });
+
+  test("returns undefined for a machine not built by setupAgent", () => {
+    expect(
+      getAgentSchemas(createMachine({ initial: "idle", states: { idle: {} } })),
+    ).toBeUndefined();
   });
 });

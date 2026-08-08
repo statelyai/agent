@@ -2,6 +2,7 @@ import {
   setup,
   type AnyActorLogic,
   type AnyMachineSnapshot,
+  type AnyStateMachine,
   type AnySetupConfig,
   type AsyncActorLogic,
   type EventObject,
@@ -37,6 +38,7 @@ import { createDecideActor } from "./decision.js";
 import { AGENT_USAGE_EVENT_TYPE, type AgentUsageEvent } from "./effects.js";
 import { appendMessages } from "./messages.js";
 import { agentExecutionOptions, machineSuspensionPredicates } from "./internal/registry.js";
+import type { AgentSchemas } from "./events.js";
 import {
   setupAgentFromConfig,
   type AgentWorkflowConfig,
@@ -1018,6 +1020,21 @@ export namespace setupAgent {
   ): FromConfigResult {
     return setupAgentFromConfig(config, options);
   }
+}
+
+/**
+ * The schema pack a machine was built with — `setupAgent(...).createMachine`
+ * and `setupAgent.fromConfig(...)` both register one, so hosts can read a
+ * machine's input/event schemas at runtime without knowing how it was
+ * authored. Returns `undefined` for machines not built by either (a plain
+ * xstate `createMachine`/`setup` machine).
+ *
+ * Registration is keyed on the machine object, so a machine returned by
+ * `machine.provide(...)` carries no pack — read it from the machine the setup
+ * returned.
+ */
+export function getAgentSchemas(machine: AnyStateMachine): AgentSchemas | undefined {
+  return agentExecutionOptions.get(machine as object)?.schemas;
 }
 
 /** Builds one TextLogic actor per `setupAgent({ requests })` entry. @internal */

@@ -23,7 +23,8 @@ export default {
     // suite can never bill a real provider. Opt in with `LIVE_TESTS=1`.
     setupFiles: [fileURLToPath(new URL("./vitest.setup.ts", import.meta.url))],
     // The demo app has its own vitest config (and `@` alias) — run its tests
-    // with `pnpm --dir demo test`.
-    exclude: ["**/node_modules/**", "demo/**"],
+    // with `pnpm --dir demo test`. Embedded agent worktrees are other
+    // sessions' checkouts — running their copies double-binds test ports.
+    exclude: ["**/node_modules/**", "demo/**", "**/.claude/worktrees/**"],
   },
 };

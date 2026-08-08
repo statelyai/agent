@@ -1,6 +1,6 @@
 export { AgentError } from "./errors.js";
 export { appendMessages, messagesSchema } from "./messages.js";
-export { createAgentSchemas, setupAgent } from "./setup-agent.js";
+export { createAgentSchemas, getAgentSchemas, setupAgent } from "./setup-agent.js";
 export type {
   AgentSchemaPack,
   // Both appear in `setupAgent`'s inferred result type (its event schemas
@@ -25,6 +25,8 @@ export type {
 export { getAcceptedEvents, parseAgentEvent } from "./events.js";
 export type {
   AgentRequestOptions,
+  // Named return type of `getAgentSchemas`, so declaration emit can name it.
+  AgentSchemas,
   AgentEventDescriptor,
   AgentEventToolNameResolver,
   AgentRequestSource,

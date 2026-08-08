@@ -1,6 +1,6 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import type { Snapshot } from "xstate";
-import { startScenarioRun, resumeScenarioRun } from "./agent-runner";
+import { resumeScenario, startScenarioRun, resumeScenarioRun } from "./agent-runner";
 import { scriptedExecutorsFor } from "./scripted-executors";
 import type { ScenarioId } from "./scenarios";
 
@@ -129,5 +129,28 @@ describe("scenario outcomes (keyless)", () => {
     expect(output.revisions).toBe(1);
     expect(output.accepted).toBe(true);
     expect(output.score).toBeGreaterThanOrEqual(8);
+  });
+});
+
+describe("ambiguous free-text review", () => {
+  test("re-idles with the snapshot's own event descriptors (REJECT still needs a reason)", async () => {
+    // No key → scripted interpretation, same path the keyless UI takes.
+    vi.stubEnv("OPENAI_API_KEY", "");
+    const first = await start("approval", "Announce the outage.");
+    expect(first.status).toBe("idle");
+
+    const echoed = await resumeScenario("approval", first.idle!.snapshot as unknown as Snapshot<unknown>, {
+      kind: "interpret",
+      text: "hmm, not sure",
+    });
+    expect(echoed.status).toBe("idle");
+
+    const reject = echoed.idle!.events.find((event) => event.type === "REJECT");
+    expect(reject?.needsPayload).toBe(true);
+    expect((reject?.jsonSchema as { required?: string[] })?.required).toContain("reason");
+    // Indistinguishable from the original idle description.
+    expect(echoed.idle!.events).toEqual(first.idle!.events);
+    expect(echoed.idle!.prompt).toBe(first.idle!.prompt);
+    vi.unstubAllEnvs();
   });
 });

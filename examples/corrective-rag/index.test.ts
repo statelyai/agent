@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import { correctiveRagMachine, runCorrectiveRagExample } from "./index.js";
 
@@ -78,6 +79,50 @@ test("no docs retrieved → skip grading, correct via web search", async () => {
   expect(result.progress).toContain("transformingQuery");
   expect(result.progress).toContain("webSearching");
   expect(result.progress.at(-1)).toBe("done");
+});
+
+test("starters behave as their labels advertise", async () => {
+  const starters = JSON.parse(readFileSync(new URL("./metadata.json", import.meta.url), "utf8"))
+    .starters as Array<{ label: string; input: { question: string } }>;
+
+  const results = new Map<string, Awaited<ReturnType<typeof runCorrectiveRagExample>>>();
+  for (const starter of starters) {
+    const keepDocs = starter.label.startsWith("Corpus hit");
+    const result = await runCorrectiveRagExample({
+      question: starter.input.question,
+      // Only the model calls are mocked; retrieve/webSearch run real keyword
+      // logic over the sample corpora, so this test measures the corpora.
+      generateText: async (request) => {
+        if (request.system?.includes("relevance grader")) {
+          return {
+            output: { grades: Array.from({ length: 3 }, () => ({ relevant: keepDocs })) },
+          };
+        }
+        if (request.system?.includes("Rewrite")) return { output: starter.input.question };
+        return { output: "answer" };
+      },
+    });
+    results.set(starter.label, result);
+  }
+
+  const hit = results.get("Corpus hit — answers without correcting")!;
+  expect(hit.usedWebSearch).toBe(false);
+  expect(hit.documents.some((doc) => doc.includes("long-term memory"))).toBe(true);
+
+  const nearMiss = results.get("Near-miss doc — graded away, then corrected")!;
+  expect(nearMiss.usedWebSearch).toBe(true);
+  expect(nearMiss.documents.some((doc) => doc.includes("vector database"))).toBe(true);
+
+  const corrected = results.get("Corpus miss — corrected via the sample index")!;
+  expect(corrected.usedWebSearch).toBe(true);
+  expect(corrected.documents.some((doc) => doc.includes("Prompt injection"))).toBe(true);
+
+  // The one deliberate miss: even the fallback index has nothing, and the
+  // labeled chip says so up front.
+  const offCorpus = starters.filter((starter) => starter.label.includes("Off-corpus"));
+  expect(offCorpus).toHaveLength(1);
+  const miss = results.get(offCorpus[0]!.label)!;
+  expect(miss.documents).toEqual(["[sample web result] No external results found for this query."]);
 });
 
 test("machine exports a runnable definition", () => {

@@ -9,11 +9,32 @@
   },
   "comparison": {
     "targets": ["LangGraph"],
-    "purpose": "Retrieves documents, grades whether they actually answer the question, and falls back to a rewritten web search before answering."
+    "purpose": "Retrieves documents about LLM agents, grades whether they actually answer the question, and falls back to a rewritten lookup in a separate sample index (a stand-in for web search) before answering."
   },
   "starters": [
-    "How does the Raft consensus algorithm elect a leader?",
-    "What is the latest stable release of Node.js?",
-    "What causes write amplification in LSM-tree stores?"
+    {
+      "label": "Corpus hit — answers without correcting",
+      "input": {
+        "question": "How does long-term memory work for LLM agents?"
+      }
+    },
+    {
+      "label": "Near-miss doc — graded away, then corrected",
+      "input": {
+        "question": "What is a vector database and why does RAG need one?"
+      }
+    },
+    {
+      "label": "Corpus miss — corrected via the sample index",
+      "input": {
+        "question": "What is prompt injection and how do you defend against it?"
+      }
+    },
+    {
+      "label": "Off-corpus question (expect no evidence, even in the fallback index)",
+      "input": {
+        "question": "How much rainfall did the Amazon basin get last month?"
+      }
+    }
   ]
 }

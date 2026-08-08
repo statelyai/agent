@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { createAsyncLogic } from "xstate";
 import { AgentIllegalResumeEventError, type RunAgentOptions } from "@statelyai/agent";
-import { refundMachine, resumeTool, startTool } from "./index.js";
+import { refundMachine, resolveInteractionLabel, resumeTool, startTool } from "./index.js";
 
 // Mock executors: validator returns valid, processRefund is a no-op side effect.
 const executors: RunAgentOptions<typeof refundMachine> = {
@@ -29,6 +29,37 @@ test("happy path: start → idle handle with interaction → approve → done", 
   expect(done.status).toBe("done");
   if (done.status !== "done") return;
   expect(done.output).toEqual({ refunded: true, reason: null });
+});
+
+test("resolved interaction copy never leaves a space before punctuation", async () => {
+  // A blank order id resolves to "" — a label that punctuates a placeholder
+  // directly (`{orderId},`) would render "on order , or type…".
+  for (const orderId of ["ORD-4471", ""]) {
+    const started = await startTool({ amount: 129.99, orderId }, executors);
+    expect(started.status).toBe("pending");
+    if (started.status !== "pending") return;
+
+    const context = JSON.parse(started.handle).context as Record<string, unknown>;
+    const labels = [
+      started.interaction?.label ?? "",
+      ...Object.values(started.interaction?.events ?? {}).map((button) => button.label ?? ""),
+    ].map((label) => resolveInteractionLabel(label, context));
+
+    for (const label of labels) {
+      expect(label).not.toMatch(/\s[,.;:!?)]/);
+      expect(label).not.toMatch(/ {2}/);
+    }
+  }
+
+  const filled = await startTool({ amount: 129.99, orderId: "ORD-4471" }, executors);
+  if (filled.status !== "pending") throw new Error("expected pending");
+  const context = JSON.parse(filled.handle).context as Record<string, unknown>;
+  expect(resolveInteractionLabel(filled.interaction?.label ?? "", context)).toBe(
+    "Approve the $129.99 refund on order ORD-4471 or type a reason to reject it.",
+  );
+  expect(resolveInteractionLabel(filled.interaction?.events?.APPROVE?.label ?? "", context)).toBe(
+    "Approve refund of $129.99",
+  );
 });
 
 test("reject path: resume with REJECT ends with refunded:false", async () => {

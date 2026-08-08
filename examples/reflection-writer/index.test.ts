@@ -50,6 +50,43 @@ test("reflection loop runs to the revision bound then stops (LangGraph should_co
   expect(result.messageCount).toBe(7);
 });
 
+test("the critic grades against the strict rubric, so one draft is never enough", async () => {
+  // The rubric text is what keeps a live run from signing off on the first
+  // draft and hiding the loop. Capture the critique request to assert the
+  // rubric reaches the model, and script a critic that behaves as instructed:
+  // false on the first draft, satisfied on the revision.
+  const critiqueSystems: string[] = [];
+  const drafts = ["thin first draft", "revised draft with evidence"];
+  const verdicts = [
+    { critique: "No counterargument, and claims lack evidence.", satisfied: false },
+    { critique: "Every rubric item met.", satisfied: true },
+  ];
+  const cursors = { writer: 0, critic: 0 };
+
+  const result = await runReflectionWriterExample({
+    topic: "Carbon tax versus cap-and-trade",
+    generateText: async (request: { model: string; system?: string }) => {
+      if (request.model === "writer") return { output: drafts[cursors.writer++] };
+      critiqueSystems.push(request.system ?? "");
+      return { output: verdicts[cursors.critic++] };
+    },
+  });
+
+  // The rubric is in the critic's system prompt on every critique.
+  expect(critiqueSystems).toHaveLength(2);
+  for (const system of critiqueSystems) {
+    expect(system).toMatch(/strict rubric/i);
+    expect(system).toMatch(/counterargument/i);
+    expect(system).toMatch(/first draft almost never clears this bar/i);
+  }
+
+  // The loop actually ran: draft → critique → revise → critique.
+  expect(result.progress.filter((s) => s === "drafting")).toHaveLength(2);
+  expect(result.revisions).toBe(2);
+  expect(result.satisfied).toBe(true);
+  expect(result.essay).toBe("revised draft with evidence");
+});
+
 test("early exit when the critic is satisfied (improves on the fixed-count tutorial)", async () => {
   // Critic signs off after the 2nd draft, under the revision bound — the
   // `satisfied` branch of the checking guard ends the loop early.

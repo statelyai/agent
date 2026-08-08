@@ -15,5 +15,6 @@
     "What are the leading approaches to long-context LLMs in 2026?",
     "How do carbon-capture startups actually remove CO2?",
     "What is the state of solid-state batteries for EVs?"
-  ]
+  ],
+  "budgetMs": 300000
 }

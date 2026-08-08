@@ -24,8 +24,10 @@
  * The critique request returns structured `{ critique, satisfied }`, so the
  * loop can ALSO exit early the moment the critic is satisfied — an improvement
  * over the tutorial's fixed message-count loop, while `maxRevisions` stays the
- * hard upper bound. Every model invoke has an `onError` that degrades to the
- * best-effort current draft rather than erroring the run.
+ * hard upper bound. The critic grades against a strict five-item rubric, so a
+ * live run reliably takes at least one revision round instead of signing off
+ * on the first draft and hiding the loop. Every model invoke has an `onError`
+ * that degrades to the best-effort current draft rather than erroring the run.
  *
  * Dual-mode: `runReflectionWriterExample(options?)` takes an injectable
  * `generateText` (the test passes mocks — keyless CI); the direct run below
@@ -127,12 +129,21 @@ const agentSetup = setupAgent({
         output: critiqueSchema,
       },
       model: "critic",
+      // The rubric is deliberately strict: with a lenient critic a live first
+      // draft often scores well enough to skip the loop entirely, so the
+      // generate <-> reflect cycle the example exists to show never runs.
+      // Every rubric item must hold before `satisfied` is true, and a first
+      // draft essentially never clears all five.
       system:
-        "You are a demanding writing teacher grading an essay. Give detailed, " +
-        "specific recommendations: length, depth, style, structure, and any " +
-        "gaps in argument. Set `satisfied` to true only when the essay needs " +
-        "no further substantive revision; otherwise false with actionable " +
-        "critique.",
+        "You are a demanding writing teacher grading an essay against a strict " +
+        "rubric: (1) a specific, arguable thesis, (2) concrete evidence or " +
+        "examples for every claim, (3) a fairly stated counterargument that is " +
+        "answered, (4) tight structure with no filler, (5) prose free of " +
+        "cliché and vague abstraction. Give detailed, specific recommendations " +
+        "for each rubric item that falls short. Set `satisfied` to true ONLY " +
+        "when every rubric item is fully met and no substantive revision is " +
+        "left; a first draft almost never clears this bar, so expect to return " +
+        "false with actionable critique at least once.",
       prompt: ({ input }) => `Essay topic: ${input.topic}\n\nEssay:\n${input.essay}`,
     },
   },

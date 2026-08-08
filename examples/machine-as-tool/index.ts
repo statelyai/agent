@@ -133,7 +133,10 @@ export const refundMachine = agentSetup.createMachine({
         interaction: {
           // `{amount}` / `{orderId}` resolve against the snapshot's context when
           // the label is shown (host convention; the meta itself is static).
-          label: "Approve the ${amount} refund on order {orderId}, or type a reason to reject it.",
+          // Nothing punctuates a placeholder directly: hosts resolve a missing
+          // or blank value to "" and collapse whitespace, so "{orderId}," would
+          // render as "order , or type…" whenever the order id is blank.
+          label: "Approve the ${amount} refund on order {orderId} or type a reason to reject it.",
           events: {
             APPROVE: { label: "Approve refund of ${amount}", style: "primary" },
             REJECT: { label: "Reject refund", style: "danger" },
@@ -180,6 +183,22 @@ export const refundMachine = agentSetup.createMachine({
 function readInteraction(snapshot: SnapshotFrom<typeof refundMachine>) {
   const meta = getStateMeta(snapshot);
   return meta.interaction ?? null;
+}
+
+/**
+ * The host convention for interaction labels: `{key}` placeholders resolve
+ * against the snapshot's context, missing/blank values resolve to "", and
+ * whitespace collapses. Labels must therefore never punctuate a placeholder
+ * directly, or a blank value leaves a dangling " ,".
+ */
+export function resolveInteractionLabel(label: string, context: Record<string, unknown>): string {
+  return label
+    .replace(/\{(\w+)\}/g, (_, key: string) => {
+      const value = context[key];
+      return typeof value === "string" || typeof value === "number" ? String(value) : "";
+    })
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 // A JSON-safe handle: exactly what the harness persists between tool calls.
@@ -277,10 +296,13 @@ export async function main() {
     return;
   }
 
-  // What a human operator would see rendered from the typed interaction.
-  console.log(`\n${started.interaction?.label}`);
+  // What a human operator would see rendered from the typed interaction, with
+  // `{key}` placeholders resolved against the handle's context.
+  const context = JSON.parse(started.handle).context as Record<string, unknown>;
+  console.log(`\n${resolveInteractionLabel(started.interaction?.label ?? "", context)}`);
   for (const [eventType, button] of Object.entries(started.interaction?.events ?? {})) {
-    console.log(`  - ${button.label ?? eventType} (${eventType})`);
+    const label = button.label ? resolveInteractionLabel(button.label, context) : eventType;
+    console.log(`  - ${label} (${eventType})`);
   }
   console.log("\n[harness auto-approves]\n");
 

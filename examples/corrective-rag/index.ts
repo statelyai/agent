@@ -4,8 +4,13 @@
  *
  * The idea (Yan et al. 2024): don't trust retrieval blindly. Grade each retrieved
  * document for relevance; if the retrieval is good enough, answer from it; if it
- * is not, rewrite the question and fall back to web search before answering. One
- * corrective pass, then generate.
+ * is not, rewrite the question and fall back to a second (external) index before
+ * answering. One corrective pass, then generate.
+ *
+ * NOTE ON THE FALLBACK: LangGraph's CRAG calls a live web search API here. This
+ * example calls NO network: the fallback is `SAMPLE_WEB_INDEX`, a second tiny
+ * in-file corpus, and its results are prefixed `[sample web result]`. Swap the
+ * `webSearch` actor for a real search tool and the machine is unchanged.
  *
  * LangGraph shape (docs/tutorials/rag/langgraph_crag) — nodes + a conditional edge:
  *
@@ -253,9 +258,9 @@ const agentSetup = setupAgent({
       },
       model: "crag",
       system:
-        "Rewrite the user's question as a single, self-contained search query " +
-        "optimized for web search. Keep the intent; make it explicit and " +
-        "keyword-rich. Return only the rewritten query.",
+        "Rewrite the user's question as a single, self-contained keyword search " +
+        "query for a fallback document index. Keep the intent; make it explicit " +
+        "and keyword-rich. Return only the rewritten query.",
       prompt: ({ input }) => input.question,
     },
     // generate: grounded answer over whatever documents survived (retrieved,
@@ -464,7 +469,8 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     const { generateText } = createAiSdkExecutors({ models });
 
     // Off-topic for the sample corpus — retrieval is weak, so CRAG corrects:
-    // grade → rewrite → web search → generate.
+    // grade → rewrite → sample web index → generate. (The sample web index has a
+    // prompt-injection doc, so the correction lands on real evidence.)
     const question = "What is prompt injection and how do you defend against it?";
     const result = await runCorrectiveRagExample({
       question,
@@ -474,7 +480,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
 
     console.log("\nQuestion:", question);
     if (result.rewrittenQuestion) console.log("Rewritten:", result.rewrittenQuestion);
-    console.log("Used web search:", result.usedWebSearch);
+    console.log("Used fallback sample web index:", result.usedWebSearch);
     console.log("\nAnswer:", result.answer);
   })().catch((error) => {
     console.error(error);

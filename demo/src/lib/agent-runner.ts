@@ -17,7 +17,7 @@ import {
   type AgentRequestExecutors,
   type RunAgentResult,
 } from "@statelyai/agent";
-import type { AnyStateMachine, Snapshot } from "xstate";
+import type { AnyMachineSnapshot, AnyStateMachine, Snapshot } from "xstate";
 import { maybeCreateRunInspection } from "./inspection.server";
 import { createTraceRecorder, describeIdle, type TraceEntry } from "./machine-chat.server";
 import type { ChatIdle } from "./machine-ui";
@@ -126,7 +126,23 @@ async function resolveExecutors(
     primary: openai(primary),
     fallback: openai(fallback),
   });
-  return { mode: "live", model: primary, executors: createAiSdkExecutors({ models }) };
+  const executors = createAiSdkExecutors({ models });
+  // Deterministic outage demo for the retry scenario: a healthy primary never
+  // fails live, so the advertised retry→fallback path would never show. A
+  // ticket carrying the `[primary-outage]` marker makes every PRIMARY-model
+  // attempt throw; the machine's bounded retry then lands on the fallback.
+  if (scenarioId === "retry") {
+    const inner = executors.generateText;
+    if (inner) {
+      executors.generateText = (request, ...rest) => {
+        if (request.model === "primary" && request.prompt?.includes("[primary-outage]")) {
+          throw new Error("Simulated primary model outage");
+        }
+        return inner(request, ...rest);
+      };
+    }
+  }
+  return { mode: "live", model: primary, executors };
 }
 
 // ─── result shaping ───
@@ -201,12 +217,14 @@ export async function startScenarioRun(
   mode: RunMode,
   model: string | undefined,
   executors: Partial<AgentRequestExecutors>,
+  signal?: AbortSignal,
 ): Promise<ScenarioResult> {
   const { trace, onTransition } = createTraceRecorder();
   const machine = machineFor(scenarioId);
   const result = await runAgent(machine, {
     input: inputFor(scenarioId, prompt),
     executors,
+    ...(signal ? { signal } : {}),
     onTransition,
     inspect: maybeCreateRunInspection(machine, scenarioSource[scenarioId]),
   });
@@ -221,6 +239,7 @@ export async function resumeScenarioRun(
   mode: RunMode,
   model: string | undefined,
   executors: Partial<AgentRequestExecutors>,
+  signal?: AbortSignal,
 ): Promise<ScenarioResult> {
   const { trace, onTransition } = createTraceRecorder();
   const machine = machineFor(scenarioId);
@@ -230,6 +249,7 @@ export async function resumeScenarioRun(
     snapshot,
     event,
     executors,
+    ...(signal ? { signal } : {}),
     onTransition,
     inspect: maybeCreateRunInspection(machine, scenarioSource[scenarioId]),
   });
@@ -241,15 +261,17 @@ export async function resumeScenarioRun(
 export async function startScenario(
   scenarioId: ScenarioId,
   prompt: string,
+  signal?: AbortSignal,
 ): Promise<ScenarioResult> {
   const { mode, model, executors } = await resolveExecutors(scenarioId);
-  return startScenarioRun(scenarioId, prompt, mode, model, executors);
+  return startScenarioRun(scenarioId, prompt, mode, model, executors, signal);
 }
 
 export async function resumeScenario(
   scenarioId: ScenarioId,
   snapshot: Snapshot<unknown>,
   event: ResumeEvent,
+  signal?: AbortSignal,
 ): Promise<ScenarioResult> {
   const { mode, model, executors } = await resolveExecutors(scenarioId);
 
@@ -262,10 +284,10 @@ export async function resumeScenario(
     }
     const typed =
       verdict === "REJECT" ? { type: "REJECT", reason: event.text } : { type: "APPROVE" };
-    return resumeScenarioRun(scenarioId, snapshot, typed, mode, model, executors);
+    return resumeScenarioRun(scenarioId, snapshot, typed, mode, model, executors, signal);
   }
 
-  return resumeScenarioRun(scenarioId, snapshot, event, mode, model, executors);
+  return resumeScenarioRun(scenarioId, snapshot, event, mode, model, executors, signal);
 }
 
 /** Interprets a free-text review as a typed verdict (scripted or live). */
@@ -303,6 +325,12 @@ function startResumeIdleEcho(
   mode: RunMode,
   model: string | undefined,
 ): ScenarioResult {
+  const machine = machineFor(scenarioId);
+  // Describe the RESTORED snapshot, so the echoed idle carries the same event
+  // schemas (REJECT's required `reason`), labels, and hints as the original.
+  const restored = machine.resolveState(
+    snapshot as never as Parameters<AnyStateMachine["resolveState"]>[0],
+  );
   return {
     mode,
     model,
@@ -310,29 +338,8 @@ function startResumeIdleEcho(
     trace: [],
     response: "Could not confidently interpret that review. Approve or reject explicitly.",
     idle: {
+      ...describeIdle(machine, restored as AnyMachineSnapshot),
       snapshot: snapshot as unknown as Json,
-      prompt: "Review the draft: approve to publish, or reject with a reason.",
-      events:
-        scenarioId === "approval"
-          ? [
-              {
-                type: "APPROVE",
-                label: "Approve",
-                style: "primary",
-                jsonSchema: null,
-                needsPayload: false,
-              },
-              {
-                type: "REJECT",
-                label: "Reject",
-                style: "danger",
-                jsonSchema: null,
-                needsPayload: false,
-              },
-            ]
-          : [],
-      textEvent: null,
-      component: null,
     },
   };
 }

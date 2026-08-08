@@ -72,6 +72,8 @@ type ExampleMetadata = {
   manual?: boolean;
   /** Export name of the machine to list first / preselect. */
   machine?: string;
+  /** Wall-clock run budget override (ms) for legitimately long examples. */
+  budgetMs?: number;
 };
 
 const metadataModules = import.meta.glob("../../../examples/*/metadata.json", {
@@ -224,6 +226,12 @@ async function loadDetail(id: string): Promise<ExampleDetail> {
     // No machine export means nothing to drive from chat, same as `manual`.
     manual: metadataById.get(id)?.manual === true || machines.length === 0,
   };
+}
+
+/** Per-example wall-clock budget override from metadata.json `budgetMs`. */
+export function exampleBudgetMs(id: string): number | undefined {
+  const raw = metadataById.get(id)?.budgetMs;
+  return typeof raw === "number" && raw > 0 ? raw : undefined;
 }
 
 /** The live machine object for a run — never serialized to the client. */

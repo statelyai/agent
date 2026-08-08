@@ -20,8 +20,8 @@
  *     idle detection is deterministic rather than heuristic.
  *   - Context-interpolated prompts: the label is
  *     "What should I do with your list? ({todosSummary})", and `{todosSummary}`
- *     resolves against the snapshot context, so the idle prompt always shows
- *     the live list state.
+ *     resolves against the snapshot context, so the idle prompt lists the
+ *     actual todos (numbered, with done/open markers), not just counts.
  *   - A multi-event command as an explicit loop in the statechart: the loop is
  *     a self-transition on `planning`, so every step, its exit condition, and
  *     the applied trail are visible in the machine — not hidden in a builtin.
@@ -97,8 +97,9 @@ export const todoSchemas = createAgentSchemas({
     nextId: z.number(),
     // The command being planned, or null when waiting for fresh user input.
     pendingCommand: z.string().nullable(),
-    // One-line summary of the list, kept in sync as todos change. Interaction
-    // labels interpolate it as `{todosSummary}`.
+    // One-line listing of the list (counts + numbered titles with done/open
+    // markers), kept in sync as todos change. Interaction labels interpolate
+    // it as `{todosSummary}`.
     todosSummary: z.string(),
     // The events applied so far for the current command, in order — the trail
     // the next decide step sees so it does not repeat itself.
@@ -132,11 +133,19 @@ function renderTodoList(todos: Todo[]): string {
   return todos.map((todo) => `  #${todo.id} [${todo.done ? "x" : " "}] ${todo.title}`).join("\n");
 }
 
-/** Short list summary shown in the idle prompt via `{todosSummary}`. */
+/**
+ * The list as shown in the idle prompt via `{todosSummary}`: counts plus the
+ * numbered titles with done/open markers, so the waiting prompt shows the
+ * actual todos. Hosts collapse whitespace in interaction labels, so the
+ * listing stays on one line: `2 todos, 1 open: 1. [x] milk · 2. [ ] eggs`.
+ */
 export function summarizeTodos(todos: Todo[]): string {
   if (todos.length === 0) return "list is empty";
   const open = todos.filter((todo) => !todo.done).length;
-  return `${todos.length} todo${todos.length === 1 ? "" : "s"}, ${open} open`;
+  const list = todos
+    .map((todo, index) => `${index + 1}. [${todo.done ? "x" : " "}] ${todo.title}`)
+    .join(" · ");
+  return `${todos.length} todo${todos.length === 1 ? "" : "s"}, ${open} open: ${list}`;
 }
 
 const agentSetup = setupAgent({

@@ -120,7 +120,7 @@ export const scenarios: Scenario[] = [
     startLabel: "Classify ticket",
     starters: [
       "Classify this ticket: I was charged twice and cannot open my invoice.",
-      "Classify this ticket: exports time out after 30 seconds.",
+      "Classify this ticket: exports time out after 30 seconds. [primary-outage]",
     ],
   },
   {

@@ -1,5 +1,10 @@
+import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import { runRAGExample } from "./index.js";
+
+/** The demo's one-click chips come from metadata.json — keep them corpus-aligned. */
+const starters = JSON.parse(readFileSync(new URL("./metadata.json", import.meta.url), "utf8"))
+  .starters as Array<{ label: string; input: { question: string } }>;
 
 test("retrieves relevant docs by keyword and answers grounded on them", async () => {
   // Mock model: echoes how many docs it was grounded on. Real model on direct run.
@@ -29,4 +34,18 @@ test("accumulates conversational memory across a turn", async () => {
   });
 
   expect(result.memory).toEqual(["Q: What is a guard?", "A: a guard is a condition"]);
+});
+
+test("each starter retrieves evidence, except the labeled off-corpus one", async () => {
+  const generateText = async () => ({ output: "answer" });
+  for (const starter of starters) {
+    const result = await runRAGExample({ question: starter.input.question, generateText });
+    const expectedMiss = starter.label.toLowerCase().includes("off-corpus");
+    expect(
+      { label: starter.label, hit: result.documents.length > 0 },
+      `starter "${starter.label}"`,
+    ).toEqual({ label: starter.label, hit: !expectedMiss });
+  }
+  // Exactly one deliberate miss-case chip, and it says so on the label.
+  expect(starters.filter((s) => s.label.toLowerCase().includes("off-corpus"))).toHaveLength(1);
 });

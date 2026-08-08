@@ -642,3 +642,83 @@
   cursor: default;
   opacity: 0.45;
 }
+
+/* ─── interleaved transition log (debug-style, demonstrates the machine) ─── */
+
+.transition-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 6px 0 10px;
+  padding: 8px 0 8px 12px;
+  border-left: 2px solid var(--line);
+}
+
+.transition-chip {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--quiet);
+}
+
+.transition-chip__dot {
+  align-self: center;
+  width: 5px;
+  height: 5px;
+  flex: none;
+  border-radius: 99px;
+  background: var(--primary);
+}
+
+.transition-chip[data-kind="done"] .transition-chip__dot {
+  background: var(--success);
+}
+
+.transition-chip[data-kind="error"] .transition-chip__dot {
+  background: var(--danger);
+}
+
+.transition-chip[data-kind="system"] .transition-chip__dot {
+  background: var(--line-strong);
+}
+
+.transition-chip__event {
+  flex: none;
+  color: var(--ink);
+  opacity: 0.85;
+}
+
+.transition-chip[data-kind="error"] .transition-chip__event {
+  color: var(--danger);
+  opacity: 1;
+}
+
+.transition-chip__payload {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transition-chip__arrow {
+  flex: none;
+}
+
+.transition-chip__state {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transition-chip__time {
+  margin-left: auto;
+  flex: none;
+  padding-left: 8px;
+  font-size: 10.5px;
+}

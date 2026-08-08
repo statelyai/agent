@@ -2,18 +2,18 @@ import type { ReactNode } from "react";
 import {
   AssistantRuntimeProvider,
   type AppendMessage,
-  ThreadPrimitive,
   type ThreadMessageLike,
   useExternalStoreRuntime,
 } from "@assistant-ui/react";
 import { RefreshCcw } from "lucide-react";
 import { Thread, type ThreadComponents } from "@/components/assistant-ui/thread";
+import { TransitionChip, TransitionStrip } from "@/components/transition-strip";
 import { EventActions, StartFormCard } from "@/components/event-actions";
 import { Button } from "@/components/ui/button";
 import type { StarterAction } from "@/components/chat-intros";
 import type { TraceEntry } from "@/lib/agent-runner";
 import type { ChatIdle, JsonObject } from "@/lib/machine-ui";
-import { stateValueLabel, traceSteps } from "@/lib/trace-view";
+import { stateValueLabel, traceSteps, type TraceStep } from "@/lib/trace-view";
 
 export type ChatTurnResult = {
   mode: string;
@@ -45,10 +45,14 @@ type AppPanelProps = {
   intro: ReactNode;
   starters: StarterAction[];
   turns: Turn[];
+  /** Transitions streamed from live inspection while the last turn runs. */
+  liveSteps: TraceStep[];
   pendingIdle: ChatIdle | null;
   startForm: { schema: JsonObject; onStart: (values: Record<string, unknown>) => void } | null;
   onSubmit: (value: string) => void;
   onSendEvent: (event: { type: string; [key: string]: unknown }) => void;
+  /** Aborts the in-flight run (composer stop button). */
+  onCancel: () => void;
   onRestart: () => void;
   textPolicy: TextPolicy;
 };
@@ -61,8 +65,25 @@ function resultState(result: ChatTurnResult): string {
   return last ? stateValueLabel(last.value) : result.mode;
 }
 
-function messagesFromTurns(turns: Turn[]): ThreadMessageLike[] {
-  return turns.flatMap((turn): ThreadMessageLike[] => {
+/** TraceSteps → fake tool-call parts the TransitionChip renderer understands. */
+function transitionPartsFor(turnId: number, steps: TraceStep[], idPrefix: string) {
+  return steps.map((step, index) => ({
+    type: "tool-call" as const,
+    toolCallId: `turn-${turnId}-${idPrefix}-${index}`,
+    toolName: step.label,
+    args: {
+      state: step.state,
+      payload: step.payload,
+      kind: step.kind,
+      gap: index === 0 ? 0 : step.at - steps[index - 1].at,
+    },
+    result: step.state,
+  }));
+}
+
+function messagesFromTurns(turns: Turn[], liveSteps: TraceStep[]): ThreadMessageLike[] {
+  return turns.flatMap((turn, index): ThreadMessageLike[] => {
+    const isLast = index === turns.length - 1;
     const userMessage: ThreadMessageLike = {
       id: `turn-${turn.id}-user`,
       role: "user",
@@ -77,7 +98,20 @@ function messagesFromTurns(turns: Turn[]): ThreadMessageLike[] {
       ],
     };
 
-    if (turn.status === "loading") return [userMessage];
+    if (turn.status === "loading") {
+      // Live inspection fills the transition log in as the run happens; the
+      // authoritative server trace replaces it at settle.
+      if (!isLast || liveSteps.length === 0) return [userMessage];
+      return [
+        userMessage,
+        {
+          id: `turn-${turn.id}-assistant`,
+          role: "assistant",
+          content: transitionPartsFor(turn.id, liveSteps, "live"),
+          status: { type: "running" },
+        },
+      ];
+    }
 
     if (turn.status === "ignored") {
       return [
@@ -109,13 +143,7 @@ function messagesFromTurns(turns: Turn[]): ThreadMessageLike[] {
 
     if (!turn.result) return [userMessage];
 
-    const transitionParts = traceSteps(turn.result.trace).map((step, index) => ({
-      type: "tool-call" as const,
-      toolCallId: `turn-${turn.id}-transition-${index}`,
-      toolName: step.title.replace(/\s[✓✗]$/, ""),
-      args: {},
-      result: step.detail.replace(/^→\s*/, ""),
-    }));
+    const transitionParts = transitionPartsFor(turn.id, traceSteps(turn.result.trace), "transition");
     const response =
       turn.result.response ||
       (turn.result.status === "done" ? "The machine reached its final state." : "Ready.");
@@ -148,10 +176,12 @@ export function AppPanel({
   intro,
   starters,
   turns,
+  liveSteps,
   pendingIdle,
   startForm,
   onSubmit,
   onSendEvent,
+  onCancel,
   onRestart,
   textPolicy,
 }: AppPanelProps) {
@@ -161,7 +191,7 @@ export function AppPanel({
   const finished = Boolean(
     !pendingIdle && !loading && started && lastReady && lastReady.status !== "idle",
   );
-  const messages = messagesFromTurns(turns);
+  const messages = messagesFromTurns(turns, liveSteps);
 
   const runtime = useExternalStoreRuntime({
     messages,
@@ -170,11 +200,10 @@ export function AppPanel({
     isDisabled: loading || !textPolicy.visible || finished,
     onNew: async (message) => {
       const text = textFromAppend(message);
-      if (!text) return;
-      const starter = !started ? starters.find((candidate) => candidate.label === text) : undefined;
-      if (starter) starter.onStart();
-      else onSubmit(text);
+      if (text) onSubmit(text);
     },
+    // The composer's stop square while running — aborts the server run.
+    onCancel: async () => onCancel(),
   });
 
   const Welcome = () => (
@@ -184,22 +213,18 @@ export function AppPanel({
         <div
           className="aui-thread-welcome-suggestions flex w-full flex-wrap justify-center gap-2"
           role="group"
-          aria-label="Prefill message"
+          aria-label="Start a run"
         >
           {starters.map((starter) => (
-            <ThreadPrimitive.Suggestion
+            <Button
               key={starter.label}
-              prompt={starter.label}
-              method="replace"
-              render={
-                <Button
-                  variant="ghost"
-                  className="aui-thread-welcome-suggestion text-foreground hover:bg-muted border-border/60 h-auto max-w-full gap-1.5 rounded-xl border px-3.5 py-1.5 text-center text-sm font-normal whitespace-normal transition-colors sm:rounded-full sm:whitespace-nowrap"
-                />
-              }
+              variant="ghost"
+              disabled={loading}
+              onClick={starter.onStart}
+              className="aui-thread-welcome-suggestion text-foreground hover:bg-muted border-border/60 h-auto max-w-full gap-1.5 rounded-xl border px-3.5 py-1.5 text-center text-sm font-normal whitespace-normal transition-colors sm:rounded-full sm:whitespace-nowrap"
             >
               {starter.label}
-            </ThreadPrimitive.Suggestion>
+            </Button>
           ))}
         </div>
       ) : null}
@@ -242,6 +267,10 @@ export function AppPanel({
 
   const components: ThreadComponents = {
     Welcome,
+    // Transitions render as an interleaved log, not collapsed "tool calls" —
+    // this UI demonstrates the library, so the machine's steps ARE the content.
+    ToolGroup: TransitionStrip,
+    ToolFallback: TransitionChip,
     ComposerBefore,
     ComposerAfter,
     ComposerReplacement,

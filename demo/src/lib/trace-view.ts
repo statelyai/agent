@@ -20,11 +20,17 @@ export function prettifyEvent(event: { type: string; actorId?: unknown }): {
   kind: "model" | "done" | "error" | "system";
 } {
   const { type } = event;
-  if (type === "xstate.done.actor") {
-    return { label: typeof event.actorId === "string" ? event.actorId : type, kind: "done" };
+  // Done/error events may carry the actor id as a field (server trace) or as
+  // a type suffix ("xstate.done.actor.0.foo" — live inspection stream).
+  if (type.startsWith("xstate.done.actor")) {
+    const suffix = type.slice("xstate.done.actor.".length).replace(/^\d+\./, "");
+    const label = typeof event.actorId === "string" ? event.actorId : suffix || type;
+    return { label, kind: "done" };
   }
-  if (type === "xstate.error.actor") {
-    return { label: typeof event.actorId === "string" ? event.actorId : type, kind: "error" };
+  if (type.startsWith("xstate.error.actor")) {
+    const suffix = type.slice("xstate.error.actor.".length).replace(/^\d+\./, "");
+    const label = typeof event.actorId === "string" ? event.actorId : suffix || type;
+    return { label, kind: "error" };
   }
   if (type.startsWith("xstate.") || type.startsWith("@xstate.")) {
     return { label: type, kind: "system" };
@@ -33,12 +39,48 @@ export function prettifyEvent(event: { type: string; actorId?: unknown }): {
 }
 
 export type TraceStep = {
-  title: string;
-  detail: string;
+  /** Event label (no status glyphs — `kind` carries done/error). */
+  label: string;
+  /** The state value the machine landed in after this event. */
+  state: string;
+  /** Compact `key: value` rendering of the event payload, "" when none. */
+  payload: string;
   kind: "model" | "done" | "error" | "system";
+  /** Milliseconds since run start (from the server-captured trace). */
+  at: number;
 };
 
-/** Derives the event chips shown in the app panel from a trace. */
+/**
+ * Builds a TraceStep from a live inspection `actorSnapshot` message, so the
+ * chat's transition log can fill in DURING a run (the authoritative server
+ * trace replaces it at settle). Lifecycle noise (`init`/`stop`) returns null.
+ */
+export function liveTraceStep(
+  event: unknown,
+  stateValue: unknown,
+  at: number,
+): TraceStep | null {
+  const source = event && typeof event === "object" ? (event as Record<string, unknown>) : null;
+  const rawType = source?.type;
+  if (typeof rawType !== "string") return null;
+  const type = rawType.replace(/^@/, "");
+  if (type === "xstate.init" || type === "xstate.stop") return null;
+  const { label, kind } = prettifyEvent({ ...source, type } as { type: string });
+  if (kind === "system") return null;
+  const payload = Object.entries(source ?? {})
+    .filter(
+      ([key, value]) =>
+        key !== "type" &&
+        (typeof value === "number" ||
+          typeof value === "boolean" ||
+          (typeof value === "string" && value.length <= 60)),
+    )
+    .map(([key, value]) => `${key}: ${value}`)
+    .join(", ");
+  return { label, state: stateValueLabel(stateValue), payload, kind, at };
+}
+
+/** Derives the transition steps shown in the app panel from a trace. */
 export function traceSteps(trace: TraceEntry[]): TraceStep[] {
   return trace
     .filter((entry) => entry.event.type !== "xstate.init" && entry.event.type !== "@xstate.init")
@@ -48,10 +90,6 @@ export function traceSteps(trace: TraceEntry[]): TraceStep[] {
         .filter(([key]) => key !== "type")
         .map(([key, value]) => `${key}: ${value}`)
         .join(", ");
-      return {
-        title: kind === "done" ? `${label} ✓` : kind === "error" ? `${label} ✗` : label,
-        detail: `→ ${stateValueLabel(entry.value)}${payload ? ` · ${payload}` : ""}`,
-        kind,
-      };
+      return { label, state: stateValueLabel(entry.value), payload, kind, at: entry.at };
     });
 }
