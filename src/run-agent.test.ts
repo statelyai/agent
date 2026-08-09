@@ -2338,6 +2338,105 @@ describe("Feature A: explicit suspension detection (isSuspended)", () => {
     expect(secondNotes).toEqual(["ready-1", "ready-2"]);
   });
 
+  test("a declared-suspension settle keeps every child delivery queued across an always-chain into the wait state", async () => {
+    // Regression (game-loop shape): the child-originated event lands on a
+    // handler that targets a transient state whose `always` fires a SECOND
+    // sendTo to the child before resting in the tagged wait state — both
+    // deliveries are still in the child's mailbox when the root transition
+    // inspect fires, and both must be flushed before the idle persist.
+    const childAgent = setupAgent({
+      context: z.object({ notes: z.array(z.string()) }),
+      events: {
+        OBSERVE: z.object({ note: z.string() }),
+      },
+      requests: {
+        tick: {
+          schemas: { input: z.object({}), output: z.string() },
+          model: "m",
+          prompt: () => "tick",
+        },
+      },
+    });
+    const childMachine = childAgent.createMachine({
+      id: "observer",
+      context: { notes: [] },
+      on: {
+        OBSERVE: ({ context, event }) => ({
+          context: { notes: [...context.notes, event.note] },
+        }),
+      },
+      initial: "boot",
+      states: {
+        boot: {
+          invoke: {
+            src: "tick",
+            input: {},
+            onDone: ({ parent }, enq) => {
+              if (parent) enq.sendTo(parent, { type: "MOVED" });
+              return { target: "watching" };
+            },
+          },
+        },
+        watching: {},
+      },
+    });
+
+    const agent = setupAgent({
+      context: z.object({}),
+      input: z.object({}),
+      events: {
+        MOVED: z.object({}),
+        DONE: z.object({}),
+      },
+      actors: { child: childMachine },
+      isSuspended: (snapshot) => snapshot.hasTag("waiting"),
+    });
+    const machine = agent.createMachine({
+      context: {},
+      initial: "running",
+      states: {
+        running: {
+          invoke: { id: "child", src: "child" },
+          initial: "playing",
+          states: {
+            playing: {
+              on: {
+                MOVED: ({ children }, enq) => {
+                  enq.sendTo(children.child, { type: "OBSERVE", note: "moved" });
+                  return { target: "over" };
+                },
+              },
+            },
+            over: {
+              always: ({ children }, enq) => {
+                enq.sendTo(children.child, { type: "OBSERVE", note: "round-over" });
+                return { target: "asking" };
+              },
+            },
+            asking: {
+              tags: ["waiting"],
+              on: { DONE: { target: "#end" } },
+            },
+          },
+        },
+        end: { id: "end", type: "final", output: () => ({}) },
+      },
+    });
+
+    const result = await runAgent(machine, {
+      input: {},
+      executors: { generateText: async () => ({ output: "tick" }) },
+    });
+    expect(result.status).toBe("idle");
+    if (result.status !== "idle") throw new Error("expected idle");
+    const notes = (
+      result.persistedSnapshot as {
+        children?: { child?: { snapshot?: { context?: { notes?: string[] } } } };
+      }
+    ).children?.child?.snapshot?.context?.notes;
+    expect(notes).toEqual(["moved", "round-over"]);
+  });
+
   test("a suspended region does not settle early while a sibling still has work in flight", async () => {
     const agent = setupAgent({
       context: z.object({ summary: z.string().nullable() }),

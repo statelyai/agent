@@ -26,11 +26,7 @@ const examplesDir = fileURLToPath(new URL(".", import.meta.url));
  * justified — this is an escape hatch, not a backlog.
  */
 const EXCLUDED: Record<string, string> = {
-  // Its waiting states are already tagged `waiting`, but declaring the
-  // predicate makes the settle path drop the invoked player actor's
-  // accumulated context (library bug, see the NOTE in the example). Re-enable
-  // `(s) => s.hasTag("waiting")` there once that is fixed.
-  "game-loop-agent#gameMachine": "library bug: isSuspended settle path loses child state",
+  // (empty — every human-waiting example currently declares its predicate)
 };
 
 /** An XState machine, duck-typed — instanceof is unreliable across module graphs. */

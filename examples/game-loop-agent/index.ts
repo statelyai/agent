@@ -178,6 +178,11 @@ const metaSchema = z.object({
 const gameSetup = setupAgent({
   models,
   meta: metaSchema,
+  // The machine's own wait signal: the `waiting` tag on the human-move states.
+  // `runAgent` settles idle deterministically whenever a resting snapshot
+  // carries it — the invoked `player` child (with its accumulated
+  // observations) round-trips through the idle `persistedSnapshot`.
+  isSuspended: (snapshot) => snapshot.hasTag("waiting"),
   context: z.object({
     seed: z.number(),
     target: z.number(),
@@ -549,10 +554,6 @@ export async function runGameLoopExample(options?: {
         }
       : createAiSdkExecutors({ models }),
     actors: { player: playerAgentMachine },
-    // NOTE: no `isSuspended` here yet — with a declared suspension predicate,
-    // the settle path loses the invoked player's accumulated context (library
-    // bug, tracked in "Fix child-state loss in isSuspended settle path").
-    // Re-enable as `(s: AnyMachineSnapshot) => s.hasTag("waiting")` once fixed.
     ...(options?.inspect ? { inspect: options.inspect } : {}),
     onTransition: (snapshot: GameSnapshot) => {
       if (snapshot.context.notice !== lastNotice) {
