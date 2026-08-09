@@ -35,6 +35,7 @@
     "executor-result-widening",
     "explicit-suspension-and-illegal-resume",
     "from-config-host-guards",
+    "from-config-suspension-predicate",
     "get-requests-cleanup-pass",
     "get-requests-state-interpretation",
     "get-state-meta",
