@@ -26,11 +26,7 @@ const examplesDir = fileURLToPath(new URL(".", import.meta.url));
  * justified — this is an escape hatch, not a backlog.
  */
 const EXCLUDED: Record<string, string> = {
-  // Authored as JSON and lowered with `setupAgent.fromConfig(...)`, whose
-  // options carry no `isSuspended` hook (a predicate is a function, so it
-  // cannot live in the JSON either). A host can still override per run with
-  // `runAgent({ isSuspended })`; a machine-carried one needs a library change.
-  "json-agent#jsonAgentMachine": "setupAgent.fromConfig has no isSuspended option",
+  // (empty — every human-waiting example currently declares its predicate)
 };
 
 /** An XState machine, duck-typed — instanceof is unreliable across module graphs. */

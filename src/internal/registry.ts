@@ -17,9 +17,10 @@ export const agentExecutionOptions = new WeakMap<object, AgentExecutionOptions>(
  * object. `config` is shared by reference across `machine.provide(...)` (unlike
  * the machine object itself), so a predicate registered here travels with the
  * machine through `.provide` — which is why it is keyed on `config`, not the
- * machine. Set by `setupAgent({ isSuspended })` in `createMachine`, read by
- * `runAgent` (below the host `options.isSuspended` override, above the timing
- * heuristic).
+ * machine. Set by `setupAgent({ isSuspended })` in `createMachine` and by
+ * `setupAgent.fromConfig` (its `isSuspended` option or the config's
+ * `suspendedTags`), read by `runAgent` (below the host `options.isSuspended`
+ * override, above the timing heuristic).
  */
 export const machineSuspensionPredicates = new WeakMap<
   object,
