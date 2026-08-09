@@ -36,6 +36,7 @@
     "explicit-suspension-and-illegal-resume",
     "from-config-host-guards",
     "from-config-suspension-predicate",
+    "get-agent-schemas",
     "get-requests-cleanup-pass",
     "get-requests-state-interpretation",
     "get-state-meta",
