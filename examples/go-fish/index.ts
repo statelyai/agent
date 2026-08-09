@@ -11,9 +11,11 @@
  * `ASK { rank }` — carrying the typed rank. The state's `meta.interaction`
  * tells the host how to render it: a label with `{handSummary}` interpolated
  * from context, and `textEvent: "ASK"` so free chat text becomes the event's
- * single string field. Illegal asks (a rank not in the human's hand) return
- * `undefined` from the transition, so the machine simply stays idle — the same
- * guard pattern that rejects the agent's illegal `AGENT_ASK`.
+ * single string field. Free text is normalized to a rank ("Do you have any 3s?"
+ * → `3`); an ask that names no rank, or one the human does not hold, keeps the
+ * turn and writes a `notice` the idle label surfaces. The agent's illegal
+ * `AGENT_ASK` is still rejected outright (the transition returns `undefined`),
+ * because the model can retry and a human cannot.
  *
  * Resume with `runAgent(machine, { snapshot: result.persistedSnapshot, event })`.
  *
@@ -246,11 +248,38 @@ function finalOutput(context: GameContext, reason?: "decision-failed") {
   } as const;
 }
 
-/** Free text ("3", " a ", "ace") to a rank, if it names one. */
-function parseRank(raw: string): Rank | undefined {
-  const normalized = raw.trim().toUpperCase();
-  if (normalized === "ACE") return "A";
-  return ranks.find((rank) => rank === normalized);
+/** Spelled-out rank names, singular. Plurals are stripped before lookup. */
+const rankNames: Record<string, Rank> = {
+  ACE: "A",
+  ONE: "A",
+  TWO: "2",
+  DEUCE: "2",
+  THREE: "3",
+  FOUR: "4",
+  FIVE: "5",
+  SIX: "6",
+};
+
+/** "SIXES" → "SIX", "THREES" → "THREE", "3S" → "3". */
+function singular(token: string): string {
+  if (token.length > 2 && token.endsWith("ES") && rankNames[token.slice(0, -2)]) {
+    return token.slice(0, -2);
+  }
+  return token.length > 1 && token.endsWith("S") ? token.slice(0, -1) : token;
+}
+
+/**
+ * Free text to a rank: "3", " a ", "ace", "Do you have any 3s?", "got any
+ * threes". Digits and spelled-out names win over a bare "A" so that "do you
+ * have a 3?" reads as 3, not an ace.
+ */
+export function parseRank(raw: string): Rank | undefined {
+  const tokens = (raw.toUpperCase().match(/[A-Z0-9]+/g) ?? []).map(singular);
+  for (const token of tokens) {
+    const named = rankNames[token] ?? ranks.find((rank) => rank === token && rank !== "A");
+    if (named) return named;
+  }
+  return tokens.includes("A") ? "A" : undefined;
 }
 
 function renderAgentPrompt(context: GameContext) {
@@ -311,17 +340,29 @@ export const goFishMachine = setupAgent({
       tags: ["waiting"],
       meta: {
         interaction: {
-          label: "Your hand: {handSummary}. Ask for a rank.",
+          // `{notice}` carries the last thing that happened — including why an
+          // illegal ask was rejected — so an idle re-settle is never silent.
+          label: "{notice} Your hand: {handSummary}. Ask for a rank.",
           textEvent: "ASK",
           events: { ASK: { label: "Ask", style: "primary" } },
         },
       },
       on: {
-        // Illegal asks (unknown rank, or one not in hand) are rejected the same
-        // way the agent's are: the transition returns `undefined`.
+        // Illegal asks (unknown rank, or one not in hand) keep the turn: the
+        // transition stays in `humanTurn` and only writes a notice explaining
+        // why, so the host re-prompts with feedback instead of silently.
         ASK: ({ context, event }) => {
           const rank = parseRank(event.rank);
-          if (!rank || !context.humanHand.includes(rank)) return undefined;
+          if (!rank) {
+            return {
+              context: {
+                notice: `"${event.rank.trim()}" is not a rank. Ranks are ${ranks.join(", ")}.`,
+              },
+            };
+          }
+          if (!context.humanHand.includes(rank)) {
+            return { context: { notice: `You have no ${rank}s — ask for a rank you hold.` } };
+          }
           return {
             target: "checkingWin",
             context: { ...playAsk(context, "human", rank), turn: "agent" },

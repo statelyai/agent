@@ -33,6 +33,40 @@ test("expands and evaluates a tree until a solved candidate appears", async () =
   expect(output.nodes).toHaveLength(5);
 });
 
+test("a confident first draft below the acceptance bar keeps the search going", async () => {
+  let rollout = 0;
+  const output = await runLatsExample({
+    problem: "retry policy",
+    generateText: async (request) => {
+      if (request.model === "generator") {
+        rollout++;
+        return { output: { candidates: [`candidate ${rollout}a`, `candidate ${rollout}b`] } };
+      }
+      return {
+        output: {
+          evaluations:
+            rollout === 1
+              ? // Evaluator claims solved, but the score is under ACCEPT_SCORE:
+                // the machine does not accept it, so the tree expands again.
+                [
+                  { score: 0.85, solved: true, critique: "no backoff cap" },
+                  { score: 0.5, solved: false, critique: "no jitter" },
+                ]
+              : [
+                  { score: 0.95, solved: true, critique: "complete" },
+                  { score: 0.6, solved: false, critique: "vague" },
+                ],
+        },
+      };
+    },
+  });
+
+  // More than one expansion happened — the tree search is actually visible.
+  expect(rollout).toBeGreaterThan(1);
+  expect(output.solved).toBe(true);
+  expect(output.answer).toContain("candidate 2a");
+});
+
 test("rollout budget returns the best candidate", async () => {
   const output = await runLatsExample({
     problem: "retry policy",

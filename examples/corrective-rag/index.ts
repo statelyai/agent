@@ -188,7 +188,7 @@ const cragContextSchema = z.object({
   documents: z.array(z.string()),
   // decide_to_generate's flag: no relevant docs survived grading.
   webSearchNeeded: z.boolean(),
-  usedWebSearch: z.boolean(),
+  usedFallbackIndex: z.boolean(),
   generation: z.string().nullable(),
 });
 
@@ -201,7 +201,7 @@ const agentSetup = setupAgent({
   output: z.object({
     answer: z.string(),
     documents: z.array(z.string()),
-    usedWebSearch: z.boolean(),
+    usedFallbackIndex: z.boolean(),
     rewrittenQuestion: z.string().nullable(),
   }),
   // `generating` always sets `generation` before `done` reads it — narrow it
@@ -297,7 +297,7 @@ export const correctiveRagMachine = agentSetup.createMachine({
     rewrittenQuestion: null,
     documents: [],
     webSearchNeeded: false,
-    usedWebSearch: false,
+    usedFallbackIndex: false,
     generation: null,
   }),
   initial: "retrieving",
@@ -371,7 +371,7 @@ export const correctiveRagMachine = agentSetup.createMachine({
           target: "generating",
           context: {
             documents: [...context.documents, ...output],
-            usedWebSearch: true,
+            usedFallbackIndex: true,
           },
         }),
       },
@@ -397,7 +397,7 @@ export const correctiveRagMachine = agentSetup.createMachine({
       output: ({ context }) => ({
         answer: context.generation,
         documents: context.documents,
-        usedWebSearch: context.usedWebSearch,
+        usedFallbackIndex: context.usedFallbackIndex,
         rewrittenQuestion: context.rewrittenQuestion,
       }),
     },
@@ -407,7 +407,7 @@ export const correctiveRagMachine = agentSetup.createMachine({
       output: ({ context }) => ({
         answer: "Unable to generate an answer for this question.",
         documents: context.documents,
-        usedWebSearch: context.usedWebSearch,
+        usedFallbackIndex: context.usedFallbackIndex,
         rewrittenQuestion: context.rewrittenQuestion,
       }),
     },
@@ -425,7 +425,7 @@ export interface RunCorrectiveRagOptions {
 export interface CorrectiveRagResult {
   answer: string;
   documents: string[];
-  usedWebSearch: boolean;
+  usedFallbackIndex: boolean;
   rewrittenQuestion: string | null;
   progress: string[];
 }
@@ -480,7 +480,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
 
     console.log("\nQuestion:", question);
     if (result.rewrittenQuestion) console.log("Rewritten:", result.rewrittenQuestion);
-    console.log("Used fallback sample web index:", result.usedWebSearch);
+    console.log("Used fallback sample web index:", result.usedFallbackIndex);
     console.log("\nAnswer:", result.answer);
   })().catch((error) => {
     console.error(error);

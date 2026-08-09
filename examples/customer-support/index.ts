@@ -78,6 +78,13 @@ export const BOOKINGS: Record<string, Booking> = {
     flight: "AA100 JFK→LHR, 2026-09-14 18:15",
     status: "confirmed",
   },
+  // The code the "cancel my flight" starter quotes — seeded so the advertised
+  // starter actually cancels a booking instead of reporting "no booking found".
+  "7QX2P": {
+    passenger: "Grace Hopper",
+    flight: "UA918 SFO→NRT, 2026-10-03 11:05",
+    status: "confirmed",
+  },
 };
 
 /** A tiny policy table (stand-in for LangGraph's `lookup_policy` retriever). */

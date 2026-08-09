@@ -296,9 +296,14 @@ function renderTranscriptPrompt(context: {
 
 const PLAY_AGAIN_PROMPT = "Do you want to play another round?";
 
-/** Record a yes/no answer against the pending transcript entry. */
+/**
+ * Append the pending question to the transcript, now that it has an answer.
+ * The pending question lives in `context.question` until then, so an unanswered
+ * question never shows up as history.
+ */
 function withAnswer(
   context: {
+    question: string;
     transcript: { question: string; answer: "yes" | "no"; rawAnswer: string }[];
     messages: AgentMessage[];
   },
@@ -306,10 +311,7 @@ function withAnswer(
   rawAnswer: string,
 ) {
   return {
-    transcript: [
-      ...context.transcript.slice(0, -1),
-      { ...context.transcript.at(-1)!, answer, rawAnswer },
-    ],
+    transcript: [...context.transcript, { question: context.question, answer, rawAnswer }],
     messages: [...context.messages, userMessage(rawAnswer)],
     pendingRawAnswer: null,
   };
@@ -386,15 +388,9 @@ export const twentyQuestionsMachine = agentSetup.createMachine({
             ? {
                 target: "awaitingAnswer",
                 context: {
+                  // The pending question stays out of `transcript` until the
+                  // player actually answers it.
                   question: event.question,
-                  transcript: [
-                    ...context.transcript,
-                    {
-                      question: event.question,
-                      answer: "yes",
-                      rawAnswer: "",
-                    },
-                  ],
                   messages: [...context.messages, assistantMessage(event.question)],
                   questionsRemaining: context.questionsRemaining - 1,
                 },
@@ -450,7 +446,7 @@ export const twentyQuestionsMachine = agentSetup.createMachine({
       invoke: {
         src: "classifyAnswer",
         input: ({ context }) => ({
-          question: context.transcript.at(-1)?.question ?? "",
+          question: context.question,
           rawAnswer: context.pendingRawAnswer ?? "",
           messages: context.messages,
           transcript: context.transcript,
@@ -469,18 +465,7 @@ export const twentyQuestionsMachine = agentSetup.createMachine({
               }
             : {
                 target: "deciding",
-                context: {
-                  transcript: [
-                    ...context.transcript.slice(0, -1),
-                    {
-                      ...context.transcript.at(-1)!,
-                      answer: output.answer,
-                      rawAnswer: context.pendingRawAnswer ?? "",
-                    },
-                  ],
-                  messages: [...context.messages, userMessage(context.pendingRawAnswer ?? "")],
-                  pendingRawAnswer: null,
-                },
+                context: withAnswer(context, output.answer, context.pendingRawAnswer ?? ""),
               },
         onError: { target: "stumped" },
       },

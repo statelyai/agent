@@ -6,6 +6,10 @@
  * signed, delegates IT provisioning to a typed actor, pauses while hardware
  * ships, then writes a day-one schedule.
  *
+ * The IT actor is a stub: the email and Slack handle it returns are derived
+ * from the employee's name, so they are recorded (and prompted) as simulated
+ * placeholders rather than accounts anyone can use.
+ *
  * Demonstrates:
  *   - durable memory as typed machine context, not raw chat history
  *   - event-driven idle states: they wait for DOCS_SIGNED and
@@ -66,6 +70,9 @@ const interactionSchema = z.object({
   textEvent: z.string().optional(),
 });
 
+// Stub IT system: it does NOT reach a real directory, so every identifier it
+// returns is derived from the employee's name and labelled simulated
+// downstream — nothing here implies a real mailbox or Slack account exists.
 const provisionIt = createAsyncLogic({
   schemas: {
     input: employeeSchema,
@@ -89,6 +96,9 @@ const contextSchema = z.object({
   welcomePacketId: z.string().nullable(),
   docsSignedAt: z.string().nullable(),
   accounts: accountsSchema.nullable(),
+  // Plain-language record of what provisioning actually did — shown to whoever
+  // is waiting, so the fabricated identifiers are never read as real ones.
+  provisioningNote: z.string().nullable(),
   hardwareDeliveredAt: z.string().nullable(),
   schedule: z.string().nullable(),
 });
@@ -129,22 +139,27 @@ const coordinatorSetup = setupAgent({
         input: z.object({
           employee: employeeSchema,
           accounts: accountsSchema,
-          hardwareDeliveredAt: z.string(),
+          // Status, not just a timestamp: the model is told delivery already
+          // happened, so it cannot write it up as still upcoming.
+          hardwareStatus: z.string(),
         }),
         output: z.string(),
       },
       model: "scheduler",
       system:
         "Write a concise day-one schedule for a new hire. Mention the role, " +
-        "account setup, and hardware readiness. Return only the schedule.",
+        "account setup, and hardware readiness. Never contradict the recorded " +
+        "facts below: anything already recorded as done is in the past — never " +
+        "describe it as upcoming or scheduled. Accounts marked simulated are " +
+        "placeholders; do not present them as verified. Return only the schedule.",
       prompt: ({ input }) =>
         [
           `Employee: ${input.employee.name}`,
           `Role: ${input.employee.role}`,
           `Start date: ${input.employee.startDate}`,
-          `Email: ${input.accounts.email}`,
-          `Slack: ${input.accounts.slack}`,
-          `Hardware delivered: ${input.hardwareDeliveredAt}`,
+          `Email (simulated): ${input.accounts.email}`,
+          `Slack (simulated): ${input.accounts.slack}`,
+          `Hardware: ${input.hardwareStatus}`,
         ].join("\n"),
     },
   },
@@ -185,6 +200,7 @@ export const longRunningOnboardingMachine = coordinatorSetup.createMachine({
     welcomePacketId: null,
     docsSignedAt: null,
     accounts: null,
+    provisioningNote: null,
     hardwareDeliveredAt: null,
     schedule: null,
   }),
@@ -222,7 +238,13 @@ export const longRunningOnboardingMachine = coordinatorSetup.createMachine({
         input: ({ context }) => context.employee,
         onDone: ({ output }) => ({
           target: "waitingForHardware",
-          context: { accounts: output },
+          context: {
+            accounts: output,
+            provisioningNote:
+              `Simulated IT provisioning (ticket ${output.ticketId}): placeholder ` +
+              `mailbox ${output.email} and Slack handle ${output.slack} were derived ` +
+              `from the employee's name. No real accounts were created.`,
+          },
         }),
       },
     },
@@ -246,7 +268,7 @@ export const longRunningOnboardingMachine = coordinatorSetup.createMachine({
         input: ({ context }) => ({
           employee: context.employee,
           accounts: context.accounts,
-          hardwareDeliveredAt: context.hardwareDeliveredAt,
+          hardwareStatus: `delivered on ${context.hardwareDeliveredAt} (already received)`,
         }),
         onDone: ({ output }) => ({
           target: "onboarded",

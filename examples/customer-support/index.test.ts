@@ -1,6 +1,7 @@
+import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import type { AgentTool } from "@statelyai/agent";
-import { customerSupportMachine, runCustomerSupportExample } from "./index.js";
+import { BOOKINGS, customerSupportMachine, runCustomerSupportExample } from "./index.js";
 
 // Mock host: routes on `request.name` (the setupAgent request key). The
 // `classify` request returns a scripted intent; the `answer` request plays the
@@ -98,6 +99,26 @@ test("APPROVE resumes from the persisted snapshot and executes the action", asyn
   // The executeAction actor read the real booking and produced the confirmation.
   expect(result.message).toContain("AB1234");
   expect(result.message).toContain("cancelled");
+});
+
+test("the advertised cancel starter approves onto a real booking", async () => {
+  const starters = JSON.parse(readFileSync(new URL("./metadata.json", import.meta.url), "utf8"))
+    .starters as string[];
+  const cancelStarter = starters.find((starter) => /cancel/i.test(starter))!;
+  const code = cancelStarter.match(/\b[A-Z0-9]{5,6}\b/)![0];
+  // The starter's confirmation code must exist in the sample table, or approving
+  // returns "No booking found; nothing changed."
+  expect(BOOKINGS[code]).toBeDefined();
+
+  const result = await runCustomerSupportExample({
+    query: cancelStarter,
+    approve: true,
+    generateText: mockGenerateText({ intent: { intent: "cancel", confirmationCode: code } }),
+  });
+
+  expect(result.resolution).toBe("executed");
+  expect(result.message).toContain("cancelled");
+  expect(result.message).not.toContain("No booking found");
 });
 
 test("rebook APPROVE carries the new flight through to execution", async () => {

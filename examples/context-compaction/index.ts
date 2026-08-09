@@ -86,6 +86,9 @@ export const contextCompactionSchemas = createAgentSchemas({
     maxMessages: z.number(),
     keepRecent: z.number(),
     pendingInput: z.string().nullable(),
+    // The latest assistant reply, mirrored out of `messages` so a host that
+    // renders context (the demo UI) can show it — message arrays are plumbing.
+    reply: z.string(),
     // Human-readable window state, interpolated into the interaction label.
     windowStatus: z.string(),
   }),
@@ -182,6 +185,7 @@ export const contextCompactionMachine = agentSetup.createMachine({
     maxMessages: input.maxMessages,
     keepRecent: input.keepRecent,
     pendingInput: null,
+    reply: "",
     windowStatus: "0 messages in the window, no summary yet",
   }),
   initial: "awaitingUser",
@@ -236,6 +240,7 @@ export const contextCompactionMachine = agentSetup.createMachine({
               messages,
               turns: context.turns + 1,
               pendingInput: null,
+              reply: output,
               windowStatus: `${messages.length}/${context.maxMessages} messages${
                 context.summary ? ", summary active" : ", no summary yet"
               }`,

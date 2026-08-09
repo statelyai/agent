@@ -29,7 +29,7 @@ test("relevant docs → straight to generate (no correction)", async () => {
   });
 
   expect(result.answer).toContain("Long-term memory");
-  expect(result.usedWebSearch).toBe(false);
+  expect(result.usedFallbackIndex).toBe(false);
   expect(result.rewrittenQuestion).toBeNull();
   // Grading happened; the correction branch did NOT.
   expect(result.progress).toContain("grading");
@@ -50,7 +50,7 @@ test("docs retrieved but all irrelevant → rewrite + web-search fallback", asyn
     ]),
   });
 
-  expect(result.usedWebSearch).toBe(true);
+  expect(result.usedFallbackIndex).toBe(true);
   expect(result.rewrittenQuestion).toBe("prompt injection attack defense for agents");
   // Full correction branch is visible in the state progression.
   expect(result.progress).toContain("grading");
@@ -74,7 +74,7 @@ test("no docs retrieved → skip grading, correct via web search", async () => {
     ]),
   });
 
-  expect(result.usedWebSearch).toBe(true);
+  expect(result.usedFallbackIndex).toBe(true);
   expect(result.progress).not.toContain("grading");
   expect(result.progress).toContain("transformingQuery");
   expect(result.progress).toContain("webSearching");
@@ -106,15 +106,15 @@ test("starters behave as their labels advertise", async () => {
   }
 
   const hit = results.get("Corpus hit — answers without correcting")!;
-  expect(hit.usedWebSearch).toBe(false);
+  expect(hit.usedFallbackIndex).toBe(false);
   expect(hit.documents.some((doc) => doc.includes("long-term memory"))).toBe(true);
 
   const nearMiss = results.get("Near-miss doc — graded away, then corrected")!;
-  expect(nearMiss.usedWebSearch).toBe(true);
+  expect(nearMiss.usedFallbackIndex).toBe(true);
   expect(nearMiss.documents.some((doc) => doc.includes("vector database"))).toBe(true);
 
   const corrected = results.get("Corpus miss — corrected via the sample index")!;
-  expect(corrected.usedWebSearch).toBe(true);
+  expect(corrected.usedFallbackIndex).toBe(true);
   expect(corrected.documents.some((doc) => doc.includes("Prompt injection"))).toBe(true);
 
   // The one deliberate miss: even the fallback index has nothing, and the

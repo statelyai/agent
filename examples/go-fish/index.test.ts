@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import type { AgentDecisionRequest, ChosenEvent } from "@statelyai/agent";
 import { runAgent } from "@statelyai/agent";
-import { goFishMachine, idleLabel, runGoFishExample, type Rank } from "./index.js";
+import { goFishMachine, idleLabel, parseRank, runGoFishExample, type Rank } from "./index.js";
 
 const deck: Rank[] = [
   "A",
@@ -121,6 +121,65 @@ describe("go-fish", () => {
     expect(result.status).toBe("done");
     expect(calls).toBe(2);
     expect(requests[1]!.attempts[0]!.failure).toBe("rejected-by-guard");
+  });
+
+  test("parses a rank out of natural-language asks", () => {
+    const cases: Array<[string, Rank | undefined]> = [
+      ["3", "3"],
+      [" a ", "A"],
+      ["ace", "A"],
+      ["Do you have any 3s?", "3"],
+      ["got any threes", "3"],
+      ["Do you have a 4?", "4"],
+      ["give me your SIXES", "6"],
+      ["I'll take aces please", "A"],
+      ["twos", "2"],
+      ["do you have any kings?", undefined],
+      ["hello there", undefined],
+    ];
+    for (const [text, expected] of cases) {
+      expect(parseRank(text), text).toBe(expected);
+    }
+  });
+
+  test("an illegal human ask explains itself in the idle label", async () => {
+    const decide = async (): Promise<{ event: ChosenEvent }> => ({
+      event: { type: "AGENT_ASK", rank: "A" },
+    });
+
+    const first = await runAgent(goFishMachine, {
+      input: { deck, maxTurns: 4, seed: 0 },
+      executors: { decide },
+    });
+    if (first.status !== "idle") throw new Error("expected idle");
+
+    // Not a rank at all.
+    const gibberish = await runAgent(goFishMachine, {
+      snapshot: first.persistedSnapshot,
+      event: { type: "ASK", rank: "banana" },
+      executors: { decide },
+    });
+    if (gibberish.status !== "idle") throw new Error("expected idle");
+    expect(gibberish.snapshot.context.turns).toBe(first.snapshot.context.turns);
+    expect(idleLabel(gibberish.snapshot)).toContain('"banana" is not a rank');
+
+    // A real rank the human does not hold (hand is 2 2 3 4 5 6 6).
+    const notHeld = await runAgent(goFishMachine, {
+      snapshot: gibberish.persistedSnapshot,
+      event: { type: "ASK", rank: "do you have any aces?" },
+      executors: { decide },
+    });
+    if (notHeld.status !== "idle") throw new Error("expected idle");
+    expect(notHeld.snapshot.context.turns).toBe(first.snapshot.context.turns);
+    expect(idleLabel(notHeld.snapshot)).toContain("You have no As");
+
+    // A natural-language ask for a held rank goes through.
+    const accepted = await runAgent(goFishMachine, {
+      snapshot: notHeld.persistedSnapshot,
+      event: { type: "ASK", rank: "Do you have any 3s?" },
+      executors: { decide },
+    });
+    expect(accepted.snapshot.context.turns).toBeGreaterThan(first.snapshot.context.turns);
   });
 
   test("stays idle on an illegal human ask and advances on a legal one", async () => {

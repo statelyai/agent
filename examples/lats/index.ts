@@ -29,6 +29,14 @@ type TreeNode = z.infer<typeof treeNodeSchema>;
 const DEFAULT_MAX_ROLLOUTS = 4;
 const DEFAULT_MAX_DEPTH = 3;
 
+/**
+ * Acceptance bar. A candidate counts as solved only when the evaluator marks it
+ * solved AND scores it at or above this bar — a confident first draft with a
+ * middling score keeps the search going instead of ending it after one
+ * expansion (which is what makes the tree search visible at all).
+ */
+const ACCEPT_SCORE = 0.9;
+
 export const models = defineModels({
   generator: openai("gpt-5.4-mini"),
   evaluator: openai("gpt-5.4-mini"),
@@ -92,7 +100,16 @@ const setup = setupAgent({
       },
       model: "evaluator",
       system:
-        "Evaluate each candidate in order. Score correctness from 0 to 1 and mark solved only for a complete answer.",
+        "Evaluate each candidate in order against ALL of these criteria: " +
+        "(1) it fully answers the problem as stated; " +
+        "(2) it handles the obvious edge cases and failure modes; " +
+        "(3) it is specific enough to act on without follow-up questions; " +
+        "(4) it contains no factual, logical, or arithmetic errors. " +
+        "Score correctness from 0 to 1 and reserve 0.9 or above for a candidate " +
+        "that meets every criterion. Mark solved ONLY when you cannot name a " +
+        "single concrete improvement — first-round candidates almost never clear " +
+        "this bar. If you can name any improvement, solved is false and the " +
+        "score is below 0.9. The critique must name that improvement.",
       prompt: ({ input }) =>
         `Problem: ${input.problem}\nCandidates:\n${JSON.stringify(input.candidates)}`,
     },
@@ -166,7 +183,9 @@ export const latsMachine = setup.createMachine({
               depth: parent.depth + 1,
               score: evaluation.score,
               visits: 0,
-              solved: evaluation.solved,
+              // The acceptance bar, enforced in the machine: an evaluator that
+              // says "solved" with a middling score does not stop the search.
+              solved: evaluation.solved && evaluation.score >= ACCEPT_SCORE,
             };
           });
           const bestScore = children.reduce((best, child) => Math.max(best, child.score), 0);

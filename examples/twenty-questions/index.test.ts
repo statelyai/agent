@@ -171,6 +171,60 @@ describe("twenty-questions", () => {
     expect(textModels).toEqual(["quick", "quick", "quick", "quick"]);
   });
 
+  test("the pending question stays out of the transcript until it is answered", async () => {
+    const decide = async (): Promise<{ event: ChosenEvent }> => ({
+      event: { type: "ASK", question: "Is it an animal?" },
+    });
+
+    // First idle settle: the question has been asked, nothing answered yet.
+    const asked = await runAgent(twentyQuestionsMachine, {
+      input: { questionsRemaining: 20 },
+      executors: { generateText: createClassifier(), decide },
+    });
+
+    expect(asked.status).toBe("idle");
+    if (asked.status !== "idle") throw new Error("expected idle");
+    expect(asked.snapshot.context.question).toBe("Is it an animal?");
+    expect(asked.snapshot.context.transcript).toEqual([]);
+
+    // The entry appears only once an answer event arrives.
+    const answered = await runAgent(twentyQuestionsMachine, {
+      snapshot: asked.persistedSnapshot,
+      event: { type: "ANSWER_YES" },
+      executors: { generateText: createClassifier(), decide },
+    });
+
+    expect(answered.snapshot.context.transcript).toEqual([
+      { question: "Is it an animal?", answer: "yes", rawAnswer: "yes" },
+    ]);
+  });
+
+  test("a classified free-text answer records the raw reply on the transcript entry", async () => {
+    let decisions = 0;
+    const decide = async (): Promise<{ event: ChosenEvent }> => {
+      decisions += 1;
+      return decisions === 1
+        ? { event: { type: "ASK", question: "Is it an animal?" } }
+        : { event: { type: "GUESS", guess: "a cat" } };
+    };
+
+    const asked = await runAgent(twentyQuestionsMachine, {
+      input: { questionsRemaining: 20 },
+      executors: { generateText: createClassifier(), decide },
+    });
+    if (asked.status !== "idle") throw new Error("expected idle");
+
+    const answered = await runAgent(twentyQuestionsMachine, {
+      snapshot: asked.persistedSnapshot,
+      event: { type: "ANSWER", rawAnswer: "mhm" },
+      executors: { generateText: createClassifier(), decide },
+    });
+
+    expect(answered.snapshot.context.transcript).toEqual([
+      { question: "Is it an animal?", answer: "yes", rawAnswer: "mhm" },
+    ]);
+  });
+
   test("button events answer deterministically, without a classifier call", async () => {
     const textModels: string[] = [];
     let askCount = 0;

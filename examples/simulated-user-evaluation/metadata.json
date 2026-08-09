@@ -32,6 +32,22 @@
         "scenario": "A long-time customer wants to cancel after a price increase.",
         "opening": "Why did my bill go up $12 this month?"
       }
+    },
+    {
+      "label": "Baseline A: bare bot, no playbook (expect a low score)",
+      "input": {
+        "scenario": "A frustrated customer wants a refund for a delayed order.",
+        "opening": "Hi, I need to talk to someone about my late package.",
+        "playbook": ""
+      }
+    },
+    {
+      "label": "Baseline B: same scenario, bot given the support playbook (expect a high score)",
+      "input": {
+        "scenario": "A frustrated customer wants a refund for a delayed order.",
+        "opening": "Hi, I need to talk to someone about my late package.",
+        "playbook": "You have access to this support playbook and must follow it:\n- Delayed orders: apologise, confirm the order number, and offer either a full refund or free expedited reshipment. Refunds settle in 5-7 business days.\n- Plans: Pro is $24/month and adds unlimited projects, priority support, and SSO. Upgrades are prorated and take effect immediately.\n- Price increases: the annual adjustment is $12/month; offer the annual plan (two months free) before processing any cancellation.\n- Address changes: possible any time before the order ships; confirm the order number, then the new address.\nAlways resolve the request in the conversation. Never tell the user to contact support elsewhere."
+      }
     }
   ]
 }

@@ -52,8 +52,18 @@ const agentSetup = setupAgent({
     evaluate: {
       schemas: { input: z.object({ draft: z.string() }), output: evaluationSchema },
       model: "critic",
+      // The rubric is deliberately strict: a vague "score it 0-10" prompt hands
+      // out 8s and 9s to first drafts, and the revision loop never runs.
       system:
-        "You are a demanding editor. Score the draft 0-10 and give specific, actionable feedback.",
+        "You are a demanding editor. Score the draft 0-10 against ALL four criteria: " +
+        "(1) concrete, specific sensory detail rather than generic imagery; " +
+        "(2) no clichés, filler, or throat-clearing; " +
+        "(3) a clear controlling idea the paragraph actually builds to; " +
+        "(4) varied rhythm and precise word choice, with no sagging sentence. " +
+        "A score of 8 or above means every criterion is met and you cannot name a " +
+        "single concrete improvement. First drafts almost never clear that bar — " +
+        "if you can name any improvement at all, score 7 or below. Give specific, " +
+        "actionable feedback naming the weakest criterion and how to fix it.",
       prompt: ({ input }) => `Score this draft:\n${input.draft}`,
     },
   },

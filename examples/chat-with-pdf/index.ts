@@ -79,6 +79,8 @@ const questionSchema = z.object({
 
 const gradeSchema = z.object({
   correct: z.boolean(),
+  /** The answer the passage supports, shown back to the learner. */
+  expected: z.string(),
   explanation: z.string(),
 });
 
@@ -272,6 +274,8 @@ export const chatWithPdfSchemas = createAgentSchemas({
     results: z.array(resultSchema),
     /** Rendered label for whatever the idle state is waiting on. */
     prompt: z.string(),
+    /** Verdict on the previous answer, shown above the next question. */
+    lastGrade: z.string(),
     /** Set when retrieval comes back empty; explains an early summary. */
     exhausted: z.boolean(),
   }),
@@ -304,7 +308,7 @@ export const chatWithPdfSchemas = createAgentSchemas({
   },
   emitted: {
     QUESTION: z.object({ prompt: z.string(), pageNumber: z.number() }),
-    GRADED: z.object({ correct: z.boolean(), explanation: z.string() }),
+    GRADED: z.object({ correct: z.boolean(), expected: z.string(), explanation: z.string() }),
   },
 });
 
@@ -356,6 +360,7 @@ const agentSetup = setupAgent({
       system:
         "Grade a quiz answer against the source passage ONLY. Be encouraging. " +
         "Accept answers that are right in substance even if worded differently. " +
+        "Return `expected` as the answer the passage supports, in one line. " +
         "In the explanation, quote or paraphrase the passage and name the page.",
       prompt: ({ input }) =>
         [
@@ -394,6 +399,12 @@ function nextStep(context: QuizContext): "summary" | "retrieving" | "asking" {
   return "asking";
 }
 
+/** The one-line verdict shown above the next question. */
+function renderGrade(grade: z.infer<typeof gradeSchema>): string {
+  const verdict = grade.correct ? "Correct" : "Incorrect";
+  return `${verdict} — the answer is ${grade.expected}. ${grade.explanation}`;
+}
+
 /** Assemble the display text. The page hint comes from the chunk, not the model. */
 function renderQuestion(question: z.infer<typeof questionSchema>, pageNumber: number): string {
   const choices = question.choices.length
@@ -424,6 +435,7 @@ export const chatWithPdfMachine = agentSetup.createMachine({
     pending: null,
     results: [],
     prompt: "",
+    lastGrade: "",
     exhausted: false,
   }),
   initial: "selectingDocument",
@@ -538,7 +550,9 @@ export const chatWithPdfMachine = agentSetup.createMachine({
       tags: ["waiting"],
       meta: {
         interaction: {
-          label: "{prompt}",
+          // `{lastGrade}` puts the verdict on the previous answer above the
+          // question, so a host never jumps to the next one silently.
+          label: "{lastGrade}\n\n{prompt}",
           events: {
             ANSWER: { label: "Answer", style: "primary" },
             SKIP: { label: "Skip" },
@@ -554,7 +568,7 @@ export const chatWithPdfMachine = agentSetup.createMachine({
         }),
         // Skipping still advances the loop through the same function grading
         // uses, so the two paths cannot drift apart.
-        SKIP: ({ context }) => ({ target: nextStep(context) }),
+        SKIP: ({ context }) => ({ target: nextStep(context), context: { lastGrade: "" } }),
         STOP: { target: "summary" },
       },
     },
@@ -569,7 +583,12 @@ export const chatWithPdfMachine = agentSetup.createMachine({
           pageNumber: context.pending.pageNumber,
         }),
         onDone: ({ context, output }, enq) => {
-          enq.emit({ type: "GRADED", correct: output.correct, explanation: output.explanation });
+          enq.emit({
+            type: "GRADED",
+            correct: output.correct,
+            expected: output.expected,
+            explanation: output.explanation,
+          });
           const results = [
             ...context.results,
             {
@@ -580,9 +599,15 @@ export const chatWithPdfMachine = agentSetup.createMachine({
               explanation: output.explanation,
             },
           ];
-          return { target: nextStep(context), context: { results, pending: null } };
+          return {
+            target: nextStep(context),
+            context: { results, pending: null, lastGrade: renderGrade(output) },
+          };
         },
-        onError: ({ context }) => ({ target: nextStep(context), context: { pending: null } }),
+        onError: ({ context }) => ({
+          target: nextStep(context),
+          context: { pending: null, lastGrade: "" },
+        }),
       },
     },
 
@@ -611,10 +636,12 @@ export type LearnerEvent =
 
 /** `{key}` placeholders in interaction labels resolve against context. */
 export function resolveInteractionLabel(label: string, context: Record<string, unknown>): string {
-  return label.replace(/\{(\w+)\}/g, (_, key: string) => {
-    const value = context[key];
-    return typeof value === "string" || typeof value === "number" ? String(value) : "";
-  });
+  return label
+    .replace(/\{(\w+)\}/g, (_, key: string) => {
+      const value = context[key];
+      return typeof value === "string" || typeof value === "number" ? String(value) : "";
+    })
+    .trim();
 }
 
 /** Prompt for whatever the idle state is waiting on, from its meta hint. */
@@ -638,8 +665,8 @@ export async function main() {
     executors: createAiSdkExecutors({ models }),
     on: {
       QUESTION: ({ prompt }: { prompt: string }) => console.log(`\n${prompt}`),
-      GRADED: ({ correct, explanation }: { correct: boolean; explanation: string }) =>
-        console.log(`${correct ? "✓" : "✗"} ${explanation}`),
+      GRADED: (grade: { correct: boolean; expected: string; explanation: string }) =>
+        console.log(`${grade.correct ? "✓" : "✗"} ${renderGrade(grade)}`),
     },
     onTransition: (snapshot: QuizSnapshot) =>
       console.log("[state]", JSON.stringify(snapshot.value)),

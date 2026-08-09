@@ -16,7 +16,8 @@
  * npx tsx examples/session-actor/index.ts
  */
 import { z } from "zod";
-import { createAgentActor, setupAgent } from "@statelyai/agent";
+import type { SnapshotFrom } from "xstate";
+import { createAgentActor, getStateMeta, setupAgent } from "@statelyai/agent";
 import type { AgentRequestExecutor } from "@statelyai/agent";
 
 // Typed interaction meta for the idle answer gate: the pause's `label`, a
@@ -40,10 +41,21 @@ const metaSchema = z.object({
     .optional(),
 });
 
+const gradeSchema = z.object({
+  correct: z.boolean(),
+  /** The answer the question was looking for, shown back to the player. */
+  expected: z.string(),
+  explanation: z.string(),
+});
+
 const sessionQuizSetup = setupAgent({
   meta: metaSchema,
   context: z.object({
     question: z.string().nullable(),
+    /** The answer being graded right now. */
+    pendingAnswer: z.string(),
+    /** Verdict on the previous answer, rendered above the next question. */
+    lastGrade: z.string(),
     rounds: z.number(),
     correct: z.number(),
   }),
@@ -55,10 +67,32 @@ const sessionQuizSetup = setupAgent({
   },
   // Deterministic idle detection: settle exactly when the machine is waiting.
   isSuspended: (snapshot) => snapshot.hasTag("waiting"),
+  requests: {
+    gradeAnswer: {
+      schemas: {
+        input: z.object({ question: z.string(), answer: z.string() }),
+        output: gradeSchema,
+      },
+      model: "host",
+      system:
+        "Grade a trivia answer. Return correct=true only if the answer is right in " +
+        "substance, `expected` as the answer that was being looked for, and a one-line " +
+        "explanation.",
+      prompt: ({ input }) => `Question: ${input.question}\nAnswer: ${input.answer}`,
+    },
+  },
 });
 
+/** The one-line verdict a host shows before the next question. */
+function renderGrade(question: string, grade: z.infer<typeof gradeSchema>): string {
+  return [
+    `${grade.correct ? "Correct" : "Incorrect"} — the answer to "${question}" is ${grade.expected}.`,
+    grade.explanation,
+  ].join(" ");
+}
+
 export const sessionQuizMachine = sessionQuizSetup.createMachine({
-  context: () => ({ question: null, rounds: 0, correct: 0 }),
+  context: () => ({ question: null, pendingAnswer: "", lastGrade: "", rounds: 0, correct: 0 }),
   initial: "asking",
   states: {
     asking: {
@@ -75,8 +109,9 @@ export const sessionQuizMachine = sessionQuizSetup.createMachine({
       tags: ["waiting"],
       meta: {
         interaction: {
-          // `{question}` resolves against context when the label is shown.
-          label: "{question}",
+          // `{question}` resolves against context when the label is shown, and
+          // `{lastGrade}` puts the verdict on the previous answer above it.
+          label: "{lastGrade}\n\n{question}",
           events: {
             ANSWER: { label: "Submit answer", style: "primary" },
             QUIT: { label: "End the quiz" },
@@ -88,18 +123,30 @@ export const sessionQuizMachine = sessionQuizSetup.createMachine({
       on: {
         ANSWER: ({ context, event }) => ({
           target: "grading",
-          context: {
-            rounds: context.rounds + 1,
-            // Scripted grading keeps the example key-free; a real host would
-            // grade with a request here.
-            correct: context.correct + (event.text.length > 3 ? 1 : 0),
-          },
+          context: { rounds: context.rounds + 1, pendingAnswer: event.text },
         }),
         QUIT: { target: "done" },
       },
     },
+    // The answer is graded before the next question is drafted, so the player
+    // always sees a verdict — not a silent jump to the next round.
     grading: {
-      always: { target: "asking" },
+      invoke: {
+        src: "gradeAnswer",
+        input: ({ context }) => ({
+          question: context.question ?? "",
+          answer: context.pendingAnswer,
+        }),
+        onDone: ({ context, output }) => ({
+          target: "asking",
+          context: {
+            correct: context.correct + (output.correct ? 1 : 0),
+            lastGrade: renderGrade(context.question ?? "", output),
+            pendingAnswer: "",
+          },
+        }),
+        onError: { target: "asking", context: { lastGrade: "", pendingAnswer: "" } },
+      },
     },
     done: {
       type: "final",
@@ -108,11 +155,42 @@ export const sessionQuizMachine = sessionQuizSetup.createMachine({
   },
 });
 
+type QuizSnapshot = SnapshotFrom<typeof sessionQuizMachine>;
+
+/**
+ * What a host shows at an idle settle: the state's `meta.interaction.label`
+ * with `{key}` placeholders resolved against context.
+ */
+export function idleLabel(snapshot: QuizSnapshot): string {
+  const label = getStateMeta(snapshot).interaction?.label ?? "";
+  return label
+    .replace(/\{(\w+)\}/g, (_, key: string) => {
+      const value = (snapshot.context as Record<string, unknown>)[key];
+      return typeof value === "string" || typeof value === "number" ? String(value) : "";
+    })
+    .trim();
+}
+
 export async function runSession() {
-  const generateText: AgentRequestExecutor = async () => ({
-    output: "What state does an XState machine start in?",
-    usage: { totalTokens: 12 },
-  });
+  // One scripted executor serves both requests; a real host would point them at
+  // a model. Grading is keyed off the request's system prompt.
+  const generateText: AgentRequestExecutor = async (request) => {
+    if (request.system?.includes("Grade a trivia answer")) {
+      const answer = (request.prompt ?? "").match(/Answer: (.*)/)?.[1] ?? "";
+      return {
+        output: {
+          correct: /initial/i.test(answer),
+          expected: "the initial state",
+          explanation: "A machine starts in the state named by `initial`.",
+        },
+        usage: { totalTokens: 12 },
+      };
+    }
+    return {
+      output: "What state does an XState machine start in?",
+      usage: { totalTokens: 12 },
+    };
+  };
 
   const session = createAgentActor(sessionQuizMachine, {
     input: {},
@@ -123,10 +201,14 @@ export async function runSession() {
   let result = await session.settled();
   console.log(`settled: ${result.status}`); // idle
 
+  console.log(idleLabel(session.actor.getSnapshot()));
+
   // Turn 2: the player answers on the SAME live actor — no snapshot restore.
   session.actor.send({ type: "ANSWER", text: "the initial state" });
   result = await session.settled();
-  console.log(`settled: ${result.status}`); // idle again (next question)
+  console.log(`settled: ${result.status}`); // idle again (graded, then next question)
+  // The verdict on the answer leads the next prompt.
+  console.log(idleLabel(session.actor.getSnapshot()));
 
   // Turn 3: the player quits; the session finalizes.
   session.actor.send({ type: "QUIT" });

@@ -65,8 +65,13 @@ export const parallelStreamsMachine = agentSetup.createMachine({
   id: "parallel-streams",
   context: ({ input }) => ({ topic: input.topic, analysis: null, poem: null }),
   output: ({ context }) => ({
-    // Primary human-readable field: both streams composed into one prose block.
-    summary: `Analysis of ${context.topic}:\n${context.analysis ?? ""}\n\nPoem about ${context.topic}:\n${context.poem ?? ""}`,
+    // A one-line manifest, NOT a second copy: the streamed text already reached
+    // the caller chunk-by-chunk and is returned verbatim in `analysis`/`poem`.
+    // Repeating it here would render each stream twice.
+    summary:
+      `Two streams completed for "${context.topic}": ` +
+      `analysis (${(context.analysis ?? "").length} chars) and ` +
+      `poem (${(context.poem ?? "").length} chars).`,
     analysis: context.analysis ?? "",
     poem: context.poem ?? "",
   }),

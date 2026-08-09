@@ -57,6 +57,7 @@ async function play(options: PlayOptions): Promise<PlayResult> {
       return {
         output: {
           correct: options.grade ? options.grade(answer) : true,
+          expected: "the expected answer",
           explanation: `graded "${answer}"`,
         },
       };
@@ -195,6 +196,30 @@ describe("chat-with-pdf quiz mode", () => {
     expect(result.output?.exhausted).toBe(true);
     expect(result.output?.answered).toBe(6);
     expect(new Set(result.output!.pagesCovered).size).toBe(6);
+  });
+
+  test("the grade for an answer is visible above the next question", async () => {
+    const wrong = await play({
+      input: { documentId: "statecharts", maxQuestions: 3, refreshEvery: 3 },
+      learnerEvents: answers(3),
+      grade: (answer) => answer !== "answer 1",
+    });
+
+    expect(wrong.status).toBe("done");
+    // The second idle label leads with the verdict on the first answer, naming
+    // the expected answer, and the question follows it.
+    const second = wrong.idleLabels[1]!;
+    expect(second).toContain("Incorrect — the answer is the expected answer.");
+    expect(second).toContain('graded "answer 1"');
+    expect(second.indexOf("Incorrect")).toBeLessThan(second.indexOf("Q2 about:"));
+
+    // ... and a correct answer is acknowledged just as visibly.
+    const third = wrong.idleLabels[2]!;
+    expect(third).toContain("Correct — the answer is the expected answer.");
+    expect(third).toContain('graded "answer 2"');
+
+    // The first question has nothing to grade yet, so it stands alone.
+    expect(wrong.idleLabels[0]).toMatch(/^Q1 about:/);
   });
 
   test("SKIP advances the loop without scoring", async () => {

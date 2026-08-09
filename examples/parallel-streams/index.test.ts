@@ -26,8 +26,12 @@ test("parallel streaming requests are disambiguated by request.id in onChunk", a
   assert.equal(buffers.thinker, "analysis chunk");
   assert.equal(buffers.poet, "poem chunk");
   assert.deepEqual(output, {
-    summary: "Analysis of actors:\nanalysis chunk\n\nPoem about actors:\npoem chunk",
+    summary: 'Two streams completed for "actors": analysis (14 chars) and poem (10 chars).',
     analysis: "analysis chunk",
     poem: "poem chunk",
   });
+  // The summary references the streams instead of repeating their text, so the
+  // demo does not render the same content twice.
+  assert.ok(!output.summary.includes("analysis chunk"));
+  assert.ok(!output.summary.includes("poem chunk"));
 });

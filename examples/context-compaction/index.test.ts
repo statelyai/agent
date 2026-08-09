@@ -120,5 +120,42 @@ describe("context-compaction", () => {
     if (second.status !== "idle") return;
     expect(second.snapshot.context.turns).toBe(1);
     expect(textContent(second.snapshot.context.messages.at(-1))).toBe("reply 1");
+    // Mirrored out of `messages` so a context-rendering host can show it.
+    expect(second.snapshot.context.reply).toBe("reply 1");
+  });
+
+  test("context.reply tracks the latest answer, including across compaction", async () => {
+    const { generateText } = createModel();
+
+    // maxMessages=4, keepRecent=2: turn 3 overflows the window and compacts.
+    const start = await runAgent(contextCompactionMachine, {
+      input: { maxMessages: 4, keepRecent: 2 },
+      executors: { generateText },
+    });
+    expect(start.status).toBe("idle");
+    if (start.status !== "idle") return;
+    let snapshot = start.persistedSnapshot;
+
+    for (const turn of [1, 2, 3]) {
+      const result = await runAgent(contextCompactionMachine, {
+        snapshot,
+        event: { type: "USER_MESSAGE", text: `q${turn}` },
+        executors: { generateText },
+      });
+      expect(result.status).toBe("idle");
+      if (result.status !== "idle") return;
+      expect(result.snapshot.context.reply).toBe(`reply ${turn}`);
+      snapshot = result.persistedSnapshot;
+    }
+
+    // Turn 3 compacted (history capped at keepRecent) yet the reply survives.
+    const final = await runAgent(contextCompactionMachine, {
+      snapshot,
+      event: { type: "USER_MESSAGE", text: "exit" },
+      executors: { generateText },
+    });
+    expect(final.status).toBe("done");
+    if (final.status !== "done") return;
+    expect(final.output.summary).toBe("SUMMARY: prior facts folded in.");
   });
 });

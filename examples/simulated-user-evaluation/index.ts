@@ -6,6 +6,10 @@
  * This ports LangGraph's multi-agent simulation topology without LangSmith's
  * dataset, experiment, or hosted runtime layers.
  *
+ * The bot under evaluation is configurable via `playbook`: empty is the bare bot
+ * (a failure baseline), and `SUPPORT_PLAYBOOK` is a bot equipped to resolve the
+ * scenario (a passing baseline). Running both makes the score comparable.
+ *
  * Run: OPENAI_API_KEY=... npx tsx examples/simulated-user-evaluation/index.ts
  */
 import { openai } from "@ai-sdk/openai";
@@ -21,10 +25,26 @@ export const models = defineModels({
   evaluator: openai("gpt-5.4-mini"),
 });
 
+/**
+ * A passing baseline for the bot under evaluation. The bare bot (empty
+ * playbook) has no product knowledge and scores badly — a useful failure case,
+ * but only meaningful next to a bot that can actually do the job. Starters pair
+ * the same scenario with and without this playbook so the two scores compare.
+ */
+export const SUPPORT_PLAYBOOK = [
+  "You have access to this support playbook and must follow it:",
+  "- Delayed orders: apologise, confirm the order number, and offer either a full refund or free expedited reshipment. Refunds settle in 5-7 business days.",
+  "- Plans: Pro is $24/month and adds unlimited projects, priority support, and SSO. Upgrades are prorated and take effect immediately.",
+  "- Price increases: the annual adjustment is $12/month; offer the annual plan (two months free) before processing any cancellation.",
+  "- Address changes: possible any time before the order ships; confirm the order number, then the new address.",
+  "Always resolve the request in the conversation. Never tell the user to contact support elsewhere.",
+].join("\n");
+
 const setup = setupAgent({
   models,
   context: z.object({
     scenario: z.string(),
+    playbook: z.string(),
     transcript: z.array(messageSchema),
     turn: z.number(),
     maxTurns: z.number(),
@@ -32,16 +52,30 @@ const setup = setupAgent({
     score: z.number().nullable(),
     feedback: z.string().nullable(),
   }),
-  input: z.object({ scenario: z.string(), opening: z.string(), maxTurns: z.number().default(4) }),
+  input: z.object({
+    scenario: z.string(),
+    opening: z.string(),
+    maxTurns: z.number().default(4),
+    /** Extra instructions for the bot under evaluation. Empty = the bare bot. */
+    playbook: z.string().default(""),
+  }),
   output: z.object({ transcript: z.array(messageSchema), score: z.number(), feedback: z.string() }),
   requests: {
     chatbot: {
       schemas: {
-        input: z.object({ scenario: z.string(), transcript: z.array(messageSchema) }),
+        input: z.object({
+          scenario: z.string(),
+          playbook: z.string(),
+          transcript: z.array(messageSchema),
+        }),
         output: z.string(),
       },
       model: "chatbot",
-      system: "You are the support chatbot under evaluation. Be accurate, direct, and helpful.",
+      // With a playbook the bot has something to answer from (the passing
+      // baseline); without one it is the bare bot that scores badly.
+      system: ({ input }) =>
+        "You are the support chatbot under evaluation. Be accurate, direct, and helpful." +
+        (input.playbook ? `\n\n${input.playbook}` : ""),
       prompt: ({ input }) => `${input.scenario}\n\n${JSON.stringify(input.transcript)}`,
     },
     simulatedUser: {
@@ -70,6 +104,7 @@ export const simulatedUserEvaluationMachine = setup.createMachine({
   id: "simulated-user-evaluation",
   context: ({ input }) => ({
     scenario: input.scenario,
+    playbook: input.playbook,
     transcript: [{ role: "user" as const, content: input.opening }],
     turn: 0,
     maxTurns: input.maxTurns,
@@ -87,7 +122,11 @@ export const simulatedUserEvaluationMachine = setup.createMachine({
     chatbot: {
       invoke: {
         src: "chatbot",
-        input: ({ context }) => ({ scenario: context.scenario, transcript: context.transcript }),
+        input: ({ context }) => ({
+          scenario: context.scenario,
+          playbook: context.playbook,
+          transcript: context.transcript,
+        }),
         onDone: ({ output, context }) => ({
           target: "simulatedUser",
           context: {
@@ -129,6 +168,8 @@ export interface RunSimulatedUserEvaluationOptions {
   scenario?: string;
   opening?: string;
   maxTurns?: number;
+  /** Extra instructions for the bot under evaluation; "" is the bare bot. */
+  playbook?: string;
   /** Injected for tests; direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
   /** Observes each machine transition. */
@@ -142,11 +183,12 @@ export async function runSimulatedUserEvaluationExample(
     scenario = "The user needs to change the delivery address before an order ships.",
     opening = "I entered the wrong address. Can you help?",
     maxTurns = 4,
+    playbook = "",
     generateText,
     onProgress,
   } = options;
   const result = await runAgent(simulatedUserEvaluationMachine, {
-    input: { scenario, opening, maxTurns },
+    input: { scenario, opening, maxTurns, playbook },
     ...(generateText
       ? { executors: { generateText } }
       : { executors: createAiSdkExecutors({ models }) }),

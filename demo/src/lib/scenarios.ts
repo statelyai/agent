@@ -147,6 +147,7 @@ export const scenarios: Scenario[] = [
     starters: [
       "Write a vivid one-paragraph description of a tidal shoreline at dusk.",
       "Describe a night market in the rain, in one paragraph.",
+      "Write one paragraph about a hospital waiting room at 3am. [expect a revision]",
     ],
   },
 ];

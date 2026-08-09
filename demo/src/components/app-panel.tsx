@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useSyncExternalStore, type ReactNode } from "react";
 import {
   AssistantRuntimeProvider,
   type AppendMessage,
@@ -161,6 +161,18 @@ function messagesFromTurns(turns: Turn[], liveSteps: TraceStep[]): ThreadMessage
   });
 }
 
+// SSR paints the welcome chips seconds before React hydrates in dev; clicks
+// in that window silently no-op. Gate interactive starters on hydration so
+// the not-yet-wired state is visibly disabled instead of a dead button.
+const noopSubscribe = () => () => {};
+function useHydrated(): boolean {
+  return useSyncExternalStore(
+    noopSubscribe,
+    () => true,
+    () => false,
+  );
+}
+
 function textFromAppend(message: AppendMessage): string {
   return message.content
     .filter(
@@ -192,6 +204,7 @@ export function AppPanel({
     !pendingIdle && !loading && started && lastReady && lastReady.status !== "idle",
   );
   const messages = messagesFromTurns(turns, liveSteps);
+  const hydrated = useHydrated();
 
   const runtime = useExternalStoreRuntime({
     messages,
@@ -219,7 +232,7 @@ export function AppPanel({
             <Button
               key={starter.label}
               variant="ghost"
-              disabled={loading}
+              disabled={loading || !hydrated}
               onClick={starter.onStart}
               className="aui-thread-welcome-suggestion text-foreground hover:bg-muted border-border/60 h-auto max-w-full gap-1.5 rounded-xl border px-3.5 py-1.5 text-center text-sm font-normal whitespace-normal transition-colors sm:rounded-full sm:whitespace-nowrap"
             >
