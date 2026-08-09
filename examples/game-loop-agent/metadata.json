@@ -8,7 +8,11 @@
     "url": null
   },
   "comparison": {
-    "targets": ["LangGraph", "Burr", "Flowise"],
+    "targets": [
+      "LangGraph",
+      "Burr",
+      "Flowise"
+    ],
     "purpose": "Shows an invoked agent that receives pushed game events and acts only on its turn, with human moves as gated machine events (HUMAN_ROLL / HUMAN_BANK / ROUND_REPLY) hinted through meta.interaction, plus natural-language round control."
   },
   "starters": [
@@ -20,5 +24,6 @@
       "target": 30,
       "maxRounds": 2
     }
-  ]
+  ],
+  "machine": "gameMachine"
 }

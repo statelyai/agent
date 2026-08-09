@@ -351,7 +351,10 @@ export const gameMachine = gameSetup.createMachine({
           tags: ["waiting"],
           meta: {
             interaction: {
-              label: "{notice} Your turn. Roll or bank?",
+              // The full decision context rides in the label — score, turn
+              // total, round, target — so a host never asks for a blind move.
+              label:
+                "{notice} Round {round}: you {humanScore} · agent {agentScore} · turn total {turnTotal} · first to {target}. Your turn — roll or bank?",
               events: {
                 HUMAN_ROLL: { label: "Roll", style: "primary" },
                 HUMAN_BANK: { label: "Bank" },
@@ -428,7 +431,8 @@ export const gameMachine = gameSetup.createMachine({
               // `{notice}` resolves against the snapshot's context when the
               // label is shown (host convention; meta itself is static), so
               // the question can say who won: "agent won the round. Another…".
-              label: "{notice} Another round, or call it here?",
+              label:
+                "{notice} Score: you {humanScore} · agent {agentScore} (wins {humanWins}–{agentWins}). Another round, or call it here?",
               textEvent: "ROUND_REPLY",
               events: { ROUND_REPLY: { label: "Reply", style: "primary" } },
             },

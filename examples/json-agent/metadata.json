@@ -8,11 +8,23 @@
     "url": null
   },
   "comparison": {
-    "targets": ["Flowise"],
+    "targets": [
+      "Flowise"
+    ],
     "purpose": "Shows a full agent workflow \u2014 decision, text request, idle human-in-the-loop step \u2014 authored as a real .json file and lowered by setupAgent.fromConfig(...) into the same runnable XState machine as TS authoring."
   },
   "starters": [
-    "My invoice charged me twice this month. Please fix it.",
-    "I can't log in - password reset emails never arrive."
+    {
+      "label": "Draft a reply for approval (login issue)",
+      "input": {
+        "ticket": "I can't log in - password reset emails never arrive."
+      }
+    },
+    {
+      "label": "Immediate escalation path (duplicate invoice)",
+      "input": {
+        "ticket": "My invoice charged me twice this month. Please fix it."
+      }
+    }
   ]
 }

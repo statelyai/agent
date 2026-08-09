@@ -28,6 +28,7 @@ test("REPLY path: decide drafts a reply, settles idle, resumes on human APPROVE"
   expect(second.status === "done" && second.output).toEqual({
     resolution: "replied",
     reply: "Sorry about that — refund issued.",
+    escalationReason: "",
   });
 });
 
@@ -43,5 +44,11 @@ test("ESCALATE path: decide escalates directly, no reply drafted", async () => {
   });
 
   expect(result.status).toBe("done");
-  expect(result.status === "done" && result.output).toEqual({ resolution: "escalated" });
+  // The decision's reason survives into the output — "escalated" alone tells
+  // a reviewer nothing.
+  expect(result.status === "done" && result.output).toEqual({
+    resolution: "escalated",
+    escalationReason: "angry customer",
+    reply: undefined,
+  });
 });

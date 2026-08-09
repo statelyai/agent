@@ -111,7 +111,9 @@ describe("game-loop-agent", () => {
     });
 
     expect(labels).toHaveLength(1);
-    expect(labels[0]).toMatch(/^(human|agent) won the round\. Another round, or call it here\?$/);
+    expect(labels[0]).toMatch(
+      /^(human|agent) won the round\. Score: you \d+ · agent \d+ \(wins \d+–\d+\)\. Another round, or call it here\?$/,
+    );
   });
 
   test("round control is decided from the free-text reply", async () => {
