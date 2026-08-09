@@ -178,6 +178,9 @@ export const emailDrafterActors = {
 const agentSetup = setupAgent({
   schemas: emailDrafterSchemas,
   models,
+  // The machine's own wait signal: the `awaiting-user` tag. Every state that
+  // needs the human carries it, so `runAgent` settles idle deterministically.
+  isSuspended: (snapshot) => snapshot.hasTag("awaiting-user"),
   actors: emailDrafterActors,
 });
 
@@ -194,6 +197,7 @@ export const emailDrafter = agentSetup.createMachine({
   initial: "prompting",
   states: {
     prompting: {
+      tags: ["awaiting-user"],
       meta: {
         interaction: {
           type: "text",
@@ -239,6 +243,7 @@ export const emailDrafter = agentSetup.createMachine({
     },
 
     needsMoreInfo: {
+      tags: ["awaiting-user"],
       meta: {
         interaction: {
           type: "select",
@@ -304,6 +309,7 @@ export const emailDrafter = agentSetup.createMachine({
     },
 
     reviewing: {
+      tags: ["awaiting-user"],
       meta: {
         interaction: {
           type: "select",
@@ -355,6 +361,7 @@ export const emailDrafter = agentSetup.createMachine({
     },
 
     sent: {
+      tags: ["awaiting-user"],
       meta: {
         display: ["Email sent."],
         interaction: {

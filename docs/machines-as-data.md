@@ -260,6 +260,22 @@ result = await runAgent(machine, { snapshot, event: { type: "APPROVE" }, executo
 
 > **Note:** An idle state is any state with no `invoke`: nothing runs, so the machine waits for an external event via `on`. A state with an `invoke` is doing work (a decision, a text request, or an `agent.userInput` pause).
 
+### Suspension declaration
+
+Without a declared suspension predicate, `runAgent` settles idle via a best-effort timing heuristic (and warns). A config declares one with `suspendedTags` — the declarative form of `setupAgent({ isSuspended })`, since JSON cannot carry a function:
+
+```yaml
+suspendedTags: [awaiting-approval]
+states:
+  awaitingApproval:
+    tags: [awaiting-approval]
+    on:
+      APPROVE: { target: resolved }
+```
+
+- `fromConfig(...)` lowers the list into a `snapshot.hasTag(...)` predicate; every listed tag must appear in some state's `tags` (an unused entry is a build-time error).
+- For predicates a tag list cannot express, pass a function instead: `setupAgent.fromConfig(config, { isSuspended })`. It takes precedence over `suspendedTags`; a `runAgent({ isSuspended })` host override beats both.
+
 > **Note:** Two `prompt`-shaped fields sit at different layers. A `requests` entry's `prompt` is the text sent to the model. An `invoke`'s `input` is the data passed to the invoked source: a request's typed input, or an `agent.decide` inline input carrying its own `model`/`prompt`/`allowedEvents`.
 
 ## Expressions
