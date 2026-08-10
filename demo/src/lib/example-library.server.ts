@@ -99,6 +99,15 @@ const exampleSources = import.meta.glob("../../../examples/*/index.ts", {
   import: "default",
 }) as Record<string, () => Promise<string>>;
 
+const exampleSiblingSources = import.meta.glob(
+  [
+    "../../../examples/*/*.ts",
+    "!../../../examples/*/*.test.ts",
+    "!../../../examples/*/type-probes.ts",
+  ],
+  { query: "?raw", import: "default" },
+) as Record<string, () => Promise<string>>;
+
 function idFromPath(path: string): string | null {
   return path.match(/examples\/([^/]+)\//)?.[1] ?? null;
 }
@@ -115,6 +124,15 @@ function byId<T>(modules: Record<string, T>): Map<string, T> {
 const metadataById = byId(metadataModules);
 const moduleById = byId(exampleModules);
 const sourceById = byId(exampleSources);
+
+const siblingSourcesById = new Map<string, Array<() => Promise<string>>>();
+for (const [path, loadSource] of Object.entries(exampleSiblingSources)) {
+  const id = idFromPath(path);
+  if (!id) continue;
+  const sources = siblingSourcesById.get(id) ?? [];
+  sources.push(loadSource);
+  siblingSourcesById.set(id, sources);
+}
 
 /** An XState machine, duck-typed — instanceof is unreliable across module graphs. */
 function isMachine(value: unknown): boolean {
@@ -166,9 +184,7 @@ function summaryFor(id: string): ExampleSummary {
   };
 }
 
-function sourceForMachine(source: string, exportName: string, machineCount: number): string {
-  if (machineCount === 1) return source;
-
+function machineInitializer(source: string, exportName: string): string | null {
   const file = ts.createSourceFile("example.ts", source, ts.ScriptTarget.Latest, true);
   let initializer: ts.Expression | undefined;
   const visit = (node: ts.Node) => {
@@ -185,9 +201,24 @@ function sourceForMachine(source: string, exportName: string, machineCount: numb
   };
   visit(file);
 
-  return initializer
-    ? `const __statelyVizMachine = ${initializer.getText(file)};\n${source}`
-    : source;
+  return initializer?.getText(file) ?? null;
+}
+
+function sourceForMachine(source: string, exportName: string, machineCount: number): string {
+  if (machineCount === 1) return source;
+  const initializer = machineInitializer(source, exportName);
+
+  return initializer ? `const __statelyVizMachine = ${initializer};\n${source}` : source;
+}
+
+async function findMachineSource(id: string, exportName: string, indexSource: string) {
+  if (machineInitializer(indexSource, exportName)) return indexSource;
+
+  for (const loadSource of siblingSourcesById.get(id) ?? []) {
+    const source = await loadSource();
+    if (source !== indexSource && machineInitializer(source, exportName)) return source;
+  }
+  return indexSource;
 }
 
 export function listExampleSummaries(): ExampleSummary[] {
@@ -223,11 +254,12 @@ async function loadDetail(id: string): Promise<ExampleDetail> {
       const mod = await loadModule();
       const exportedMachines = Object.entries(mod).filter((entry) => isMachine(entry[1]));
       for (const [exportName, value] of exportedMachines) {
+        const machineSource = await findMachineSource(id, exportName, source);
         const config = (value as { config: { initial?: unknown } }).config;
         const inputInfo = describeMachineInput(value as AnyStateMachine);
         machines.push({
           exportName,
-          vizConfig: sourceForMachine(source, exportName, exportedMachines.length),
+          vizConfig: sourceForMachine(machineSource, exportName, exportedMachines.length),
           initial: typeof config.initial === "string" ? config.initial : null,
           inputJsonSchema: inputInfo.jsonSchema,
           promptField: inputInfo.promptField,
@@ -262,6 +294,20 @@ export async function getExampleSource(id: string): Promise<string> {
   const loadSource = sourceById.get(id);
   if (!loadSource) throw new Error(`Unknown example: ${id}`);
   return loadSource();
+}
+
+/** Source containing the selected machine, prioritized for Viz conversion. */
+export async function getExampleMachineSource(id: string, exportName: string): Promise<string> {
+  const indexSource = await getExampleSource(id);
+  const loadModule = moduleById.get(id);
+  if (!loadModule) throw new Error(`Unknown example: ${id}`);
+  const mod = await loadModule();
+  const machineCount = Object.values(mod).filter(isMachine).length;
+  return sourceForMachine(
+    await findMachineSource(id, exportName, indexSource),
+    exportName,
+    machineCount,
+  );
 }
 
 /** Per-example wall-clock budget override from metadata.json `budgetMs`. */

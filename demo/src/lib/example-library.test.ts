@@ -29,6 +29,14 @@ describe("example library auto-discovery", () => {
     expect(machine?.vizConfig).toBe(detail.source);
   });
 
+  it("finds a re-exported machine in its defining source file", async () => {
+    const detail = await getExampleDetail("email-drafter");
+    const machine = detail.machines.find((entry) => entry.exportName === "emailDrafter");
+
+    expect(detail.source).not.toContain("export const emailDrafter =");
+    expect(machine?.vizConfig).toContain("export const emailDrafter =");
+  });
+
   it("puts the selected machine first when a source file exports several", async () => {
     const detail = await getExampleDetail("game-agent");
     const machine = detail.machines.find((entry) => entry.exportName === "rpsMachine");

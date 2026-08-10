@@ -59,7 +59,7 @@ export const startExample = createServerFn({ method: "POST" })
   .validator((input: unknown) => startExampleInput.parse(input))
   .handler(async ({ data }): Promise<MachineChatResult> => {
     const [
-      { getExampleMachine, getExampleSource, exampleBudgetMs, exampleSuspendedTag },
+      { getExampleMachine, getExampleMachineSource, exampleBudgetMs, exampleSuspendedTag },
       { startMachineChat },
       { getRequest },
     ] = await Promise.all([
@@ -69,7 +69,7 @@ export const startExample = createServerFn({ method: "POST" })
     ]);
     const [machine, machineSource] = await Promise.all([
       getExampleMachine(data.id, data.exportName),
-      getExampleSource(data.id),
+      getExampleMachineSource(data.id, data.exportName),
     ]);
     return startMachineChat(machine, data.input, {
       signal: getRequest().signal,
@@ -83,7 +83,7 @@ export const resumeExample = createServerFn({ method: "POST" })
   .validator((input: unknown) => resumeExampleInput.parse(input))
   .handler(async ({ data }): Promise<MachineChatResult> => {
     const [
-      { getExampleMachine, getExampleSource, exampleBudgetMs, exampleSuspendedTag },
+      { getExampleMachine, getExampleMachineSource, exampleBudgetMs, exampleSuspendedTag },
       { resumeMachineChat },
       { getRequest },
     ] = await Promise.all([
@@ -93,7 +93,7 @@ export const resumeExample = createServerFn({ method: "POST" })
     ]);
     const [machine, machineSource] = await Promise.all([
       getExampleMachine(data.id, data.exportName),
-      getExampleSource(data.id),
+      getExampleMachineSource(data.id, data.exportName),
     ]);
     return resumeMachineChat(
       machine,
