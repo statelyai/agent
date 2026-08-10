@@ -59,7 +59,7 @@ export const startExample = createServerFn({ method: "POST" })
   .validator((input: unknown) => startExampleInput.parse(input))
   .handler(async ({ data }): Promise<MachineChatResult> => {
     const [
-      { getExampleMachine, exampleBudgetMs, exampleSuspendedTag },
+      { getExampleMachine, getExampleSource, exampleBudgetMs, exampleSuspendedTag },
       { startMachineChat },
       { getRequest },
     ] = await Promise.all([
@@ -67,11 +67,15 @@ export const startExample = createServerFn({ method: "POST" })
       import("./machine-chat.server"),
       import("@tanstack/react-start/server"),
     ]);
-    const machine = await getExampleMachine(data.id, data.exportName);
+    const [machine, machineSource] = await Promise.all([
+      getExampleMachine(data.id, data.exportName),
+      getExampleSource(data.id),
+    ]);
     return startMachineChat(machine, data.input, {
       signal: getRequest().signal,
       budgetMs: exampleBudgetMs(data.id),
       suspendedTag: exampleSuspendedTag(data.id),
+      machineSource,
     });
   });
 
@@ -79,7 +83,7 @@ export const resumeExample = createServerFn({ method: "POST" })
   .validator((input: unknown) => resumeExampleInput.parse(input))
   .handler(async ({ data }): Promise<MachineChatResult> => {
     const [
-      { getExampleMachine, exampleBudgetMs, exampleSuspendedTag },
+      { getExampleMachine, getExampleSource, exampleBudgetMs, exampleSuspendedTag },
       { resumeMachineChat },
       { getRequest },
     ] = await Promise.all([
@@ -87,7 +91,10 @@ export const resumeExample = createServerFn({ method: "POST" })
       import("./machine-chat.server"),
       import("@tanstack/react-start/server"),
     ]);
-    const machine = await getExampleMachine(data.id, data.exportName);
+    const [machine, machineSource] = await Promise.all([
+      getExampleMachine(data.id, data.exportName),
+      getExampleSource(data.id),
+    ]);
     return resumeMachineChat(
       machine,
       data.snapshot,
@@ -96,6 +103,7 @@ export const resumeExample = createServerFn({ method: "POST" })
         signal: getRequest().signal,
         budgetMs: exampleBudgetMs(data.id),
         suspendedTag: exampleSuspendedTag(data.id),
+        machineSource,
       },
     );
   });

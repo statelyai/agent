@@ -19,8 +19,23 @@ describe("example library auto-discovery", () => {
     expect(detail.source).toContain("createMachine");
     const machine = detail.machines.find((entry) => entry.exportName === "jokeMachine");
     expect(machine).toBeDefined();
-    expect(machine!.vizConfig).toMatchObject({ id: expect.any(String) });
-    expect(machine!.vizConfig.states).toBeTruthy();
+    expect(machine!.vizConfig).toBe(detail.source);
+  });
+
+  it("passes v6 example source directly to Viz", async () => {
+    const detail = await getExampleDetail("customer-support");
+    const machine = detail.machines.find((entry) => entry.exportName === "customerSupportMachine");
+
+    expect(machine?.vizConfig).toBe(detail.source);
+  });
+
+  it("puts the selected machine first when a source file exports several", async () => {
+    const detail = await getExampleDetail("game-agent");
+    const machine = detail.machines.find((entry) => entry.exportName === "rpsMachine");
+
+    expect(machine?.vizConfig.indexOf("rpsSetup.createMachine")).toBeLessThan(
+      machine?.vizConfig.indexOf("gameAgentSetup.createMachine") ?? -1,
+    );
   });
 
   it("surfaces pre-baked starters from metadata.json", () => {

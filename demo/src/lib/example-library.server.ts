@@ -10,7 +10,7 @@
  * their node-only dependencies must never reach the client bundle.
  */
 import type { AnyStateMachine } from "xstate";
-import { toVizConfig } from "./scenarios";
+import ts from "typescript";
 import { describeMachineInput, hasLiveExecutors } from "./machine-chat.server";
 import { humanizeFieldName, type JsonObject } from "./machine-ui";
 
@@ -40,7 +40,8 @@ export type ExampleSummary = {
 
 export type ExampleMachine = {
   exportName: string;
-  vizConfig: Record<string, Json>;
+  /** Raw XState source so Viz can preserve v6 function transitions. */
+  vizConfig: string;
   initial: string | null;
   /** JSON Schema of the machine's `input`, when declared via setupAgent. */
   inputJsonSchema: JsonObject | null;
@@ -165,6 +166,30 @@ function summaryFor(id: string): ExampleSummary {
   };
 }
 
+function sourceForMachine(source: string, exportName: string, machineCount: number): string {
+  if (machineCount === 1) return source;
+
+  const file = ts.createSourceFile("example.ts", source, ts.ScriptTarget.Latest, true);
+  let initializer: ts.Expression | undefined;
+  const visit = (node: ts.Node) => {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === exportName &&
+      node.initializer
+    ) {
+      initializer = node.initializer;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+
+  return initializer
+    ? `const __statelyVizMachine = ${initializer.getText(file)};\n${source}`
+    : source;
+}
+
 export function listExampleSummaries(): ExampleSummary[] {
   // Every example folder with an index.ts is included; metadata.json refines it.
   // `"manual": true` opts an example out — CLI-only scripts and host adapters
@@ -188,9 +213,7 @@ export function getExampleDetail(id: string): Promise<ExampleDetail> {
 }
 
 async function loadDetail(id: string): Promise<ExampleDetail> {
-  const loadSource = sourceById.get(id);
-  if (!loadSource) throw new Error(`Unknown example: ${id}`);
-  const source = await loadSource();
+  const source = await getExampleSource(id);
 
   const machines: ExampleMachine[] = [];
   let importError: string | null = null;
@@ -198,15 +221,14 @@ async function loadDetail(id: string): Promise<ExampleDetail> {
   if (loadModule) {
     try {
       const mod = await loadModule();
-      for (const [exportName, value] of Object.entries(mod)) {
-        if (!isMachine(value)) continue;
-        // toVizConfig strips functions, so the result is plain JSON.
-        const vizConfig = toVizConfig(value as never) as Record<string, Json>;
+      const exportedMachines = Object.entries(mod).filter((entry) => isMachine(entry[1]));
+      for (const [exportName, value] of exportedMachines) {
+        const config = (value as { config: { initial?: unknown } }).config;
         const inputInfo = describeMachineInput(value as AnyStateMachine);
         machines.push({
           exportName,
-          vizConfig,
-          initial: typeof vizConfig.initial === "string" ? vizConfig.initial : null,
+          vizConfig: sourceForMachine(source, exportName, exportedMachines.length),
+          initial: typeof config.initial === "string" ? config.initial : null,
           inputJsonSchema: inputInfo.jsonSchema,
           promptField: inputInfo.promptField,
         });
@@ -233,6 +255,13 @@ async function loadDetail(id: string): Promise<ExampleDetail> {
     // No machine export means nothing to drive from chat, same as `manual`.
     manual: metadataById.get(id)?.manual === true || machines.length === 0,
   };
+}
+
+/** Raw module source used by both the static embed and live inspection. */
+export async function getExampleSource(id: string): Promise<string> {
+  const loadSource = sourceById.get(id);
+  if (!loadSource) throw new Error(`Unknown example: ${id}`);
+  return loadSource();
 }
 
 /** Per-example wall-clock budget override from metadata.json `budgetMs`. */

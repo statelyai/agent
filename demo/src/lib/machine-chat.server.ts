@@ -292,6 +292,8 @@ export type RunLimits = {
    * for plain XState machines with no setupAgent isSuspended predicate.
    */
   suspendedTag?: string;
+  /** Raw source passed to Viz so v6 function transitions remain visible. */
+  machineSource?: string;
 };
 
 export const DEFAULT_RUN_BUDGET_MS = 120_000;
@@ -520,7 +522,7 @@ export async function startMachineChat(
     signal: runSignal(limits),
     isSuspended: suspendedPredicate(limits),
     onTransition,
-    inspect: maybeCreateRunInspection(machine),
+    inspect: maybeCreateRunInspection(machine, limits.machineSource),
   });
   return toChatResult(
     machine,
@@ -581,7 +583,7 @@ export async function resumeMachineChat(
     signal: runSignal(limits),
     isSuspended: suspendedPredicate(limits),
     onTransition,
-    inspect: maybeCreateRunInspection(machine),
+    inspect: maybeCreateRunInspection(machine, limits.machineSource),
   });
   return toChatResult(
     machine,
