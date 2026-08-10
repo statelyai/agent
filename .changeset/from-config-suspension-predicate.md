@@ -10,8 +10,11 @@
 {
   "suspendedTags": ["awaiting-approval"],
   "states": {
-    "awaitingApproval": { "tags": ["awaiting-approval"], "on": { "APPROVE": { "target": "resolved" } } }
-  }
+    "awaitingApproval": {
+      "tags": ["awaiting-approval"],
+      "on": { "APPROVE": { "target": "resolved" } },
+    },
+  },
 }
 ```
 

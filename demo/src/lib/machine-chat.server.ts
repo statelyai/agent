@@ -96,8 +96,7 @@ export function createTraceRecorder(baselineContext?: unknown): {
         context: smallContext(snapshot.context),
       });
     },
-    changedKeys: () =>
-      [...changedAt.entries()].sort((a, b) => b[1] - a[1]).map(([key]) => key),
+    changedKeys: () => [...changedAt.entries()].sort((a, b) => b[1] - a[1]).map(([key]) => key),
     latestContext: () => latest,
   };
 }
@@ -379,9 +378,7 @@ export function renderIdleWork(
   const isMessageHistory = (value: unknown): boolean =>
     Array.isArray(value) &&
     value.length > 0 &&
-    value.every(
-      (item) => item && typeof item === "object" && "role" in item && "content" in item,
-    );
+    value.every((item) => item && typeof item === "object" && "role" in item && "content" in item);
 
   const strings: Array<{ key: string; body: string }> = [];
   const objects: Array<{ key: string; body: string }> = [];

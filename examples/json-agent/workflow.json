@@ -9,9 +9,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "ticket"
-      ]
+      "required": ["ticket"]
     },
     "context": {
       "type": "object",
@@ -29,9 +27,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "ticket"
-      ]
+      "required": ["ticket"]
     },
     "events": {
       "ESCALATE": {
@@ -41,9 +37,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "reason"
-        ]
+        "required": ["reason"]
       },
       "REPLY": {
         "type": "object",
@@ -71,9 +65,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "resolution"
-      ]
+      "required": ["resolution"]
     }
   },
   "context": {
@@ -92,9 +84,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "ticket"
-        ]
+        "required": ["ticket"]
       },
       "output": {
         "type": "object",
@@ -103,16 +93,12 @@
             "type": "string"
           }
         },
-        "required": [
-          "reply"
-        ]
+        "required": ["reply"]
       }
     }
   },
   "initial": "triaging",
-  "suspendedTags": [
-    "awaiting-approval"
-  ],
+  "suspendedTags": ["awaiting-approval"],
   "states": {
     "triaging": {
       "invoke": {
@@ -122,10 +108,7 @@
           "model": "openai/gpt-5.4-mini",
           "system": "Decide whether this support ticket needs human escalation or a drafted reply.",
           "prompt": "{{ context.ticket }}",
-          "allowedEvents": [
-            "ESCALATE",
-            "REPLY"
-          ],
+          "allowedEvents": ["ESCALATE", "REPLY"],
           "maxRetries": 2
         },
         "onError": {
@@ -165,9 +148,7 @@
     },
     "awaitingApproval": {
       "description": "Idle: nothing left to do until a human approves or rejects the drafted reply.",
-      "tags": [
-        "awaiting-approval"
-      ],
+      "tags": ["awaiting-approval"],
       "meta": {
         "interaction": {
           "label": "Nothing left to do until you approve or reject the drafted reply.",

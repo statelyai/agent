@@ -175,13 +175,14 @@ describe("run output rendering", () => {
 });
 
 describe("idle work rendering (changed context surfaces before approval)", () => {
-  const fakeSnapshot = (context: Record<string, unknown>) =>
-    ({ value: "s", context }) as never;
+  const fakeSnapshot = (context: Record<string, unknown>) => ({ value: "s", context }) as never;
 
   test("recorder tracks keys changed after init, most recent first", () => {
     const recorder = createTraceRecorder();
     recorder.onTransition(fakeSnapshot({ topic: "cats", draft: "" }), { type: "xstate.init" });
-    recorder.onTransition(fakeSnapshot({ topic: "cats", draft: "A draft." }), { type: "model.done" });
+    recorder.onTransition(fakeSnapshot({ topic: "cats", draft: "A draft." }), {
+      type: "model.done",
+    });
     recorder.onTransition(fakeSnapshot({ topic: "cats", draft: "A draft.", score: 7 }), {
       type: "eval.done",
     });
@@ -199,20 +200,22 @@ describe("idle work rendering (changed context surfaces before approval)", () =>
 
   test("a single changed string renders bare; several get humanized headers", () => {
     expect(renderIdleWork({ draft: "The draft body." }, ["draft"])).toBe("The draft body.");
-    const multi = renderIdleWork(
-      { sqlQuery: "SELECT 1", explanation: "It counts rows." },
-      ["explanation", "sqlQuery"],
-    )!;
+    const multi = renderIdleWork({ sqlQuery: "SELECT 1", explanation: "It counts rows." }, [
+      "explanation",
+      "sqlQuery",
+    ])!;
     expect(multi).toContain("**Explanation**");
     expect(multi).toContain("**Sql query**");
     expect(multi.indexOf("It counts rows.")).toBeLessThan(multi.indexOf("SELECT 1"));
   });
 
   test("strings lead, small objects follow as JSON, noise is skipped", () => {
-    const text = renderIdleWork(
-      { answer: "Jupiter", board: { turn: 2 }, count: 3, empty: "" },
-      ["board", "answer", "count", "empty"],
-    )!;
+    const text = renderIdleWork({ answer: "Jupiter", board: { turn: 2 }, count: 3, empty: "" }, [
+      "board",
+      "answer",
+      "count",
+      "empty",
+    ])!;
     // The prose answer outranks the more recently changed object.
     expect(text.indexOf("Jupiter")).toBeLessThan(text.indexOf("```json"));
     expect(text).toContain('"turn": 2');
@@ -223,15 +226,19 @@ describe("idle work rendering (changed context surfaces before approval)", () =>
 
   test("input echoes and message-history arrays are plumbing, not work", () => {
     // The user's own text stored into context isn't "produced" output.
-    expect(renderIdleWork({ prompt: "write it", draft: "Dear team…" }, ["prompt", "draft"], [
-      "write it",
-    ])).toBe("Dear team…");
-    // ai-sdk style message logs are skipped even though they changed.
     expect(
       renderIdleWork(
-        { messages: [{ role: "user", content: "hi" }], draft: "Dear team…" },
-        ["messages", "draft"],
+        { prompt: "write it", draft: "Dear team…" },
+        ["prompt", "draft"],
+        ["write it"],
       ),
+    ).toBe("Dear team…");
+    // ai-sdk style message logs are skipped even though they changed.
+    expect(
+      renderIdleWork({ messages: [{ role: "user", content: "hi" }], draft: "Dear team…" }, [
+        "messages",
+        "draft",
+      ]),
     ).toBe("Dear team…");
   });
 });

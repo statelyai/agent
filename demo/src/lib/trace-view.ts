@@ -55,11 +55,7 @@ export type TraceStep = {
  * chat's transition log can fill in DURING a run (the authoritative server
  * trace replaces it at settle). Lifecycle noise (`init`/`stop`) returns null.
  */
-export function liveTraceStep(
-  event: unknown,
-  stateValue: unknown,
-  at: number,
-): TraceStep | null {
+export function liveTraceStep(event: unknown, stateValue: unknown, at: number): TraceStep | null {
   const source = event && typeof event === "object" ? (event as Record<string, unknown>) : null;
   const rawType = source?.type;
   if (typeof rawType !== "string") return null;

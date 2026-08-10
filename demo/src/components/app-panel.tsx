@@ -186,7 +186,11 @@ function messagesFromTurns(turns: Turn[], liveSteps: TraceStep[]): ThreadMessage
 
     if (!turn.result) return [userMessage];
 
-    const transitionParts = transitionPartsFor(turn.id, traceSteps(turn.result.trace), "transition");
+    const transitionParts = transitionPartsFor(
+      turn.id,
+      traceSteps(turn.result.trace),
+      "transition",
+    );
     const response =
       turn.result.response ||
       (turn.result.status === "done" ? "The machine reached its final state." : "Ready.");

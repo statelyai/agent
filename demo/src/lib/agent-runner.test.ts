@@ -202,10 +202,14 @@ describe("ambiguous free-text review", () => {
     const first = await start("approval", "Announce the outage.");
     expect(first.status).toBe("idle");
 
-    const echoed = await resumeScenario("approval", first.idle!.snapshot as unknown as Snapshot<unknown>, {
-      kind: "interpret",
-      text: "hmm, not sure",
-    });
+    const echoed = await resumeScenario(
+      "approval",
+      first.idle!.snapshot as unknown as Snapshot<unknown>,
+      {
+        kind: "interpret",
+        text: "hmm, not sure",
+      },
+    );
     expect(echoed.status).toBe("idle");
 
     const reject = echoed.idle!.events.find((event) => event.type === "REJECT");

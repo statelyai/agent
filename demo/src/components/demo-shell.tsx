@@ -239,10 +239,7 @@ export function DemoShell() {
       setLiveSteps([]);
       return;
     }
-    if (
-      message.type === "@statelyai.system.actorSnapshot" &&
-      message.sessionId === run.sessionId
-    ) {
+    if (message.type === "@statelyai.system.actorSnapshot" && message.sessionId === run.sessionId) {
       const step = liveTraceStep(
         message.event,
         (message.snapshot as { value?: unknown } | null | undefined)?.value,
