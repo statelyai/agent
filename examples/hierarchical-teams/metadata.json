@@ -12,9 +12,9 @@
     "purpose": "Two teams under one coordinator: a research manager keeps assigning searches until it has enough, then a writing team turns the findings into a draft, with one round of revisions allowed."
   },
   "starters": [
-    "The impact of RISC-V on the data center market.",
-    "How tokenization affects LLM reasoning on math problems.",
-    "What is happening to grid-scale battery costs?"
+    "One reason RISC-V matters for data centers.",
+    "One way tokenization trips up LLM arithmetic.",
+    "Which way are grid-scale battery costs moving?"
   ],
   "machine": "hierarchicalTeamsMachine"
 }

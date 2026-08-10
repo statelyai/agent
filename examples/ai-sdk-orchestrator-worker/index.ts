@@ -10,6 +10,9 @@
  * step) rather than static parallel regions. Tests inject a deterministic
  * `implementChanges` via `.provide`; the direct run wires the real AI SDK.
  *
+ * The final output leads with the plan and one line per changed file; the raw
+ * code sits under `detail`, so it never becomes the headline.
+ *
  * Compare: https://ai-sdk.dev/docs/agents/workflows#orchestrator-worker
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/ai-sdk-orchestrator-worker/index.ts
@@ -48,13 +51,15 @@ const workerOutputSchema = z.object({
   code: z.string(),
 });
 
+// Each worker returns a one-phrase `explanation` (the line the demo shows) and
+// short `code` (kept out of the leading summary).
 const workerSystemPrompts: Record<ImplementationPlan["files"][number]["changeType"], string> = {
   create:
-    "You implement a new file. Return the full file contents as `code` and a one-line `explanation` of what it does.",
+    "You implement a new file. Return the file contents as `code`, under 30 lines, and a one-phrase `explanation` of what it does.",
   modify:
-    "You modify an existing file. Return the changed file contents as `code` and a one-line `explanation` of the change.",
+    "You modify an existing file. Return just the changed section as `code`, under 30 lines, and a one-phrase `explanation` of the change.",
   delete:
-    "You remove a file. Return an empty `code` string and a one-line `explanation` of why it is safe to delete.",
+    "You remove a file. Return an empty `code` string and a one-phrase `explanation` of why it is safe to delete.",
 };
 
 export const models = defineModels({
@@ -97,16 +102,45 @@ export function createImplementChangesActor(model: LanguageModel) {
 const contextSchema = z.object({
   featureRequest: z.string(),
   plan: implementationPlanSchema.nullable(),
+  /** One line: how many files the orchestrator planned, and how hard. */
+  planSummary: z.string().nullable(),
   changes: z.array(fileChangeSchema),
 });
+
+/** "Plan: 2 files, medium complexity" */
+function planLine(plan: ImplementationPlan) {
+  const count = plan.files.length;
+  return `Plan: ${count} file${count === 1 ? "" : "s"}, ${plan.estimatedComplexity} complexity`;
+}
+
+/**
+ * The final read: the plan line, then one line per changed file. Full code stays
+ * out of the leading string — it rides along nested under `detail`.
+ */
+function summarize(plan: ImplementationPlan | null, changes: FileChange[]) {
+  const files = changes.map(
+    (change) => `- ${change.filePath} (${change.changeType}) — ${change.explanation}`,
+  );
+  return [
+    plan ? planLine(plan) : "Plan: none",
+    files.length ? files.join("\n") : "No files changed.",
+  ].join("\n\n");
+}
 
 const agentSetup = setupAgent({
   models,
   context: contextSchema,
   input: z.object({ featureRequest: z.string() }),
+  // Leads with the plan and one line per changed file; the raw code stays
+  // nested under `detail` so it never becomes the headline.
   output: z.object({
-    plan: implementationPlanSchema,
-    changes: z.array(fileChangeSchema),
+    summary: z.string(),
+    filesChanged: z.number(),
+    complexity: z.enum(["low", "medium", "high"]),
+    detail: z.object({
+      plan: implementationPlanSchema,
+      changes: z.array(fileChangeSchema),
+    }),
   }),
   actors: {
     // Bound to the real AI SDK by default; overridden in tests via `.provide`.
@@ -125,7 +159,7 @@ const agentSetup = setupAgent({
       },
       model: "orchestrator",
       system:
-        "You are an implementation orchestrator. Break a feature request into the minimal set of file-level changes (path, purpose, create/modify/delete) and rate overall complexity.",
+        "You are an implementation orchestrator. Break a feature request into the minimal set of file-level changes (path, purpose, create/modify/delete) and rate overall complexity. Plan at most three files, and keep each purpose to one short phrase.",
       prompt: ({ input }) => input.featureRequest,
     },
   },
@@ -136,6 +170,7 @@ export const aiSdkOrchestratorWorkerMachine = agentSetup.createMachine({
   context: ({ input }) => ({
     featureRequest: input.featureRequest,
     plan: null,
+    planSummary: null,
     changes: [],
   }),
   initial: "planning",
@@ -147,7 +182,7 @@ export const aiSdkOrchestratorWorkerMachine = agentSetup.createMachine({
         input: ({ context }) => ({ featureRequest: context.featureRequest }),
         onDone: ({ output }) => ({
           target: "implementing",
-          context: { plan: output },
+          context: { plan: output, planSummary: planLine(output) },
         }),
         onError: { target: "failed" },
       },
@@ -170,17 +205,24 @@ export const aiSdkOrchestratorWorkerMachine = agentSetup.createMachine({
     done: {
       type: "final",
       output: ({ context }) => ({
-        plan: context.plan,
-        changes: context.changes,
+        summary: summarize(context.plan, context.changes),
+        filesChanged: context.changes.length,
+        complexity: context.plan.estimatedComplexity,
+        detail: { plan: context.plan, changes: context.changes },
       }),
     },
     // Best-effort output when the planning model call fails.
     failed: {
       type: "final",
-      output: ({ context }) => ({
-        plan: context.plan ?? { files: [], estimatedComplexity: "low" as const },
-        changes: context.changes,
-      }),
+      output: ({ context }) => {
+        const plan = context.plan ?? { files: [], estimatedComplexity: "low" as const };
+        return {
+          summary: summarize(context.plan, context.changes),
+          filesChanged: context.changes.length,
+          complexity: plan.estimatedComplexity,
+          detail: { plan, changes: context.changes },
+        };
+      },
     },
   },
 });

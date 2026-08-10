@@ -3,9 +3,10 @@
  *
  * `plainWriterMachine` below is a normal XState v6 machine. It imports only
  * from `xstate` (`setup`, `createAsyncLogic`), and it has ZERO knowledge of
- * `@statelyai/agent`: a promise-shaped actor for one step, a plain
+ * `@statelyai/agent`: a promise-shaped actor for one step, an `onError`
+ * transition that retries that actor a bounded number of times, a plain
  * `on: { APPROVE, REVISE }` decision state with a guarded transition bounding
- * the revision loop, and a final state. It runs on its own under a bare
+ * the revision loop, and final states. It runs on its own under a bare
  * `createActor(...)` — the placeholder `writeDraft` returns a canned draft, so
  * nothing about it needs an LLM.
  *
@@ -49,13 +50,35 @@ export const models = defineModels({
 /** Revision rounds allowed before only APPROVE remains legal. */
 const MAX_REVISIONS = 2;
 
+/** Re-invokes allowed when the draft actor rejects. */
+const MAX_RETRIES = 2;
+
 const contextSchema = z.object({
   topic: z.string(),
   maxRevisions: z.number(),
   /** Drafts produced so far (incremented each time `writeDraft` resolves). */
   attempts: z.number(),
+  /** Failed draft attempts re-invoked so far. */
+  retries: z.number(),
+  maxRetries: z.number(),
   draft: z.string(),
+  /** Readable running tally of drafts, revisions, and retries. */
+  progress: z.string(),
 });
+
+/** The tally a host can show without decoding the trace. */
+function renderProgress(context: {
+  attempts: number;
+  maxRevisions: number;
+  retries: number;
+}): string {
+  const revisions = Math.max(0, context.attempts - 1);
+  const retries = `${context.retries} ${context.retries === 1 ? "retry" : "retries"}`;
+  return (
+    `Draft ${context.attempts} ready: ${revisions} of ${context.maxRevisions} revisions used, ` +
+    `${retries} after a failed attempt.`
+  );
+}
 
 const eventSchemas = {
   APPROVE: z.object({}),
@@ -75,7 +98,12 @@ export const plainWriterMachine = setup({
     context: contextSchema,
     events: eventSchemas,
     input: z.object({ topic: z.string() }),
-    output: z.object({ draft: z.string(), attempts: z.number() }),
+    output: z.object({
+      draft: z.string(),
+      attempts: z.number(),
+      retries: z.number(),
+      progress: z.string(),
+    }),
   },
   actors: {
     // A bog-standard promise-shaped actor. Standalone it returns a canned
@@ -94,26 +122,71 @@ export const plainWriterMachine = setup({
     topic: input.topic,
     maxRevisions: MAX_REVISIONS,
     attempts: 0,
+    retries: 0,
+    maxRetries: MAX_RETRIES,
     draft: "",
+    progress: "",
   }),
-  output: ({ context }) => ({ draft: context.draft, attempts: context.attempts }),
+  output: ({ context }) => ({
+    draft: context.draft,
+    attempts: context.attempts,
+    retries: context.retries,
+    progress: context.progress,
+  }),
   initial: "drafting",
   states: {
     // A normal invoke: its actor resolves to a value, which onDone stores.
+    // A rejection is not the run's problem either — `onError` is an ordinary
+    // transition, so a flaky model call is retried by the graph, not by a
+    // try/catch buried in the actor.
     drafting: {
       invoke: {
         id: "writeDraft",
         src: "writeDraft",
         input: ({ context }) => ({ topic: context.topic, attempts: context.attempts }),
-        onDone: ({ context, output }) => ({
-          target: "judging",
-          context: { draft: output, attempts: context.attempts + 1 },
-        }),
+        onDone: ({ context, output }) => {
+          const attempts = context.attempts + 1;
+          return {
+            target: "judging",
+            context: {
+              draft: output,
+              attempts,
+              progress: renderProgress({ ...context, attempts }),
+            },
+          };
+        },
+        // The retry budget, like the revision budget, is the machine's: past it
+        // the transition targets `failed` instead of trying forever.
+        onError: ({ context }) =>
+          context.retries < context.maxRetries
+            ? {
+                target: "retrying",
+                context: {
+                  retries: context.retries + 1,
+                  progress:
+                    `Draft attempt failed: retrying ` +
+                    `(${context.retries + 1} of ${context.maxRetries}).`,
+                },
+              }
+            : {
+                target: "failed",
+                context: {
+                  progress: `Draft failed after ${context.maxRetries} retries.`,
+                },
+              },
       },
+    },
+    // A retry is a state, so it is visible in the trace and re-enters
+    // `drafting` — which re-invokes the actor, no manual re-run needed.
+    retrying: {
+      always: { target: "drafting" },
     },
     // A normal decision point: an event-waiting state with a guarded loop.
     // Nothing here knows the events will be chosen by a model.
     judging: {
+      // Plain XState tags mark the human-wait state; hosts that want
+      // deterministic idle pass runAgent({ isSuspended: (s) => s.hasTag("waiting") }).
+      tags: ["waiting"],
       on: {
         APPROVE: { target: "approved" },
         // The revision budget, expressed as an ordinary guarded transition:
@@ -125,6 +198,7 @@ export const plainWriterMachine = setup({
       },
     },
     approved: { type: "final" },
+    failed: { type: "final" },
   },
 });
 
@@ -134,6 +208,10 @@ export interface PlainXstateResult {
   draft: string;
   /** Drafts produced (1 + number of accepted REVISEs). */
   attempts: number;
+  /** Failed draft attempts the machine re-invoked. */
+  retries: number;
+  /** Readable tally of drafts, revisions, and retries. */
+  progress: string;
   /** The chosen event type per judging round, in order. */
   decisions: string[];
 }
@@ -204,7 +282,13 @@ export async function runPlainXstateExample(
   }
 
   const settled = actor.getSnapshot();
-  return { draft: settled.context.draft, attempts: settled.context.attempts, decisions };
+  return {
+    draft: settled.context.draft,
+    attempts: settled.context.attempts,
+    retries: settled.context.retries,
+    progress: settled.context.progress,
+    decisions,
+  };
 }
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
@@ -216,6 +300,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   void (async () => {
     const result = await runPlainXstateExample();
     console.log("Decisions:", result.decisions.join(" → "));
+    console.log(result.progress);
     console.log(`\nFinal draft (after ${result.attempts} draft(s)):\n${result.draft}`);
   })().catch((error) => {
     console.error(error);

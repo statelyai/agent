@@ -29,6 +29,11 @@
  * The web/file tools are represented by model requests; the hierarchy and the
  * routing loops are real child actors and real decisions.
  *
+ * Each team returns a `log` of one-line worker results alongside its output, and
+ * the coordinator folds those into a compact `teamReport` tree (team, worker,
+ * result) as the teams finish. That tree, not the raw research prose, is what
+ * the run leads with; the full research and report stay nested under `details`.
+ *
  * Dual-mode: `runHierarchicalTeamsExample(options?)` takes injectable
  * `generateText`/`decide` (tests script them — keyless CI); the direct run
  * defaults real executors.
@@ -47,6 +52,12 @@ export const models = defineModels({
   outliner: openai("gpt-5.4-mini"),
   writer: openai("gpt-5.4-mini"),
 });
+
+/** Collapses a worker result to one short line for the team tree. */
+function oneLine(text: string, max = 64): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
 
 function renderResearchPrompt(context: { topic: string; notes: string[]; budget: number }): string {
   return [
@@ -67,10 +78,12 @@ const researchSetup = setupAgent({
   context: z.object({
     topic: z.string(),
     notes: z.array(z.string()),
+    // One line per worker step, handed up to the coordinator's team tree.
+    log: z.array(z.string()),
     budget: z.number(),
   }),
   input: z.object({ topic: z.string(), priorNotes: z.array(z.string()).default([]) }),
-  output: z.object({ research: z.string() }),
+  output: z.object({ research: z.string(), log: z.array(z.string()) }),
   events: {
     SEARCH: z.object({}),
     SCRAPE: z.object({}),
@@ -83,7 +96,9 @@ const researchSetup = setupAgent({
         output: z.string(),
       },
       model: "searcher",
-      system: "Find concise, relevant source leads. Avoid repeating material already gathered.",
+      system:
+        "Find relevant source leads. Reply with at most two short leads on one " +
+        "line each. Avoid repeating material already gathered.",
       prompt: ({ input }) =>
         `Topic: ${input.topic}\nAlready gathered:\n${input.notes.join("\n") || "(nothing yet)"}`,
     },
@@ -93,7 +108,9 @@ const researchSetup = setupAgent({
         output: z.string(),
       },
       model: "scraper",
-      system: "Turn source leads into factual research notes. Preserve uncertainty.",
+      system:
+        "Turn source leads into factual research notes: at most two short " +
+        "sentences. Preserve uncertainty.",
       prompt: ({ input }) =>
         `Topic: ${input.topic}\nLeads and notes so far:\n${input.notes.join("\n") || "(none)"}`,
     },
@@ -102,8 +119,13 @@ const researchSetup = setupAgent({
 
 export const researchTeamMachine = researchSetup.createMachine({
   id: "research-team",
-  context: ({ input }) => ({ topic: input.topic, notes: [...input.priorNotes], budget: 4 }),
-  output: ({ context }) => ({ research: context.notes.join("\n") }),
+  context: ({ input }) => ({
+    topic: input.topic,
+    notes: [...input.priorNotes],
+    log: [],
+    budget: 2,
+  }),
+  output: ({ context }) => ({ research: context.notes.join("\n"), log: context.log }),
   initial: "supervising",
   states: {
     // The research supervisor: each turn it routes to a worker or stops. The
@@ -136,11 +158,15 @@ export const researchTeamMachine = researchSetup.createMachine({
         input: ({ context }) => ({ topic: context.topic, notes: context.notes }),
         onDone: ({ context, output }) => ({
           target: "supervising",
-          context: { notes: [...context.notes, output], budget: context.budget - 1 },
+          context: {
+            notes: [...context.notes, output],
+            log: [...context.log, `search. done. ${oneLine(output)}`],
+            budget: context.budget - 1,
+          },
         }),
         onError: ({ context }) => ({
           target: "supervising",
-          context: { budget: context.budget - 1 },
+          context: { log: [...context.log, "search. failed"], budget: context.budget - 1 },
         }),
       },
     },
@@ -150,11 +176,15 @@ export const researchTeamMachine = researchSetup.createMachine({
         input: ({ context }) => ({ topic: context.topic, notes: context.notes }),
         onDone: ({ context, output }) => ({
           target: "supervising",
-          context: { notes: [...context.notes, output], budget: context.budget - 1 },
+          context: {
+            notes: [...context.notes, output],
+            log: [...context.log, `scrape. done. ${oneLine(output)}`],
+            budget: context.budget - 1,
+          },
         }),
         onError: ({ context }) => ({
           target: "supervising",
-          context: { budget: context.budget - 1 },
+          context: { log: [...context.log, "scrape. failed"], budget: context.budget - 1 },
         }),
       },
     },
@@ -168,14 +198,15 @@ const writingSetup = setupAgent({
     research: z.string(),
     outline: z.string().nullable(),
     report: z.string().nullable(),
+    log: z.array(z.string()),
   }),
   input: z.object({ research: z.string() }),
-  output: z.object({ report: z.string() }),
+  output: z.object({ report: z.string(), log: z.array(z.string()) }),
   requests: {
     outline: {
       schemas: { input: z.object({ research: z.string() }), output: z.string() },
       model: "outliner",
-      system: "Create a short report outline from the research notes.",
+      system: "Create a report outline from the research notes: at most three short bullets.",
       prompt: ({ input }) => input.research,
     },
     write: {
@@ -184,7 +215,7 @@ const writingSetup = setupAgent({
         output: z.string(),
       },
       model: "writer",
-      system: "Write a concise report. Use only the research notes.",
+      system: "Write a report of at most four sentences. Use only the research notes.",
       prompt: ({ input }) => `Outline:\n${input.outline}\n\nResearch:\n${input.research}`,
     },
   },
@@ -192,27 +223,39 @@ const writingSetup = setupAgent({
 
 export const writingTeamMachine = writingSetup.createMachine({
   id: "writing-team",
-  context: ({ input }) => ({ research: input.research, outline: null, report: null }),
-  output: ({ context }) => ({ report: context.report ?? "" }),
+  context: ({ input }) => ({ research: input.research, outline: null, report: null, log: [] }),
+  output: ({ context }) => ({ report: context.report ?? "", log: context.log }),
   initial: "outlining",
   states: {
     outlining: {
       invoke: {
         src: "outline",
         input: ({ context }) => ({ research: context.research }),
-        onDone: ({ output }) => ({ target: "writing", context: { outline: output } }),
+        onDone: ({ context, output }) => ({
+          target: "writing",
+          context: { outline: output, log: [...context.log, `outline. done. ${oneLine(output)}`] },
+        }),
       },
     },
     writing: {
       invoke: {
         src: "write",
         input: ({ context }) => ({ research: context.research, outline: context.outline ?? "" }),
-        onDone: ({ output }) => ({ target: "done", context: { report: output } }),
+        onDone: ({ context, output }) => ({
+          target: "done",
+          context: { report: output, log: [...context.log, `write. done. ${oneLine(output)}`] },
+        }),
       },
     },
     done: { type: "final" },
   },
 });
+
+/** Adds a team block to the tree: the team name, then its indented worker lines. */
+function appendTeam(tree: string, team: string, log: string[]): string {
+  const lines = log.length > 0 ? log : ["(no worker steps)"];
+  return `${tree}${team}\n${lines.map((line) => `  ${line}`).join("\n")}\n`;
+}
 
 function renderReviewPrompt(context: {
   research: string;
@@ -235,10 +278,17 @@ const coordinatorSetup = setupAgent({
     topic: z.string(),
     research: z.string().nullable(),
     report: z.string().nullable(),
+    // The team tree, one line per team and per worker, grown as teams finish.
+    teamReport: z.string(),
     revisionsRemaining: z.number(),
   }),
   input: z.object({ topic: z.string() }),
-  output: z.object({ research: z.string(), report: z.string() }),
+  // One leading string (the tree, with the report under it); the raw research
+  // and report stay nested so neither becomes the lead.
+  output: z.object({
+    teamReport: z.string(),
+    details: z.object({ research: z.string(), report: z.string() }),
+  }),
   events: {
     REVISE: z.object({}),
     PUBLISH: z.object({}),
@@ -252,9 +302,13 @@ export const hierarchicalTeamsMachine = coordinatorSetup.createMachine({
     topic: input.topic,
     research: null,
     report: null,
+    teamReport: "",
     revisionsRemaining: 1,
   }),
-  output: ({ context }) => ({ research: context.research ?? "", report: context.report ?? "" }),
+  output: ({ context }) => ({
+    teamReport: [context.teamReport.trimEnd(), "", "Report", context.report || "(none)"].join("\n"),
+    details: { research: context.research ?? "", report: context.report ?? "" },
+  }),
   initial: "researching",
   states: {
     researching: {
@@ -265,7 +319,17 @@ export const hierarchicalTeamsMachine = coordinatorSetup.createMachine({
           topic: context.topic,
           priorNotes: context.research ? [context.research] : [],
         }),
-        onDone: ({ output }) => ({ target: "writing", context: { research: output.research } }),
+        onDone: ({ context, output }) => ({
+          target: "writing",
+          context: {
+            research: output.research,
+            teamReport: appendTeam(
+              context.teamReport,
+              context.revisionsRemaining === 0 ? "research team (revision)" : "research team",
+              output.log,
+            ),
+          },
+        }),
       },
     },
     writing: {
@@ -273,7 +337,13 @@ export const hierarchicalTeamsMachine = coordinatorSetup.createMachine({
         id: "writingTeam",
         src: "writingTeam",
         input: ({ context }) => ({ research: context.research ?? "" }),
-        onDone: ({ output }) => ({ target: "reviewing", context: { report: output.report } }),
+        onDone: ({ context, output }) => ({
+          target: "reviewing",
+          context: {
+            report: output.report,
+            teamReport: appendTeam(context.teamReport, "writing team", output.log),
+          },
+        }),
       },
     },
     // The top-level supervisor: accept the report, or send one round back to
@@ -299,10 +369,16 @@ export const hierarchicalTeamsMachine = coordinatorSetup.createMachine({
           context.revisionsRemaining > 0
             ? {
                 target: "researching",
-                context: { revisionsRemaining: context.revisionsRemaining - 1 },
+                context: {
+                  revisionsRemaining: context.revisionsRemaining - 1,
+                  teamReport: `${context.teamReport}coordinator. revise\n`,
+                },
               }
             : undefined,
-        PUBLISH: { target: "done" },
+        PUBLISH: ({ context }) => ({
+          target: "done",
+          context: { teamReport: `${context.teamReport}coordinator. publish\n` },
+        }),
       },
     },
     done: { type: "final" },
@@ -322,7 +398,7 @@ export interface RunHierarchicalTeamsOptions {
 /** Runs the hierarchy; real executors default, overrides merge on top. */
 export async function runHierarchicalTeamsExample(options: RunHierarchicalTeamsOptions = {}) {
   const {
-    topic = "How explicit state improves reliable AI agents",
+    topic = "One reason explicit state makes AI agents easier to debug",
     generateText,
     decide,
     onProgress,
@@ -348,6 +424,6 @@ export async function runHierarchicalTeamsExample(options: RunHierarchicalTeamsO
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   if (!process.env.OPENAI_API_KEY) throw new Error("Set OPENAI_API_KEY to run this example.");
   void runHierarchicalTeamsExample({ onProgress: (state) => console.log(`  → ${state}`) }).then(
-    ({ report }) => console.log("\n" + report),
+    ({ teamReport }) => console.log("\n" + teamReport),
   );
 }

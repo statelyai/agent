@@ -16,7 +16,9 @@
  * with no changes.
  *
  * The machine is a two-step streaming copy chain (tagline → pitch) at the same
- * scale as the joke / marketing-chain examples.
+ * scale as the joke / marketing-chain examples. Each finished stream leaves a
+ * lane in `streamSummary` (word count + elapsed ms), so the streaming story is
+ * still readable once the run is over and the tokens have stopped moving.
  *
  * Dual-mode: `runAiSdkUiStreamExample(options?)` takes an injectable `streamText`
  * (tests pass a mock — keyless CI); the direct run uses a real model and consumes
@@ -53,13 +55,22 @@ const contextSchema = z.object({
   product: z.string(),
   tagline: z.string().nullable(),
   pitch: z.string().nullable(),
+  /** One lane per finished stream: word count and elapsed ms, measured here. */
+  streamSummary: z.string().nullable(),
+  /** When the current stream started — the clock for the lane above. */
+  startedAt: z.number(),
 });
+
+/** "tagline 4 words in 120ms" */
+function streamLane(label: string, text: string, elapsedMs: number) {
+  return `${label} ${text.trim().split(/\s+/).filter(Boolean).length} words in ${elapsedMs}ms`;
+}
 
 const agentSetup = setupAgent({
   models,
   context: contextSchema,
   input: z.object({ product: z.string() }),
-  output: z.object({ tagline: z.string(), pitch: z.string() }),
+  output: z.object({ pitch: z.string(), tagline: z.string(), streamSummary: z.string() }),
   requests: {
     // Two streamed text requests: each becomes one UI text part.
     streamTagline: {
@@ -87,9 +98,19 @@ export const aiSdkUiStreamSchemas = agentSetup.schemas;
 
 export const aiSdkUiStreamMachine = agentSetup.createMachine({
   id: "ai-sdk-ui-stream",
-  context: ({ input }) => ({ product: input.product, tagline: null, pitch: null }),
-  // Both fields are set before `done`; fall back to "" to satisfy the output type.
-  output: ({ context }) => ({ tagline: context.tagline ?? "", pitch: context.pitch ?? "" }),
+  context: ({ input }) => ({
+    product: input.product,
+    tagline: null,
+    pitch: null,
+    streamSummary: null,
+    startedAt: Date.now(),
+  }),
+  // All three are set before `done`; fall back to "" to satisfy the output type.
+  output: ({ context }) => ({
+    pitch: context.pitch ?? "",
+    tagline: context.tagline ?? "",
+    streamSummary: context.streamSummary ?? "",
+  }),
   initial: "tagline",
   states: {
     tagline: {
@@ -97,7 +118,18 @@ export const aiSdkUiStreamMachine = agentSetup.createMachine({
         id: "tagline",
         src: "streamTagline",
         input: ({ context }) => ({ product: context.product }),
-        onDone: ({ output }) => ({ target: "pitch", context: { tagline: output } }),
+        // Close this stream's lane and restart the clock for the next one.
+        onDone: ({ context, output }) => {
+          const now = Date.now();
+          return {
+            target: "pitch",
+            context: {
+              tagline: output,
+              startedAt: now,
+              streamSummary: streamLane("tagline", output, now - context.startedAt),
+            },
+          };
+        },
       },
     },
     pitch: {
@@ -105,7 +137,17 @@ export const aiSdkUiStreamMachine = agentSetup.createMachine({
         id: "pitch",
         src: "streamPitch",
         input: ({ context }) => ({ product: context.product, tagline: context.tagline ?? "" }),
-        onDone: ({ output }) => ({ target: "done", context: { pitch: output } }),
+        onDone: ({ context, output }) => {
+          const now = Date.now();
+          const lane = streamLane("pitch", output, now - context.startedAt);
+          return {
+            target: "done",
+            context: {
+              pitch: output,
+              streamSummary: `${context.streamSummary ?? ""} · ${lane}`.trim(),
+            },
+          };
+        },
       },
     },
     done: { type: "final" },

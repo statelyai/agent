@@ -11,7 +11,18 @@ test("parent invokes the child agent machine and maps typed I/O across the bound
     }),
   });
 
-  assert.deepEqual(output, {
-    research: "Research summary: Research: actors",
-  });
+  assert.equal(output.research, "Research summary: Research: actors");
+  // The boundary is readable without digging through the trace.
+  assert.equal(
+    output.sentToChild,
+    'Parent invoked "subflows-child" with input { topic: "actors" }.',
+  );
+  assert.equal(
+    output.childReturned,
+    "Child finished and returned its declared output { research: string } (34 chars).",
+  );
+  assert.equal(
+    output.parentNext,
+    "Parent mapped research onto its own context and reached its final state.",
+  );
 });

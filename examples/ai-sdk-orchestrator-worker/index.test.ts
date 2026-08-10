@@ -57,14 +57,26 @@ test("AI SDK orchestrator-worker plans then fans out a worker call per file", as
   });
 
   assert.equal(result.status, "done");
+  const output = result.status === "done" ? result.output : undefined;
   assert.deepEqual(
-    result.status === "done"
-      ? result.output.changes.map((change: FileChange) => change.filePath)
-      : [],
+    output?.detail.changes.map((change: FileChange) => change.filePath) ?? [],
     ["app/page.tsx", "app/page.test.tsx"],
   );
   assert.equal(
-    result.status === "done" ? result.output.changes[0]?.explanation : undefined,
+    output?.detail.changes[0]?.explanation,
     "Implement Add UI for Add settings page",
   );
+  // The summary leads with the plan and one line per file; code stays nested.
+  assert.equal(output?.filesChanged, 2);
+  assert.equal(output?.complexity, "medium");
+  assert.equal(
+    output?.summary,
+    [
+      "Plan: 2 files, medium complexity",
+      "",
+      "- app/page.tsx (modify) — Implement Add UI for Add settings page",
+      "- app/page.test.tsx (create) — Implement Add test for Add settings page",
+    ].join("\n"),
+  );
+  assert.ok(!output?.summary.includes("// modify"));
 });

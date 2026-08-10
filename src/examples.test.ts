@@ -198,21 +198,27 @@ describe("curated XState setup examples", () => {
     expect(result.playerScore).toBe(1);
   });
 
-  test("joke workflow loops until the decision ends it", async () => {
-    const decisions = ["TELL_ANOTHER", "END"] as const;
-    let jokes = 0;
-    let decisionIndex = 0;
+  /** Joke machine wired to counting stubs: `n` jokes told, ratings 3 then 9. */
+  function provideJokeStubs() {
+    const jokes: string[] = [];
     const machine = jokeMachine.provide({
       actors: {
         tellJoke: tellJokeLogic.withExecutor(async ({ input }) => {
-          jokes += 1;
-          return { output: `joke ${jokes} about ${input.topic}` };
+          const joke = `joke ${jokes.length + 1} about ${input.topic}`;
+          jokes.push(joke);
+          return { output: joke };
         }),
         rateJoke: rateJokeLogic.withExecutor(async () => ({
-          output: { rating: jokes === 1 ? 3 : 9, explanation: "because" },
+          output: { rating: jokes.length === 1 ? 3 : 9, explanation: "because" },
         })),
       },
     });
+    return { machine, jokes };
+  }
+
+  test("joke workflow loops until the decision ends it", async () => {
+    const { machine, jokes } = provideJokeStubs();
+    const decisionPrompts: string[] = [];
 
     // runAgent auto-delivers each chosen decision event: the machine's
     // `deciding` state loops back to `telling` on TELL_ANOTHER and ends on END.
@@ -220,16 +226,52 @@ describe("curated XState setup examples", () => {
       input: { topic: "state machines" },
       executors: {
         generateText: async () => ({ output: {} }),
-        decide: async () => ({ event: { type: decisions[decisionIndex++] ?? "END" } }),
+        decide: async (request) => {
+          decisionPrompts.push(request.prompt ?? "");
+          return { event: { type: "END" } };
+        },
       },
     });
 
-    expect(jokes).toBe(2);
+    // The machine, not the model, owns the first revision: no decision is asked
+    // for until the improvement pass has already produced a second joke.
+    expect(jokes).toHaveLength(2);
+    expect(decisionPrompts).toHaveLength(1);
+    expect(decisionPrompts[0]).toContain("Last joke rating: 9");
     expect(result.status).toBe("done");
     expect(result.status === "done" && result.output).toMatchObject({
       topic: "state machines",
+      joke: "joke 2 about state machines",
+      firstJoke: "joke 1 about state machines",
       jokes: ["joke 1 about state machines", "joke 2 about state machines"],
       lastRating: 9,
     });
+    // The revision notice carries the score the first attempt got.
+    expect(result.status === "done" && result.output.revisionNotice).toContain(
+      "First attempt scored 3/10",
+    );
+  });
+
+  test("joke workflow stops at MAX_JOKES even when the decision says keep going", async () => {
+    const { machine, jokes } = provideJokeStubs();
+    let decisions = 0;
+
+    const result = await runAgent(machine, {
+      input: { topic: "state machines" },
+      executors: {
+        generateText: async () => ({ output: {} }),
+        decide: async () => {
+          decisions += 1;
+          return { event: { type: "TELL_ANOTHER" } };
+        },
+      },
+    });
+
+    // Improvement pass, one TELL_ANOTHER loop, then the joke cap ends the run
+    // before a second decision is ever requested.
+    expect(jokes).toHaveLength(3);
+    expect(decisions).toBe(1);
+    expect(result.status).toBe("done");
+    expect(result.status === "done" && result.output.joke).toBe("joke 3 about state machines");
   });
 });

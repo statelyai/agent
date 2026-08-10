@@ -12,6 +12,8 @@
  *     runAgent rebinds every unbound request in an invoked child machine (at
  *     any depth) with the same host executors it gives the parent's own
  *     requests. No nested `.provide` ceremony; bind explicitly only to override.
+ *   - the boundary itself as readable context: what the parent sent in, what
+ *     contract the child returned, and what the parent did with it next.
  *
  * Dual-mode: `runSubflowsExample(options?)` takes an injectable `generateText`
  * executor (the test passes a mock — keyless CI); the direct run below uses a
@@ -76,16 +78,40 @@ export const childMachine = childAgentSetup.createMachine({
 
 // ─── Parent agent: delegate to the child, map I/O across the boundary ───
 const parentAgentSetup = setupAgent({
-  context: z.object({ topic: z.string(), research: z.string().nullable() }),
+  context: z.object({
+    topic: z.string(),
+    research: z.string().nullable(),
+    // The boundary, written down: without these the delegation is only visible
+    // by reading the trace.
+    sentToChild: z.string(),
+    childReturned: z.string(),
+    parentNext: z.string(),
+  }),
   input: z.object({ topic: z.string() }),
-  output: z.object({ research: z.string() }),
+  output: z.object({
+    research: z.string(),
+    sentToChild: z.string(),
+    childReturned: z.string(),
+    parentNext: z.string(),
+  }),
   actors: { child: childMachine },
 });
 
 export const subflowsMachine = parentAgentSetup.createMachine({
   id: "subflows-parent",
-  context: ({ input }) => ({ topic: input.topic, research: null }),
-  output: ({ context }) => ({ research: context.research ?? "" }),
+  context: ({ input }) => ({
+    topic: input.topic,
+    research: null,
+    sentToChild: "",
+    childReturned: "",
+    parentNext: "",
+  }),
+  output: ({ context }) => ({
+    research: context.research ?? "",
+    sentToChild: context.sentToChild,
+    childReturned: context.childReturned,
+    parentNext: context.parentNext,
+  }),
   initial: "delegating",
   states: {
     delegating: {
@@ -93,9 +119,14 @@ export const subflowsMachine = parentAgentSetup.createMachine({
         id: "child",
         src: "child",
         input: ({ context }) => ({ topic: context.topic }),
-        onDone: ({ output }) => ({
+        onDone: ({ context, output }) => ({
           target: "done",
-          context: { research: output.research },
+          context: {
+            research: output.research,
+            sentToChild: `Parent invoked "subflows-child" with input { topic: "${context.topic}" }.`,
+            childReturned: `Child finished and returned its declared output { research: string } (${output.research.length} chars).`,
+            parentNext: `Parent mapped research onto its own context and reached its final state.`,
+          },
         }),
       },
     },
@@ -157,6 +188,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
         console.log(`[inspect] [${actorRef.id}] ${JSON.stringify(snapshot.value)}`);
       }),
     });
+    console.log(`\n${output.sentToChild}\n${output.childReturned}\n${output.parentNext}`);
     console.log(`\n${output.research}`);
   })().catch((error) => {
     console.error(error);

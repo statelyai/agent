@@ -1,7 +1,30 @@
+import { useState } from "react";
 import type { ExampleDetail, ExampleSummary } from "@/lib/example-library";
 import type { Scenario } from "@/lib/scenarios";
 
 export type StarterAction = { label: string; onStart: () => void };
+
+/**
+ * Long purposes bury the starter chips below the fold, where the thread's
+ * floating scroll-to-bottom button covers them and swallows clicks — so
+ * anything past a few lines collapses behind a "More" toggle.
+ */
+function Purpose({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const clampable = text.length > 280;
+  return (
+    <div className="chat-intro__purpose-wrap">
+      <p className="chat-intro__purpose" data-clamped={(clampable && !expanded) || undefined}>
+        {text}
+      </p>
+      {clampable ? (
+        <button className="chat-intro__more" onClick={() => setExpanded((v) => !v)}>
+          {expanded ? "Less" : "More"}
+        </button>
+      ) : null}
+    </div>
+  );
+}
 
 export function ScenarioIntro({ scenario }: { scenario: Scenario }) {
   return (
@@ -31,7 +54,7 @@ export function ExampleIntro({
   return (
     <div className="chat-intro">
       <h2 className="chat-intro__title">{summary.title}</h2>
-      {summary.purpose ? <p className="chat-intro__purpose">{summary.purpose}</p> : null}
+      {summary.purpose ? <Purpose text={summary.purpose} /> : null}
 
       {error ? <p className="chat-intro__error">Failed to load this example: {error}</p> : null}
       {!detail && !error ? <p className="chat-intro__status">Loading example…</p> : null}

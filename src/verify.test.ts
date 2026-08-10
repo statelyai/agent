@@ -471,10 +471,15 @@ describe("simulateAgent — keyless deterministic playthrough", () => {
   });
 
   test("does not drain the caller's scripted queues", async () => {
+    // Two jokes per run: the machine always takes one improvement pass before
+    // the decision is asked for.
     const script = {
       text: {
-        tellJoke: ["Why did the state cross the transition?"],
-        rateJoke: [{ rating: 9, explanation: "Punchy." }],
+        tellJoke: ["Why did the state cross the transition?", "The state crossed. Twice."],
+        rateJoke: [
+          { rating: 4, explanation: "Setup drags." },
+          { rating: 9, explanation: "Punchy." },
+        ],
       },
       decisions: { "agent.decide": [{ type: "END" } as const] },
     };
@@ -484,8 +489,8 @@ describe("simulateAgent — keyless deterministic playthrough", () => {
 
     // The same script object must still be usable: simulateAgent consumes
     // copies of every queue, never the caller's arrays.
-    expect(script.text.tellJoke).toHaveLength(1);
-    expect(script.text.rateJoke).toHaveLength(1);
+    expect(script.text.tellJoke).toHaveLength(2);
+    expect(script.text.rateJoke).toHaveLength(2);
     expect(script.decisions["agent.decide"]).toHaveLength(1);
 
     const second = await simulateAgent(jokeMachine, { input: { topic: "states" }, script });

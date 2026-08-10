@@ -3,10 +3,15 @@ import { runAgent } from "@statelyai/agent";
 import type { AgentDecisionRequest, AgentRequestExecutor, ChosenEvent } from "@statelyai/agent";
 import { jokeMachine } from "./index.js";
 
-// Streaming joke executor: emits chunks and returns the accumulated text.
+// Streaming joke executor: emits chunks and returns the accumulated text. The
+// revision prompt (the improvement pass) yields a distinct, better joke.
 const streamText: AgentRequestExecutor = async (request) => {
-  const topic = request.prompt?.match(/joke about (.*)\./)?.[1] ?? "?";
-  const joke = `A joke about ${topic}.`;
+  const prompt = request.prompt ?? "";
+  const topic =
+    prompt.match(/Tell a joke about (.*)\./)?.[1] ?? prompt.match(/Previous joke about (.*):/)?.[1];
+  const joke = prompt.includes("Rewrite it")
+    ? `A better joke about ${topic ?? "?"}.`
+    : `A joke about ${topic ?? "?"}.`;
   return { output: joke };
 };
 
@@ -19,20 +24,20 @@ function createRater(ratings: number[]): AgentRequestExecutor {
 }
 
 describe("joke-teller", () => {
-  test("tells a joke for the topic, parses the rating, and the decision ends the loop", async () => {
-    const seenTopics: string[] = [];
-    const rate = createRater([9]);
+  test("always takes one improvement pass, even when the first joke rates well", async () => {
+    const revisionPrompts: string[] = [];
+    let decideCount = 0;
 
     const result = await runAgent(jokeMachine, {
       input: { topic: "penguins" },
       executors: {
         streamText: async (request, info) => {
-          seenTopics.push(request.prompt?.match(/joke about (.*)\./)?.[1] ?? "");
+          if (request.prompt?.includes("Rewrite it")) revisionPrompts.push(request.prompt);
           return streamText(request, info);
         },
-        generateText: rate,
-        decide: async (request: AgentDecisionRequest): Promise<{ event: ChosenEvent }> => {
-          // High rating -> END.
+        generateText: createRater([9, 10]),
+        decide: async (_request: AgentDecisionRequest): Promise<{ event: ChosenEvent }> => {
+          decideCount += 1;
           return { event: { type: "END" } };
         },
       },
@@ -40,14 +45,49 @@ describe("joke-teller", () => {
 
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");
-    expect(seenTopics).toEqual(["penguins"]);
+    // A 9/10 first joke still gets revised: the machine owns that rule.
+    expect(revisionPrompts).toHaveLength(1);
+    expect(revisionPrompts[0]).toContain("A joke about penguins.");
+    expect(revisionPrompts[0]).toContain("scored it 9/10");
+    // The decision only runs after the improvement pass.
+    expect(decideCount).toBe(1);
     expect(result.output.topic).toBe("penguins");
-    expect(result.output.joke).toBe("A joke about penguins.");
-    expect(result.output.jokes).toEqual(["A joke about penguins."]);
-    expect(result.output.lastRating).toBe(9);
+    expect(result.output.firstJoke).toBe("A joke about penguins.");
+    expect(result.output.joke).toBe("A better joke about penguins.");
+    expect(result.output.jokes).toEqual([
+      "A joke about penguins.",
+      "A better joke about penguins.",
+    ]);
+    expect(result.output.revisionNotice).toContain("First attempt scored 9/10");
+    expect(result.output.revisionNotice).toContain("improvement pass");
+    expect(result.output.lastRating).toBe(10);
   });
 
-  test("the decision event drives the loop: TELL_ANOTHER re-tells before END", async () => {
+  test("the decision event drives the loop: TELL_ANOTHER re-tells, then the joke cap stops it", async () => {
+    let decideCount = 0;
+
+    const result = await runAgent(jokeMachine, {
+      input: { topic: "state machines" },
+      executors: {
+        streamText,
+        generateText: createRater([3, 4, 8]),
+        decide: async (): Promise<{ event: ChosenEvent }> => {
+          decideCount += 1;
+          return { event: { type: "TELL_ANOTHER" } };
+        },
+      },
+    });
+
+    expect(result.status).toBe("done");
+    if (result.status !== "done") throw new Error("expected done");
+    // Revision (machine-owned) → decide TELL_ANOTHER → third joke hits the cap,
+    // so the run ends without asking again.
+    expect(decideCount).toBe(1);
+    expect(result.output.jokes).toHaveLength(3);
+    expect(result.output.lastRating).toBe(8);
+  });
+
+  test("the model can end the loop after the improvement pass", async () => {
     let decideCount = 0;
 
     const result = await runAgent(jokeMachine, {
@@ -57,15 +97,14 @@ describe("joke-teller", () => {
         generateText: createRater([3, 8]),
         decide: async (): Promise<{ event: ChosenEvent }> => {
           decideCount += 1;
-          // First joke rated low -> loop; second -> end.
-          return { event: { type: decideCount === 1 ? "TELL_ANOTHER" : "END" } };
+          return { event: { type: "END" } };
         },
       },
     });
 
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");
-    expect(decideCount).toBe(2);
+    expect(decideCount).toBe(1);
     expect(result.output.jokes).toHaveLength(2);
     expect(result.output.lastRating).toBe(8);
   });

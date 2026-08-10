@@ -12,6 +12,12 @@
  *     evidence is retained, not discarded between steps.
  *   - `solveTask`: composes the final answer from the whole evidence map.
  *
+ * Readable output: the plan stays visible as a `plan` string and each finished
+ * step collapses to ONE line appended to `progress`. Full per-step evidence
+ * lives under the nested `details` field, so a renderer that leads with the
+ * longest string field shows the plan/progress/answer summary, not a wall of
+ * evidence prose.
+ *
  * Dual-mode: `runPlanAndExecuteExample(options?)` takes injectable executors
  * (the test passes mocks — keyless CI); the direct run below uses real models.
  *
@@ -36,17 +42,32 @@ const planAndExecuteContextSchema = z.object({
   steps: z.array(stepSchema),
   stepIndex: z.number(),
   evidence: z.record(z.string(), z.string()),
+  // The plan, kept visible for the whole run: one line per step.
+  plan: z.string(),
+  // One collapsed line per finished step, appended as the loop runs.
+  progress: z.string(),
   answer: z.string().nullable(),
 });
+
+/** Collapses a model answer to a single short line for the progress trail. */
+function oneLine(text: string, max = 70): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
 
 const agentSetup = setupAgent({
   models,
   context: planAndExecuteContextSchema,
   input: z.object({ goal: z.string() }),
+  // One leading human-readable string (plan + collapsed progress + answer);
+  // the full evidence map stays nested so it never becomes the lead.
   output: z.object({
-    answer: z.string(),
-    steps: z.array(stepSchema),
-    evidence: z.record(z.string(), z.string()),
+    summary: z.string(),
+    details: z.object({
+      answer: z.string(),
+      steps: z.array(stepSchema),
+      evidence: z.record(z.string(), z.string()),
+    }),
   }),
   // solveTask always sets `answer` before `done` reads it — narrow it non-null there.
   states: {
@@ -62,8 +83,8 @@ const agentSetup = setupAgent({
       },
       model: "planner",
       system:
-        "You are a planner. Break the goal into 2-3 ordered research sub-questions. " +
-        'Give each a short id like "E1", "E2".',
+        "You are a planner. Break the goal into exactly 2 ordered research " +
+        'sub-questions, each one short line. Give each a short id like "E1", "E2".',
       prompt: ({ input }) => input.goal,
     },
     gatherEvidence: {
@@ -72,7 +93,9 @@ const agentSetup = setupAgent({
         output: z.string(),
       },
       model: "worker",
-      system: "You are a research worker. Answer the sub-question concisely with facts.",
+      system:
+        "You are a research worker. Answer the sub-question in at most two short " +
+        "sentences of plain facts. No preamble, no lists.",
       prompt: ({ input }) => input.question,
     },
     solveTask: {
@@ -84,7 +107,9 @@ const agentSetup = setupAgent({
         output: z.string(),
       },
       model: "solver",
-      system: "You are a solver. Compose a final answer from the gathered evidence.",
+      system:
+        "You are a solver. Compose a final answer from the gathered evidence in " +
+        "at most three sentences.",
       prompt: ({ input }) =>
         `Goal: ${input.goal}\n\nEvidence:\n${Object.entries(input.evidence)
           .map(([id, text]) => `${id}: ${text}`)
@@ -102,6 +127,8 @@ export const planAndExecuteMachine = agentSetup.createMachine({
     steps: [],
     stepIndex: 0,
     evidence: {},
+    plan: "",
+    progress: "",
     answer: null,
   }),
   initial: "planning",
@@ -113,7 +140,11 @@ export const planAndExecuteMachine = agentSetup.createMachine({
         input: ({ context }) => ({ goal: context.goal }),
         onDone: ({ output }) => ({
           target: "executing",
-          context: { steps: output.steps },
+          context: {
+            steps: output.steps,
+            // The plan is written once and stays visible for the whole run.
+            plan: output.steps.map((step) => `${step.id}. ${step.question}`).join("\n"),
+          },
         }),
         // On failure, finish with an empty answer (best-effort output).
         onError: { target: "done", context: { answer: "" } },
@@ -134,22 +165,31 @@ export const planAndExecuteMachine = agentSetup.createMachine({
         input: ({ context }) => ({
           question: context.steps[context.stepIndex]?.question ?? "",
         }),
-        onDone: ({ context, output }) => ({
-          target: "executing",
-          context: {
-            stepIndex: context.stepIndex + 1,
-            evidence: {
-              ...context.evidence,
-              [context.steps[context.stepIndex]?.id ?? String(context.stepIndex)]: output,
+        // The step's full evidence goes in the map; the progress trail only
+        // gets one collapsed line, so the run stays readable as it grows.
+        onDone: ({ context, output }) => {
+          const id = context.steps[context.stepIndex]?.id ?? String(context.stepIndex);
+          return {
+            target: "executing",
+            context: {
+              stepIndex: context.stepIndex + 1,
+              evidence: { ...context.evidence, [id]: output },
+              progress: `${context.progress}${id}. done. ${oneLine(output)}\n`,
             },
-          },
-        }),
+          };
+        },
         // On failure, skip the failed step (advance the index) and continue the
         // loop rather than retrying it forever.
-        onError: ({ context }) => ({
-          target: "executing",
-          context: { stepIndex: context.stepIndex + 1 },
-        }),
+        onError: ({ context }) => {
+          const id = context.steps[context.stepIndex]?.id ?? String(context.stepIndex);
+          return {
+            target: "executing",
+            context: {
+              stepIndex: context.stepIndex + 1,
+              progress: `${context.progress}${id}. skipped. worker error\n`,
+            },
+          };
+        },
       },
     },
     solving: {
@@ -171,9 +211,21 @@ export const planAndExecuteMachine = agentSetup.createMachine({
     done: {
       type: "final",
       output: ({ context }) => ({
-        answer: context.answer,
-        steps: context.steps,
-        evidence: context.evidence,
+        summary: [
+          "Plan",
+          context.plan || "(no plan)",
+          "",
+          "Progress",
+          context.progress.trimEnd() || "(no steps run)",
+          "",
+          "Answer",
+          context.answer || "(none)",
+        ].join("\n"),
+        details: {
+          answer: context.answer,
+          steps: context.steps,
+          evidence: context.evidence,
+        },
       }),
     },
   },
@@ -183,9 +235,7 @@ export async function runPlanAndExecuteExample(
   options?: RunAgentOptions<typeof planAndExecuteMachine>,
 ) {
   const result = await runAgent(planAndExecuteMachine, {
-    input: {
-      goal: "Should a small team pick XState or a hand-rolled reducer for agent workflows?",
-    },
+    input: { goal: "Is a heat pump worth it for a 1920s house?" },
     ...(options && Object.keys(options).length > 0
       ? options
       : { executors: createAiSdkExecutors({ models }) }),
@@ -212,15 +262,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
           `step ${snapshot.context.stepIndex}/${snapshot.context.steps.length}`,
         ),
     });
-    console.log("Plan:");
-    for (const step of output.steps) {
-      console.log(`  ${step.id}: ${step.question}`);
-    }
-    console.log("\nEvidence:");
-    for (const [id, text] of Object.entries(output.evidence)) {
-      console.log(`  ${id}: ${text}`);
-    }
-    console.log(`\nAnswer:\n${output.answer}`);
+    console.log(output.summary);
   })().catch((error) => {
     console.error(error);
     process.exitCode = 1;

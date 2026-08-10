@@ -82,6 +82,87 @@
   line-height: 1.5;
 }
 
+.chat-intro__purpose[data-clamped] {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+}
+
+.chat-intro__more {
+  border: none;
+  background: none;
+  padding: 0;
+  margin-top: 2px;
+  color: var(--accent, #7aa2f7);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.chat-intro__more:hover {
+  text-decoration: underline;
+}
+
+/* ─── checkpoint rail (time travel: rewind + fork) ─── */
+
+.checkpoint-rail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.checkpoint-rail__title {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-right: 2px;
+}
+
+.checkpoint-rail__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  padding: 3px 10px 3px 4px;
+  border: 1px solid var(--line, rgba(127, 127, 127, 0.35));
+  border-radius: 999px;
+  background: none;
+  color: var(--ink, inherit);
+  cursor: pointer;
+  transition: border-color 120ms ease;
+}
+
+.checkpoint-rail__chip:hover:not(:disabled) {
+  border-color: var(--accent, #7aa2f7);
+}
+
+.checkpoint-rail__chip[data-current] {
+  cursor: default;
+  border-style: dashed;
+  opacity: 0.7;
+}
+
+.checkpoint-rail__index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--line, rgba(127, 127, 127, 0.25));
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.checkpoint-rail__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .chat-intro__status,
 .chat-intro__run {
   margin: 0;

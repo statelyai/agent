@@ -108,10 +108,18 @@ describe("scenario outcomes (keyless)", () => {
   test("retry reaches fallback success after primary failures", async () => {
     const result = await start("retry", "I was charged twice and cannot open my invoice.");
     expect(result.status).toBe("done");
-    const output = result.output as { category: string; attempts: number; usedFallback: boolean };
+    const output = result.output as {
+      category: string;
+      attempts: number;
+      usedFallback: boolean;
+      outcome: string;
+    };
     expect(output.usedFallback).toBe(true);
     expect(output.attempts).toBe(2);
     expect(output.category).not.toBe("");
+    // The visible outcome names the winning attempt and the model that served it.
+    expect(output.outcome).toBe("Attempt 3 of 3 succeeded on the fallback model.");
+    expect(result.response).toContain(output.outcome);
   });
 
   test("tools calls a tool then finishes within the cap", async () => {
@@ -125,10 +133,65 @@ describe("scenario outcomes (keyless)", () => {
   test("reflection revises once then accepts", async () => {
     const result = await start("reflection", "A tidal shoreline at dusk.");
     expect(result.status).toBe("done");
-    const output = result.output as { revisions: number; accepted: boolean; score: number };
+    const output = result.output as {
+      revisions: number;
+      accepted: boolean;
+      score: number;
+      firstDraft: string;
+      draft: string;
+      verdict: string;
+    };
     expect(output.revisions).toBe(1);
     expect(output.accepted).toBe(true);
     expect(output.score).toBeGreaterThanOrEqual(8);
+    // Before/after: the weak first pass is kept alongside the revised draft.
+    expect(output.firstDraft).not.toBe("");
+    expect(output.draft).not.toBe(output.firstDraft);
+    expect(output.verdict).toBe("Reached target in 1 revision (score 9/10).");
+    expect(result.response).toContain(output.firstDraft);
+    expect(result.response).toContain(output.verdict);
+  });
+});
+
+describe("bounded exits", () => {
+  test("retry gives up once every attempt fails, and says so", async () => {
+    const result = await startScenarioRun(
+      "retry",
+      "Classify this ticket: exports time out.",
+      "script",
+      undefined,
+      {
+        generateText: async () => {
+          throw new Error("every model unavailable (scripted failure)");
+        },
+      },
+    );
+    expect(result.status).toBe("done");
+    const output = result.output as { category: string; outcome: string };
+    expect(output.category).toBe("");
+    expect(output.outcome).toBe("All 3 attempts failed, the fallback model included.");
+    expect(result.response).toContain(output.outcome);
+  });
+
+  test("reflection labels a best effort when the revision budget runs out", async () => {
+    const result = await startScenarioRun(
+      "reflection",
+      "A tidal shoreline at dusk.",
+      "script",
+      undefined,
+      {
+        generateText: async (request) =>
+          request.name === "writeDraft"
+            ? { output: `Draft about the shoreline (${request.prompt?.length ?? 0}).` }
+            : { output: { score: 5, feedback: "Still generic. Name one concrete image." } },
+      },
+    );
+    expect(result.status).toBe("done");
+    const output = result.output as { revisions: number; accepted: boolean; verdict: string };
+    expect(output.revisions).toBe(2);
+    expect(output.accepted).toBe(false);
+    expect(output.verdict).toBe("Best effort after 2 revisions (score 5/10, target 8/10).");
+    expect(result.response).toContain(output.verdict);
   });
 });
 

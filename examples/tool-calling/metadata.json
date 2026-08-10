@@ -9,7 +9,12 @@
   },
   "comparison": {
     "targets": ["Burr", "LangGraph"],
-    "purpose": "Model selects a tool via structured output; typed tool actors (calculator, unit converter, sample-data lookup) genuinely execute; progress is surfaced via onTransition; a final request formats the result."
+    "purpose": "The SDK runs the tool loop inside one state (calculator, unit converter, sample-data lookup all genuinely execute), then the machine validates the typed answer: an answer no tool backs is rejected, the model retries with the reason, and a spent budget ends in a denial."
   },
-  "starters": ["Convert 100 kilometers to miles.", "What is 15% of 240?"]
+  "starters": [
+    "Convert 100 kilometers to miles.",
+    "What is 15% of 240?",
+    "What is the USD to JPY rate?",
+    "How many furlongs is 10 km?"
+  ]
 }

@@ -79,6 +79,7 @@ export function DemoShell() {
   const mobileView = useSelector(store, (s) => s.context.mobileView);
   const turns = useSelector(store, (s) => s.context.turns);
   const pendingIdle = useSelector(store, (s) => s.context.pendingIdle);
+  const checkpoints = useSelector(store, (s) => s.context.checkpoints);
 
   const [examples, setExamples] = useState<ExampleSummary[]>([]);
   const [exampleDetail, setExampleDetail] = useState<ExampleDetail | null>(null);
@@ -254,6 +255,13 @@ export function DemoShell() {
   const resetRun = () => {
     store.trigger.runReset();
     player.reset();
+  };
+
+  /** Rewind to a stored idle checkpoint; the next answer forks a new branch. */
+  const rewindTo = (turnId: number) => {
+    abortRef.current?.abort();
+    endRun();
+    store.trigger.rewound({ turnId });
   };
 
   const select = (next: Selection) => {
@@ -506,6 +514,8 @@ export function DemoShell() {
       onSendEvent={sendEvent}
       onCancel={cancelRun}
       onRestart={resetRun}
+      checkpoints={checkpoints.map(({ turnId, label }) => ({ turnId, label }))}
+      onRewind={rewindTo}
       textPolicy={textPolicy}
     />
   );

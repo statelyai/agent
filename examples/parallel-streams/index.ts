@@ -9,6 +9,8 @@
  *   - `runAgent`'s `onChunk(chunk, { request })` callback: because both streams
  *     land on the same callback, `request.id` (the invoke id) tells you which
  *     region a chunk belongs to.
+ *   - a `laneSummary` recorded as each region finishes, so the final view keeps
+ *     the completion order and elapsed time the live stream showed.
  *
  * Dual-mode: `runParallelStreamsExample(options?)` takes injectable executors
  * (the test passes a mock `streamText` — keyless CI); the direct run below
@@ -26,15 +28,42 @@ export const models = defineModels({
   poet: openai("gpt-5.4-mini"),
 });
 
+/** One finished stream: which lane, and how long it took from run start. */
+const laneSchema = z.object({ name: z.string(), ms: z.number() });
+
+type Lane = z.infer<typeof laneSchema>;
+
+/** Completion order plus elapsed time, the part a final view usually drops. */
+function renderLanes(lanes: Lane[]): string {
+  return lanes
+    .map((lane, index) => `${index + 1}. ${lane.name} — finished at +${lane.ms}ms`)
+    .join("\n");
+}
+
+/** Append a lane at the moment it finishes, and re-render the summary. */
+function completeLane(context: { startedAt: number; lanes: Lane[] }, name: string) {
+  const lanes = [...context.lanes, { name, ms: Date.now() - context.startedAt }];
+  return { lanes, laneSummary: renderLanes(lanes) };
+}
+
 const agentSetup = setupAgent({
   models,
   context: z.object({
     topic: z.string(),
     analysis: z.string().nullable(),
     poem: z.string().nullable(),
+    /** Run start, so each lane's elapsed time is measured here, not guessed. */
+    startedAt: z.number(),
+    lanes: z.array(laneSchema),
+    laneSummary: z.string(),
   }),
   input: z.object({ topic: z.string() }),
-  output: z.object({ summary: z.string(), analysis: z.string(), poem: z.string() }),
+  output: z.object({
+    summary: z.string(),
+    analysis: z.string(),
+    poem: z.string(),
+    laneSummary: z.string(),
+  }),
   requests: {
     thinker: {
       mode: "stream",
@@ -63,7 +92,14 @@ export const parallelStreamsSchemas = agentSetup.schemas;
 
 export const parallelStreamsMachine = agentSetup.createMachine({
   id: "parallel-streams",
-  context: ({ input }) => ({ topic: input.topic, analysis: null, poem: null }),
+  context: ({ input }) => ({
+    topic: input.topic,
+    analysis: null,
+    poem: null,
+    startedAt: Date.now(),
+    lanes: [],
+    laneSummary: "",
+  }),
   output: ({ context }) => ({
     // A one-line manifest, NOT a second copy: the streamed text already reached
     // the caller chunk-by-chunk and is returned verbatim in `analysis`/`poem`.
@@ -74,6 +110,8 @@ export const parallelStreamsMachine = agentSetup.createMachine({
       `poem (${(context.poem ?? "").length} chars).`,
     analysis: context.analysis ?? "",
     poem: context.poem ?? "",
+    // Timing survives the run instead of scrolling by with the chunks.
+    laneSummary: context.laneSummary,
   }),
   type: "parallel",
   states: {
@@ -85,9 +123,9 @@ export const parallelStreamsMachine = agentSetup.createMachine({
             id: "thinker",
             src: "thinker",
             input: ({ context }) => ({ topic: context.topic }),
-            onDone: ({ output }) => ({
+            onDone: ({ context, output }) => ({
               target: "done",
-              context: { analysis: output },
+              context: { analysis: output, ...completeLane(context, "analysis") },
             }),
           },
         },
@@ -102,9 +140,9 @@ export const parallelStreamsMachine = agentSetup.createMachine({
             id: "poet",
             src: "poet",
             input: ({ context }) => ({ topic: context.topic }),
-            onDone: ({ output }) => ({
+            onDone: ({ context, output }) => ({
               target: "done",
-              context: { poem: output },
+              context: { poem: output, ...completeLane(context, "poem") },
             }),
           },
         },
@@ -145,11 +183,12 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     process.exit(1);
   }
   void (async () => {
-    const { buffers } = await runParallelStreamsExample(undefined, (snapshot) =>
+    const { output, buffers } = await runParallelStreamsExample(undefined, (snapshot) =>
       console.log("[state]", JSON.stringify(snapshot.value)),
     );
     console.log("[thinker]\n" + buffers.thinker);
     console.log("\n[poet]\n" + buffers.poet);
+    console.log("\n[lanes]\n" + output.laneSummary);
   })().catch((error) => {
     console.error(error);
     process.exitCode = 1;

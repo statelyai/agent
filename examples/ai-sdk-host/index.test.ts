@@ -2,13 +2,14 @@ import { describe, expect, test } from "vitest";
 import type { AgentRequestExecutor } from "@statelyai/agent";
 import { createTextLogic } from "@statelyai/agent";
 import { z } from "zod";
+import { tellJoke } from "../joke/index.js";
 import { runStreamingDemo, runTriageDemo } from "./index.js";
 
 /**
  * Mock `generateText` for the triage machine: returns a canned structured
- * triage object and records every request it saw. The triage machine issues a
- * single text request (`triageTicket`), so a `done` run must call it exactly
- * once, and the machine's structured output must flow straight through.
+ * payload covering both requests the machine makes (`classifyTicket`, then
+ * `draftReply`) and records every prompt it saw. A `done` run calls it exactly
+ * twice, and the machine's structured output must flow straight through.
  */
 function createTriageModel() {
   const tickets: string[] = [];
@@ -18,6 +19,7 @@ function createTriageModel() {
       output: {
         sentiment: "negative" as const,
         category: "billing" as const,
+        confidence: 0.9,
         reply: "We are sorry about the duplicate charge and will refund it.",
       },
     };
@@ -37,12 +39,18 @@ describe("ai-sdk-host", () => {
       sentiment: "negative",
       category: "billing",
       reply: "We are sorry about the duplicate charge and will refund it.",
+      // Confidence cleared the threshold, so no human was pulled in.
+      escalated: false,
     });
     expect((output as { summary: string }).summary).toContain(
       "We are sorry about the duplicate charge and will refund it.",
     );
-    // The machine lowered the ticket into a single text request's prompt.
-    expect(tickets).toEqual(["I was charged twice."]);
+    // Two text requests: classification gets the raw ticket, the draft gets the
+    // ticket plus the classification and the SLA note the machine computed.
+    expect(tickets).toHaveLength(2);
+    expect(tickets[0]).toBe("I was charged twice.");
+    expect(tickets[1]).toContain("Ticket (billing, customer sounds negative):");
+    expect(tickets[1]).toContain("SLA: first response due in 2h (billing, negative).");
   });
 
   test("runStreamingDemo settles on the accumulated final joke", async () => {
@@ -51,7 +59,7 @@ describe("ai-sdk-host", () => {
     // would) and hands the machine only the accumulated final text.
     const streamingTellJoke = createTextLogic({
       mode: "stream",
-      schemas: { input: z.object({ topic: z.string() }), output: z.string() },
+      schemas: tellJoke.schemas,
       model: "jokeWriter",
       prompt: ({ input }) => `Tell a joke about ${input.topic}.`,
     }).withExecutor(async ({ input }) => {
@@ -63,7 +71,8 @@ describe("ai-sdk-host", () => {
 
     // The machine transitions only on the accumulated final text.
     expect(joke).toBe("A joke about state machines.");
-    // The topic was lowered into the stream logic's input.
-    expect(topics).toEqual(["state machines"]);
+    // The topic was lowered into the stream logic's input, once per pass — the
+    // joke machine always takes one improvement pass before deciding.
+    expect(topics).toEqual(["state machines", "state machines"]);
   });
 });

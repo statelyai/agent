@@ -73,16 +73,22 @@ export async function runJokeDemo(model: BaseChatModel, onChunk?: (chunk: string
 }
 
 /**
- * A scripted LangChain model for one pass of the joke machine. The queue is
+ * A scripted LangChain model for a full run of the joke machine. The queue is
  * consumed in the order the *machine* asks, not in prompt order — the machine
- * owns the sequence.
+ * owns the sequence, including the improvement pass it always takes before any
+ * decision is requested.
  */
 export const jokeScript: ScriptedResponse[] = [
-  // 1. `telling` streams a joke.
+  // 1. `telling` streams the first joke.
   { text: "A state machine walks into a bar. It refuses the transition." },
   // 2. `rating` asks for structured output — the `{ result }` envelope.
+  { structured: { result: { rating: 6, explanation: "Setup is longer than the punchline." } } },
+  // 3. `telling` again: the machine always takes one improvement pass, so the
+  //    writer gets the first joke plus the critique and rewrites it.
+  { text: "A state machine walks into a bar. Illegal transition." },
+  // 4. `rating` scores the rewrite.
   { structured: { result: { rating: 9, explanation: "Tight setup, legal punchline." } } },
-  // 3. `deciding` forces one event tool. Event tools are named
+  // 5. `deciding` forces one event tool. Event tools are named
   //    `send_event_<EVENT_TYPE>`, so ending the loop is `send_event_END`.
   { toolCall: { name: "send_event_END" } },
 ];

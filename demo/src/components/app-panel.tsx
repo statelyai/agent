@@ -54,8 +54,51 @@ type AppPanelProps = {
   /** Aborts the in-flight run (composer stop button). */
   onCancel: () => void;
   onRestart: () => void;
+  /** Idle waits this run has settled at — the time-travel rail. */
+  checkpoints: CheckpointChip[];
+  /** Truncate the conversation back to a checkpoint and fork from there. */
+  onRewind: (turnId: number) => void;
   textPolicy: TextPolicy;
 };
+
+export type CheckpointChip = { turnId: number; label: string };
+
+/**
+ * The checkpoint rail: every idle wait is a persisted snapshot the run can be
+ * rewound to — click one, answer differently, and the conversation forks.
+ */
+function CheckpointRail({
+  checkpoints,
+  currentTurnId,
+  onRewind,
+}: {
+  checkpoints: CheckpointChip[];
+  /** The checkpoint that IS the current wait (not rewindable), if any. */
+  currentTurnId: number | null;
+  onRewind: (turnId: number) => void;
+}) {
+  return (
+    <div className="checkpoint-rail" role="group" aria-label="Checkpoints">
+      <span className="checkpoint-rail__title">Checkpoints</span>
+      {checkpoints.map((checkpoint, index) => {
+        const current = checkpoint.turnId === currentTurnId;
+        return (
+          <button
+            key={checkpoint.turnId}
+            className="checkpoint-rail__chip"
+            data-current={current || undefined}
+            disabled={current}
+            title={current ? `${checkpoint.label} (current)` : `Rewind to: ${checkpoint.label}`}
+            onClick={() => onRewind(checkpoint.turnId)}
+          >
+            <span className="checkpoint-rail__index">{index + 1}</span>
+            <span className="checkpoint-rail__label">{checkpoint.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 function resultState(result: ChatTurnResult): string {
   const committed = result.trace.filter(
@@ -195,6 +238,8 @@ export function AppPanel({
   onSendEvent,
   onCancel,
   onRestart,
+  checkpoints,
+  onRewind,
   textPolicy,
 }: AppPanelProps) {
   const loading = turns.some((turn) => turn.status === "loading");
@@ -244,10 +289,24 @@ export function AppPanel({
       {startForm ? <StartFormCard schema={startForm.schema} onStart={startForm.onStart} /> : null}
     </div>
   );
+  // The current wait's own checkpoint is shown but not rewindable; earlier
+  // ones (and all of them once the run finishes) rewind + fork.
+  const currentCheckpointTurnId =
+    pendingIdle && checkpoints.length ? checkpoints[checkpoints.length - 1].turnId : null;
+  const rail =
+    !loading && (checkpoints.length > 1 || (checkpoints.length === 1 && !pendingIdle)) ? (
+      <CheckpointRail
+        checkpoints={checkpoints}
+        currentTurnId={currentCheckpointTurnId}
+        onRewind={onRewind}
+      />
+    ) : null;
+
   const ComposerBefore =
     pendingIdle && !loading
       ? () => (
           <div className="aui-demo-actions flex flex-col gap-3 px-1">
+            {rail}
             <div className="chat-waiting" role="status">
               <div className="chat-waiting__row">
                 <span className="chat-waiting__dot" aria-hidden="true" />
@@ -269,11 +328,14 @@ export function AppPanel({
     : undefined;
   const ComposerReplacement = finished
     ? () => (
-        <div className="flex justify-end px-1">
-          <Button variant="outline" onClick={onRestart}>
-            <RefreshCcw aria-hidden="true" />
-            Run again
-          </Button>
+        <div className="flex flex-col gap-3 px-1">
+          {rail}
+          <div className="flex justify-end">
+            <Button variant="outline" onClick={onRestart}>
+              <RefreshCcw aria-hidden="true" />
+              Run again
+            </Button>
+          </div>
         </div>
       )
     : undefined;

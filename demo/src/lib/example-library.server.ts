@@ -74,6 +74,13 @@ type ExampleMetadata = {
   machine?: string;
   /** Wall-clock run budget override (ms) for legitimately long examples. */
   budgetMs?: number;
+  /**
+   * State tag that marks human-wait states, for plain XState machines that
+   * can't carry a setupAgent isSuspended predicate. The demo passes
+   * `runAgent(machine, { isSuspended: (s) => s.hasTag(tag) })` so idle
+   * settles deterministically instead of via the timing heuristic.
+   */
+  suspendedTag?: string;
 };
 
 const metadataModules = import.meta.glob("../../../examples/*/metadata.json", {
@@ -232,6 +239,12 @@ async function loadDetail(id: string): Promise<ExampleDetail> {
 export function exampleBudgetMs(id: string): number | undefined {
   const raw = metadataById.get(id)?.budgetMs;
   return typeof raw === "number" && raw > 0 ? raw : undefined;
+}
+
+/** Suspension tag override from metadata.json `suspendedTag`. */
+export function exampleSuspendedTag(id: string): string | undefined {
+  const raw = metadataById.get(id)?.suspendedTag;
+  return typeof raw === "string" && raw ? raw : undefined;
 }
 
 /** The live machine object for a run — never serialized to the client. */

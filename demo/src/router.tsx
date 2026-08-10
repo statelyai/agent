@@ -6,6 +6,12 @@ export function getRouter() {
     routeTree,
     defaultPreload: "intent",
     scrollRestoration: true,
+    defaultNotFoundComponent: () => (
+      <div style={{ padding: "2rem", textAlign: "center" }}>
+        <p>Not found.</p>
+        <a href="/">Back to the demo</a>
+      </div>
+    ),
   });
 }
 

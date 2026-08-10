@@ -76,13 +76,18 @@ describe("langchain-host: Direction A (LangChain model as executor)", () => {
     const chunks: string[] = [];
     const output = await runJokeDemo(model, (chunk) => chunks.push(chunk));
 
-    expect(output.jokes).toHaveLength(1);
+    // Two jokes: the first attempt, then the improvement pass the machine
+    // always takes before the decision.
+    expect(output.jokes).toHaveLength(2);
+    expect(output.firstJoke).toBe(output.jokes[0]);
+    expect(output.joke).toBe(output.jokes[1]);
+    expect(output.revisionNotice).toContain("First attempt scored 6/10");
     expect(output.lastRating).toBe(9);
-    // Streaming really streamed: more than one chunk, reassembling to the joke.
+    // Streaming really streamed: more than one chunk, reassembling to both jokes.
     expect(chunks.length).toBeGreaterThan(1);
-    expect(chunks.join("")).toBe(output.jokes[0]);
-    // Three model calls: tell (stream), rate (structured), decide (tool call).
-    expect(model.calls).toBe(3);
+    expect(chunks.join("")).toBe(output.jokes.join(""));
+    // Five model calls: tell + rate twice, then decide (tool call).
+    expect(model.calls).toBe(5);
   });
 
   test("the machine, not the model, ends the loop — decide returns the chosen event", async () => {

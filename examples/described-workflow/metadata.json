@@ -11,6 +11,7 @@
     "targets": ["LangGraph", "hand-rolled loop"],
     "purpose": "A plain XState machine (no setupAgent): each state's description is its prompt — the writing states send it themselves, and `getRequests` interprets the idle judging gate from the same description."
   },
+  "suspendedTag": "decision",
   "starters": [
     {
       "label": "Write the Statechart Studio launch blurb",

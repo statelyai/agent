@@ -4,6 +4,9 @@
  * evaluate)* loop, gated by a pure `always` transition that checks quality
  * and iteration budget.
  *
+ * The first pass translates literally on purpose, so the strict reviewer always
+ * has something to catch and every run shows a real before/after revision.
+ *
  * Compare: https://ai-sdk.dev/docs/agents/workflows#evaluator-optimizer
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/ai-sdk-evaluator-optimizer/index.ts
@@ -42,10 +45,22 @@ const contextSchema = z.object({
   text: z.string(),
   targetLanguage: z.string(),
   translation: z.string().nullable(),
+  /** The literal first pass, kept so the demo can show before/after. */
+  firstDraft: z.string().nullable(),
+  /** One line: what the reviewer asked the improver to fix. */
+  revisionNotes: z.string().nullable(),
+  /** One line: the latest score and remaining issues. */
+  review: z.string().nullable(),
   evaluation: translationEvaluationSchema.nullable(),
   iterations: z.number(),
   maxIterations: z.number(),
 });
+
+/** "Score 6/10 — literal calque; wrong register" */
+function reviewLine(evaluation: z.infer<typeof translationEvaluationSchema>) {
+  const issues = evaluation.specificIssues.join("; ");
+  return `Score ${evaluation.qualityScore}/10${issues ? ` — ${issues}` : " — reads naturally"}`;
+}
 
 const agentSetup = setupAgent({
   models,
@@ -55,10 +70,17 @@ const agentSetup = setupAgent({
     targetLanguage: z.string(),
     maxIterations: z.number().default(3),
   }),
+  // Leads with a short human-readable summary (final, first draft, what the
+  // revision fixed); the structured values stay nested under `detail`.
   output: z.object({
-    translation: z.string(),
-    evaluation: translationEvaluationSchema.nullable(),
+    summary: z.string(),
+    qualityScore: z.number(),
     iterations: z.number(),
+    detail: z.object({
+      firstDraft: z.string(),
+      translation: z.string(),
+      evaluation: translationEvaluationSchema.nullable(),
+    }),
   }),
   emitted: {
     TRANSLATED: z.object({ translation: z.string() }),
@@ -78,8 +100,10 @@ const agentSetup = setupAgent({
         output: z.string(),
       },
       model: "translator",
+      // A deliberately literal first pass: the reviewer always has something to
+      // catch, so the loop demonstrates a real revision on every run.
       system:
-        "You are an expert literary translator. Translate faithfully into the target language, preserving register, tone, idiom, and cultural nuance rather than translating word for word. Return only the translation.",
+        "You are a fast first-pass translator. Translate the text literally, close to word for word, without hunting for the idiomatic equivalent in the target language. Return only the translation.",
       prompt: ({ input }) => `Translate this text to ${input.targetLanguage}:\n${input.text}`,
     },
     evaluateTranslation: {
@@ -89,7 +113,7 @@ const agentSetup = setupAgent({
       },
       model: "evaluator",
       system:
-        "You are a bilingual translation reviewer. Score the translation 1-10 for overall quality and judge whether it preserves tone, preserves nuance, and is culturally accurate. List specific issues and concrete improvement suggestions. Be strict: reserve scores of 8+ for translations that read naturally to a native speaker.",
+        "You are a bilingual translation reviewer. Score the translation 1-10 for overall quality and judge whether it preserves tone, preserves nuance, and is culturally accurate. List at most two specific issues and matching improvement suggestions, each a short phrase. Be strict: reserve scores of 8+ for translations that read naturally to a native speaker, and mark any literal calque of an idiom as failing nuance.",
       prompt: ({ input }) => `Original: ${input.original}\nTranslation: ${input.translation}`,
     },
     improveTranslation: {
@@ -121,6 +145,9 @@ export const aiSdkEvaluatorOptimizerMachine = agentSetup.createMachine({
     text: input.text,
     targetLanguage: input.targetLanguage,
     translation: null,
+    firstDraft: null,
+    revisionNotes: null,
+    review: null,
     evaluation: null,
     iterations: 0,
     maxIterations: input.maxIterations,
@@ -139,11 +166,11 @@ export const aiSdkEvaluatorOptimizerMachine = agentSetup.createMachine({
           enq.emit({ type: "TRANSLATED", translation: output });
           return {
             target: "evaluating",
-            context: { translation: output },
+            context: { translation: output, firstDraft: output },
           };
         },
         // On failure, finish with an empty translation (best-effort output).
-        onError: { target: "done", context: { translation: "" } },
+        onError: { target: "done", context: { translation: "", firstDraft: "" } },
       },
     },
     evaluating: {
@@ -164,6 +191,7 @@ export const aiSdkEvaluatorOptimizerMachine = agentSetup.createMachine({
             target: "checking",
             context: {
               evaluation: output,
+              review: reviewLine(output),
               iterations: context.iterations + 1,
             },
           };
@@ -188,11 +216,14 @@ export const aiSdkEvaluatorOptimizerMachine = agentSetup.createMachine({
           translation: context.translation,
           evaluation: context.evaluation,
         }),
-        onDone: ({ output }, enq) => {
+        onDone: ({ context, output }, enq) => {
           enq.emit({ type: "IMPROVED", translation: output });
           return {
             target: "evaluating",
-            context: { translation: output },
+            context: {
+              translation: output,
+              revisionNotes: context.evaluation.specificIssues.join("; ") || "polish pass",
+            },
           };
         },
         // On failure, finish with the prior translation (best-effort output).
@@ -202,9 +233,20 @@ export const aiSdkEvaluatorOptimizerMachine = agentSetup.createMachine({
     done: {
       type: "final",
       output: ({ context }) => ({
-        translation: context.translation,
-        evaluation: context.evaluation,
+        summary: [
+          `**Final translation (${context.targetLanguage})**\n\n${context.translation}`,
+          `**First draft**\n\n${context.firstDraft ?? context.translation}`,
+          `**Reviewer**\n\n${context.review ?? "not reviewed"}${
+            context.revisionNotes ? `\n\nRevised to fix: ${context.revisionNotes}` : ""
+          }`,
+        ].join("\n\n"),
+        qualityScore: context.evaluation?.qualityScore ?? 0,
         iterations: context.iterations,
+        detail: {
+          firstDraft: context.firstDraft ?? "",
+          translation: context.translation,
+          evaluation: context.evaluation,
+        },
       }),
     },
   },
@@ -213,8 +255,8 @@ export const aiSdkEvaluatorOptimizerMachine = agentSetup.createMachine({
 export async function runAiSdkEvaluatorOptimizerExample() {
   const result = await runAgent(aiSdkEvaluatorOptimizerMachine, {
     input: {
-      text: "Hello friend",
-      targetLanguage: "Spanish",
+      text: "The early bird catches the worm.",
+      targetLanguage: "Japanese",
       maxIterations: 3,
     },
     executors: createAiSdkExecutors({ models }),

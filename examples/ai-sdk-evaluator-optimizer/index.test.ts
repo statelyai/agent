@@ -51,7 +51,9 @@ test("AI SDK evaluator-optimizer maps to an explicit machine", async () => {
     },
   });
   assert.equal(result.status, "done");
-  assert.deepEqual(result.status === "done" ? result.output : undefined, {
+  const output = result.status === "done" ? result.output : undefined;
+  assert.deepEqual(output?.detail, {
+    firstDraft: "Spanish:Hello friend",
     translation: "Spanish:Hello friend improved",
     evaluation: {
       qualityScore: 9,
@@ -61,8 +63,14 @@ test("AI SDK evaluator-optimizer maps to an explicit machine", async () => {
       specificIssues: [],
       improvementSuggestions: [],
     },
-    iterations: 2,
   });
+  assert.equal(output?.qualityScore, 9);
+  assert.equal(output?.iterations, 2);
+  // The summary leads with prose: final, first draft, and why it was revised.
+  assert.ok(output?.summary.includes("Spanish:Hello friend improved"));
+  assert.ok(output?.summary.includes("**First draft**"));
+  assert.ok(output?.summary.includes("Score 9/10"));
+  assert.ok(output?.summary.includes("Revised to fix: missing nuance"));
   // Two evaluate passes (iterations 1 then 2) with one improve step between.
   assert.deepEqual(evaluated, [1, 2]);
   assert.deepEqual(improved, ["Spanish:Hello friend improved"]);

@@ -9,7 +9,7 @@
   },
   "comparison": {
     "targets": ["LangGraph", "AI SDK"],
-    "purpose": "Streams a two-step run to the browser over the AI SDK v6 UI message stream, so a plain useChat client renders the text and the live machine state unchanged."
+    "purpose": "Streams a two-step run to the browser over the AI SDK v6 UI message stream, so a plain useChat client renders the text and the live machine state unchanged — each stream leaves a word-count and timing lane behind once it finishes."
   },
   "starters": [
     "A keyboard-first task manager for developers.",

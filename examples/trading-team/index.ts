@@ -7,7 +7,13 @@
  *   - Debate is a bounded loop, not a one-shot. Bull and bear ALTERNATE
  *     (`bullArguing → bearArguing → debateCheck`), each turn appended to a typed
  *     transcript so the bear rebuts the bull's latest point and vice versa;
- *     `debateCheck` loops until `round >= maxDebateRounds` (default 2).
+ *     `debateCheck` loops until `round >= maxDebateRounds` (default 1).
+ *   - The risk desk owns the policy, and the trader does not. The trader's first
+ *     proposal never carries risk controls (its brief says so: risk controls are
+ *     the desk's job), so the deterministic `policyCheck` gate always sends the
+ *     first proposal back once with the desk's actual limits attached. The
+ *     revision complies and clears. Every send-back and clearance appends a line
+ *     to `riskNotice`, which is the run's readable trail.
  *   - Risk review is a rejection loop. On `approved: false`, `decisionCheck`
  *     routes back to `proposing` with the rejection reason in context so the
  *     trader revises. Bounded to one revision (`maxRevisions`, default 1); a
@@ -37,7 +43,44 @@ const debateTurnSchema = z.object({
   stance: z.enum(["bull", "bear"]),
   argument: z.string(),
 });
-const proposalSchema = z.object({ action: actionSchema, rationale: z.string() });
+const proposalSchema = z.object({
+  action: actionSchema,
+  /** Position size as a percent of the portfolio. */
+  sizePct: z.number(),
+  /** Stop-loss as a percent below entry, or null when no risk control is set. */
+  stopLossPct: z.number().nullable(),
+  rationale: z.string(),
+});
+
+/**
+ * The risk desk's standing policy. The trader is not shown it until a proposal
+ * is sent back, which is what makes the first send-back deterministic rather
+ * than a coin flip on the model's mood.
+ */
+const DESK_POLICY = {
+  maxPositionPct: 2,
+  requireStopLoss: true,
+  /** How many times the desk will send a proposal back before escalating. */
+  maxSendBacks: 1,
+} as const;
+
+const POLICY_TEXT =
+  `Risk desk policy: position size at most ${DESK_POLICY.maxPositionPct}% of the ` +
+  "portfolio, and every proposal must set an explicit stopLossPct.";
+
+/** The policy breaches in a proposal, empty when it complies. */
+function policyBreaches(proposal: z.infer<typeof proposalSchema>): string[] {
+  const breaches: string[] = [];
+  if (DESK_POLICY.requireStopLoss && proposal.stopLossPct === null) {
+    breaches.push("no stop-loss set");
+  }
+  if (proposal.sizePct > DESK_POLICY.maxPositionPct) {
+    breaches.push(
+      `size ${proposal.sizePct}% exceeds the ${DESK_POLICY.maxPositionPct}% desk limit`,
+    );
+  }
+  return breaches;
+}
 const riskSchema = z.object({ acceptable: z.boolean(), concerns: z.array(z.string()) });
 const decisionSchema = z.object({
   approved: z.boolean(),
@@ -62,10 +105,15 @@ const setup = setupAgent({
     debate: z.array(debateTurnSchema),
     round: z.number(),
     maxDebateRounds: z.number(),
-    // Set when a decision is rejected; fed into the next proposal.
+    // Set when a decision is rejected or the desk sends a proposal back; fed
+    // into the next proposal.
     rejectionReason: z.string().nullable(),
     revisions: z.number(),
     maxRevisions: z.number(),
+    // Desk send-backs, budgeted separately from portfolio-manager rejections.
+    sendBacks: z.number(),
+    // One line per desk action, the run's readable trail.
+    riskNotice: z.string(),
     proposal: proposalSchema.nullable(),
     risk: riskSchema.nullable(),
     decision: decisionSchema.nullable(),
@@ -73,19 +121,28 @@ const setup = setupAgent({
   input: z.object({
     symbol: z.string(),
     marketData: z.string(),
-    maxDebateRounds: z.number().default(2),
+    maxDebateRounds: z.number().default(1),
     maxRevisions: z.number().default(1),
   }),
+  // `riskNotice` is the one leading string; the decision prose stays nested so
+  // it never outgrows the trail.
   output: z.object({
+    riskNotice: z.string(),
     outcome: z.enum(["approved", "rejected"]),
     action: actionSchema,
-    reason: z.string(),
     revisions: z.number(),
+    sendBacks: z.number(),
+    details: z.object({
+      reason: z.string(),
+      proposal: proposalSchema.nullable(),
+      risk: riskSchema.nullable(),
+    }),
   }),
   // Narrow the fields each state guarantees, so downstream reads are non-null
   // without assertions. `reviewingRisk`/`deciding` always run after a proposal;
   // both terminals always run after a decision.
   states: {
+    policyCheck: { context: { proposal: proposalSchema } },
     reviewingRisk: { context: { proposal: proposalSchema } },
     deciding: { context: { proposal: proposalSchema, risk: riskSchema } },
     done: { context: { decision: decisionSchema } },
@@ -101,7 +158,9 @@ const setup = setupAgent({
         output: z.string(),
       },
       model: "analyst",
-      system: ({ input }) => `You are the ${input.role} analyst. Analyze only the supplied data.`,
+      system: ({ input }) =>
+        `You are the ${input.role} analyst. Analyze only the supplied data, in ` +
+        "at most two short sentences.",
       prompt: ({ input }) => input.data,
     },
     // One debate turn. Sees the analyst reports AND the running transcript, so a
@@ -117,8 +176,9 @@ const setup = setupAgent({
       },
       model: "researcher",
       system: ({ input }) =>
-        `Argue the ${input.stance} case. Address the analyst reports and directly ` +
-        `rebut the opponent's most recent argument in the transcript.`,
+        `Argue the ${input.stance} case in at most three sentences. Address the ` +
+        "analyst reports and directly rebut the opponent's most recent argument " +
+        "in the transcript.",
       prompt: ({ input }) =>
         JSON.stringify({ analyses: input.analyses, transcript: input.transcript }),
     },
@@ -134,9 +194,21 @@ const setup = setupAgent({
         output: proposalSchema,
       },
       model: "trader",
-      system:
-        "Propose buy, hold, or sell from the analyst evidence and the debate. If a " +
-        "prior proposal was rejected, address the rejection reason. Do not invent data.",
+      // Separation of duties, and the reason the first send-back is certain: on
+      // the opening proposal the trader is told risk controls are not its job,
+      // so `stopLossPct` comes back null and `policyCheck` bounces it. The
+      // rejection reason then carries the desk's actual policy, and the revision
+      // can comply.
+      system: ({ input }) =>
+        input.rejectionReason
+          ? "Propose buy, hold, or sell from the analyst evidence and the debate. " +
+            "Your prior proposal was sent back: address the stated reason exactly, " +
+            "including any size limit and stop-loss requirement. Keep the rationale " +
+            "to one sentence. Do not invent data."
+          : "Propose buy, hold, or sell from the analyst evidence and the debate, " +
+            "with a position size in percent of the portfolio. Risk controls belong " +
+            "to the risk desk, not to you: set stopLossPct to null. Keep the " +
+            "rationale to one sentence. Do not invent data.",
       prompt: ({ input }) => JSON.stringify(input),
     },
     reviewRisk: {
@@ -145,7 +217,9 @@ const setup = setupAgent({
         output: riskSchema,
       },
       model: "risk",
-      system: "Review the proposal for unsupported assumptions and downside risk.",
+      system:
+        "Review the proposal for unsupported assumptions and downside risk. List " +
+        "at most two concerns, a few words each.",
       prompt: ({ input }) => JSON.stringify(input.proposal),
     },
     decide: {
@@ -156,11 +230,37 @@ const setup = setupAgent({
       model: "portfolio",
       system:
         "Make the final paper-trading decision. Reject unsupported or " +
-        "unacceptable-risk proposals with a clear reason.",
+        "unacceptable-risk proposals with a clear one-sentence reason.",
       prompt: ({ input }) => JSON.stringify(input),
     },
   },
 });
+
+/** Both terminals report the same shape: the desk trail leads, prose nests. */
+function finalOutput(
+  context: {
+    riskNotice: string;
+    decision: z.infer<typeof decisionSchema>;
+    revisions: number;
+    sendBacks: number;
+    proposal: z.infer<typeof proposalSchema> | null;
+    risk: z.infer<typeof riskSchema> | null;
+  },
+  outcome: "approved" | "rejected",
+) {
+  return {
+    riskNotice: context.riskNotice.trimEnd(),
+    outcome,
+    action: context.decision.action,
+    revisions: context.revisions,
+    sendBacks: context.sendBacks,
+    details: {
+      reason: context.decision.reason,
+      proposal: context.proposal,
+      risk: context.risk,
+    },
+  };
+}
 
 export const tradingTeamMachine = setup.createMachine({
   id: "trading-team",
@@ -174,6 +274,8 @@ export const tradingTeamMachine = setup.createMachine({
     rejectionReason: null,
     revisions: 0,
     maxRevisions: input.maxRevisions,
+    sendBacks: 0,
+    riskNotice: "",
     proposal: null,
     risk: null,
     decision: null,
@@ -283,14 +385,62 @@ export const tradingTeamMachine = setup.createMachine({
           debate: context.debate,
           rejectionReason: context.rejectionReason,
         }),
-        onDone: ({ output }) => ({ target: "reviewingRisk", context: { proposal: output } }),
+        onDone: ({ output }) => ({ target: "policyCheck", context: { proposal: output } }),
+      },
+    },
+    // The deterministic desk gate. No model call: the proposal either meets the
+    // written policy or it does not. The opening proposal never does (the trader
+    // is briefed not to set risk controls), so the send-back always happens once
+    // and is visible in `riskNotice`.
+    policyCheck: {
+      type: "choice",
+      choice: ({ context }) => {
+        const breaches = policyBreaches(context.proposal);
+        const round = context.sendBacks + 1;
+        if (breaches.length === 0) {
+          return {
+            target: "reviewingRisk",
+            context: {
+              riskNotice:
+                `${context.riskNotice}${round}. cleared. ` +
+                `size ${context.proposal.sizePct}%, stop-loss ${context.proposal.stopLossPct}%\n`,
+            },
+          };
+        }
+        // Budget spent: the desk escalates the breach to the portfolio manager
+        // rather than looping forever.
+        if (context.sendBacks >= DESK_POLICY.maxSendBacks) {
+          return {
+            target: "reviewingRisk",
+            context: {
+              riskNotice: `${context.riskNotice}${round}. escalated. ${breaches.join("; ")}\n`,
+            },
+          };
+        }
+        return {
+          target: "proposing",
+          context: {
+            sendBacks: context.sendBacks + 1,
+            rejectionReason: `${breaches.join("; ")}. ${POLICY_TEXT}`,
+            riskNotice: `${context.riskNotice}${round}. blocked. ${breaches.join("; ")}\n`,
+          },
+        };
       },
     },
     reviewingRisk: {
       invoke: {
         src: "reviewRisk",
         input: ({ context }) => ({ proposal: context.proposal }),
-        onDone: ({ output }) => ({ target: "deciding", context: { risk: output } }),
+        onDone: ({ context, output }) => ({
+          target: "deciding",
+          context: {
+            risk: output,
+            riskNotice:
+              `${context.riskNotice}risk review. ` +
+              `${output.acceptable ? "acceptable" : "not acceptable"}. ` +
+              `${output.concerns.join("; ") || "no concerns"}\n`,
+          },
+        }),
       },
     },
     deciding: {
@@ -305,6 +455,9 @@ export const tradingTeamMachine = setup.createMachine({
             decision: output,
             revisions: output.approved ? context.revisions : context.revisions + 1,
             rejectionReason: output.approved ? context.rejectionReason : output.reason,
+            riskNotice:
+              `${context.riskNotice}portfolio. ` +
+              `${output.approved ? "approved" : "rejected"}. ${output.reason}\n`,
           },
         }),
       },
@@ -322,21 +475,11 @@ export const tradingTeamMachine = setup.createMachine({
     },
     done: {
       type: "final",
-      output: ({ context }) => ({
-        outcome: "approved" as const,
-        action: context.decision.action,
-        reason: context.decision.reason,
-        revisions: context.revisions,
-      }),
+      output: ({ context }) => finalOutput(context, "approved"),
     },
     rejected: {
       type: "final",
-      output: ({ context }) => ({
-        outcome: "rejected" as const,
-        action: context.decision.action,
-        reason: context.decision.reason,
-        revisions: context.revisions,
-      }),
+      output: ({ context }) => finalOutput(context, "rejected"),
     },
   },
 });
@@ -353,10 +496,16 @@ export interface RunTradingTeamOptions {
 }
 
 export interface TradingTeamResult {
+  riskNotice: string;
   outcome: "approved" | "rejected";
   action: z.infer<typeof actionSchema>;
-  reason: string;
   revisions: number;
+  sendBacks: number;
+  details: {
+    reason: string;
+    proposal: z.infer<typeof proposalSchema> | null;
+    risk: z.infer<typeof riskSchema> | null;
+  };
   progress: string[];
 }
 
@@ -367,7 +516,7 @@ export async function runTradingTeamExample(
   const {
     symbol = "ACME",
     marketData = "Illustrative data only: revenue +8%, neutral sentiment, flat momentum.",
-    maxDebateRounds = 2,
+    maxDebateRounds = 1,
     maxRevisions = 1,
     generateText,
     onProgress,
@@ -399,9 +548,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   void runTradingTeamExample({
     onProgress: (state) => console.log(`  → ${state}`),
   }).then((result) => {
-    console.log("\nOutcome:", result.outcome);
-    console.log("Action:", result.action);
-    console.log("Revisions:", result.revisions);
-    console.log("Reason:", result.reason);
+    console.log("\n" + result.riskNotice);
+    console.log("\nOutcome:", result.outcome, "-", result.action);
   });
 }

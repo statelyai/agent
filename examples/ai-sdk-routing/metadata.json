@@ -9,7 +9,7 @@
   },
   "comparison": {
     "targets": ["Vercel AI SDK", "routing"],
-    "purpose": "Classifies an incoming ticket, then hands it to the matching specialist reply \u2014 the AI SDK routing workflow as an explicit XState machine."
+    "purpose": "Classifies an incoming ticket, hands it to the matching specialist, and shows the policy sentence the answer rests on \u2014 the AI SDK routing workflow as an explicit XState machine."
   },
   "starters": [
     "I want a refund for order #4821, it arrived broken.",

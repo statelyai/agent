@@ -23,17 +23,23 @@ const evaluationSchema = z.object({
 const agentSetup = setupAgent({
   context: z.object({
     topic: z.string(),
+    /** The untouched first pass, kept so the before/after is visible at the end. */
+    firstDraft: z.string(),
     draft: z.string(),
     feedback: z.string().nullable(),
     score: z.number().nullable(),
     revisions: z.number(),
+    /** Plain-language result: target reached, or best effort once the budget ran out. */
+    verdict: z.string(),
   }),
   input: z.object({ topic: z.string() }),
   output: z.object({
+    firstDraft: z.string(),
     draft: z.string(),
     score: z.number(),
     revisions: z.number(),
     accepted: z.boolean(),
+    verdict: z.string(),
   }),
   requests: {
     writeDraft: {
@@ -43,11 +49,14 @@ const agentSetup = setupAgent({
       },
       model: "writer",
       system:
-        "Write a short, vivid paragraph. If feedback is provided, revise to address every point while keeping what works.",
+        "Write a short paragraph. If feedback is provided, revise to address every point while keeping what works.",
+      // The first pass is deliberately weak, so the loop has something to improve
+      // and the before/after is worth looking at. Without it the writer opens
+      // near the bar and the revision states barely earn their place.
       prompt: ({ input }) =>
         input.feedback
           ? `Topic: ${input.topic}\n\nRevise to address this feedback:\n${input.feedback}`
-          : `Topic: ${input.topic}`,
+          : `Topic: ${input.topic}\n\nFirst pass only: two flat, generic sentences. No sensory detail, no polish, no strong verbs.`,
     },
     evaluate: {
       schemas: { input: z.object({ draft: z.string() }), output: evaluationSchema },
@@ -77,10 +86,12 @@ export const reflectionMachine = agentSetup.createMachine({
   id: "reflection",
   context: ({ input }) => ({
     topic: input.topic,
+    firstDraft: "",
     draft: "",
     feedback: null,
     score: null,
     revisions: 0,
+    verdict: "",
   }),
   initial: "drafting",
   states: {
@@ -88,7 +99,14 @@ export const reflectionMachine = agentSetup.createMachine({
       invoke: {
         src: "writeDraft",
         input: ({ context }) => ({ topic: context.topic, feedback: context.feedback }),
-        onDone: { target: "evaluating", context: ({ output }) => ({ draft: output }) },
+        onDone: {
+          target: "evaluating",
+          context: ({ context, output }) => ({
+            draft: output,
+            // Only the first pass is preserved; later drafts overwrite `draft` alone.
+            firstDraft: context.firstDraft || output,
+          }),
+        },
         onError: { target: "done" },
       },
     },
@@ -104,20 +122,39 @@ export const reflectionMachine = agentSetup.createMachine({
       },
     },
     // The loop bound: accept if good enough, else revise while budget remains.
+    // Either way the exit is labelled, so a run that stops short of the target
+    // reads as a bounded best effort rather than a silent failure.
     checking: {
       type: "choice",
-      choice: ({ context }) =>
-        (context.score ?? 0) >= SCORE_THRESHOLD || context.revisions >= MAX_REVISIONS
-          ? { target: "done" }
-          : { target: "drafting", context: { revisions: context.revisions + 1 } },
+      choice: ({ context }) => {
+        const score = context.score ?? 0;
+        const rounds = `${context.revisions} revision${context.revisions === 1 ? "" : "s"}`;
+        if (score >= SCORE_THRESHOLD) {
+          return {
+            target: "done",
+            context: { verdict: `Reached target in ${rounds} (score ${score}/10).` },
+          };
+        }
+        if (context.revisions >= MAX_REVISIONS) {
+          return {
+            target: "done",
+            context: {
+              verdict: `Best effort after ${rounds} (score ${score}/10, target ${SCORE_THRESHOLD}/10).`,
+            },
+          };
+        }
+        return { target: "drafting", context: { revisions: context.revisions + 1 } };
+      },
     },
     done: {
       type: "final",
       output: ({ context }) => ({
+        firstDraft: context.firstDraft,
         draft: context.draft,
         score: context.score ?? 0,
         revisions: context.revisions,
         accepted: (context.score ?? 0) >= SCORE_THRESHOLD,
+        verdict: context.verdict,
       }),
     },
   },

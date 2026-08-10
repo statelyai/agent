@@ -189,6 +189,8 @@ const cragContextSchema = z.object({
   // decide_to_generate's flag: no relevant docs survived grading.
   webSearchNeeded: z.boolean(),
   usedFallbackIndex: z.boolean(),
+  // Plain-language trail of which index was used and whether correction ran.
+  retrievalNotice: z.string(),
   generation: z.string().nullable(),
 });
 
@@ -200,6 +202,7 @@ const agentSetup = setupAgent({
   }),
   output: z.object({
     answer: z.string(),
+    retrievalNotice: z.string(),
     documents: z.array(z.string()),
     usedFallbackIndex: z.boolean(),
     rewrittenQuestion: z.string().nullable(),
@@ -298,6 +301,7 @@ export const correctiveRagMachine = agentSetup.createMachine({
     documents: [],
     webSearchNeeded: false,
     usedFallbackIndex: false,
+    retrievalNotice: "",
     generation: null,
   }),
   initial: "retrieving",
@@ -310,8 +314,21 @@ export const correctiveRagMachine = agentSetup.createMachine({
         input: ({ context }) => ({ question: context.question }),
         onDone: ({ output }) =>
           output.length > 0
-            ? { target: "grading", context: { documents: output } }
-            : { target: "deciding", context: { documents: output, webSearchNeeded: true } },
+            ? {
+                target: "grading",
+                context: {
+                  documents: output,
+                  retrievalNotice: `Primary index returned ${output.length} candidate document(s).`,
+                },
+              }
+            : {
+                target: "deciding",
+                context: {
+                  documents: output,
+                  webSearchNeeded: true,
+                  retrievalNotice: "Primary index returned no matching documents.",
+                },
+              },
       },
     },
     // grade_documents: one request, a verdict per doc. Keep the relevant ones;
@@ -333,6 +350,9 @@ export const correctiveRagMachine = agentSetup.createMachine({
             context: {
               documents: relevant,
               webSearchNeeded: relevant.length === 0,
+              retrievalNotice:
+                `${context.retrievalNotice} The grader kept ${relevant.length} of ` +
+                `${context.documents.length} as relevant.`,
             },
           };
         },
@@ -372,6 +392,9 @@ export const correctiveRagMachine = agentSetup.createMachine({
           context: {
             documents: [...context.documents, ...output],
             usedFallbackIndex: true,
+            retrievalNotice:
+              `${context.retrievalNotice} Corrected: rewrote the question and answered from ` +
+              `the fallback sample web index (${output.length} result(s)).`,
           },
         }),
       },
@@ -385,9 +408,14 @@ export const correctiveRagMachine = agentSetup.createMachine({
           question: context.rewrittenQuestion ?? context.question,
           documents: context.documents,
         }),
-        onDone: ({ output }) => ({
+        onDone: ({ context, output }) => ({
           target: "done",
-          context: { generation: output },
+          context: {
+            generation: output,
+            retrievalNotice: context.usedFallbackIndex
+              ? context.retrievalNotice
+              : `${context.retrievalNotice} Answered from the primary index, no correction needed.`,
+          },
         }),
         onError: { target: "failed" },
       },
@@ -396,6 +424,7 @@ export const correctiveRagMachine = agentSetup.createMachine({
       type: "final",
       output: ({ context }) => ({
         answer: context.generation,
+        retrievalNotice: context.retrievalNotice,
         documents: context.documents,
         usedFallbackIndex: context.usedFallbackIndex,
         rewrittenQuestion: context.rewrittenQuestion,
@@ -406,6 +435,7 @@ export const correctiveRagMachine = agentSetup.createMachine({
       type: "final",
       output: ({ context }) => ({
         answer: "Unable to generate an answer for this question.",
+        retrievalNotice: context.retrievalNotice,
         documents: context.documents,
         usedFallbackIndex: context.usedFallbackIndex,
         rewrittenQuestion: context.rewrittenQuestion,
@@ -424,6 +454,7 @@ export interface RunCorrectiveRagOptions {
 
 export interface CorrectiveRagResult {
   answer: string;
+  retrievalNotice: string;
   documents: string[];
   usedFallbackIndex: boolean;
   rewrittenQuestion: string | null;
@@ -480,7 +511,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
 
     console.log("\nQuestion:", question);
     if (result.rewrittenQuestion) console.log("Rewritten:", result.rewrittenQuestion);
-    console.log("Used fallback sample web index:", result.usedFallbackIndex);
+    console.log("Retrieval:", result.retrievalNotice);
     console.log("\nAnswer:", result.answer);
   })().catch((error) => {
     console.error(error);

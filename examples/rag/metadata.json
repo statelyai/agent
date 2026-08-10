@@ -9,9 +9,15 @@
   },
   "comparison": {
     "targets": ["LangGraph", "Burr"],
-    "purpose": "Looks up relevant passages in a small corpus of state-machine docs, answers only from what it found, and remembers the conversation across turns."
+    "purpose": "Looks up relevant passages in a small corpus of state-machine docs, rewrites the query and retries once when the first lookup misses, answers only from what it found, and remembers the conversation across turns."
   },
   "starters": [
+    {
+      "label": "Vague question — rewritten, then retried",
+      "input": {
+        "question": "Why does my app get stuck on the wrong screen?"
+      }
+    },
     {
       "label": "What context is (hits the corpus)",
       "input": {
@@ -31,7 +37,7 @@
       }
     },
     {
-      "label": "Off-corpus question (expect no evidence)",
+      "label": "Off-corpus question (even a rewrite finds nothing)",
       "input": {
         "question": "How should I shard a Postgres database?"
       }

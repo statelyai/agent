@@ -29,8 +29,20 @@ test("expands and evaluates a tree until a solved candidate appears", async () =
 
   expect(rollout).toBe(2);
   expect(output.solved).toBe(true);
-  expect(output.answer).toContain("candidate 2a");
-  expect(output.nodes).toHaveLength(5);
+  expect(output.rollouts).toBe(2);
+  expect(output.details.answer).toContain("candidate 2a");
+  expect(output.details.nodes).toHaveLength(5);
+
+  // The tree is rendered as indented lines: node, score, and the markers for
+  // the chosen branch and the winning leaf.
+  // The root carries its backpropagated score, not a candidate's.
+  const treeLines = output.searchTree.split("\n");
+  expect(treeLines[1]).toBe("root  (0.77)");
+  expect(output.searchTree).toMatch(/^ {2}1-1 candidate 1b {2}\(0\.95\) {2}<- chosen$/m);
+  expect(output.searchTree).toMatch(/^ {4}2-0 candidate 2a {2}\(0\.95\) {2}<- best$/m);
+  // The winning answer sits under the tree, so the tree string always leads.
+  expect(output.searchTree).toContain("Best answer (0.95, solved)");
+  expect(output.searchTree.length).toBeGreaterThan(output.details.answer.length);
 });
 
 test("a confident first draft below the acceptance bar keeps the search going", async () => {
@@ -64,7 +76,7 @@ test("a confident first draft below the acceptance bar keeps the search going", 
   // More than one expansion happened — the tree search is actually visible.
   expect(rollout).toBeGreaterThan(1);
   expect(output.solved).toBe(true);
-  expect(output.answer).toContain("candidate 2a");
+  expect(output.details.answer).toContain("candidate 2a");
 });
 
 test("rollout budget returns the best candidate", async () => {
@@ -84,5 +96,7 @@ test("rollout budget returns the best candidate", async () => {
   });
 
   expect(output.solved).toBe(false);
-  expect(output.answer).toContain("better");
+  expect(output.details.answer).toContain("better");
+  // Budget exhausted rather than solved, and the tree says so.
+  expect(output.searchTree).toContain("budget reached");
 });

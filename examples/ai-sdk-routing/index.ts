@@ -5,7 +5,8 @@
  *
  * The responder is grounded: each reply carries the matching `SAMPLE_POLICIES`
  * excerpt and is told it is the only source of policy facts, so the demo does
- * not invent refund windows or fees.
+ * not invent refund windows or fees. `groundedIn` carries that provenance —
+ * chosen specialist plus the policy sentence — beside the answer.
  *
  * Compare: https://ai-sdk.dev/docs/agents/workflows#routing
  *
@@ -49,22 +50,42 @@ const GROUNDING_RULE =
 const contextSchema = z.object({
   query: z.string(),
   classification: classificationSchema.nullable(),
+  /** One line naming the specialist and the policy sentence it answered from. */
+  groundedIn: z.string().nullable(),
   response: z.string().nullable(),
 });
+
+/** "Specialist: refunds (complex) · Policy: Damaged-on-arrival items qualify…" */
+function groundingLine(classification: z.infer<typeof classificationSchema>) {
+  const policy = SAMPLE_POLICIES[classification.type];
+  const firstSentence = policy.split(". ")[0] ?? policy;
+  return `Specialist: ${classification.type} (${classification.complexity}) · Policy: ${firstSentence}.`;
+}
 
 const agentSetup = setupAgent({
   models,
   context: contextSchema,
   input: z.object({ query: z.string() }),
+  // `groundedIn` ships beside the answer so the demo shows which specialist
+  // replied and which policy sentence the answer rests on.
   output: z.object({
-    classification: classificationSchema,
     response: z.string(),
+    groundedIn: z.string(),
+    classification: classificationSchema,
   }),
   // After classifying, `classification` is always set — narrow it non-null.
   // responding sets response before done reads it — narrow that too.
   states: {
-    responding: { context: { classification: classificationSchema } },
-    done: { context: { classification: classificationSchema, response: z.string() } },
+    responding: {
+      context: { classification: classificationSchema, groundedIn: z.string() },
+    },
+    done: {
+      context: {
+        classification: classificationSchema,
+        groundedIn: z.string(),
+        response: z.string(),
+      },
+    },
   },
   requests: {
     classifyCustomerQuery: {
@@ -114,6 +135,7 @@ export const aiSdkRoutingMachine = agentSetup.createMachine({
   context: ({ input }) => ({
     query: input.query,
     classification: null,
+    groundedIn: null,
     response: null,
   }),
   initial: "classifying",
@@ -125,7 +147,7 @@ export const aiSdkRoutingMachine = agentSetup.createMachine({
         input: ({ context }) => ({ query: context.query }),
         onDone: ({ output }) => ({
           target: "responding",
-          context: { classification: output },
+          context: { classification: output, groundedIn: groundingLine(output) },
         }),
         onError: { target: "failed" },
       },
@@ -148,16 +170,18 @@ export const aiSdkRoutingMachine = agentSetup.createMachine({
     done: {
       type: "final",
       output: ({ context }) => ({
-        classification: context.classification,
         response: context.response,
+        groundedIn: context.groundedIn,
+        classification: context.classification,
       }),
     },
     // Best-effort output when a model call fails.
     failed: {
       type: "final",
       output: () => ({
-        classification: { reasoning: "", type: "general" as const, complexity: "simple" as const },
         response: "",
+        groundedIn: "",
+        classification: { reasoning: "", type: "general" as const, complexity: "simple" as const },
       }),
     },
   },

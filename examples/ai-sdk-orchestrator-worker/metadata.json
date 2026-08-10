@@ -9,11 +9,11 @@
   },
   "comparison": {
     "targets": ["Vercel AI SDK", "orchestrator-worker"],
-    "purpose": "An orchestrator plans which files a feature touches, then a worker writes the change for each file in turn."
+    "purpose": "An orchestrator plans which files a small feature touches, then a worker writes the change for each file — the result reads as a plan plus one line per changed file."
   },
   "starters": [
     "Add a dark mode toggle persisted to localStorage.",
-    "Add CSV export to the reports page.",
-    "Add rate limiting to the public API routes."
+    "Add a CSV export button to the reports page.",
+    "Add a rate limit to one public API route."
   ]
 }

@@ -37,9 +37,16 @@ test("AI SDK marketing chain maps to an explicit machine", async () => {
     },
   });
   assert.equal(result.status, "done");
-  assert.equal(
-    result.status === "done" ? result.output.copy : undefined,
-    "Buy state machines. Start today.",
-  );
+  const output = result.status === "done" ? result.output : undefined;
+  assert.deepEqual(output?.detail, {
+    originalCopy: "Buy state machines",
+    rubricNotes: "No call to action; appeal 5/10; clarity 6/10",
+    improvedCopy: "Buy state machines. Start today.",
+    quality: { hasCallToAction: false, emotionalAppeal: 5, clarity: 6 },
+  });
+  // Three compact cards lead the output as prose.
+  assert.ok(output?.summary.includes("**Improved copy**\n\nBuy state machines. Start today."));
+  assert.ok(output?.summary.includes("**Reviewer**\n\nNo call to action"));
+  assert.ok(output?.summary.includes("**Original copy**\n\nBuy state machines"));
   assert.deepEqual(evaluated, [{ hasCallToAction: false, emotionalAppeal: 5, clarity: 6 }]);
 });

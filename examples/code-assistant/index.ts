@@ -19,6 +19,14 @@
  *                                      ├─ failed    (budget spent)
  *                                      └─ reflecting → generating → …
  *
+ * The task can SEED existing code (`initialCode`). The run then starts at
+ * `executing`, so attempt 1 is a real verification of code that already exists
+ * rather than a fresh generation. The default task seeds a function with a
+ * genuine bug (`reduce` with no seed value throws on an empty array), so the
+ * first check ALWAYS fails and the repair loop always runs: seeded code →
+ * failing check → repair → passing rerun. Nothing about that depends on what
+ * the model does on the first turn.
+ *
  * What maps to what:
  *   - generate    → `generating`  (ONE structured-output request: the model
  *                    returns `{ code, explanation }`; the code must define a
@@ -149,6 +157,12 @@ const agentSetup = setupAgent({
     explanation: z.string(),
     // Failures from the latest execution — fed back into the next generation.
     failures: z.array(z.string()),
+    // Human-readable trail, one line each. A host renders these as prose as
+    // they change: what the checks said, what the repair changed, how the
+    // rerun went.
+    checkReport: z.string(),
+    repairSummary: z.string(),
+    rerunNote: z.string(),
     // Completed generate→execute attempts; the typed loop bound.
     attempts: z.number(),
     maxAttempts: z.number(),
@@ -158,9 +172,12 @@ const agentSetup = setupAgent({
     spec: z.string(),
     functionName: z.string(),
     checks: z.array(codeCheckSchema),
+    /** Existing code to verify first; the run starts at `executing` when set. */
+    initialCode: z.string().default(""),
     maxAttempts: z.number().default(3),
   }),
   output: z.object({
+    summary: z.string(),
     code: z.string(),
     attempts: z.number(),
     passed: z.boolean(),
@@ -220,21 +237,40 @@ const agentSetup = setupAgent({
 
 export const codeAssistantSchemas = agentSetup.schemas;
 
+/** One line of prose for the host: what the checks said on this attempt. */
+function checkReportFor(attempt: number, total: number, result: ExecutionResult): string {
+  return result.passed
+    ? `Attempt ${attempt}: all ${total} checks passed.`
+    : `Attempt ${attempt}: ${result.failures.length} of ${total} checks failed — ` +
+        result.failures.join("; ");
+}
+
 export const codeAssistantMachine = agentSetup.createMachine({
   id: "code-assistant",
   context: ({ input }) => ({
     spec: input.spec,
     functionName: input.functionName,
     checks: input.checks,
-    code: "",
+    code: input.initialCode,
     explanation: "",
     failures: [],
+    checkReport: input.initialCode
+      ? `Verifying the supplied \`${input.functionName}\` against ${input.checks.length} checks.`
+      : "",
+    repairSummary: "",
+    rerunNote: "",
     attempts: 0,
     maxAttempts: input.maxAttempts,
     passed: false,
   }),
-  initial: "generating",
+  initial: "starting",
   states: {
+    // Seeded code is verified before anything is generated, so the first check
+    // result is the fixture's, not the model's.
+    starting: {
+      type: "choice",
+      choice: ({ context }) => ({ target: context.code ? "executing" : "generating" }),
+    },
     // generate: produce (or correct) the code. A generation failure degrades to
     // `failed` with a best-effort message rather than aborting the run.
     generating: {
@@ -247,9 +283,16 @@ export const codeAssistantMachine = agentSetup.createMachine({
           previousCode: context.code || null,
           failures: context.failures,
         }),
-        onDone: ({ output }) => ({
+        onDone: ({ context, output }) => ({
           target: "executing",
-          context: { code: output.code, explanation: output.explanation },
+          context: {
+            code: output.code,
+            explanation: output.explanation,
+            // Repairs are the interesting case: say what the rewrite was for.
+            repairSummary: context.attempts
+              ? `Repair after attempt ${context.attempts}: ${output.explanation}`
+              : "",
+          },
         }),
         onError: {
           target: "failed",
@@ -273,6 +316,7 @@ export const codeAssistantMachine = agentSetup.createMachine({
             passed: output.passed,
             failures: output.failures,
             attempts: context.attempts + 1,
+            checkReport: checkReportFor(context.attempts + 1, context.checks.length, output),
           },
         }),
       },
@@ -283,7 +327,15 @@ export const codeAssistantMachine = agentSetup.createMachine({
       type: "choice",
       choice: ({ context }) =>
         context.passed
-          ? { target: "done" }
+          ? {
+              target: "done",
+              context: {
+                rerunNote:
+                  context.attempts > 1
+                    ? `Rerun after the repair: all ${context.checks.length} checks passed on attempt ${context.attempts}.`
+                    : `All ${context.checks.length} checks passed on the first run.`,
+              },
+            }
           : context.attempts >= context.maxAttempts
             ? { target: "failed" }
             : { target: "reflecting" },
@@ -296,6 +348,7 @@ export const codeAssistantMachine = agentSetup.createMachine({
     done: {
       type: "final",
       output: ({ context }) => ({
+        summary: [context.repairSummary, context.rerunNote].filter(Boolean).join(" "),
         code: context.code,
         attempts: context.attempts,
         passed: true,
@@ -307,6 +360,7 @@ export const codeAssistantMachine = agentSetup.createMachine({
     failed: {
       type: "final",
       output: ({ context }) => ({
+        summary: `Gave up after ${context.attempts} attempts. ${context.checkReport}`,
         code: context.code,
         attempts: context.attempts,
         passed: false,
@@ -320,6 +374,8 @@ export interface RunCodeAssistantOptions {
   spec?: string;
   functionName?: string;
   checks?: CodeCheck[];
+  /** Existing (possibly broken) code to verify before generating anything. */
+  initialCode?: string;
   maxAttempts?: number;
   /** Injected for tests; direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
@@ -328,16 +384,25 @@ export interface RunCodeAssistantOptions {
 }
 
 export interface CodeAssistantResult {
+  summary: string;
   code: string;
   attempts: number;
   passed: boolean;
   failures: string[];
   progress: string[];
+  /** The prose trail, in order: failing checks, repair, passing rerun. */
+  notes: string[];
 }
 
+/**
+ * The seeded bug: `reduce` with no initial value throws on an empty array, so
+ * the `sumArray([]) === 0` check fails on attempt 1 every time. Verification is
+ * this example's own (the sandboxed `runChecks` actor), not a test runner.
+ */
 const DEFAULT_TASK = {
-  spec: "Write a function that returns the sum of an array of numbers.",
+  spec: "Fix this function so it returns the sum of an array of numbers.",
   functionName: "sumArray",
+  initialCode: "function sumArray(numbers) {\n  return numbers.reduce((total, n) => total + n);\n}",
   checks: [
     { args: [[1, 2, 3]], expected: 6 },
     { args: [[]], expected: 0 },
@@ -353,14 +418,18 @@ export async function runCodeAssistantExample(
     spec = DEFAULT_TASK.spec,
     functionName = DEFAULT_TASK.functionName,
     checks = DEFAULT_TASK.checks,
+    initialCode = "",
     maxAttempts = 3,
     generateText,
     onProgress,
   } = options;
 
   const progress: string[] = [];
+  const notes: string[] = [];
+  // Collect each prose field the moment it changes — the trail a host renders.
+  const seen = new Map<string, string>();
   const result = await runAgent(codeAssistantMachine, {
-    input: { spec, functionName, checks, maxAttempts },
+    input: { spec, functionName, checks, initialCode, maxAttempts },
     ...(generateText
       ? { executors: { generateText } }
       : { executors: createAiSdkExecutors({ models }) }),
@@ -368,13 +437,20 @@ export async function runCodeAssistantExample(
       const state = String(snapshot.value);
       progress.push(state);
       onProgress?.(state);
+      for (const key of ["checkReport", "repairSummary", "rerunNote"] as const) {
+        const value = snapshot.context[key];
+        if (value && seen.get(key) !== value) {
+          seen.set(key, value);
+          notes.push(value);
+        }
+      }
     },
   });
 
   if (result.status !== "done") {
     throw new Error(`Code-assistant example did not complete: ${result.status}`);
   }
-  return { ...result.output, progress };
+  return { ...result.output, progress, notes };
 }
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
@@ -387,11 +463,13 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     const { generateText } = createAiSdkExecutors({ models });
 
     const result = await runCodeAssistantExample({
+      ...DEFAULT_TASK,
       generateText,
       onProgress: (state) => console.log(`  → ${state}`),
     });
 
     console.log("\nTask:", DEFAULT_TASK.spec);
+    for (const note of result.notes) console.log("-", note);
     console.log("Attempts:", result.attempts);
     console.log("Passed:", result.passed);
     if (result.failures.length) console.log("Failures:", result.failures);

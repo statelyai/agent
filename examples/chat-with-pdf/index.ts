@@ -402,7 +402,21 @@ function nextStep(context: QuizContext): "summary" | "retrieving" | "asking" {
 /** The one-line verdict shown above the next question. */
 function renderGrade(grade: z.infer<typeof gradeSchema>): string {
   const verdict = grade.correct ? "Correct" : "Incorrect";
-  return `${verdict} — the answer is ${grade.expected}. ${grade.explanation}`;
+  // `expected` usually arrives as a full sentence, so joining it with the
+  // sentence-ending period below renders "…set of states..".
+  const expected = grade.expected.trim().replace(/[.!?]+$/, "");
+  return `${verdict} — the answer is ${expected}. ${grade.explanation}`;
+}
+
+/**
+ * The passage the grade was grounded on, quoted in one line with its page.
+ * The learner sees the evidence, not just the verdict.
+ */
+function citeSource(pageNumber: number, sourceText: string): string {
+  const text = sourceText.trim();
+  const sentence = text.split(/(?<=[.!?])\s+/)[0] ?? text;
+  const snippet = sentence.length > 160 ? `${sentence.slice(0, 159)}…` : sentence;
+  return `Source (page ${pageNumber}): "${snippet}"`;
 }
 
 /** Assemble the display text. The page hint comes from the chunk, not the model. */
@@ -601,7 +615,14 @@ export const chatWithPdfMachine = agentSetup.createMachine({
           ];
           return {
             target: nextStep(context),
-            context: { results, pending: null, lastGrade: renderGrade(output) },
+            context: {
+              results,
+              pending: null,
+              lastGrade:
+                renderGrade(output) +
+                "\n" +
+                citeSource(context.pending.pageNumber, context.pending.sourceText),
+            },
           };
         },
         onError: ({ context }) => ({

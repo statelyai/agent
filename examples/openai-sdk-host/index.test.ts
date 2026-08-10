@@ -260,19 +260,27 @@ describe("createOpenAiExecutors + runAgent (stubbed client, no network)", () => 
     };
 
     const { streamText } = createOpenAiExecutors({ client: stubClient as never });
-    const seen: string[] = [];
+    // One entry per streamed joke: the machine always takes an improvement
+    // pass, so the writer streams twice.
+    const passes: string[][] = [];
 
     const result = await runAgent(jokeMachine, {
       input: { topic: "state machines" },
       executors: {
         generateText: async () => ({ output: { rating: 9, explanation: "stub" } }),
-        streamText,
+        streamText: async (request, info) => {
+          const seen: string[] = [];
+          passes.push(seen);
+          return streamText(request, { ...info, onChunk: (chunk) => seen.push(chunk) });
+        },
         decide: async () => ({ event: { type: "END" } }),
       },
-      onChunk: (chunk) => seen.push(chunk),
     });
 
-    expect(seen.join("")).toBe(chunks.join(""));
+    expect(passes).toHaveLength(2);
+    for (const seen of passes) {
+      expect(seen.join("")).toBe(chunks.join(""));
+    }
     expect(result.status).toBe("done");
   });
 });

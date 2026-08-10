@@ -13,9 +13,9 @@
   },
   "starters": [
     {
-      "label": "Corpus hit — answers without correcting",
+      "label": "Corpus miss — corrected via the sample index",
       "input": {
-        "question": "How does long-term memory work for LLM agents?"
+        "question": "What is prompt injection and how do you defend against it?"
       }
     },
     {
@@ -25,9 +25,9 @@
       }
     },
     {
-      "label": "Corpus miss — corrected via the sample index",
+      "label": "Corpus hit — answers without correcting",
       "input": {
-        "question": "What is prompt injection and how do you defend against it?"
+        "question": "How does long-term memory work for LLM agents?"
       }
     },
     {

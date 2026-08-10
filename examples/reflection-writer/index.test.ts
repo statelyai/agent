@@ -29,25 +29,53 @@ test("reflection loop runs to the revision bound then stops (LangGraph should_co
   const result = await runReflectionWriterExample({
     topic: "The little prince",
     generateText: scriptedGenerateText({
-      writer: ["draft 1", "draft 2", "draft 3", "draft 4"],
+      writer: ["draft 1", "draft 2", "draft 3"],
       critic: [
         { critique: "Too short.", satisfied: false },
         { critique: "Needs depth.", satisfied: false },
-        { critique: "Still thin.", satisfied: false },
       ],
     }),
   });
 
-  // 3 revision rounds: drafting entered 3 times, critiquing 3 times.
-  expect(result.progress.filter((s) => s === "drafting")).toHaveLength(3);
-  expect(result.progress.filter((s) => s === "critiquing")).toHaveLength(3);
-  expect(result.revisions).toBe(3);
+  // 2 revision rounds: drafting entered twice, critiquing twice.
+  expect(result.progress.filter((s) => s === "drafting")).toHaveLength(2);
+  expect(result.progress.filter((s) => s === "critiquing")).toHaveLength(2);
+  expect(result.revisions).toBe(2);
   expect(result.satisfied).toBe(false);
-  // Final draft is the 3rd (the 4th is never requested — bound hit first).
-  expect(result.essay).toBe("draft 3");
+  // Final draft is the 2nd (the 3rd is never requested — bound hit first).
+  expect(result.details.essay).toBe("draft 2");
   expect(result.progress.at(-1)).toBe("done");
-  // Transcript: 1 task + 3 drafts + 3 critiques = 7 messages.
-  expect(result.messageCount).toBe(7);
+  // Transcript: 1 task + 2 drafts + 2 critiques = 5 messages.
+  expect(result.messageCount).toBe(5);
+});
+
+test("the result shows the original next to the final draft, with a one-line revision log", async () => {
+  const result = await runReflectionWriterExample({
+    topic: "The little prince",
+    generateText: scriptedGenerateText({
+      writer: ["the original draft", "the final draft"],
+      critic: [
+        { critique: "Too short.", satisfied: false },
+        { critique: "Good enough now.", satisfied: true },
+      ],
+    }),
+  });
+
+  // Both drafts are kept, and the comparison leads with them side by side.
+  expect(result.details.firstDraft).toBe("the original draft");
+  expect(result.details.essay).toBe("the final draft");
+  expect(result.comparison).toMatch(/Original draft\nthe original draft/);
+  expect(result.comparison).toMatch(/Final draft \(after 2 critique rounds\)\nthe final draft/);
+
+  // One collapsed line per revision round — no critique prose accumulating.
+  const logLines = result.comparison
+    .split("\n")
+    .filter((line) => /^\d+\. (revise|satisfied)\./.test(line));
+  expect(logLines).toEqual(["1. revise. Too short.", "2. satisfied. Good enough now."]);
+
+  // The comparison embeds both drafts, so it is always the longest string field
+  // and leads the rendered output.
+  expect(result.comparison.length).toBeGreaterThan(result.details.essay.length);
 });
 
 test("the critic grades against the strict rubric, so one draft is never enough", async () => {
@@ -84,27 +112,25 @@ test("the critic grades against the strict rubric, so one draft is never enough"
   expect(result.progress.filter((s) => s === "drafting")).toHaveLength(2);
   expect(result.revisions).toBe(2);
   expect(result.satisfied).toBe(true);
-  expect(result.essay).toBe("revised draft with evidence");
+  expect(result.details.essay).toBe("revised draft with evidence");
 });
 
 test("early exit when the critic is satisfied (improves on the fixed-count tutorial)", async () => {
-  // Critic signs off after the 2nd draft, under the revision bound — the
+  // Critic signs off after the 1st draft, under the revision bound — the
   // `satisfied` branch of the checking guard ends the loop early.
   const result = await runReflectionWriterExample({
     topic: "The little prince",
     generateText: scriptedGenerateText({
-      writer: ["draft 1", "draft 2", "draft 3"],
-      critic: [
-        { critique: "Expand the ending.", satisfied: false },
-        { critique: "Excellent — ship it.", satisfied: true },
-      ],
+      writer: ["draft 1", "draft 2"],
+      critic: [{ critique: "Excellent, ship it.", satisfied: true }],
     }),
   });
 
   expect(result.satisfied).toBe(true);
-  expect(result.revisions).toBe(2);
-  expect(result.progress.filter((s) => s === "drafting")).toHaveLength(2);
-  expect(result.essay).toBe("draft 2");
+  // Stopped at 1 round, under the bound of 2.
+  expect(result.revisions).toBe(1);
+  expect(result.progress.filter((s) => s === "drafting")).toHaveLength(1);
+  expect(result.details.essay).toBe("draft 1");
   expect(result.progress.at(-1)).toBe("done");
 });
 
@@ -121,7 +147,7 @@ test("model failure degrades to the best-effort current draft (onError, no throw
     generateText,
   });
 
-  expect(result.essay).toBe("the only draft");
+  expect(result.details.essay).toBe("the only draft");
   // Never reached a completed critique, so no revision counted and not satisfied.
   expect(result.revisions).toBe(0);
   expect(result.satisfied).toBe(false);

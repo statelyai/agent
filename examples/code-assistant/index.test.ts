@@ -26,6 +26,9 @@ const SUM_TASK = {
   ],
 };
 
+// The seeded bug: `reduce` with no initial value throws on an empty array.
+const SEEDED_BUG = "function sumArray(xs) { return xs.reduce((a, b) => a + b); }";
+
 test("first generation fails a check, second passes → attempts === 2, failure fed back", async () => {
   // v1 forgets the empty-array case (returns undefined → NaN); v2 is correct.
   const brokenSum = "function sumArray(xs) { return xs.reduce((a, b) => a + b); }";
@@ -71,6 +74,35 @@ test("executeCode treats a syntax error as a normal failure, not a rejection", (
 
   expect(result.passed).toBe(false);
   expect(result.failures[0]).toContain("failed to load");
+});
+
+test("seeded buggy code fails verification first, then the repair passes on rerun", async () => {
+  const correctSum = "function sumArray(xs) { return xs.reduce((a, b) => a + b, 0); }";
+  const { generateText, prompts } = scriptedGenerateText([correctSum]);
+
+  const result = await runCodeAssistantExample({
+    ...SUM_TASK,
+    initialCode: SEEDED_BUG,
+    generateText,
+  });
+
+  // Attempt 1 verified the SEEDED code — no generation ran before it.
+  expect(result.progress[0]).toBe("executing");
+  expect(result.progress.filter((state) => state === "generating")).toHaveLength(1);
+  expect(result.passed).toBe(true);
+  expect(result.attempts).toBe(2);
+
+  // The trail reads: failing check → repair → passing rerun.
+  expect(result.notes[0]).toContain("Verifying the supplied `sumArray`");
+  expect(result.notes[1]).toContain("Attempt 1");
+  expect(result.notes[1]).toContain("sumArray([])");
+  expect(result.notes.at(-1)).toContain("Rerun after the repair");
+  expect(result.summary).toContain("all 2 checks passed on attempt 2");
+
+  // The single generation was a repair: it saw the seeded code and its failure.
+  expect(prompts).toHaveLength(1);
+  expect(prompts[0]).toContain(SEEDED_BUG);
+  expect(prompts[0]).toContain("sumArray([])");
 });
 
 test("machine exports a runnable definition", () => {

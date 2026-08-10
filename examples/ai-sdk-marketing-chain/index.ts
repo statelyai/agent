@@ -2,6 +2,10 @@
  * Vercel AI SDK marketing chain — sequential processing, ported to
  * `setupAgent` with co-located `requests:`.
  *
+ * The first pass writes a plain blurb with no call to action, so the reviewer
+ * always fails it and every run shows the improvement step: original copy,
+ * rubric, improved copy.
+ *
  * Compare: https://ai-sdk.dev/docs/agents/workflows#sequential-processing-chains
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/ai-sdk-marketing-chain/index.ts
@@ -31,16 +35,62 @@ export const models = defineModels({
 
 const contextSchema = z.object({
   product: z.string(),
-  copy: z.string().nullable(),
+  /** Card 1: the plain first-pass blurb. */
+  originalCopy: z.string().nullable(),
+  /** Card 2: the reviewer's rubric, one line. */
+  rubricNotes: z.string().nullable(),
+  /** Card 3: the rewrite that addresses the rubric. */
+  improvedCopy: z.string().nullable(),
   quality: qualitySchema.nullable(),
-  finalCopy: z.string().nullable(),
 });
+
+/**
+ * Three compact cards — improved copy, reviewer rubric, original copy — as one
+ * prose string, with the structured values nested under `detail`.
+ */
+function summarize(context: z.infer<typeof contextSchema>) {
+  const originalCopy = context.originalCopy ?? "";
+  const rubricNotes = context.rubricNotes ?? "not reviewed";
+  const improvedCopy = context.improvedCopy ?? originalCopy;
+  return {
+    summary: [
+      `**Improved copy**\n\n${improvedCopy}`,
+      `**Reviewer**\n\n${rubricNotes}`,
+      `**Original copy**\n\n${originalCopy}`,
+    ].join("\n\n"),
+    detail: {
+      originalCopy,
+      rubricNotes,
+      improvedCopy,
+      quality: context.quality ?? { hasCallToAction: false, emotionalAppeal: 1, clarity: 1 },
+    },
+  };
+}
+
+/** "No call to action; appeal 5/10; clarity 6/10" */
+function rubricLine(quality: z.infer<typeof qualitySchema>) {
+  return [
+    quality.hasCallToAction ? "Has a call to action" : "No call to action",
+    `appeal ${quality.emotionalAppeal}/10`,
+    `clarity ${quality.clarity}/10`,
+  ].join("; ");
+}
 
 const agentSetup = setupAgent({
   models,
   context: contextSchema,
   input: z.object({ product: z.string() }),
-  output: z.object({ copy: z.string(), quality: qualitySchema }),
+  // Leads with three compact cards as one prose string; the structured values
+  // stay nested under `detail`.
+  output: z.object({
+    summary: z.string(),
+    detail: z.object({
+      originalCopy: z.string(),
+      rubricNotes: z.string(),
+      improvedCopy: z.string(),
+      quality: qualitySchema,
+    }),
+  }),
   emitted: {
     EVALUATED: z.object({
       hasCallToAction: z.boolean(),
@@ -48,12 +98,12 @@ const agentSetup = setupAgent({
       clarity: z.number(),
     }),
   },
-  // writing sets copy before any state that reads it; evaluating also sets
-  // quality before checking/improving/done — narrow both non-null there.
+  // writing sets originalCopy before any state that reads it; evaluating also
+  // sets quality before checking/improving/done — narrow both non-null there.
   states: {
-    evaluating: { context: { copy: z.string() } },
-    improving: { context: { copy: z.string(), quality: qualitySchema } },
-    done: { context: { copy: z.string(), quality: qualitySchema } },
+    evaluating: { context: { originalCopy: z.string() } },
+    improving: { context: { originalCopy: z.string(), quality: qualitySchema } },
+    done: { context: { originalCopy: z.string(), quality: qualitySchema } },
   },
   requests: {
     writeMarketingCopy: {
@@ -62,10 +112,11 @@ const agentSetup = setupAgent({
         output: z.string(),
       },
       model: "copywriter",
+      // A plain first pass on purpose: no call to action, so the reviewer always
+      // fails it and the improvement step runs on every run.
       system:
-        "You are a direct-response copywriter. Lead with the customer benefit, build emotional appeal, and end on one clear call to action. Keep it tight — a short paragraph, no headings.",
-      prompt: ({ input }) =>
-        `Write persuasive marketing copy for: ${input.product}. Focus on benefits and emotional appeal.`,
+        "You are writing a plain first-pass product blurb. Describe what the product is and does in at most two sentences. Stay factual, and do not add a call to action.",
+      prompt: ({ input }) => `Write a first-pass blurb for: ${input.product}`,
     },
     evaluateMarketingCopy: {
       schemas: {
@@ -84,7 +135,7 @@ const agentSetup = setupAgent({
       },
       model: "improver",
       system:
-        "You are a copy editor. Revise the copy to address the notes below while preserving its voice. Return only the improved copy.",
+        "You are a direct-response copy editor. Revise the copy to address the notes below while preserving its voice. Return only the improved copy, at most two sentences.",
       prompt: ({ input }) =>
         [
           !input.quality.hasCallToAction ? "Add a clear call to action." : "",
@@ -102,9 +153,10 @@ export const aiSdkMarketingChainMachine = agentSetup.createMachine({
   id: "ai-sdk-marketing-chain",
   context: ({ input }) => ({
     product: input.product,
-    copy: null,
+    originalCopy: null,
+    rubricNotes: null,
+    improvedCopy: null,
     quality: null,
-    finalCopy: null,
   }),
   initial: "writing",
   states: {
@@ -115,7 +167,7 @@ export const aiSdkMarketingChainMachine = agentSetup.createMachine({
         input: ({ context }) => ({ product: context.product }),
         onDone: ({ output }) => ({
           target: "evaluating",
-          context: { copy: output },
+          context: { originalCopy: output },
         }),
         onError: { target: "failed" },
       },
@@ -124,12 +176,12 @@ export const aiSdkMarketingChainMachine = agentSetup.createMachine({
       invoke: {
         id: "evaluateMarketingCopy",
         src: "evaluateMarketingCopy",
-        input: ({ context }) => ({ copy: context.copy }),
+        input: ({ context }) => ({ copy: context.originalCopy }),
         onDone: ({ output }, enq) => {
           enq.emit({ type: "EVALUATED", ...output });
           return {
             target: "checking",
-            context: { quality: output },
+            context: { quality: output, rubricNotes: rubricLine(output) },
           };
         },
         onError: { target: "failed" },
@@ -145,30 +197,24 @@ export const aiSdkMarketingChainMachine = agentSetup.createMachine({
         id: "improveMarketingCopy",
         src: "improveMarketingCopy",
         input: ({ context }) => ({
-          copy: context.copy,
+          copy: context.originalCopy,
           quality: context.quality,
         }),
         onDone: ({ output }) => ({
           target: "done",
-          context: { finalCopy: output },
+          context: { improvedCopy: output },
         }),
         onError: { target: "failed" },
       },
     },
     done: {
       type: "final",
-      output: ({ context }) => ({
-        copy: context.finalCopy ?? context.copy,
-        quality: context.quality,
-      }),
+      output: ({ context }) => summarize(context),
     },
     // Best-effort output when a model call fails.
     failed: {
       type: "final",
-      output: ({ context }) => ({
-        copy: context.copy ?? "",
-        quality: context.quality ?? { hasCallToAction: false, emotionalAppeal: 1, clarity: 1 },
-      }),
+      output: ({ context }) => summarize(context),
     },
   },
 });

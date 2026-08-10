@@ -30,6 +30,11 @@ test("AI SDK routing maps to an explicit machine", async () => {
   assert.deepEqual(routedModels, ["complexAnswerer"]);
   assert.equal(result.status, "done");
   assert.equal(result.status === "done" ? result.output.response : undefined, "technical:answered");
+  // The chosen specialist and the policy sentence behind the answer travel with it.
+  assert.equal(
+    result.status === "done" ? result.output.groundedIn : undefined,
+    "Specialist: technical (complex) · Policy: Crash reports are collected automatically.",
+  );
   // The responder is grounded: the matching policy excerpt travels with the
   // query, and the system prompt forbids inventing policy facts.
   assert.ok(answerPrompt?.includes("The app crashes on launch."));

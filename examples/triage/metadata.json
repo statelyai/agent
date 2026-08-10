@@ -9,11 +9,12 @@
   },
   "comparison": {
     "targets": ["CrewAI", "LangGraph"],
-    "purpose": "Classifies an incoming ticket by category and urgency, then drafts the response that fits."
+    "purpose": "Classifies an incoming ticket, escalates to a human when the classifier is unsure, drafts the reply that fits, and retries once if the draft fails."
   },
   "starters": [
     "I cannot log in and my password reset email never arrives.",
     "How do I upgrade to the annual plan?",
-    "You charged my card twice this month. Fix it."
+    "You charged my card twice this month. Fix it.",
+    "hey quick question about the thing from yesterday, can you sort it?"
   ]
 }

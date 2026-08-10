@@ -29,6 +29,11 @@
  * on the first draft and hiding the loop. Every model invoke has an `onError`
  * that degrades to the best-effort current draft rather than erroring the run.
  *
+ * Readable output: the run presents the ORIGINAL draft and the FINAL draft side
+ * by side, plus a one-line-per-revision `revisionLog`. The intermediate drafts
+ * and the full critique prose stay out of the leading string fields, so the
+ * result reads as a comparison rather than a wall of essay text.
+ *
  * Dual-mode: `runReflectionWriterExample(options?)` takes an injectable
  * `generateText` (the test passes mocks — keyless CI); the direct run below
  * uses real models.
@@ -64,7 +69,13 @@ const critiqueSchema = z.object({
 });
 
 /** Hard upper bound on revision rounds (the tutorial's loop bound). */
-const MAX_REVISIONS = 3;
+const MAX_REVISIONS = 2;
+
+/** Collapses critique prose to a single short line for the revision log. */
+function oneLine(text: string, max = 90): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
 
 const agentSetup = setupAgent({
   models,
@@ -72,6 +83,11 @@ const agentSetup = setupAgent({
     topic: z.string(),
     // The latest draft. Also the best-effort output if a model call fails.
     essay: z.string(),
+    // The very first draft, kept so the result can show original vs. final.
+    firstDraft: z.string(),
+    // One line per completed revision round; the full critique prose stays in
+    // the transcript, not here.
+    revisionLog: z.string(),
     // Accumulating transcript: task + every draft (assistant) + every critique
     // (role-flipped to user, as the tutorial does so the writer treats the
     // reflection as feedback to act on).
@@ -86,13 +102,19 @@ const agentSetup = setupAgent({
   input: z.object({
     topic: z.string(),
   }),
+  // One leading string (original next to final, with the revision log); the
+  // raw drafts stay nested so neither essay becomes the lead.
   output: z.object({
-    essay: z.string(),
+    comparison: z.string(),
     revisions: z.number(),
     // Whether the critic signed off (vs. stopped at the revision bound).
     satisfied: z.boolean(),
     // Transcript length — a consequence here, the control signal in LangGraph.
     messageCount: z.number(),
+    details: z.object({
+      firstDraft: z.string(),
+      essay: z.string(),
+    }),
   }),
   emitted: {
     DRAFTED: z.object({ revision: z.number(), length: z.number() }),
@@ -116,9 +138,9 @@ const agentSetup = setupAgent({
       model: "writer",
       system:
         "You are an essay-writing assistant. Write the best essay you can for " +
-        "the user's request. If the transcript contains a critique of a prior " +
-        "draft, produce a revised essay that addresses every point while " +
-        "keeping what already works. Return only the essay prose.",
+        "the user's request, in at most 150 words. If the transcript contains a " +
+        "critique of a prior draft, produce a revised essay that addresses every " +
+        "point while keeping what already works. Return only the essay prose.",
       messages: ({ input }) => input.messages,
     },
     // The `reflect` node: a teacher grades the latest draft and returns prose
@@ -140,7 +162,8 @@ const agentSetup = setupAgent({
         "examples for every claim, (3) a fairly stated counterargument that is " +
         "answered, (4) tight structure with no filler, (5) prose free of " +
         "cliché and vague abstraction. Give detailed, specific recommendations " +
-        "for each rubric item that falls short. Set `satisfied` to true ONLY " +
+        "for each rubric item that falls short, in at most 60 words total. Set " +
+        "`satisfied` to true ONLY " +
         "when every rubric item is fully met and no substantive revision is " +
         "left; a first draft almost never clears this bar, so expect to return " +
         "false with actionable critique at least once.",
@@ -156,6 +179,8 @@ export const reflectionWriterMachine = agentSetup.createMachine({
   context: ({ input }) => ({
     topic: input.topic,
     essay: "",
+    firstDraft: "",
+    revisionLog: "",
     messages: [userMessage(`Write an essay on the following topic:\n${input.topic}`)],
     critique: null,
     revisions: 0,
@@ -175,6 +200,9 @@ export const reflectionWriterMachine = agentSetup.createMachine({
             target: "critiquing",
             context: {
               essay: output,
+              // The original draft is kept once, so the result can show it next
+              // to the final one.
+              firstDraft: context.revisions === 0 ? output : context.firstDraft,
               // Record the draft in the transcript (assistant turn).
               messages: [...context.messages, assistantMessage(output)],
             },
@@ -202,6 +230,10 @@ export const reflectionWriterMachine = agentSetup.createMachine({
             context: {
               critique: output,
               revisions: context.revisions + 1,
+              // One line per round; the full critique lives in the transcript.
+              revisionLog:
+                `${context.revisionLog}${context.revisions + 1}. ` +
+                `${output.satisfied ? "satisfied" : "revise"}. ${oneLine(output.critique)}\n`,
               // Feed the critique back as a role-flipped USER message, as the
               // tutorial does, so the next draft treats it as feedback to act on.
               messages: [...context.messages, userMessage(`Critique:\n${output.critique}`)],
@@ -225,10 +257,20 @@ export const reflectionWriterMachine = agentSetup.createMachine({
     done: {
       type: "final",
       output: ({ context }) => ({
-        essay: context.essay,
+        comparison: [
+          "Original draft",
+          context.firstDraft || "(none)",
+          "",
+          `Final draft (after ${context.revisions} critique round${context.revisions === 1 ? "" : "s"})`,
+          context.essay || "(none)",
+          "",
+          "Revision log",
+          context.revisionLog.trimEnd() || "(no critique completed)",
+        ].join("\n"),
         revisions: context.revisions,
         satisfied: context.critique?.satisfied ?? false,
         messageCount: context.messages.length,
+        details: { firstDraft: context.firstDraft, essay: context.essay },
       }),
     },
   },
@@ -243,10 +285,11 @@ export interface RunReflectionWriterOptions {
 }
 
 export interface ReflectionWriterResult {
-  essay: string;
+  comparison: string;
   revisions: number;
   satisfied: boolean;
   messageCount: number;
+  details: { firstDraft: string; essay: string };
   progress: string[];
 }
 
@@ -296,9 +339,8 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     });
 
     console.log("Topic:", topic);
-    console.log("Revisions:", result.revisions);
     console.log("Satisfied:", result.satisfied);
-    console.log("Essay:\n", result.essay);
+    console.log(result.comparison);
   })().catch((error) => {
     console.error(error);
     process.exitCode = 1;

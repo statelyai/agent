@@ -9,7 +9,7 @@
   },
   "comparison": {
     "targets": ["Vercel AI SDK", "evaluator-optimizer"],
-    "purpose": "Translates a phrase, has a critic grade the result, and revises until it passes \u2014 the AI SDK evaluator-optimizer loop as an explicit XState machine."
+    "purpose": "Translates a phrase literally on the first pass, has a strict critic grade it, and revises until it passes \u2014 the AI SDK evaluator-optimizer loop as an explicit XState machine."
   },
   "starters": [
     {

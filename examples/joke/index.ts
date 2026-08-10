@@ -3,9 +3,11 @@
  * `joke-teller` example.
  *
  * Flow: get a topic from the user → stream a joke about it → rate it 1-10 with
- * an explanation → let the model DECIDE (not a regex) whether to tell another
- * joke or stop. The decision is an `agent.decide` invoke; the state's own `on:`
- * transitions define the legal choices, so the state machine owns the loop.
+ * an explanation → ALWAYS take one improvement pass (the machine, not the
+ * model, guarantees the first revision) → then let the model DECIDE (not a
+ * regex) whether to keep going or stop. The decision is an `agent.decide`
+ * invoke; the state's own `on:` transitions define the legal choices, so the
+ * state machine owns the loop.
  *
  * Dual-mode: `runAgent` takes host executors, so the same machine runs live
  * against real models (readline topic, streaming to stdout) or against mocked
@@ -19,6 +21,9 @@ import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 import { createAgentSchemas, createTextLogic, runAgent, setupAgent } from "@statelyai/agent";
 
 const DEFAULT_TOPIC = "state machines";
+
+/** Hard cap on jokes told, so a run stays short no matter what the model decides. */
+const MAX_JOKES = 3;
 
 const ratingSchema = z.object({
   rating: z.number().min(1).max(10),
@@ -46,10 +51,16 @@ export const jokeSchemas = createAgentSchemas({
     jokes: z.array(z.string()),
     lastRating: z.number().nullable(),
     lastExplanation: z.string().nullable(),
+    // The before/after pair the run shows off: the first attempt, kept as-is,
+    // and a note saying what it scored and why a revision followed.
+    firstJoke: z.string().nullable(),
+    revisionNotice: z.string().nullable(),
   }),
   input: z.object({ topic: z.string().default(DEFAULT_TOPIC) }),
   output: z.object({
     joke: z.string(),
+    firstJoke: z.string().nullable(),
+    revisionNotice: z.string().nullable(),
     topic: z.string(),
     jokes: z.array(z.string()),
     lastRating: z.number().nullable(),
@@ -69,12 +80,26 @@ export const models = defineModels({
 export const tellJoke = createTextLogic({
   mode: "stream",
   schemas: {
-    input: z.object({ topic: z.string() }),
+    input: z.object({
+      topic: z.string(),
+      // Set on the improvement pass: the joke to beat and the critic's reasons.
+      previousJoke: z.string().nullable(),
+      rating: z.number().nullable(),
+      critique: z.string().nullable(),
+    }),
     output: z.string(),
   },
   model: "jokeWriter",
   system: "You tell short, punchy jokes. Stay on topic.",
-  prompt: ({ input }) => `Tell a joke about ${input.topic}.`,
+  prompt: ({ input }) =>
+    input.previousJoke
+      ? [
+          `Previous joke about ${input.topic}:`,
+          input.previousJoke,
+          `A critic scored it ${input.rating ?? "?"}/10: ${input.critique ?? ""}`,
+          "Rewrite it so it lands harder. Return only the new joke.",
+        ].join("\n")
+      : `Tell a joke about ${input.topic}.`,
 });
 
 export const rateJoke = createTextLogic({
@@ -106,13 +131,22 @@ export const jokeMachine = jokeAgentSetup.createMachine({
     jokes: [],
     lastRating: null,
     lastExplanation: null,
+    firstJoke: null,
+    revisionNotice: null,
   }),
   initial: "telling",
   states: {
     telling: {
       invoke: {
         src: "tellJoke",
-        input: ({ context }) => ({ topic: context.topic }),
+        // After the first pass the writer sees the joke to beat and the
+        // critique, so `telling` doubles as the revision step.
+        input: ({ context }) => ({
+          topic: context.topic,
+          previousJoke: context.jokes.at(-1) ?? null,
+          rating: context.lastRating,
+          critique: context.lastExplanation,
+        }),
         onDone: ({ context, output }) => ({
           target: "rating",
           context: { jokes: [...context.jokes, output] },
@@ -123,13 +157,31 @@ export const jokeMachine = jokeAgentSetup.createMachine({
       invoke: {
         src: "rateJoke",
         input: ({ context }) => ({ joke: context.jokes.at(-1) ?? "" }),
-        onDone: ({ output }) => ({
-          target: "deciding",
-          context: {
+        onDone: ({ context, output }) => {
+          const rated = {
             lastRating: output.rating,
             lastExplanation: output.explanation,
-          },
-        }),
+          };
+          // The first joke ALWAYS gets one improvement pass. The machine owns
+          // that rule, so the revision branch shows up on every run instead of
+          // depending on whatever the critic happened to score.
+          if (context.jokes.length === 1) {
+            return {
+              target: "telling",
+              context: {
+                ...rated,
+                firstJoke: context.jokes[0]!,
+                revisionNotice:
+                  `First attempt scored ${output.rating}/10 (${output.explanation}). ` +
+                  "Every run takes one improvement pass before deciding whether to stop.",
+              },
+            };
+          }
+          // Past that, the model decides — unless the run hits its joke cap.
+          return context.jokes.length >= MAX_JOKES
+            ? { target: "done", context: rated }
+            : { target: "deciding", context: rated };
+        },
       },
     },
     deciding: {
@@ -159,6 +211,8 @@ export const jokeMachine = jokeAgentSetup.createMachine({
       type: "final",
       output: ({ context }) => ({
         joke: context.jokes.at(-1) ?? "",
+        firstJoke: context.firstJoke,
+        revisionNotice: context.revisionNotice,
         topic: context.topic,
         jokes: context.jokes,
         lastRating: context.lastRating,
@@ -199,8 +253,9 @@ export async function main() {
   if (result.status !== "done") {
     throw new Error(`Joke agent did not complete: ${result.status}`);
   }
+  if (result.output.revisionNotice) console.log(`\n\n${result.output.revisionNotice}`);
   console.log(
-    `\n\nTold ${result.output.jokes.length} joke(s) about "${result.output.topic}". ` +
+    `\nTold ${result.output.jokes.length} joke(s) about "${result.output.topic}". ` +
       `Final rating: ${result.output.lastRating}`,
   );
 }

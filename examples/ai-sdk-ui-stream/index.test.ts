@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { UIMessageChunk } from "ai";
-import type { AgentRequestExecutor } from "@statelyai/agent";
+import { runAgent, type AgentRequestExecutor } from "@statelyai/agent";
 import {
   agentRunToUIMessageStream,
   aiSdkUiStreamMachine,
@@ -83,4 +83,16 @@ test("a data-agent-state part appears for each machine state entered", async () 
 
 test("machine exports a runnable definition", () => {
   expect(aiSdkUiStreamMachine.id).toBe("ai-sdk-ui-stream");
+});
+
+test("each finished stream leaves a timing lane in the output", async () => {
+  const result = await runAgent(aiSdkUiStreamMachine, {
+    input: { product: "a state-machine agent framework" },
+    executors: { streamText: mockStreamText([TAGLINE, PITCH]) },
+  });
+
+  expect(result.status).toBe("done");
+  const summary = result.status === "done" ? result.output.streamSummary : "";
+  // One lane per stream, with its word count and a measured elapsed time.
+  expect(summary).toMatch(/^tagline 3 words in \d+ms · pitch 12 words in \d+ms$/);
 });

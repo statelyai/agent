@@ -119,8 +119,9 @@ export const scenarios: Scenario[] = [
     placeholder: "Classify this ticket: I was charged twice and cannot open my invoice.",
     startLabel: "Classify ticket",
     starters: [
-      "Classify this ticket: I was charged twice and cannot open my invoice.",
-      "Classify this ticket: exports time out after 30 seconds. [primary-outage]",
+      "Classify this ticket: I was charged twice and cannot open my invoice. [primary-outage]",
+      "Classify this ticket: exports time out after 30 seconds. [primary-outage-hard]",
+      "Classify this ticket: the billing page shows last month's total.",
     ],
   },
   {
@@ -147,7 +148,7 @@ export const scenarios: Scenario[] = [
     starters: [
       "Write a vivid one-paragraph description of a tidal shoreline at dusk.",
       "Describe a night market in the rain, in one paragraph.",
-      "Write one paragraph about a hospital waiting room at 3am. [expect a revision]",
+      "Write one paragraph about a hospital waiting room at 3am.",
     ],
   },
 ];

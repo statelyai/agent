@@ -1,12 +1,21 @@
 /**
- * Retrieval-augmented generation (RAG): retrieve → answer, grounded on a small
- * in-file corpus, with conversational memory accumulating in machine context.
+ * Retrieval-augmented generation (RAG) with a recovery branch:
+ *
+ *   retrieving ─ hit ─→ answering → done
+ *        ↑             └ miss → rewritingQuery ┘
+ *
+ * A miss is not the end of the run: the machine rewrites the question into a
+ * better search query and retries retrieval ONCE (bounded by construction — the
+ * retry only leaves `retrieving` for `answering`), then answers on whatever it
+ * found. That retry is the reason this is a machine and not two function calls.
  *
  * Demonstrates:
  *   - Retrieval as a typed plain actor (`retrieve`) — no LLM, no fake embeddings
  *     API. It does honest keyword-overlap scoring over a sample corpus and
  *     returns the top documents. (Real systems swap this for a vector store;
  *     the machine shape is identical.)
+ *   - Grading retrieval in the machine, not the model: zero documents is a miss,
+ *     and the miss transition is visible in the state graph.
  *   - A grounded answer request: the model only sees the retrieved docs and is
  *     told to answer from them.
  *   - Conversational context: `memory` accumulates each question and answer in
@@ -126,8 +135,12 @@ function searchCorpus(
 
 const ragContextSchema = z.object({
   question: z.string(),
+  // Set only on the recovery branch: the query the rewrite produced.
+  rewrittenQuestion: z.string().nullable(),
   documents: z.array(z.string()),
   answer: z.string().nullable(),
+  // Plain-language trail of what retrieval did, including any rewrite.
+  retrievalNotice: z.string(),
   memory: z.array(z.string()),
 });
 
@@ -139,12 +152,15 @@ const agentSetup = setupAgent({
   }),
   output: z.object({
     answer: z.string(),
+    retrievalNotice: z.string(),
+    rewrittenQuestion: z.string().nullable(),
     documents: z.array(z.string()),
     memory: z.array(z.string()),
   }),
   // answering always sets `answer` before `done` reads it — narrow it non-null there.
   states: {
     retrieving: {},
+    rewritingQuery: {},
     answering: {},
     done: {
       schemas: { context: ragContextSchema.extend({ answer: z.string() }) },
@@ -157,6 +173,21 @@ const agentSetup = setupAgent({
     }),
   },
   requests: {
+    // The recovery step: turn a question that matched nothing into a keyword
+    // query in the corpus's own vocabulary, then retry retrieval once.
+    rewriteQuery: {
+      schemas: {
+        input: z.object({ question: z.string() }),
+        output: z.string(),
+      },
+      model: "answerer",
+      system:
+        "A keyword search for the user's question returned nothing. Rewrite it " +
+        "as a short keyword query using state-machine terminology (states, " +
+        "transitions, events, context, actors, invoke, guards, final states). " +
+        "Return only the query.",
+      prompt: ({ input }) => input.question,
+    },
     answerQuestion: {
       schemas: {
         input: z.object({
@@ -184,21 +215,64 @@ export const ragMachine = agentSetup.createMachine({
   id: "rag",
   context: ({ input }) => ({
     question: input.question,
+    rewrittenQuestion: null,
     documents: [],
     answer: null,
+    retrievalNotice: "",
     // Conversational memory starts empty and accumulates across turns.
     memory: [],
   }),
   initial: "retrieving",
   states: {
+    // Retrieve, then grade the result in the machine: a hit answers, a miss
+    // routes to the rewrite. Re-entered at most once, because the second pass
+    // (rewrittenQuestion set) always goes on to `answering`.
     retrieving: {
       invoke: {
         src: "retrieve",
+        input: ({ context }) => ({ question: context.rewrittenQuestion ?? context.question }),
+        onDone: ({ context, output }) => {
+          if (output.length > 0) {
+            return {
+              target: "answering",
+              context: {
+                documents: output,
+                retrievalNotice: context.rewrittenQuestion
+                  ? `${context.retrievalNotice} The retry found ${output.length} passage(s).`
+                  : `Found ${output.length} passage(s) for the question as asked.`,
+              },
+            };
+          }
+          return context.rewrittenQuestion
+            ? {
+                target: "answering",
+                context: {
+                  documents: output,
+                  retrievalNotice: `${context.retrievalNotice} The retry found nothing either; answering without evidence.`,
+                },
+              }
+            : {
+                target: "rewritingQuery",
+                context: {
+                  retrievalNotice: "The question as asked matched no passages.",
+                },
+              };
+        },
+      },
+    },
+    // A rewrite failure is not fatal: answer from what we have (nothing).
+    rewritingQuery: {
+      invoke: {
+        src: "rewriteQuery",
         input: ({ context }) => ({ question: context.question }),
-        onDone: ({ output }) => ({
-          target: "answering",
-          context: { documents: output },
+        onDone: ({ context, output }) => ({
+          target: "retrieving",
+          context: {
+            rewrittenQuestion: output,
+            retrievalNotice: `${context.retrievalNotice} Rewrote it to "${output}" and retried.`,
+          },
         }),
+        onError: { target: "answering" },
       },
     },
     answering: {
@@ -223,6 +297,8 @@ export const ragMachine = agentSetup.createMachine({
       type: "final",
       output: ({ context }) => ({
         answer: context.answer,
+        retrievalNotice: context.retrievalNotice,
+        rewrittenQuestion: context.rewrittenQuestion,
         documents: context.documents,
         memory: context.memory,
       }),
@@ -240,13 +316,18 @@ export interface RunRAGOptions {
 
 export interface RAGResult {
   answer: string;
+  retrievalNotice: string;
+  rewrittenQuestion: string | null;
   documents: string[];
   memory: string[];
 }
 
+/** The default question misses the corpus on purpose, so the retry branch runs. */
+export const DEFAULT_QUESTION = "Why does my app get stuck on the wrong screen?";
+
 /** Retrieves against the sample corpus and answers grounded on the results. */
 export async function runRAGExample(options: RunRAGOptions = {}): Promise<RAGResult> {
-  const { question = "What is context in a state machine?", generateText, onTransition } = options;
+  const { question = DEFAULT_QUESTION, generateText, onTransition } = options;
 
   const result = await runAgent(ragMachine, {
     input: { question },
@@ -271,7 +352,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   void (async () => {
     const { generateText } = createAiSdkExecutors({ models });
 
-    const question = "What is context in a state machine?";
+    const question = DEFAULT_QUESTION;
     const result = await runRAGExample({
       question,
       generateText,
@@ -279,6 +360,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     });
 
     console.log("Question:", question);
+    console.log("Retrieval:", result.retrievalNotice);
     console.log("\nRetrieved documents:");
     result.documents.forEach((doc, i) => console.log(`  [${i + 1}] ${doc}`));
     console.log("\nGrounded answer:", result.answer);

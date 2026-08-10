@@ -128,15 +128,26 @@ async function resolveExecutors(
   });
   const executors = createAiSdkExecutors({ models });
   // Deterministic outage demo for the retry scenario: a healthy primary never
-  // fails live, so the advertised retry→fallback path would never show. A
-  // ticket carrying the `[primary-outage]` marker makes every PRIMARY-model
-  // attempt throw; the machine's bounded retry then lands on the fallback.
+  // fails live, so the advertised retry path would never show. Two markers, two
+  // shapes of recovery:
+  //   `[primary-outage]`      — the FIRST primary attempt throws, the retry
+  //                             succeeds on the primary model.
+  //   `[primary-outage-hard]` — EVERY primary attempt throws, so the retry
+  //                             budget is spent and the fallback model answers.
+  // The counter is per-run: `resolveExecutors` is called once per start/resume.
   if (scenarioId === "retry") {
     const inner = executors.generateText;
     if (inner) {
+      let primaryAttempts = 0;
       executors.generateText = (request, ...rest) => {
-        if (request.model === "primary" && request.prompt?.includes("[primary-outage]")) {
-          throw new Error("Simulated primary model outage");
+        if (request.model === "primary") {
+          const prompt = request.prompt ?? "";
+          primaryAttempts += 1;
+          const hard = prompt.includes("[primary-outage-hard]");
+          const soft = prompt.includes("[primary-outage]");
+          if (hard || (soft && primaryAttempts === 1)) {
+            throw new Error("Simulated primary model outage");
+          }
         }
         return inner(request, ...rest);
       };
@@ -167,12 +178,12 @@ function describeResult(scenarioId: ScenarioId, result: RunAgentResult<AnyStateM
           : `${output.draft}\n\nVerification: ${output.verification}`;
       case "retry":
         return output.category
-          ? `${output.category} (${output.usedFallback ? "fallback model" : "primary model"}, ${output.attempts} retr${output.attempts === 1 ? "y" : "ies"})`
-          : "All model attempts failed.";
+          ? `${output.category}\n\n${output.outcome} (${output.attempts} retr${output.attempts === 1 ? "y" : "ies"})`
+          : String(output.outcome || "All model attempts failed.");
       case "tools":
         return `${output.answer} (in ${output.steps} tool step${output.steps === 1 ? "" : "s"})`;
       case "reflection":
-        return `${output.draft}\n\nScore ${output.score}/10 after ${output.revisions} revision${output.revisions === 1 ? "" : "s"}${output.accepted ? "" : " (revision budget spent)"}.`;
+        return `**First draft**\n\n${output.firstDraft}\n\n**Final draft**\n\n${output.draft}\n\n${output.verdict}`;
     }
   }
   if (result.status === "idle") {

@@ -29,6 +29,8 @@ test("relevant docs → straight to generate (no correction)", async () => {
   });
 
   expect(result.answer).toContain("Long-term memory");
+  expect(result.retrievalNotice).toContain("Primary index returned");
+  expect(result.retrievalNotice).toContain("no correction needed");
   expect(result.usedFallbackIndex).toBe(false);
   expect(result.rewrittenQuestion).toBeNull();
   // Grading happened; the correction branch did NOT.
@@ -52,6 +54,8 @@ test("docs retrieved but all irrelevant → rewrite + web-search fallback", asyn
 
   expect(result.usedFallbackIndex).toBe(true);
   expect(result.rewrittenQuestion).toBe("prompt injection attack defense for agents");
+  expect(result.retrievalNotice).toContain("The grader kept 0 of");
+  expect(result.retrievalNotice).toContain("Corrected: rewrote the question");
   // Full correction branch is visible in the state progression.
   expect(result.progress).toContain("grading");
   expect(result.progress).toContain("transformingQuery");
@@ -75,6 +79,8 @@ test("no docs retrieved → skip grading, correct via web search", async () => {
   });
 
   expect(result.usedFallbackIndex).toBe(true);
+  expect(result.retrievalNotice).toContain("Primary index returned no matching documents.");
+  expect(result.retrievalNotice).toContain("fallback sample web index");
   expect(result.progress).not.toContain("grading");
   expect(result.progress).toContain("transformingQuery");
   expect(result.progress).toContain("webSearching");
@@ -104,6 +110,16 @@ test("starters behave as their labels advertise", async () => {
     });
     results.set(starter.label, result);
   }
+
+  // The DEFAULT chip is the one the demo runs first: its question matches
+  // nothing in the primary corpus, so the correction branch runs on every run,
+  // whatever the grader says.
+  const defaultStarter = results.get(starters[0]!.label)!;
+  expect(defaultStarter.usedFallbackIndex).toBe(true);
+  expect(defaultStarter.progress).not.toContain("grading");
+  expect(defaultStarter.progress).toContain("transformingQuery");
+  expect(defaultStarter.retrievalNotice).toContain("no matching documents");
+  expect(defaultStarter.retrievalNotice).toContain("Corrected");
 
   const hit = results.get("Corpus hit — answers without correcting")!;
   expect(hit.usedFallbackIndex).toBe(false);

@@ -287,9 +287,22 @@ export type RunLimits = {
   signal?: AbortSignal;
   /** Wall-clock budget for the whole run; examples override via metadata. */
   budgetMs?: number;
+  /**
+   * Human-wait state tag from metadata `suspendedTag` — deterministic idle
+   * for plain XState machines with no setupAgent isSuspended predicate.
+   */
+  suspendedTag?: string;
 };
 
 export const DEFAULT_RUN_BUDGET_MS = 120_000;
+
+/** metadata `suspendedTag` → an isSuspended predicate, or undefined. */
+function suspendedPredicate(
+  limits: RunLimits,
+): ((snapshot: AnyMachineSnapshot) => boolean) | undefined {
+  const tag = limits.suspendedTag;
+  return tag ? (snapshot) => snapshot.hasTag(tag) : undefined;
+}
 
 /** One signal for runAgent: request abort OR time budget, whichever first. */
 export function runSignal(limits: RunLimits): AbortSignal {
@@ -505,6 +518,7 @@ export async function startMachineChat(
     input: input as never,
     executors: live.executors,
     signal: runSignal(limits),
+    isSuspended: suspendedPredicate(limits),
     onTransition,
     inspect: maybeCreateRunInspection(machine),
   });
@@ -565,6 +579,7 @@ export async function resumeMachineChat(
     event: parsed as never,
     executors: live.executors,
     signal: runSignal(limits),
+    isSuspended: suspendedPredicate(limits),
     onTransition,
     inspect: maybeCreateRunInspection(machine),
   });

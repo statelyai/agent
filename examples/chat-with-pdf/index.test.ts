@@ -24,6 +24,8 @@ interface PlayOptions {
   learnerEvents: LearnerEvent[];
   /** Grade every answer as correct unless this says otherwise. */
   grade?: (answer: string) => boolean;
+  /** The `expected` string the grader returns. */
+  expected?: string;
 }
 
 interface PlayResult {
@@ -57,7 +59,7 @@ async function play(options: PlayOptions): Promise<PlayResult> {
       return {
         output: {
           correct: options.grade ? options.grade(answer) : true,
-          expected: "the expected answer",
+          expected: options.expected ?? "the expected answer",
           explanation: `graded "${answer}"`,
         },
       };
@@ -212,6 +214,8 @@ describe("chat-with-pdf quiz mode", () => {
     expect(second).toContain("Incorrect — the answer is the expected answer.");
     expect(second).toContain('graded "answer 1"');
     expect(second.indexOf("Incorrect")).toBeLessThan(second.indexOf("Q2 about:"));
+    // The feedback quotes the passage it was grounded on, with its page.
+    expect(second).toContain('Source (page 1): "A state machine is in exactly one');
 
     // ... and a correct answer is acknowledged just as visibly.
     const third = wrong.idleLabels[2]!;
@@ -220,6 +224,18 @@ describe("chat-with-pdf quiz mode", () => {
 
     // The first question has nothing to grade yet, so it stands alone.
     expect(wrong.idleLabels[0]).toMatch(/^Q1 about:/);
+  });
+
+  test("an expected answer that already ends in a period is not double-punctuated", async () => {
+    const result = await play({
+      input: { documentId: "statecharts", maxQuestions: 2, refreshEvery: 2 },
+      learnerEvents: answers(2),
+      expected: "a finite set of states.",
+    });
+
+    const second = result.idleLabels[1]!;
+    expect(second).toContain("the answer is a finite set of states.");
+    expect(second).not.toContain("states..");
   });
 
   test("SKIP advances the loop without scoring", async () => {
