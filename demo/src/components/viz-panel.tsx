@@ -67,6 +67,7 @@ export function VizPanel({
             data-ready
             title={`Live inspection for ${title}`}
             src={liveUrl}
+            allow="clipboard-read; clipboard-write"
             referrerPolicy="strict-origin"
           />
         </div>
@@ -298,6 +299,7 @@ function EmbedVizPanel({
               data-ready={ready || undefined}
               title={`Live statechart for ${title}`}
               src={vizUrl}
+              allow="clipboard-read; clipboard-write"
               sandbox="allow-scripts allow-same-origin"
               referrerPolicy="strict-origin"
             />
