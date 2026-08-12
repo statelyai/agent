@@ -26,7 +26,7 @@ import { type AgentRequestMode } from "./text-logic.js";
 import {
   agentExecutionOptions,
   machineStaticTransitionTargets,
-  machineSuspensionPredicates,
+  machineIdlePredicates,
   missingActor,
 } from "./internal/registry.js";
 import {
@@ -160,14 +160,14 @@ export interface AgentWorkflowConfig {
   /**
    * State tags that mark an INTENTIONAL wait for an external event (a human
    * approval, an inbound webhook, …) — the declarative form of `setupAgent({
-   * isSuspended })`, since a config cannot carry a function. Lowered to a
+   * isIdle })`, since a config cannot carry a function. Lowered to a
    * `snapshot.hasTag(...)`-any-of predicate so `runAgent` settles those
    * snapshots idle deterministically instead of using its timing heuristic.
    * Every listed tag must appear in some state's `tags` — an unused tag is a
-   * build-time error. A `fromConfig(config, { isSuspended })` option takes
-   * precedence; a `runAgent({ isSuspended })` host override beats both.
+   * build-time error. A `fromConfig(config, { isIdle })` option takes
+   * precedence; a `runAgent({ isIdle })` host override beats both.
    */
-  suspendedTags?: string[];
+  idleTags?: string[];
   meta?: Record<string, unknown>;
 }
 
@@ -910,33 +910,33 @@ function collectDeclaredStateTags(
   return tags;
 }
 
-// Resolves the machine-carried suspension predicate for a fromConfig machine:
-// the host `options.isSuspended` function when given, else the config's
-// declarative `suspendedTags` lowered to a hasTag-any-of predicate. A
-// `suspendedTags` entry no state declares is a typo'd silent no-op — the
-// machine would never test as suspended there — so it throws at build time.
-function resolveSuspensionPredicate(
+// Resolves the machine-carried idle predicate for a fromConfig machine:
+// the host `options.isIdle` function when given, else the config's
+// declarative `idleTags` lowered to a hasTag-any-of predicate. A
+// `idleTags` entry no state declares is a typo'd silent no-op — the
+// machine would never tests as idle there — so it throws at build time.
+function resolveIdlePredicate(
   config: AgentWorkflowConfig,
   options: FromConfigOptions,
 ): ((snapshot: AnyMachineSnapshot) => boolean) | undefined {
-  if (options.isSuspended) {
-    return options.isSuspended;
+  if (options.isIdle) {
+    return options.isIdle;
   }
-  const suspendedTags = config.suspendedTags ?? [];
-  if (!suspendedTags.length) {
+  const idleTags = config.idleTags ?? [];
+  if (!idleTags.length) {
     return undefined;
   }
   const declaredTags = collectDeclaredStateTags(config.states);
-  const unknown = suspendedTags.filter((tag) => !declaredTags.has(tag));
+  const unknown = idleTags.filter((tag) => !declaredTags.has(tag));
   if (unknown.length) {
     throw new Error(
-      `setupAgent.fromConfig: 'suspendedTags' lists ${unknown
+      `setupAgent.fromConfig: 'idleTags' lists ${unknown
         .map((tag) => `'${tag}'`)
         .join(", ")}, which no state declares in its 'tags'. Tag the waiting state(s) — e.g. ` +
         `"tags": ["${unknown[0]}"] — or remove the entry.`,
     );
   }
-  return (snapshot) => suspendedTags.some((tag) => snapshot.hasTag(tag));
+  return (snapshot) => idleTags.some((tag) => snapshot.hasTag(tag));
 }
 
 // Implementation backing the public `setupAgent.fromConfig(...)` namespace member (see setup-agent.ts) — translates an AgentWorkflowConfig into MachineJSON and builds the machine through xstate's createMachineFromConfig.
@@ -1005,12 +1005,12 @@ export function setupAgentFromConfig(
   if (machine.config) {
     machineStaticTransitionTargets.set(machine.config as object, translation.transitionTargets);
   }
-  // The wait-state predicate (options.isSuspended, or the config's declarative
-  // `suspendedTags`), carried on the root config like setupAgent's — so it
+  // The wait-state predicate (options.isIdle, or the config's declarative
+  // `idleTags`), carried on the root config like setupAgent's — so it
   // survives further `machine.provide(...)` executor rebinding.
-  const isSuspended = resolveSuspensionPredicate(config, options);
-  if (isSuspended && machine.config) {
-    machineSuspensionPredicates.set(machine.config as object, isSuspended);
+  const isIdle = resolveIdlePredicate(config, options);
+  if (isIdle && machine.config) {
+    machineIdlePredicates.set(machine.config as object, isIdle);
   }
   return { machine, schemas };
 }
@@ -1064,12 +1064,12 @@ export interface FromConfigOptions {
   actions?: Record<string, (params: any) => unknown>;
   /**
    * Detects a snapshot that is an INTENTIONAL wait for an external event —
-   * the same machine-carried predicate `setupAgent({ isSuspended })` declares
+   * the same machine-carried predicate `setupAgent({ isIdle })` declares
    * for TS-authored machines, registered here because a function cannot live
    * in the workflow config itself. Takes precedence over the config's
-   * declarative {@link AgentWorkflowConfig.suspendedTags}; a
-   * `runAgent({ isSuspended })` host override beats both. Travels with the
+   * declarative {@link AgentWorkflowConfig.idleTags}; a
+   * `runAgent({ isIdle })` host override beats both. Travels with the
    * machine through `machine.provide(...)`.
    */
-  isSuspended?: (snapshot: AnyMachineSnapshot) => boolean;
+  isIdle?: (snapshot: AnyMachineSnapshot) => boolean;
 }

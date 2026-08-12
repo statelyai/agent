@@ -2,7 +2,7 @@
  * STEP 3 — the `{ pending }` sentinel becomes an idle state.
  *
  * Moved: `needsApproval` (a final state whose output the runner reshaped) becomes
- * a real idle `awaitingApproval` state — no invoke, an `isSuspended` tag, and
+ * a real idle `awaitingApproval` state — no invoke, an `isIdle` tag, and
  * APPROVE/DENY handlers. `runAgent` now settles `{ status: 'idle', snapshot }`
  * there; the runner persists that snapshot (plain JSON) and resumes with an event
  * in a second `runAgent` call. No closure, no lost state, resumable across
@@ -14,7 +14,6 @@ import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 import {
   createAgentSchemas,
-  persistSnapshot,
   runAgent,
   setupAgent,
   type AgentRequestExecutors,
@@ -49,7 +48,7 @@ const schemas = createAgentSchemas({
 const agentSetup = setupAgent({
   schemas,
   models,
-  isSuspended: (snapshot) => snapshot.hasTag("awaiting-approval"),
+  isIdle: (snapshot) => snapshot.hasTag("awaiting-approval"),
   states: { awaitingApproval: { context: { pendingRefund: z.number() } } },
 });
 
@@ -168,7 +167,7 @@ export async function runSupportStep3(
   if (first.status !== "idle") throw new Error(`unexpected status ${first.status}`);
 
   const second = await runAgent(supportMachineStep3, {
-    snapshot: persistSnapshot(first.snapshot),
+    snapshot: first.persistedSnapshot,
     event: approve ? { type: "APPROVE" } : { type: "DENY", reason: "Outside policy." },
     executors,
   });

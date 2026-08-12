@@ -5,19 +5,26 @@ description: Watch an agent run locally in the Stately Inspector, ship its versi
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
 
-Two ways to observe a run:
+This page covers how to watch an agent run, in development and in production, and how the trace stream relates to the replayable event log.
 
-- **Locally**, watch it live in the [Stately Inspector](https://stately.ai/docs/inspector), a browser-based viewer that renders a running state machine as a diagram and lights it up state by state.
-- **In production**, ship the versioned trace stream to any [OpenTelemetry](https://opentelemetry.io) backend with the [`@statelyai/agent/otel`](#otel-export) bridge: one handler, GenAI-semconv spans, your exporter. OpenTelemetry is the vendor-neutral standard for traces; Honeycomb, Langfuse, LangSmith, Braintrust, Datadog, and Grafana all ingest it.
+There are two ways to observe a run.
 
-No hosted platform, no adapter to install. Every trace pairs with a replayable event log and settled snapshot, so a traced run can be reproduced and resumed.
+- Locally, watch it live in the [Stately Inspector](https://stately.ai/docs/inspector). The inspector is a browser-based viewer that renders a running state machine as a diagram and highlights each state as it is entered.
+- In production, ship the versioned trace stream to any [OpenTelemetry](https://opentelemetry.io) backend with the [`@statelyai/agent/otel`](#otel-export) bridge. OpenTelemetry is the vendor-neutral standard for traces. Honeycomb, Langfuse, LangSmith, Braintrust, Datadog, and Grafana all ingest it.
 
-Two streams, not one:
+Neither requires a hosted platform or an installed adapter. Every trace pairs with a replayable event log and a settled snapshot, so a traced run can be reproduced and resumed.
 
-- **`result.events`**, the replay record: a versioned `AgentLogEntry[]` of machine input, effect completions/failures, externally sent events, and timer firings. Each entry has stable identity, acceptance time, machine identity/version, and verification hashes.
-- **`AgentTraceEvent[]`**, the richer observational stream described below: request lifecycle, chunks, transitions, emissions, timestamps, run boundaries.
+A run produces two separate streams.
 
-Feed only `result.events` to `replay`, never trace events. See [The event log](event-log.md#export-events-from-runagent).
+- `result.events` is the replay record. It is a versioned `AgentLogEntry[]` of machine input, effect completions and failures, externally sent events, and timer firings. Each entry carries a stable identity, an acceptance time, the machine identity and version, and verification hashes.
+- `AgentTraceEvent[]` is the observational stream described on this page. It covers the request lifecycle, chunks, transitions, emissions, timestamps, and run boundaries.
+
+Pass only `result.events` to `replay`. Trace events are not a replay record. See [The event log](event-log.md#export-events-from-runagent).
+
+<!-- viz: run observation surfaces: runAgent emitting onTrace / onTransition / on / onEvent / inspect, and where each one feeds (OTel bridge, inspector, replay log) -->
+
+<!-- viz: trace event sequence for one run: run.start -> request.start -> stream.chunk* -> request.end -> machine.transition -> run.end -->
+
 
 ## The versioned trace stream
 
@@ -30,11 +37,13 @@ The `onTrace` callback fires a single ordered stream of `AgentTraceEvent`s. Ever
 | `seq`            | Monotonic within a `runId`, so events are re-orderable after the fact.                                                                                                           |
 | `timestamp`      | ISO string, set when the event is produced.                                                                                                                                      |
 | `machineId`      | The machine's `id`.                                                                                                                                                              |
-| `machineVersion` | `machineVersion` option, else the machine's own `version` (`createMachine({ version })`), else its structural hash. Same identity stamped onto settled snapshots as `agentMeta`. |
+| `machineVersion` | The machine's version. See the fallback order below.                                                                                                                            |
 
-`schemaVersion` is bumped **only** on a breaking change to the envelope or a payload shape, so a consumer can gate on it. It is identical across `runAgent`, `provideExecutors`, and `traceTransitions`.
+`machineVersion` is the machine's own `version` from `createMachine({ version })`. A machine that declares no version falls back to its structural hash. The same identity is stamped onto settled snapshots as `agentMeta`.
 
-The payload is a discriminated union on `type`:
+`schemaVersion` is bumped only on a breaking change to the envelope or to a payload shape, so a consumer can gate on it. It is identical across `runAgent`, `provideExecutors`, and `traceTransitions`.
+
+The payload is a discriminated union on `type`.
 
 | `type`               | Key fields                                              | Notes                                                                                                                                                                    |
 | -------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -47,9 +56,9 @@ The payload is a discriminated union on `type`:
 | `emit`               | `event`                                                 | An event the machine emitted with `enq.emit(...)`; controlled path only.                                                                                                 |
 | `run.end`            | `status` (`done` \| `idle` \| `error`) + variant fields | `done`: `output`, `snapshot`. `idle`: `snapshot`, `pendingUserInputs?`, `persistedSnapshot?`. `error`: `cause`, `error`, `snapshot`. Run boundary; controlled path only. |
 
-Each `request` is an `AgentStepRequest`: a text request carries `src`; a decision carries `model` instead. Both carry `id` and `kind`.
+Each `request` is an `AgentStepRequest`. A text request carries `src`, and a decision carries `model` instead. Both carry `id` and `kind`.
 
-Two timestamps, neither of them machine time:
+Two timestamps appear in the system, and neither is machine time.
 
 - Trace `timestamp` records when an observation was emitted.
 - Replay-entry `recordedAt` records when the host accepted the durable machine input.
@@ -60,7 +69,7 @@ Put time in the event payload when transition logic depends on it.
 
 ### Controlled (`runAgent`)
 
-On `runAgent`, `onTrace` emits the full stream, run boundary included:
+On `runAgent`, `onTrace` emits the full stream, including run boundaries.
 
 ```ts
 import { runAgent, serializeTraceEvent, type AgentTraceEvent } from "@statelyai/agent";
@@ -72,11 +81,11 @@ await runAgent(machine, {
 });
 ```
 
-`serializeTraceEvent(event)` returns a JSONL-safe plain-JSON form, stripping values that don't survive `JSON.stringify` (actor refs, snapshot internals). Use it for any file, queue, or wire sink; skip it for in-process consumers that want the live objects.
+`serializeTraceEvent(event)` returns a JSONL-safe plain-JSON form. It strips values that do not survive `JSON.stringify`, such as actor refs and snapshot internals. Use it for any file, queue, or wire sink. Skip it for in-process consumers that want the live objects.
 
 ### Streaming with `createAgentRun`
 
-`createAgentRun(machine, options)` wraps `runAgent` in a handle that exposes the same trace stream as an async iterator, alongside the same `result` promise:
+`createAgentRun(machine, options)` wraps `runAgent` in a handle that exposes the same trace stream as an async iterator, alongside the same `result` promise.
 
 ```ts
 import { createAgentRun } from "@statelyai/agent";
@@ -91,18 +100,18 @@ for await (const event of run.events) {
 const result = await run.result; // done | idle | error, exactly as runAgent
 ```
 
-- **Starts immediately**: the run is in flight when `createAgentRun` returns, not on first iteration.
-- **Buffered, never blocking**: events are queued unboundedly, so a slow or absent consumer never applies backpressure to the run. Await `result` first and drain `events` after if you prefer.
-- **Completes after `run.end`**: the iterator yields `run.end`, then finishes. It also closes if the run settles without one (a bind-time throw).
-- **`result` mirrors `runAgent`**: same `done | idle | error` value, and it rejects only where `runAgent` rejects (bind-time programmer errors like a missing executor or an illegal resume event). A run-level failure resolves with `{ status: 'error' }`.
-- **`onTrace` still fires**: pass `options.onTrace` and it receives every event too. The wrapper composes, it does not replace your sink.
-- **Resumes identically**: options pass straight through, so a persisted `snapshot` (+ resume `event`) streams that run from its own `run.start`.
+- The run starts immediately. It is in flight when `createAgentRun` returns, not on the first iteration.
+- Events are buffered and never block. The queue is unbounded, so a slow or absent consumer applies no backpressure to the run. You can await `result` first and drain `events` afterwards.
+- The iterator yields `run.end` and then finishes. It also closes if the run settles without a `run.end`, such as after a bind-time throw.
+- `result` mirrors `runAgent`. It resolves to the same `done | idle | error` value and rejects only where `runAgent` rejects, on bind-time programmer errors such as a missing executor or an illegal resume event. A run-level failure resolves with `{ status: 'error' }`.
+- `onTrace` still fires. Pass `options.onTrace` and it receives every event as well. The wrapper composes with your sink rather than replacing it.
+- Resume behaves the same. Options pass straight through, so a persisted `snapshot` and resume `event` stream that run from its own `run.start`.
 
-`events` is single-consumer: a second `for await` picks up only what the first hasn't pulled, one shared cursor rather than a replay. Breaking out early (or calling `events.return()`) stops delivery but does **not** cancel the run (`result` still settles), so pass `options.signal` to abort the work itself.
+`events` has a single consumer. A second `for await` picks up only what the first has not pulled, because the two share one cursor. Breaking out early, or calling `events.return()`, stops delivery but does not cancel the run, and `result` still settles. Pass `options.signal` to abort the work itself.
 
 ### Uncontrolled (`provideExecutors` + `traceTransitions`)
 
-On the [uncontrolled path](any-stack.md#controlled-and-uncontrolled), `provideExecutors`' `onTrace` emits the request-level events; `traceTransitions` on the actor's `inspect` folds `machine.transition` events into the **same** `runId`/`seq` stream:
+On the [uncontrolled path](any-stack.md#controlled-and-uncontrolled), `onTrace` on `provideExecutors` emits the request-level events. `traceTransitions` on the actor's `inspect` folds `machine.transition` events into the same `runId` and `seq` stream.
 
 ```ts
 import { createActor } from "xstate";
@@ -120,23 +129,23 @@ const actor = createActor(bound, { inspect: traceTransitions(onTrace) });
 actor.start();
 ```
 
-The tracing gap, compared to `runAgent`:
+This path traces less than `runAgent` does.
 
-- **No `run.start` / `run.end`.** A `createActor` has no run boundary, so the stream starts at the first transition and never emits a settle event.
-- **No `emit` events.** In this XState build, emitted events are delivered through `actor.on(...)`, not the inspection protocol, so an `inspect` handler can't see them. Subscribe with `actor.on('*', ...)` if you need them.
-- **No child traces.** `provideExecutors` does not descend into invoked child machines, so a child with its own agent invokes needs its own `provideExecutors(...)` call and its own stream.
+- There is no `run.start` or `run.end`. A `createActor` has no run boundary, so the stream starts at the first transition and never emits a settle event.
+- There are no `emit` events. In this XState build, emitted events are delivered through `actor.on(...)` rather than the inspection protocol, so an `inspect` handler cannot see them. Subscribe with `actor.on('*', ...)` if you need them.
+- There are no child traces. `provideExecutors` does not descend into invoked child machines, so a child with its own agent invokes needs its own `provideExecutors(...)` call and its own stream.
 
 ## Observation callbacks
 
-`onTrace` is one of several `runAgent` callbacks. All are purely observational: they return `void` and cannot control the run.
+`onTrace` is one of several `runAgent` callbacks. All of them are observational only. They return `void` and cannot control the run.
 
-- **`onTrace(event)`**: the whole ordered run ledger described above (the eval trace / JSONL / telemetry slot). Uncontrolled mode gets the same stream via `provideExecutors` + `traceTransitions`.
-- **`onChunk(chunk, info)`**: each streamed chunk of a `mode: 'stream'` request, with the `AgentRequest` that produced it (parallel streams stay distinguishable).
-- **`onResult(request, result)`**: once per resolved text or decision request (decision retries fire per attempt), with normalized `result.output` and the verbatim executor result in `result.raw`. Return `usage` alongside `output` and `raw` becomes your token meter; the shipped adapter does, so `raw as AiSdkGenerateResult` carries `usage`, `finishReason`, `toolCalls`, `toolResults`.
-- **`onEvent(entry)`**: each newly created versioned `AgentLogEntry` around a replayable external input. Entries are JSON-validated and carry ids, timestamps, machine identity/version, and replay hashes; seeded resume history is not re-emitted.
-- **`onTransition(snapshot, event)`**: every machine transition, with the new snapshot and causing event.
-- **`on: { EVENT: handler, '*': handler }`**: events the machine emits with `enq.emit(...)`, keyed by emitted event type (`'*'` catches all).
-- **`inspect(inspectionEvent)`**: raw xstate inspection passthrough for the whole actor system (also how the [Stately Inspector](#local-inspection) attaches). `onTransition` covers the root only; to watch a child machine's states (see [multi-agent](multi-agent.md)), filter `inspectionEvent.type === '@xstate.transition'` and read `inspectionEvent.actorRef`. The `inspectTransitions(handler)` helper does that filtering and hands over the typed snapshot + actorRef.
+- `onTrace(event)` receives the versioned trace stream described above. Use it for eval traces, JSONL logs, and telemetry.
+- `onChunk(chunk, info)` receives each streamed chunk of a `mode: 'stream'` request, along with the `AgentRequest` that produced it. Parallel streams stay distinguishable.
+- `onResult(request, result)` fires once per resolved text or decision request, and once per attempt for decision retries. `result.output` is the normalized output and `result.raw` is the verbatim executor result. If your executor returns `usage` alongside `output`, `raw` carries it. The shipped adapter does, so `raw as AiSdkGenerateResult` carries `usage`, `finishReason`, `toolCalls`, and `toolResults`.
+- `onEvent(entry)` receives each newly created versioned `AgentLogEntry` around a replayable external input. Entries are JSON-validated and carry ids, timestamps, machine identity and version, and replay hashes. Seeded resume history is not re-emitted.
+- `onTransition(snapshot, event)` receives every machine transition, with the new snapshot and the causing event.
+- `on: { EVENT: handler, '*': handler }` receives events the machine emits with `enq.emit(...)`, keyed by emitted event type. `'*'` catches all of them.
+- `inspect(inspectionEvent)` is a raw XState inspection passthrough for the whole actor system. The [Stately Inspector](#local-inspection) attaches this way. `onTransition` covers the root machine only. To watch a child machine's states, filter for `inspectionEvent.type === '@xstate.transition'` and read `inspectionEvent.actorRef`. The `inspectTransitions(handler)` helper does that filtering and passes a typed snapshot and actorRef. See [Multi-agent composition](multi-agent.md).
 
 ```ts
 await runAgent(machine, {
@@ -151,15 +160,15 @@ await runAgent(machine, {
 });
 ```
 
-`onEvent` is write-through observation, not transactional durability: the live XState actor has already accepted the event, and this synchronous callback cannot await an asynchronous store before the transition. For append-before-continue crash safety, use [the step path](steps.md#durable-append-before-continue), where the host commits each completion envelope before exposing the derived state.
+`onEvent` is write-through observation, not transactional durability. The live XState actor has already accepted the event, and this synchronous callback cannot await an asynchronous store before the transition happens. For append-before-continue crash safety, use [the step path](steps.md#durable-append-before-continue), where the host commits each completion envelope before exposing the derived state.
 
-`onTrace`, `onTransition`, and `on` differ in level:
+`onTrace`, `onTransition`, and `on` observe at different levels.
 
-- `onTrace`: the whole ordered run ledger (evals, exports).
-- `onTransition`: XState's terms (state values, events).
-- `on`: the domain events the machine emits at authored moments (a progress UI, an SSE stream, a log line).
+- `onTrace` gives every event in the run, in order. Use it for evals and exports.
+- `onTransition` gives XState terms: state values and events.
+- `on` gives the domain events the machine emits at authored moments. Use it for a progress UI, an SSE stream, or a log line.
 
-Declare emitted schemas in `setupAgent` and both `enq.emit(...)` and the `on` handlers are fully typed:
+Declare emitted schemas in `setupAgent` and both `enq.emit(...)` and the `on` handlers are fully typed.
 
 ```ts no-check
 const agentSetup = setupAgent({
@@ -177,17 +186,17 @@ onDone: ({ context, output }, enq) => {
 },
 ```
 
-Emitted events are fire-and-forget observation, not control flow: they never target states, and a run behaves identically with no handlers attached.
+Emitted events are fire-and-forget observation, not control flow. They never target states, and a run behaves identically with no handlers attached.
 
 ## Local inspection
 
-The Stately Inspector is a live diagram view of a running machine: connect a run to it and every transition highlights as it happens. Point a run at it through `runAgent`'s `inspect` option (a raw XState inspection passthrough: system-wide, children included), using `createInspector` from [`@statelyai/sdk`](https://www.npmjs.com/package/@statelyai/sdk).
+The Stately Inspector is a live diagram view of a running machine. Connect a run to it and every transition highlights as it happens. Point a run at it through `runAgent`'s `inspect` option, using `createInspector` from [`@statelyai/sdk`](https://www.npmjs.com/package/@statelyai/sdk). `inspect` is a raw XState inspection passthrough, so it covers the whole actor system, children included.
 
-`createInspector`:
+`createInspector` does the following:
 
-- runs from Node and other server runtimes, with no in-browser machine required
-- normalizes XState v5 and v6 inspection events
-- opens the inspector UI in your browser once connected, unless you set `autoOpen: false`
+- Runs from Node and other server runtimes. No in-browser machine is required.
+- Normalizes XState v5 and v6 inspection events.
+- Opens the inspector UI in your browser once connected, unless you set `autoOpen: false`.
 
 ```ts
 import { createInspector } from "@statelyai/sdk";
@@ -201,21 +210,21 @@ const inspector = createInspector({
 await runAgent(machine, {
   input,
   executors,
-  inspect: inspector.inspect, // the machine lights up in the inspector
+  inspect: inspector.inspect,
 });
 
 inspector.destroy();
 ```
 
-`inspector.roomId`, `relayUrl`, and `inspectorUrl` describe the negotiated room; let the SDK construct them instead of hand-writing registration messages or actor identifiers.
+`inspector.roomId`, `relayUrl`, and `inspectorUrl` describe the negotiated room. Let the SDK construct them instead of writing registration messages or actor identifiers by hand.
 
-For serverless/edge runtimes (Cloudflare Workers/Durable Objects), `@statelyai/sdk/relay` ships `createInspectionRelay`, a runtime-neutral relay with bounded late-join replay that a Durable Object can host directly, so per-request lifetimes and hibernation don't break the stream.
+For serverless and edge runtimes such as Cloudflare Workers and Durable Objects, `@statelyai/sdk/relay` ships `createInspectionRelay`. It is a runtime-neutral relay with bounded late-join replay that a Durable Object can host directly, so per-request lifetimes and hibernation do not break the stream.
 
-The inspector renders the running actor as the same diagram you author, so the whole flow is visible as one live machine. See [`examples/email-drafter-inspector`](../examples/email-drafter-inspector/index.ts) for a full session (it keeps one long-lived actor instead of the `runAgent` loop, but the wiring is identical).
+The inspector renders the running actor as the same diagram you author, so the whole flow is visible as one live machine. See [`examples/email-drafter-inspector`](../examples/email-drafter-inspector/index.ts) for a full session. That example keeps one long-lived actor instead of using the `runAgent` loop, but the inspector wiring is identical.
 
 ## OTel export
 
-OpenTelemetry models work as **spans**: timed, nested units that carry attributes, which an exporter ships to whatever backend you use. `@statelyai/agent/otel` maps the trace stream onto [OpenTelemetry GenAI](https://github.com/open-telemetry/semantic-conventions-genai) spans, the standard's conventions for model calls and agent runs. That is the whole integration: pass a `tracer` from **your existing SDK setup** and hand the handler to `onTrace`.
+OpenTelemetry models work as **spans**, which are timed, nested units that carry attributes. An exporter ships them to your backend. `@statelyai/agent/otel` maps the trace stream onto [OpenTelemetry GenAI](https://github.com/open-telemetry/semantic-conventions-genai) spans, the standard's conventions for model calls and agent runs. To integrate, pass a `tracer` from your existing SDK setup and pass the returned handler to `onTrace`.
 
 ```sh
 npm install @opentelemetry/api
@@ -238,7 +247,7 @@ try {
 }
 ```
 
-**Ships no exporter, owns no SDK lifecycle.** `@opentelemetry/api` is an optional peer dependency, the `Tracer` is yours, and where the spans go is your exporter's business. Nothing else is installed at runtime.
+The bridge ships no exporter and owns no SDK lifecycle. `@opentelemetry/api` is an optional peer dependency, you own the `Tracer`, and your exporter decides where the spans go. Nothing else is installed at runtime.
 
 The run span nests under whatever span is active when the run starts, so an agent run inside an HTTP handler lands in that request's trace.
 
@@ -270,13 +279,13 @@ Attributes follow the [GenAI semantic conventions](https://github.com/open-telem
 | `agent.request_id`, `agent.request_kind`, `agent.request_src`, `agent.request_attempt`    | The request. `request_src` is absent on a decision; `request_attempt` appears on a retry. |
 | `agent.seq`                                                                               | Every span event, so events stay re-orderable downstream.                                 |
 
-- **No prompt or response bodies by default.** Semconv marks message content opt-in, and bodies are large and frequently sensitive, so the bridge records output _sizes_ (`agent.output_length`) instead. Pass `captureContent: true` for JSON-stringified `gen_ai.input.messages`, `gen_ai.output.messages`, and `gen_ai.system_instructions`.
-- **`dispose()` is not optional.** It ends any span still open, which is how a run that never emitted `run.end` (a crash, an uncontrolled actor) stops leaking one.
-- **`attributes`** sets the same key/values on every span the bridge creates: deployment, tenant, eval id.
+- The bridge records no prompt or response bodies by default. Semconv marks message content opt-in, and bodies are large and often sensitive, so the bridge records output sizes as `agent.output_length` instead. Pass `captureContent: true` to record JSON-stringified `gen_ai.input.messages`, `gen_ai.output.messages`, and `gen_ai.system_instructions`.
+- Always call `dispose()`. It ends any span still open, so a run that never emitted `run.end`, after a crash or on an uncontrolled actor, does not leak one.
+- `attributes` sets the same key/value pairs on every span the bridge creates, such as deployment, tenant, or eval id.
 
 ### Uncontrolled mode
 
-On the [uncontrolled path](#uncontrolled-provideexecutors--tracetransitions) there is no `run.start` / `run.end`, so the run span opens on the **first** event of a `runId` and stays open until you dispose. Same handler, same tree:
+The uncontrolled path traces less than `runAgent` does, as described in [Uncontrolled](#uncontrolled-provideexecutors--tracetransitions). One of those gaps changes the span tree: with no `run.start` or `run.end`, the run span opens on the first event of a `runId` and stays open until you dispose the handler. The handler is otherwise the same.
 
 ```ts
 const tracer = new NodeTracerProvider().getTracer("my-app");
@@ -288,17 +297,17 @@ actor.subscribe({ complete: () => onTrace.dispose() });
 actor.start();
 ```
 
-Those run spans carry `agent.unfinished: true` (no settle event ever confirmed how they ended) and no `agent.status`. One handler per long-lived actor, disposed when the actor stops, keeps handler state bounded.
+Those run spans carry `agent.unfinished: true` and no `agent.status`, because no settle event confirmed how they ended. Use one handler per long-lived actor and dispose it when the actor stops. This keeps handler state bounded.
 
 ### Vendor endpoints
 
-The bridge emits plain OTel spans, so a vendor is a **URL and a set of headers** on your own exporter. Nothing in the wiring above changes per vendor, and no vendor SDK enters your machine.
+The bridge emits plain OTel spans, so a vendor is a URL and a set of headers on your own exporter. Nothing in the wiring above changes per vendor, and no vendor SDK enters your machine.
 
 ```sh
 npm install @opentelemetry/sdk-trace-node @opentelemetry/exporter-trace-otlp-http
 ```
 
-One wiring, with the vendor's URL and headers swapped in:
+The wiring is the same for every vendor. Substitute the vendor's URL and headers.
 
 ```ts
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
@@ -313,7 +322,7 @@ const provider = new NodeTracerProvider({ spanProcessors: [new BatchSpanProcesso
 const onTrace = createOtelTraceHandler({ tracer: provider.getTracer("my-app") });
 ```
 
-Endpoints and header names drift, so each vendor's linked docs page is the authority.
+Endpoints and header names change over time. Each vendor's linked docs page is the authority.
 
 | Vendor     | Endpoint                                               | Headers                                                                                 | Docs                                                                                |
 | ---------- | ------------------------------------------------------ | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
@@ -325,42 +334,44 @@ Endpoints and header names drift, so each vendor's linked docs page is the autho
 
 - Regional hosts swap the subdomain: LangSmith `eu.`/`apac.`/`aws.`, Braintrust `api-eu.`, Langfuse `us.`/`jp.`/`hipaa.` or self-hosted, Honeycomb `api.eu1.`.
 - Datadog's host depends on your site, and Datadog still recommends the Agent or Collector for production traffic. Its `trace.agent.datadoghq.com` intake is proprietary, not OTLP.
-- Braintrust also runs the offline scoring side; see [Evals](evals.md) for scoring the same runs from `runAgent`'s output and event log.
+- Braintrust also runs offline scoring. See [Evals](evals.md) for scoring the same runs from `runAgent`'s output and event log.
 
-See [`examples/langsmith-otel`](../examples/langsmith-otel/index.ts) for the full runnable wiring: real OTel SDK, real OTLP exporter, keyless run that prints the exported span tree.
+See [`examples/langsmith-otel`](../examples/langsmith-otel/index.ts) for the full runnable wiring. It uses a real OTel SDK and a real OTLP exporter, and prints the exported span tree from a keyless run.
 
 ### Model spans via AI SDK telemetry
 
-The `request.*` events span the model call as `runAgent` sees it: one span per request, with usage on `event.raw`. For provider-level detail (token timing, the exact request the SDK sent), the Vercel AI SDK emits its own OpenTelemetry spans when passed `experimental_telemetry`.
+The `request.*` events span the model call as `runAgent` sees it: one span per request, with usage on `event.raw`. For provider-level detail such as token timing and the exact request the SDK sent, the Vercel AI SDK emits its own OpenTelemetry spans when you pass `experimental_telemetry`.
 
-`createAiSdkExecutors` does **not** forward `experimental_telemetry` (request `metadata` only carries adapter conventions like `maxSteps`). Enable it by supplying the text executors yourself (the raw `ai` functions are valid executors; see [models and providers](models-and-providers.md#reusing-models-from-other-frameworks)) and keeping the adapter's `decide`:
+`createAiSdkExecutors` does not forward `experimental_telemetry`. Wrap the adapter's `generateText` instead of replacing it: open your own span, call through to the adapter, and end the span when the call settles. The adapter keeps handling structured output, tool loops, and `decide`.
 
-```ts no-check
-import { generateText, streamText } from "ai";
+```ts
+import { trace } from "@opentelemetry/api";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
+import { runAgent, type AgentRequestExecutors } from "@statelyai/agent";
 
-const telemetry = { isEnabled: true, functionId: "agent" } as const;
+const adapter = createAiSdkExecutors({ models });
+const tracer = trace.getTracer("my-app");
 
-const executors = {
-  ...createAiSdkExecutors({ models }), // keeps decide (and structured output)
+const executors: AgentRequestExecutors = {
+  ...adapter,
   generateText: (request, info) =>
-    generateText({
-      model: resolveModel(request.model),
-      system: request.system,
-      prompt: request.prompt ?? "",
-      abortSignal: info?.signal,
-      experimental_telemetry: telemetry,
+    tracer.startActiveSpan(`model ${request.model}`, async (span) => {
+      try {
+        return await adapter.generateText(request, info);
+      } finally {
+        span.end();
+      }
     }),
 };
 
 await runAgent(machine, { input, executors });
 ```
 
-Trade-off: raw `ai` executors do structured output best-effort (`JSON.parse` + validate), so keep `createAiSdkExecutors`' `generateText` for reliable structured requests and add telemetry per-request via a wrapper only where you need the provider spans. The AI SDK's spans nest under whatever span is active when the executor runs, so they slot beneath the bridge's `chat` span for that request.
+Any span the AI SDK emits inside the call nests under whatever span is active when the executor runs, so provider spans appear beneath both your wrapper span and the bridge's `chat` span for that request.
 
 ## Replay from a trace
 
-A trace names a run; a snapshot resumes it. The `runId` scoping the trace stream also identifies the settled snapshot: capture the `runId` off any trace event, store the settled snapshot under it, and later resume exactly what you traced.
+The `runId` that scopes the trace stream also identifies the settled snapshot. Capture the `runId` from any trace event, store the settled snapshot under it, and resume that run later.
 
 ```ts
 let runId: string | undefined;
@@ -374,11 +385,11 @@ const result = await runAgent(machine, {
 });
 
 if (result.status === "idle" && runId) {
-  // Persist keyed by the run's identity; resume it later, event and all.
-  store.set(runId, persistSnapshot(result.persistedSnapshot ?? result.snapshot));
+  // Key the stored snapshot by runId.
+  store.set(runId, result.persistedSnapshot ?? result.snapshot);
 }
 
-// Later, same machine and same trace lineage:
+// Later, with the same machine:
 const resumed = await runAgent(machine, {
   snapshot: store.get(runId!),
   event: { type: "APPROVE" },
@@ -387,7 +398,7 @@ const resumed = await runAgent(machine, {
 });
 ```
 
-Because the snapshot is stamped with the same `machineVersion` the trace carries, a resume against a structurally changed machine is caught (see [Human in the loop](human-in-the-loop.md#persist-and-resume-across-processes)). A traced run is a reproducible run.
+The snapshot is stamped with the same `machineVersion` the trace carries, so a resume against a structurally changed machine is caught. Read more about resuming across processes in [Human in the loop](human-in-the-loop.md#persist-and-resume-across-processes).
 
 ## Related
 

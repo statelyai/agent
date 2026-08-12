@@ -66,7 +66,7 @@ import {
 import type { AgentRequest, AgentStepRequest } from "./steps.js";
 import {
   executorBoundLogics,
-  getMachineSuspensionPredicate,
+  getMachineIdlePredicate,
   getRegisteredAgentExecutionOptions,
   isUnboundPlaceholder,
 } from "./internal/registry.js";
@@ -96,8 +96,7 @@ import type { AgentLogEntry, JsonValue } from "./event-log-store.js";
  * {@link getAcceptedEvents}). A programmer/integration error, in the same
  * class as runAgent's bind-time throws — it throws rather than settling an
  * `error` result. A type-legal event a guard rejects is NOT this error (the
- * machine simply takes no transition). Opt out with
- * {@link RunAgentOptions.onIllegalResumeEvent} `'ignore'`.
+ * machine simply takes no transition). Always enforced; there is no opt-out.
  */
 export class AgentIllegalResumeEventError extends AgentError {
   readonly eventType: string;
@@ -173,8 +172,8 @@ export interface AgentUserInputExecutor {
 
 /**
  * The run's machine identity, stamped onto every settled snapshot's `agentMeta`.
- * `machineId` is the machine's `id`; `version` is
- * {@link RunAgentOptions.machineVersion} or the
+ * `machineId` is the machine's `id`; `version` is the machine's own
+ * `version` (XState's `createMachine({ version })`) or, when unversioned, the
  * {@link getMachineStructuralHash} of the machine. Trace events and the
  * `onMessage` info arg carry the same identity flattened, as
  * `machineId`/`machineVersion`.
@@ -192,7 +191,7 @@ export interface AgentRunMeta {
 export interface AgentMessageInfo {
   runId: string;
   machineId: string;
-  /** {@link RunAgentOptions.machineVersion}, else the machine's own `version`, else its structural hash. */
+  /** The machine's own `version`, else its structural hash. */
   machineVersion: string;
 }
 
@@ -212,7 +211,7 @@ export type AgentTraceEvent<TMachine extends AnyStateMachine = AnyStateMachine> 
   seq: number;
   timestamp: string;
   machineId: string;
-  /** {@link RunAgentOptions.machineVersion}, else the machine's own `version`, else its structural hash. */
+  /** The machine's own `version`, else its structural hash. */
   machineVersion: string;
 } & (
   | {
@@ -409,7 +408,7 @@ function toJsonValue(value: unknown, ancestors: readonly object[]): JsonValue | 
  * in a JSONL file). Live values are sanitized rather than trusted:
  *
  * - Snapshots (`run.start`, `machine.transition`, `run.end`) go through the
- *   same JSON round-trip as {@link persistSnapshot}, so what lands on disk is
+ *   same JSON round-trip as `machine.getPersistedSnapshot(...)`, so what lands on disk is
  *   what a resume would see.
  * - `request.end`'s `raw` (a provider SDK object, frequently cyclic) is DROPPED
  *   unless `includeRaw` is set, in which case it is sanitized like everything
@@ -508,29 +507,12 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
    * (or an event-log store) and resume from the log alone.
    */
   events?: readonly AgentLogEntry[];
-  /**
-   * How to handle a resume `event` the restored state cannot accept (a
-   * type-level check via {@link getAcceptedEvents}, only applied when resuming
-   * from a `snapshot`). `'throw'` (default) throws {@link AgentIllegalResumeEventError}
-   * before delivering the event; `'ignore'` restores the older silent behavior
-   * (the event is sent and the machine drops it). A type-legal event a guard
-   * rejects is never an illegal resume event.
-   */
-  onIllegalResumeEvent?: "throw" | "ignore";
-
   // version stamping
   /**
-   * The version stamped onto every settled snapshot's `agentMeta` and compared
-   * against an incoming snapshot's stamp on resume. Defaults to the machine's
-   * own `version` (XState's `createMachine({ version })` prop) when set, else
-   * {@link getMachineStructuralHash} of the machine (a structural fingerprint
-   * that changes on any edit). Set `version` on the machine — or this option —
-   * to control migration boundaries yourself.
-   */
-  machineVersion?: string;
-  /**
    * How to handle a resume `snapshot` whose stamped `agentMeta.version` differs
-   * from the current machine's version. `'throw'` (default) throws
+   * from the current machine's `version` (XState's `createMachine({ version })`
+   * prop — the single source of truth; an unversioned machine falls back to its
+   * {@link getMachineStructuralHash}). `'throw'` (default) throws
    * {@link AgentSnapshotVersionMismatchError} with `from`/`to`; `'warn'`
    * `console.warn`s once and proceeds; `'ignore'` proceeds silently. Ignored
    * when {@link migrateSnapshot} is provided (that runs instead), and never
@@ -542,6 +524,12 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
    * version mismatches the current machine's: receives the incoming snapshot
    * and `{ from, to }`, and its return value is used as the snapshot to resume
    * from. A throw propagates.
+   *
+   * Prefer XState's own `createMachine({ version, migrate })` hook when the
+   * migration belongs to the machine: a machine that declares `migrate` is left
+   * to xstate, and runAgent neither throws nor rewrites the snapshot's version
+   * before restore. This option stays for host-owned migrations (a machine you
+   * do not control, or a migration that needs run-scoped context).
    */
   migrateSnapshot?: (
     snapshot: Snapshot<unknown>,
@@ -567,7 +555,7 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
    * Host override for detecting a snapshot that is an INTENTIONAL wait for an
    * external event — the deterministic replacement for the timing heuristic
    * runAgent uses to settle idle. Resolution order: this option (host override)
-   * → the machine-carried predicate declared via `setupAgent({ isSuspended })`
+   * → the machine-carried predicate declared via `setupAgent({ isIdle })`
    * → the timing heuristic (when neither is present). When the resolved
    * predicate returns true and nothing is in flight (no live requests/
    * invokes; the `agent.userInput` placeholder exemption still applies), runAgent
@@ -577,7 +565,7 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
    * exactly as before (with a one-time dev warning suggesting a predicate).
    * Declare your own signal, e.g. `(s) => s.hasTag('awaiting-review')`.
    */
-  isSuspended?: (snapshot: AnyMachineSnapshot) => boolean;
+  isIdle?: (snapshot: AnyMachineSnapshot) => boolean;
 
   // interpretation — the override to the default invoke-driven contract
   /**
@@ -589,22 +577,15 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
    * tags, a lookup table keyed by state value, wherever you keep them. Return
    * nothing to settle idle (human-wait states).
    *
-   * There is no blessed source for the prompts — this is a recipe seam.
-   * Prompts-in-descriptions, copy-paste and adapt:
+   * There is no blessed source for the prompts — this is a recipe seam. The
+   * shipped prompts-in-descriptions recipe is {@link getSnapshotRequests}:
    *
    * ```ts
-   * getRequests: (snapshot) =>
-   *   snapshot._nodes
-   *     .filter((node) => node.description && !node.tags.includes('waiting'))
-   *     .map((node) => ({
-   *       model: 'writer',
-   *       prompt: node.description!,
-   *       kind: node.tags.includes('decision') ? 'decision' : 'text',
-   *       // single-outcome states advance deterministically; else `decide`
-   *       onDone: node.ownEvents.length === 1 ? { type: node.ownEvents[0] } : undefined,
-   *       allowedEvents: node.ownEvents,
-   *     })),
+   * getRequests: (snapshot) => getSnapshotRequests(snapshot, { model: 'writer' }),
    * ```
+   *
+   * Reach for {@link getSnapshotNodes} when you want to build requests some
+   * other way — between them, host code never touches `snapshot._nodes`.
    *
    * Each request runs per {@link AgentStateRequest.kind}, appends to the
    * run's message log (see {@link RunAgentOptions.messages}), and advances
@@ -705,10 +686,144 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
     | { next?: (inspectionEvent: InspectionEvent) => void };
 
   // control
-  /** Caps the number of model/decision calls this run may make (each retry of a decision counts separately); exceeding it settles `{ status: 'error', cause: 'max-model-calls' }`. Default 100. */
+  /**
+   * Caps the number of model/decision calls this run may make (each retry of a
+   * decision counts separately). Default 100. The overrun is thrown into the
+   * invoke that would have made the call, as an
+   * {@link AgentMaxModelCallsExceededError} with `code: 'max-model-calls'` — so
+   * an `onError` can branch on it and route to a degraded state. Unhandled, it
+   * settles `{ status: 'error', cause: 'max-model-calls' }`.
+   */
   maxModelCalls?: number; // default 100
   /** Aborts the run; settles `{ status: 'error', cause: 'aborted' }` with `signal.reason` as the error. */
   signal?: AbortSignal;
+}
+
+// ─── getSnapshotRequests (the getRequests recipe, without _nodes) ───
+
+/**
+ * One active state node of a snapshot, as {@link getSnapshotRequests} and
+ * {@link getSnapshotNodes} surface it: the prompt-bearing `description`, the
+ * `tags` a recipe branches on, the state `meta`, and `ownEvents` (the event
+ * types this node itself declares transitions for). The shape hosts used to
+ * reach for through the private `snapshot._nodes` array.
+ */
+export interface AgentSnapshotNode {
+  /** The node's full id (e.g. `writer.drafting`). */
+  id: string;
+  /** The node's own key (e.g. `drafting`). */
+  key: string;
+  /** The node's `description` — the prompt, in the prompts-in-descriptions recipe. */
+  description?: string;
+  tags: string[];
+  meta?: unknown;
+  /** Event types this node declares transitions for (xstate's `ownEvents`). */
+  ownEvents: string[];
+  /** True when the node has no child states. */
+  leaf: boolean;
+}
+
+// TODO(xstate): use snapshot.nodes when public — this is the ONE place the
+// private `_nodes` array is read, so host code never has to.
+function snapshotNodes(snapshot: AnyMachineSnapshot): AgentSnapshotNode[] {
+  const nodes = (snapshot as unknown as { _nodes?: readonly unknown[] })._nodes ?? [];
+  return nodes.map((raw) => {
+    const node = raw as {
+      id?: string;
+      key?: string;
+      description?: string;
+      tags?: readonly string[];
+      meta?: unknown;
+      ownEvents?: readonly string[];
+      states?: Record<string, unknown>;
+    };
+    return {
+      id: node.id ?? "",
+      key: node.key ?? "",
+      ...(node.description !== undefined ? { description: node.description } : {}),
+      tags: [...(node.tags ?? [])],
+      ...(node.meta !== undefined ? { meta: node.meta } : {}),
+      ownEvents: [...(node.ownEvents ?? [])],
+      leaf: Object.keys(node.states ?? {}).length === 0,
+    };
+  });
+}
+
+/**
+ * The active state nodes of a snapshot, as plain {@link AgentSnapshotNode}
+ * descriptors. The escape hatch under {@link getSnapshotRequests}: use it when
+ * your `getRequests` hook needs to build requests some other way, so host code
+ * never touches xstate's private `snapshot._nodes`.
+ */
+export function getSnapshotNodes(snapshot: AnyMachineSnapshot): AgentSnapshotNode[] {
+  return snapshotNodes(snapshot);
+}
+
+/** Options for {@link getSnapshotRequests}. */
+export interface GetSnapshotRequestsOptions {
+  /** Executor model name every produced request carries. */
+  model: string;
+  /**
+   * Which active nodes produce a request. Default: every node with a
+   * `description` that is NOT tagged `'waiting'` (a human-wait state settles
+   * idle instead).
+   */
+  filter?: (node: AgentSnapshotNode) => boolean;
+  /**
+   * Shapes (or drops, by returning `undefined`) each node's request before it
+   * is returned — set `system`, `allowedEvents`, a custom `onDone`, …
+   */
+  map?: (request: AgentStateRequest, node: AgentSnapshotNode) => AgentStateRequest | undefined;
+}
+
+/**
+ * Builds the {@link AgentStateRequest}s for a snapshot straight from its active
+ * state nodes — the prompts-in-descriptions recipe as a function, so a
+ * {@link RunAgentOptions.getRequests} hook is one line and never reaches into
+ * xstate's private `snapshot._nodes`:
+ *
+ * ```ts
+ * runAgent(machine, {
+ *   executors,
+ *   getRequests: (snapshot) => getSnapshotRequests(snapshot, { model: 'writer' }),
+ * });
+ * ```
+ *
+ * Each described active node becomes one request: `prompt` from the node's
+ * `description`, `kind: 'decision'` when it is tagged `'decision'`, `system`
+ * from `meta.role` when present, `allowedEvents` scoped to the node's own
+ * events, and an explicit `onDone` when the node has exactly one own event
+ * (single-outcome states advance deterministically; anything else falls
+ * through to a `decide` call). Nodes tagged `'waiting'` produce nothing, so the
+ * run settles idle for a human. Override any of it with `filter`/`map`.
+ */
+export function getSnapshotRequests(
+  snapshot: AnyMachineSnapshot,
+  options: GetSnapshotRequestsOptions,
+): AgentStateRequest[] {
+  const filter =
+    options.filter ??
+    ((node: AgentSnapshotNode) => !!node.description && !node.tags.includes("waiting"));
+  const requests: AgentStateRequest[] = [];
+  for (const node of snapshotNodes(snapshot)) {
+    if (!filter(node)) {
+      continue;
+    }
+    const system = (node.meta as { role?: string } | undefined)?.role;
+    const request: AgentStateRequest = {
+      model: options.model,
+      prompt: node.description ?? "",
+      kind: node.tags.includes("decision") ? "decision" : "text",
+      ...(system !== undefined ? { system } : {}),
+      ...(node.ownEvents.length > 0 ? { allowedEvents: node.ownEvents } : {}),
+      ...(node.ownEvents.length === 1 ? { onDone: { type: node.ownEvents[0]! } } : {}),
+    };
+    const mapped = options.map ? options.map(request, node) : request;
+    if (mapped) {
+      requests.push(mapped);
+    }
+  }
+  return requests;
 }
 
 /**
@@ -795,13 +910,34 @@ export type RunAgentErrorCause =
   | "machine"
   | "stopped";
 
-// Thrown internally by consumeModelCall() past the budget; caught by runAgent's settle loop to produce a 'max-model-calls' error result.
 let nextRunAgentTraceId = 1;
 
-class AgentMaxModelCallsExceededError extends AgentError {
-  constructor() {
-    super("max-model-calls-exceeded", "runAgent exceeded maxModelCalls.");
+/**
+ * Thrown into the invoke that would have made the call once
+ * {@link RunAgentOptions.maxModelCalls} is spent. It reaches the machine
+ * through the normal error channel, so an invoke's `onError` can branch on it
+ * (`error.code === 'max-model-calls'`, the same string the settled result's
+ * `cause` uses) and route to a degraded/finish state instead of failing the
+ * run. Unhandled, it settles `{ status: 'error', cause: 'max-model-calls' }`.
+ *
+ * ```ts
+ * onError: [
+ *   { guard: ({ event }) => event.error?.code === 'max-model-calls', target: 'budgetSpent' },
+ *   { target: 'failed' },
+ * ]
+ * ```
+ */
+export class AgentMaxModelCallsExceededError extends AgentError {
+  /** The budget that was exceeded (`options.maxModelCalls`). */
+  readonly maxModelCalls: number;
+  constructor(maxModelCalls: number) {
+    super(
+      "max-model-calls",
+      `runAgent exceeded maxModelCalls (${maxModelCalls}). Raise the budget, or handle it ` +
+        `in the invoke's onError (error.code === 'max-model-calls').`,
+    );
     this.name = "AgentMaxModelCallsExceededError";
+    this.maxModelCalls = maxModelCalls;
   }
 }
 
@@ -865,7 +1001,7 @@ function collectConfiguredInvokeSrcs(
  * walk into invoked child machines (their internal agent requests are opaque
  * to the parent-level source walk otherwise).
  */
-function isStateMachine(logic: unknown): logic is AnyStateMachine {
+export function isStateMachineLogic(logic: unknown): logic is AnyStateMachine {
   return (
     !!logic &&
     typeof logic === "object" &&
@@ -934,7 +1070,7 @@ function assertMachineBindable(
   for (const { stateName, src } of invokes) {
     if (typeof src !== "string") {
       // Direct-object src.
-      if (isStateMachine(src)) {
+      if (isStateMachineLogic(src)) {
         assertChildMachineBindable(src, src, stateName, executors, ctx);
         continue;
       }
@@ -964,7 +1100,7 @@ function assertMachineBindable(
       );
     }
 
-    if (isStateMachine(logic)) {
+    if (isStateMachineLogic(logic)) {
       assertChildMachineBindable(logic, src, stateName, executors, ctx);
       continue;
     }
@@ -1145,19 +1281,17 @@ interface RunAgentBindContext {
 }
 
 /**
- * True when the snapshot's active states declare a transition for the reserved
- * `'@agent.usage'` type EXPLICITLY. A catch-all `on: { '*': … }` deliberately
- * does not count: a wildcard is a machine's own event vocabulary, not an
- * opt-in to a library-reserved event, and `snapshot.can(event)` alone cannot
- * tell the two apart (it answers "would this event be taken?", which a
- * wildcard makes true for everything). Gating delivery on the explicit
- * declaration is what keeps `@agent.usage` opt-in by construction — and keeps
- * a wildcard machine's context and event log byte-identical to a run without
- * the feature. @internal
+ * True when the snapshot's active states declare a transition that would
+ * receive the reserved `'@agent.usage'` type — an explicit `on: { '@agent.usage'
+ * }` OR a catch-all `on: { '*': … }`. Plain XState semantics apply unmodified:
+ * a wildcard matches every event delivered to the machine, reserved ones
+ * included. (The MODEL-facing side stays closed: `getAcceptedEvents` drops
+ * `@agent.*` before any `allowedEvents` matching, so a wildcard never offers
+ * the reserved event as a decision candidate.) @internal
  */
 function declaresUsageTransition(snapshot: AnyMachineSnapshot): boolean {
   return getNextTransitions(snapshot).some(
-    (transition) => transition.eventType === AGENT_USAGE_EVENT_TYPE,
+    (transition) => transition.eventType === AGENT_USAGE_EVENT_TYPE || transition.eventType === "*",
   );
 }
 
@@ -1342,14 +1476,21 @@ function createCountingDecide(
   runCtx: RunAgentBindContext,
   self: BoundActorSelf | undefined,
 ): AgentDecisionExecutor {
-  return async (attemptRequest) => {
+  return async (attemptRequest, info) => {
     runCtx.consumeModelCall();
     runCtx.emitTrace?.({ type: "request.start", request: attemptRequest }, self);
     try {
+      const { id } = selfIdAndSrc(self);
       // `runId` rides on the request like `signal` does: host-injected
-      // correlation, never serialized into machine state.
+      // correlation, never serialized into machine state. It also rides on the
+      // `info` second argument, where generateText/streamText carry it.
       const result = await runCtx.decide!(
         runCtx.runId !== undefined ? { ...attemptRequest, runId: runCtx.runId } : attemptRequest,
+        {
+          ...info,
+          ...(runCtx.runId !== undefined ? { runId: runCtx.runId } : {}),
+          ...(info?.requestId === undefined && id !== "" ? { requestId: id } : {}),
+        },
       );
       const usage = getCallUsage(result);
       if (usage) {
@@ -1436,12 +1577,16 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
 
       const request: AgentDecisionRequest = { ...logic.request(input as never), id, events };
 
-      const chosen = await resolveDecision(request, createCountingDecide(runCtx, self), {
-        maxRetries: logic.maxRetries,
-        signal,
-        canTake: (event) =>
-          actorRef ? (actorRef.getSnapshot() as AnyMachineSnapshot).can(event) : true,
-      });
+      const chosen = await resolveDecision(
+        request,
+        { decide: createCountingDecide(runCtx, self) },
+        {
+          maxRetries: logic.maxRetries,
+          signal,
+          canTake: (event) =>
+            actorRef ? (actorRef.getSnapshot() as AnyMachineSnapshot).can(event) : true,
+        },
+      );
 
       // Auto-deliver: send the chosen event to the invoking actor, then
       // complete with it as output. The delivered event's transition typically
@@ -1558,7 +1703,7 @@ function provideTraceSink(onTrace?: (event: AgentTraceEvent) => void): TraceSink
 }
 
 /** Options threaded into the `provideExecutors` bind helpers. @internal */
-interface ProvideBindOptions {
+export interface ProvideBindOptions {
   onChunk?: (chunk: string) => void;
   onTrace?: (event: AgentTraceEvent) => void;
 }
@@ -1612,9 +1757,9 @@ function provideBindContext(
  * under a live `createActor` tree) on the `provideExecutors` path.
  *
  * Gating is identical on both: the target snapshot must be active, must declare
- * an `'@agent.usage'` transition EXPLICITLY (see {@link declaresUsageTransition}
- * — a catch-all `on: { '*' }` is not an opt-in), and must be able to take the
- * event. `onDropped` is the run path's straggler gate: it returns `true` for a
+ * an `'@agent.usage'` transition — explicitly, or through a catch-all
+ * `on: { '*' }` (see {@link declaresUsageTransition}) — and must be able to
+ * take the event. `onDropped` is the run path's straggler gate: it returns `true` for a
  * call that settled after the cycle resolved, which drops the event (traced as
  * `usage.dropped`) rather than delivering it. Uncontrolled mode has no cycle to
  * settle, so it passes no gate and has no dropped stragglers.
@@ -1675,6 +1820,25 @@ export function bindDecisionForProvide(
   options: ProvideBindOptions,
 ): DecisionLogic {
   return bindDecisionLogic(logic, provideBindContext(machine, executors, options));
+}
+
+/**
+ * Recursively binds an invoked child state machine for {@link provideExecutors},
+ * with the same semantics `runAgent` applies ({@link rebindChildMachine}):
+ * string-keyed text/decision sources at any depth inherit the host executors,
+ * a source that carries its own executor is left alone, and a cycle is
+ * returned as-is. Each machine in the tree is bound with its own registered
+ * `setupAgent` schemas. Returns the original machine when nothing needed
+ * wrapping. @internal
+ */
+export function bindChildMachineForProvide(
+  childMachine: AnyStateMachine,
+  executors: Partial<AgentRequestExecutors>,
+  options: ProvideBindOptions,
+  visited: Set<AnyStateMachine>,
+): AnyStateMachine {
+  const ctxFor = (target: AnyStateMachine) => provideBindContext(target, executors, options);
+  return rebindChildMachine(childMachine, ctxFor(childMachine), visited, ctxFor);
 }
 
 /**
@@ -1741,11 +1905,20 @@ function rebindChildMachine(
   childMachine: AnyStateMachine,
   runCtx: RunAgentBindContext,
   visited: Set<AnyStateMachine>,
+  /**
+   * Optional per-machine bind-context factory. `runAgent` shares ONE run-scoped
+   * context at every depth (one budget, one trace envelope, one root actor), so
+   * it omits this. `provideExecutors` passes it so each machine in the tree is
+   * bound with its OWN registered `setupAgent` schemas — a child decision must
+   * validate against the child's event schemas, not the root's. @internal
+   */
+  ctxFor?: (machine: AnyStateMachine) => RunAgentBindContext,
 ): AnyStateMachine {
   if (visited.has(childMachine)) {
     return childMachine;
   }
   const childVisited = new Set([...visited, childMachine]);
+  runCtx = ctxFor ? ctxFor(childMachine) : runCtx;
   const sources = childMachine.sources.actors as Record<string, AnyActorLogic>;
   const wrapped: Record<string, AnyActorLogic> = {};
 
@@ -1762,8 +1935,8 @@ function rebindChildMachine(
       }
       continue;
     }
-    if (isStateMachine(logic)) {
-      const rebound = rebindChildMachine(logic, runCtx, childVisited);
+    if (isStateMachineLogic(logic)) {
+      const rebound = rebindChildMachine(logic, runCtx, childVisited, ctxFor);
       if (rebound !== logic) {
         wrapped[key] = rebound;
       }
@@ -1902,13 +2075,11 @@ function createAgentSession<TMachine extends AnyStateMachine>(
   // enumerable `agentMeta` field so it survives JSON persist/resume, and an
   // incoming snapshot's stamp is checked against this version on resume.
   const machineId = (machine.config as { id?: string }).id ?? machine.id ?? "(machine)";
-  // Resolution order: explicit option → the machine's own `version` (XState's
-  // standard `createMachine({ version })` prop, `.provide`-surviving) → the
-  // structural hash.
+  // The machine's own `version` (XState's standard `createMachine({ version })`
+  // prop, `.provide`-surviving) is the single source of truth; an unversioned
+  // machine falls back to the structural hash.
   const machineVersion =
-    options.machineVersion ??
-    (machine as { version?: string }).version ??
-    getMachineStructuralHash(machine);
+    (machine as { version?: string }).version ?? getMachineStructuralHash(machine);
   const agentMeta: AgentRunMeta = { machineId, version: machineVersion };
 
   // The run's single observation dispatch point: every trace payload in this
@@ -1934,13 +2105,13 @@ function createAgentSession<TMachine extends AnyStateMachine>(
 
   const consumeModelCall = () => {
     if (budgetExceeded) {
-      throw new AgentMaxModelCallsExceededError();
+      throw new AgentMaxModelCallsExceededError(maxModelCalls);
     }
     // Count only calls the budget actually admits, so `usage.modelCalls`
     // reports calls MADE (the rejected attempt never reaches an executor).
     if (modelCallCount + 1 > maxModelCalls) {
       budgetExceeded = true;
-      throw new AgentMaxModelCallsExceededError();
+      throw new AgentMaxModelCallsExceededError(maxModelCalls);
     }
     modelCallCount += 1;
   };
@@ -1955,12 +2126,12 @@ function createAgentSession<TMachine extends AnyStateMachine>(
   // Reserved `@agent.usage` delivery — the seam that puts a settled call's
   // tokens in reach of the machine's own context and guards (see
   // AGENT_USAGE_EVENT_TYPE). Opt-in BY CONSTRUCTION: sent only when the live
-  // root snapshot DECLARES the reserved type explicitly (machine-level `on`
-  // catches every call; a state-scoped one only catches calls made while that
-  // state is active). A catch-all `on: { '*': … }` does NOT count as opt-in —
-  // see declaresUsageTransition. A machine without an explicit declaration
-  // gets no extra transition, no `machine.transition` trace, and no extra
-  // event-log entry — existing runs are byte-identical.
+  // root snapshot DECLARES a transition that receives the reserved type
+  // (machine-level `on` catches every call; a state-scoped one only catches
+  // calls made while that state is active). A catch-all `on: { '*': … }` DOES
+  // receive it, per plain XState wildcard semantics — see
+  // declaresUsageTransition. A machine that declares neither gets no extra
+  // transition, no `machine.transition` trace, and no extra event-log entry.
   //
   // Root actor only: it is the actor whose external inputs the run journals
   // (see the inspect handler), so delivering here is what makes the folded
@@ -2102,7 +2273,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
       continue;
     }
 
-    if (isStateMachine(logic)) {
+    if (isStateMachineLogic(logic)) {
       // An invoked child machine (string-keyed): recursively rebind its own
       // agent sources with the same host-backed wrappers, so requests at any
       // depth inherit runAgent's executors. Skipped if nothing needed wrapping.
@@ -2121,11 +2292,11 @@ function createAgentSession<TMachine extends AnyStateMachine>(
   }) as TMachine;
 
   // Resolution order: host override → machine-carried predicate
-  // (`setupAgent({ isSuspended })`, read off the original machine so it survives
+  // (`setupAgent({ isIdle })`, read off the original machine so it survives
   // the provide/rebind above) → the timing heuristic (`() => false` here — the
   // inspect handler falls through to `scheduleIdleCheck`).
-  const declaredSuspensionPredicate = options.isSuspended ?? getMachineSuspensionPredicate(machine);
-  const isSuspended = declaredSuspensionPredicate ?? (() => false);
+  const declaredIdlePredicate = options.isIdle ?? getMachineIdlePredicate(machine);
+  const isIdle = declaredIdlePredicate ?? (() => false);
 
   // Version stamping (§ item 2): when resuming, compare the incoming snapshot's
   // stamped version against this machine's. A mismatch runs `migrateSnapshot`
@@ -2137,11 +2308,23 @@ function createAgentSession<TMachine extends AnyStateMachine>(
   // policy: after this gate, the snapshot's XState-level `version` field is
   // aligned to the machine's (see below) so `restoreSnapshot`'s own
   // mismatch throw never double-fires.
+  // xstate ships its own migration hook (`createMachine({ version, migrate })`)
+  // and applies it during restore. When the machine declares one, that hook
+  // owns version mismatches: runAgent neither throws nor aligns the snapshot's
+  // `version` field (see below), so xstate's `migrate` sees the real
+  // `fromVersion`. An explicit `options.migrateSnapshot` still wins (a
+  // host-owned migration is the more specific instruction).
+  const machineDeclaresMigrate =
+    typeof (machine.config as { migrate?: unknown }).migrate === "function";
   let effectiveSnapshot = options.snapshot;
   if (effectiveSnapshot !== undefined) {
     const incoming = (effectiveSnapshot as { agentMeta?: { version?: string } }).agentMeta;
     const from = incoming?.version ?? (effectiveSnapshot as { version?: string }).version;
-    if (from !== undefined && from !== machineVersion) {
+    if (
+      from !== undefined &&
+      from !== machineVersion &&
+      !(machineDeclaresMigrate && !options.migrateSnapshot)
+    ) {
       const info = { from, to: machineVersion };
       if (options.migrateSnapshot) {
         effectiveSnapshot = options.migrateSnapshot(effectiveSnapshot, info);
@@ -2197,6 +2380,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
   // caller's snapshot object is never mutated.
   const machineOwnVersion = (machine as { version?: string }).version;
   if (
+    !machineDeclaresMigrate &&
     effectiveSnapshot !== undefined &&
     (effectiveSnapshot as { version?: string }).version !== machineOwnVersion
   ) {
@@ -2242,13 +2426,8 @@ function createAgentSession<TMachine extends AnyStateMachine>(
   // here (before the actor starts, like the bind-time throws) against the
   // type-level legal set of the restored snapshot — a live-but-unstarted actor
   // exposes it via getAcceptedEvents. A guard-rejected-but-type-legal event
-  // still appears here, so it is never treated as illegal. Opt out with
-  // onIllegalResumeEvent: 'ignore' (the older silent behavior).
-  if (
-    effectiveSnapshot !== undefined &&
-    options.event !== undefined &&
-    (options.onIllegalResumeEvent ?? "throw") === "throw"
-  ) {
+  // still appears here, so it is never treated as illegal. Always enforced.
+  if (effectiveSnapshot !== undefined && options.event !== undefined) {
     const restoredSnapshot = createActor(boundMachine, {
       snapshot: effectiveSnapshot,
     } as never).getSnapshot() as AnyMachineSnapshot;
@@ -2302,7 +2481,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
   let actor: ReturnType<typeof createActor<TMachine>>;
   // True only during the resumed actor's initial (restore) transition, while
   // an `event` is still pending delivery. The restored state may itself be a
-  // suspended/idle snapshot; without this guard, Feature A's immediate settle
+  // idle snapshot; without this guard, Feature A's immediate settle
   // would fire during `start()` and settle idle BEFORE the resume event is
   // sent. Cleared right before `actor.send(options.event)`.
   let deliveringResumeEvent = options.event !== undefined;
@@ -2467,7 +2646,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
       .finally(() => {
         interpreting = false;
         // A transition observed DURING this pass (e.g. our own send while
-        // the machine reads as suspended) saw `interpreting` and skipped
+        // the machine reads as idle) saw `interpreting` and skipped
         // both settling and starting a new pass — re-evaluate now so the
         // run always makes progress (settle, or the next pass).
         if (!settled) {
@@ -2480,7 +2659,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
   // Fallback for untagged machines: defer one macrotask so in-flight work
   // that starts synchronously with a transition registers first, then settle
   // idle if the snapshot is at rest. Feature A short-circuits this for
-  // detector-positive (suspended) snapshots — see the inspect handler.
+  // detector-positive (idle) snapshots — see the inspect handler.
   const scheduleIdleCheck = () => {
     if (idleTimer !== undefined) {
       clearTimeout(idleTimer);
@@ -2494,7 +2673,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
       if (isIdleSnapshot(current, { ignoreUserInputChildren: userInputIsPlaceholder })) {
         if (!maybeInterpret(current)) {
           if (
-            !declaredSuspensionPredicate &&
+            !declaredIdlePredicate &&
             current.status === "active" &&
             !warnedHeuristicIdle &&
             process.env.NODE_ENV !== "production"
@@ -2502,9 +2681,9 @@ function createAgentSession<TMachine extends AnyStateMachine>(
             warnedHeuristicIdle = true;
             console.warn(
               `[@statelyai/agent] runAgent settled idle via the timing heuristic (no ` +
-                `suspension predicate declared). This is best-effort; for deterministic ` +
-                `idle detection, declare setupAgent({ isSuspended }) or pass ` +
-                `runAgent(machine, { isSuspended }), e.g. (s) => s.hasTag('waiting').`,
+                `idle predicate declared). This is best-effort; for deterministic ` +
+                `idle detection, declare setupAgent({ isIdle }) or pass ` +
+                `runAgent(machine, { isIdle }), e.g. (s) => s.hasTag('waiting').`,
             );
           }
           settleIdle(current);
@@ -2603,14 +2782,14 @@ function createAgentSession<TMachine extends AnyStateMachine>(
       // flight settles idle immediately and deterministically — no
       // setTimeout race. `deliveringResumeEvent` suppresses this during a
       // resume's restore transition so the pending event is delivered first.
-      // Everything else (untagged machines, or a suspended snapshot with
+      // Everything else (untagged machines, or a idle snapshot with
       // sibling work still running) falls through to the timing heuristic.
       if (
         !deliveringResumeEvent &&
-        isSuspended(snapshot) &&
+        isIdle(snapshot) &&
         isIdleSnapshot(snapshot, { ignoreUserInputChildren: userInputIsPlaceholder })
       ) {
-        // Not settled synchronously: the event that reached this suspended
+        // Not settled synchronously: the event that reached this idle
         // state may have come from an invoked child mid-flush (child →
         // parent, whose handler sendTo's the child back). A sync settle
         // would persist — and, one-shot, stop — the child before its
@@ -2622,14 +2801,14 @@ function createAgentSession<TMachine extends AnyStateMachine>(
           }
           const current = actor.getSnapshot() as AnyMachineSnapshot;
           if (
-            isSuspended(current) &&
+            isIdle(current) &&
             isIdleSnapshot(current, { ignoreUserInputChildren: userInputIsPlaceholder })
           ) {
             if (!maybeInterpret(current)) {
               settleIdle(current);
             }
           } else {
-            // A drained child event started new work (or left suspension)
+            // A drained child event started new work (or left the idle state)
             // without a root transition to re-trigger idle detection — fall
             // back to the timing heuristic so the run still settles.
             scheduleIdleCheck();

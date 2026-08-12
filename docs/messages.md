@@ -9,7 +9,9 @@ description: Build and store conversation history as a parts-based message model
 
 <!-- AgentMessage union and part types from src/types.ts -->
 
-An `AgentMessage` is a parts-based, discriminated union representing one conversation turn. It structurally mirrors the Vercel AI SDK's `ModelMessage`, but core has no dependency on `ai`. Build messages, store them in machine context, and pass them to a [text request](text-requests.md) or [decision](decisions.md) through the `messages` field.
+This page covers the message model, the builder helpers, and how to store and persist conversation history.
+
+An `AgentMessage` is a parts-based discriminated union that represents one conversation turn. It structurally mirrors the Vercel AI SDK's `ModelMessage`, but core does not depend on the `ai` package. Build messages, store them in machine context, and pass them to a [text request](text-requests.md) or [decision](decisions.md) through the `messages` field.
 
 ```ts
 type AgentMessage = SystemMessage | UserMessage | AssistantMessage | ToolMessage;
@@ -17,12 +19,14 @@ type AgentMessage = SystemMessage | UserMessage | AssistantMessage | ToolMessage
 
 The `content` field is a string or an array of typed parts, depending on `role`:
 
-- **`system`**: a string.
-- **`user`**: a string, or `TextPart` / `ImagePart` / `FilePart` parts.
-- **`assistant`**: a string, or `TextPart` / `FilePart` / `ToolCallPart` / `ToolResultPart` parts.
-- **`tool`**: an array of `ToolResultPart`.
+| `role` | `content` |
+| ------ | --------- |
+| `system` | A string. |
+| `user` | A string, or an array of `TextPart`, `ImagePart`, and `FilePart` parts. |
+| `assistant` | A string, or an array of `TextPart`, `FilePart`, `ToolCallPart`, and `ToolResultPart` parts. |
+| `tool` | An array of `ToolResultPart`. |
 
-> **Warning:** `ImagePart` and `FilePart` can hold binary data or a `URL` instance, which are not JSON-serializable. Use base64 strings and URL strings if the messages will be persisted. See [Persisting messages](#persisting-messages).
+`ImagePart` and `FilePart` can hold binary data or a `URL` instance, neither of which is JSON-serializable. See [Persisting messages](#persisting-messages).
 
 ## Message builders
 
@@ -49,7 +53,7 @@ userMessage([
 ]);
 ```
 
-The `toolMessage(parts)` helper builds a `role: "tool"` message from `ToolResultPart`s; each tool result follows the assistant message whose `ToolCallPart` invoked it. Use it to seed `runAgent({ messages })` with a prior conversation where tools ran, or to append tool results from a custom host:
+The `toolMessage(parts)` helper builds a `role: "tool"` message from `ToolResultPart` values. Each tool result follows the assistant message whose `ToolCallPart` invoked it. Use `toolMessage` to seed `runAgent({ messages })` with a prior conversation in which tools ran, or to append tool results from a custom host:
 
 ```ts
 const messages = [
@@ -70,7 +74,7 @@ const messages = [
 
 ## Store messages in context
 
-Messages are plain context state. Declare the `messages` field with `z.custom<AgentMessage[]>`, and grow it over transitions:
+Messages are plain context state. Declare the `messages` field with `z.custom<AgentMessage[]>` and append to it over transitions:
 
 ```ts
 import { setupAgent, type AgentMessage } from "@statelyai/agent";
@@ -84,9 +88,9 @@ const agentSetup = setupAgent({
 });
 ```
 
-`z.custom` keeps the exact `AgentMessage[]` type at author time with a shallow runtime check, which is enough when the array is built from the helpers above. Do not put `messagesSchema` inside a `z.object`: it is a Standard Schema value, not a Zod type, so Zod infers the field as `unknown`.
+`z.custom` keeps the exact `AgentMessage[]` type at author time and performs a shallow runtime check. That check is enough when the array is built from the helpers above. Use the root `messagesSchema` export for messages that arrive from outside your process.
 
-Append with `appendMessages`, which returns a transition result adding one or more messages. Pass a message, an array, or a function of `{ context, event }`:
+Append with `appendMessages`, which returns a transition result that adds one or more messages. Pass a message, an array, or a function of `{ context, event }`:
 
 ```ts no-check
 import { appendMessages, userMessage } from '@statelyai/agent';
@@ -97,11 +101,13 @@ on: {
 }
 ```
 
+`appendMessages` is a pure helper. It returns a `{ context, event } => { context }` function and mutates nothing, so it fits anywhere a transition function fits, and it needs only a `messages: AgentMessage[]` field on context.
+
 A request that needs history sends it through `messages` instead of a bare `prompt`. [examples/email-drafter/agent-logic.ts](../examples/email-drafter/agent-logic.ts) keeps a running `messages` array in context and feeds it to a `createTextLogic` request.
 
 ### Validating messages with messagesSchema
 
-`messagesSchema` (root export) is a `StandardSchemaV1<AgentMessage[]>` that checks every message has a known `role` and that `content` is a string or an array of known parts. Use it as a **standalone** validator, on messages arriving from outside your process (an HTTP body, a stored transcript, a client resume payload):
+`messagesSchema` is a root export typed as `StandardSchemaV1<AgentMessage[]>`. It checks that every message has a known `role` and that `content` is a string or an array of known parts. Use it as a standalone validator on messages that arrive from outside your process, such as an HTTP body, a stored transcript, or a client resume payload:
 
 ```ts
 import { messagesSchema, type AgentMessage } from "@statelyai/agent";
@@ -113,10 +119,12 @@ if (result.issues) {
 const messages: AgentMessage[] = result.value;
 ```
 
-It is also usable directly as a schema wherever a Standard Schema is accepted (a `createAgentSchemas` pack field, a `createTextLogic` input schema of its own). Just never nest it inside `z.object`.
+You can also use `messagesSchema` directly wherever a Standard Schema is accepted, such as a `createAgentSchemas` pack field or a `createTextLogic` input schema.
+
+Never nest `messagesSchema` inside a `z.object`. It is a Standard Schema value, not a Zod type, so Zod infers the field as `unknown`. Use the `z.custom<AgentMessage[]>` recipe above for a context field.
 
 ## Persisting messages
 
-> **Warning:** `ImagePart` and `FilePart` can carry binary data (`Uint8Array` or `ArrayBuffer`) or a `URL` instance, none of which are JSON-serializable. When persisting machine context with messages, store binary content as base64 strings and URLs as strings; the library does not convert this for you.
+> **Warning:** `ImagePart` and `FilePart` can carry binary data as a `Uint8Array` or `ArrayBuffer`, or a `URL` instance. None of these are JSON-serializable. When you persist machine context that contains messages, store binary content as base64 strings and URLs as strings. The library does not convert them for you.
 
-Everything else in a message is plain JSON, so a history built from strings, base64, and URL strings survives a snapshot round-trip cleanly. See [Human in the loop](human-in-the-loop.md) for the persistence flow this applies to.
+Everything else in a message is plain JSON. A history built from strings, base64, and URL strings survives a snapshot round-trip. See [Human in the loop](human-in-the-loop.md) for the persistence flow this applies to.

@@ -5,19 +5,19 @@ description: Statically lint, simulate, and explore agent machines without any A
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
 
-Three APIs check an agent machine before it runs, with no API key or model call:
+This page covers the APIs that check an agent machine before it runs. None of them need an API key or a model call.
 
-- `lintAgentMachine` catches dead states, undeliverable decisions, and output-contract gaps statically.
-- `simulateAgent` drives a scripted playthrough to a known outcome deterministically.
-- `explorePaths` / `canReach` enumerate every decision branch and prove a target state is reachable.
+- `lintAgentMachine` statically catches dead states, undeliverable decisions, and output-contract gaps. Pass `{ throw: true }` for the throwing form.
+- `simulateAgent` drives a deterministic scripted playthrough to a known outcome.
+- `explorePaths` and `canReach` enumerate decision branches and check that a target state is reachable.
 
-Use them to prove an LLM-generated machine is legal before you run it ([authoring from scratch](quickstart.md)), or to pin that a refactor preserved behavior, so a machine converted [from a loop](from-a-loop.md) is safe to ship.
+Use these APIs to check that an LLM-generated machine is legal before you run it. See [authoring from scratch](quickstart.md). You can also use them to confirm that a refactor preserved behavior, so a machine converted [from a loop](from-a-loop.md) is safe to ship.
 
-> **Note:** Everything on this page runs on `machine.config` and the pure step path: no provider, no network, no keys. It is deterministic, so these are ordinary unit tests in any test runner (vitest, jest) and CI checks.
+> **Note:** Everything on this page runs on `machine.config` and the pure step path, with no provider, no network, and no keys. It is deterministic, so these checks work as ordinary unit tests in any test runner, such as vitest or jest, and as CI checks.
 
 ## Machine linting
 
-The `lintAgentMachine(machine, options?)` function runs static structural checks over a built machine, for TS-authored (`setupAgent(...).createMachine(...)`) and `setupAgent.fromConfig(...)`-compiled machines alike. It returns `AgentLintDiagnostic[]` (`{ code, severity, path, message }`), empty when clean.
+`lintAgentMachine(machine, options?)` runs static structural checks over a built machine. It accepts machines authored in TypeScript with `setupAgent(...).createMachine(...)` and machines compiled with `setupAgent.fromConfig(...)`. It returns `AgentLintDiagnostic[]`, where each diagnostic is `{ code, severity, path, message }`. The array is empty when the machine is clean.
 
 ```ts
 import { lintAgentMachine } from "@statelyai/agent";
@@ -28,33 +28,37 @@ if (errors.length) {
 }
 ```
 
-For a one-liner that throws instead of returning findings, use `assertAgentMachine(machine, options?)`: silent when clean, throws `AgentLintError` (findings on `.diagnostics`) on any error-severity finding. `warnings: true` fails warnings too; `disable` skips checks, same as `lintAgentMachine`.
+To throw instead of returning findings, pass `{ throw: true }`. The call is silent when the machine is clean, and throws `AgentLintError` on any error-severity finding, with the findings on `.diagnostics`. Add `warnings: true` to fail on warnings too. Pass `disable` to skip checks by code.
+
+```ts no-check
+lintAgentMachine(machine, { throw: true, warnings: true });
+```
 
 | Code                       | Severity | Fires when                                                                                                                                                                                                                                                                         |
 | -------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `unreachable-state`        | error    | A state no transition/`always`/`choice`/`onDone`/`onError` can reach from the initial state. Conservative: dynamic (function) transitions over-approximate, so it never false-flags. Exact for `fromConfig` machines, whose declared targets the lowering retains.                 |
+| `unreachable-state`        | error    | A state that no transition, `always`, `choice`, `onDone`, or `onError` can reach from the initial state. The check is conservative. Dynamic function transitions over-approximate, so it never reports a false positive. It is exact for `fromConfig` machines, because the lowering retains their declared targets.                 |
 | `decide-without-events`    | error    | A state invokes `agent.decide` but neither it nor any ancestor handles any event, so the chosen event can never be delivered.                                                                                                                                                      |
-| `unserializable-context`   | warning  | The context schema exposes no JSON schema (e.g. a `z.custom` messages array), so its fields can't be statically checked for JSON persist/resume.                                                                                                                                   |
-| `direct-object-src`        | warning  | An invoke `src` is a direct object/machine value that can't be rebound by `runAgent`, so it inherits no host executors.                                                                                                                                                            |
+| `unserializable-context`   | warning  | The context schema exposes no JSON schema, for example a `z.custom` messages array, so its fields cannot be checked statically for JSON persist and resume.                                                                                                                                   |
+| `direct-object-src`        | warning  | An invoke `src` is a direct object or machine value that `runAgent` cannot rebind, so it inherits no host executors.                                                                                                                                                            |
 | `final-without-output`     | error    | The machine declares an output schema but a top-level final state has no `output`.                                                                                                                                                                                                 |
-| `final-output-reads-event` | warning  | A top-level final state's `output` function reads the entering `event`. Final `output` fns are evaluated more than once with different events, so `event` is unreliable. Read `context` only, capturing what you need into context in the transition that targets the final state. |
-| `undeclared-event`         | warning  | A state handles an event in `on:` that isn't declared in `schemas.events` and isn't a builtin/wildcard pattern. Its payload stays unvalidated; usually a typo. Skipped entirely when the machine declares no events.                                                               |
-| `missing-final`            | warning  | No reachable final state; the machine can only idle/loop (legal, but flagged).                                                                                                                                                                                                     |
+| `final-output-reads-event` | warning  | A top-level final state's `output` function reads the entering `event`. Final `output` functions are evaluated more than once with different events, so `event` is unreliable. Read `context` only, and capture what you need into context in the transition that targets the final state. |
+| `undeclared-event`         | warning  | A state handles an event in `on:` that is not declared in `schemas.events` and is not a builtin or wildcard pattern. Its payload stays unvalidated. This is usually a typo. The check is skipped when the machine declares no events.                                                               |
+| `missing-final`            | warning  | The machine has no reachable final state, so it can only idle or loop. This is legal, but flagged.                                                                                                                                                                                                     |
 
 ## Test assertions
 
-Every check is a plain function, so assert structural soundness, reachability, and scripted playthroughs directly in vitest/jest:
+Every check is a plain function, so you can assert structural soundness, reachability, and scripted playthroughs directly in vitest or jest.
 
 ```ts no-check
-import { assertAgentMachine, canReach, simulateAgent } from "@statelyai/agent";
+import { canReach, lintAgentMachine, simulateAgent } from "@statelyai/agent";
 import { supportMachine } from "./support-machine";
 
 test("machine is structurally sound", () => {
-  assertAgentMachine(supportMachine); // throws AgentLintError with findings
+  lintAgentMachine(supportMachine, { throw: true });
 });
 
 test("escalation is reachable", async () => {
-  const { canReach: reachable } = await canReach(supportMachine, "escalated", {
+  const { reachable } = await canReach(supportMachine, "escalated", {
     input: { question: "refund?" },
   });
   expect(reachable).toBe(true);
@@ -69,11 +73,11 @@ test("happy path settles done", async () => {
 });
 ```
 
-Guards stay in force throughout: `canReach` and `simulateAgent` walk the same step path `runAgent` uses, so a graph path that is guard-illegal never counts as reachable. These tests pin the shape as prompts and models change.
+Guards stay in force throughout. `canReach` and `simulateAgent` walk the same step path that `runAgent` uses, so a graph path that a guard rejects never counts as reachable. These tests pin the machine's shape as prompts and models change.
 
 ## Deterministic executors
 
-Executors are plain functions, so a test supplies scripted ones and never touches the network. Bind them onto a logic with `.withExecutor(...)`:
+Executors are plain functions, so a test can supply scripted executors and never touch the network. Bind them onto a logic with `.withExecutor(...)`.
 
 ```ts no-check
 const machine = emailDrafter.provide({
@@ -85,17 +89,18 @@ const machine = emailDrafter.provide({
 });
 ```
 
-[examples/email-drafter/agent-logic.ts](../examples/email-drafter/agent-logic.ts) drives a full run this way: fixed values, deterministic, no model called.
+[examples/email-drafter/agent-logic.ts](../examples/email-drafter/agent-logic.ts) drives a full run this way, with fixed values and no model call.
 
-Use this when the test should exercise the real `runAgent` path with canned model output; use `simulateAgent` below when a scripted playthrough on the pure step path is enough.
+Use deterministic executors when the test should exercise the real `runAgent` path with canned model output. Use [`simulateAgent`](#scripted-playthroughs) when a scripted playthrough on the pure step path is enough.
 
 ## Scripted playthroughs
 
-The `simulateAgent(machine, { input, script, maxSteps? })` call runs a deterministic, model-free playthrough on the pure step path. The `script` supplies responses by invoke `src` (FIFO queues), so runs are reproducible:
+`simulateAgent(machine, { input, script, maxSteps? })` runs a deterministic, model-free playthrough on the pure step path. The `script` supplies responses as FIFO queues, so runs are reproducible.
 
-- `decisions`: the `ChosenEvent` to apply per decision (keyed by decision src, usually `agent.decide`);
-- `text`: output values for text requests (keyed by request src);
-- `invokes`: answers for `agent.userInput` invokes.
+- `decisions` holds the `ChosenEvent` to apply per decision, keyed by decision src, usually `agent.decide`.
+- `text` holds output values for text requests, keyed by request src.
+- `invokes` holds answers for scripted invokes, keyed by invoke src.
+- `userInput` is one flat queue of answers for `agent.userInput` invokes.
 
 ```ts
 import { simulateAgent } from "@statelyai/agent";
@@ -104,7 +109,7 @@ const { status, snapshot, trail } = await simulateAgent(machine, {
   input: { questionsRemaining: 20 },
   script: {
     decisions: { "agent.decide": [{ type: "GUESS", guess: "a cat" }] },
-    invokes: { "agent.userInput": ["yes", "no"] },
+    userInput: ["yes", "no"],
     text: {
       classifyGuessFeedback: [{ correct: true, reasoning: "matched" }],
       classifyPlayAgain: [{ playAgain: false, reasoning: "stop" }],
@@ -114,7 +119,13 @@ const { status, snapshot, trail } = await simulateAgent(machine, {
 // status: 'done' | 'idle' | 'exhausted'
 ```
 
-It returns `{ status, snapshot, trail }`. For a `'done'` run the output lives on `snapshot.output`, typed as the generic `AnyMachineSnapshot`, so it needs a cast to your output type:
+`simulateAgent` returns `{ status, snapshot, trail }`. The status is one of three values:
+
+- `'done'`: the machine reached a final state.
+- `'idle'`: the machine came to rest waiting on an external event that the script does not supply.
+- `'exhausted'`: the playthrough hit the `maxSteps` bound, which defaults to 100, before reaching either of the above. Raise `maxSteps` or shorten the script.
+
+For a `'done'` run, the output is on `snapshot.output`. The snapshot is typed as the generic `AnyMachineSnapshot`, so the output needs a cast to your output type.
 
 ```ts
 if (result.status === "done") {
@@ -122,15 +133,20 @@ if (result.status === "done") {
 }
 ```
 
-> **Note:** When the script runs dry mid-request, `simulateAgent` throws a descriptive error naming the pending request's kind, src, and id, so a missing response is obvious.
+> **Note:** When a script queue runs dry mid-request, `simulateAgent` throws a descriptive error naming the pending request's kind, src, and id.
 
 ## Branch exploration
 
-The `explorePaths(machine, { input, maxDepth?, textOutputs? })` call enumerates decision and external-event branches, model-free, and reports coverage.
+`explorePaths(machine, { input, maxDepth?, maxPaths?, text?, invokes?, userInput? })` enumerates decision and external-event branches without a model, and reports coverage.
 
-- At each decision it forks one branch per candidate event. Guard-rejected candidates count in `prunedByGuard` and are not explored.
-- At an idle wait it forks per externally-accepted event.
-- Text/`userInput` invokes resolve from `textOutputs` (a by-src canned-output map); a missing src halts that branch with a `needs-output` terminal instead of throwing.
+- At each decision, it forks one branch per candidate event. Guard-rejected candidates count in `prunedByGuard` and are not explored.
+- At an idle wait, it forks one branch per externally accepted event.
+- `text` is a map of canned outputs for text requests, keyed by src. One value per src is reused every time that src is reached.
+- `invokes` is the same map for scripted invokes, and `userInput` is the shorthand for `invokes['agent.userInput']`.
+- A src with no canned output halts that branch with a `needs-output` terminal instead of throwing. The terminal's `missingSrc` names it.
+
+<!-- viz: branch exploration tree for the refund machine: deciding -> AUTO_APPROVE (pruned by guard) / NEEDS_REVIEW -> awaitingHuman -> refunded, denied -->
+
 
 ```ts
 import { explorePaths } from "@statelyai/agent";
@@ -143,34 +159,36 @@ const report = await explorePaths(refundMachine, {
 // report.reachedStates → ['deciding', 'awaitingHuman', 'refunded', 'denied']
 ```
 
-Exploration is bounded by `maxDepth` (default 8) and `maxPaths` (default 200; `report.hitPathCap` flags a partial report).
+Exploration is bounded by `maxDepth`, which defaults to 8, and `maxPaths`, which defaults to 200. `report.hitPathCap` is true when the report is partial.
 
 ## Reachability checks
 
-The `canReach(machine, statePath, opts)` call wraps `explorePaths` to answer "can this state be reached?" with a witness path (async).
+`canReach(machine, statePath, opts)` wraps `explorePaths` to report whether a state is reachable, along with a witness path. It is async.
 
 ```ts
 import { canReach } from "@statelyai/agent";
 
-const { canReach: ok, witness } = await canReach(refundMachine, "denied", {
+const { reachable, witness } = await canReach(refundMachine, "denied", {
   input: { request: "x", amount: 5000 },
 });
-// ok → true; witness → [{ type: 'NEEDS_REVIEW' }, { type: 'DENY' }]
+// reachable → true; witness → [{ type: 'NEEDS_REVIEW' }, { type: 'DENY' }]
 ```
+
+`witness` is the sequence of chosen and applied events that reaches the state, which is the proof that it is reachable. It is absent when `reachable` is `false`.
 
 ## CI checks
 
-Everything on this page runs without an API key, so a small script is enough for CI or a generation loop:
+Everything on this page runs without an API key, so a small script is enough for CI or a generation loop.
 
 ```ts no-check
 // check.ts (run with: npx tsx check.ts)
-import { assertAgentMachine } from "@statelyai/agent";
+import { lintAgentMachine } from "@statelyai/agent";
 import { machine } from "./machine";
 
-assertAgentMachine(machine); // throws AgentLintError on error-severity findings
+lintAgentMachine(machine, { throw: true }); // throws AgentLintError on error-severity findings
 ```
 
-For machines authored as data (see [Machines as data](machines-as-data.md)), compile the config first: `assertAgentMachine(setupAgent.fromConfig(config, { compileSchema }).machine)`. Every check applies, reachability included: the lowering keeps the config's transition targets, so `unreachable-state` reads the real graph even where the JSON layer folds a target into a resolver function.
+For machines authored as data, validate the config with `validateAgentConfig(config)` from `@statelyai/agent/validate` first, then compile it and lint the machine: `lintAgentMachine(setupAgent.fromConfig(config, { compileSchema }).machine, { throw: true })`. See [Machines as data](machines-as-data.md). Every check applies, including reachability. The lowering keeps the config's transition targets, so `unreachable-state` reads the real graph even where the JSON layer folds a target into a resolver function.
 
 ## Related
 

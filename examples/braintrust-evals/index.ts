@@ -44,7 +44,7 @@ type DrafterSnapshot = SnapshotFrom<typeof emailDrafter>;
  */
 const WAITING_STATES = new Set(["prompting", "needsMoreInfo", "reviewing", "sent"]);
 
-const isSuspended = (snapshot: AnyMachineSnapshot) =>
+const isIdle = (snapshot: AnyMachineSnapshot) =>
   typeof snapshot.value === "string" && WAITING_STATES.has(snapshot.value);
 
 /** One dataset row's input: the request, plus how the simulated user behaves. */
@@ -159,7 +159,7 @@ export async function runDrafterCase(
       ...(snapshot ? { snapshot, event } : { event }),
       events: log,
       executors,
-      isSuspended,
+      isIdle,
       onTransition: (next) => statePath.push(String(next.value)),
     });
 

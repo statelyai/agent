@@ -22,7 +22,6 @@ import {
   createScriptedExecutors,
   getAcceptedEvents,
   getStateMeta,
-  persistSnapshot,
   runAgent,
   setupAgent,
   type AgentRequestExecutors,
@@ -70,7 +69,7 @@ const agentSetup = setupAgent({
   output: z.object({ published: z.boolean(), draft: z.string() }),
   meta: z.object({ interaction: z.object({ label: z.string() }).optional() }),
   events: eventSchemas,
-  isSuspended: (snapshot) => snapshot.hasTag("awaiting-review"),
+  isIdle: (snapshot) => snapshot.hasTag("awaiting-review"),
   requests: {
     writeDraft: {
       schemas: { input: z.object({ topic: z.string() }), output: z.string() },
@@ -164,7 +163,7 @@ type Settled =
  */
 function settle(result: Awaited<ReturnType<typeof runAgent<typeof announceMachine>>>, id: string) {
   if (result.status === "idle") {
-    snapshots.set(id, persistSnapshot(result.snapshot));
+    snapshots.set(id, result.persistedSnapshot);
     const { interaction } = getStateMeta(result.snapshot);
     return {
       id,

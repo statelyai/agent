@@ -5,13 +5,16 @@ description: One agent machine runs unchanged in a local script, an HTTP route, 
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
 
-An agent machine is a portable blueprint: **the machine decides, the host executes.** The machine never names a provider, a server, or a runtime, so the same definition runs unchanged locally, behind an HTTP route, or on the edge. The only host-specific part is the [executors](hosts.md), the functions that call a model.
+An agent machine does not name a provider, a server, or a runtime. The same definition runs locally, behind an HTTP route, or on an edge runtime. The only host-specific part is the [executors](hosts.md), the functions that call a model.
 
-This page authors one machine, runs it both ways a host can, then drops it into two real stacks.
+This page defines one machine, runs it in both controlled and uncontrolled mode, and then runs it in two production stacks. Each walkthrough is labeled with the stack and the mode it uses: Express with `runAgent` (controlled), and a Cloudflare Durable Object with `provideExecutors` (uncontrolled). Stack and mode are independent choices. Express can run uncontrolled, and a Durable Object can call `runAgent`.
 
 ## Machine definition
 
-A draft-and-review announcer: write a draft, settle idle for a human, publish on approval. Nothing here is host-aware.
+This machine drafts an announcement, settles idle for human review, and publishes on approval. None of it is host-aware.
+
+<!-- viz: announce machine: drafting (invoke writeDraft) -> reviewing -> APPROVE -> published (final); REJECT returns to drafting with the revision reason appended -->
+
 
 ```ts
 import { z } from "zod";
@@ -68,12 +71,12 @@ export const announceMachine = agentSetup.createMachine({
 
 ## Controlled and uncontrolled
 
-Every host binds executors one of two ways:
+Every host binds executors in one of two ways:
 
-- **Controlled (`runAgent`):** the library owns the loop. It drives the machine to a settle point (`done` | `idle` | `error`), handles idle pauses, and descends into child machines. Best when the host wants a request/response boundary and snapshot persistence.
-- **Uncontrolled (`provideExecutors` + `createActor`):** you bind executors onto the machine and run it as a plain XState actor. No run loop, no idle settling; the machine drives itself and you observe it. Best when the host already owns an actor lifecycle (a React component, a Durable Object).
+- Controlled, with `runAgent`. The library owns the loop. It drives the machine to a settle point of `done`, `idle`, or `error`, handles idle pauses, and descends into child machines. Use it when the host wants a request/response boundary and snapshot persistence.
+- Uncontrolled, with `provideExecutors` and `createActor`. You bind executors onto the machine and run it as a plain XState actor. There is no run loop and no idle settling. The actor runs itself and you observe it. Use it when the host already owns an actor lifecycle, such as a React component or a Durable Object.
 
-Same machine, same executors either way.
+The machine and the executors are the same in both modes.
 
 ```ts
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
@@ -86,7 +89,7 @@ const executors = createAiSdkExecutors({ models });
 
 ## Controlled host
 
-Run the machine end to end with `runAgent`, handling the idle pause inline:
+Run the machine with `runAgent` and handle the idle pause inline.
 
 ```ts
 import { runAgent } from "@statelyai/agent";
@@ -109,7 +112,7 @@ if (result.status === "idle") {
 
 ## Uncontrolled host
 
-Run the same machine as a plain XState actor:
+Run the same machine as a plain XState actor.
 
 ```ts
 import { createActor } from "xstate";
@@ -125,19 +128,24 @@ actor.subscribe((snapshot) => {
 actor.start();
 ```
 
-For fully external control with no live actor at all, XState's pure `transition(…)` / `initialTransition(…)` functions step the machine one event at a time. That is the lowest-level uncontrolled form, and it is what durable hosts build on; see [The step path](steps.md).
+For external control with no live actor, use XState's pure `transition(…)` and `initialTransition(…)` functions, which step the machine one event at a time. This is the lowest-level uncontrolled form, and durable hosts build on it. See [The step path](steps.md).
 
 ## Host walkthroughs
 
-The same machine, dropped into real stacks with zero machine changes.
+These hosts run the same machine without changing it.
 
 ### Express (controlled)
 
-`runAgent` per request. The process holds no live actor between requests, so any worker can pick up the resume: an idle settle plus a persisted snapshot **is** human-in-the-loop over HTTP.
+This host calls `runAgent` once per request. The process holds no live actor between requests, so any worker can handle the resume. An idle settle plus a persisted snapshot is how human-in-the-loop works over HTTP.
+
+The `snapshots` map below is module-level and therefore per-process. Replace it with shared storage such as Redis or a database before any worker can serve a resume. The route reports the human's options with [`getAcceptedEvents`](human-in-the-loop.md#the-humans-choices).
+
+<!-- viz: sequence diagram: client POST /agent -> runAgent -> model -> idle settle -> 202 with snapshot id; client POST /agent/:id/resume with APPROVE -> runAgent from snapshot -> done output -->
+
 
 ```ts no-check
 import express from "express";
-import { getAcceptedEvents, persistSnapshot, runAgent } from "@statelyai/agent";
+import { getAcceptedEvents, runAgent } from "@statelyai/agent";
 import type { Snapshot } from "xstate";
 import { announceMachine } from "./announce-machine.js";
 import { executors } from "./executors.js"; // as built above
@@ -154,7 +162,7 @@ app.post("/agent", async (req, res) => {
   });
   if (result.status === "idle") {
     const id = crypto.randomUUID();
-    snapshots.set(id, persistSnapshot(result.snapshot));
+    snapshots.set(id, result.persistedSnapshot ?? result.snapshot);
     const { draft } = result.snapshot.context;
     const accepted = getAcceptedEvents(result.snapshot).map((e) => e.type);
     return res.status(202).json({ id, draft, acceptedEvents: accepted });
@@ -179,11 +187,11 @@ app.post("/agent/:id/resume", async (req, res) => {
 app.listen(3000);
 ```
 
-The full reference, with revision loops and typed state meta, is [examples/express-host](../examples/express-host/index.ts). The same shape ports directly to [Hono](../examples/hono-host/index.ts), [Next.js](../examples/next-host), and [TanStack Start](../examples/tanstack-start-host).
+For the full reference, including revision loops and typed state meta, see [examples/express-host](../examples/express-host/index.ts). The same structure applies to [Hono](../examples/hono-host/index.ts), [Next.js](../examples/next-host), and [TanStack Start](../examples/tanstack-start-host).
 
 ### Cloudflare Durable Object (uncontrolled)
 
-A Durable Object already owns a long-lived actor and its own persistence, so bind executors with `provideExecutors` and run a plain `createActor`. The persisted snapshot lives in Durable Object state, so a run survives hibernation and resumes where it left off. Model resolution is injected from the environment binding, so the class stays provider-agnostic.
+A Durable Object owns a long-lived actor and its own persistence, so bind executors with `provideExecutors` and run a plain `createActor`. The persisted snapshot lives in Durable Object state, so a run survives hibernation and resumes where it stopped. On restore the snapshot wins: `createActor(machine, { snapshot, input })` ignores `input` entirely whenever a snapshot is present, so the `input` below applies only to a first start. Model resolution comes from the environment binding, so the class does not name a provider.
 
 ```ts no-check
 import { Agent, type Connection } from "agents";
@@ -232,15 +240,15 @@ export class AnnounceAgent extends Agent<Env, State> {
 }
 ```
 
-The shipped [cloudflare-agent-host](../examples/cloudflare-agent-host/index.ts) is a drop-in Durable Object class, with the `wrangler.toml` and subclass wiring spelled out. For one-turn-per-request Workers, [cloudflare-workers-ai-host](../examples/cloudflare-workers-ai-host/index.ts) drives the lower-level [step path](steps.md) against a raw Workers AI binding.
+The [cloudflare-agent-host](../examples/cloudflare-agent-host/index.ts) example is a Durable Object class you can use directly, with the `wrangler.toml` and subclass wiring included. For Workers that handle one turn per request, [cloudflare-workers-ai-host](../examples/cloudflare-workers-ai-host/index.ts) drives the [step path](steps.md) against a raw Workers AI binding.
 
 ## What changes per host
 
-The machine is **imported, never edited**. Only three things change:
+You import the machine and do not edit it. Three things change per host:
 
-- how executors are built (AI SDK locally, injected model resolution on the edge);
-- controlled (`runAgent`) or uncontrolled (`provideExecutors` + `createActor`);
-- where the snapshot is persisted (in-memory map, Durable Object state, or nothing for a straight-through local run).
+- How executors are built. Use the AI SDK locally and injected model resolution on the edge.
+- Whether the host is controlled with `runAgent` or uncontrolled with `provideExecutors` and `createActor`.
+- Where the snapshot is persisted. Options include an in-memory map, Durable Object state, or nowhere for a local run that never pauses.
 
 ## Related
 

@@ -36,8 +36,8 @@ export interface CreateLoopMachineConfig {
   };
   /** Stop condition, checked after each iteration. */
   until: (state: LoopState) => boolean;
-  /** Hard upper bound on iterations, enforced by a guard. */
-  maxIterations: number;
+  /** Hard upper bound on machine turns (iterations), enforced by a guard. */
+  maxTurns: number;
 }
 
 /** Context of a {@link createLoopMachine} machine. */
@@ -60,7 +60,7 @@ const outputSchema = objectSchema<{ iterations: number; results: unknown[]; last
 
 /**
  * A bounded repeat: run the body, check `until` over the accumulated state,
- * and either stop or go again. `maxIterations` is a guard, so the loop cannot
+ * and either stop or go again. `maxTurns` is a guard, so the loop cannot
  * run away even if `until` never returns `true`.
  *
  * States: `running` → `checking` → (`running` | `done`).
@@ -70,14 +70,14 @@ const outputSchema = objectSchema<{ iterations: number; results: unknown[]; last
  *   model: "quick",
  *   body: { instructions: "Improve the draft. Return only the draft." },
  *   until: ({ last }) => String(last).length > 500,
- *   maxIterations: 4,
+ *   maxTurns: 4,
  * });
  * ```
  */
 export function createLoopMachine(config: CreateLoopMachineConfig): AnyStateMachine {
-  const { model, body, until, maxIterations } = config;
-  if (!Number.isInteger(maxIterations) || maxIterations < 1) {
-    throw new Error("createLoopMachine: maxIterations must be an integer >= 1.");
+  const { model, body, until, maxTurns } = config;
+  if (!Number.isInteger(maxTurns) || maxTurns < 1) {
+    throw new Error("createLoopMachine: maxTurns must be an integer >= 1.");
   }
 
   const agentSetup = setupAgent({
@@ -133,7 +133,7 @@ export function createLoopMachine(config: CreateLoopMachineConfig): AnyStateMach
       checking: {
         type: "choice",
         choice: ({ context }: { context: LoopContext }) =>
-          context.iterations >= maxIterations || until(loopState(context))
+          context.iterations >= maxTurns || until(loopState(context))
             ? { target: "done" }
             : { target: "running" },
       },

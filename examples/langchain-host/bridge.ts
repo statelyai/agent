@@ -26,7 +26,6 @@ import type { BaseChatModel } from "@langchain/core/language_models/chat_models"
 import { createAgent } from "langchain";
 import {
   getStateMeta,
-  persistSnapshot,
   runAgent,
   type RunAgentOptions,
   type RunAgentResult,
@@ -147,7 +146,7 @@ function toToolResult(result: RunAgentResult<typeof emailDrafter>, handle: strin
 
   const meta = getStateMeta<typeof result.snapshot, z.infer<typeof metaSchema>>(result.snapshot);
   const interaction = meta.interaction ?? null;
-  runs.set(handle, { snapshot: persistSnapshot(result.snapshot), interaction });
+  runs.set(handle, { snapshot: result.persistedSnapshot, interaction });
 
   return {
     status: "pending",

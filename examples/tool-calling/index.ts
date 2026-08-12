@@ -11,7 +11,7 @@
  *
  * One text request carries `tools` (a calculator, a unit converter, and a
  * sample-data currency lookup) and the host runs the tool loop — the AI SDK
- * adapter reads `metadata.maxSteps` to bound it. Selecting and executing tools
+ * adapter reads the request's typed `maxSteps` to bound it. Selecting and executing tools
  * is the model + host's business, not explicit workflow steps.
  *
  * What the MACHINE owns is the contract on the way out. The request returns a
@@ -31,7 +31,7 @@
  *     denied by the tools themselves (divide by zero, unknown currency pair).
  *   - A typed output contract the machine enforces, with a bounded retry that
  *     feeds the validation message back to the model.
- *   - `metadata.maxSteps` bounding the host-side tool loop (adapter behavior).
+ *   - `maxSteps` bounding the host-side tool loop (adapter behavior).
  *   - Progress and the validation trail surfaced host-side via `onTransition`.
  *
  * Want the tool loop as visible, persistable machine states instead (each
@@ -160,7 +160,7 @@ const agentSetup = setupAgent({
         }),
       },
       // Bound the host-side tool loop (the AI SDK adapter reads this).
-      metadata: { maxSteps: 5 },
+      maxSteps: 5,
     },
   },
 });

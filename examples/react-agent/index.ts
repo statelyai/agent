@@ -3,7 +3,7 @@
  *
  * This is the escalation, not the default. For plain tool use, keep the loop
  * inside one request and let your SDK run it — that's examples/tool-calling
- * (one state, `tools` on the request, `metadata.maxSteps` bounding the loop).
+ * (one state, `tools` on the request, `maxSteps` bounding the loop).
  * Unroll to this shape when individual turns need what a state gives you: an
  * approval gate before a dangerous tool, a spend guard, a snapshot you can
  * persist and resume mid-loop.

@@ -16,7 +16,7 @@
  *     `textEvent: "COMMAND"`, so a host routes free chat text into the machine
  *     and resumes with `runAgent(machine, { snapshot: persistedSnapshot,
  *     event })`. Nothing needs to answer a prompt callback. The state is
- *     tagged `waiting` and `setupAgent({ isSuspended })` reads that tag, so
+ *     tagged `waiting` and `setupAgent({ isIdle })` reads that tag, so
  *     idle detection is deterministic rather than heuristic.
  *   - Context-interpolated prompts: the label is
  *     "What should I do with your list? ({todosSummary})", and `{todosSummary}`
@@ -153,7 +153,7 @@ const agentSetup = setupAgent({
   models,
   // Deterministic idle detection: the only state that waits on a human is
   // tagged `waiting`, so hosts never rely on the timing heuristic.
-  isSuspended: (snapshot) => snapshot.hasTag("waiting"),
+  isIdle: (snapshot) => snapshot.hasTag("waiting"),
 });
 
 export const todoMachine = agentSetup.createMachine({

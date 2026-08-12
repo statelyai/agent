@@ -153,7 +153,7 @@ const agentSetup = setupAgent({
   // Deterministic idle detection: the states waiting on the player are exactly
   // the ones tagged `waiting`, so runAgent does not fall back to its timing
   // heuristic.
-  isSuspended: (snapshot) => snapshot.hasTag("waiting"),
+  isIdle: (snapshot) => snapshot.hasTag("waiting"),
   requests: {
     classifyAnswer: {
       schemas: {

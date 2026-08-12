@@ -71,8 +71,8 @@
         "$ref": "#/$defs/State"
       }
     },
-    "suspendedTags": {
-      "description": "State tags that mark an intentional wait for an external event (a human approval, an inbound webhook, ...). Lowered by setupAgent.fromConfig(...) into a snapshot.hasTag(...) suspension predicate so runAgent settles those states idle deterministically. Every listed tag must appear in some state's 'tags'.",
+    "idleTags": {
+      "description": "State tags that mark an intentional wait for an external event (a human approval, an inbound webhook, ...). Lowered by setupAgent.fromConfig(...) into a snapshot.hasTag(...) idle predicate so runAgent settles those states idle deterministically. Every listed tag must appear in some state's 'tags'.",
       "type": "array",
       "items": {
         "type": "string",

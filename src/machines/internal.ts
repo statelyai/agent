@@ -58,8 +58,8 @@ export interface PresetRequestEntry {
   outputSchema?: StandardSchemaV1;
   /** Tools the host runs inside this one request. */
   tools?: AgentTools;
-  /** Bounds the host-side tool loop (lowered to `metadata.maxSteps`). */
-  maxTurns?: number;
+  /** Bounds the host-side tool loop (lowered to the request's typed `maxSteps`). */
+  maxSteps?: number;
 }
 
 /** One delegated unit of work, lowered to an invoked child machine. */
@@ -129,7 +129,7 @@ export function requestInput(
     prompt,
     ...(entry.tools ? { tools: entry.tools } : {}),
     ...(entry.outputSchema ? { outputSchema: entry.outputSchema } : {}),
-    ...(entry.maxTurns !== undefined ? { metadata: { maxSteps: entry.maxTurns } } : {}),
+    ...(entry.maxSteps !== undefined ? { maxSteps: entry.maxSteps } : {}),
   };
 }
 

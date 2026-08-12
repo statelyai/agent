@@ -437,7 +437,7 @@ describe("provideExecutors + '@agent.usage'", () => {
     ]);
   });
 
-  test("a wildcard-only machine never receives it (same opt-in gate as runAgent)", async () => {
+  test("a wildcard-only machine DOES receive it (plain XState wildcard semantics, as in runAgent)", async () => {
     const wildcardSchemas = createAgentSchemas({
       context: z.object({ tokens: z.number(), seen: z.array(z.string()) }),
       output: z.object({ tokens: z.number(), seen: z.array(z.string()) }),
@@ -469,7 +469,8 @@ describe("provideExecutors + '@agent.usage'", () => {
     actor.start();
     const output = await toPromise(actor);
 
-    expect(output.seen).not.toContain(AGENT_USAGE_EVENT_TYPE);
+    expect(output.seen).toContain(AGENT_USAGE_EVENT_TYPE);
+    // The wildcard handler only records event types, so tokens stay 0.
     expect(output.tokens).toBe(0);
   });
 
@@ -514,5 +515,140 @@ describe("provideExecutors + '@agent.usage'", () => {
     actor.start();
 
     expect(await toPromise(actor)).toEqual({ tokens: 77, kinds: ["decision:choose"] });
+  });
+});
+
+// ─── Recursive executor inheritance (parity with runAgent) ───
+
+describe("provideExecutors recursive child binding", () => {
+  const childText = createTextLogic({
+    schemas: { input: z.object({ topic: z.string() }), output: z.string() },
+    model: "child-model",
+    prompt: ({ input }) => input.topic,
+  });
+
+  const buildGrandchild = () => {
+    const schemas = createAgentSchemas({
+      context: z.object({ line: z.string().nullable() }),
+      input: z.object({ topic: z.string() }),
+      output: z.object({ line: z.string() }),
+    });
+    return setupAgent({ schemas, actors: { childText } }).createMachine({
+      context: { line: null },
+      initial: "writing",
+      states: {
+        writing: {
+          invoke: {
+            id: "write",
+            src: "childText",
+            input: ({ context }: { context: { line: string | null } }) => {
+              void context;
+              return { topic: "grandchild topic" };
+            },
+            onDone: ({ output }: { output: unknown }) => ({
+              target: "done",
+              context: { line: output as string },
+            }),
+          },
+        },
+        done: {
+          type: "final",
+          output: ({ context }: { context: { line: string | null } }) => ({ line: context.line }),
+        },
+      },
+    } as never);
+  };
+
+  const buildParent = () => {
+    const grandchild = buildGrandchild();
+    const childSchemas = createAgentSchemas({
+      context: z.object({ line: z.string().nullable() }),
+      input: z.object({ topic: z.string() }),
+      output: z.object({ line: z.string() }),
+    });
+    const child = setupAgent({
+      schemas: childSchemas,
+      actors: { grandchild },
+    }).createMachine({
+      context: { line: null },
+      initial: "delegating",
+      states: {
+        delegating: {
+          invoke: {
+            id: "grandchild",
+            src: "grandchild",
+            input: { topic: "t" },
+            onDone: ({ output }: { output: unknown }) => ({
+              target: "done",
+              context: { line: (output as { line: string }).line },
+            }),
+          },
+        },
+        done: {
+          type: "final",
+          output: ({ context }: { context: { line: string | null } }) => ({ line: context.line }),
+        },
+      },
+    } as never);
+
+    const parentSchemas = createAgentSchemas({
+      context: z.object({ line: z.string().nullable() }),
+      input: z.object({}),
+      output: z.object({ line: z.string() }),
+    });
+    return setupAgent({ schemas: parentSchemas, actors: { child } }).createMachine({
+      context: { line: null },
+      initial: "delegating",
+      states: {
+        delegating: {
+          invoke: {
+            id: "child",
+            src: "child",
+            input: { topic: "t" },
+            onDone: ({ output }: { output: unknown }) => ({
+              target: "done",
+              context: { line: (output as { line: string }).line },
+            }),
+          },
+        },
+        done: {
+          type: "final",
+          output: ({ context }: { context: { line: string | null } }) => ({ line: context.line }),
+        },
+      },
+    } as never);
+  };
+
+  test("a request inside a nested child machine inherits the host executors", async () => {
+    const models: string[] = [];
+    const bound = provideExecutors(buildParent(), {
+      generateText: async (request: { model: string }) => {
+        models.push(request.model);
+        return { output: "written by the grandchild" };
+      },
+    } as never);
+
+    const actor = createActor(bound, { input: {} } as never);
+    actor.start();
+    const output = (await toPromise(actor)) as { line: string };
+
+    expect(output).toEqual({ line: "written by the grandchild" });
+    // Two levels down, and it still reached the host executor.
+    expect(models).toEqual(["child-model"]);
+  });
+
+  test("child requests reach the same onTrace stream as parent ones", async () => {
+    const traced: string[] = [];
+    const bound = provideExecutors(
+      buildParent(),
+      { generateText: async () => ({ output: "ok" }) } as never,
+      { onTrace: (event) => traced.push(event.type) },
+    );
+
+    const actor = createActor(bound, { input: {} } as never);
+    actor.start();
+    await toPromise(actor);
+
+    expect(traced).toEqual(["request.start", "request.end"]);
   });
 });

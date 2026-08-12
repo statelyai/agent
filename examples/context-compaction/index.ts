@@ -127,7 +127,7 @@ const agentSetup = setupAgent({
   models,
   // Deterministic idle detection: the run settles whenever the machine is
   // parked in the tagged waiting-for-a-human state.
-  isSuspended: (snapshot) => snapshot.hasTag("waiting"),
+  isIdle: (snapshot) => snapshot.hasTag("waiting"),
   requests: {
     // Chat reply. Rendered as: [summary-as-system?] + recent messages.
     respond: {

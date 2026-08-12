@@ -483,7 +483,7 @@ describe("onResult metadata enrichment", () => {
   });
 });
 
-describe("metadata.maxSteps (multi-step tool loops)", () => {
+describe("maxSteps (multi-step tool loops)", () => {
   const streamUsage = {
     inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
     outputTokens: { total: 1, text: 1, reasoning: 0 },
@@ -513,7 +513,7 @@ describe("metadata.maxSteps (multi-step tool loops)", () => {
     },
   };
 
-  test("streamText honors metadata.maxSteps (loops the tool call, matching generateText)", async () => {
+  test("streamText honors the typed maxSteps (loops the tool call, matching generateText)", async () => {
     let calls = 0;
     const model = new MockLanguageModelV3({
       doStream: async () => {
@@ -530,7 +530,7 @@ describe("metadata.maxSteps (multi-step tool loops)", () => {
     const result = await streamText({
       model: "m",
       prompt: "hi",
-      metadata: { maxSteps: 5 },
+      maxSteps: 5,
       tools: pingTool,
     });
 
@@ -752,7 +752,7 @@ describe("metadata.maxSteps (multi-step tool loops)", () => {
     expect(JSON.stringify(sentResponseFormat)).not.toContain("reasoning");
   });
 
-  test("generateText honors metadata.maxSteps (symmetry check)", async () => {
+  test("generateText honors the typed maxSteps (symmetry check)", async () => {
     let calls = 0;
     const model = new MockLanguageModelV3({
       doGenerate: async () => {
@@ -790,7 +790,59 @@ describe("metadata.maxSteps (multi-step tool loops)", () => {
     const result = await generateText({
       model: "m",
       prompt: "hi",
+      maxSteps: 5,
+      tools: pingTool,
+    });
+
+    expect(calls).toBe(3);
+    expect(result.output).toBe("done");
+  });
+
+  test("metadata.maxSteps still works as a fallback for pre-typed-field requests", async () => {
+    let calls = 0;
+    const model = new MockLanguageModelV3({
+      doStream: async () => {
+        calls++;
+        return {
+          stream: simulateReadableStream({
+            chunks: calls < 2 ? toolCallStreamChunks(`call-${calls}`) : finalTextStreamChunks,
+          }),
+        };
+      },
+    });
+    const { streamText } = createAiSdkExecutors({ models: { m: model } });
+
+    const result = await streamText({
+      model: "m",
+      prompt: "hi",
       metadata: { maxSteps: 5 },
+      tools: pingTool,
+    });
+
+    expect(calls).toBe(2);
+    expect(result.output).toBe("done");
+  });
+
+  test("the typed maxSteps wins over metadata.maxSteps", async () => {
+    let calls = 0;
+    const model = new MockLanguageModelV3({
+      doStream: async () => {
+        calls++;
+        return {
+          stream: simulateReadableStream({
+            chunks: calls < 3 ? toolCallStreamChunks(`call-${calls}`) : finalTextStreamChunks,
+          }),
+        };
+      },
+    });
+    const { streamText } = createAiSdkExecutors({ models: { m: model } });
+
+    // The typed field allows the loop; the stale metadata value (1) is ignored.
+    const result = await streamText({
+      model: "m",
+      prompt: "hi",
+      maxSteps: 5,
+      metadata: { maxSteps: 1 },
       tools: pingTool,
     });
 

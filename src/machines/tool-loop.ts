@@ -13,15 +13,12 @@ export interface CreateToolLoopMachineConfig {
   tools?: AgentTools;
   /** Structured output schema. Omitted means the output is plain text. */
   outputSchema?: StandardSchemaV1;
-  /** Bounds the host-side tool loop — lowered to `metadata.maxSteps`. */
-  maxTurns?: number;
   /**
-   * Tool names the host should gate before executing. Lowered to
-   * `metadata.interruptOn`, which only a host that implements gating reads —
-   * the preset itself stays a single state and never pauses. For a real
-   * approval gate as machine states, eject to `examples/review-tool-calls`.
+   * Bounds the host-side tool loop — lowered to the request's typed
+   * {@link AgentTextRequest.maxSteps}. It bounds MODEL STEPS inside one
+   * request, not machine turns, hence the name.
    */
-  interruptOn?: readonly string[];
+  maxSteps?: number;
 }
 
 /** Context of a {@link createToolLoopMachine} machine. */
@@ -38,7 +35,7 @@ const outputSchema = objectSchema<{ result: unknown }>({ result: jsonAny }, ["re
 
 /**
  * The single-state tool loop: one text request carries the `tools`, and the
- * host runs the tool loop inside it (`maxTurns` bounds it). Selecting and
+ * host runs the tool loop inside it (`maxSteps` bounds it). Selecting and
  * executing tools is the model + host's business, not machine states.
  *
  * States: `answering` → `done`.
@@ -48,7 +45,7 @@ const outputSchema = objectSchema<{ result: unknown }>({ result: jsonAny }, ["re
  *   model: "quick",
  *   instructions: "Answer using the tools.",
  *   tools: { calculate },
- *   maxTurns: 5,
+ *   maxSteps: 5,
  * });
  *
  * const result = await runAgent(machine, {
@@ -59,12 +56,7 @@ const outputSchema = objectSchema<{ result: unknown }>({ result: jsonAny }, ["re
  * ```
  */
 export function createToolLoopMachine(config: CreateToolLoopMachineConfig): AnyStateMachine {
-  const { model, instructions, tools, outputSchema: resultSchema, maxTurns, interruptOn } = config;
-
-  const metadata = {
-    ...(maxTurns !== undefined ? { maxSteps: maxTurns } : {}),
-    ...(interruptOn && interruptOn.length > 0 ? { interruptOn: [...interruptOn] } : {}),
-  };
+  const { model, instructions, tools, outputSchema: resultSchema, maxSteps } = config;
 
   const agentSetup = setupAgent({
     context: contextSchema,
@@ -92,7 +84,7 @@ export function createToolLoopMachine(config: CreateToolLoopMachineConfig): AnyS
             prompt: context.prompt,
             ...(tools ? { tools } : {}),
             ...(resultSchema ? { outputSchema: resultSchema } : {}),
-            ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
+            ...(maxSteps !== undefined ? { maxSteps } : {}),
           }),
           onDone: ({ output }) => ({ target: "done", context: { result: output } }),
         },

@@ -9,6 +9,7 @@ import {
   type SchemaCompiler,
   type StandardSchemaV1,
 } from "./index.js";
+import { validateAgentConfig } from "./validate/index.js";
 
 const workflowSchema = JSON.parse(
   readFileSync(fileURLToPath(new URL("../schemas/agent-workflow.json", import.meta.url)), "utf8"),
@@ -206,5 +207,35 @@ describe("schemas/agent-workflow.json", () => {
         guards: { isReady: () => true },
       }),
     ).not.toThrow();
+  });
+});
+
+describe("validateAgentConfig", () => {
+  test("accepts configs the shipped schema allows", () => {
+    expect(validateAgentConfig(exampleWorkflow)).toEqual({ valid: true, errors: [] });
+    expect(validateAgentConfig(kitchenSinkWorkflow)).toEqual({ valid: true, errors: [] });
+  });
+
+  test("reports diagnostics with a JSON Pointer path for an invalid config", () => {
+    const result = validateAgentConfig({
+      key: "broken",
+      // `initial` and `states` are missing; `requests` has the wrong type.
+      requests: "nope",
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.errors.length).toBeGreaterThan(0);
+    for (const error of result.errors) {
+      expect(error.severity).toBe("error");
+      expect(error.path.startsWith("/")).toBe(true);
+      expect(typeof error.message).toBe("string");
+      expect(typeof error.keyword).toBe("string");
+    }
+    expect(result.errors.some((error) => error.path === "/requests")).toBe(true);
+  });
+
+  test("agrees with a directly-compiled Ajv validator", () => {
+    const config = { key: "x" };
+    expect(validateAgentConfig(config).valid).toBe(schemaErrors(config).length === 0);
   });
 });

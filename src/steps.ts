@@ -325,7 +325,7 @@ export function resolveAgentStep<TMachine extends AnyActorLogic>(
  * present. Accepts either a `kind: 'text'` `AgentEffect` (the step-path shape
  * from `getAgentEffects`) or an {@link AgentRequest} envelope.
  * **Text-only**: passing a `kind: 'decision'` request throws, directing the
- * caller to `resolveDecision(request, executors.decide, ...)` instead. Always
+ * caller to `resolveDecision(request, executors, ...)` instead. Always
  * returns both the normalized `output` and the `raw` executor result (tool
  * calls, usage, finish reason — needed for observability and event-sourced
  * replay).
@@ -345,7 +345,7 @@ export async function executeAgentRequest(
   if ((requestOrEffect as { kind: string }).kind === "decision") {
     throw new Error(
       "executeAgentRequest(...) is text-only. Resolve a 'decision' request with " +
-        "resolveDecision(request, executors.decide, ...) instead.",
+        "resolveDecision(request, executors, ...) instead.",
     );
   }
 

@@ -20,13 +20,7 @@
  * DB row, a KV namespace — keyed by run id. See ../file-snapshot-store.
  */
 import { z } from "zod";
-import {
-  getAcceptedEvents,
-  getStateMeta,
-  persistSnapshot,
-  runAgent,
-  setupAgent,
-} from "@statelyai/agent";
+import { getAcceptedEvents, getStateMeta, runAgent, setupAgent } from "@statelyai/agent";
 import type { Snapshot } from "xstate";
 import { NextResponse, type NextRequest } from "next/server";
 import { models, resolveExecutors, maybeCreateRunInspection } from "../../../agent-runtime";
@@ -42,7 +36,7 @@ const agentSetup = setupAgent({
   output: z.object({ published: z.boolean(), draft: z.string() }),
   meta: z.object({ interaction: z.object({ label: z.string() }).optional() }),
   events: { APPROVE: z.object({}), REJECT: z.object({ reason: z.string() }) },
-  isSuspended: (snapshot) => snapshot.hasTag("awaiting-review"),
+  isIdle: (snapshot) => snapshot.hasTag("awaiting-review"),
   requests: {
     writeDraft: {
       schemas: { input: z.object({ topic: z.string() }), output: z.string() },
@@ -102,7 +96,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   if (result.status === "idle") {
     const id = crypto.randomUUID();
-    snapshots.set(id, persistSnapshot(result.snapshot));
+    snapshots.set(id, result.persistedSnapshot);
     const { interaction } = getStateMeta(result.snapshot);
     return NextResponse.json(
       {

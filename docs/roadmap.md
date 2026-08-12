@@ -5,30 +5,38 @@ description: Work deliberately deferred past the 2.0 alpha, and why.
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
 
-What gates 2.0 stable, and what is honestly not shipped yet. Everything not listed as gating is additive and waits on real usage feedback; if one of these blocks you, open an issue.
+This page lists what gates the 2.0 stable release, what is planned but not shipped, and what is not planned. If one of these items blocks you, open an issue.
 
 ## Road to v2 stable (gating)
 
-v2 leaves alpha only when its durable formats can be promised. Changing a persisted format after stable is worse than staying alpha longer, so these land in order and formats freeze last.
+v2 leaves alpha once its durable formats can be committed to. Changing a persisted format after the stable release is worse than staying in alpha longer, so these items land in order and the formats freeze last.
 
-- **Runtime semantics complete first.** The durable-execution seams still moving (step request envelope, execution info, event-log contract, dynamic actor binding) settle before any freeze.
-- **Stable XState v6.** The alpha pins `xstate@6.0.0-alpha.*`. The persisted snapshot format is XState's, so a stable v6 is a hard dependency: if it slips, v2 stays alpha rather than freezing on an alpha format.
-- **Node LTS matrix.** Declare and CI-test the supported active LTS versions.
-- **Format freeze.** The durable formats freeze together, with documented versioning rules: the `AgentLogEntry` envelope (`AGENT_EVENT_SCHEMA_VERSION`, including the reserved `@agent.init` event and verification hashes), the `AgentEventLogStore` protocol, and the `AgentTraceEvent` envelope (`AGENT_TRACE_SCHEMA_VERSION`). Persisted snapshots are compaction caches, versioned by XState.
-- **Upgrade tests.** Fixture snapshots and traces from the frozen formats, replayed in CI against every release, so a break is caught before it ships.
-- **RC cycle.** At least one release candidate with formats frozen and real hosts running against it before `2.0.0`.
+- Runtime semantics complete first. The durable-execution seams that are still moving settle before any freeze. These are the step request envelope, execution info, the event-log contract, and dynamic actor binding.
+- Stable XState v6. The alpha pins `xstate@6.0.0-alpha.*`. The persisted snapshot format is XState's, so a stable v6 is a hard dependency. If v6 slips, v2 stays in alpha rather than freezing on an alpha format.
+- Node LTS matrix. Declare and CI-test the supported active LTS versions.
+- Format freeze. The durable formats freeze together, with documented versioning rules. The formats are the `AgentLogEntry` envelope, versioned by `AGENT_EVENT_SCHEMA_VERSION` and including the reserved `@agent.init` event and verification hashes, the `AgentEventLogStore` protocol, and the `AgentTraceEvent` envelope, versioned by `AGENT_TRACE_SCHEMA_VERSION`. Persisted snapshots are compaction caches and are versioned by XState.
+- Upgrade tests. Fixture snapshots and traces from the frozen formats are replayed in CI against every release, so a break is caught before it ships.
+- RC cycle. At least one release candidate ships with formats frozen and real hosts running against it before `2.0.0`.
 
-## Not shipped yet
+## Planned
 
-- **Postgres and Redis storage adapters.** Core ships the persistence contracts, an in-memory event-log store, and SQLite (`createSqliteEventLogStore` / `createSqliteSnapshotStore` from `@statelyai/agent/sqlite`). No Postgres or Redis packages.
-- **OpenTelemetry exporter.** `@statelyai/agent/otel` ships `createOtelTraceHandler` (trace-to-span mapping), but no exporter or SDK lifecycle; bring your own provider, or build on `onTrace` with `serializeTraceEvent(event)` for JSONL-safe output.
-- **SSE/WebSocket transport helpers.** Host your own stream over `onChunk` (an SSE example ships in `examples/sse-transport`).
-- **Agent-specific dynamic fan-out helper.** Fan-out works today via XState `spawn(...)` or `Promise.all(...)`; core has no higher-level helper for branch binding and progress.
-- **Visualization tooling.** Stately Studio and the VS Code extension own diagramming and inspection.
+These items are not shipped yet. They are additive and wait on usage feedback.
 
-## Near-term, non-gating
+### Not shipped
 
-- **Managed step-path helper.** A collapsed driver over the [step path](steps.md) loop. Deferred because the loop is ~15 lines of host-owned code by design.
-- **Idle persist/revive helper.** The persist, return handle, resume-with-event recipe (see [human in the loop](human-in-the-loop.md)) is a documented pattern each host rewrites; a helper lands once real stores show the common shape.
-- **Plan executor.** Multi-event commands are an explicit [decide loop](decisions.md#multi-event-commands-the-decide-loop) today; the executor layer that simulates a proposed plan up front and replans on divergence is next, as a documented pattern first.
-- **Live-path mid-flight resume for fan-out.** Event-log [replay](event-log.md) already re-derives still-owed spawned effects; restoring a live `runAgent` snapshot persisted mid-flight still drops frozen children.
+- Postgres and Redis storage adapters. Core ships the persistence contracts, an in-memory event-log store, and SQLite through `createSqliteEventLogStore` and `createSqliteSnapshotStore` from `@statelyai/agent/sqlite`. There are no Postgres or Redis packages.
+- OpenTelemetry exporter. `@statelyai/agent/otel` ships `createOtelTraceHandler` for trace-to-span mapping, but no exporter and no SDK lifecycle. Bring your own provider, or build on `onTrace` with `serializeTraceEvent(event)` for JSONL-safe output.
+- SSE and WebSocket transport helpers. Host your own stream over `onChunk`. An SSE example ships in `examples/sse-transport`.
+- Agent-specific dynamic fan-out helper. Fan-out works today through XState `spawn(...)` or `Promise.all(...)`. Core has no higher-level helper for branch binding and progress.
+
+### Near-term, non-gating
+
+- Managed step-path helper. This is a collapsed driver over the [step path](steps.md) loop. It is deferred because the loop is around 15 lines of host-owned code by design.
+- Idle persist and revive helper. The recipe of persisting a snapshot, returning a handle, and resuming with an event is a documented pattern that each host rewrites. See [Human in the loop](human-in-the-loop.md). A helper lands once real stores show the common shape.
+- Plan executor. Multi-event commands use an explicit [decide loop](decisions.md#the-decide-loop-for-multi-event-commands) today. The executor layer that simulates a proposed plan up front and replans on divergence comes next, as a documented pattern first.
+- Live-path mid-flight resume for fan-out. Event-log [replay](event-log.md) already re-derives spawned effects that are still owed. Restoring a live `runAgent` snapshot that was persisted mid-flight still drops frozen children.
+- Tool-call gating, meaning an interrupt before selected tool calls. This is planned. The alpha carried it as a request metadata convention that core never acted on, so it was removed.
+
+## Not planned
+
+- Visualization tooling. Stately Studio and the VS Code extension handle diagramming and inspection. See [Scope](scope.md#non-goals).

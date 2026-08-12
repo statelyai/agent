@@ -22,13 +22,7 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic, type SnapshotFrom } from "xstate";
-import {
-  getStateMeta,
-  persistSnapshot,
-  runAgent,
-  setupAgent,
-  type RunAgentOptions,
-} from "@statelyai/agent";
+import { getStateMeta, runAgent, setupAgent, type RunAgentOptions } from "@statelyai/agent";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 
 // ─── In-memory sample table (the whole "database") ───
@@ -109,7 +103,7 @@ const agentSetup = setupAgent({
   },
   // The machine's own wait signal: the `awaiting-approval` tag. `runAgent`
   // settles idle deterministically whenever a resting snapshot carries it.
-  isSuspended: (snapshot) => snapshot.hasTag("awaiting-approval"),
+  isIdle: (snapshot) => snapshot.hasTag("awaiting-approval"),
   actors: {
     runQuery: createAsyncLogic<number, { plan: QueryPlan }>({
       run: async ({ input }) => executeQuery(input.plan),
@@ -269,7 +263,7 @@ export async function runSqlAgentExample(
   const interaction = readInteraction(first.snapshot);
 
   const second = await runAgent(sqlAgentMachine, {
-    snapshot: persistSnapshot(first.snapshot),
+    snapshot: first.persistedSnapshot,
     event: { type: approval },
     onTransition: observe,
     ...resolved,

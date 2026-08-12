@@ -17,7 +17,7 @@
  *
  *   - Non-sensitive Q&A: ONE `answer` request carries real `tools`
  *     (`lookupBooking`, `searchPolicies` over a small sample table) and the host
- *     runs the tool loop, bounded by `metadata.maxSteps`. The machine never sees
+ *     runs the tool loop, bounded by the request's `maxSteps`. The machine never sees
  *     the intermediate tool calls — same as LangGraph's safe-tools path, minus
  *     the extra node. (See examples/tool-calling.)
  *   - Intent routing: a structured-output `classify` request returns a
@@ -28,7 +28,7 @@
  *     `['awaiting-approval']`, a static `meta.interaction` label, and the pending
  *     action in `context.pendingAction`. `runAgent` settles `{ status: 'idle',
  *     snapshot }` deterministically (the machine declares its own wait signal via
- *     `isSuspended`), so pausing is a first-class machine state, not a host-side
+ *     `isIdle`), so pausing is a first-class machine state, not a host-side
  *     `snapshot.next` check. The host persists the snapshot and resumes with an
  *     APPROVE or DENY event in a *second* `runAgent` call. (See
  *     examples/human-in-the-loop.)
@@ -47,7 +47,6 @@ import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 import {
   getAcceptedEvents,
   getStateMeta,
-  persistSnapshot,
   runAgent,
   setupAgent,
   type AgentRequestExecutors,
@@ -158,7 +157,7 @@ const agentSetup = setupAgent({
   // The machine's own wait signal: the `confirming` tag. `runAgent` settles idle
   // deterministically whenever a resting snapshot carries it — no timing
   // heuristic, no host-side `snapshot.next` check.
-  isSuspended: (snapshot) => snapshot.hasTag("awaiting-approval"),
+  isIdle: (snapshot) => snapshot.hasTag("awaiting-approval"),
   actors: {
     // Applies the approved sensitive action. Reads the real booking table and
     // returns a confirmation message. (A production host would persist the
@@ -223,7 +222,7 @@ const agentSetup = setupAgent({
         }),
       },
       // Bound the host-side tool loop (the AI SDK adapter reads this).
-      metadata: { maxSteps: 5 },
+      maxSteps: 5,
     },
   },
   // `confirming` and `executing` are reached only after classify set a sensitive
@@ -427,7 +426,7 @@ export async function runCustomerSupportExample(
     ? ({ type: "APPROVE" } as const)
     : ({ type: "DENY", reason: denyReason } as const);
   const second = await runAgent(customerSupportMachine, {
-    snapshot: persistSnapshot(first.snapshot),
+    snapshot: first.persistedSnapshot,
     event,
     ...executors,
     onTransition: track,
@@ -490,7 +489,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
       console.log(interaction?.label ?? "");
       console.log("Legal events:", legalEvents.join(", "));
 
-      const persisted = persistSnapshot(snapshot);
+      const persisted = result.persistedSnapshot;
       const answer = (await promptLine("approve / deny? ")).toLowerCase();
       const event = answer.startsWith("a")
         ? ({ type: "APPROVE" } as const)

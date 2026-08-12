@@ -33,6 +33,7 @@ import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 import {
   createTextLogic,
   getAgentMessages,
+  getSnapshotNodes,
   runAgent,
   type AgentMessage,
   type AgentRequestExecutors,
@@ -156,9 +157,10 @@ export const describedWorkflowMachine = setup({ actors: { write } }).createMachi
  * idle, so this hook never sees them.
  */
 export const getRequests = (snapshot: AnyMachineSnapshot): AgentStateRequest[] => {
-  const rootDescription = snapshot._nodes.find((node) => !node.parent)?.description;
-  return snapshot._nodes
-    .filter((node) => node.parent && node.description && !node.tags.includes("waiting"))
+  const [root, ...descendants] = getSnapshotNodes(snapshot);
+  const rootDescription = root?.description;
+  return descendants
+    .filter((node) => node.description && !node.tags.includes("waiting"))
     .map((node) => ({
       model: "writer",
       prompt: node.description!,

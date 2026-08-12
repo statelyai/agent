@@ -65,7 +65,7 @@ describe("ticket-triage", () => {
       executors: { generateText },
     });
 
-    // The `waiting` tag + isSuspended settles this deterministically.
+    // The `waiting` tag + isIdle settles this deterministically.
     expect(first.status).toBe("idle");
     if (first.status !== "idle") throw new Error("expected idle");
     expect(first.snapshot.value).toBe("escalating");

@@ -7,6 +7,7 @@ export default defineConfig({
     machines: "src/machines/index.ts",
     otel: "src/otel/index.ts",
     sqlite: "src/sqlite/index.ts",
+    validate: "src/validate/index.ts",
   },
   format: ["esm", "cjs"],
   dts: true,

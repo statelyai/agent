@@ -14,7 +14,7 @@
  *     threshold the run does NOT reply on its own — it settles idle in
  *     `escalating` and waits for a person to confirm the category or type the
  *     right one. `meta.interaction` tells a host how to render that, and the
- *     `waiting` tag plus `isSuspended` make the idle settle deterministic.
+ *     `waiting` tag plus `isIdle` make the idle settle deterministic.
  *   - One retry on reply generation. A failed draft is not an exception: it
  *     routes through `replyFailed`, retries once, then degrades to a `failed`
  *     outcome carrying a fallback reply rather than throwing.
@@ -119,7 +119,7 @@ const triageAgentSetup = setupAgent({
   models,
   // Deterministic idle detection: the run settles whenever a person owes it a
   // decision, instead of falling back to the timing heuristic.
-  isSuspended: (snapshot) => snapshot.hasTag("waiting"),
+  isIdle: (snapshot) => snapshot.hasTag("waiting"),
   requests: {
     classifyTicket: {
       schemas: {

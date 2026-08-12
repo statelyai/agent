@@ -339,7 +339,7 @@ describe("@agent.usage (reserved per-call usage event)", () => {
     });
   });
 
-  test("a wildcard-only machine never receives it: an `on: { '*' }` handler is not an opt-in", async () => {
+  test("a wildcard-only machine DOES receive it: `on: { '*' }` matches, per plain XState semantics", async () => {
     const wildcardSchemas = createAgentSchemas({
       context: z.object({ note: z.string(), wildcards: z.array(z.string()) }),
       output: z.object({ note: z.string(), wildcards: z.array(z.string()) }),
@@ -376,9 +376,9 @@ describe("@agent.usage (reserved per-call usage event)", () => {
     });
 
     expect(result.status).toBe("done");
-    expect(seen).not.toContain(AGENT_USAGE_EVENT_TYPE);
-    expect(usageEntries(result.events)).toHaveLength(0);
-    expect(result.snapshot.context.wildcards).not.toContain(AGENT_USAGE_EVENT_TYPE);
+    expect(seen).toContain(AGENT_USAGE_EVENT_TYPE);
+    expect(usageEntries(result.events)).toHaveLength(1);
+    expect(result.snapshot.context.wildcards).toContain(AGENT_USAGE_EVENT_TYPE);
   });
 
   test("a machine declaring BOTH a wildcard and an explicit handler still receives it", async () => {

@@ -16,7 +16,6 @@ import {
   initEntry,
   replay,
   AgentReplayDivergenceError,
-  verifyReplay,
   type AgentEffect,
 } from "./effects.js";
 import type { AgentLogEntry } from "./event-log-store.js";
@@ -434,7 +433,9 @@ describe("replay — envelope verification", () => {
       verification: { stateHash: expect.any(String), effectsHash: expect.any(String) },
     });
     const roundTripped = JSON.parse(JSON.stringify(entries)) as AgentLogEntry[];
-    expect(verifyReplay(machine, roundTripped).snapshot.context).toEqual({ count: 1 });
+    expect(replay(machine, roundTripped, { verify: "strict" }).snapshot.context).toEqual({
+      count: 1,
+    });
   });
 
   test("pins strict divergence to the first mismatched entry", () => {
@@ -445,9 +446,11 @@ describe("replay — envelope verification", () => {
       verification: { ...entries[1]!.verification!, stateHash: "deadbeef" },
     };
 
-    expect(() => verifyReplay(machine, entries)).toThrow(AgentReplayDivergenceError);
+    expect(() => replay(machine, entries, { verify: "strict" })).toThrow(
+      AgentReplayDivergenceError,
+    );
     try {
-      verifyReplay(machine, entries);
+      replay(machine, entries, { verify: "strict" });
     } catch (error) {
       expect(error).toMatchObject({ eventId: "evt_00000001", index: 1, kind: "state" });
     }

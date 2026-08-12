@@ -1,7 +1,7 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import type { AnyMachineSnapshot, Snapshot } from "xstate";
-import { persistSnapshot, runAgent, type AgentTextRequest } from "@statelyai/agent";
+import { runAgent, type AgentTextRequest } from "@statelyai/agent";
 import { fanOutMachine, runFanOutExample } from "./index.js";
 
 test("fan-out plans subtopics, spawns one branch per subtopic, and reduces all summaries", async () => {
@@ -73,7 +73,7 @@ test("fan-out plans subtopics, spawns one branch per subtopic, and reduces all s
 });
 
 // FINDING (2026-07): resuming a snapshot persisted while branches are still in
-// flight does NOT re-run those spawned children. `persistSnapshot` captures the
+// flight does NOT re-run those spawned children. A persisted snapshot captures the
 // live children with no resumable state (status undefined, no output); on
 // restore xstate drops them (`children: {}`), so `collecting` has nothing left
 // to await and `runAgent` settles `{ status: 'idle' }` in `collecting` with
@@ -104,7 +104,7 @@ test.skip("resumes a mid-flight snapshot and completes with all summaries", asyn
     onTransition: (snapshot) => {
       if (JSON.stringify(snapshot.value) !== '"collecting"') return;
       if (!captured && Object.keys(snapshot.context.summaries).length < subtopics.length) {
-        captured = persistSnapshot(snapshot);
+        captured = fanOutMachine.getPersistedSnapshot(snapshot);
       }
     },
   });

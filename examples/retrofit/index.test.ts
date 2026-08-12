@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import {
-  assertAgentMachine,
+  lintAgentMachine,
   simulateAgent,
   type AgentRequestExecutors,
   type ChosenEvent,
@@ -12,7 +12,7 @@ const TRIAGE = { category: "refund", sentiment: "neutral", summary: "Damaged ite
 // ─── (a) the final machine is structurally sound ───
 
 test("final machine lints clean", () => {
-  assertAgentMachine(supportMachine);
+  lintAgentMachine(supportMachine, { throw: true });
 });
 
 // ─── (b) simulateAgent proves the refactor preserved before.ts behavior ───

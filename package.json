@@ -68,6 +68,16 @@
         "default": "./dist/otel.cjs"
       }
     },
+    "./validate": {
+      "import": {
+        "types": "./dist/validate.d.mts",
+        "default": "./dist/validate.mjs"
+      },
+      "require": {
+        "types": "./dist/validate.d.cts",
+        "default": "./dist/validate.cjs"
+      }
+    },
     "./sqlite": {
       "import": {
         "types": "./dist/sqlite.d.mts",
@@ -151,6 +161,7 @@
   "peerDependencies": {
     "@opentelemetry/api": "^1",
     "ai": "^6.0.67",
+    "ajv": "^8.20.0",
     "xstate": ">=6.0.0-alpha.25 <6.0.0"
   },
   "peerDependenciesMeta": {
@@ -158,6 +169,9 @@
       "optional": true
     },
     "ai": {
+      "optional": true
+    },
+    "ajv": {
       "optional": true
     }
   },

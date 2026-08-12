@@ -16,14 +16,9 @@
  * Run: OPENAI_API_KEY=... npx tsx examples/swarm-handoff/index.ts
  */
 import { z } from "zod";
+import type { Snapshot as PersistedSnapshot } from "xstate";
 import { openai } from "@ai-sdk/openai";
-import {
-  persistSnapshot,
-  runAgent,
-  setupAgent,
-  type RunAgentOptions,
-  type RunAgentResult,
-} from "@statelyai/agent";
+import { runAgent, setupAgent, type RunAgentOptions, type RunAgentResult } from "@statelyai/agent";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 
 const agentName = z.enum(["travel", "food"]);
@@ -74,7 +69,7 @@ const agentSetup = setupAgent({
   },
   // The machine's own wait signal: the `waiting` tag. `runAgent` settles idle
   // deterministically at the turn boundary whenever a snapshot carries it.
-  isSuspended: (snapshot) => snapshot.hasTag("waiting"),
+  isIdle: (snapshot) => snapshot.hasTag("waiting"),
   requests: {
     travelReply: {
       schemas: {
@@ -179,7 +174,7 @@ export async function runSwarmHandoffExample(
 
   // Persist the snapshot (host's choice of store) — JSON round-trip it to
   // prove `activeAgent` survives a real persistence layer.
-  const persisted = persistSnapshot(first.snapshot);
+  const persisted = first.persistedSnapshot;
 
   // ...later, new process: hand off to the food agent for the next turn.
   const second = await runAgent(swarmHandoffMachine, {
@@ -222,10 +217,10 @@ async function runInteractive() {
 
   // Turn 1 seeds the conversation from a fresh run; later turns resume the
   // persisted snapshot with a HANDOFF event.
-  type Snapshot = ReturnType<typeof swarmHandoffMachine.resolveState>;
-  let snapshot: Snapshot | null = null;
+  type LiveSnapshot = ReturnType<typeof swarmHandoffMachine.resolveState>;
+  let snapshot: PersistedSnapshot<unknown> | null = null;
 
-  const onTransition = (snap: Snapshot) => {
+  const onTransition = (snap: LiveSnapshot) => {
     // Surface the turn's routing (which agent's turn state runs).
     if (snap.value === "travelTurn" || snap.value === "foodTurn") {
       console.log(`  [state] ${snap.value}`);
@@ -275,7 +270,7 @@ async function runInteractive() {
         break;
       }
       active = result.snapshot.context.activeAgent;
-      snapshot = persistSnapshot(result.snapshot);
+      snapshot = result.persistedSnapshot;
       console.log(`[${active}] ${result.snapshot.context.reply ?? ""}\n`);
     }
   });

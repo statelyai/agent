@@ -10,7 +10,7 @@
  *     are inferred from the idle snapshot with `getAcceptedEvents(...)`.
  *   - REJECT-with-reason redraft loop: rejecting feeds the reason back into the
  *     next draft; APPROVE publishes.
- *   - Snapshot persistence: each idle snapshot survives `persistSnapshot(...)`
+ *   - Snapshot persistence: each idle settle hands back a `persistedSnapshot`
  *     (a JSON round-trip) and resumes in the *next* `runAgent` call.
  *
  * Two entry points:
@@ -29,7 +29,6 @@ import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 import {
   getAcceptedEvents,
   getStateMeta,
-  persistSnapshot,
   runAgent,
   setupAgent,
   type AgentRequestExecutors,
@@ -75,8 +74,8 @@ const agentSetup = setupAgent({
   },
   // This machine declares its own wait signal: a tag it chose. runAgent settles
   // idle deterministically whenever a resting snapshot carries it (no timing
-  // heuristic). A host could override this per-run via runAgent({ isSuspended }).
-  isSuspended: (snapshot) => snapshot.hasTag("awaiting-review"),
+  // heuristic). A host could override this per-run via runAgent({ isIdle }).
+  isIdle: (snapshot) => snapshot.hasTag("awaiting-review"),
   requests: {
     writeDraft: {
       schemas: {
@@ -185,7 +184,7 @@ export async function runHumanInTheLoopExample(
   // Phase 2: ...later, new process, human approved. Same machine, one event,
   // resumed from the persisted (JSON-round-tripped) snapshot.
   const second = await runAgent(humanInTheLoopMachine, {
-    snapshot: persistSnapshot(first.snapshot),
+    snapshot: first.persistedSnapshot,
     event: { type: "APPROVE" },
     ...executors,
   });
@@ -240,7 +239,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
       console.log("\n" + (interaction?.label ?? ""));
       console.log("Legal events:", legalEvents.join(", "));
 
-      const persisted = persistSnapshot(snapshot);
+      const persisted = result.persistedSnapshot;
       const answer = (await promptLine("approve / reject? ")).toLowerCase();
 
       if (answer.startsWith("a")) {

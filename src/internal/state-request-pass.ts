@@ -282,10 +282,14 @@ async function runAdvancePhase(
     events,
     attempts: [],
   };
-  const chosen = await resolveDecision(decisionRequest, deps.decide, {
-    signal: deps.signal,
-    canTake: (event) => deps.getSnapshot().can(event),
-  });
+  const chosen = await resolveDecision(
+    decisionRequest,
+    { decide: deps.decide },
+    {
+      signal: deps.signal,
+      canTake: (event) => deps.getSnapshot().can(event),
+    },
+  );
   // Re-check after the await: a run that settled while the decision was in
   // flight gets no further appends (no stray post-settle onMessage) or sends.
   if (deps.isSettled()) {

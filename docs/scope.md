@@ -5,11 +5,16 @@ description: What Stately Agent owns, what the host owns, and where specialized 
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
 
-`@statelyai/agent` is a portable control-flow tool, not an agent framework. It owns the executable machine: states, legal transitions, typed requests, decisions, composition, suspension, resume, and deterministic testing. The host owns every external capability.
+This page describes what `@statelyai/agent` implements, what your host implements, and where other libraries fit.
 
-That boundary is what makes a machine portable. Agent frameworks that bundle a model client, a search client, a memory store, and a server all at once tie your control flow to those choices. Here the machine only ever describes work; the host decides how it happens, so the same machine runs against a different SDK, provider, or database with no edits.
+`@statelyai/agent` is a control-flow library, not an agent framework. It owns the executable machine: states, legal transitions, typed requests, decisions, composition, suspension, resume, and deterministic testing. The host owns every external capability.
 
-In practice the machine says _what_:
+This boundary is what makes a machine portable. An agent framework that bundles a model client, a search client, a memory store, and a server ties your control flow to those choices. Here, the machine describes work and the host decides how the work happens. The same machine runs against a different SDK, provider, or database without edits.
+
+The machine declares what happens:
+
+<!-- viz: ownership boundary diagram: machine (states, requests, decisions) | executors/actors seam | host capabilities (model SDK, search, memory, sandbox, store, telemetry) -->
+
 
 ```ts no-check
 searching: {
@@ -17,52 +22,50 @@ searching: {
 }
 ```
 
-and the host says _how_, binding `searchWeb` to whichever search client, cache, and auth it uses.
+The host decides how it happens, binding `searchWeb` to the search client, cache, and auth it uses.
 
 ## Ownership boundary
 
 <!-- ownership boundaries derived from src/run-agent.ts, src/steps.ts, src/types.ts, and the host/example adapters -->
 
-| Concern                                                                 | Owner                            | Stately Agent integration point                                 |
-| ----------------------------------------------------------------------- | -------------------------------- | --------------------------------------------------------------- |
-| Workflow states, branching, loops, parallelism, retries, approval gates | Machine                          | XState machine configuration                                    |
-| Model calls and structured output                                       | Host or model SDK                | `AgentRequestExecutors`                                         |
-| Tools and tool loops                                                    | Host or model SDK                | request `tools` and `metadata`                                  |
-| Search, RAG, crawling, data APIs                                        | Specialized library or service   | tool, executor, or `actors` implementation                      |
-| Long-term and semantic memory                                           | Database or memory library       | load into machine input; expose reads/writes as actors or tools |
-| Sandboxes, filesystems, generated artifacts                             | Sandbox or workspace library     | host actors and artifact handles in machine context             |
-| MCP discovery, auth, sessions, and transport                            | MCP client or host framework     | pass discovered tool descriptors into requests                  |
-| Evaluation datasets, scorers, experiments, and dashboards               | Evaluation library               | consume `onTrace`, `onResult`, snapshots, and machine outputs   |
-| Snapshot persistence                                                    | Host store                       | `AgentSnapshotStore` and `persistSnapshot(...)`                 |
-| Queues, schedules, leases, deployment, HTTP/SSE/WebSocket               | Runtime or application framework | step API, snapshots, callbacks, emitted events                  |
-| Telemetry export                                                        | Observability library            | `onTrace` and `inspect`                                         |
+| Concern                                                                 | Owner                            | Stately Agent integration point                        |
+| ----------------------------------------------------------------------- | -------------------------------- | ------------------------------------------------------ |
+| Workflow states, branching, loops, parallelism, retries, approval gates | Machine                          | Machine configuration                                  |
+| Model calls and structured output                                       | Host or model SDK                | `AgentRequestExecutors`                                |
+| Tools and tool loops                                                    | Host or model SDK                | Request `tools` and `metadata`                         |
+| Search, RAG, crawling, data APIs                                        | Specialized library or service   | Request `tools`, executors, or `actors`                |
+| Long-term and semantic memory                                           | Database or memory library       | Machine `input`, plus `actors` for reads and writes    |
+| Sandboxes, filesystems, generated artifacts                             | Sandbox or workspace library     | `actors`, plus artifact handles in machine context     |
+| MCP discovery, auth, sessions, and transport                            | MCP client or host framework     | Request `tools`                                        |
+| Evaluation datasets, scorers, experiments, and dashboards               | Evaluation library               | `onTrace`, `onResult`, snapshots, and machine output   |
+| Snapshot persistence                                                    | Host store                       | `AgentSnapshotStore` and `getPersistedSnapshot()`      |
+| Queues, schedules, leases, deployment, HTTP/SSE/WebSocket               | Runtime or application framework | Step path, snapshots, callbacks, and emitted events    |
+| Telemetry export                                                        | Observability library            | `onTrace` and `inspect`                                |
 
-The repository includes examples for the orchestration shape, not replacement implementations of those systems:
+The repository examples show the orchestration shape. They are not replacement implementations of the systems listed above.
 
-- [Deep research](../examples/deep-research/index.ts) models planning, concurrent research, reflection, and synthesis. Its search implementation still belongs to the host.
-- [Trading team](../examples/trading-team/index.ts) models parallel analysts, debate, risk review, and approval. Market feeds and order execution remain external.
+- [Deep research](https://github.com/statelyai/agent/blob/main/examples/deep-research/index.ts) models planning, concurrent research, reflection, and synthesis. The host still supplies the search implementation.
+- [Trading team](https://github.com/statelyai/agent/blob/main/examples/trading-team/index.ts) models parallel analysts, debate, risk review, and approval. Market feeds and order execution remain external.
 
 ## Core criteria
 
-A feature belongs in core when portable machine intent cannot otherwise be expressed or handed to an arbitrary host without framework-specific glue. Good core candidates improve one of these seams:
+The rules for what belongs in core live in [CONTRIBUTING.md](https://github.com/statelyai/agent/blob/main/CONTRIBUTING.md).
 
-- authoring typed, inspectable control flow;
-- describing external work without executing it;
-- binding that work in any host;
-- suspending, persisting, and resuming without changing the machine;
-- stepping and replaying deterministically;
-- observing a run without coupling it to one telemetry or evaluation vendor.
+## Non-goals
 
-A feature does not belong in core merely because popular agent applications need it. Search clients, vector stores, browser automation, code sandboxes, skills, prompt registries, eval scorers, and deployment servers are useful precisely because specialized libraries can evolve them independently.
+- Visualization tooling. Stately Studio and the VS Code extension handle diagramming and inspection.
+- Search clients, vector stores, browser automation, code sandboxes, skills, prompt registries, eval scorers, and deployment servers. These evolve independently as specialized libraries.
 
 ## Integration recipes
 
+The seam between tools and actors is fixed. Tools are chosen by the model within one request. Actors are steps the machine orchestrates.
+
 - Wrap an async capability as an XState actor and provide it through `actors`.
 - Pass SDK-native tools through a request's `tools` map.
-- Put host-only hints in request `metadata`; core preserves it without interpreting it.
-- Close over auth, tenant, tracing, and service clients when constructing executors or actors.
-- Persist JSON-safe snapshots and external artifact handles, not live clients or binary resources, in machine context.
-- Feed traces to an evaluation or observability library through `onTrace`; do not make the machine aware of the destination.
+- Put host-only hints in request `metadata`. Core preserves `metadata` without interpreting it.
+- Close over auth, tenant, tracing, and service clients when you construct executors or actors.
+- Store JSON-safe snapshots and external artifact handles in machine context. Do not store live clients or binary resources there.
+- Send traces to an evaluation or observability library through `onTrace`. The machine does not need to know the destination.
 
 ## Related
 

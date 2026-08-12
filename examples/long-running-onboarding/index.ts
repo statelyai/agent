@@ -27,7 +27,6 @@ import { createAsyncLogic } from "xstate";
 import {
   getAcceptedEvents,
   getStateMeta,
-  persistSnapshot,
   runAgent,
   setupAgent,
   type AgentRequestExecutors,
@@ -122,7 +121,7 @@ const coordinatorSetup = setupAgent({
   // state with `meta.interaction` (what the host should show), so it reuses that
   // as its suspension signal instead of a separate tag. runAgent settles idle
   // deterministically at any resting state carrying an interaction.
-  isSuspended: (snapshot) => getStateMeta(snapshot).interaction !== undefined,
+  isIdle: (snapshot) => getStateMeta(snapshot).interaction !== undefined,
   actors: {
     sendWelcomePacket: createAsyncLogic({
       schemas: {
@@ -335,7 +334,7 @@ export async function runLongRunningOnboardingExample(
   idlePrompts.push(getStateMeta(first.snapshot).interaction?.label ?? "");
   idleEventTypes.push(getAcceptedEvents(first.snapshot).map((event) => event.type));
 
-  const persistedAfterWelcome = persistSnapshot(first.snapshot);
+  const persistedAfterWelcome = first.persistedSnapshot;
   const second = await runAgent(longRunningOnboardingMachine, {
     snapshot: persistedAfterWelcome,
     event: { type: "DOCS_SIGNED", signedAt: "2026-07-20" },
@@ -351,7 +350,7 @@ export async function runLongRunningOnboardingExample(
   idlePrompts.push(getStateMeta(second.snapshot).interaction?.label ?? "");
   idleEventTypes.push(getAcceptedEvents(second.snapshot).map((event) => event.type));
 
-  const persistedAfterProvisioning = persistSnapshot(second.snapshot);
+  const persistedAfterProvisioning = second.persistedSnapshot;
   const third = await runAgent(longRunningOnboardingMachine, {
     snapshot: persistedAfterProvisioning,
     event: { type: "HARDWARE_DELIVERED", deliveredAt: "2026-07-28" },

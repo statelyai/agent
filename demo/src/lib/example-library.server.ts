@@ -77,8 +77,8 @@ type ExampleMetadata = {
   budgetMs?: number;
   /**
    * State tag that marks human-wait states, for plain XState machines that
-   * can't carry a setupAgent isSuspended predicate. The demo passes
-   * `runAgent(machine, { isSuspended: (s) => s.hasTag(tag) })` so idle
+   * can't carry a setupAgent isIdle predicate. The demo passes
+   * `runAgent(machine, { isIdle: (s) => s.hasTag(tag) })` so idle
    * settles deterministically instead of via the timing heuristic.
    */
   suspendedTag?: string;

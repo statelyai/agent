@@ -103,7 +103,7 @@ function createAiSdkSubAgentWorkflow(subAgents: SubAgents) {
         },
         // Bound the host-side tool loop so the supervisor can call both
         // sub-agents across steps (the AI SDK adapter reads this).
-        metadata: { maxSteps: 8 },
+        maxSteps: 8,
       },
     },
   });

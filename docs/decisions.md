@@ -7,15 +7,18 @@ description: Let the model choose one currently-legal machine event, validated a
 
 ## Overview
 
-A **decision** lets the model choose an event to send to the running machine. It chooses based on which events are enabled in the current state: the machine declares candidate events, guards decide which are legal, and the model picks among the survivors. Not free text, not an arbitrary tool call; an out-of-bounds choice is impossible, not merely discouraged by a prompt.
+A **decision** lets the model choose one event to send to the running machine. The machine declares the candidate events, guards determine which of them are legal in the current state, and the model picks one of the remaining candidates. The model does not produce free text or an arbitrary tool call. The machine rejects any event that is not legal in the current state.
 
-The snippets below are from [Twenty Questions](../examples/twenty-questions/index.ts), where each turn the model chooses `ASK` or `GUESS`.
+The snippets below come from [Twenty Questions](../examples/twenty-questions/index.ts), where the model chooses `ASK` or `GUESS` each turn.
+
+<!-- viz: sequence diagram for one decision: machine invokes agent.decide -> host coerces the model to one candidate event -> validation (unknown-event / invalid-payload / rejected-by-guard) -> retry or send the event to the machine -->
+
 
 ## Invoking an agent decision
 
 <!-- agent.decide builtin from src/setup-agent.ts and src/decision.ts -->
 
-Author a decision inline with the builtin `agent.decide` actor source, on the invoke that needs one. Its input takes:
+Author a decision inline on the invoke that needs one, using the builtin `agent.decide` actor source. Its input takes:
 
 - `model`: which model to use (a key from your models map).
 - `system` (optional): system prompt.
@@ -35,7 +38,7 @@ deciding: {
       prompt: `Questions remaining: ${context.questionsRemaining}`,
       allowedEvents: ['ASK', 'GUESS'],
     }),
-    // The model never made a valid choice (retries exhausted).
+    // Reached when retries are exhausted.
     onError: { target: 'failed' },
   },
   on: {
@@ -47,37 +50,41 @@ deciding: {
 // ...
 ```
 
-The `allowedEvents` list is strongly typed against the machine's event schema, so a typo is a compile error. Listing events explicitly also makes the candidate set reviewable in the machine.
+The `allowedEvents` list is typed against the machine's event schema, so a typo is a compile error. Listing events explicitly also makes the candidate set visible in the machine.
 
-> **Note:** `agent.decide` needs a **snapshot-aware host** (`runAgent` or the [step path](steps.md)) to know which events are currently legal. Under a bare `createActor(...)`, list `allowedEvents` explicitly; wildcards and the omitted default cannot expand there.
-
-> **Note:** `allowedEvents` narrows the _declared_ candidates; guards then decide what is actually legal from the current snapshot. A declared-but-currently-illegal choice does not get through.
+> **Note:** `agent.decide` needs a snapshot-aware host, either `runAgent` or the [step path](steps.md), to know which events are currently legal. In [uncontrolled mode](choosing-a-run-mode.md#uncontrolled-provideexecutors), under a bare `createActor(...)`, list `allowedEvents` explicitly. Wildcards and the omitted default cannot expand there.
 
 ### `allowedEvents` patterns
 
-The `allowedEvents` option accepts a single string or an array. Entries are exact event types or wildcard patterns, and the two can mix (`['todo.*', 'reset']`):
+The `allowedEvents` option accepts a single string or an array. Entries are exact event types or wildcard patterns, and the two can mix, as in `['todo.*', 'reset']`.
 
-- `['ASK', 'GUESS']`: exact types, typed against the event-schema keys (typo = compile error).
-- `'ASK'`: a single string, shorthand for a one-entry array.
-- `'*'`: every currently-legal event.
-- `'todo.*'`: a dotted namespace, every declared event under `todo.` (`todo.add`, `todo.toggle`, …). Typed against declared dotted types, so `'nope.*'` (matching nothing) is a compile error.
+| Value | Meaning |
+| ----- | ------- |
+| `['ASK', 'GUESS']` | Exact event types, typed against the event-schema keys. A typo is a compile error. |
+| `'ASK'` | A single string, shorthand for a one-entry array. |
+| `'*'` | Every currently-legal event. |
+| `'todo.*'` | Every declared event under the `todo.` namespace, such as `todo.add` and `todo.toggle`. Typed against declared dotted types, so a pattern matching nothing, such as `'nope.*'`, is a compile error. |
 
 ## Delivering the chosen event
 
-Delivery is automatic: when the decision resolves, the `agent.decide` actor sends the chosen event to the machine, and the matching `on:` transition runs. You handle the outcome with ordinary transitions, no special decision plumbing.
+Delivery is automatic. When the decision resolves, the `agent.decide` actor sends the chosen event to the machine, and the matching `on:` transition runs. You handle the outcome with ordinary transitions.
 
-> **Note:** The chosen event's transition typically exits the invoking state, cancelling the invoke, so `onDone` normally never fires. Declare `onDone` only when the chosen event's transition stays in-state; the invoke then completes with the chosen event as output. `onError` (retries exhausted, `AgentDecisionExhaustedError`) is unaffected.
+### When `onDone` fires
+
+The chosen event's transition usually exits the invoking state, which cancels the invoke, so `onDone` normally never fires. Declare `onDone` only when the chosen event's transition stays in the same state. The invoke then completes with the chosen event as its output. `onError` is unaffected and still fires when retries are exhausted with `AgentDecisionExhaustedError`.
 
 ## Guard enforcement
 
-Guards are transition functions returning `undefined` (see [transitions](machines.md#transitions)). Because a guard may read the event payload, candidates cannot be filtered upfront: a decision offers the full `allowedEvents` set (intersected with what the state statically accepts), and `snapshot.can(event)` is checked **after** the model picks. A chosen `ASK` on the final turn is rejected and the model asked again.
+Guards are transition functions that return `undefined`. See [Transitions](machines.md#transitions). A guard may read the event payload, so candidates cannot be filtered before the model picks.
 
-`runAgent` and the step path do this for you. When calling `resolveDecision` directly (uncontrolled mode), thread the check via `canTake`:
+The candidate set is the `allowedEvents` list intersected with the events the state statically accepts. After the model picks one, `snapshot.can(event)` decides whether it is legal in the current snapshot. A chosen `ASK` on the final turn is rejected, and the model is asked again.
+
+`runAgent` and the step path perform this check for you. When you call [`resolveDecision`](steps.md#standalone-decision-resolution) directly in [uncontrolled mode](choosing-a-run-mode.md#uncontrolled-provideexecutors), pass the check through `canTake`:
 
 ```ts
 import { resolveDecision } from "@statelyai/agent";
 
-const event = await resolveDecision(request, executors.decide, {
+const event = await resolveDecision(request, executors, {
   canTake: (e) => snapshot.can(e),
 });
 ```
@@ -88,30 +95,35 @@ const event = await resolveDecision(request, executors.decide, {
 
 Each attempt runs three checks in order. Each failure is typed and fed back to the model on the next attempt:
 
-- **`unknown-event`**: the type is not among the candidate events.
-- **`invalid-payload`**: the payload does not match that event's schema.
-- **`rejected-by-guard`**: type and payload are fine, but `snapshot.can(event)` returned `false`.
+| Failure | Cause |
+| ------- | ----- |
+| `unknown-event` | The event type is not among the candidate events. |
+| `invalid-payload` | The payload does not match that event's schema. |
+| `rejected-by-guard` | The type and payload are valid, but `snapshot.can(event)` returned `false`. |
 
 Retry behavior:
 
-- Default 2 retries, so up to 3 attempts. Set `maxRetries` on the decide input to change it.
-- Prior failed attempts ride on `request.attempts`, so the host can render "your last choice failed because X" into the next call. Core never rewrites the prompt itself; see [Hosts](hosts.md).
-- Exhausting retries throws `AgentDecisionExhaustedError` (carrying the attempts list), caught by the invoke's `onError`.
+- The default is 2 retries, so up to 3 attempts. Set `maxRetries` on the decide input to change it.
+- Prior failed attempts are carried on `request.attempts`, so the host can render the previous failure into the next call. Core does not rewrite the prompt itself. See [Hosts](hosts.md).
+- Exhausting retries throws `AgentDecisionExhaustedError`, which carries the attempts list and is caught by the invoke's `onError`.
 
 ## Coercion
 
-Core validates and retries; it never talks to a model. Coercing the model into choosing exactly one option (tool-per-event with forced tool choice, structured output over an event union, etc.) is the host's responsibility. The shipped `createAiSdkExecutors` provides a `decide` executor for the Vercel AI SDK; the raw-SDK examples force the choice with `tool_choice`. See [Hosts](hosts.md).
+Core validates and retries. It never calls a model. Coercing the model into choosing exactly one option is the host's responsibility. Hosts do this with one tool per event and a forced tool choice, or with structured output over an event union. The shipped `createAiSdkExecutors` provides a `decide` executor for the Vercel AI SDK. The raw-SDK examples force the choice with `tool_choice`. See [Hosts](hosts.md).
 
-> **Note:** Decisions are state-local: author them inline on the invoke. There is no reusable decision-logic object, because a decision's candidates and legality depend on the state it runs in.
+> **Note:** Decisions are state-local, so author them inline on the invoke. There is no reusable decision-logic object, because a decision's candidates and legality depend on the state it runs in.
 
-## Multi-event commands: the decide loop
+## The decide loop for multi-event commands
 
-A decision is one event. When one command needs several ("add X and Y" → two `ADD_TODO`), loop the decision in the machine. The loop, its exit, and the applied trail stay visible in the statechart:
+A decision produces one event. When one command needs several events, such as "add X and Y" producing two `ADD_TODO` events, loop the decision in the machine. The loop, its exit, and the trail of applied events stay visible in the statechart.
 
-- A `planning` state invokes `agent.decide` for **one** event.
-- Applying that event targets a turnaround state that immediately re-enters `planning`, starting the next step.
-- An explicit machine event (e.g. `DONE`) is among `allowedEvents` and targets somewhere outside the loop, so the model can end it.
+- A `planning` state invokes `agent.decide` for one event.
+- Applying that event targets a turnaround state that immediately re-enters `planning` and starts the next step.
+- An explicit machine event, such as `DONE`, is among `allowedEvents` and targets a state outside the loop, so the model can end the loop.
 - The trail of applied events lives in context and is appended to each step's prompt.
+
+<!-- viz: state diagram of the decide loop: planning (invoke agent.decide) -> applying (always -> planning) for ADD_TODO/TOGGLE_TODO, and DONE -> awaitingCommand -->
+
 
 ```ts no-check
 planning: {
@@ -134,10 +146,10 @@ planning: {
 applying: { always: { target: 'planning' } },
 ```
 
-Every step gets this page's validation/retry loop. Full example: [examples/todo-nl/index.ts](../examples/todo-nl/index.ts).
+Every step runs the validation and retry loop described above. For the full example, see [examples/todo-nl/index.ts](../examples/todo-nl/index.ts).
 
 ## Related
 
-- [Agent machines](machines.md): transitions, guards, and event schemas.
-- [Hosts](hosts.md): the decide executor and how the model is coerced into one event.
-- [Machines as data](machines-as-data.md): authoring decisions from JSON.
+- Read more about [Agent machines](machines.md), including transitions, guards, and event schemas.
+- Read more about [Hosts](hosts.md), including the decide executor and how the model is coerced into one event.
+- Read more about [Machines as data](machines-as-data.md), including authoring decisions from JSON.

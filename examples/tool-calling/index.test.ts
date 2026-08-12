@@ -66,12 +66,12 @@ test("sample-data rate lookup reads the fixed table", async () => {
   expect(result.validated).toBe(true);
 });
 
-test("the request carries maxSteps metadata for the host tool loop", async () => {
+test("the request carries a typed maxSteps for the host tool loop", async () => {
   let seenMaxSteps: unknown;
   const result = await runToolCallingExample({
     query: "What is 1 plus 1?",
     generateText: async (request) => {
-      seenMaxSteps = request.metadata?.maxSteps;
+      seenMaxSteps = request.maxSteps;
       const sum = (await executeTool(request.tools?.calculate, {
         operation: "add",
         a: 1,

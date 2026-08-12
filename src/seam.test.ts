@@ -42,7 +42,7 @@ const setup = setupAgent({
       prompt: ({ input }) => input.prompt,
     },
   },
-  isSuspended: (snapshot) =>
+  isIdle: (snapshot) =>
     typeof snapshot.value === "string" &&
     ["prompting", "asking", "reviewing"].includes(snapshot.value),
 });
@@ -208,11 +208,14 @@ describe("runSeam", () => {
     expect(run.before.statePath).toContain("writing");
   });
 
-  test("addresses the same call by model key", async () => {
+  test("the model key addresses the queue, never the seam", async () => {
+    // Scripts route by request name when one is scripted under it, else by
+    // model key — but the seam itself is addressed by request name only.
     const seen: string[] = [];
     const run = await runSeam(machine, {
-      ...reviseRun(),
-      seam: { model: "writer", occurrence: 1 },
+      scripts: { judge: [COMPLETE], writer: [DRAFT, REVISED] },
+      respond: user({ prompt: "Tell the team.", changes: "Add the ship date." }),
+      seam: { request: "write", occurrence: 1 },
       candidate: async (request) => {
         seen.push(request.model);
         return { output: REVISED };
@@ -224,11 +227,12 @@ describe("runSeam", () => {
     expect(run.after.statePath).toEqual(["reviewing", "done"]);
   });
 
-  test("the last scripted answer repeats, so a longer branch never runs dry", async () => {
+  test("repeatLast replays the last scripted answer down a longer branch", async () => {
     // One scripted draft, but the user asks for a revision: the `write` queue
     // is called twice and its last entry covers the second call.
     const run = await runSeam(machine, {
       scripts: { assess: [COMPLETE], write: [DRAFT] },
+      repeatLast: true,
       respond: user({ prompt: "Tell the team.", changes: "Add the ship date." }),
       seam: { request: "assess" },
     });
@@ -237,6 +241,18 @@ describe("runSeam", () => {
     if (run.result.status !== "done") return;
     expect(run.result.output.draft).toEqual(DRAFT);
     expect(run.after.statePath).toEqual(["writing", "reviewing", "writing", "reviewing", "done"]);
+  });
+
+  test("without repeatLast an exhausted queue fails the run instead of replaying", async () => {
+    const run = await runSeam(machine, {
+      scripts: { assess: [COMPLETE], write: [DRAFT] },
+      respond: user({ prompt: "Tell the team.", changes: "Add the ship date." }),
+      seam: { request: "assess" },
+    });
+
+    expect(run.result.status).toBe("error");
+    if (run.result.status !== "error") return;
+    expect(String((run.result.error as Error).message)).toMatch(/repeatLast/);
   });
 
   test("a dry queue fails the run, naming the request that went unanswered", async () => {
@@ -295,6 +311,7 @@ describe("runSeam", () => {
   test("maxTurns bounds the drive loop", async () => {
     const run = await runSeam(machine, {
       scripts: { assess: [COMPLETE], write: [DRAFT] },
+      repeatLast: true,
       seam: { request: "assess" },
       // The user always revises: without a bound this never settles `done`.
       respond: ({ state }) =>

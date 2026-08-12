@@ -30,14 +30,14 @@ import {
   toDecisionMessages,
 } from "./mappers.js";
 
-// Multi-step tool loops: `metadata` is the host-owned per-call channel (see
-// AgentTextRequest.metadata). `metadata.maxSteps` bounds the AI SDK tool-call
-// loop for a request; default stays single-step. Shared by generateText and
-// streamText so both honor it symmetrically.
+// Multi-step tool loops: the request's typed `maxSteps` bounds the AI SDK
+// tool-call loop; default stays single-step. `metadata.maxSteps` is still read
+// as a fallback for requests written before `maxSteps` was a typed field.
+// Shared by generateText and streamText so both honor it symmetrically.
 function maxStepsSetting(request: AgentTextRequest): { stopWhen?: ReturnType<typeof stepCountIs> } {
-  return typeof request.metadata?.maxSteps === "number"
-    ? { stopWhen: stepCountIs(request.metadata.maxSteps) }
-    : {};
+  const maxSteps =
+    typeof request.maxSteps === "number" ? request.maxSteps : request.metadata?.maxSteps;
+  return typeof maxSteps === "number" ? { stopWhen: stepCountIs(maxSteps) } : {};
 }
 
 // ─── createAiSdkExecutors ───

@@ -5,29 +5,42 @@ description: Give an agent machine the executor functions that call a model, and
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
 
+This page describes the executor contract, the AI SDK adapter that ships with the package, and how to write your own executors.
+
 ## The executor contract
 
 <!-- AgentRequestExecutors contract and bind-time checks from src/run-agent.ts -->
 
-A **host** runs an agent machine and supplies the functions that call a model. The machine decides what to ask; the host executes it. The machine never talks to a model directly.
+A **host** runs an agent machine and supplies the functions that call a model. The machine determines which request to make. The host performs the call. The machine never calls a model directly.
 
-Those functions are the **executors** (`AgentRequestExecutors`). Each is a plain async function over a plain request object, so any SDK or a raw `fetch` can back it:
+Those functions are the **executors**, typed as `AgentRequestExecutors`. Each executor is an async function that takes a plain request object, so you can implement one with any SDK or with `fetch`.
 
-| Executor                      | Returns                                                                                                     | Required when                            |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| `generateText(request, info)` | `{ output }` (text string or structured object; optional passthrough fields like `usage` allowed alongside) | machine has a generate-mode text request |
-| `streamText(request, info)`   | `{ output }` (accumulated text; chunks stream through `info.onChunk`)                                       | machine has a streaming request          |
-| `decide(request)`             | `{ event }` (the one event the model chose)                                                                 | machine has a decision                   |
+<!-- viz: executor boundary: machine (states, requests, decisions) -> request object -> host executors (generateText / streamText / decide) -> model provider, with the result folded back as an event -->
 
-At bind time, before any actor runs, `runAgent` checks the required executors, so a machine that needs `decide` without one fails immediately rather than mid-run. A machine with only plain actors needs no executors.
 
-> **Note:** Mind the arity. `decide` takes one argument (the request); `generateText` and `streamText` take two (`request, info`, where `info` carries `onChunk` and the abort `signal`).
+| Executor                      | Returns       | Required when                            |
+| ----------------------------- | ------------- | ---------------------------------------- |
+| `generateText(request, info)` | `{ output }`  | machine has a generate-mode text request |
+| `streamText(request, info)`   | `{ output }`  | machine has a streaming request          |
+| `decide(request, info)`       | `{ event }`   | machine has a decision                   |
+
+What each return value holds:
+
+- `generateText` returns `output` as a text string, or as a structured object when the request declares an output schema.
+- `streamText` returns `output` as the accumulated text. Individual chunks are delivered through `info.onChunk` while the call runs.
+- `decide` returns `event`, the one event the model chose from the candidate set.
+
+An executor may return extra passthrough fields alongside `output` or `event`. `usage` is the common one. See [Usage and budgets](usage-and-budgets.md).
+
+`runAgent` checks the required executors at bind time, before any actor runs. A machine that needs `decide` but has no `decide` executor fails immediately instead of failing mid-run. A machine with only plain actors needs no executors.
+
+All three executors take the same two arguments, `request` and `info`. The `info` argument carries `onChunk`, the abort `signal`, and the request id.
 
 ## The shipped AI SDK adapter
 
 <!-- createAiSdkExecutors surface from src/ai-sdk/index.ts -->
 
-`createAiSdkExecutors` from `@statelyai/agent/ai-sdk` is the only adapter this package ships. It builds the `{ generateText, streamText, decide }` set from the Vercel AI SDK (decisions map onto a tool-forced `generateText` call). The subpath exports adapters only (`defineModels`, `createAiSdkExecutors`); `runAgent` always comes from the root and always takes explicit executors.
+`createAiSdkExecutors` from `@statelyai/agent/ai-sdk` is the only adapter that ships with this package. It builds the `{ generateText, streamText, decide }` set from the Vercel AI SDK. Decisions map onto a tool-forced `generateText` call. The `/ai-sdk` subpath exports only adapters, `defineModels` and `createAiSdkExecutors`. `runAgent` is always imported from the root and always takes explicit executors.
 
 ```ts
 import { runAgent } from "@statelyai/agent";
@@ -42,7 +55,7 @@ const result = await runAgent(machine, {
 });
 ```
 
-Executor sets are plain objects, so mixing is fine: keep the adapter's `decide` and swap in your own `streamText`.
+Executor sets are plain objects, so you can mix them. The following example keeps the adapter's `decide` and replaces its `streamText`.
 
 ```ts
 const executors = {
@@ -53,18 +66,18 @@ const executors = {
 
 <!-- peer dependencies and entry points from package.json#peerDependencies and package.json#exports -->
 
-Dependencies stay minimal:
+The package has these dependencies:
 
-- `ai` is an optional peer dependency, imported only by the `/ai-sdk` subpath.
-- `xstate` is core's only runtime peer.
-- `@opentelemetry/api` is an optional peer for the OTel bridge.
+- `ai` is an optional peer dependency. Only the `/ai-sdk` subpath imports it.
+- `xstate` is the only runtime peer dependency of core.
+- `@opentelemetry/api` is an optional peer dependency for the OpenTelemetry bridge.
 - No provider package is a dependency, because you supply the model resolver.
 
-The package ships `@statelyai/agent`, `@statelyai/agent/ai-sdk`, `@statelyai/agent/machines`, `@statelyai/agent/otel`, `@statelyai/agent/sqlite`, and the JSON Schema at `@statelyai/agent/agent-workflow.json`. Every host helper (`getJsonSchema`, `buildEnvelopeSchema`, `parseStructuredEnvelope`, `parseOutput`, `getAgentOutputMode`, `renderDecisionAttempts`, `resolveDecision`, `executeAgentRequest`, ...) is a root export.
+The package exports `@statelyai/agent`, `@statelyai/agent/ai-sdk`, `@statelyai/agent/machines`, `@statelyai/agent/otel`, `@statelyai/agent/sqlite`, and the JSON Schema at `@statelyai/agent/agent-workflow.json`. Host helpers such as `getJsonSchema`, `buildEnvelopeSchema`, `parseStructuredEnvelope`, `parseOutput`, `getAgentOutputMode`, `renderDecisionAttempts`, `resolveDecision`, and `executeAgentRequest` are root exports.
 
 ### Typed model aliases
 
-Pass one `models` map to both `setupAgent` and the adapter, and request `model:` values are typed against its keys:
+Pass the same `models` map to `setupAgent` and to the adapter. Request `model:` values are then typed against the map's keys.
 
 ```ts
 const models = defineModels({
@@ -89,28 +102,28 @@ const agentSetup = setupAgent({
 await runAgent(machine, { input, executors: createAiSdkExecutors({ models }) });
 ```
 
-For a fully dynamic host (one whose machine must not name concrete models), use `resolveModel` instead:
+Use `resolveModel` for a dynamic host, where the machine must not name concrete models.
 
-- It takes the raw ref string and returns a model, so refs like `"openai/gpt-5.4-mini"` resolve without a static map.
-- Pass both `models` and `resolveModel` and `resolveModel` wins.
-- With `models` alone, an unknown ref throws.
-- `parseModelRef(ref)` splits a `"provider/model-id"` ref, so a resolver is one line: `(ref) => openai(parseModelRef(ref).modelId)`.
+- `resolveModel` takes the raw ref string and returns a model, so a ref such as `"openai/gpt-5.4-mini"` resolves without a static map.
+- If you pass both `models` and `resolveModel`, `resolveModel` takes precedence.
+- If you pass only `models`, an unknown ref throws.
+- `parseModelRef(ref)` splits a `"provider/model-id"` ref into its parts, so a resolver can be a single expression: `(ref) => openai(parseModelRef(ref).modelId)`.
 
-Model refs are opaque strings, so any string is a legal `model:` value; the `models` map only adds key autocomplete and a resolution point.
+Model refs are opaque strings, so any string is a legal `model:` value. The `models` map adds key autocomplete and a resolution point.
 
 ### Multi-step tool loops
 
-A text request runs a single model call by default. Set `metadata.maxSteps` on the request to allow a bounded tool-call loop; the adapter forwards it as `stopWhen: stepCountIs(maxSteps)`. This is adapter behavior, not core.
+A text request runs a single model call by default. Set the typed `maxSteps` field on the request to allow a bounded tool-call loop. The adapter forwards it as `stopWhen: stepCountIs(maxSteps)`. This is adapter behavior, not core behavior.
 
-Request `metadata` is the host-owned per-call channel: core leaves it uninterpreted except for adapter conventions like `maxSteps`. A host that doesn't understand a key ignores it, so requests stay portable. It differs from XState `meta` (state-node/transition metadata for tooling); request `metadata` is runtime input passed to the executor. See [Text requests](text-requests.md#tools-and-multi-step-loops).
+Request `metadata` is the host-owned channel for per-call values. Core does not interpret it. A host ignores keys it does not understand, so requests remain portable across hosts. Request `metadata` is not the same as XState `meta`. XState `meta` is state-node and transition metadata used by tooling. Request `metadata` is runtime input passed to the executor. See [Text requests](text-requests.md#tools-and-multi-step-loops).
 
 ## Threading host context into actors and requests
 
-Host-owned values (a session handle, db client, auth or billing ids) often need to reach the code that makes a model call. There is no `hostContext` option today (under consideration, **not shipped**). Pick the pattern by whether the value is serializable and whether it is needed per call:
+Host-owned values such as a session handle, a database client, or auth and billing ids often need to reach the code that calls the model. There is no `hostContext` option today. It is under consideration and is not shipped. Choose a pattern based on whether the value is serializable and whether it is needed per call.
 
-- **Serializable ids the machine carries:** pass as machine `input`, land in `context`, map into each actor's `input`.
-- **Non-serializable handles (a live session, db client, socket):** close over them where you define the actor via `.provide({ actors })` or `.withExecutor(...)`. The handle stays in the closure, never in `context` (it won't survive [snapshot serialization](human-in-the-loop.md#persist-and-resume-across-processes)).
-- **Per-call reference ids** (auth token, billing id, trace id): put them in the request's input schema, so they're typed and validated at the call site rather than smuggled through `metadata`.
+- Serializable ids that the machine carries: pass them as machine `input`. They land in `context`, and you map them into each actor's `input`.
+- Non-serializable handles such as a live session, a database client, or a socket: close over them where you define the actor, using `.provide({ actors })` or `.withExecutor(...)`. The handle stays in the closure and never enters `context`, because it does not survive [snapshot serialization](human-in-the-loop.md#persist-and-resume-across-processes).
+- Per-call reference ids such as an auth token, a billing id, or a trace id: put them in the request's input schema. They are then typed and validated at the call site instead of being passed through `metadata`.
 
 ```ts no-check
 function buildMachine(session: Session, db: DbClient) {
@@ -129,7 +142,7 @@ function buildMachine(session: Session, db: DbClient) {
 
 <!-- createScriptedExecutors surface from src/scripted-executors.ts -->
 
-`createScriptedExecutors` is the keyless executor set: a full `{ generateText, streamText, decide }` that plays back scripted answers from FIFO queues instead of calling a model. No API key, no network. It is a root export (no dependencies), so a machine runs end to end with nothing installed but core.
+`createScriptedExecutors` returns a full `{ generateText, streamText, decide }` set that plays back scripted answers from FIFO queues instead of calling a model. It needs no API key and makes no network calls. It is a root export with no dependencies, so a machine runs end to end with only core installed.
 
 ```ts
 import { createScriptedExecutors, runAgent } from "@statelyai/agent";
@@ -143,17 +156,18 @@ const result = await runAgent(moderationMachine, {
 });
 ```
 
-- `decisions` answers `decide`; `text` answers every text request, `generateText` and `streamText` sharing the one queue.
-- Entries are values or functions of the request: route on `request.name`, on the decision's candidate `events`, or on prior `attempts`.
-- An entry may be the raw envelope (`{ output, usage }` / `{ event, usage }`), so scripted runs can exercise usage aggregation.
+- `decisions` answers `decide`. `text` answers every text request, and `generateText` and `streamText` share that one queue. `userInput` answers `agent.userInput` invokes.
+- The returned object also carries a `userInput` handler. Pass it to `runAgent`'s `userInput` option, because `agent.userInput` is an actor source rather than an executor slot.
+- An entry is a value or a function of the request. A function can route on `request.name`, on the decision's candidate `events`, or on prior `attempts`.
+- An entry may be a raw envelope, `{ output, usage }` or `{ event, usage }`, so a scripted run can exercise usage aggregation.
 - A guard-rejected decision consumes an entry and retries with the next one.
-- A dry queue throws with `code: 'scripted-executors-exhausted'`, naming the pending request. Queues are copied, so one script object seeds many runs.
+- An empty queue throws an error with `code: 'scripted-executors-exhausted'` that names the pending request. Queues are copied, so one script object can seed many runs.
 
-For a playthrough with no run loop at all, `simulateAgent` scripts the pure step path by invoke `src`. See [Testing and verification](verify.md).
+To script a run with no run loop, use `simulateAgent`, which scripts the step path by invoke `src`. See [Testing and verification](verify.md).
 
 ## Writing your own executors
 
-The contract is three plain functions, so a raw `fetch` is enough:
+The contract is three async functions, so `fetch` is enough to implement one.
 
 ```ts
 import type { AgentRequestExecutors } from "@statelyai/agent";
@@ -171,20 +185,23 @@ const executors: AgentRequestExecutors = {
 await runAgent(machine, { input, executors });
 ```
 
-A hand-written host reads the fields it needs off the plain request and builds its own payload. The one public mapping helper is `getJsonSchema(schema)`: it reads a Standard Schema's JSON Schema for a `response_format` or a tool's `parameters`. Wrap the declared output schema with `buildEnvelopeSchema` first (below).
+A hand-written host reads the fields it needs from the request and builds its own payload. The one public mapping helper is `getJsonSchema(schema)`. It reads a Standard Schema's JSON Schema for use as a `response_format` or as a tool's `parameters`. Wrap the declared output schema with `buildEnvelopeSchema` first. See [The structured-output envelope](#the-structured-output-envelope).
 
-Two more root exports for hand-rolled hosts:
+Two other root exports are useful for hand-written hosts:
 
-- **`isStandardSchema(value)`** narrows an unknown schema before extraction. A tool's `inputSchema` may be an SDK-specific wrapper core can't read: check first and fall back to unconstrained parameters instead of crashing (what the shipped adapter does internally).
-- **`renderDecisionAttempts(request)`** renders a decision request's prior failed `attempts` as feedback messages to append to the next call, so retries converge instead of repeating the same illegal choice. See [Decisions](decisions.md#validation-and-retries).
+- `isStandardSchema(value)` narrows an unknown schema before extraction. A tool's `inputSchema` may be an SDK-specific wrapper that core cannot read. Check the value first and fall back to unconstrained parameters. The shipped adapter does this internally.
+- `renderDecisionAttempts(request)` renders a decision request's prior failed `attempts` as feedback messages to append to the next call, so a retry does not repeat the same illegal choice. See [Decisions](decisions.md#validation-and-retries).
 
-For runnable reference implementations against real provider SDKs (raw `openai`, raw `@anthropic-ai/sdk`, Cloudflare Workers AI, Durable Objects), see [Models and providers](models-and-providers.md).
+For runnable reference implementations against provider SDKs, including raw `openai`, raw `@anthropic-ai/sdk`, Cloudflare Workers AI, and Durable Objects, see [Models and providers](models-and-providers.md).
 
 ## The structured-output envelope
 
 <!-- buildEnvelopeSchema and the wire contract from src/text-logic.ts; adapter in src/ai-sdk -->
 
-When a request has a structured output schema (`getAgentOutputMode(request.outputSchema) === 'structured'`), a host sends the schema wrapped as a root object (the **envelope**) and unwraps it before returning. This is THE wire contract for structured output: a root object is universally accepted as a provider response schema, unlike a bare union or array root that many providers reject.
+When a request has a structured output schema, meaning `getAgentOutputMode(request.outputSchema)` returns `'structured'`, the host sends the schema wrapped in a root object called the **envelope**, then unwraps the response before returning it. This is the wire contract for structured output. Providers accept a root object as a response schema, but many reject a bare union or array at the root.
+
+<!-- viz: structured output round trip: declared schema -> buildEnvelopeSchema -> getJsonSchema -> provider -> parseStructuredEnvelope -> unwrapped .result returned as output -->
+
 
 ```json
 { "result": <the declared schema>, "reasoning": "<optional string>" }
@@ -206,20 +223,20 @@ if (getAgentOutputMode(request.outputSchema) === "structured") {
 }
 ```
 
-Return the **unwrapped** `.result` as `output`:
+Return the unwrapped `.result` as `output`.
 
-- The machine only ever validates and sees the schema it declared.
-- `reasoning` is surfaced on the raw executor result only, never in machine context/output (see [reasoning opt-in](text-requests.md#reasoning)).
-- Requests with no declared output schema are text requests and skip the envelope entirely.
-- Prompt-serialized hosts that never send a response schema (the Workers AI host, for one) parse best-effort JSON and skip it too.
+- The machine validates and sees only the schema it declared.
+- `reasoning` appears on the raw executor result only. It never appears in machine context or output. See [reasoning opt-in](text-requests.md#reasoning).
+- A request with no declared output schema is a text request and skips the envelope.
+- A prompt-serialized host that never sends a response schema, such as the Workers AI host, parses the JSON best-effort and also skips the envelope.
 
 ## Retries and budgets
 
-Transport-level retries and executor-level budgets belong to the host. See [Usage and budgets](usage-and-budgets.md#retries-and-executor-budgets).
+The host owns transport-level retries and executor-level budgets. See [Usage and budgets](usage-and-budgets.md#retries-and-executor-budgets).
 
 ## Machines with no requests
 
-`RunAgentOptions.getRequests` is the retrofit seam: when a machine would otherwise settle idle, this hook reads the snapshot and returns the model request(s) to run instead, so a plain invoke-less XState machine runs as an agent with no machine changes. Prompts can come from state `description`s, `meta`, tags, or a lookup keyed by state value. Full recipe in [Migrating from a loop](from-a-loop.md#retrofit-with-getrequests).
+`RunAgentOptions.getRequests` lets you run an existing XState machine as an agent without changing the machine. When the machine would otherwise settle idle, the hook reads the snapshot and returns the model requests to run instead. Prompts can come from state `description` fields, `meta`, tags, or a lookup keyed by state value. See [Migrating from a loop](from-a-loop.md#retrofit-with-getrequests).
 
 ## Related
 

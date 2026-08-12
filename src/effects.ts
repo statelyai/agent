@@ -746,15 +746,6 @@ export function replay<TMachine extends AnyStateMachine>(
   return { snapshot: snapshot as SnapshotFrom<TMachine>, effects };
 }
 
-/** Requires and checks every entry's recorded state/effect hashes. */
-export function verifyReplay<TMachine extends AnyStateMachine>(
-  machine: TMachine,
-  entries: readonly AgentLogEntry[],
-  options: Omit<ReplayOptions, "verify"> = {},
-): ReplayResult<TMachine> {
-  return replay(machine, entries, { ...options, verify: "strict" });
-}
-
 /** Structural event-tail, logical-state, and owed-effect comparison. */
 export function diffEventLogs<TMachine extends AnyStateMachine>(
   machine: TMachine,

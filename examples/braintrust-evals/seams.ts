@@ -122,8 +122,7 @@ export async function runSeamCase(
     seam: input.seam,
     ...(candidate ? { candidate } : {}),
     respond: respondFor(input),
-    isSuspended: (snapshot) =>
-      typeof snapshot.value === "string" && WAITING_STATES.has(snapshot.value),
+    isIdle: (snapshot) => typeof snapshot.value === "string" && WAITING_STATES.has(snapshot.value),
   });
 
   return {
@@ -256,7 +255,7 @@ export const clarifySeam: SeamRow[] = [
         promptEvaluator: [VAGUE_ASSESSMENT, COMPLETE_ASSESSMENT],
         emailDrafter: [DRAFT],
       },
-      seam: { model: "promptEvaluator", occurrence: 0 },
+      seam: { request: "evaluatePrompt", occurrence: 0 },
     },
     expected: {
       // A prompt with no recipient must send the machine to `needsMoreInfo`.
@@ -276,7 +275,7 @@ export const clarifySeam: SeamRow[] = [
         promptEvaluator: [COMPLETE_ASSESSMENT],
         emailDrafter: [DRAFT],
       },
-      seam: { model: "promptEvaluator", occurrence: 0 },
+      seam: { request: "evaluatePrompt", occurrence: 0 },
     },
     expected: {
       // Straight to drafting: no clarification round.
@@ -299,7 +298,7 @@ export const draftSeam: SeamRow[] = [
         promptEvaluator: [COMPLETE_ASSESSMENT],
         emailDrafter: [DRAFT],
       },
-      seam: { model: "emailDrafter", occurrence: 0 },
+      seam: { request: "draftEmail", occurrence: 0 },
     },
     expected: {
       statePath: ["reviewing", "sending", "sent"],
@@ -318,7 +317,7 @@ export const draftSeam: SeamRow[] = [
         promptEvaluator: [VAGUE_ASSESSMENT, COMPLETE_ASSESSMENT],
         emailDrafter: [DRAFT],
       },
-      seam: { model: "emailDrafter", occurrence: 0 },
+      seam: { request: "draftEmail", occurrence: 0 },
     },
     expected: {
       statePath: ["reviewing", "sending", "sent"],
@@ -341,7 +340,7 @@ export const reviseSeam: SeamRow[] = [
         promptEvaluator: [COMPLETE_ASSESSMENT],
         emailDrafter: [DRAFT, REVISED_DRAFT],
       },
-      seam: { model: "emailDrafter", occurrence: 1 },
+      seam: { request: "draftEmail", occurrence: 1 },
     },
     expected: {
       statePath: ["reviewing", "sending", "sent"],

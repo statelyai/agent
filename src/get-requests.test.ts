@@ -1,9 +1,8 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
-import { createMachine } from "xstate";
+import { createActor, createMachine, type AnyMachineSnapshot } from "xstate";
 import {
   getAgentMessages,
-  persistSnapshot,
   runAgent,
   userMessage,
   type AgentDecisionRequest,
@@ -14,6 +13,8 @@ import {
   type AgentTools,
 } from "./index.js";
 import { getMachineStructuralHash } from "./index.js";
+// TODO: re-export from ./index.js (see the export list in the handoff report).
+import { getSnapshotNodes, getSnapshotRequests } from "./run-agent.js";
 
 // ─── State interpretation (runAgent's `getRequests` option) ───
 //
@@ -137,7 +138,9 @@ describe("runAgent getRequests (state interpretation)", () => {
     // typed accessor — it works on the live and JSON-persisted snapshot alike.
     // `onMessage` observed the same log live, message by message.
     const messages = getAgentMessages(result.snapshot);
-    expect(getAgentMessages(persistSnapshot(result.snapshot))).toEqual(messages);
+    expect(getAgentMessages(taglineMachine.getPersistedSnapshot(result.snapshot) as never)).toEqual(
+      messages,
+    );
     expect(live).toEqual(messages);
 
     // The live info arg carries the run's identity, one per message, all
@@ -465,7 +468,7 @@ describe("runAgent getRequests (state interpretation)", () => {
   });
 
   test(
-    "advances through isSuspended-positive states instead of stalling",
+    "advances through isIdle-positive states instead of stalling",
     { timeout: 3000 },
     async () => {
       const machine = createMachine({
@@ -481,7 +484,7 @@ describe("runAgent getRequests (state interpretation)", () => {
       const result = await runAgent(machine, {
         // Every snapshot reads as an intentional wait — interpretation must
         // still retrigger after each pass (P1 regression).
-        isSuspended: () => true,
+        isIdle: () => true,
         getRequests: (snapshot) =>
           snapshot._nodes
             .filter((node) => node.description)
@@ -521,3 +524,95 @@ describe("runAgent getRequests (state interpretation)", () => {
     expect(result.status === "error" ? result.cause : undefined).toBe("max-model-calls");
   });
 });
+
+// ─── getSnapshotRequests / getSnapshotNodes (the recipe, without `_nodes`) ───
+
+describe("getSnapshotRequests", () => {
+  test("drives the same described machine with no `_nodes` access in host code", async () => {
+    const textCalls: AgentTextRequest[] = [];
+    const decideCalls: AgentDecisionRequest[] = [];
+
+    const result = await runAgent(taglineMachine, {
+      getRequests: (snapshot) => getSnapshotRequests(snapshot, { model: "test-model" }),
+      executors: {
+        generateText: async (request) => {
+          textCalls.push(request);
+          return { output: "a line" };
+        },
+        decide: async (request) => {
+          decideCalls.push(request);
+          return { event: { type: "APPROVE" } };
+        },
+      },
+    });
+
+    expect(result.status).toBe("done");
+    // brainstorming + drafting are text steps; judging (tagged `decision`) is not.
+    expect(textCalls).toHaveLength(2);
+    expect(textCalls[1]?.system).toBe("Senior copywriter");
+    expect(decideCalls).toHaveLength(1);
+    // Candidate events are scoped to the node's own events.
+    expect(decideCalls[0]?.events.map((event) => event.type).sort()).toEqual(["APPROVE", "REVISE"]);
+  });
+
+  test("single-outcome states advance deterministically; `filter`/`map` override the defaults", () => {
+    const machine = createMachine({
+      id: "two",
+      initial: "writing",
+      states: {
+        writing: {
+          description: "Write it.",
+          on: { NEXT: { target: "waiting" } },
+        },
+        waiting: {
+          description: "Wait for a human.",
+          tags: ["waiting"],
+          on: { APPROVE: { target: "done" }, REJECT: { target: "writing" } },
+        },
+        done: { type: "final" },
+      },
+    });
+
+    const snapshot = runAgentSnapshot(machine);
+    const requests = getSnapshotRequests(snapshot, { model: "m" });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      model: "m",
+      prompt: "Write it.",
+      kind: "text",
+      onDone: { type: "NEXT" },
+      allowedEvents: ["NEXT"],
+    });
+
+    // `map` reshapes; returning undefined drops.
+    expect(
+      getSnapshotRequests(snapshot, {
+        model: "m",
+        map: (request) => ({ ...request, system: "Be brief." }),
+      })[0]?.system,
+    ).toBe("Be brief.");
+    expect(getSnapshotRequests(snapshot, { model: "m", map: () => undefined })).toEqual([]);
+    // `filter` overrides the default described-and-not-waiting rule.
+    expect(getSnapshotRequests(snapshot, { model: "m", filter: () => false })).toEqual([]);
+  });
+
+  test("getSnapshotNodes exposes the active nodes as plain descriptors", () => {
+    const snapshot = runAgentSnapshot(taglineMachine);
+    const nodes = getSnapshotNodes(snapshot);
+
+    expect(nodes.some((node) => node.id.endsWith("brainstorming"))).toBe(true);
+    const leaf = nodes.find((node) => node.key === "brainstorming");
+    expect(leaf?.description).toBe("Brainstorm three tagline ideas for the product.");
+    expect(leaf?.ownEvents).toEqual(["IDEAS_READY"]);
+    expect(leaf?.leaf).toBe(true);
+  });
+});
+
+// The initial snapshot of a machine, as a live actor would see it.
+function runAgentSnapshot(machine: Parameters<typeof createActor>[0]) {
+  const actor = createActor(machine);
+  actor.start();
+  const snapshot = actor.getSnapshot() as AnyMachineSnapshot;
+  actor.stop();
+  return snapshot;
+}

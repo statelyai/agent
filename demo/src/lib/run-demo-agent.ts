@@ -36,7 +36,7 @@ const startInput = z.object({
 
 const resumeInput = z.object({
   scenarioId,
-  // The persisted snapshot is opaque JSON produced by persistSnapshot.
+  // The persisted snapshot is the opaque JSON an idle settle hands back.
   snapshot: z.custom<Snapshot<unknown>>((value) => value != null && typeof value === "object"),
   event: z.union([
     z.object({ kind: z.literal("interpret"), text: z.string().trim().min(1).max(4000) }),

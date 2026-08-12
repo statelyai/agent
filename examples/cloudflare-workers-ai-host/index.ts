@@ -159,43 +159,45 @@ async function runWorkersAiTextRequest(env: Env, request: AgentTextRequest) {
 async function runWorkersAiDecision(env: Env, request: AgentDecisionRequest): Promise<ChosenEvent> {
   return resolveDecision(
     request,
-    async (attemptRequest) => {
-      const legalEvents = attemptRequest.events.map((event) => `- ${event.type}`).join("\n");
-      const attemptFeedback = renderDecisionAttempts(attemptRequest)
-        .map((m) => m.content)
-        .join("\n");
+    {
+      decide: async (attemptRequest) => {
+        const legalEvents = attemptRequest.events.map((event) => `- ${event.type}`).join("\n");
+        const attemptFeedback = renderDecisionAttempts(attemptRequest)
+          .map((m) => m.content)
+          .join("\n");
 
-      const prompt = [
-        attemptRequest.prompt ?? "",
-        attemptFeedback,
-        "",
-        "Choose exactly one legal event.",
-        "Legal events:",
-        legalEvents,
-        "",
-        "Reply with ONLY a JSON object and no other text, no explanation, no prose.",
-        'Example reply: {"type":"ATTACK","target":"goblin"}',
-      ]
-        .filter(Boolean)
-        .join("\n");
+        const prompt = [
+          attemptRequest.prompt ?? "",
+          attemptFeedback,
+          "",
+          "Choose exactly one legal event.",
+          "Legal events:",
+          legalEvents,
+          "",
+          "Reply with ONLY a JSON object and no other text, no explanation, no prose.",
+          'Example reply: {"type":"ATTACK","target":"goblin"}',
+        ]
+          .filter(Boolean)
+          .join("\n");
 
-      const text = await runWorkersAiPrompt(env, {
-        model: attemptRequest.model,
-        system: attemptRequest.system,
-        prompt,
-        temperature: attemptRequest.temperature,
-        maxOutputTokens: attemptRequest.maxOutputTokens,
-      });
+        const text = await runWorkersAiPrompt(env, {
+          model: attemptRequest.model,
+          system: attemptRequest.system,
+          prompt,
+          temperature: attemptRequest.temperature,
+          maxOutputTokens: attemptRequest.maxOutputTokens,
+        });
 
-      try {
-        return { event: parseJsonFromText(text) as ChosenEvent };
-      } catch (error) {
-        // Not JSON at all. Hand back an event type that cannot match, so
-        // `resolveDecision` records an `unknown-event` attempt and re-asks with
-        // that feedback in `request.attempts` — rather than throwing out of the
-        // whole turn on one malformed response.
-        return { event: { type: `<unparsed response: ${String(error)}>` } };
-      }
+        try {
+          return { event: parseJsonFromText(text) as ChosenEvent };
+        } catch (error) {
+          // Not JSON at all. Hand back an event type that cannot match, so
+          // `resolveDecision` records an `unknown-event` attempt and re-asks with
+          // that feedback in `request.attempts` — rather than throwing out of the
+          // whole turn on one malformed response.
+          return { event: { type: `<unparsed response: ${String(error)}>` } };
+        }
+      },
     },
     { maxRetries: 2 },
   );

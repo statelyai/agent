@@ -5,34 +5,47 @@ description: Three ways to execute the same agent machine, what each one owns, a
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
 
+This page describes the three ways to execute an agent machine and how to choose between them.
+
 ## Three ways to execute one machine
 
-An agent machine is a blueprint. It declares states, requests, and decisions; it never runs itself and never talks to a model. Something has to drive it, and there are three drivers:
+An agent machine declares states, requests, and decisions. It does not run itself and does not call a model. A host drives it. There are three hosts to choose from:
 
-- **`runAgent`** (controlled): the library owns the actor and the loop.
-- **`provideExecutors` + `createActor`** (uncontrolled): you own the actor; XState drives it.
-- **The step path** (`getAgentEffects` / `executeAgentRequest` / `replay`): you own the loop and the persistence.
+- `runAgent` (controlled). The library owns the actor and the run loop.
+- `provideExecutors` with `createActor` (uncontrolled). You own the actor and XState drives it.
+- The step path (`getAgentEffects`, `executeAgentRequest`, `replay`). You own the loop and the persistence.
 
-**The machine does not change between them.** The same file runs under all three, and the same tests cover it either way. Only the host changes.
+The machine is the same in all three modes. The same file runs under each one, and the same tests cover it. Only the host changes.
+
+<!-- viz: one machine feeding three hosts: runAgent (library-owned actor + loop), provideExecutors + createActor (user-owned actor), step path (user-owned loop + event log) -->
+
 
 ## Decision table
 
-| Mode                   | You own                                             | The library owns                                                    | Idle handling                                                         | Durability                                                  | Reach for it when                                                                                                 |
-| ---------------------- | --------------------------------------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| **`runAgent`**         | The call site and the executors                     | The actor, the run loop, request retries, usage aggregation, traces | Settles `idle` with a snapshot to resume from                         | Snapshot per settle, plus a replayable `result.events` log  | Default. Scripts, HTTP handlers, workers, anything with a request/response boundary                               |
-| **`provideExecutors`** | `createActor`, the actor lifecycle, subscriptions   | Executor binding for agent sources only                             | None: the actor just sits in the waiting state                        | Whatever you persist off the actor (`getPersistedSnapshot`) | A host that already owns an actor lifecycle: React, a Durable Object, a long-lived process                        |
-| **Step path**          | The loop, the event log, when to persist, the clock | Pure effect derivation, request execution, replay, verification     | Explicit: no async effect owed means idle, and you persist and return | Event-sourced. Append before continue, resume by `replay`   | Serverless per turn, queue-driven work, durable execution engines, crash recovery that cannot re-bill model calls |
+| Mode                   | You own                                             | The library owns                                                    | Durability                                                  | Reach for it when                                                                                                 |
+| ---------------------- | --------------------------------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| **`runAgent`**         | The call site and the executors                     | The actor, the run loop, request retries, usage aggregation, traces | Snapshot per settle, plus a replayable `result.events` log  | Scripts, HTTP handlers, workers, and anything with a request/response boundary                                    |
+| **`provideExecutors`** | `createActor`, the actor lifecycle, subscriptions   | Executor binding for agent sources only                             | Whatever you persist off the actor (`getPersistedSnapshot`) | A host that already owns an actor lifecycle, such as React, a Durable Object, or a long-lived process             |
+| **Step path**          | The loop, the event log, when to persist, the clock | Pure effect derivation, request execution, replay, verification     | Event-sourced. Append before continue, resume by `replay`   | Serverless per turn, queue-driven work, durable execution engines, and crash recovery that cannot re-bill model calls |
+
+### Idle handling
+
+Each mode reaches the point where the machine waits for an outside event differently:
+
+- `runAgent` settles with status `idle` and returns a snapshot to resume from.
+- `provideExecutors` does not settle. The actor stays alive in its current state until you send it an event.
+- On the step path, you detect idle yourself. When no asynchronous effect is owed, persist and return.
 
 ## Start with `runAgent`
 
-`runAgent` is the default and answers most needs. It binds executors, drives the machine to a settle point, and returns `{ status, output?, snapshot, events, usage }`.
+`runAgent` is the default mode. It binds executors, drives the machine to a settle point, and returns `{ status, output?, snapshot, events, usage }`.
 
-Move off it when one of these is true:
+Choose another mode when one of these is true:
 
-- The host already owns an actor and a render loop, and a second loop inside it is redundant. Go **uncontrolled**.
-- Each turn is a separate process invocation, or a crash between two model calls must not re-run the completed one. Go to the **step path**.
+- The host already owns an actor and a render loop. Use the uncontrolled mode instead of running a second loop inside it.
+- Each turn is a separate process invocation, or a crash between two model calls must not re-run the completed call. Use the step path.
 
-Everything else, including human-in-the-loop pauses that span days, is `runAgent` plus a persisted snapshot.
+Everything else uses `runAgent` with a persisted snapshot, including human-in-the-loop pauses that last days.
 
 ## Controlled: `runAgent`
 
@@ -46,14 +59,21 @@ if (result.status === "idle") {
 }
 ```
 
-- Settles `done` | `idle` | `error`, and stops its actor on every settle path, so resume is always by snapshot.
-- Descends into invoked child machines, rebinding executors as it goes.
-- Aggregates token usage into `result.usage` and emits the full trace stream through `onTrace`.
-- Returns `result.events`, a JSON-safe `AgentLogEntry[]` you can hand straight to `replay`.
-- `generateResult(machine, options)` is the go-straight-through variant: it resolves with the done result and throws `AgentIdleError` if the machine pauses.
-- For a **long-lived session** (chat turns, sockets, device events) that keeps the event log, budgets, and traces without settling and restoring each turn, `createAgentActor` is the same engine with an actor that survives idle settles: `session.actor.send(event)` re-opens the cycle, `await session.settled()` resolves at the next quiescence.
+- `runAgent` settles with status `done`, `idle`, or `error`. It stops its actor on every settle path, so you always resume from a snapshot.
+- It descends into invoked child machines and rebinds executors as it goes.
+- It aggregates token usage into `result.usage` and emits the trace stream through `onTrace`.
+- It returns `result.events`, a JSON-safe `AgentLogEntry[]` that you can pass to `replay`.
 
-Full surface: [Hosts and executors](hosts.md).
+<!-- viz: runAgent lifecycle: start/resume -> run loop (request -> executor -> transition) -> settle as done | idle | error, with snapshot + events emitted at each settle -->
+
+### Variants of the controlled mode
+
+Two entry points run the same engine as `runAgent` with a different call shape. They are variants of the controlled mode, not separate modes.
+
+- `generateResult(machine, options)` resolves with the done result and throws `AgentIdleError` if the machine pauses. Use it when an idle settle is a failure for the caller.
+- `createAgentActor(machine, options)` returns an actor that survives idle settles. Use it for long-lived sessions such as chat turns, sockets, or device events, where the event log, budgets, and traces persist across turns. Call `session.actor.send(event)` to re-open the cycle, and `await session.settled()` to resolve at the next quiescence.
+
+Read more about [Hosts and executors](hosts.md).
 
 ## Uncontrolled: `provideExecutors`
 
@@ -66,13 +86,13 @@ actor.subscribe((snapshot) => snapshot.status === "done" && console.log(snapshot
 actor.start();
 ```
 
-- Returns a machine with every agent source bound. From there it is a plain XState actor, nothing more.
-- No run loop and **no idle settling**: the actor simply waits in its current state until you send it an event.
-- **Does not descend into invoked child machines.** A child machine gets no executors unless you bind it yourself.
-- `agent.userInput` is left unbound; supply it through the third argument, `{ actors }`.
-- Tracing composes: pass `onTrace` to `provideExecutors` and `traceTransitions(onTrace)` to the actor's `inspect` for one merged stream.
+- `provideExecutors` returns a machine with every agent source bound. The result is a plain XState actor.
+- There is no run loop and no idle settling. The actor waits in its current state until you send it an event.
+- `provideExecutors` descends into registered child machines, at any depth, and binds each with its own schemas. A child invoked as a direct object is not bound, the same as under `runAgent`.
+- `agent.userInput` is left unbound. Supply it through the third argument, `{ actors }`.
+- To trace an uncontrolled run, pass `onTrace` to `provideExecutors` and pass `traceTransitions(onTrace)` to the actor's `inspect` option. The two produce one merged stream.
 
-Worked hosts: [Use in any stack](any-stack.md#controlled-and-uncontrolled).
+Read more about [Use in any stack](any-stack.md#controlled-and-uncontrolled).
 
 ## Owning the loop: the step path
 
@@ -88,21 +108,23 @@ const entry = createReplayEntry(machine, entries, effects[0].toDoneEvent(output)
 await store.append({ threadId, expectedIndex: entries.length, entries: [entry] });
 ```
 
-- No actor at all. `getAgentEffects` lowers the current frontier into an ordered `AgentEffect[]`; you resolve one, append, and fold.
-- The **event log is the source of truth**. `replay(machine, entries)` reconstructs the snapshot and the still-owed effects without executing anything.
-- Append before you continue: an optimistic `expectedIndex` append is the commit point, so two workers on one thread resolve to exactly one winner.
-- Every owed effect carries a replay-stable `requestId` to use as an idempotency key.
-- The host owns the clock (`delay` effects) and the runtime for plain `task` effects.
-- `verifyReplay` re-checks recorded hashes, so a tampered or diverged log fails loudly.
+- There is no actor. `getAgentEffects` lowers the current frontier into an ordered `AgentEffect[]`. You resolve one effect, append its completion, and fold it back in.
+- The event log is the source of truth. `replay(machine, entries)` reconstructs the snapshot and the still-owed effects without executing anything.
+- Append before you continue. An optimistic `expectedIndex` append is the commit point, so two workers on one thread resolve to exactly one winner.
+- Every owed effect carries a replay-stable `requestId` that you can use as an idempotency key.
+- The host owns the clock for `delay` effects and the runtime for `task` effects.
+- `replay(machine, events, { verify: 'strict' })` re-checks recorded hashes, so a tampered or diverged log fails with an error.
 
-Full loop, per-effect handling, and known limits: [The step path](steps.md).
+<!-- viz: step path loop: replay(entries) -> frontier effects -> execute one -> append entry -> fold with transition -> repeat, with idle exit when nothing is owed -->
 
-## Modes are not exclusive
+Read more about [The step path](steps.md), including per-effect handling and known limits.
 
-- Nothing about the machine is mode-specific, so a machine authored against `runAgent` drops onto the step path unchanged, and back.
-- Tests do not follow the mode. `simulateAgent` walks the pure step path from a by-`src` script and `createScriptedExecutors` feeds any executor-taking host, so the same assertions cover a machine whichever way production runs it. See [Testing and verification](verify.md).
-- Modes can coexist in one deployment: an HTTP route uses `runAgent`, the same machine's long-running jobs go through the step path, and a React view runs it uncontrolled.
-- Moving between modes is a host change. The cost is the code you write around the machine, never a rewrite of the machine.
+## Combining modes
+
+- No part of the machine is mode-specific. A machine written for `runAgent` runs on the step path without changes, and the reverse is also true.
+- Tests do not depend on the mode. `simulateAgent` walks the step path from a script keyed by `src`, and `createScriptedExecutors` works with any host that takes executors. The same assertions cover the machine in every mode. See [Testing and verification](verify.md).
+- One deployment can use several modes. An HTTP route can use `runAgent`, long-running jobs for the same machine can use the step path, and a React view can run it uncontrolled.
+- Moving between modes changes only the host code around the machine.
 
 ## Related
 

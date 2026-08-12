@@ -103,8 +103,6 @@ declare const rawOutput: any;
 
 declare const snapshot: any;
 
-declare const persistSnapshot: (snapshot: any) => Promise<void>;
-
 declare const store: any;
 
 declare const executors: any;

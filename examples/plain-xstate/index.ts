@@ -185,7 +185,7 @@ export const plainWriterMachine = setup({
     // Nothing here knows the events will be chosen by a model.
     judging: {
       // Plain XState tags mark the human-wait state; hosts that want
-      // deterministic idle pass runAgent({ isSuspended: (s) => s.hasTag("waiting") }).
+      // deterministic idle pass runAgent({ isIdle: (s) => s.hasTag("waiting") }).
       tags: ["waiting"],
       on: {
         APPROVE: { target: "approved" },
@@ -271,7 +271,7 @@ export async function runPlainXstateExample(
         events,
         attempts: [],
       },
-      decide,
+      { decide },
       // The guard, not the model, is the source of truth: a REVISE past the
       // budget is rejected here and the decision retries (converging to APPROVE).
       { canTake: (event) => snapshot.can(event) },

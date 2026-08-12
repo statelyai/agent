@@ -45,26 +45,17 @@ import type { AgentTools } from "./types.js";
 import { getStateMeta, type MetaOfSnapshot } from "./utils.js";
 
 /**
- * Which model call is under test: the Nth call addressed either by request
- * `name` (the `setupAgent({ requests })` key or `createTextLogic({ name })`,
- * the better developer handle) or by `model` key (the `defineModels` key) for
- * requests that carry no name.
+ * Which model call is under test: the Nth call with this request `name` (the
+ * `setupAgent({ requests })` key, or `createTextLogic({ name })`). Name the
+ * requests you want to score — a seam is a developer-facing handle, not a
+ * model binding, so there is no addressing by model key.
  */
-export type SeamRef =
-  | {
-      /** The request's registered `name`. */
-      request: string;
-      model?: undefined;
-      /** 0-based occurrence among the calls matching this key. Default `0`. */
-      occurrence?: number;
-    }
-  | {
-      /** The `defineModels` key the request names. */
-      model: string;
-      request?: undefined;
-      /** 0-based occurrence among the calls matching this key. Default `0`. */
-      occurrence?: number;
-    };
+export interface SeamRef {
+  /** The request's registered `name`. */
+  request: string;
+  /** 0-based occurrence among the calls with this name. Default `0`. */
+  occurrence?: number;
+}
 
 /**
  * One idle pause, handed to {@link RunSeamOptions.respond} so the simulated
@@ -107,11 +98,17 @@ export interface RunSeamOptions<TMachine extends AnyStateMachine> {
    * by model.
    *
    * Entries follow {@link ScriptedTextEntry} conventions (a value, an
-   * `{ output, usage? }` envelope, or a function of the request). The LAST
-   * entry of a queue repeats, so a live seam that sends the run down a longer
-   * branch still finds an answer instead of running dry.
+   * `{ output, usage? }` envelope, or a function of the request). A queue that
+   * runs dry throws; set {@link RunSeamOptions.repeatLast} to replay its last
+   * entry instead.
    */
   scripts?: Record<string, ScriptedTextEntry[]>;
+  /**
+   * Replay the LAST entry of a queue once it is exhausted, so a live seam that
+   * sends the run down a longer branch still finds an answer. Off by default:
+   * a dry queue throws, the same as every other scripted surface.
+   */
+  repeatLast?: boolean;
   /** The call under test. */
   seam: SeamRef;
   /**
@@ -135,7 +132,7 @@ export interface RunSeamOptions<TMachine extends AnyStateMachine> {
    */
   executors?: Partial<AgentRequestExecutors>;
   /** Passed through to `runAgent`: the deterministic idle-state predicate. */
-  isSuspended?: RunAgentOptions<TMachine>["isSuspended"];
+  isIdle?: RunAgentOptions<TMachine>["isIdle"];
   /** Passed through to `runAgent`: actor implementations merged onto the machine. */
   actors?: RunAgentOptions<TMachine>["actors"];
 }
@@ -240,8 +237,8 @@ export async function runSeam<TMachine extends AnyStateMachine>(
 
   /**
    * Consumes this request's slot in the call plan, or resolves `undefined` when
-   * its queue is dry. The LAST entry repeats: a live seam that branches further
-   * still finds an answer instead of running dry.
+   * its queue is dry. With `repeatLast`, the last entry is replayed instead of
+   * running dry.
    */
   const takeScriptedSlot = async (
     request: AgentTextRequest,
@@ -251,7 +248,7 @@ export async function runSeam<TMachine extends AnyStateMachine>(
     if (!queue?.length) {
       return undefined;
     }
-    const entry = queue.length === 1 ? queue[0]! : queue.shift()!;
+    const entry = options.repeatLast && queue.length === 1 ? queue[0]! : queue.shift()!;
     return resolveScriptedTextEntry(entry, request, info);
   };
 
@@ -264,8 +261,8 @@ export async function runSeam<TMachine extends AnyStateMachine>(
       throw new AgentError(
         "seam-script-exhausted",
         `runSeam: no scripted answer left for request ${describeText(request)}. Add an entry ` +
-          `to \`scripts.${queueKeyOf(request)}\` — its last entry repeats, so one extra answer ` +
-          "covers a longer branch.",
+          `to \`scripts.${queueKeyOf(request)}\`, or pass \`repeatLast: true\` to replay its ` +
+          "last entry down a longer branch.",
       );
     }
     return scripted;
@@ -276,8 +273,7 @@ export async function runSeam<TMachine extends AnyStateMachine>(
     info?: AgentRequestExecutorInfo,
   ): Promise<ExecutorReturn> => {
     const callIndex = calls++;
-    const keyMatches =
-      seam.request !== undefined ? request.name === seam.request : request.model === seam.model;
+    const keyMatches = request.name === seam.request;
     const isSeam = keyMatches && seamMatches++ === (seam.occurrence ?? 0);
 
     if (isSeam && candidate) {
@@ -328,7 +324,7 @@ export async function runSeam<TMachine extends AnyStateMachine>(
     result = await runAgent(machine, {
       ...(snapshot ? { snapshot } : { input: options.input }),
       ...(event ? { event } : {}),
-      ...(options.isSuspended ? { isSuspended: options.isSuspended } : {}),
+      ...(options.isIdle ? { isIdle: options.isIdle } : {}),
       ...(options.actors ? { actors: options.actors } : {}),
       events,
       executors,

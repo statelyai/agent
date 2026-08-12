@@ -7,7 +7,7 @@
  * has to decide the run is idle; without a declared predicate it falls back to
  * a timing heuristic and logs a warning. The fix is one line on `setupAgent`:
  *
- *     isSuspended: (snapshot) => snapshot.hasTag("awaiting-approval")
+ *     isIdle: (snapshot) => snapshot.hasTag("awaiting-approval")
  *
  * plus the matching `tags: [...]` on the waiting state. This test fails when a
  * new example forgets it.
@@ -17,7 +17,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { AnyStateMachine, StateNode } from "xstate";
-import { getMachineSuspensionPredicate } from "../src/internal/registry.js";
+import { getMachineIdlePredicate } from "../src/internal/registry.js";
 
 const examplesDir = fileURLToPath(new URL(".", import.meta.url));
 
@@ -88,7 +88,7 @@ describe("example suspension predicates", () => {
         if (!isMachine(value)) continue;
         const key = `${id}#${exportName}`;
         if (!humanWaitStates(value).length || key in EXCLUDED) continue;
-        (getMachineSuspensionPredicate(value) ? declared : undeclared).push(key);
+        (getMachineIdlePredicate(value) ? declared : undeclared).push(key);
       }
     }
 
@@ -110,7 +110,7 @@ describe("example suspension predicates", () => {
       // Still a human-waiting machine, still undeclared — drop the exclusion
       // once either stops being true.
       expect(humanWaitStates(machine as AnyStateMachine).length).toBeGreaterThan(0);
-      expect(getMachineSuspensionPredicate(machine as AnyStateMachine)).toBeUndefined();
+      expect(getMachineIdlePredicate(machine as AnyStateMachine)).toBeUndefined();
     }
   }, 60_000);
 });

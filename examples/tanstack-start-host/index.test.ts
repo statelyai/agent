@@ -9,7 +9,7 @@
  * The HTTP half is covered by booting the app (`pnpm --dir examples/tanstack-start-host dev`).
  */
 import { describe, expect, it } from "vitest";
-import { createScriptedExecutors, persistSnapshot, runAgent } from "@statelyai/agent";
+import { createScriptedExecutors, runAgent } from "@statelyai/agent";
 import { announceEventSchema, announceMachine } from "./index.js";
 
 const drafts = (...texts: string[]) => createScriptedExecutors({ text: texts });
@@ -50,7 +50,7 @@ describe("announceMachine", () => {
     if (idle.status !== "idle") return;
 
     const done = await runAgent(announceMachine, {
-      snapshot: persistSnapshot(idle.snapshot),
+      snapshot: idle.persistedSnapshot,
       event: { type: "APPROVE" },
       executors: drafts(),
     });
@@ -69,7 +69,7 @@ describe("announceMachine", () => {
 
     let seenPrompt = "";
     const rejected = await runAgent(announceMachine, {
-      snapshot: persistSnapshot(idle.snapshot),
+      snapshot: idle.persistedSnapshot,
       event: { type: "REJECT", reason: "name the speedup" },
       executors: createScriptedExecutors({
         text: [

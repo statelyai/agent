@@ -17,22 +17,22 @@ export const agentExecutionOptions = new WeakMap<object, AgentExecutionOptions>(
  * object. `config` is shared by reference across `machine.provide(...)` (unlike
  * the machine object itself), so a predicate registered here travels with the
  * machine through `.provide` — which is why it is keyed on `config`, not the
- * machine. Set by `setupAgent({ isSuspended })` in `createMachine` and by
- * `setupAgent.fromConfig` (its `isSuspended` option or the config's
- * `suspendedTags`), read by `runAgent` (below the host `options.isSuspended`
+ * machine. Set by `setupAgent({ isIdle })` in `createMachine` and by
+ * `setupAgent.fromConfig` (its `isIdle` option or the config's
+ * `idleTags`), read by `runAgent` (below the host `options.isIdle`
  * override, above the timing heuristic).
  */
-export const machineSuspensionPredicates = new WeakMap<
+export const machineIdlePredicates = new WeakMap<
   object,
   (snapshot: AnyMachineSnapshot) => boolean
 >();
 
-/** Reads the {@link machineSuspensionPredicates} predicate carried by `machine` (via its root `config`), if any. */
-export function getMachineSuspensionPredicate(
+/** Reads the {@link machineIdlePredicates} predicate carried by `machine` (via its root `config`), if any. */
+export function getMachineIdlePredicate(
   machine: AnyStateMachine,
 ): ((snapshot: AnyMachineSnapshot) => boolean) | undefined {
   const config = (machine as { config?: object }).config;
-  return config ? machineSuspensionPredicates.get(config) : undefined;
+  return config ? machineIdlePredicates.get(config) : undefined;
 }
 
 /**
@@ -45,7 +45,7 @@ export function getMachineSuspensionPredicate(
  * context patch into an opaque resolver function, erasing its target from
  * `machine.config` — so `lintAgentMachine`'s reachability walk reads the
  * targets from here instead. Keyed on the machine's root `config` object (like
- * {@link machineSuspensionPredicates}) so it survives `machine.provide(...)`.
+ * {@link machineIdlePredicates}) so it survives `machine.provide(...)`.
  */
 export const machineStaticTransitionTargets = new WeakMap<object, Record<string, string[]>>();
 

@@ -145,9 +145,9 @@ describe("curated XState setup examples", () => {
     }
     expect(chooseMove.events.map((event) => event.type)).toEqual(["ATTACK", "DEFEND", "FLEE"]);
 
-    const attackEvent = await resolveDecision(chooseMove, async () => ({
-      event: { type: "ATTACK", target: "goblin" },
-    }));
+    const attackEvent = await resolveDecision(chooseMove, {
+      decide: async () => ({ event: { type: "ATTACK", target: "goblin" } }),
+    });
 
     const attackStep = transitionAgentStep(gameMachine, snapshot, attackEvent as never);
 

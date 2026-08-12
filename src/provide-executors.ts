@@ -2,9 +2,11 @@ import type { AnyActorLogic, AnyStateMachine } from "xstate";
 import { isTextLogic, USER_INPUT_ACTOR, type AgentRequestExecutors } from "./text-logic.js";
 import { isDecisionLogic } from "./decision.js";
 import {
+  bindChildMachineForProvide,
   bindDecisionForProvide,
   bindTextForProvide,
   getConfiguredInvokeSrcs,
+  isStateMachineLogic,
   type AgentTraceEvent,
 } from "./run-agent.js";
 import { executorBoundLogics } from "./internal/registry.js";
@@ -68,9 +70,12 @@ export interface ProvideExecutorsOptions<TMachine extends AnyStateMachine = AnyS
  * Throws at bind time if a source needs an executor kind that `executors` does
  * not provide.
  *
- * `provideExecutors` does not descend into invoked child state machines: a string-keyed child
- * machine source is left untouched, so a child with its own agent invokes needs
- * its own `provideExecutors(...)` (or `runAgent`, which does rebind children).
+ * Executor inheritance is RECURSIVE, exactly as in `runAgent`: a string-keyed
+ * invoked child machine is rebound too, so its own text/decision requests — at
+ * any depth — reach the same host executors. A direct-object invoke `src`
+ * cannot be swapped via `.provide`, so nothing under one inherits; bind those
+ * with `.withExecutor(...)` or register the child as a string-keyed source. A
+ * source that already carries its own executor is never overwritten.
  */
 export function provideExecutors<TMachine extends AnyStateMachine>(
   machine: TMachine,
@@ -101,6 +106,21 @@ export function provideExecutors<TMachine extends AnyStateMachine>(
       continue;
     }
 
+    // An invoked child machine: recursively bind ITS agent sources with the
+    // same executors (same semantics as runAgent's rebindChildMachine).
+    if (isStateMachineLogic(logic)) {
+      const rebound = bindChildMachineForProvide(
+        logic,
+        executors,
+        bindOptions,
+        new Set([provided as AnyStateMachine]),
+      );
+      if (rebound !== logic) {
+        wrappedSources[key] = rebound;
+      }
+      continue;
+    }
+
     let binding: MissingExecutorBinding | undefined;
     if (isDecisionLogic(logic)) {
       binding = {
@@ -116,7 +136,7 @@ export function provideExecutors<TMachine extends AnyStateMachine>(
         bind: () => bindTextForProvide(provided, logic, executors, bindOptions),
       };
     }
-    // Invoked child state machines and non-agent actors pass through untouched.
+    // Non-agent actors pass through untouched.
     if (!binding) {
       continue;
     }

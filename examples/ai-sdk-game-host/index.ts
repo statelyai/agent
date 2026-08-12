@@ -70,7 +70,7 @@ async function resolveEffect(
     if (!executors.decide) {
       throw new Error(`decision effect '${effect.request.id}' needs a 'decide' executor.`);
     }
-    return resolveDecision(effect.request, executors.decide, {
+    return resolveDecision(effect.request, executors, {
       canTake: (event) => snapshot.can(event as never),
     });
   }
