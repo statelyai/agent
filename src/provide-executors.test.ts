@@ -330,6 +330,51 @@ describe("provideExecutors onTrace / traceTransitions", () => {
     }
   });
 
+  test("a declared createMachine({ version }) is stamped on uncontrolled trace envelopes", async () => {
+    const draftText = createTextLogic({
+      schemas: { input: z.object({ topic: z.string() }), output: z.string() },
+      model: "test-model",
+      prompt: ({ input }) => input.topic,
+    });
+    const schemas = createAgentSchemas({
+      context: z.object({ topic: z.string() }),
+      input: z.object({ topic: z.string() }),
+    });
+    const machine = setupAgent({ schemas, actors: { draftText } }).createMachine({
+      version: "7",
+      context: ({ input }: { input: { topic: string } }) => ({ topic: input.topic }),
+      initial: "drafting",
+      states: {
+        drafting: {
+          invoke: {
+            src: "draftText",
+            input: ({ context }: { context: { topic: string } }) => ({ topic: context.topic }),
+            onDone: { target: "done" },
+          },
+        },
+        done: { type: "final" },
+      },
+    } as never);
+
+    const trace: AgentTraceEvent[] = [];
+    const push = (event: AgentTraceEvent) => trace.push(event);
+    const bound = provideExecutors(
+      machine,
+      {
+        generateText: async () => ({ output: "ok" }),
+      } as never,
+      { onTrace: push },
+    );
+    const actor = createActor(bound, { inspect: traceTransitions(push), input: { topic: "cats" } });
+    actor.start();
+    await toPromise(actor);
+
+    expect(trace.length).toBeGreaterThan(0);
+    for (const event of trace) {
+      expect(event.machineVersion).toBe("7");
+    }
+  });
+
   test("two concurrent actors from one bound machine get distinct runIds and independent seq", async () => {
     const trace: AgentTraceEvent[] = [];
     const bound = provideExecutors(buildStreamMachine(), streamExecutors(), {
@@ -650,5 +695,75 @@ describe("provideExecutors recursive child binding", () => {
     await toPromise(actor);
 
     expect(traced).toEqual(["request.start", "request.end"]);
+  });
+
+  test("a nested child's missing executor throws at bind time, before any actor starts", () => {
+    expect(() => provideExecutors(buildParent(), {} as never)).toThrow(
+      /provideExecutors: actor source 'child > grandchild > childText' is a text source but no 'generateText' executor/,
+    );
+  });
+
+  test("a child machine's stream request with no streamText throws at bind time", () => {
+    const streamLogic = createTextLogic({
+      schemas: { input: z.object({ topic: z.string() }), output: z.string() },
+      model: "child-model",
+      mode: "stream",
+      prompt: ({ input }) => input.topic,
+    });
+    const childSchemas = createAgentSchemas({
+      context: z.object({ line: z.string().nullable() }),
+      input: z.object({ topic: z.string() }),
+      output: z.object({ line: z.string() }),
+    });
+    const child = setupAgent({ schemas: childSchemas, actors: { streamLogic } }).createMachine({
+      context: { line: null },
+      initial: "writing",
+      states: {
+        writing: {
+          invoke: {
+            src: "streamLogic",
+            input: { topic: "t" },
+            onDone: ({ output }: { output: unknown }) => ({
+              target: "done",
+              context: { line: output as string },
+            }),
+          },
+        },
+        done: {
+          type: "final",
+          output: ({ context }: { context: { line: string | null } }) => ({ line: context.line }),
+        },
+      },
+    } as never);
+
+    const parentSchemas = createAgentSchemas({
+      context: z.object({ line: z.string().nullable() }),
+      input: z.object({}),
+      output: z.object({ line: z.string() }),
+    });
+    const parent = setupAgent({ schemas: parentSchemas, actors: { child } }).createMachine({
+      context: { line: null },
+      initial: "delegating",
+      states: {
+        delegating: {
+          invoke: {
+            src: "child",
+            input: { topic: "t" },
+            onDone: { target: "done" },
+          },
+        },
+        done: {
+          type: "final",
+          output: ({ context }: { context: { line: string | null } }) => ({ line: context.line }),
+        },
+      },
+    } as never);
+
+    // Passing generateText is not enough: the child needs streamText.
+    expect(() =>
+      provideExecutors(parent, { generateText: async () => ({ output: "x" }) } as never),
+    ).toThrow(
+      /provideExecutors: actor source 'child > streamLogic' is a streaming text source but no 'streamText' executor/,
+    );
   });
 });

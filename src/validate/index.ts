@@ -5,9 +5,11 @@
  * stays dependency-free. This module imports `ajv`, which is declared as an
  * optional peer dependency.
  */
-import { existsSync, readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import Ajv2020, { type ValidateFunction } from "ajv/dist/2020.js";
+// The schema is imported as a JSON module so bundlers inline it into the
+// built output — no runtime file read, so `/validate` works in edge runtimes
+// and bundles that have no `node:fs`.
+import workflowSchema from "../../schemas/agent-workflow.json";
 
 /**
  * One schema-validation finding from {@link validateAgentConfig}. `path` is a
@@ -33,28 +35,11 @@ export interface AgentConfigValidationResult {
 
 let compiledWorkflowValidator: ValidateFunction | undefined;
 
-/**
- * Resolves `schemas/agent-workflow.json` relative to this module. The built
- * output is flat (`dist/validate.mjs`), while the source lives one level
- * deeper (`src/validate/index.ts`), so both candidates are checked.
- */
-function resolveSchemaPath(): string {
-  const candidates = ["../schemas/agent-workflow.json", "../../schemas/agent-workflow.json"];
-  for (const candidate of candidates) {
-    const path = fileURLToPath(new URL(candidate, import.meta.url));
-    if (existsSync(path)) {
-      return path;
-    }
-  }
-  throw new Error("Could not locate schemas/agent-workflow.json");
-}
-
 function getWorkflowValidator(): ValidateFunction {
   if (!compiledWorkflowValidator) {
-    const schema = JSON.parse(readFileSync(resolveSchemaPath(), "utf8")) as Record<string, unknown>;
     // The published schema is draft 2020-12, so it needs Ajv's 2020 build.
     const ajv = new Ajv2020({ strict: false, allowUnionTypes: true, allErrors: true });
-    compiledWorkflowValidator = ajv.compile(schema);
+    compiledWorkflowValidator = ajv.compile(workflowSchema as Record<string, unknown>);
   }
   return compiledWorkflowValidator;
 }

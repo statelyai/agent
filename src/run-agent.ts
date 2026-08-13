@@ -28,8 +28,8 @@ import { AgentError } from "./errors.js";
 import {
   findNonSerializableContextPaths,
   getAgentMessages,
-  getMachineStructuralHash,
   isStandardSchema,
+  resolveMachineVersion,
   validateSchemaSync,
 } from "./utils.js";
 import {
@@ -1390,8 +1390,7 @@ function bindTextLogic(logic: TextLogic, runCtx: RunAgentBindContext): TextLogic
     const executor = logic.mode === "stream" ? runCtx.streamText : runCtx.generateText;
     if (!executor) {
       throw new Error(
-        `runAgent: no '${logic.mode === "stream" ? "streamText" : "generateText"}' ` +
-          "executor provided.",
+        `No '${logic.mode === "stream" ? "streamText" : "generateText"}' ` + "executor provided.",
       );
     }
 
@@ -1543,7 +1542,7 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
   const decisionLogic = createAsyncLogic<ChosenEvent, unknown>({
     run: async ({ input, signal, self: selfArg }) => {
       if (!runCtx.decide) {
-        throw new Error("runAgent: no 'decide' executor provided.");
+        throw new Error("No 'decide' executor provided.");
       }
       const self = selfArg as BoundActorSelf | undefined;
       const { id } = selfIdAndSrc(self);
@@ -1668,7 +1667,7 @@ function rootTraceState(root: AnyActorRef): RootTraceState {
     const logic = (root as { logic?: AnyStateMachine }).logic;
     const machineId =
       (logic?.config as { id?: string } | undefined)?.id ?? logic?.id ?? "(machine)";
-    const machineVersion = logic ? getMachineStructuralHash(logic) : "";
+    const machineVersion = logic ? resolveMachineVersion(logic) : "";
     state = { runId: `run_${nextProvideRunId++}`, seq: 0, machineId, machineVersion };
     rootTraceRegistry.set(root as object, state);
   }
@@ -2078,8 +2077,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
   // The machine's own `version` (XState's standard `createMachine({ version })`
   // prop, `.provide`-surviving) is the single source of truth; an unversioned
   // machine falls back to the structural hash.
-  const machineVersion =
-    (machine as { version?: string }).version ?? getMachineStructuralHash(machine);
+  const machineVersion = resolveMachineVersion(machine);
   const agentMeta: AgentRunMeta = { machineId, version: machineVersion };
 
   // The run's single observation dispatch point: every trace payload in this

@@ -109,6 +109,12 @@ export function provideExecutors<TMachine extends AnyStateMachine>(
     // An invoked child machine: recursively bind ITS agent sources with the
     // same executors (same semantics as runAgent's rebindChildMachine).
     if (isStateMachineLogic(logic)) {
+      // Assert BEFORE binding: a child's own invoked text/decision sources
+      // need the same executors, and a missing one must fail here rather than
+      // when the child actor eventually starts.
+      if (invokedSrcs.has(key)) {
+        assertChildBindable(logic, executors, key, new Set([provided as AnyStateMachine]));
+      }
       const rebound = bindChildMachineForProvide(
         logic,
         executors,
@@ -121,25 +127,18 @@ export function provideExecutors<TMachine extends AnyStateMachine>(
       continue;
     }
 
-    let binding: MissingExecutorBinding | undefined;
-    if (isDecisionLogic(logic)) {
-      binding = {
-        executorKey: "decide",
-        kind: "decision",
-        bind: () => bindDecisionForProvide(provided, logic, executors, bindOptions),
-      };
-    } else if (isTextLogic(logic)) {
-      const streaming = logic.mode === "stream";
-      binding = {
-        executorKey: streaming ? "streamText" : "generateText",
-        kind: streaming ? "streaming text" : "text",
-        bind: () => bindTextForProvide(provided, logic, executors, bindOptions),
-      };
-    }
     // Non-agent actors pass through untouched.
-    if (!binding) {
+    const requirement = executorRequirementOf(logic);
+    if (!requirement) {
       continue;
     }
+    const binding: MissingExecutorBinding = {
+      ...requirement,
+      bind: () =>
+        isDecisionLogic(logic)
+          ? bindDecisionForProvide(provided, logic, executors, bindOptions)
+          : bindTextForProvide(provided, logic as never, executors, bindOptions),
+    };
     // A source that already carries its own executor (`.withExecutor(...)`) runs itself.
     if (executorBoundLogics.has(logic)) {
       continue;
@@ -154,6 +153,63 @@ export function provideExecutors<TMachine extends AnyStateMachine>(
   }
 
   return withActors(provided, wrappedSources);
+}
+
+/** The executor slot + label an agent logic needs, or `undefined` for a non-agent actor. */
+function executorRequirementOf(logic: AnyActorLogic):
+  | {
+      executorKey: "generateText" | "streamText" | "decide";
+      kind: "text" | "streaming text" | "decision";
+    }
+  | undefined {
+  if (isDecisionLogic(logic)) {
+    return { executorKey: "decide", kind: "decision" };
+  }
+  if (isTextLogic(logic)) {
+    return logic.mode === "stream"
+      ? { executorKey: "streamText", kind: "streaming text" }
+      : { executorKey: "generateText", kind: "text" };
+  }
+  return undefined;
+}
+
+/**
+ * Walks an invoked child machine's own invoked sources (recursively, at any
+ * depth) and throws the same missing-executor error `provideExecutors` throws
+ * for the top-level machine — before any actor starts. Mirrors runAgent's
+ * `assertBindable` for the uncontrolled path. Cycle-safe via `visited`.
+ */
+function assertChildBindable(
+  childMachine: AnyStateMachine,
+  executors: AgentRequestExecutors,
+  path: string,
+  visited: Set<AnyStateMachine>,
+): void {
+  if (visited.has(childMachine)) {
+    return;
+  }
+  const nextVisited = new Set([...visited, childMachine]);
+  const sources = childMachine.sources.actors as Record<string, AnyActorLogic>;
+  for (const src of getConfiguredInvokeSrcs(childMachine)) {
+    if (src === USER_INPUT_ACTOR) {
+      continue;
+    }
+    const logic = sources[src];
+    if (!logic) {
+      continue;
+    }
+    if (isStateMachineLogic(logic)) {
+      assertChildBindable(logic, executors, `${path} > ${src}`, nextVisited);
+      continue;
+    }
+    const requirement = executorRequirementOf(logic);
+    if (!requirement || executorBoundLogics.has(logic)) {
+      continue;
+    }
+    if (!executors[requirement.executorKey]) {
+      throw missingExecutorError(`${path} > ${src}`, requirement.kind, requirement.executorKey);
+    }
+  }
 }
 
 /** What one agent source needs: the executor slot, its label, and how to bind it. */

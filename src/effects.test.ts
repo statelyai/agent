@@ -8,7 +8,12 @@ import {
   type AnyMachineSnapshot,
   type EventObject,
 } from "xstate";
-import { createAgentSchemas, createTextLogic, setupAgent } from "./index.js";
+import {
+  createAgentSchemas,
+  createTextLogic,
+  getMachineStructuralHash,
+  setupAgent,
+} from "./index.js";
 import {
   createReplayEntry,
   diffEventLogs,
@@ -468,5 +473,27 @@ describe("replay — envelope verification", () => {
     expect(diff.stateChanges).toEqual(
       expect.arrayContaining([expect.objectContaining({ path: "/status" })]),
     );
+  });
+});
+
+describe("machine version resolution", () => {
+  const build = (version?: string) =>
+    createMachine({
+      id: "versioned",
+      ...(version !== undefined ? { version } : {}),
+      initial: "a",
+      states: { a: { on: { GO: "b" } }, b: { type: "final" } },
+    } as never);
+
+  test("a declared createMachine({ version }) is the default machineVersion for log entries", () => {
+    const machine = build("7");
+    const init = initEntry(machine);
+    expect(init.machineVersion).toBe("7");
+    expect(createReplayEntry(machine, [init], { type: "GO" }).machineVersion).toBe("7");
+  });
+
+  test("an unversioned machine falls back to the structural hash", () => {
+    const machine = build();
+    expect(initEntry(machine).machineVersion).toBe(getMachineStructuralHash(machine));
   });
 });

@@ -98,6 +98,18 @@ export function getMachineStructuralHash(machine: AnyStateMachine): string {
   return djb2Hex(stableStructuralString((machine as { config: unknown }).config));
 }
 
+/**
+ * The version a machine is stamped with everywhere: an explicitly declared
+ * `createMachine({ version })` when present, else its
+ * {@link getMachineStructuralHash}. Single source of truth so `runAgent`,
+ * `provideExecutors`/`traceTransitions` trace envelopes, and the event-log
+ * helpers (`initEntry`, `createReplayEntry`, `replay`) never disagree.
+ * @internal
+ */
+export function resolveMachineVersion(machine: AnyStateMachine): string {
+  return (machine as { version?: string }).version ?? getMachineStructuralHash(machine);
+}
+
 // Deterministic structural serialization: sorted object keys, function/
 // undefined/symbol values omitted, cycles collapsed. Not reversible — only used
 // as hash input, so the exact string shape is irrelevant as long as it is
@@ -223,8 +235,7 @@ export function getStateMeta<
   // Structural depth per active node id. A custom `id: 'review'` on a nested
   // state has no dots, so the id string is not a usable depth proxy.
   // TODO(xstate): use snapshot.nodes when public.
-  const nodes = (snapshot as { _nodes?: Array<{ id: string; path: string[] }> })
-    ._nodes;
+  const nodes = (snapshot as { _nodes?: Array<{ id: string; path: string[] }> })._nodes;
   const depthById = new Map(nodes?.map((node) => [node.id, node.path.length]));
   const depth = (id: string) => depthById.get(id) ?? id.split(".").length;
   const entries = Object.entries(snapshot.getMeta())
