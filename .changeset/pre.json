@@ -17,6 +17,7 @@
     "agent-usage-event",
     "aggregated-usage-on-run-results",
     "allowed-events-wildcards",
+    "alpha-api-consistency-pass",
     "api-polish-states-helpers-prune",
     "assert-agent-machine",
     "audit-bugfixes-batch",
