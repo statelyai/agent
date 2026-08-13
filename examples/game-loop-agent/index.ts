@@ -182,7 +182,7 @@ const gameSetup = setupAgent({
   // `runAgent` settles idle deterministically whenever a resting snapshot
   // carries it — the invoked `player` child (with its accumulated
   // observations) round-trips through the idle `persistedSnapshot`.
-  isSuspended: (snapshot) => snapshot.hasTag("waiting"),
+  isIdle: (snapshot) => snapshot.hasTag("waiting"),
   context: z.object({
     seed: z.number(),
     target: z.number(),

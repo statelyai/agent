@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { lintAgentMachine, persistSnapshot, runAgent } from "../index.js";
+import { lintAgentMachine, runAgent } from "../index.js";
 import type { AgentRequestExecutors, AgentTextRequest } from "../text-logic.js";
 import type { AgentDecisionExecutor, AgentDecisionRequest } from "../decision.js";
 import {
@@ -43,7 +43,7 @@ describe("createToolLoopMachine", () => {
     model: "quick",
     instructions: "Answer using the tools.",
     tools: { calculate: { description: "math", execute: async () => 714 } },
-    maxTurns: 5,
+    maxSteps: 5,
   });
 
   test("runs one request and finishes with its output", async () => {
@@ -62,16 +62,16 @@ describe("createToolLoopMachine", () => {
     expect(Object.keys(requests[0]?.tools ?? {})).toEqual(["calculate"]);
   });
 
-  test("maxTurns lowers to metadata.maxSteps, interruptOn to metadata.interruptOn", async () => {
+  test("maxSteps lowers to the typed request field", async () => {
     const gated = createToolLoopMachine({
       model: "quick",
-      maxTurns: 3,
-      interruptOn: ["sendRefund"],
+      maxSteps: 3,
     });
     const { generateText, requests } = mockGenerateText();
     await runAgent(gated, { input: { prompt: "hi" }, executors: { generateText } });
 
-    expect(requests[0]?.metadata).toEqual({ maxSteps: 3, interruptOn: ["sendRefund"] });
+    expect(requests[0]?.maxSteps).toBe(3);
+    expect(requests[0]?.metadata).toBeUndefined();
   });
 
   test("carries version '1' and lints clean", () => {
@@ -95,16 +95,15 @@ describe("createToolLoopMachine", () => {
     expect((result.snapshot as { agentMeta?: { version?: string } }).agentMeta?.version).toBe("1");
   });
 
-  test("an explicit machineVersion option still overrides the machine-carried version", async () => {
+  test("the machine's own version is the single source (no machineVersion option)", async () => {
     const { generateText } = mockGenerateText();
     const events: string[] = [];
     await runAgent(machine, {
       input: { prompt: "hi" },
-      machineVersion: "my-pinned-version",
       executors: { generateText },
       onTrace: (event) => events.push(event.machineVersion),
     });
-    expect(new Set(events)).toEqual(new Set(["my-pinned-version"]));
+    expect(new Set(events)).toEqual(new Set(["1"]));
   });
 });
 
@@ -296,7 +295,7 @@ describe("createLoopMachine", () => {
       model: "quick",
       body: { instructions: "Improve it." },
       until: ({ iterations }) => iterations >= 2,
-      maxIterations: 10,
+      maxTurns: 10,
     });
     const { generateText } = mockGenerateText(() => "draft");
     const result = await runAgent(machine, {
@@ -312,12 +311,12 @@ describe("createLoopMachine", () => {
     });
   });
 
-  test("maxIterations bounds a predicate that never fires", async () => {
+  test("maxTurns bounds a predicate that never fires", async () => {
     const machine = createLoopMachine({
       model: "quick",
       body: { instructions: "Improve it.", prompt: ({ iterations }) => `round ${iterations}` },
       until: () => false,
-      maxIterations: 3,
+      maxTurns: 3,
     });
     const { generateText, requests } = mockGenerateText(() => "draft");
     const result = await runAgent(machine, {
@@ -332,10 +331,10 @@ describe("createLoopMachine", () => {
     expect(lintErrors(machine)).toEqual([]);
   });
 
-  test("rejects a non-positive maxIterations", () => {
+  test("rejects a non-positive maxTurns", () => {
     expect(() =>
-      createLoopMachine({ model: "quick", body: {}, until: () => true, maxIterations: 0 }),
-    ).toThrow(/maxIterations/);
+      createLoopMachine({ model: "quick", body: {}, until: () => true, maxTurns: 0 }),
+    ).toThrow(/maxTurns/);
   });
 });
 
@@ -430,7 +429,7 @@ describe("createHandoffMachine", () => {
     expect(first.snapshot.context.reply).toBe("travel says hi");
 
     const second = await runAgent(machine, {
-      snapshot: persistSnapshot(first.snapshot),
+      snapshot: first.persistedSnapshot,
       event: { type: "transfer_to_food", message: "What should I eat?" },
       executors: { generateText },
     });

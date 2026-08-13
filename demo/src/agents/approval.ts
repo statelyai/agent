@@ -8,7 +8,7 @@
  * APPROVE publishes.
  *
  * A direct port of examples/human-in-the-loop: the idle snapshot round-trips
- * through persistSnapshot on every resume, so the two halves can run in
+ * through a persisted snapshot on every resume, so the two halves can run in
  * different requests.
  */
 import { z } from "zod";
@@ -23,7 +23,7 @@ const agentSetup = setupAgent({
     APPROVE: z.object({}),
     REJECT: z.object({ reason: z.string() }),
   },
-  isSuspended: (snapshot) => snapshot.hasTag("awaiting-review"),
+  isIdle: (snapshot) => snapshot.hasTag("awaiting-review"),
   requests: {
     writeDraft: {
       schemas: { input: z.object({ topic: z.string() }), output: z.string() },

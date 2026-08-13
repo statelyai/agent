@@ -481,6 +481,67 @@ describe("runAgent", () => {
     expect(result.status === "error" ? result.cause : undefined).toBe("max-model-calls");
   });
 
+  test("maxModelCalls: the overrun is a typed AgentError an invoke's onError can branch on", async () => {
+    const schemas = createAgentSchemas({
+      context: z.object({ calls: z.number(), budgetSpent: z.boolean() }),
+      input: z.object({}),
+      output: z.object({ calls: z.number(), budgetSpent: z.boolean() }),
+    });
+
+    const step = createTextLogic({
+      schemas: { input: z.object({}), output: z.number() },
+      model: "test-model",
+    });
+
+    const agent = setupAgent({ schemas, actors: { step } });
+    const machine = agent.createMachine({
+      context: { calls: 0, budgetSpent: false },
+      initial: "looping",
+      states: {
+        looping: {
+          invoke: {
+            id: "step",
+            src: "step",
+            input: {},
+            onDone: ({ context }) => ({
+              target: "looping",
+              reenter: true,
+              context: { calls: context.calls + 1 },
+            }),
+            // The budget breach is branchable: a typed AgentError whose `code`
+            // is the same string the settled result's `cause` uses.
+            onError: ({ event }) =>
+              (event.error as { code?: string })?.code === "max-model-calls"
+                ? { target: "budgetSpent", context: { budgetSpent: true } }
+                : { target: "failed" },
+          },
+        },
+        budgetSpent: {
+          type: "final",
+          output: ({ context }) => context,
+        },
+        failed: { type: "final", output: ({ context }) => context },
+      },
+    });
+
+    let calls = 0;
+    const result = await runAgent(machine, {
+      input: {},
+      maxModelCalls: 2,
+      executors: {
+        generateText: async () => {
+          calls += 1;
+          return { output: calls };
+        },
+      },
+    });
+
+    // Handled: the run completes normally instead of settling an error.
+    expect(result.status).toBe("done");
+    expect(result.status === "done" && result.output).toEqual({ calls: 2, budgetSpent: true });
+    expect(calls).toBe(2);
+  });
+
   test("abort: a pre-aborted signal settles an aborted error", async () => {
     const schemas = createAgentSchemas({
       context: z.object({}),
@@ -1818,21 +1879,26 @@ describe("emitted events (runAgent `on`)", () => {
     expect(new Set(trace.map((event) => event.runId)).size).toBe(1);
   });
 
-  test("machineVersion option overrides the version in every trace event", async () => {
-    const trace: AgentTraceEvent<typeof machine>[] = [];
+  test("the machine's own version (not the structural hash) fills every trace event", async () => {
+    const trace: AgentTraceEvent[] = [];
+    const versioned = setup({}).createMachine({
+      id: "versionedTrace",
+      version: "v-declared",
+      context: {},
+      initial: "done",
+      states: { done: { type: "final" } },
+    } as never);
 
-    await runAgent(machine, {
-      input: { topic: "rivers" },
-      machineVersion: "v-override",
+    await runAgent(versioned, {
       onTrace: (event) => trace.push(event),
       executors: {
-        generateText: async () => ({ output: "a draft", usage: { totalTokens: 3 } }),
+        generateText: async () => ({ output: "a draft" }),
       },
     });
 
     expect(trace.length).toBeGreaterThan(0);
     for (const event of trace) {
-      expect(event.machineVersion).toBe("v-override");
+      expect(event.machineVersion).toBe("v-declared");
     }
   });
 });
@@ -2173,15 +2239,15 @@ describe("inspect passthrough (system-wide visibility)", () => {
   });
 });
 
-describe("Feature A: explicit suspension detection (isSuspended)", () => {
-  test("a machine-carried isSuspended predicate settles idle and resumes to done", async () => {
+describe("Feature A: explicit suspension detection (isIdle)", () => {
+  test("a machine-carried isIdle predicate settles idle and resumes to done", async () => {
     const agent = setupAgent({
       context: z.object({}),
       input: z.object({}),
       output: z.object({ approved: z.boolean() }),
       events: { APPROVE: z.object({}) },
       // The machine declares its own wait signal — a tag it chose.
-      isSuspended: (snapshot) => snapshot.hasTag("awaiting-review"),
+      isIdle: (snapshot) => snapshot.hasTag("awaiting-review"),
     });
     const machine = agent.createMachine({
       context: {},
@@ -2275,7 +2341,7 @@ describe("Feature A: explicit suspension detection (isSuspended)", () => {
         CONTINUE: z.object({}),
       },
       actors: { child: childMachine },
-      isSuspended: (snapshot) => snapshot.hasTag("waiting"),
+      isIdle: (snapshot) => snapshot.hasTag("waiting"),
     });
     const machine = agent.createMachine({
       context: { readies: 0 },
@@ -2389,7 +2455,7 @@ describe("Feature A: explicit suspension detection (isSuspended)", () => {
         DONE: z.object({}),
       },
       actors: { child: childMachine },
-      isSuspended: (snapshot) => snapshot.hasTag("waiting"),
+      isIdle: (snapshot) => snapshot.hasTag("waiting"),
     });
     const machine = agent.createMachine({
       context: {},
@@ -2443,7 +2509,7 @@ describe("Feature A: explicit suspension detection (isSuspended)", () => {
       input: z.object({}),
       output: z.object({ summary: z.string() }),
       events: { APPROVE: z.object({}) },
-      isSuspended: (snapshot) => snapshot.hasTag("awaiting-review"),
+      isIdle: (snapshot) => snapshot.hasTag("awaiting-review"),
       requests: {
         summarize: {
           schemas: { input: z.object({}), output: z.string() },
@@ -2493,7 +2559,7 @@ describe("Feature A: explicit suspension detection (isSuspended)", () => {
     expect((result.snapshot.context as { summary: string | null }).summary).toBe("done-summary");
   });
 
-  test("the runAgent isSuspended option overrides the machine-carried predicate", async () => {
+  test("the runAgent isIdle option overrides the machine-carried predicate", async () => {
     const machineSeen: string[] = [];
     const agent = setupAgent({
       context: z.object({}),
@@ -2502,7 +2568,7 @@ describe("Feature A: explicit suspension detection (isSuspended)", () => {
       events: { GO: z.object({}) },
       // Machine-carried predicate would NEVER fire (wrong state) — proves the
       // host option below wins.
-      isSuspended: (snapshot) => {
+      isIdle: (snapshot) => {
         machineSeen.push(JSON.stringify(snapshot.value));
         return snapshot.matches("done");
       },
@@ -2519,7 +2585,7 @@ describe("Feature A: explicit suspension detection (isSuspended)", () => {
     const seen: string[] = [];
     const result = await runAgent(machine, {
       input: {},
-      isSuspended: (snapshot) => {
+      isIdle: (snapshot) => {
         seen.push(JSON.stringify(snapshot.value));
         return snapshot.matches("paused");
       },
@@ -2541,7 +2607,7 @@ describe("Feature A: explicit suspension detection (isSuspended)", () => {
       input: z.object({}),
       output: z.object({}),
       events: { GO: z.object({}) },
-      isSuspended: (snapshot) => snapshot.matches("paused"),
+      isIdle: (snapshot) => snapshot.matches("paused"),
       requests: {
         noop: {
           schemas: { input: z.object({}), output: z.string() },
@@ -2655,22 +2721,17 @@ describe("Feature B: illegal resume event throws", () => {
     expect(err.acceptedTypes.slice().sort()).toEqual(["APPROVE", "REJECT", "SUBMIT"]);
   });
 
-  test("onIllegalResumeEvent: 'ignore' restores the older silent-drop behavior", async () => {
+  test("an illegal resume event always rejects (there is no opt-out)", async () => {
     const first = await runAgent(machine, { input: {}, executors: { generateText } });
     if (first.status !== "idle") throw new Error("expected idle");
 
-    const second = await runAgent(machine, {
-      snapshot: first.snapshot,
-      event: { type: "NOPE" } as never,
-      onIllegalResumeEvent: "ignore",
-      executors: {
-        generateText,
-      },
-    });
-
-    // No throw: the event is silently dropped and the run settles idle again.
-    expect(second.status).toBe("idle");
-    expect(second.status === "idle" ? second.snapshot.value : undefined).toBe("reviewing");
+    await expect(
+      runAgent(machine, {
+        snapshot: first.snapshot,
+        event: { type: "NOPE" } as never,
+        executors: { generateText },
+      }),
+    ).rejects.toBeInstanceOf(AgentIllegalResumeEventError);
   });
 
   test("a type-legal event a guard rejects does not throw (settles per normal semantics)", async () => {
@@ -3326,7 +3387,7 @@ describe("machine version prop (createMachine({ version }))", () => {
       input: z.object({}),
       output: z.object({}),
       events: { GO: {} },
-      isSuspended: (snapshot) => snapshot.hasTag("waiting"),
+      isIdle: (snapshot) => snapshot.hasTag("waiting"),
     });
     return agentSetup.createMachine({
       version,
@@ -3471,11 +3532,23 @@ describe("snapshot version stamping", () => {
     expect(caught?.to).toBe(getMachineStructuralHash(v2));
   });
 
-  test("machineVersion override is respected on stamp and mismatch", async () => {
-    const machine = buildMachine();
-    const idle = await runAgent(machine, {
+  // The machine's own XState `version` is the single source of truth: it is
+  // what gets stamped, and what a resume is checked against.
+  const buildTaggedMachine = (version: string) =>
+    setupAgent({ schemas: versionSchemas() }).createMachine({
+      id: "versioned",
+      version,
+      context: () => ({ n: 0 }),
+      initial: "waiting",
+      states: {
+        waiting: { on: { GO: { target: "done" } } },
+        done: { type: "final", output: ({ context }) => ({ n: context.n }) },
+      },
+    });
+
+  test("the machine's declared version is stamped, and a bump is a mismatch", async () => {
+    const idle = await runAgent(buildTaggedMachine("v1"), {
       input: {},
-      machineVersion: "v1",
       executors: { generateText },
     });
     if (idle.status !== "idle") throw new Error("expected idle");
@@ -3483,10 +3556,9 @@ describe("snapshot version stamping", () => {
 
     let caught: AgentSnapshotVersionMismatchError | undefined;
     try {
-      await runAgent(machine, {
+      await runAgent(buildTaggedMachine("v2"), {
         snapshot: idle.snapshot,
         event: { type: "GO" },
-        machineVersion: "v2",
         executors: {
           generateText,
         },
@@ -3499,19 +3571,16 @@ describe("snapshot version stamping", () => {
   });
 
   test("migrateSnapshot is called with correct args and its result is used", async () => {
-    const machine = buildMachine();
-    const idle = await runAgent(machine, {
+    const idle = await runAgent(buildTaggedMachine("v1"), {
       input: {},
-      machineVersion: "v1",
       executors: { generateText },
     });
     if (idle.status !== "idle") throw new Error("expected idle");
 
     const calls: Array<{ from: string; to: string }> = [];
-    const done = await runAgent(machine, {
+    const done = await runAgent(buildTaggedMachine("v2"), {
       snapshot: idle.snapshot,
       event: { type: "GO" },
-      machineVersion: "v2",
       migrateSnapshot: (snapshot, info) => {
         calls.push(info);
         return snapshot;
@@ -3525,10 +3594,8 @@ describe("snapshot version stamping", () => {
   });
 
   test("warn mode proceeds", async () => {
-    const machine = buildMachine();
-    const idle = await runAgent(machine, {
+    const idle = await runAgent(buildTaggedMachine("v1"), {
       input: {},
-      machineVersion: "v1",
       executors: { generateText },
     });
     if (idle.status !== "idle") throw new Error("expected idle");
@@ -3538,10 +3605,9 @@ describe("snapshot version stamping", () => {
     console.warn = (...args: unknown[]) => warnings.push(args.map(String).join(" "));
     let done;
     try {
-      done = await runAgent(machine, {
+      done = await runAgent(buildTaggedMachine("v2"), {
         snapshot: idle.snapshot,
         event: { type: "GO" },
-        machineVersion: "v2",
         onVersionMismatch: "warn",
         executors: {
           generateText,

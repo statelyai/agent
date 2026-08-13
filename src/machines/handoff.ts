@@ -91,7 +91,7 @@ export function createHandoffMachine(config: CreateHandoffMachineConfig): AnySta
     actors: machineActors(agents),
     // A turn ends in `waiting`, which is an intentional wait for the next
     // message — not a stall.
-    isSuspended: (snapshot) => snapshot.matches("waiting"),
+    isIdle: (snapshot) => snapshot.matches("waiting"),
   });
 
   const turnState = (name: string) => `${name}Turn`;

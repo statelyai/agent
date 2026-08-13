@@ -103,11 +103,22 @@ export interface AgentTextRequest<TMetadata = Record<string, unknown>> {
   seed?: number;
   stopSequences?: string[];
   /**
+   * Bounds the HOST-side tool-call loop for this one request: the maximum
+   * number of model steps the executor may run before it must return. Omitted
+   * means single-step (one model call, tool results not fed back). Named and
+   * typed to match the AI SDK — the shipped adapter lowers it to
+   * `stopWhen: stepCountIs(maxSteps)`.
+   *
+   * This is a REQUEST budget, distinct from the machine-level `maxTurns` a
+   * preset uses for its own turn budget, and from `runAgent`'s run-wide
+   * `maxModelCalls`.
+   */
+  maxSteps?: number;
+  /**
    * Host-owned per-call options. Use this for provider/runtime details such
    * as Cloudflare bindings, tracing IDs, SDK provider options, or transport
-   * hints. The machine carries it; the host decides what it means — e.g.
-   * the AI SDK adapter (`createAiSdkExecutors`) reads `metadata.maxSteps` to
-   * bound its multi-step tool-call loop for that request.
+   * hints. The machine carries it; the host decides what it means. Not the
+   * place for `maxSteps` any more — that is a typed field above.
    */
   metadata?: TMetadata;
 }
@@ -340,6 +351,7 @@ function createBuiltinTextActor(
           topK: ({ input }) => input.topK,
           seed: ({ input }) => input.seed,
           stopSequences: ({ input }) => input.stopSequences,
+          maxSteps: ({ input }) => input.maxSteps,
           metadata: ({ input }) => input.metadata,
         },
         execute,
@@ -435,6 +447,8 @@ export interface TextLogicConfig<
   topK?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
   seed?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
   stopSequences?: ResolveTextLogicValue<string[] | undefined, InferOutput<TInputSchema>>;
+  /** Bounds this request's host-side tool loop (see {@link AgentTextRequest.maxSteps}). */
+  maxSteps?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
   metadata?: ResolveTextLogicValue<TMetadata | undefined, InferOutput<TInputSchema>>;
 }
 
@@ -545,6 +559,7 @@ export function createTextLogic<
       topK: resolveTextLogicValue(config.topK, args),
       seed: resolveTextLogicValue(config.seed, args),
       stopSequences: resolveTextLogicValue(config.stopSequences, args),
+      maxSteps: resolveTextLogicValue(config.maxSteps, args),
       metadata: resolveTextLogicValue(config.metadata, args),
     };
   };

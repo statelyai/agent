@@ -52,7 +52,7 @@ const agentSetup = setupAgent({
   },
   // `awaitingApproval` is an idle human-wait state — declare it as the suspend
   // signal so runAgent settles idle deterministically instead of timing out.
-  isSuspended: (snapshot) => snapshot.hasTag("awaiting-approval"),
+  isIdle: (snapshot) => snapshot.hasTag("awaiting-approval"),
 });
 
 export const refundMachine = agentSetup.createMachine({

@@ -13,9 +13,9 @@
 import {
   getAcceptedEvents,
   getAgentSchemas,
+  getSnapshotNodes,
   getStateMeta,
   parseAgentEvent,
-  persistSnapshot,
   runAgent,
   type AgentRequestExecutors,
   type RunAgentResult,
@@ -215,7 +215,7 @@ export function resolveLabel(label: string, context: unknown): string {
  * it is the next-best idle prompt.
  */
 function activeDescription(snapshot: AnyMachineSnapshot): string | null {
-  const nodes = (snapshot as { _nodes?: Array<{ description?: string }> })._nodes ?? [];
+  const nodes = getSnapshotNodes(snapshot);
   for (let index = nodes.length - 1; index >= 0; index -= 1) {
     const description = nodes[index]?.description;
     if (typeof description === "string" && description.trim()) return description;
@@ -288,7 +288,7 @@ export type RunLimits = {
   budgetMs?: number;
   /**
    * Human-wait state tag from metadata `suspendedTag` — deterministic idle
-   * for plain XState machines with no setupAgent isSuspended predicate.
+   * for plain XState machines with no setupAgent isIdle predicate.
    */
   suspendedTag?: string;
   /** Raw source passed to Viz so v6 function transitions remain visible. */
@@ -297,7 +297,7 @@ export type RunLimits = {
 
 export const DEFAULT_RUN_BUDGET_MS = 120_000;
 
-/** metadata `suspendedTag` → an isSuspended predicate, or undefined. */
+/** metadata `suspendedTag` → an isIdle predicate, or undefined. */
 function suspendedPredicate(
   limits: RunLimits,
 ): ((snapshot: AnyMachineSnapshot) => boolean) | undefined {
@@ -447,7 +447,7 @@ function toChatResult(
       // Resume from the run's persisted snapshot, not the live one — it
       // round-trips invoked children WITH their state (a long-lived agent
       // keeps its context across chat turns).
-      idle: { ...idle, snapshot: persistSnapshot(result.persistedSnapshot) as unknown as Json },
+      idle: { ...idle, snapshot: result.persistedSnapshot as unknown as Json },
     };
   }
   const error = (result as { error?: unknown }).error;
@@ -517,7 +517,7 @@ export async function startMachineChat(
     input: input as never,
     executors: live.executors,
     signal: runSignal(limits),
-    isSuspended: suspendedPredicate(limits),
+    isIdle: suspendedPredicate(limits),
     onTransition,
     inspect: maybeCreateRunInspection(machine, limits.machineSource),
   });
@@ -560,8 +560,8 @@ export async function resumeMachineChat(
   );
   // Validate the wire event against the restored snapshot's accepted events
   // (and payload schema, when registered) before delivering it. If the
-  // snapshot can't be rehydrated for validation, runAgent's own
-  // onIllegalResumeEvent guard still rejects illegal event types.
+  // snapshot can't be rehydrated for validation, runAgent still rejects an
+  // event the restored state cannot accept.
   let parsed: { type: string } & Record<string, unknown> = event;
   try {
     const restored = machine.resolveState(
@@ -578,7 +578,7 @@ export async function resumeMachineChat(
     event: parsed as never,
     executors: live.executors,
     signal: runSignal(limits),
-    isSuspended: suspendedPredicate(limits),
+    isIdle: suspendedPredicate(limits),
     onTransition,
     inspect: maybeCreateRunInspection(machine, limits.machineSource),
   });

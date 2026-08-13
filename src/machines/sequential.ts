@@ -35,8 +35,8 @@ export interface SequentialStep {
   model?: string;
   /** Tools the host runs inside this step's request. */
   tools?: AgentTools;
-  /** Bounds this step's host-side tool loop (`metadata.maxSteps`). */
-  maxTurns?: number;
+  /** Bounds this step's host-side tool loop (the request's typed `maxSteps`). */
+  maxSteps?: number;
 }
 
 /** Config for {@link createSequentialMachine}. */
@@ -111,7 +111,7 @@ export function createSequentialMachine(config: CreateSequentialMachineConfig): 
               model: step.model,
               outputSchema: step.outputSchema,
               tools: step.tools,
-              maxTurns: step.maxTurns,
+              maxSteps: step.maxSteps,
             },
             model,
             step.prompt

@@ -38,6 +38,7 @@ import {
 // Well-known builtin invoke srcs (kept local to avoid widening the public
 // surface of text-logic/decision internals).
 const DECIDE_SRC = "agent.decide";
+const USER_INPUT_SRC = "agent.userInput";
 
 // ─── Diagnostics ───
 
@@ -65,10 +66,18 @@ export interface AgentLintDiagnostic {
   message: string;
 }
 
-/** Options for {@link lintAgentMachine}. Reserved for future check selection. */
+/** Options for {@link lintAgentMachine}. */
 export interface LintAgentMachineOptions {
   /** Skip these check codes entirely. */
   disable?: AgentLintDiagnostic["code"][];
+  /**
+   * Throw {@link AgentLintError} on failing diagnostics instead of returning
+   * them. Fails on error-severity findings; add `warnings: true` to fail on
+   * warnings too.
+   */
+  throw?: boolean;
+  /** With `throw: true`, also fail on warning-severity findings. Default: errors only. */
+  warnings?: boolean;
 }
 
 // ─── State-config model ───
@@ -657,10 +666,22 @@ const LINT_CHECKS: Array<(ctx: LintContext) => AgentLintDiagnostic[]> = [
  * call this to catch dead states, undeliverable decisions, un-rebindable
  * invoke srcs, and output-contract gaps before ever running it.
  *
+ * Pass `{ throw: true }` for the one-liner form used in tests and generation
+ * loops: it returns silently when the machine is clean and throws
+ * {@link AgentLintError} (findings on `.diagnostics`) on error-severity
+ * findings, or on warnings too with `{ throw: true, warnings: true }`.
+ *
  * @example
  * ```ts
  * const errors = lintAgentMachine(machine).filter((d) => d.severity === 'error');
  * if (errors.length) throw new Error(errors.map((e) => `${e.path}: ${e.message}`).join('\n'));
+ * ```
+ *
+ * @example Throwing form
+ * ```ts
+ * test('agent machine is structurally sound', () => {
+ *   lintAgentMachine(machine, { throw: true });
+ * });
  * ```
  */
 export function lintAgentMachine(
@@ -683,17 +704,25 @@ export function lintAgentMachine(
   };
 
   const disabled = new Set(options.disable ?? []);
-  return LINT_CHECKS.flatMap((check) => check(ctx)).filter((d) => !disabled.has(d.code));
-}
+  const diagnostics = LINT_CHECKS.flatMap((check) => check(ctx)).filter(
+    (d) => !disabled.has(d.code),
+  );
 
-/** Options for {@link assertAgentMachine}. */
-export interface AssertAgentMachineOptions extends LintAgentMachineOptions {
-  /** Also fail on warning-severity findings. Default: errors only. */
-  warnings?: boolean;
+  if (options.throw) {
+    const failing = options.warnings
+      ? diagnostics
+      : diagnostics.filter((d) => d.severity === "error");
+    if (failing.length > 0) {
+      throw new AgentLintError(machine.id ?? "(machine)", failing);
+    }
+  }
+
+  return diagnostics;
 }
 
 /**
- * Thrown by {@link assertAgentMachine} when lint finds failing diagnostics.
+ * Thrown by `lintAgentMachine(machine, { throw: true })` when lint finds
+ * failing diagnostics.
  * `diagnostics` holds the findings; the message lists them one per finding,
  * so a test runner's failure output reads like the CLI's lint report.
  */
@@ -713,32 +742,6 @@ export class AgentLintError extends AgentError {
   }
 }
 
-/**
- * Asserts a machine passes {@link lintAgentMachine}: returns silently when
- * clean, throws {@link AgentLintError} (with the findings on `.diagnostics`)
- * otherwise. Fails on error-severity findings; set `warnings: true` to fail on
- * warnings too. The one-liner for tests and generation loops:
- *
- * @example
- * ```ts
- * test('agent machine is structurally sound', () => {
- *   assertAgentMachine(machine);
- * });
- * ```
- */
-export function assertAgentMachine(
-  machine: AnyStateMachine,
-  options: AssertAgentMachineOptions = {},
-): void {
-  const diagnostics = lintAgentMachine(machine, options);
-  const failing = options.warnings
-    ? diagnostics
-    : diagnostics.filter((d) => d.severity === "error");
-  if (failing.length > 0) {
-    throw new AgentLintError(machine.id ?? "(machine)", failing);
-  }
-}
-
 // ─── Simulation ───
 
 /**
@@ -749,13 +752,17 @@ export function assertAgentMachine(
  *   `setupAgent({ requests })` key, or `agent.generateText`/`agent.streamText`).
  * - `decisions` — the {@link ChosenEvent} to apply for a decision request,
  *   keyed by decision src (usually `agent.decide`).
- * - `invokes` — output values for scripted invokes (notably `agent.userInput`,
- *   and any other actor whose output must be canned), keyed by src.
+ * - `invokes` — output values for scripted invokes (any actor whose output must
+ *   be canned), keyed by src.
+ * - `userInput` — a flat FIFO queue of answers for `agent.userInput`, the
+ *   shorthand for `invokes: { 'agent.userInput': [...] }`. Entries here are
+ *   consumed before that src's `invokes` queue.
  */
 export interface SimulationScript {
   text?: Record<string, unknown[]>;
   decisions?: Record<string, ChosenEvent[]>;
   invokes?: Record<string, unknown[]>;
+  userInput?: unknown[];
 }
 
 /** One entry in a {@link SimulateAgentResult.trail}: the state after this step, plus what drove the step. */
@@ -844,6 +851,14 @@ export async function simulateAgent(
     decisions: mapValues(options.script.decisions ?? {}, (arr) => [...arr]),
     invokes: mapValues(options.script.invokes ?? {}, (arr) => [...arr]),
   };
+  if (options.script.userInput?.length) {
+    // `userInput` is the shorthand queue for the `agent.userInput` src, and is
+    // consumed before that src's own `invokes` entries.
+    script.invokes![USER_INPUT_SRC] = [
+      ...options.script.userInput,
+      ...(script.invokes![USER_INPUT_SRC] ?? []),
+    ];
+  }
 
   let step = initialAgentStep(machine, options.input);
   const trail: SimulationTrailEntry[] = [];
@@ -918,9 +933,17 @@ function scriptDryError(
     request?.kind === "decision"
       ? ` Candidate events: ${request.events.map((e) => e.type).join(", ") || "(none)"}.`
       : "";
+  const key =
+    kind === "text"
+      ? `text['${src}']`
+      : kind === "decision"
+        ? `decisions['${src}']`
+        : src === USER_INPUT_SRC
+          ? "userInput"
+          : `invokes['${src}']`;
   return new Error(
     `simulateAgent: script ran dry on a pending ${kind} request for src '${src}' (id '${id}'). ` +
-      `Add a '${kind}' entry for '${src}' to the script.${events}`,
+      `Add an entry to the script's \`${key}\` queue.${events}`,
   );
 }
 
@@ -933,8 +956,17 @@ export interface ExplorePathsOptions {
   maxDepth?: number;
   /** Total path cap before exploration stops (reported via `hitPathCap`). Default 200. */
   maxPaths?: number;
-  /** Canned outputs for text/userInput invokes, keyed by src. A missing src halts that branch with a `needs-output` note. */
-  textOutputs?: Record<string, unknown>;
+  /**
+   * Canned output for each text request, keyed by src (the
+   * `setupAgent({ requests })` key, or `agent.generateText`/`agent.streamText`).
+   * One value per src, reused every time that src is reached. A missing src
+   * halts that branch with a `needs-output` terminal.
+   */
+  text?: Record<string, unknown>;
+  /** Canned output for scripted invokes, keyed by src. Same one-value-per-src rule as `text`. */
+  invokes?: Record<string, unknown>;
+  /** Canned output for `agent.userInput`, the shorthand for `invokes['agent.userInput']`. */
+  userInput?: unknown;
 }
 
 /** A single explored path's terminal outcome. */
@@ -978,7 +1010,11 @@ async function explore(
 ): Promise<{ report: AgentPathReport; witness?: ChosenEvent[] }> {
   const maxDepth = options.maxDepth ?? 8;
   const maxPaths = options.maxPaths ?? 200;
-  const textOutputs = options.textOutputs ?? {};
+  const textScript = options.text ?? {};
+  const invokeOutputs: Record<string, unknown> = { ...(options.invokes ?? {}) };
+  if ("userInput" in options) {
+    invokeOutputs[USER_INPUT_SRC] = options.userInput;
+  }
 
   const reachedStates = new Set<string>();
   const reachedValues: unknown[] = [];
@@ -1015,10 +1051,10 @@ async function explore(
       }
       const request = current.requests[0] as AgentStepRequest | undefined;
       if (request && request.kind === "text") {
-        if (!(request.src in textOutputs)) {
+        if (!(request.src in textScript)) {
           return { step: current, blockedSrc: request.src };
         }
-        current = resolveAgentStep(machine, current, request, textOutputs[request.src]);
+        current = resolveAgentStep(machine, current, request, textScript[request.src]);
         recordState(current.snapshot);
         continue;
       }
@@ -1028,10 +1064,10 @@ async function explore(
       // No request: maybe a pending scripted invoke (userInput), else a wait.
       const [invoke] = pendingInvokes(current);
       if (invoke) {
-        if (!(invoke.src in textOutputs)) {
+        if (!(invoke.src in invokeOutputs)) {
           return { step: current, blockedSrc: invoke.src };
         }
-        current = resolveAgentStep(machine, current, invoke.id, textOutputs[invoke.src]);
+        current = resolveAgentStep(machine, current, invoke.id, invokeOutputs[invoke.src]);
         recordState(current.snapshot);
         continue;
       }
@@ -1134,9 +1170,10 @@ async function explore(
  * depth, model-free, and reports which states are reached and how each path
  * terminates. At each decision request it forks one branch per candidate event
  * (guard-rejected candidates are counted in `prunedByGuard`, not explored); at
- * an idle wait it forks per externally-accepted event. Text/`userInput` invokes
- * are resolved from `textOutputs` (a by-src canned-output map) — a missing src
- * halts that branch with a `needs-output` terminal rather than throwing.
+ * an idle wait it forks per externally-accepted event. Text requests resolve
+ * from `text`, other invokes from `invokes` (or `userInput` for
+ * `agent.userInput`) — all by-src canned-output maps, and a missing src halts
+ * that branch with a `needs-output` terminal rather than throwing.
  *
  * Combinatorics are bounded by `maxDepth` (default 8) and `maxPaths` (default
  * 200, reported via `hitPathCap`).
@@ -1156,20 +1193,22 @@ export async function explorePaths(
 
 /** The result of a {@link canReach} query. */
 export interface CanReachResult {
-  canReach: boolean;
+  /** True when the target state was reached within the exploration bounds. */
+  reachable: boolean;
   /** When reachable, the sequence of chosen/applied events that gets there. */
   witness?: ChosenEvent[];
 }
 
 /**
  * Answers "can the machine reach `statePath`?" by exploring its branches (a
- * thin wrapper over {@link explorePaths}). Returns `{ canReach: true, witness }`
- * with the event sequence that reaches it, or `{ canReach: false }`.
+ * thin wrapper over {@link explorePaths}). Returns
+ * `{ reachable: true, witness }` with the event sequence that reaches it, or
+ * `{ reachable: false }`.
  *
  * @example
  * ```ts
- * const { canReach, witness } = await canReach(refundMachine, 'denied', { input: { request: 'x', amount: 5000 } });
- * // canReach → true; witness → [{ type: 'NEEDS_REVIEW' }, { type: 'DENY' }]
+ * const { reachable, witness } = await canReach(refundMachine, 'denied', { input: { request: 'x', amount: 5000 } });
+ * // reachable → true; witness → [{ type: 'NEEDS_REVIEW' }, { type: 'DENY' }]
  * ```
  */
 export async function canReach(
@@ -1184,5 +1223,5 @@ export async function canReach(
       return false;
     }
   });
-  return witness !== undefined ? { canReach: true, witness } : { canReach: false };
+  return witness !== undefined ? { reachable: true, witness } : { reachable: false };
 }

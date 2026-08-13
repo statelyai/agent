@@ -43,7 +43,7 @@ import {
 import { executeAgentRequest, resolveDecision, type AgentRequest } from "./index.js";
 import { getAgentOutputMode, parseOutput } from "./index.js";
 import { isStructuredOutputSchema } from "./text-logic.js";
-import { getMachineSuspensionPredicate } from "./internal/registry.js";
+import { getMachineIdlePredicate } from "./internal/registry.js";
 
 /**
  * ~15-line Ajv-to-StandardSchema adapter — the recipe for a real
@@ -1612,9 +1612,9 @@ describe("setupAgent", () => {
       "machine_defend",
     ]);
 
-    const chosenEvent = await resolveDecision(request, async () => ({
-      event: { type: "ATTACK", target: "orc" },
-    }));
+    const chosenEvent = await resolveDecision(request, {
+      decide: async () => ({ event: { type: "ATTACK", target: "orc" } }),
+    });
     expect(chosenEvent).toEqual({ type: "ATTACK", target: "orc" });
   });
 
@@ -2598,16 +2598,16 @@ describe("setupAgent", () => {
     },
   };
 
-  test("fromConfig lowers suspendedTags into a machine-carried hasTag predicate", () => {
+  test("fromConfig lowers idleTags into a machine-carried hasTag predicate", () => {
     const { machine } = setupAgent.fromConfig(
-      { id: "suspended-tags", suspendedTags: ["waiting"], ...suspensionConfig },
+      { id: "suspended-tags", idleTags: ["waiting"], ...suspensionConfig },
       { compileSchema: ajvCompiler() },
     );
 
-    const predicate = getMachineSuspensionPredicate(machine);
+    const predicate = getMachineIdlePredicate(machine);
     expect(predicate).toBeDefined();
     // Keyed on the root config, so it survives further `.provide(...)` rebinding.
-    expect(getMachineSuspensionPredicate(machine.provide({}))).toBe(predicate);
+    expect(getMachineIdlePredicate(machine.provide({}))).toBe(predicate);
 
     const actor = createActor(machine).start();
     expect(predicate!(actor.getSnapshot())).toBe(true);
@@ -2615,16 +2615,16 @@ describe("setupAgent", () => {
     expect(predicate!(actor.getSnapshot())).toBe(false);
   });
 
-  test("fromConfig registers options.isSuspended, which wins over suspendedTags", () => {
+  test("fromConfig registers options.isIdle, which wins over idleTags", () => {
     const hostPredicate = () => false;
     const { machine } = setupAgent.fromConfig(
-      { id: "issuspended-option", suspendedTags: ["waiting"], ...suspensionConfig },
-      { compileSchema: ajvCompiler(), isSuspended: hostPredicate },
+      { id: "issuspended-option", idleTags: ["waiting"], ...suspensionConfig },
+      { compileSchema: ajvCompiler(), isIdle: hostPredicate },
     );
-    expect(getMachineSuspensionPredicate(machine)).toBe(hostPredicate);
+    expect(getMachineIdlePredicate(machine)).toBe(hostPredicate);
   });
 
-  test("fromConfig rejects a suspendedTags entry that no state declares", () => {
+  test("fromConfig rejects a idleTags entry that no state declares", () => {
     expect(() =>
       setupAgent.fromConfig(
         {
@@ -2632,19 +2632,19 @@ describe("setupAgent", () => {
           schemas: { context: { type: "object", properties: {} } },
           context: {},
           initial: "start",
-          suspendedTags: ["waiting"],
+          idleTags: ["waiting"],
           states: { start: { type: "final" } },
         },
         { compileSchema: ajvCompiler() },
       ),
-    ).toThrow(/suspendedTags.*'waiting'.*no state declares/s);
+    ).toThrow(/idleTags.*'waiting'.*no state declares/s);
   });
 
-  test("fromConfig + runAgent: suspendedTags settles idle without the heuristic warning", async () => {
+  test("fromConfig + runAgent: idleTags settles idle without the heuristic warning", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const { machine } = setupAgent.fromConfig(
-        { id: "suspended-tags-run", suspendedTags: ["waiting"], ...suspensionConfig },
+        { id: "suspended-tags-run", idleTags: ["waiting"], ...suspensionConfig },
         { compileSchema: ajvCompiler() },
       );
 
@@ -2686,9 +2686,9 @@ describe("resolveDecision", () => {
 
   test("resolves on the first attempt", async () => {
     const request = makeRequest();
-    const event = await resolveDecision(request, async () => ({
-      event: { type: "ATTACK", target: "goblin" },
-    }));
+    const event = await resolveDecision(request, {
+      decide: async () => ({ event: { type: "ATTACK", target: "goblin" } }),
+    });
 
     expect(event).toEqual({ type: "ATTACK", target: "goblin" });
   });
@@ -2697,11 +2697,11 @@ describe("resolveDecision", () => {
     const request = makeRequest();
     await expect(
       // Common mistake: bare event instead of the `{ event }` envelope.
-      resolveDecision(request, async () => ({ type: "DEFEND" }) as never),
+      resolveDecision(request, { decide: async () => ({ type: "DEFEND" }) as never }),
     ).rejects.toThrow(/decide executor must return \{ event: \{ type: string/);
 
     await expect(
-      resolveDecision(request, async () => ({ event: { noType: true } }) as never),
+      resolveDecision(request, { decide: async () => ({ event: { noType: true } }) as never }),
     ).rejects.toThrow(/decide executor must return/);
   });
 
@@ -2709,9 +2709,11 @@ describe("resolveDecision", () => {
     const request = makeRequest();
     const calls: AgentDecisionRequest[] = [];
 
-    const event = await resolveDecision(request, async (req) => {
-      calls.push(req);
-      return calls.length === 1 ? { event: { type: "HEAL" } } : { event: { type: "DEFEND" } };
+    const event = await resolveDecision(request, {
+      decide: async (req: AgentDecisionRequest) => {
+        calls.push(req);
+        return calls.length === 1 ? { event: { type: "HEAL" } } : { event: { type: "DEFEND" } };
+      },
     });
 
     expect(event).toEqual({ type: "DEFEND" });
@@ -2732,15 +2734,17 @@ describe("resolveDecision", () => {
     await expect(
       resolveDecision(
         request,
-        async () => ({ event: { type: "ATTACK" } }), // missing required `target`
+        { decide: async () => ({ event: { type: "ATTACK" } }) }, // missing required `target`
         { maxRetries: 0 },
       ),
     ).rejects.toThrow(AgentDecisionExhaustedError);
 
     try {
-      await resolveDecision(request, async () => ({ event: { type: "ATTACK" } }), {
-        maxRetries: 0,
-      });
+      await resolveDecision(
+        request,
+        { decide: async () => ({ event: { type: "ATTACK" } }) },
+        { maxRetries: 0 },
+      );
       expect.fail("expected AgentDecisionExhaustedError");
     } catch (error) {
       expect(error).toBeInstanceOf(AgentDecisionExhaustedError);
@@ -2754,10 +2758,11 @@ describe("resolveDecision", () => {
     const request = makeRequest();
 
     try {
-      await resolveDecision(request, async () => ({ event: { type: "DEFEND" } }), {
-        maxRetries: 0,
-        canTake: () => false,
-      });
+      await resolveDecision(
+        request,
+        { decide: async () => ({ event: { type: "DEFEND" } }) },
+        { maxRetries: 0, canTake: () => false },
+      );
       expect.fail("expected AgentDecisionExhaustedError");
     } catch (error) {
       expect(error).toBeInstanceOf(AgentDecisionExhaustedError);
@@ -2776,9 +2781,11 @@ describe("resolveDecision", () => {
     const request = makeRequest();
 
     try {
-      await resolveDecision(request, async () => ({ event: { type: "UNKNOWN" } }), {
-        maxRetries: 2,
-      });
+      await resolveDecision(
+        request,
+        { decide: async () => ({ event: { type: "UNKNOWN" } }) },
+        { maxRetries: 2 },
+      );
       expect.fail("expected AgentDecisionExhaustedError");
     } catch (error) {
       expect(error).toBeInstanceOf(AgentDecisionExhaustedError);
@@ -3358,8 +3365,69 @@ describe("setupAgent reserved agent.* actor keys", () => {
     ).toThrow(/machine\.provide/);
   });
 
-  test("a non-reserved actors key is accepted", () => {
+  test("the whole 'agent.' namespace is reserved, not just the shipped builtins", () => {
+    expect(() =>
+      setupAgent({
+        schemas,
+        actors: { "agent.summarize": someLogic } as never,
+      }),
+    ).toThrow(/reserved 'agent\.' namespace/);
+
+    expect(() =>
+      setupAgent({
+        schemas,
+        requests: {
+          "agent.classify": { schemas: { input: z.object({}), output: z.object({}) }, model: "m" },
+        } as never,
+      }),
+    ).toThrow(/reserved 'agent\.' namespace/);
+  });
+
+  test("a non-reserved actors key is accepted, including one merely containing 'agent'", () => {
     expect(() => setupAgent({ schemas, actors: { myActor: someLogic } })).not.toThrow();
+    expect(() => setupAgent({ schemas, actors: { agentSummarize: someLogic } })).not.toThrow();
+  });
+});
+
+describe("resolveDecision executor set", () => {
+  test("errors clearly when the executor set has no 'decide'", async () => {
+    const request: AgentDecisionRequest = {
+      kind: "decision",
+      id: "d1",
+      model: "m",
+      events: [{ type: "ATTACK", toolName: "send_event_ATTACK" }],
+      attempts: [],
+    };
+
+    await expect(resolveDecision(request, {})).rejects.toThrow(/no 'decide' function/);
+    await expect(resolveDecision(request, {})).rejects.toMatchObject({
+      code: "missing-decide-executor",
+    });
+  });
+
+  test("passes the same (request, info) pair generateText gets", async () => {
+    const request: AgentDecisionRequest = {
+      kind: "decision",
+      id: "d1",
+      model: "m",
+      events: [{ type: "ATTACK", toolName: "send_event_ATTACK" }],
+      attempts: [],
+    };
+    const controller = new AbortController();
+    let seenInfo: unknown;
+
+    await resolveDecision(
+      request,
+      {
+        decide: async (_request, info) => {
+          seenInfo = info;
+          return { event: { type: "ATTACK" } };
+        },
+      },
+      { signal: controller.signal },
+    );
+
+    expect(seenInfo).toEqual({ signal: controller.signal, requestId: "d1" });
   });
 });
 

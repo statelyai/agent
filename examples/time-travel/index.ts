@@ -5,8 +5,8 @@
  * LangGraph exposes `graph.get_state_history(config)` (a list of checkpoints) and
  * lets you resume from any past checkpoint's `config` to rewind and fork an
  * alternative branch. Here the equivalent is dead simple: every `runAgent` settle
- * (`idle` or `done`) hands back a `snapshot`, and `persistSnapshot(...)` is a plain
- * JSON round-trip. Keep those persisted snapshots in a list and you have the
+ * (`idle` or `done`) hands back a `snapshot`, and `machine.getPersistedSnapshot(...)`
+ * turns it into plain JSON. Keep those persisted snapshots in a list and you have the
  * history; feed any one of them back into a fresh `runAgent` and you have a rewind.
  *
  * Because a persisted snapshot is immutable JSON, resuming from the SAME
@@ -37,13 +37,8 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
-import {
-  persistSnapshot,
-  runAgent,
-  setupAgent,
-  type AgentRequestExecutors,
-} from "@statelyai/agent";
-import type { SnapshotFrom } from "xstate";
+import { runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
+import type { Snapshot, SnapshotFrom } from "xstate";
 
 export const models = defineModels({
   writer: openai("gpt-5.4-mini"),
@@ -92,7 +87,7 @@ const agentSetup = setupAgent({
   },
   // The machine's own wait signal: `runAgent` settles idle deterministically
   // whenever a resting snapshot carries this tag (see human-in-the-loop.md).
-  isSuspended: (snapshot) => snapshot.hasTag("awaiting-review"),
+  isIdle: (snapshot) => snapshot.hasTag("awaiting-review"),
   requests: {
     writeDraft: {
       schemas: {
@@ -179,11 +174,11 @@ export const timeTravelMachine = agentSetup.createMachine({
 // ─── In-example checkpoint history (NOT a library API) ───
 //
 // A list of `{ label, snapshot }`, one per settle. Each snapshot is captured via
-// `persistSnapshot` (a JSON round-trip), so entries are immutable and independent
+// `machine.getPersistedSnapshot(...)` (plain JSON), so entries are immutable and independent
 // of the live run — the same guarantee a real persistence layer gives you.
 export interface Checkpoint {
   label: string;
-  snapshot: SnapshotFrom<typeof timeTravelMachine>;
+  snapshot: Snapshot<unknown>;
 }
 
 export class CheckpointHistory {
@@ -191,7 +186,7 @@ export class CheckpointHistory {
 
   /** Capture a settle's snapshot as an immutable, persisted checkpoint. */
   record(label: string, snapshot: SnapshotFrom<typeof timeTravelMachine>): void {
-    this.entries.push({ label, snapshot: persistSnapshot(snapshot) });
+    this.entries.push({ label, snapshot: timeTravelMachine.getPersistedSnapshot(snapshot) });
   }
 
   /** The checkpoint at `index` — the point you rewind/fork from. */
@@ -254,7 +249,7 @@ export async function runTimeTravelExample(
 
   // 2. Resume with REVISE, redraft, settle idle again. Checkpoint the revised draft.
   const second = await runAgent(timeTravelMachine, {
-    snapshot: persistSnapshot(first.snapshot),
+    snapshot: first.persistedSnapshot,
     event: { type: "REVISE", feedback },
     ...executors,
   });
@@ -263,7 +258,7 @@ export async function runTimeTravelExample(
 
   // 3. Approve the revised draft → the MAIN branch's final answer.
   const mainDone = await runAgent(timeTravelMachine, {
-    snapshot: persistSnapshot(second.snapshot),
+    snapshot: second.persistedSnapshot,
     event: { type: "APPROVE" },
     ...executors,
   });
@@ -275,7 +270,7 @@ export async function runTimeTravelExample(
   //    above is untouched — this is a new lineage that approves the ORIGINAL draft.
   const rewindTo = history.at(0);
   const forkedDone = await runAgent(timeTravelMachine, {
-    snapshot: persistSnapshot(rewindTo.snapshot),
+    snapshot: rewindTo.snapshot,
     event: { type: "APPROVE" },
     ...executors,
   });

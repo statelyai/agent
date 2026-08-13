@@ -317,7 +317,7 @@ const agentSetup = setupAgent({
   models,
   // Deterministic idle detection: the states waiting on the human are exactly
   // the ones tagged `waiting`.
-  isSuspended: (snapshot) => snapshot.hasTag("waiting"),
+  isIdle: (snapshot) => snapshot.hasTag("waiting"),
   actors: {
     // Plain typed actor — no model in the retrieval path.
     retrieve: createAsyncLogic<Chunk[], QueryPdfInput>({

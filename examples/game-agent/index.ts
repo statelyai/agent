@@ -465,7 +465,7 @@ const rpsSetup = setupAgent({
   models: rpsModels,
   // Deterministic idle detection: the run settles as soon as the machine is in
   // the tagged waiting-for-you state, no timing heuristic involved.
-  isSuspended: (snapshot) => snapshot.hasTag("waiting"),
+  isIdle: (snapshot) => snapshot.hasTag("waiting"),
   states: {
     awaitingHumanThrow: {},
     choosingThrow: {},

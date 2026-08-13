@@ -43,7 +43,6 @@ import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 import {
   getAcceptedEvents,
   getStateMeta,
-  persistSnapshot,
   runAgent,
   setupAgent,
   type AgentRequestExecutors,
@@ -115,7 +114,7 @@ const agentSetup = setupAgent({
   },
   // The machine's own wait signal: the `awaiting-review` tag. `runAgent` settles
   // idle deterministically whenever a resting snapshot carries it.
-  isSuspended: (snapshot) => snapshot.hasTag("awaiting-review"),
+  isIdle: (snapshot) => snapshot.hasTag("awaiting-review"),
   actors: {
     // The consequential tool: applies the approved/edited refund. A real host
     // would call a payments API here; this fake records it and returns a receipt.
@@ -302,7 +301,7 @@ export async function runReviewToolCallsExample(
     const event = events[i] ?? events[events.length - 1];
     i++;
     result = await runAgent(reviewToolCallsMachine, {
-      snapshot: persistSnapshot(result.snapshot),
+      snapshot: result.persistedSnapshot,
       event,
       ...executors,
       onTransition: track,
@@ -356,7 +355,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
       console.log(interaction?.label ?? "");
       console.log("Legal events:", legalEvents.join(", "));
 
-      const persisted = persistSnapshot(snapshot);
+      const persisted = result.persistedSnapshot;
       const answer = (await promptLine("approve / edit / reject? ")).toLowerCase();
 
       let event:

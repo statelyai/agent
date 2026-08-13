@@ -22,7 +22,6 @@ import {
   createAgentSchemas,
   getAcceptedEvents,
   getStateMeta,
-  persistSnapshot,
   runAgent,
   setupAgent,
   type AgentRequestExecutors,
@@ -98,7 +97,7 @@ const agentSetup = setupAgent({
   models,
   // The machine's own wait signal — `runAgent` settles idle whenever a resting
   // snapshot carries this tag (the `{ pending }` sentinel, now first-class).
-  isSuspended: (snapshot) => snapshot.hasTag("awaiting-approval"),
+  isIdle: (snapshot) => snapshot.hasTag("awaiting-approval"),
   actors: {
     // The `lookupOrder` tool, now a typed actor. Reads the sample table.
     lookupOrder: createAsyncLogic<string, { orderId: string }>({
@@ -332,7 +331,7 @@ export async function runRetrofitExample(
     ? ({ type: "APPROVE" } as const)
     : ({ type: "DENY", reason: denyReason } as const);
   const second = await runAgent(supportMachine, {
-    snapshot: persistSnapshot(first.snapshot),
+    snapshot: first.persistedSnapshot,
     event,
     executors,
     onTransition: track,

@@ -12,6 +12,8 @@ import {
   DECIDE_ACTOR,
   resolveTextLogicValue,
   type AgentCallUsage,
+  type AgentRequestExecutorInfo,
+  type AgentRequestExecutors,
   type ResolveTextLogicValue,
 } from "./text-logic.js";
 import { isEventPattern, sanitizeEventToolName, type AgentEventDescriptor } from "./events.js";
@@ -109,10 +111,14 @@ function decideActorWithExecutor(
         );
       }
 
-      return resolveDecision(decideRequestFromInput(input), execute, {
-        maxRetries: input.maxRetries ?? 2,
-        signal,
-      });
+      return resolveDecision(
+        decideRequestFromInput(input),
+        { decide: execute },
+        {
+          maxRetries: input.maxRetries ?? 2,
+          signal,
+        },
+      );
     },
   });
 
@@ -304,7 +310,7 @@ export function createDecisionLogic<
         );
       }
 
-      return resolveDecision(request(input), execute, { maxRetries, signal });
+      return resolveDecision(request(input), { decide: execute }, { maxRetries, signal });
     },
   });
 
@@ -450,14 +456,20 @@ export function renderDecisionAttempts(
  * `generateText`/`streamText` — how the model is coerced into choosing
  * (tool-per-event + forced tool choice, structured output, …) is entirely
  * adapter business; core only validates and retries the returned choice (see
- * {@link resolveDecision}). The optional `reason` is carried through to
+ * {@link resolveDecision}). It takes the same `(request, info)` pair as
+ * `generateText`/`streamText` — `info` carries the host seams (`signal`,
+ * `runId`, `requestId`); `onChunk` is never set for a decision.
+ * The optional `reason` is carried through to
  * `onResult`/event-sourcing but never affects validation. Like text
  * executors' `{ output, ...extras }` envelope, any extra keys (finish reason,
  * …) flow untouched to `onResult`'s `raw`; `usage` is the one core reads —
  * report this attempt's tokens there and `runAgent` folds them into the run's
  * aggregated {@link AgentUsage}.
  */
-export type AgentDecisionExecutor = (request: AgentDecisionRequest) => PromiseLike<{
+export type AgentDecisionExecutor = (
+  request: AgentDecisionRequest,
+  info?: AgentRequestExecutorInfo,
+) => PromiseLike<{
   event: ChosenEvent;
   reason?: string;
   /** This attempt's token usage, aggregated into the run result's {@link AgentUsage}. */
@@ -491,7 +503,7 @@ export interface ResolveDecisionOptions<TEvent extends ChosenEvent = ChosenEvent
 
 /**
  * Validation + retry core for decisions. No provider mechanics — the
- * `executor` is responsible for making the model choose an event; this
+ * `executors.decide` is responsible for making the model choose an event; this
  * function only validates the choice and retries on failure, up to
  * `options.maxRetries` (default 2, i.e. up to 3 attempts total).
  *
@@ -509,29 +521,45 @@ export interface ResolveDecisionOptions<TEvent extends ChosenEvent = ChosenEvent
  *
  * @example
  * ```ts
- * const event = await resolveDecision(request, decide, {
+ * const event = await resolveDecision(request, executors, {
  *   canTake: (e) => snapshot.can(e),
  * });
  * ```
  */
 export async function resolveDecision<TEvent extends ChosenEvent = ChosenEvent>(
   request: AgentDecisionRequest,
-  executor: AgentDecisionExecutor,
+  executors: Pick<Partial<AgentRequestExecutors>, "decide">,
   options: ResolveDecisionOptions<TEvent> = {},
 ): Promise<TEvent> {
+  const executor = executors?.decide;
+  if (typeof executor !== "function") {
+    throw new AgentError(
+      "missing-decide-executor",
+      "resolveDecision(request, executors, ...) takes the EXECUTOR SET (the same object " +
+        "executeAgentRequest takes), and this one has no 'decide' function. Build one with " +
+        "createAiSdkExecutors({ models }), or pass { decide }.",
+    );
+  }
   const maxRetries = options.maxRetries ?? 2;
   const attempts: DecisionAttempt[] = [];
   const eventsByType = new Map(request.events.map((event) => [event.type, event]));
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     options.signal?.throwIfAborted();
-    const result = await executor({
-      ...request,
-      attempts: [...attempts],
-      // Thread the run's abort signal onto the request so the executor can
-      // cancel its in-flight model call (adapters read `request.signal`).
-      signal: options.signal,
-    });
+    const result = await executor(
+      {
+        ...request,
+        attempts: [...attempts],
+        // Thread the run's abort signal onto the request so the executor can
+        // cancel its in-flight model call (adapters read `request.signal`).
+        signal: options.signal,
+      },
+      // The same `info` second argument generateText/streamText receive.
+      {
+        ...(options.signal !== undefined ? { signal: options.signal } : {}),
+        ...(request.id ? { requestId: request.id } : {}),
+      },
+    );
 
     // Fail fast (and descriptively) on the common executor mistake of
     // returning a bare event (`{ type: 'SAFE' }`) instead of the required

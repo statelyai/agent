@@ -12,6 +12,7 @@
     "declaration": true,
     "sourceMap": true,
     "isolatedModules": true,
+    "resolveJsonModule": true,
     "paths": {
       "@statelyai/agent": ["./src/index.ts"],
       "@statelyai/agent/ai-sdk": ["./src/ai-sdk/index.ts"],

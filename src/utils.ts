@@ -14,19 +14,9 @@ import type {
 } from "./types.js";
 
 /**
- * Deep-clones a snapshot to a plain-JSON value via a `JSON` round-trip, the
- * shape you persist and later feed back to `runAgent({ snapshot })`. Asserts
- * JSON-serializability: functions, `undefined`, and other non-JSON values are
- * dropped or throw exactly as `JSON.stringify`/`JSON.parse` would. Returns a
- * plain-JSON deep clone, not a live snapshot.
- */
-export function persistSnapshot<TSnapshot>(snapshot: TSnapshot): TSnapshot {
-  return JSON.parse(JSON.stringify(snapshot)) as TSnapshot;
-}
-
-/**
  * Walks a context value and returns the dot-paths of the first few values that
- * would NOT survive a JSON persist/resume round-trip (see {@link persistSnapshot}):
+ * would NOT survive a JSON persist/resume round-trip (persist with XState's
+ * `actor.getPersistedSnapshot()`, resume with `createActor(machine, { snapshot })`):
  * `Date`, `Map`, `Set`, `RegExp`, functions, `undefined`, `bigint`, class
  * instances (non-plain objects), and circular references. Plain objects,
  * arrays, and JSON primitives are walked/allowed. Returns `[]` for a
@@ -102,10 +92,22 @@ export function findNonSerializableContextPaths(context: unknown, limit = 5): st
  * Used by {@link runAgent} to stamp settled snapshots with a `version` and to
  * detect a structurally-edited machine on resume. It is a change detector, not
  * a cryptographic digest — collisions are possible but unlikely for real
- * configs. Pass an explicit `machineVersion` to `runAgent` to override it.
+ * configs. Declare `createMachine({ version })` to pin an explicit version instead.
  */
 export function getMachineStructuralHash(machine: AnyStateMachine): string {
   return djb2Hex(stableStructuralString((machine as { config: unknown }).config));
+}
+
+/**
+ * The version a machine is stamped with everywhere: an explicitly declared
+ * `createMachine({ version })` when present, else its
+ * {@link getMachineStructuralHash}. Single source of truth so `runAgent`,
+ * `provideExecutors`/`traceTransitions` trace envelopes, and the event-log
+ * helpers (`initEntry`, `createReplayEntry`, `replay`) never disagree.
+ * @internal
+ */
+export function resolveMachineVersion(machine: AnyStateMachine): string {
+  return (machine as { version?: string }).version ?? getMachineStructuralHash(machine);
 }
 
 // Deterministic structural serialization: sorted object keys, function/
@@ -205,8 +207,15 @@ export type MetaOfSnapshot<TSnapshot extends { getMeta(): Record<string, unknown
  *
  * `snapshot.getMeta()` is keyed by state id; a leaf machine has one active
  * state, but parallel/nested machines can have several. This shallow-merges
- * every active state's meta into one object (later/deeper entries win) and
- * returns `{}` when no active state declares meta.
+ * every active state's meta into one object and returns `{}` when no active
+ * state declares meta.
+ *
+ * Merge order is fixed and does not depend on XState's internal node order:
+ * entries are sorted by structural depth (the state node's distance from the
+ * root, regardless of custom `id` strings), then by state id lexicographically,
+ * and merged in that order. So a deeper state's key wins over an ancestor's,
+ * and between equal-depth parallel siblings the later state id alphabetically
+ * wins.
  *
  * The return type is recovered from the snapshot's own `getMeta()` type, so a
  * schema-typed machine (`setupAgent({ meta })`) yields the meta schema's
@@ -223,12 +232,17 @@ export function getStateMeta<
   TSnapshot extends { getMeta(): Record<string, unknown> } = AnyMachineSnapshot,
   TMeta = MetaOfSnapshot<TSnapshot>,
 >(snapshot: TSnapshot): Partial<TMeta> {
-  return Object.assign(
-    {},
-    ...Object.values(snapshot.getMeta()).filter(
-      (meta): meta is Record<string, unknown> => meta != null,
-    ),
-  );
+  // Structural depth per active node id. A custom `id: 'review'` on a nested
+  // state has no dots, so the id string is not a usable depth proxy.
+  // TODO(xstate): use snapshot.nodes when public.
+  const nodes = (snapshot as { _nodes?: Array<{ id: string; path: string[] }> })._nodes;
+  const depthById = new Map(nodes?.map((node) => [node.id, node.path.length]));
+  const depth = (id: string) => depthById.get(id) ?? id.split(".").length;
+  const entries = Object.entries(snapshot.getMeta())
+    .filter((entry): entry is [string, Record<string, unknown>] => entry[1] != null)
+    .sort(([a], [b]) => depth(a) - depth(b) || (a < b ? -1 : a > b ? 1 : 0));
+
+  return Object.assign({}, ...entries.map(([, meta]) => meta));
 }
 
 /**

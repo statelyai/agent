@@ -37,7 +37,6 @@ import {
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   getStateMeta,
-  persistSnapshot,
   runAgent,
   type AgentTextRequest,
   type RunAgentOptions,
@@ -165,7 +164,7 @@ function toToolResult(result: RunAgentResult<typeof emailDrafter>, handle: strin
 
   const meta = getStateMeta<typeof result.snapshot, z.infer<typeof metaSchema>>(result.snapshot);
   const interaction = meta.interaction ?? null;
-  runs.set(handle, { snapshot: persistSnapshot(result.snapshot), interaction });
+  runs.set(handle, { snapshot: result.persistedSnapshot, interaction });
 
   return {
     status: "pending",

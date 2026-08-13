@@ -137,6 +137,7 @@ export const evaluatePrompt = createTextLogic({
     input: z.object({ prompt: z.string() }),
     output: promptAssessmentSchema,
   },
+  name: "evaluatePrompt",
   model: "promptEvaluator",
   system:
     "Evaluate an email drafting request. Require recipient, subject, and body details. Return missing fields and one question per gap.",
@@ -151,6 +152,7 @@ export const draftEmail = createTextLogic({
     }),
     output: emailDraftSchema,
   },
+  name: "draftEmail",
   model: "emailDrafter",
   system:
     "Draft a polished email from the request. Use the provided details without inventing missing essentials unless the user explicitly asked to draft anyway.",
@@ -180,7 +182,7 @@ const agentSetup = setupAgent({
   models,
   // The machine's own wait signal: the `awaiting-user` tag. Every state that
   // needs the human carries it, so `runAgent` settles idle deterministically.
-  isSuspended: (snapshot) => snapshot.hasTag("awaiting-user"),
+  isIdle: (snapshot) => snapshot.hasTag("awaiting-user"),
   actors: emailDrafterActors,
 });
 

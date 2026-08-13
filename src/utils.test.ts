@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import { createActor } from "xstate";
-import { getStateMeta, persistSnapshot, setupAgent } from "./index.js";
+import { getStateMeta, setupAgent } from "./index.js";
 import { getJsonSchema, getJsonSchemaSync, getMachineStructuralHash } from "./index.js";
 import { findNonSerializableContextPaths } from "./utils.js";
 import type { StandardSchemaV1 } from "./types.js";
@@ -77,6 +77,49 @@ describe("getStateMeta", () => {
     expect(meta.interaction).toEqual({ label: "child", eventType: "DONE" });
   });
 
+  test("equal-depth parallel siblings merge by state id (later id wins)", () => {
+    const machine = agent.createMachine({
+      context: {},
+      type: "parallel",
+      states: {
+        // Declared in reverse alphabetical order on purpose: the merge order is
+        // by state id, not by declaration order.
+        zeta: { meta: { banner: "zeta" } },
+        alpha: { meta: { banner: "alpha" } },
+      },
+    });
+    const snapshot = createActor(machine).start().getSnapshot();
+
+    // Both regions are at the same depth, so the later id alphabetically wins.
+    expect(getStateMeta(snapshot).banner).toBe("zeta");
+  });
+
+  test("a deeper state with a custom id still wins over its ancestor", () => {
+    const machine = agent.createMachine({
+      context: {},
+      initial: "parent",
+      states: {
+        parent: {
+          meta: { interaction: { label: "parent", eventType: "GO" } },
+          initial: "child",
+          states: {
+            child: {
+              // A custom id has no dots, so id-string depth would misrank it.
+              id: "review",
+              meta: { interaction: { label: "child", eventType: "DONE" } },
+            },
+          },
+        },
+      },
+    });
+    const snapshot = createActor(machine).start().getSnapshot();
+
+    expect(getStateMeta(snapshot).interaction).toEqual({
+      label: "child",
+      eventType: "DONE",
+    });
+  });
+
   test("recovers the meta type from the snapshot generic", () => {
     const machine = agent.createMachine({
       context: {},
@@ -89,27 +132,6 @@ describe("getStateMeta", () => {
     // Type-level: `banner` is a `string | undefined`, not `unknown`.
     const banner: string | undefined = meta.banner;
     expect(banner).toBe("hi");
-  });
-});
-
-describe("persistSnapshot", () => {
-  test("returns a plain-JSON deep clone (equal value, not same reference)", () => {
-    const snapshot = { value: "reviewing", context: { draft: { body: "hi" } } };
-    const persisted = persistSnapshot(snapshot);
-
-    expect(persisted).toEqual(snapshot);
-    expect(persisted).not.toBe(snapshot);
-    expect(persisted.context).not.toBe(snapshot.context);
-  });
-
-  test("drops non-JSON values exactly as JSON round-trip does", () => {
-    const persisted = persistSnapshot({
-      keep: 1,
-      fn: () => 1,
-      undef: undefined,
-    });
-
-    expect(persisted).toEqual({ keep: 1 });
   });
 });
 

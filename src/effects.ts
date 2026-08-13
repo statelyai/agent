@@ -43,7 +43,7 @@ import {
   type AgentLogVerification,
   type JsonValue,
 } from "./event-log-store.js";
-import { djb2Hex, getMachineStructuralHash } from "./utils.js";
+import { djb2Hex, resolveMachineVersion } from "./utils.js";
 import { AgentError } from "./errors.js";
 import {
   getRegisteredAgentExecutionOptions,
@@ -181,7 +181,7 @@ export function createReplayEntry<TMachine extends AnyStateMachine>(
 ): AgentLogEntry {
   const index = entries.length;
   const machineId = (machine.config as { id?: string }).id ?? machine.id ?? "(machine)";
-  const machineVersion = options.machineVersion ?? getMachineStructuralHash(machine);
+  const machineVersion = options.machineVersion ?? resolveMachineVersion(machine);
   const entry: AgentLogEntry = {
     schemaVersion: AGENT_EVENT_SCHEMA_VERSION,
     id: options.id ?? `evt_${String(index).padStart(8, "0")}`,
@@ -710,7 +710,7 @@ export function replay<TMachine extends AnyStateMachine>(
   options: ReplayOptions = {},
 ): ReplayResult<TMachine> {
   const machineId = (machine.config as { id?: string }).id ?? machine.id ?? "(machine)";
-  const machineVersion = options.machineVersion ?? getMachineStructuralHash(machine);
+  const machineVersion = options.machineVersion ?? resolveMachineVersion(machine);
   validateReplayEntries(entries, { machineId, machineVersion }, "Replay entries");
   const events = toEvents(entries);
 
@@ -744,15 +744,6 @@ export function replay<TMachine extends AnyStateMachine>(
   }
 
   return { snapshot: snapshot as SnapshotFrom<TMachine>, effects };
-}
-
-/** Requires and checks every entry's recorded state/effect hashes. */
-export function verifyReplay<TMachine extends AnyStateMachine>(
-  machine: TMachine,
-  entries: readonly AgentLogEntry[],
-  options: Omit<ReplayOptions, "verify"> = {},
-): ReplayResult<TMachine> {
-  return replay(machine, entries, { ...options, verify: "strict" });
 }
 
 /** Structural event-tail, logical-state, and owed-effect comparison. */

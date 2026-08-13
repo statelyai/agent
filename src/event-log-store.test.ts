@@ -1,7 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import { createActor, setup, type EventFromLogic } from "xstate";
-import { persistSnapshot } from "./utils.js";
 import { createReplayEntry, initEntry, replay } from "./effects.js";
 import {
   AgentEventLogConflictError,
@@ -33,7 +32,7 @@ describe("createInMemoryEventLogStore conformance", () => {
 });
 
 describe("AgentEventLogConflictError", () => {
-  test("carries threadId, expectedIndex, and actualLength", async () => {
+  test("carries threadId, expectedIndex, and actualIndex", async () => {
     const store = createInMemoryEventLogStore();
     await store.append({
       threadId: "t",
@@ -56,7 +55,7 @@ describe("AgentEventLogConflictError", () => {
     const conflict = caught as AgentEventLogConflictError;
     expect(conflict.threadId).toBe("t");
     expect(conflict.expectedIndex).toBe(0);
-    expect(conflict.actualLength).toBe(1);
+    expect(conflict.actualIndex).toBe(1);
     expect(conflict.name).toBe("AgentEventLogConflictError");
   });
 });
@@ -181,7 +180,8 @@ describe("deterministic replay from the log", () => {
     const { snapshot } = replay(counterMachine, journal);
 
     // The deterministic-replay property the whole durability model rests on.
-    expect(persistSnapshot(snapshot)).toEqual(persistSnapshot(liveSnapshot));
+    const toJson = (value: unknown) => JSON.parse(JSON.stringify(value)) as unknown;
+    expect(toJson(snapshot)).toEqual(toJson(liveSnapshot));
     expect(snapshot.context).toEqual({ total: 17, ops: 3 });
     expect(snapshot.status).toBe("done");
   });

@@ -82,7 +82,7 @@ const agentSetup = setupAgent({
   },
   // The machine's own wait signal: the `awaiting-approval` tag. `runAgent`
   // settles idle deterministically whenever a resting snapshot carries it.
-  isSuspended: (snapshot) => snapshot.hasTag("awaiting-approval"),
+  isIdle: (snapshot) => snapshot.hasTag("awaiting-approval"),
   requests: {
     // Stands in for a real validation model call (fraud check, policy, …).
     validateRefund: {

@@ -37,7 +37,7 @@ import {
 import { createDecideActor } from "./decision.js";
 import { AGENT_USAGE_EVENT_TYPE, type AgentUsageEvent } from "./effects.js";
 import { appendMessages } from "./messages.js";
-import { agentExecutionOptions, machineSuspensionPredicates } from "./internal/registry.js";
+import { agentExecutionOptions, machineIdlePredicates } from "./internal/registry.js";
 import type { AgentSchemas } from "./events.js";
 import {
   setupAgentFromConfig,
@@ -638,14 +638,14 @@ type SetupAgentBaseConfig<
   /**
    * Detects a snapshot that is an INTENTIONAL wait for an external event (a
    * human approval, an inbound webhook, …) — the machine's own declaration of
-   * what "suspended" means for it, so `runAgent` settles those snapshots idle
+   * what "idle" means for it, so `runAgent` settles those snapshots idle
    * deterministically instead of using its timing heuristic. Travels with the
-   * machine through `machine.provide(...)`. A `runAgent({ isSuspended })` host
+   * machine through `machine.provide(...)`. A `runAgent({ isIdle })` host
    * override takes precedence; with neither, `runAgent` falls back to the timing
    * heuristic. Declare your own signal — e.g. `(s) => s.hasTag('awaiting-review')`
    * or `(s) => getStateMeta(s).interaction !== undefined`.
    */
-  isSuspended?: (snapshot: AnyMachineSnapshot) => boolean;
+  isIdle?: (snapshot: AnyMachineSnapshot) => boolean;
 };
 
 // The raw xstate `setup(...)` result type for an agent config, before setupAgent's own extensions (schemas/models/requests/appendMessages, plus the wrapped createMachine) are added.
@@ -939,10 +939,10 @@ export function setupAgent<
       agentExecutionOptions.set(machine as object, machineOptions);
       // Carry the wait-state predicate on the machine's root `config` (shared by
       // reference across `.provide`), so it survives provide/executor rebinding.
-      if (config.isSuspended) {
+      if (config.isIdle) {
         const rootConfig = (machine as { config?: object }).config;
         if (rootConfig) {
-          machineSuspensionPredicates.set(rootConfig, config.isSuspended);
+          machineIdlePredicates.set(rootConfig, config.isIdle);
         }
       }
       return machine;
@@ -1178,13 +1178,23 @@ const RESERVED_AGENT_ACTOR_KEYS = [
 ] satisfies readonly (keyof BuiltinAgentActors)[];
 
 /**
+ * The whole `agent.` actor-source namespace is reserved for the library, not
+ * just the shipped builtins: a key starting with this prefix is rejected at
+ * setup time so a future builtin can never collide with (or be shadowed by) a
+ * user source. Name your own sources without it.
+ */
+const RESERVED_AGENT_KEY_PREFIX = "agent.";
+
+/**
  * Runtime guards over the user-supplied `actors`/`requests` keys, in one walk
  * of both groups:
  *
- * 1. A key in the reserved `agent.*` builtin namespace is rejected. Without
- *    this, the builtins-first spread in {@link createAgentActors} lets such a
- *    key overwrite the builtin (`agent.decide`, …) silently. Deliberate
- *    override of a builtin is still possible after the machine is created, via
+ * 1. A key in the reserved `agent.` namespace is rejected — every key with
+ *    that prefix, not only today's builtins. Without this, the builtins-first
+ *    spread in {@link createAgentActors} lets such a key overwrite the builtin
+ *    (`agent.decide`, …) silently, and a builtin added later would start
+ *    colliding with user code. Deliberate override of a builtin is still
+ *    possible after the machine is created, via
  *    `machine.provide({ actors: { 'agent.decide': ... } })`.
  * 2. A key appearing in BOTH groups is almost certainly a mistake (whichever
  *    spread applies last would silently win) — fail fast with a clear message
@@ -1208,6 +1218,14 @@ function assertActorKeys(
             `cannot be redefined here (it would silently clobber the builtin). Reserved keys: ` +
             `${RESERVED_AGENT_ACTOR_KEYS.join(", ")}. To deliberately override a builtin, do it ` +
             `on the created machine instead: machine.provide({ actors: { '${key}': ... } }).`,
+        );
+      }
+      if (key.startsWith(RESERVED_AGENT_KEY_PREFIX)) {
+        throw new Error(
+          `setupAgent: '${groupName}' key '${key}' uses the reserved '` +
+            `${RESERVED_AGENT_KEY_PREFIX}' namespace, which belongs to the library (` +
+            `${RESERVED_AGENT_ACTOR_KEYS.join(", ")}, and anything added later). Rename it ` +
+            `without the '${RESERVED_AGENT_KEY_PREFIX}' prefix.`,
         );
       }
       const existingGroup = seenIn.get(key);

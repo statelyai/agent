@@ -67,6 +67,9 @@ export {
   AGENT_TRACE_SCHEMA_VERSION,
   AgentIdleError,
   AgentIllegalResumeEventError,
+  AgentMaxModelCallsExceededError,
+  getSnapshotNodes,
+  getSnapshotRequests,
   inspectTransitions,
   runAgent,
   createAgentActor,
@@ -80,7 +83,9 @@ export type {
   AgentInputFrom,
   AgentMessageInfo,
   AgentRunMeta,
+  AgentSnapshotNode,
   AgentStateRequest,
+  GetSnapshotRequestsOptions,
   AgentTraceEvent,
   AgentUserInputExecutor,
   InspectedActorRef,
@@ -97,7 +102,6 @@ export { provideExecutors } from "./provide-executors.js";
 export type { ProvideExecutorsOptions } from "./provide-executors.js";
 export {
   AgentLintError,
-  assertAgentMachine,
   canReach,
   explorePaths,
   lintAgentMachine,
@@ -108,7 +112,6 @@ export type {
   AgentLintSeverity,
   AgentPathReport,
   AgentPathTerminal,
-  AssertAgentMachineOptions,
   CanReachResult,
   ExplorePathsOptions,
   LintAgentMachineOptions,
@@ -131,8 +134,10 @@ export { createScriptedExecutors } from "./scripted-executors.js";
 export type {
   ScriptedDecisionEntry,
   ScriptedDecisionValue,
+  ScriptedExecutors,
   ScriptedExecutorsScript,
   ScriptedTextEntry,
+  ScriptedUserInputEntry,
 } from "./scripted-executors.js";
 export {
   assistantMessage,
@@ -142,7 +147,6 @@ export {
   getMachineStructuralHash,
   getStateMeta,
   isStandardSchema,
-  persistSnapshot,
   systemMessage,
   toolMessage,
   userMessage,
@@ -172,7 +176,6 @@ export {
   getAgentEffects,
   initEntry,
   replay,
-  verifyReplay,
 } from "./effects.js";
 export type {
   AgentEffectDiff,

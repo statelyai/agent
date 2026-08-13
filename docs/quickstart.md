@@ -5,7 +5,7 @@ description: Install @statelyai/agent and run your first agent machine end to en
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
 
-The [overview](index.md) has the copy-paste version; this page builds the same shape up piece by piece.
+This page builds an agent piece by piece, from installation to a live model call. For a single copy-paste example, see the [overview](index.md).
 
 ## Installation
 
@@ -15,19 +15,21 @@ The [overview](index.md) has the copy-paste version; this page builds the same s
 pnpm add @statelyai/agent@alpha xstate@alpha zod ai@^6 @ai-sdk/openai@^3
 ```
 
-- The `@alpha` tag floats. Install it once, then pin what it resolved to (`npm ls @statelyai/agent`) so a later alpha cannot change the API under you.
-- `xstate` is the one required peer, at **v6 alpha.25 or newer**. Node 22.18 or newer.
-- Provider packages must match your `ai` major. `@ai-sdk/openai@^3` pairs with `ai@^6`; a bare `@ai-sdk/openai` resolves to `@latest`, whose `LanguageModel` spec version may not match your `ai` peer.
-- The package is **ESM-first**; every entry also ships a CommonJS build, so `require()` works. The examples use top-level `await`, which needs ESM: set `"type": "module"` in `package.json` (or use `.mts` files).
+- The `@alpha` tag floats. Install it once, then run `npm ls @statelyai/agent` and pin the resolved version, so a later alpha cannot change the API.
+- `xstate` is the only required peer dependency, at v6 alpha.25 or newer. Node must be 22.18 or newer.
+- Provider packages must match your `ai` major version. `@ai-sdk/openai@^3` pairs with `ai@^6`. A bare `@ai-sdk/openai` resolves to `@latest`, whose `LanguageModel` spec version may not match your `ai` peer.
+- The package is ESM-first. Every entry point also ships a CommonJS build, so `require()` works. The examples use top-level `await`, which requires ESM. Set `"type": "module"` in `package.json`, or use `.mts` files.
 
 ## First agent
 
-A comment moderator. The model reads a comment and picks one of three events; the machine owns the trust threshold that decides whether publishing is even legal.
+The first agent is a comment moderator. The model reads a comment and picks one of three events. The machine owns the trust threshold that decides whether publishing is legal.
 
-Two pieces do the work:
+Two functions do the work:
 
-- `setupAgent` declares the schemas and events, then `createMachine` authors the control flow from them.
-- `createScriptedExecutors` plays back canned answers through the executor contract, so this first version runs end to end with **no API key**.
+- `setupAgent` declares the schemas and events. `createMachine` authors the control flow from them.
+- `createScriptedExecutors` plays back canned answers through the executor contract, so this first version runs end to end without an API key.
+
+<!-- viz: moderation machine: reviewing -> published/flagged/blocked, with the trust >= 50 guard on PUBLISH and the retry back into reviewing when the guard rejects -->
 
 ```ts
 import { createScriptedExecutors, runAgent, setupAgent } from "@statelyai/agent";
@@ -52,7 +54,7 @@ const agentSetup = setupAgent({
 });
 
 const moderationMachine = agentSetup.createMachine({
-  // Comments start flagged; only the machine can clear one.
+  // Comments start flagged.
   context: ({ input }) => ({ ...input, outcome: "flagged", reason: null }),
   output: ({ context }) => ({ outcome: context.outcome, reason: context.reason }),
   initial: "reviewing",
@@ -68,13 +70,15 @@ const moderationMachine = agentSetup.createMachine({
         }),
       },
       on: {
-        // The guard owns the threshold, not the model: under 50 this returns
-        // undefined, so PUBLISH is illegal and the model has to choose again.
+        // Returns undefined below a trust score of 50, which rejects PUBLISH.
         PUBLISH: ({ context }) =>
           context.trust >= 50
             ? { target: "published", context: { outcome: "published" } }
             : undefined,
-        FLAG: ({ event }) => ({ target: "flagged", context: { reason: event.reason } }),
+        FLAG: ({ event }) => ({
+          target: "flagged",
+          context: { outcome: "flagged", reason: event.reason },
+        }),
         BLOCK: () => ({ target: "blocked", context: { outcome: "blocked" } }),
       },
     },
@@ -87,7 +91,7 @@ const moderationMachine = agentSetup.createMachine({
 const result = await runAgent(moderationMachine, {
   input: { comment: "honestly this update is terrible", trust: 20 },
   executors: createScriptedExecutors({
-    decisions: [{ type: "FLAG", reason: "Borderline tone." }],
+    decisions: [{ type: "PUBLISH" }, { type: "FLAG", reason: "Borderline tone." }],
   }),
 });
 
@@ -102,11 +106,13 @@ Save it as `agent.ts` in a project with `"type": "module"` in its `package.json`
 npx tsx agent.ts
 ```
 
-It prints `{ outcome: 'flagged', reason: 'Borderline tone.' }`. The scripted decision took the place of a model call. Everything else (the guard, the retry, the final state, the schema-checked output) is the real machine.
+It prints `{ outcome: 'flagged', reason: 'Borderline tone.' }`. The scripted decisions replaced the model calls. The first decision consumes the `PUBLISH` entry, and the trust guard rejects it because the author's trust score is 20. The decision is requested again, consumes the `FLAG` entry, and the machine reaches `flagged`. The guard, the retry, the final state, and the schema-checked output all come from the real machine.
+
+The `model` value is a plain string. The `models` registry is optional and only narrows the type of that string. It is never consulted at run time, and scripted executors ignore it because they route on the request name.
 
 ### Real model executors
 
-Swap the executors. The machine does not change: add a `models` registry (which also types the `model:` keys), then hand `runAgent` the AI SDK adapter instead of the script.
+To call a real model, replace the executors. The machine does not change. Add a `models` registry, which also types the `model` keys, then pass the AI SDK adapter to `runAgent` instead of the script.
 
 ```ts no-check
 import { openai } from "@ai-sdk/openai";
@@ -115,7 +121,7 @@ import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 const models = defineModels({ fast: openai("gpt-5.4-mini") });
 
 const agentSetup = setupAgent({
-  models, // adds typed `model` keys; everything else is unchanged
+  models,
   // …the same schemas and events
 });
 
@@ -130,21 +136,21 @@ export OPENAI_API_KEY=sk-...
 npx tsx agent.ts
 ```
 
-Now the model picks the event, and `reason` is whatever it wrote. Keep the scripted set around: it is what your tests run against (see [Testing without an API key](#testing-without-an-api-key)).
+The model now picks the event, and `reason` contains the text it wrote. Keep the scripted executors, because your tests run against them. See [Testing without an API key](#testing-without-an-api-key).
 
-What the machine does that a prompt call cannot:
+The machine adds three properties that a direct prompt call does not have:
 
-- **The model only ever picks a legal event.** `allowedEvents` is intersected with the events the current state actually accepts, so the choice set moves with the machine.
-- **A guard can overrule the model.** A `PUBLISH` on a low-trust author is rejected before it reaches state (`failure: 'rejected-by-guard'`) and the decision retries with that feedback. The threshold lives in one place and cannot be prompted away.
-- **The outcome is a state, not a parsed string.** Every path ends in a known final state with schema-checked output, and the whole graph renders as a diagram.
+- The model can only pick a legal event. `allowedEvents` is intersected with the events the current state accepts, so the choice set changes as the machine moves.
+- A guard can override the model. A `PUBLISH` for a low-trust author is rejected before it changes state, with `failure: 'rejected-by-guard'`, and the decision retries with that feedback. The threshold is defined in one place and a prompt cannot change it.
+- The outcome is a state, not a parsed string. Every path ends in a known final state with schema-checked output, and the graph renders as a diagram.
 
 ## The `setupAgent` surface
 
-`setupAgent` returns a **setup** (not a running agent) you author machines from, like XState's `setup()`. Context, input, output, and event payloads are Standard Schemas, so Zod works directly and the machine's types come from them.
+`setupAgent` returns a **setup**, which you author machines from. It is not a running agent. It works like XState's `setup()`. Context, input, output, and event payloads are Standard Schemas, so Zod works directly and the machine's types come from those schemas.
 
 The `model` value is a key into the `models` registry, or any string your [host](hosts.md#typed-model-aliases) resolves at run time.
 
-Every machine can invoke these built-in actor sources. They are reserved `src` strings; the invoke's `input` shapes each call.
+Every machine can invoke the following built-in actor sources. They are reserved `src` strings. The invoke's `input` shapes each call.
 
 | `src`                | Purpose                                                 |
 | -------------------- | ------------------------------------------------------- |
@@ -155,7 +161,7 @@ Every machine can invoke these built-in actor sources. They are reserved `src` s
 
 ### Named requests
 
-A **request** is a typed, reusable model call: named schemas, a model, and a prompt built from its input. It is the testable counterpart to an inline `agent.generateText`.
+A **request** is a typed, reusable model call. It has named schemas, a model, and a prompt built from its input. Use a request instead of an inline `agent.generateText` when you want to test the call by name.
 
 ```ts no-check
 const agentSetup = setupAgent({
@@ -190,25 +196,31 @@ See [Text requests](text-requests.md) for tools, streaming, and messages.
 
 ## Running
 
-`runAgent` drives the machine and calls your **executors** whenever it needs a model. It settles with a `status`:
+`runAgent` drives the machine and calls your **executors** whenever the machine needs a model. It settles with one of three statuses.
 
-- `done`: reached a final state; `result.output` matches your output schema.
-- `idle`: waiting on a human. See [Human in the loop](human-in-the-loop.md).
-- `error`: something threw.
+| Status  | Meaning                                                                          |
+| ------- | -------------------------------------------------------------------------------- |
+| `done`  | The machine reached a final state. `result.output` matches your output schema.    |
+| `idle`  | The machine is waiting on a human. See [Human in the loop](human-in-the-loop.md). |
+| `error` | Something threw.                                                                  |
 
-Every variant carries `result.events`, a versioned, JSON-safe `AgentLogEntry[]` of the replayable external inputs (identity, timestamp, machine version, state/effect hashes). Pass it to `replay(machine, result.events)` to reconstruct the final snapshot without re-running model or tool calls; `verifyReplay` requires every hash. See [The event log](event-log.md#export-events-from-runagent).
+<!-- viz: runAgent lifecycle: start -> model call loop -> settle at done, idle, or error, with idle resuming back into the loop -->
 
-For a run that must go straight through to a final state, `generateResult(machine, options)` resolves with the done result: `result.output` plus metadata (`result.snapshot`, replayable `result.events`, aggregated `result.usage`), like `generateText`'s `text` + call metadata. It throws `AgentIdleError` if the machine pauses.
+Every status carries `result.events`, a versioned JSON-safe `AgentLogEntry[]` of the replayable external inputs. Each entry records identity, timestamp, machine version, and state and effect hashes. Pass the array to `replay(machine, result.events)` to reconstruct the final snapshot without re-running model or tool calls. Pass `{ verify: 'strict' }` to require every hash to match. See [The event log](event-log.md#export-events-from-runagent).
+
+If a run must reach a final state, use `generateResult(machine, options)` instead. It resolves with the done result: `result.output`, plus `result.snapshot`, replayable `result.events`, and aggregated `result.usage`. It throws `AgentIdleError` if the machine pauses.
 
 ### Other ways to run the same machine
 
-`runAgent` is the default, not the only option. `provideExecutors` binds the executors onto the machine and hands it back for a plain `createActor`; the step path lets a durable host own the loop and the persistence. The machine is identical in all three. See [Choosing a run mode](choosing-a-run-mode.md).
+`runAgent` is the default, but not the only option. `provideExecutors` binds the executors onto the machine and returns it for use with a plain `createActor`. The step path lets a durable host own the loop and the persistence. The machine is identical in all three modes. See [Choosing a run mode](choosing-a-run-mode.md).
 
 ### Testing without an API key
 
-`createScriptedExecutors` is the same helper the first run used: FIFO queues of scripted answers, one entry consumed per model call. `decisions` feeds `agent.decide`, `text` feeds every text request.
+`createScriptedExecutors` is the helper the first run used. It holds FIFO queues of scripted answers and consumes one entry per model call. `decisions` feeds `agent.decide`, and `text` feeds every text request.
 
 ```ts
+import { createScriptedExecutors, generateResult } from "@statelyai/agent";
+
 const executors = createScriptedExecutors({
   decisions: [{ type: "FLAG", reason: "Borderline tone." }],
   text: [{ note: "Repeat offender." }],
@@ -222,15 +234,15 @@ const result = await generateResult(moderationMachine, {
 expect(result.output).toEqual({ outcome: "flagged", reason: "Borderline tone." });
 ```
 
-- An entry may be a **function of the request**, for branching or looping machines: `(request) => request.name === "moderatorNote" ? … : …`.
-- A `PUBLISH` rejected by the guard consumes an entry and retries with the next one, so scripts assert retry behavior directly.
-- Running dry throws an error naming the pending request.
+- An entry can be a function of the request, which is useful for branching or looping machines. For example: `(request) => request.name === "moderatorNote" ? … : …`.
+- A `PUBLISH` rejected by the guard consumes an entry and retries with the next one, so a script can assert retry behavior.
+- If the queue runs out, the executor throws an error naming the pending request.
 
-Executors are plain functions, so a hand-written mock is just an object; see [Hosts and executors](hosts.md#scripted-executors). To assert a whole playthrough without a run loop at all, `simulateAgent` walks the step path from a by-`src` script. See [Testing and verification](verify.md).
+Executors are plain functions, so you can also write a mock by hand as an object. See [Hosts and executors](hosts.md#scripted-executors). To assert a full playthrough without a run loop, use `simulateAgent`, which walks the step path from a script keyed by `src`. See [Testing and verification](verify.md).
 
 ### Live visualization
 
-The [Stately Inspector](https://stately.ai/docs/inspector) is a web UI that draws a running machine as a diagram and highlights each state as it is entered. Install `@statelyai/sdk`, create an inspector, and pass its handler to `runAgent`'s `inspect` option. The run opens the diagram in your browser and updates it live:
+The [Stately Inspector](https://stately.ai/docs/inspector) is a web UI that draws a running machine as a diagram and highlights each state as the machine enters it. Install `@statelyai/sdk`, create an inspector, and pass its handler to the `inspect` option of `runAgent`. The run opens the diagram in your browser and updates it as the machine runs.
 
 ```ts
 import { createInspector } from "@statelyai/sdk";
@@ -241,11 +253,11 @@ const inspector = createInspector();
 await runAgent(moderationMachine, {
   input: { comment: "honestly this update is terrible", trust: 20 },
   executors: createAiSdkExecutors({ models }),
-  inspect: inspector.inspect, // opens the diagram and lights it up live
+  inspect: inspector.inspect,
 });
 ```
 
-It is the same machine you authored, so it also renders in [Stately Studio](https://stately.ai/editor) and the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=statelyai.stately-vscode). See [Observability](observability.md) for production tracing.
+The same machine also renders in [Stately Studio](https://stately.ai/editor) and the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=statelyai.stately-vscode). For production tracing, see [Observability](observability.md).
 
 ## Related
 

@@ -259,42 +259,41 @@ export interface AgentEventLogStore {
   /** The thread's current log length (0 for an unknown thread) — the next `expectedIndex`. */
   length(threadId: string): Promise<number>;
   /**
-   * Copy a prefix onto a fresh, empty `newThreadId` — either `[0, upToIndex)`
-   * or through the inclusive `atEventId`. With neither cutoff the full source
-   * is copied. The fork then appends independently. Rejects (plain `Error`) if
-   * `newThreadId` already has entries, the source/id is unknown, or both cutoff
-   * forms are supplied. Implementations may copy-on-write or physically copy;
-   * observable behavior must match a full copy.
+   * Copy the prefix `[0, upToIndex)` onto a fresh, empty `newThreadId`.
+   * Without `upToIndex` the full source is copied. The fork then appends
+   * independently. Rejects (plain `Error`) if `newThreadId` already has
+   * entries, the source is unknown, or `upToIndex` is out of range.
+   * Implementations may copy-on-write or physically copy; observable behavior
+   * must match a full copy.
    */
   fork(input: {
     threadId: string;
     newThreadId: string;
+    /** Exclusive index cutoff. */
     upToIndex?: number;
-    /** Inclusive event-id cutoff. Mutually exclusive with `upToIndex`. */
-    atEventId?: string;
   }): Promise<void>;
 }
 
 /**
  * Rejection from {@link AgentEventLogStore.append} when the thread's stored
  * length is not the `expectedIndex` the writer held — a concurrent writer
- * appended first. `actualLength` is the length core found.
+ * appended first. `actualIndex` is the next index the store would accept.
  */
 export class AgentEventLogConflictError extends AgentError {
   readonly threadId: string;
   readonly expectedIndex: number;
-  readonly actualLength: number;
+  readonly actualIndex: number;
 
-  constructor(threadId: string, expectedIndex: number, actualLength: number) {
+  constructor(threadId: string, expectedIndex: number, actualIndex: number) {
     super(
       "event-log-conflict",
-      `AgentEventLogStore.append: length conflict on thread "${threadId}": ` +
-        `expected length ${expectedIndex} but found ${actualLength} — a concurrent writer won.`,
+      `AgentEventLogStore.append: index conflict on thread "${threadId}": ` +
+        `expected index ${expectedIndex} but found ${actualIndex} — a concurrent writer won.`,
     );
     this.name = "AgentEventLogConflictError";
     this.threadId = threadId;
     this.expectedIndex = expectedIndex;
-    this.actualLength = actualLength;
+    this.actualIndex = actualIndex;
   }
 }
 
@@ -359,7 +358,7 @@ export function createInMemoryEventLogStore(): AgentEventLogStore {
       return threads.get(threadId)?.length ?? 0;
     },
 
-    async fork({ threadId, newThreadId, upToIndex, atEventId }) {
+    async fork({ threadId, newThreadId, upToIndex }) {
       if ((threads.get(newThreadId)?.length ?? 0) > 0) {
         throw new Error(
           `AgentEventLogStore.fork: newThreadId "${newThreadId}" already has entries.`,
@@ -369,17 +368,7 @@ export function createInMemoryEventLogStore(): AgentEventLogStore {
       if (!source) {
         throw new Error(`AgentEventLogStore.fork: unknown source thread "${threadId}".`);
       }
-      if (upToIndex !== undefined && atEventId !== undefined) {
-        throw new Error("AgentEventLogStore.fork: pass either upToIndex or atEventId, not both.");
-      }
-      const eventIndex =
-        atEventId === undefined ? undefined : source.findIndex((entry) => entry.id === atEventId);
-      if (atEventId !== undefined && eventIndex === -1) {
-        throw new Error(
-          `AgentEventLogStore.fork: thread "${threadId}" has no event id "${atEventId}".`,
-        );
-      }
-      const upTo = eventIndex === undefined ? (upToIndex ?? source.length) : eventIndex + 1;
+      const upTo = upToIndex ?? source.length;
       if (upTo < 0 || upTo > source.length) {
         throw new Error(
           `AgentEventLogStore.fork: thread "${threadId}" (length ${source.length}) ` +

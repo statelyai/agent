@@ -8,7 +8,7 @@
  * async in the App Router as of Next 15. This example is typed against the real
  * `next` package, so that is enforced rather than assumed.
  */
-import { persistSnapshot, runAgent } from "@statelyai/agent";
+import { runAgent } from "@statelyai/agent";
 import { NextResponse, type NextRequest } from "next/server";
 import { announceMachine, snapshots } from "../../route";
 import { resolveExecutors, maybeCreateRunInspection } from "../../../../../agent-runtime";
@@ -39,7 +39,7 @@ export async function POST(
     // A REJECT loops back through `drafting` and settles at `reviewing` again,
     // so the stored snapshot has to be replaced or the next resume would run
     // against the pre-rejection draft.
-    snapshots.set(id, persistSnapshot(result.snapshot));
+    snapshots.set(id, result.persistedSnapshot);
     return NextResponse.json(
       { status: "idle", id, draft: result.snapshot.context.draft },
       { status: 202 },

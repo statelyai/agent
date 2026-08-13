@@ -65,7 +65,7 @@ const agentSetup = setupAgent({
   },
   // The machine's own wait signal: the `awaiting-review` tag. `runAgent` settles
   // idle deterministically whenever a resting snapshot carries it.
-  isSuspended: (snapshot) => snapshot.hasTag("awaiting-review"),
+  isIdle: (snapshot) => snapshot.hasTag("awaiting-review"),
   requests: {
     writeDraft: {
       schemas: { input: z.object({ topic: z.string() }), output: z.string() },

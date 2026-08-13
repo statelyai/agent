@@ -66,7 +66,7 @@ const sessionQuizSetup = setupAgent({
     QUIT: {},
   },
   // Deterministic idle detection: settle exactly when the machine is waiting.
-  isSuspended: (snapshot) => snapshot.hasTag("waiting"),
+  isIdle: (snapshot) => snapshot.hasTag("waiting"),
   requests: {
     gradeAnswer: {
       schemas: {

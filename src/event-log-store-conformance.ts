@@ -123,8 +123,8 @@ export async function assertEventLogStoreConformance(create: CreateStore): Promi
     if (!(caught instanceof AgentEventLogConflictError)) {
       fail("a stale expectedIndex must throw AgentEventLogConflictError");
     }
-    if (caught.threadId !== "t" || caught.expectedIndex !== 0 || caught.actualLength !== 1) {
-      fail("conflict error must carry threadId, expectedIndex, and the actual length");
+    if (caught.threadId !== "t" || caught.expectedIndex !== 0 || caught.actualIndex !== 1) {
+      fail("conflict error must carry threadId, expectedIndex, and the actual index");
     }
   }
 
@@ -257,12 +257,12 @@ export async function assertEventLogStoreConformance(create: CreateStore): Promi
       "fork with upToIndex 1 must copy only entry 0",
     );
 
-    // Inclusive event-id cutoff.
-    await store.fork({ threadId: "src", newThreadId: "fork-id", atEventId: "evt_1" });
+    // upToIndex is exclusive.
+    await store.fork({ threadId: "src", newThreadId: "fork-2", upToIndex: 2 });
     assertJsonEqual(
-      (await store.read("fork-id")).map((e) => e.id),
+      (await store.read("fork-2")).map((e) => e.id),
       ["evt_0", "evt_1"],
-      "fork with atEventId must include the named entry",
+      "fork with upToIndex 2 must copy entries 0 and 1 only",
     );
 
     // The fork appends independently from its copied length; the source is untouched.
@@ -299,6 +299,17 @@ export async function assertEventLogStoreConformance(create: CreateStore): Promi
     }
     if (!(caughtUnknown instanceof Error) || caughtUnknown instanceof AgentEventLogConflictError) {
       fail("forking an unknown source thread must reject with a plain Error");
+    }
+
+    // An out-of-range upToIndex rejects.
+    let caughtRange: unknown;
+    try {
+      await store.fork({ threadId: "src", newThreadId: "fork-range", upToIndex: 99 });
+    } catch (error) {
+      caughtRange = error;
+    }
+    if (!(caughtRange instanceof Error) || caughtRange instanceof AgentEventLogConflictError) {
+      fail("forking past the source length must reject with a plain Error");
     }
   }
 }

@@ -5,13 +5,15 @@ description: Define tools, attach them to a text request, and let the host run t
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
 
-Tools belong to a **request**, not to machine states. The machine decides _when_ a request runs; the model picks which tools to call; the host executes them. The machine never sees the intermediate calls.
+Tools belong to a request, not to a machine state. The machine decides when a request runs. The model picks which tools to call. The host executes them. The machine does not see the intermediate tool calls.
+
+<!-- viz: data-flow figure of the tool loop: machine invokes a tool-carrying request -> host executor runs model/tool turns up to maxSteps -> final output validated -> single onDone transition back in the machine -->
 
 ## The tool contract
 
 <!-- AgentTool/AgentToolDescriptor from src/types.ts -->
 
-`AgentTool` is a minimal structural contract, so tools from any SDK drop in unchanged:
+`AgentTool` is a minimal structural contract, so tools from any SDK work without changes:
 
 | Field           | Type                                 | Meaning                                          |
 | --------------- | ------------------------------------ | ------------------------------------------------ |
@@ -21,11 +23,11 @@ Tools belong to a **request**, not to machine states. The machine decides _when_
 | `execute?`      | `(...args) => unknown`               | The implementation the host runs.                |
 | anything else   | `unknown`                            | Passed through untouched (`providerOptions`, …). |
 
-- A bare function is shorthand for `execute` (`AgentToolExecute`).
+- A bare function is shorthand for `execute`, typed as `AgentToolExecute`.
 - `AgentTools` is `Record<string, AgentTool | undefined>`, keyed by tool name.
-- `inputSchema` is deliberately widened to `object` so an SDK-native tool assigns with no cast. Core reads it as a Standard Schema when it can.
+- `inputSchema` is widened to `object` so an SDK-native tool assigns without a cast. Core reads it as a Standard Schema when it can.
 
-A native AI SDK tool owns its input typing, so `execute`'s argument needs no cast:
+A native AI SDK tool owns its input typing, so the argument to `execute` needs no cast:
 
 ```ts
 import { tool } from "ai";
@@ -38,7 +40,7 @@ const calculate = tool({
 });
 ```
 
-With no SDK, a plain object is enough. Core reads `description`/`inputSchema` and runs `execute`:
+Without an SDK, a plain object is enough. Core reads `description` and `inputSchema`, then runs `execute`:
 
 ```ts
 const calculate = {
@@ -53,7 +55,10 @@ const calculate = {
 
 ## Attaching tools to a request
 
-Put `tools` on any [text request](text-requests.md), inline in `setupAgent({ requests })` or on a standalone `createTextLogic`. `metadata.maxSteps` bounds the host-side tool loop; without it the request is single-step. `toolChoice` (`'auto' | 'none' | 'required' | { type: 'tool', name }`) constrains selection.
+Put `tools` on any [text request](text-requests.md), either inline in `setupAgent({ requests })` or on a standalone `createTextLogic`.
+
+- `maxSteps` is a typed field on the request. It bounds the host-side tool loop. Without it, the request is single-step.
+- `toolChoice` constrains selection. It accepts `'auto'`, `'none'`, `'required'`, or `{ type: 'tool', name }`.
 
 ```ts no-check
 import { z } from "zod";
@@ -75,7 +80,7 @@ const agentSetup = setupAgent({
       system: "Answer in one sentence. Use calculate for arithmetic.",
       prompt: ({ input }) => input.query,
       tools: { calculate },
-      metadata: { maxSteps: 5 }, // bounds the host-side loop
+      maxSteps: 5,
     },
   },
 });
@@ -97,7 +102,7 @@ export const toolCallingMachine = agentSetup.createMachine({
 });
 ```
 
-Run it with any executor set; the machine is unchanged between scripted and real models.
+Run the machine with any executor set. The machine is the same for scripted and real models.
 
 ```ts
 import { runAgent } from "@statelyai/agent";
@@ -109,29 +114,29 @@ const result = await runAgent(toolCallingMachine, {
 });
 ```
 
-Full version, with three real tools and progress via `onTransition`: [examples/tool-calling/index.ts](../examples/tool-calling/index.ts).
+For the full version, with three real tools and progress reported through `onTransition`, see [examples/tool-calling/index.ts](../examples/tool-calling/index.ts).
 
 ## Execution flow through the host
 
 <!-- toAiSdkTools / maxStepsSetting from src/ai-sdk/mappers.ts and src/ai-sdk/index.ts -->
 
-1. The machine invokes the request; core lowers it to an `AgentTextRequest` carrying `tools`, `toolChoice`, and `metadata`.
-2. The executor maps tools to its SDK. `createAiSdkExecutors` passes a native `tool({...})` through unchanged and wraps a plain descriptor or bare function in `tool()`; a tool with no `inputSchema` gets a permissive one.
-3. `metadata.maxSteps` becomes `stopWhen: stepCountIs(maxSteps)`. The loop runs entirely inside the executor.
+1. The machine invokes the request. Core lowers it to an `AgentTextRequest` carrying `tools`, `toolChoice`, and `metadata`.
+2. The executor maps tools to its SDK. `createAiSdkExecutors` passes a native `tool({...})` through unchanged and wraps a plain descriptor or bare function in `tool()`. A tool with no `inputSchema` gets a permissive one.
+3. `maxSteps` becomes `stopWhen: stepCountIs(maxSteps)`. The loop runs entirely inside the executor. The adapter still reads `metadata.maxSteps` as a fallback for requests written before `maxSteps` was typed, and the typed field wins.
 4. The final output is validated against the request's output schema and returned to `onDone`.
 
-Two consequences worth knowing:
+Two consequences follow:
 
-- **Tool-carrying requests do not retry.** The AI SDK adapter retries invalid structured output only when the request has no tools, since a tool loop may already have caused side effects.
-- **`metadata` is host-owned.** A host that does not understand a key ignores it, so requests stay portable.
+- Tool-carrying requests do not retry. The AI SDK adapter retries invalid structured output only when the request has no tools, because a tool loop may already have caused side effects.
+- `metadata` is host-owned. A host that does not understand a key ignores it, so requests stay portable.
 
-The raw executor result (tool calls and results included) reaches host code via `runAgent`'s `onResult(request, { raw })` and the `request.end` trace event. See [Observability](observability.md).
+The raw executor result, including tool calls and results, reaches host code through `runAgent`'s `onResult(request, { raw })` and the `request.end` trace event. See [Observability](observability.md).
 
 ## Tool results in messages
 
 <!-- message model from src/types.ts and src/utils.ts -->
 
-The portable message model has first-class tool parts, so a conversation that includes tool traffic is plain machine context:
+The message model includes tool parts, so a conversation that contains tool traffic is stored as plain machine context:
 
 - `ToolCallPart`: `{ type: 'tool-call', toolCallId, toolName, input }`.
 - `ToolResultPart`: `{ type: 'tool-result', toolCallId, toolName, output }`, where `output` is `{ type: 'text' | 'json' | 'error-text' | 'error-json' | 'content', value }`.
@@ -152,32 +157,22 @@ const recordToolResult = appendMessages([
 ]);
 ```
 
-You only build these by hand when the machine owns the loop (a ReAct-style machine, or replaying a transcript). With a host-run tool loop, the intermediate calls stay inside the executor. See [Messages](messages.md).
+Build these parts by hand only when the machine owns the loop, such as in a ReAct-style machine or when replaying a transcript. With a host-run tool loop, the intermediate calls stay inside the executor. See [Messages](messages.md).
 
 ## Presets and ejecting
 
-`createToolLoopMachine` from `@statelyai/agent/machines` is the same shape as the example above, prebuilt: one `answering` state, one request, `maxTurns` lowering to `metadata.maxSteps`.
+`createToolLoopMachine` from `@statelyai/agent/machines` is a prebuilt version of the machine above: one `answering` state and one tool-carrying request. See [Preset machines](machines-presets.md) for its options, including `maxSteps`.
 
-```ts no-check
-import { createToolLoopMachine } from "@statelyai/agent/machines";
+Eject from the preset when the tool loop needs machine states of its own:
 
-const machine = createToolLoopMachine({
-  model: "assistant",
-  instructions: "Answer using the tools.",
-  tools: { calculate },
-  maxTurns: 5,
-});
-```
+- To model approval as machine states, with approve, edit, and reject steps that persist and resume, eject to [examples/review-tool-calls](../examples/review-tool-calls/index.ts).
+- To model each think, act, and observe turn as its own transition, see [examples/react-agent](../examples/react-agent/index.ts).
 
-- `interruptOn: ['sendRefund']` lowers to `metadata.interruptOn`, read only by a host that implements gating. The preset stays a single state and never pauses.
-- For approval as real machine states (approve / edit / reject, persistable and resumable), eject to [examples/review-tool-calls](../examples/review-tool-calls/index.ts).
-- For each think/act/observe turn as its own transition, see [examples/react-agent](../examples/react-agent/index.ts).
-
-> **Not yet:** there is no built-in MCP client and no built-in tool-approval gate. MCP discovery, auth, and transport are your host's job; pass the discovered tool descriptors into `tools` like any other tool. See [Scope](scope.md).
+> **Note:** There is no built-in MCP client and no built-in tool-approval gate. MCP discovery, auth, and transport are the host's responsibility. Pass the discovered tool descriptors into `tools` like any other tool. See [Scope](scope.md).
 
 ## Related
 
-- [Text requests](text-requests.md): the request a tool attaches to, and structured/streaming output.
-- [Hosts](hosts.md): executors, model aliases, and writing your own adapter.
-- [Messages](messages.md): the message model tool parts live in.
-- [Preset machines](machines-presets.md): `createToolLoopMachine` and its siblings.
+- Read more about [Text requests](text-requests.md), the request a tool attaches to, including structured and streaming output.
+- Read more about [Hosts](hosts.md), including executors, model aliases, and writing your own adapter.
+- Read more about [Messages](messages.md), the message model that tool parts live in.
+- Read more about [Preset machines](machines-presets.md), including `createToolLoopMachine`.

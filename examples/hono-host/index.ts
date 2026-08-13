@@ -23,7 +23,6 @@ import { openai } from "@ai-sdk/openai";
 import {
   getAcceptedEvents,
   getStateMeta,
-  persistSnapshot,
   runAgent,
   setupAgent,
   type AgentRequestExecutors,
@@ -46,7 +45,7 @@ const reviewSetup = setupAgent({
   output: z.object({ published: z.boolean(), draft: z.string() }),
   meta: z.object({ interaction: z.object({ label: z.string() }).optional() }),
   events: { APPROVE: z.object({}), REJECT: z.object({ reason: z.string() }) },
-  isSuspended: (snapshot) => snapshot.hasTag("awaiting-review"),
+  isIdle: (snapshot) => snapshot.hasTag("awaiting-review"),
   requests: {
     writeDraft: {
       schemas: { input: z.object({ topic: z.string() }), output: z.string() },
@@ -152,7 +151,7 @@ export function createApp(executors: Partial<AgentRequestExecutors> = resolveExe
 
     if (result.status === "idle") {
       const id = crypto.randomUUID();
-      snapshots.set(id, persistSnapshot(result.snapshot));
+      snapshots.set(id, result.persistedSnapshot);
       const { interaction } = getStateMeta(result.snapshot);
       return c.json(
         {
@@ -181,7 +180,7 @@ export function createApp(executors: Partial<AgentRequestExecutors> = resolveExe
       return c.json({ status: "done", output: result.output });
     }
     if (result.status === "idle") {
-      snapshots.set(id, persistSnapshot(result.snapshot));
+      snapshots.set(id, result.persistedSnapshot);
       return c.json({ status: "idle", draft: result.snapshot.context.draft }, 202);
     }
     return c.json({ status: result.status }, 500);

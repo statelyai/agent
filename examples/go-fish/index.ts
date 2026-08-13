@@ -299,7 +299,7 @@ export const goFishMachine = setupAgent({
   models,
   // Deterministic idle detection: the run settles whenever it is waiting on the
   // human, instead of falling back to the timing heuristic.
-  isSuspended: (snapshot) => snapshot.hasTag("waiting"),
+  isIdle: (snapshot) => snapshot.hasTag("waiting"),
 }).createMachine({
   id: "go-fish",
   context: ({ input }) => deal(input.deck ?? shuffledDeck(input.seed), input.maxTurns),

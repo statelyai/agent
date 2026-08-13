@@ -202,10 +202,7 @@ export function createSqliteEventLogStore(
       return lengthOf(threadId);
     },
 
-    async fork({ threadId, newThreadId, upToIndex, atEventId }) {
-      if (upToIndex !== undefined && atEventId !== undefined) {
-        throw new Error("AgentEventLogStore.fork: pass either upToIndex or atEventId, not both.");
-      }
+    async fork({ threadId, newThreadId, upToIndex }) {
       transact(() => {
         if (lengthOf(newThreadId) > 0) {
           throw new Error(
@@ -216,18 +213,7 @@ export function createSqliteEventLogStore(
         if (sourceLength === 0) {
           throw new Error(`AgentEventLogStore.fork: unknown source thread "${threadId}".`);
         }
-        let upTo = upToIndex ?? sourceLength;
-        if (atEventId !== undefined) {
-          const row = db
-            .prepare(`SELECT idx FROM ${table} WHERE thread_id = ? AND entry_id = ?`)
-            .get(threadId, atEventId) as { idx: number } | undefined;
-          if (!row) {
-            throw new Error(
-              `AgentEventLogStore.fork: thread "${threadId}" has no event id "${atEventId}".`,
-            );
-          }
-          upTo = Number(row.idx) + 1;
-        }
+        const upTo = upToIndex ?? sourceLength;
         if (upTo < 0 || upTo > sourceLength) {
           throw new Error(
             `AgentEventLogStore.fork: thread "${threadId}" (length ${sourceLength}) ` +

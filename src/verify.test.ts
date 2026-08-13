@@ -2,7 +2,6 @@ import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import {
   AgentLintError,
-  assertAgentMachine,
   canReach,
   createTextLogic,
   explorePaths,
@@ -36,7 +35,7 @@ function createRefundMachine() {
       APPROVE: z.object({}),
       DENY: z.object({}),
     },
-    isSuspended: (snapshot) => snapshot.hasTag("awaiting-human"),
+    isIdle: (snapshot) => snapshot.hasTag("awaiting-human"),
   });
 
   return agent.createMachine({
@@ -467,7 +466,7 @@ describe("simulateAgent — keyless deterministic playthrough", () => {
     const result = await canReach(twentyQuestionsMachine, "gameOver", {
       input: { questionsRemaining: 1 },
     });
-    expect(result.canReach).toBe(true);
+    expect(result.reachable).toBe(true);
   });
 
   test("does not drain the caller's scripted queues", async () => {
@@ -538,7 +537,7 @@ describe("canReach — reachability with a witness path", () => {
     const result = await canReach(createRefundMachine(), "denied", {
       input: { request: "x", amount: 5000 },
     });
-    expect(result.canReach).toBe(true);
+    expect(result.reachable).toBe(true);
     expect(result.witness?.map((event) => event.type)).toEqual(["NEEDS_REVIEW", "DENY"]);
   });
 
@@ -546,14 +545,14 @@ describe("canReach — reachability with a witness path", () => {
     const result = await canReach(createRefundMachine(), "nonexistent", {
       input: { request: "x", amount: 5000 },
     });
-    expect(result.canReach).toBe(false);
+    expect(result.reachable).toBe(false);
     expect(result.witness).toBeUndefined();
   });
 });
 
-describe("assertAgentMachine — one-line pass/fail for tests", () => {
+describe("lintAgentMachine({ throw: true }) — one-line pass/fail for tests", () => {
   test("returns silently for a clean machine", () => {
-    expect(() => assertAgentMachine(jokeMachine)).not.toThrow();
+    expect(() => lintAgentMachine(jokeMachine, { throw: true })).not.toThrow();
   });
 
   test("throws AgentLintError with the findings for a broken machine", () => {
@@ -574,7 +573,7 @@ describe("assertAgentMachine — one-line pass/fail for tests", () => {
 
     let thrown: unknown;
     try {
-      assertAgentMachine(machine);
+      lintAgentMachine(machine, { throw: true });
     } catch (error) {
       thrown = error;
     }
@@ -603,8 +602,10 @@ describe("assertAgentMachine — one-line pass/fail for tests", () => {
       },
     });
 
-    expect(() => assertAgentMachine(machine)).not.toThrow();
-    expect(() => assertAgentMachine(machine, { warnings: true })).toThrow(AgentLintError);
+    expect(() => lintAgentMachine(machine, { throw: true })).not.toThrow();
+    expect(() => lintAgentMachine(machine, { throw: true, warnings: true })).toThrow(
+      AgentLintError,
+    );
   });
 
   test("forwards lint options: a disabled check no longer fails the assert", () => {
@@ -622,7 +623,94 @@ describe("assertAgentMachine — one-line pass/fail for tests", () => {
       },
     });
 
-    expect(() => assertAgentMachine(machine)).toThrow(AgentLintError);
-    expect(() => assertAgentMachine(machine, { disable: ["unreachable-state"] })).not.toThrow();
+    expect(() => lintAgentMachine(machine, { throw: true })).toThrow(AgentLintError);
+    expect(() =>
+      lintAgentMachine(machine, { throw: true, disable: ["unreachable-state"] }),
+    ).not.toThrow();
+  });
+});
+
+// A machine whose only pending work is an `agent.userInput` invoke, for the
+// scripted `userInput` channel.
+function createFeedbackMachine() {
+  const agent = setupAgent({
+    context: z.object({ feedback: z.string().nullable() }),
+    input: z.object({}),
+    output: z.object({ feedback: z.string() }),
+    events: {},
+  });
+  return agent.createMachine({
+    id: "feedback",
+    context: () => ({ feedback: null }),
+    initial: "asking",
+    states: {
+      asking: {
+        invoke: {
+          id: "ask",
+          src: "agent.userInput",
+          input: { prompt: "How was it?" },
+          onDone: ({ output }) => ({ target: "done", context: { feedback: output } }),
+        },
+      },
+      done: {
+        type: "final",
+        output: ({ context }) => ({ feedback: context.feedback ?? "" }),
+      },
+    },
+  });
+}
+
+describe("scripted key taxonomy — userInput", () => {
+  test("simulateAgent resolves agent.userInput from the `userInput` queue", async () => {
+    const result = await simulateAgent(createFeedbackMachine(), {
+      input: {},
+      script: { userInput: ["great"] },
+    });
+
+    expect(result.status).toBe("done");
+    expect(result.snapshot.context.feedback).toBe("great");
+    expect(result.trail).toContainEqual(
+      expect.objectContaining({
+        resolvedRequest: expect.objectContaining({ kind: "userInput", src: "agent.userInput" }),
+      }),
+    );
+  });
+
+  test("simulateAgent still accepts the by-src `invokes` form", async () => {
+    const result = await simulateAgent(createFeedbackMachine(), {
+      input: {},
+      script: { invokes: { "agent.userInput": ["fine"] } },
+    });
+    expect(result.snapshot.context.feedback).toBe("fine");
+  });
+
+  test("a dry userInput queue throws, naming the queue to add to", async () => {
+    await expect(simulateAgent(createFeedbackMachine(), { input: {}, script: {} })).rejects.toThrow(
+      /script ran dry on a pending userInput request.*`userInput` queue/s,
+    );
+  });
+
+  test("explorePaths resolves agent.userInput from `userInput`, and reports a missing one", async () => {
+    const explored = await explorePaths(createFeedbackMachine(), {
+      input: {},
+      userInput: "great",
+    });
+    expect(explored.terminals.map((terminal) => terminal.status)).toEqual(["done"]);
+
+    const blocked = await explorePaths(createFeedbackMachine(), { input: {} });
+    expect(blocked.terminals[0]).toEqual(
+      expect.objectContaining({ status: "needs-output", missingSrc: "agent.userInput" }),
+    );
+  });
+
+  test("explorePaths reads text requests from `text`", async () => {
+    const report = await explorePaths(jokeMachine, {
+      input: { topic: "state machines" },
+      text: {
+        tellJoke: "Why did the state cross the transition?",
+        rateJoke: { rating: 4, explanation: "Setup drags." },
+      },
+    });
+    expect(report.terminals.some((terminal) => terminal.status === "needs-output")).toBe(false);
   });
 });

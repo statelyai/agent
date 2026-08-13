@@ -12,7 +12,6 @@
  * network.
  */
 import {
-  persistSnapshot,
   runAgent,
   type AgentRequestExecutors,
   type RunAgentResult,
@@ -213,7 +212,7 @@ function toResult(
   if (result.status === "idle") {
     base.idle = {
       ...describeIdle(machineFor(scenarioId), result.snapshot),
-      snapshot: persistSnapshot(result.snapshot) as unknown as Json,
+      snapshot: result.persistedSnapshot as unknown as Json,
     };
   }
   return base;
@@ -254,8 +253,8 @@ export async function resumeScenarioRun(
 ): Promise<ScenarioResult> {
   const { trace, onTransition } = createTraceRecorder();
   const machine = machineFor(scenarioId);
-  // `onIllegalResumeEvent: "throw"` (the default) rejects an event the restored
-  // state cannot accept — the snapshot-level validation the task requires.
+  // runAgent rejects an event the restored state cannot accept — the
+  // snapshot-level validation the task requires.
   const result = await runAgent(machine, {
     snapshot,
     event,
