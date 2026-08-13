@@ -8,7 +8,7 @@ description: Author a @statelyai/agent workflow as JSON and check it before it r
 An agent machine is data. You author a JSON `AgentWorkflowConfig`, then run it through gates that all work with no API key: Ajv → `fromConfig` → lint → simulate. Do not hand back a config that has not passed all four.
 
 ```
-author → validate (Ajv 2020) → lower (fromConfig) → lint (assertAgentMachine) → simulate → hand back
+author → validate (validateAgentConfig) → lower (fromConfig) → lint (lintAgentMachine) → simulate → hand back
 ```
 
 ## 1. Read the schema
@@ -132,28 +132,26 @@ Reference config — decision, text request, idle human step, one final state:
 }
 ```
 
-## 3. Validate with Ajv 2020
+## 3. Validate with `validateAgentConfig`
 
-The workflow schema is draft 2020-12, so it needs Ajv's 2020 build. Run this before anything else touches the config.
+`validateAgentConfig` from `@statelyai/agent/validate` checks a candidate against the shipped workflow schema with Ajv 2020 built in. It needs `ajv` installed (an optional peer of the package). Run it before anything else touches the config.
 
 ```ts
-import Ajv2020 from "ajv/dist/2020.js";
-import workflowSchema from "@statelyai/agent/agent-workflow.json";
+import { validateAgentConfig } from "@statelyai/agent/validate";
 import type { AgentWorkflowConfig } from "@statelyai/agent";
 
-const validateWorkflow = new Ajv2020({ strict: false }).compile(workflowSchema);
-
 function validateGeneratedConfig(candidate: unknown): AgentWorkflowConfig {
-  if (validateWorkflow(candidate)) return candidate as AgentWorkflowConfig;
+  const result = validateAgentConfig(candidate);
+  if (result.valid) return candidate as AgentWorkflowConfig;
   throw new Error(
-    (validateWorkflow.errors ?? [])
-      .map((error) => `${error.instancePath || "(root)"} ${error.message}`)
+    result.errors
+      .map((error) => `${error.path || "(root)"} ${error.message}`)
       .join("\n"),
   );
 }
 ```
 
-Ajv errors carry `instancePath`, so a repair prompt can name the exact bad field.
+Each error carries a JSON Pointer `path`, so a repair prompt can name the exact bad field.
 
 ## 4. Lower with `fromConfig`
 
@@ -193,10 +191,10 @@ Lowering is itself a gate: it throws on an unresolved named guard/action and on 
 ## 5. Lint
 
 ```ts
-import { assertAgentMachine, lintAgentMachine } from "@statelyai/agent";
+import { lintAgentMachine } from "@statelyai/agent";
 
 const diagnostics = lintAgentMachine(machine);
-assertAgentMachine(machine); // throws AgentLintError on error-severity findings
+lintAgentMachine(machine, { throw: true }); // throws AgentLintError on error-severity findings
 ```
 
 Every check applies to config-built machines, reachability included — the lowering keeps the config's transition targets, so `unreachable-state` and `missing-final` read the real graph. Do not disable checks.
@@ -224,7 +222,7 @@ Derive the script from the config rather than guessing: take the first entry of 
 
 - `'exhausted'` → the machine loops. Reject it.
 - `'idle'` → it stopped at a human step. Expected when the config has one.
-- To cover every branch instead of one path, use `explorePaths` / `canReach`.
+- To cover every branch instead of one path, use `explorePaths` / `canReach` (its result is `{ reachable, witness }`).
 
 ## 7. Repair loop
 

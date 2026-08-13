@@ -94,6 +94,32 @@ describe("getStateMeta", () => {
     expect(getStateMeta(snapshot).banner).toBe("zeta");
   });
 
+  test("a deeper state with a custom id still wins over its ancestor", () => {
+    const machine = agent.createMachine({
+      context: {},
+      initial: "parent",
+      states: {
+        parent: {
+          meta: { interaction: { label: "parent", eventType: "GO" } },
+          initial: "child",
+          states: {
+            child: {
+              // A custom id has no dots, so id-string depth would misrank it.
+              id: "review",
+              meta: { interaction: { label: "child", eventType: "DONE" } },
+            },
+          },
+        },
+      },
+    });
+    const snapshot = createActor(machine).start().getSnapshot();
+
+    expect(getStateMeta(snapshot).interaction).toEqual({
+      label: "child",
+      eventType: "DONE",
+    });
+  });
+
   test("recovers the meta type from the snapshot generic", () => {
     const machine = agent.createMachine({
       context: {},

@@ -199,10 +199,11 @@ export type MetaOfSnapshot<TSnapshot extends { getMeta(): Record<string, unknown
  * state declares meta.
  *
  * Merge order is fixed and does not depend on XState's internal node order:
- * entries are sorted by depth (the number of `.` segments in the state id),
- * then by state id lexicographically, and merged in that order. So a deeper
- * state's key wins over an ancestor's, and between equal-depth parallel
- * siblings the later state id alphabetically wins.
+ * entries are sorted by structural depth (the state node's distance from the
+ * root, regardless of custom `id` strings), then by state id lexicographically,
+ * and merged in that order. So a deeper state's key wins over an ancestor's,
+ * and between equal-depth parallel siblings the later state id alphabetically
+ * wins.
  *
  * The return type is recovered from the snapshot's own `getMeta()` type, so a
  * schema-typed machine (`setupAgent({ meta })`) yields the meta schema's
@@ -219,7 +220,13 @@ export function getStateMeta<
   TSnapshot extends { getMeta(): Record<string, unknown> } = AnyMachineSnapshot,
   TMeta = MetaOfSnapshot<TSnapshot>,
 >(snapshot: TSnapshot): Partial<TMeta> {
-  const depth = (id: string) => id.split(".").length;
+  // Structural depth per active node id. A custom `id: 'review'` on a nested
+  // state has no dots, so the id string is not a usable depth proxy.
+  // TODO(xstate): use snapshot.nodes when public.
+  const nodes = (snapshot as { _nodes?: Array<{ id: string; path: string[] }> })
+    ._nodes;
+  const depthById = new Map(nodes?.map((node) => [node.id, node.path.length]));
+  const depth = (id: string) => depthById.get(id) ?? id.split(".").length;
   const entries = Object.entries(snapshot.getMeta())
     .filter((entry): entry is [string, Record<string, unknown>] => entry[1] != null)
     .sort(([a], [b]) => depth(a) - depth(b) || (a < b ? -1 : a > b ? 1 : 0));
