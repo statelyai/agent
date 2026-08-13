@@ -1,5 +1,46 @@
 # @statelyai/agent
 
+## 2.0.0-alpha.19
+
+### Minor Changes
+
+- [#96](https://github.com/statelyai/agent/pull/96) [`0d71b2c`](https://github.com/statelyai/agent/commit/0d71b2c639e1204d97ed8b5af58a2c5395d4a228) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **Alpha API consistency pass.** Breaking renames and removals to settle the surface before 2.0 stable.
+
+  Renames:
+
+  - `isSuspended` → `isIdle` and `suspendedTags` → `idleTags`, matching `status: 'idle'`.
+  - `canReach` returns `{ reachable, witness }` (was `{ canReach, witness }`).
+  - `AgentEventLogConflictError.actualLength` → `actualIndex`.
+  - `createLoopMachine({ maxIterations })` → `maxTurns`; `createToolLoopMachine({ maxTurns })` → `maxSteps`.
+  - Budget breach error code `max-model-calls-exceeded` → `max-model-calls`, thrown as the exported `AgentMaxModelCallsExceededError` so `onError` can branch on `event.error.code`.
+
+  Removals:
+
+  - `persistSnapshot`: use XState-native `actor.getPersistedSnapshot()`, `machine.getPersistedSnapshot(snapshot)`, or `result.persistedSnapshot`.
+  - `verifyReplay`: use `replay(machine, events, { verify: 'strict' })`.
+  - `assertAgentMachine`: use `lintAgentMachine(machine, { throw: true })`.
+  - `explorePaths({ textOutputs })`: use the `text`, `invokes`, and `userInput` channels.
+  - `fork({ atEventId })`: `upToIndex` (exclusive) is the only fork address.
+  - `runAgent({ onIllegalResumeEvent })`: illegal resume events always reject.
+  - `runAgent({ machineVersion })`: `createMachine({ version })` is the single source, with a structural hash fallback for unversioned machines. A machine declaring XState-native `migrate` owns version mismatches.
+  - `runSeam` `{ model }` seam form: seams are addressed by `{ request, occurrence }`; the implicit last-entry repeat is now opt-in `repeatLast: true`.
+  - The tool-loop preset's `interruptOn` metadata convention (core never acted on it; tool-call gating is on the roadmap).
+
+  Behavior changes:
+
+  - `'*'` transitions now receive `@agent.usage` (plain XState wildcard semantics). Model-facing `allowedEvents` still excludes `@agent.*`.
+  - `provideExecutors` binds executors recursively into child agent machines, same as `runAgent`.
+  - `decide` executors take `(request, info)` like the text executors, and `resolveDecision(request, executors, options)` takes the executor set (`missing-decide-executor` error code).
+  - Requests take a typed top-level `maxSteps` (the AI SDK adapter still reads `metadata.maxSteps` as a fallback).
+  - `setupAgent` throws for any `requests`/`actors` key starting with `agent.` (reserved prefix).
+  - All scripted queues throw when they run dry; `createScriptedExecutors` and `simulateAgent` scripts gain a `userInput` queue.
+  - `getStateMeta` merges deterministically: deeper states win, and equal-depth parallel siblings merge by state id.
+
+  New:
+
+  - `validateAgentConfig(config)` at `@statelyai/agent/validate` (Ajv is an optional peer; the root bundle stays dependency-free).
+  - `getSnapshotRequests(snapshot, options)` and `getSnapshotNodes(snapshot)` replace reading `snapshot._nodes` when hosting request interpretation.
+
 ## 2.0.0-alpha.18
 
 ### Minor Changes
@@ -31,9 +72,9 @@
     "states": {
       "awaitingApproval": {
         "tags": ["awaiting-approval"],
-        "on": { "APPROVE": { "target": "resolved" } },
-      },
-    },
+        "on": { "APPROVE": { "target": "resolved" } }
+      }
+    }
   }
   ```
 
@@ -137,7 +178,9 @@
     on: {
       "@agent.usage": ({ context, event }) => {
         const tokens = context.tokens + (event.usage.totalTokens ?? 0);
-        return tokens > 50_000 ? { target: ".done", context: { tokens } } : { context: { tokens } };
+        return tokens > 50_000
+          ? { target: ".done", context: { tokens } }
+          : { context: { tokens } };
       },
     },
     // ...
@@ -158,7 +201,9 @@
 
   ```ts
   const result = await runAgent(machine, { input, executors });
-  console.log(`${result.usage.modelCalls} calls, ${result.usage.totalTokens ?? 0} tokens`);
+  console.log(
+    `${result.usage.modelCalls} calls, ${result.usage.totalTokens ?? 0} tokens`
+  );
   ```
 
   - New `AgentUsage` type (and per-call `AgentCallUsage`): `inputTokens`, `outputTokens`, `totalTokens`, `reasoningTokens`, `cachedInputTokens`, plus an always-present `modelCalls`.
@@ -212,7 +257,9 @@
   for (const effect of effects) {
     if (effect.kind === "text") {
       const output = await executeAgentRequest(effect, executors);
-      entries.push(createReplayEntry(machine, entries, effect.toDoneEvent(output)));
+      entries.push(
+        createReplayEntry(machine, entries, effect.toDoneEvent(output))
+      );
     }
   }
   ```
@@ -368,7 +415,9 @@
     seam: { request: "evaluatePrompt" }, // or { model: 'promptEvaluator', occurrence: 0 }
     candidate: createAiSdkExecutors({ models }).generateText, // omit for a keyless run
     respond: ({ state }) =>
-      state === "prompting" ? { type: "PROMPT_SUBMITTED", prompt } : { type: "SEND" },
+      state === "prompting"
+        ? { type: "PROMPT_SUBMITTED", prompt }
+        : { type: "SEND" },
   });
 
   matchesTrajectory(run.after.statePath, ["needsMoreInfo", "drafting"]);
@@ -500,7 +549,11 @@
   const path = matchesTrajectory(statePath, ["prompting", "drafting", "sent"]);
   expect(path.matched, JSON.stringify(path.firstMiss)).toBe(true);
 
-  matchesTrajectory(result.events, ["PROMPT_SUBMITTED", { type: "MORE_INFO" }, "SEND"]);
+  matchesTrajectory(result.events, [
+    "PROMPT_SUBMITTED",
+    { type: "MORE_INFO" },
+    "SEND",
+  ]);
   ```
 
   It compares a run's trajectory against an expected one as an ordered subsequence (gaps allowed, order enforced), with `{ exact: true }` for strict equality. Both trajectories may be state values from `onTransition` (strings, dot paths like `'review.editing'`, or the nested value XState reports) or events from `result.events` (`AgentLogEntry[]`, bare event objects, or event types).

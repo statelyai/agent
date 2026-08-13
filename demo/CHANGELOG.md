@@ -1,5 +1,12 @@
 # @statelyai/agent-demo
 
+## 0.0.1-alpha.7
+
+### Patch Changes
+
+- Updated dependencies [[`0d71b2c`](https://github.com/statelyai/agent/commit/0d71b2c639e1204d97ed8b5af58a2c5395d4a228)]:
+  - @statelyai/agent@2.0.0-alpha.19
+
 ## 0.0.1-alpha.6
 
 ### Patch Changes
