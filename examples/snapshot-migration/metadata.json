@@ -1,0 +1,25 @@
+{
+  "name": "snapshot-migration",
+  "title": "Resume a run after shipping a new machine",
+  "kind": "pattern",
+  "machine": "orderApprovalMachine",
+  "origin": {
+    "type": "stately-agent",
+    "source": "Versioned snapshots: machineVersion stamping, onVersionMismatch, and migrateSnapshot across two versions of one order-approval machine",
+    "url": null
+  },
+  "comparison": {
+    "targets": ["LangGraph checkpointer"],
+    "purpose": "A snapshot carries the version of the machine that wrote it, so a paused run resumed on a redeployed machine either throws with from/to or passes through an explicit migrateSnapshot, instead of silently restoring stale state."
+  },
+  "starters": [
+    {
+      "label": "Small order ($25.00)",
+      "input": { "orderId": "ORD-2", "amountCents": 2500, "currency": "USD" }
+    },
+    {
+      "label": "High-risk order ($812.50)",
+      "input": { "orderId": "ORD-4417", "amountCents": 81250, "currency": "USD" }
+    }
+  ]
+}

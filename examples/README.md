@@ -17,12 +17,15 @@ Exceptions to the `OPENAI_API_KEY` + `tsx` default:
 
 ## Start here
 
-**No API key needed.** Three examples run fully scripted, in about a second each, with no key and no network:
+**No API key needed.** Six examples run fully scripted, in about a second each, with no key and no network:
 
 ```bash
 npx tsx examples/crash-recovery/index.ts
 npx tsx examples/session-actor/index.ts
 npx tsx examples/preset-machine/index.ts
+npx tsx examples/verification/index.ts
+npx tsx examples/snapshot-migration/index.ts
+npx tsx examples/seam-scoring/index.ts
 ```
 
 Good first reads: [`twenty-questions`](twenty-questions/index.ts), [`go-fish`](go-fish/index.ts), [`joke`](joke/index.ts), [`email-drafter`](email-drafter/agent-logic.ts), [`human-in-the-loop`](human-in-the-loop/index.ts), [`retrofit`](retrofit/index.ts), [`json-agent`](json-agent/index.ts), [`ai-sdk-host`](ai-sdk-host/index.ts). The [hosts and executors guide](../docs/hosts.md) explains what the runtime side of each one is doing.
@@ -31,6 +34,8 @@ Good first reads: [`twenty-questions`](twenty-questions/index.ts), [`go-fish`](g
 
 - [`twenty-questions/index.ts`](twenty-questions/index.ts): a decision loop with guard-enforced legality where every player turn is an idle state offering buttons or free text a classifier interprets.
 - [`go-fish/index.ts`](go-fish/index.ts): a hidden-information card game where the model asks and the machine enforces the rules, with the human's turn as an idle state resumed by a free-text `ASK` event.
+- [`just-one/index.ts`](just-one/index.ts): the cooperative word game where three clue-givers write simultaneously as isolated parallel regions, and the machine strikes every duplicate clue before the human guesser sees it.
+- [`chameleon/index.ts`](chameleon/index.ts): the hidden-role word game where the chameleon's request input has no `secretWord` field at all, so the secret cannot reach it, and the human detective votes from an idle state.
 - [`game-agent/index.ts`](game-agent/index.ts): a turn-based combat machine whose decision `allowedEvents` are computed from context, plus an interactive rock-paper-scissors match driven from `meta.interaction` buttons.
 - [`game-loop-agent/index.ts`](game-loop-agent/index.ts): a long-lived player agent invoked once at the game machine's `playing` state, so one agent spans substates and rounds.
 - [`river-crossing/index.ts`](river-crossing/index.ts): the machine as a verifiable environment where guards reject illegal wolf, goat, and cabbage crossings and the run narrates both banks.
@@ -57,6 +62,7 @@ Good first reads: [`twenty-questions`](twenty-questions/index.ts), [`go-fish`](g
 - [`customer-support/index.ts`](customer-support/index.ts): intent routing plus safe question answering, with sensitive actions gated behind an idle `confirming` state.
 - [`time-travel/index.ts`](time-travel/index.ts): checkpointing each settle, rewinding to a past checkpoint, and forking a divergent branch while the main branch stays unchanged.
 - [`crash-recovery/index.ts`](crash-recovery/index.ts): events-only resume, where a crash mid-request recovers from `runAgent({ events })` alone and the in-flight request re-executes idempotently.
+- [`snapshot-migration/index.ts`](snapshot-migration/index.ts): resuming a paused run after the machine was redeployed, where `machineVersion` stamping makes a stale snapshot throw with `from`/`to` and `migrateSnapshot` adapts it at the boundary.
 - [`session-actor/index.ts`](session-actor/index.ts): `createAgentActor` session mode, one live actor across turns on a single replayable log with cumulative usage.
 - [`file-snapshot-store/index.ts`](file-snapshot-store/index.ts): durable checkpoints in a file-backed snapshot store, where each idle settle writes JSON to disk.
 
@@ -123,7 +129,9 @@ The same agent machine served from real app frameworks, in both modes: controlle
 
 ## Evals and observability
 
+- [`verification/index.ts`](verification/index.ts): the whole keyless verification suite over a refund-approval machine, where `canReach` proves an over-limit payout without human approval is unreachable rather than merely discouraged.
 - [`braintrust-evals/index.ts`](braintrust-evals/index.ts): a Braintrust `Eval()` over the unmodified email-drafter machine, scoring output, state path, trajectory, and usage, keyless and offline by default.
+- [`seam-scoring/index.ts`](seam-scoring/index.ts): `runSeam` scoring one model call of the unmodified email-drafter machine while every other request is served from the call plan, comparing a good and a bad candidate for that call in a single table.
 - [`langsmith-otel/index.ts`](langsmith-otel/index.ts): tracing a run to LangSmith over OpenTelemetry with a real OTLP exporter, printing the span tree when run keyless.
 
 See [Evals](../docs/evals.md) for scoring runs, and [Observability](../docs/observability.md) for the trace stream.

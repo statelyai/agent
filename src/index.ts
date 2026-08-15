@@ -129,7 +129,14 @@ export type {
   TrajectoryMiss,
 } from "./trajectory.js";
 export { runSeam } from "./seam.js";
-export type { RunSeamOptions, RunSeamResult, SeamRef, SeamSlice, SeamTurn } from "./seam.js";
+export type {
+  RunSeamOptions,
+  RunSeamResult,
+  SeamCall,
+  SeamRef,
+  SeamSlice,
+  SeamTurn,
+} from "./seam.js";
 export { createScriptedExecutors } from "./scripted-executors.js";
 export type {
   ScriptedDecisionEntry,
