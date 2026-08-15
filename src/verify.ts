@@ -10,7 +10,7 @@
  * - {@link explorePaths} — enumerates decision/external branches to a bounded
  *   depth and reports reached states and terminal outcomes.
  * - {@link canReach} — a thin wrapper over {@link explorePaths} answering
- *   "can this state be reached?" with a witness path.
+ *   "can this state (or snapshot predicate) be reached?" with a witness path.
  *
  * @module
  */
@@ -19,7 +19,7 @@ import type { ChosenEvent } from "./types.js";
 import { AgentError } from "./errors.js";
 import { getJsonSchemaSync } from "./utils.js";
 import { getAcceptedEvents } from "./events.js";
-import { isDecisionLogic } from "./decision.js";
+import { AgentDecisionExhaustedError, isDecisionLogic, resolveDecision } from "./decision.js";
 import { isTextLogic } from "./text-logic.js";
 import {
   executorBoundLogics,
@@ -751,26 +751,50 @@ export class AgentLintError extends AgentError {
  * - `text` — output values for text requests, keyed by request src (the
  *   `setupAgent({ requests })` key, or `agent.generateText`/`agent.streamText`).
  * - `decisions` — the {@link ChosenEvent} to apply for a decision request,
- *   keyed by decision src (usually `agent.decide`).
+ *   keyed by decision src (usually `agent.decide`). An invoke whose src is an
+ *   inline logic object has only an auto-generated src, so its queue may be
+ *   keyed by the invoke's `id` instead.
  * - `invokes` — output values for scripted invokes (any actor whose output must
  *   be canned), keyed by src.
  * - `userInput` — a flat FIFO queue of answers for `agent.userInput`, the
  *   shorthand for `invokes: { 'agent.userInput': [...] }`. Entries here are
  *   consumed before that src's `invokes` queue.
+ * - `events` — a flat FIFO queue of external (human/host-sent) events. When the
+ *   machine settles idle with no pending request or invoke — a human gate — the
+ *   next queued event is applied, so a simulation can cross states that a live
+ *   run crosses via `actor.send(...)`. An event the current state cannot take
+ *   (no handler, or guard-rejected) throws rather than silently vanishing.
  */
 export interface SimulationScript {
   text?: Record<string, unknown[]>;
   decisions?: Record<string, ChosenEvent[]>;
   invokes?: Record<string, unknown[]>;
   userInput?: unknown[];
+  events?: ChosenEvent[];
 }
 
-/** One entry in a {@link SimulateAgentResult.trail}: the state after this step, plus what drove the step. */
+/**
+ * One entry in a {@link SimulateAgentResult.trail}: the state after this step,
+ * plus what drove the step. The first entry is always the machine's initial
+ * state, with no `appliedEvent`/`resolvedRequest` — so `trail.map((e) =>
+ * e.state)` is the complete state path, directly comparable with
+ * `matchesTrajectory` without prepending the initial state by hand.
+ */
 export interface SimulationTrailEntry {
   /** The machine state value after applying this step. */
   state: unknown;
-  /** The chosen event applied (for a decision request). */
+  /** The chosen event applied (for a decision request), or the external event applied (when `external`). */
   appliedEvent?: ChosenEvent;
+  /** True when `appliedEvent` came from the script's `events` queue (an external/user event), not a decision. */
+  external?: boolean;
+  /**
+   * Scripted decisions that failed validation (unknown event, invalid payload,
+   * or guard-rejected — live-run retry parity, see {@link simulateAgent})
+   * before this step settled. Present with an `appliedEvent` when a later
+   * scripted attempt succeeded, or alone when every attempt failed and the
+   * exhaustion error was routed through the decision invoke's `onError`.
+   */
+  rejectedEvents?: ChosenEvent[];
   /** The resolved request (for a text/userInput invoke): its kind and src. */
   resolvedRequest?: { kind: "text" | "userInput"; src: string; id: string };
 }
@@ -827,6 +851,21 @@ function takeFromQueue<T>(
  * the real transition logic. Returns the terminal `status`, final `snapshot`,
  * and a `trail` of every step taken.
  *
+ * Decisions run through the live run's own validation/retry core,
+ * {@link resolveDecision}, with the script standing in for the model: each
+ * attempt consumes the next queued {@link ChosenEvent} for that src, so an
+ * unknown, payload-invalid, or guard-rejected event is NOT silently swallowed
+ * — the next queued decision is tried, exactly as a live run re-asks the
+ * model. The decision logic's `maxRetries` caps attempts as it would live;
+ * when retries continue past the end of the queue, the last queued decision
+ * repeats (a scripted model that insists). The repeat applies only within one
+ * decision request's retries — each new decision request must have its own
+ * queued entry, or the dry-script error throws as usual. Exhausting all
+ * attempts delivers
+ * the resulting {@link AgentDecisionExhaustedError} to the machine as the
+ * decision invoke's error (so an `onError` transition observes it, as it
+ * would live); with no `onError` to catch it, it is thrown.
+ *
  * Throws a descriptive error when the script runs dry mid-request, naming the
  * pending request's kind, src, and id so the missing scripted response is
  * obvious.
@@ -835,7 +874,10 @@ function takeFromQueue<T>(
  * ```ts
  * const { status, snapshot } = simulateAgent(machine, {
  *   input: { topic: 'state machines' },
- *   script: { decisions: { 'agent.decide': [{ type: 'END' }] } },
+ *   script: {
+ *     decisions: { 'agent.decide': [{ type: 'ESCALATE' }] },
+ *     events: [{ type: 'APPROVE' }], // crosses the human gate
+ *   },
  * });
  * ```
  */
@@ -850,6 +892,7 @@ export async function simulateAgent(
     text: mapValues(options.script.text ?? {}, (arr) => [...arr]),
     decisions: mapValues(options.script.decisions ?? {}, (arr) => [...arr]),
     invokes: mapValues(options.script.invokes ?? {}, (arr) => [...arr]),
+    events: [...(options.script.events ?? [])],
   };
   if (options.script.userInput?.length) {
     // `userInput` is the shorthand queue for the `agent.userInput` src, and is
@@ -861,7 +904,8 @@ export async function simulateAgent(
   }
 
   let step = initialAgentStep(machine, options.input);
-  const trail: SimulationTrailEntry[] = [];
+  // The trail starts with the initial state, so it is a complete state path.
+  const trail: SimulationTrailEntry[] = [{ state: step.snapshot.value }];
 
   for (let i = 0; i < maxSteps; i++) {
     if (step.done) {
@@ -872,15 +916,27 @@ export async function simulateAgent(
     if (request) {
       if (request.kind === "decision") {
         // A decision request carries no `src` of its own — correlate it to its
-        // invoke src (usually `agent.decide`) via the step's spawn actions.
-        const srcById = new Map(pendingInvokes(step).map((invoke) => [invoke.id, invoke.src]));
-        const decisionSrc = srcById.get(request.id) ?? request.id;
-        const taken = takeFromQueue(script.decisions, decisionSrc);
-        if (!taken.found) {
-          throw scriptDryError("decision", decisionSrc, request.id, request);
-        }
-        step = transitionAgentStep(machine, step, taken.value as never);
-        trail.push({ state: step.snapshot.value, appliedEvent: taken.value });
+        // invoke (usually `agent.decide`) via the step's spawn actions. A
+        // direct-object src lowers to an auto-generated src string
+        // (`xstate.invoke.…`) nobody would key a script by, so the invoke id
+        // works as the queue key too; the logic rides along for maxRetries.
+        const invokeMeta = findInvokeMetadata(step, request.id);
+        const src = invokeMeta?.src ?? request.id;
+        const decisionSrc =
+          src in (script.decisions ?? {})
+            ? src
+            : request.id in (script.decisions ?? {})
+              ? request.id
+              : src;
+        step = await applyScriptedDecision(
+          machine,
+          step,
+          request,
+          decisionSrc,
+          invokeMeta?.logic,
+          script,
+          trail,
+        );
         continue;
       }
       // Text request.
@@ -912,11 +968,150 @@ export async function simulateAgent(
       continue;
     }
 
-    // Nothing pending and not done: an intentional wait for an external event.
+    // Nothing pending and not done: an idle wait for an external event. Apply
+    // the next scripted external event if there is one (the simulation
+    // equivalent of a human's `actor.send(...)`), else settle idle.
+    const external = script.events!;
+    if (external.length > 0) {
+      const event = external.shift() as ChosenEvent;
+      if (!(step.snapshot as AnyMachineSnapshot).can(event as never)) {
+        throw new Error(
+          `simulateAgent: scripted external event '${event.type}' cannot be taken in state ` +
+            `${JSON.stringify(step.snapshot.value)} (no handler, or its guard rejected it). ` +
+            `A live run's send would be silently dropped here; fix the script's \`events\` queue.`,
+        );
+      }
+      step = transitionAgentStep(machine, step, event as never);
+      trail.push({ state: step.snapshot.value, appliedEvent: event, external: true });
+      continue;
+    }
     return { status: "idle", snapshot: step.snapshot, trail };
   }
 
   return { status: "exhausted", snapshot: step.snapshot, trail };
+}
+
+// Resolves one decision request by running the live run's own validation/retry
+// core, resolveDecision, with a scripted `decide` executor standing in for the
+// model — so unknown-event, invalid-payload, and rejected-by-guard semantics
+// (and the maxRetries budget) are the real ones, not a mirror that can drift.
+// Each attempt dequeues the next scripted decision; when retries continue past
+// the end of the queue, the last queued decision repeats (a scripted model
+// that insists). A queue that is empty on the FIRST ask throws the dry-script
+// error. Exhaustion is delivered to the machine as the invoke's error event so
+// `onError` can observe it (as live), and thrown when nothing handles it.
+async function applyScriptedDecision(
+  machine: AnyStateMachine,
+  step: AgentStep,
+  request: AgentStepRequest & { kind: "decision" },
+  decisionSrc: string,
+  invokeLogic: unknown,
+  script: SimulationScript,
+  trail: SimulationTrailEntry[],
+): Promise<AgentStep> {
+  // The scripted decisions actually dequeued for this request (synthetic
+  // repeats excluded) — failed ones surface on the trail as `rejectedEvents`.
+  const dequeued: ChosenEvent[] = [];
+  const decide = async (): Promise<{ event: ChosenEvent }> => {
+    const taken = takeFromQueue(script.decisions, decisionSrc);
+    if (taken.found) {
+      dequeued.push(taken.value);
+      return { event: taken.value };
+    }
+    if (dequeued.length === 0) {
+      throw scriptDryError("decision", decisionSrc, request.id, request);
+    }
+    return { event: dequeued[dequeued.length - 1] as ChosenEvent };
+  };
+
+  // Mirror bindDecisionLogic (the runAgent path): the attempt budget is the
+  // decision logic's maxRetries. The invoke's own logic wins (covers
+  // direct-object srcs), then the registered actors, then `sources.actors`
+  // (which survives `machine.provide(...)`, whose product the registry may
+  // not know).
+  const logic = isDecisionLogic(invokeLogic)
+    ? invokeLogic
+    : resolveRegisteredDecisionLogic(machine, decisionSrc);
+  const maxRetries = logic?.maxRetries;
+
+  let chosen: ChosenEvent;
+  try {
+    chosen = await resolveDecision(
+      request,
+      { decide },
+      {
+        maxRetries,
+        canTake: (event) => (step.snapshot as AnyMachineSnapshot).can(event as never),
+      },
+    );
+  } catch (error) {
+    if (!(error instanceof AgentDecisionExhaustedError)) {
+      throw error;
+    }
+    const errorEvent = {
+      type: "xstate.error.actor",
+      actorId: request.id,
+      ...sessionIdOf(step.snapshot, request.id),
+      error,
+    };
+    const next = transitionAgentStep(machine, step, errorEvent as never);
+    if ((next.snapshot as { status?: unknown }).status === "error") {
+      // No onError anywhere caught it — same as a live run failing.
+      throw error;
+    }
+    trail.push({ state: next.snapshot.value, rejectedEvents: dequeued });
+    return next;
+  }
+
+  const next = transitionAgentStep(machine, step, chosen as never);
+  // Success comes from the last dequeued decision; everything before it failed.
+  const rejected = dequeued.slice(0, -1);
+  trail.push({
+    state: next.snapshot.value,
+    appliedEvent: chosen,
+    ...(rejected.length > 0 ? { rejectedEvents: rejected } : {}),
+  });
+  return next;
+}
+
+// The spawn-action metadata for the invoke with this id: its string src (when
+// it has one) and its inline logic (when the src is a direct logic object).
+function findInvokeMetadata(
+  step: AgentStep,
+  id: string,
+): { src?: string; logic?: unknown } | undefined {
+  for (const action of step.actions) {
+    const metadata = getInvokeEffectMetadata(action);
+    if (metadata?.id !== id) {
+      continue;
+    }
+    return {
+      ...(typeof metadata.src === "string" ? { src: metadata.src } : {}),
+      logic: metadata.logic ?? (typeof metadata.src === "object" ? metadata.src : undefined),
+    };
+  }
+  return undefined;
+}
+
+// The DecisionLogic registered for a src, checking the machine's registered
+// setupAgent actors first and falling back to `machine.sources.actors` (the
+// same chain lintAgentMachine uses, so `.provide(...)` products resolve too).
+function resolveRegisteredDecisionLogic(
+  machine: AnyStateMachine,
+  src: string,
+): { maxRetries: number } | undefined {
+  const candidate =
+    (getRegisteredAgentExecutionOptions(machine).actors as Record<string, unknown> | undefined)?.[
+      src
+    ] ?? (machine as { sources?: { actors?: Record<string, unknown> } }).sources?.actors?.[src];
+  return isDecisionLogic(candidate) ? candidate : undefined;
+}
+
+// The invoked child's session identity, needed on a minted error event so
+// xstate's transition doesn't discard it as stale.
+function sessionIdOf(snapshot: AnyMachineSnapshot, id: string): { sessionId?: string } {
+  const child = (snapshot.children as Record<string, { sessionId?: unknown }>)[id];
+  return typeof child?.sessionId === "string" ? { sessionId: child.sessionId } : {};
 }
 
 function mapValues<T, U>(obj: Record<string, T>, fn: (value: T) => U): Record<string, U> {
@@ -1042,10 +1237,16 @@ async function explore(
   // Advance a step deterministically through any non-branching text/userInput
   // invokes until it is done, idle-with-external-events, at a decision, or
   // blocked on a missing canned output. Returns the settled step plus a note.
-  const advance = (step: AgentStep): { step: AgentStep; blockedSrc?: string } => {
+  // `stopWhen` is checked on EVERY snapshot along the way — including the
+  // intermediate ones this advance resolves straight through — so a predicate
+  // canReach target that only holds mid-chain is still found (`hit`).
+  const advance = (step: AgentStep): { step: AgentStep; blockedSrc?: string; hit?: boolean } => {
     let current = step;
     // Bounded loop: each iteration resolves one text/userInput invoke.
     for (let i = 0; i < MAX_ADVANCE_STEPS; i++) {
+      if (stopWhen?.(current.snapshot)) {
+        return { step: current, hit: true };
+      }
       if (current.done) {
         return { step: current };
       }
@@ -1085,8 +1286,8 @@ async function explore(
       return;
     }
 
-    const { step: settled, blockedSrc } = advance(step);
-    if (stopWhen?.(settled.snapshot)) {
+    const { step: settled, blockedSrc, hit } = advance(step);
+    if (hit) {
       witness = path;
       return;
     }
@@ -1200,8 +1401,11 @@ export interface CanReachResult {
 }
 
 /**
- * Answers "can the machine reach `statePath`?" by exploring its branches (a
- * thin wrapper over {@link explorePaths}). Returns
+ * Answers "can the machine reach this?" by exploring its branches (a thin
+ * wrapper over {@link explorePaths}). The target is either a state path string
+ * (`snapshot.matches(...)` semantics) or a snapshot predicate — the predicate
+ * form checks any property (a context invariant, a tag, a state+context
+ * combination) without reifying a sentinel state for it. Returns
  * `{ reachable: true, witness }` with the event sequence that reaches it, or
  * `{ reachable: false }`.
  *
@@ -1210,18 +1414,32 @@ export interface CanReachResult {
  * const { reachable, witness } = await canReach(refundMachine, 'denied', { input: { request: 'x', amount: 5000 } });
  * // reachable → true; witness → [{ type: 'NEEDS_REVIEW' }, { type: 'DENY' }]
  * ```
+ *
+ * @example Predicate target — a violation property, no sentinel state needed
+ * ```ts
+ * const violation = await canReach(
+ *   refundMachine,
+ *   (snapshot) => snapshot.matches('issued') && !snapshot.context.approved,
+ *   { input: { amount: 5000 } },
+ * );
+ * // violation.reachable → false is the safety proof
+ * ```
  */
 export async function canReach(
   machine: AnyStateMachine,
-  statePath: string,
+  target: string | ((snapshot: AnyMachineSnapshot) => boolean),
   options: ExplorePathsOptions = {},
 ): Promise<CanReachResult> {
-  const { witness } = await explore(machine, options, (snapshot) => {
-    try {
-      return (snapshot as AnyMachineSnapshot).matches(statePath as never);
-    } catch {
-      return false;
-    }
-  });
+  const stopWhen =
+    typeof target === "function"
+      ? target
+      : (snapshot: AnyMachineSnapshot): boolean => {
+          try {
+            return snapshot.matches(target as never);
+          } catch {
+            return false;
+          }
+        };
+  const { witness } = await explore(machine, options, stopWhen);
   return witness !== undefined ? { reachable: true, witness } : { reachable: false };
 }

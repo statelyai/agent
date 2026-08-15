@@ -6,13 +6,16 @@ import {
   createTextLogic,
   explorePaths,
   lintAgentMachine,
+  runAgent,
   setupAgent,
   simulateAgent,
   type AgentLintDiagnostic,
+  type ChosenEvent,
   type AgentWorkflowConfig,
   type SchemaCompiler,
   type StandardSchemaV1,
 } from "./index.js";
+import { createDecisionLogic } from "./decision.js";
 import * as examples from "../examples/index.js";
 import {
   humanInTheLoopMachine,
@@ -68,6 +71,41 @@ function createRefundMachine() {
       },
       refunded: { type: "final", output: () => ({ refunded: true }) },
       denied: { type: "final", output: () => ({ refunded: false }) },
+    },
+  });
+}
+
+// A classifier whose guarded ISSUE is illegal over $100 and whose decision
+// invoke routes exhaustion to `refused` via onError — the adversarial-model
+// shape used by the retry-parity tests below.
+function createGuardedIssueMachine() {
+  const agent = setupAgent({
+    context: z.object({ amount: z.number() }),
+    input: z.object({ amount: z.number() }),
+    events: { ISSUE: z.object({}), REFUSE: z.object({}) },
+  });
+  return agent.createMachine({
+    context: ({ input }) => input,
+    initial: "classifying",
+    states: {
+      classifying: {
+        invoke: {
+          id: "decide",
+          src: "agent.decide",
+          input: () => ({
+            model: "quick",
+            prompt: "Issue or refuse?",
+            allowedEvents: ["ISSUE", "REFUSE"] as const,
+          }),
+          onError: { target: "refused" },
+        },
+        on: {
+          ISSUE: ({ context }) => (context.amount > 100 ? undefined : { target: "issued" }),
+          REFUSE: { target: "refused" },
+        },
+      },
+      issued: { type: "final" },
+      refused: { type: "final" },
     },
   });
 }
@@ -443,9 +481,8 @@ describe("lintAgentMachine — each check fires on a crafted bad machine", () =>
 
 describe("simulateAgent — keyless deterministic playthrough", () => {
   // Player turns in twenty-questions are idle states resumed by external
-  // events, and `SimulationScript` has no channel for delivering those, so a
-  // scripted playthrough settles at the first player turn. `canReach` covers
-  // the rest of the path (it forks on externally-accepted events).
+  // events. With no `events` scripted, a playthrough settles at the first
+  // player turn; the `events` queue (tested below) crosses such gates.
   test("drives twenty-questions through scripted decisions to the first player turn", async () => {
     const result = await simulateAgent(twentyQuestionsMachine, {
       input: { questionsRemaining: 1 },
@@ -504,6 +541,317 @@ describe("simulateAgent — keyless deterministic playthrough", () => {
       }),
     ).rejects.toThrow(/script ran dry on a pending decision request for src 'agent\.decide'/);
   });
+
+  test("the trail starts with the initial state (a complete state path)", async () => {
+    const result = await simulateAgent(createRefundMachine(), {
+      input: { request: "small refund", amount: 50 },
+      script: { decisions: { "agent.decide": [{ type: "AUTO_APPROVE" }] } },
+    });
+
+    expect(result.status).toBe("done");
+    expect(result.trail[0]).toEqual({ state: "deciding" });
+    // No hand-prepending needed to compare trajectories.
+    expect(result.trail.map((entry) => entry.state)).toEqual(["deciding", "refunded"]);
+  });
+});
+
+describe("simulateAgent — live-run decision retry semantics", () => {
+  test("a guard-rejected scripted decision retries with the next queued one", async () => {
+    // AUTO_APPROVE is guard-rejected at $5000; a live run re-asks the model,
+    // so the simulation consumes the next scripted decision for the same src.
+    const result = await simulateAgent(createRefundMachine(), {
+      input: { request: "big refund", amount: 5000 },
+      script: {
+        decisions: {
+          "agent.decide": [
+            { type: "AUTO_APPROVE" },
+            { type: "NEEDS_REVIEW", reason: "over limit" },
+          ],
+        },
+      },
+    });
+
+    expect(result.status).toBe("idle");
+    expect(result.snapshot.value).toBe("awaitingHuman");
+    expect(result.trail).toContainEqual({
+      state: "awaitingHuman",
+      appliedEvent: { type: "NEEDS_REVIEW", reason: "over limit" },
+      rejectedEvents: [{ type: "AUTO_APPROVE" }],
+    });
+  });
+
+  test("an unknown scripted event type is rejected and retried, like live validation", async () => {
+    // Comes free from delegating to resolveDecision: the typo'd type is not
+    // among the request's candidate events, so it fails 'unknown-event' and
+    // the next queued decision is tried — a live run behaves identically.
+    const result = await simulateAgent(createRefundMachine(), {
+      input: { request: "small refund", amount: 50 },
+      script: {
+        decisions: { "agent.decide": [{ type: "AUTO_APPROVE_TYPO" }, { type: "AUTO_APPROVE" }] },
+      },
+    });
+
+    expect(result.status).toBe("done");
+    expect(result.snapshot.value).toBe("refunded");
+    expect(result.trail).toContainEqual(
+      expect.objectContaining({
+        appliedEvent: { type: "AUTO_APPROVE" },
+        rejectedEvents: [{ type: "AUTO_APPROVE_TYPO" }],
+      }),
+    );
+  });
+
+  test("an all-rejected queue routes decision exhaustion through the invoke's onError", async () => {
+    // The adversarial "model" only ever tries the guarded ISSUE. Live, the
+    // decision exhausts and its error routes via onError; the simulation
+    // agrees rather than parking idle.
+    const result = await simulateAgent(createGuardedIssueMachine(), {
+      input: { amount: 5000 },
+      script: { decisions: { "agent.decide": [{ type: "ISSUE" }] } },
+    });
+
+    expect(result.status).toBe("done");
+    expect(result.snapshot.value).toBe("refused");
+    expect(result.trail).toContainEqual({
+      state: "refused",
+      rejectedEvents: [{ type: "ISSUE" }],
+    });
+  });
+
+  test("an all-rejected queue with no onError throws AgentDecisionExhaustedError", async () => {
+    // The last queued decision repeats for the remaining retries (a scripted
+    // model that insists), so the default budget of 3 attempts is spent — the
+    // same count a live adversarial model would produce.
+    await expect(
+      simulateAgent(createRefundMachine(), {
+        input: { request: "big refund", amount: 5000 },
+        script: { decisions: { "agent.decide": [{ type: "AUTO_APPROVE" }] } },
+      }),
+    ).rejects.toThrow(/Decision exhausted after 3 attempts.*guard rejected/);
+  });
+
+  test("a direct-object decision logic's own maxRetries caps scripted attempts", async () => {
+    // maxRetries: 0 → exactly one attempt. The logic rides on the invoke
+    // itself (no string src, nothing registered), so the budget must come from
+    // the spawn metadata — and the script queue is keyed by the invoke id.
+    const choose = createDecisionLogic({
+      model: "quick",
+      prompt: "Go or stop?",
+      allowedEvents: ["GO", "STOP"],
+      maxRetries: 0,
+    });
+    const agent = setupAgent({
+      context: z.object({}),
+      events: { GO: z.object({}), STOP: z.object({}) },
+    });
+    const machine = agent.createMachine({
+      context: () => ({}),
+      initial: "a",
+      states: {
+        a: {
+          invoke: { id: "choose", src: choose },
+          on: {
+            GO: () => undefined, // always guard-rejected
+            STOP: { target: "done" },
+          },
+        },
+        done: { type: "final" },
+      },
+    });
+
+    await expect(
+      simulateAgent(machine, {
+        script: { decisions: { choose: [{ type: "GO" }] } },
+      }),
+    ).rejects.toThrow(/Decision exhausted after 1 attempt\b/);
+  });
+});
+
+describe("simulateAgent — scripted external events cross human gates", () => {
+  test("the `events` queue resumes an idle wait, all the way to done", async () => {
+    const result = await simulateAgent(createRefundMachine(), {
+      input: { request: "big refund", amount: 5000 },
+      script: {
+        decisions: { "agent.decide": [{ type: "NEEDS_REVIEW", reason: "over limit" }] },
+        events: [{ type: "APPROVE" }],
+      },
+    });
+
+    expect(result.status).toBe("done");
+    expect(result.snapshot.value).toBe("refunded");
+    expect(result.trail).toContainEqual({
+      state: "refunded",
+      appliedEvent: { type: "APPROVE" },
+      external: true,
+    });
+    expect(result.trail.map((entry) => entry.state)).toEqual([
+      "deciding",
+      "awaitingHuman",
+      "refunded",
+    ]);
+  });
+
+  test("an external event the state cannot take throws instead of vanishing", async () => {
+    await expect(
+      simulateAgent(createRefundMachine(), {
+        input: { request: "big refund", amount: 5000 },
+        script: {
+          decisions: { "agent.decide": [{ type: "NEEDS_REVIEW", reason: "over limit" }] },
+          events: [{ type: "AUTO_APPROVE" }], // not handled at the human gate
+        },
+      }),
+    ).rejects.toThrow(/external event 'AUTO_APPROVE' cannot be taken in state "awaitingHuman"/);
+  });
+});
+
+describe("simulateAgent ↔ runAgent — the same script produces the same outcome", () => {
+  // The live-run counterpart of a simulation script: a `decide` executor that
+  // dequeues one scripted decision per attempt and repeats the last one when
+  // the queue runs dry mid-retry — simulateAgent's exact convention, including
+  // its scope: the repeat only spans one request's retries (`request.attempts`
+  // is empty on a fresh request, where a dry queue is an error instead).
+  const scriptedDecide = (queue: ChosenEvent[]) => {
+    const remaining = [...queue];
+    let last: ChosenEvent | undefined;
+    return async (request: { attempts: readonly unknown[] }) => {
+      if (request.attempts.length === 0) {
+        last = undefined;
+      }
+      last = remaining.shift() ?? last;
+      if (!last) {
+        throw new Error("scripted decide: queue is empty");
+      }
+      return { event: last };
+    };
+  };
+
+  test("guard-rejected then accepted: both surfaces settle idle at the human gate", async () => {
+    const decisions: ChosenEvent[] = [
+      { type: "AUTO_APPROVE" },
+      { type: "NEEDS_REVIEW", reason: "over limit" },
+    ];
+    const input = { request: "big refund", amount: 5000 };
+
+    const simulated = await simulateAgent(createRefundMachine(), {
+      input,
+      script: { decisions: { "agent.decide": decisions } },
+    });
+    const live = await runAgent(createRefundMachine(), {
+      input,
+      executors: { decide: scriptedDecide(decisions) },
+    });
+
+    expect(simulated.status).toBe("idle");
+    expect(live.status).toBe("idle");
+    expect(live.snapshot.value).toEqual(simulated.snapshot.value); // 'awaitingHuman'
+  });
+
+  test("adversarial exhaustion: both surfaces route through onError to 'refused'", async () => {
+    const decisions: ChosenEvent[] = [{ type: "ISSUE" }];
+    const input = { amount: 5000 };
+
+    const simulated = await simulateAgent(createGuardedIssueMachine(), {
+      input,
+      script: { decisions: { "agent.decide": decisions } },
+    });
+    const live = await runAgent(createGuardedIssueMachine(), {
+      input,
+      executors: { decide: scriptedDecide(decisions) },
+    });
+
+    expect(simulated.status).toBe("done");
+    expect(live.status).toBe("done");
+    expect(live.snapshot.value).toEqual(simulated.snapshot.value); // 'refused'
+  });
+});
+
+describe("canReach — predicate targets", () => {
+  // A refund flow whose `approved` flag is written ONLY by the human gate's
+  // APPROVE — so "issued over the limit without approval" is a genuine
+  // state+context property that changes along paths, not a constant of the
+  // input.
+  function createApprovalMachine() {
+    const agent = setupAgent({
+      context: z.object({ amount: z.number(), approved: z.boolean() }),
+      input: z.object({ amount: z.number() }),
+      events: {
+        ISSUE: z.object({}),
+        ESCALATE: z.object({}),
+        APPROVE: z.object({}),
+        REJECT: z.object({}),
+      },
+      isIdle: (snapshot) => snapshot.hasTag("awaiting-approval"),
+    });
+    return agent.createMachine({
+      context: ({ input }) => ({ amount: input.amount, approved: false }),
+      initial: "classifying",
+      states: {
+        classifying: {
+          invoke: {
+            id: "decide",
+            src: "agent.decide",
+            input: () => ({
+              model: "quick",
+              prompt: "Issue or escalate?",
+              allowedEvents: ["ISSUE", "ESCALATE"] as const,
+            }),
+          },
+          on: {
+            ISSUE: ({ context }) =>
+              context.amount > 100 && !context.approved ? undefined : { target: "issued" },
+            ESCALATE: { target: "approving" },
+          },
+        },
+        approving: {
+          tags: ["awaiting-approval"],
+          on: {
+            // The only writer of `approved`.
+            APPROVE: () => ({ target: "issued", context: { approved: true } }),
+            REJECT: { target: "rejected" },
+          },
+        },
+        issued: { type: "final" },
+        rejected: { type: "final" },
+      },
+    });
+  }
+
+  test("a snapshot predicate can express a violation property without a sentinel state", async () => {
+    type Ctx = { amount: number; approved: boolean };
+
+    // The safety property: over the limit, `issued` is never entered without
+    // `approved` — a predicate over context that only APPROVE can flip, so
+    // this is decided by exploration, not by the input alone.
+    const violation = await canReach(
+      createApprovalMachine(),
+      (snapshot) =>
+        snapshot.matches("issued") &&
+        (snapshot.context as Ctx).amount > 100 &&
+        !(snapshot.context as Ctx).approved,
+      { input: { amount: 5000 } },
+    );
+    expect(violation.reachable).toBe(false);
+
+    // The same terminal state IS reachable with approval on record — the
+    // witness must pass through the human gate.
+    const legal = await canReach(
+      createApprovalMachine(),
+      (snapshot) => snapshot.matches("issued") && (snapshot.context as Ctx).approved,
+      { input: { amount: 5000 } },
+    );
+    expect(legal.reachable).toBe(true);
+    expect(legal.witness?.map((event) => event.type)).toEqual(["ESCALATE", "APPROVE"]);
+
+    // Below the limit, the direct ISSUE is legal and the violation predicate
+    // (approved never set) still has no witness.
+    const small = await canReach(
+      createApprovalMachine(),
+      (snapshot) => snapshot.matches("issued") && !(snapshot.context as Ctx).approved,
+      { input: { amount: 40 } },
+    );
+    expect(small.reachable).toBe(true);
+    expect(small.witness?.map((event) => event.type)).toEqual(["ISSUE"]);
+  });
 });
 
 describe("explorePaths — enumerates decision + human branches", () => {
@@ -547,6 +895,46 @@ describe("canReach — reachability with a witness path", () => {
     });
     expect(result.reachable).toBe(false);
     expect(result.witness).toBeUndefined();
+  });
+
+  test("finds a state passed through mid-chain between two text requests", async () => {
+    // `middle` is entered and immediately left while exploration resolves the
+    // chained text requests — the target check must run on every intermediate
+    // snapshot, not only where a path settles.
+    const agent = setupAgent({ context: z.object({}) });
+    const machine = agent.createMachine({
+      context: () => ({}),
+      initial: "first",
+      states: {
+        first: {
+          invoke: {
+            id: "t1",
+            src: "agent.generateText",
+            input: () => ({ model: "quick", prompt: "one" }),
+            onDone: { target: "middle" },
+          },
+        },
+        middle: {
+          invoke: {
+            id: "t2",
+            src: "agent.generateText",
+            input: () => ({ model: "quick", prompt: "two" }),
+            onDone: { target: "last" },
+          },
+        },
+        last: { type: "final" },
+      },
+    });
+    const text = { "agent.generateText": "canned" };
+
+    const byPath = await canReach(machine, "middle", { text });
+    expect(byPath.reachable).toBe(true);
+    expect(byPath.witness).toEqual([]);
+
+    const byPredicate = await canReach(machine, (snapshot) => snapshot.matches("middle"), {
+      text,
+    });
+    expect(byPredicate.reachable).toBe(true);
   });
 });
 
