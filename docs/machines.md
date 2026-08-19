@@ -79,6 +79,13 @@ Both `enq.emit({ type: 'EVALUATED', ... })` and the host-side `on: { EVALUATED: 
 
 > **Note:** To reuse one schema set across machines or the step helpers, declare it once with `createAgentSchemas({ context, input, output, events })` and pass it as `setupAgent({ schemas })`. This is equivalent to the inline form. See [Authoring forms](#authoring-forms).
 
+<!-- getAgentSchemas registration and lookup from src/setup-agent.ts -->
+
+When a generic host receives only a machine, call `getAgentSchemas(machine)` to
+recover its schema pack for validation or form generation. It returns
+`undefined` for plain XState machines. Read it before `machine.provide(...)`;
+the provided machine is a new object and does not carry the registration.
+
 ## Agent setup
 
 <!-- setupAgent config surface (models, requests, actors, builtins) from src/setup-agent.ts -->

@@ -4,7 +4,7 @@
 
 Each example lives in a flat `examples/*` directory with an `index.ts` or `index.mts` entrypoint and a `metadata.json` file describing its origin and comparison purpose.
 
-Every example is dual-mode: run it directly against a real model with `OPENAI_API_KEY=... npx tsx examples/<name>/index.ts`, while its tests use injected mocks. Nothing auto-loads `.env`; copy `.env.template` to `.env` and pass it explicitly (Node 22+):
+Model-backed examples run directly with `OPENAI_API_KEY=... npx tsx examples/<name>/index.ts`, while their tests use injected mocks. Verification, migration, and scripted-eval examples are intentionally keyless. Nothing auto-loads `.env`; copy `.env.template` to `.env` and pass it explicitly (Node 22+):
 
 ```bash
 npx tsx --env-file=.env examples/<name>/index.ts
@@ -41,7 +41,7 @@ Good first reads: [`twenty-questions`](twenty-questions/index.ts), [`go-fish`](g
 - [`email-drafter-inspector/index.ts`](email-drafter-inspector/index.ts): the email-drafter machine run as one live `createActor` session wired to `createInspector`, so the whole flow is visible in the Stately Inspector.
 - [`guardrails/index.ts`](guardrails/index.ts): input and output guardrails as explicit gate states that refuse out-of-scope questions and verify answers before returning them.
 - [`context-compaction/index.ts`](context-compaction/index.ts): a self-managing chat loop whose `compacting` state folds stale messages into a running summary once history exceeds a threshold.
-- [`described-workflow/index.ts`](described-workflow/index.ts): a plain invoke-less `createMachine` run as an agent via `runAgent({ getRequests })`, with prompts read from state descriptions.
+- [`described-workflow/index.ts`](described-workflow/index.ts): a plain `createMachine` whose writing states send their described prompts directly and whose idle judging gate is interpreted through `runAgent({ getRequests })`.
 - [`plain-xstate/index.ts`](plain-xstate/index.ts): a normal XState v6 `setup(...)` machine with zero knowledge of the library, adopted as an agent through `getAcceptedEvents` and `resolveDecision`.
 - [`json-agent/index.ts`](json-agent/index.ts): `setupAgent.fromConfig(...)` lowering a support-ticket workflow authored as a real `.json` file.
 - [`preset-machine/index.ts`](preset-machine/index.ts): `createParallelMachine` from `@statelyai/agent/machines`, running two review branches as regions of one parallel state and joining by branch name.
@@ -70,8 +70,8 @@ Good first reads: [`twenty-questions`](twenty-questions/index.ts), [`go-fish`](g
 - [`subflows/index.ts`](subflows/index.ts): agent machines invoking other agent machines as XState child actors, each keeping its own executor binding.
 - [`fan-out/index.ts`](fan-out/index.ts): dynamic runtime fan-out, where a planner produces N subtopics, the machine spawns one live child branch each, and a reducer composes the results.
 - [`rag/index.ts`](rag/index.ts): retrieval as a typed plain actor feeding a grounded answer, with conversational memory in context.
-- [`corrective-rag/index.ts`](corrective-rag/index.ts): corrective RAG as explicit states, grading documents and branching into query rewrite and a web-search fallback.
-- [`adaptive-rag/index.ts`](adaptive-rag/index.ts): adaptive RAG routing between local retrieval and search, then grading, bounded rewriting, and verifying the generation.
+- [`corrective-rag/index.ts`](corrective-rag/index.ts): corrective RAG as explicit states, grading documents and branching into query rewrite and a separate sample-index fallback.
+- [`adaptive-rag/index.ts`](adaptive-rag/index.ts): adaptive RAG routing between a local corpus and sample web index, then grading, bounded rewriting, and verifying the generation.
 - [`deep-research/index.ts`](deep-research/index.ts): planning complementary searches, one dynamically spawned researcher per query, coverage reflection, and a sourced report.
 - [`reflection-writer/index.ts`](reflection-writer/index.ts): a generate and critique loop with a typed `maxRevisions` bound and a structured early exit.
 - [`code-assistant/index.ts`](code-assistant/index.ts): self-correcting code generation with sandboxed `node:vm` checks and a bounded reflect-and-regenerate branch.

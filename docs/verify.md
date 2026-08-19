@@ -163,7 +163,10 @@ Exploration is bounded by `maxDepth`, which defaults to 8, and `maxPaths`, which
 
 ## Reachability checks
 
-`canReach(machine, statePath, opts)` wraps `explorePaths` to report whether a state is reachable, along with a witness path. It is async.
+<!-- canReach contract from src/verify.ts -->
+
+`canReach(machine, target, opts)` wraps `explorePaths` to answer whether a state
+path or snapshot predicate is reachable, with a witness path when it is.
 
 ```ts
 import { canReach } from "@statelyai/agent";
