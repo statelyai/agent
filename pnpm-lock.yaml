@@ -198,8 +198,8 @@ importers:
         specifier: ^8.21.1
         version: 8.21.1
       xstate:
-        specifier: 6.0.0-alpha.25
-        version: 6.0.0-alpha.25
+        specifier: 6.0.0-alpha.41
+        version: 6.0.0-alpha.41
       zod:
         specifier: ^4.3.6
         version: 4.4.3
@@ -7302,10 +7302,6 @@ packages:
   xstate@5.32.5:
     resolution: {integrity: sha512-ULazi1oe6wGrXl0Frb6otSlkm5HLifbbVTkMk5kkSKqz4TkxJaVpnl6jOJwKeid3ORPxYyZQgNLUSYX9q65SIA==, tarball: https://registry.npmjs.org/xstate/-/xstate-5.32.5.tgz}
 
-  xstate@6.0.0-alpha.25:
-    resolution: {integrity: sha512-zk36UtcEZJDcU0GH1xE94me6H+qVZq71bInqeqHXxxyW+PUCFCFH1emyjqFToGFJIyN54u35c59bLyp91c24kA==, tarball: https://registry.npmjs.org/xstate/-/xstate-6.0.0-alpha.25.tgz}
-    hasBin: true
-
   xstate@6.0.0-alpha.41:
     resolution: {integrity: sha512-uzopnySBMT3jgBgzUFCBJykwkz0KrnKij7Q71Nyv+qpnwed12mL8/EgzTUuQtAKFdztSOmoUxcYqZmkKxADJIA==, tarball: https://registry.npmjs.org/xstate/-/xstate-6.0.0-alpha.41.tgz}
     hasBin: true
@@ -14320,8 +14316,6 @@ snapshots:
       js-yaml: 4.1.1
 
   xstate@5.32.5: {}
-
-  xstate@6.0.0-alpha.25: {}
 
   xstate@6.0.0-alpha.41: {}
 
