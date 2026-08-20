@@ -256,8 +256,8 @@ importers:
         specifier: ^6.0.67
         version: 6.0.67(zod@4.4.3)
       xstate:
-        specifier: 6.0.0-alpha.25
-        version: 6.0.0-alpha.25
+        specifier: 6.0.0-alpha.41
+        version: 6.0.0-alpha.41
       zod:
         specifier: ^4.3.6
         version: 4.4.3
@@ -284,8 +284,8 @@ importers:
         specifier: ^6.0.67
         version: 6.0.67(zod@4.4.3)
       xstate:
-        specifier: 6.0.0-alpha.25
-        version: 6.0.0-alpha.25
+        specifier: 6.0.0-alpha.41
+        version: 6.0.0-alpha.41
       zod:
         specifier: ^4.3.6
         version: 4.4.3
@@ -336,8 +336,8 @@ importers:
         specifier: ^19.2.7
         version: 19.2.7(react@19.2.7)
       xstate:
-        specifier: 6.0.0-alpha.25
-        version: 6.0.0-alpha.25
+        specifier: 6.0.0-alpha.41
+        version: 6.0.0-alpha.41
       zod:
         specifier: ^4.3.6
         version: 4.4.3
@@ -366,8 +366,8 @@ importers:
         specifier: ^19.2.7
         version: 19.2.7(react@19.2.7)
       xstate:
-        specifier: 6.0.0-alpha.25
-        version: 6.0.0-alpha.25
+        specifier: 6.0.0-alpha.41
+        version: 6.0.0-alpha.41
       zod:
         specifier: ^4.3.6
         version: 4.4.3
@@ -406,8 +406,8 @@ importers:
         specifier: ^19.2.7
         version: 19.2.7(react@19.2.7)
       xstate:
-        specifier: 6.0.0-alpha.25
-        version: 6.0.0-alpha.25
+        specifier: 6.0.0-alpha.41
+        version: 6.0.0-alpha.41
       zod:
         specifier: ^4.3.6
         version: 4.4.3

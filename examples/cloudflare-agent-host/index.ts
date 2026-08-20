@@ -111,7 +111,7 @@ export class EmailDrafter extends Agent<Env, EmailDrafterState> {
     const machine = provideExecutors(emailDrafter, resolveExecutors(this.env));
 
     // Restore from the persisted snapshot if the DO was evicted mid-run.
-    this.#actor = createActor(machine, { snapshot: this.state.snapshot });
+    this.#actor = createActor(machine, { snapshot: this.state.snapshot, input: undefined });
 
     this.#actor.subscribe((snapshot) => {
       // Durable persistence on every transition: this is the journal the
