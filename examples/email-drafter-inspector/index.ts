@@ -140,6 +140,7 @@ export async function main() {
 
   const actor = createActor(inspectedEmailDrafter, {
     inspect: inspector.inspect,
+    input: undefined,
   });
   actor.start();
 

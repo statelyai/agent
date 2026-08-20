@@ -726,7 +726,7 @@ export interface AgentSnapshotNode {
 // TODO(xstate): use snapshot.nodes when public — this is the ONE place the
 // private `_nodes` array is read, so host code never has to.
 function snapshotNodes(snapshot: AnyMachineSnapshot): AgentSnapshotNode[] {
-  const nodes = (snapshot as unknown as { _nodes?: readonly unknown[] })._nodes ?? [];
+  const nodes = (snapshot as unknown as { nodes?: readonly unknown[] }).nodes ?? [];
   return nodes.map((raw) => {
     const node = raw as {
       id?: string;
@@ -2391,6 +2391,10 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     } else {
       aligned.version = machineOwnVersion;
     }
+    // A live snapshot carries its producing machine as an own property;
+    // restore prefers it over the actor's machine for the version check, so a
+    // stale reference would re-raise the mismatch this block just resolved.
+    delete (aligned as { machine?: unknown }).machine;
     effectiveSnapshot = aligned;
   }
 

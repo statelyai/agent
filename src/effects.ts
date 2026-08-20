@@ -247,7 +247,14 @@ function toEvents(history: readonly (EventObject | AgentLogEntry)[] | undefined)
   });
 }
 
-function rebindActorSession(
+/**
+ * Rewrites a journaled actor event's per-incarnation `sessionId` to the
+ * current snapshot's child for the same stable `actorId`, so replayed
+ * completions match freshly restored children.
+ *
+ * @internal
+ */
+export function rebindActorSession(
   event: EventObject,
   snapshot: AnyMachineSnapshot,
   sessions: Map<string, string>,
