@@ -28,6 +28,7 @@
     "create-agent-run",
     "decide-auto-delivery-and-define-models",
     "decision-and-invoke-typing-dx",
+    "durable-runtime-run-durable-agent",
     "dx-sweep-resilience-and-sugar",
     "event-log-replay-core",
     "event-log-store",
