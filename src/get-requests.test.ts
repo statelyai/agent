@@ -31,14 +31,14 @@ import { getSnapshotNodes, getSnapshotRequests } from "./run-agent.js";
 const fromDescriptions =
   (model: string) =>
   (snapshot: {
-    _nodes: Array<{
+    nodes: Array<{
       description?: string;
       tags: string[];
       meta?: unknown;
       ownEvents: string[];
     }>;
   }) =>
-    snapshot._nodes
+    snapshot.nodes
       .filter((node) => node.description && !node.tags.includes("waiting"))
       .map(
         (node): AgentStateRequest => ({
@@ -237,7 +237,7 @@ describe("runAgent getRequests (state interpretation)", () => {
       // Recipe: one request per described leaf, each explicitly advancing
       // itself via its node's single own event.
       getRequests: (snapshot) =>
-        snapshot._nodes
+        snapshot.nodes
           .filter((node) => node.description)
           .map((node) => ({
             model: "test-model",
@@ -416,7 +416,7 @@ describe("runAgent getRequests (state interpretation)", () => {
     const decideEvents: string[][] = [];
     const result = await runAgent(machine, {
       getRequests: (snapshot) =>
-        snapshot._nodes
+        snapshot.nodes
           .filter((node) => node.description)
           .map((node) => ({ model: "test-model", prompt: node.description! })),
       executors: {
@@ -486,7 +486,7 @@ describe("runAgent getRequests (state interpretation)", () => {
         // still retrigger after each pass (P1 regression).
         isIdle: () => true,
         getRequests: (snapshot) =>
-          snapshot._nodes
+          snapshot.nodes
             .filter((node) => node.description)
             .map((node) => ({
               model: "test-model",

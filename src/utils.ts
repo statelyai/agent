@@ -235,7 +235,7 @@ export function getStateMeta<
   // Structural depth per active node id. A custom `id: 'review'` on a nested
   // state has no dots, so the id string is not a usable depth proxy.
   // TODO(xstate): use snapshot.nodes when public.
-  const nodes = (snapshot as { _nodes?: Array<{ id: string; path: string[] }> })._nodes;
+  const nodes = (snapshot as { nodes?: Array<{ id: string; path: string[] }> }).nodes;
   const depthById = new Map(nodes?.map((node) => [node.id, node.path.length]));
   const depth = (id: string) => depthById.get(id) ?? id.split(".").length;
   const entries = Object.entries(snapshot.getMeta())

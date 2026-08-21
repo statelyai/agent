@@ -177,6 +177,8 @@ export {
   initEntry,
   replay,
 } from "./effects.js";
+export { runDurableAgent } from "./durable.js";
+export type { DurableAgentResult, RunDurableAgentOptions } from "./durable.js";
 export type {
   AgentEffectDiff,
   AgentEventLogDiff,

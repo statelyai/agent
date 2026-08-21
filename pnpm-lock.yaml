@@ -120,8 +120,8 @@ importers:
         specifier: ^3.2.6
         version: 3.2.7(@types/debug@4.1.13)(@types/node@20.19.30)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0)
       xstate:
-        specifier: 6.0.0-alpha.25
-        version: 6.0.0-alpha.25
+        specifier: 6.0.0-alpha.41
+        version: 6.0.0-alpha.41
       zod:
         specifier: ^4.3.6
         version: 4.3.6
@@ -198,8 +198,8 @@ importers:
         specifier: ^8.21.1
         version: 8.21.1
       xstate:
-        specifier: 6.0.0-alpha.25
-        version: 6.0.0-alpha.25
+        specifier: 6.0.0-alpha.41
+        version: 6.0.0-alpha.41
       zod:
         specifier: ^4.3.6
         version: 4.4.3
@@ -251,13 +251,13 @@ importers:
         version: link:../..
       agents:
         specifier: ^0.11.5
-        version: 0.11.5(@babel/core@7.29.0)(@babel/runtime@7.29.7)(@cloudflare/workers-types@4.20260702.1)(@tanstack/ai@0.42.0(@opentelemetry/api@1.9.1))(ai@6.0.67(zod@4.4.3))(react@19.2.7)(rolldown@1.2.0)(zod@4.4.3)
+        version: 0.11.5(@babel/core@7.29.0)(@babel/runtime@7.29.7)(@cloudflare/workers-types@4.20260702.1)(@tanstack/ai@0.42.0(@opentelemetry/api@1.9.1))(ai@6.0.67(zod@4.4.3))(react@19.2.7)(rolldown@1.2.0)(vite@7.3.6(@types/node@20.19.30)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0))(zod@4.4.3)
       ai:
         specifier: ^6.0.67
         version: 6.0.67(zod@4.4.3)
       xstate:
-        specifier: 6.0.0-alpha.25
-        version: 6.0.0-alpha.25
+        specifier: 6.0.0-alpha.41
+        version: 6.0.0-alpha.41
       zod:
         specifier: ^4.3.6
         version: 4.4.3
@@ -284,8 +284,8 @@ importers:
         specifier: ^6.0.67
         version: 6.0.67(zod@4.4.3)
       xstate:
-        specifier: 6.0.0-alpha.25
-        version: 6.0.0-alpha.25
+        specifier: 6.0.0-alpha.41
+        version: 6.0.0-alpha.41
       zod:
         specifier: ^4.3.6
         version: 4.4.3
@@ -336,8 +336,8 @@ importers:
         specifier: ^19.2.7
         version: 19.2.7(react@19.2.7)
       xstate:
-        specifier: 6.0.0-alpha.25
-        version: 6.0.0-alpha.25
+        specifier: 6.0.0-alpha.41
+        version: 6.0.0-alpha.41
       zod:
         specifier: ^4.3.6
         version: 4.4.3
@@ -366,8 +366,8 @@ importers:
         specifier: ^19.2.7
         version: 19.2.7(react@19.2.7)
       xstate:
-        specifier: 6.0.0-alpha.25
-        version: 6.0.0-alpha.25
+        specifier: 6.0.0-alpha.41
+        version: 6.0.0-alpha.41
       zod:
         specifier: ^4.3.6
         version: 4.4.3
@@ -406,8 +406,8 @@ importers:
         specifier: ^19.2.7
         version: 19.2.7(react@19.2.7)
       xstate:
-        specifier: 6.0.0-alpha.25
-        version: 6.0.0-alpha.25
+        specifier: 6.0.0-alpha.41
+        version: 6.0.0-alpha.41
       zod:
         specifier: ^4.3.6
         version: 4.4.3
@@ -7302,8 +7302,8 @@ packages:
   xstate@5.32.5:
     resolution: {integrity: sha512-ULazi1oe6wGrXl0Frb6otSlkm5HLifbbVTkMk5kkSKqz4TkxJaVpnl6jOJwKeid3ORPxYyZQgNLUSYX9q65SIA==, tarball: https://registry.npmjs.org/xstate/-/xstate-5.32.5.tgz}
 
-  xstate@6.0.0-alpha.25:
-    resolution: {integrity: sha512-zk36UtcEZJDcU0GH1xE94me6H+qVZq71bInqeqHXxxyW+PUCFCFH1emyjqFToGFJIyN54u35c59bLyp91c24kA==, tarball: https://registry.npmjs.org/xstate/-/xstate-6.0.0-alpha.25.tgz}
+  xstate@6.0.0-alpha.41:
+    resolution: {integrity: sha512-uzopnySBMT3jgBgzUFCBJykwkz0KrnKij7Q71Nyv+qpnwed12mL8/EgzTUuQtAKFdztSOmoUxcYqZmkKxADJIA==, tarball: https://registry.npmjs.org/xstate/-/xstate-6.0.0-alpha.41.tgz}
     hasBin: true
 
   xxhash-wasm@1.1.0:
@@ -10514,13 +10514,14 @@ snapshots:
   '@rolldown/binding-win32-x64-msvc@1.2.0':
     optional: true
 
-  '@rolldown/plugin-babel@0.2.3(@babel/core@7.29.0)(@babel/runtime@7.29.7)(rolldown@1.2.0)':
+  '@rolldown/plugin-babel@0.2.3(@babel/core@7.29.0)(@babel/runtime@7.29.7)(rolldown@1.2.0)(vite@7.3.6(@types/node@20.19.30)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0))':
     dependencies:
       '@babel/core': 7.29.0
       picomatch: 4.0.4
       rolldown: 1.2.0
     optionalDependencies:
       '@babel/runtime': 7.29.7
+      vite: 7.3.6(@types/node@20.19.30)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0)
 
   '@rolldown/pluginutils@1.0.0-rc.12': {}
 
@@ -11301,12 +11302,12 @@ snapshots:
 
   agent-base@7.1.4: {}
 
-  agents@0.11.5(@babel/core@7.29.0)(@babel/runtime@7.29.7)(@cloudflare/workers-types@4.20260702.1)(@tanstack/ai@0.42.0(@opentelemetry/api@1.9.1))(ai@6.0.67(zod@4.4.3))(react@19.2.7)(rolldown@1.2.0)(zod@4.4.3):
+  agents@0.11.5(@babel/core@7.29.0)(@babel/runtime@7.29.7)(@cloudflare/workers-types@4.20260702.1)(@tanstack/ai@0.42.0(@opentelemetry/api@1.9.1))(ai@6.0.67(zod@4.4.3))(react@19.2.7)(rolldown@1.2.0)(vite@7.3.6(@types/node@20.19.30)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0))(zod@4.4.3):
     dependencies:
       '@babel/plugin-proposal-decorators': 7.29.0(@babel/core@7.29.0)
       '@cfworker/json-schema': 4.1.1
       '@modelcontextprotocol/sdk': 1.29.0(@cfworker/json-schema@4.1.1)(zod@4.4.3)
-      '@rolldown/plugin-babel': 0.2.3(@babel/core@7.29.0)(@babel/runtime@7.29.7)(rolldown@1.2.0)
+      '@rolldown/plugin-babel': 0.2.3(@babel/core@7.29.0)(@babel/runtime@7.29.7)(rolldown@1.2.0)(vite@7.3.6(@types/node@20.19.30)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0))
       ai: 6.0.67(zod@4.4.3)
       cron-schedule: 6.0.0
       mimetext: 3.0.28
@@ -11318,6 +11319,7 @@ snapshots:
       zod: 4.4.3
     optionalDependencies:
       '@tanstack/ai': 0.42.0(@opentelemetry/api@1.9.1)
+      vite: 7.3.6(@types/node@20.19.30)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0)
     transitivePeerDependencies:
       - '@babel/core'
       - '@babel/plugin-transform-runtime'
@@ -14315,7 +14317,7 @@ snapshots:
 
   xstate@5.32.5: {}
 
-  xstate@6.0.0-alpha.25: {}
+  xstate@6.0.0-alpha.41: {}
 
   xxhash-wasm@1.1.0: {}
 
