@@ -185,9 +185,7 @@ The result carries the seam's own answer and two slices, ready for `matchesTraje
 
 ```ts
 run.seamOutput; // what the seam call returned
-run.seamUsage; // token usage reported by the seam call, when available
 run.callsBeforeSeam; // model calls made before it (-1 if never reached)
-run.calls; // ordered text-call ledger: routing key, source, and seam marker
 run.before; // { statePath, events } up to the seam's completion
 run.after; // { statePath, events } from it onward: the branch the seam caused
 run.result; // the full RunAgentResult; `events` is the whole run's log
