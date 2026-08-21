@@ -29,7 +29,6 @@ import {
   AGENT_INIT_EVENT_TYPE,
   createReplayEntry,
   initEntry,
-  rebindActorSession,
   validateReplayEntries,
 } from "./effects.js";
 import type { AgentLogEntry } from "./event-log-store.js";
@@ -195,6 +194,23 @@ export async function runDurableAgent<TMachine extends AnyStateMachine>(
     }
   }
 
+  // ─── execution identity ───
+  // Pinning `executionId` makes session ids a deterministic function of
+  // actor-creation order (`<executionId>:<n>`), so journaled completion
+  // events — which carry the producing incarnation's `sessionId` — match the
+  // children a replay re-creates, with no rewriting. Minted once per journal
+  // and persisted in the init entry's metadata; a journal that predates the
+  // field falls back to its init entry id (deterministic per log).
+  const storedExecutionId = hasInit
+    ? (priorEntries[0]!.metadata as { executionId?: unknown } | undefined)?.executionId
+    : undefined;
+  const executionId =
+    typeof storedExecutionId === "string"
+      ? storedExecutionId
+      : hasInit
+        ? priorEntries[0]!.id
+        : crypto.randomUUID();
+
   // ─── adapter ───
   const mailbox = createMailbox();
   const rootAddress = machineId;
@@ -222,6 +238,7 @@ export async function runDurableAgent<TMachine extends AnyStateMachine>(
   let replaying = journal.length > 0;
 
   const adapter: DurableExecutionAdapter<TMachine> = {
+    executionId,
     sendEvent(source, target, event) {
       if ((target as { address?: string }).address === rootAddress) {
         mailbox.push(event);
@@ -280,12 +297,14 @@ export async function runDurableAgent<TMachine extends AnyStateMachine>(
     options.onEntry?.(entry);
   };
   if (!hasInit) {
-    const entry = initEntry(machine, input, entryOptions);
+    const entry = initEntry(machine, input, {
+      ...entryOptions,
+      metadata: { executionId },
+    });
     entries.push(entry);
     options.onEntry?.(entry);
   }
 
-  const sessions = new Map<string, string>();
   let journalIndex = 0;
   let liveEventConsumed = false;
 
@@ -317,9 +336,9 @@ export async function runDurableAgent<TMachine extends AnyStateMachine>(
     let fromJournal = false;
     if (journalIndex < journal.length) {
       // Journal first: it is the authoritative total order of the original
-      // run. A journaled completion's per-incarnation `sessionId` is rebound
-      // to this execution's child for the same stable actor id.
-      event = rebindActorSession(journal[journalIndex]!, machineSnapshot, sessions);
+      // run. Session ids are deterministic under the pinned `executionId`, so
+      // a journaled completion matches the replay's re-created child as-is.
+      event = journal[journalIndex]!;
       journalIndex++;
       fromJournal = true;
       replaying = journalIndex < journal.length;

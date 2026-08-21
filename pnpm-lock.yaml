@@ -120,8 +120,8 @@ importers:
         specifier: ^3.2.6
         version: 3.2.7(@types/debug@4.1.13)(@types/node@20.19.30)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0)
       xstate:
-        specifier: 6.0.0-alpha.41
-        version: 6.0.0-alpha.41
+        specifier: 6.0.0-alpha.43
+        version: 6.0.0-alpha.43
       zod:
         specifier: ^4.3.6
         version: 4.3.6
@@ -198,8 +198,8 @@ importers:
         specifier: ^8.21.1
         version: 8.21.1
       xstate:
-        specifier: 6.0.0-alpha.41
-        version: 6.0.0-alpha.41
+        specifier: 6.0.0-alpha.43
+        version: 6.0.0-alpha.43
       zod:
         specifier: ^4.3.6
         version: 4.4.3
@@ -256,8 +256,8 @@ importers:
         specifier: ^6.0.67
         version: 6.0.67(zod@4.4.3)
       xstate:
-        specifier: 6.0.0-alpha.41
-        version: 6.0.0-alpha.41
+        specifier: 6.0.0-alpha.43
+        version: 6.0.0-alpha.43
       zod:
         specifier: ^4.3.6
         version: 4.4.3
@@ -284,8 +284,8 @@ importers:
         specifier: ^6.0.67
         version: 6.0.67(zod@4.4.3)
       xstate:
-        specifier: 6.0.0-alpha.41
-        version: 6.0.0-alpha.41
+        specifier: 6.0.0-alpha.43
+        version: 6.0.0-alpha.43
       zod:
         specifier: ^4.3.6
         version: 4.4.3
@@ -336,8 +336,8 @@ importers:
         specifier: ^19.2.7
         version: 19.2.7(react@19.2.7)
       xstate:
-        specifier: 6.0.0-alpha.41
-        version: 6.0.0-alpha.41
+        specifier: 6.0.0-alpha.43
+        version: 6.0.0-alpha.43
       zod:
         specifier: ^4.3.6
         version: 4.4.3
@@ -366,8 +366,8 @@ importers:
         specifier: ^19.2.7
         version: 19.2.7(react@19.2.7)
       xstate:
-        specifier: 6.0.0-alpha.41
-        version: 6.0.0-alpha.41
+        specifier: 6.0.0-alpha.43
+        version: 6.0.0-alpha.43
       zod:
         specifier: ^4.3.6
         version: 4.4.3
@@ -406,8 +406,8 @@ importers:
         specifier: ^19.2.7
         version: 19.2.7(react@19.2.7)
       xstate:
-        specifier: 6.0.0-alpha.41
-        version: 6.0.0-alpha.41
+        specifier: 6.0.0-alpha.43
+        version: 6.0.0-alpha.43
       zod:
         specifier: ^4.3.6
         version: 4.4.3
@@ -7302,8 +7302,8 @@ packages:
   xstate@5.32.5:
     resolution: {integrity: sha512-ULazi1oe6wGrXl0Frb6otSlkm5HLifbbVTkMk5kkSKqz4TkxJaVpnl6jOJwKeid3ORPxYyZQgNLUSYX9q65SIA==, tarball: https://registry.npmjs.org/xstate/-/xstate-5.32.5.tgz}
 
-  xstate@6.0.0-alpha.41:
-    resolution: {integrity: sha512-uzopnySBMT3jgBgzUFCBJykwkz0KrnKij7Q71Nyv+qpnwed12mL8/EgzTUuQtAKFdztSOmoUxcYqZmkKxADJIA==, tarball: https://registry.npmjs.org/xstate/-/xstate-6.0.0-alpha.41.tgz}
+  xstate@6.0.0-alpha.43:
+    resolution: {integrity: sha512-2inPGtQkL5Ja1qeZKfWhHrrH9UJF7TOn2FAADkseqUEPyc8gGsL1BZEfawyMlKhsEsso3XFzdaPgnDilWDauOQ==, tarball: https://registry.npmjs.org/xstate/-/xstate-6.0.0-alpha.43.tgz}
     hasBin: true
 
   xxhash-wasm@1.1.0:
@@ -14317,7 +14317,7 @@ snapshots:
 
   xstate@5.32.5: {}
 
-  xstate@6.0.0-alpha.41: {}
+  xstate@6.0.0-alpha.43: {}
 
   xxhash-wasm@1.1.0: {}
 
