@@ -152,6 +152,7 @@ To eval a seam, run the machine end to end but route every request except one to
 
 <!-- viz: seam eval: chain of model calls in one run, all scripted except the seam under test, with before/after trajectory slices marked at the seam's completion -->
 
+<!-- runSeam options and result fields from src/seam.ts -->
 
 ```ts
 import { matchesTrajectory, runSeam } from "@statelyai/agent";
