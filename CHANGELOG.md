@@ -1,5 +1,26 @@
 # @statelyai/agent
 
+## 2.0.0-alpha.20
+
+### Minor Changes
+
+- [#99](https://github.com/statelyai/agent/pull/99) [`11ff1ac`](https://github.com/statelyai/agent/commit/11ff1ac010a6a0adf147f2cd29f71182ca3899e6) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **`runDurableAgent`: run an agent machine on xstate's durable runtime.** Built on the new experimental `xstate/durable` entrypoint (`createDurable`), with the existing `AgentLogEntry` event log as the journal — journal in, run to `done`/`idle`, journal out. A resume folds the journal through pure transitions: an invoke whose completion is journaled is never re-started (recorded model calls never re-execute), while work in flight at a crash re-executes live.
+
+  ```ts
+  const first = await runDurableAgent(machine, { input, executors });
+  // persist first.entries; later, in a new process:
+  const next = await runDurableAgent(machine, {
+    entries: first.entries,
+    event: { type: "APPROVE" },
+    executors,
+  });
+  ```
+
+  Requires `xstate@>=6.0.0-alpha.41` (peer range bumped). Also in the upgrade:
+
+  - Fixed cross-version snapshot resume under alpha.41: restored snapshots carry an own `machine` reference that made `runAgent`'s version-alignment path re-raise the mismatch it had just resolved.
+  - `snapshot._nodes` reads replaced with the now-public `snapshot.nodes`.
+
 ## 2.0.0-alpha.19
 
 ### Minor Changes
