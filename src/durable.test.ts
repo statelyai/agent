@@ -292,3 +292,44 @@ describe("runDurableAgent timers", () => {
     expect(counters.modelCalls).toBe(1);
   });
 });
+
+describe("runDurableAgent timer/idle interplay", () => {
+  test("live mode: isIdle settling a delayed wait state disarms the timer and reports it", async () => {
+    // The 'wait for human, auto-proceed after timeout' pattern: the state is
+    // an isIdle wait AND carries an after(...). Settling idle must not leak
+    // the armed setTimeout (it would hold the process open and fire into a
+    // discarded mailbox).
+    const agent = setupAgent({
+      context: z.object({}),
+      events: { APPROVE: z.object({}) },
+    });
+    const machine = agent.createMachine({
+      id: "idle-timer",
+      context: {},
+      initial: "waiting",
+      states: {
+        waiting: {
+          tags: ["awaiting-user"],
+          after: { 60_000: { target: "timedOut" } },
+          on: { APPROVE: { target: "done" } },
+        },
+        timedOut: { type: "final" },
+        done: { type: "final" },
+      },
+    });
+
+    const started = Date.now();
+    const idle = await runDurableAgent(machine, {
+      isIdle: (snapshot) => snapshot.hasTag("awaiting-user"),
+    });
+    // Settles immediately — not held open by the 60s timer.
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(idle.status).toBe("idle");
+    if (idle.status !== "idle") throw new Error("unreachable");
+    // The disarmed timer is still reported, so a host can schedule the
+    // auto-proceed wake-up; a resume re-arms it (firing was never journaled).
+    expect(idle.pendingTimers).toEqual([
+      { id: expect.stringContaining("xstate.after"), delayMs: 60_000 },
+    ]);
+  });
+});

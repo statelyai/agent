@@ -283,6 +283,19 @@ export async function runDurableAgent<TMachine extends AnyStateMachine>(
     }
     pendingTimers.delete(id);
   };
+  // Disarms armed setTimeouts without forgetting the timers, for an idle
+  // settle: an orphaned handle would keep the process alive and fire into a
+  // discarded mailbox. The timers stay in `pendingTimers` so the idle result
+  // reports them — their firings were never journaled, so a resume re-arms
+  // them (restarting the full delay) or an external scheduler wakes the run.
+  const disarmPendingTimers = () => {
+    for (const pending of pendingTimers.values()) {
+      if (pending.handle !== undefined) {
+        clearTimeout(pending.handle);
+        pending.handle = undefined;
+      }
+    }
+  };
 
   const findChildRef = (effect: unknown): (AnyActor & { id: string }) | undefined => {
     const raw = effect as { actor?: unknown; args?: unknown[] };
@@ -463,6 +476,7 @@ export async function runDurableAgent<TMachine extends AnyStateMachine>(
         event = await execution.waitForEvent();
       } catch (error) {
         if (error === IDLE) {
+          disarmPendingTimers();
           return {
             status: "idle",
             snapshot: snapshot as SnapshotFrom<TMachine>,
