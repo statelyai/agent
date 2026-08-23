@@ -102,6 +102,7 @@ export { provideExecutors } from "./provide-executors.js";
 export type { ProvideExecutorsOptions } from "./provide-executors.js";
 export {
   AgentLintError,
+  assertAgentMachine,
   canReach,
   explorePaths,
   lintAgentMachine,
@@ -112,6 +113,7 @@ export type {
   AgentLintSeverity,
   AgentPathReport,
   AgentPathTerminal,
+  AssertAgentMachineOptions,
   CanReachResult,
   ExplorePathsOptions,
   LintAgentMachineOptions,
