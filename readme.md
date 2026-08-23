@@ -12,7 +12,7 @@ Stately Agent adds model requests and decisions to XState:
 
 Stately Agent 2 is in alpha. APIs may change before the stable release.
 
-[Documentation](https://stately.ai/docs/agents) · [Examples](examples/README.md) · [XState](https://github.com/statelyai/xstate)
+[Documentation](https://stately.ai/docs/packages/agent) · [Examples](examples/README.md) · [XState](https://github.com/statelyai/xstate)
 
 ## Three starting points
 
