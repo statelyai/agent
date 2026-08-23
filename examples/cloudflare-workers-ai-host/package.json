@@ -11,7 +11,7 @@
   "dependencies": {
     "@statelyai/agent": "workspace:*",
     "ai": "^6.0.67",
-    "xstate": "6.0.0-alpha.43",
+    "xstate": "6.0.0-alpha.46",
     "zod": "^4.3.6"
   },
   "devDependencies": {

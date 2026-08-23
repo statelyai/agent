@@ -99,6 +99,9 @@ export type DurableAgentResult<TMachine extends AnyStateMachine> =
       entries: AgentLogEntry[];
     };
 
+/** Thrown by the adapter's `waitForEvent` when nothing can produce an event. */
+const IDLE = Symbol("agent.durable.idle");
+
 interface Mailbox {
   push(event: EventObject): void;
   take(): Promise<EventObject>;
@@ -236,6 +239,9 @@ export async function runDurableAgent<TMachine extends AnyStateMachine>(
   // True while the loop is still consuming `journal` — replayed frontiers must
   // not re-run fire-and-forget actions.
   let replaying = journal.length > 0;
+  let liveEventConsumed = false;
+  // The current snapshot, for the adapter's `isIdle` consultation.
+  let latestSnapshot: SnapshotFrom<TMachine>;
 
   const adapter: DurableExecutionAdapter<TMachine> = {
     executionId,
@@ -277,9 +283,27 @@ export async function runDurableAgent<TMachine extends AnyStateMachine>(
       const executable = action as unknown as { exec?: () => void };
       executable.exec?.();
     },
-    // The loop below owns event flow; `run()` (which uses this) is never called.
-    waitForEvent() {
-      return mailbox.take() as Promise<EventFromLogic<TMachine>>;
+    // Consulted by `execution.waitForEvent()` once no captured root events
+    // are retained: pending mailbox deliveries first, then a wait on live
+    // in-flight work, then the host's own `options.event` — and when none of
+    // those can produce anything, the run is idle.
+    async waitForEvent() {
+      if (mailbox.size() > 0) {
+        return (await mailbox.take()) as EventFromLogic<TMachine>;
+      }
+      if (
+        liveInFlight.size > 0 &&
+        !(options.isIdle?.(latestSnapshot as SnapshotFrom<TMachine>) ?? false)
+      ) {
+        // Live work is in flight (a model call, a task): wait for its event
+        // before considering the host's own — the machine is not at rest yet.
+        return (await mailbox.take()) as EventFromLogic<TMachine>;
+      }
+      if (!liveEventConsumed && options.event !== undefined) {
+        liveEventConsumed = true;
+        return options.event;
+      }
+      throw IDLE;
     },
   };
 
@@ -306,18 +330,16 @@ export async function runDurableAgent<TMachine extends AnyStateMachine>(
   }
 
   let journalIndex = 0;
-  let liveEventConsumed = false;
 
   let [snapshot, effects] = execution.initialTransition(input as never);
+  latestSnapshot = snapshot;
 
   for (;;) {
     // Execute the frontier. Suppressed children contribute nothing; live
     // children run through xstate's own runtime. Root events produced while
-    // effects settle come back captured, in order.
-    const captured = await execution.executeEffects(effects);
-    for (const rootEvent of captured) {
-      mailbox.push(rootEvent.event);
-    }
+    // effects settle are retained by the execution, in order, and handed out
+    // by `execution.waitForEvent()` below.
+    await execution.executeEffects(effects);
 
     const machineSnapshot = snapshot as AnyMachineSnapshot;
     if (machineSnapshot.status === "done") {
@@ -342,24 +364,21 @@ export async function runDurableAgent<TMachine extends AnyStateMachine>(
       journalIndex++;
       fromJournal = true;
       replaying = journalIndex < journal.length;
-    } else if (mailbox.size() > 0) {
-      event = await mailbox.take();
-    } else if (
-      liveInFlight.size > 0 &&
-      !(options.isIdle?.(snapshot as SnapshotFrom<TMachine>) ?? false)
-    ) {
-      // Live work is in flight (a model call, a task): wait for its event
-      // before considering the host's own — the machine is not at rest yet.
-      event = await mailbox.take();
-    } else if (!liveEventConsumed && options.event !== undefined) {
-      event = options.event;
-      liveEventConsumed = true;
     } else {
-      return {
-        status: "idle",
-        snapshot: snapshot as SnapshotFrom<TMachine>,
-        entries,
-      };
+      // Captured root events first, then the adapter's durable wait; the
+      // adapter throws IDLE when nothing can produce an event.
+      try {
+        event = await execution.waitForEvent();
+      } catch (error) {
+        if (error === IDLE) {
+          return {
+            status: "idle",
+            snapshot: snapshot as SnapshotFrom<TMachine>,
+            entries,
+          };
+        }
+        throw error;
+      }
     }
 
     const completedId = completionActorId(event);
@@ -370,5 +389,6 @@ export async function runDurableAgent<TMachine extends AnyStateMachine>(
       appendEntry(event);
     }
     [snapshot, effects] = execution.transition(snapshot, event as never);
+    latestSnapshot = snapshot;
   }
 }
