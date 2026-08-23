@@ -5,7 +5,7 @@
   "machine": "orderApprovalMachine",
   "origin": {
     "type": "stately-agent",
-    "source": "Versioned snapshots: machineVersion stamping, onVersionMismatch, and migrateSnapshot across two versions of one order-approval machine",
+    "source": "Versioned snapshots: machine `version` stamping, onVersionMismatch, and migrateSnapshot across two versions of one order-approval machine",
     "url": null
   },
   "comparison": {

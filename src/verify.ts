@@ -1063,10 +1063,14 @@ async function applyScriptedDecision(
 
   let chosen: ChosenEvent;
   try {
-    chosen = await resolveDecision(request, decide, {
-      maxRetries,
-      canTake: (event) => (step.snapshot as AnyMachineSnapshot).can(event as never),
-    });
+    chosen = await resolveDecision(
+      request,
+      { decide },
+      {
+        maxRetries,
+        canTake: (event) => (step.snapshot as AnyMachineSnapshot).can(event as never),
+      },
+    );
   } catch (error) {
     if (!(error instanceof AgentDecisionExhaustedError)) {
       throw error;

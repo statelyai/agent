@@ -8,11 +8,11 @@
  * context has the wrong shape.
  *
  * Demonstrates the three pieces `runAgent` gives you for that:
- *   - `machineVersion` — the stamp written onto every settled snapshot's
- *     `agentMeta` (defaults to the machine's own `version`, else
+ *   - the machine's own `version` — the stamp written onto every settled
+ *     snapshot's `agentMeta` (falling back to
  *     `getMachineStructuralHash(machine)`, which changes on any structural
- *     edit). Both machines here set it explicitly, so the boundary is a
- *     deliberate "1.0.0" → "2.0.0" and not an accident of hashing.
+ *     edit). Both machines here declare it, so the boundary is a deliberate
+ *     "1.0.0" → "2.0.0" and not an accident of hashing.
  *   - `onVersionMismatch` — `'throw'` (the default) turns a stale resume into
  *     an `AgentSnapshotVersionMismatchError` carrying `from`/`to`, instead of
  *     restoring garbage. `'warn'`/`'ignore'` opt out.
@@ -28,13 +28,16 @@
  * npx tsx examples/snapshot-migration/index.ts
  */
 import { z } from "zod";
-import {
-  AgentSnapshotVersionMismatchError,
-  persistSnapshot,
-  runAgent,
-  setupAgent,
-} from "@statelyai/agent";
+import { AgentSnapshotVersionMismatchError, runAgent, setupAgent } from "@statelyai/agent";
 import type { Snapshot } from "xstate";
+
+/**
+ * What a durable store does to a settled snapshot: write it as JSON and read it
+ * back. Everything `runAgent` hands you at an idle gate survives the trip.
+ */
+export function persistSnapshot<T>(snapshot: T): T {
+  return JSON.parse(JSON.stringify(snapshot)) as T;
+}
 
 /** The version stamped on snapshots produced by {@link orderApprovalMachineV1}. */
 export const V1 = "1.0.0";
@@ -58,12 +61,13 @@ const v1Setup = setupAgent({
   },
   // The idle gate is declared by the machine, so `runAgent` settles
   // `{ status: 'idle', snapshot }` deterministically rather than by timing.
-  isSuspended: (snapshot) => snapshot.hasTag("awaiting-approval"),
+  isIdle: (snapshot) => snapshot.hasTag("awaiting-approval"),
 });
 
 /** v1 of the order-approval flow. Kept exported so the old snapshot is real, not hand-written. */
 export const orderApprovalMachineV1 = v1Setup.createMachine({
   id: "order-approval",
+  version: V1,
   context: ({ input }) => ({
     orderId: input.orderId,
     total: input.total,
@@ -134,7 +138,7 @@ const v2Setup = setupAgent({
       })
       .optional(),
   }),
-  isSuspended: (snapshot) => snapshot.hasTag("awaiting-approval"),
+  isIdle: (snapshot) => snapshot.hasTag("awaiting-approval"),
 });
 
 /** Anything at or above this is `riskLevel: 'high'`. New rule in v2. */
@@ -143,6 +147,7 @@ export const HIGH_RISK_CENTS = 50_000;
 /** v2 of the order-approval flow — the current machine. */
 export const orderApprovalMachine = v2Setup.createMachine({
   id: "order-approval",
+  version: V2,
   context: ({ input }) => ({
     orderId: input.orderId,
     amountCents: input.amountCents,
@@ -258,7 +263,6 @@ export async function runSnapshotMigrationExample(
   // Act 1 — v1 runs to its idle gate and the snapshot is persisted as JSON.
   const paused = await runAgent(orderApprovalMachineV1, {
     input: { orderId, total },
-    machineVersion: V1,
   });
   if (paused.status !== "idle") {
     throw new Error(`Expected v1 to settle idle, got '${paused.status}'.`);
@@ -273,7 +277,6 @@ export async function runSnapshotMigrationExample(
     await runAgent(orderApprovalMachine, {
       snapshot: persisted as never,
       event: { type: "APPROVE" },
-      machineVersion: V2,
     });
   } catch (error) {
     if (!(error instanceof AgentSnapshotVersionMismatchError)) {
@@ -290,7 +293,6 @@ export async function runSnapshotMigrationExample(
   const resumed = await runAgent(orderApprovalMachine, {
     snapshot: persisted as never,
     event: { type: "APPROVE" },
-    machineVersion: V2,
     migrateSnapshot: (snapshot, info) => {
       migrationInfo = info;
       return migrateOrderSnapshot(snapshot);
@@ -311,7 +313,6 @@ export async function main(): Promise<void> {
   console.log("Act 1 — v1 pauses for a human and the snapshot is persisted");
   const paused = await runAgent(orderApprovalMachineV1, {
     input: { orderId, total },
-    machineVersion: V1,
   });
   if (paused.status !== "idle") {
     throw new Error(`Expected v1 to settle idle, got '${paused.status}'.`);
@@ -327,7 +328,6 @@ export async function main(): Promise<void> {
     await runAgent(orderApprovalMachine, {
       snapshot: persisted as never,
       event: { type: "APPROVE" },
-      machineVersion: V2,
       onVersionMismatch: "throw", // the default, spelled out
     });
     console.log("  (unreachable — the stale snapshot was accepted)");
@@ -343,7 +343,6 @@ export async function main(): Promise<void> {
   const resumed = await runAgent(orderApprovalMachine, {
     snapshot: persisted as never,
     event: { type: "APPROVE" },
-    machineVersion: V2,
     migrateSnapshot: (snapshot, info) => {
       const migrated = migrateOrderSnapshot(snapshot);
       console.log(`  migrating '${info.from}' → '${info.to}'`);

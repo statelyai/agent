@@ -228,7 +228,7 @@ const agentSetup = setupAgent({
   models,
   // Deterministic idle detection: the run settles exactly when it is waiting on
   // the detective, instead of falling back to the timing heuristic.
-  isSuspended: (snapshot) => snapshot.hasTag("waiting"),
+  isIdle: (snapshot) => snapshot.hasTag("waiting"),
   requests: {
     /**
      * ONE request definition for all four players. Its input is a union, and

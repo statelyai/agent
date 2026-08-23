@@ -780,7 +780,7 @@ describe("canReach — predicate targets", () => {
         APPROVE: z.object({}),
         REJECT: z.object({}),
       },
-      isSuspended: (snapshot) => snapshot.hasTag("awaiting-approval"),
+      isIdle: (snapshot) => snapshot.hasTag("awaiting-approval"),
     });
     return agent.createMachine({
       context: ({ input }) => ({ amount: input.amount, approved: false }),

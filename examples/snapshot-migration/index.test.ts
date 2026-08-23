@@ -1,8 +1,9 @@
 import { expect, test } from "vitest";
-import { assertJsonSerializable, persistSnapshot, runAgent } from "@statelyai/agent";
+import { assertJsonSerializable, runAgent } from "@statelyai/agent";
 import { AgentSnapshotVersionMismatchError } from "@statelyai/agent";
 import {
   migrateOrderSnapshot,
+  persistSnapshot,
   orderApprovalMachine,
   orderApprovalMachineV1,
   runSnapshotMigrationExample,
@@ -14,7 +15,6 @@ import {
 async function persistedV1Snapshot(orderId = "ORD-1", total = 812.5) {
   const paused = await runAgent(orderApprovalMachineV1, {
     input: { orderId, total },
-    machineVersion: V1,
   });
   if (paused.status !== "idle") {
     throw new Error(`Expected idle, got '${paused.status}'.`);
@@ -38,7 +38,6 @@ test("resuming the v1 snapshot on v2 throws AgentSnapshotVersionMismatchError wi
     await runAgent(orderApprovalMachine, {
       snapshot: persisted as never,
       event: { type: "APPROVE" },
-      machineVersion: V2,
     });
   } catch (error) {
     caught = error;
@@ -90,7 +89,6 @@ test("opting out with 'ignore' does not protect you — the stale snapshot fails
     await runAgent(orderApprovalMachine, {
       snapshot: persisted as never,
       event: { type: "APPROVE" },
-      machineVersion: V2,
       onVersionMismatch: "ignore",
     });
   } catch (error) {
@@ -105,7 +103,6 @@ test("opting out with 'ignore' does not protect you — the stale snapshot fails
 test("a v2 snapshot resumes on v2 without any migration", async () => {
   const paused = await runAgent(orderApprovalMachine, {
     input: { orderId: "ORD-2", amountCents: 2500 },
-    machineVersion: V2,
   });
   if (paused.status !== "idle") {
     throw new Error(`Expected idle, got '${paused.status}'.`);
@@ -113,7 +110,6 @@ test("a v2 snapshot resumes on v2 without any migration", async () => {
   const resumed = await runAgent(orderApprovalMachine, {
     snapshot: persistSnapshot(paused.snapshot),
     event: { type: "REJECT", reason: "duplicate order" },
-    machineVersion: V2,
   });
   expect(resumed.status).toBe("done");
   if (resumed.status !== "done") return;

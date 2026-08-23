@@ -106,7 +106,7 @@ const agentSetup = setupAgent({
   models,
   // The gate is an idle state: runAgent settles `idle` there and waits for a
   // human event rather than hanging.
-  isSuspended: (snapshot) => snapshot.hasTag("awaiting-approval"),
+  isIdle: (snapshot) => snapshot.hasTag("awaiting-approval"),
 });
 
 const CLASSIFY_SYSTEM_PROMPT =

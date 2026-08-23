@@ -62,7 +62,7 @@ Good first reads: [`twenty-questions`](twenty-questions/index.ts), [`go-fish`](g
 - [`customer-support/index.ts`](customer-support/index.ts): intent routing plus safe question answering, with sensitive actions gated behind an idle `confirming` state.
 - [`time-travel/index.ts`](time-travel/index.ts): checkpointing each settle, rewinding to a past checkpoint, and forking a divergent branch while the main branch stays unchanged.
 - [`crash-recovery/index.ts`](crash-recovery/index.ts): events-only resume, where a crash mid-request recovers from `runAgent({ events })` alone and the in-flight request re-executes idempotently.
-- [`snapshot-migration/index.ts`](snapshot-migration/index.ts): resuming a paused run after the machine was redeployed, where `machineVersion` stamping makes a stale snapshot throw with `from`/`to` and `migrateSnapshot` adapts it at the boundary.
+- [`snapshot-migration/index.ts`](snapshot-migration/index.ts): resuming a paused run after the machine was redeployed, where the machine's own `version` stamp makes a stale snapshot throw with `from`/`to` and `migrateSnapshot` adapts it at the boundary.
 - [`session-actor/index.ts`](session-actor/index.ts): `createAgentActor` session mode, one live actor across turns on a single replayable log with cumulative usage.
 - [`file-snapshot-store/index.ts`](file-snapshot-store/index.ts): durable checkpoints in a file-backed snapshot store, where each idle settle writes JSON to disk.
 
