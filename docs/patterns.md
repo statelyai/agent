@@ -163,7 +163,7 @@ Most patterns are one self-contained `index.ts`, with no shared harness and no l
 2. Install the runtime dependencies. The provider package major version must match your installed `ai` major version. This repo uses `ai@6`, so it uses `@ai-sdk/openai@3` rather than 4.
 
    ```sh
-   pnpm add @statelyai/agent@alpha ai@^6.0.67 zod@^4 xstate@6.0.0-alpha.25 @ai-sdk/openai@^3
+   pnpm add @statelyai/agent@alpha ai@^6.0.67 zod@^4 xstate@6.0.0-alpha.43 @ai-sdk/openai@^3
    pnpm add -D @types/node typescript tsx
    ```
 
@@ -172,7 +172,7 @@ Most patterns are one self-contained `index.ts`, with no shared harness and no l
 
 <!-- peer ranges from package.json#peerDependencies and example schema dependency from package.json#devDependencies -->
 
-`@statelyai/agent` declares these peer ranges: `ai@^6.0.67`, `xstate@>=6.0.0-alpha.25 <6.0.0`, and optionally `@opentelemetry/api@^1`. The examples use Zod 4 directly. The `@alpha` tag floats, so pin the exact version it installs once you have a working build.
+`@statelyai/agent` declares these peer ranges: `ai@^6.0.67`, `xstate@>=6.0.0-alpha.43 <6.0.0`, and optionally `@opentelemetry/api@^1`. The examples use Zod 4 directly. The `@alpha` tag floats, so pin the exact version it installs once you have a working build.
 
 ## Running from the repo
 

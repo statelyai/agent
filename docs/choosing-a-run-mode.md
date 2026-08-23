@@ -1,32 +1,36 @@
 ---
 title: Choosing a run mode
-description: Three ways to execute the same agent machine, what each one owns, and which to reach for.
+description: Four ways to execute the same agent machine, what each one owns, and which to reach for.
 ---
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
 
-This page describes the three ways to execute an agent machine and how to choose between them.
+This page describes the four ways to execute an agent machine and how to choose between them.
 
-## Three ways to execute one machine
+## Four ways to execute one machine
 
-An agent machine declares states, requests, and decisions. It does not run itself and does not call a model. A host drives it. There are three hosts to choose from:
+<!-- public execution modes from src/index.ts, src/run.ts, src/provide-executors.ts, src/durable.ts, and src/effects.ts -->
+
+An agent machine declares states, requests, and decisions. It does not run itself and does not call a model. A host drives it. There are four hosts to choose from:
 
 - `runAgent` (controlled). The library owns the actor and the run loop.
 - `provideExecutors` with `createActor` (uncontrolled). You own the actor and XState drives it.
+- `runDurableAgent` (durable runtime). The library owns an event-sourced durable loop.
 - The step path (`getAgentEffects`, `executeAgentRequest`, `replay`). You own the loop and the persistence.
 
-The machine is the same in all three modes. The same file runs under each one, and the same tests cover it. Only the host changes.
+The machine is the same in all four modes. The same file runs under each one, and the same tests cover it. Only the host changes.
 
-<!-- viz: one machine feeding three hosts: runAgent (library-owned actor + loop), provideExecutors + createActor (user-owned actor), step path (user-owned loop + event log) -->
+<!-- viz: one machine feeding four hosts: runAgent (library-owned actor + loop), provideExecutors + createActor (user-owned actor), runDurableAgent (library-owned durable loop + event log), step path (user-owned loop + event log) -->
 
 
 ## Decision table
 
-| Mode                   | You own                                             | The library owns                                                    | Durability                                                  | Reach for it when                                                                                                 |
-| ---------------------- | --------------------------------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| **`runAgent`**         | The call site and the executors                     | The actor, the run loop, request retries, usage aggregation, traces | Snapshot per settle, plus a replayable `result.events` log  | Scripts, HTTP handlers, workers, and anything with a request/response boundary                                    |
-| **`provideExecutors`** | `createActor`, the actor lifecycle, subscriptions   | Executor binding for agent sources only                             | Whatever you persist off the actor (`getPersistedSnapshot`) | A host that already owns an actor lifecycle, such as React, a Durable Object, or a long-lived process             |
-| **Step path**          | The loop, the event log, when to persist, the clock | Pure effect derivation, request execution, replay, verification     | Event-sourced. Append before continue, resume by `replay`   | Serverless per turn, queue-driven work, durable execution engines, and crash recovery that cannot re-bill model calls |
+| Mode                    | You own                                             | The library owns                                                    | Durability                                                  | Reach for it when                                                                                                 |
+| ----------------------- | --------------------------------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| **`runAgent`**          | The call site and the executors                     | The actor, the run loop, request retries, usage aggregation, traces | Snapshot per settle, plus a replayable `result.events` log  | Scripts, HTTP handlers, workers, and anything with a request/response boundary                                    |
+| **`provideExecutors`**  | `createActor`, the actor lifecycle, subscriptions   | Executor binding for agent sources only                             | Whatever you persist off the actor (`getPersistedSnapshot`) | A host that already owns an actor lifecycle, such as React, a Durable Object, or a long-lived process             |
+| **`runDurableAgent`**   | Journal persistence and the external event boundary | The durable runtime loop, executor binding, and replay              | Event-sourced. Persist `entries`; resume with an event       | Durable request/response turns without writing the host loop                                                      |
+| **Step path**           | The loop, the event log, when to persist, the clock | Pure effect derivation, request execution, replay, verification     | Event-sourced. Append before continue, resume by `replay`   | Custom durable engines and crash recovery that cannot re-bill completed model calls                               |
 
 ### Idle handling
 
@@ -34,6 +38,7 @@ Each mode reaches the point where the machine waits for an outside event differe
 
 - `runAgent` settles with status `idle` and returns a snapshot to resume from.
 - `provideExecutors` does not settle. The actor stays alive in its current state until you send it an event.
+- `runDurableAgent` settles with status `idle`; persist `entries` and resume with them plus an external `event`.
 - On the step path, you detect idle yourself. When no asynchronous effect is owed, persist and return.
 
 ## Start with `runAgent`
@@ -43,7 +48,8 @@ Each mode reaches the point where the machine waits for an outside event differe
 Choose another mode when one of these is true:
 
 - The host already owns an actor and a render loop. Use the uncontrolled mode instead of running a second loop inside it.
-- Each turn is a separate process invocation, or a crash between two model calls must not re-run the completed call. Use the step path.
+- Each turn is a separate process invocation and the standard durable loop fits. Use `runDurableAgent`.
+- You need custom persistence, scheduling, or effect execution. Use the step path.
 
 Everything else uses `runAgent` with a persisted snapshot, including human-in-the-loop pauses that last days.
 
@@ -93,6 +99,27 @@ actor.start();
 - To trace an uncontrolled run, pass `onTrace` to `provideExecutors` and pass `traceTransitions(onTrace)` to the actor's `inspect` option. The two produce one merged stream.
 
 Read more about [Use in any stack](any-stack.md#controlled-and-uncontrolled).
+
+## Durable runtime: `runDurableAgent`
+
+```ts
+import { runDurableAgent } from "@statelyai/agent";
+
+const first = await runDurableAgent(machine, { input, executors });
+await store.save(first.entries);
+
+const next = await runDurableAgent(machine, {
+  entries: await store.load(),
+  event: { type: "APPROVE" },
+  executors,
+});
+```
+
+- The result is `done` with `output`, or `idle` awaiting an external event.
+- `entries` is the complete journal. Persist it after each call and pass it back on resume.
+- Recorded invoke completions replay without re-running; work still in flight at a crash runs again.
+- Use `onEntry` when the store should persist each append incrementally.
+- This mode is experimental because it uses XState's experimental durable runtime.
 
 ## Owning the loop: the step path
 

@@ -30,7 +30,7 @@ pnpm add @statelyai/agent@alpha xstate@alpha zod ai@^6 @ai-sdk/openai@^3
 
 Requirements:
 
-- Node 22.18 or newer, and XState v6 alpha.25 or newer.
+- Node 22.18 or newer, and XState v6 alpha.43 or newer.
 - The package is ESM-first. CommonJS builds are published too, so `require()` works.
 - Provider packages must match your `ai` major: `@ai-sdk/openai@^3` pairs with `ai@^6`. A bare `@ai-sdk/openai` resolves to `@latest`, which can mismatch the `ai` peer.
 

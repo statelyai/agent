@@ -16,7 +16,7 @@ pnpm add @statelyai/agent@alpha xstate@alpha zod ai@^6 @ai-sdk/openai@^3
 ```
 
 - The `@alpha` tag floats. Install it once, then run `npm ls @statelyai/agent` and pin the resolved version, so a later alpha cannot change the API.
-- `xstate` is the only required peer dependency, at v6 alpha.25 or newer. Node must be 22.18 or newer.
+- `xstate` is the only required peer dependency, at v6 alpha.43 or newer. Node must be 22.18 or newer.
 - Provider packages must match your `ai` major version. `@ai-sdk/openai@^3` pairs with `ai@^6`. A bare `@ai-sdk/openai` resolves to `@latest`, whose `LanguageModel` spec version may not match your `ai` peer.
 - The package is ESM-first. Every entry point also ships a CommonJS build, so `require()` works. The examples use top-level `await`, which requires ESM. Set `"type": "module"` in `package.json`, or use `.mts` files.
 
@@ -212,7 +212,7 @@ If a run must reach a final state, use `generateResult(machine, options)` instea
 
 ### Other ways to run the same machine
 
-`runAgent` is the default, but not the only option. `provideExecutors` binds the executors onto the machine and returns it for use with a plain `createActor`. The step path lets a durable host own the loop and the persistence. The machine is identical in all three modes. See [Choosing a run mode](choosing-a-run-mode.md).
+`runAgent` is the default, but not the only option. `provideExecutors` binds the executors onto the machine for a plain `createActor`. `runDurableAgent` owns an event-sourced durable loop, while the step path lets your host own that loop and persistence. The machine is identical in all four modes. See [Choosing a run mode](choosing-a-run-mode.md).
 
 ### Testing without an API key
 
