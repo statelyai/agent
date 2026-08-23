@@ -42,9 +42,11 @@ export type { AgentStateRequest } from "./internal/state-request-pass.js";
 import { getAcceptedEvents, type AgentSchemas } from "./events.js";
 import {
   AGENT_USAGE_TOKEN_FIELDS,
+  GENERATE_TEXT_ACTOR,
   getCallUsage,
   isTextLogic,
   normalizeGeneratorResult,
+  STREAM_TEXT_ACTOR,
   USER_INPUT_ACTOR,
   type AgentCallUsage,
   type AgentUsage,
@@ -1384,9 +1386,22 @@ function invokingActorOf(
  * identical event shapes by construction. @internal
  */
 function bindTextLogic(logic: TextLogic, runCtx: RunAgentBindContext): TextLogic {
-  return logic.withExecutor(async ({ request, self: selfArg, signal }) => {
+  return logic.withExecutor(async ({ request: rawRequest, self: selfArg, signal }) => {
     const self = selfArg as BoundActorSelf | undefined;
     const { id, src } = selfIdAndSrc(self);
+    // A request authored with no `name` (bare `createTextLogic({ model })`)
+    // takes its `actors:` registration key: the invoke `src` IS the
+    // developer-facing handle, so name-addressed surfaces (runSeam's
+    // `{ request }`, script routing, host mocks) work without a `name` in the
+    // config. The `agent.*` builtins keep their documented nameless requests —
+    // their `src` is the builtin id, not a handle the author chose.
+    const request: AgentTextRequest =
+      rawRequest.name === undefined &&
+      src !== "" &&
+      src !== GENERATE_TEXT_ACTOR &&
+      src !== STREAM_TEXT_ACTOR
+        ? { ...rawRequest, name: src }
+        : rawRequest;
     const executor = logic.mode === "stream" ? runCtx.streamText : runCtx.generateText;
     if (!executor) {
       throw new Error(

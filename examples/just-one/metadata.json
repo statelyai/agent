@@ -1,0 +1,24 @@
+{
+  "name": "just-one",
+  "title": "Just One",
+  "kind": "agent-workflow",
+  "origin": {
+    "type": "stately-agent",
+    "source": "Created in this repository",
+    "url": null
+  },
+  "comparison": {
+    "targets": ["LangGraph", "Burr", "CrewAI Flow"],
+    "purpose": "Three clue-givers run as isolated parallel regions whose inputs are built before any sibling settles, and the duplicate-cancelling rule is a pure function in the machine instead of an instruction the agents are asked to coordinate on."
+  },
+  "starters": [
+    {
+      "label": "Quick game (1 round)",
+      "input": { "rounds": 1 }
+    },
+    {
+      "label": "Full game (3 rounds)",
+      "input": { "rounds": 3 }
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "name": "chameleon",
+  "title": "The Chameleon",
+  "kind": "agent-workflow",
+  "origin": {
+    "type": "stately-agent",
+    "source": "Created in this repository",
+    "url": null
+  },
+  "comparison": {
+    "targets": ["LangGraph", "Burr", "CrewAI Flow"],
+    "purpose": "Hidden-role asymmetry is expressed as per-request input shaping: the chameleon's turn is built from a union branch with no secretWord field, so its request provably never receives the secret, while the other three players' turns do."
+  },
+  "starters": [
+    {
+      "label": "Ocean creatures — octopus (Cleo is the chameleon)",
+      "input": { "category": "Ocean creatures", "secretWord": "octopus", "chameleonIndex": 2 }
+    },
+    {
+      "label": "Big cats — lion (Ada is the chameleon)",
+      "input": { "category": "Big cats", "secretWord": "lion", "chameleonIndex": 0 }
+    },
+    {
+      "label": "Musical instruments — violin (Dev is the chameleon)",
+      "input": { "category": "Musical instruments", "secretWord": "violin", "chameleonIndex": 3 }
+    }
+  ]
+}

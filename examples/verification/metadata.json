@@ -1,0 +1,28 @@
+{
+  "name": "verification",
+  "title": "Verified agent machine",
+  "kind": "evaluation",
+  "origin": {
+    "type": "stately-agent",
+    "source": "Flagship showcase for the keyless verification suite (lintAgentMachine, canReach, explorePaths, simulateAgent, matchesTrajectory) over a refund-approval machine",
+    "url": null
+  },
+  "comparison": {
+    "targets": ["LangGraph", "Burr", "prompt-level guardrails"],
+    "purpose": "A prompt can ask a model not to issue a large refund without approval; a guard makes it an illegal transition, and canReach proves the violation state unreachable across every branch without one model call."
+  },
+  "starters": [
+    {
+      "label": "Small refund ($40)",
+      "input": { "amount": 40, "reason": "Late delivery credit" }
+    },
+    {
+      "label": "Large refund ($500)",
+      "input": { "amount": 500, "reason": "Duplicate annual charge" }
+    },
+    {
+      "label": "Right at the limit ($100)",
+      "input": { "amount": 100, "reason": "Damaged item" }
+    }
+  ]
+}

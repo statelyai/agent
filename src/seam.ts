@@ -28,14 +28,16 @@ import type {
 } from "xstate";
 import { AgentError } from "./errors.js";
 import type { AgentLogEntry } from "./event-log-store.js";
-import { normalizeGeneratorResult } from "./text-logic.js";
+import { getCallUsage, normalizeGeneratorResult } from "./text-logic.js";
 import { runAgent } from "./run-agent.js";
 import type { RunAgentOptions, RunAgentResult } from "./run-agent.js";
 import { isRecord } from "./internal/is-record.js";
 import { describeText, emitScriptedChunk, resolveScriptedTextEntry } from "./scripted-executors.js";
 import type { ScriptedTextEntry } from "./scripted-executors.js";
 import type {
+  AgentCallUsage,
   AgentExecutorTextRequest,
+  AgentRequestExecutor,
   AgentRequestExecutorInfo,
   AgentRequestExecutorResult,
   AgentRequestExecutors,
@@ -79,6 +81,27 @@ export interface SeamTurn<TMachine extends AnyStateMachine> {
   result: RunAgentResult<TMachine>;
 }
 
+/**
+ * One text call in a {@link runSeam} run's ledger, in call order — the receipt
+ * that says which answers came from the script and which one came from the
+ * candidate, so "everything else stayed scripted" is a plain assertion on
+ * {@link RunSeamResult.calls} rather than a recording function wrapped around
+ * every script entry. Text calls only: `decide` and other base executors are
+ * not routed by the seam and do not appear.
+ */
+export interface SeamCall {
+  /** The request's `name`, when it has one. */
+  name?: string;
+  /** The request's model key. */
+  model: string;
+  /** The `scripts` queue key that routed this call. */
+  key: string;
+  /** Where the answer came from: the script, or the seam's `candidate`. */
+  source: "script" | "candidate";
+  /** True for the seam call itself — scripted or candidate. */
+  seam: boolean;
+}
+
 /** One side of the seam: a trajectory pair ready for `matchesTrajectory`. */
 export interface SeamSlice {
   /** State values entered on this side of the seam, in order. */
@@ -116,7 +139,7 @@ export interface RunSeamOptions<TMachine extends AnyStateMachine> {
    * request-shaped. Omit to run the seam scripted too: the whole seam run is
    * then keyless and deterministic.
    */
-  candidate?: AgentRequestExecutors["generateText"];
+  candidate?: AgentRequestExecutor;
   /**
    * The simulated user. Called at every idle pause; return the event to send,
    * or `null`/`undefined` to stop the run there. Omitted, the run stops at the
@@ -146,8 +169,17 @@ export interface RunSeamResult<TMachine extends AnyStateMachine> {
   result: RunAgentResult<TMachine>;
   /** What the seam call returned, or `undefined` when the run never reached it. */
   seamOutput: unknown;
+  /**
+   * The seam call's own reported token usage — the cost of the one live call
+   * when a `candidate` is a real model. `undefined` when the run never reached
+   * the seam or its answer reported no usage (scripted entries report usage
+   * only via the `{ output, usage }` envelope).
+   */
+  seamUsage?: AgentCallUsage;
   /** Model calls made before the seam, or `-1` when the run never reached it. */
   callsBeforeSeam: number;
+  /** The run's text calls in order: what was served, and by whom. */
+  calls: SeamCall[];
   /** Everything up to the seam's own effect completion. */
   before: SeamSlice;
   /**
@@ -158,7 +190,7 @@ export interface RunSeamResult<TMachine extends AnyStateMachine> {
 }
 
 /** Whatever a host executor may return — our envelope, or a raw AI SDK result. */
-type ExecutorReturn = Awaited<ReturnType<NonNullable<AgentRequestExecutors["generateText"]>>>;
+type ExecutorReturn = Awaited<ReturnType<AgentRequestExecutor>>;
 
 /**
  * The seam's own answer, for scoring. Our `{ output }` envelope is read
@@ -226,6 +258,8 @@ export async function runSeam<TMachine extends AnyStateMachine>(
   let calls = 0;
   let seamMatches = 0;
   let seamOutput: unknown;
+  let seamUsage: AgentCallUsage | undefined;
+  const callLog: SeamCall[] = [];
   let seamReached = false;
   let callsBeforeSeam = -1;
   let seamStateAt = 0;
@@ -275,6 +309,15 @@ export async function runSeam<TMachine extends AnyStateMachine>(
     const callIndex = calls++;
     const keyMatches = request.name === seam.request;
     const isSeam = keyMatches && seamMatches++ === (seam.occurrence ?? 0);
+    const ledger = (source: SeamCall["source"]): void => {
+      callLog.push({
+        ...(request.name !== undefined ? { name: request.name } : {}),
+        model: request.model,
+        key: queueKeyOf(request),
+        source,
+        seam: isSeam,
+      });
+    };
 
     if (isSeam && candidate) {
       // The script is the whole call plan, so the seam consumes its slot too:
@@ -288,10 +331,13 @@ export async function runSeam<TMachine extends AnyStateMachine>(
 
       const result = await candidate(request as AgentExecutorTextRequest, info);
       seamOutput = await seamOutputOf(result, request);
+      seamUsage = getCallUsage(result);
+      ledger("candidate");
       return result;
     }
 
     const scripted = await scriptedAnswer(request, info);
+    ledger("script");
     if (!isSeam) {
       return scripted;
     }
@@ -301,6 +347,7 @@ export async function runSeam<TMachine extends AnyStateMachine>(
     seamStateAt = statePath.length;
     seamEventAt = liveEvents;
     seamOutput = scripted.output;
+    seamUsage = scripted.usage;
     return scripted;
   };
 
@@ -381,7 +428,9 @@ export async function runSeam<TMachine extends AnyStateMachine>(
   return {
     result,
     seamOutput,
+    ...(seamUsage !== undefined ? { seamUsage } : {}),
     callsBeforeSeam,
+    calls: callLog,
     before: { statePath: statePath.slice(0, splitStateAt), events: events.slice(0, splitAt) },
     after: { statePath: statePath.slice(splitStateAt), events: events.slice(splitAt) },
   };

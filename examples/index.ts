@@ -30,6 +30,12 @@ export { plainWriterMachine, runPlainXstateExample } from "./plain-xstate/index.
 export { triageMachine, triageSchemas, triageSchema } from "./triage/index.js";
 export { twentyQuestionsMachine, twentyQuestionsSchemas } from "./twenty-questions/index.js";
 export { goFishMachine, goFishSchemas, ranks as goFishRanks } from "./go-fish/index.js";
+export {
+  justOneMachine,
+  justOneSchemas,
+  judgeClues,
+  main as runJustOneExample,
+} from "./just-one/index.js";
 export { humanInTheLoopMachine, runHumanInTheLoopExample } from "./human-in-the-loop/index.js";
 export { ragMachine, runRAGExample } from "./rag/index.js";
 export { correctiveRagMachine, runCorrectiveRagExample } from "./corrective-rag/index.js";
@@ -143,3 +149,28 @@ export {
   longRunningOnboardingMachine,
   runLongRunningOnboardingExample,
 } from "./long-running-onboarding/index.js";
+export {
+  APPROVAL_THRESHOLD,
+  // `refundMachine` is already taken by machine-as-tool.
+  refundMachine as verifiedRefundMachine,
+  verificationSchemas,
+  main as runVerificationExample,
+} from "./verification/index.js";
+export {
+  orderApprovalMachine,
+  orderApprovalMachineV1,
+  migrateOrderSnapshot,
+  runSnapshotMigrationExample,
+} from "./snapshot-migration/index.js";
+export {
+  BAD_DRAFT,
+  GOOD_DRAFT,
+  runCandidate as runSeamScoringCandidate,
+  main as runSeamScoringExample,
+} from "./seam-scoring/index.js";
+export {
+  chameleonMachine,
+  chameleonSchemas,
+  PLAYERS as CHAMELEON_PLAYERS,
+  main as runChameleonExample,
+} from "./chameleon/index.js";

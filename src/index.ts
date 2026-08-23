@@ -102,6 +102,7 @@ export { provideExecutors } from "./provide-executors.js";
 export type { ProvideExecutorsOptions } from "./provide-executors.js";
 export {
   AgentLintError,
+  assertAgentMachine,
   canReach,
   explorePaths,
   lintAgentMachine,
@@ -112,6 +113,7 @@ export type {
   AgentLintSeverity,
   AgentPathReport,
   AgentPathTerminal,
+  AssertAgentMachineOptions,
   CanReachResult,
   ExplorePathsOptions,
   LintAgentMachineOptions,
@@ -129,7 +131,14 @@ export type {
   TrajectoryMiss,
 } from "./trajectory.js";
 export { runSeam } from "./seam.js";
-export type { RunSeamOptions, RunSeamResult, SeamRef, SeamSlice, SeamTurn } from "./seam.js";
+export type {
+  RunSeamOptions,
+  RunSeamResult,
+  SeamCall,
+  SeamRef,
+  SeamSlice,
+  SeamTurn,
+} from "./seam.js";
 export { createScriptedExecutors } from "./scripted-executors.js";
 export type {
   ScriptedDecisionEntry,
