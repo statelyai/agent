@@ -14,7 +14,7 @@ const next = await runDurableAgent(machine, {
 });
 ```
 
-Requires `xstate@>=6.0.0-alpha.43` (peer range bumped). Executions pin a persisted `executionId`, so session ids are deterministic and journaled completions match replayed children natively. Also in the upgrade:
+Requires `xstate@>=6.0.0-alpha.46` (peer range bumped). Executions pin a persisted `executionId`, so session ids are deterministic and journaled completions match replayed children natively. Also in the upgrade:
 
 - Fixed cross-version snapshot resume under alpha.41: restored snapshots carry an own `machine` reference that made `runAgent`'s version-alignment path re-raise the mismatch it had just resolved.
 - `snapshot._nodes` reads replaced with the now-public `snapshot.nodes`.
