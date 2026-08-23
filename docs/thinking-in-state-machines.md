@@ -13,7 +13,7 @@ For the mechanical refactor of an existing codebase, see [Migrating from a hand-
 
 <!-- xstate version requirement from package.json#peerDependencies -->
 
-> **Version requirement.** Build the machine with the `xstate` install this package peers on, v6 alpha.43 or newer. See [Installation](quickstart.md#installation). Machines authored for XState v5 usually port with few changes, but a machine object imported from a separate `xstate@5` install does not bind. Write event-transition guards as functions that return `undefined`. XState v6 drops named string guards on `on`, and the function form is what makes `snapshot.can(event)` reflect the guard.
+> **Version requirement.** Build the machine with the `xstate` install this package peers on, v6 alpha.46 or newer. See [Installation](quickstart.md#installation). Machines authored for XState v5 usually port with few changes, but a machine object imported from a separate `xstate@5` install does not bind. Write event-transition guards as functions that return `undefined`. XState v6 drops named string guards on `on`, and the function form is what makes `snapshot.can(event)` reflect the guard.
 
 ## The loop to model
 
