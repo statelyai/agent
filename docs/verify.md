@@ -8,6 +8,7 @@ description: Statically lint, simulate, and explore agent machines without any A
 This page covers the APIs that check an agent machine before it runs. None of them need an API key or a model call.
 
 - `lintAgentMachine` statically catches dead states, undeliverable decisions, and output-contract gaps. Pass `{ throw: true }` for the throwing form.
+- `assertAgentMachine` is the one-line throwing form for tests and generation loops.
 - `simulateAgent` drives a deterministic scripted playthrough to a known outcome.
 - `explorePaths` and `canReach` enumerate decision branches and check that a target state is reachable.
 
@@ -16,6 +17,8 @@ Use these APIs to check that an LLM-generated machine is legal before you run it
 > **Note:** Everything on this page runs on `machine.config` and the pure step path, with no provider, no network, and no keys. It is deterministic, so these checks work as ordinary unit tests in any test runner, such as vitest or jest, and as CI checks.
 
 ## Machine linting
+
+<!-- lintAgentMachine, assertAgentMachine, and related options from src/verify.ts -->
 
 `lintAgentMachine(machine, options?)` runs static structural checks over a built machine. It accepts machines authored in TypeScript with `setupAgent(...).createMachine(...)` and machines compiled with `setupAgent.fromConfig(...)`. It returns `AgentLintDiagnostic[]`, where each diagnostic is `{ code, severity, path, message }`. The array is empty when the machine is clean.
 
@@ -28,10 +31,14 @@ if (errors.length) {
 }
 ```
 
-To throw instead of returning findings, pass `{ throw: true }`. The call is silent when the machine is clean, and throws `AgentLintError` on any error-severity finding, with the findings on `.diagnostics`. Add `warnings: true` to fail on warnings too. Pass `disable` to skip checks by code.
+To throw instead of returning findings, call `assertAgentMachine(machine, options?)`
+or pass `{ throw: true }` to `lintAgentMachine`. Both are silent when clean and
+throw `AgentLintError` on error-severity findings, with the findings on
+`.diagnostics`. Add `warnings: true` to fail on warnings too. Pass `disable` to
+skip checks by code.
 
 ```ts no-check
-lintAgentMachine(machine, { throw: true, warnings: true });
+assertAgentMachine(machine, { warnings: true });
 ```
 
 | Code                       | Severity | Fires when                                                                                                                                                                                                                                                                         |
@@ -50,11 +57,11 @@ lintAgentMachine(machine, { throw: true, warnings: true });
 Every check is a plain function, so you can assert structural soundness, reachability, and scripted playthroughs directly in vitest or jest.
 
 ```ts no-check
-import { canReach, lintAgentMachine, simulateAgent } from "@statelyai/agent";
+import { assertAgentMachine, canReach, simulateAgent } from "@statelyai/agent";
 import { supportMachine } from "./support-machine";
 
 test("machine is structurally sound", () => {
-  lintAgentMachine(supportMachine, { throw: true });
+  assertAgentMachine(supportMachine);
 });
 
 test("escalation is reachable", async () => {
@@ -185,13 +192,13 @@ Everything on this page runs without an API key, so a small script is enough for
 
 ```ts no-check
 // check.ts (run with: npx tsx check.ts)
-import { lintAgentMachine } from "@statelyai/agent";
+import { assertAgentMachine } from "@statelyai/agent";
 import { machine } from "./machine";
 
-lintAgentMachine(machine, { throw: true }); // throws AgentLintError on error-severity findings
+assertAgentMachine(machine); // throws AgentLintError on error-severity findings
 ```
 
-For machines authored as data, validate the config with `validateAgentConfig(config)` from `@statelyai/agent/validate` first, then compile it and lint the machine: `lintAgentMachine(setupAgent.fromConfig(config, { compileSchema }).machine, { throw: true })`. See [Machines as data](machines-as-data.md). Every check applies, including reachability. The lowering keeps the config's transition targets, so `unreachable-state` reads the real graph even where the JSON layer folds a target into a resolver function.
+For machines authored as data, validate the config with `validateAgentConfig(config)` from `@statelyai/agent/validate` first, then compile it and lint the machine: `assertAgentMachine(setupAgent.fromConfig(config, { compileSchema }).machine)`. See [Machines as data](machines-as-data.md). Every check applies, including reachability. The lowering keeps the config's transition targets, so `unreachable-state` reads the real graph even where the JSON layer folds a target into a resolver function.
 
 ## Related
 
