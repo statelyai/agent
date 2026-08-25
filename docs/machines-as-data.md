@@ -223,7 +223,8 @@ requests:
   lookupOrder:
     model: openai/gpt-5.4-mini
     prompt: "{{ context.ticket }}"
-    reasoning: true
+    includeReasoning: true
+    reasoning: high
     toolChoice: auto
     tools:
       searchOrders:
