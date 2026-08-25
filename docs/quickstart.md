@@ -12,12 +12,12 @@ This page builds an agent piece by piece, from installation to a live model call
 <!-- pinned alpha install; peers consistent with package.json -->
 
 ```bash
-pnpm add @statelyai/agent@alpha xstate@alpha zod ai@^6 @ai-sdk/openai@^3
+pnpm add @statelyai/agent@alpha xstate@alpha zod ai@^7 @ai-sdk/openai@^4
 ```
 
 - The `@alpha` tag floats. Install it once, then run `npm ls @statelyai/agent` and pin the resolved version, so a later alpha cannot change the API.
 - `xstate` is the only required peer dependency, at v6 alpha.46 or newer. Node must be 22.18 or newer.
-- Provider packages must match your `ai` major version. `@ai-sdk/openai@^3` pairs with `ai@^6`. A bare `@ai-sdk/openai` resolves to `@latest`, whose `LanguageModel` spec version may not match your `ai` peer.
+- Provider packages must match your `ai` major version. `@ai-sdk/openai@^4` pairs with `ai@^7`. A bare `@ai-sdk/openai` resolves to `@latest`, whose `LanguageModel` spec version may not match your `ai` peer.
 - The package is ESM-first. Every entry point also ships a CommonJS build, so `require()` works. The examples use top-level `await`, which requires ESM. Set `"type": "module"` in `package.json`, or use `.mts` files.
 
 ## First agent

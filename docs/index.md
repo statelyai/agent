@@ -30,7 +30,7 @@ In a [decision](decisions.md), the model chooses exactly one machine event that 
 <!-- install command matching the package prerelease channel and package.json peers -->
 
 ```bash
-pnpm add @statelyai/agent@alpha xstate@alpha zod ai@^6 @ai-sdk/openai@^3
+pnpm add @statelyai/agent@alpha xstate@alpha zod ai@^7 @ai-sdk/openai@^4
 ```
 
 Requires Node 22.18 or newer. `xstate` is the only required peer dependency. `ai` and `@ai-sdk/openai` back the shipped adapter, `createAiSdkExecutors`. The example below uses top-level `await`, so set `"type": "module"` in `package.json`.

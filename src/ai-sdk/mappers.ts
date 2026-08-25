@@ -1,10 +1,25 @@
-import { tool, type FlexibleSchema, type ModelMessage, type Tool } from "ai";
-import { getAgentOutputMode, type AgentTextRequest } from "../text-logic.js";
+import {
+  tool,
+  type FlexibleSchema,
+  type LanguageModelUsage,
+  type ModelMessage,
+  type Tool,
+  type ToolSet,
+} from "ai";
+import { getAgentOutputMode, type AgentCallUsage, type AgentTextRequest } from "../text-logic.js";
 import { isStandardSchema } from "../utils.js";
 import { renderDecisionAttempts } from "../decision.js";
 import type { AgentDecisionRequest } from "../decision.js";
 import type { AgentEventDescriptor } from "../events.js";
 import type { AgentTools, StandardSchemaV1 } from "../types.js";
+
+/**
+ * One call's usage as the adapter reports it: the AI SDK's `LanguageModelUsage`
+ * plus the flat {@link AgentCallUsage} token fields core folds into a run's
+ * aggregated usage.
+ */
+export type AiSdkCallUsage = LanguageModelUsage &
+  Pick<AgentCallUsage, "reasoningTokens" | "cachedInputTokens">;
 
 // Adapter-internal request/result mappers for the AI SDK adapter. NOT part of
 // the public `@statelyai/agent/ai-sdk` entry point — `createAiSdkExecutors`
@@ -88,6 +103,24 @@ const unknownSchema = {
 } as unknown as StandardSchemaV1 & FlexibleSchema<unknown>;
 
 /**
+ * Folds AI SDK v7's nested token details onto the flat field names core
+ * aggregates. v7 moved `reasoningTokens` under `outputTokenDetails` and the
+ * cached-input count under `inputTokenDetails.cacheReadTokens`, while
+ * {@link AgentCallUsage} stays flat and provider-agnostic. The SDK's own shape
+ * is spread through unchanged, so `onResult` consumers still see every field
+ * the provider reported, including v7's `raw`.
+ */
+export function toAgentCallUsage(usage: LanguageModelUsage): AiSdkCallUsage {
+  const reasoningTokens = usage.outputTokenDetails?.reasoningTokens;
+  const cachedInputTokens = usage.inputTokenDetails?.cacheReadTokens;
+  return {
+    ...usage,
+    ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
+    ...(cachedInputTokens !== undefined ? { cachedInputTokens } : {}),
+  };
+}
+
+/**
  * AI SDK request-mapping settings shared by `generateText`/`streamText`.
  * `AgentTextRequest.messages` (`AgentMessage[]`) and AI SDK's `ModelMessage[]`
  * are structurally compatible by design (§1 of .scratch/p0-design.md) — the cast
@@ -97,7 +130,12 @@ export function toAiSdkCallSettings(request: AgentTextRequest & { tools?: AgentT
   const messages = request.messages as ModelMessage[] | undefined;
   return {
     system: request.system,
-    ...(messages ? { messages } : { prompt: request.prompt ?? "" }),
+    // AI SDK v7 rejects `role: 'system'` inside `messages` unless a caller opts
+    // in. An agent's messages are machine-authored server-side content (see the
+    // `systemMessage()` helper), which is exactly the trusted case the flag is
+    // for, so the opt-in rides along whenever the request uses `messages`.
+    ...(messages ? { messages, allowSystemInMessages: true } : { prompt: request.prompt ?? "" }),
+    reasoning: request.reasoning,
     temperature: request.temperature,
     maxOutputTokens: request.maxOutputTokens,
     topP: request.topP,
@@ -169,7 +207,7 @@ export function extractFirstJsonValue(text: string): string | undefined {
 
 /** One AI SDK `tool()` per candidate event — the "tool-per-event +
  * toolChoice: 'required'" recipe from .scratch/p0-design.md §2.6. */
-export function toAiSdkEventTools(events: AgentEventDescriptor[]) {
+export function toAiSdkEventTools(events: AgentEventDescriptor[]): ToolSet {
   return Object.fromEntries(
     events.map((event) => [
       event.toolName,

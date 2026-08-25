@@ -183,8 +183,10 @@ export interface AgentWorkflowRequestConfig {
   output: JsonSchemaObject;
   tools?: AgentTools;
   toolChoice?: AgentToolChoice | unknown;
-  /** Opt into the structured-output envelope's `reasoning` field (see `AgentTextRequest.reasoning`). */
-  reasoning?: boolean;
+  /** Opt into the structured-output envelope's `reasoning` field (see `AgentTextRequest.includeReasoning`). */
+  includeReasoning?: boolean;
+  /** The provider's reasoning-effort setting, passed through (see `AgentTextRequest.reasoning`). */
+  reasoning?: "none" | "provider-default" | "minimal" | "low" | "medium" | "high" | "xhigh";
   temperature?: unknown;
   maxOutputTokens?: unknown;
   topP?: unknown;
@@ -330,6 +332,7 @@ function createRequestsFromWorkflowConfig(
         messages: resolver<AgentMessage[] | undefined>(request.messages),
         tools: request.tools,
         toolChoice: request.toolChoice as AgentToolChoice | undefined,
+        includeReasoning: request.includeReasoning,
         reasoning: request.reasoning,
         temperature: resolver<number | undefined>(request.temperature),
         maxOutputTokens: resolver<number | undefined>(request.maxOutputTokens),

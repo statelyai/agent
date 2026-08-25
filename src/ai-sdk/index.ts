@@ -7,7 +7,6 @@ import {
   type FinishReason,
   type FlexibleSchema,
   type LanguageModel,
-  type LanguageModelUsage,
   type ToolSet,
   type TypedToolCall,
   type TypedToolResult,
@@ -25,9 +24,11 @@ import type { AgentTools, ChosenEvent } from "../types.js";
 import {
   extractFirstJsonValue,
   isStructuredOutputRequest,
+  toAgentCallUsage,
   toAiSdkCallSettings,
   toAiSdkEventTools,
   toDecisionMessages,
+  type AiSdkCallUsage,
 } from "./mappers.js";
 
 // Multi-step tool loops: the request's typed `maxSteps` bounds the AI SDK
@@ -145,8 +146,9 @@ export type AiSdkGenerateResult = {
   reasoning?: string;
   /** The call's token usage. Its flat `inputTokens`/`outputTokens`/`totalTokens`/
    * `reasoningTokens`/`cachedInputTokens` fields are what `runAgent` folds into
-   * the run result's aggregated `AgentUsage`. */
-  usage: LanguageModelUsage;
+   * the run result's aggregated `AgentUsage`; the AI SDK's own nested
+   * `inputTokenDetails`/`outputTokenDetails` and `raw` ride along untouched. */
+  usage: AiSdkCallUsage;
   finishReason: FinishReason;
   toolCalls: TypedToolCall<ToolSet>[];
   toolResults: TypedToolResult<ToolSet>[];
@@ -155,14 +157,14 @@ export type AiSdkGenerateResult = {
 export type AiSdkStreamResult = {
   output: string;
   /** The stream's final (awaited) usage; aggregated into the run result's `AgentUsage`. */
-  usage: LanguageModelUsage;
+  usage: AiSdkCallUsage;
   finishReason: FinishReason;
 };
 /** Raw result shape from {@link AiSdkExecutors.decide} — the chosen event plus the AI SDK call metadata, delivered per decision attempt to `onResult`. */
 export type AiSdkDecideResult = {
   event: ChosenEvent;
   /** This attempt's usage; aggregated into the run result's `AgentUsage`. */
-  usage: LanguageModelUsage;
+  usage: AiSdkCallUsage;
   finishReason: FinishReason;
 };
 
@@ -213,7 +215,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
       // array root. Unwrap `.result` before the machine validates the declared
       // schema; surface `reasoning` on the raw result only.
       const envelope = buildEnvelopeSchema(request.outputSchema!, {
-        reasoning: request.reasoning,
+        reasoning: request.includeReasoning,
       });
       const structuredOutput = withJsonRepair(
         Output.object({
@@ -240,7 +242,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
       return {
         output,
         ...(reasoning !== undefined ? { reasoning } : {}),
-        usage: result.usage,
+        usage: toAgentCallUsage(result.usage),
         finishReason: result.finishReason,
         toolCalls: result.toolCalls,
         toolResults: result.toolResults,
@@ -250,7 +252,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
     const result = await aiGenerateText(common);
     return {
       output: result.text,
-      usage: result.usage,
+      usage: toAgentCallUsage(result.usage),
       finishReason: result.finishReason,
       toolCalls: result.toolCalls,
       toolResults: result.toolResults,
@@ -275,7 +277,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
 
     return {
       output: await result.text,
-      usage: await result.usage,
+      usage: toAgentCallUsage(await result.usage),
       finishReason: await result.finishReason,
     } satisfies AiSdkStreamResult;
   };
@@ -322,7 +324,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
         ...(toolCall.input && typeof toolCall.input === "object" ? toolCall.input : {}),
         type: chosenEvent.type,
       } as ChosenEvent,
-      usage: result.usage,
+      usage: toAgentCallUsage(result.usage),
       finishReason: result.finishReason,
     } satisfies AiSdkDecideResult;
   };

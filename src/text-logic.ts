@@ -89,8 +89,18 @@ export interface AgentTextRequest<TMetadata = Record<string, unknown>> {
    * structured-output envelope schema, nudging the model to reason before
    * committing to the result. The reasoning is surfaced on the executor's raw
    * result (never in machine context/output). Ignored for text-mode requests.
+   *
+   * Distinct from {@link AgentTextRequest.reasoning}, which is the provider's
+   * own reasoning-effort setting and means nothing to core.
    */
-  reasoning?: boolean;
+  includeReasoning?: boolean;
+  /**
+   * The model's reasoning effort, passed through to the provider untouched.
+   * A generation setting like `temperature`, not an agent concept: core never
+   * reads it, and the value set is the Vercel AI SDK's, so an
+   * {@link AgentTextRequest} stays spread-compatible with its call options.
+   */
+  reasoning?: "none" | "provider-default" | "minimal" | "low" | "medium" | "high" | "xhigh";
   temperature?: number;
   /**
    * Maximum number of output tokens to generate. Named `maxOutputTokens` (not
@@ -344,6 +354,7 @@ function createBuiltinTextActor(
           messages: ({ input }) => input.messages,
           tools: ({ input }) => input.tools,
           toolChoice: ({ input }) => input.toolChoice,
+          includeReasoning: ({ input }) => input.includeReasoning,
           reasoning: ({ input }) => input.reasoning,
           temperature: ({ input }) => input.temperature,
           maxOutputTokens: ({ input }) => input.maxOutputTokens,
@@ -439,8 +450,10 @@ export interface TextLogicConfig<
   messages?: ResolveTextLogicValue<AgentMessage[] | undefined, InferOutput<TInputSchema>>;
   tools?: ResolveTextLogicValue<AgentTools | undefined, InferOutput<TInputSchema>>;
   toolChoice?: ResolveTextLogicValue<AgentToolChoice | undefined, InferOutput<TInputSchema>>;
-  /** Opt into the structured-output envelope's `reasoning` field (see {@link AgentTextRequest.reasoning}). */
-  reasoning?: ResolveTextLogicValue<boolean | undefined, InferOutput<TInputSchema>>;
+  /** Opt into the structured-output envelope's `reasoning` field (see {@link AgentTextRequest.includeReasoning}). */
+  includeReasoning?: ResolveTextLogicValue<boolean | undefined, InferOutput<TInputSchema>>;
+  /** The provider's reasoning-effort setting, passed through (see {@link AgentTextRequest.reasoning}). */
+  reasoning?: ResolveTextLogicValue<AgentTextRequest["reasoning"], InferOutput<TInputSchema>>;
   temperature?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
   maxOutputTokens?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
   topP?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
@@ -552,6 +565,7 @@ export function createTextLogic<
       tools: resolveTextLogicValue(config.tools, args),
       toolChoice: resolveTextLogicValue(config.toolChoice, args),
       outputSchema: schemas.output,
+      includeReasoning: resolveTextLogicValue(config.includeReasoning, args),
       reasoning: resolveTextLogicValue(config.reasoning, args),
       temperature: resolveTextLogicValue(config.temperature, args),
       maxOutputTokens: resolveTextLogicValue(config.maxOutputTokens, args),
@@ -940,14 +954,14 @@ export function buildEnvelopeSchema(
  * provider was asked to satisfy).
  */
 export function parseStructuredEnvelope(
-  request: Pick<AgentTextRequest, "outputSchema" | "reasoning">,
+  request: Pick<AgentTextRequest, "outputSchema" | "includeReasoning">,
   value: unknown,
 ): StructuredOutputEnvelope {
   if (!request.outputSchema) {
     throw new Error("parseStructuredEnvelope: the request declares no outputSchema.");
   }
   const envelope = buildEnvelopeSchema(request.outputSchema, {
-    reasoning: request.reasoning,
+    reasoning: request.includeReasoning,
   });
   return validateSchemaSync<StructuredOutputEnvelope>(envelope, value);
 }

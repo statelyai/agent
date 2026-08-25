@@ -128,6 +128,8 @@ actor.subscribe((snapshot) => {
 actor.start();
 ```
 
+[examples/react-uncontrolled](../examples/react-uncontrolled/index.tsx) runs this same actor inside a React component, where the UI observes snapshots, sends user events, and renders streamed chunks from `onChunk`.
+
 For external control with no live actor, use XState's pure `transition(…)` and `initialTransition(…)` functions, which step the machine one event at a time. This is the lowest-level uncontrolled form, and durable hosts build on it. See [The step path](steps.md).
 
 ## Host walkthroughs
@@ -241,6 +243,13 @@ export class AnnounceAgent extends Agent<Env, State> {
 ```
 
 The [cloudflare-agent-host](../examples/cloudflare-agent-host/index.ts) example is a Durable Object class you can use directly, with the `wrangler.toml` and subclass wiring included. For Workers that handle one turn per request, [cloudflare-workers-ai-host](../examples/cloudflare-workers-ai-host/index.ts) drives the [step path](steps.md) against a raw Workers AI binding.
+
+### More host examples
+
+Each of these is a runnable file rather than a walkthrough, and none of them changes the machine.
+
+- Agent frameworks calling the machine as a tool: [Mastra](../examples/mastra-host/index.ts), [LangChain](../examples/langchain-host/index.ts), [Flue 2](../examples/flue-host/index.ts), and [Eve](../examples/eve-host/agent.ts). The framework converses, and the machine owns legality and the human pause. Flue 2 also runs the other way around in [flue-owned.ts](../examples/flue-host/flue-owned.ts), where Flue's hooks own each step and a small machine replaces the step variable.
+- Streaming a run to a browser client: [the AI SDK UI message stream](../examples/ai-sdk-ui-stream/index.ts) behind a `useChat` route, [TanStack AI's AG-UI protocol over SSE](../examples/tanstack-ai-stream/index.ts), and [plain SSE](../examples/sse-transport/index.ts).
 
 ## What changes per host
 

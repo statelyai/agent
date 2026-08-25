@@ -717,7 +717,7 @@ describe("maxSteps (multi-step tool loops)", () => {
       model: "m",
       prompt: "x",
       outputSchema: schema,
-      reasoning: true,
+      includeReasoning: true,
       tools: {},
     });
 

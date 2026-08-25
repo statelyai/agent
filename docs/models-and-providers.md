@@ -25,7 +25,7 @@ There are four integration paths. The first two both go through `createAiSdkExec
 
 - **AI SDK adapter.** Accepts any `LanguageModel`, including models from Mastra, Cloudflare Workers AI through `workers-ai-provider`, TanStack AI, OpenRouter's AI SDK provider, and any `@ai-sdk/*` package. Supports all three executors, including `decide`.
 - **OpenAI-compatible endpoints.** Point `createOpenAI({ baseURL })` from `@ai-sdk/openai` at any OpenAI-shaped endpoint, such as Groq, Ollama, vLLM, Together, or LM Studio, then pass the result to the same adapter. Supports all three executors, including `decide`.
-- **Hand-written `fetch` executors.** Write the three executors yourself against a provider's HTTP API. Supports all three executors, but you map structured output and decision retries yourself. See [Hosts](hosts.md#writing-your-own-executors).
+- **Hand-written executors.** Write the three executors yourself against a provider's HTTP API, or against a client that is not an AI SDK `LanguageModel`, such as a LangChain `BaseChatModel`. Supports all three executors, but you map structured output and decision retries yourself. See [Hosts](hosts.md#writing-your-own-executors) and [LangChain models](#langchain-models).
 - **Raw `ai` functions.** Pass the `ai` package's `generateText` and `streamText` as your `executors` set. This path supports text only. `decide` requires the adapter, and structured output is best-effort.
 
 <!-- viz: executor sourcing paths: LanguageModel object -> createAiSdkExecutors -> { generateText, streamText, decide }, with the raw-`ai` path bypassing the adapter and losing decide/structured output -->
@@ -64,6 +64,16 @@ export const hostAgent = new Agent({
 ```
 
 Any framework that exposes a `LanguageModel` works the same way. The machine and the Mastra agent share one model definition. See [`examples/mastra-host`](https://github.com/statelyai/agent/tree/main/examples/mastra-host) for the full bridge, including pause and resume across tool calls.
+
+## LangChain models
+
+LangChain chat models are not AI SDK `LanguageModel` objects, so they take the hand-written path. Wrap any `BaseChatModel` in the three executors and the machine keeps LangChain's model config, callbacks, and retries.
+
+- `generateText` and `streamText` call the model's `invoke` and `stream`.
+- `decide` binds one tool per allowed event and forces a tool call.
+- LangSmith tracing is env-var driven, so a wrapped model traces without code changes. For tracing the machine's own spans instead, see [Observability](observability.md).
+
+See [`examples/langchain-host`](../examples/langchain-host/index.ts) for both directions: LangChain models as executors, and the machine handed to a LangChain `createAgent` loop as `start_workflow` and `resume_workflow` tools.
 
 ## Cloudflare Workers AI
 
@@ -147,5 +157,7 @@ Each example is a runnable host for one provider stack.
 | [ai-sdk-host](../examples/ai-sdk-host/index.ts)                               | Vercel AI SDK, through the shipped adapter                                                                        |
 | [openai-sdk-host](../examples/openai-sdk-host/index.ts)                       | raw `openai` (Chat Completions); structured via `response_format`, decisions via `tool_choice: 'required'`        |
 | [anthropic-sdk-host](../examples/anthropic-sdk-host/index.ts)                 | raw `@anthropic-ai/sdk` (Messages); structured via forced tool call, decisions via `tool_choice: { type: 'any' }` |
+| [langchain-host](../examples/langchain-host/index.ts)                         | LangChain `BaseChatModel` (`@langchain/core`), wrapped into the executor contract                                 |
+| [mastra-host](../examples/mastra-host/index.ts)                               | Mastra `Agent` and `createTool`, bridging to `runAgent`                                                           |
 | [cloudflare-agent-host](../examples/cloudflare-agent-host/index.ts)           | Durable Object                                                                                                    |
 | [cloudflare-workers-ai-host](../examples/cloudflare-workers-ai-host/index.ts) | Workers AI binding                                                                                                |

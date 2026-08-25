@@ -207,3 +207,4 @@ For machines authored as data, validate the config with `validateAgentConfig(con
 - [Hosts and executors](hosts.md#scripted-executors): keyless scripted executors for `runAgent`.
 - [Machines as data](machines-as-data.md): verifying a machine lowered from a config.
 - [Migrating from a hand-rolled loop](from-a-loop.md): pinning behavior across a refactor.
+- [examples/verification](../examples/verification/index.ts): every API on this page run over one refund-approval machine, keyless, including `canReach` proving that an over-limit payout without human approval is unreachable.

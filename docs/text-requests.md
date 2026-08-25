@@ -114,20 +114,34 @@ The mode is derived from the schema automatically. You never set it. See [exampl
 
 ### Reasoning
 
-<!-- reasoning opt-in from src/text-logic.ts (AgentTextRequest.reasoning) -->
+<!-- reasoning opt-in from src/text-logic.ts (AgentTextRequest.includeReasoning) -->
 
-Set `reasoning: true` on a structured request to add an optional string `reasoning` field to the [envelope](./hosts.md#the-structured-output-envelope). The field is listed before `result`, so the property order prompts the model to reason before answering:
+Set `includeReasoning: true` on a structured request to add an optional string `reasoning` field to the [envelope](./hosts.md#the-structured-output-envelope). The field is listed before `result`, so the property order prompts the model to reason before answering:
 
 ```ts
 export const triageTicket = createTextLogic({
   schemas: { input: z.object({ ticket: z.string() }), output: triageSchema },
   model: "quick",
-  reasoning: true, // opt in
+  includeReasoning: true, // opt in
   prompt: ({ input }) => input.ticket,
 });
 ```
 
 The reasoning never enters machine context or output. It surfaces in three places: on the raw executor result as `result.reasoning` from the `generateText` executor of `createAiSdkExecutors`, on `runAgent`'s `onResult(request, { raw })`, and as a `reasoning` field on the `request.end` `onTrace` event. Text-mode requests ignore the option.
+
+`includeReasoning` is not the provider's reasoning-effort setting. That setting is `reasoning`, and it is passed through to the model untouched like `temperature`:
+
+```ts
+export const planRefactor = createTextLogic({
+  schemas: { input: z.object({ file: z.string() }), output: planSchema },
+  model: "careful",
+  reasoning: "high", // provider setting, forwarded as-is
+  includeReasoning: true, // envelope field, read by the adapter
+  prompt: ({ input }) => input.file,
+});
+```
+
+Core never reads `reasoning`. Its accepted values are the Vercel AI SDK's (`'none'`, `'provider-default'`, `'minimal'`, `'low'`, `'medium'`, `'high'`, `'xhigh'`), so an `AgentTextRequest` stays spread-compatible with the SDK's call options, and a host that does not support the setting can ignore it.
 
 ## Streaming requests
 

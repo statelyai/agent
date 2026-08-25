@@ -160,9 +160,9 @@ export async function runAiSdkSubAgentsDeterministicExample() {
       tools: {},
       generate: async ({ prompt }) => {
         calls.push(`researcher:${prompt}`);
-        return { text: `notes:${prompt}` } as GenerateTextResult<{}, never>;
+        return { text: `notes:${prompt}` } as GenerateTextResult<{}, never, never>;
       },
-      stream: async () => ({}) as StreamTextResult<{}, never>,
+      stream: async () => ({}) as StreamTextResult<{}, never, never>,
     },
     writer: {
       version: "agent-v1",
@@ -170,9 +170,9 @@ export async function runAiSdkSubAgentsDeterministicExample() {
       tools: {},
       generate: async ({ prompt }) => {
         calls.push(`writer:${prompt}`);
-        return { text: `final:${prompt}` } as GenerateTextResult<{}, never>;
+        return { text: `final:${prompt}` } as GenerateTextResult<{}, never, never>;
       },
-      stream: async () => ({}) as StreamTextResult<{}, never>,
+      stream: async () => ({}) as StreamTextResult<{}, never, never>,
     },
   };
   const { machine } = createAiSdkSubAgentWorkflow(fakeSubAgents);

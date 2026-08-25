@@ -218,7 +218,7 @@ for (const seam of seams) {
 
 A row is a Braintrust test case, which Langfuse calls a dataset item. Its shape is `{ input, expected, metadata }`. `input` carries the prompt, the simulated user's answers, and the call plan. `expected` carries the post-seam trajectory.
 
-With no `candidate`, every seam runs scripted and keyless, and the same rows score the real model when a key is present. [`examples/braintrust-evals/seams.ts`](https://github.com/statelyai/agent/tree/main/examples/braintrust-evals) is a working version of all of this, with datasets, scorers, and `Eval()` wiring.
+With no `candidate`, every seam runs scripted and keyless, and the same rows score the real model when a key is present. [`examples/braintrust-evals/seams.ts`](https://github.com/statelyai/agent/tree/main/examples/braintrust-evals) is a working version of all of this, with datasets, scorers, and `Eval()` wiring. For `runSeam` on its own, without a vendor, [`examples/seam-scoring`](../examples/seam-scoring/index.ts) scores one `draftEmail` call of the unmodified email drafter and prints a good and a bad candidate side by side.
 
 ## Datasets from event logs
 

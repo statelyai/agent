@@ -80,7 +80,7 @@ const kitchenSinkWorkflow = {
     summarize: {
       model: "openai/gpt-5.4-mini",
       prompt: "Summarize {{ input.topic }}",
-      reasoning: true,
+      includeReasoning: true,
       toolChoice: "auto",
       tools: {
         lookup: {

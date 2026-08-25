@@ -2086,7 +2086,7 @@ describe("onResult raw pass-through", () => {
         ask: {
           schemas: { input: z.object({}), output: z.object({ answer: z.string() }) },
           model: "m",
-          reasoning: true,
+          includeReasoning: true,
           prompt: () => "q",
         },
       },

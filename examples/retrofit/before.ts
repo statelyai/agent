@@ -132,7 +132,7 @@ export async function runSupportAgent(ticket: string, deps: Deps = {}): Promise<
         messages: messages.map((m) => ({ role: m.role, content: m.content })) as never,
         ...(useTools ? { tools } : {}),
       } as never),
-    ) as Promise<GenerateTextResult<typeof tools, never>>;
+    ) as Promise<GenerateTextResult<typeof tools, never, never>>;
 
   async function drive(): Promise<RunOutcome> {
     while (true) {

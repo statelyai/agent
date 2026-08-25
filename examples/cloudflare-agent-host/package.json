@@ -10,17 +10,17 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@ai-sdk/openai": "^3.0.25",
+    "@ai-sdk/openai": "^4.0.0",
     "@statelyai/agent": "workspace:*",
-    "agents": "^0.11.5",
-    "ai": "^6.0.67",
-    "xstate": "6.0.0-alpha.46",
-    "zod": "^4.3.6"
+    "agents": "^0.21.0",
+    "ai": "^7.0.0",
+    "xstate": "6.0.0-alpha.48",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.12.21",
-    "@cloudflare/workers-types": "^4.20260702.1",
-    "vitest": "^3.2.6",
-    "wrangler": "^4.116.0"
+    "@cloudflare/vitest-pool-workers": "^0.22.0",
+    "@cloudflare/workers-types": "^5.20260823.1",
+    "vitest": "^4.1.11",
+    "wrangler": "^4.125.0"
   }
 }

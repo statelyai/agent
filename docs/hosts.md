@@ -73,7 +73,7 @@ The package has these dependencies:
 - `@opentelemetry/api` is an optional peer dependency for the OpenTelemetry bridge.
 - No provider package is a dependency, because you supply the model resolver.
 
-The package exports `@statelyai/agent`, `@statelyai/agent/ai-sdk`, `@statelyai/agent/machines`, `@statelyai/agent/otel`, `@statelyai/agent/sqlite`, and the JSON Schema at `@statelyai/agent/agent-workflow.json`. Host helpers such as `getJsonSchema`, `buildEnvelopeSchema`, `parseStructuredEnvelope`, `parseOutput`, `getAgentOutputMode`, `renderDecisionAttempts`, `resolveDecision`, and `executeAgentRequest` are root exports.
+The package exports `@statelyai/agent`, `@statelyai/agent/ai-sdk`, `@statelyai/agent/machines`, `@statelyai/agent/otel`, `@statelyai/agent/sqlite`, `@statelyai/agent/validate`, and the JSON Schema at `@statelyai/agent/agent-workflow.json`. Host helpers such as `getJsonSchema`, `buildEnvelopeSchema`, `parseStructuredEnvelope`, `parseOutput`, `getAgentOutputMode`, `renderDecisionAttempts`, `resolveDecision`, and `executeAgentRequest` are root exports.
 
 ### Typed model aliases
 
@@ -216,7 +216,9 @@ import {
 } from "@statelyai/agent";
 
 if (getAgentOutputMode(request.outputSchema) === "structured") {
-  const envelope = buildEnvelopeSchema(request.outputSchema, { reasoning: request.reasoning });
+  const envelope = buildEnvelopeSchema(request.outputSchema, {
+    reasoning: request.includeReasoning,
+  });
   const jsonSchema = await getJsonSchema(envelope); // send this to the provider
   const parsed = parseStructuredEnvelope(request, JSON.parse(providerContent));
   return { output: parsed.result, reasoning: parsed.reasoning };

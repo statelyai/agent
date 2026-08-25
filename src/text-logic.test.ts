@@ -464,7 +464,7 @@ describe("parseStructuredEnvelope", () => {
   test("surfaces reasoning when the request opted in", () => {
     expect(
       parseStructuredEnvelope(
-        { ...request, reasoning: true },
+        { ...request, includeReasoning: true },
         { result: { answer: "ok" }, reasoning: "because" },
       ),
     ).toEqual({ result: { answer: "ok" }, reasoning: "because" });
