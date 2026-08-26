@@ -277,11 +277,6 @@
           "description": "Opt into the structured-output envelope's `reasoning` field.",
           "type": "boolean"
         },
-        "reasoning": {
-          "description": "The model's reasoning effort, passed through to the provider untouched.",
-          "type": "string",
-          "enum": ["none", "provider-default", "minimal", "low", "medium", "high", "xhigh"]
-        },
         "temperature": {
           "$ref": "#/$defs/ExpressionValue"
         },

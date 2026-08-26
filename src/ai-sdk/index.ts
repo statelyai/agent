@@ -19,7 +19,7 @@ import {
   type AgentTextRequest,
   type StructuredOutputEnvelope,
 } from "../text-logic.js";
-import type { AgentDecisionExecutor } from "../decision.js";
+import type { AgentDecisionExecutor, AgentDecisionRequest } from "../decision.js";
 import type { AgentTools, ChosenEvent } from "../types.js";
 import {
   extractFirstJsonValue,
@@ -71,12 +71,46 @@ export function defineModels<T extends Record<string, LanguageModel>>(
 }
 
 /**
+ * Per-call AI SDK settings a host can apply on top of what the machine asked
+ * for — reasoning effort, `providerOptions`, and anything else the SDK's call
+ * options accept. Typed straight off `generateText`, so it tracks the
+ * installed `ai` version instead of restating its vocabulary.
+ *
+ * The request's own fields (`model`, `prompt`/`messages`, `tools`, and the
+ * generation settings every provider shares) are excluded: those belong to the
+ * machine, and a host override would silently contradict it.
+ */
+export type AiSdkCallSettings = Omit<
+  Parameters<typeof aiGenerateText>[0],
+  | "model"
+  | "prompt"
+  | "messages"
+  | "system"
+  | "instructions"
+  | "tools"
+  | "toolChoice"
+  | "output"
+  | "abortSignal"
+  | "stopWhen"
+>;
+
+/**
  * Options for {@link createAiSdkExecutors}: either a static `models` map
  * (model refs resolved by lookup), a `resolveModel` function (refs resolved
  * dynamically, e.g. `"openai/gpt-5.4-mini"` → `openai('gpt-5.4-mini')`), or
  * both — `resolveModel` takes precedence when both are supplied.
+ *
+ * `settings` carries provider knobs that are the HOST's business rather than
+ * the machine's, such as reasoning effort. Pass an object to apply it to every
+ * call, or a function to vary it per request (`request.name` is the request's
+ * registered key). Core neither declares nor reads these: a machine stays
+ * portable, and a host that cannot honor a knob simply does not set it.
  */
-export type CreateAiSdkExecutorsOptions<TModels extends AiSdkModelMap = AiSdkModelMap> =
+export type CreateAiSdkExecutorsOptions<TModels extends AiSdkModelMap = AiSdkModelMap> = {
+  settings?:
+    | AiSdkCallSettings
+    | ((request: AgentTextRequest | AgentDecisionRequest) => AiSdkCallSettings | undefined);
+} & (
   | {
       models: TModels;
       resolveModel?: (modelRef: keyof TModels & string) => LanguageModel;
@@ -84,7 +118,17 @@ export type CreateAiSdkExecutorsOptions<TModels extends AiSdkModelMap = AiSdkMod
   | {
       models?: TModels;
       resolveModel: (modelRef: string) => LanguageModel;
-    };
+    }
+);
+
+/** Resolves the host's `settings` option for one request. */
+function callSettings<TModels extends AiSdkModelMap>(
+  options: CreateAiSdkExecutorsOptions<TModels>,
+  request: AgentTextRequest | AgentDecisionRequest,
+): AiSdkCallSettings {
+  const settings = options.settings;
+  return (typeof settings === "function" ? settings(request) : settings) ?? {};
+}
 
 // Resolves a text/decision request's `model` ref to an AI SDK LanguageModel via `resolveModel` (if given) or a `models` lookup.
 function resolveAiSdkModel<TModels extends AiSdkModelMap>(
@@ -205,6 +249,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
     const common = {
       model,
       abortSignal: info?.signal,
+      ...callSettings(options, request),
       ...toAiSdkCallSettings(request),
       ...maxStepsSetting(request),
     };
@@ -267,6 +312,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
     const result = aiStreamText({
       model,
       abortSignal: info?.signal,
+      ...callSettings(options, request),
       ...toAiSdkCallSettings(request),
       ...maxStepsSetting(request),
     });
@@ -290,8 +336,9 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
     const result = await aiGenerateText({
       model,
       abortSignal: request.signal,
+      ...callSettings(options, request),
       system: request.system,
-      ...(messages ? { messages } : { prompt: request.prompt ?? "" }),
+      ...(messages ? { messages, allowSystemInMessages: true } : { prompt: request.prompt ?? "" }),
       tools,
       toolChoice: "required",
       stopWhen: stepCountIs(1),

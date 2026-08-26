@@ -90,17 +90,10 @@ export interface AgentTextRequest<TMetadata = Record<string, unknown>> {
    * committing to the result. The reasoning is surfaced on the executor's raw
    * result (never in machine context/output). Ignored for text-mode requests.
    *
-   * Distinct from {@link AgentTextRequest.reasoning}, which is the provider's
-   * own reasoning-effort setting and means nothing to core.
+   * Not a provider setting: reasoning EFFORT belongs to the host, which owns
+   * how hard a model thinks. See `createAiSdkExecutors({ settings })`.
    */
   includeReasoning?: boolean;
-  /**
-   * The model's reasoning effort, passed through to the provider untouched.
-   * A generation setting like `temperature`, not an agent concept: core never
-   * reads it, and the value set is the Vercel AI SDK's, so an
-   * {@link AgentTextRequest} stays spread-compatible with its call options.
-   */
-  reasoning?: "none" | "provider-default" | "minimal" | "low" | "medium" | "high" | "xhigh";
   temperature?: number;
   /**
    * Maximum number of output tokens to generate. Named `maxOutputTokens` (not
@@ -355,7 +348,6 @@ function createBuiltinTextActor(
           tools: ({ input }) => input.tools,
           toolChoice: ({ input }) => input.toolChoice,
           includeReasoning: ({ input }) => input.includeReasoning,
-          reasoning: ({ input }) => input.reasoning,
           temperature: ({ input }) => input.temperature,
           maxOutputTokens: ({ input }) => input.maxOutputTokens,
           topP: ({ input }) => input.topP,
@@ -452,8 +444,6 @@ export interface TextLogicConfig<
   toolChoice?: ResolveTextLogicValue<AgentToolChoice | undefined, InferOutput<TInputSchema>>;
   /** Opt into the structured-output envelope's `reasoning` field (see {@link AgentTextRequest.includeReasoning}). */
   includeReasoning?: ResolveTextLogicValue<boolean | undefined, InferOutput<TInputSchema>>;
-  /** The provider's reasoning-effort setting, passed through (see {@link AgentTextRequest.reasoning}). */
-  reasoning?: ResolveTextLogicValue<AgentTextRequest["reasoning"], InferOutput<TInputSchema>>;
   temperature?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
   maxOutputTokens?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
   topP?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
@@ -566,7 +556,6 @@ export function createTextLogic<
       toolChoice: resolveTextLogicValue(config.toolChoice, args),
       outputSchema: schemas.output,
       includeReasoning: resolveTextLogicValue(config.includeReasoning, args),
-      reasoning: resolveTextLogicValue(config.reasoning, args),
       temperature: resolveTextLogicValue(config.temperature, args),
       maxOutputTokens: resolveTextLogicValue(config.maxOutputTokens, args),
       topP: resolveTextLogicValue(config.topP, args),

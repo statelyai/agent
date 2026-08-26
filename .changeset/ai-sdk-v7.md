@@ -4,19 +4,28 @@
 
 **AI SDK v7.** The `ai` peer dependency is now `^7`, paired with `@ai-sdk/openai@^4`.
 
-`reasoning` on a text request is now the provider's reasoning-effort setting, passed through to the model untouched, the same way `temperature` is. It is not an agent concept, and core never reads it. The structured-output envelope opt-in that used to own that name is now `includeReasoning`, on `createTextLogic`, on `AgentTextRequest`, and in `agent-workflow.json`.
+The structured-output envelope opt-in is now `includeReasoning`, on `createTextLogic`, on `AgentTextRequest`, and in `agent-workflow.json`. AI SDK v7 repurposed `reasoning` as a reasoning-effort setting, and a boolean under that name both collided with it and broke the invariant that an `AgentTextRequest` is spread-compatible with the SDK's call options — which is what lets the raw `ai` `generateText`/`streamText` functions work as executors with no adapter.
 
 ```ts
 export const triageTicket = createTextLogic({
   schemas: { input: z.object({ ticket: z.string() }), output: triageSchema },
   model: "careful",
-  reasoning: "high", // provider setting, forwarded as-is
   includeReasoning: true, // was `reasoning: true`
   prompt: ({ input }) => input.ticket,
 });
 ```
 
-Keeping the two apart restores the invariant that an `AgentTextRequest` is spread-compatible with the AI SDK's call options, so the raw `ai` `generateText`/`streamText` functions still work as executors with no adapter.
+Reasoning effort itself is not a core field. What it means differs per provider — an enum for one, a thinking-token budget for another, nothing for a third — so a machine that named a level would stop being portable. It belongs to the host, alongside the API key:
+
+```ts
+const executors = createAiSdkExecutors({
+  models,
+  settings: { reasoning: "high" },
+  // or per request: (request) => "name" in request && request.name === "review" ? … : undefined
+});
+```
+
+`createAiSdkExecutors` gains that `settings` option: anything the AI SDK's call options accept, typed against the installed `ai` version, applied to `generateText`, `streamText`, and `decide`. A request's own settings outrank it, and `model`, the prompt fields, `tools`, and `toolChoice` are not settable there.
 
 The rest of the migration is inside `createAiSdkExecutors`:
 

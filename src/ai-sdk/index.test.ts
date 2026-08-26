@@ -977,4 +977,96 @@ describe("structured-output resilience", () => {
     ).rejects.toThrow();
     expect(calls).toBe(2);
   });
+
+  test("host `settings` reach the model call, and the machine's own settings win", async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const usage = {
+      inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+      outputTokens: { total: 1, text: 1, reasoning: 0 },
+    };
+    const model = new MockLanguageModelV3({
+      doGenerate: async (options) => {
+        seen.push(options as unknown as Record<string, unknown>);
+        return {
+          content: [{ type: "text" as const, text: "ok" }],
+          finishReason: { unified: "stop" as const, raw: "stop" },
+          usage,
+          warnings: [],
+        };
+      },
+    });
+
+    const { generateText } = createAiSdkExecutors({
+      models: { m: model },
+      // Reasoning effort is the host's call, not the machine's. `temperature`
+      // is set here too, to prove the request still outranks the host.
+      settings: { reasoning: "high", temperature: 0.9 },
+    });
+
+    await generateText({ model: "m", prompt: "hi", temperature: 0.1, tools: {} });
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.reasoning).toBe("high");
+    expect(seen[0]!.temperature).toBe(0.1);
+  });
+
+  test("`settings` can vary per request", async () => {
+    const efforts: Array<unknown> = [];
+    const usage = {
+      inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+      outputTokens: { total: 1, text: 1, reasoning: 0 },
+    };
+    const model = new MockLanguageModelV3({
+      doGenerate: async (options) => {
+        efforts.push((options as unknown as { reasoning?: unknown }).reasoning);
+        return {
+          content: [{ type: "text" as const, text: "ok" }],
+          finishReason: { unified: "stop" as const, raw: "stop" },
+          usage,
+          warnings: [],
+        };
+      },
+    });
+
+    const { generateText } = createAiSdkExecutors({
+      models: { m: model },
+      settings: (request) =>
+        "name" in request && request.name === "review" ? { reasoning: "xhigh" } : undefined,
+    });
+
+    await generateText({ name: "review", model: "m", prompt: "hi", tools: {} });
+    await generateText({ name: "draft", model: "m", prompt: "hi", tools: {} });
+
+    expect(efforts).toEqual(["xhigh", undefined]);
+  });
+
+  test("a host setting survives a request that leaves the same key unset", async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const usage = {
+      inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+      outputTokens: { total: 1, text: 1, reasoning: 0 },
+    };
+    const model = new MockLanguageModelV3({
+      doGenerate: async (options) => {
+        seen.push(options as unknown as Record<string, unknown>);
+        return {
+          content: [{ type: "text" as const, text: "ok" }],
+          finishReason: { unified: "stop" as const, raw: "stop" },
+          usage,
+          warnings: [],
+        };
+      },
+    });
+
+    const { generateText } = createAiSdkExecutors({
+      models: { m: model },
+      settings: { temperature: 0.9 },
+    });
+
+    // The request declares no temperature, so the mapper must not emit an
+    // `undefined` that spreads over the host's value.
+    await generateText({ model: "m", prompt: "hi", tools: {} });
+
+    expect(seen[0]!.temperature).toBe(0.9);
+  });
 });

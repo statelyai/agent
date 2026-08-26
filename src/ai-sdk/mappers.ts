@@ -120,6 +120,13 @@ export function toAgentCallUsage(usage: LanguageModelUsage): AiSdkCallUsage {
   };
 }
 
+/** Drops keys whose value is `undefined`, so a spread cannot erase what it lands on. */
+function defined<T extends object>(settings: T): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(settings).filter(([, value]) => value !== undefined),
+  ) as Partial<T>;
+}
+
 /**
  * AI SDK request-mapping settings shared by `generateText`/`streamText`.
  * `AgentTextRequest.messages` (`AgentMessage[]`) and AI SDK's `ModelMessage[]`
@@ -135,15 +142,19 @@ export function toAiSdkCallSettings(request: AgentTextRequest & { tools?: AgentT
     // `systemMessage()` helper), which is exactly the trusted case the flag is
     // for, so the opt-in rides along whenever the request uses `messages`.
     ...(messages ? { messages, allowSystemInMessages: true } : { prompt: request.prompt ?? "" }),
-    reasoning: request.reasoning,
-    temperature: request.temperature,
-    maxOutputTokens: request.maxOutputTokens,
-    topP: request.topP,
-    topK: request.topK,
-    seed: request.seed,
-    stopSequences: request.stopSequences,
-    tools: request.tools ? toAiSdkTools(request.tools) : undefined,
-    toolChoice: toAiSdkToolChoice(request.toolChoice),
+    // Only settings the request actually declares. An `undefined` here would
+    // spread over — and erase — a host's own default for the same key (see
+    // `createAiSdkExecutors({ settings })`).
+    ...defined({
+      temperature: request.temperature,
+      maxOutputTokens: request.maxOutputTokens,
+      topP: request.topP,
+      topK: request.topK,
+      seed: request.seed,
+      stopSequences: request.stopSequences,
+      tools: request.tools ? toAiSdkTools(request.tools) : undefined,
+      toolChoice: toAiSdkToolChoice(request.toolChoice),
+    }),
   };
 }
 

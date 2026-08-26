@@ -111,6 +111,36 @@ Use `resolveModel` for a dynamic host, where the machine must not name concrete 
 
 Model refs are opaque strings, so any string is a legal `model:` value. The `models` map adds key autocomplete and a resolution point.
 
+### Per-call provider settings
+
+<!-- settings option from src/ai-sdk/index.ts (CreateAiSdkExecutorsOptions) -->
+
+Some model knobs are the host's business rather than the machine's. Reasoning effort is the clearest case: one provider takes an enum, another a thinking-token budget, a third has nothing. A machine that named one would stop running everywhere.
+
+Set them on the executors instead. `settings` accepts anything the AI SDK's call options accept, and it is typed against the installed `ai` version.
+
+```ts
+const executors = createAiSdkExecutors({
+  models,
+  settings: { reasoning: "high" },
+});
+```
+
+Pass a function to vary it per request. The argument is the request the machine produced: a text request carries `name`, its registered key, while a decision request carries `id` and no name.
+
+```ts
+const executors = createAiSdkExecutors({
+  models,
+  settings: (request) =>
+    "name" in request && request.name === "finalReview" ? { reasoning: "xhigh" } : undefined,
+});
+```
+
+- Settings apply to `generateText`, `streamText`, and `decide`.
+- The machine outranks the host: a request that sets `temperature` keeps its own value.
+- `model`, the prompt fields, `tools`, and `toolChoice` are not settable here. Those are the machine's, and a host override would contradict it.
+- Core neither declares nor reads any of this, so a machine stays portable and a host that cannot honor a knob simply does not set it.
+
 ### Multi-step tool loops
 
 A text request runs a single model call by default. Set the typed `maxSteps` field on the request to allow a bounded tool-call loop. The adapter forwards it as `stopWhen: stepCountIs(maxSteps)`. This is adapter behavior, not core behavior.
