@@ -16,6 +16,7 @@
     "agent-plan-builtin",
     "agent-usage-event",
     "aggregated-usage-on-run-results",
+    "ai-sdk-v7",
     "allowed-events-wildcards",
     "alpha-api-consistency-pass",
     "api-polish-states-helpers-prune",
@@ -78,6 +79,7 @@
     "typed-tools-union-output-core-helpers",
     "validate-machine-input",
     "versioned-trace-schema",
-    "workflow-json-schema-drift"
+    "workflow-json-schema-drift",
+    "xstate-alpha-48"
   ]
 }
