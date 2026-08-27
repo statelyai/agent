@@ -1,5 +1,53 @@
 # @statelyai/agent
 
+## 2.0.0-alpha.21
+
+### Minor Changes
+
+- [#109](https://github.com/statelyai/agent/pull/109) [`19298f4`](https://github.com/statelyai/agent/commit/19298f45fa665d0eab092fe46c36147b88992b52) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **AI SDK v7.** The `ai` peer dependency is now `^7`, paired with `@ai-sdk/openai@^4`.
+
+  The structured-output envelope opt-in is now `includeReasoning`, on `createTextLogic`, on `AgentTextRequest`, and in `agent-workflow.json`. AI SDK v7 repurposed `reasoning` as a reasoning-effort setting, and a boolean under that name both collided with it and broke the invariant that an `AgentTextRequest` is spread-compatible with the SDK's call options — which is what lets the raw `ai` `generateText`/`streamText` functions work as executors with no adapter.
+
+  ```ts
+  export const triageTicket = createTextLogic({
+    schemas: { input: z.object({ ticket: z.string() }), output: triageSchema },
+    model: "careful",
+    includeReasoning: true, // was `reasoning: true`
+    prompt: ({ input }) => input.ticket,
+  });
+  ```
+
+  Reasoning effort itself is not a core field. What it means differs per provider — an enum for one, a thinking-token budget for another, nothing for a third — so a machine that named a level would stop being portable. It belongs to the host, alongside the API key, and a `models` entry can now carry it:
+
+  ```ts
+  const models = defineModels({
+    quick: openai("gpt-5.4-mini"),
+    deep: { model: openai("gpt-5.4"), settings: { reasoning: "xhigh" } },
+  });
+
+  // the machine picks a persona by name, as it already did
+  requests: { finalReview: { model: "deep", schemas, prompt: … } }
+  ```
+
+  The ref is the unit a machine already names and already has typed, so this gives per-request effort without putting a provider's vocabulary in the machine. Swap in a host whose map defines `deep` differently and every request follows, unedited.
+
+  `createAiSdkExecutors` also gains a top-level `settings` for a default across every call, or a function of the request for knobs that do not generalize into a persona. Settings accept anything the AI SDK's call options accept, typed against the installed `ai` version, and apply to `generateText`, `streamText`, and `decide`. They resolve least-specific first: the host's `settings`, then the ref's own, then what the request declared. `model`, the prompt fields, `tools`, and `toolChoice` are not settable in either place.
+
+  The rest of the migration is inside `createAiSdkExecutors`:
+
+  - v7 rejects `role: 'system'` inside `messages` unless the caller opts in. The adapter opts in, because an agent's messages are machine-authored server-side content, so `systemMessage()` keeps working.
+  - v7 moved `reasoningTokens` under `usage.outputTokenDetails` and the cached-input count under `usage.inputTokenDetails.cacheReadTokens`. The adapter folds both onto the flat fields `AgentUsage` aggregates, and passes the SDK's own shape (including `raw`) through untouched.
+  - `AgentToolDescriptor.description` now also accepts a function, matching a v7 tool whose description is computed per call.
+
+### Patch Changes
+
+- [#109](https://github.com/statelyai/agent/pull/109) [`19298f4`](https://github.com/statelyai/agent/commit/19298f45fa665d0eab092fe46c36147b88992b52) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **Works with XState 6.0.0-alpha.47 and later.** Two type regressions surfaced by alpha.47, both in this package's own plumbing rather than in a machine you write.
+
+  - `setupAgent({ guards, delays })` typed both slots through XState's fully generic `AnySetupConfig`, so a source saw `MachineContext` instead of the agent's own context. alpha.47 tightened those source types, which rejected the parameter annotations that were previously the only way to type them. Both slots are now typed from the agent's own context and event schemas, so an inline source is contextually typed and no annotation is needed.
+  - alpha.47 resolves a machine's input type to `<input> | undefined`. `AgentInputFrom` matched that union against the input-schema brand, `undefined` never matched an object type, and the brand was dropped — so a field declared with a schema default read as required at the `runAgent({ input })` call site. The brand is now unwrapped through the optional union.
+
+  The `xstate` peer range is unchanged (`>=6.0.0-alpha.46 <6.0.0`); both fixes hold on alpha.46 as well.
+
 ## 2.0.0-alpha.20
 
 ### Minor Changes
