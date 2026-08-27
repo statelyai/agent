@@ -30,14 +30,18 @@ import {
   type StandardSchemaV1,
   type TextLogic,
 } from "@statelyai/agent";
-import { createAiSdkExecutors, type AiSdkExecutors } from "@statelyai/agent/ai-sdk";
+import {
+  createAiSdkExecutors,
+  type AiSdkExecutors,
+  type AiSdkModelMap,
+} from "@statelyai/agent/ai-sdk";
 import { jokeMachine, models as jokeModels, tellJoke } from "../joke/index.js";
 import { models as triageModels, triageMachine } from "../triage/index.js";
 
 // ─── Host Adapter: AI SDK execution ───
 
 interface AiSdkTextHostOptions {
-  models?: Record<string, LanguageModel>;
+  models?: AiSdkModelMap;
   resolveModel?: (modelRef: string) => LanguageModel;
   onChunk?: (chunk: string) => void;
 }

@@ -22,6 +22,7 @@ import {
 import type { AgentDecisionExecutor, AgentDecisionRequest } from "../decision.js";
 import type { AgentTools, ChosenEvent } from "../types.js";
 import {
+  defined,
   extractFirstJsonValue,
   isStructuredOutputRequest,
   toAgentCallUsage,
@@ -43,8 +44,18 @@ function maxStepsSetting(request: AgentTextRequest): { stopWhen?: ReturnType<typ
 
 // ─── createAiSdkExecutors ───
 
-/** AI SDK model registry: maps model refs (as used in `setupAgent({ models })`/`AgentTextRequest.model`) to AI SDK `LanguageModel` values. The optional `TKey` parameter pins the ref keys (see {@link defineModels}); it defaults to `string`, so bare `AiSdkModelMap` stays `Record<string, LanguageModel>`. */
-export type AiSdkModelMap<TKey extends string = string> = Record<TKey, LanguageModel>;
+/**
+ * One entry in an {@link AiSdkModelMap}: a bare `LanguageModel`, or a model
+ * paired with the {@link AiSdkCallSettings} that ref always runs with. The
+ * paired form is how a host gives a ref a persona — `deep` thinks harder than
+ * `quick` — without the machine naming a provider knob.
+ */
+export type AiSdkModelEntry =
+  | LanguageModel
+  | { model: LanguageModel; settings?: AiSdkCallSettings };
+
+/** AI SDK model registry: maps model refs (as used in `setupAgent({ models })`/`AgentTextRequest.model`) to AI SDK `LanguageModel` values, or to `{ model, settings }` pairs. The optional `TKey` parameter pins the ref keys (see {@link defineModels}); it defaults to `string`, so bare `AiSdkModelMap` stays `Record<string, AiSdkModelEntry>`. */
+export type AiSdkModelMap<TKey extends string = string> = Record<TKey, AiSdkModelEntry>;
 
 /**
  * Identity helper for a `models` map whose value is exported. Returns the map
@@ -64,7 +75,7 @@ export type AiSdkModelMap<TKey extends string = string> = Record<TKey, LanguageM
  * // typeof models === AiSdkModelMap<'quick' | 'deep'>
  * ```
  */
-export function defineModels<T extends Record<string, LanguageModel>>(
+export function defineModels<T extends Record<string, AiSdkModelEntry>>(
   models: T,
 ): AiSdkModelMap<keyof T & string> {
   return models;
@@ -134,9 +145,9 @@ function callSettings<TModels extends AiSdkModelMap>(
 function resolveAiSdkModel<TModels extends AiSdkModelMap>(
   options: CreateAiSdkExecutorsOptions<TModels>,
   modelRef: string,
-): LanguageModel {
+): { model: LanguageModel; settings?: AiSdkCallSettings } {
   if (options.resolveModel) {
-    return options.resolveModel(modelRef as keyof TModels & string);
+    return { model: options.resolveModel(modelRef as keyof TModels & string) };
   }
 
   const models = options.models;
@@ -144,11 +155,30 @@ function resolveAiSdkModel<TModels extends AiSdkModelMap>(
     throw new Error(`createAiSdkExecutors: no model resolver configured for '${modelRef}'.`);
   }
 
-  const model = models[modelRef as keyof TModels & string];
-  if (!model) {
+  const entry = models[modelRef as keyof TModels & string];
+  if (!entry) {
     throw new Error(`createAiSdkExecutors: unknown model '${modelRef}'.`);
   }
-  return model;
+  return isModelWithSettings(entry) ? entry : { model: entry };
+}
+
+/**
+ * The `LanguageModel` inside a map entry, whichever form it takes. `defineModels`
+ * widens its return to {@link AiSdkModelMap}, so reading an entry out of the map
+ * to hand to a raw AI SDK call needs this to get past the union.
+ */
+export function toLanguageModel(entry: AiSdkModelEntry): LanguageModel {
+  return isModelWithSettings(entry) ? entry.model : entry;
+}
+
+// A `{ model, settings }` pair, as opposed to a bare `LanguageModel`. In v7 a
+// `LanguageModel` is a provider model-id string or a `LanguageModelV2`/`V3`/`V4`
+// object, and none of those carries a `model` property of its own, so the key's
+// presence is a safe discriminant.
+function isModelWithSettings(
+  entry: AiSdkModelEntry,
+): entry is { model: LanguageModel; settings?: AiSdkCallSettings } {
+  return typeof entry === "object" && entry !== null && "model" in entry;
 }
 
 // Wraps an AI SDK Output spec so a parse failure retries once against the
@@ -245,11 +275,12 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
     request: AgentTextRequest & { tools: AgentTools },
     info?: AgentRequestExecutorInfo,
   ) => {
-    const model = resolveAiSdkModel(options, request.model);
+    const { model, settings: modelSettings } = resolveAiSdkModel(options, request.model);
     const common = {
       model,
       abortSignal: info?.signal,
       ...callSettings(options, request),
+      ...defined(modelSettings ?? {}),
       ...toAiSdkCallSettings(request),
       ...maxStepsSetting(request),
     };
@@ -308,11 +339,12 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
     request: AgentTextRequest & { tools: AgentTools },
     info?: AgentRequestExecutorInfo,
   ) => {
-    const model = resolveAiSdkModel(options, request.model);
+    const { model, settings: modelSettings } = resolveAiSdkModel(options, request.model);
     const result = aiStreamText({
       model,
       abortSignal: info?.signal,
       ...callSettings(options, request),
+      ...defined(modelSettings ?? {}),
       ...toAiSdkCallSettings(request),
       ...maxStepsSetting(request),
     });
@@ -329,7 +361,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
   };
 
   const decide: AgentDecisionExecutor = async (request) => {
-    const model = resolveAiSdkModel(options, request.model);
+    const { model, settings: modelSettings } = resolveAiSdkModel(options, request.model);
     const tools = toAiSdkEventTools(request.events);
     const messages = toDecisionMessages(request);
 
@@ -337,6 +369,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
       model,
       abortSignal: request.signal,
       ...callSettings(options, request),
+      ...defined(modelSettings ?? {}),
       system: request.system,
       ...(messages ? { messages, allowSystemInMessages: true } : { prompt: request.prompt ?? "" }),
       tools,

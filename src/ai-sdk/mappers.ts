@@ -121,7 +121,7 @@ export function toAgentCallUsage(usage: LanguageModelUsage): AiSdkCallUsage {
 }
 
 /** Drops keys whose value is `undefined`, so a spread cannot erase what it lands on. */
-function defined<T extends object>(settings: T): Partial<T> {
+export function defined<T extends object>(settings: T): Partial<T> {
   return Object.fromEntries(
     Object.entries(settings).filter(([, value]) => value !== undefined),
   ) as Partial<T>;

@@ -1069,4 +1069,70 @@ describe("structured-output resilience", () => {
 
     expect(seen[0]!.temperature).toBe(0.9);
   });
+
+  test("a model ref can carry its own settings, and the request still outranks them", async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const usage = {
+      inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+      outputTokens: { total: 1, text: 1, reasoning: 0 },
+    };
+    const makeModel = () =>
+      new MockLanguageModelV3({
+        doGenerate: async (options) => {
+          seen.push(options as unknown as Record<string, unknown>);
+          return {
+            content: [{ type: "text" as const, text: "ok" }],
+            finishReason: { unified: "stop" as const, raw: "stop" },
+            usage,
+            warnings: [],
+          };
+        },
+      });
+
+    const { generateText } = createAiSdkExecutors({
+      models: defineModels({
+        quick: makeModel(),
+        // `deep` is a persona: this ref always thinks harder.
+        deep: { model: makeModel(), settings: { reasoning: "xhigh", temperature: 0.5 } },
+      }),
+    });
+
+    await generateText({ model: "quick", prompt: "hi", tools: {} });
+    await generateText({ model: "deep", prompt: "hi", tools: {} });
+    await generateText({ model: "deep", prompt: "hi", temperature: 0.1, tools: {} });
+
+    expect(seen[0]!.reasoning).toBeUndefined();
+    expect(seen[1]!.reasoning).toBe("xhigh");
+    expect(seen[1]!.temperature).toBe(0.5);
+    // The machine's own value wins over the ref's persona.
+    expect(seen[2]!.temperature).toBe(0.1);
+  });
+
+  test("a model ref's settings outrank the host-wide `settings`", async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const usage = {
+      inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+      outputTokens: { total: 1, text: 1, reasoning: 0 },
+    };
+    const model = new MockLanguageModelV3({
+      doGenerate: async (options) => {
+        seen.push(options as unknown as Record<string, unknown>);
+        return {
+          content: [{ type: "text" as const, text: "ok" }],
+          finishReason: { unified: "stop" as const, raw: "stop" },
+          usage,
+          warnings: [],
+        };
+      },
+    });
+
+    const { generateText } = createAiSdkExecutors({
+      models: defineModels({ deep: { model, settings: { reasoning: "xhigh" } } }),
+      settings: { reasoning: "low" },
+    });
+
+    await generateText({ model: "deep", prompt: "hi", tools: {} });
+
+    expect(seen[0]!.reasoning).toBe("xhigh");
+  });
 });

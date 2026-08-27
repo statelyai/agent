@@ -18,7 +18,7 @@ import {
 } from "ai";
 import { z } from "zod";
 import { setupAgent, type AgentTool, type AgentToolExecute, runAgent } from "@statelyai/agent";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors, defineModels, toLanguageModel } from "@statelyai/agent/ai-sdk";
 
 const answerSchema = z.object({ answer: z.string() });
 const taskInputSchema = z.object({ task: z.string() });
@@ -137,7 +137,7 @@ function createAiSdkSubAgentWorkflow(subAgents: SubAgents) {
 }
 
 export async function runAiSdkSubAgentsDemo(task: string) {
-  const model = models.supervisor;
+  const model = toLanguageModel(models.supervisor);
   const { machine } = createAiSdkSubAgentWorkflow(createAiSdkSubAgents(model));
 
   const result = await runAgent(machine, {

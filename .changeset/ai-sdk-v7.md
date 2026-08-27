@@ -15,17 +15,21 @@ export const triageTicket = createTextLogic({
 });
 ```
 
-Reasoning effort itself is not a core field. What it means differs per provider — an enum for one, a thinking-token budget for another, nothing for a third — so a machine that named a level would stop being portable. It belongs to the host, alongside the API key:
+Reasoning effort itself is not a core field. What it means differs per provider — an enum for one, a thinking-token budget for another, nothing for a third — so a machine that named a level would stop being portable. It belongs to the host, alongside the API key, and a `models` entry can now carry it:
 
 ```ts
-const executors = createAiSdkExecutors({
-  models,
-  settings: { reasoning: "high" },
-  // or per request: (request) => "name" in request && request.name === "review" ? … : undefined
+const models = defineModels({
+  quick: openai("gpt-5.4-mini"),
+  deep: { model: openai("gpt-5.4"), settings: { reasoning: "xhigh" } },
 });
+
+// the machine picks a persona by name, as it already did
+requests: { finalReview: { model: "deep", schemas, prompt: … } }
 ```
 
-`createAiSdkExecutors` gains that `settings` option: anything the AI SDK's call options accept, typed against the installed `ai` version, applied to `generateText`, `streamText`, and `decide`. A request's own settings outrank it, and `model`, the prompt fields, `tools`, and `toolChoice` are not settable there.
+The ref is the unit a machine already names and already has typed, so this gives per-request effort without putting a provider's vocabulary in the machine. Swap in a host whose map defines `deep` differently and every request follows, unedited.
+
+`createAiSdkExecutors` also gains a top-level `settings` for a default across every call, or a function of the request for knobs that do not generalize into a persona. Settings accept anything the AI SDK's call options accept, typed against the installed `ai` version, and apply to `generateText`, `streamText`, and `decide`. They resolve least-specific first: the host's `settings`, then the ref's own, then what the request declared. `model`, the prompt fields, `tools`, and `toolChoice` are not settable in either place.
 
 The rest of the migration is inside `createAiSdkExecutors`:
 

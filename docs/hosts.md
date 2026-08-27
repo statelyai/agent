@@ -113,33 +113,46 @@ Model refs are opaque strings, so any string is a legal `model:` value. The `mod
 
 ### Per-call provider settings
 
-<!-- settings option from src/ai-sdk/index.ts (CreateAiSdkExecutorsOptions) -->
+<!-- model entry settings and the settings option from src/ai-sdk/index.ts -->
 
 Some model knobs are the host's business rather than the machine's. Reasoning effort is the clearest case: one provider takes an enum, another a thinking-token budget, a third has nothing. A machine that named one would stop running everywhere.
 
-Set them on the executors instead. `settings` accepts anything the AI SDK's call options accept, and it is typed against the installed `ai` version.
+Give the model ref a persona instead. A `models` entry can be a `{ model, settings }` pair, and `settings` accepts anything the AI SDK's call options accept, typed against the installed `ai` version.
+
+```ts
+const models = defineModels({
+  quick: openai("gpt-5.4-mini"),
+  deep: { model: openai("gpt-5.4"), settings: { reasoning: "xhigh" } },
+});
+```
+
+The machine then picks a persona by name, which it already does, and which is already typed:
+
+```ts no-check
+requests: {
+  draft: { model: "quick", schemas, prompt: ({ input }) => input.brief },
+  finalReview: { model: "deep", schemas, prompt: ({ input }) => input.draft },
+}
+```
+
+Swap in a host whose `models` map defines `deep` differently and every request follows, with no edit to the machine. A host that cannot honor a knob leaves it out of its own map.
+
+For a default across every call, or for a knob that does not generalize into a persona, `createAiSdkExecutors` also takes a top-level `settings`. Pass a function to vary it per request: a text request carries `name`, its registered key, while a decision request carries `id` and no name.
 
 ```ts
 const executors = createAiSdkExecutors({
   models,
-  settings: { reasoning: "high" },
+  settings: { providerOptions: { openai: { store: false } } },
 });
 ```
 
-Pass a function to vary it per request. The argument is the request the machine produced: a text request carries `name`, its registered key, while a decision request carries `id` and no name.
+Settings resolve least-specific first, so each layer overrides the one before it:
 
-```ts
-const executors = createAiSdkExecutors({
-  models,
-  settings: (request) =>
-    "name" in request && request.name === "finalReview" ? { reasoning: "xhigh" } : undefined,
-});
-```
+1. the host's top-level `settings`
+2. the model ref's own `settings`
+3. what the request itself declared, such as `temperature`
 
-- Settings apply to `generateText`, `streamText`, and `decide`.
-- The machine outranks the host: a request that sets `temperature` keeps its own value.
-- `model`, the prompt fields, `tools`, and `toolChoice` are not settable here. Those are the machine's, and a host override would contradict it.
-- Core neither declares nor reads any of this, so a machine stays portable and a host that cannot honor a knob simply does not set it.
+Settings apply to `generateText`, `streamText`, and `decide`. `model`, the prompt fields, `tools`, and `toolChoice` are not settable in either place — those are the machine's, and a host override would contradict it. Core neither declares nor reads any of this, so a machine stays portable.
 
 ### Multi-step tool loops
 
