@@ -142,20 +142,38 @@ export function toAiSdkCallSettings(request: AgentTextRequest & { tools?: AgentT
     // `systemMessage()` helper), which is exactly the trusted case the flag is
     // for, so the opt-in rides along whenever the request uses `messages`.
     ...(messages ? { messages, allowSystemInMessages: true } : { prompt: request.prompt ?? "" }),
-    // Only settings the request actually declares. An `undefined` here would
-    // spread over — and erase — a host's own default for the same key (see
-    // `createAiSdkExecutors({ settings })`).
+    ...toAiSdkGenerationSettings(request),
     ...defined({
-      temperature: request.temperature,
-      maxOutputTokens: request.maxOutputTokens,
-      topP: request.topP,
-      topK: request.topK,
-      seed: request.seed,
-      stopSequences: request.stopSequences,
       tools: request.tools ? toAiSdkTools(request.tools) : undefined,
       toolChoice: toAiSdkToolChoice(request.toolChoice),
     }),
   };
+}
+
+/**
+ * The generation settings a text request and a decision request share, with
+ * unset keys omitted.
+ *
+ * Omitting matters: these settings are one layer of a stack — the host's
+ * `createAiSdkExecutors({ settings })`, then the model ref's own, then the
+ * request's — and an `undefined` spread over a layer below erases it. Both the
+ * text path and `decide` map their settings through here so neither can drift
+ * back into writing the keys unconditionally.
+ */
+export function toAiSdkGenerationSettings(
+  request: Pick<
+    AgentTextRequest,
+    "temperature" | "maxOutputTokens" | "topP" | "topK" | "seed" | "stopSequences"
+  >,
+) {
+  return defined({
+    temperature: request.temperature,
+    maxOutputTokens: request.maxOutputTokens,
+    topP: request.topP,
+    topK: request.topK,
+    seed: request.seed,
+    stopSequences: request.stopSequences,
+  });
 }
 
 /** Maps an {@link AgentToolChoice} to AI SDK's tool-choice shape — `{ type: 'tool'; name }` becomes `{ type: 'tool'; toolName }`; `'auto'`/`'none'`/`'required'`/`undefined` pass through unchanged. */

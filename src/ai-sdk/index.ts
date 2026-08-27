@@ -27,6 +27,7 @@ import {
   isStructuredOutputRequest,
   toAgentCallUsage,
   toAiSdkCallSettings,
+  toAiSdkGenerationSettings,
   toAiSdkEventTools,
   toDecisionMessages,
   type AiSdkCallUsage,
@@ -375,17 +376,9 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
       tools,
       toolChoice: "required",
       stopWhen: stepCountIs(1),
-      // Only what the decision itself declared: an `undefined` here would
-      // spread over the host and model settings layered above, exactly as it
-      // would in `toAiSdkCallSettings`.
-      ...defined({
-        temperature: request.temperature,
-        maxOutputTokens: request.maxOutputTokens,
-        topP: request.topP,
-        topK: request.topK,
-        seed: request.seed,
-        stopSequences: request.stopSequences,
-      }),
+      // Shared with the text path, so a decision cannot drift back into
+      // writing these unconditionally and erasing the layers above.
+      ...toAiSdkGenerationSettings(request),
     });
 
     const toolCall = result.toolCalls[0];
