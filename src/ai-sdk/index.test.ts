@@ -1135,4 +1135,50 @@ describe("structured-output resilience", () => {
 
     expect(seen[0]!.reasoning).toBe("xhigh");
   });
+
+  test("decide inherits host and model settings, and the decision still overrides them", async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const model = new MockLanguageModelV3({
+      doGenerate: async (options) => {
+        seen.push(options as unknown as Record<string, unknown>);
+        return {
+          content: [
+            { type: "tool-call" as const, toolCallId: "c1", toolName: "choose_GO", input: "{}" },
+          ],
+          finishReason: { unified: "tool-calls" as const, raw: "tool_calls" },
+          usage: {
+            inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+            outputTokens: { total: 1, text: 1, reasoning: 0 },
+          },
+          warnings: [],
+        };
+      },
+    });
+
+    const { decide } = createAiSdkExecutors({
+      models: defineModels({ m: { model, settings: { reasoning: "xhigh", topP: 0.3 } } }),
+      settings: { temperature: 0.9, maxOutputTokens: 256 },
+    });
+
+    const base = {
+      kind: "decision" as const,
+      id: "d1",
+      model: "m",
+      prompt: "choose",
+      events: [{ type: "GO", toolName: "choose_GO" }],
+      attempts: [],
+    };
+
+    await decide(base);
+    await decide({ ...base, temperature: 0.1 });
+
+    // A decision that declares nothing still gets the host and model defaults.
+    expect(seen[0]!.temperature).toBe(0.9);
+    expect(seen[0]!.maxOutputTokens).toBe(256);
+    expect(seen[0]!.topP).toBe(0.3);
+    expect(seen[0]!.reasoning).toBe("xhigh");
+    // What the decision does declare still wins.
+    expect(seen[1]!.temperature).toBe(0.1);
+    expect(seen[1]!.topP).toBe(0.3);
+  });
 });
