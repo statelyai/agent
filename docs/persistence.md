@@ -66,6 +66,8 @@ Each recipe is written up in full on its owning page.
 - Fork and branch: `store.fork({ threadId, newThreadId, upToIndex })` copies the prefix `[0, upToIndex)` onto a new thread. `diffEventLogs` reports what diverged. See [fork and diff](event-log.md#fork-and-diff).
 - Verify a log: `replay(machine, entries, { verify: 'strict' })` requires verification hashes on every entry and fails at the first mismatch. See [strict replay verification](event-log.md#strict-replay-verification).
 
+Runnable versions: [crash-recovery](../examples/crash-recovery/index.ts) and [time-travel](../examples/time-travel/index.ts) for the log recipes, [file-snapshot-store](../examples/file-snapshot-store/index.ts) for a store written against `AgentSnapshotStore`, [session-actor](../examples/session-actor/index.ts) for one live actor across turns on a single log, and [snapshot-migration](../examples/snapshot-migration/index.ts) for resuming a paused run after the machine was redeployed.
+
 ## Related
 
 - [The event log](event-log.md): the log envelope, the JSON wire contract, and the SQLite stores.

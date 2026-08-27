@@ -1869,7 +1869,12 @@ export function bindChildMachineForProvide(
  * drops the brand — fall back to xstate's `InputFrom`.
  */
 export type AgentInputFrom<TMachine extends AnyStateMachine> =
-  InputFrom<TMachine> extends WithAgentInputSchema<infer TInputSchema>
+  // `NonNullable` first: a machine whose input is optional resolves to
+  // `<branded> | undefined`, and `undefined` never matches an object type, so
+  // matching the union directly drops the brand and reports the validated
+  // (defaults-required) side at the call site. The brackets keep the match
+  // non-distributive.
+  [NonNullable<InputFrom<TMachine>>] extends [WithAgentInputSchema<infer TInputSchema>]
     ? [TInputSchema] extends [StandardSchemaV1]
       ? InferInput<TInputSchema>
       : InputFrom<TMachine>

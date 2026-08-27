@@ -73,7 +73,7 @@ The package has these dependencies:
 - `@opentelemetry/api` is an optional peer dependency for the OpenTelemetry bridge.
 - No provider package is a dependency, because you supply the model resolver.
 
-The package exports `@statelyai/agent`, `@statelyai/agent/ai-sdk`, `@statelyai/agent/machines`, `@statelyai/agent/otel`, `@statelyai/agent/sqlite`, and the JSON Schema at `@statelyai/agent/agent-workflow.json`. Host helpers such as `getJsonSchema`, `buildEnvelopeSchema`, `parseStructuredEnvelope`, `parseOutput`, `getAgentOutputMode`, `renderDecisionAttempts`, `resolveDecision`, and `executeAgentRequest` are root exports.
+The package exports `@statelyai/agent`, `@statelyai/agent/ai-sdk`, `@statelyai/agent/machines`, `@statelyai/agent/otel`, `@statelyai/agent/sqlite`, `@statelyai/agent/validate`, and the JSON Schema at `@statelyai/agent/agent-workflow.json`. Host helpers such as `getJsonSchema`, `buildEnvelopeSchema`, `parseStructuredEnvelope`, `parseOutput`, `getAgentOutputMode`, `renderDecisionAttempts`, `resolveDecision`, and `executeAgentRequest` are root exports.
 
 ### Typed model aliases
 
@@ -110,6 +110,49 @@ Use `resolveModel` for a dynamic host, where the machine must not name concrete 
 - `parseModelRef(ref)` splits a `"provider/model-id"` ref into its parts, so a resolver can be a single expression: `(ref) => openai(parseModelRef(ref).modelId)`.
 
 Model refs are opaque strings, so any string is a legal `model:` value. The `models` map adds key autocomplete and a resolution point.
+
+### Per-call provider settings
+
+<!-- model entry settings and the settings option from src/ai-sdk/index.ts -->
+
+Some model knobs are the host's business rather than the machine's. Reasoning effort is the clearest case: one provider takes an enum, another a thinking-token budget, a third has nothing. A machine that named one would stop running everywhere.
+
+Give the model ref a persona instead. A `models` entry can be a `{ model, settings }` pair, and `settings` accepts anything the AI SDK's call options accept, typed against the installed `ai` version.
+
+```ts
+const models = defineModels({
+  quick: openai("gpt-5.4-mini"),
+  deep: { model: openai("gpt-5.4"), settings: { reasoning: "xhigh" } },
+});
+```
+
+The machine then picks a persona by name, which it already does, and which is already typed:
+
+```ts no-check
+requests: {
+  draft: { model: "quick", schemas, prompt: ({ input }) => input.brief },
+  finalReview: { model: "deep", schemas, prompt: ({ input }) => input.draft },
+}
+```
+
+Swap in a host whose `models` map defines `deep` differently and every request follows, with no edit to the machine. A host that cannot honor a knob leaves it out of its own map.
+
+For a default across every call, or for a knob that does not generalize into a persona, `createAiSdkExecutors` also takes a top-level `settings`. Pass a function to vary it per request: a text request carries `name`, its registered key, while a decision request carries `id` and no name.
+
+```ts
+const executors = createAiSdkExecutors({
+  models,
+  settings: { providerOptions: { openai: { store: false } } },
+});
+```
+
+Settings resolve least-specific first, so each layer overrides the one before it:
+
+1. the host's top-level `settings`
+2. the model ref's own `settings`
+3. what the request itself declared, such as `temperature`
+
+Settings apply to `generateText`, `streamText`, and `decide`. `model`, the prompt fields, `tools`, and `toolChoice` are not settable in either place — those are the machine's, and a host override would contradict it. Core neither declares nor reads any of this, so a machine stays portable.
 
 ### Multi-step tool loops
 
@@ -216,7 +259,9 @@ import {
 } from "@statelyai/agent";
 
 if (getAgentOutputMode(request.outputSchema) === "structured") {
-  const envelope = buildEnvelopeSchema(request.outputSchema, { reasoning: request.reasoning });
+  const envelope = buildEnvelopeSchema(request.outputSchema, {
+    reasoning: request.includeReasoning,
+  });
   const jsonSchema = await getJsonSchema(envelope); // send this to the provider
   const parsed = parseStructuredEnvelope(request, JSON.parse(providerContent));
   return { output: parsed.result, reasoning: parsed.reasoning };

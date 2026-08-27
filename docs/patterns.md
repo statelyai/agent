@@ -25,6 +25,10 @@ In a game, the machine owns turn order and move legality. The model picks among 
 
 - [game-agent](../examples/game-agent/index.ts): `allowedEvents` narrowed as a function of input, gating moves by HP.
 - [go-fish](../examples/go-fish/index.ts): hidden-information play with a check-win, agent, human loop. The model chooses requests and the machine enforces the rules.
+- [just-one](../examples/just-one/index.ts): three clue-givers writing at once as isolated parallel regions, with every duplicate clue struck before the human guesser sees it.
+- [chameleon](../examples/chameleon/index.ts): hidden-role play where the chameleon's request input has no `secretWord` field, so the secret cannot reach it.
+- [river-crossing](../examples/river-crossing/index.ts): guards as the rules of the puzzle, rejecting illegal wolf, goat, and cabbage crossings.
+- [game-loop-agent](../examples/game-loop-agent/index.ts): one long-lived player agent invoked at the game's `playing` state, so a single agent spans substates and rounds.
 
 ## Reasoning and tool loops
 
@@ -49,6 +53,7 @@ Start with [`react-agent`](../examples/react-agent/index.ts).
 - Adaptive RAG ([adaptive-rag](../examples/adaptive-rag/index.ts)): routing, grading, and a bounded query rewrite each get their own state.
 - Deep research ([deep-research](../examples/deep-research/index.ts)): researchers spawn per query, and a coverage reflection gates one optional follow-up.
 - SQL agent ([sql-agent](../examples/sql-agent/index.ts)): query generation, database execution, and synthesis are separately testable states.
+- Chat with a PDF ([chat-with-pdf](../examples/chat-with-pdf/index.ts)): question sequencing lifted out of the instructions and into the machine.
 
 Start with [`corrective-rag`](../examples/corrective-rag/index.ts).
 
@@ -160,10 +165,10 @@ Start with [`retrofit`](../examples/retrofit/index.ts).
 Most patterns are one self-contained `index.ts`, with no shared harness and no local imports. A few ship as a small directory, such as `email-drafter` and `retrofit`. To lift one into your project:
 
 1. Copy the example file into your project as `index.ts`.
-2. Install the runtime dependencies. The provider package major version must match your installed `ai` major version. This repo uses `ai@6`, so it uses `@ai-sdk/openai@3` rather than 4.
+2. Install the runtime dependencies. The provider package major version must match your installed `ai` major version. This repo uses `ai@7`, so it uses `@ai-sdk/openai@4`.
 
    ```sh
-   pnpm add @statelyai/agent@alpha ai@^6.0.67 zod@^4 xstate@6.0.0-alpha.46 @ai-sdk/openai@^3
+   pnpm add @statelyai/agent@alpha ai@^7 zod@^4 xstate@6.0.0-alpha.46 @ai-sdk/openai@^4
    pnpm add -D @types/node typescript tsx
    ```
 
@@ -172,7 +177,7 @@ Most patterns are one self-contained `index.ts`, with no shared harness and no l
 
 <!-- peer ranges from package.json#peerDependencies and example schema dependency from package.json#devDependencies -->
 
-`@statelyai/agent` declares these peer ranges: `ai@^6.0.67`, `xstate@>=6.0.0-alpha.46 <6.0.0`, and optionally `@opentelemetry/api@^1`. The examples use Zod 4 directly. The `@alpha` tag floats, so pin the exact version it installs once you have a working build.
+`@statelyai/agent` declares these peer ranges: `ai@^7`, `xstate@>=6.0.0-alpha.46 <6.0.0`, and optionally `@opentelemetry/api@^1`. The examples use Zod 4 directly. The `@alpha` tag floats, so pin the exact version it installs once you have a working build.
 
 ## Running from the repo
 

@@ -102,7 +102,7 @@ One `agent.decide` picks exactly one declared route, then the machine runs it. R
 
 ### `createParallelMachine`
 
-Static fan-out with one region per branch. All branches run concurrently and join into a keyed `results` object. The branch count is fixed at author time. For a branch count decided at run time, see [examples/fan-out](../examples/fan-out/index.ts).
+Static fan-out with one region per branch. All branches run concurrently and join into a keyed `results` object. The branch count is fixed at author time. [examples/preset-machine](../examples/preset-machine/index.ts) runs this preset over two review branches. For a branch count decided at run time, see [examples/fan-out](../examples/fan-out/index.ts).
 
 <!-- viz: state diagram of createParallelMachine: parallel state with one region per branch, all joining into a single done state with keyed results -->
 

@@ -61,6 +61,37 @@ type EventsOf<TEventSchemas extends AgentEventSchemaInputMap> = Constrain<
   EventUnion<TEventSchemas>,
   EventObject
 >;
+/**
+ * The first argument a guard or delay source receives. `context` and `event`
+ * come from the agent's own schemas, so an inline source is contextually typed
+ * and an annotated one stays assignable. XState's remaining fields (`self`,
+ * `parent`, `value`, `children`, `stateNode`) are deliberately not modeled:
+ * `setupAgent` only forwards these sources to `setup()`, which types them for
+ * real where the machine is built.
+ */
+type AgentSourceArgs<
+  TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
+  TEventSchemas extends AgentEventSchemaInputMap,
+> = {
+  context: ContextOf<TContextSchema>;
+  event: EventsOf<TEventSchemas>;
+};
+
+/** Guard sources for `setupAgent({ guards })`, typed against the agent's own context and events. */
+type AgentGuardSources<
+  TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
+  TEventSchemas extends AgentEventSchemaInputMap,
+> = Record<
+  string,
+  (args: AgentSourceArgs<TContextSchema, TEventSchemas>, ...params: any[]) => boolean
+>;
+
+/** Delay sources for `setupAgent({ delays })`, typed the same way as {@link AgentGuardSources}. */
+type AgentDelaySources<
+  TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
+  TEventSchemas extends AgentEventSchemaInputMap,
+> = Record<string, number | ((args: AgentSourceArgs<TContextSchema, TEventSchemas>) => number)>;
+
 // Identity mapping over an actor map, preserving each entry's AsyncActorLogic input/output types.
 type SetupActors<TActors extends { [K in keyof TActors]: AnyActorLogic }> = {
   [K in keyof TActors]: TActors[K] extends AsyncActorLogic<infer TOutput, infer TInput>
@@ -633,8 +664,8 @@ type SetupAgentBaseConfig<
   states?: TStateSchemas;
   requests?: AgentRequestInput<TRequestSchemas, AgentModelRef<TModels>>;
   actions?: NonNullable<AnySetupConfig["actions"]>;
-  guards?: NonNullable<AnySetupConfig["guards"]>;
-  delays?: NonNullable<AnySetupConfig["delays"]>;
+  guards?: AgentGuardSources<TContextSchema, TEventSchemas>;
+  delays?: AgentDelaySources<TContextSchema, TEventSchemas>;
   /**
    * Detects a snapshot that is an INTENTIONAL wait for an external event (a
    * human approval, an inbound webhook, …) — the machine's own declaration of
@@ -917,8 +948,10 @@ export function setupAgent<
     // config narrows it to the declared (non-reserved) event types.
     actors: actors as never,
     actions: config.actions,
-    guards: config.guards,
-    delays: config.delays,
+    // Typed against the agent's own schemas above; xstate re-types both slots
+    // against the machine it builds, so they cross the boundary uncast-checked.
+    guards: config.guards as never,
+    delays: config.delays as never,
   };
   const base = setup(setupConfig);
   const createBaseMachine = base.createMachine.bind(base);

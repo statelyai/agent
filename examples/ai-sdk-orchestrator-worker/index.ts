@@ -22,7 +22,7 @@ import { openai } from "@ai-sdk/openai";
 import { generateText, Output, type LanguageModel } from "ai";
 import { createAsyncLogic } from "xstate";
 import { setupAgent, runAgent } from "@statelyai/agent";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors, defineModels, toLanguageModel } from "@statelyai/agent/ai-sdk";
 
 const implementationPlanSchema = z.object({
   files: z.array(
@@ -144,7 +144,7 @@ const agentSetup = setupAgent({
   }),
   actors: {
     // Bound to the real AI SDK by default; overridden in tests via `.provide`.
-    implementChanges: createImplementChangesActor(models.worker),
+    implementChanges: createImplementChangesActor(toLanguageModel(models.worker)),
   },
   // planning sets plan before any state that reads it — narrow it non-null there.
   states: {

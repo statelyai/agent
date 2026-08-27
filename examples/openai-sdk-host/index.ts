@@ -41,6 +41,7 @@ import {
   type AgentRequestExecutorInfo,
   type AgentRequestExecutors,
   type AgentTextRequest,
+  type AgentTool,
   type AgentTools,
   type ChosenEvent,
 } from "@statelyai/agent";
@@ -103,6 +104,15 @@ export function toOpenAiCallSettings(request: AgentTextRequest) {
   };
 }
 
+/** A tool `description` may be a string or, for an AI SDK v7 tool, a function
+ * of the call's context. A raw JSON payload can only carry the static form. */
+function staticDescription(descriptor: AgentTool): string | undefined {
+  if (typeof descriptor === "function") {
+    return undefined;
+  }
+  return typeof descriptor.description === "string" ? descriptor.description : undefined;
+}
+
 /** One OpenAI function tool per `AgentTools` entry. */
 export function toOpenAiTools(tools: AgentTools): ChatCompletionFunctionTool[] {
   return Object.entries(tools).flatMap(([name, descriptor]) => {
@@ -115,7 +125,7 @@ export function toOpenAiTools(tools: AgentTools): ChatCompletionFunctionTool[] {
         type: "function" as const,
         function: {
           name,
-          description: typeof descriptor === "function" ? undefined : descriptor.description,
+          description: staticDescription(descriptor),
           parameters:
             (isStandardSchema(inputSchema) ? getJsonSchemaSync(inputSchema) : undefined) ?? {},
         },
@@ -196,7 +206,7 @@ export function createOpenAiExecutors({
       // machine validates the bare schema it declared. `reasoning` (opt-in) is
       // surfaced on the raw result only.
       const envelope = buildEnvelopeSchema(request.outputSchema!, {
-        reasoning: request.reasoning,
+        reasoning: request.includeReasoning,
       });
       const jsonSchema = await getJsonSchema(envelope);
       if (jsonSchema) {

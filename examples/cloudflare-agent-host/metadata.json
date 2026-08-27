@@ -5,7 +5,7 @@
   "manual": true,
   "origin": {
     "type": "platform-adapter",
-    "source": "Cloudflare Agents integration; a workspace package with a real wrangler project, booted locally with `wrangler dev` and tested in workerd via @cloudflare/vitest-pool-workers",
+    "source": "Cloudflare Agents integration; a workspace package with a real wrangler project, booted locally with `wrangler dev` and tested in workerd via @cloudflare/vitest-plugin",
     "url": "https://developers.cloudflare.com/agents/"
   },
   "comparison": {

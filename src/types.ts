@@ -213,7 +213,12 @@ export type AgentToolSchema = object;
  * SDK you built the tool with owns its precise input typing.
  */
 export interface AgentToolDescriptor {
-  description?: string;
+  /**
+   * Text shown to the model. Typed loosely enough to accept an SDK tool whose
+   * description is computed per call (the AI SDK v7 `tool({ description })`
+   * accepts a function of the call's context); core never reads it.
+   */
+  description?: string | ((...args: any[]) => string);
   inputSchema?: AgentToolSchema;
   outputSchema?: AgentToolSchema;
   execute?: (...args: any[]) => unknown;

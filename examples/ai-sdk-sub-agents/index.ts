@@ -18,7 +18,7 @@ import {
 } from "ai";
 import { z } from "zod";
 import { setupAgent, type AgentTool, type AgentToolExecute, runAgent } from "@statelyai/agent";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors, defineModels, toLanguageModel } from "@statelyai/agent/ai-sdk";
 
 const answerSchema = z.object({ answer: z.string() });
 const taskInputSchema = z.object({ task: z.string() });
@@ -137,7 +137,7 @@ function createAiSdkSubAgentWorkflow(subAgents: SubAgents) {
 }
 
 export async function runAiSdkSubAgentsDemo(task: string) {
-  const model = models.supervisor;
+  const model = toLanguageModel(models.supervisor);
   const { machine } = createAiSdkSubAgentWorkflow(createAiSdkSubAgents(model));
 
   const result = await runAgent(machine, {
@@ -160,9 +160,9 @@ export async function runAiSdkSubAgentsDeterministicExample() {
       tools: {},
       generate: async ({ prompt }) => {
         calls.push(`researcher:${prompt}`);
-        return { text: `notes:${prompt}` } as GenerateTextResult<{}, never>;
+        return { text: `notes:${prompt}` } as GenerateTextResult<{}, never, never>;
       },
-      stream: async () => ({}) as StreamTextResult<{}, never>,
+      stream: async () => ({}) as StreamTextResult<{}, never, never>,
     },
     writer: {
       version: "agent-v1",
@@ -170,9 +170,9 @@ export async function runAiSdkSubAgentsDeterministicExample() {
       tools: {},
       generate: async ({ prompt }) => {
         calls.push(`writer:${prompt}`);
-        return { text: `final:${prompt}` } as GenerateTextResult<{}, never>;
+        return { text: `final:${prompt}` } as GenerateTextResult<{}, never, never>;
       },
-      stream: async () => ({}) as StreamTextResult<{}, never>,
+      stream: async () => ({}) as StreamTextResult<{}, never, never>,
     },
   };
   const { machine } = createAiSdkSubAgentWorkflow(fakeSubAgents);

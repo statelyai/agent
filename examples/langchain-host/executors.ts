@@ -218,7 +218,7 @@ export function createLangChainExecutors({
 
     if (getAgentOutputMode(request.outputSchema) === "structured") {
       const envelope = buildEnvelopeSchema(request.outputSchema!, {
-        reasoning: request.reasoning,
+        reasoning: request.includeReasoning,
       });
       const jsonSchema = await getJsonSchema(envelope);
       if (jsonSchema) {

@@ -1,5 +1,5 @@
 /**
- * Runs the replay loop in real workerd (via @cloudflare/vitest-pool-workers).
+ * Runs the replay loop in real workerd (via @cloudflare/vitest-plugin).
  *
  * The `AI` binding is stubbed here on purpose: `env.AI` proxies to the live
  * Cloudflare account even under `wrangler dev`, so a test that used it would be

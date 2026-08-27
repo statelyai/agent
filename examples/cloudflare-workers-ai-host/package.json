@@ -10,14 +10,14 @@
   },
   "dependencies": {
     "@statelyai/agent": "workspace:*",
-    "ai": "^6.0.67",
-    "xstate": "6.0.0-alpha.46",
-    "zod": "^4.3.6"
+    "ai": "^7.0.0",
+    "xstate": "6.0.0-alpha.48",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.12.21",
-    "@cloudflare/workers-types": "^4.20260702.1",
-    "vitest": "^3.2.6",
-    "wrangler": "^4.116.0"
+    "@cloudflare/vitest-plugin": "1.1.0",
+    "@cloudflare/workers-types": "^5.20260823.1",
+    "vitest": "^4.1.11",
+    "wrangler": "^4.125.0"
   }
 }

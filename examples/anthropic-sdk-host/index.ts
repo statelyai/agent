@@ -57,6 +57,7 @@ import {
   type AgentRequestExecutorInfo,
   type AgentRequestExecutors,
   type AgentTextRequest,
+  type AgentTool,
   type AgentTools,
   type ChosenEvent,
 } from "@statelyai/agent";
@@ -138,6 +139,15 @@ export function toAnthropicCallSettings(request: AgentTextRequest) {
   };
 }
 
+/** A tool `description` may be a string or, for an AI SDK v7 tool, a function
+ * of the call's context. A raw JSON payload can only carry the static form. */
+function staticDescription(descriptor: AgentTool): string | undefined {
+  if (typeof descriptor === "function") {
+    return undefined;
+  }
+  return typeof descriptor.description === "string" ? descriptor.description : undefined;
+}
+
 /** One Anthropic tool per `AgentTools` entry. */
 export function toAnthropicTools(tools: AgentTools): Tool[] {
   return Object.entries(tools).flatMap(([name, descriptor]) => {
@@ -149,7 +159,7 @@ export function toAnthropicTools(tools: AgentTools): Tool[] {
     return [
       {
         name,
-        description: typeof descriptor === "function" ? undefined : descriptor.description,
+        description: staticDescription(descriptor),
         input_schema: { type: "object" as const, ...jsonSchema },
       },
     ];
@@ -248,7 +258,7 @@ export function createAnthropicExecutors(
       // the bare schema it declared; `reasoning` (opt-in) is surfaced on the raw
       // result only.
       const envelope = buildEnvelopeSchema(request.outputSchema!, {
-        reasoning: request.reasoning,
+        reasoning: request.includeReasoning,
       });
       const jsonSchema = getJsonSchemaSync(envelope);
       if (jsonSchema) {

@@ -215,14 +215,14 @@ A `requests` entry can also declare these fields.
 | --- | --- | --- |
 | `tools` | Map of tool name to `{ description?, inputSchema?, outputSchema? }`, where the schemas are JSON Schemas | Passes the tools to the model alongside the request. |
 | `toolChoice` | `"auto"`, `"none"`, `"required"`, or `{ type: "tool", name }` | Controls whether the model must call a tool. |
-| `reasoning` | `true` | Opts into the `reasoning` field of the structured-output envelope. |
+| `includeReasoning` | `true` | Opts into the `reasoning` field of the structured-output envelope. |
 
 ```yaml
 requests:
   lookupOrder:
     model: openai/gpt-5.4-mini
     prompt: "{{ context.ticket }}"
-    reasoning: true
+    includeReasoning: true
     toolChoice: auto
     tools:
       searchOrders:

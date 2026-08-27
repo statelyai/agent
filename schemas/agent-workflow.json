@@ -273,7 +273,7 @@
             }
           ]
         },
-        "reasoning": {
+        "includeReasoning": {
           "description": "Opt into the structured-output envelope's `reasoning` field.",
           "type": "boolean"
         },
