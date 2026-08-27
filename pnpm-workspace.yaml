@@ -17,7 +17,7 @@ allowBuilds:
   core-js-pure: false
   esbuild: false
   # workerd's postinstall unpacks the platform binary that `wrangler dev` and
-  # @cloudflare/vitest-pool-workers run the Cloudflare examples on.
+  # @cloudflare/vitest-plugin run the Cloudflare examples on.
   workerd: true
 minimumReleaseAgeExclude:
   - xstate

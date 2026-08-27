@@ -1,5 +1,5 @@
 /**
- * Runs the Worker in real workerd (via @cloudflare/vitest-pool-workers), so the
+ * Runs the Worker in real workerd (via @cloudflare/vitest-plugin), so the
  * Durable Object, its SQLite storage, and the persisted XState snapshot are the
  * real thing — not a Node stand-in. Keyless: `vitest.config.ts` forces the
  * `OPENAI_API_KEY` binding empty (it would otherwise be picked up from a

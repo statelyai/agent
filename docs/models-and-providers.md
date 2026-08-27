@@ -143,7 +143,7 @@ An `AgentTextRequest` is spread-compatible with the AI SDK's call options. Resul
 | Path                   | `generateText` | `streamText` | `decide` | Structured output |
 | ---------------------- | -------------- | ------------ | -------- | ----------------- |
 | `createAiSdkExecutors` | yes            | yes          | yes      | yes               |
-| Raw `fetch` executors  | yes            | yes          | yes      | yes (you map it)  |
+| Hand-written executors | yes            | yes          | yes      | yes (you map it)  |
 | Raw `ai` functions     | yes            | yes          | no       | best-effort       |
 
 The `decide` executor maps each machine event to a forced tool call. That mapping lives in the adapter layer, so raw `ai` functions cannot back a decision. For reliable structured output, use `createAiSdkExecutors` or map the envelope yourself. See [Text requests](text-requests.md) and [Decisions](decisions.md).
