@@ -948,6 +948,72 @@ describe("setupAgent", () => {
     expect(result.issues![0]!.message).toMatch(/unknown message part type/i);
   });
 
+  test("messagesSchema rejects a text part missing its text", () => {
+    const result = messagesSchema["~standard"].validate([
+      { role: "user", content: [{ type: "text" }] },
+    ]);
+
+    expect(result.issues).toBeDefined();
+    expect(result.issues![0]!.message).toMatch(/text part requires a string "text"/i);
+  });
+
+  test("messagesSchema accepts a text part with extra fields", () => {
+    const result = messagesSchema["~standard"].validate([
+      { role: "user", content: [{ type: "text", text: "hi", extra: 1 }] },
+    ]);
+
+    expect(result.issues).toBeUndefined();
+  });
+
+  test("messagesSchema rejects a malformed tool-call part", () => {
+    const result = messagesSchema["~standard"].validate([
+      {
+        role: "assistant",
+        content: [{ type: "tool-call", toolCallId: "call_1", input: {} }],
+      },
+    ]);
+
+    expect(result.issues).toBeDefined();
+    expect(result.issues![0]!.message).toMatch(/tool-call part requires a string "toolName"/i);
+  });
+
+  test("messagesSchema rejects a tool-result part with a malformed output", () => {
+    const result = messagesSchema["~standard"].validate([
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call_1",
+            toolName: "lookup",
+            output: { type: "text" },
+          },
+        ],
+      },
+    ]);
+
+    expect(result.issues).toBeDefined();
+    expect(result.issues![0]!.message).toMatch(/requires a string "value"/i);
+  });
+
+  test("messagesSchema accepts a valid tool-result part", () => {
+    const result = messagesSchema["~standard"].validate([
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call_1",
+            toolName: "lookup",
+            output: { type: "text", value: "done" },
+          },
+        ],
+      },
+    ]);
+
+    expect(result.issues).toBeUndefined();
+  });
+
   test("authors reusable text actors with typed input and output", async () => {
     const getSummary = createTextLogic({
       mode: "generate",

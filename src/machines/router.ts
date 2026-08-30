@@ -1,4 +1,3 @@
-import type { AnyStateMachine } from "xstate";
 import { setupAgent } from "../setup-agent.js";
 import {
   assertEntryNames,
@@ -12,26 +11,46 @@ import {
   objectSchema,
   renderEntryList,
   type PresetEntry,
+  type PresetMachine,
 } from "./internal.js";
 
 /** Config for {@link createRouterMachine}. */
-export interface CreateRouterMachineConfig {
+export interface CreateRouterMachineConfig<
+  TRoutes extends Record<string, PresetEntry> = Record<string, PresetEntry>,
+> {
   /** Model ref for the routing decision, and the default for request routes. */
   model: string;
   /** System prompt for the routing decision. */
   instructions?: string;
   /** The legal destinations, keyed by route name. Each is an inline request or a child machine. */
-  routes: Record<string, PresetEntry>;
+  routes: TRoutes;
   /** Route taken when the routing decision errors. Without it, a failed decision ends the run. */
-  fallback?: string;
+  fallback?: keyof TRoutes & string;
 }
 
 /** Context of a {@link createRouterMachine} machine. */
-export type RouterContext = {
+export type RouterContext<TRoute extends string = string> = {
   prompt: string;
-  route: string | null;
+  route: TRoute | null;
   result: unknown;
 };
+
+/** Machine input of a {@link createRouterMachine} machine. */
+export type RouterInput = { prompt: string };
+/** Machine output of a {@link createRouterMachine} machine. */
+export type RouterOutput<TRoute extends string = string> = {
+  route: TRoute | null;
+  result: unknown;
+};
+/** The events a {@link createRouterMachine} machine accepts: one per declared route. */
+export type RouterEvent<TRoute extends string = string> = { type: `ROUTE_${TRoute}` };
+/** The machine {@link createRouterMachine} returns. */
+export type RouterMachine<TRoute extends string = string> = PresetMachine<
+  RouterContext<TRoute>,
+  RouterInput,
+  RouterOutput<TRoute>,
+  RouterEvent<TRoute>
+>;
 
 const contextSchema = objectSchema<RouterContext>(
   { prompt: jsonString, route: { type: ["string", "null"] }, result: jsonAny },
@@ -67,7 +86,9 @@ export function routeEventType(route: string): string {
  * });
  * ```
  */
-export function createRouterMachine(config: CreateRouterMachineConfig): AnyStateMachine {
+export function createRouterMachine<const TRoutes extends Record<string, PresetEntry>>(
+  config: CreateRouterMachineConfig<TRoutes>,
+): RouterMachine<keyof TRoutes & string> {
   const { model, instructions, routes, fallback } = config;
   const names = Object.keys(routes);
   assertEntryNames("route", names, ["routing", "done"]);
@@ -145,5 +166,5 @@ export function createRouterMachine(config: CreateRouterMachineConfig): AnyState
 
   const machine = agentSetup.createMachine(machineConfig);
 
-  return machine as unknown as AnyStateMachine;
+  return machine as unknown as RouterMachine<keyof TRoutes & string>;
 }

@@ -65,6 +65,24 @@ The `allowedEvents` option accepts a single string or an array. Entries are exac
 | `'*'` | Every currently-legal event. |
 | `'todo.*'` | Every declared event under the `todo.` namespace, such as `todo.add` and `todo.toggle`. Typed against declared dotted types, so a pattern matching nothing, such as `'nope.*'`, is a compile error. |
 
+### Reusable decision logic
+
+For a decision used by more than one state or machine, `createDecisionLogic` builds the same decision as standalone actor logic, exported from `@statelyai/agent`. Register the result under `actors:` and invoke it by name. It takes the same fields as the `agent.decide` input, each a static value or an `({ input }) => value` resolver, plus an optional `schemas.input` to type and validate the input.
+
+```ts no-check
+import { createDecisionLogic } from "@statelyai/agent";
+
+export const chooseAction = createDecisionLogic({
+  schemas: { input: z.object({ questionsRemaining: z.number() }) },
+  model: "quick",
+  system: "Ask one yes/no question at a time, but guess on the final turn.",
+  prompt: ({ input }) => `Questions remaining: ${input.questionsRemaining}`,
+  allowedEvents: ["ASK", "GUESS"],
+});
+```
+
+Prefer the `agent.decide` builtin for a one-off, state-local decision: it needs no separate declaration and types `allowedEvents` against the machine's own event schemas.
+
 ## Delivering the chosen event
 
 Delivery is automatic. When the decision resolves, the `agent.decide` actor sends the chosen event to the machine, and the matching `on:` transition runs. You handle the outcome with ordinary transitions.

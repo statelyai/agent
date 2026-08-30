@@ -213,6 +213,9 @@ function resolveAllowedEventTypes(
  *
  * @example
  * ```ts
+ * import { createDecisionLogic } from '@statelyai/agent';
+ * import { z } from 'zod';
+ *
  * export const chooseMove = createDecisionLogic({
  *   schemas: { input: z.object({ playerHp: z.number(), enemyHp: z.number() }) },
  *   model: 'openai/gpt-5.4-mini',
@@ -224,10 +227,6 @@ function resolveAllowedEventTypes(
  *       : ['ATTACK', 'DEFEND', 'FLEE'],
  * });
  * ```
- *
- * @internal Not part of the public API (not exported from the package root).
- * State-local decisions use the `agent.decide` builtin invoke
- * (`src: 'agent.decide'`); this backs standalone/reusable decision tests.
  */
 export function createDecisionLogic<
   TInputSchema extends StandardSchemaV1,

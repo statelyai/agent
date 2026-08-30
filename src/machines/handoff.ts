@@ -1,4 +1,3 @@
-import type { AnyStateMachine } from "xstate";
 import { setupAgent } from "../setup-agent.js";
 import {
   assertEntryNames,
@@ -9,24 +8,45 @@ import {
   machineActors,
   objectSchema,
   type PresetEntry,
+  type PresetMachine,
 } from "./internal.js";
 
 /** Config for {@link createHandoffMachine}. */
-export interface CreateHandoffMachineConfig {
+export interface CreateHandoffMachineConfig<
+  TAgents extends Record<string, PresetEntry> = Record<string, PresetEntry>,
+> {
   /** The peer agents, keyed by name. Each is an inline request or a child machine. */
-  agents: Record<string, PresetEntry>;
+  agents: TAgents;
   /** Which agent holds the mic at the start of a run. */
-  defaultActiveAgent: string;
+  defaultActiveAgent: keyof TAgents & string;
   /** Default model ref for request agents that declare none. */
   model?: string;
 }
 
 /** Context of a {@link createHandoffMachine} machine. */
-export type HandoffContext = {
+export type HandoffContext<TAgent extends string = string> = {
   message: string;
-  activeAgent: string;
+  activeAgent: TAgent;
   reply: unknown;
 };
+
+/** Machine input of a {@link createHandoffMachine} machine. */
+export type HandoffInput<TAgent extends string = string> = {
+  message: string;
+  activeAgent?: TAgent;
+};
+/** The events a {@link createHandoffMachine} machine accepts: one per peer agent. */
+export type HandoffEvent<TAgent extends string = string> = {
+  type: `transfer_to_${TAgent}`;
+  message?: string;
+};
+/** The machine {@link createHandoffMachine} returns. There is no final state, so it has no output. */
+export type HandoffMachine<TAgent extends string = string> = PresetMachine<
+  HandoffContext<TAgent>,
+  HandoffInput<TAgent>,
+  undefined,
+  HandoffEvent<TAgent>
+>;
 
 const contextSchema = objectSchema<HandoffContext>(
   { message: jsonString, activeAgent: jsonString, reply: jsonAny },
@@ -73,7 +93,9 @@ export function transferEventType(agent: string): string {
  * });
  * ```
  */
-export function createHandoffMachine(config: CreateHandoffMachineConfig): AnyStateMachine {
+export function createHandoffMachine<const TAgents extends Record<string, PresetEntry>>(
+  config: CreateHandoffMachineConfig<TAgents>,
+): HandoffMachine<keyof TAgents & string> {
   const { agents, defaultActiveAgent, model } = config;
   const names = Object.keys(agents);
   assertEntryNames("agent", names, ["routing", "waiting"]);
@@ -151,5 +173,5 @@ export function createHandoffMachine(config: CreateHandoffMachineConfig): AnySta
 
   const machine = agentSetup.createMachine(machineConfig);
 
-  return machine as unknown as AnyStateMachine;
+  return machine as unknown as HandoffMachine<keyof TAgents & string>;
 }

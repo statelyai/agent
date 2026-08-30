@@ -1,4 +1,3 @@
-import type { AnyStateMachine } from "xstate";
 import { setupAgent } from "../setup-agent.js";
 import type { AgentTools, StandardSchemaV1 } from "../types.js";
 import {
@@ -9,6 +8,7 @@ import {
   jsonString,
   objectSchema,
   requestInput,
+  type PresetMachine,
 } from "./internal.js";
 
 /** Arguments a {@link SequentialStep}'s `prompt` receives. */
@@ -54,6 +54,13 @@ export type SequentialContext = {
   previous: unknown;
 };
 
+/** Machine input of a {@link createSequentialMachine} machine. */
+export type SequentialInput = { prompt: string };
+/** Machine output of a {@link createSequentialMachine} machine. */
+export type SequentialOutput = { results: Record<string, unknown>; output: unknown };
+/** The machine {@link createSequentialMachine} returns. */
+export type SequentialMachine = PresetMachine<SequentialContext, SequentialInput, SequentialOutput>;
+
 const contextSchema = objectSchema<SequentialContext>(
   { prompt: jsonString, results: jsonRecord, previous: jsonAny },
   ["prompt", "results"],
@@ -82,7 +89,7 @@ const outputSchema = objectSchema<{ results: Record<string, unknown>; output: un
  * });
  * ```
  */
-export function createSequentialMachine(config: CreateSequentialMachineConfig): AnyStateMachine {
+export function createSequentialMachine(config: CreateSequentialMachineConfig): SequentialMachine {
   const { model, steps } = config;
   assertEntryNames(
     "step",
@@ -159,5 +166,5 @@ export function createSequentialMachine(config: CreateSequentialMachineConfig): 
 
   const machine = agentSetup.createMachine(machineConfig);
 
-  return machine as unknown as AnyStateMachine;
+  return machine as unknown as SequentialMachine;
 }

@@ -47,6 +47,7 @@ const agentSetup = setupAgent({
 - Each schema field accepts any [Standard Schema](https://standardschema.dev) validator.
 - Both schema slots are optional. Omit `output` and the request resolves to `string`. Omit `input` and the invoke needs no `input`. A request with neither writes `schemas: {}`. The `schemas` key itself stays required on `requests` entries, while a standalone `createTextLogic` can omit it entirely.
 - Each request-shaping field, such as `system`, `prompt`, `messages`, `temperature`, and `maxOutputTokens`, is either a static value or a `({ input }) => value` function.
+- `prompt` and `messages` are mutually exclusive: a request must resolve exactly one of them. Resolving both, or neither, throws.
 
 ### Model references
 

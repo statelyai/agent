@@ -1,4 +1,3 @@
-import type { AnyStateMachine } from "xstate";
 import { setupAgent } from "../setup-agent.js";
 import {
   assertEntryNames,
@@ -9,6 +8,7 @@ import {
   machineActors,
   objectSchema,
   type PresetEntry,
+  type PresetMachine,
 } from "./internal.js";
 
 /** Config for {@link createParallelMachine}. */
@@ -24,6 +24,13 @@ export type ParallelContext = {
   prompt: string;
   results: Record<string, unknown>;
 };
+
+/** Machine input of a {@link createParallelMachine} machine. */
+export type ParallelInput = { prompt: string };
+/** Machine output of a {@link createParallelMachine} machine. */
+export type ParallelOutput = { results: Record<string, unknown> };
+/** The machine {@link createParallelMachine} returns. */
+export type ParallelMachine = PresetMachine<ParallelContext, ParallelInput, ParallelOutput>;
 
 const contextSchema = objectSchema<ParallelContext>({ prompt: jsonString, results: jsonRecord }, [
   "prompt",
@@ -55,7 +62,7 @@ const outputSchema = objectSchema<{ results: Record<string, unknown> }>({ result
  * });
  * ```
  */
-export function createParallelMachine(config: CreateParallelMachineConfig): AnyStateMachine {
+export function createParallelMachine(config: CreateParallelMachineConfig): ParallelMachine {
   const { model, branches } = config;
   const names = Object.keys(branches);
   assertEntryNames("branch", names, ["running", "done"]);
@@ -114,5 +121,5 @@ export function createParallelMachine(config: CreateParallelMachineConfig): AnyS
 
   const machine = agentSetup.createMachine(machineConfig);
 
-  return machine as unknown as AnyStateMachine;
+  return machine as unknown as ParallelMachine;
 }

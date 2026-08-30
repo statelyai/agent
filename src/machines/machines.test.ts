@@ -254,9 +254,14 @@ describe("createRouterMachine", () => {
   });
 
   test("rejects a fallback that is not a route", () => {
-    expect(() => createRouterMachine({ model: "quick", routes: { a: {} }, fallback: "b" })).toThrow(
-      /fallback 'b' is not a declared route/,
-    );
+    expect(() =>
+      createRouterMachine({
+        model: "quick",
+        routes: { a: {} },
+        // @ts-expect-error 'b' is not a declared route — the runtime check backs the type
+        fallback: "b",
+      }),
+    ).toThrow(/fallback 'b' is not a declared route/);
   });
 });
 
@@ -451,7 +456,65 @@ describe("createHandoffMachine", () => {
 
   test("rejects a default that is not a declared agent", () => {
     expect(() =>
-      createHandoffMachine({ agents: { a: { model: "quick" } }, defaultActiveAgent: "b" }),
+      createHandoffMachine({
+        agents: { a: { model: "quick" } },
+        // @ts-expect-error 'b' is not a declared agent — the runtime check backs the type
+        defaultActiveAgent: "b",
+      }),
     ).toThrow(/defaultActiveAgent 'b' is not a declared agent/);
+  });
+});
+
+describe("preset machine types", () => {
+  const { generateText } = mockGenerateText();
+
+  test("machine input is typed, not `any`", async () => {
+    const machine = createToolLoopMachine({ model: "quick" });
+    await expect(
+      runAgent(machine, {
+        // @ts-expect-error `prompt` is a string on this machine's input
+        input: { prompt: 123 },
+        executors: { generateText },
+      }),
+    ).rejects.toThrow();
+  });
+
+  test("machine output is typed", async () => {
+    const machine = createLoopMachine({
+      model: "quick",
+      body: {},
+      until: ({ iterations }) => iterations >= 1,
+      maxTurns: 1,
+    });
+    const result = await runAgent(machine, {
+      input: { prompt: "go" },
+      executors: { generateText },
+    });
+    if (result.status === "done") {
+      const iterations: number = result.output.iterations;
+      expect(iterations).toBe(1);
+      // @ts-expect-error `missing` is not part of the loop output
+      expect(result.output.missing).toBeUndefined();
+    }
+  });
+
+  test("route and transfer events are typed from the declared keys", async () => {
+    const handoff = createHandoffMachine({
+      model: "quick",
+      defaultActiveAgent: "travel",
+      agents: { travel: {}, food: {} },
+    });
+    const first = await runAgent(handoff, {
+      input: { message: "hi" },
+      executors: { generateText },
+    });
+    await expect(
+      runAgent(handoff, {
+        snapshot: first.snapshot,
+        // @ts-expect-error 'transfer_to_nope' is not a declared agent transfer
+        event: { type: "transfer_to_nope" },
+        executors: { generateText },
+      }),
+    ).rejects.toThrow(/cannot resume with event 'transfer_to_nope'/);
   });
 });

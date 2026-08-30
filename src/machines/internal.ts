@@ -1,5 +1,45 @@
-import type { AnyStateMachine } from "xstate";
+import type {
+  AnyActorRef,
+  AnyStateMachine,
+  EventObject,
+  MachineContext,
+  MetaObject,
+  StateMachine,
+  StateSchema,
+  StateValue,
+} from "xstate";
 import type { AgentTools, StandardSchemaV1 } from "../types.js";
+
+/**
+ * The machine type a preset factory returns: its context, event union, input
+ * and output are all concrete, so callers get typed `runAgent` input and
+ * output instead of `AnyStateMachine`. The remaining slots (children, state
+ * value/tags/config, source maps) are left permissive — a preset builds its
+ * states dynamically, so there is no literal state schema to infer.
+ *
+ * @internal
+ */
+export type PresetMachine<
+  TContext extends MachineContext,
+  TInput,
+  TOutput,
+  TEvent extends EventObject = EventObject,
+> = StateMachine<
+  TContext,
+  TEvent,
+  Record<string, AnyActorRef | undefined>,
+  StateValue,
+  string,
+  TInput,
+  TOutput,
+  EventObject,
+  MetaObject,
+  StateSchema,
+  any,
+  any,
+  any,
+  any
+>;
 
 /** The builtin inline text request every preset lowers a request entry to. */
 export const GENERATE_TEXT_SRC = "agent.generateText";
