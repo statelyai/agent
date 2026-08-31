@@ -929,6 +929,115 @@ describe("setupAgent", () => {
     expect(result.issues).toBeUndefined();
   });
 
+  test.each([
+    {
+      role: "user",
+      part: { type: "tool-call", toolCallId: "call_1", toolName: "lookup", input: {} },
+      expected: /user message content does not allow "tool-call" parts/i,
+    },
+    {
+      role: "assistant",
+      part: { type: "image", image: "https://example.com/image.png" },
+      expected: /assistant message content does not allow "image" parts/i,
+    },
+    {
+      role: "tool",
+      part: { type: "text", text: "hello" },
+      expected: /tool message content does not allow "text" parts/i,
+    },
+  ])("messagesSchema rejects a $role message's disallowed part", ({ role, part, expected }) => {
+    const result = messagesSchema["~standard"].validate([{ role, content: [part] }]);
+
+    expect(result.issues?.[0]?.message).toMatch(expected);
+  });
+
+  test("messagesSchema rejects disallowed nested tool-result content", () => {
+    const result = messagesSchema["~standard"].validate([
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call_1",
+            toolName: "lookup",
+            output: {
+              type: "content",
+              value: [{ type: "file", data: "document", mediaType: "text/plain" }],
+            },
+          },
+        ],
+      },
+    ]);
+
+    expect(result.issues?.[0]?.message).toMatch(
+      /tool-result output content does not allow "file" parts/i,
+    );
+  });
+
+  test.each([
+    { type: "image", image: 42 },
+    { type: "file", data: { bytes: [] }, mediaType: "application/octet-stream" },
+  ])("messagesSchema rejects an invalid $type media payload", (part) => {
+    const result = messagesSchema["~standard"].validate([{ role: "user", content: [part] }]);
+
+    expect(result.issues?.[0]?.message).toMatch(/string, Uint8Array, ArrayBuffer, or URL/i);
+  });
+
+  test("messagesSchema accepts all supported media payloads", () => {
+    const result = messagesSchema["~standard"].validate([
+      {
+        role: "user",
+        content: [
+          { type: "image", image: "https://example.com/image.png" },
+          { type: "image", image: new Uint8Array([1]) },
+          { type: "image", image: new ArrayBuffer(1) },
+          { type: "file", data: new URL("https://example.com/file.txt"), mediaType: "text/plain" },
+        ],
+      },
+    ]);
+
+    expect(result.issues).toBeUndefined();
+  });
+
+  test.each(["json", "error-json"] as const)(
+    "messagesSchema rejects undefined %s output",
+    (type) => {
+      const result = messagesSchema["~standard"].validate([
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: "call_1",
+              toolName: "lookup",
+              output: { type, value: undefined },
+            },
+          ],
+        },
+      ]);
+
+      expect(result.issues?.[0]?.message).toMatch(/requires a "value"/i);
+    },
+  );
+
+  test.each(["json", "error-json"] as const)("messagesSchema accepts null %s output", (type) => {
+    const result = messagesSchema["~standard"].validate([
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call_1",
+            toolName: "lookup",
+            output: { type, value: null },
+          },
+        ],
+      },
+    ]);
+
+    expect(result.issues).toBeUndefined();
+  });
+
   test("messagesSchema rejects an unknown role", () => {
     const result = messagesSchema["~standard"].validate([{ role: "developer", content: "hi" }]);
 
@@ -946,6 +1055,72 @@ describe("setupAgent", () => {
 
     expect(result.issues).toBeDefined();
     expect(result.issues![0]!.message).toMatch(/unknown message part type/i);
+  });
+
+  test("messagesSchema rejects a text part missing its text", () => {
+    const result = messagesSchema["~standard"].validate([
+      { role: "user", content: [{ type: "text" }] },
+    ]);
+
+    expect(result.issues).toBeDefined();
+    expect(result.issues![0]!.message).toMatch(/text part requires a string "text"/i);
+  });
+
+  test("messagesSchema accepts a text part with extra fields", () => {
+    const result = messagesSchema["~standard"].validate([
+      { role: "user", content: [{ type: "text", text: "hi", extra: 1 }] },
+    ]);
+
+    expect(result.issues).toBeUndefined();
+  });
+
+  test("messagesSchema rejects a malformed tool-call part", () => {
+    const result = messagesSchema["~standard"].validate([
+      {
+        role: "assistant",
+        content: [{ type: "tool-call", toolCallId: "call_1", input: {} }],
+      },
+    ]);
+
+    expect(result.issues).toBeDefined();
+    expect(result.issues![0]!.message).toMatch(/tool-call part requires a string "toolName"/i);
+  });
+
+  test("messagesSchema rejects a tool-result part with a malformed output", () => {
+    const result = messagesSchema["~standard"].validate([
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call_1",
+            toolName: "lookup",
+            output: { type: "text" },
+          },
+        ],
+      },
+    ]);
+
+    expect(result.issues).toBeDefined();
+    expect(result.issues![0]!.message).toMatch(/requires a string "value"/i);
+  });
+
+  test("messagesSchema accepts a valid tool-result part", () => {
+    const result = messagesSchema["~standard"].validate([
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call_1",
+            toolName: "lookup",
+            output: { type: "text", value: "done" },
+          },
+        ],
+      },
+    ]);
+
+    expect(result.issues).toBeUndefined();
   });
 
   test("authors reusable text actors with typed input and output", async () => {

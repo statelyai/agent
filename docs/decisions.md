@@ -65,6 +65,27 @@ The `allowedEvents` option accepts a single string or an array. Entries are exac
 | `'*'` | Every currently-legal event. |
 | `'todo.*'` | Every declared event under the `todo.` namespace, such as `todo.add` and `todo.toggle`. Typed against declared dotted types, so a pattern matching nothing, such as `'nope.*'`, is a compile error. |
 
+### Reusable decision logic
+
+<!-- createDecisionLogic public API from src/decision.ts and src/index.ts -->
+
+For a decision used by more than one state or machine, `createDecisionLogic` builds the same decision as standalone actor logic, exported from `@statelyai/agent`. Register the result under `actors:` and invoke it by name. It takes the same fields as the `agent.decide` input, each a static value or an `({ input }) => value` resolver, plus an optional `schemas.input` to type and validate the input.
+
+```ts no-check
+import { createDecisionLogic } from "@statelyai/agent";
+import { z } from "zod";
+
+export const chooseAction = createDecisionLogic({
+  schemas: { input: z.object({ questionsRemaining: z.number() }) },
+  model: "quick",
+  system: "Ask one yes/no question at a time, but guess on the final turn.",
+  prompt: ({ input }) => `Questions remaining: ${input.questionsRemaining}`,
+  allowedEvents: ["ASK", "GUESS"],
+});
+```
+
+Prefer the `agent.decide` builtin for a one-off, state-local decision: it needs no separate declaration and types `allowedEvents` against the machine's own event schemas.
+
 ## Delivering the chosen event
 
 Delivery is automatic. When the decision resolves, the `agent.decide` actor sends the chosen event to the machine, and the matching `on:` transition runs. You handle the outcome with ordinary transitions.
@@ -111,7 +132,7 @@ Retry behavior:
 
 Core validates and retries. It never calls a model. Coercing the model into choosing exactly one option is the host's responsibility. Hosts do this with one tool per event and a forced tool choice, or with structured output over an event union. The shipped `createAiSdkExecutors` provides a `decide` executor for the Vercel AI SDK. The raw-SDK examples force the choice with `tool_choice`. See [Hosts](hosts.md).
 
-> **Note:** Decisions are state-local, so author them inline on the invoke. There is no reusable decision-logic object, because a decision's candidates and legality depend on the state it runs in.
+> **Note:** Decisions are state-local, so prefer authoring one-off decisions inline on the invoke.
 
 ## The decide loop for multi-event commands
 

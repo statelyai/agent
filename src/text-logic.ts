@@ -223,10 +223,38 @@ export type BuiltinAgentActors<TEvent extends string = string, TModel extends st
   >;
 };
 
+// Returns the exclusivity error message for a request that resolved both a
+// non-empty `prompt` and a non-empty `messages` array, or `undefined` when the
+// request is fine. Shared by `agentTextInputSchema` and `createTextLogic`'s
+// lowering so config authors hit the same error as direct callers.
+function textRequestSourceIssue(request: {
+  name?: string;
+  prompt?: unknown;
+  messages?: unknown;
+}): string | undefined {
+  const hasPrompt = typeof request.prompt === "string" && request.prompt.length > 0;
+  const hasMessages = Array.isArray(request.messages) && request.messages.length > 0;
+  const label = request.name ? ` '${request.name}'` : "";
+
+  if (hasPrompt && hasMessages) {
+    return (
+      `Agent text request${label} has both a non-empty \`prompt\` and \`messages\` — ` +
+      "provide exactly one so the model has a single input source."
+    );
+  }
+  if (!hasPrompt && !hasMessages) {
+    return (
+      `Agent text request${label} has neither a non-empty \`prompt\` nor \`messages\` — ` +
+      "provide at least one so the model has something to respond to."
+    );
+  }
+  return undefined;
+}
+
 // Input schema for the `agent.generateText`/`agent.streamText` builtins: an
-// object with a string `model` AND at least one input source — a non-empty
+// object with a string `model` AND exactly one input source — a non-empty
 // `prompt` or a non-empty `messages` array — so the model is never called with
-// nothing to respond to.
+// nothing to respond to, and never with two competing sources.
 const agentTextInputSchema: StandardSchemaV1<AgentTextRequest> = {
   "~standard": {
     version: 1,
@@ -239,19 +267,9 @@ const agentTextInputSchema: StandardSchemaV1<AgentTextRequest> = {
       if (typeof request.model !== "string") {
         return { issues: [{ message: "Expected agent text input with a string `model`" }] };
       }
-      const hasPrompt = typeof request.prompt === "string" && request.prompt.length > 0;
-      const hasMessages = Array.isArray(request.messages) && request.messages.length > 0;
-      if (!hasPrompt && !hasMessages) {
-        const label = request.name ? ` '${request.name}'` : "";
-        return {
-          issues: [
-            {
-              message:
-                `Agent text request${label} has neither a non-empty \`prompt\` nor \`messages\` — ` +
-                "provide at least one so the model has something to respond to.",
-            },
-          ],
-        };
+      const issue = textRequestSourceIssue(request);
+      if (issue) {
+        return { issues: [{ message: issue }] };
       }
       return { value: request };
     },
@@ -546,12 +564,21 @@ export function createTextLogic<
     const parsedInput = validateSchemaSync<TInput>(schemas.input, input);
     const args = { input: parsedInput };
 
+    const name = resolveTextLogicValue(config.name, args);
+    const prompt = resolveTextLogicValue(config.prompt, args);
+    const messages = resolveTextLogicValue(config.messages, args);
+    const sourceIssue = textRequestSourceIssue({ name, prompt, messages });
+
+    if (sourceIssue) {
+      throw new Error(sourceIssue);
+    }
+
     return {
-      name: resolveTextLogicValue(config.name, args),
+      name,
       model: resolveTextLogicValue(config.model, args)!,
       system: resolveTextLogicValue(config.system, args),
-      prompt: resolveTextLogicValue(config.prompt, args),
-      messages: resolveTextLogicValue(config.messages, args),
+      prompt,
+      messages,
       tools: resolveTextLogicValue(config.tools, args),
       toolChoice: resolveTextLogicValue(config.toolChoice, args),
       outputSchema: schemas.output,
@@ -980,6 +1007,12 @@ export async function executeAgentTextRequest(
       ...tools,
     },
   };
+  const sourceIssue = textRequestSourceIssue(request);
+
+  if (sourceIssue) {
+    throw new Error(sourceIssue);
+  }
+
   const executor = mode === "stream" ? executors.streamText : executors.generateText;
 
   if (!executor) {
@@ -990,7 +1023,8 @@ export async function executeAgentTextRequest(
 
   // The runtime object is a plain lowered request; the cast bridges to the
   // executor-facing type (see AgentExecutorTextRequest — prompt/messages are
-  // typed as mutually exclusive there, which core guarantees at runtime).
+  // typed as mutually exclusive there, which core enforces at runtime through
+  // agentTextInputSchema, createTextLogic's lowering, and this direct boundary.
   const raw = await executor(request as AgentExecutorTextRequest, info);
   return {
     output: await normalizeGeneratorResult(raw, id, {

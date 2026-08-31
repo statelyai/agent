@@ -1,7 +1,12 @@
-import type { AnyStateMachine } from "xstate";
 import { setupAgent } from "../setup-agent.js";
 import type { AgentTools, StandardSchemaV1 } from "../types.js";
-import { GENERATE_TEXT_SRC, jsonAny, jsonString, objectSchema } from "./internal.js";
+import {
+  GENERATE_TEXT_SRC,
+  jsonAny,
+  jsonString,
+  objectSchema,
+  type PresetMachine,
+} from "./internal.js";
 
 /** Config for {@link createToolLoopMachine}. */
 export interface CreateToolLoopMachineConfig {
@@ -26,6 +31,13 @@ export type ToolLoopContext = {
   prompt: string;
   result: unknown;
 };
+
+/** Machine input of a {@link createToolLoopMachine} machine. */
+export type ToolLoopInput = { prompt: string };
+/** Machine output of a {@link createToolLoopMachine} machine. */
+export type ToolLoopOutput = { result: unknown };
+/** The machine {@link createToolLoopMachine} returns. */
+export type ToolLoopMachine = PresetMachine<ToolLoopContext, ToolLoopInput, ToolLoopOutput>;
 
 const contextSchema = objectSchema<ToolLoopContext>({ prompt: jsonString, result: jsonAny }, [
   "prompt",
@@ -55,7 +67,7 @@ const outputSchema = objectSchema<{ result: unknown }>({ result: jsonAny }, ["re
  * // Snapshots and log entries carry machine.version ("1") automatically.
  * ```
  */
-export function createToolLoopMachine(config: CreateToolLoopMachineConfig): AnyStateMachine {
+export function createToolLoopMachine(config: CreateToolLoopMachineConfig): ToolLoopMachine {
   const { model, instructions, tools, outputSchema: resultSchema, maxSteps } = config;
 
   const agentSetup = setupAgent({
@@ -96,5 +108,5 @@ export function createToolLoopMachine(config: CreateToolLoopMachineConfig): AnyS
     },
   });
 
-  return machine as unknown as AnyStateMachine;
+  return machine as unknown as ToolLoopMachine;
 }

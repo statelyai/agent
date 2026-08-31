@@ -1,4 +1,3 @@
-import type { AnyStateMachine } from "xstate";
 import { setupAgent } from "../setup-agent.js";
 import {
   assertEntryNames,
@@ -13,27 +12,46 @@ import {
   objectSchema,
   renderEntryList,
   type PresetEntry,
+  type PresetMachine,
 } from "./internal.js";
 
 /** Config for {@link createSupervisorMachine}. */
-export interface CreateSupervisorMachineConfig {
+export interface CreateSupervisorMachineConfig<
+  TWorkers extends Record<string, PresetEntry> = Record<string, PresetEntry>,
+> {
   /** Model ref for the supervising decision, and the default for request workers. */
   model: string;
   /** System prompt for the supervising decision. */
   instructions?: string;
   /** The workers the supervisor may delegate to, keyed by name. */
-  workers: Record<string, PresetEntry>;
+  workers: TWorkers;
   /** Hard upper bound on delegations, enforced by a guard. Default 6. */
   maxTurns?: number;
 }
 
 /** Context of a {@link createSupervisorMachine} machine. */
-export type SupervisorContext = {
+export type SupervisorContext<TWorker extends string = string> = {
   task: string;
   results: Record<string, unknown>;
   turns: number;
-  worker: string | null;
+  worker: TWorker | null;
 };
+
+/** Machine input of a {@link createSupervisorMachine} machine. */
+export type SupervisorInput = { task: string };
+/** Machine output of a {@link createSupervisorMachine} machine. */
+export type SupervisorOutput = { results: Record<string, unknown>; turns: number };
+/** The events a {@link createSupervisorMachine} machine accepts: one per worker, plus `FINISH`. */
+export type SupervisorEvent<TWorker extends string = string> =
+  | { type: `DELEGATE_${TWorker}` }
+  | { type: typeof FINISH_EVENT_TYPE };
+/** The machine {@link createSupervisorMachine} returns. */
+export type SupervisorMachine<TWorker extends string = string> = PresetMachine<
+  SupervisorContext<TWorker>,
+  SupervisorInput,
+  SupervisorOutput,
+  SupervisorEvent<TWorker>
+>;
 
 const contextSchema = objectSchema<SupervisorContext>(
   {
@@ -84,7 +102,9 @@ export const FINISH_EVENT_TYPE = "FINISH";
  * });
  * ```
  */
-export function createSupervisorMachine(config: CreateSupervisorMachineConfig): AnyStateMachine {
+export function createSupervisorMachine<const TWorkers extends Record<string, PresetEntry>>(
+  config: CreateSupervisorMachineConfig<TWorkers>,
+): SupervisorMachine<keyof TWorkers & string> {
   const { model, instructions, workers, maxTurns = 6 } = config;
   const names = Object.keys(workers);
   assertEntryNames("worker", names, ["supervising", "done"]);
@@ -186,7 +206,7 @@ export function createSupervisorMachine(config: CreateSupervisorMachineConfig): 
 
   const machine = agentSetup.createMachine(machineConfig);
 
-  return machine as unknown as AnyStateMachine;
+  return machine as unknown as SupervisorMachine<keyof TWorkers & string>;
 }
 
 // Renders the accumulated worker results for the next supervising decision.

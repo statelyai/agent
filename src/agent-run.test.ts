@@ -242,6 +242,7 @@ describe("createAgentRun", () => {
     const step = createTextLogic({
       schemas: { input: z.object({}), output: z.object({}) },
       model: "test-model",
+      prompt: "work",
     });
     const agent = setupAgent({ schemas, actors: { step } });
     const machine = agent.createMachine({

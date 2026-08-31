@@ -443,6 +443,7 @@ describe("runAgent", () => {
         output: z.number(),
       },
       model: "test-model",
+      prompt: "step",
     });
 
     const agent = setupAgent({ schemas, actors: { step } });
@@ -491,6 +492,7 @@ describe("runAgent", () => {
     const step = createTextLogic({
       schemas: { input: z.object({}), output: z.number() },
       model: "test-model",
+      prompt: "step",
     });
 
     const agent = setupAgent({ schemas, actors: { step } });
@@ -551,6 +553,7 @@ describe("runAgent", () => {
     const step = createTextLogic({
       schemas: { input: z.object({}), output: z.object({}) },
       model: "test-model",
+      prompt: "work",
     });
     const agent = setupAgent({ schemas, actors: { step } });
     const machine = agent.createMachine({
@@ -588,6 +591,7 @@ describe("runAgent", () => {
     const step = createTextLogic({
       schemas: { input: z.object({}), output: z.object({}) },
       model: "test-model",
+      prompt: "work",
     });
     const agent = setupAgent({ schemas, actors: { step } });
     const machine = agent.createMachine({
@@ -628,6 +632,7 @@ describe("runAgent", () => {
     const step = createTextLogic({
       schemas: { input: z.object({}), output: z.object({}) },
       model: "test-model",
+      prompt: "work",
     });
     const agent = setupAgent({ schemas, actors: { step } });
     const machine = agent.createMachine({
@@ -785,6 +790,7 @@ describe("runAgent", () => {
         mode: "stream",
         schemas: { input: z.object({}), output: z.string() },
         model: "test-model",
+        prompt: "summarize",
       });
       const agent = setupAgent({
         schemas: createAgentSchemas({ context: z.object({}), input: z.object({}) }),
@@ -2828,6 +2834,7 @@ describe("runAgent error cause split", () => {
     const step = createTextLogic({
       schemas: { input: z.object({}), output: z.object({}) },
       model: "test-model",
+      prompt: "work",
     });
     const agent = setupAgent({ schemas, actors: { step } });
     const machine = agent.createMachine({

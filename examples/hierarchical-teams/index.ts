@@ -207,7 +207,7 @@ const writingSetup = setupAgent({
       schemas: { input: z.object({ research: z.string() }), output: z.string() },
       model: "outliner",
       system: "Create a report outline from the research notes: at most three short bullets.",
-      prompt: ({ input }) => input.research,
+      prompt: ({ input }) => `Research:\n${input.research || "(none gathered)"}`,
     },
     write: {
       schemas: {

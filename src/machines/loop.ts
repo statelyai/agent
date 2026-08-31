@@ -1,4 +1,3 @@
-import type { AnyStateMachine } from "xstate";
 import { setupAgent } from "../setup-agent.js";
 import {
   entryInput,
@@ -10,6 +9,7 @@ import {
   jsonString,
   objectSchema,
   type PresetEntry,
+  type PresetMachine,
   type PresetMachineEntry,
 } from "./internal.js";
 
@@ -48,6 +48,13 @@ export type LoopContext = {
   last: unknown;
 };
 
+/** Machine input of a {@link createLoopMachine} machine. */
+export type LoopInput = { prompt: string };
+/** Machine output of a {@link createLoopMachine} machine. */
+export type LoopOutput = { iterations: number; results: unknown[]; last: unknown };
+/** The machine {@link createLoopMachine} returns. */
+export type LoopMachine = PresetMachine<LoopContext, LoopInput, LoopOutput>;
+
 const contextSchema = objectSchema<LoopContext>(
   { prompt: jsonString, iterations: jsonNumber, results: jsonArray, last: jsonAny },
   ["prompt", "iterations", "results"],
@@ -74,7 +81,7 @@ const outputSchema = objectSchema<{ iterations: number; results: unknown[]; last
  * });
  * ```
  */
-export function createLoopMachine(config: CreateLoopMachineConfig): AnyStateMachine {
+export function createLoopMachine(config: CreateLoopMachineConfig): LoopMachine {
   const { model, body, until, maxTurns } = config;
   if (!Number.isInteger(maxTurns) || maxTurns < 1) {
     throw new Error("createLoopMachine: maxTurns must be an integer >= 1.");
@@ -150,5 +157,5 @@ export function createLoopMachine(config: CreateLoopMachineConfig): AnyStateMach
 
   const machine = agentSetup.createMachine(machineConfig);
 
-  return machine as unknown as AnyStateMachine;
+  return machine as unknown as LoopMachine;
 }

@@ -11,6 +11,7 @@ export type {
 } from "./setup-agent.js";
 export {
   AgentDecisionExhaustedError,
+  createDecisionLogic,
   renderDecisionAttempts,
   resolveDecision,
 } from "./decision.js";
@@ -19,6 +20,8 @@ export type {
   AgentDecisionRequest,
   AgentDecisionExecutor,
   DecisionAttempt,
+  // Return type of `createDecisionLogic`, so declaration emit can name it.
+  DecisionLogic,
   DecisionLogicConfig,
   ResolveDecisionOptions,
 } from "./decision.js";
