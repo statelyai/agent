@@ -26,6 +26,7 @@
     "child-machine-bind-validation",
     "collapse-steps-adapter-subpaths",
     "commit-is-suspended-heuristic-warning",
+    "contract-fixes-xor-decisions-presets-messages",
     "create-agent-run",
     "decide-auto-delivery-and-define-models",
     "decision-and-invoke-typing-dx",
