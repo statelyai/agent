@@ -56,16 +56,25 @@ export function appendMessages<
   });
 }
 
-// Recognized `AgentMessage` content part type tags.
-const KNOWN_PART_TYPES = new Set(["text", "image", "file", "tool-call", "tool-result"]);
+type MessagePartType = "text" | "image" | "file" | "tool-call" | "tool-result";
+
+// Recognized `AgentMessage` content part type tags, narrowed per role below.
+const KNOWN_PART_TYPES = new Set<MessagePartType>([
+  "text",
+  "image",
+  "file",
+  "tool-call",
+  "tool-result",
+]);
+const USER_PART_TYPES = new Set<MessagePartType>(["text", "image", "file"]);
+const ASSISTANT_PART_TYPES = new Set<MessagePartType>(["text", "file", "tool-call", "tool-result"]);
+const TOOL_PART_TYPES = new Set<MessagePartType>(["tool-result"]);
+const TOOL_RESULT_CONTENT_PART_TYPES = new Set<MessagePartType>(["text", "image"]);
 
 // True if `part` is an object with a recognized part `type`.
-function isKnownPart(part: unknown): part is { type: string } {
-  return (
-    !!part &&
-    typeof part === "object" &&
-    KNOWN_PART_TYPES.has((part as { type?: unknown }).type as string)
-  );
+function isKnownPart(part: unknown): part is { type: MessagePartType } {
+  const type = part && typeof part === "object" ? (part as { type?: unknown }).type : undefined;
+  return typeof type === "string" && KNOWN_PART_TYPES.has(type as MessagePartType);
 }
 
 // Requires `field` on `part` to be a string; returns an error message, or undefined.
@@ -77,15 +86,23 @@ function requireString(
   return typeof part[field] === "string" ? undefined : `${type} part requires a string "${field}"`;
 }
 
-// Requires `field` on `part` to be present (any defined value); returns an error message, or undefined.
-function requireDefined(
+function isMediaData(value: unknown): boolean {
+  return (
+    typeof value === "string" ||
+    value instanceof Uint8Array ||
+    value instanceof ArrayBuffer ||
+    value instanceof URL
+  );
+}
+
+function requireMediaData(
   part: Record<string, unknown>,
-  type: string,
-  field: string,
+  type: "image" | "file",
+  field: "image" | "data",
 ): string | undefined {
-  return field in part && part[field] !== undefined
+  return isMediaData(part[field])
     ? undefined
-    : `${type} part requires a "${field}" value`;
+    : `${type} part requires "${field}" to be a string, Uint8Array, ArrayBuffer, or URL`;
 }
 
 const TOOL_RESULT_OUTPUT_TYPES = new Set(["text", "json", "error-text", "error-json", "content"]);
@@ -111,33 +128,44 @@ function validateToolResultOutput(output: unknown): string | undefined {
       return 'tool-result output of type "content" requires an array "value"';
     }
     for (const contentPart of record.value) {
-      const error = validatePart(contentPart);
+      const error = validatePart(
+        contentPart,
+        TOOL_RESULT_CONTENT_PART_TYPES,
+        "tool-result output content",
+      );
       if (error) {
         return error;
       }
     }
     return undefined;
   }
-  // "json" | "error-json": any value, but the key must be present.
-  return "value" in record
+  // "json" | "error-json": any defined value, including null.
+  return record.value !== undefined
     ? undefined
     : `tool-result output of type "${outputType}" requires a "value"`;
 }
 
 // Validates a single content part's required fields; returns an error message, or undefined.
-function validatePart(part: unknown): string | undefined {
+function validatePart(
+  part: unknown,
+  allowedTypes: ReadonlySet<MessagePartType>,
+  location: string,
+): string | undefined {
   if (!isKnownPart(part)) {
     const type = part && typeof part === "object" ? (part as { type?: unknown }).type : undefined;
     return `Unknown message part type: ${JSON.stringify(type)}`;
+  }
+  if (!allowedTypes.has(part.type)) {
+    return `${location} does not allow "${part.type}" parts`;
   }
   const record = part as unknown as Record<string, unknown>;
   switch (record.type) {
     case "text":
       return requireString(record, "text", "text");
     case "image":
-      return requireDefined(record, "image", "image");
+      return requireMediaData(record, "image", "image");
     case "file":
-      return requireDefined(record, "file", "data") ?? requireString(record, "file", "mediaType");
+      return requireMediaData(record, "file", "data") ?? requireString(record, "file", "mediaType");
     case "tool-call":
       return (
         requireString(record, "tool-call", "toolCallId") ??
@@ -156,12 +184,16 @@ function validatePart(part: unknown): string | undefined {
 }
 
 // Validates a message `content` array of parts; returns an error message, or undefined if valid.
-function validatePartsArray(content: unknown): string | undefined {
+function validatePartsArray(
+  content: unknown,
+  allowedTypes: ReadonlySet<MessagePartType>,
+  location: string,
+): string | undefined {
   if (!Array.isArray(content)) {
     return "Expected content to be a string or an array of parts";
   }
   for (const part of content) {
-    const error = validatePart(part);
+    const error = validatePart(part, allowedTypes, location);
     if (error) {
       return error;
     }
@@ -173,9 +205,9 @@ function validatePartsArray(content: unknown): string | undefined {
  * A {@link StandardSchemaV1} validating an `AgentMessage[]` context field —
  * checks that every message has a known `role` (`system`/`user`/`assistant`/
  * `tool`) and that `content` is either a string (where the role allows it) or
- * an array of parts with a known `type` whose required fields are present and
- * of the right primitive type (extra fields are allowed). Use it directly as a context
- * schema's `messages` field when authoring with `createAgentSchemas`.
+ * an array of role-appropriate parts whose required fields and media payloads
+ * have the right runtime types (extra fields are allowed). Use it directly as
+ * a context schema's `messages` field when authoring with `createAgentSchemas`.
  */
 export const messagesSchema: StandardSchemaV1<AgentMessage[]> = {
   "~standard": {
@@ -210,22 +242,22 @@ export const messagesSchema: StandardSchemaV1<AgentMessage[]> = {
         }
 
         if (role === "tool") {
-          const error =
-            validatePartsArray(content) ??
-            ((content as Array<{ type?: unknown }>).some((part) => part.type !== "tool-result")
-              ? "tool message content must contain only tool-result parts"
-              : undefined);
+          const error = validatePartsArray(content, TOOL_PART_TYPES, "tool message content");
           if (error) {
             return { issues: [{ message: error }] };
           }
           continue;
         }
 
-        // user | assistant: string or a parts array
+        // user | assistant: string or a role-appropriate parts array
         if (typeof content === "string") {
           continue;
         }
-        const error = validatePartsArray(content);
+        const error = validatePartsArray(
+          content,
+          role === "user" ? USER_PART_TYPES : ASSISTANT_PART_TYPES,
+          `${role} message content`,
+        );
         if (error) {
           return { issues: [{ message: error }] };
         }

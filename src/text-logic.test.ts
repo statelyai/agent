@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { z } from "zod";
 import { createActor, toPromise } from "xstate";
 import {
@@ -140,7 +140,7 @@ describe('createTextLogic({ mode: "stream" })', () => {
       executeAgentTextRequest(
         "stream",
         "myStream",
-        { model: "test-model" },
+        { model: "test-model", prompt: "go" },
         { generateText: async () => ({ output: "nope" }) },
       ),
     ).rejects.toThrow(/no executor.*stream.*'myStream'/i);
@@ -657,9 +657,9 @@ describe("agent text request input sources", () => {
   });
 
   test("rejects a request with neither", () => {
-    expect(() =>
-      generateText.request({ model: "test-model" } as AgentTextRequest),
-    ).toThrow(/has neither a non-empty `prompt` nor `messages`/);
+    expect(() => generateText.request({ model: "test-model" } as AgentTextRequest)).toThrow(
+      /has neither a non-empty `prompt` nor `messages`/,
+    );
   });
 
   test("accepts a prompt-only request", () => {
@@ -688,5 +688,41 @@ describe("agent text request input sources", () => {
     expect(() => both.request(undefined as never)).toThrow(
       /'both' has both a non-empty `prompt` and `messages`/,
     );
+  });
+
+  test("createTextLogic lowering throws when neither source resolves", () => {
+    const neither = createTextLogic({
+      name: "neither",
+      model: "test-model",
+    });
+
+    expect(() => neither.request(undefined as never)).toThrow(
+      /'neither' has neither a non-empty `prompt` nor `messages`/,
+    );
+  });
+
+  test.each([
+    {
+      name: "both",
+      input: {
+        name: "both",
+        model: "test-model",
+        prompt: "Tell a joke.",
+        messages: [{ role: "user" as const, content: "Tell a joke." }],
+      },
+      error: /'both' has both a non-empty `prompt` and `messages`/,
+    },
+    {
+      name: "neither",
+      input: { name: "neither", model: "test-model" },
+      error: /'neither' has neither a non-empty `prompt` nor `messages`/,
+    },
+  ])("direct execution rejects a request with $name source", async ({ name, input, error }) => {
+    const generateText = vi.fn(async () => ({ output: "unreachable" }));
+
+    await expect(
+      executeAgentTextRequest("generate", name, input, { generateText }),
+    ).rejects.toThrow(error);
+    expect(generateText).not.toHaveBeenCalled();
   });
 });

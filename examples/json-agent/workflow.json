@@ -76,7 +76,7 @@
     "draftReply": {
       "model": "openai/gpt-5.4-mini",
       "system": "Draft a short, courteous support reply to the customer's ticket.",
-      "prompt": "{{ context.ticket }}",
+      "prompt": "{{ input.ticket }}",
       "input": {
         "type": "object",
         "properties": {

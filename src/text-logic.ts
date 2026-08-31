@@ -567,14 +567,10 @@ export function createTextLogic<
     const name = resolveTextLogicValue(config.name, args);
     const prompt = resolveTextLogicValue(config.prompt, args);
     const messages = resolveTextLogicValue(config.messages, args);
-    const bothSources =
-      typeof prompt === "string" &&
-      prompt.length > 0 &&
-      Array.isArray(messages) &&
-      messages.length > 0;
+    const sourceIssue = textRequestSourceIssue({ name, prompt, messages });
 
-    if (bothSources) {
-      throw new Error(textRequestSourceIssue({ name, prompt, messages })!);
+    if (sourceIssue) {
+      throw new Error(sourceIssue);
     }
 
     return {
@@ -1011,6 +1007,12 @@ export async function executeAgentTextRequest(
       ...tools,
     },
   };
+  const sourceIssue = textRequestSourceIssue(request);
+
+  if (sourceIssue) {
+    throw new Error(sourceIssue);
+  }
+
   const executor = mode === "stream" ? executors.streamText : executors.generateText;
 
   if (!executor) {
@@ -1021,9 +1023,8 @@ export async function executeAgentTextRequest(
 
   // The runtime object is a plain lowered request; the cast bridges to the
   // executor-facing type (see AgentExecutorTextRequest — prompt/messages are
-  // typed as mutually exclusive there, which core enforces at runtime: both
-  // agentTextInputSchema and createTextLogic's lowering reject a request that
-  // carries a non-empty `prompt` and a non-empty `messages` array).
+  // typed as mutually exclusive there, which core enforces at runtime through
+  // agentTextInputSchema, createTextLogic's lowering, and this direct boundary.
   const raw = await executor(request as AgentExecutorTextRequest, info);
   return {
     output: await normalizeGeneratorResult(raw, id, {

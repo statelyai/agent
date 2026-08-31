@@ -359,6 +359,7 @@ describe("lintAgentMachine — each check fires on a crafted bad machine", () =>
     const inlineLogic = createTextLogic({
       schemas: { input: z.object({}), output: z.string() },
       model: "m",
+      prompt: "work",
     });
     const agent = setupAgent({
       context: z.object({}),

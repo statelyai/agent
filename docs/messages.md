@@ -107,7 +107,7 @@ A request that needs history sends it through `messages` instead of a bare `prom
 
 ### Validating messages with messagesSchema
 
-`messagesSchema` is a root export typed as `StandardSchemaV1<AgentMessage[]>`. It checks that every message has a known `role` and that `content` is a string or an array of known parts. Use it as a standalone validator on messages that arrive from outside your process, such as an HTTP body, a stored transcript, or a client resume payload:
+`messagesSchema` is a root export typed as `StandardSchemaV1<AgentMessage[]>`. It checks each role's allowed content parts, required part fields, media payload types, and nested tool-result content. Use it as a standalone validator on messages that arrive from outside your process, such as an HTTP body, a stored transcript, or a client resume payload:
 
 ```ts
 import { messagesSchema, type AgentMessage } from "@statelyai/agent";

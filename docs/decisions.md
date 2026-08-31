@@ -67,10 +67,13 @@ The `allowedEvents` option accepts a single string or an array. Entries are exac
 
 ### Reusable decision logic
 
+<!-- createDecisionLogic public API from src/decision.ts and src/index.ts -->
+
 For a decision used by more than one state or machine, `createDecisionLogic` builds the same decision as standalone actor logic, exported from `@statelyai/agent`. Register the result under `actors:` and invoke it by name. It takes the same fields as the `agent.decide` input, each a static value or an `({ input }) => value` resolver, plus an optional `schemas.input` to type and validate the input.
 
 ```ts no-check
 import { createDecisionLogic } from "@statelyai/agent";
+import { z } from "zod";
 
 export const chooseAction = createDecisionLogic({
   schemas: { input: z.object({ questionsRemaining: z.number() }) },
@@ -129,7 +132,7 @@ Retry behavior:
 
 Core validates and retries. It never calls a model. Coercing the model into choosing exactly one option is the host's responsibility. Hosts do this with one tool per event and a forced tool choice, or with structured output over an event union. The shipped `createAiSdkExecutors` provides a `decide` executor for the Vercel AI SDK. The raw-SDK examples force the choice with `tool_choice`. See [Hosts](hosts.md).
 
-> **Note:** Decisions are state-local, so author them inline on the invoke. There is no reusable decision-logic object, because a decision's candidates and legality depend on the state it runs in.
+> **Note:** Decisions are state-local, so prefer authoring one-off decisions inline on the invoke.
 
 ## The decide loop for multi-event commands
 
