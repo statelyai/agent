@@ -81,6 +81,62 @@ Look for the following patterns in any loop:
 
 Two states can run the same code and still be different states. `drafting` after classification and `drafting` after a revision run the same code, but only the second increments a counter. The loop needs a flag to tell them apart. The machine tells them apart by which transition arrived.
 
+## Status comes from state
+
+<!-- snapshot.value, state meta, getStateMeta, and RunAgentOptions.onTransition from the public XState/Agent observation APIs -->
+
+A loop has no name for its current step, so applications usually add status calls by hand: `reportStatus("researching")`, `reportStatus("waiting for approval")`, and another call on every branch. Those calls drift when the control flow changes, and asking the model to report progress spends tokens on a status it can forget or misrepresent.
+
+An agent machine already records the truthful status in every snapshot. `snapshot.value` is the machine-readable progress value. No separate Agent status protocol is needed.
+
+```ts no-check
+await runAgent(machine, {
+  input,
+  executors,
+  onTransition: (snapshot) => {
+    publishStatus({ state: snapshot.value });
+  },
+});
+```
+
+For user-facing text, declare optional presentation metadata on the states themselves. This keeps the wording next to the control flow and preserves it when the machine is serialized as data.
+
+```ts no-check
+const agentSetup = setupAgent({
+  meta: z.object({ status: z.string().optional() }),
+  // context, events, requests, ...
+});
+
+const machine = agentSetup.createMachine({
+  initial: "researching",
+  states: {
+    researching: {
+      meta: { status: "Researching sources" },
+      // ...
+    },
+    awaitingApproval: {
+      meta: { status: "Waiting for approval" },
+      // ...
+    },
+  },
+});
+
+await runAgent(machine, {
+  input,
+  executors,
+  onTransition: (snapshot) => {
+    publishStatus({
+      state: snapshot.value,
+      label: getStateMeta(snapshot).status,
+    });
+  },
+});
+```
+
+Hierarchical and parallel machines report nested state values, so hosts should preserve `snapshot.value` rather than coercing it with `String(...)`. The same snapshot can drive a progress UI, logs, tracing, or a “what is the agent doing?” endpoint. Persisting and resuming the machine also restores this status automatically.
+
+Do not confuse progress with `snapshot.status`. XState's `snapshot.status` is the actor lifecycle (`active`, `done`, `error`, or `stopped`); `snapshot.value` says what the agent is currently doing. See [Observability](observability.md#report-agent-progress-from-state).
+
 ## States as prompts
 
 Each state that calls the model owns one prompt. The model does one of two things: it produces a value, or it chooses an event. `classify` and `writeReply` produce values, so they become text logic, and the prompt sits next to the state that uses it.

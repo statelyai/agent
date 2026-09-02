@@ -168,6 +168,29 @@ await runAgent(machine, {
 - `onTransition` gives XState terms: state values and events.
 - `on` gives the domain events the machine emits at authored moments. Use it for a progress UI, an SSE stream, or a log line.
 
+### Report agent progress from state
+
+<!-- snapshot.value, state meta, getStateMeta, and RunAgentOptions.onTransition from the public XState/Agent observation APIs -->
+
+The current machine state is already the agent's canonical progress status. Publish `snapshot.value` from `onTransition` instead of adding status calls to every request, tool, or branch—or asking the model to report what it is doing.
+
+```ts no-check
+await runAgent(machine, {
+  input,
+  executors,
+  onTransition: (snapshot) => {
+    publishStatus({
+      state: snapshot.value,
+      label: getStateMeta(snapshot).status,
+    });
+  },
+});
+```
+
+`state` remains the portable, machine-readable value. A state may optionally declare schema-typed `meta.status` text for display; `getStateMeta(snapshot)` resolves the active metadata. This also works for persisted and resumed runs because progress is derived from the snapshot, not a separate status log. Preserve nested/parallel state values rather than coercing them with `String(...)`.
+
+`snapshot.status` is different: it reports the XState actor lifecycle (`active`, `done`, `error`, or `stopped`). Use `snapshot.value` for “what is the agent doing?” See [Thinking in state machines](thinking-in-state-machines.md#status-comes-from-state).
+
 Declare emitted schemas in `setupAgent` and both `enq.emit(...)` and the `on` handlers are fully typed.
 
 ```ts no-check
