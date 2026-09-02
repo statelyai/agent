@@ -85,10 +85,10 @@ export { AGENT_USAGE_EVENT_TYPE } from "./usage.js";
 export type { AgentUsageEvent } from "./usage.js";
 export {
   AGENT_TRACE_SCHEMA_VERSION,
-  AgentIdleError,
   AgentIllegalResumeEventError,
   AgentMaxModelCallsExceededError,
   inspectTransitions,
+  isAgentIdle,
   runAgent,
   serializeTraceEvent,
   traceTransitions,

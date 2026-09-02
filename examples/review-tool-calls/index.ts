@@ -148,8 +148,8 @@ const agentSetup = setupAgent({
   // `reviewing` and `executing` are reached only after a proposal exists — narrow
   // it non-null in both so the EDIT merge and the invoke input type-check.
   states: {
-    reviewing: { context: { proposal: refundCallSchema } },
-    executing: { context: { proposal: refundCallSchema } },
+    reviewing: { schemas: { context: contextSchema.extend({ proposal: refundCallSchema }) } },
+    executing: { schemas: { context: contextSchema.extend({ proposal: refundCallSchema }) } },
   },
 });
 

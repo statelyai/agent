@@ -146,6 +146,32 @@ describe("lintAgentMachine — each check fires on a crafted bad machine", () =>
     ).toBe(false);
   });
 
+  test("unhandled-agent-messages: a state-scoped transcript transition is recognized", () => {
+    const agent = setupAgent({
+      context: z.object({ messages: z.array(z.unknown()) }),
+      requests: {
+        answer: { schemas: {}, model: "test", prompt: "answer" },
+      },
+    });
+    const machine = agent.createMachine({
+      context: { messages: [] },
+      initial: "answering",
+      states: {
+        answering: {
+          on: { "agent.messages": agent.appendMessages() },
+          invoke: { src: "answer", onDone: { target: "done" } },
+        },
+        done: { type: "final" },
+      },
+    });
+
+    expect(
+      lintAgentMachine(machine).some(
+        (diagnostic) => diagnostic.code === "unhandled-agent-messages",
+      ),
+    ).toBe(false);
+  });
+
   test("decide-without-events: an agent.decide state with no on/ancestor handlers", () => {
     const agent = setupAgent({
       context: z.object({}),

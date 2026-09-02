@@ -101,30 +101,6 @@ export class AgentIllegalResumeEventError extends AgentError {
   }
 }
 
-/**
- * Thrown by {@link generateResult} when the run settles `idle` instead of
- * `done`: the machine paused for external input. Carries the idle `snapshot`
- * and `acceptedTypes` (the event types that could resume it, via
- * {@link getAcceptedEvents}). Use {@link runAgent} directly when idle is an
- * expected outcome you handle.
- */
-export class AgentIdleError extends AgentError {
-  readonly snapshot: AnyMachineSnapshot;
-  readonly acceptedTypes: string[];
-  constructor(snapshot: AnyMachineSnapshot, acceptedTypes: string[]) {
-    super(
-      "agent-idle",
-      `generateResult: the machine paused (idle) instead of completing. Resume it by ` +
-        `calling runAgent with one of these events: ${
-          acceptedTypes.length > 0 ? acceptedTypes.join(", ") : "(none)"
-        }.`,
-    );
-    this.name = "AgentIdleError";
-    this.snapshot = snapshot;
-    this.acceptedTypes = acceptedTypes;
-  }
-}
-
 /** Handler for `agent.userInput` invokes passed as {@link RunAgentOptions.userInput}. Resolves to what the human typed. */
 export interface AgentUserInputExecutor {
   (input: AgentUserInput): PromiseLike<string>;
@@ -1708,64 +1684,17 @@ export async function runAgent<TMachine extends AnyStateMachine>(
   machine: TMachine,
   options: RunAgentOptions<TMachine>,
 ): Promise<RunAgentResult<TMachine>> {
-  return createAgentSession(machine, options, { oneShot: true }).settled();
+  return createAgentSession(machine, options).settled();
 }
 
-/**
- * A long-lived agent session returned by {@link createAgentActor}: the same
- * engine as {@link runAgent} (executor binding at any depth, budgets, traces),
- * but the actor stays alive across idle settles.
- *
- * One **cycle** runs from start (or the event that re-opened the session) to
- * the next quiescence. `settled()` resolves with the current cycle's
- * {@link RunAgentResult}; after an `idle` settle, sending the actor an event
- * re-opens the cycle and the next `settled()` call tracks it. The event log
- * spans the whole session — every turn appends to one replayable history.
- * `done`, `error`, and external stop are final: the actor stops and every
- * later `settled()` resolves with that final result.
- */
-export interface AgentActorSession<TMachine extends AnyStateMachine> {
-  /** The live bound actor. Drive it directly: `session.actor.send(event)`. */
-  actor: ReturnType<typeof createActor<TMachine>>;
-  /** Cumulative session usage (all cycles). */
-  usage(): AgentUsage;
-  /** Resolves with the current cycle's settled result (`done | idle | error`). */
+interface AgentRunSession<TMachine extends AnyStateMachine> {
   settled(): Promise<RunAgentResult<TMachine>>;
-  /** Stops the actor. A not-yet-settled cycle settles `error`/`stopped`. */
-  stop(): void;
-}
-
-/**
- * Session mode: {@link runAgent}'s engine with a long-lived actor. Use it when
- * the agent is a *session* fed by external events (chat turns, device or
- * timer events, a socket) rather than a one-shot job — you keep the budget,
- * traces, and idle semantics that bare `provideExecutors` +
- * `createActor` would forfeit.
- *
- * ```ts
- * const session = createAgentActor(machine, { input, executors });
- * let result = await session.settled();          // first quiescence
- * while (result.status === "idle") {
- *   session.actor.send(await nextUserEvent(result.snapshot));
- *   result = await session.settled();            // next quiescence, same log
- * }
- * session.stop();
- * ```
- *
- * Accepts the same options as {@link runAgent}, including snapshot resume.
- */
-export function createAgentActor<TMachine extends AnyStateMachine>(
-  machine: TMachine,
-  options: RunAgentOptions<TMachine>,
-): AgentActorSession<TMachine> {
-  return createAgentSession(machine, options, { oneShot: false });
 }
 
 function createAgentSession<TMachine extends AnyStateMachine>(
   machine: TMachine,
   options: RunAgentOptions<TMachine>,
-  lifecycle: { oneShot: boolean },
-): AgentActorSession<TMachine> {
+): AgentRunSession<TMachine> {
   const maxModelCalls = options.maxModelCalls ?? 100;
   let modelCallCount = 0;
   let budgetExceeded = false;
@@ -1843,11 +1772,10 @@ function createAgentSession<TMachine extends AnyStateMachine>(
   // INVOKED CHILD machine is therefore reported to the root too, attributed by
   // the event's `id`/`src`/`model`.
   //
-  // A call that settles AFTER the run's current cycle has resolved is a
+  // A call that settles AFTER the run has resolved is a
   // straggler: its tokens still fold into the run-level aggregate, but the
-  // event is DROPPED rather than delivered — identical on both the one-shot
-  // and the session (`createAgentActor`) path, so a late arrival can never
-  // re-open an already-returned idle result. Dropped stragglers are visible on
+  // event is DROPPED rather than delivered, so a late arrival can never
+  // affect an already-returned result. Dropped stragglers are visible on
   // `onTrace` as `usage.dropped`.
   //
   // Run-level usage aggregation: every executor-reported per-call usage folds
@@ -1999,9 +1927,9 @@ function createAgentSession<TMachine extends AnyStateMachine>(
   // The machine owns its wait semantics. An explicit setupAgent predicate wins;
   // otherwise a resting configuration with event handlers (or interaction
   // metadata) is an intentional external wait.
-  const isIdle = getMachineIdlePredicate(machine) ?? isStructurallyIdle;
+  const isIdle = getMachineIdlePredicate(machine) ?? isAgentIdle;
   const isIntentionalIdle = (snapshot: AnyMachineSnapshot) =>
-    isIdle(snapshot) || userInputIsPlaceholder;
+    isIdle(snapshot) || collectPendingUserInputs(snapshot).length > 0;
 
   const effectiveSnapshot = options.snapshot;
 
@@ -2025,14 +1953,10 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     }
   }
 
-  // One cycle = start (or re-opening event) → next quiescence. `settled`
-  // gates the current cycle; `finalized` marks a terminal settle (one-shot
-  // mode, or done/error/stopped in session mode) after which the actor is
-  // stopped and the result is permanent.
+  // One run = start (or resume event) to the next quiescence.
   let settled = false;
-  let finalized = false;
-  // A call settling after the cycle resolved is a straggler (see
-  // deliverUsageEvent): dropped identically on both lifecycle paths.
+  // A call settling after the run resolved is a straggler (see
+  // deliverUsageEvent): dropped after the run settles.
   cycleGate.isResolved = () => settled;
   let lastResult: RunAgentResult<TMachine> | undefined;
   const waiters: Array<(result: RunAgentResult<TMachine>) => void> = [];
@@ -2076,13 +2000,10 @@ function createAgentSession<TMachine extends AnyStateMachine>(
       clearTimeout(idleTimer);
     }
     onTrace({ type: "run.end", ...outcome } as AgentTraceEventPayload<TMachine>);
-    if (lifecycle.oneShot || result.status !== "idle") {
-      finalized = true;
-      if (options.signal) {
-        options.signal.removeEventListener("abort", onAbort);
-      }
-      actor.stop();
+    if (options.signal) {
+      options.signal.removeEventListener("abort", onAbort);
     }
+    actor.stop();
     lastResult = result;
     for (const resolve of waiters.splice(0)) {
       resolve(result);
@@ -2162,14 +2083,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
         return;
       }
       if (settled) {
-        if (finalized) {
-          return;
-        }
-        // Session mode: an external event after an idle settle re-opens the
-        // cycle. The journal keeps appending to the same log below, and the
-        // next quiescence resolves the next `settled()` call.
-        settled = false;
-        lastResult = undefined;
+        return;
       }
 
       const snapshot = event.snapshot as AnyMachineSnapshot;
@@ -2273,18 +2187,13 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     }
   }
 
-  const sessionApi: AgentActorSession<TMachine> = {
-    actor,
-    usage: runUsage,
+  const sessionApi: AgentRunSession<TMachine> = {
     settled: () =>
       settled && lastResult !== undefined
         ? Promise.resolve(lastResult)
         : new Promise<RunAgentResult<TMachine>>((resolve) => {
             waiters.push(resolve);
           }),
-    stop: () => {
-      actor.stop();
-    },
   };
 
   if (options.signal) {
@@ -2344,59 +2253,6 @@ function createAgentSession<TMachine extends AnyStateMachine>(
   }
 
   return sessionApi;
-}
-
-/**
- * The resolved value of {@link generateResult}: the `done`-narrowed
- * {@link RunAgentResult} — `output` plus run metadata (`snapshot`, `persist`,
- * aggregated `usage`), mirroring how the AI SDK's `generateText`
- * resolves `text` alongside its call metadata.
- */
-export type GenerateResult<TMachine extends AnyStateMachine> = Extract<
-  RunAgentResult<TMachine>,
-  { status: "done" }
->;
-
-/**
- * Runs an agent machine to a **final state**, for run-to-done flows where an
- * idle pause is unexpected. Wraps {@link runAgent}:
- *
- * - `done` → resolves with the done result: `result.output` (the machine's
- *   `OutputFrom`) plus metadata — `result.snapshot`, the replayable
- *   `result.persist()`, and the aggregated `result.usage` — the same shape
- *   `generateText` users expect (`text` + call metadata).
- * - `idle` → throws {@link AgentIdleError} carrying the idle snapshot and the
- *   event types that could resume it.
- * - `error` → throws `result.error` when it is an `Error`; otherwise wraps it
- *   in an `Error` whose `.cause` is the {@link RunAgentErrorCause} and whose
- *   `.error` is the raw thrown value.
- *
- * Use {@link runAgent} directly when idle is an expected outcome you handle
- * (human-in-the-loop, resumable flows); use `generateResult` when the
- * machine is meant to run straight through to a final state.
- */
-export async function generateResult<TMachine extends AnyStateMachine>(
-  machine: TMachine,
-  options: RunAgentOptions<TMachine>,
-): Promise<GenerateResult<TMachine>> {
-  const result = await runAgent(machine, options);
-  if (result.status === "done") {
-    return result;
-  }
-  if (result.status === "idle") {
-    const acceptedTypes = getAcceptedEvents(result.snapshot as AnyMachineSnapshot, {
-      schemas: getRegisteredAgentExecutionOptions(machine).schemas,
-    }).map((descriptor) => descriptor.type);
-    throw new AgentIdleError(result.snapshot as AnyMachineSnapshot, acceptedTypes);
-  }
-  // error
-  if (result.error instanceof Error) {
-    throw result.error;
-  }
-  const wrapped = new Error(`generateResult: run failed with cause '${result.cause}'.`);
-  (wrapped as { cause?: unknown }).cause = result.cause;
-  (wrapped as { error?: unknown }).error = result.error;
-  throw wrapped;
 }
 
 /**
@@ -2516,28 +2372,26 @@ function isIdleSnapshot(
   return !hasPendingWork;
 }
 
-/** Default machine-owned idle semantics: every active leaf is an intentional
- * external wait, expressed either by accepted events or interaction metadata,
- * and has no immediate/invoked work of its own. */
-function isStructurallyIdle(snapshot: AnyMachineSnapshot): boolean {
+/**
+ * Default machine-owned idle signal used by {@link runAgent}: an active
+ * snapshot that accepts an external event anywhere in its active hierarchy,
+ * or declares interaction metadata on an active state.
+ *
+ * Compose this in `setupAgent({ isIdle })` when the application has additional
+ * wait states: `isIdle: (snapshot) => isAgentIdle(snapshot) || snapshot.hasTag('waiting')`.
+ * Pending work and active invoked children are checked separately by the
+ * runner, so this function only answers whether the state is an intentional
+ * external wait.
+ */
+export function isAgentIdle(snapshot: AnyMachineSnapshot): boolean {
   if (snapshot.status !== "active") {
     return false;
   }
-  const leaves = snapshot.nodes.filter((node) => node.type === "atomic" || node.type === "final");
-  return (
-    leaves.length > 0 &&
-    leaves.every((node) => {
-      const meta = node.meta;
-      const hasInteraction = typeof meta === "object" && meta !== null && "interaction" in meta;
-      const hasExternalEvent = node.ownEvents.length > 0;
-      return (
-        (hasInteraction || hasExternalEvent) &&
-        node.invoke.length === 0 &&
-        node.after.length === 0 &&
-        !(node.always?.length ?? 0)
-      );
-    })
-  );
+  const hasInteraction = snapshot.nodes.some((node) => {
+    const meta = node.meta;
+    return typeof meta === "object" && meta !== null && "interaction" in meta;
+  });
+  return hasInteraction || getAcceptedEvents(snapshot).length > 0;
 }
 
 // Gathers the still-active `agent.userInput` placeholder children off an idle snapshot: one {@link PendingUserInput} per pending invoke, with the invoke's resolved input (prompt, metadata) read off the child's own snapshot.

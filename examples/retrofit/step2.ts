@@ -47,7 +47,11 @@ const schemas = createAgentSchemas({
 const agentSetup = setupAgent({
   schemas,
   models,
-  states: { needsApproval: { context: { pendingRefund: z.number() } } },
+  states: {
+    needsApproval: {
+      schemas: { context: schemas.context.extend({ pendingRefund: z.number() }) },
+    },
+  },
 });
 
 export const supportMachineStep2 = agentSetup.createMachine({

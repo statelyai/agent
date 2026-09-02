@@ -2,6 +2,15 @@
 
 A human wait is an ordinary XState state with accepted events. A resting state with event handlers—or `meta.interaction`—settles `runAgent` as `idle`.
 
+`isAgentIdle(snapshot)` exposes that default rule. Compose it with application-specific waits when needed:
+
+```ts no-check
+setupAgent({
+  isIdle: (snapshot) =>
+    isAgentIdle(snapshot) || snapshot.hasTag("waiting-for-webhook")
+});
+```
+
 ```ts no-check
 awaitingApproval: {
   meta: {

@@ -228,8 +228,12 @@ const agentSetup = setupAgent({
   // `confirming` and `executing` are reached only after classify set a sensitive
   // `pendingAction` — narrow it non-null there so the invoke input type-checks.
   states: {
-    confirming: { context: { pendingAction: pendingActionSchema } },
-    executing: { context: { pendingAction: pendingActionSchema } },
+    confirming: {
+      schemas: { context: contextSchema.extend({ pendingAction: pendingActionSchema }) },
+    },
+    executing: {
+      schemas: { context: contextSchema.extend({ pendingAction: pendingActionSchema }) },
+    },
   },
 });
 

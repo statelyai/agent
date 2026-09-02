@@ -162,11 +162,19 @@ const triageAgentSetup = setupAgent({
   // `classifying` assigns `classification` before any of these is entered —
   // narrow it non-null so they can read it.
   states: {
-    checkingConfidence: { context: { classification: classificationSchema } },
-    escalating: { context: { classification: classificationSchema } },
-    replying: { context: { classification: classificationSchema } },
-    done: { context: { classification: classificationSchema } },
-    failed: { context: { classification: classificationSchema } },
+    checkingConfidence: {
+      schemas: { context: contextSchema.extend({ classification: classificationSchema }) },
+    },
+    escalating: {
+      schemas: { context: contextSchema.extend({ classification: classificationSchema }) },
+    },
+    replying: {
+      schemas: { context: contextSchema.extend({ classification: classificationSchema }) },
+    },
+    done: { schemas: { context: contextSchema.extend({ classification: classificationSchema }) } },
+    failed: {
+      schemas: { context: contextSchema.extend({ classification: classificationSchema }) },
+    },
   },
 });
 

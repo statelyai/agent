@@ -49,7 +49,11 @@ const agentSetup = setupAgent({
   schemas,
   models,
   isIdle: (snapshot) => snapshot.hasTag("awaiting-approval"),
-  states: { awaitingApproval: { context: { pendingRefund: z.number() } } },
+  states: {
+    awaitingApproval: {
+      schemas: { context: schemas.context.extend({ pendingRefund: z.number() }) },
+    },
+  },
 });
 
 export const supportMachineStep3 = agentSetup.createMachine({

@@ -238,9 +238,14 @@ function checkDirectObjectSrc(ctx: LintContext): AgentLintDiagnostic[] {
 }
 
 function checkUnhandledAgentMessages(ctx: LintContext): AgentLintDiagnostic[] {
-  const rootHandlesMessages =
-    ctx.config.on?.[AGENT_MESSAGES_EVENT_TYPE] !== undefined || ctx.config.on?.["*"] !== undefined;
-  if (rootHandlesMessages) return [];
+  const handlesMessages = (config: AnyConfig) =>
+    config.on?.[AGENT_MESSAGES_EVENT_TYPE] !== undefined || config.on?.["*"] !== undefined;
+  if (
+    handlesMessages(ctx.config) ||
+    [...ctx.index.values()].some((node) => handlesMessages(node.config))
+  ) {
+    return [];
+  }
 
   let contextJsonSchema: { properties?: Record<string, unknown> } | undefined;
   try {
@@ -270,7 +275,7 @@ function checkUnhandledAgentMessages(ctx: LintContext): AgentLintDiagnostic[] {
           severity: "warning",
           path: "(root)",
           message:
-            "Text requests may return framework messages, but the root machine does not " +
+            "Text requests may return framework messages, but the machine does not " +
             `handle '${AGENT_MESSAGES_EVENT_TYPE}'. Add on: { ` +
             `'${AGENT_MESSAGES_EVENT_TYPE}': appendMessages() } when transcript retention ` +
             "is intended, or disable this warning when messages are intentionally ignored.",

@@ -71,8 +71,12 @@ const agentSetup = setupAgent({
   // answering (and its retry, revising) always sets `answer` before either
   // state's request reads it — narrow it non-null there.
   states: {
-    verifyingAnswer: { context: { answer: z.string() } },
-    revising: { context: { answer: z.string() } },
+    verifyingAnswer: {
+      schemas: { context: guardrailsSchemas.context.extend({ answer: z.string() }) },
+    },
+    revising: {
+      schemas: { context: guardrailsSchemas.context.extend({ answer: z.string() }) },
+    },
   },
   requests: {
     validateQuestion: {

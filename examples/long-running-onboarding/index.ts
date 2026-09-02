@@ -170,23 +170,33 @@ const coordinatorSetup = setupAgent({
     // Narrowing threads through the chain: each state declares what is
     // guaranteed by the time it is entered, so every bare `target` into the
     // next narrowed state typechecks.
-    waitingForSignedDocs: { context: { welcomePacketId: z.string() } },
-    provisioningIt: { context: { welcomePacketId: z.string() } },
+    waitingForSignedDocs: {
+      schemas: { context: contextSchema.extend({ welcomePacketId: z.string() }) },
+    },
+    provisioningIt: {
+      schemas: { context: contextSchema.extend({ welcomePacketId: z.string() }) },
+    },
     waitingForHardware: {
-      context: { welcomePacketId: z.string(), accounts: accountsSchema },
+      schemas: {
+        context: contextSchema.extend({ welcomePacketId: z.string(), accounts: accountsSchema }),
+      },
     },
     preparingSchedule: {
-      context: {
-        welcomePacketId: z.string(),
-        accounts: accountsSchema,
-        hardwareDeliveredAt: z.string(),
+      schemas: {
+        context: contextSchema.extend({
+          welcomePacketId: z.string(),
+          accounts: accountsSchema,
+          hardwareDeliveredAt: z.string(),
+        }),
       },
     },
     onboarded: {
-      context: {
-        welcomePacketId: z.string(),
-        accounts: accountsSchema,
-        schedule: z.string(),
+      schemas: {
+        context: contextSchema.extend({
+          welcomePacketId: z.string(),
+          accounts: accountsSchema,
+          schedule: z.string(),
+        }),
       },
     },
   },

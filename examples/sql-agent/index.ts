@@ -111,9 +111,13 @@ const agentSetup = setupAgent({
   },
   // planning sets plan before any state that reads it — narrow it non-null there.
   states: {
-    awaitingApproval: { context: { plan: queryPlanSchema } },
-    executing: { context: { plan: queryPlanSchema } },
-    summarizing: { context: { plan: queryPlanSchema, result: z.number() } },
+    awaitingApproval: {
+      schemas: { context: contextSchema.extend({ plan: queryPlanSchema }) },
+    },
+    executing: { schemas: { context: contextSchema.extend({ plan: queryPlanSchema }) } },
+    summarizing: {
+      schemas: { context: contextSchema.extend({ plan: queryPlanSchema, result: z.number() }) },
+    },
   },
   requests: {
     planQuery: {

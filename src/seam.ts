@@ -154,7 +154,6 @@ export interface RunSeamOptions<TMachine extends AnyStateMachine> {
    * Text slots are always owned by the routing.
    */
   executors?: Partial<AgentRequestExecutors>;
-  /** Passed through to `runAgent`: the deterministic idle-state predicate. */
   /** Passed through to `runAgent`: actor implementations merged onto the machine. */
   actors?: RunAgentOptions<TMachine>["actors"];
 }

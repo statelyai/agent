@@ -121,7 +121,9 @@ const agentSetup = setupAgent({
   },
   states: {
     // `pendingRefund` is set non-null before the machine reaches these.
-    awaitingApproval: { context: { pendingRefund: z.number() } },
+    awaitingApproval: {
+      schemas: { context: schemas.context.extend({ pendingRefund: z.number() }) },
+    },
   },
 });
 

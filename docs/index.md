@@ -26,6 +26,7 @@ Stately Agent is XState plus typed model requests, decisions, and host executors
 | `provideExecutors` | Bind executors for an application-owned XState actor |
 | `createScriptedExecutors` | Deterministic named request scripts |
 | `getInteraction` / `eventFromInteraction` | Render and validate human interactions |
+| `isAgentIdle` | Default composable idle-state predicate |
 | `lintAgentMachine` | Agent-specific diagnostics |
 
 The optional `@statelyai/agent/ai-sdk` entry provides `defineModels` and AI SDK executors. Core has no runtime dependency on the AI SDK.

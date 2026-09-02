@@ -373,8 +373,12 @@ const agentSetup = setupAgent({
   states: {
     // `asking` always sets `pending` before `awaitingAnswer` / `grading` read
     // it, so those two states can be narrowed non-null.
-    awaitingAnswer: { context: { pending: askedQuestionSchema } },
-    grading: { context: { pending: askedQuestionSchema } },
+    awaitingAnswer: {
+      schemas: { context: chatWithPdfSchemas.context.extend({ pending: askedQuestionSchema }) },
+    },
+    grading: {
+      schemas: { context: chatWithPdfSchemas.context.extend({ pending: askedQuestionSchema }) },
+    },
   },
 });
 

@@ -3,7 +3,6 @@ import { z } from "zod";
 import {
   AgentDecisionExhaustedError,
   AgentError,
-  AgentIdleError,
   AgentIllegalResumeEventError,
   AgentLintError,
   createAgentSchemas,
@@ -136,7 +135,7 @@ describe("serializeTraceEvent", () => {
         type: "run.end",
         status: "error",
         cause: "machine",
-        error: new AgentIdleError({ value: "waiting" } as never, ["GO"]),
+        error: new AgentIllegalResumeEventError("GO", ["STOP"]),
         snapshot: { value: "waiting", context: {} } as never,
       },
     ];
@@ -302,7 +301,6 @@ describe("serializeTraceEvent", () => {
 describe("AgentError", () => {
   test("every error extends AgentError and carries a stable kebab-case code", () => {
     const errors: Array<[AgentError, string]> = [
-      [new AgentIdleError({ value: "a" } as never, ["GO"]), "agent-idle"],
       [new AgentIllegalResumeEventError("GO", ["STOP"]), "illegal-resume-event"],
       [new AgentDecisionExhaustedError([]), "decision-exhausted"],
       [new AgentLintError("m", []), "lint-failed"],

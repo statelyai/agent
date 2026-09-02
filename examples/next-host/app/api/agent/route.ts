@@ -45,8 +45,8 @@ const agentSetup = setupAgent({
     },
   },
   states: {
-    reviewing: { context: { draft: z.string() } },
-    published: { context: { draft: z.string() } },
+    reviewing: { schemas: { context: contextSchema.extend({ draft: z.string() }) } },
+    published: { schemas: { context: contextSchema.extend({ draft: z.string() }) } },
   },
 });
 

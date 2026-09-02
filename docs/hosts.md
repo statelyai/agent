@@ -33,6 +33,30 @@ await runAgent(machine, { input });
 
 A registry created by `defineModels` carries an optional AI SDK executor factory. Explicit executors merge over those defaults. Core does not import or require the AI SDK at runtime.
 
+## Executor-owned structured retries
+
+Retry policy belongs to the SDK or host executor. For example, a host may retry a tool-free AI SDK structured-output failure once while preserving the runner's abort signal:
+
+```ts no-check
+import { NoObjectGeneratedError } from "ai";
+
+const aiSdk = createAiSdkExecutors({ models });
+const executors = {
+  ...aiSdk,
+  generateText: async (request, info) => {
+    try {
+      return await aiSdk.generateText(request, info);
+    } catch (error) {
+      const hasTools = Object.keys(request.tools ?? {}).length > 0;
+      if (hasTools || !NoObjectGeneratedError.isInstance(error)) throw error;
+      return aiSdk.generateText(request, info);
+    }
+  }
+};
+```
+
+Tool-bearing calls are not retried here because tools may have side effects. Use the framework's own interruption and retry facilities when available; Stately Agent forwards messages and execution to it.
+
 ## Uncontrolled XState actor
 
 ```ts no-check

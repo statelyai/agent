@@ -5,11 +5,11 @@ import { createDecisionLogic } from "./decision.js";
 import {
   AGENT_TRACE_SCHEMA_VERSION,
   AgentError,
-  AgentIdleError,
   createAgentSchemas,
   createTextLogic,
   AgentIllegalResumeEventError,
   inspectTransitions,
+  isAgentIdle,
   runAgent,
   setupAgent,
   type AgentDecisionRequest,
@@ -18,7 +18,6 @@ import {
   type AgentTraceEvent,
   type ChosenEvent,
 } from "./index.js";
-import { createAgentActor, generateResult } from "./run-agent.js";
 import { getMachineStructuralHash } from "./index.js";
 
 describe("runAgent", () => {
@@ -2192,6 +2191,51 @@ describe("inspect passthrough (system-wide visibility)", () => {
 });
 
 describe("Feature A: explicit suspension detection (isIdle)", () => {
+  test("the exported default recognizes root handlers and composes with custom waits", async () => {
+    const machine = setup({}).createMachine({
+      on: { CONTINUE: { target: ".done" } },
+      initial: "waiting",
+      states: {
+        waiting: {},
+        done: { type: "final" },
+      },
+    });
+    const actor = createActor(machine).start();
+    const snapshot = actor.getSnapshot();
+
+    expect(isAgentIdle(snapshot)).toBe(true);
+    expect(isAgentIdle(snapshot) || snapshot.hasTag("waiting-for-webhook")).toBe(true);
+    actor.stop();
+
+    const result = await runAgent(machine, { executors: {} });
+    expect(result.status).toBe("idle");
+  });
+
+  test("an unreachable userInput placeholder does not override a custom idle predicate", async () => {
+    const controller = new AbortController();
+    const agent = setupAgent({
+      context: z.object({}),
+      isIdle: () => false,
+    });
+    const machine = agent.createMachine({
+      context: {},
+      initial: "waiting",
+      states: {
+        waiting: {},
+        unreachablePrompt: {
+          invoke: { src: "agent.userInput", input: { prompt: "Never reached" } },
+        },
+      },
+    });
+    setTimeout(() => controller.abort("test complete"), 5);
+
+    const result = await runAgent(machine, {
+      signal: controller.signal,
+      executors: {},
+    });
+    expect(result).toMatchObject({ status: "error", cause: "aborted" });
+  });
+
   test("a machine-carried isIdle predicate settles idle and resumes to done", async () => {
     const agent = setupAgent({
       context: z.object({}),
@@ -2720,7 +2764,7 @@ describe("runAgent error cause split", () => {
         },
         attacked: { type: "final" },
         healed: { type: "final" },
-        fumbled: {},
+        fumbled: { type: "final" },
       },
     });
   }
@@ -2751,9 +2795,9 @@ describe("runAgent error cause split", () => {
       },
     });
 
-    // onError routed it to `fumbled` — the run settles idle, not error.
+    // onError routed it to the machine's final `fumbled` state, not a run error.
     expect(result.status).not.toBe("error");
-    expect(result.status === "idle" ? result.snapshot.value : undefined).toBe("fumbled");
+    expect(result.snapshot.value).toBe("fumbled");
   });
 
   test("a plain executor throw (not decision-exhausted) still settles cause 'machine'", async () => {
@@ -2864,139 +2908,6 @@ describe("runAgent dev-mode serialization guard", () => {
   });
 });
 
-// ─── generateResult (item 1) ───
-describe("generateResult", () => {
-  const buildDraftMachine = () => {
-    const schemas = createAgentSchemas({
-      context: z.object({ prompt: z.string(), draft: z.string().nullable() }),
-      input: z.object({ prompt: z.string() }),
-      output: z.object({ draft: z.string() }),
-      events: { APPROVE: z.object({}) },
-    });
-    const draftText = createTextLogic({
-      schemas: { input: z.object({ prompt: z.string() }), output: z.string() },
-      model: "test-model",
-      prompt: ({ input }) => input.prompt,
-    });
-    const agent = setupAgent({ schemas, actors: { draftText } });
-    return agent.createMachine({
-      context: ({ input }) => ({ prompt: input.prompt, draft: null }),
-      initial: "drafting",
-      states: {
-        drafting: {
-          invoke: {
-            id: "draft",
-            src: "draftText",
-            input: ({ context }) => ({ prompt: context.prompt }),
-            onDone: ({ output }) => ({ target: "awaitingApproval", context: { draft: output } }),
-          },
-        },
-        awaitingApproval: { on: { APPROVE: { target: "done" } } },
-        done: { type: "final", output: ({ context }) => ({ draft: context.draft ?? "" }) },
-      },
-    });
-  };
-
-  const generateText = async (request: AgentTextRequest & { tools: AgentTools }) => ({
-    output: `Draft: ${request.prompt}`,
-  });
-
-  test("done: resolves with the machine output", async () => {
-    const machine = buildDraftMachine();
-    const first = await runAgent(machine, {
-      input: { prompt: "notes" },
-      executors: { generateText },
-    });
-    if (first.status !== "idle") throw new Error("expected idle");
-
-    const result = await generateResult(machine, {
-      snapshot: first.persist(),
-      event: { type: "APPROVE" },
-      executors: {
-        generateText,
-      },
-    });
-    expect(result.status).toBe("done");
-    expect(result.output).toEqual({ draft: "Draft: notes" });
-    // generateText-style metadata rides along with the output:
-    expect(result.snapshot.status).toBe("done");
-    expect(result.persist()).toEqual(expect.objectContaining({ status: "done" }));
-  });
-
-  test("idle: throws AgentIdleError carrying snapshot + acceptedTypes", async () => {
-    const machine = buildDraftMachine();
-    await expect(
-      generateResult(machine, { input: { prompt: "notes" }, executors: { generateText } }),
-    ).rejects.toBeInstanceOf(AgentIdleError);
-
-    let caught: AgentIdleError | undefined;
-    try {
-      await generateResult(machine, {
-        input: { prompt: "notes" },
-        executors: { generateText },
-      });
-    } catch (error) {
-      caught = error as AgentIdleError;
-    }
-    expect(caught?.acceptedTypes).toContain("APPROVE");
-    expect((caught?.snapshot as { value?: unknown }).value).toBe("awaitingApproval");
-  });
-
-  test("error (Error): rethrows the underlying Error as-is", async () => {
-    const schemas = createAgentSchemas({
-      context: z.object({ prompt: z.string() }),
-      input: z.object({ prompt: z.string() }),
-      output: z.object({}),
-    });
-    const boom = createTextLogic({
-      schemas: { input: z.object({ prompt: z.string() }), output: z.string() },
-      model: "test-model",
-      prompt: ({ input }) => input.prompt,
-    });
-    const agent = setupAgent({ schemas, actors: { boom } });
-    const machine = agent.createMachine({
-      context: ({ input }) => ({ prompt: input.prompt }),
-      initial: "working",
-      states: {
-        working: { invoke: { id: "boom", src: "boom", input: ({ context }) => context } },
-      },
-    });
-    const thrown = new Error("executor exploded");
-    await expect(
-      generateResult(machine, {
-        input: { prompt: "x" },
-        executors: {
-          generateText: async () => {
-            throw thrown;
-          },
-        },
-      }),
-    ).rejects.toBe(thrown);
-  });
-
-  test("error (non-Error): wraps, preserving cause + raw error", async () => {
-    const machine = buildDraftMachine();
-    const controller = new AbortController();
-    controller.abort("stringy-reason");
-
-    let caught: (Error & { cause?: unknown; error?: unknown }) | undefined;
-    try {
-      await generateResult(machine, {
-        input: { prompt: "notes" },
-        signal: controller.signal,
-        executors: {
-          generateText,
-        },
-      });
-    } catch (error) {
-      caught = error as Error & { cause?: unknown; error?: unknown };
-    }
-    expect(caught).toBeInstanceOf(Error);
-    expect(caught?.cause).toBe("aborted");
-    expect(caught?.error).toBe("stringy-reason");
-  });
-});
-
 // ─── Snapshot version stamping + migrate hook (item 2) ───
 describe("restore semantics: pending requests and events-only resume", () => {
   // Shared two-phase machine: a request, an idle gate, then a second request.
@@ -3103,106 +3014,6 @@ describe("restore semantics: pending requests and events-only resume", () => {
     expect(seen).toHaveLength(1);
     expect(seen[0]?.runId).toMatch(/^run_\d+$/);
     expect(seen[0]?.requestId).toContain("first");
-  });
-});
-
-describe("createAgentActor (session mode)", () => {
-  const buildMachine = () => {
-    const agentSetup = setupAgent({
-      context: z.object({ a: z.string().nullable(), b: z.string().nullable() }),
-      input: z.object({}),
-      output: z.object({ a: z.string(), b: z.string() }),
-      events: { GO: {} },
-    });
-    return agentSetup.createMachine({
-      context: () => ({ a: null, b: null }),
-      initial: "first",
-      states: {
-        first: {
-          invoke: {
-            src: "agent.generateText",
-            input: () => ({ model: "m", prompt: "one" }),
-            onDone: ({ event }) => ({
-              target: "waiting",
-              context: { a: String(event.output) },
-            }),
-          },
-        },
-        waiting: { on: { GO: { target: "second" } } },
-        second: {
-          invoke: {
-            src: "agent.generateText",
-            input: () => ({ model: "m", prompt: "two" }),
-            onDone: ({ event }) => ({
-              target: "done",
-              context: { b: String(event.output) },
-            }),
-          },
-        },
-        done: {
-          type: "final",
-          output: ({ context }) => ({ a: context.a ?? "", b: context.b ?? "" }),
-        },
-      },
-    });
-  };
-
-  const executors = {
-    generateText: async (request: AgentTextRequest & { tools: AgentTools }) => ({
-      output: `ok:${request.prompt}`,
-      usage: { totalTokens: 7 },
-    }),
-  };
-
-  test("actor survives an idle settle; the next event re-opens the cycle", async () => {
-    const machine = buildMachine();
-    const session = createAgentActor(machine, { input: {}, executors });
-
-    const first = await session.settled();
-    expect(first.status).toBe("idle");
-    expect(first.usage.modelCalls).toBe(1);
-
-    // Same live actor, no snapshot round-trip: send the next turn's event.
-    session.actor.send({ type: "GO" });
-    const second = await session.settled();
-    expect(second.status).toBe("done");
-    expect(second.status === "done" ? second.output : undefined).toEqual({
-      a: "ok:one",
-      b: "ok:two",
-    });
-
-    // Usage is cumulative across cycles.
-    expect(session.usage().modelCalls).toBe(2);
-    expect(session.usage().totalTokens).toBe(14);
-
-    // done is final: settled() keeps resolving with the final result.
-    const again = await session.settled();
-    expect(again.status).toBe("done");
-  });
-
-  test("settled() called while idle resolves immediately with the current result", async () => {
-    const machine = buildMachine();
-    const session = createAgentActor(machine, { input: {}, executors });
-    const first = await session.settled();
-    expect(first.status).toBe("idle");
-    // A second call with no new events resolves with the same idle result.
-    const sameCycle = await session.settled();
-    expect(sameCycle.status).toBe("idle");
-    expect(sameCycle.snapshot).toBe(first.snapshot);
-    session.stop();
-  });
-
-  test("runAgent one-shot behavior is unchanged: idle settle stops the actor", async () => {
-    const machine = buildMachine();
-    const result = await runAgent(machine, { input: {}, executors });
-    expect(result.status).toBe("idle");
-    // The one-shot path resumes by snapshot, not by live actor.
-    const resumed = await runAgent(machine, {
-      snapshot: result.persist(),
-      event: { type: "GO" },
-      executors,
-    });
-    expect(resumed.status).toBe("done");
   });
 });
 
@@ -3543,18 +3354,6 @@ describe("runAgent usage aggregation", () => {
     for (const end of ends) {
       expect(end).toHaveProperty("usage", { inputTokens: 2, outputTokens: 1 });
     }
-  });
-
-  test("generateResult resolves usage alongside output", async () => {
-    const result = await generateResult(twoCallMachine, {
-      input: {},
-      executors: {
-        generateText: async () => ({ output: "x", usage: { inputTokens: 6, outputTokens: 2 } }),
-      },
-    });
-
-    expect(result.output).toEqual({ first: "x", second: "x" });
-    expect(result.usage).toEqual({ inputTokens: 12, outputTokens: 4, modelCalls: 2 });
   });
 });
 

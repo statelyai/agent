@@ -264,7 +264,9 @@ const agentSetup = setupAgent({
   // and states whose reset transitions write `guess`/`pendingSideQuestion` back
   // to null cannot be narrowed (a narrowed source can't widen a field).
   states: {
-    gameOver: { context: { guess: z.string() } },
+    gameOver: {
+      schemas: { context: twentyQuestionsSchemas.context.extend({ guess: z.string() }) },
+    },
   },
 });
 

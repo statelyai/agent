@@ -234,7 +234,7 @@ const machine = agentSetup.createMachine({
 
 ## Per-state context narrowing
 
-A context field that starts `null` and is assigned mid-run forces a `?? fallback` at every later read. When a state is reachable only after that field is set, narrow it to non-null under `setupAgent({ states })`. Declare only the fields that change. The narrowed type flows into that state's invoke `input`, transition functions, and `output`, so the fallback is no longer needed:
+A context field that starts `null` and is assigned mid-run forces a `?? fallback` at every later read. When a state is reachable only after that field is set, narrow it with XState's native per-state context schema under `setupAgent({ states })`. The narrowed type flows into that state's invoke `input`, transition functions, and `output`, so the fallback is no longer needed:
 
 ```ts
 const context = z.object({ question: z.string(), plan: planSchema.nullable() });
@@ -243,13 +243,11 @@ const agentSetup = setupAgent({
   context,
   // `planning` assigns `plan` before `executing` and `done` run, so narrow it there.
   states: {
-    executing: { context: { plan: planSchema } },
-    done: { context: { plan: planSchema } },
+    executing: { schemas: { context: context.extend({ plan: planSchema }) } },
+    done: { schemas: { context: context.extend({ plan: planSchema }) } },
   },
 });
 ```
-
-The field-level form is shorthand for XState's full form, `executing: { schemas: { context: context.extend({ plan: planSchema }) } }`. The full form also works.
 
 > **Note:** Narrow only where every path into the state has assigned the field. A state that is also reachable on an error or refusal route, where the field is still `null`, must keep its nullable handling. Narrowing changes the type only. Runtime behavior is unchanged.
 

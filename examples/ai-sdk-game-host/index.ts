@@ -8,7 +8,7 @@
  *   OPENAI_API_KEY=... npx tsx examples/ai-sdk-game-host/index.ts
  */
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { runAgent, type AgentRequestExecutors } from "@statelyai/agent";
+import { runAgentStream, type AgentRequestExecutors } from "@statelyai/agent";
 import { gameMachine, models, turnSummarySchema } from "../game-agent/index.js";
 
 // Adapter-provided executors: `decide` forces a tool call, one tool per
@@ -25,15 +25,14 @@ export async function runAiSdkGameTurn(
   // AI SDK set above.
   executors: AgentRequestExecutors = defaultExecutors,
 ) {
-  const result = await runAgent(gameMachine, {
-    input,
-    executors,
-    onTransition: (snapshot) => onStep?.(snapshot.value),
-  });
-  if (result.status !== "done") {
-    throw new Error(`Game turn ended with ${result.status}.`);
+  for await (const event of runAgentStream(gameMachine, { input, executors })) {
+    if (event.kind === "transition") onStep?.(event.value);
+    if (event.kind === "done") return event.result.output;
+    if (event.kind === "idle" || event.kind === "error") {
+      throw new Error(`Game turn ended with ${event.kind}.`);
+    }
   }
-  return result.output;
+  throw new Error("Game turn ended without a result.");
 }
 
 async function main() {

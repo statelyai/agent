@@ -77,28 +77,30 @@ function oneLine(text: string, max = 90): string {
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
 
+const reflectionContextSchema = z.object({
+  topic: z.string(),
+  // The latest draft. Also the best-effort output if a model call fails.
+  essay: z.string(),
+  // The very first draft, kept so the result can show original vs. final.
+  firstDraft: z.string(),
+  // One line per completed revision round; the full critique prose stays in
+  // the transcript, not here.
+  revisionLog: z.string(),
+  // Accumulating transcript: task + every draft (assistant) + every critique
+  // (role-flipped to user, as the tutorial does so the writer treats the
+  // reflection as feedback to act on).
+  messages: z.custom<AgentMessage[]>((v) => Array.isArray(v)),
+  // The critic's latest structured verdict (drives the early-exit guard).
+  critique: critiqueSchema.nullable(),
+  // Completed revision rounds — the typed loop bound, replacing LangGraph's
+  // `len(messages) > 6` check.
+  revisions: z.number(),
+  maxRevisions: z.number(),
+});
+
 const agentSetup = setupAgent({
   models,
-  context: z.object({
-    topic: z.string(),
-    // The latest draft. Also the best-effort output if a model call fails.
-    essay: z.string(),
-    // The very first draft, kept so the result can show original vs. final.
-    firstDraft: z.string(),
-    // One line per completed revision round; the full critique prose stays in
-    // the transcript, not here.
-    revisionLog: z.string(),
-    // Accumulating transcript: task + every draft (assistant) + every critique
-    // (role-flipped to user, as the tutorial does so the writer treats the
-    // reflection as feedback to act on).
-    messages: z.custom<AgentMessage[]>((v) => Array.isArray(v)),
-    // The critic's latest structured verdict (drives the early-exit guard).
-    critique: critiqueSchema.nullable(),
-    // Completed revision rounds — the typed loop bound, replacing LangGraph's
-    // `len(messages) > 6` check.
-    revisions: z.number(),
-    maxRevisions: z.number(),
-  }),
+  context: reflectionContextSchema,
   input: z.object({
     topic: z.string(),
   }),
@@ -122,8 +124,10 @@ const agentSetup = setupAgent({
   },
   // `critiquing` runs only once a draft exists; `done` always carries an essay.
   states: {
-    critiquing: { context: { essay: z.string() } },
-    done: { context: { essay: z.string() } },
+    critiquing: {
+      schemas: { context: reflectionContextSchema.extend({ essay: z.string() }) },
+    },
+    done: { schemas: { context: reflectionContextSchema.extend({ essay: z.string() }) } },
   },
   requests: {
     // The `generate` node: write (or revise) the essay from the whole

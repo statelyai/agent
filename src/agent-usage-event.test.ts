@@ -9,7 +9,6 @@ import {
   setupAgent,
   type ChosenEvent,
 } from "./index.js";
-import { createAgentActor } from "./run-agent.js";
 import { AGENT_USAGE_EVENT_TYPE, type AgentUsageEvent } from "./usage.js";
 
 const schemas = createAgentSchemas({
@@ -327,17 +326,6 @@ describe("@agent.usage (reserved per-call usage event)", () => {
     expect(result.status).toBe("done");
     expect(result.snapshot.context.tokens).toBe(400);
     expect(seen).toContain(AGENT_USAGE_EVENT_TYPE);
-  });
-
-  test("the session actor path behaves identically to runAgent", async () => {
-    const session = createAgentActor(budgetMachine, {
-      input: { maxTokens: 1000 },
-      executors: textExecutors,
-    });
-    const result = await session.settled();
-
-    expect(result.status).toBe("done");
-    expect(result.snapshot.context.tokens).toBe(1200);
   });
 });
 

@@ -54,18 +54,31 @@ export const agentMessagesEventSchema: StandardSchemaV1<AgentMessagesEventPayloa
  * }
  * ```
  */
+export type AppendMessagesTransition = <TContext extends object>(args: {
+  context: TContext;
+  event: EventObject & Partial<Omit<AgentMessagesEvent, "type">>;
+}) => { context: Partial<TContext> };
+
 export function appendMessages<TKey extends string = "messages">(options?: {
   key?: TKey;
-}): (args: any) => { context: any };
-export function appendMessages(options?: {
-  key?: string;
-}): (args: { context: any; event: any }) => { context: Record<string, unknown> } {
+}): AppendMessagesTransition;
+export function appendMessages(options?: { key?: string }): AppendMessagesTransition {
   const key = options?.key ?? "messages";
-  return ({ context, event }) => ({
-    context: {
-      [key]: [...(context[key] ?? []), ...(event.messages ?? [])],
-    },
-  });
+  return (({
+    context,
+    event,
+  }: {
+    context: object;
+    event: EventObject & Partial<Omit<AgentMessagesEvent, "type">>;
+  }) => {
+    const current = (context as Record<string, unknown>)[key];
+    const messages = (event as Partial<AgentMessagesEvent>).messages;
+    return {
+      context: {
+        [key]: [...(Array.isArray(current) ? current : []), ...(messages ?? [])],
+      },
+    };
+  }) as AppendMessagesTransition;
 }
 
 type MessagePartType = "text" | "image" | "file" | "tool-call" | "tool-result";
