@@ -263,7 +263,7 @@ export async function runSqlAgentExample(
   const interaction = readInteraction(first.snapshot);
 
   const second = await runAgent(sqlAgentMachine, {
-    snapshot: first.persistedSnapshot,
+    snapshot: first.persist(),
     event: { type: approval },
     onTransition: observe,
     ...resolved,

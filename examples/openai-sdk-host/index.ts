@@ -38,6 +38,7 @@ import {
   type AgentDecisionExecutor,
   type AgentDecisionRequest,
   type AgentEventDescriptor,
+  type AgentMessage,
   type AgentRequestExecutorInfo,
   type AgentRequestExecutors,
   type AgentTextRequest,
@@ -52,7 +53,7 @@ import { twentyQuestionsMachine } from "../twenty-questions/index.js";
 
 /** Maps `AgentTextRequest.messages`/`system`/`prompt` to OpenAI chat messages. */
 export function toOpenAiMessages(
-  request: Pick<AgentTextRequest, "system" | "prompt" | "messages">,
+  request: Pick<AgentTextRequest, "system" | "prompt"> & { messages?: AgentMessage[] },
 ): ChatCompletionMessageParam[] {
   if (request.messages) {
     // AgentMessage's `system|user|assistant|tool` roles map 1:1 onto
@@ -269,20 +270,23 @@ export function createOpenAiExecutors({
     return { output: text };
   };
 
-  const decide: AgentDecisionExecutor = async (request) => {
+  const decide: AgentDecisionExecutor = async (request, info) => {
     const tools = toOpenAiEventTools(request.events);
 
-    const response = await client.chat.completions.create({
-      model: resolveModel(request.model),
-      messages: toDecisionMessages(request),
-      tools,
-      tool_choice: "required" as ChatCompletionToolChoiceOption,
-      temperature: request.temperature,
-      max_completion_tokens: request.maxOutputTokens,
-      top_p: request.topP,
-      stop: request.stopSequences,
-      seed: request.seed,
-    });
+    const response = await client.chat.completions.create(
+      {
+        model: resolveModel(request.model),
+        messages: toDecisionMessages(request),
+        tools,
+        tool_choice: "required" as ChatCompletionToolChoiceOption,
+        temperature: request.temperature,
+        max_completion_tokens: request.maxOutputTokens,
+        top_p: request.topP,
+        stop: request.stopSequences,
+        seed: request.seed,
+      },
+      { signal: info?.signal },
+    );
 
     const toolCall = response.choices[0]?.message.tool_calls?.[0];
     if (!toolCall || toolCall.type !== "function") {
@@ -344,6 +348,7 @@ export async function runStreamingDemo(client: OpenAI) {
   let text = "";
   await streamText(
     {
+      name: "streamingDemo",
       model: "gpt-5.4-mini",
       system: "You tell short, punchy jokes.",
       prompt: "Tell a joke about state machines.",

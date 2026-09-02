@@ -91,8 +91,7 @@ describe("createToolLoopMachine", () => {
     });
 
     expect(new Set(events)).toEqual(new Set(["1"]));
-    expect(result.events.every((entry) => entry.machineVersion === "1")).toBe(true);
-    expect((result.snapshot as { agentMeta?: { version?: string } }).agentMeta?.version).toBe("1");
+    expect(result.persist()).toEqual(expect.objectContaining({ version: "1" }));
   });
 
   test("the machine's own version is the single source (no machineVersion option)", async () => {
@@ -434,7 +433,7 @@ describe("createHandoffMachine", () => {
     expect(first.snapshot.context.reply).toBe("travel says hi");
 
     const second = await runAgent(machine, {
-      snapshot: first.persistedSnapshot,
+      snapshot: first.persist(),
       event: { type: "transfer_to_food", message: "What should I eat?" },
       executors: { generateText },
     });
@@ -510,7 +509,7 @@ describe("preset machine types", () => {
     });
     await expect(
       runAgent(handoff, {
-        snapshot: first.snapshot,
+        snapshot: first.persist(),
         // @ts-expect-error 'transfer_to_nope' is not a declared agent transfer
         event: { type: "transfer_to_nope" },
         executors: { generateText },

@@ -585,7 +585,7 @@ export async function runGameLoopExample(options?: {
       queued.shift() ??
       toHumanEvent(result.snapshot, await promptLine(`${idlePrompt(result.snapshot)}\n> `));
     result = await runAgent(gameMachine, {
-      snapshot: result.persistedSnapshot,
+      snapshot: result.persist(),
       event,
       ...shared,
     });

@@ -347,7 +347,7 @@ export async function runContextCompactionExample(options?: {
         ? "exit"
         : await promptLine(`${idlePrompt(result.snapshot)}\n> `);
     result = await runAgent(contextCompactionMachine, {
-      snapshot: result.persistedSnapshot,
+      snapshot: result.persist(),
       event: { type: "USER_MESSAGE", text },
       ...shared,
     });

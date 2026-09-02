@@ -19,7 +19,7 @@
  *     event free chat text becomes (`textEvent`). Labels interpolate
  *     `{question}` against the snapshot context, so the button row is captioned
  *     with whatever the agent just asked. Resume with
- *     `runAgent(machine, { snapshot: result.persistedSnapshot, event })`.
+ *     `runAgent(machine, { snapshot: result.persist(), event })`.
  *   - Two paths into the same state: button events are deterministic (no model
  *     call), free text goes through a classifier request instead.
  *   - Side-question detour: the player's free-text reply to a yes/no question
@@ -697,7 +697,7 @@ export async function main() {
   while (result.status === "idle") {
     const text = await promptLine(`${idlePrompt(result.snapshot)}\n> `);
     result = await runAgent(twentyQuestionsMachine, {
-      snapshot: result.persistedSnapshot,
+      snapshot: result.persist(),
       event: toPlayerEvent(result.snapshot, text),
       ...shared,
     });

@@ -111,7 +111,7 @@ describe("context-compaction", () => {
 
     // Resuming from `persistedSnapshot` with the text event advances one turn.
     const second = await runAgent(contextCompactionMachine, {
-      snapshot: first.persistedSnapshot,
+      snapshot: first.persist(),
       event: { type: "USER_MESSAGE", text: "hello" },
       executors: { generateText },
     });
@@ -134,7 +134,7 @@ describe("context-compaction", () => {
     });
     expect(start.status).toBe("idle");
     if (start.status !== "idle") return;
-    let snapshot = start.persistedSnapshot;
+    let snapshot = start.persist();
 
     for (const turn of [1, 2, 3]) {
       const result = await runAgent(contextCompactionMachine, {
@@ -145,7 +145,7 @@ describe("context-compaction", () => {
       expect(result.status).toBe("idle");
       if (result.status !== "idle") return;
       expect(result.snapshot.context.reply).toBe(`reply ${turn}`);
-      snapshot = result.persistedSnapshot;
+      snapshot = result.persist();
     }
 
     // Turn 3 compacted (history capped at keepRecent) yet the reply survives.

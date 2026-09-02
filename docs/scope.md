@@ -38,14 +38,14 @@ The host decides how it happens, binding `searchWeb` to the search client, cache
 | Sandboxes, filesystems, generated artifacts                             | Sandbox or workspace library     | `actors`, plus artifact handles in machine context     |
 | MCP discovery, auth, sessions, and transport                            | MCP client or host framework     | Request `tools`                                        |
 | Evaluation datasets, scorers, experiments, and dashboards               | Evaluation library               | `onTrace`, `onResult`, snapshots, and machine output   |
-| Snapshot persistence                                                    | Host store                       | `AgentSnapshotStore` and `getPersistedSnapshot()`      |
+| Snapshot persistence                                                    | Host store                       | XState persisted snapshots from `result.persist()`     |
 | Queues, schedules, leases, deployment, HTTP/SSE/WebSocket               | Runtime or application framework | Step path, snapshots, callbacks, and emitted events    |
 | Telemetry export                                                        | Observability library            | `onTrace` and `inspect`                                |
 
 The repository examples show the orchestration shape. They are not replacement implementations of the systems listed above.
 
 - [Deep research](https://github.com/statelyai/agent/blob/main/examples/deep-research/index.ts) models planning, concurrent research, reflection, and synthesis. The host still supplies the search implementation.
-- [Trading team](https://github.com/statelyai/agent/blob/main/examples/trading-team/index.ts) models parallel analysts, debate, risk review, and approval. Market feeds and order execution remain external.
+- [Hierarchical teams](https://github.com/statelyai/agent/blob/main/examples/hierarchical-teams/index.ts) models specialized child agents. External data and side effects remain host-owned.
 
 ## Core criteria
 

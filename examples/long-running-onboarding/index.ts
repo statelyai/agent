@@ -334,7 +334,7 @@ export async function runLongRunningOnboardingExample(
   idlePrompts.push(getStateMeta(first.snapshot).interaction?.label ?? "");
   idleEventTypes.push(getAcceptedEvents(first.snapshot).map((event) => event.type));
 
-  const persistedAfterWelcome = first.persistedSnapshot;
+  const persistedAfterWelcome = first.persist();
   const second = await runAgent(longRunningOnboardingMachine, {
     snapshot: persistedAfterWelcome,
     event: { type: "DOCS_SIGNED", signedAt: "2026-07-20" },
@@ -350,7 +350,7 @@ export async function runLongRunningOnboardingExample(
   idlePrompts.push(getStateMeta(second.snapshot).interaction?.label ?? "");
   idleEventTypes.push(getAcceptedEvents(second.snapshot).map((event) => event.type));
 
-  const persistedAfterProvisioning = second.persistedSnapshot;
+  const persistedAfterProvisioning = second.persist();
   const third = await runAgent(longRunningOnboardingMachine, {
     snapshot: persistedAfterProvisioning,
     event: { type: "HARDWARE_DELIVERED", deliveredAt: "2026-07-28" },

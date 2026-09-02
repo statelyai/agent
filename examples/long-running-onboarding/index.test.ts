@@ -44,7 +44,7 @@ test("labels the stub-provisioned accounts as simulated", async () => {
   if (first.status !== "idle") return;
 
   const second = await runAgent(longRunningOnboardingMachine, {
-    snapshot: first.persistedSnapshot,
+    snapshot: first.persist(),
     event: { type: "DOCS_SIGNED", signedAt: "2026-07-20" },
     executors: { generateText },
   });

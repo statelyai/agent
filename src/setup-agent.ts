@@ -14,7 +14,6 @@ import {
 } from "xstate";
 import type {
   AgentEventSchemaInputMap,
-  AgentMessage,
   EventUnion,
   InferInput,
   InferOutput,
@@ -35,8 +34,13 @@ import {
   type TextLogicConfig,
 } from "./text-logic.js";
 import { createDecideActor } from "./decision.js";
-import { AGENT_USAGE_EVENT_TYPE, type AgentUsageEvent } from "./effects.js";
-import { appendMessages } from "./messages.js";
+import { AGENT_USAGE_EVENT_TYPE, type AgentUsageEvent } from "./usage.js";
+import {
+  AGENT_MESSAGES_EVENT_TYPE,
+  agentMessagesEventSchema,
+  appendMessages,
+  type AgentMessagesEventPayload,
+} from "./messages.js";
 import { agentExecutionOptions, machineIdlePredicates } from "./internal/registry.js";
 import type { AgentSchemas } from "./events.js";
 import {
@@ -225,12 +229,16 @@ const agentUsageEventSchema: StandardSchemaV1<AgentUsageEventPayload> = {
  * is typed (and autocompletes) without the machine declaring anything.
  * Idempotent: re-applying it to an already-registered map is a no-op.
  */
-export type WithAgentUsageEvent<T extends AgentEventSchemaInputMap> = Omit<
+export type WithAgentEvents<T extends AgentEventSchemaInputMap> = Omit<
   T,
-  typeof AGENT_USAGE_EVENT_TYPE
+  typeof AGENT_USAGE_EVENT_TYPE | typeof AGENT_MESSAGES_EVENT_TYPE
 > & {
   [AGENT_USAGE_EVENT_TYPE]: StandardSchemaV1<AgentUsageEventPayload>;
+  [AGENT_MESSAGES_EVENT_TYPE]: StandardSchemaV1<AgentMessagesEventPayload>;
 };
+
+/** @deprecated Use {@link WithAgentEvents}. */
+export type WithAgentUsageEvent<T extends AgentEventSchemaInputMap> = WithAgentEvents<T>;
 
 /**
  * Adds the reserved `'@agent.usage'` schema to an authored event map. A
@@ -241,7 +249,7 @@ export type WithAgentUsageEvent<T extends AgentEventSchemaInputMap> = Omit<
  */
 function withAgentUsageEventSchema<T extends AgentEventSchemaInputMap>(
   events: T | undefined,
-): WithAgentUsageEvent<T> {
+): WithAgentEvents<T> {
   const declared = events?.[AGENT_USAGE_EVENT_TYPE];
   if (declared !== undefined && declared !== agentUsageEventSchema) {
     throw new Error(
@@ -251,10 +259,19 @@ function withAgentUsageEventSchema<T extends AgentEventSchemaInputMap>(
         `transition instead: on: { '${AGENT_USAGE_EVENT_TYPE}': … }.`,
     );
   }
+  const declaredMessages = events?.[AGENT_MESSAGES_EVENT_TYPE];
+  if (declaredMessages !== undefined && declaredMessages !== agentMessagesEventSchema) {
+    throw new Error(
+      `setupAgent: event type '${AGENT_MESSAGES_EVENT_TYPE}' is reserved and cannot be ` +
+        `declared in 'events' — setupAgent registers it for you. Add a transition ` +
+        `instead: on: { '${AGENT_MESSAGES_EVENT_TYPE}': appendMessages() }.`,
+    );
+  }
   return {
     ...events,
     [AGENT_USAGE_EVENT_TYPE]: agentUsageEventSchema,
-  } as WithAgentUsageEvent<T>;
+    [AGENT_MESSAGES_EVENT_TYPE]: agentMessagesEventSchema,
+  } as WithAgentEvents<T>;
 }
 
 function normalizeEventSchemas<T extends AgentEventSchemaInputMap>(
@@ -671,10 +688,9 @@ type SetupAgentBaseConfig<
    * human approval, an inbound webhook, …) — the machine's own declaration of
    * what "idle" means for it, so `runAgent` settles those snapshots idle
    * deterministically instead of using its timing heuristic. Travels with the
-   * machine through `machine.provide(...)`. A `runAgent({ isIdle })` host
-   * override takes precedence; with neither, `runAgent` falls back to the timing
-   * heuristic. Declare your own signal — e.g. `(s) => s.hasTag('awaiting-review')`
-   * or `(s) => getStateMeta(s).interaction !== undefined`.
+   * machine through `machine.provide(...)`. Without one, `runAgent` recognizes
+   * resting event-handling states and `meta.interaction` by structure. Use a
+   * predicate only for a more specialized machine-owned wait rule.
    */
   isIdle?: (snapshot: AnyMachineSnapshot) => boolean;
 };
@@ -777,21 +793,8 @@ type SetupAgentResult<
   readonly models: TModels;
   /** The {@link TextLogic} actors built from `setupAgent({ requests })`, keyed the same way. */
   readonly requests: RequestActors<TRequestSchemas>;
-  /** {@link appendMessages}, typed against this agent's context/event schemas. */
-  appendMessages(
-    resolve:
-      | AgentMessage
-      | AgentMessage[]
-      | ((args: {
-          context: ContextOf<TContextSchema> & { messages: AgentMessage[] };
-          event: any;
-        }) => AgentMessage | AgentMessage[]),
-  ): ReturnType<
-    typeof appendMessages<
-      ContextOf<TContextSchema> & { messages: AgentMessage[] },
-      EventsOf<WithAgentUsageEvent<TEventSchemas>>
-    >
-  >;
+  /** {@link appendMessages}, for an explicit top-level `agent.messages` transition. */
+  appendMessages: typeof appendMessages;
 };
 
 /**

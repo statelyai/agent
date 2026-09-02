@@ -154,7 +154,7 @@ Each example is a runnable host for one provider stack.
 
 | Example                                                                       | Backing                                                                                                           |
 | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| [ai-sdk-host](../examples/ai-sdk-host/index.ts)                               | Vercel AI SDK, through the shipped adapter                                                                        |
+| [ai-sdk-game-host](../examples/ai-sdk-game-host/index.ts)                    | Vercel AI SDK, through the optional adapter                                                                       |
 | [openai-sdk-host](../examples/openai-sdk-host/index.ts)                       | raw `openai` (Chat Completions); structured via `response_format`, decisions via `tool_choice: 'required'`        |
 | [anthropic-sdk-host](../examples/anthropic-sdk-host/index.ts)                 | raw `@anthropic-ai/sdk` (Messages); structured via forced tool call, decisions via `tool_choice: { type: 'any' }` |
 | [langchain-host](../examples/langchain-host/index.ts)                         | LangChain `BaseChatModel` (`@langchain/core`), wrapped into the executor contract                                 |

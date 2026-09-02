@@ -701,7 +701,7 @@ export async function main() {
   while (result.status === "idle") {
     const text = await promptLine(`${idlePrompt(result.snapshot)}\n> `);
     result = await runAgent(chatWithPdfMachine, {
-      snapshot: result.persistedSnapshot,
+      snapshot: result.persist(),
       event: toLearnerEvent(result.snapshot, text),
       ...shared,
     });

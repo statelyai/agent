@@ -22,7 +22,7 @@ import {
   type Tracer,
   type TracerProvider,
 } from "@opentelemetry/api";
-import type { AgentUsageEvent } from "../effects.js";
+import type { AgentUsageEvent } from "../usage.js";
 import type { AgentTraceEvent } from "../run-agent.js";
 import type { AgentStepRequest } from "../steps.js";
 import type { AgentCallUsage } from "../text-logic.js";
@@ -330,9 +330,6 @@ export function createOtelTraceHandler(options: OtelTraceHandlerOptions): OtelTr
           "agent.event_type": event.event.type,
           "agent.state": toJson(event.snapshot.value) ?? "",
         };
-        if (event.eventId !== undefined) {
-          attributes["agent.event_id"] = event.eventId;
-        }
         addRunEvent(event, "agent.transition", attributes);
         break;
       }

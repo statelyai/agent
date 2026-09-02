@@ -159,7 +159,7 @@ const result = await runAgent(machine, {
 - `onChunk` is observational only. It cannot change the run.
 - A `mode: 'stream'` request needs a `streamText` executor. Without one, `runAgent` fails at bind time.
 
-See [examples/joke/index.ts](../examples/joke/index.ts).
+See [parallel-streams](../examples/parallel-streams/index.ts).
 
 ## Tools and multi-step loops
 
@@ -167,7 +167,7 @@ See [examples/joke/index.ts](../examples/joke/index.ts).
 
 A text request can carry `tools`, a map of tool name to tool. The tool type is a minimal structural contract, so tools from any SDK work. See [Tools](tools.md) for the contract, how to attach tools, and how the host runs the tool loop.
 
-To let one request run a bounded tool-call loop, set the typed `maxSteps` field on the request. The shipped AI SDK adapter forwards it as `stopWhen: stepCountIs(maxSteps)`. A request with no `maxSteps` stays single-step. The adapter also reads `metadata.maxSteps` as a fallback, and the typed field wins when both are present.
+To let one request run a bounded tool-call loop, set the typed `maxSteps` field on the request. The shipped AI SDK adapter forwards it as `stopWhen: stepCountIs(maxSteps)`. A request with no `maxSteps` stays single-step.
 
 ```ts no-check
 export const research = createTextLogic({

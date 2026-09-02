@@ -13,20 +13,18 @@ import { runAgent, setupAgent } from "@statelyai/agent";
 
 // Something from every entry — proves each entry's public types resolve
 // from the shipped package, not just source. The root block also asserts the
-// WHOLE effect loop is importable in one statement (it used to be split
-// across the removed `/steps` and `/adapter` subpaths).
 export {
-  AGENT_INIT_EVENT_TYPE,
+  appendMessages,
+  eventFromInteraction,
   executeAgentRequest,
-  getAgentEffects,
+  getInteraction,
   getJsonSchema,
-  initEntry,
   parseModelRef,
-  replay,
   resolveDecision,
-  type AgentEffect,
+  runAgentLoop,
+  runAgentStream,
   type AgentOutputMode,
-  type ReplayResult,
+  type AgentInteraction,
   type StructuredOutputEnvelope,
 } from "@statelyai/agent";
 export { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
@@ -36,12 +34,6 @@ export {
   type OtelTraceHandler,
   type OtelTraceHandlerOptions,
 } from "@statelyai/agent/otel";
-export {
-  createSqliteEventLogStore,
-  createSqliteSnapshotStore,
-  type SqliteDatabase,
-  type SqliteEventLogStoreOptions,
-} from "@statelyai/agent/sqlite";
 
 const setup = setupAgent({
   models: { quick: "openai/gpt-5.4-mini" },

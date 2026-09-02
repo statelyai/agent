@@ -117,7 +117,7 @@ export const chooseMoveInput = ({
 }: {
   context: { playerHp: number; enemyHp: number };
 }) => ({
-  model: "moveChooser",
+  model: "moveChooser" as const,
   system: "You are playing a turn-based game. Choose exactly one legal move.",
   prompt: [
     `Player HP: ${context.playerHp}`,
@@ -608,7 +608,7 @@ export function resolveInteractionLabel(label: string, context: Record<string, u
 
 /**
  * Plays a full RPS match, settling idle on every one of your throws and
- * resuming from `result.persistedSnapshot`. The test passes mock executors and
+ * resuming from `result.persist()`. The test passes mock executors and
  * scripted throws, so CI stays keyless.
  */
 export async function runRpsExample(options?: {
@@ -645,7 +645,7 @@ export async function runRpsExample(options?: {
       queued.shift() ??
       toThrowEvent(await promptLine(`${label}\n(rock/paper/scissors) > `));
     result = await runAgent(rpsMachine, {
-      snapshot: result.persistedSnapshot,
+      snapshot: result.persist(),
       event,
       ...shared,
     });

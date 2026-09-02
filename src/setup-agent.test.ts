@@ -31,7 +31,6 @@ import {
   getAgentSchemas,
   setupAgent,
   toolMessage,
-  userMessage,
   type AgentDecisionRequest,
   type AgentTextRequest,
   type AgentTools,
@@ -194,7 +193,7 @@ describe("setupAgent", () => {
             input: z.object({ prompt: z.string() }),
             output: z.object({ answer: z.string() }),
           },
-          // Registered aliases autocomplete, but any string is a legal model ref.
+          // @ts-expect-error a registered model map closes the alias set
           model: "missing",
           prompt: ({ input }) => input.prompt,
         },
@@ -206,7 +205,7 @@ describe("setupAgent", () => {
       initial: "deciding",
       states: {
         deciding: {
-          // A bare (unregistered) model ref is accepted on inline decisions too.
+          // @ts-expect-error inline decisions use registered model aliases
           invoke: {
             src: "agent.decide",
             input: {
@@ -854,15 +853,13 @@ describe("setupAgent", () => {
     });
   });
 
-  test("appendMessages creates a typed action for message context", async () => {
+  test("appendMessages creates an explicit agent.messages transition", async () => {
     const schemas = createAgentSchemas({
       context: z.object({
         messages: messagesSchema,
       }),
       input: z.object({}),
-      events: {
-        USER_REPLIED: z.object({ text: z.string() }),
-      },
+      events: {},
     });
     const agent = setupAgent({ schemas });
     const machine = agent.createMachine({
@@ -871,10 +868,7 @@ describe("setupAgent", () => {
       states: {
         waiting: {
           on: {
-            USER_REPLIED: agent.appendMessages(({ event }) => {
-              const text: string = event.text;
-              return userMessage(text);
-            }) as never,
+            "agent.messages": agent.appendMessages(),
           },
         },
       },
@@ -882,7 +876,12 @@ describe("setupAgent", () => {
 
     const actor = createActor(machine);
     actor.start();
-    actor.send({ type: "USER_REPLIED", text: "hello" } as never);
+    actor.send({
+      type: "agent.messages",
+      request: "reply",
+      actorId: "reply",
+      messages: [{ role: "user", content: "hello" }],
+    } as never);
 
     expect(actor.getSnapshot().context.messages).toEqual([{ role: "user", content: "hello" }]);
   });

@@ -76,7 +76,7 @@ describe("ticket-triage", () => {
     expect(label).toContain("Confirm the category");
 
     const result = await runAgent(triageMachine, {
-      snapshot: first.persistedSnapshot,
+      snapshot: first.persist(),
       event: { type: "RECLASSIFY", category: "Technical" },
       executors: { generateText },
     });
@@ -102,7 +102,7 @@ describe("ticket-triage", () => {
     if (first.status !== "idle") throw new Error("expected idle");
 
     const again = await runAgent(triageMachine, {
-      snapshot: first.persistedSnapshot,
+      snapshot: first.persist(),
       event: { type: "RECLASSIFY", category: "urgent" },
       executors: { generateText },
     });
@@ -128,7 +128,7 @@ describe("ticket-triage", () => {
     if (first.status !== "idle") throw new Error("expected idle");
 
     const result = await runAgent(triageMachine, {
-      snapshot: first.persistedSnapshot,
+      snapshot: first.persist(),
       event: { type: "CONFIRM" },
       executors: { generateText },
     });

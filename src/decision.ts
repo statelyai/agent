@@ -30,10 +30,13 @@ export interface AgentDecisionInput<
   TMetadata = Record<string, unknown>,
   TModel extends string = string,
 > {
+  /** Semantic request identity. Defaults to the invoke occurrence id. */
+  name?: string;
   model: TModel;
   system?: string;
   prompt?: string;
-  messages?: AgentMessage[];
+  /** Framework-native messages, passed through without conversion. */
+  messages?: any[];
   allowedEvents?: AllowedEvents<TEvent>;
   maxRetries?: number;
   temperature?: number;
@@ -54,6 +57,8 @@ function decideRequestFromInput(input: AgentDecisionInput): AgentDecisionRequest
   return {
     kind: "decision",
     id: "",
+    name: input.name,
+    input,
     model: input.model,
     system: input.system,
     prompt: input.prompt,
@@ -153,11 +158,14 @@ export interface DecisionLogicConfig<
   TMetadata extends Record<string, unknown> = Record<string, unknown>,
   TModel extends string = string,
 > {
+  /** Semantic request identity. Defaults to the invoke occurrence id. */
+  name?: ResolveTextLogicValue<string | undefined, InferOutput<TInputSchema>>;
   schemas?: { input: TInputSchema };
   model: ResolveTextLogicValue<TModel, InferOutput<TInputSchema>>;
   system?: ResolveTextLogicValue<string | undefined, InferOutput<TInputSchema>>;
   prompt?: ResolveTextLogicValue<string | undefined, InferOutput<TInputSchema>>;
-  messages?: ResolveTextLogicValue<AgentMessage[] | undefined, InferOutput<TInputSchema>>;
+  /** Framework-native messages, passed through without conversion. */
+  messages?: ResolveTextLogicValue<any[] | undefined, InferOutput<TInputSchema>>;
   allowedEvents?: AllowedEvents<TEvent, InferOutput<TInputSchema>>;
   maxRetries?: number; // default 2
   temperature?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
@@ -254,6 +262,8 @@ export function createDecisionLogic<
     return {
       kind: "decision",
       id: "",
+      name: resolveTextLogicValue(config.name, args),
+      input: parsedInput,
       model: resolveTextLogicValue(config.model, args)!,
       system: resolveTextLogicValue(config.system, args),
       prompt: resolveTextLogicValue(config.prompt, args),
@@ -279,7 +289,7 @@ export function createDecisionLogic<
         throw new Error(
           "Decision logic has no host execution. Pass an executor as the second " +
             "argument to createDecisionLogic(...), provide a runtime adapter, or " +
-            "extract it with getAgentEffects(..., { actors }) and resolveDecision(...).",
+            "bind it through runAgent/provideExecutors, or call resolveDecision from your host.",
         );
       }
 
@@ -353,10 +363,15 @@ export interface AgentDecisionRequest {
   kind: "decision";
   /** Durable invoke id. */
   id: string;
+  /** Semantic request identity; defaults to {@link id}. */
+  name?: string;
+  /** The schema-validated invoke input that produced this request. */
+  input?: unknown;
   model: string;
   system?: string;
   prompt?: string;
-  messages?: AgentMessage[];
+  /** Framework-native messages, passed through without conversion. */
+  messages?: any[];
   /** Candidate events: declared `allowedEvents` ∩ snapshot-legal events. */
   events: AgentEventDescriptor[];
   /**
@@ -373,13 +388,6 @@ export interface AgentDecisionRequest {
   stopSequences?: string[];
   metadata?: Record<string, unknown>;
   /**
-   * Abort signal for the underlying model call, threaded through by
-   * {@link resolveDecision} from its `options.signal` so a `decide` executor
-   * can cancel the in-flight request (symmetric with the text executors'
-   * `info.signal`). Runtime-only — never serialized into a provider request.
-   */
-  signal?: AbortSignal;
-  /**
    * The `runAgent` run this decision belongs to (`run_<n>`, matching trace
    * events), injected by runAgent like `signal` (symmetric with the text
    * executors' `info.runId`). Runtime-only correlation for executor
@@ -389,6 +397,9 @@ export interface AgentDecisionRequest {
    */
   runId?: string;
 }
+
+/** Decision request after core has resolved its semantic identity. */
+export type AgentExecutorDecisionRequest = AgentDecisionRequest & { name: string };
 
 /**
  * A single failed decision attempt, recorded by {@link resolveDecision} and
@@ -466,7 +477,7 @@ export function renderDecisionAttempts(
  * aggregated {@link AgentUsage}.
  */
 export type AgentDecisionExecutor = (
-  request: AgentDecisionRequest,
+  request: AgentExecutorDecisionRequest,
   info?: AgentRequestExecutorInfo,
 ) => PromiseLike<{
   event: ChosenEvent;
@@ -548,10 +559,8 @@ export async function resolveDecision<TEvent extends ChosenEvent = ChosenEvent>(
     const result = await executor(
       {
         ...request,
+        name: request.name ?? (request.id || "agent.decide"),
         attempts: [...attempts],
-        // Thread the run's abort signal onto the request so the executor can
-        // cancel its in-flight model call (adapters read `request.signal`).
-        signal: options.signal,
       },
       // The same `info` second argument generateText/streamText receive.
       {

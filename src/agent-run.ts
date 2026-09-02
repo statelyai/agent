@@ -1,4 +1,5 @@
-import type { AnyStateMachine } from "xstate";
+import type { AnyStateMachine, EmittedFrom, EventFromLogic, StateValue } from "xstate";
+import type { AgentStepRequest } from "./steps.js";
 import {
   runAgent,
   type AgentTraceEvent,
@@ -163,4 +164,114 @@ export function createAgentRun<TMachine extends AnyStateMachine>(
   };
 
   return { events, result };
+}
+
+export type AgentStreamEvent<TMachine extends AnyStateMachine = AnyStateMachine> =
+  | {
+      kind: "request";
+      phase: "start" | "end";
+      name: string;
+      id: string;
+      request: AgentStepRequest;
+      output?: unknown;
+      raw?: unknown;
+    }
+  | {
+      kind: "request";
+      phase: "error";
+      name: string;
+      id: string;
+      request: AgentStepRequest;
+      error: unknown;
+    }
+  | { kind: "chunk"; name: string; id: string; delta: string }
+  | {
+      kind: "transition";
+      value: StateValue;
+      event: EventFromLogic<TMachine>;
+    }
+  | { kind: "emit"; event: EmittedFrom<TMachine> }
+  | { kind: "done"; result: Extract<RunAgentResult<TMachine>, { status: "done" }> }
+  | { kind: "idle"; result: Extract<RunAgentResult<TMachine>, { status: "idle" }> }
+  | { kind: "error"; result: Extract<RunAgentResult<TMachine>, { status: "error" }> };
+
+function requestIdentity(request: AgentStepRequest): { name: string; id: string } {
+  const candidate = request as {
+    id?: string;
+    name?: string;
+    kind?: string;
+    input?: { name?: string };
+  };
+  const id = candidate.id ?? candidate.name ?? "agent.request";
+  const name = candidate.kind === "text" ? (candidate.input?.name ?? id) : (candidate.name ?? id);
+  return { name, id };
+}
+
+/**
+ * Streams one {@link runAgent} call as agent-level events. The machine remains
+ * the single artifact; this function only projects its requests, chunks,
+ * transitions, emitted events, and terminal result into an async iterable.
+ */
+export async function* runAgentStream<TMachine extends AnyStateMachine>(
+  machine: TMachine,
+  options: RunAgentOptions<TMachine>,
+): AsyncGenerator<AgentStreamEvent<TMachine>, void> {
+  const run = createAgentRun(machine, options);
+
+  for await (const event of run.events) {
+    switch (event.type) {
+      case "request.start": {
+        const identity = requestIdentity(event.request);
+        yield { kind: "request", phase: "start", ...identity, request: event.request };
+        break;
+      }
+      case "request.end": {
+        const identity = requestIdentity(event.request);
+        yield {
+          kind: "request",
+          phase: "end",
+          ...identity,
+          request: event.request,
+          output: event.output,
+          raw: event.raw,
+        };
+        break;
+      }
+      case "request.error": {
+        const identity = requestIdentity(event.request);
+        yield {
+          kind: "request",
+          phase: "error",
+          ...identity,
+          request: event.request,
+          error: event.error,
+        };
+        break;
+      }
+      case "stream.chunk": {
+        const identity = requestIdentity(event.request);
+        yield { kind: "chunk", ...identity, delta: event.chunk };
+        break;
+      }
+      case "machine.transition":
+        yield {
+          kind: "transition",
+          value: (event.snapshot as { value: StateValue }).value,
+          event: event.event,
+        };
+        break;
+      case "emit":
+        yield { kind: "emit", event: event.event };
+        break;
+    }
+  }
+
+  const result = await run.result;
+  if (result.status === "done") {
+    yield { kind: "done", result };
+  } else if (result.status === "idle") {
+    yield { kind: "idle", result };
+  } else {
+    yield { kind: "error", result };
+  }
 }

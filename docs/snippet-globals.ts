@@ -97,7 +97,6 @@ declare const output: any;
 
 declare let result: any;
 
-declare const generateResult: any;
 
 declare const rawOutput: any;
 
@@ -282,8 +281,6 @@ declare function resolveModel(key: string): LanguageModel;
 declare function createMyStore(): any;
 
 declare function appendToStore(entry: any): Promise<void>;
-
-declare function createReplayEntry(entry: any): any;
 
 declare function createSubAgentExecute(config: any): any;
 

@@ -36,7 +36,7 @@
  * The guesser's turn is an idle state (no invoke) carrying `meta.interaction`:
  * the surviving clues in the label, free text routed to `GUESS`, and a `PASS`
  * button. Resume with
- * `runAgent(machine, { snapshot: result.persistedSnapshot, event })`.
+ * `runAgent(machine, { snapshot: result.persist(), event })`.
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/just-one/index.ts
  */
@@ -530,7 +530,7 @@ export async function main() {
   while (result.status === "idle") {
     const text = await promptLine(`${idlePrompt(result.snapshot)}\n> `);
     result = await runAgent(justOneMachine, {
-      snapshot: result.persistedSnapshot,
+      snapshot: result.persist(),
       event: toGuesserEvent(text),
       ...shared,
     });

@@ -1,18 +1,10 @@
 import { describe, expect, test } from "vitest";
 import { matchesTrajectory, runAgent, createScriptedExecutors, setupAgent } from "./index.js";
-import type { AgentLogEntry } from "./index.js";
 import { z } from "zod";
 
-const entry = (type: string, payload: Record<string, unknown> = {}): AgentLogEntry =>
-  ({
-    schemaVersion: 1,
-    id: type,
-    index: 0,
-    recordedAt: "2026-01-01T00:00:00.000Z",
-    machineId: "m",
-    machineVersion: "1",
-    event: { type, ...payload },
-  }) as unknown as AgentLogEntry;
+const entry = (type: string, payload: Record<string, unknown> = {}) => ({
+  event: { type, ...payload },
+});
 
 describe("matchesTrajectory: state paths", () => {
   test("ordered subsequence with gaps allowed", () => {
@@ -152,18 +144,9 @@ describe("matchesTrajectory: partial credit and degenerate cases", () => {
     expect(result.firstMiss).toEqual({ index: 2, expected: "reviewing", searchedFrom: 2 });
   });
 
-  test("an empty expectation always matches", () => {
-    expect(matchesTrajectory(["a"], [])).toEqual({
-      matched: true,
-      matchedCount: 0,
-      expectedCount: 0,
-      score: 1,
-    });
-    expect(matchesTrajectory([], [], { exact: true }).matched).toBe(true);
-    expect(matchesTrajectory(["a"], [], { exact: true })).toMatchObject({
-      matched: false,
-      score: 0,
-    });
+  test("an empty expectation throws", () => {
+    expect(() => matchesTrajectory(["a"], [])).toThrow(/at least one item/);
+    expect(() => matchesTrajectory([], [], { exact: true })).toThrow(/at least one item/);
   });
 
   test("an empty run misses the first expected item", () => {
@@ -216,17 +199,22 @@ describe("matchesTrajectory: over a real run", () => {
     },
   });
 
-  test("scores the state path and the event log with the same call", async () => {
+  test("scores state and event trajectories from the same transition stream", async () => {
     const statePath: unknown[] = [];
+    const events: Array<{ type: string }> = [];
 
     const result = await runAgent(jokeMachine, {
       input: { topic: "state machines" },
       executors: createScriptedExecutors({ text: ["A joke."] }),
-      onTransition: (snapshot) => statePath.push(snapshot.value),
+      onTransition: (snapshot, event) => {
+        statePath.push(snapshot.value);
+        events.push(event);
+      },
     });
 
     expect(matchesTrajectory(statePath, ["telling", "told"]).matched).toBe(true);
-    expect(matchesTrajectory(result.events, ["@agent.init"]).matched).toBe(true);
-    expect(matchesTrajectory(result.events, ["told"]).matched).toBe(false);
+    expect(result.status).toBe("done");
+    expect(matchesTrajectory(events, ["@xstate.init"]).matched).toBe(true);
+    expect(matchesTrajectory(events, ["told"]).matched).toBe(false);
   });
 });

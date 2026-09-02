@@ -331,7 +331,7 @@ export async function runRetrofitExample(
     ? ({ type: "APPROVE" } as const)
     : ({ type: "DENY", reason: denyReason } as const);
   const second = await runAgent(supportMachine, {
-    snapshot: first.persistedSnapshot,
+    snapshot: first.persist(),
     event,
     executors,
     onTransition: track,

@@ -370,7 +370,7 @@ export async function main() {
   while (result.status === "idle") {
     const answer = await promptLine(`${escalationLabel(result.snapshot)}\n> `);
     result = await runAgent(triageMachine, {
-      snapshot: result.persistedSnapshot,
+      snapshot: result.persist(),
       event: answer === "" ? { type: "CONFIRM" } : { type: "RECLASSIFY", category: answer },
       ...shared,
     });

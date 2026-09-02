@@ -51,8 +51,6 @@ interface Assessment {
   questions: string[];
 }
 
-const WAITING_STATES = new Set(["prompting", "needsMoreInfo", "reviewing", "sent"]);
-
 // ─── The driver ───
 
 /** How the simulated user behaves for one row. */
@@ -122,14 +120,13 @@ export async function runSeamCase(
     seam: input.seam,
     ...(candidate ? { candidate } : {}),
     respond: respondFor(input),
-    isIdle: (snapshot) => typeof snapshot.value === "string" && WAITING_STATES.has(snapshot.value),
   });
 
   return {
     status: run.result.status,
     seamOutput: run.seamOutput,
     seamStatePath: run.after.statePath,
-    seamEvents: run.after.events.map((entry) => entry.event.type),
+    seamEvents: run.after.events.map((event) => event.type),
     statePath: [...run.before.statePath, ...run.after.statePath],
     sentEmails: run.result.status === "done" ? run.result.output.sentEmails : [],
   };

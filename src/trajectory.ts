@@ -1,9 +1,8 @@
 /**
  * Trajectory matching — the `expect` vocabulary for machine agents.
  *
- * A run leaves two trajectories behind: the state path (from `onTransition`)
- * and the durable event log (`result.events`). {@link matchesTrajectory} scores
- * either one against an expected sequence, as an ordered subsequence by default
+ * A run leaves state and event trajectories through `onTransition`.
+ * {@link matchesTrajectory} scores either one against an expected sequence, as an ordered subsequence by default
  * so an extra retry loop does not fail a run that reached the right places in
  * the right order.
  *
@@ -13,7 +12,7 @@
  * @module
  */
 import type { StateValue } from "xstate";
-import type { AgentLogEntry } from "./event-log-store.js";
+import { AgentError } from "./errors.js";
 import { isRecord } from "./internal/is-record.js";
 
 /** An event-shaped trajectory item: anything with a string `type`. */
@@ -22,16 +21,24 @@ export interface TrajectoryEvent {
   [key: string]: unknown;
 }
 
+/** Any host-owned envelope around an event. */
+export interface TrajectoryEventEnvelope {
+  event: TrajectoryEvent;
+}
+
 /**
  * One item in a trajectory, on either side of the comparison:
  *
  * - a state value — `'drafting'`, a dot path `'review.editing'`, or the nested
  *   object XState reports (`{ review: 'editing' }`),
- * - an event — an {@link AgentLogEntry} from `result.events`, a bare event
- *   object, or just the event type as a string,
+ * - an event object, or just the event type as a string,
  * - a machine snapshot, whose `value` is used.
  */
-export type TrajectoryItem = StateValue | AgentLogEntry | TrajectoryEvent | { value: StateValue };
+export type TrajectoryItem =
+  | StateValue
+  | TrajectoryEvent
+  | TrajectoryEventEnvelope
+  | { value: StateValue };
 
 /** Options for {@link matchesTrajectory}. */
 export interface MatchTrajectoryOptions {
@@ -174,8 +181,8 @@ function matcherFor(expected: unknown): (actual: unknown) => boolean {
 /**
  * Matches a run's trajectory against an expected one.
  *
- * Both trajectories may be state values (collected from `onTransition`) or
- * events (`result.events`, whose {@link AgentLogEntry} envelopes are unwrapped);
+ * Both trajectories may be state values or events collected from
+ * `onTransition`;
  * items are compared by shape, so `['prompting', 'drafting']` scores a state
  * path and `['PROMPT_SUBMITTED', 'SEND']` scores an event log with the same
  * call.
@@ -195,7 +202,7 @@ function matcherFor(expected: unknown): (actual: unknown) => boolean {
  *
  * const path = matchesTrajectory(statePath, ['prompting', 'drafting', 'sent']);
  * expect(path.matched, JSON.stringify(path.firstMiss)).toBe(true);
- * expect(matchesTrajectory(result.events, ['PROMPT_SUBMITTED', 'SEND']).matched).toBe(true);
+ * expect(matchesTrajectory(events, ['PROMPT_SUBMITTED', 'SEND']).matched).toBe(true);
  * ```
  *
  * @example Partial credit in an eval scorer
@@ -213,6 +220,12 @@ export function matchesTrajectory(
   options: MatchTrajectoryOptions = {},
 ): TrajectoryMatch {
   const expectedCount = expected.length;
+  if (expectedCount === 0) {
+    throw new AgentError(
+      "empty-trajectory",
+      "matchesTrajectory: expected trajectory must contain at least one item.",
+    );
+  }
   const exact = options.exact === true;
 
   let cursor = 0;

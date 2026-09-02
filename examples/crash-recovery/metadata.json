@@ -4,12 +4,12 @@
   "kind": "agent-workflow",
   "origin": {
     "type": "stately-agent",
-    "source": "Events-only resume: recover a crashed run from its persisted event log alone",
+    "source": "Native XState snapshot resume after a simulated process crash",
     "url": null
   },
   "comparison": {
     "targets": ["LangGraph checkpointer"],
-    "purpose": "Writes an article in two steps while logging every result, then restarts from the log alone: finished steps replay instantly and only the interrupted one runs again."
+    "purpose": "Writes an article in two steps, persists a native idle snapshot, and resumes it in a fresh run without an Agent-specific storage layer."
   },
   "starters": ["state machines", "the history of the fax machine", "why builds are slow"]
 }

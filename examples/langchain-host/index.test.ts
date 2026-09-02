@@ -98,6 +98,7 @@ describe("langchain-host: Direction A (LangChain model as executor)", () => {
       decide({
         kind: "decision",
         id: "d1",
+        name: "chooseNext",
         model: "critic",
         prompt: "stop or go",
         events: [
@@ -117,6 +118,7 @@ describe("langchain-host: Direction A (LangChain model as executor)", () => {
       decide({
         kind: "decision",
         id: "d1",
+        name: "chooseNext",
         model: "critic",
         prompt: "stop or go",
         events: [{ type: "END", toolName: "send_event_END" }],

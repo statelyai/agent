@@ -114,7 +114,7 @@ const result = await runAgent(toolCallingMachine, {
 });
 ```
 
-For the full version, with three real tools and progress reported through `onTransition`, see [examples/tool-calling/index.ts](../examples/tool-calling/index.ts).
+For approval and progress around real tools, see [review-tool-calls](../examples/review-tool-calls/index.ts).
 
 ## Execution flow through the host
 
@@ -122,7 +122,7 @@ For the full version, with three real tools and progress reported through `onTra
 
 1. The machine invokes the request. Core lowers it to an `AgentTextRequest` carrying `tools`, `toolChoice`, and `metadata`.
 2. The executor maps tools to its SDK. `createAiSdkExecutors` passes a native `tool({...})` through unchanged and wraps a plain descriptor or bare function in `tool()`. A tool with no `inputSchema` gets a permissive one.
-3. `maxSteps` becomes `stopWhen: stepCountIs(maxSteps)`. The loop runs entirely inside the executor. The adapter still reads `metadata.maxSteps` as a fallback for requests written before `maxSteps` was typed, and the typed field wins.
+3. `maxSteps` becomes `stopWhen: stepCountIs(maxSteps)`. The loop runs entirely inside the executor.
 4. The final output is validated against the request's output schema and returned to `onDone`.
 
 Two consequences follow:
@@ -136,25 +136,16 @@ The raw executor result, including tool calls and results, reaches host code thr
 
 <!-- message model from src/types.ts and src/utils.ts -->
 
-The message model includes tool parts, so a conversation that contains tool traffic is stored as plain machine context:
+Tool calls and results stay in the executor framework's native message objects. Store them explicitly as machine context:
 
-- `ToolCallPart`: `{ type: 'tool-call', toolCallId, toolName, input }`.
-- `ToolResultPart`: `{ type: 'tool-result', toolCallId, toolName, output }`, where `output` is `{ type: 'text' | 'json' | 'error-text' | 'error-json' | 'content', value }`.
-- A `tool`-role message carries only tool-result parts. Build one with `toolMessage(...)`.
+```ts no-check
+import { appendMessages } from "@statelyai/agent";
 
-```ts
-import { appendMessages, toolMessage } from "@statelyai/agent";
-
-const recordToolResult = appendMessages([
-  toolMessage([
-    {
-      type: "tool-result",
-      toolCallId: "call_1",
-      toolName: "calculate",
-      output: { type: "json", value: { value: 714 } },
-    },
-  ]),
-]);
+const machine = agent.createMachine({
+  context: { messages: [] },
+  on: { "agent.messages": appendMessages() },
+  // ...
+});
 ```
 
 Build these parts by hand only when the machine owns the loop, such as in a ReAct-style machine or when replaying a transcript. With a host-run tool loop, the intermediate calls stay inside the executor. See [Messages](messages.md).
@@ -166,7 +157,7 @@ Build these parts by hand only when the machine owns the loop, such as in a ReAc
 Eject from the preset when the tool loop needs machine states of its own:
 
 - To model approval as machine states, with approve, edit, and reject steps that persist and resume, eject to [examples/review-tool-calls](../examples/review-tool-calls/index.ts).
-- To model each think, act, and observe turn as its own transition, see [examples/react-agent](../examples/react-agent/index.ts).
+- To model each think, act, and observe turn as its own transition, use explicit request, tool, and observation states.
 
 > **Note:** There is no built-in MCP client and no built-in tool-approval gate. MCP discovery, auth, and transport are the host's responsibility. Pass the discovered tool descriptors into `tools` like any other tool. See [Scope](scope.md).
 

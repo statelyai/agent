@@ -143,6 +143,91 @@ describe("createScriptedExecutors", () => {
     expect(prompts[0]).toContain("Outline an article about state machines.");
   });
 
+  test("routes text scripts by request name and records resolved inputs", async () => {
+    const scripted = createScriptedExecutors({
+      text: {
+        draft: ({ input }) => `draft for ${(input as { outline: string }).outline}`,
+        outline: ["named outline"],
+      },
+    });
+
+    const result = await runAgent(writerMachine, {
+      input: { topic: "state machines" },
+      executors: scripted,
+    });
+
+    expect(result.status).toBe("done");
+    if (result.status !== "done") return;
+    expect(result.output).toEqual({
+      outline: "named outline",
+      article: "draft for named outline",
+    });
+    expect(scripted.calls.map(({ kind, name, input }) => ({ kind, name, input }))).toEqual([
+      { kind: "generateText", name: "outline", input: { topic: "state machines" } },
+      { kind: "generateText", name: "draft", input: { outline: "named outline" } },
+    ]);
+  });
+
+  test("supports named decision scripts, wildcard fallback, repeat, and default usage", async () => {
+    const scripted = createScriptedExecutors({
+      decisions: {
+        moderateComment: [{ type: "BLOCK" }],
+        "*": [{ type: "FLAG", reason: "fallback" }],
+      },
+      repeat: true,
+      usage: { totalTokens: 3 },
+    });
+
+    const request = {
+      kind: "decision" as const,
+      id: "decision-1",
+      name: "moderateComment",
+      input: { comment: "spam" },
+      model: "fast",
+      events: [
+        { type: "BLOCK", toolName: "send_event_BLOCK" },
+        { type: "FLAG", toolName: "send_event_FLAG" },
+      ],
+      attempts: [],
+    };
+
+    await expect(scripted.decide(request)).resolves.toMatchObject({
+      event: { type: "BLOCK" },
+      usage: { totalTokens: 3 },
+    });
+    await expect(scripted.decide(request)).resolves.toMatchObject({
+      event: { type: "BLOCK" },
+      usage: { totalTokens: 3 },
+    });
+    expect(scripted.calls).toHaveLength(2);
+  });
+
+  test("scripts stream chunks separately from generateText answers", async () => {
+    const scripted = createScriptedExecutors({
+      stream: { writeDraft: ["hello ", "world"] },
+    });
+    const chunks: string[] = [];
+
+    const result = await scripted.streamText(
+      {
+        name: "writeDraft",
+        input: { topic: "state machines" },
+        model: "fast",
+        prompt: "write",
+        tools: {},
+      },
+      { onChunk: (chunk) => chunks.push(chunk) },
+    );
+
+    expect(result.output).toBe("hello world");
+    expect(chunks).toEqual(["hello ", "world"]);
+    expect(scripted.calls[0]).toMatchObject({
+      kind: "streamText",
+      name: "writeDraft",
+      input: { topic: "state machines" },
+    });
+  });
+
   test("a decision function entry can pick from the request's candidate events", async () => {
     const result = await runAgent(moderationMachine, {
       input: { comment: "great post", trust: 90 },
@@ -226,6 +311,7 @@ describe("createScriptedExecutors", () => {
       executors.decide({
         kind: "decision",
         id: "forward",
+        name: "forward",
         model: "fast",
         events: [{ type: "FORWARD", toolName: "send_event_FORWARD" }],
         attempts: [],
@@ -282,7 +368,12 @@ describe("createScriptedExecutors", () => {
       text: [{ output: "draft", confidence: 0.9 }],
     });
 
-    const result = await executors.generateText({ model: "fast", prompt: "hi", tools: {} });
+    const result = await executors.generateText({
+      name: "test",
+      model: "fast",
+      prompt: "hi",
+      tools: {},
+    });
 
     expect(result.output).toEqual({ output: "draft", confidence: 0.9 });
     expect(result.usage).toBeUndefined();
@@ -293,7 +384,12 @@ describe("createScriptedExecutors", () => {
       text: [{ output: "draft", usage: { totalTokens: 5 } }],
     });
 
-    const result = await executors.generateText({ model: "fast", prompt: "hi", tools: {} });
+    const result = await executors.generateText({
+      name: "test",
+      model: "fast",
+      prompt: "hi",
+      tools: {},
+    });
 
     expect(result.output).toBe("draft");
     expect(result.usage).toEqual({ totalTokens: 5 });
@@ -304,7 +400,12 @@ describe("createScriptedExecutors", () => {
     inherited.note = "mine";
     const executors = createScriptedExecutors({ text: [inherited] });
 
-    const result = await executors.generateText({ model: "fast", prompt: "hi", tools: {} });
+    const result = await executors.generateText({
+      name: "test",
+      model: "fast",
+      prompt: "hi",
+      tools: {},
+    });
 
     expect(result.output).toBe(inherited);
   });
@@ -329,7 +430,7 @@ describe("createScriptedExecutors", () => {
     const executors = createScriptedExecutors({ text: ["hello world"] });
     const chunks: string[] = [];
     const result = await executors.streamText(
-      { model: "fast", prompt: "hi", tools: {} },
+      { name: "test", model: "fast", prompt: "hi", tools: {} },
       { onChunk: (chunk) => chunks.push(chunk) },
     );
 
@@ -355,6 +456,7 @@ describe("createScriptedExecutors", () => {
       executors.decide({
         kind: "decision",
         id: "0.(machine).reviewing",
+        name: "review",
         model: "fast",
         events: [
           { type: "PUBLISH", toolName: "send_event_PUBLISH" },

@@ -25,7 +25,13 @@ Stately Agent 2 is in alpha. APIs may change before the stable release.
 <!-- install command matching the package prerelease channel and package.json peers -->
 
 ```sh
-pnpm add @statelyai/agent@alpha xstate@alpha zod ai@^7 @ai-sdk/openai@^4
+pnpm add @statelyai/agent@alpha xstate@alpha zod
+```
+
+For the optional Vercel AI SDK executor:
+
+```sh
+pnpm add ai@^7 @ai-sdk/openai@^4
 ```
 
 Requirements:
@@ -43,7 +49,7 @@ This agent reviews refund requests. The model may propose an automatic refund, b
 ```ts
 import { openai } from "@ai-sdk/openai";
 import { runAgent, setupAgent } from "@statelyai/agent";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { defineModels } from "@statelyai/agent/ai-sdk";
 import { z } from "zod";
 
 const models = defineModels({
@@ -104,7 +110,6 @@ const result = await runAgent(refundMachine, {
     request: "I was charged twice for the same order.",
     amount: 75,
   },
-  executors: createAiSdkExecutors({ models }),
 });
 
 if (result.status === "done") {
@@ -129,7 +134,7 @@ const result = await runAgent(refundMachine, {
 });
 ```
 
-Scripted executors run the machine above end to end with no API key; swap in `createAiSdkExecutors({ models })` for a real model. See [Hosts and executors](docs/hosts.md).
+Scripted executors run the machine above end to end with no API key. A registry created by `defineModels` supplies the optional AI SDK executor by default; explicit `executors` override it. Core does not import the AI SDK. See [Hosts and executors](docs/hosts.md).
 
 ## Architecture
 
@@ -147,15 +152,15 @@ The machine never talks to a model directly, so swapping `createAiSdkExecutors` 
 
 The example above has one model decision and two final outcomes. Real machines add approval states, retries, parallel work, child agents, and long-running waits without changing how control flow is represented.
 
-The core concepts (machines owning control flow, bounded model decisions, typed requests, host-run executors, storable snapshots, verified replay entries) are in the [documentation overview](docs/index.md).
+The core concepts (machines owning control flow, bounded model decisions, typed requests, host-run executors, and native XState snapshots) are in the [documentation overview](docs/index.md).
 
 ## Examples
 
 <!-- starter examples derived from examples/*/metadata.json and examples/index.ts -->
 
 - [Twenty Questions](examples/twenty-questions) shows a model choosing legal events in a loop.
-- [Go Fish](examples/go-fish) pits a model against a human while the machine enforces hidden-information game rules.
-- [Human in the loop](examples/human-in-the-loop) pauses, stores a snapshot, and resumes after review.
+- [Chameleon](examples/chameleon) combines hidden information, sequential turns, and a human vote.
+- [Snapshot migration](examples/snapshot-migration) uses XState's native `version` and `migrate` contract.
 - [Ticket triage](examples/triage) returns structured data from a model request.
 - [JSON agent](examples/json-agent) runs a machine defined as data.
 
@@ -173,7 +178,7 @@ See [all examples](examples/README.md).
 - [Hosts and executors](docs/hosts.md)
 - [Models and providers](docs/models-and-providers.md)
 - [Use in any stack](docs/any-stack.md)
-- [The event log](docs/event-log.md)
+- [Persistence](docs/persistence.md)
 - [Observability](docs/observability.md)
 - [Usage and budgets](docs/usage-and-budgets.md)
 - [Agent patterns](docs/patterns.md)

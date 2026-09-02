@@ -1,57 +1,69 @@
 import type { EventObject } from "xstate";
 import type { AgentMessage, StandardSchemaV1 } from "./types.js";
 
-// ─── Message helpers ───
-//
-// Messages are plain context state: declare a `messages` field in the
-// context schema and update it with `appendMessages(...)`:
-//
-//   actions: appendMessages(({ event }) => userMessage(event.prompt))
+/** Ordinary machine event emitted after a request returns framework-native messages. */
+export const AGENT_MESSAGES_EVENT_TYPE = "agent.messages" as const;
 
-// Resolves `resolve` and returns the full new `messages` array (existing + appended).
-function addMessages<TContext extends { messages: AgentMessage[] }, TEvent extends EventObject>(
-  resolve:
-    | AgentMessage
-    | AgentMessage[]
-    | ((args: { context: TContext; event: TEvent }) => AgentMessage | AgentMessage[]),
-): (args: { context: TContext; event: TEvent }) => AgentMessage[] {
-  return (args) => {
-    const resolved = typeof resolve === "function" ? resolve(args) : resolve;
-    return [...args.context.messages, ...(Array.isArray(resolved) ? resolved : [resolved])];
-  };
+export interface AgentMessagesEvent<TMessage = unknown> extends EventObject {
+  type: typeof AGENT_MESSAGES_EVENT_TYPE;
+  /** Semantic request identity. */
+  request: string;
+  /** Invoke occurrence identity. */
+  actorId: string;
+  /** Messages exactly as returned by the executor/framework. */
+  messages: TMessage[];
 }
 
+export type AgentMessagesEventPayload = Omit<AgentMessagesEvent, "type">;
+
+/** Runtime schema for the framework-neutral `agent.messages` envelope. */
+export const agentMessagesEventSchema: StandardSchemaV1<AgentMessagesEventPayload> = {
+  "~standard": {
+    version: 1,
+    vendor: "statelyai-agent",
+    validate(value: unknown) {
+      if (!value || typeof value !== "object") {
+        return { issues: [{ message: "Expected an 'agent.messages' payload object" }] };
+      }
+      const event = value as Record<string, unknown>;
+      const issues: Array<{ message: string; path?: unknown[] }> = [];
+      if (typeof event.request !== "string") {
+        issues.push({ message: "Expected a string", path: ["request"] });
+      }
+      if (typeof event.actorId !== "string") {
+        issues.push({ message: "Expected a string", path: ["actorId"] });
+      }
+      if (!Array.isArray(event.messages)) {
+        issues.push({ message: "Expected an array", path: ["messages"] });
+      }
+      return issues.length > 0
+        ? { issues }
+        : { value: event as unknown as AgentMessagesEventPayload };
+    },
+  },
+};
+
 /**
- * Builds a transition-function result that appends one or more
- * {@link AgentMessage}s to a context's `messages` array. `resolve` is either
- * a message (or array of messages) or a function of `{ context, event }`
- * returning them; the returned function is meant to be used directly as (or
- * composed into) a transition's result, e.g. `on: { USER_REPLIED:
- * agent.appendMessages(({ event }) => userMessage(event.text)) }`. Requires
- * `messages: AgentMessage[]` on context — see {@link messagesSchema} for a
- * ready-made schema for that field.
+ * Appends framework-native messages from `agent.messages` to machine context.
+ * Put this on a top-level transition; no hidden transcript state is created.
  *
  * @example
  * ```ts
  * on: {
- *   USER_REPLIED: appendMessages(({ event }) => userMessage(event.text)),
+ *   'agent.messages': appendMessages(),
  * }
  * ```
  */
-export function appendMessages<
-  TContext extends { messages: AgentMessage[] },
-  TEvent extends EventObject,
->(
-  resolve:
-    | AgentMessage
-    | AgentMessage[]
-    | ((args: { context: TContext; event: TEvent }) => AgentMessage | AgentMessage[]),
-): (args: { context: TContext; event: TEvent }) => {
-  context: { messages: AgentMessage[] };
-} {
-  return (args: { context: TContext; event: TEvent }) => ({
+export function appendMessages<TKey extends string = "messages">(options?: {
+  key?: TKey;
+}): (args: any) => { context: any };
+export function appendMessages(options?: {
+  key?: string;
+}): (args: { context: any; event: any }) => { context: Record<string, unknown> } {
+  const key = options?.key ?? "messages";
+  return ({ context, event }) => ({
     context: {
-      messages: addMessages(resolve)(args),
+      [key]: [...(context[key] ?? []), ...(event.messages ?? [])],
     },
   });
 }

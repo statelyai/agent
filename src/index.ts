@@ -1,5 +1,16 @@
 export { AgentError } from "./errors.js";
-export { appendMessages, messagesSchema } from "./messages.js";
+export type {
+  ContextOf,
+  EventOf,
+  InputOf,
+  MetaOf,
+  OutputOf,
+  RequestNamesOf,
+  SnapshotOf,
+  StateValueOf,
+} from "./type-helpers.js";
+export { AGENT_MESSAGES_EVENT_TYPE, appendMessages, messagesSchema } from "./messages.js";
+export type { AgentMessagesEvent, AgentMessagesEventPayload } from "./messages.js";
 export { createAgentSchemas, getAgentSchemas, setupAgent } from "./setup-agent.js";
 export type {
   AgentSchemaPack,
@@ -7,6 +18,7 @@ export type {
   // always carry the reserved `'@agent.usage'` entry), so consumers' declaration
   // emit needs them nameable.
   AgentUsageEventPayload,
+  WithAgentEvents,
   WithAgentUsageEvent,
 } from "./setup-agent.js";
 export {
@@ -17,6 +29,7 @@ export {
 } from "./decision.js";
 export type {
   AgentDecisionInput,
+  AgentExecutorDecisionRequest,
   AgentDecisionRequest,
   AgentDecisionExecutor,
   DecisionAttempt,
@@ -26,6 +39,8 @@ export type {
   ResolveDecisionOptions,
 } from "./decision.js";
 export { getAcceptedEvents, parseAgentEvent } from "./events.js";
+export { eventFromInteraction, getInteraction } from "./interaction.js";
+export type { AgentInteraction, AgentInteractionEvent } from "./interaction.js";
 export type {
   AgentRequestOptions,
   // Named return type of `getAgentSchemas`, so declaration emit can name it.
@@ -66,45 +81,39 @@ export type {
 } from "./text-logic.js";
 export { executeAgentRequest } from "./steps.js";
 export type { AgentRequest, AgentStepRequest } from "./steps.js";
+export { AGENT_USAGE_EVENT_TYPE } from "./usage.js";
+export type { AgentUsageEvent } from "./usage.js";
 export {
   AGENT_TRACE_SCHEMA_VERSION,
   AgentIdleError,
   AgentIllegalResumeEventError,
   AgentMaxModelCallsExceededError,
-  getSnapshotNodes,
-  getSnapshotRequests,
   inspectTransitions,
   runAgent,
-  createAgentActor,
-  generateResult,
-  AgentSnapshotVersionMismatchError,
   serializeTraceEvent,
   traceTransitions,
 } from "./run-agent.js";
+export { runAgentStream } from "./agent-run.js";
+export type { AgentStreamEvent } from "./agent-run.js";
+export { runAgentLoop } from "./run-loop.js";
+export type { RunAgentLoopOptions } from "./run-loop.js";
 export type {
-  AgentActorSession,
   AgentInputFrom,
-  AgentMessageInfo,
-  AgentRunMeta,
-  AgentSnapshotNode,
-  AgentStateRequest,
-  GetSnapshotRequestsOptions,
+  AgentTransitionHandler,
   AgentTraceEvent,
   AgentUserInputExecutor,
   InspectedActorRef,
   JsonSerializableTraceEvent,
   PendingUserInput,
   RunAgentOptions,
-  GenerateResult,
   RunAgentResult,
   RunAgentErrorCause,
 } from "./run-agent.js";
-export { createAgentRun } from "./agent-run.js";
-export type { AgentRun } from "./agent-run.js";
 export { provideExecutors } from "./provide-executors.js";
 export type { ProvideExecutorsOptions } from "./provide-executors.js";
 export {
   AgentLintError,
+  AgentUnknownStateError,
   assertAgentMachine,
   canReach,
   explorePaths,
@@ -153,9 +162,9 @@ export type {
 } from "./scripted-executors.js";
 export {
   assistantMessage,
-  getAgentMessages,
   getJsonSchema,
   getJsonSchemaSync,
+  getMessageText,
   getMachineStructuralHash,
   getStateMeta,
   isStandardSchema,
@@ -163,45 +172,6 @@ export {
   toolMessage,
   userMessage,
 } from "./utils.js";
-export {
-  AGENT_EVENT_SCHEMA_VERSION,
-  AgentEventLogConflictError,
-  NonSerializableAgentEventError,
-  assertAgentLogEntry,
-  assertEventLogStoreConformance,
-  assertJsonSerializable,
-  createInMemoryEventLogStore,
-} from "./event-log-store.js";
-export type {
-  AgentEventLogStore,
-  AgentLogEntry,
-  AgentLogVerification,
-  JsonValue,
-} from "./event-log-store.js";
-export {
-  AGENT_INIT_EVENT_TYPE,
-  AGENT_USAGE_EVENT_TYPE,
-  AgentReplayDivergenceError,
-  AgentReplayMachineMismatchError,
-  createReplayEntry,
-  diffEventLogs,
-  getAgentEffects,
-  initEntry,
-  replay,
-} from "./effects.js";
-export { runDurableAgent } from "./durable.js";
-export type { DurableAgentResult, RunDurableAgentOptions } from "./durable.js";
-export type {
-  AgentEffectDiff,
-  AgentEventLogDiff,
-  AgentEffect,
-  AgentLogPatchOperation,
-  AgentUsageEvent,
-  CreateReplayEntryOptions,
-  GetAgentEffectsOptions,
-  ReplayOptions,
-  ReplayResult,
-} from "./effects.js";
 export type {
   AgentWorkflowActionConfig,
   AgentWorkflowActorConfig,
@@ -216,7 +186,6 @@ export type {
 } from "./workflow-config.js";
 export type {
   AgentMessage,
-  AgentSnapshotStore,
   AgentTool,
   AgentToolChoice,
   AgentToolDescriptor,

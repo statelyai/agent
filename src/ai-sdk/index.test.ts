@@ -60,7 +60,7 @@ describe("createAiSdkExecutors with core runAgent", () => {
     warnings: [],
   };
 
-  test("core runAgent runs a machine with AI SDK executors", async () => {
+  test("defineModels supplies the default AI SDK executors", async () => {
     const models = defineModels({ quick: new MockLanguageModelV3({ doGenerate: response }) });
     const agent = setupAgent({ context: z.object({}), input: z.object({}), models });
     const machine = agent.createMachine({
@@ -78,9 +78,7 @@ describe("createAiSdkExecutors with core runAgent", () => {
       },
     });
 
-    await expect(
-      runAgent(machine, { input: {}, executors: createAiSdkExecutors({ models }) }),
-    ).resolves.toMatchObject({ status: "done" });
+    await expect(runAgent(machine, { input: {} })).resolves.toMatchObject({ status: "done" });
   });
 
   test("the adapter's LanguageModelUsage lands in the run result's aggregated usage", async () => {
@@ -404,6 +402,8 @@ describe("onResult metadata enrichment", () => {
     expect(result.finishReason).toBe("stop");
     expect(result.toolCalls).toEqual([]);
     expect(result.toolResults).toEqual([]);
+    expect(result.messages).toHaveLength(1);
+    expect(result.raw).toBeDefined();
   });
 
   test("decide returns usage/finishReason alongside the chosen event", async () => {
@@ -605,7 +605,7 @@ describe("maxSteps (multi-step tool loops)", () => {
     const result = await generateText({
       model: "m",
       prompt: "What is 42 times 17?",
-      metadata: { maxSteps: 5 },
+      maxSteps: 5,
       tools: {
         // A genuine AI SDK `tool({...})` — `input` is typed from `inputSchema`
         // by the SDK, no cast. The adapter hands it to the SDK unchanged, so the
@@ -798,32 +798,7 @@ describe("maxSteps (multi-step tool loops)", () => {
     expect(result.output).toBe("done");
   });
 
-  test("metadata.maxSteps still works as a fallback for pre-typed-field requests", async () => {
-    let calls = 0;
-    const model = new MockLanguageModelV3({
-      doStream: async () => {
-        calls++;
-        return {
-          stream: simulateReadableStream({
-            chunks: calls < 2 ? toolCallStreamChunks(`call-${calls}`) : finalTextStreamChunks,
-          }),
-        };
-      },
-    });
-    const { streamText } = createAiSdkExecutors({ models: { m: model } });
-
-    const result = await streamText({
-      model: "m",
-      prompt: "hi",
-      metadata: { maxSteps: 5 },
-      tools: pingTool,
-    });
-
-    expect(calls).toBe(2);
-    expect(result.output).toBe("done");
-  });
-
-  test("the typed maxSteps wins over metadata.maxSteps", async () => {
+  test("only the typed maxSteps controls the tool loop", async () => {
     let calls = 0;
     const model = new MockLanguageModelV3({
       doStream: async () => {
@@ -837,7 +812,7 @@ describe("maxSteps (multi-step tool loops)", () => {
     });
     const { streamText } = createAiSdkExecutors({ models: { m: model } });
 
-    // The typed field allows the loop; the stale metadata value (1) is ignored.
+    // Host metadata is transparent and cannot override agent control flow.
     const result = await streamText({
       model: "m",
       prompt: "hi",
@@ -898,7 +873,7 @@ describe("structured-output resilience", () => {
     expect(result.output).toEqual({ answer: "first" });
   });
 
-  test("generateText retries once when the output is unrepairable", async () => {
+  test("generateText leaves unrepairable output retry policy to the AI SDK/host", async () => {
     let calls = 0;
     const model = new MockLanguageModelV3({
       doGenerate: async () => {
@@ -907,7 +882,7 @@ describe("structured-output resilience", () => {
           content: [
             {
               type: "text" as const,
-              text: calls === 1 ? "not json at all" : '{"result":{"answer":"ok"}}',
+              text: "not json at all",
             },
           ],
           finishReason: { unified: "stop" as const, raw: "stop" },
@@ -918,15 +893,10 @@ describe("structured-output resilience", () => {
     });
 
     const { generateText } = createAiSdkExecutors({ models: { m: model } });
-    const result = await generateText({
-      model: "m",
-      prompt: "hi",
-      outputSchema: answerSchema,
-      tools: {},
-    });
-
-    expect(calls).toBe(2);
-    expect(result.output).toEqual({ answer: "ok" });
+    await expect(
+      generateText({ model: "m", prompt: "hi", outputSchema: answerSchema, tools: {} }),
+    ).rejects.toThrow();
+    expect(calls).toBe(1);
   });
 
   test("generateText does NOT retry a request that carries tools (side effects)", async () => {
@@ -955,27 +925,6 @@ describe("structured-output resilience", () => {
       }),
     ).rejects.toThrow();
     expect(calls).toBe(1);
-  });
-
-  test("generateText surfaces the error when the retry also fails", async () => {
-    let calls = 0;
-    const model = new MockLanguageModelV3({
-      doGenerate: async () => {
-        calls++;
-        return {
-          content: [{ type: "text" as const, text: "never json" }],
-          finishReason: { unified: "stop" as const, raw: "stop" },
-          usage,
-          warnings: [],
-        };
-      },
-    });
-
-    const { generateText } = createAiSdkExecutors({ models: { m: model } });
-    await expect(
-      generateText({ model: "m", prompt: "hi", outputSchema: answerSchema, tools: {} }),
-    ).rejects.toThrow();
-    expect(calls).toBe(2);
   });
 
   test("host `settings` reach the model call, and the machine's own settings win", async () => {

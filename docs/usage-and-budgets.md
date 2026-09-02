@@ -197,7 +197,7 @@ Model-call results reach the machine with usage stripped out.
 | **Not model-facing** | The `@agent.*` namespace is excluded from `getAcceptedEvents` and `parseAgentEvent`. The event is never a decision candidate, even under `allowedEvents: ['*']`, and cannot be forged from a wire message.                                                                                                                     |
 | **Durability**       | The event is journaled like any other external input, so events-only recovery with `runAgent({ events })` replays the folded tokens without calling a model again.                                                                                                                                                             |
 | **Spend records**    | The cost is already incurred when the event is reported, so entries are append-only facts. Replay folds every entry, and a call re-executed by crash recovery journals its own usage on top. A recovered total therefore reflects cumulative cost, including the call whose result the crash lost.                              |
-| **Stragglers**       | A call that settles after the run's cycle resolved, at an idle settle, a `done` or `error` settle, or an abort, still folds into `result.usage`, but its machine event is dropped. This applies to both `runAgent` and `createAgentActor`, so a late arrival cannot re-open a returned idle result. Watch `usage.dropped` on `onTrace` if a counter looks short. |
+| **Stragglers**       | A call that settles after a `runAgent` leg resolved still folds into `result.usage`, but its machine event is dropped. Watch `usage.dropped` on `onTrace` if a counter looks short. |
 | **Coverage**         | Only usage your executor reports is delivered. No `usage` on the result means no event. [`simulateAgent`](verify.md) scripts return no usage, so a token counter stays `0` under simulation. Test budgets with `runAgent` and a usage-reporting mock.                                                                          |
 
 Opt in with a transition.
@@ -488,7 +488,7 @@ The older form still has two uses. The tokens arrive inside `onDone`, in the sam
 ## Related
 
 - [Observability](observability.md): the trace stream `request.end` usage rides on.
-- [Event log](event-log.md): the journal a delivered `@agent.usage` is recorded in, and replayed from.
+- [Persistence](persistence.md): storing the machine context that folded delivered usage events.
 - [Machines](machines.md#transitions): guards as return values.
 - [Decisions](decisions.md): why a guarded-out event is never offered to the model.
 - [Human in the loop](human-in-the-loop.md): pausing and resuming across run boundaries.

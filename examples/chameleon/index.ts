@@ -35,7 +35,7 @@
  * The vote is an idle state (no invoke) carrying `meta.interaction`: the
  * category and the four spoken words in the label, one `ACCUSE_P*` button per
  * player. Resume with
- * `runAgent(machine, { snapshot: result.persistedSnapshot, event })`.
+ * `runAgent(machine, { snapshot: result.persist(), event })`.
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/chameleon/index.ts
  */
@@ -564,7 +564,7 @@ export async function main() {
       continue;
     }
     result = await runAgent(chameleonMachine, {
-      snapshot: result.persistedSnapshot,
+      snapshot: result.persist(),
       event,
       ...shared,
     });

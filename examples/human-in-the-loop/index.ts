@@ -184,7 +184,7 @@ export async function runHumanInTheLoopExample(
   // Phase 2: ...later, new process, human approved. Same machine, one event,
   // resumed from the persisted (JSON-round-tripped) snapshot.
   const second = await runAgent(humanInTheLoopMachine, {
-    snapshot: first.persistedSnapshot,
+    snapshot: first.persist(),
     event: { type: "APPROVE" },
     ...executors,
   });
@@ -239,7 +239,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
       console.log("\n" + (interaction?.label ?? ""));
       console.log("Legal events:", legalEvents.join(", "));
 
-      const persisted = result.persistedSnapshot;
+      const persisted = result.persist();
       const answer = (await promptLine("approve / reject? ")).toLowerCase();
 
       if (answer.startsWith("a")) {

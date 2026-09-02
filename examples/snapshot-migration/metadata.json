@@ -5,12 +5,12 @@
   "machine": "orderApprovalMachine",
   "origin": {
     "type": "stately-agent",
-    "source": "Versioned snapshots: machine `version` stamping, onVersionMismatch, and migrateSnapshot across two versions of one order-approval machine",
+    "source": "Native XState versioned snapshots and machine-level migrate across two versions of one order-approval machine",
     "url": null
   },
   "comparison": {
     "targets": ["LangGraph checkpointer"],
-    "purpose": "A snapshot carries the version of the machine that wrote it, so a paused run resumed on a redeployed machine either throws with from/to or passes through an explicit migrateSnapshot, instead of silently restoring stale state."
+    "purpose": "A paused run resumed after deployment follows XState's native version and migrate contract instead of an Agent-specific snapshot adapter."
   },
   "starters": [
     {

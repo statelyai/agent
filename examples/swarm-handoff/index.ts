@@ -174,7 +174,7 @@ export async function runSwarmHandoffExample(
 
   // Persist the snapshot (host's choice of store) — JSON round-trip it to
   // prove `activeAgent` survives a real persistence layer.
-  const persisted = first.persistedSnapshot;
+  const persisted = first.persist();
 
   // ...later, new process: hand off to the food agent for the next turn.
   const second = await runAgent(swarmHandoffMachine, {
@@ -270,7 +270,7 @@ async function runInteractive() {
         break;
       }
       active = result.snapshot.context.activeAgent;
-      snapshot = result.persistedSnapshot;
+      snapshot = result.persist();
       console.log(`[${active}] ${result.snapshot.context.reply ?? ""}\n`);
     }
   });

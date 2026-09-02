@@ -167,7 +167,7 @@ export async function runSupportStep3(
   if (first.status !== "idle") throw new Error(`unexpected status ${first.status}`);
 
   const second = await runAgent(supportMachineStep3, {
-    snapshot: first.persistedSnapshot,
+    snapshot: first.persist(),
     event: approve ? { type: "APPROVE" } : { type: "DENY", reason: "Outside policy." },
     executors,
   });

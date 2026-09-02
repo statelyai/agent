@@ -301,7 +301,7 @@ export async function runReviewToolCallsExample(
     const event = events[i] ?? events[events.length - 1];
     i++;
     result = await runAgent(reviewToolCallsMachine, {
-      snapshot: result.persistedSnapshot,
+      snapshot: result.persist(),
       event,
       ...executors,
       onTransition: track,
@@ -355,7 +355,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
       console.log(interaction?.label ?? "");
       console.log("Legal events:", legalEvents.join(", "));
 
-      const persisted = result.persistedSnapshot;
+      const persisted = result.persist();
       const answer = (await promptLine("approve / edit / reject? ")).toLowerCase();
 
       let event:

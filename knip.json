@@ -11,10 +11,6 @@
       "entry": ["app/**/route.ts", "app/**/*.tsx"],
       "project": ["**/*.{ts,tsx}"]
     },
-    "examples/tanstack-start-host": {
-      "entry": ["index.ts", "src/**/*.tsx"],
-      "project": ["**/*.{ts,tsx}"]
-    },
     "examples/tanstack-ai-stream": {
       "entry": ["index.ts", "chat.tsx"],
       "project": ["**/*.{ts,tsx}"]

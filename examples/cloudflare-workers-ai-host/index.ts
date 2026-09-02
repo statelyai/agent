@@ -1,14 +1,5 @@
 /**
- * Cloudflare Workers AI step host for the game workflow — the DURABLE step-path
- * flavor.
- *
- * Unlike `../ai-sdk-game-host/index.ts` (same append-only-log loop, AI SDK
- * models, one in-process run), this one persists nothing but the JOURNAL of
- * external inputs (`entries`) and resumes by REPLAYING it. Each iteration below
- * calls `replay(machine, entries)` to rebuild `{ snapshot, effects }` from the
- * log alone — exactly what a fresh Worker invocation would do after loading the
- * journal from durable storage (KV, D1, a Durable Object). No snapshot blob is
- * persisted; the log is the source of truth.
+ * Cloudflare Workers AI host for the game workflow.
  *
  * Workers AI does not expose the same tool-calling shape as the Vercel AI SDK
  * binding path, so this host serializes allowed event tools into the prompt and
@@ -29,20 +20,16 @@
  * logged-in Cloudflare account, so a local run performs real inference. Run
  * `npx wrangler login` first if the account is not connected.
  */
-import { type EventObject } from "xstate";
 import {
-  createReplayEntry,
   getAgentOutputMode,
-  initEntry,
   renderDecisionAttempts,
-  replay,
   resolveDecision,
+  runAgent,
   type AgentDecisionRequest,
-  type AgentLogEntry,
   type AgentTextRequest,
   type ChosenEvent,
 } from "@statelyai/agent";
-import { gameActors, gameMachine, gameSchemas } from "../game-agent/index.js";
+import { gameMachine } from "../game-agent/index.js";
 
 export interface Env {
   AI: {
@@ -204,49 +191,19 @@ async function runWorkersAiDecision(env: Env, request: AgentDecisionRequest): Pr
 }
 
 export async function runCloudflareGameTurn(env: Env, input = { playerHp: 20, enemyHp: 15 }) {
-  const options = { schemas: gameSchemas, actors: gameActors };
-
-  // The ONLY durable state is this journal of external inputs. In a real Worker
-  // it lives in KV/D1/a Durable Object; each turn below loads it, appends one
-  // completion, and stores it again.
-  const entries: AgentLogEntry[] = [initEntry(gameMachine, input)];
-
-  // Resume-by-replay: rebuild the frontier from the log alone every iteration,
-  // exactly as a fresh Worker invocation would after loading `entries`.
-  let { snapshot, effects } = replay(gameMachine, entries, options);
-
-  while (snapshot.status === "active") {
-    let next: EventObject | undefined;
-    for (const effect of effects) {
-      if (effect.kind === "execute") {
-        effect.exec();
-        continue;
-      }
-      if (effect.kind === "text") {
-        next = effect.toDoneEvent(await runWorkersAiTextRequest(env, effect.request));
-        break;
-      }
-      if (effect.kind === "decision") {
-        next = await runWorkersAiDecision(env, effect.request);
-        break;
-      }
-      throw new Error(`This game host does not handle '${effect.kind}' effects.`);
-    }
-    if (!next) {
-      break; // idle: nothing async owed. Persist `entries`; resume on the next event.
-    }
-
-    // Journal the completion, then re-derive the next frontier by REPLAYING the
-    // whole log — crash-safe: the same log always rebuilds the same
-    // `{ snapshot, effects }`, so a Worker that crashed mid-turn resumes here
-    // with no lost or duplicated work. (A hot loop could fold with
-    // `transition(snapshot, next)` for speed and only `replay` on cold start —
-    // both yield the identical state.)
-    entries.push(createReplayEntry(gameMachine, entries, next));
-    ({ snapshot, effects } = replay(gameMachine, entries, options));
+  const result = await runAgent(gameMachine, {
+    input,
+    executors: {
+      generateText: async (request) => ({
+        output: await runWorkersAiTextRequest(env, request),
+      }),
+      decide: async (request) => ({ event: await runWorkersAiDecision(env, request) }),
+    },
+  });
+  if (result.status !== "done") {
+    throw new Error(`Game turn ended with ${result.status}.`);
   }
-
-  return snapshot.output;
+  return result.output;
 }
 
 export default {

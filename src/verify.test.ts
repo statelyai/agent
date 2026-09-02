@@ -11,18 +11,9 @@ import {
   simulateAgent,
   type AgentLintDiagnostic,
   type ChosenEvent,
-  type AgentWorkflowConfig,
-  type SchemaCompiler,
-  type StandardSchemaV1,
 } from "./index.js";
 import { createDecisionLogic } from "./decision.js";
-import * as examples from "../examples/index.js";
-import {
-  humanInTheLoopMachine,
-  jokeMachine,
-  jsonAgentMachine,
-  twentyQuestionsMachine,
-} from "../examples/index.js";
+import { humanInTheLoopMachine, jokeMachine, twentyQuestionsMachine } from "../examples/index.js";
 
 // A refund machine mirroring the README's keyless example: an `agent.decide`
 // that may AUTO_APPROVE (guarded to amount <= 100) or NEEDS_REVIEW, then a human
@@ -122,156 +113,37 @@ describe("lintAgentMachine — the lint corpus stays quiet", () => {
   ])("%s produces zero error-severity diagnostics", (_name, machine) => {
     expect(errorsOf(lintAgentMachine(machine))).toEqual([]);
   });
-
-  test("no example machine trips 'final-output-reads-event'", () => {
-    const tripped: string[] = [];
-    for (const [name, value] of Object.entries(examples)) {
-      const machine = value as { config?: unknown };
-      if (!machine || typeof machine !== "object" || typeof machine.config !== "object") {
-        continue;
-      }
-      try {
-        if (lintAgentMachine(machine as never).some((d) => d.code === "final-output-reads-event")) {
-          tripped.push(name);
-        }
-      } catch {
-        // Not a lintable machine export — skip.
-      }
-    }
-    expect(tripped).toEqual([]);
-  });
-
-  test("a hand-authored function target still over-approximates rather than false-flag", () => {
-    // Unchanged behavior for TS-authored machines: `b` is only ever entered by a
-    // dynamic transition, which lint cannot read, so it must stay quiet.
-    const agent = setupAgent({
-      context: z.object({ n: z.number() }),
-      events: { E: z.object({}) },
-    });
-    const machine = agent.createMachine({
-      context: () => ({ n: 0 }),
-      initial: "a",
-      states: {
-        a: { on: { E: ({ context }) => (context.n > 0 ? { target: "b" } : undefined) } },
-        b: { type: "final" },
-      },
-    });
-
-    expect(lintAgentMachine(machine).filter((d) => d.code === "unreachable-state")).toEqual([]);
-  });
-});
-
-// A pass-through `compileSchema` for `fromConfig` lint tests: it validates
-// nothing, but exposes the JSON Schema, which is all the lint checks read.
-const passthroughCompiler: SchemaCompiler = (jsonSchema): StandardSchemaV1 => ({
-  "~standard": {
-    version: 1,
-    vendor: "verify-test",
-    validate: (value: unknown) => ({ value }),
-    jsonSchema: { input: () => jsonSchema },
-  } as never,
-});
-
-const fromConfigMachine = (config: AgentWorkflowConfig) =>
-  setupAgent.fromConfig(config, { compileSchema: passthroughCompiler }).machine;
-
-describe("lintAgentMachine — fromConfig machines lint on their declared graph", () => {
-  test("json-agent (targets folded behind context patches) is completely clean", () => {
-    // Regression: xstate's JSON layer rewrites a transition that carries an
-    // `assign` into an opaque `to` resolver with no `target`. Every state here
-    // but `drafting` is entered that way, so reachability used to see no edges
-    // and flag `awaitingApproval`/`resolved` unreachable plus `missing-final`.
-    expect(lintAgentMachine(jsonAgentMachine)).toEqual([]);
-  });
-
-  test("the retained targets survive machine.provide(...)", () => {
-    expect(lintAgentMachine(jsonAgentMachine.provide({}))).toEqual([]);
-  });
-
-  test("a config machine whose transitions carry emit actions still lints clean", () => {
-    // Regression companion to the json-agent case: an `emit` in a transition
-    // folds the target behind a resolver the same way `assign` does.
-    const machine = fromConfigMachine({
-      id: "emit-config",
-      schemas: {
-        context: { type: "object", properties: {} },
-        events: { GO: { type: "object" } },
-        emitted: { MOVED: { type: "object", properties: {} } },
-      },
-      initial: "a",
-      states: {
-        a: { on: { GO: { target: "b", actions: { emit: { type: "MOVED" } } } } },
-        b: { type: "final" },
-      },
-    } as AgentWorkflowConfig);
-
-    expect(lintAgentMachine(machine)).toEqual([]);
-  });
-
-  test("a config state nothing targets is still reported unreachable", () => {
-    const machine = fromConfigMachine({
-      id: "orphan-config",
-      schemas: { context: { type: "object", properties: {} }, events: { GO: { type: "object" } } },
-      initial: "a",
-      states: {
-        a: { on: { GO: { target: "b", assign: { seen: true } } } },
-        b: { type: "final" },
-        orphan: {},
-      },
-    } as AgentWorkflowConfig);
-
-    const diagnostics = lintAgentMachine(machine);
-    expect(diagnostics).toContainEqual(
-      expect.objectContaining({ code: "unreachable-state", severity: "error", path: "orphan" }),
-    );
-    // The `assign`-carrying edge into the final state is still seen, so
-    // reachability is exact here, not over-approximated to "everything".
-    expect(diagnostics.filter((d) => d.code === "unreachable-state")).toHaveLength(1);
-    expect(diagnostics.some((d) => d.code === "missing-final")).toBe(false);
-  });
-
-  test("nested and choice targets are retained too", () => {
-    const machine = fromConfigMachine({
-      id: "nested-config",
-      schemas: { context: { type: "object", properties: {} } },
-      initial: "outer",
-      states: {
-        outer: {
-          initial: "pick",
-          states: {
-            pick: { type: "choice", choice: [{ target: "chosen", assign: { picked: true } }] },
-            chosen: { type: "final" },
-          },
-          onDone: { target: "settled", assign: { settled: true } },
-        },
-        settled: { type: "final" },
-      },
-    } as AgentWorkflowConfig);
-
-    expect(lintAgentMachine(machine).filter((d) => d.code === "unreachable-state")).toEqual([]);
-  });
 });
 
 describe("lintAgentMachine — each check fires on a crafted bad machine", () => {
-  test("unreachable-state: an orphan state with no incoming target", () => {
+  test("unhandled-agent-messages: text requests without a root transcript transition warn", () => {
     const agent = setupAgent({
-      context: z.object({}),
-      events: { E: z.object({}), F: z.object({}) },
+      context: z.object({ messages: z.array(z.unknown()) }),
+      requests: {
+        answer: { schemas: {}, model: "test", prompt: "answer" },
+      },
     });
     const machine = agent.createMachine({
-      context: () => ({}),
-      initial: "a",
+      context: { messages: [] },
+      initial: "answering",
       states: {
-        a: { on: { E: { target: "b" } } },
-        b: { type: "final" },
-        c: { on: { F: { target: "b" } } }, // nothing targets `c`
+        answering: { invoke: { src: "answer", onDone: { target: "done" } } },
+        done: { type: "final" },
       },
     });
 
-    const diagnostics = lintAgentMachine(machine);
-    expect(diagnostics).toContainEqual(
-      expect.objectContaining({ code: "unreachable-state", severity: "error", path: "c" }),
+    expect(lintAgentMachine(machine)).toContainEqual(
+      expect.objectContaining({
+        code: "unhandled-agent-messages",
+        severity: "warning",
+        path: "(root)",
+      }),
     );
+    expect(
+      lintAgentMachine(machine, { disable: ["unhandled-agent-messages"] }).some(
+        (diagnostic) => diagnostic.code === "unhandled-agent-messages",
+      ),
+    ).toBe(false);
   });
 
   test("decide-without-events: an agent.decide state with no on/ancestor handlers", () => {
@@ -303,58 +175,6 @@ describe("lintAgentMachine — each check fires on a crafted bad machine", () =>
     );
   });
 
-  test("undeclared-event: an `on:` key not in schemas.events and not builtin (warning)", () => {
-    const agent = setupAgent({
-      context: z.object({}),
-      events: { GO: z.object({}) },
-    });
-    const machine = agent.createMachine({
-      context: () => ({}),
-      initial: "a",
-      states: {
-        a: { on: { GO: { target: "b" }, TYPOED: { target: "b" }, "*": { target: "b" } } },
-        b: { type: "final" },
-      },
-    });
-
-    const diagnostics = lintAgentMachine(machine);
-    expect(diagnostics).toContainEqual(
-      expect.objectContaining({ code: "undeclared-event", severity: "warning", path: "a" }),
-    );
-    // Declared `GO` and wildcard `*` do not warn — only the undeclared `TYPOED`.
-    expect(diagnostics.filter((d) => d.code === "undeclared-event")).toHaveLength(1);
-  });
-
-  test("unserializable-context: a context schema with no JSON schema (warning)", () => {
-    const rawContext: StandardSchemaV1<Record<string, unknown>> = {
-      "~standard": {
-        version: 1,
-        vendor: "verify-test",
-        validate: (value) => ({ value: value as Record<string, unknown> }),
-      },
-    };
-    const agent = setupAgent({
-      context: rawContext,
-      events: { E: z.object({}) },
-    });
-    const machine = agent.createMachine({
-      context: () => ({}),
-      initial: "a",
-      states: { a: { on: { E: { target: "b" } } }, b: { type: "final" } },
-    });
-
-    const diagnostics = lintAgentMachine(machine);
-    expect(diagnostics).toContainEqual(
-      expect.objectContaining({
-        code: "unserializable-context",
-        severity: "warning",
-        path: "context",
-      }),
-    );
-    // A warning must never count as an error for the CLI/CI gate.
-    expect(errorsOf(diagnostics)).toEqual([]);
-  });
-
   test("direct-object-src: an inline (non-string) agent logic src (warning)", () => {
     const inlineLogic = createTextLogic({
       schemas: { input: z.object({}), output: z.string() },
@@ -379,103 +199,6 @@ describe("lintAgentMachine — each check fires on a crafted bad machine", () =>
     const diagnostics = lintAgentMachine(machine);
     expect(diagnostics).toContainEqual(
       expect.objectContaining({ code: "direct-object-src", severity: "warning", path: "s" }),
-    );
-  });
-
-  test("final-without-output: declared output schema, a final lacking output", () => {
-    const agent = setupAgent({
-      context: z.object({}),
-      output: z.object({ ok: z.boolean() }),
-      events: { E: z.object({}) },
-    });
-    const machine = agent.createMachine({
-      context: () => ({}),
-      initial: "a",
-      states: {
-        a: { on: { E: { target: "b" } } },
-        b: { type: "final" }, // no output, but the machine declares one
-      },
-    });
-
-    const diagnostics = lintAgentMachine(machine);
-    expect(diagnostics).toContainEqual(
-      expect.objectContaining({
-        code: "final-without-output",
-        severity: "error",
-        path: "b",
-      }),
-    );
-  });
-
-  test("final-output-reads-event: a top-level final whose output reads event (warning)", () => {
-    const agent = setupAgent({
-      context: z.object({}),
-      output: z.object({ echoed: z.string() }),
-      events: { E: z.object({ value: z.string() }) },
-    });
-    const machine = agent.createMachine({
-      context: () => ({}),
-      initial: "a",
-      states: {
-        a: { on: { E: { target: "b" } } },
-        // Reads the entering event in the final output — the anti-pattern.
-        b: {
-          type: "final",
-          output: ({ event }) => ({ echoed: (event as { value: string }).value }),
-        },
-      },
-    });
-
-    const diagnostics = lintAgentMachine(machine);
-    expect(diagnostics).toContainEqual(
-      expect.objectContaining({
-        code: "final-output-reads-event",
-        severity: "warning",
-        path: "b",
-      }),
-    );
-    // A warning must never count as an error for the CLI/CI gate.
-    expect(errorsOf(diagnostics)).toEqual([]);
-  });
-
-  test("final-output-reads-event: quiet when a context-only final output", () => {
-    const agent = setupAgent({
-      context: z.object({ captured: z.string() }),
-      output: z.object({ echoed: z.string() }),
-      events: { E: z.object({ value: z.string() }) },
-    });
-    const machine = agent.createMachine({
-      context: () => ({ captured: "" }),
-      initial: "a",
-      states: {
-        a: { on: { E: { target: "b" } } },
-        // The final output reads context only — the correct pattern.
-        b: { type: "final", output: ({ context }) => ({ echoed: context.captured }) },
-      },
-    });
-
-    expect(lintAgentMachine(machine).some((d) => d.code === "final-output-reads-event")).toBe(
-      false,
-    );
-  });
-
-  test("missing-final: a machine that can only loop", () => {
-    const agent = setupAgent({
-      context: z.object({}),
-      events: { E: z.object({}) },
-    });
-    const machine = agent.createMachine({
-      context: () => ({}),
-      initial: "a",
-      states: {
-        a: { on: { E: { target: "b" } } },
-        b: { on: { E: { target: "a" } } },
-      },
-    });
-
-    const diagnostics = lintAgentMachine(machine);
-    expect(diagnostics).toContainEqual(
-      expect.objectContaining({ code: "missing-final", severity: "warning", path: "(root)" }),
     );
   });
 });
@@ -890,12 +613,12 @@ describe("canReach — reachability with a witness path", () => {
     expect(result.witness?.map((event) => event.type)).toEqual(["NEEDS_REVIEW", "DENY"]);
   });
 
-  test("reports unreachable states honestly", async () => {
-    const result = await canReach(createRefundMachine(), "nonexistent", {
-      input: { request: "x", amount: 5000 },
-    });
-    expect(result.reachable).toBe(false);
-    expect(result.witness).toBeUndefined();
+  test("throws for an unknown state target", async () => {
+    await expect(
+      canReach(createRefundMachine(), "nonexistent", {
+        input: { request: "x", amount: 5000 },
+      }),
+    ).rejects.toMatchObject({ code: "unknown-state", target: "nonexistent" });
   });
 
   test("finds a state passed through mid-chain between two text requests", async () => {
@@ -939,83 +662,27 @@ describe("canReach — reachability with a witness path", () => {
   });
 });
 
-describe("lintAgentMachine({ throw: true }) — one-line pass/fail for tests", () => {
-  test("returns silently for a clean machine", () => {
-    expect(() => lintAgentMachine(jokeMachine, { throw: true })).not.toThrow();
-  });
-
-  test("throws AgentLintError with the findings for a broken machine", () => {
+describe("lintAgentMachine({ throw: true })", () => {
+  test("throws for an agent-specific error", () => {
     const agent = setupAgent({
       context: z.object({}),
-      events: { E: z.object({}), F: z.object({}) },
+      events: { GO: z.object({}) },
     });
     const machine = agent.createMachine({
-      id: "broken",
-      context: () => ({}),
-      initial: "a",
+      id: "broken-agent",
+      context: {},
+      initial: "deciding",
       states: {
-        a: { on: { E: { target: "b" } } },
-        b: { type: "final" },
-        c: { on: { F: { target: "b" } } }, // nothing targets `c`
-      },
-    });
-
-    let thrown: unknown;
-    try {
-      lintAgentMachine(machine, { throw: true });
-    } catch (error) {
-      thrown = error;
-    }
-    expect(thrown).toBeInstanceOf(AgentLintError);
-    const lintError = thrown as AgentLintError;
-    expect(lintError.diagnostics).toContainEqual(
-      expect.objectContaining({ code: "unreachable-state", severity: "error", path: "c" }),
-    );
-    expect(lintError.message).toContain("'broken'");
-    expect(lintError.message).toContain("unreachable-state");
-    expect(lintError.message).toContain("c");
-  });
-
-  test("warnings pass by default; warnings: true fails them", () => {
-    const agent = setupAgent({
-      context: z.object({}),
-      events: { E: z.object({}) },
-    });
-    // No reachable final state: a warning-severity 'missing-final' finding.
-    const machine = agent.createMachine({
-      id: "loopy",
-      context: () => ({}),
-      initial: "a",
-      states: {
-        a: { on: { E: { target: "a" } } },
-      },
-    });
-
-    expect(() => lintAgentMachine(machine, { throw: true })).not.toThrow();
-    expect(() => lintAgentMachine(machine, { throw: true, warnings: true })).toThrow(
-      AgentLintError,
-    );
-  });
-
-  test("forwards lint options: a disabled check no longer fails the assert", () => {
-    const agent = setupAgent({
-      context: z.object({}),
-      events: { E: z.object({}), F: z.object({}) },
-    });
-    const machine = agent.createMachine({
-      context: () => ({}),
-      initial: "a",
-      states: {
-        a: { on: { E: { target: "b" } } },
-        b: { type: "final" },
-        c: { on: { F: { target: "b" } } },
+        deciding: {
+          invoke: {
+            src: "agent.decide",
+            input: { name: "choose", model: "m", allowedEvents: ["GO"] },
+          },
+        },
       },
     });
 
     expect(() => lintAgentMachine(machine, { throw: true })).toThrow(AgentLintError);
-    expect(() =>
-      lintAgentMachine(machine, { throw: true, disable: ["unreachable-state"] }),
-    ).not.toThrow();
   });
 });
 

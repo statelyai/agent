@@ -1,28 +1,27 @@
 /**
- * Crash recovery — resume a run from its event log alone (events-only resume).
+ * Crash recovery — resume a run from XState's persisted snapshot.
  *
- * The host persists every `AgentLogEntry` as it is produced (`onEvent` here;
- * an event-log store in production). The process then "crashes" mid-request:
+ * The process "crashes" mid-request:
  * the second model call is in flight when the run aborts, so its result was
- * never recorded. Recovery is one call — `runAgent(machine, { events })` with
- * NO snapshot:
+ * never completed. The host stores `result.persist()`, then recovery is one
+ * `runAgent(machine, { snapshot })` call:
  *
- * - recorded results are replayed, never re-executed (call one runs once);
- * - the request that was in flight when the log ended restarts idempotently
+ * - completed state is restored (call one runs once);
+ * - the request that was in flight at the crash restarts idempotently
  *   (XState v6 re-enters restored pending invokes);
- * - the run continues to done on the same, still-replayable log.
+ * - the run continues to done.
  *
  * No API key needed: executors are scripted. Run:
  * npx tsx examples/crash-recovery/index.ts
  */
 import { z } from "zod";
+import type { Snapshot } from "xstate";
 import { runAgent, setupAgent } from "@statelyai/agent";
-import type { AgentLogEntry, AgentRequestExecutor } from "@statelyai/agent";
+import type { AgentRequestExecutor } from "@statelyai/agent";
 
 const crashRecoverySetup = setupAgent({
   context: z.object({
-    // The topic is part of context, so it survives in the log's `@agent.init`
-    // entry and is restored on an events-only resume.
+    // The topic is part of context, so it survives snapshot persistence.
     topic: z.string(),
     outline: z.string().nullable(),
     article: z.string().nullable(),
@@ -73,8 +72,7 @@ export const crashRecoveryMachine = crashRecoverySetup.createMachine({
 });
 
 /** First process: answers the outline call, hangs on the draft call, then "crashes". */
-export async function runUntilCrash(topic = "state machines"): Promise<AgentLogEntry[]> {
-  const persisted: AgentLogEntry[] = [];
+export async function runUntilCrash(topic = "state machines"): Promise<Snapshot<unknown>> {
   const abort = new AbortController();
 
   const generateText: AgentRequestExecutor = async (request) => {
@@ -90,19 +88,15 @@ export async function runUntilCrash(topic = "state machines"): Promise<AgentLogE
   const crashed = await runAgent(crashRecoveryMachine, {
     input: { topic },
     executors: { generateText },
-    onEvent: (entry) => persisted.push(entry), // the durable log
     signal: abort.signal,
   });
 
-  console.log(`crashed with status '${crashed.status}' after logging:`);
-  for (const entry of persisted) {
-    console.log(`  [${entry.index}] ${entry.event.type}`);
-  }
-  return persisted;
+  console.log(`crashed with status '${crashed.status}'`);
+  return crashed.persist();
 }
 
-/** Second process: recover from the persisted log alone. */
-export async function recover(persisted: AgentLogEntry[]) {
+/** Second process: recover from XState's persisted snapshot. */
+export async function recover(persisted: Snapshot<unknown>) {
   const calls: string[] = [];
   const generateText: AgentRequestExecutor = async (request) => {
     calls.push(request.prompt ?? "");
@@ -110,17 +104,14 @@ export async function recover(persisted: AgentLogEntry[]) {
   };
 
   const recovered = await runAgent(crashRecoveryMachine, {
-    // Events-only resume: no snapshot. Recorded results replay; the in-flight
-    // draft request re-executes.
-    events: persisted,
+    snapshot: persisted,
     executors: { generateText },
   });
 
   console.log(`recovered with status '${recovered.status}'`);
   console.log(`model calls made during recovery: ${calls.length}`); // 1 — only the draft
   if (recovered.status === "done") {
-    // The topic came back from the log's `@agent.init` input, so the recovered
-    // draft is about the original topic, not a generic article.
+    // The topic came back from context, so the recovered draft is specific.
     console.log(`topic: ${recovered.output.topic}`);
     console.log(`article: ${recovered.output.article}`);
   }
@@ -129,6 +120,6 @@ export async function recover(persisted: AgentLogEntry[]) {
 
 const isMain = process.argv[1]?.endsWith("crash-recovery/index.ts");
 if (isMain) {
-  const log = await runUntilCrash();
-  await recover(log);
+  const snapshot = await runUntilCrash();
+  await recover(snapshot);
 }

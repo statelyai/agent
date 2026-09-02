@@ -63,10 +63,34 @@ export function objectSchema<T>(
     "~standard": {
       version: 1,
       vendor: "statelyai-agent-machines",
-      validate: (value: unknown) =>
-        value !== null && typeof value === "object"
-          ? { value: value as T }
-          : { issues: [{ message: "Expected an object" }] },
+      validate: (value: unknown) => {
+        if (value === null || typeof value !== "object" || Array.isArray(value)) {
+          return { issues: [{ message: "Expected an object" }] };
+        }
+        const record = value as Record<string, unknown>;
+        const issues: Array<{ message: string; path?: PropertyKey[] }> = [];
+        for (const key of required) {
+          if (!(key in record)) {
+            issues.push({ message: `Required property '${key}' is missing`, path: [key] });
+          }
+        }
+        for (const [key, schema] of Object.entries(properties)) {
+          const item = record[key];
+          if (item === undefined) continue;
+          const type = (schema as { type?: unknown } | undefined)?.type;
+          const valid =
+            type === undefined ||
+            (type === "array"
+              ? Array.isArray(item)
+              : type === "object"
+                ? item !== null && typeof item === "object" && !Array.isArray(item)
+                : typeof item === type);
+          if (!valid) {
+            issues.push({ message: `Expected '${key}' to be ${String(type)}`, path: [key] });
+          }
+        }
+        return issues.length > 0 ? { issues } : { value: value as T };
+      },
       jsonSchema: { input: () => json },
     },
   } as StandardSchemaV1<T>;

@@ -345,7 +345,7 @@ states:
 ```
 
 - `fromConfig(...)` converts the list into a `snapshot.hasTag(...)` predicate. Every listed tag must appear in some state's `tags`. An unused entry is a build-time error.
-- For predicates that a tag list cannot express, pass a function instead: `setupAgent.fromConfig(config, { isIdle })`. The function takes precedence over `idleTags`. A `runAgent({ isIdle })` host override takes precedence over both.
+- For predicates that a tag list cannot express, pass a function instead: `setupAgent.fromConfig(config, { isIdle })`. The function takes precedence over `idleTags` and remains machine-owned.
 
 ## Decisions from JSON
 

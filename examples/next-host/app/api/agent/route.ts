@@ -96,7 +96,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   if (result.status === "idle") {
     const id = crypto.randomUUID();
-    snapshots.set(id, result.persistedSnapshot);
+    snapshots.set(id, result.persist());
     const { interaction } = getStateMeta(result.snapshot);
     return NextResponse.json(
       {

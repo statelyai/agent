@@ -365,7 +365,7 @@ export async function runTodoNlExample(options?: {
   while (result.status === "idle") {
     const text = queued.shift() ?? (await promptLine(`${idlePrompt(result.snapshot)}\n> `));
     result = await runAgent(todoMachine, {
-      snapshot: result.persistedSnapshot,
+      snapshot: result.persist(),
       event: { type: "COMMAND", text },
       ...shared,
     });

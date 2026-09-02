@@ -164,7 +164,7 @@ function toToolResult(result: RunAgentResult<typeof emailDrafter>, handle: strin
 
   const meta = getStateMeta<typeof result.snapshot, z.infer<typeof metaSchema>>(result.snapshot);
   const interaction = meta.interaction ?? null;
-  runs.set(handle, { snapshot: result.persistedSnapshot, interaction });
+  runs.set(handle, { snapshot: result.persist(), interaction });
 
   return {
     status: "pending",

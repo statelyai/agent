@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
-import { createActor, createAsyncLogic, setup, toPromise } from "xstate";
+import { createActor, createAsyncLogic, setup, toPromise, type Snapshot } from "xstate";
 import { createDecisionLogic } from "./decision.js";
 import {
   AGENT_TRACE_SCHEMA_VERSION,
@@ -10,18 +10,15 @@ import {
   createTextLogic,
   AgentIllegalResumeEventError,
   inspectTransitions,
-  replay,
   runAgent,
-  generateResult,
   setupAgent,
-  AgentSnapshotVersionMismatchError,
   type AgentDecisionRequest,
-  type AgentLogEntry,
   type AgentTextRequest,
   type AgentTools,
   type AgentTraceEvent,
   type ChosenEvent,
 } from "./index.js";
+import { createAgentActor, generateResult } from "./run-agent.js";
 import { getMachineStructuralHash } from "./index.js";
 
 describe("runAgent", () => {
@@ -68,50 +65,21 @@ describe("runAgent", () => {
       output: { answer: `Answered: ${request.prompt}` },
     });
 
-    const observedEvents: AgentLogEntry[] = [];
+    const observedEvents: string[] = [];
     const result = await runAgent(machine, {
       input: { prompt: "why state machines?" },
       executors: {
         generateText,
       },
-      onEvent: (event) => observedEvents.push(event),
+      onTransition: (_snapshot, event) => observedEvents.push(event.type),
     });
 
     expect(result.status).toBe("done");
     expect(result.status === "done" ? result.output : undefined).toEqual({
       answer: "Answered: why state machines?",
     });
-    expect(result.events.map((entry) => entry.event)).toEqual([
-      { type: "@agent.init", input: { prompt: "why state machines?" } },
-      {
-        type: "xstate.done.actor",
-        output: { answer: "Answered: why state machines?" },
-        actorId: "answer",
-        sessionId: expect.any(String),
-      },
-    ]);
-    expect(result.events[0]).toMatchObject({
-      schemaVersion: 1,
-      id: "evt_00000000",
-      machineId: machine.id,
-      machineVersion: expect.any(String),
-      recordedAt: expect.any(String),
-      verification: { stateHash: expect.any(String), effectsHash: expect.any(String) },
-    });
-    expect(observedEvents).toEqual(result.events);
-
-    const replayed = replay(machine, result.events);
-    expect(replayed.snapshot.status).toBe("done");
-    expect(replayed.snapshot.output).toEqual({
-      answer: "Answered: why state machines?",
-    });
-
-    const fromAnotherActorSystem = result.events.map((entry) =>
-      entry.event.type === "xstate.done.actor"
-        ? { ...entry, event: { ...entry.event, sessionId: "another-system:99" } }
-        : entry,
-    );
-    expect(replay(machine, fromAnotherActorSystem).snapshot.status).toBe("done");
+    expect(observedEvents).toContain("@xstate.init");
+    expect(observedEvents).toContain("xstate.done.actor");
   });
 
   test("idle + resume: settles idle waiting for an event, then completes on resume", async () => {
@@ -174,12 +142,9 @@ describe("runAgent", () => {
     }
     expect(first.snapshot.value).toBe("awaitingApproval");
 
-    const resumedEvents: AgentLogEntry[] = [];
     const second = await runAgent(machine, {
-      snapshot: first.snapshot,
+      snapshot: first.persist(),
       event: { type: "APPROVE" },
-      events: first.events,
-      onEvent: (event) => resumedEvents.push(event),
       executors: {
         generateText,
       },
@@ -189,16 +154,9 @@ describe("runAgent", () => {
     expect(second.status === "done" ? second.output : undefined).toEqual({
       draft: "Draft: release notes",
     });
-    expect(second.events.map((entry) => entry.event.type)).toEqual([
-      "@agent.init",
-      "xstate.done.actor",
-      "APPROVE",
-    ]);
-    expect(resumedEvents.map((entry) => entry.event.type)).toEqual(["APPROVE"]);
-    expect(replay(machine, second.events).snapshot.status).toBe("done");
   });
 
-  test("events: excludes raised events but includes timer deliveries", async () => {
+  test("onTransition observes raised events and timer deliveries", async () => {
     const raisedMachine = setup({}).createMachine({
       id: "raised-events",
       initial: "starting",
@@ -211,15 +169,14 @@ describe("runAgent", () => {
       },
     });
 
+    const raisedEvents: string[] = [];
     const raised = await runAgent(raisedMachine, {
       input: undefined,
       executors: {},
+      onTransition: (_snapshot, event) => raisedEvents.push(event.type),
     });
     expect(raised.status).toBe("done");
-    expect(raised.events.map((entry) => entry.event)).toEqual([
-      { type: "@agent.init", input: undefined },
-    ]);
-    expect(replay(raisedMachine, raised.events).snapshot.status).toBe("done");
+    expect(raisedEvents).toEqual(["@xstate.init"]);
 
     const timerMachine = setup({}).createMachine({
       id: "timer-events",
@@ -230,16 +187,14 @@ describe("runAgent", () => {
       },
     });
 
+    const timerEvents: string[] = [];
     const timed = await runAgent(timerMachine, {
       input: undefined,
       executors: {},
+      onTransition: (_snapshot, event) => timerEvents.push(event.type),
     });
     expect(timed.status).toBe("done");
-    expect(timed.events.map((entry) => entry.event)).toEqual([
-      { type: "@agent.init", input: undefined },
-      { type: "xstate.timer", id: "xstate.after.5.timer-events.waiting" },
-    ]);
-    expect(replay(timerMachine, timed.events).snapshot.status).toBe("done");
+    expect(timerEvents).toContain("xstate.timer");
   });
 
   test("idle + resume: pre-idle side effects and model calls run exactly once, never re-executed on resume", async () => {
@@ -426,8 +381,6 @@ describe("runAgent", () => {
     expect(result.status).toBe("done");
     expect(callCount).toBe(2);
     expect(requestsSeen[1]!.attempts[0]!.failure).toBe("rejected-by-guard");
-    expect(result.events.map((entry) => entry.event.type)).toEqual(["@agent.init", "ATTACK"]);
-    expect(replay(machine, result.events).snapshot.status).toBe("done");
   });
 
   test("maxModelCalls: exceeding the budget settles a max-model-calls error", async () => {
@@ -758,7 +711,7 @@ describe("runAgent", () => {
       expect(result.status).toBe("idle");
       if (result.status !== "idle") throw new Error("expected idle");
       expect(result.pendingUserInputs).toEqual([{ id: "ask", input: { prompt: "How was it?" } }]);
-      expect(result.persistedSnapshot).toBeDefined();
+      expect(result.persist()).toBeDefined();
     });
 
     test("a machine invoking an unregistered string src throws naming the source", async () => {
@@ -1694,7 +1647,7 @@ describe("agent.userInput as a pending placeholder (durable parallel HITL)", () 
     // The sibling region's work ran to completion before settling.
     expect((result.snapshot.context as { summary: string | null }).summary).toBe("a summary");
     expect(result.pendingUserInputs).toEqual([{ id: "askHuman", input: { prompt: "Feedback?" } }]);
-    expect(result.persistedSnapshot).toBeDefined();
+    expect(result.persist()).toBeDefined();
   });
 
   test("the persisted snapshot JSON round-trips and resumes with a userInput handler to done", async () => {
@@ -1704,11 +1657,11 @@ describe("agent.userInput as a pending placeholder (durable parallel HITL)", () 
         generateText: async () => ({ output: "a summary" }),
       },
     });
-    if (first.status !== "idle" || !first.persistedSnapshot) {
+    if (first.status !== "idle" || !first.persist()) {
       throw new Error("expected idle with persistedSnapshot");
     }
 
-    const stored = JSON.parse(JSON.stringify(first.persistedSnapshot));
+    const stored = JSON.parse(JSON.stringify(first.persist()));
 
     const second = await runAgent(machine, {
       snapshot: stored,
@@ -1735,12 +1688,12 @@ describe("agent.userInput as a pending placeholder (durable parallel HITL)", () 
         generateText: async () => ({ output: "a summary" }),
       },
     });
-    if (first.status !== "idle" || !first.persistedSnapshot) {
+    if (first.status !== "idle" || !first.persist()) {
       throw new Error("expected idle with persistedSnapshot");
     }
 
     const again = await runAgent(machine, {
-      snapshot: JSON.parse(JSON.stringify(first.persistedSnapshot)),
+      snapshot: JSON.parse(JSON.stringify(first.persist())),
       executors: {
         generateText: async () => ({ output: "unused" }),
       },
@@ -1841,17 +1794,6 @@ describe("emitted events (runAgent `on`)", () => {
     expect(trace[0]).toEqual(expect.objectContaining({ type: "run.start", seq: 1 }));
     expect(trace.at(-1)).toEqual(expect.objectContaining({ type: "run.end", status: "done" }));
     expect(trace.at(-1)).not.toHaveProperty("events");
-    expect(result.events).toHaveLength(2);
-    expect(result.events[0]!.event.type).toBe("@agent.init");
-    expect(result.events[1]!.event).toMatchObject({
-      type: "xstate.done.actor",
-      actorId: expect.any(String),
-    });
-    expect(
-      trace.flatMap((event) =>
-        event.type === "machine.transition" && event.eventId ? [event.eventId] : [],
-      ),
-    ).toEqual(result.events.map((entry) => entry.id));
     expect(trace.map((event) => event.type)).toEqual(
       expect.arrayContaining([
         "emit",
@@ -2278,7 +2220,7 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
     expect(first.snapshot.value).toBe("reviewing");
 
     const second = await runAgent(machine, {
-      snapshot: first.snapshot,
+      snapshot: first.persist(),
       event: { type: "APPROVE" },
       executors: {
         generateText: async () => ({ output: {} }),
@@ -2388,7 +2330,7 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
     expect(first.status).toBe("idle");
     if (first.status !== "idle") throw new Error("expected idle");
     const persistedNotes = (
-      first.persistedSnapshot as {
+      first.persist() as {
         children?: { child?: { snapshot?: { context?: { notes?: string[] } } } };
       }
     ).children?.child?.snapshot?.context?.notes;
@@ -2396,14 +2338,14 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
 
     // Resume from the persisted snapshot: the child keeps accumulating.
     const second = await runAgent(machine, {
-      snapshot: first.persistedSnapshot,
+      snapshot: first.persist(),
       event: { type: "CONTINUE" },
       executors,
     });
     expect(second.status).toBe("idle");
     if (second.status !== "idle") throw new Error("expected idle");
     const secondNotes = (
-      second.persistedSnapshot as {
+      second.persist() as {
         children?: { child?: { snapshot?: { context?: { notes?: string[] } } } };
       }
     ).children?.child?.snapshot?.context?.notes;
@@ -2502,7 +2444,7 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
     expect(result.status).toBe("idle");
     if (result.status !== "idle") throw new Error("expected idle");
     const notes = (
-      result.persistedSnapshot as {
+      result.persist() as {
         children?: { child?: { snapshot?: { context?: { notes?: string[] } } } };
       }
     ).children?.child?.snapshot?.context?.notes;
@@ -2565,19 +2507,12 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
     expect((result.snapshot.context as { summary: string | null }).summary).toBe("done-summary");
   });
 
-  test("the runAgent isIdle option overrides the machine-carried predicate", async () => {
-    const machineSeen: string[] = [];
+  test("a resting state with an event handler is idle by default", async () => {
     const agent = setupAgent({
       context: z.object({}),
       input: z.object({}),
       output: z.object({}),
       events: { GO: z.object({}) },
-      // Machine-carried predicate would NEVER fire (wrong state) — proves the
-      // host option below wins.
-      isIdle: (snapshot) => {
-        machineSeen.push(JSON.stringify(snapshot.value));
-        return snapshot.matches("done");
-      },
     });
     const machine = agent.createMachine({
       context: {},
@@ -2588,13 +2523,8 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
       },
     });
 
-    const seen: string[] = [];
     const result = await runAgent(machine, {
       input: {},
-      isIdle: (snapshot) => {
-        seen.push(JSON.stringify(snapshot.value));
-        return snapshot.matches("paused");
-      },
       executors: {
         generateText: async () => ({ output: {} }),
       },
@@ -2602,9 +2532,6 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
 
     expect(result.status).toBe("idle");
     expect(result.status === "idle" ? result.snapshot.value : undefined).toBe("paused");
-    // The host override was consulted; the machine-carried predicate was not.
-    expect(seen).toContain('"paused"');
-    expect(machineSeen).toEqual([]);
   });
 
   test("the machine-carried predicate survives machine.provide (executor rebinding)", async () => {
@@ -2711,7 +2638,7 @@ describe("Feature B: illegal resume event throws", () => {
     let caught: unknown;
     try {
       await runAgent(machine, {
-        snapshot: first.snapshot,
+        snapshot: first.persist(),
         event: { type: "NOPE" } as never,
         executors: {
           generateText,
@@ -2733,7 +2660,7 @@ describe("Feature B: illegal resume event throws", () => {
 
     await expect(
       runAgent(machine, {
-        snapshot: first.snapshot,
+        snapshot: first.persist(),
         event: { type: "NOPE" } as never,
         executors: { generateText },
       }),
@@ -2747,7 +2674,7 @@ describe("Feature B: illegal resume event throws", () => {
     // SUBMIT is a declared, type-legal event; its guard rejects it here. This
     // is NOT an illegal resume event — no throw, machine takes no transition.
     const second = await runAgent(machine, {
-      snapshot: first.snapshot,
+      snapshot: first.persist(),
       event: { type: "SUBMIT" },
       executors: {
         generateText,
@@ -2979,7 +2906,7 @@ describe("generateResult", () => {
     if (first.status !== "idle") throw new Error("expected idle");
 
     const result = await generateResult(machine, {
-      snapshot: first.snapshot,
+      snapshot: first.persist(),
       event: { type: "APPROVE" },
       executors: {
         generateText,
@@ -2989,7 +2916,7 @@ describe("generateResult", () => {
     expect(result.output).toEqual({ draft: "Draft: notes" });
     // generateText-style metadata rides along with the output:
     expect(result.snapshot.status).toBe("done");
-    expect(Array.isArray(result.events)).toBe(true);
+    expect(result.persist()).toEqual(expect.objectContaining({ status: "done" }));
   });
 
   test("idle: throws AgentIdleError carrying snapshot + acceptedTypes", async () => {
@@ -3144,7 +3071,7 @@ describe("restore semantics: pending requests and events-only resume", () => {
     expect(restored.status).toBe("idle");
 
     const finished = await runAgent(machine, {
-      snapshot: restored.snapshot,
+      snapshot: restored.persist(),
       event: { type: "GO" },
       executors: resolving,
     });
@@ -3154,88 +3081,6 @@ describe("restore semantics: pending requests and events-only resume", () => {
       a: "ok:one",
       b: "ok:two",
     });
-  });
-
-  test("events-only resume: continues from the log alone without re-executing recorded calls", async () => {
-    const machine = buildMachine();
-    const calls: string[] = [];
-    const executors = {
-      generateText: async (request: AgentTextRequest & { tools: AgentTools }) => {
-        calls.push(request.prompt ?? "");
-        return { output: `ok:${request.prompt}` };
-      },
-    };
-
-    const first = await runAgent(machine, { input: {}, executors });
-    expect(first.status).toBe("idle");
-    expect(calls).toEqual(["one"]);
-
-    // No snapshot: resume purely from the replayable log (JSON round-tripped).
-    const resumed = await runAgent(machine, {
-      events: JSON.parse(JSON.stringify(first.events)),
-      event: { type: "GO" },
-      executors,
-    });
-    expect(resumed.status).toBe("done");
-    expect(resumed.status === "done" ? resumed.output : undefined).toEqual({
-      a: "ok:one",
-      b: "ok:two",
-    });
-    // The recorded first call was NOT re-executed.
-    expect(calls).toEqual(["one", "two"]);
-    // The resumed log extends the original history (init entry retained).
-    expect(resumed.events[0]?.event.type).toBe("@agent.init");
-    expect(resumed.events.map((entry) => entry.event.type)).toContain("GO");
-    // The full log still replays to the same final state.
-    expect(replay(machine, resumed.events).snapshot.status).toBe("done");
-  });
-
-  test("events-only resume: a request in flight when the log ended re-executes and the run completes (crash recovery)", async () => {
-    const machine = buildMachine();
-    const calls: string[] = [];
-    const abort = new AbortController();
-
-    // First leg to the idle gate, then a second leg that hangs on call two and
-    // aborts — simulating a crash mid-second-invoke with the log persisted.
-    const hangingExecutors = {
-      generateText: async (request: AgentTextRequest & { tools: AgentTools }) => {
-        calls.push(request.prompt ?? "");
-        if (request.prompt === "two") {
-          setTimeout(() => abort.abort(new Error("simulated crash")), 10);
-          return new Promise(() => {}) as never;
-        }
-        return { output: `ok:${request.prompt}` };
-      },
-    };
-    const first = await runAgent(machine, { input: {}, executors: hangingExecutors });
-    expect(first.status).toBe("idle");
-    const crashed = await runAgent(machine, {
-      snapshot: first.snapshot,
-      events: first.events,
-      event: { type: "GO" },
-      executors: hangingExecutors,
-      signal: abort.signal,
-    });
-    expect(crashed.status).toBe("error");
-    expect(calls).toEqual(["one", "two"]);
-
-    // Recovery: resume from the crashed run's log alone. Only the in-flight
-    // request re-executes.
-    const recovered = await runAgent(machine, {
-      events: JSON.parse(JSON.stringify(crashed.events)),
-      executors: {
-        generateText: async (request) => {
-          calls.push(`retry:${request.prompt}`);
-          return { output: `ok:${request.prompt}` };
-        },
-      },
-    });
-    expect(recovered.status).toBe("done");
-    expect(recovered.status === "done" ? recovered.output : undefined).toEqual({
-      a: "ok:one",
-      b: "ok:two",
-    });
-    expect(calls).toEqual(["one", "two", "retry:two"]);
   });
 
   test("executors receive runId and requestId correlation info", async () => {
@@ -3254,25 +3099,6 @@ describe("restore semantics: pending requests and events-only resume", () => {
     expect(seen).toHaveLength(1);
     expect(seen[0]?.runId).toMatch(/^run_\d+$/);
     expect(seen[0]?.requestId).toContain("first");
-  });
-
-  test("events without an init entry and without a snapshot remain history-only (fresh start)", async () => {
-    const machine = buildMachine();
-    const calls: string[] = [];
-    const executors = {
-      generateText: async (request: AgentTextRequest & { tools: AgentTools }) => {
-        calls.push(request.prompt ?? "");
-        return { output: `ok:${request.prompt}` };
-      },
-    };
-    const first = await runAgent(machine, { input: {}, executors });
-    // Drop the init entry: no longer a self-contained log. But entry indices
-    // must be contiguous from 0, so this malformed prefix throws loudly rather
-    // than silently starting fresh.
-    const withoutInit = first.events.slice(1);
-    await expect(
-      runAgent(machine, { events: withoutInit, event: { type: "GO" }, executors }),
-    ).rejects.toThrow(/contiguous/);
   });
 });
 
@@ -3324,9 +3150,8 @@ describe("createAgentActor (session mode)", () => {
     }),
   };
 
-  test("actor survives an idle settle; the next event re-opens the cycle on one cumulative log", async () => {
+  test("actor survives an idle settle; the next event re-opens the cycle", async () => {
     const machine = buildMachine();
-    const { createAgentActor } = await import("./index.js");
     const session = createAgentActor(machine, { input: {}, executors });
 
     const first = await session.settled();
@@ -3342,15 +3167,6 @@ describe("createAgentActor (session mode)", () => {
       b: "ok:two",
     });
 
-    // One replayable log spanning both cycles: init, first done, GO, second done.
-    expect(session.events.map((entry) => entry.event.type)).toEqual([
-      "@agent.init",
-      "xstate.done.actor",
-      "GO",
-      "xstate.done.actor",
-    ]);
-    expect(replay(machine, [...session.events]).snapshot.status).toBe("done");
-
     // Usage is cumulative across cycles.
     expect(session.usage().modelCalls).toBe(2);
     expect(session.usage().totalTokens).toBe(14);
@@ -3362,7 +3178,6 @@ describe("createAgentActor (session mode)", () => {
 
   test("settled() called while idle resolves immediately with the current result", async () => {
     const machine = buildMachine();
-    const { createAgentActor } = await import("./index.js");
     const session = createAgentActor(machine, { input: {}, executors });
     const first = await session.settled();
     expect(first.status).toBe("idle");
@@ -3379,7 +3194,7 @@ describe("createAgentActor (session mode)", () => {
     expect(result.status).toBe("idle");
     // The one-shot path resumes by snapshot, not by live actor.
     const resumed = await runAgent(machine, {
-      snapshot: result.snapshot,
+      snapshot: result.persist(),
       event: { type: "GO" },
       executors,
     });
@@ -3388,7 +3203,10 @@ describe("createAgentActor (session mode)", () => {
 });
 
 describe("machine version prop (createMachine({ version }))", () => {
-  const buildVersioned = (version: string) => {
+  const buildVersioned = (
+    version: string,
+    migrate?: (snapshot: Snapshot<unknown>, fromVersion: string | undefined) => Snapshot<unknown>,
+  ) => {
     const agentSetup = setupAgent({
       context: z.object({}),
       input: z.object({}),
@@ -3398,6 +3216,7 @@ describe("machine version prop (createMachine({ version }))", () => {
     });
     return agentSetup.createMachine({
       version,
+      ...(migrate ? { migrate } : {}),
       context: () => ({}),
       initial: "waiting",
       states: {
@@ -3407,15 +3226,12 @@ describe("machine version prop (createMachine({ version }))", () => {
     });
   };
 
-  test("machine.version is the default machineVersion and a live snapshot resumes under it", async () => {
+  test("XState's persisted version resumes under the same machine", async () => {
     const machine = buildVersioned("3");
     const first = await runAgent(machine, { input: {} });
     expect(first.status).toBe("idle");
-    expect(first.events.every((entry) => entry.machineVersion === "3")).toBe(true);
-    // JSON round-trip of the LIVE snapshot (no XState `version` field): the
-    // aligned restore must not trip XState's own restoreSnapshot version throw.
     const resumed = await runAgent(machine, {
-      snapshot: JSON.parse(JSON.stringify(first.snapshot)),
+      snapshot: JSON.parse(JSON.stringify(first.persist())),
       event: { type: "GO" },
     });
     expect(resumed.status).toBe("done");
@@ -3425,206 +3241,24 @@ describe("machine version prop (createMachine({ version }))", () => {
     const machineV1 = buildVersioned("1");
     const first = await runAgent(machineV1, { input: {} });
     expect(first.status).toBe("idle");
-    // Strip our agentMeta stamp: only XState's persisted `version` field
-    // remains, exercising the gate's fallback.
-    const persisted = JSON.parse(
-      JSON.stringify(first.status === "idle" ? first.snapshot : undefined),
-    ) as Record<string, unknown>;
-    delete persisted.agentMeta;
-    persisted.version = "1";
+    const persisted = JSON.parse(JSON.stringify(first.persist())) as Snapshot<unknown>;
 
     const machineV2 = buildVersioned("2");
-    await expect(
-      runAgent(machineV2, { snapshot: persisted as never, event: { type: "GO" } }),
-    ).rejects.toThrow(AgentSnapshotVersionMismatchError);
-
-    // migrateSnapshot adapts it instead of throwing.
-    const migrated = await runAgent(machineV2, {
-      snapshot: persisted as never,
+    const mismatched = await runAgent(machineV2, {
+      snapshot: persisted,
       event: { type: "GO" },
-      migrateSnapshot: (snapshot) => snapshot,
+    });
+    expect(mismatched.status).toBe("error");
+    expect(String(mismatched.status === "error" ? mismatched.error : "")).toMatch(
+      /does not match machine version/,
+    );
+
+    const migratingV2 = buildVersioned("2", (snapshot) => ({ ...snapshot, version: "2" }));
+    const migrated = await runAgent(migratingV2, {
+      snapshot: persisted,
+      event: { type: "GO" },
     });
     expect(migrated.status).toBe("done");
-  });
-});
-
-describe("snapshot version stamping", () => {
-  const versionSchemas = () =>
-    createAgentSchemas({
-      context: z.object({ n: z.number() }),
-      input: z.object({}),
-      output: z.object({ n: z.number() }),
-      events: { GO: z.object({}) },
-    });
-  const buildMachine = () =>
-    setupAgent({ schemas: versionSchemas() }).createMachine({
-      id: "versioned",
-      context: () => ({ n: 0 }),
-      initial: "waiting",
-      states: {
-        waiting: { on: { GO: { target: "done" } } },
-        done: { type: "final", output: ({ context }) => ({ n: context.n }) },
-      },
-    });
-  // A structurally-different machine (extra state) → different structural hash.
-  const buildEditedMachine = () =>
-    setupAgent({ schemas: versionSchemas() }).createMachine({
-      id: "versioned",
-      context: () => ({ n: 0 }),
-      initial: "waiting",
-      states: {
-        waiting: { on: { GO: { target: "done" } } },
-        done: { type: "final", output: ({ context }) => ({ n: context.n }) },
-        extra: {},
-      },
-    });
-  const generateText = async () => ({ output: {} });
-
-  test("stamp present on idle and on done, using the structural hash", async () => {
-    const machine = buildMachine();
-    const version = getMachineStructuralHash(machine);
-
-    const idle = await runAgent(machine, { input: {}, executors: { generateText } });
-    if (idle.status !== "idle") throw new Error("expected idle");
-    expect((idle.snapshot as { agentMeta?: unknown }).agentMeta).toEqual({
-      machineId: "versioned",
-      version,
-    });
-
-    const done = await runAgent(machine, {
-      snapshot: idle.snapshot,
-      event: { type: "GO" },
-      executors: {
-        generateText,
-      },
-    });
-    if (done.status !== "done") throw new Error("expected done");
-    expect((done.snapshot as { agentMeta?: { version?: string } }).agentMeta?.version).toBe(
-      version,
-    );
-  });
-
-  test("same-machine resume passes", async () => {
-    const machine = buildMachine();
-    const idle = await runAgent(machine, { input: {}, executors: { generateText } });
-    if (idle.status !== "idle") throw new Error("expected idle");
-    const done = await runAgent(machine, {
-      snapshot: idle.snapshot,
-      event: { type: "GO" },
-      executors: {
-        generateText,
-      },
-    });
-    expect(done.status).toBe("done");
-  });
-
-  test("structurally-edited machine resume throws with from/to", async () => {
-    const v1 = buildMachine();
-    const v2 = buildEditedMachine();
-    const idle = await runAgent(v1, { input: {}, executors: { generateText } });
-    if (idle.status !== "idle") throw new Error("expected idle");
-
-    let caught: AgentSnapshotVersionMismatchError | undefined;
-    try {
-      await runAgent(v2, {
-        snapshot: idle.snapshot,
-        event: { type: "GO" },
-        executors: { generateText },
-      });
-    } catch (error) {
-      caught = error as AgentSnapshotVersionMismatchError;
-    }
-    expect(caught).toBeInstanceOf(AgentSnapshotVersionMismatchError);
-    expect(caught?.from).toBe(getMachineStructuralHash(v1));
-    expect(caught?.to).toBe(getMachineStructuralHash(v2));
-  });
-
-  // The machine's own XState `version` is the single source of truth: it is
-  // what gets stamped, and what a resume is checked against.
-  const buildTaggedMachine = (version: string) =>
-    setupAgent({ schemas: versionSchemas() }).createMachine({
-      id: "versioned",
-      version,
-      context: () => ({ n: 0 }),
-      initial: "waiting",
-      states: {
-        waiting: { on: { GO: { target: "done" } } },
-        done: { type: "final", output: ({ context }) => ({ n: context.n }) },
-      },
-    });
-
-  test("the machine's declared version is stamped, and a bump is a mismatch", async () => {
-    const idle = await runAgent(buildTaggedMachine("v1"), {
-      input: {},
-      executors: { generateText },
-    });
-    if (idle.status !== "idle") throw new Error("expected idle");
-    expect((idle.snapshot as { agentMeta?: { version?: string } }).agentMeta?.version).toBe("v1");
-
-    let caught: AgentSnapshotVersionMismatchError | undefined;
-    try {
-      await runAgent(buildTaggedMachine("v2"), {
-        snapshot: idle.snapshot,
-        event: { type: "GO" },
-        executors: {
-          generateText,
-        },
-      });
-    } catch (error) {
-      caught = error as AgentSnapshotVersionMismatchError;
-    }
-    expect(caught?.from).toBe("v1");
-    expect(caught?.to).toBe("v2");
-  });
-
-  test("migrateSnapshot is called with correct args and its result is used", async () => {
-    const idle = await runAgent(buildTaggedMachine("v1"), {
-      input: {},
-      executors: { generateText },
-    });
-    if (idle.status !== "idle") throw new Error("expected idle");
-
-    const calls: Array<{ from: string; to: string }> = [];
-    const done = await runAgent(buildTaggedMachine("v2"), {
-      snapshot: idle.snapshot,
-      event: { type: "GO" },
-      migrateSnapshot: (snapshot, info) => {
-        calls.push(info);
-        return snapshot;
-      },
-      executors: {
-        generateText,
-      },
-    });
-    expect(calls).toEqual([{ from: "v1", to: "v2" }]);
-    expect(done.status).toBe("done");
-  });
-
-  test("warn mode proceeds", async () => {
-    const idle = await runAgent(buildTaggedMachine("v1"), {
-      input: {},
-      executors: { generateText },
-    });
-    if (idle.status !== "idle") throw new Error("expected idle");
-
-    const warnings: string[] = [];
-    const original = console.warn;
-    console.warn = (...args: unknown[]) => warnings.push(args.map(String).join(" "));
-    let done;
-    try {
-      done = await runAgent(buildTaggedMachine("v2"), {
-        snapshot: idle.snapshot,
-        event: { type: "GO" },
-        onVersionMismatch: "warn",
-        executors: {
-          generateText,
-        },
-      });
-    } finally {
-      console.warn = original;
-    }
-    expect(done?.status).toBe("done");
-    expect(warnings.some((w) => w.includes("machine version 'v1'"))).toBe(true);
   });
 });
 
@@ -3824,9 +3458,8 @@ describe("runAgent usage aggregation", () => {
 
     // A resumed run counts only ITS OWN calls, not the prior run's.
     const resumed = await runAgent(idleMachine, {
-      snapshot: result.snapshot,
+      snapshot: result.persist(),
       event: { type: "APPROVE" },
-      events: result.events,
       executors: { generateText: async () => ({ output: "unused" }) },
     });
     expect(resumed.status).toBe("done");
@@ -3919,38 +3552,6 @@ describe("runAgent usage aggregation", () => {
     expect(result.output).toEqual({ first: "x", second: "x" });
     expect(result.usage).toEqual({ inputTokens: 12, outputTokens: 4, modelCalls: 2 });
   });
-
-  test("getRequests (state-interpretation) calls aggregate too", async () => {
-    const interpretSchemas = createAgentSchemas({
-      context: z.object({}),
-      input: z.object({}),
-      output: z.object({}),
-      events: { GO: z.object({}) },
-    });
-    const interpretAgent = setupAgent({ schemas: interpretSchemas });
-    const interpretMachine = interpretAgent.createMachine({
-      context: {},
-      initial: "start",
-      states: {
-        start: { on: { GO: { target: "done" } } },
-        done: { type: "final" },
-      },
-    });
-
-    const result = await runAgent(interpretMachine, {
-      input: {},
-      getRequests: (snapshot) =>
-        snapshot.value === "start"
-          ? { model: "test-model", prompt: "advance", onDone: { type: "GO" } }
-          : undefined,
-      executors: {
-        generateText: async () => ({ output: "ok", usage: { inputTokens: 8, outputTokens: 2 } }),
-      },
-    });
-
-    expect(result.status).toBe("done");
-    expect(result.usage).toEqual({ inputTokens: 8, outputTokens: 2, modelCalls: 1 });
-  });
 });
 
 describe("machine input validation", () => {
@@ -4008,16 +3609,14 @@ describe("machine input validation", () => {
     expect(result.output).toEqual({ topic: "otters", rounds: 9, tone: "neutral" });
   });
 
-  test("the replayable init entry carries post-default input, so a replay reproduces the run", async () => {
+  test("schema defaults reach the machine context", async () => {
     const result = await runAgent(buildMachine(), { input: { topic: "otters" } });
-
-    const init = result.events[0] as AgentLogEntry & { event?: { input?: unknown } };
-    expect(init.event?.input).toEqual({ topic: "otters", rounds: 3, tone: "neutral" });
+    expect(result.snapshot.context).toEqual({ topic: "otters", rounds: 3, tone: "neutral" });
   });
 
   test("invalid input rejects with an AgentError, like a bad resume snapshot", async () => {
     // Thrown, not settled: the actor never starts, so this is a bad call rather
-    // than a machine failure (same shape as AgentSnapshotVersionMismatchError).
+    // than a machine failure.
     await expect(
       runAgent(buildMachine(), {
         // `rounds` is not a number.
