@@ -20,7 +20,6 @@ const v1 = setupAgent({
   input: z.object({ orderId: z.string(), total: z.number() }),
   output: z.object({ orderId: z.string(), approved: z.boolean() }),
   events: { APPROVE: z.object({}), REJECT: z.object({ reason: z.string() }) },
-  isIdle: (snapshot) => snapshot.hasTag("awaiting-approval"),
 });
 
 export const orderApprovalMachineV1 = v1.createMachine({
@@ -101,7 +100,6 @@ const v2 = setupAgent({
     riskLevel: z.enum(["low", "high"]),
   }),
   events: { APPROVE: z.object({}), REJECT: z.object({ reason: z.string() }) },
-  isIdle: (snapshot) => snapshot.hasTag("awaiting-approval"),
 });
 
 export const orderApprovalMachine = v2.createMachine({

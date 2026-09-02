@@ -9,7 +9,7 @@ import type { ModelMessage } from "ai";
 
 const agent = setupAgent({
   context: z.object({
-    messages: z.custom<ModelMessage[]>()
+    messages: z.custom<ModelMessage[]>(),
   }),
   // ...
 });
@@ -21,7 +21,7 @@ When an executor returns framework messages, Stately Agent sends one ordinary `a
 const machine = agent.createMachine({
   context: { messages: [] },
   on: {
-    "agent.messages": appendMessages()
+    "agent.messages": appendMessages(),
   },
   // ...
 });
@@ -30,3 +30,6 @@ const machine = agent.createMachine({
 The default key is `messages`. Use `appendMessages({ key: "history" })` for another context field.
 
 This is deliberately transparent: the AI SDK executor returns AI SDK messages, another framework returns its own messages, and the machine stores those values unchanged. Tool calls and tool results remain part of that framework-native chat log.
+
+See the runnable [`tool-calling`](../examples/tool-calling) example for an AI
+SDK-owned tool loop whose native response messages are retained this way.

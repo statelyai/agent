@@ -17,7 +17,7 @@
  *
  * The snapshot store here is a module-level Map for illustration. A real
  * deployment (serverless, multiple instances) needs a shared store — Redis, a
- * DB row, a KV namespace — keyed by run id. See ../file-snapshot-store.
+ * DB row, a KV namespace — keyed by run id. See examples/file-snapshot-store.
  */
 import { z } from "zod";
 import { getAcceptedEvents, getStateMeta, runAgent, setupAgent } from "@statelyai/agent";
@@ -36,7 +36,6 @@ const agentSetup = setupAgent({
   output: z.object({ published: z.boolean(), draft: z.string() }),
   meta: z.object({ interaction: z.object({ label: z.string() }).optional() }),
   events: { APPROVE: z.object({}), REJECT: z.object({ reason: z.string() }) },
-  isIdle: (snapshot) => snapshot.hasTag("awaiting-review"),
   requests: {
     writeDraft: {
       schemas: { input: z.object({ topic: z.string() }), output: z.string() },

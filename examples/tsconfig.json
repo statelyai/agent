@@ -12,7 +12,6 @@
   // See the root `typecheck:example-packages` script.
   "exclude": [
     "next-host",
-    "tanstack-start-host",
     "tanstack-ai-stream",
     "cloudflare-agent-host",
     "cloudflare-workers-ai-host"

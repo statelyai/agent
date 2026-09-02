@@ -95,9 +95,6 @@ const schemas = createAgentSchemas({
 const agentSetup = setupAgent({
   schemas,
   models,
-  // The machine's own wait signal — `runAgent` settles idle whenever a resting
-  // snapshot carries this tag (the `{ pending }` sentinel, now first-class).
-  isIdle: (snapshot) => snapshot.hasTag("awaiting-approval"),
   actors: {
     // The `lookupOrder` tool, now a typed actor. Reads the sample table.
     lookupOrder: createAsyncLogic<string, { orderId: string }>({

@@ -17,7 +17,7 @@
  * lives in the tools. Same bridge as ../mastra-host/index.ts.
  *
  * Snapshots live in an in-memory `Map` keyed by handle (same shape as
- * ../express-host); swap it for Redis/Postgres and the tools are unchanged.
+ * ../next-host); swap it for Redis/Postgres and the tools are unchanged.
  */
 import { z } from "zod";
 import type { EventFromLogic, Snapshot } from "xstate";

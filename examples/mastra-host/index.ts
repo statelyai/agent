@@ -18,7 +18,7 @@
  * so no hand-rolled legality check lives in the tools.
  *
  * Snapshots live in an in-memory `Map` keyed by handle (same shape as
- * examples/express-host); swap it for Redis/Postgres and the tools are unchanged.
+ * examples/next-host); swap it for Redis/Postgres and the tools are unchanged.
  *
  * Run: npx tsx examples/mastra-host/index.ts
  *   No API key -> keyless mock executors drive the machine end to end.

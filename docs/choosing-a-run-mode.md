@@ -2,12 +2,12 @@
 
 The machine is the artifact. Runners only decide how one host executes its XState effects.
 
-| Need | Use |
-| --- | --- |
-| One request/response run | `runAgent` |
-| Several idle/resume turns | `runAgentLoop` |
-| Async progress feed | `runAgentStream` |
-| A long-lived actor | `provideExecutors` + XState `createActor` |
+| Need                        | Use                                                                                 |
+| --------------------------- | ----------------------------------------------------------------------------------- |
+| One request/response run    | `runAgent`                                                                          |
+| Several idle/resume turns   | `runAgentLoop`                                                                      |
+| Async progress feed         | `runAgentStream`                                                                    |
+| A long-lived actor          | `provideExecutors` + XState `createActor`                                           |
 | A custom or durable runtime | XState `initialTransition` / `transition`, or `createDurable` from `xstate/durable` |
 
 ## Managed run
@@ -60,5 +60,8 @@ while (state.status === "active") {
 
 return state.output;
 ```
+
+[`portable-xstate-loop`](../examples/portable-xstate-loop) is a runnable version
+using an Agent machine with XState's durable transition/effect protocol.
 
 A durable host should use XState's `createDurable`. Its adapter owns persistence, retries, messaging, timers, and child execution. Stately Agent does not wrap those framework responsibilities.

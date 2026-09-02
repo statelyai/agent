@@ -22,7 +22,7 @@
  * two tools. Contrast ./flue-owned.ts, where Flue's hooks do the owning.
  *
  * Snapshots live in an in-memory `Map` keyed by handle (same shape as
- * examples/express-host); swap it for Redis/Postgres and the tools are
+ * examples/next-host); swap it for Redis/Postgres and the tools are
  * unchanged.
  *
  * Run: npx tsx examples/flue-host/index.ts
@@ -204,7 +204,7 @@ function toToolResult(result: RunAgentResult<typeof emailDrafter>, handle: strin
 export async function startDraft(
   prompt: string,
   // Defaults evaluate per call, so `useLiveExecutors()` takes effect for
-  // direct callers too (mirrors eve-host/bridge.ts and mastra-host).
+  // direct callers too (mirrors langchain-host/bridge.ts and mastra-host).
   runOptions: RunAgentOptions<typeof emailDrafter> = toolRunOptions,
 ): Promise<ToolResult> {
   const handle = `draft-${++nextHandle}`;

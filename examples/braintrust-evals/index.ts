@@ -36,10 +36,6 @@ import { emailDrafter, models } from "../email-drafter/agent-logic.js";
 type DrafterEvent = EventFromLogic<typeof emailDrafter>;
 type DrafterSnapshot = SnapshotFrom<typeof emailDrafter>;
 
-/**
- * The states where the drafter waits for a human. Declared so idle detection is
- * deterministic instead of falling back to `runAgent`'s timing heuristic.
- */
 /** One dataset row's input: the request, plus how the simulated user behaves. */
 export interface DrafterCase {
   /** The initial drafting request. */

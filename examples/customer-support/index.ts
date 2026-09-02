@@ -154,10 +154,6 @@ const agentSetup = setupAgent({
     APPROVE: z.object({}),
     DENY: z.object({ reason: z.string() }),
   },
-  // The machine's own wait signal: the `confirming` tag. `runAgent` settles idle
-  // deterministically whenever a resting snapshot carries it — no timing
-  // heuristic, no host-side `snapshot.next` check.
-  isIdle: (snapshot) => snapshot.hasTag("awaiting-approval"),
   actors: {
     // Applies the approved sensitive action. Reads the real booking table and
     // returns a confirmation message. (A production host would persist the

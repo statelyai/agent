@@ -2,6 +2,8 @@
 
 These examples use one XState machine artifact across different model SDKs and hosts.
 
+<!-- curated example catalog derived from examples/*/metadata.json and examples/index.ts -->
+
 ## Start here
 
 - [email-drafter](email-drafter): typed requests, revision, approval, and sending
@@ -10,6 +12,7 @@ These examples use one XState machine artifact across different model SDKs and h
 - [plain-xstate](plain-xstate): application-owned XState execution
 - [retrofit](retrofit): migrate a hand-written agent loop incrementally
 - [json-agent](json-agent): serializable machine configuration
+- [portable-xstate-loop](portable-xstate-loop): the native XState transition/effect loop
 
 ## State-machine advantages
 
@@ -19,6 +22,7 @@ These examples use one XState machine artifact across different model SDKs and h
 - [long-running-onboarding](long-running-onboarding), [snapshot-migration](snapshot-migration), [crash-recovery](crash-recovery): pauses and native XState snapshots
 - [review-tool-calls](review-tool-calls), [sql-agent](sql-agent), [customer-support](customer-support): explicit human gates
 - [context-compaction](context-compaction), [chat-with-pdf](chat-with-pdf): framework-native message history
+- [tool-calling](tool-calling): SDK-owned tools and explicit native message retention
 - [game-loop-agent](game-loop-agent), [chameleon](chameleon), [just-one](just-one): long-lived game rules and hidden state
 
 ## Agent patterns
@@ -39,6 +43,8 @@ These examples use one XState machine artifact across different model SDKs and h
 - [langchain-host](langchain-host), [mastra-host](mastra-host), [flue-host](flue-host)
 - [cloudflare-agent-host](cloudflare-agent-host), [cloudflare-workers-ai-host](cloudflare-workers-ai-host)
 - [next-host](next-host)
+- [file-snapshot-store](file-snapshot-store): application-owned snapshot persistence
+- [long-lived-actor](long-lived-actor): application-owned `createActor` lifetime
 - [machine-as-tool](machine-as-tool)
 - [braintrust-evals](braintrust-evals)
 - [river-crossing](river-crossing)

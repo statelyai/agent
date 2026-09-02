@@ -101,9 +101,6 @@ const agentSetup = setupAgent({
     APPROVE: z.object({}),
     REJECT: z.object({}),
   },
-  // The machine's own wait signal: the `awaiting-approval` tag. `runAgent`
-  // settles idle deterministically whenever a resting snapshot carries it.
-  isIdle: (snapshot) => snapshot.hasTag("awaiting-approval"),
   actors: {
     runQuery: createAsyncLogic<number, { plan: QueryPlan }>({
       run: async ({ input }) => executeQuery(input.plan),

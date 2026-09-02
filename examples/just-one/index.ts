@@ -278,9 +278,6 @@ const CLUE_SYSTEM_PROMPT = [
 const agentSetup = setupAgent({
   schemas: justOneSchemas,
   models,
-  // Deterministic idle detection: the run settles exactly when it is waiting on
-  // the guesser, instead of falling back to the timing heuristic.
-  isIdle: (snapshot) => snapshot.hasTag("waiting"),
   requests: {
     // ONE request definition, used by all three regions. Its input type is the
     // isolation guarantee in miniature: `{ secretWord, persona }` and nothing
@@ -526,7 +523,7 @@ export async function main() {
 
   let result = await runAgent(justOneMachine, { input: { rounds: 3 }, ...shared });
 
-  // Every guessing turn settles the run idle. Resume from `persistedSnapshot`.
+  // Every guessing turn settles the run idle. Resume from `result.persist()`.
   while (result.status === "idle") {
     const text = await promptLine(`${idlePrompt(result.snapshot)}\n> `);
     result = await runAgent(justOneMachine, {

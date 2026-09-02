@@ -180,9 +180,6 @@ export const emailDrafterActors = {
 const agentSetup = setupAgent({
   schemas: emailDrafterSchemas,
   models,
-  // The machine's own wait signal: the `awaiting-user` tag. Every state that
-  // needs the human carries it, so `runAgent` settles idle deterministically.
-  isIdle: (snapshot) => snapshot.hasTag("awaiting-user"),
   actors: emailDrafterActors,
 });
 

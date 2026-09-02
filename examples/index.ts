@@ -114,3 +114,11 @@ export {
   PLAYERS as CHAMELEON_PLAYERS,
   main as runChameleonExample,
 } from "./chameleon/index.js";
+export { portableLoopMachine, runPortableXstateLoop } from "./portable-xstate-loop/index.js";
+export { runLongLivedActor } from "./long-lived-actor/index.js";
+export {
+  loadSnapshot,
+  runFileSnapshotStoreExample,
+  saveSnapshot,
+} from "./file-snapshot-store/index.js";
+export { toolCallingMachine, runToolCallingExample } from "./tool-calling/index.js";

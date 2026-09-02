@@ -109,7 +109,7 @@ describe("context-compaction", () => {
     // Labels interpolate `{contextKey}` against the snapshot context.
     expect(idlePrompt(first.snapshot)).toContain("turn 0");
 
-    // Resuming from `persistedSnapshot` with the text event advances one turn.
+    // Resuming from `result.persist()` with the text event advances one turn.
     const second = await runAgent(contextCompactionMachine, {
       snapshot: first.persist(),
       event: { type: "USER_MESSAGE", text: "hello" },

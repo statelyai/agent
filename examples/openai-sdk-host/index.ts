@@ -6,8 +6,8 @@
  * (not the `responses` API — chat.completions is the canonical/stable
  * surface), with no Vercel AI SDK in between. Proof that the executor
  * contract is "three plain functions," not an AI-SDK-specific shape.
- * Compare `../ai-sdk-host/index.ts` (same contract, mapped through the AI
- * SDK) and `../../src/ai-sdk/index.ts` (the reference adapter this file
+ * Compare `@statelyai/agent/ai-sdk` (same contract, mapped through the AI SDK)
+ * and `../../src/ai-sdk/index.ts` (the reference adapter this file
  * mirrors).
  *
  * Structured output uses `response_format: { type: 'json_schema', ... }`

@@ -117,9 +117,6 @@ export const models = defineModels({
 const triageAgentSetup = setupAgent({
   schemas,
   models,
-  // Deterministic idle detection: the run settles whenever a person owes it a
-  // decision, instead of falling back to the timing heuristic.
-  isIdle: (snapshot) => snapshot.hasTag("waiting"),
   requests: {
     classifyTicket: {
       schemas: {

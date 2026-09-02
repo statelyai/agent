@@ -98,7 +98,6 @@
     }
   },
   "initial": "triaging",
-  "idleTags": ["awaiting-approval"],
   "states": {
     "triaging": {
       "invoke": {

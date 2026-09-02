@@ -1,0 +1,15 @@
+{
+  "name": "tool-calling",
+  "title": "Framework-native tool calling and messages",
+  "kind": "agent-workflow",
+  "origin": {
+    "type": "stately-agent",
+    "source": "AI SDK-owned multi-step tool loop",
+    "url": null
+  },
+  "comparison": {
+    "targets": ["Vercel AI SDK tools", "framework-native chat history"],
+    "purpose": "Keeps tool execution in the AI SDK while explicitly appending its native response messages through an agent.messages transition."
+  },
+  "starters": ["What is 6 times 7?"]
+}

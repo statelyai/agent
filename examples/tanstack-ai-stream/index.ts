@@ -53,11 +53,9 @@ import {
 // `@tanstack/ai-react`, to keep fast-moving meta-frameworks out of the library's
 // devDeps. That traded CI noise for silent drift — a shim only stays honest
 // until the upstream package moves. Host examples for frameworks published on
-// npm are now real workspace packages (this one, ../next-host,
-// ../tanstack-start-host) with real dependencies, so the typecheck catches drift
-// instead of a dated comment claiming it was verified once. The examples still
-// on shims are the ones with nothing to depend on: ../flue-host and ../eve-host
-// target unpublished hosts, and ../langsmith-otel stubs an exporter on purpose.
+// npm are real workspace packages (this one and ../next-host), so typechecking
+// catches drift instead of a dated comment claiming it was verified once.
+// Unpublished hosts keep their boundaries explicit in ordinary TypeScript.
 
 export const models = defineModels({
   writer: openai("gpt-5.4-mini"),

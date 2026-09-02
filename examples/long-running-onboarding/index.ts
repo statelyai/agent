@@ -117,11 +117,6 @@ const coordinatorSetup = setupAgent({
     DOCS_SIGNED: z.object({ signedAt: z.string() }),
     HARDWARE_DELIVERED: z.object({ deliveredAt: z.string() }),
   },
-  // Meta-based wait signal: this machine already annotates every human-wait
-  // state with `meta.interaction` (what the host should show), so it reuses that
-  // as its suspension signal instead of a separate tag. runAgent settles idle
-  // deterministically at any resting state carrying an interaction.
-  isIdle: (snapshot) => getStateMeta(snapshot).interaction !== undefined,
   actors: {
     sendWelcomePacket: createAsyncLogic({
       schemas: {

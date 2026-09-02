@@ -5,7 +5,7 @@
  * contract directly against the raw `@anthropic-ai/sdk` package (Messages
  * API) with no Vercel AI SDK in between — proof that the contract is "three
  * plain functions," not an AI-SDK-specific shape. Compare with
- * `../ai-sdk-host/index.ts` (same contract, mapped through the AI SDK),
+ * `@statelyai/agent/ai-sdk` (same contract, mapped through the AI SDK),
  * `../openai-sdk-host/index.ts` (same contract, raw OpenAI SDK), and
  * `../../src/ai-sdk/index.ts` (the reference adapter this file mirrors).
  *

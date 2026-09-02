@@ -2,7 +2,7 @@
  * STEP 3 — the `{ pending }` sentinel becomes an idle state.
  *
  * Moved: `needsApproval` (a final state whose output the runner reshaped) becomes
- * a real idle `awaitingApproval` state — no invoke, an `isIdle` tag, and
+ * a real idle `awaitingApproval` state — no invoke, plus ordinary
  * APPROVE/DENY handlers. `runAgent` now settles `{ status: 'idle', snapshot }`
  * there; the runner persists that snapshot (plain JSON) and resumes with an event
  * in a second `runAgent` call. No closure, no lost state, resumable across
@@ -48,7 +48,6 @@ const schemas = createAgentSchemas({
 const agentSetup = setupAgent({
   schemas,
   models,
-  isIdle: (snapshot) => snapshot.hasTag("awaiting-approval"),
   states: {
     awaitingApproval: {
       schemas: { context: schemas.context.extend({ pendingRefund: z.number() }) },

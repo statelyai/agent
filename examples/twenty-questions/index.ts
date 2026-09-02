@@ -150,10 +150,6 @@ export const twentyQuestionsSchemas = createAgentSchemas({
 const agentSetup = setupAgent({
   schemas: twentyQuestionsSchemas,
   models,
-  // Deterministic idle detection: the states waiting on the player are exactly
-  // the ones tagged `waiting`, so runAgent does not fall back to its timing
-  // heuristic.
-  isIdle: (snapshot) => snapshot.hasTag("waiting"),
   requests: {
     classifyAnswer: {
       schemas: {
@@ -695,7 +691,7 @@ export async function main() {
     ...shared,
   });
 
-  // Every player turn settles the run idle. Resume from `persistedSnapshot`.
+  // Every player turn settles the run idle. Resume from `result.persist()`.
   while (result.status === "idle") {
     const text = await promptLine(`${idlePrompt(result.snapshot)}\n> `);
     result = await runAgent(twentyQuestionsMachine, {

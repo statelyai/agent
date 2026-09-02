@@ -82,7 +82,7 @@ describe("game-loop-agent", () => {
     expect(player.prompts[0]).toContain("human banked");
 
     // The long-lived proof: every human move settles the run idle, and the
-    // resume from `persistedSnapshot` restores the `player` child WITH its
+    // resume from `result.persist()` restores the `player` child WITH its
     // accumulated observations — so no post-resume decision ever starts from
     // an empty history, and round-1 events are still visible in round 2.
     expect(player.prompts.some((prompt) => prompt.includes("(nothing yet)"))).toBe(false);

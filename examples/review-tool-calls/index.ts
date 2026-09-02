@@ -112,9 +112,6 @@ const agentSetup = setupAgent({
     EDIT: z.object({ override: refundCallSchema.partial() }),
     REJECT: z.object({ feedback: z.string() }),
   },
-  // The machine's own wait signal: the `awaiting-review` tag. `runAgent` settles
-  // idle deterministically whenever a resting snapshot carries it.
-  isIdle: (snapshot) => snapshot.hasTag("awaiting-review"),
   actors: {
     // The consequential tool: applies the approved/edited refund. A real host
     // would call a payments API here; this fake records it and returns a receipt.

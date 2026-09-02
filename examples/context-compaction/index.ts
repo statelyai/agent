@@ -125,9 +125,6 @@ const SUMMARIZE_SYSTEM =
 const agentSetup = setupAgent({
   schemas: contextCompactionSchemas,
   models,
-  // Deterministic idle detection: the run settles whenever the machine is
-  // parked in the tagged waiting-for-a-human state.
-  isIdle: (snapshot) => snapshot.hasTag("waiting"),
   requests: {
     // Chat reply. Rendered as: [summary-as-system?] + recent messages.
     respond: {
@@ -339,7 +336,7 @@ export async function runContextCompactionExample(options?: {
     ...shared,
   });
 
-  // Each chat turn settles the run idle. Resume from `persistedSnapshot`.
+  // Each chat turn settles the run idle. Resume from `result.persist()`.
   while (result.status === "idle") {
     const text = queued.length
       ? (queued.shift() as string)

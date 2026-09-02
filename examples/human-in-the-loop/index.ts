@@ -10,8 +10,8 @@
  *     are inferred from the idle snapshot with `getAcceptedEvents(...)`.
  *   - REJECT-with-reason redraft loop: rejecting feeds the reason back into the
  *     next draft; APPROVE publishes.
- *   - Snapshot persistence: each idle settle hands back a `persistedSnapshot`
- *     (a JSON round-trip) and resumes in the *next* `runAgent` call.
+ *   - Snapshot persistence: each idle settle's `persist()` result survives a
+ *     JSON round-trip and resumes in the *next* `runAgent` call.
  *
  * Two entry points:
  *   - `runHumanInTheLoopExample(options)` — compact, test-facing: draft → idle →
@@ -31,6 +31,7 @@ import {
   getAcceptedEvents,
   getInteraction,
   getStateMeta,
+  isAgentIdle,
   runAgent,
   runAgentLoop,
   setupAgent,
@@ -75,10 +76,9 @@ const agentSetup = setupAgent({
     APPROVE: z.object({}),
     REJECT: z.object({ reason: z.string() }),
   },
-  // This machine declares its own wait signal: a tag it chose. runAgent settles
-  // idle deterministically whenever a resting snapshot carries it (no timing
-  // heuristic). A broader predicate can compose this with `isAgentIdle`.
-  isIdle: (snapshot) => snapshot.hasTag("awaiting-review"),
+  // Most machines need no predicate: event-handling states are structurally
+  // idle. This deliberately demonstrates extending—not replacing—the default.
+  isIdle: (snapshot) => isAgentIdle(snapshot) || snapshot.hasTag("awaiting-review"),
   requests: {
     writeDraft: {
       schemas: {
