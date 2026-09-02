@@ -328,7 +328,7 @@ result = await runAgent(machine, { snapshot, event: { type: "APPROVE" }, executo
 ```
 
 > **Note:** By default, an **idle state** is an active snapshot that accepts an external event anywhere in its active hierarchy, or has `meta.interaction`. `runAgent` also verifies that no invoked child, eventless transition, or delayed transition is still working.
-
+>
 > **Note:** Two `prompt`-shaped fields sit at different layers. A `requests` entry's `prompt` is the text sent to the model. An `invoke`'s `input` is the data passed to the invoked source. That is either a request's typed input, or an `agent.decide` inline input carrying its own `model`, `prompt`, and `allowedEvents`.
 
 ## Idle declaration
