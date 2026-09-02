@@ -50,12 +50,12 @@ Any host can run the same artifact with XState's pure transition API:
 
 ```ts no-check
 let [state, effects] = initialTransition(machine, input);
-await Promise.all(effects.map((effect) => effect.exec()));
+for (const effect of effects) await effect.exec();
 
 while (state.status === "active") {
   const event = await nextEvent();
   [state, effects] = transition(machine, state, event);
-  await Promise.all(effects.map((effect) => effect.exec()));
+  for (const effect of effects) await effect.exec();
 }
 
 return state.output;

@@ -4,8 +4,7 @@
  * Workers AI does not expose the same tool-calling shape as the Vercel AI SDK
  * binding path, so this host serializes allowed event tools into the prompt and
  * accepts JSON output for both text effects (structured output) and decision
- * effects (event choice) — see `resolveDecision` for the retry/validation core
- * this uses for the latter.
+ * effects (event choice). `runAgent` owns decision validation and retries.
  *
  * Running this
  * -------------
@@ -23,7 +22,6 @@
 import {
   getAgentOutputMode,
   renderDecisionAttempts,
-  resolveDecision,
   runAgent,
   type AgentDecisionRequest,
   type AgentTextRequest,
@@ -141,53 +139,44 @@ async function runWorkersAiTextRequest(env: Env, request: AgentTextRequest) {
   }
 }
 
-/** Decision effect: legal events serialized into the prompt, JSON-parsed
- * choice validated and retried via `resolveDecision`. */
-async function runWorkersAiDecision(env: Env, request: AgentDecisionRequest): Promise<ChosenEvent> {
-  return resolveDecision(
-    request,
-    {
-      decide: async (attemptRequest) => {
-        const legalEvents = attemptRequest.events.map((event) => `- ${event.type}`).join("\n");
-        const attemptFeedback = renderDecisionAttempts(attemptRequest)
-          .map((m) => m.content)
-          .join("\n");
+/** One decision attempt. `runAgent` validates the returned event and calls this
+ * again with attempt feedback when it is malformed or rejected by a guard. */
+async function runWorkersAiDecision(
+  env: Env,
+  request: AgentDecisionRequest,
+): Promise<{ event: ChosenEvent }> {
+  const legalEvents = request.events.map((event) => `- ${event.type}`).join("\n");
+  const attemptFeedback = renderDecisionAttempts(request)
+    .map((message) => message.content)
+    .join("\n");
 
-        const prompt = [
-          attemptRequest.prompt ?? "",
-          attemptFeedback,
-          "",
-          "Choose exactly one legal event.",
-          "Legal events:",
-          legalEvents,
-          "",
-          "Reply with ONLY a JSON object and no other text, no explanation, no prose.",
-          'Example reply: {"type":"ATTACK","target":"goblin"}',
-        ]
-          .filter(Boolean)
-          .join("\n");
+  const prompt = [
+    request.prompt ?? "",
+    attemptFeedback,
+    "",
+    "Choose exactly one legal event.",
+    "Legal events:",
+    legalEvents,
+    "",
+    "Reply with ONLY a JSON object and no other text, no explanation, no prose.",
+    'Example reply: {"type":"ATTACK","target":"goblin"}',
+  ]
+    .filter(Boolean)
+    .join("\n");
 
-        const text = await runWorkersAiPrompt(env, {
-          model: attemptRequest.model,
-          system: attemptRequest.system,
-          prompt,
-          temperature: attemptRequest.temperature,
-          maxOutputTokens: attemptRequest.maxOutputTokens,
-        });
+  const text = await runWorkersAiPrompt(env, {
+    model: request.model,
+    system: request.system,
+    prompt,
+    temperature: request.temperature,
+    maxOutputTokens: request.maxOutputTokens,
+  });
 
-        try {
-          return { event: parseJsonFromText(text) as ChosenEvent };
-        } catch (error) {
-          // Not JSON at all. Hand back an event type that cannot match, so
-          // `resolveDecision` records an `unknown-event` attempt and re-asks with
-          // that feedback in `request.attempts` — rather than throwing out of the
-          // whole turn on one malformed response.
-          return { event: { type: `<unparsed response: ${String(error)}>` } };
-        }
-      },
-    },
-    { maxRetries: 2 },
-  );
+  try {
+    return { event: parseJsonFromText(text) as ChosenEvent };
+  } catch (error) {
+    return { event: { type: `<unparsed response: ${String(error)}>` } };
+  }
 }
 
 export async function runCloudflareGameTurn(env: Env, input = { playerHp: 20, enemyHp: 15 }) {
@@ -197,7 +186,7 @@ export async function runCloudflareGameTurn(env: Env, input = { playerHp: 20, en
       generateText: async (request) => ({
         output: await runWorkersAiTextRequest(env, request),
       }),
-      decide: async (request) => ({ event: await runWorkersAiDecision(env, request) }),
+      decide: (request) => runWorkersAiDecision(env, request),
     },
   });
   if (result.status !== "done") {

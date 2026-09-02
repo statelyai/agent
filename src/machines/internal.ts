@@ -70,21 +70,33 @@ export function objectSchema<T>(
         const record = value as Record<string, unknown>;
         const issues: Array<{ message: string; path?: PropertyKey[] }> = [];
         for (const key of required) {
-          if (!(key in record)) {
+          if (!(key in record) || record[key] === undefined) {
             issues.push({ message: `Required property '${key}' is missing`, path: [key] });
           }
         }
         for (const [key, schema] of Object.entries(properties)) {
           const item = record[key];
           if (item === undefined) continue;
-          const type = (schema as { type?: unknown } | undefined)?.type;
+          const type = (schema as { type?: string | string[] } | undefined)?.type;
+          const types = Array.isArray(type) ? type : type === undefined ? [] : [type];
           const valid =
-            type === undefined ||
-            (type === "array"
-              ? Array.isArray(item)
-              : type === "object"
-                ? item !== null && typeof item === "object" && !Array.isArray(item)
-                : typeof item === type);
+            types.length === 0 ||
+            types.some((candidate) => {
+              switch (candidate) {
+                case "array":
+                  return Array.isArray(item);
+                case "object":
+                  return item !== null && typeof item === "object" && !Array.isArray(item);
+                case "null":
+                  return item === null;
+                case "integer":
+                  return typeof item === "number" && Number.isInteger(item);
+                case "number":
+                  return typeof item === "number" && Number.isFinite(item);
+                default:
+                  return typeof item === candidate;
+              }
+            });
           if (!valid) {
             issues.push({ message: `Expected '${key}' to be ${String(type)}`, path: [key] });
           }

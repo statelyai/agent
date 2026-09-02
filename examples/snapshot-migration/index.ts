@@ -61,6 +61,11 @@ export function migrateOrderSnapshot(
   const old = snapshot as Snapshot<unknown> & { value?: unknown; context?: V1Context };
   if (!old.context) return snapshot;
   const amountCents = Math.round(old.context.total * 100);
+  if (!Number.isSafeInteger(amountCents)) {
+    throw new RangeError(
+      `Cannot migrate order '${old.context.orderId}': total ${old.context.total} cannot be represented as safe integer cents.`,
+    );
+  }
   return {
     ...old,
     version: V2,

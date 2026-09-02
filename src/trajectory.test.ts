@@ -7,6 +7,9 @@ const entry = (type: string, payload: Record<string, unknown> = {}) => ({
 });
 
 describe("matchesTrajectory: state paths", () => {
+  test("unwraps value-only snapshot-like objects", () => {
+    expect(matchesTrajectory([{ value: "told" }], ["told"]).matched).toBe(true);
+  });
   test("ordered subsequence with gaps allowed", () => {
     const actual = ["prompting", "evaluating", "needsMoreInfo", "drafting", "sent"];
 

@@ -54,6 +54,11 @@ test("migration is pure and writes the current version", async () => {
   });
 });
 
+test("migration rejects totals that cannot be represented as safe integer cents", async () => {
+  const persisted = await persistedV1Snapshot("ORD-HUGE", 100_000_000_000_000);
+  expect(() => migrateOrderSnapshot(persisted, V1)).toThrow(/safe integer cents/);
+});
+
 test("a current snapshot resumes without migration", async () => {
   const paused = await runAgent(orderApprovalMachine, {
     input: { orderId: "ORD-2", amountCents: 2500 },

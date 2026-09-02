@@ -182,9 +182,9 @@ const result = await runAgent(machine, {
 });
 
 if (result.status === "idle") {
-  // result.snapshot is plain JSON. Persist it, then resume in any process.
+  // result.snapshot is live; persist() returns XState's storage form.
   const resumed = await runAgent(machine, {
-    snapshot: result.snapshot,
+    snapshot: result.persist(),
     event: { type: "APPROVE" },
     executors,
   });
@@ -192,12 +192,12 @@ if (result.status === "idle") {
 }
 ```
 
-The idle snapshot is plain JSON, so a `stringify`, store, and `parse` round-trip resumes the same run.
+The persisted XState snapshot is plain JSON, so a `stringify`, store, and `parse` round-trip resumes the same run.
 
 <!-- viz: resume flow: runAgent settles idle -> persisted snapshot -> JSON in a store -> new process parses -> runAgent(snapshot, event) -> done -->
 
 ```ts
-const wire = JSON.stringify(result.persistedSnapshot ?? result.snapshot); // stored by your DB or queue
+const wire = JSON.stringify(result.persist()); // stored by your DB or queue
 const restored = JSON.parse(wire); // read in a fresh process, with no live objects
 
 const resumed = await runAgent(machine, {

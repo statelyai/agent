@@ -7,8 +7,9 @@
  * `runAgent(machine, { snapshot })` call:
  *
  * - completed state is restored (call one runs once);
- * - the request that was in flight at the crash restarts idempotently
- *   (XState v6 re-enters restored pending invokes);
+ * - XState v6 re-enters the request that was in flight at the crash; the host
+ *   executor must supply any required idempotency key and retry policy because
+ *   the provider may have accepted the original request;
  * - the run continues to done.
  *
  * No API key needed: executors are scripted. Run:

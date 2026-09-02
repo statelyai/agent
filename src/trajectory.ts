@@ -97,7 +97,7 @@ function normalize(item: unknown): Normalized {
     if (typeof item["type"] === "string") {
       return { kind: "event", event: item as TrajectoryEvent };
     }
-    if ("value" in item && "status" in item) {
+    if ("value" in item) {
       return { kind: "state", value: item["value"] as StateValue };
     }
   }
