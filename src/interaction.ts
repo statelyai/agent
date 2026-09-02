@@ -75,7 +75,9 @@ export function getInteraction(snapshot: AnyMachineSnapshot): AgentInteraction |
   return {
     label: interpolate(label, snapshot.context),
     events,
-    ...(interaction.textEvent ? { textEvent: interaction.textEvent } : {}),
+    ...(interaction.textEvent && accepted.has(interaction.textEvent)
+      ? { textEvent: interaction.textEvent }
+      : {}),
   };
 }
 
@@ -107,7 +109,7 @@ export function eventFromInteraction(
         interaction.events.map(({ type }) => type),
       );
     }
-    event = { ...descriptor.event, ...choice, type: choice.type };
+    event = { ...choice, ...descriptor.event, type: choice.type };
   }
 
   return parseAgentEvent(snapshot, event);

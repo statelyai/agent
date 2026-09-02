@@ -1116,7 +1116,8 @@ export async function canReach(
   const stopWhen =
     typeof target === "function"
       ? target
-      : (snapshot: AnyMachineSnapshot): boolean => snapshot.matches(target as never);
+      : (snapshot: AnyMachineSnapshot): boolean =>
+          snapshot.nodes.some((node) => node.id === resolvedTarget);
   const { witness } = await explore(machine, options, stopWhen);
   return witness !== undefined
     ? { reachable: true, witness, ...(resolvedTarget ? { target: resolvedTarget } : {}) }

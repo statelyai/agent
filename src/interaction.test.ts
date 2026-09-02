@@ -1,7 +1,12 @@
 import { describe, expect, test } from "vitest";
 import { createActor } from "xstate";
 import { z } from "zod";
-import { eventFromInteraction, getInteraction, setupAgent } from "./index.js";
+import {
+  AgentIllegalResumeEventError,
+  eventFromInteraction,
+  getInteraction,
+  setupAgent,
+} from "./index.js";
 
 describe("interactions", () => {
   const agent = setupAgent({
@@ -55,5 +60,36 @@ describe("interactions", () => {
       type: "REJECT",
       text: "needs work",
     });
+  });
+
+  test("keeps metadata fields fixed when building an event", () => {
+    expect(eventFromInteraction(snapshot, { type: "APPROVE", id: 7 })).toEqual({
+      type: "APPROVE",
+      id: 42,
+    });
+  });
+
+  test("does not advertise a text event the state cannot accept", () => {
+    const hiddenTextMachine = agent.createMachine({
+      context: { draft: { subject: "Hello" } },
+      initial: "review",
+      states: {
+        review: {
+          meta: {
+            interaction: {
+              label: "Review",
+              textEvent: "HIDDEN",
+            },
+          },
+          on: { APPROVE: {} },
+        },
+      },
+    });
+    const hiddenTextSnapshot = createActor(hiddenTextMachine).getSnapshot();
+
+    expect(getInteraction(hiddenTextSnapshot)).toEqual({ label: "Review", events: [] });
+    expect(() => eventFromInteraction(hiddenTextSnapshot, { text: "not accepted" })).toThrow(
+      AgentIllegalResumeEventError,
+    );
   });
 });

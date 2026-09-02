@@ -35,7 +35,7 @@ if (paused.status === "idle") {
 }
 ```
 
-`getInteraction` interpolates labels, collapses whitespace, and filters choices through XState's currently accepted events. `eventFromInteraction` validates the chosen payload against the machine's event schema.
+`getInteraction` interpolates labels, collapses whitespace, and filters choices and `textEvent` through XState's currently accepted events. `eventFromInteraction` preserves fixed fields declared in interaction metadata and validates the chosen payload against the machine's event schema.
 
 ## Drive several turns
 

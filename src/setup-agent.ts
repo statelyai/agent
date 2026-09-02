@@ -493,9 +493,12 @@ type AgentSetupXStateConfig<
   actors: SetupActors<
     AgentSetupActors<
       AgentAllActors<TActors, TRequestSchemas>,
-      // Reserved `@agent.*` types are never model-facing, so they stay out of
-      // the `allowedEvents` candidate union the decide builtin types.
-      Exclude<keyof TEventSchemas & string, typeof AGENT_USAGE_EVENT_TYPE>,
+      // Framework-reserved event types are never model-facing, so they stay
+      // out of the `allowedEvents` candidate union the decide builtin types.
+      Exclude<
+        keyof TEventSchemas & string,
+        typeof AGENT_USAGE_EVENT_TYPE | typeof AGENT_MESSAGES_EVENT_TYPE
+      >,
       AgentModelRef<TModels>
     >
   >;

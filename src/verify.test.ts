@@ -660,6 +660,29 @@ describe("canReach — reachability with a witness path", () => {
     });
     expect(byPredicate.reachable).toBe(true);
   });
+
+  test("accepts state-node IDs as targets", async () => {
+    const agent = setupAgent({ context: z.object({}), events: { GO: z.object({}) } });
+    const machine = agent.createMachine({
+      id: "id-targets",
+      context: {},
+      initial: "first",
+      states: {
+        first: { on: { GO: { target: "second" } } },
+        second: { id: "custom-second" },
+      },
+    });
+
+    await expect(canReach(machine, "custom-second")).resolves.toMatchObject({
+      reachable: true,
+      target: "custom-second",
+      witness: [{ type: "GO" }],
+    });
+    await expect(canReach(machine, "#custom-second")).resolves.toMatchObject({
+      reachable: true,
+      target: "custom-second",
+    });
+  });
 });
 
 describe("lintAgentMachine({ throw: true })", () => {

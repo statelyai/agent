@@ -50,7 +50,7 @@ deciding: {
 // ...
 ```
 
-The `allowedEvents` list is typed against the machine's event schema, so a typo is a compile error. Listing events explicitly also makes the candidate set visible in the machine.
+The `allowedEvents` list is typed against the machine's user-authored event schema, so a typo is a compile error. Framework events such as `agent.messages` and `@agent.usage` can be handled by the machine but are never model-facing candidates. Listing events explicitly also makes the candidate set visible in the machine.
 
 > **Note:** `agent.decide` needs a snapshot-aware host, either `runAgent` or the [step path](steps.md), to know which events are currently legal. In [uncontrolled mode](choosing-a-run-mode.md#uncontrolled-provideexecutors), under a bare `createActor(...)`, list `allowedEvents` explicitly. Wildcards and the omitted default cannot expand there.
 

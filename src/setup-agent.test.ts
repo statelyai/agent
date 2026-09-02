@@ -3303,6 +3303,26 @@ describe("inline agent.decide invoke (state-local decisions)", () => {
         attacked: {},
       },
     });
+
+    // Illegal: framework events can be handled by the machine but are never
+    // model-facing decision candidates.
+    agent.createMachine({
+      context: {},
+      initial: "choosingMove",
+      states: {
+        choosingMove: {
+          // @ts-expect-error 'agent.messages' is reserved from allowedEvents
+          invoke: {
+            id: "choosingMove",
+            src: "agent.decide",
+            input: {
+              model: "test-model",
+              allowedEvents: ["agent.messages"],
+            },
+          },
+        },
+      },
+    });
   });
 });
 

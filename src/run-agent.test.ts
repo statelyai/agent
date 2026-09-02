@@ -1204,7 +1204,7 @@ describe("runAgent", () => {
     const healSchema = z.object({});
 
     const schemas = createAgentSchemas({
-      context: z.object({ hp: z.number() }),
+      context: z.object({ hp: z.number(), messages: z.array(z.unknown()) }),
       input: z.object({}),
       events: { ATTACK: attackSchema, HEAL: healSchema },
     });
@@ -1212,7 +1212,10 @@ describe("runAgent", () => {
     test("runAgent + inline agent.decide with allowedEvents omitted: candidates are exactly the legal events, with inputSchema attached", async () => {
       const agent = setupAgent({ schemas });
       const machine = agent.createMachine({
-        context: { hp: 10 },
+        context: { hp: 10, messages: [] },
+        on: {
+          "agent.messages": agent.appendMessages(),
+        },
         initial: "choosingMove",
         states: {
           choosingMove: {
@@ -1251,6 +1254,7 @@ describe("runAgent", () => {
 
       expect(result.status).toBe("done");
       expect(seenEvents.map((event) => event.type).sort()).toEqual(["ATTACK", "HEAL"]);
+      expect(seenEvents.map((event) => event.type)).not.toContain("agent.messages");
       expect(seenEvents.find((event) => event.type === "ATTACK")?.inputSchema).toBe(attackSchema);
       expect(seenEvents.find((event) => event.type === "HEAL")?.inputSchema).toBe(healSchema);
     });
@@ -1264,7 +1268,7 @@ describe("runAgent", () => {
 
       const agent = setupAgent({ schemas, actors: { chooseMove } });
       const machine = agent.createMachine({
-        context: { hp: 10 },
+        context: { hp: 10, messages: [] },
         initial: "choosingMove",
         states: {
           choosingMove: {
@@ -1306,7 +1310,7 @@ describe("runAgent", () => {
     test("guard-narrowing still intact: a type-legal event offered as a candidate can still be canTake-rejected", async () => {
       const agent = setupAgent({ schemas });
       const machine = agent.createMachine({
-        context: { hp: 10 },
+        context: { hp: 10, messages: [] },
         initial: "choosingMove",
         states: {
           choosingMove: {
