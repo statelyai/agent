@@ -9,7 +9,7 @@
   },
   "comparison": {
     "targets": ["Vercel AI SDK tools", "framework-native chat history"],
-    "purpose": "Keeps tool execution in the AI SDK while explicitly appending its native response messages through an agent.messages transition."
+    "purpose": "Keeps the multi-step tool loop in the AI SDK while explicitly appending its native response messages through an agent.messages transition; use review-tool-calls when the machine must gate each call."
   },
   "starters": ["What is 6 times 7?"]
 }

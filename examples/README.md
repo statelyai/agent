@@ -12,7 +12,7 @@ These examples use one XState machine artifact across different model SDKs and h
 - [plain-xstate](plain-xstate): application-owned XState execution
 - [retrofit](retrofit): migrate a hand-written agent loop incrementally
 - [json-agent](json-agent): serializable machine configuration
-- [portable-xstate-loop](portable-xstate-loop): the native XState transition/effect loop
+- [portable-xstate-loop](portable-xstate-loop): a native durable XState transition/effect loop
 
 ## State-machine advantages
 
@@ -20,9 +20,9 @@ These examples use one XState machine artifact across different model SDKs and h
 - [parallel-streams](parallel-streams): concurrent regions
 - [hierarchical-teams](hierarchical-teams), [swarm-handoff](swarm-handoff): child machines and handoff
 - [long-running-onboarding](long-running-onboarding), [snapshot-migration](snapshot-migration), [crash-recovery](crash-recovery): pauses and native XState snapshots
-- [review-tool-calls](review-tool-calls), [sql-agent](sql-agent), [customer-support](customer-support): explicit human gates
+- [review-tool-calls](review-tool-calls), [sql-agent](sql-agent), [customer-support](customer-support): explicit, persistable human gates
 - [context-compaction](context-compaction), [chat-with-pdf](chat-with-pdf): framework-native message history
-- [tool-calling](tool-calling): SDK-owned tools and explicit native message retention
+- [tool-calling](tool-calling): SDK-owned multi-step tools and explicit native message retention; compare [review-tool-calls](review-tool-calls) for machine-gated calls
 - [game-loop-agent](game-loop-agent), [chameleon](chameleon), [just-one](just-one): long-lived game rules and hidden state
 
 ## Agent patterns
@@ -36,6 +36,10 @@ These examples use one XState machine artifact across different model SDKs and h
 - [todo-nl](todo-nl)
 
 ## Hosts and integrations
+
+`portable-xstate-loop`, `file-snapshot-store`, and `long-lived-actor`
+intentionally reuse the same machine artifact under a durable transition loop,
+request-scoped snapshot storage, and an application-owned actor.
 
 - [ai-sdk-ui-stream](ai-sdk-ui-stream), [tanstack-ai-stream](tanstack-ai-stream)
 - [ai-sdk-game-host](ai-sdk-game-host)

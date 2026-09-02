@@ -61,7 +61,8 @@ while (state.status === "active") {
 return state.output;
 ```
 
-[`portable-xstate-loop`](../examples/portable-xstate-loop) is a runnable version
-using an Agent machine with XState's durable transition/effect protocol.
+[`portable-xstate-loop`](../examples/portable-xstate-loop) expands this sketch
+into a runnable `createDurable` host. Its extra mailbox and wake-up plumbing is
+host implementation, while the Agent machine artifact stays unchanged.
 
 A durable host should use XState's `createDurable`. Its adapter owns persistence, retries, messaging, timers, and child execution. Stately Agent does not wrap those framework responsibilities.

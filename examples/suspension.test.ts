@@ -9,7 +9,9 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import type { AnyStateMachine, StateNode } from "xstate";
+import { isAgentIdle, setupAgent } from "../src/index.js";
 import { getMachineIdlePredicate } from "../src/internal/registry.js";
 
 const examplesDir = fileURLToPath(new URL(".", import.meta.url));
@@ -53,9 +55,12 @@ function runnableExampleIds(): string[] {
 }
 
 describe("example suspension predicates", () => {
-  it("uses structural idle by default and keeps one composition example", async () => {
+  it("uses structural idle by default and preserves it in custom predicates", async () => {
     const humanWaits: string[] = [];
-    const customPredicates: string[] = [];
+    const customPredicates: Array<{
+      key: string;
+      predicate: NonNullable<ReturnType<typeof getMachineIdlePredicate>>;
+    }> = [];
 
     for (const id of runnableExampleIds()) {
       const module = (await import(path.join(examplesDir, id, "index.ts"))) as Record<
@@ -66,11 +71,46 @@ describe("example suspension predicates", () => {
         if (!isMachine(value) || !humanWaitStates(value).length) continue;
         const key = `${id}#${exportName}`;
         humanWaits.push(key);
-        if (getMachineIdlePredicate(value)) customPredicates.push(key);
+        const predicate = getMachineIdlePredicate(value);
+        if (predicate) customPredicates.push({ key, predicate });
       }
     }
 
     expect(humanWaits.length).toBeGreaterThan(15);
-    expect(customPredicates).toEqual(["human-in-the-loop#humanInTheLoopMachine"]);
+    expect(customPredicates.length).toBeGreaterThan(0);
+
+    const idleFixture = setupAgent({
+      context: z.object({}),
+      events: { CONTINUE: z.object({}) },
+      meta: z.object({
+        interaction: z.object({ label: z.string() }).optional(),
+      }),
+    });
+    const eventWait = idleFixture
+      .createMachine({
+        context: {},
+        initial: "waiting",
+        states: {
+          waiting: { on: { CONTINUE: { target: "done" } } },
+          done: { type: "final" },
+        },
+      })
+      .getInitialSnapshot();
+    const interactionWait = idleFixture
+      .createMachine({
+        context: {},
+        initial: "waiting",
+        states: {
+          waiting: { meta: { interaction: { label: "Continue" } } },
+        },
+      })
+      .getInitialSnapshot();
+
+    expect(isAgentIdle(eventWait)).toBe(true);
+    expect(isAgentIdle(interactionWait)).toBe(true);
+    for (const { key, predicate } of customPredicates) {
+      expect(predicate(eventWait), `${key} replaced event-based idle semantics`).toBe(true);
+      expect(predicate(interactionWait), `${key} replaced interaction idle semantics`).toBe(true);
+    }
   }, 60_000);
 });

@@ -125,6 +125,11 @@ For approval and progress around real tools, see [review-tool-calls](../examples
 3. `maxSteps` becomes `stopWhen: stepCountIs(maxSteps)`. The loop runs entirely inside the executor.
 4. The final output is validated against the request's output schema and returned to `onDone`.
 
+The machine observes the request boundary, not each intermediate tool call. For
+example, `maxSteps: 5` permits up to five AI SDK-controlled steps before the
+machine receives `onDone`. Model individual calls as states when the machine
+must approve, persist, retry, or reject them separately.
+
 Two consequences follow:
 
 - Tool-carrying requests do not retry. The AI SDK adapter retries invalid structured output only when the request has no tools, because a tool loop may already have caused side effects.

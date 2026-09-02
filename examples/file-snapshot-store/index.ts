@@ -7,7 +7,8 @@
  *
  * Run: npx tsx examples/file-snapshot-store/index.ts
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Snapshot } from "xstate";
@@ -20,8 +21,8 @@ export async function saveSnapshot(
   id: string,
   snapshot: Snapshot<unknown>,
 ): Promise<void> {
-  mkdirSync(directory, { recursive: true });
-  writeFileSync(join(directory, `${id}.json`), JSON.stringify(snapshot), "utf8");
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, `${id}.json`), JSON.stringify(snapshot), "utf8");
 }
 
 export async function loadSnapshot(
@@ -29,9 +30,12 @@ export async function loadSnapshot(
   id: string,
 ): Promise<Snapshot<unknown> | undefined> {
   const path = join(directory, `${id}.json`);
-  return existsSync(path)
-    ? (JSON.parse(readFileSync(path, "utf8")) as Snapshot<unknown>)
-    : undefined;
+  try {
+    return JSON.parse(await readFile(path, "utf8")) as Snapshot<unknown>;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
 }
 
 export async function runFileSnapshotStoreExample(

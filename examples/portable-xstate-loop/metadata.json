@@ -1,15 +1,15 @@
 {
   "name": "portable-xstate-loop",
-  "title": "Portable XState transition loop",
+  "title": "Portable durable XState transition loop",
   "kind": "host-adapter",
   "origin": {
     "type": "stately-agent",
-    "source": "The canonical XState transition and effect loop",
+    "source": "A native XState durable transition and effect loop",
     "url": null
   },
   "comparison": {
     "targets": ["XState durable adapters", "workflow runtimes"],
-    "purpose": "Runs one agent machine through native XState transitions and effects without using a Stately Agent runner."
+    "purpose": "Runs one agent machine through XState createDurable transitions and effects without using a Stately Agent runner."
   },
   "starters": ["portable agent machines"]
 }

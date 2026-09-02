@@ -10,7 +10,7 @@ Add `ai` and a provider only when using the optional AI SDK adapter.
 
 ## Define and run one artifact
 
-Save this as `agent.ts`. It uses a deterministic executor, so it needs no API
+Save this as `agent.mts`. It uses a deterministic executor, so it needs no API
 key or model SDK.
 
 ```ts
@@ -75,7 +75,7 @@ console.log(scripted.calls[0]?.name); // "answer"
 Run it:
 
 ```sh
-npx tsx agent.ts
+npx tsx agent.mts
 ```
 
 It prints:
@@ -101,7 +101,7 @@ const executors = createAiSdkExecutors({
   models: { fast: openai("gpt-5.4-mini") },
 });
 
-const liveResult = await runAgent<typeof machine>(machine, {
+const liveResult = await runAgent(machine, {
   input: { prompt: "Why state machines?" },
   executors,
 });

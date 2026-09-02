@@ -32,4 +32,6 @@ The default key is `messages`. Use `appendMessages({ key: "history" })` for anot
 This is deliberately transparent: the AI SDK executor returns AI SDK messages, another framework returns its own messages, and the machine stores those values unchanged. Tool calls and tool results remain part of that framework-native chat log.
 
 See the runnable [`tool-calling`](../examples/tool-calling) example for an AI
-SDK-owned tool loop whose native response messages are retained this way.
+SDK-owned tool loop whose native response messages are retained this way. Compare
+[`review-tool-calls`](../examples/review-tool-calls) when each proposed call must
+become an explicit, persistable machine decision.

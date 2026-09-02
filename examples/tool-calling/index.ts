@@ -4,6 +4,8 @@
  * The request carries a real AI SDK tool and `maxSteps`; the AI SDK executor
  * owns intermediate tool calls. Its `ModelMessage[]` response is emitted as an
  * ordinary `agent.messages` event and appended explicitly by the machine.
+ * The machine sees the completed request, not each intermediate tool call. See
+ * `review-tool-calls` when the machine must gate individual calls.
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/tool-calling/index.ts
  */

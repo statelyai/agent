@@ -2,6 +2,9 @@
  * Review tool calls — LangGraph's "review tool calls" human-in-the-loop pattern
  * as explicit, typed machine states.
  *
+ * Unlike `tool-calling`, where the AI SDK owns the complete multi-step loop,
+ * this machine surfaces the proposed call before any consequential tool runs.
+ *
  * LangGraph shape (how-tos/human_in_the_loop/review-tool-calls): the model emits
  * a tool call, the graph hits an `interrupt()` that surfaces the pending call to
  * a human, and the human resumes with a `Command(resume={...})` carrying one of
