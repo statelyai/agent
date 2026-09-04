@@ -740,15 +740,19 @@ export interface AgentRequestExecutorInfo {
   requestId?: string;
   /**
    * Idempotency key for THIS call: `${logId}:${siteId}#${occurrence}`, where
-   * `logId` is the id of the log's `@agent.init` entry and `occurrence` is the
-   * 1-based count of journaled completions for the invoke site. Identical
-   * across a crash resume that re-executes the same call, and distinct per
-   * loop iteration, so providers and tools can dedupe on it. Forks share the
-   * `logId`, so a fork can reuse the parent's cached results.
+   * `logId` is the log's `executionId` (pinned in its `@agent.init` entry's
+   * `metadata`, minted once per log and inherited by every resume) and
+   * `occurrence` is the 1-based count of journaled completions for the invoke
+   * site. Identical across a crash resume that re-executes the same call, and
+   * distinct per loop iteration — and distinct across unrelated runs, since
+   * each new log mints its own id — so providers and tools can dedupe on it.
+   * Forks copy the init entry and so share the `logId`, letting a fork reuse
+   * the parent's cached results.
    *
    * Undefined off the `runAgent` path (bare `provideExecutors` / direct
-   * `TextLogic.execute`) and on a `runAgent` run resumed from a snapshot with
-   * no event log — neither has a log to key against.
+   * `TextLogic.execute`), on a `runAgent` run resumed from a snapshot with no
+   * event log, and on a log written before `metadata.executionId` existed —
+   * none of them has a lineage id to key against.
    */
   callKey?: string;
 }

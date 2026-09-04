@@ -147,7 +147,7 @@ const result = await runAgent(machine, {
 
 <!-- events-only resume from src/run-agent.ts (options.events + replay + getPersistedSnapshot); tests in src/run-agent.test.ts "restore semantics" -->
 
-A log is self-contained when its first entry is the reserved `@agent.init` entry. Every fresh `runAgent` log is self-contained. Given such a log, `runAgent` derives the resume state from the log itself.
+A log is self-contained when its first entry is the reserved `@agent.init` entry. Every fresh `runAgent` log is self-contained. That entry carries the machine input plus `metadata.executionId`, a UUID minted once per log that identifies the lineage: it is inherited verbatim by every resume, copied by every fork, and it is what `agentMeta.logId` and `info.callKey` are keyed on (`getLogExecutionId(entries)` reads it). Given such a log, `runAgent` derives the resume state from the log itself.
 
 ```ts
 const recovered = await runAgent(machine, {
@@ -179,7 +179,11 @@ Use `assertJsonSerializable(value)` and `assertAgentLogEntry(entry)` at custom t
 
 `createReplayEntry` and `initEntry` write the `verification` hashes, and they do so by default. Hashes are absent in one case: `runAgent` resuming from a snapshot whose log does not start at the `@agent.init` entry, because that replay history is incomplete.
 
-`runDurableAgent` also records hashes by default. It takes them straight from the live snapshot and the frontier effects of the transition it just made, so recording is O(1) per entry and the hashes are identical to a pure fold's. On resume it re-verifies the journal it was handed with `{ verify: 'strict' }` — one pure fold, no executors and nothing executed — so nondeterminism surfaces at the diverging entry rather than compounding. Pass `verification: false` to opt out of both.
+`runDurableAgent` also records hashes by default. It takes them straight from the live snapshot and the frontier effects of the transition it just made, so recording is O(1) per entry and the hashes are identical to a pure fold's. On resume it re-verifies the journal it was handed — one pure fold, no executors and nothing executed — so nondeterminism surfaces at the diverging entry rather than compounding. Pass `verification: false` to opt out of both.
+
+A resumed journal is verified for what it carries. `{ verify: 'strict' }` is used only when every prior entry has hashes; a journal with any hash-free entry (one written with `verification: false`) is verified with `{ verify: true }` instead, which checks the hashes that are present and skips the missing ones. So a hash-free journal still resumes under the default, a mixed journal still throws on a tampered hashed entry, and entries the new leg appends are hashed either way.
+
+A journal must begin with its reserved `@agent.init` entry. `runDurableAgent` throws `AgentError` with `code: 'invalid-journal'` for a non-empty `entries` that does not — the init entry carries the input the fold seeds from and the lineage `callKey` keys against, so there is nothing to resume from without it.
 
 `replay` has three verification modes.
 
@@ -303,12 +307,15 @@ When both `snapshot` and `events` are passed, which one wins depends on whether 
 - **Self-contained log.** The log is the source of truth. The snapshot is a cache of it and never overrides it.
 - **No log, or a log that does not start at `@agent.init`.** The snapshot is the live resume source and the events are history only. This path is lossy: the run has no replayable history before the snapshot, so it cannot be replayed, verified, or forked. Prefer carrying the full log.
 
-Every settled snapshot is stamped with `agentMeta.logIndex`, the length of the run's event log when it settled. On the next resume, that stamp decides how the cache is used.
+Every settled snapshot is stamped with `agentMeta.logIndex`, the length of the run's event log when it settled, and `agentMeta.logId`, that log's `executionId` — the lineage id pinned in its `@agent.init` entry's `metadata`. On the next resume, those two stamps decide how the cache is used.
 
-- `logIndex` equal to `events.length`: the snapshot was taken at the log's current tail, so it is trusted as-is and no replay runs.
-- `logIndex` lower than `events.length`: the log is replayed. The snapshot is verified against the state the log's first `logIndex` entries replay to, and the run resumes from the replayed state, not the snapshot.
+- Trusted as-is, no replay: `logId` names the log being resumed, `logIndex` equals `events.length`, and the snapshot's state hash matches the tail entry's `verification.stateHash`. Length alone does not identify a prefix — a snapshot from a fork or a sibling thread can sit at the same index — so lineage and the tail hash are checked too.
+- A log written before `metadata.executionId` existed has no `logId`, so its cache is never trusted without a replay.
+- Everything else is untrusted: the log is replayed and the run resumes from the replayed state, not the snapshot. A snapshot stamped with a `logIndex` inside the log is still verified against the state the log's first `logIndex` entries replay to.
 - A mismatch between those two states throws an `AgentError` with code `snapshot-diverged`. The two copies disagree about the same point in history, which is a bug rather than a resume. Drop the snapshot and resume from `events` alone if the log is the trustworthy copy.
 - An unstamped snapshot carries no position, so there is nothing to verify against and the log wins.
+
+The replay path carries the cache's message log (the working memory `getRequests` runs build) onto the replayed snapshot, since the event log does not record messages yet.
 
 ## Snapshots as compaction
 

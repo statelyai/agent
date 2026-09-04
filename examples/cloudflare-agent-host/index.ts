@@ -128,15 +128,28 @@ export class EmailDrafter extends Agent<Env> {
 
   onMessage(connection: Connection, message: string) {
     // Client messages are machine events (PROMPT_SUBMITTED, SEND, ...).
-    const event = JSON.parse(message) as { type: string; [key: string]: unknown };
+    // A malformed frame is a client error like any other: it answers on the
+    // same structured error channel instead of throwing out of the socket
+    // handler, and no turn is scheduled for it.
+    let event: { type: string; [key: string]: unknown };
+    try {
+      event = JSON.parse(message) as { type: string; [key: string]: unknown };
+    } catch (error) {
+      this.#sendError(connection, error);
+      return;
+    }
     void this.#enqueue(() => this.#send(event)).catch((error: unknown) => {
-      connection.send(
-        JSON.stringify({
-          type: "error",
-          issues: [{ message: (error as Error).message }],
-        }),
-      );
+      this.#sendError(connection, error);
     });
+  }
+
+  #sendError(connection: Connection, error: unknown) {
+    connection.send(
+      JSON.stringify({
+        type: "error",
+        issues: [{ message: (error as Error).message }],
+      }),
+    );
   }
 
   async onRequest(request: Request): Promise<Response> {
@@ -168,7 +181,16 @@ export class EmailDrafter extends Agent<Env> {
       // the machine is waiting on a human again, or is done.
       await this.#enqueue(() => this.#send(event));
     } catch (error) {
-      return Response.json({ error: (error as Error).message, ...this.#view() }, { status: 400 });
+      // A turn can fail before there is any state to report: if the very first
+      // replay/run throws, `#snapshot` is still undefined and `#view()` would
+      // throw over the real error. That case is a host-side failure (500) with
+      // no view; a later turn failing is a rejected client event (400) and can
+      // still show the state the client is looking at.
+      const message = (error as Error).message;
+      if (!this.#snapshot) {
+        return Response.json({ error: message }, { status: 500 });
+      }
+      return Response.json({ error: message, ...this.#view() }, { status: 400 });
     }
     return Response.json(this.#view());
   }

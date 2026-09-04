@@ -33,6 +33,7 @@ import {
   agentCallOccurrence,
   createReplayEntry,
   getAgentEffects,
+  getLogExecutionId,
   initEntry,
   rebindActorSession,
   replay,
@@ -40,6 +41,7 @@ import {
   validateReplayEntries,
 } from "./effects.js";
 import type { AgentLogEntry } from "./event-log-store.js";
+import { AgentError } from "./errors.js";
 import { resolveMachineVersion } from "./utils.js";
 import { provideExecutors, type ProvideExecutorsOptions } from "./provide-executors.js";
 import type { AgentRequestExecutors } from "./text-logic.js";
@@ -92,7 +94,15 @@ export interface RunDurableAgentOptions<TMachine extends AnyStateMachine> extend
    * the loop steps once per appended event — the same derivation `replay`
    * performs — so recording costs O(1) per entry (no prefix replay). Pass
    * `false` to omit the hashes, which also skips the shadow fold and the
-   * strict re-verification of a resumed journal.
+   * re-verification of a resumed journal.
+   *
+   * A resumed journal is verified for what it carries: strict (every entry
+   * must have hashes) only when every prior entry does, and otherwise a
+   * tolerant pass that checks the hashes that ARE present and skips the
+   * missing ones. So a journal written with `verification: false` still
+   * resumes under the default, and a mixed journal verifies its hashed
+   * entries — a tampered hashed entry throws
+   * `AgentReplayDivergenceError` either way.
    */
   verification?: boolean;
 }
@@ -191,6 +201,19 @@ export async function runDurableAgent<TMachine extends AnyStateMachine>(
     validateReplayEntries(priorEntries, { machineId, machineVersion }, "Durable journal entries");
   }
   const hasInit = priorEntries[0]?.event.type === AGENT_INIT_EVENT_TYPE;
+  if (priorEntries.length > 0 && !hasInit) {
+    // A journal is resumable only when its reserved `@agent.init` entry is
+    // entry 0: it carries the input the fold seeds from, and it is the log
+    // lineage `callKey` keys against. Appending one now would push a second
+    // `index: 0` into the log and fold from `undefined` input, so refuse.
+    throw new AgentError(
+      "invalid-journal",
+      `runDurableAgent: journal entries must begin with the reserved ` +
+        `'${AGENT_INIT_EVENT_TYPE}' entry; found '${priorEntries[0]!.event.type}' at index 0. ` +
+        `Resume with the entries a previous runDurableAgent result returned, or pass no ` +
+        `entries and start fresh from 'input'.`,
+    );
+  }
   const input = hasInit
     ? (priorEntries[0]!.event as EventObject & { input?: unknown }).input
     : options.input;
@@ -215,15 +238,8 @@ export async function runDurableAgent<TMachine extends AnyStateMachine>(
   // a journal recorded before the pinning). Minted once per journal
   // and persisted in the init entry's metadata; a journal that predates the
   // field falls back to its init entry id (deterministic per log).
-  const storedExecutionId = hasInit
-    ? (priorEntries[0]!.metadata as { executionId?: unknown } | undefined)?.executionId
-    : undefined;
   const executionId =
-    typeof storedExecutionId === "string"
-      ? storedExecutionId
-      : hasInit
-        ? priorEntries[0]!.id
-        : crypto.randomUUID();
+    getLogExecutionId(priorEntries) ?? (hasInit ? priorEntries[0]!.id : crypto.randomUUID());
 
   // ─── adapter ───
   const mailbox = createMailbox();
@@ -320,8 +336,11 @@ export async function runDurableAgent<TMachine extends AnyStateMachine>(
 
   // ─── per-call idempotency keys (`info.callKey`) ───
   // The same key `runAgent` mints, from the same parts and the same ONE
-  // counting rule: `${logId}:${siteId}#${n}`, where `logId` is the
-  // `@agent.init` entry's id and `n = agentCallOccurrence(journal prefix) +
+  // counting rule: `${logId}:${siteId}#${n}`, where `logId` is the journal's
+  // `executionId` (pinned in the `@agent.init` entry's metadata, minted once
+  // per journal and inherited by resumes and forks — a journal that predates
+  // the field has none, and then no key is minted) and
+  // `n = agentCallOccurrence(journal prefix) +
   // calls started live this session at that site`. The prefix is `priorEntries`
   // — the journal as it stood when this session began — so a resumed leg lines
   // up: a journal holding one completion for a site re-executes its in-flight
@@ -334,7 +353,7 @@ export async function runDurableAgent<TMachine extends AnyStateMachine>(
   const liveCallStarts = new Map<string, number>();
   const mintCallKey = (siteId: string): string | undefined => {
     // Read lazily: a fresh run's init entry is appended below, after binding.
-    const logId = entries.find((entry) => entry.event.type === AGENT_INIT_EVENT_TYPE)?.id;
+    const logId = getLogExecutionId(entries);
     if (logId === undefined) {
       return undefined;
     }
@@ -437,7 +456,18 @@ export async function runDurableAgent<TMachine extends AnyStateMachine>(
     // Cost is one replay per resume, linear in journal length, not per entry.
     // Its final snapshot seeds the shadow pure fold, so a resumed leg's own
     // appended entries are hashed off the same pure chain (no second fold).
-    const resumed = replay(machine, priorEntries, { machineVersion, verify: "strict" });
+    //
+    // MIXED JOURNALS: `'strict'` additionally REQUIRES a hash on every entry,
+    // so a journal recorded with `verification: false` would fail at entry 0
+    // for having no hashes rather than for diverging. Demand `'strict'` only
+    // when every prior entry actually carries hashes; otherwise verify what is
+    // there (`verify: true` checks present hashes, skips missing ones).
+    // Entries appended by THIS leg are hashed either way.
+    const allHashed = priorEntries.every((entry) => entry.verification !== undefined);
+    const resumed = replay(machine, priorEntries, {
+      machineVersion,
+      verify: allHashed ? "strict" : true,
+    });
     pureSnapshot = resumed.snapshot as AnyMachineSnapshot;
   }
 

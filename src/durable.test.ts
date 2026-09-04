@@ -2,12 +2,13 @@ import { describe, expect, test } from "vitest";
 import { createActor, createAsyncLogic } from "xstate";
 import { z } from "zod";
 import { runDurableAgent } from "./durable.js";
-import { provideExecutors, setupAgent } from "./index.js";
+import { provideExecutors, runAgent, setupAgent } from "./index.js";
 import type { AgentLogEntry } from "./event-log-store.js";
 import {
   AGENT_INIT_EVENT_TYPE,
   AgentReplayDivergenceError,
   createReplayEntry,
+  getLogExecutionId,
   replay,
 } from "./effects.js";
 
@@ -590,7 +591,8 @@ describe("runDurableAgent callKey (idempotency key)", () => {
     });
 
     expect(result.status).toBe("done");
-    const logId = result.entries[0]!.id;
+    const logId = getLogExecutionId(result.entries);
+    expect(logId).toBeTypeOf("string");
     expect(keys).toEqual([`${logId}:ask#1`, `${logId}:ask#2`, `${logId}:ask#3`]);
   });
 
@@ -614,7 +616,7 @@ describe("runDurableAgent callKey (idempotency key)", () => {
       const effect = owed[0]!;
       if (effect.kind !== "text") throw new Error("expected an owed text effect");
       expect(effect.requestId).toBe(`ask#${n + 1}`);
-      expect(keys[n]).toBe(`${result.entries[0]!.id}:${effect.requestId}`);
+      expect(keys[n]).toBe(`${getLogExecutionId(result.entries)}:${effect.requestId}`);
     });
   });
 
@@ -641,6 +643,68 @@ describe("runDurableAgent callKey (idempotency key)", () => {
     expect(retried[0]).toContain(":ask#2");
     // The rest of the leg keeps counting from there.
     expect(retried).toEqual([keys[1], keys[2]]);
+  });
+
+  test("a resume keeps the journal's logId, and matches runAgent's key format", async () => {
+    const machine = buildLoopMachine();
+    const keys: Array<string | undefined> = [];
+    const full = await runDurableAgent(machine, {
+      input: {},
+      executors: collectingExecutors(keys),
+    });
+    const logId = getLogExecutionId(full.entries);
+    expect(logId).toBeTypeOf("string");
+
+    const journal = JSON.parse(JSON.stringify(full.entries.slice(0, 2))) as AgentLogEntry[];
+    expect(journal[0]!.metadata).toEqual({ executionId: logId });
+
+    const resumedKeys: Array<string | undefined> = [];
+    const resumed = await runDurableAgent(machine, {
+      entries: journal,
+      executors: collectingExecutors(resumedKeys),
+    });
+
+    expect(resumed.status).toBe("done");
+    // Inherited, never re-minted.
+    expect(getLogExecutionId(resumed.entries)).toBe(logId);
+    expect(resumedKeys).toEqual([`${logId}:ask#2`, `${logId}:ask#3`]);
+  });
+
+  test("a journal whose init entry predates executionId mints no callKey", async () => {
+    const machine = buildLoopMachine();
+    const full = await runDurableAgent(machine, { input: {}, executors: collectingExecutors([]) });
+    const legacy = JSON.parse(JSON.stringify(full.entries.slice(0, 2))) as AgentLogEntry[];
+    delete legacy[0]!.metadata;
+
+    const keys: Array<string | undefined> = [];
+    const resumed = await runDurableAgent(machine, {
+      entries: legacy,
+      executors: collectingExecutors(keys),
+    });
+
+    expect(resumed.status).toBe("done");
+    expect(keys.every((key) => key === undefined)).toBe(true);
+  });
+
+  test("runAgent resuming a durable journal mints the same keys", async () => {
+    const machine = buildLoopMachine();
+    const durableKeys: Array<string | undefined> = [];
+    const full = await runDurableAgent(machine, {
+      input: {},
+      executors: collectingExecutors(durableKeys),
+    });
+    const logId = getLogExecutionId(full.entries);
+
+    const runKeys: Array<string | undefined> = [];
+    const resumed = await runAgent(machine, {
+      events: JSON.parse(JSON.stringify(full.entries.slice(0, 2))) as AgentLogEntry[],
+      executors: collectingExecutors(runKeys),
+    });
+
+    expect(resumed.status).toBe("done");
+    // Same lineage id, same site#occurrence rule: one key space across hosts.
+    expect(runKeys).toEqual([`${logId}:ask#2`, `${logId}:ask#3`]);
+    expect(runKeys).toEqual(durableKeys.slice(1));
   });
 
   test("bare provideExecutors (no callKey option) leaves info.callKey undefined", async () => {
@@ -749,5 +813,99 @@ describe("runDurableAgent — builtin `agent.generateText` invokes", () => {
       // Only the calls that were still in flight at the prefix re-executed.
       expect(calls.length, `prefix ${k}: live calls`).toBe(entries.length - k);
     }
+  });
+});
+
+describe("runDurableAgent — journal intake and mixed verification", () => {
+  test("a non-empty journal without the reserved init entry is rejected", async () => {
+    const counters = { modelCalls: 0, entryActions: 0 };
+    const machine = buildDraftMachine(counters);
+    const executors = makeExecutors(counters);
+
+    const idle = await runDurableAgent(machine, { executors });
+    // The init entry lost (a truncated log, a host that stored only events):
+    // re-indexed so it is contiguous, and therefore only the missing init
+    // entry is wrong about it.
+    const withoutInit = idle.entries.slice(1).map((entry, index) => ({ ...entry, index }));
+    expect(withoutInit.length).toBeGreaterThan(0);
+
+    await expect(
+      runDurableAgent(machine, { entries: withoutInit, executors }),
+    ).rejects.toMatchObject({ code: "invalid-journal" });
+    // Nothing re-executed: the refusal happens before the machine is bound.
+    expect(counters.modelCalls).toBe(1);
+  });
+
+  test("a journal recorded with verification:false resumes under the default (hash-free entries are skipped)", async () => {
+    const counters = { modelCalls: 0, entryActions: 0 };
+    const machine = buildDraftMachine(counters);
+    const executors = makeExecutors(counters);
+
+    const idle = await runDurableAgent(machine, { executors, verification: false });
+    expect(idle.entries.every((entry) => entry.verification === undefined)).toBe(true);
+
+    // Default (`verification: true`) resume of that hash-free journal.
+    const done = await runDurableAgent(machine, {
+      entries: idle.entries,
+      event: { type: "APPROVE" },
+      executors,
+    });
+
+    expect(done.status).toBe("done");
+    expect(done.status === "done" ? done.output : undefined).toEqual({ draft: "the draft" });
+    // The journal replayed (no second model call), and the entry this leg
+    // appended IS hashed — a mixed journal from here on.
+    expect(counters.modelCalls).toBe(1);
+    expect(done.entries[0]!.verification).toBeUndefined();
+    expect(done.entries.at(-1)!.verification?.stateHash).toMatch(/^[0-9a-f]+$/);
+  });
+
+  test("a mixed journal still throws when a HASHED entry is tampered with", async () => {
+    const counters = { modelCalls: 0, entryActions: 0 };
+    const machine = buildDraftMachine(counters);
+    const executors = makeExecutors(counters);
+
+    // Leg 1 unhashed, leg 2 (default) hashes what it appends.
+    const unhashed = await runDurableAgent(machine, { executors, verification: false });
+    const mixed = await runDurableAgent(machine, {
+      entries: unhashed.entries,
+      event: { type: "REJECT" },
+      executors,
+    });
+    expect(mixed.status).toBe("idle");
+    const hashedIndex = mixed.entries.findIndex((entry) => entry.verification !== undefined);
+    expect(hashedIndex).toBeGreaterThan(0);
+
+    // The mixed journal itself resumes fine.
+    await expect(
+      runDurableAgent(machine, {
+        entries: mixed.entries,
+        event: { type: "APPROVE" },
+        executors,
+      }),
+    ).resolves.toMatchObject({ status: "done" });
+
+    // Tamper with the last HASHED entry (a completion the second leg recorded).
+    const tamperIndex = mixed.entries.length - 1;
+    expect(mixed.entries[tamperIndex]!.verification).toBeDefined();
+    const tampered = mixed.entries.map((entry, index) =>
+      index === tamperIndex
+        ? { ...entry, event: { ...entry.event, output: "a different draft" } }
+        : entry,
+    );
+
+    await expect(
+      runDurableAgent(machine, {
+        entries: tampered,
+        event: { type: "APPROVE" },
+        executors,
+      }),
+    ).rejects.toMatchObject({
+      name: "AgentReplayDivergenceError",
+      // The divergence is a real hash mismatch, not the "no hashes here"
+      // rejection strict mode raises for the unhashed prefix.
+      index: tamperIndex,
+      kind: "state",
+    });
   });
 });

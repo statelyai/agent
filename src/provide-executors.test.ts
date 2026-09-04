@@ -767,3 +767,124 @@ describe("provideExecutors recursive child binding", () => {
     );
   });
 });
+
+// ─── `options.callKey` ───
+// One bound machine can back MANY concurrent root actors, so key state must be
+// per invoked actor, never per invoke site: a site-keyed memo lets two actors
+// deciding at the same site hand each other's retries the wrong key.
+describe("provideExecutors callKey", () => {
+  const buildDecidingMachine = () => {
+    const schemas = createAgentSchemas({
+      context: z.object({ tag: z.string() }),
+      input: z.object({ tag: z.string() }),
+      events: { ATTACK: z.object({}), FLEE: z.object({}) },
+    });
+    return setupAgent({ schemas }).createMachine({
+      context: ({ input }) => ({ tag: input.tag }),
+      initial: "deciding",
+      states: {
+        deciding: {
+          invoke: {
+            id: "choose",
+            src: "agent.decide",
+            // `prompt` carries the actor's own tag, so the executor can tell
+            // the two concurrent actors apart.
+            input: ({ context }) => ({
+              model: "test-model",
+              prompt: context.tag,
+              allowedEvents: ["ATTACK", "FLEE"] as const,
+            }),
+          },
+          on: { ATTACK: { target: "attacked" }, FLEE: { target: "fled" } },
+        },
+        attacked: { type: "final" },
+        fled: { type: "final" },
+      },
+    });
+  };
+
+  test("a decision retry reuses ITS OWN actor's key when two root actors overlap", async () => {
+    const machine = buildDecidingMachine();
+
+    // The kind of minter a host with a log supplies: one occurrence per mint.
+    let minted = 0;
+    const callKey = (siteId: string) => `log:${siteId}#${++minted}`;
+
+    const seen: Array<{ tag: string; attempt: number; key: string | undefined }> = [];
+    let firstAttempts = 0;
+    let releaseFirst!: () => void;
+    const bothStarted = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+
+    const bound = provideExecutors(
+      machine,
+      {
+        decide: async (request, info) => {
+          seen.push({
+            tag: String(request.prompt),
+            attempt: request.attempts.length,
+            key: info?.callKey,
+          });
+          if (request.attempts.length === 0) {
+            // Hold both first attempts open together, so the retries below
+            // are interleaved with the other actor's calls.
+            if (++firstAttempts === 2) {
+              releaseFirst();
+            }
+            await bothStarted;
+            // Not among the candidate events: forces one retry of THIS invoke.
+            return { event: { type: "NOPE" } as ChosenEvent };
+          }
+          return { event: { type: "ATTACK" } as ChosenEvent };
+        },
+      },
+      { callKey },
+    );
+
+    const a = createActor(bound, { input: { tag: "a" } });
+    const b = createActor(bound, { input: { tag: "b" } });
+    a.start();
+    b.start();
+    await Promise.all([toPromise(a), toPromise(b)]);
+
+    expect(a.getSnapshot().value).toBe("attacked");
+    expect(b.getSnapshot().value).toBe("attacked");
+    expect(seen).toHaveLength(4);
+
+    for (const tag of ["a", "b"]) {
+      const calls = seen.filter((call) => call.tag === tag);
+      expect(calls.map((call) => call.attempt)).toEqual([0, 1]);
+      // The retry is the same call: same key, no new occurrence consumed.
+      expect(calls[1]!.key).toBe(calls[0]!.key);
+      expect(calls[0]!.key).toContain(":choose#");
+    }
+    // ...and the two actors never share one.
+    const keyOf = (tag: string) => seen.find((call) => call.tag === tag)!.key;
+    expect(keyOf("a")).not.toBe(keyOf("b"));
+    // Exactly one mint per invoked actor.
+    expect(minted).toBe(2);
+  });
+
+  test("a minter is not actor-scoped: two actors draw occurrences from the same sequence", async () => {
+    // Documented consequence of one bound machine backing many actors — the
+    // keys never collide, but `#n` interleaves across actors. A host that
+    // needs per-actor lineage folds its own id into the minter (as
+    // `runDurableAgent` folds in its journal's init entry id).
+    const machine = buildDecidingMachine();
+    let minted = 0;
+    const bound = provideExecutors(
+      machine,
+      { decide: async () => ({ event: { type: "ATTACK" } as ChosenEvent }) },
+      { callKey: (siteId) => `log:${siteId}#${++minted}` },
+    );
+
+    const a = createActor(bound, { input: { tag: "a" } });
+    const b = createActor(bound, { input: { tag: "b" } });
+    a.start();
+    b.start();
+    await Promise.all([toPromise(a), toPromise(b)]);
+
+    expect(minted).toBe(2);
+  });
+});

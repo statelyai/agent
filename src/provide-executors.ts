@@ -51,6 +51,15 @@ export interface ProvideExecutorsOptions<TMachine extends AnyStateMachine = AnyS
    * `info.callKey` unset. Omit the option and `info.callKey` is always
    * undefined, as before.
    *
+   * Called ONCE per invoked actor: repeated executor attempts for one invoke
+   * (a decision retry) reuse that invoke's first key rather than consuming a
+   * new occurrence, and concurrent actors never share a memo. One bound
+   * machine can back many root actors, though, and they all draw from the
+   * minter you pass — occurrences at a shared site therefore interleave across
+   * actors. Supply a minter that folds in your own lineage id (as
+   * {@link runDurableAgent} folds in its journal's `executionId`) when keys
+   * must be unique per actor.
+   *
    * `self` is accepted for signature parity with `runAgent`'s minter and is
    * never passed on this path — the key is minted at the executor seam, which
    * sees `info`, not the invoked leaf actor.
@@ -182,32 +191,46 @@ export function provideExecutors<TMachine extends AnyStateMachine>(
 
 /**
  * Wraps each provided executor so it receives `info.callKey`, minted once per
- * live call from `info.requestId` (the durable invoke id = the call's site id).
+ * INVOKED ACTOR from `info.requestId` (the durable invoke id = the call's site
+ * id).
  *
  * A decision RETRY calls the same executor again for ONE invoke (the retry
  * loop grows `request.attempts` and re-enters), which must not consume a new
  * occurrence — the mirror of `runAgent` memoizing its key per invoked leaf
- * actor. `attempts.length > 0` identifies those re-entries, and they reuse the
- * site's last minted key.
+ * actor. The seam never sees that actor's `self`, but it does see the actor's
+ * own `info.signal`: xstate mints one `AbortSignal` per invoked actor run, and
+ * `resolveDecision` threads the SAME one through every attempt, so it
+ * identifies the invoke exactly. Memoizing on it (per bound machine, in a
+ * WeakMap) is therefore per-actor.
+ *
+ * Site-keyed memoization would NOT be: one bound machine can back many
+ * concurrent root actors, and two of them invoking the same site would hand
+ * each other's retries the wrong key.
  */
 function withCallKeys(
   executors: AgentRequestExecutors,
   mintCallKey: (siteId: string, self?: AnyActorRef) => string | undefined,
 ): AgentRequestExecutors {
-  const lastKeyBySite = new Map<string, string>();
-  const keyFor = (info: AgentRequestExecutorInfo | undefined, isRetry: boolean) => {
+  const keyByInvoke = new WeakMap<AbortSignal, string>();
+  const keyFor = (info: AgentRequestExecutorInfo | undefined) => {
     const siteId = info?.requestId;
     // Nothing to key against without a site id, and a key already on `info`
     // (a host that minted its own) is never overwritten.
     if (siteId === undefined || info?.callKey !== undefined) {
       return undefined;
     }
-    if (isRetry) {
-      return lastKeyBySite.get(siteId);
+    const invoke = info?.signal;
+    if (invoke) {
+      const memoized = keyByInvoke.get(invoke);
+      if (memoized !== undefined) {
+        return memoized;
+      }
     }
     const key = mintCallKey(siteId);
-    if (key !== undefined) {
-      lastKeyBySite.set(siteId, key);
+    // No signal (an executor driven outside an invoked actor) means no invoke
+    // identity to memoize against: mint per call.
+    if (key !== undefined && invoke) {
+      keyByInvoke.set(invoke, key);
     }
     return key;
   };
@@ -220,20 +243,12 @@ function withCallKeys(
   const { generateText, streamText, decide } = executors;
   return {
     ...(generateText
-      ? {
-          generateText: (request, info) =>
-            generateText(request, withKey(info, keyFor(info, false))),
-        }
+      ? { generateText: (request, info) => generateText(request, withKey(info, keyFor(info))) }
       : {}),
     ...(streamText
-      ? { streamText: (request, info) => streamText(request, withKey(info, keyFor(info, false))) }
+      ? { streamText: (request, info) => streamText(request, withKey(info, keyFor(info))) }
       : {}),
-    ...(decide
-      ? {
-          decide: (request, info) =>
-            decide(request, withKey(info, keyFor(info, (request.attempts?.length ?? 0) > 0))),
-        }
-      : {}),
+    ...(decide ? { decide: (request, info) => decide(request, withKey(info, keyFor(info))) } : {}),
   };
 }
 

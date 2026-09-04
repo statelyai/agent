@@ -1,23 +1,36 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
-import { createActor, createAsyncLogic, setup, toPromise, type Snapshot } from "xstate";
+import {
+  createActor,
+  createAsyncLogic,
+  createCallbackLogic,
+  createMachine,
+  setup,
+  toPromise,
+  type Snapshot,
+} from "xstate";
 import { createDecisionLogic } from "./decision.js";
 import {
   AGENT_TRACE_SCHEMA_VERSION,
+  AGENT_USAGE_EVENT_TYPE,
   AgentError,
   AgentIdleError,
   createAgentSchemas,
+  createInMemoryEventLogStore,
   createTextLogic,
   AgentIllegalResumeEventError,
   inspectTransitions,
   replay,
   runAgent,
   generateResult,
+  getAgentMessages,
+  getLogExecutionId,
   getUsageFromEvents,
   setupAgent,
   AgentSnapshotVersionMismatchError,
   type AgentDecisionRequest,
   type AgentLogEntry,
+  type AgentStateRequest,
   type AgentTextRequest,
   type AgentTools,
   type AgentTraceEvent,
@@ -3363,6 +3376,125 @@ describe("restore semantics: pending requests and events-only resume", () => {
       ).rejects.toMatchObject({ code: "snapshot-diverged" });
     });
 
+    test("an equal-length snapshot from a divergent lineage does not override the log", async () => {
+      const machine = buildMachine();
+      const callsA: string[] = [];
+      const callsB: string[] = [];
+      // Two logs of the SAME length that disagree about the state at that
+      // length: only the executor output differs, so `logIndex` alone cannot
+      // tell them apart.
+      const legA = await runAgent(machine, { input: {}, executors: executorsFor(callsA) });
+      const legB = await runAgent(machine, {
+        input: {},
+        executors: {
+          generateText: async (request: AgentTextRequest & { tools: AgentTools }) => {
+            callsB.push(request.prompt ?? "");
+            return { output: `other:${request.prompt}` };
+          },
+        },
+      });
+      expect(legA.status).toBe("idle");
+      expect(legB.status).toBe("idle");
+      expect(legA.events.length).toBe(legB.events.length);
+
+      const cacheFromA = JSON.parse(
+        JSON.stringify(legA.status === "idle" ? legA.persistedSnapshot : legA.snapshot),
+      ) as Snapshot<unknown>;
+      // A's cache must not be trusted over B's log at the same index.
+      await expect(
+        runAgent(machine, {
+          snapshot: cacheFromA,
+          events: JSON.parse(JSON.stringify(legB.events)),
+          event: { type: "GO" },
+          executors: executorsFor(callsB),
+        }),
+      ).rejects.toMatchObject({ code: "snapshot-diverged" });
+    });
+
+    test("an equal-length snapshot from a coincidentally identical lineage resumes from the log", async () => {
+      const machine = buildMachine();
+      const callsA: string[] = [];
+      const callsB: string[] = [];
+      // Same length AND same state at that length: the caches agree, so the
+      // resume proceeds and the log is still what the run continues from.
+      const legA = await runAgent(machine, { input: {}, executors: executorsFor(callsA) });
+      const legB = await runAgent(machine, { input: {}, executors: executorsFor(callsB) });
+      const cacheFromA = JSON.parse(
+        JSON.stringify(legA.status === "idle" ? legA.persistedSnapshot : legA.snapshot),
+      ) as Snapshot<unknown>;
+      const resumed = await runAgent(machine, {
+        snapshot: cacheFromA,
+        events: JSON.parse(JSON.stringify(legB.events)),
+        event: { type: "GO" },
+        executors: executorsFor(callsB),
+      });
+      expect(resumed.status).toBe("done");
+      expect(resumed.status === "done" ? resumed.output : undefined).toEqual({
+        a: "ok:one",
+        b: "ok:two",
+      });
+    });
+
+    test("a stale cache alongside a longer log still carries its message log", async () => {
+      // The message log is host-supplied working memory (`getRequests`) that
+      // the event log does not record, so replaying the log cannot rebuild it:
+      // the cache's copy must survive the replay path, exactly as it survives
+      // the cache-at-tail path.
+      const messagesMachine = createMachine({
+        id: "cachedMessages",
+        initial: "writing",
+        states: {
+          writing: {
+            description: "Write one sentence.",
+            on: { WRITTEN: { target: "awaiting" } },
+          },
+          awaiting: { tags: ["waiting"], on: { GO: { target: "revising" } } },
+          revising: { description: "Revise it.", on: { REVISED: { target: "complete" } } },
+          complete: { type: "final" },
+        },
+      });
+      const shared = {
+        getRequests: (snapshot: {
+          nodes: Array<{ description?: string; tags: string[]; ownEvents: string[] }>;
+        }) =>
+          snapshot.nodes
+            .filter((node) => node.description && !node.tags.includes("waiting"))
+            .map(
+              (node): AgentStateRequest => ({
+                model: "m",
+                prompt: node.description!,
+                onDone: node.ownEvents.length === 1 ? { type: node.ownEvents[0]! } : undefined,
+              }),
+            ),
+        executors: { generateText: async () => ({ output: "ok" }) },
+      };
+
+      const first = await runAgent(messagesMachine, shared);
+      expect(first.status).toBe("idle");
+      const cachedContents = getAgentMessages(first.snapshot).map((message) => message.content);
+      expect(cachedContents).toEqual(["Write one sentence.", "ok"]);
+
+      const second = await runAgent(messagesMachine, {
+        ...shared,
+        events: JSON.parse(JSON.stringify(first.events)),
+        event: { type: "GO" },
+      });
+      expect(second.status).toBe("done");
+      expect(second.events.length).toBeGreaterThan(first.events.length);
+
+      // Cache stamped at the gate, log run to the end: replay wins for state,
+      // but the conversation the cache carries is not thrown away.
+      const resumed = await runAgent(messagesMachine, {
+        ...shared,
+        snapshot: JSON.parse(JSON.stringify(first.snapshot)) as Snapshot<unknown>,
+        events: JSON.parse(JSON.stringify(second.events)),
+      });
+      expect(resumed.status).toBe("done");
+      expect(getAgentMessages(resumed.snapshot).map((message) => message.content)).toEqual(
+        cachedContents,
+      );
+    });
+
     test("a log that already reached a final state settles done immediately", async () => {
       const calls: string[] = [];
       const { machine, executors, done } = await runBothLegs(calls);
@@ -3598,6 +3730,7 @@ describe("snapshot version stamping", () => {
       machineId: "versioned",
       version,
       logIndex: idle.events.length,
+      logId: getLogExecutionId(idle.events),
     });
 
     const done = await runAgent(machine, {
@@ -4317,7 +4450,8 @@ describe("executor callKey (idempotency key)", () => {
     });
 
     expect(result.status).toBe("done");
-    const logId = result.events[0]!.id;
+    const logId = getLogExecutionId(result.events);
+    expect(logId).toBeTypeOf("string");
     expect(keys).toEqual([`${logId}:ask#1`, `${logId}:ask#2`, `${logId}:ask#3`]);
   });
 
@@ -4346,7 +4480,7 @@ describe("executor callKey (idempotency key)", () => {
       const effect = owed[0]!;
       if (effect.kind !== "text") throw new Error("expected an owed text effect");
       expect(effect.requestId).toBe(`ask#${n + 1}`);
-      expect(keys[n]).toBe(`${result.events[0]!.id}:${effect.requestId}`);
+      expect(keys[n]).toBe(`${getLogExecutionId(result.events)}:${effect.requestId}`);
     });
   });
 
@@ -4396,7 +4530,7 @@ describe("executor callKey (idempotency key)", () => {
       input: {},
       executors: { generateText: async (request) => ({ output: `ok:${request.prompt}` }) },
     });
-    const logId = original.events[0]!.id;
+    const logId = getLogExecutionId(original.events);
 
     // Fork: replay a prefix of the same log lineage as a new run.
     const forkPoint = original.events.findIndex(
@@ -4423,5 +4557,168 @@ describe("executor callKey (idempotency key)", () => {
     // The fork re-derives the parent's own occurrences, so cached results keyed
     // by the parent's callKey are reusable.
     expect(forkKeys[0]).toBe(`${logId}:ask#2`);
+    // Slicing copies the init entry, so the fork shares the lineage id by
+    // construction — it is never re-minted on resume.
+    expect(getLogExecutionId(forked.events)).toBe(logId);
+
+    // Same by construction through a store fork, which copies the prefix
+    // (init entry and its metadata included).
+    const store = createInMemoryEventLogStore();
+    await store.append({ threadId: "src", expectedIndex: 0, entries: original.events });
+    await store.fork({ threadId: "src", newThreadId: "branch", upToIndex: forkPoint + 1 });
+    expect(getLogExecutionId(await store.read("branch"))).toBe(logId);
+  });
+
+  test("two fresh runs get different logIds and different callKey prefixes", async () => {
+    const machine = buildLoopMachine();
+    const run = async () => {
+      const keys: string[] = [];
+      const result = await runAgent(machine, {
+        input: {},
+        executors: {
+          generateText: async (request, info) => {
+            keys.push(info!.callKey!);
+            return { output: `ok:${request.prompt}` };
+          },
+        },
+      });
+      return { result, keys };
+    };
+
+    const first = await run();
+    const second = await run();
+
+    const firstId = getLogExecutionId(first.result.events);
+    const secondId = getLogExecutionId(second.result.events);
+    expect(firstId).toBeTypeOf("string");
+    expect(secondId).toBeTypeOf("string");
+    expect(firstId).not.toBe(secondId);
+    // Entry ids are index-derived and therefore identical across runs — the
+    // lineage id is what separates them.
+    expect(first.result.events[0]!.id).toBe(second.result.events[0]!.id);
+    expect(first.keys).not.toEqual(second.keys);
+    expect(first.keys.every((key) => key.startsWith(`${firstId}:`))).toBe(true);
+    expect(second.keys.every((key) => key.startsWith(`${secondId}:`))).toBe(true);
+  });
+
+  test("a resume from the log keeps the logId, through JSON", async () => {
+    const machine = buildLoopMachine();
+    const original = await runAgent(machine, {
+      input: {},
+      executors: { generateText: async (request) => ({ output: `ok:${request.prompt}` }) },
+    });
+    const logId = getLogExecutionId(original.events);
+    expect(logId).toBeTypeOf("string");
+
+    const roundTripped = JSON.parse(JSON.stringify(original.events)) as AgentLogEntry[];
+    expect(roundTripped[0]!.metadata).toEqual({ executionId: logId });
+
+    const resumed = await runAgent(machine, {
+      events: roundTripped.slice(0, 2),
+      executors: { generateText: async (request) => ({ output: `ok:${request.prompt}` }) },
+    });
+    expect(getLogExecutionId(resumed.events)).toBe(logId);
+    expect((resumed.snapshot as { agentMeta?: { logId?: string } }).agentMeta?.logId).toBe(logId);
+  });
+
+  test("a log whose init entry predates executionId leaves logId and callKey unset", async () => {
+    const machine = buildLoopMachine();
+    const original = await runAgent(machine, {
+      input: {},
+      executors: { generateText: async (request) => ({ output: `ok:${request.prompt}` }) },
+    });
+    const legacy = (JSON.parse(JSON.stringify(original.events)) as AgentLogEntry[]).slice(0, 2);
+    delete legacy[0]!.metadata;
+
+    const keys: Array<string | undefined> = [];
+    const resumed = await runAgent(machine, {
+      events: legacy,
+      executors: {
+        generateText: async (request, info) => {
+          keys.push(info?.callKey);
+          return { output: `ok:${request.prompt}` };
+        },
+      },
+    });
+
+    expect(resumed.status).toBe("done");
+    expect(getLogExecutionId(resumed.events)).toBeUndefined();
+    expect(
+      (resumed.snapshot as { agentMeta?: { logId?: string } }).agentMeta?.logId,
+    ).toBeUndefined();
+    expect(keys.every((key) => key === undefined)).toBe(true);
+  });
+});
+
+// A call's usage entry is journaled by `recordUsage` BEFORE the event is
+// delivered, and the inspect handler reuses that entry when the delivery
+// re-enters it. Reuse must key on the event OBJECT, not on its type: a
+// distinct `@agent.usage` sent from elsewhere during that same delivery is its
+// own input and needs its own entry.
+describe("@agent.usage entry-id reuse is per-event-object", () => {
+  test("a usage event sent during a call's usage delivery gets its own entry", async () => {
+    const usageSchemas = createAgentSchemas({
+      context: z.object({ folded: z.number() }),
+      input: z.object({}),
+      output: z.object({ folded: z.number() }),
+      events: { DONE: z.object({}) },
+    });
+    const call = createTextLogic({
+      name: "call",
+      schemas: { input: z.object({}), output: z.string() },
+      model: "test-model",
+      prompt: () => "hi",
+    });
+    // Sends its own `@agent.usage` to the root — synchronously at start, which
+    // is inside the delivery of the call's usage event.
+    const echoUsage = createCallbackLogic(({ sendBack }) => {
+      sendBack({ type: AGENT_USAGE_EVENT_TYPE, id: "host", usage: { totalTokens: 7 } });
+      sendBack({ type: "DONE" });
+    });
+    const machine = setupAgent({
+      schemas: usageSchemas,
+      actors: { call, echoUsage },
+    }).createMachine({
+      id: "usageIdReuse",
+      context: { folded: 0 },
+      on: {
+        [AGENT_USAGE_EVENT_TYPE]: ({ context, event }) => ({
+          context: { folded: context.folded + (event.usage.totalTokens ?? 0) },
+        }),
+      },
+      initial: "working",
+      states: {
+        working: {
+          invoke: { src: "call", input: {} },
+          on: { [AGENT_USAGE_EVENT_TYPE]: { target: "echoing" } },
+        },
+        echoing: {
+          invoke: { src: "echoUsage" },
+          on: { DONE: { target: "complete" } },
+        },
+        complete: { type: "final", output: ({ context }) => ({ folded: context.folded }) },
+      },
+    });
+
+    const result = await runAgent(machine, {
+      input: {},
+      executors: {
+        generateText: async () => ({ output: "ok", usage: { totalTokens: 400 } }),
+      },
+    });
+
+    expect(result.status).toBe("done");
+    const usageEntries = result.events.filter(
+      (entry) => entry.event.type === AGENT_USAGE_EVENT_TYPE,
+    );
+    // Two distinct inputs, two entries, two ids.
+    expect(usageEntries).toHaveLength(2);
+    expect(new Set(usageEntries.map((entry) => entry.id)).size).toBe(2);
+    expect(
+      usageEntries.map(
+        (entry) =>
+          (entry.event as unknown as { usage: { totalTokens?: number } }).usage.totalTokens,
+      ),
+    ).toEqual([400, 7]);
   });
 });

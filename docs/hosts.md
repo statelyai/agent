@@ -42,12 +42,13 @@ Effect execution is at-least-once. A host runs the call and then journals its co
 
 `info.callKey` is the key that makes the duplicate safe to drop:
 
-- Its format is `${logId}:${siteId}#${occurrence}`. `logId` identifies the log lineage, `siteId` the invoke site, and `occurrence` counts that site's completions in the log.
+- Its format is `${logId}:${siteId}#${occurrence}`. `logId` is the log's `executionId` — a UUID minted when the log is started, pinned in the reserved `@agent.init` entry's `metadata`, and inherited by every resume — `siteId` the invoke site, and `occurrence` counts that site's completions in the log.
+- Every fresh run mints a new `logId`, so keys never collide across unrelated runs.
 - A resumed run re-executing an in-flight call passes the same `callKey` as the original attempt.
 - Each iteration of a looped state gets its own key: `ask#1`, `ask#2`, `ask#3`.
-- A fork of a log keeps the parent's `logId`, so a fork can reuse results cached under the parent's keys.
+- A fork of a log copies the init entry and so keeps the parent's `logId`, letting a fork reuse results cached under the parent's keys.
 - [`runDurableAgent`](choosing-a-run-mode.md) supplies the same key from its journal: the same format, the same occurrence rule, and the same key on a resume that re-executes an in-flight call.
-- It is `undefined` off the `runAgent` and `runDurableAgent` paths (a bare `provideExecutors` bind) and on a run resumed from a snapshot with no event log. Neither has a log to key against.
+- It is `undefined` off the `runAgent` and `runDurableAgent` paths (a bare `provideExecutors` bind), on a run resumed from a snapshot with no event log, and on a log written before `metadata.executionId` existed. None of them has a lineage id to key against.
 
 Pass it to the provider or tool as the idempotency key, and dedupe on it in your own cache:
 

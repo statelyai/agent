@@ -263,6 +263,25 @@ export function initEntry<TMachine extends AnyStateMachine>(
   );
 }
 
+/**
+ * The log's execution id: the lineage identity pinned in the reserved
+ * `@agent.init` entry's `metadata.executionId` when the log was started.
+ *
+ * Minted once per run (`crypto.randomUUID()`) and inherited verbatim by every
+ * resume of that log, so it names one lineage rather than one process. Entry
+ * ids cannot serve this role — the built-in ids are index-derived, so every
+ * log's init entry is `evt_00000000`. Forks copy the init entry, so a fork
+ * shares its parent's execution id by construction.
+ *
+ * Returns `undefined` for a log with no init entry, and for a log written
+ * before the field existed — callers must treat the id as optional.
+ */
+export function getLogExecutionId(entries: readonly AgentLogEntry[]): string | undefined {
+  const init = entries.find((entry) => entry.event.type === AGENT_INIT_EVENT_TYPE);
+  const executionId = (init?.metadata as { executionId?: unknown } | undefined)?.executionId;
+  return typeof executionId === "string" ? executionId : undefined;
+}
+
 /** Options accepted by {@link getAgentEffects} and {@link replay}. */
 export interface GetAgentEffectsOptions extends Partial<AgentExecutionOptions> {
   /**

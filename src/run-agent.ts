@@ -73,6 +73,7 @@ import {
 } from "./internal/registry.js";
 import {
   createReplayEntry,
+  getLogExecutionId,
   getSnapshotStateHash,
   getUsageFromEvents,
   initEntry,
@@ -225,15 +226,24 @@ export interface AgentUserInputExecutor {
  * `machineId`/`machineVersion`.
  *
  * `logIndex` is the length of the run's event log when the snapshot settled —
- * the position in the log this snapshot is a cache of. On the next resume,
- * a `logIndex` equal to the passed `events.length` marks the snapshot as
- * current with the log's tail and skips replay; a lower one is verified
- * against the log by replay (see {@link AgentSnapshotDivergedError}).
+ * the position in the log this snapshot is a cache of — and `logId` is that
+ * log's lineage identity: the `executionId` pinned in its reserved
+ * `@agent.init` entry's `metadata`, minted once when the log was started,
+ * inherited by every resume and retained by forks (which copy that entry). On
+ * the next resume, a snapshot whose `logId` matches the passed log AND whose
+ * `logIndex` equals `events.length` is current with the log's tail and skips
+ * replay. Any other combination — a lower `logIndex`, a `logId` from another
+ * lineage, or no `logId` at all — is untrusted: the log is replayed and the
+ * snapshot verified against it (see {@link AgentSnapshotDivergedError}).
+ * `logId` is absent when the run had no self-contained log to identify, and
+ * for a log written before `metadata.executionId` existed — such a log never
+ * takes the fast path.
  */
 export interface AgentRunMeta {
   machineId: string;
   version: string;
   logIndex: number;
+  logId?: string;
 }
 
 /**
@@ -547,8 +557,9 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
    *
    * With a self-contained `events` log, the log is the source of truth and
    * this snapshot is only a CACHE of it: it is trusted as-is when its stamped
-   * `agentMeta.logIndex` equals `events.length`, and otherwise verified
-   * against a replay of the log (mismatch throws
+   * `agentMeta.logId` identifies that same log AND its `agentMeta.logIndex`
+   * equals `events.length`. A cache from another lineage, or one stamped at an
+   * earlier index, is verified against a replay of the log (mismatch throws
    * {@link AgentSnapshotDivergedError}) while the run resumes from the
    * replayed state.
    *
@@ -1347,9 +1358,10 @@ interface RunAgentBindContext {
   runId?: string;
   /**
    * Mints the per-call idempotency key threaded to executors as
-   * `info.callKey` (`${logId}:${siteId}#${occurrence}`). Assigned once the
-   * session's log exists; returns undefined when the run has no `@agent.init`
-   * entry to key against. `self` (the invoked leaf actor) memoizes the key, so
+   * `info.callKey` (`${logId}:${siteId}#${occurrence}`, where `logId` is the
+   * log's `executionId`). Assigned once the session's log exists; returns
+   * undefined when the run has no self-contained log, or when its
+   * `@agent.init` entry predates `metadata.executionId`. `self` (the invoked leaf actor) memoizes the key, so
    * repeated executor attempts for ONE invoke (a decision retry) share it.
    */
   callKey?: (siteId: string, self?: object) => string | undefined;
@@ -2496,14 +2508,41 @@ function createAgentSession<TMachine extends AnyStateMachine>(
   const resumeEvents = options.events;
   if (resumeEvents !== undefined && resumeEvents[0]?.event.type === AGENT_INIT_EVENT_TYPE) {
     const cachedSnapshot = effectiveSnapshot;
-    const cachedLogIndex = (cachedSnapshot as { agentMeta?: { logIndex?: number } } | undefined)
-      ?.agentMeta?.logIndex;
-    if (cachedSnapshot === undefined || cachedLogIndex !== resumeEvents.length) {
+    const cachedMeta = (
+      cachedSnapshot as { agentMeta?: { logIndex?: number; logId?: string } } | undefined
+    )?.agentMeta;
+    const cachedLogIndex = cachedMeta?.logIndex;
+    // Lineage, not length: a snapshot cached at index N of ANOTHER log (a
+    // fork, a sibling thread) can trivially collide with this log's length, so
+    // the tail fast path takes two further guards beyond `logIndex`.
+    //   1. `logId` — the cache must name this log's lineage: the
+    //      `executionId` pinned in its `@agent.init` entry's metadata, unique
+    //      per log start and inherited by resumes and forks. A log written
+    //      before that field existed has none, so it never takes this path.
+    //   2. The tail entry's `verification.stateHash` — the state the log
+    //      itself says index N replays to. Comparing the cache against it is
+    //      free (no replay) and catches the case ids cannot: two forks of one
+    //      init entry that diverged at the same length.
+    // Failing either, the cache is untrusted: the log is replayed and the
+    // cache is still hash-checked at the index it claims — genuinely different
+    // lineage throws AgentSnapshotDivergedError, and a coincidentally
+    // identical state passes while the log wins anyway.
+    const logId = getLogExecutionId(resumeEvents);
+    const tailStateHash = resumeEvents[resumeEvents.length - 1]?.verification?.stateHash;
+    const cachedStateHash = cachedSnapshot === undefined ? undefined : tryStateHash(cachedSnapshot);
+    const sameLineage =
+      cachedMeta?.logId !== undefined &&
+      logId !== undefined &&
+      cachedMeta.logId === logId &&
+      (tailStateHash === undefined ||
+        cachedStateHash === undefined ||
+        tailStateHash === cachedStateHash);
+    if (cachedSnapshot === undefined || !sameLineage || cachedLogIndex !== resumeEvents.length) {
       if (
         cachedSnapshot !== undefined &&
         typeof cachedLogIndex === "number" &&
         cachedLogIndex > 0 &&
-        cachedLogIndex < resumeEvents.length
+        cachedLogIndex <= resumeEvents.length
       ) {
         const { snapshot: atCache } = replay(machine, resumeEvents.slice(0, cachedLogIndex), {
           machineVersion,
@@ -2515,9 +2554,18 @@ function createAgentSession<TMachine extends AnyStateMachine>(
         }
       }
       const { snapshot: replayedSnapshot } = replay(machine, resumeEvents, { machineVersion });
-      effectiveSnapshot = machine.getPersistedSnapshot(
+      const replayedPersisted = machine.getPersistedSnapshot(
         replayedSnapshot as never,
       ) as Snapshot<unknown>;
+      // The message log is HOST-SUPPLIED working memory (`getRequests`), and
+      // the event log does not record it yet (follow-up), so replay cannot
+      // reconstruct it. Carry the cache's copy onto the replayed snapshot so
+      // this path keeps the conversation the cache-at-tail path keeps.
+      const cachedMessages = getAgentMessages(cachedSnapshot);
+      if (cachedMessages.length > 0) {
+        (replayedPersisted as { messages?: AgentMessage[] }).messages = [...cachedMessages];
+      }
+      effectiveSnapshot = replayedPersisted;
     }
   }
 
@@ -2573,7 +2621,11 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     // event log this snapshot caches, read back by the next resume to decide
     // whether it can be trusted without replaying (see the log-first resume
     // block above).
-    const agentMeta: AgentRunMeta = { ...machineIdentity, logIndex: replayEvents.length };
+    const agentMeta: AgentRunMeta = {
+      ...machineIdentity,
+      logIndex: replayEvents.length,
+      ...(logExecutionId !== undefined ? { logId: logExecutionId } : {}),
+    };
     (snapshot as { agentMeta?: unknown }).agentMeta = agentMeta;
     if (!options.getRequests && !options.messages && messages.length === 0) {
       return;
@@ -2632,12 +2684,20 @@ function createAgentSession<TMachine extends AnyStateMachine>(
   // collide on `#1`. Seeding from the prefix keeps a resumed leg aligned: a
   // crash recovery whose log holds one completion re-executes the in-flight
   // call as `#2`, exactly the id replay derives for it.
+  // ─── Log lineage id (`executionId`) ───
+  // One id per lineage, minted when the log is started and inherited verbatim
+  // by every resume of it (and by every fork, which copies the init entry).
+  // It is pinned in the init entry's `metadata.executionId` because entry ids
+  // are index-derived: every log's init entry is `evt_00000000`, so an entry
+  // id cannot tell two lineages apart. A log written before the field existed
+  // has none, and then `logId`/`callKey` are simply undefined.
+  const startsFreshLog = replayEvents.length === 0 && effectiveSnapshot === undefined;
+  const logExecutionId = startsFreshLog ? crypto.randomUUID() : getLogExecutionId(replayEvents);
   const resumedHistory: readonly AgentLogEntry[] = [...replayEvents];
   const siteCallCounts = new Map<string, number>();
   const mintedCallKeys = new WeakMap<object, string>();
   runCtx.callKey = (siteId: string, self?: object) => {
-    const logId = replayEvents.find((entry) => entry.event.type === AGENT_INIT_EVENT_TYPE)?.id;
-    if (logId === undefined) {
+    if (logExecutionId === undefined) {
       return undefined;
     }
     const memoized = self === undefined ? undefined : mintedCallKeys.get(self);
@@ -2646,14 +2706,17 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     }
     const startedHere = siteCallCounts.get(siteId) ?? 0;
     siteCallCounts.set(siteId, startedHere + 1);
-    const key = `${logId}:${siteId}#${agentCallOccurrence(resumedHistory, siteId) + startedHere}`;
+    const key = `${logExecutionId}:${siteId}#${agentCallOccurrence(resumedHistory, siteId) + startedHere}`;
     if (self !== undefined) {
       mintedCallKeys.set(self, key);
     }
     return key;
   };
-  if (replayEvents.length === 0 && effectiveSnapshot === undefined) {
-    const entry = initEntry(machine, resolvedInput, { machineVersion });
+  if (startsFreshLog) {
+    const entry = initEntry(machine, resolvedInput, {
+      machineVersion,
+      ...(logExecutionId !== undefined ? { metadata: { executionId: logExecutionId } } : {}),
+    });
     replayEventIds.add(entry.id);
     replayEvents.push(entry);
     options.onEvent?.(entry);
@@ -2924,8 +2987,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
       let eventId: string | undefined;
       if (
         journaledUsageEvent !== undefined &&
-        (event.event === (journaledUsageEvent.event as unknown) ||
-          event.event.type === AGENT_USAGE_EVENT_TYPE)
+        event.event === (journaledUsageEvent.event as unknown)
       ) {
         // Already journaled by recordUsage before delivery — reuse its entry.
         eventId = journaledUsageEvent.id;

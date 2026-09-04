@@ -110,3 +110,59 @@ describe("cloudflare agent host", () => {
     expect(bob.state).toBe("prompting");
   });
 });
+
+describe("host error channels", () => {
+  it("answers a malformed WebSocket frame with a structured error", async () => {
+    const namespace = (env as { EmailDrafter: DurableObjectNamespace }).EmailDrafter;
+    const stub = namespace.get(namespace.idFromName("bad-frame"));
+    const sent: string[] = [];
+
+    await runInDurableObject(stub, (instance) => {
+      (instance as unknown as { onMessage(connection: unknown, message: string): void }).onMessage(
+        { send: (data: string) => sent.push(data) },
+        "{ not json",
+      );
+    });
+
+    expect(sent).toHaveLength(1);
+    expect(JSON.parse(sent[0]!)).toMatchObject({ type: "error" });
+  });
+
+  it("reports a first-turn failure as a 500 instead of throwing on a missing view", async () => {
+    const name = "corrupt-log";
+    const namespace = (env as { EmailDrafter: DurableObjectNamespace }).EmailDrafter;
+    const stub = namespace.get(namespace.idFromName(name));
+
+    // Seed a journal whose recorded hashes cannot be reproduced, so the very
+    // first turn of this conversation fails: the host has no snapshot to
+    // render, and the response must carry the real error rather than blow up
+    // building a view.
+    await runInDurableObject(stub, async (_instance, state) => {
+      await createDurableObjectEventLogStore(state.storage).append({
+        threadId: "main",
+        expectedIndex: 0,
+        entries: [
+          {
+            schemaVersion: 1,
+            id: "corrupt-0",
+            index: 0,
+            recordedAt: new Date(0).toISOString(),
+            machineId: "emailDrafter",
+            machineVersion: "corrupt",
+            event: { type: "SEND" },
+            verification: { stateHash: "corrupt", effectsHash: "corrupt" },
+          },
+        ],
+      });
+    });
+
+    const response = await SELF.fetch(url(name), {
+      method: "POST",
+      body: JSON.stringify({ type: "PROMPT_SUBMITTED", prompt: "Email ana@example.com" }),
+    });
+    const view = (await response.json()) as View;
+    expect(response.status).toBe(500);
+    expect(view.error).toBeTruthy();
+    expect(view.state).toBeUndefined();
+  });
+});

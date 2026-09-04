@@ -187,6 +187,7 @@ export {
   createReplayEntry,
   diffEventLogs,
   getAgentEffects,
+  getLogExecutionId,
   getUsageFromEvents,
   initEntry,
   replay,
