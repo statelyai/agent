@@ -47,7 +47,9 @@ Four things affect how you read these numbers.
 
 ### Billing
 
-`result.usage` is the authoritative record of what a run spent. Usage folds into the totals before the machine is involved, so a call counts even when its `@agent.usage` event is never delivered. A straggler that settles after the run resolved counts, and so does a call whose event no active state accepts. Only the machine event is dropped, and the drop is traced as `usage.dropped`. Counters in `context` are control flow, not billing: they only see the calls the machine reacted to.
+`result.usage` is a projection of the event log, not a separate counter: every settled call's `@agent.usage` event is journaled, and `result.usage` is the fold over the entries the run appended. Fold a log yourself with `getUsageFromEvents(entries)` — over `result.events` it reproduces `result.usage`, and over a resumed log it gives the cumulative spend across legs.
+
+Because journaling is unconditional, a call counts even when its `@agent.usage` event is never delivered to the machine: a call whose event no active state accepts is recorded, and so is a straggler that settles after the run resolved (its entry is appended to the log after the result returned, so it reaches `onEvent` and your event-log store rather than the already-returned `result.usage`). Only the machine *event* is skipped, traced as `usage.dropped`. Counters in `context` are control flow, not billing: they only see the calls the machine reacted to.
 
 Two caveats apply.
 
@@ -163,7 +165,7 @@ A wrapper is still host-side. The machine cannot read the remaining budget or re
 `@agent.usage` is a reserved event that carries one model call's tokens into the machine. Four rules govern it.
 
 - You declare nothing. `setupAgent` and `createAgentSchemas` register `'@agent.usage'` and its payload schema in every agent's events, so the handler is typed and `event.usage.totalTokens` narrows. Declaring it yourself is an error, because the `@agent.` namespace is reserved.
-- Delivery is opt-in. The event is delivered only when an active state declares a transition that matches it, either `'@agent.usage'` or the wildcard `'*'`. If no active state declares one, there is no transition, no trace event, and no event-log entry. Wildcard matching follows XState semantics, so a catch-all `on: { '*': … }` does receive `@agent.usage`. Narrow the handler on `event.type` when the catch-all is meant for other events.
+- Delivery is opt-in, journaling is not. The event is *delivered* only when an active state declares a transition that matches it, either `'@agent.usage'` or the wildcard `'*'`. If no active state declares one, there is no transition and no `machine.transition` trace — but the entry is still written to the event log, because `result.usage` is a fold over those entries. The entry replays as a no-op on a machine with no handler, so state and verification hashes are unaffected. One consequence: a machine that handles no usage no longer produces a byte-identical log to a pre-usage version of the library. Wildcard matching follows XState semantics, so a catch-all `on: { '*': … }` does receive `@agent.usage`. Narrow the handler on `event.type` when the catch-all is meant for other events.
 - Declare the handler at machine level. A root `on: { '@agent.usage': … }` catches every call regardless of which state made it. A state-scoped handler drops calls made in other states.
 - Delivery goes to the run's root machine, including usage from requests inside an invoked child machine. Attribute those calls with `id`, `src`, and `model`.
 
@@ -188,7 +190,7 @@ Model-call results reach the machine with usage stripped out.
 - A text invoke's `onDone` receives the normalized output only. The runner returns `{ output }` and drops the rest of the executor envelope (`src/run-agent.ts`).
 - A decision delivers only the chosen event. `resolveDecision` returns the validated event and drops the executor's `usage` (`src/decision.ts`).
 
-`@agent.usage` carries the tokens instead. After every settled model call that reported usage, `runAgent` delivers the event to the machine, so `context` can fold it and guards can read it. You can then keep both counters in `context`: increment turns in `onDone`, and fold tokens in the `@agent.usage` handler.
+`@agent.usage` carries the tokens instead. After every settled model call that reported usage, `runAgent` journals the event and — when the machine declares a transition for it — delivers it, so `context` can fold it and guards can read it. You can then keep both counters in `context`: increment turns in `onDone`, and fold tokens in the `@agent.usage` handler.
 
 ### Rules
 
@@ -197,7 +199,7 @@ Model-call results reach the machine with usage stripped out.
 | **Not model-facing** | The `@agent.*` namespace is excluded from `getAcceptedEvents` and `parseAgentEvent`. The event is never a decision candidate, even under `allowedEvents: ['*']`, and cannot be forged from a wire message.                                                                                                                     |
 | **Durability**       | The event is journaled like any other external input, so events-only recovery with `runAgent({ events })` replays the folded tokens without calling a model again.                                                                                                                                                             |
 | **Spend records**    | The cost is already incurred when the event is reported, so entries are append-only facts. Replay folds every entry, and a call re-executed by crash recovery journals its own usage on top. A recovered total therefore reflects cumulative cost, including the call whose result the crash lost.                              |
-| **Stragglers**       | A call that settles after the run's cycle resolved, at an idle settle, a `done` or `error` settle, or an abort, still folds into `result.usage`, but its machine event is dropped. This applies to both `runAgent` and `createAgentActor`, so a late arrival cannot re-open a returned idle result. Watch `usage.dropped` on `onTrace` if a counter looks short. |
+| **Stragglers**       | A call that settles after the run's cycle resolved, at an idle settle, a `done` or `error` settle, or an abort, is still appended to the log and still reaches `onEvent`, but its machine event is not delivered. This applies to both `runAgent` and `createAgentActor`, so a late arrival cannot re-open a returned idle result. The trace for it is `usage.dropped` — a historical name (`schemaVersion: 1`): the tokens are recorded, only the machine event is skipped. Watch it on `onTrace` if a `context` counter looks short. |
 | **Coverage**         | Only usage your executor reports is delivered. No `usage` on the result means no event. [`simulateAgent`](verify.md) scripts return no usage, so a token counter stays `0` under simulation. Test budgets with `runAgent` and a usage-reporting mock.                                                                          |
 
 Opt in with a transition.

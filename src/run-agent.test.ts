@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
-import { createActor, createAsyncLogic, setup, toPromise } from "xstate";
+import { createActor, createAsyncLogic, setup, toPromise, type Snapshot } from "xstate";
 import { createDecisionLogic } from "./decision.js";
 import {
   AGENT_TRACE_SCHEMA_VERSION,
@@ -13,6 +13,7 @@ import {
   replay,
   runAgent,
   generateResult,
+  getUsageFromEvents,
   setupAgent,
   AgentSnapshotVersionMismatchError,
   type AgentDecisionRequest,
@@ -1841,17 +1842,24 @@ describe("emitted events (runAgent `on`)", () => {
     expect(trace[0]).toEqual(expect.objectContaining({ type: "run.start", seq: 1 }));
     expect(trace.at(-1)).toEqual(expect.objectContaining({ type: "run.end", status: "done" }));
     expect(trace.at(-1)).not.toHaveProperty("events");
-    expect(result.events).toHaveLength(2);
+    // The reserved `@agent.usage` event is journaled unconditionally, so it sits
+    // in the log even though this machine declares no handler for it.
+    expect(result.events).toHaveLength(3);
     expect(result.events[0]!.event.type).toBe("@agent.init");
-    expect(result.events[1]!.event).toMatchObject({
+    expect(result.events[1]!.event).toMatchObject({ type: "@agent.usage" });
+    expect(result.events[2]!.event).toMatchObject({
       type: "xstate.done.actor",
       actorId: expect.any(String),
     });
+    // The undelivered usage entry takes no transition, so it has no
+    // `machine.transition` trace; every OTHER entry still does.
     expect(
       trace.flatMap((event) =>
         event.type === "machine.transition" && event.eventId ? [event.eventId] : [],
       ),
-    ).toEqual(result.events.map((entry) => entry.id));
+    ).toEqual(
+      result.events.filter((entry) => entry.event.type !== "@agent.usage").map((entry) => entry.id),
+    );
     expect(trace.map((event) => event.type)).toEqual(
       expect.arrayContaining([
         "emit",
@@ -3274,6 +3282,103 @@ describe("restore semantics: pending requests and events-only resume", () => {
       runAgent(machine, { events: withoutInit, event: { type: "GO" }, executors }),
     ).rejects.toThrow(/contiguous/);
   });
+
+  // The log is the source of truth on resume; a `snapshot` passed with it is a
+  // cache, trusted only when it is stamped at the log's current tail.
+  describe("log-first resume (snapshot as cache)", () => {
+    const executorsFor = (calls: string[]) => ({
+      generateText: async (request: AgentTextRequest & { tools: AgentTools }) => {
+        calls.push(request.prompt ?? "");
+        return { output: `ok:${request.prompt}` };
+      },
+    });
+
+    // idle-at-the-gate leg, then the leg that runs through to done.
+    const runBothLegs = async (calls: string[]) => {
+      const machine = buildMachine();
+      const executors = executorsFor(calls);
+      const idle = await runAgent(machine, { input: {}, executors });
+      expect(idle.status).toBe("idle");
+      const done = await runAgent(machine, {
+        events: idle.events,
+        event: { type: "GO" },
+        executors,
+      });
+      expect(done.status).toBe("done");
+      return { machine, executors, idle, done };
+    };
+
+    test("settled snapshots are stamped with agentMeta.logIndex = events.length", async () => {
+      const calls: string[] = [];
+      const { idle, done } = await runBothLegs(calls);
+      const idleMeta = (idle.snapshot as { agentMeta?: { logIndex?: number } }).agentMeta;
+      expect(idleMeta?.logIndex).toBe(idle.events.length);
+      expect(
+        (idle.status === "idle"
+          ? (idle.persistedSnapshot as { agentMeta?: { logIndex?: number } })
+          : {}
+        ).agentMeta?.logIndex,
+      ).toBe(idle.events.length);
+      const doneMeta = (done.snapshot as { agentMeta?: { logIndex?: number } }).agentMeta;
+      expect(doneMeta?.logIndex).toBe(done.events.length);
+    });
+
+    test("a stale snapshot alongside a longer log resumes from the log", async () => {
+      const calls: string[] = [];
+      const { machine, executors, idle, done } = await runBothLegs(calls);
+      expect(calls).toEqual(["one", "two"]);
+      const stale = JSON.parse(
+        JSON.stringify(idle.status === "idle" ? idle.persistedSnapshot : idle.snapshot),
+      ) as Snapshot<unknown>;
+
+      // The cache is stamped at the gate; the log runs to the final state.
+      const resumed = await runAgent(machine, {
+        snapshot: stale,
+        events: JSON.parse(JSON.stringify(done.events)),
+        executors,
+      });
+      expect(resumed.status).toBe("done");
+      expect(resumed.status === "done" ? resumed.output : undefined).toEqual({
+        a: "ok:one",
+        b: "ok:two",
+      });
+      // Nothing recorded in the log was re-executed.
+      expect(calls).toEqual(["one", "two"]);
+    });
+
+    test("a snapshot that disagrees with the log at its own logIndex throws snapshot-diverged", async () => {
+      const calls: string[] = [];
+      const { machine, executors, idle, done } = await runBothLegs(calls);
+      const tampered = JSON.parse(
+        JSON.stringify(idle.status === "idle" ? idle.persistedSnapshot : idle.snapshot),
+      ) as Snapshot<unknown> & { context: { a: string | null } };
+      tampered.context.a = "tampered";
+
+      await expect(
+        runAgent(machine, {
+          snapshot: tampered,
+          events: JSON.parse(JSON.stringify(done.events)),
+          executors,
+        }),
+      ).rejects.toMatchObject({ code: "snapshot-diverged" });
+    });
+
+    test("a log that already reached a final state settles done immediately", async () => {
+      const calls: string[] = [];
+      const { machine, executors, done } = await runBothLegs(calls);
+
+      const replayed = await runAgent(machine, {
+        events: JSON.parse(JSON.stringify(done.events)),
+        executors,
+      });
+      expect(replayed.status).toBe("done");
+      expect(replayed.status === "done" ? replayed.output : undefined).toEqual({
+        a: "ok:one",
+        b: "ok:two",
+      });
+      expect(calls).toEqual(["one", "two"]);
+    });
+  });
 });
 
 describe("createAgentActor (session mode)", () => {
@@ -3342,11 +3447,14 @@ describe("createAgentActor (session mode)", () => {
       b: "ok:two",
     });
 
-    // One replayable log spanning both cycles: init, first done, GO, second done.
+    // One replayable log spanning both cycles: init, each call's journaled
+    // usage, the first done, GO, the second done.
     expect(session.events.map((entry) => entry.event.type)).toEqual([
       "@agent.init",
+      "@agent.usage",
       "xstate.done.actor",
       "GO",
+      "@agent.usage",
       "xstate.done.actor",
     ]);
     expect(replay(machine, [...session.events]).snapshot.status).toBe("done");
@@ -3489,6 +3597,7 @@ describe("snapshot version stamping", () => {
     expect((idle.snapshot as { agentMeta?: unknown }).agentMeta).toEqual({
       machineId: "versioned",
       version,
+      logIndex: idle.events.length,
     });
 
     const done = await runAgent(machine, {
@@ -3774,6 +3883,94 @@ describe("runAgent usage aggregation", () => {
     // reported fields are sums over the reporting subset.
     expect(result.usage).toEqual({ inputTokens: 5, totalTokens: 6, modelCalls: 2 });
     expect(result.usage.outputTokens).toBeUndefined();
+  });
+
+  test("result.usage is exactly the fold over the log's own usage entries", async () => {
+    const result = await runAgent(twoCallMachine, {
+      input: {},
+      executors: {
+        generateText: async () => ({
+          output: "out",
+          usage: { inputTokens: 10, outputTokens: 4, totalTokens: 14 },
+        }),
+      },
+    });
+
+    expect(result.status).toBe("done");
+    expect(result.events.filter((entry) => entry.event.type === "@agent.usage")).toHaveLength(2);
+    expect(result.usage).toEqual({ ...getUsageFromEvents(result.events), modelCalls: 2 });
+  });
+
+  test("events-only resume recovers the log's spend plus the re-executed call's", async () => {
+    const executors = {
+      generateText: async () => ({ output: "out", usage: { totalTokens: 14 } }),
+    };
+    const first = await runAgent(twoCallMachine, { input: {}, executors });
+    expect(first.usage).toEqual({ totalTokens: 28, modelCalls: 2 });
+    expect(getUsageFromEvents(first.events)).toEqual({ totalTokens: 28 });
+
+    // Truncate the log to just after the FIRST call's completion: the second
+    // call was in flight when the "crash" happened, so the resume re-executes
+    // it and journals its usage on top. Usage entries are spend records — the
+    // first call's tokens stay spent.
+    const cut = first.events.findIndex((entry) => entry.event.type === "xstate.done.actor") + 1;
+    const truncated = first.events.slice(0, cut);
+    expect(getUsageFromEvents(truncated)).toEqual({ totalTokens: 14 });
+
+    const resumed = await runAgent(twoCallMachine, { events: truncated, executors });
+    expect(resumed.status).toBe("done");
+    // The resumed run reports only what IT spent...
+    expect(resumed.usage).toEqual({ totalTokens: 14, modelCalls: 1 });
+    // ...and the recovered log carries the true cumulative cost.
+    expect(getUsageFromEvents(resumed.events)).toEqual({ totalTokens: 28 });
+  });
+
+  test("a straggler settling after the run is appended to the log and reaches onEvent", async () => {
+    const seen: AgentLogEntry[] = [];
+    const controller = new AbortController();
+    let markStarted: () => void = () => {};
+    const callStarted = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    let markFinished: () => void = () => {};
+    const callFinished = new Promise<void>((resolve) => {
+      markFinished = resolve;
+    });
+
+    const pending = runAgent(twoCallMachine, {
+      input: {},
+      signal: controller.signal,
+      onEvent: (entry) => seen.push(entry),
+      executors: {
+        generateText: async () => {
+          markStarted();
+          // Settles well after the abort below: a straggler.
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          markFinished();
+          return { output: "late", usage: { totalTokens: 42 } };
+        },
+      },
+    });
+
+    await callStarted;
+    controller.abort();
+    const result = await pending;
+
+    // The run aborted before the call reported anything.
+    expect(result.status).toBe("error");
+    expect(result.usage).toEqual({ modelCalls: 1 });
+    expect(result.events.some((entry) => entry.event.type === "@agent.usage")).toBe(false);
+
+    // The straggler still lands in the log — and therefore in the caller's
+    // event-log store / `onEvent` sink — once it settles.
+    await callFinished;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const stragglers = seen.filter((entry) => entry.event.type === "@agent.usage");
+    expect(stragglers).toHaveLength(1);
+    expect(stragglers[0]!.event).toMatchObject({ usage: { totalTokens: 42 } });
+    // Appended past the returned result's tail: an already-returned result is
+    // never mutated.
+    expect(stragglers[0]!.index).toBe(result.events.length);
   });
 
   test("counts model calls even when no executor reports usage", async () => {
@@ -4067,5 +4264,164 @@ describe("machine input validation", () => {
 
     if (result.status !== "done") throw new Error("expected done");
     expect(result.output).toEqual({ anything: 1 });
+  });
+});
+
+describe("executor callKey (idempotency key)", () => {
+  // A single invoke site re-entered N times: same site id, rising occurrence.
+  const buildLoopMachine = () => {
+    const agentSetup = setupAgent({
+      context: z.object({ count: z.number(), answers: z.array(z.string()) }),
+      input: z.object({}),
+      output: z.object({ answers: z.array(z.string()) }),
+      events: {},
+    });
+    return agentSetup.createMachine({
+      context: () => ({ count: 0, answers: [] }),
+      initial: "asking",
+      states: {
+        asking: {
+          invoke: {
+            id: "ask",
+            src: "agent.generateText",
+            input: ({ context }) => ({ model: "m", prompt: `ask-${context.count}` }),
+            onDone: ({ context, event }) => ({
+              target: context.count >= 2 ? "done" : "asking",
+              reenter: true,
+              context: {
+                count: context.count + 1,
+                answers: [...context.answers, String(event.output)],
+              },
+            }),
+          },
+        },
+        done: {
+          type: "final",
+          output: ({ context }) => ({ answers: context.answers }),
+        },
+      },
+    });
+  };
+
+  test("a looped invoke site gets #1, #2, #3", async () => {
+    const machine = buildLoopMachine();
+    const keys: Array<string | undefined> = [];
+    const result = await runAgent(machine, {
+      input: {},
+      executors: {
+        generateText: async (request, info) => {
+          keys.push(info?.callKey);
+          return { output: `ok:${request.prompt}` };
+        },
+      },
+    });
+
+    expect(result.status).toBe("done");
+    const logId = result.events[0]!.id;
+    expect(keys).toEqual([`${logId}:ask#1`, `${logId}:ask#2`, `${logId}:ask#3`]);
+  });
+
+  test("callKey's site#occurrence half equals the requestId replay derives for that call", async () => {
+    const machine = buildLoopMachine();
+    const keys: string[] = [];
+    const result = await runAgent(machine, {
+      input: {},
+      executors: {
+        generateText: async (request, info) => {
+          keys.push(info!.callKey!);
+          return { output: `ok:${request.prompt}` };
+        },
+      },
+    });
+
+    // Replay the prefix that ends just before each recorded completion: the
+    // owed effect is exactly the call that was in flight at that point.
+    const completions = result.events
+      .map((entry, index) => ({ entry, index }))
+      .filter(({ entry }) => entry.event.type === "xstate.done.actor");
+    expect(completions).toHaveLength(3);
+    completions.forEach(({ index }, n) => {
+      const owed = replay(machine, result.events.slice(0, index)).effects;
+      expect(owed).toHaveLength(1);
+      const effect = owed[0]!;
+      if (effect.kind !== "text") throw new Error("expected an owed text effect");
+      expect(effect.requestId).toBe(`ask#${n + 1}`);
+      expect(keys[n]).toBe(`${result.events[0]!.id}:${effect.requestId}`);
+    });
+  });
+
+  test("crash resume re-executes the in-flight call with the SAME callKey", async () => {
+    const machine = buildLoopMachine();
+    const abort = new AbortController();
+    const keys: string[] = [];
+
+    // Crash mid-second call, with the log persisted.
+    const crashed = await runAgent(machine, {
+      input: {},
+      signal: abort.signal,
+      executors: {
+        generateText: async (request, info) => {
+          keys.push(info!.callKey!);
+          if (request.prompt === "ask-1") {
+            setTimeout(() => abort.abort(new Error("simulated crash")), 10);
+            return new Promise(() => {}) as never;
+          }
+          return { output: `ok:${request.prompt}` };
+        },
+      },
+    });
+    expect(crashed.status).toBe("error");
+    expect(keys).toHaveLength(2);
+
+    // Recover from the log alone: the in-flight call runs again, same key.
+    const retried: string[] = [];
+    const recovered = await runAgent(machine, {
+      events: JSON.parse(JSON.stringify(crashed.events)) as AgentLogEntry[],
+      executors: {
+        generateText: async (request, info) => {
+          retried.push(info!.callKey!);
+          return { output: `ok:${request.prompt}` };
+        },
+      },
+    });
+
+    expect(recovered.status).toBe("done");
+    expect(retried[0]).toBe(keys[1]);
+    expect(retried[0]).toContain(":ask#2");
+  });
+
+  test("a fork of the log shares the logId prefix", async () => {
+    const machine = buildLoopMachine();
+    const original = await runAgent(machine, {
+      input: {},
+      executors: { generateText: async (request) => ({ output: `ok:${request.prompt}` }) },
+    });
+    const logId = original.events[0]!.id;
+
+    // Fork: replay a prefix of the same log lineage as a new run.
+    const forkPoint = original.events.findIndex(
+      (entry) => entry.event.type === "xstate.done.actor",
+    );
+    const forkKeys: string[] = [];
+    const forked = await runAgent(machine, {
+      events: JSON.parse(
+        JSON.stringify(original.events.slice(0, forkPoint + 1)),
+      ) as AgentLogEntry[],
+      executors: {
+        generateText: async (request, info) => {
+          forkKeys.push(info!.callKey!);
+          return { output: `fork:${request.prompt}` };
+        },
+      },
+    });
+
+    expect(forked.status).toBe("done");
+    expect(forkKeys.length).toBeGreaterThan(0);
+    for (const key of forkKeys) {
+      expect(key.startsWith(`${logId}:`)).toBe(true);
+    }
+    // The fork re-derives the parent's own occurrences, so cached results keyed
+    // by the parent's callKey are reusable.
+    expect(forkKeys[0]).toBe(`${logId}:ask#2`);
   });
 });

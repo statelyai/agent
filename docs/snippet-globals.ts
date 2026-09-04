@@ -314,3 +314,5 @@ declare function myCustomStreamText(options: any): any;
 type JsonValue = string | number | boolean | null | JsonValue[] | { [k: string]: JsonValue };
 
 type State = any;
+
+declare function callProvider(request: unknown, idempotencyKey?: string): Promise<string>;

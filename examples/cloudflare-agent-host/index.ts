@@ -3,9 +3,15 @@
  * Cloudflare Agents host for XState agent machines — a complete, runnable Worker.
  *
  * The shape:
- * - The Agent (a Durable Object) hosts the XState actor.
- * - The persisted snapshot lives in Agent state, so the machine survives
- *   hibernation/eviction and resumes exactly where it left off.
+ * - The Agent (a Durable Object) hosts the agent machine.
+ * - **The event log is the source of truth.** The DO persists an append-only
+ *   journal of external inputs (`AgentLogEntry`) in its own SQLite storage, and
+ *   every wake resumes by replaying that journal through `runDurableAgent`.
+ *   A snapshot is only ever a cache over what the log already implies, so this
+ *   host keeps none: there is no snapshot to go stale, diverge, or fail to
+ *   deserialize after a machine change.
+ * - Model calls are never re-run on resume: an invoke whose completion is
+ *   already journaled replays its recorded result instead of executing again.
  * - Clients drive the machine with plain machine events, over HTTP
  *   (`onRequest`) or WebSocket (`onMessage`) — provider/runtime details stay in
  *   the host, never in the machine.
@@ -22,7 +28,7 @@
  *                                              accepted events, draft, output)
  *   POST /agents/email-drafter/:name        -> body is a machine event
  *                                              (`{"type":"PROMPT_SUBMITTED", ...}`),
- *                                              validated, sent, then awaited
+ *                                              validated, journaled, then run
  *                                              until the machine is idle again
  *
  * Run:
@@ -35,19 +41,21 @@
  *   curl -X POST localhost:3009/agents/email-drafter/demo -d '{"type":"END"}'
  */
 import { Agent, routeAgentRequest, type Connection } from "agents";
-import { createActor, type Actor, type AnyMachineSnapshot, type Snapshot } from "xstate";
+import type { EventFromLogic, SnapshotFrom } from "xstate";
 import { createOpenAI } from "@ai-sdk/openai";
 import {
   createScriptedExecutors,
   getAcceptedEvents,
   getStateMeta,
   parseAgentEvent,
-  provideExecutors,
+  runDurableAgent,
+  type AgentLogEntry,
   type AgentRequestExecutors,
   type AgentTextRequest,
 } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import { emailDrafter, emailDrafterSchemas } from "../email-drafter/agent-logic.js";
+import { createDurableObjectEventLogStore } from "./event-log-store.js";
 
 interface Env {
   EmailDrafter: DurableObjectNamespace<EmailDrafter>;
@@ -55,9 +63,11 @@ interface Env {
   OPENAI_API_KEY?: string;
 }
 
-interface EmailDrafterState {
-  snapshot?: Snapshot<unknown>;
-}
+type DrafterSnapshot = SnapshotFrom<typeof emailDrafter>;
+type DrafterEvent = EventFromLogic<typeof emailDrafter>;
+
+/** One DO instance is one conversation, so it holds exactly one log thread. */
+const THREAD_ID = "main";
 
 /**
  * Keyless answers, routed on the request's model ref (`model: 'promptEvaluator'`
@@ -97,57 +107,41 @@ function resolveExecutors(env: Env): AgentRequestExecutors {
   });
 }
 
-/** Idle = the machine is waiting on a human (it declares an interaction) or finished. */
-function isSettled(snapshot: AnyMachineSnapshot): boolean {
-  return snapshot.status !== "active" || Boolean(getStateMeta(snapshot).interaction);
-}
+export class EmailDrafter extends Agent<Env> {
+  #store: ReturnType<typeof createDurableObjectEventLogStore> | undefined;
+  /** Derived state, never authoritative: recomputed from the log on every wake. */
+  #snapshot: DrafterSnapshot | undefined;
+  /** Serializes turns, so two overlapping requests cannot interleave appends. */
+  #turns: Promise<unknown> = Promise.resolve();
 
-export class EmailDrafter extends Agent<Env, EmailDrafterState> {
-  initialState: EmailDrafterState = {};
-  #actor: Actor<typeof emailDrafter> | undefined;
+  get #log() {
+    // Lazily built so the table DDL runs on first use rather than at construction.
+    this.#store ??= createDurableObjectEventLogStore(this.ctx.storage);
+    return this.#store;
+  }
 
   onStart() {
-    // Executors are provided by the host; the machine only names its requests.
-    const machine = provideExecutors(emailDrafter, resolveExecutors(this.env));
-
-    // Restore from the persisted snapshot if the DO was evicted mid-run.
-    this.#actor = createActor(machine, { snapshot: this.state.snapshot, input: undefined });
-
-    this.#actor.subscribe((snapshot) => {
-      // Durable persistence on every transition: this is the journal the
-      // analytics/visualization layer reads, keyed by this Agent instance.
-      this.setState({ snapshot: this.#actor!.getPersistedSnapshot() });
-      this.broadcast(
-        JSON.stringify({
-          type: "state",
-          value: snapshot.value,
-          // meta is schema-typed: clients get the interaction protocol
-          // (text / select / confirm) for the current state.
-          meta: snapshot.getMeta(),
-        }),
-      );
-    });
-
-    this.#actor.start();
+    // Warm the DO: replay the journal (or start a fresh run) so a connecting
+    // client gets a state broadcast without having to send anything first.
+    void this.#enqueue(() => this.#ready());
   }
 
   onMessage(connection: Connection, message: string) {
     // Client messages are machine events (PROMPT_SUBMITTED, SEND, ...).
     const event = JSON.parse(message) as { type: string; [key: string]: unknown };
-    try {
-      this.#send(event);
-    } catch (error) {
+    void this.#enqueue(() => this.#send(event)).catch((error: unknown) => {
       connection.send(
         JSON.stringify({
           type: "error",
           issues: [{ message: (error as Error).message }],
         }),
       );
-    }
+    });
   }
 
   async onRequest(request: Request): Promise<Response> {
     if (request.method === "GET") {
+      await this.#enqueue(() => this.#ready());
       return Response.json(this.#view());
     }
     if (request.method !== "POST") {
@@ -170,49 +164,99 @@ export class EmailDrafter extends Agent<Env, EmailDrafterState> {
     }
 
     try {
-      this.#send(event);
+      // One POST maps to one settled turn: `runDurableAgent` returns only when
+      // the machine is waiting on a human again, or is done.
+      await this.#enqueue(() => this.#send(event));
     } catch (error) {
       return Response.json({ error: (error as Error).message, ...this.#view() }, { status: 400 });
     }
-
-    // Hold the request open across the machine's async work, so one POST maps
-    // to one settled turn: the response is always an idle (or final) state.
-    await this.#settle();
     return Response.json(this.#view());
   }
 
-  /** Validates the event against the snapshot's accepted events + payload schemas, then sends it. */
-  #send(event: { type: string } & Record<string, unknown>) {
-    const snapshot = this.#actor?.getSnapshot();
-    if (!snapshot) {
-      throw new Error("Agent actor is not running.");
-    }
-    this.#actor!.send(parseAgentEvent(snapshot, event, { events: emailDrafterSchemas.events }));
+  /** Runs `work` after every previously queued turn, whatever their outcome. */
+  #enqueue<T>(work: () => Promise<T>): Promise<T> {
+    const result = this.#turns.then(work, work);
+    this.#turns = result.catch(() => {});
+    return result;
   }
 
-  /** Resolves once the machine is waiting on a human again, or is done. */
-  #settle(timeoutMs = 60_000): Promise<void> {
-    const actor = this.#actor!;
-    if (isSettled(actor.getSnapshot())) {
-      return Promise.resolve();
+  /** Ensures the derived snapshot exists: a fresh run, or a replay of the journal. */
+  async #ready(): Promise<void> {
+    if (!this.#snapshot) {
+      await this.#turn();
     }
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        subscription.unsubscribe();
-        reject(new Error(`Machine did not settle within ${timeoutMs}ms.`));
-      }, timeoutMs);
-      const subscription = actor.subscribe((snapshot) => {
-        if (!isSettled(snapshot)) return;
-        clearTimeout(timer);
-        subscription.unsubscribe();
-        resolve();
-      });
+  }
+
+  /** Validates the event against the derived snapshot, then runs one turn with it. */
+  async #send(event: { type: string } & Record<string, unknown>): Promise<void> {
+    await this.#ready();
+    const parsed = parseAgentEvent(this.#snapshot!, event, {
+      events: emailDrafterSchemas.events,
     });
+    await this.#turn(parsed);
+  }
+
+  /**
+   * One durable turn: read the journal, resume from it, optionally deliver one
+   * client event, and append everything the run journals as it happens.
+   *
+   * `runDurableAgent` settles when the machine is waiting on a human or done —
+   * the same "idle" the HTTP protocol promises — and the entries it appends are
+   * what makes the turn durable. Nothing else is persisted.
+   */
+  async #turn(event?: DrafterEvent): Promise<void> {
+    const store = this.#log;
+    const journal = await store.read(THREAD_ID);
+    const log: AgentLogEntry[] = [...journal];
+    const writes: Promise<void>[] = [];
+
+    const result = await runDurableAgent(emailDrafter, {
+      entries: journal.length > 0 ? journal : undefined,
+      event,
+      executors: resolveExecutors(this.env),
+      // Incremental persistence: each external input is journaled the moment
+      // the run accepts it, so a crash mid-turn loses only in-flight work.
+      onEntry: (entry, snapshot) => {
+        log.push(entry);
+        writes.push(this.#turnWrite(store, entry, snapshot));
+      },
+    });
+
+    await Promise.all(writes);
+    this.#snapshot = result.snapshot;
+    if (writes.length === 0) {
+      // A pure resume appended nothing; still tell clients where we are.
+      this.#broadcastState(result.snapshot);
+    }
+  }
+
+  /** Appends one entry, then broadcasts the state that entry produces. */
+  async #turnWrite(
+    store: ReturnType<typeof createDurableObjectEventLogStore>,
+    entry: AgentLogEntry,
+    snapshot: DrafterSnapshot,
+  ): Promise<void> {
+    await store.append({ threadId: THREAD_ID, expectedIndex: entry.index, entries: [entry] });
+    // `onEntry` hands over the live snapshot that entry produced, so the
+    // broadcast is exact — no replay of the log prefix to re-derive it.
+    this.#broadcastState(snapshot);
+  }
+
+  #broadcastState(snapshot: DrafterSnapshot) {
+    this.broadcast(
+      JSON.stringify({
+        type: "state",
+        value: snapshot.value,
+        // meta is schema-typed: clients get the interaction protocol
+        // (text / select / confirm) for the current state.
+        meta: snapshot.getMeta(),
+      }),
+    );
   }
 
   /** The wire view of the machine: what a client needs to render the next step. */
   #view() {
-    const snapshot = this.#actor!.getSnapshot();
+    const snapshot = this.#snapshot!;
     const { display, interaction } = getStateMeta(snapshot);
     return {
       status: snapshot.status,
@@ -235,7 +279,8 @@ const usage = [
   "  POST /agents/email-drafter/:name   send a machine event, e.g.",
   '       {"type":"PROMPT_SUBMITTED","prompt":"Email ana@example.com about Friday\'s launch"}',
   "",
-  "Each :name is its own Durable Object, i.e. its own conversation.",
+  "Each :name is its own Durable Object, i.e. its own conversation, and its own",
+  "append-only event log in that object's SQLite storage.",
 ].join("\n");
 
 export default {

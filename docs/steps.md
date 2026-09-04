@@ -140,7 +140,7 @@ if (effect.kind === "text") {
 }
 ```
 
-In this example, `append(event)` is the loop's own `entries.push(createReplayEntry(machine, entries, event))` followed by `transition(...)`. Add `kind`, `id`, `src`, and `model` to the event to record the attribution that `runAgent` stamps. Usage is opt-in: a machine that declares no `'@agent.usage'` transition ignores the event, so append it only when the machine declares one.
+In this example, `append(event)` is the loop's own `entries.push(createReplayEntry(machine, entries, event))` followed by `transition(...)`. Add `kind`, `id`, `src`, and `model` to the event to record the attribution that `runAgent` stamps. Append the usage event to the log for every call; usage entries are spend records and the log is the source of truth. Delivery is separate: a machine that declares no `'@agent.usage'` transition ignores the event when it is applied, so the entry is a no-op transition for that machine.
 
 ### Standalone decision resolution
 

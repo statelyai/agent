@@ -1,13 +1,17 @@
 /**
  * Runs the Worker in real workerd (via @cloudflare/vitest-plugin), so the
- * Durable Object, its SQLite storage, and the persisted XState snapshot are the
- * real thing — not a Node stand-in. Keyless: `vitest.config.ts` forces the
+ * Durable Object, its SQLite storage, and the persisted event log are the real
+ * thing — not a Node stand-in. Keyless: `vitest.config.ts` forces the
  * `OPENAI_API_KEY` binding empty (it would otherwise be picked up from a
  * `.dev.vars` left behind by `dev:live`), so the host falls back to scripted
  * executors and this suite never bills a provider.
+ *
+ * The host is log-as-truth: it persists no snapshot at all, so "does it survive
+ * a wake?" is really "does replaying the journal reproduce the conversation?".
  */
-import { SELF } from "cloudflare:test";
+import { SELF, env, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import { createDurableObjectEventLogStore } from "../event-log-store.js";
 
 interface View {
   status: string;
@@ -56,13 +60,35 @@ describe("cloudflare agent host", () => {
     expect(done.output?.sentEmails).toHaveLength(1);
   });
 
-  it("persists the snapshot in Durable Object state across requests", async () => {
+  it("resumes from the journal across requests", async () => {
     const name = "persisted";
     await send(name, { type: "PROMPT_SUBMITTED", prompt: "Email ana@example.com" });
 
     const view = (await (await SELF.fetch(url(name))).json()) as View;
     expect(view.state).toBe("reviewing");
     expect(view.draft).not.toBeNull();
+  });
+
+  it("journals the run as an append-only log, and stores no snapshot", async () => {
+    const name = "journaled";
+    await send(name, { type: "PROMPT_SUBMITTED", prompt: "Email ana@example.com" });
+
+    const namespace = (env as { EmailDrafter: DurableObjectNamespace }).EmailDrafter;
+    const stub = namespace.get(namespace.idFromName(name));
+    await runInDurableObject(stub, async (_instance, state) => {
+      const entries = await createDurableObjectEventLogStore(state.storage).read("main");
+
+      // Contiguous from a reserved init entry, then one entry per external
+      // input: the user event and each invoke completion.
+      expect(entries.map((entry) => entry.index)).toEqual(entries.map((_e, i) => i));
+      expect(entries[0]!.event.type).toBe("@agent.init");
+      expect(entries.map((entry) => entry.event.type)).toContain("PROMPT_SUBMITTED");
+      expect(entries.length).toBeGreaterThan(2);
+
+      // No snapshot cache: the log is the only durable representation.
+      const keys = await state.storage.list<unknown>();
+      expect([...keys.keys()].filter((key) => key.includes("snapshot"))).toEqual([]);
+    });
   });
 
   it("rejects an event the current state does not accept", async () => {

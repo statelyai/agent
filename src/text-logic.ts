@@ -738,6 +738,19 @@ export interface AgentRequestExecutorInfo {
    * call has no invoking actor.
    */
   requestId?: string;
+  /**
+   * Idempotency key for THIS call: `${logId}:${siteId}#${occurrence}`, where
+   * `logId` is the id of the log's `@agent.init` entry and `occurrence` is the
+   * 1-based count of journaled completions for the invoke site. Identical
+   * across a crash resume that re-executes the same call, and distinct per
+   * loop iteration, so providers and tools can dedupe on it. Forks share the
+   * `logId`, so a fork can reuse the parent's cached results.
+   *
+   * Undefined off the `runAgent` path (bare `provideExecutors` / direct
+   * `TextLogic.execute`) and on a `runAgent` run resumed from a snapshot with
+   * no event log — neither has a log to key against.
+   */
+  callKey?: string;
 }
 
 /**

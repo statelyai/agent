@@ -29,6 +29,7 @@ import {
 import { getAgentRequests, getInvokeEffectMetadata } from "./steps.js";
 import { isDecisionLogic, type AgentDecisionRequest } from "./decision.js";
 import {
+  AGENT_USAGE_TOKEN_FIELDS,
   isTextLogic,
   type AgentCallUsage,
   type AgentRequestMode,
@@ -118,13 +119,16 @@ export const AGENT_INIT_EVENT_TYPE = "@agent.init" as const;
  * `getAcceptedEvents`/`parseAgentEvent` never offer it — a model can neither
  * be shown it as a decision candidate nor forge one.
  *
- * Delivery is opt-in BY CONSTRUCTION: the event is sent only when the live
+ * JOURNALING is unconditional: `runAgent` appends every usage event to the
+ * event log, because `result.usage` is a fold over those entries (see
+ * {@link getUsageFromEvents}) rather than a host-side counter. DELIVERY to the
+ * machine stays opt-in BY CONSTRUCTION: the event is sent only when the live
  * snapshot can currently take it (i.e. the machine declares an
  * `'@agent.usage'` transition, usually machine-level `on`). A machine without
- * one sees no extra transition, no extra trace event, and no extra log entry.
- * When it IS taken it rides the event log like any other external input, so
- * events-only recovery (`runAgent({ events })`) replays the folded tokens
- * without re-calling a model.
+ * one sees no extra transition and no extra `machine.transition` trace — but
+ * it does get the log entry, which replays as a no-op and leaves the state
+ * unchanged. Events-only recovery (`runAgent({ events })`) therefore recovers
+ * the spend without re-calling a model, handler or not.
  */
 export const AGENT_USAGE_EVENT_TYPE = "@agent.usage" as const;
 
@@ -152,6 +156,41 @@ export interface AgentUsageEvent extends EventObject {
   model?: string;
   /** The reporting text request's registered `name`, when it declared one. */
   name?: string;
+}
+
+/**
+ * Folds the reserved {@link AGENT_USAGE_EVENT_TYPE} entries of an event log
+ * into one cumulative {@link AgentCallUsage}. This is how `runAgent` computes
+ * `result.usage`: the log is the source of truth, so the totals are a pure
+ * projection of it — replay a log, fold it, and you get the same numbers the
+ * run reported, with no host-side accumulator in between.
+ *
+ * Accepts entries or bare events (a step-loop journal holds either). Token
+ * fields are partial sums: a field stays `undefined` until some entry reports
+ * it, and non-finite values are ignored. Usage entries are SPEND RECORDS, so
+ * a re-executed call's fresh entry adds to the recovered total rather than
+ * replacing it.
+ */
+export function getUsageFromEvents(
+  entries: readonly (EventObject | AgentLogEntry)[],
+): AgentCallUsage {
+  const totals: AgentCallUsage = {};
+  for (const event of toEvents(entries)) {
+    if (event.type !== AGENT_USAGE_EVENT_TYPE) {
+      continue;
+    }
+    const usage = (event as { usage?: unknown }).usage;
+    if (!usage || typeof usage !== "object") {
+      continue;
+    }
+    for (const field of AGENT_USAGE_TOKEN_FIELDS) {
+      const value = (usage as Record<string, unknown>)[field];
+      if (typeof value === "number" && Number.isFinite(value)) {
+        totals[field] = (totals[field] ?? 0) + value;
+      }
+    }
+  }
+  return totals;
 }
 
 /** Options controlling the durable envelope created by {@link createReplayEntry}. */
@@ -247,7 +286,7 @@ function toEvents(history: readonly (EventObject | AgentLogEntry)[] | undefined)
   });
 }
 
-function rebindActorSession(
+export function rebindActorSession(
   event: EventObject,
   snapshot: AnyMachineSnapshot,
   sessions: Map<string, string>,
@@ -295,6 +334,19 @@ function invokeOccurrence(events: readonly EventObject[], id: string): number {
     }
   }
   return count + 1;
+}
+
+/**
+ * The 1-based occurrence `n` for the next call at `siteId` given `history` —
+ * the ONE counting rule behind every `${siteId}#${n}` request id (see
+ * {@link invokeOccurrence}). Exposed so the live `runAgent` path derives the
+ * same `n` the step/replay path does. @internal
+ */
+export function agentCallOccurrence(
+  history: readonly (EventObject | AgentLogEntry)[] | undefined,
+  siteId: string,
+): number {
+  return invokeOccurrence(toEvents(history), siteId);
 }
 
 /** The exact canonical done/error events xstate's actor system delivers for an invoke `id`. */
@@ -815,7 +867,7 @@ function verifyEntry(
   }
 }
 
-function replayVerification(
+export function replayVerification(
   snapshot: AnyMachineSnapshot,
   effects: AgentEffect[],
 ): AgentLogVerification {
@@ -823,6 +875,17 @@ function replayVerification(
     stateHash: hashStableJson(logicalReplayState(snapshot)),
     effectsHash: hashStableJson(serializableEffects(effects)),
   };
+}
+
+/**
+ * The logical state hash replay verification uses — `status`, `value`,
+ * `context` (plus `output`/`error` when set) folded through the same
+ * canonicalization as an entry's `verification.stateHash`. Accepts a live or a
+ * persisted snapshot; compare like with like (two persisted snapshots, or two
+ * live ones). Throws when the state is not JSON-serializable.
+ */
+export function getSnapshotStateHash(snapshot: unknown): string {
+  return hashStableJson(logicalReplayState(snapshot as AnyMachineSnapshot));
 }
 
 function logicalReplayState(snapshot: AnyMachineSnapshot): JsonValue {

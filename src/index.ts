@@ -77,6 +77,7 @@ export {
   runAgent,
   createAgentActor,
   generateResult,
+  AgentSnapshotDivergedError,
   AgentSnapshotVersionMismatchError,
   serializeTraceEvent,
   traceTransitions,
@@ -186,6 +187,7 @@ export {
   createReplayEntry,
   diffEventLogs,
   getAgentEffects,
+  getUsageFromEvents,
   initEntry,
   replay,
 } from "./effects.js";

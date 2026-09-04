@@ -16,19 +16,27 @@
 import { createDurable, type DurableExecutionAdapter } from "xstate/durable";
 import {
   deliverEvent,
+  initialTransition,
+  transition,
   type AnyActor,
   type AnyMachineSnapshot,
   type AnyStateMachine,
   type EventFromLogic,
   type EventObject,
+  type ExecutableActionObject,
   type InputFrom,
   type OutputFrom,
   type SnapshotFrom,
 } from "xstate";
 import {
   AGENT_INIT_EVENT_TYPE,
+  agentCallOccurrence,
   createReplayEntry,
+  getAgentEffects,
   initEntry,
+  rebindActorSession,
+  replay,
+  replayVerification,
   validateReplayEntries,
 } from "./effects.js";
 import type { AgentLogEntry } from "./event-log-store.js";
@@ -64,8 +72,12 @@ export interface RunDurableAgentOptions<TMachine extends AnyStateMachine> extend
   event?: EventFromLogic<TMachine>;
   /** Host executors, bound with {@link provideExecutors} semantics. */
   executors?: AgentRequestExecutors;
-  /** Called with each entry as it is appended, for incremental persistence. */
-  onEntry?: (entry: AgentLogEntry) => void;
+  /**
+   * Called with each entry as it is appended, for incremental persistence.
+   * The second argument is the live snapshot that entry's event produced, so a
+   * host can broadcast state per transition without replaying the log.
+   */
+  onEntry?: (entry: AgentLogEntry, snapshot: SnapshotFrom<TMachine>) => void;
   /**
    * Settle `idle` when this returns true for the current snapshot even though
    * children are still pending — for machines whose wait states keep a
@@ -75,9 +87,12 @@ export interface RunDurableAgentOptions<TMachine extends AnyStateMachine> extend
   /** Explicit machine version for entry stamping; defaults to the structural hash. */
   machineVersion?: string;
   /**
-   * Record replay-verification hashes on appended entries. Off by default:
-   * hashing replays the whole prefix per entry, which is quadratic in log
-   * length.
+   * Record replay-verification hashes on appended entries. On by default:
+   * each entry's hashes come from a shadow fold of the UNBOUND machine that
+   * the loop steps once per appended event — the same derivation `replay`
+   * performs — so recording costs O(1) per entry (no prefix replay). Pass
+   * `false` to omit the hashes, which also skips the shadow fold and the
+   * strict re-verification of a resumed journal.
    */
   verification?: boolean;
 }
@@ -99,8 +114,13 @@ export type DurableAgentResult<TMachine extends AnyStateMachine> =
       entries: AgentLogEntry[];
     };
 
-/** Thrown by the adapter's `waitForEvent` when nothing can produce an event. */
-const IDLE = Symbol("agent.durable.idle");
+/**
+ * Returned (never thrown) by the adapter's `waitForEvent` when nothing can
+ * produce an event: a rejected promise here would be reported as unhandled by
+ * runtimes that check before the drive loop's `await` adopts it (workerd does).
+ * The loop compares by identity and settles `idle`; it is never transitioned on.
+ */
+const IDLE_EVENT = { type: "@agent.durable.idle" } as const satisfies EventObject;
 
 interface Mailbox {
   push(event: EventObject): void;
@@ -162,16 +182,6 @@ export async function runDurableAgent<TMachine extends AnyStateMachine>(
   machine: TMachine,
   options: RunDurableAgentOptions<TMachine> = {},
 ): Promise<DurableAgentResult<TMachine>> {
-  const bound = options.executors
-    ? provideExecutors(machine, options.executors, {
-        actors: options.actors,
-        onChunk: options.onChunk,
-        onTrace: options.onTrace,
-      })
-    : options.actors
-      ? (machine.provide({ actors: options.actors as never }) as TMachine)
-      : machine;
-
   const machineId = (machine.config as { id?: string }).id ?? machine.id ?? "(machine)";
   const machineVersion = options.machineVersion ?? resolveMachineVersion(machine);
 
@@ -201,7 +211,8 @@ export async function runDurableAgent<TMachine extends AnyStateMachine>(
   // Pinning `executionId` makes session ids a deterministic function of
   // actor-creation order (`<executionId>:<n>`), so journaled completion
   // events — which carry the producing incarnation's `sessionId` — match the
-  // children a replay re-creates, with no rewriting. Minted once per journal
+  // children a replay re-creates (paired with the rebinding below, which maps
+  // a journal recorded before the pinning). Minted once per journal
   // and persisted in the init entry's metadata; a journal that predates the
   // field falls back to its init entry id (deterministic per log).
   const storedExecutionId = hasInit
@@ -303,36 +314,132 @@ export async function runDurableAgent<TMachine extends AnyStateMachine>(
         liveEventConsumed = true;
         return options.event;
       }
-      throw IDLE;
+      return IDLE_EVENT as unknown as EventFromLogic<TMachine>;
     },
   };
+
+  // ─── per-call idempotency keys (`info.callKey`) ───
+  // The same key `runAgent` mints, from the same parts and the same ONE
+  // counting rule: `${logId}:${siteId}#${n}`, where `logId` is the
+  // `@agent.init` entry's id and `n = agentCallOccurrence(journal prefix) +
+  // calls started live this session at that site`. The prefix is `priorEntries`
+  // — the journal as it stood when this session began — so a resumed leg lines
+  // up: a journal holding one completion for a site re-executes its in-flight
+  // call as `#2`, exactly the `requestId` replay derives for it.
+  //
+  // NOT `startsSeen`: that counter advances on every spawn INCLUDING the
+  // suppressed replays of already-journaled calls, and it is bumped at the
+  // spawn effect rather than when the executor actually runs. Counting live
+  // mints here keeps `n` in step with the calls that reach an executor.
+  const liveCallStarts = new Map<string, number>();
+  const mintCallKey = (siteId: string): string | undefined => {
+    // Read lazily: a fresh run's init entry is appended below, after binding.
+    const logId = entries.find((entry) => entry.event.type === AGENT_INIT_EVENT_TYPE)?.id;
+    if (logId === undefined) {
+      return undefined;
+    }
+    const startedHere = liveCallStarts.get(siteId) ?? 0;
+    liveCallStarts.set(siteId, startedHere + 1);
+    return `${logId}:${siteId}#${agentCallOccurrence(priorEntries, siteId) + startedHere}`;
+  };
+
+  const bound = options.executors
+    ? provideExecutors(machine, options.executors, {
+        actors: options.actors,
+        onChunk: options.onChunk,
+        onTrace: options.onTrace,
+        callKey: mintCallKey,
+      })
+    : options.actors
+      ? (machine.provide({ actors: options.actors as never }) as TMachine)
+      : machine;
 
   const execution = createDurable(bound, adapter);
 
   // ─── the loop ───
   const entries: AgentLogEntry[] = [...priorEntries];
-  const entryOptions = {
-    machineVersion,
-    verification: options.verification ?? false,
+  const verification = options.verification ?? true;
+  // Hashes are attached here, from the live frontier — never by
+  // `createReplayEntry`'s own prefix replay.
+  const entryOptions = { machineVersion, verification: false as const };
+
+  // ─── the shadow pure fold (verification only) ───
+  // Hashes MUST describe the UNBOUND machine's derivation, because that is
+  // what `replay` re-derives: `provideExecutors` rewrites a builtin invoke's
+  // input (it injects `outputSchema`), so the bound execution's own action
+  // objects — and any snapshot carrying bound state nodes — hash differently.
+  // So the loop keeps a second, purely-derived snapshot alongside the live
+  // one and steps it with `transition(machine, …)` for each appended event.
+  // One extra pure transition per entry: O(1), no prefix replay.
+  let pureSnapshot: AnyMachineSnapshot | undefined;
+  // Live child sessionId -> pure-fold child sessionId, per actor id.
+  const pureSessions = new Map<string, string>();
+
+  const recordVerification = (
+    entry: AgentLogEntry,
+    snapshotForHash: AnyMachineSnapshot,
+    actionsForHash: readonly ExecutableActionObject[],
+  ) => {
+    entry.verification = replayVerification(
+      snapshotForHash,
+      getAgentEffects(machine, snapshotForHash, actionsForHash, { history: entries }),
+    );
   };
-  const appendEntry = (event: EventObject) => {
+
+  const appendEntry = (event: EventObject, frontierSnapshot: unknown) => {
     const entry = createReplayEntry(machine, entries, event, entryOptions);
     entries.push(entry);
-    options.onEntry?.(entry);
+    if (verification && pureSnapshot) {
+      // The pure counterpart of the transition the execution just ran. The
+      // event names the LIVE child's session; rebind it onto the pure fold's
+      // child exactly as `replay` does.
+      const pureEvent = rebindActorSession(event, pureSnapshot, pureSessions);
+      const [nextPure, pureActions] = transition(
+        machine,
+        pureSnapshot as never,
+        pureEvent as never,
+      );
+      pureSnapshot = nextPure as AnyMachineSnapshot;
+      recordVerification(entry, pureSnapshot, pureActions);
+    }
+    options.onEntry?.(entry, frontierSnapshot as SnapshotFrom<TMachine>);
   };
-  if (!hasInit) {
-    const entry = initEntry(machine, input, {
-      ...entryOptions,
-      metadata: { executionId },
-    });
-    entries.push(entry);
-    options.onEntry?.(entry);
+
+  const initLogEntry = hasInit
+    ? undefined
+    : initEntry(machine, input, { ...entryOptions, metadata: { executionId } });
+  if (initLogEntry) {
+    entries.push(initLogEntry);
   }
 
   let journalIndex = 0;
+  // Original-incarnation sessionId -> this run's child sessionId, per actor id.
+  const journalSessions = new Map<string, string>();
 
   let [snapshot, effects] = execution.initialTransition(input as never);
   latestSnapshot = snapshot;
+  if (initLogEntry) {
+    // The init entry's hashes describe the initial frontier, matching what
+    // `replay` verifies for entry 0 — derived from the UNBOUND machine.
+    if (verification) {
+      const [initialPure, pureActions] = initialTransition(machine, input as never);
+      pureSnapshot = initialPure as AnyMachineSnapshot;
+      recordVerification(initLogEntry, pureSnapshot, pureActions);
+    }
+    options.onEntry?.(initLogEntry, snapshot as SnapshotFrom<TMachine>);
+  }
+
+  if (verification && priorEntries.length > 0) {
+    // Resume check: one pure fold of the journal (no executors, nothing
+    // executed) that throws `AgentReplayDivergenceError` at the first entry
+    // whose recorded hashes disagree with what the machine re-derives — the
+    // nondeterminism a durable resume would otherwise carry forward silently.
+    // Cost is one replay per resume, linear in journal length, not per entry.
+    // Its final snapshot seeds the shadow pure fold, so a resumed leg's own
+    // appended entries are hashed off the same pure chain (no second fold).
+    const resumed = replay(machine, priorEntries, { machineVersion, verify: "strict" });
+    pureSnapshot = resumed.snapshot as AnyMachineSnapshot;
+  }
 
   for (;;) {
     // Execute the frontier. Suppressed children contribute nothing; live
@@ -358,26 +465,28 @@ export async function runDurableAgent<TMachine extends AnyStateMachine>(
     let fromJournal = false;
     if (journalIndex < journal.length) {
       // Journal first: it is the authoritative total order of the original
-      // run. Session ids are deterministic under the pinned `executionId`, so
-      // a journaled completion matches the replay's re-created child as-is.
-      event = journal[journalIndex]!;
+      // run. Session ids are deterministic under the pinned `executionId`, and
+      // the rebinding maps any completion recorded against another incarnation.
+      // Completions name the original incarnation's child session: rebind them
+      // onto this fold's child, so the completion actually matches.
+      event = rebindActorSession(
+        journal[journalIndex]!,
+        snapshot as AnyMachineSnapshot,
+        journalSessions,
+      );
       journalIndex++;
       fromJournal = true;
       replaying = journalIndex < journal.length;
     } else {
       // Captured root events first, then the adapter's durable wait; the
-      // adapter throws IDLE when nothing can produce an event.
-      try {
-        event = await execution.waitForEvent();
-      } catch (error) {
-        if (error === IDLE) {
-          return {
-            status: "idle",
-            snapshot: snapshot as SnapshotFrom<TMachine>,
-            entries,
-          };
-        }
-        throw error;
+      // adapter returns the IDLE sentinel when nothing can produce an event.
+      event = await execution.waitForEvent();
+      if (event === (IDLE_EVENT as EventObject)) {
+        return {
+          status: "idle",
+          snapshot: snapshot as SnapshotFrom<TMachine>,
+          entries,
+        };
       }
     }
 
@@ -385,10 +494,12 @@ export async function runDurableAgent<TMachine extends AnyStateMachine>(
     if (completedId !== undefined) {
       liveInFlight.delete(completedId);
     }
-    if (!fromJournal) {
-      appendEntry(event);
-    }
     [snapshot, effects] = execution.transition(snapshot, event as never);
     latestSnapshot = snapshot;
+    if (!fromJournal) {
+      // Appended after the transition so the entry's hashes can read the
+      // frontier this event produced (re-derived on the shadow pure fold).
+      appendEntry(event, snapshot);
+    }
   }
 }

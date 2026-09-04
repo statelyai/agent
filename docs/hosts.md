@@ -34,7 +34,42 @@ An executor may return extra passthrough fields alongside `output` or `event`. `
 
 `runAgent` checks the required executors at bind time, before any actor runs. A machine that needs `decide` but has no `decide` executor fails immediately instead of failing mid-run. A machine with only plain actors needs no executors.
 
-All three executors take the same two arguments, `request` and `info`. The `info` argument carries `onChunk`, the abort `signal`, and the request id.
+All three executors take the same two arguments, `request` and `info`. The `info` argument carries `onChunk`, the abort `signal`, the `runId`, the `requestId`, and the `callKey`.
+
+### Idempotency keys
+
+Effect execution is at-least-once. A host runs the call and then journals its completion, so a crash between the two re-executes the call when the run resumes.
+
+`info.callKey` is the key that makes the duplicate safe to drop:
+
+- Its format is `${logId}:${siteId}#${occurrence}`. `logId` identifies the log lineage, `siteId` the invoke site, and `occurrence` counts that site's completions in the log.
+- A resumed run re-executing an in-flight call passes the same `callKey` as the original attempt.
+- Each iteration of a looped state gets its own key: `ask#1`, `ask#2`, `ask#3`.
+- A fork of a log keeps the parent's `logId`, so a fork can reuse results cached under the parent's keys.
+- [`runDurableAgent`](choosing-a-run-mode.md) supplies the same key from its journal: the same format, the same occurrence rule, and the same key on a resume that re-executes an in-flight call.
+- It is `undefined` off the `runAgent` and `runDurableAgent` paths (a bare `provideExecutors` bind) and on a run resumed from a snapshot with no event log. Neither has a log to key against.
+
+Pass it to the provider or tool as the idempotency key, and dedupe on it in your own cache:
+
+```ts
+const results = new Map<string, { output: string }>();
+
+const executors: AgentRequestExecutors = {
+  generateText: async (request, info) => {
+    const cached = info?.callKey ? results.get(info.callKey) : undefined;
+    if (cached) {
+      return cached;
+    }
+    const result = { output: await callProvider(request, info?.callKey) };
+    if (info?.callKey) {
+      results.set(info.callKey, result);
+    }
+    return result;
+  },
+};
+```
+
+The `${siteId}#${occurrence}` half of `callKey` is the same `requestId` the step and replay APIs put on an owed effect, so a host that mixes `runAgent` with [steps](steps.md) keys both on the same value.
 
 ## The shipped AI SDK adapter
 

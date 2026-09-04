@@ -7,6 +7,7 @@ import {
   executeAgentRequest,
   getAgentEffects,
   getCallUsage,
+  getUsageFromEvents,
   initEntry,
   createAgentActor,
   createAgentSchemas,
@@ -20,6 +21,7 @@ import {
   type AgentUsageEvent,
   type ChosenEvent,
 } from "./index.js";
+import { getSnapshotStateHash } from "./effects.js";
 
 const schemas = createAgentSchemas({
   input: z.object({ maxTokens: z.number() }),
@@ -186,7 +188,7 @@ describe("@agent.usage (reserved per-call usage event)", () => {
     });
   });
 
-  test("a machine that declares no handler is untouched: no event, no log entry", async () => {
+  test("a machine that declares no handler takes no transition, but the entry is still journaled", async () => {
     const plainSchemas = createAgentSchemas({
       context: z.object({ note: z.string() }),
       output: z.object({ note: z.string() }),
@@ -215,10 +217,30 @@ describe("@agent.usage (reserved per-call usage event)", () => {
     });
 
     expect(result.status).toBe("done");
+    // No delivery: the machine declares no `'@agent.usage'` transition, so it
+    // never sees the event.
     expect(seen).not.toContain(AGENT_USAGE_EVENT_TYPE);
-    expect(usageEntries(result.events)).toHaveLength(0);
-    // Aggregation is unaffected by delivery being skipped.
+    // Journaling is unconditional all the same — the log is the source of
+    // truth for spend (test (a)).
+    expect(usageEntries(result.events)).toHaveLength(1);
+    expect(usageEntries(result.events)[0]!.event).toMatchObject({
+      type: AGENT_USAGE_EVENT_TYPE,
+      usage: { totalTokens: 400, inputTokens: 300 },
+    });
+    // `result.usage` is the fold over those entries (test (b)).
     expect(result.usage).toEqual({ totalTokens: 400, inputTokens: 300, modelCalls: 1 });
+    expect(result.usage).toEqual({
+      ...getUsageFromEvents(result.events),
+      modelCalls: 1,
+    });
+    // The undelivered entry replays as a no-op: same snapshot hash as a log
+    // with the usage entries stripped (test (d)).
+    const withoutUsage = result.events
+      .filter((entry) => entry.event.type !== AGENT_USAGE_EVENT_TYPE)
+      .map((entry, index) => ({ ...entry, index }));
+    expect(getSnapshotStateHash(replay(machine, result.events).snapshot)).toBe(
+      getSnapshotStateHash(replay(machine, withoutUsage, { verify: false }).snapshot),
+    );
   });
 
   test("is never offered to a model, even under an allowedEvents wildcard", async () => {

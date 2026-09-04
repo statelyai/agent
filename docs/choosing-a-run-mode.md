@@ -65,7 +65,8 @@ if (result.status === "idle") {
 }
 ```
 
-- `runAgent` settles with status `done`, `idle`, or `error`. It stops its actor on every settle path, so you always resume from a snapshot.
+- `runAgent` settles with status `done`, `idle`, or `error`. It stops its actor on every settle path, so you always resume from a snapshot, from `result.events`, or from both.
+- Passing both, with a self-contained log, resumes from the log and treats the snapshot as a cache. See [Resume precedence](event-log.md#resume-precedence).
 - It descends into invoked child machines and rebinds executors as it goes.
 - It aggregates token usage into `result.usage` and emits the trace stream through `onTrace`.
 - It returns `result.events`, a JSON-safe `AgentLogEntry[]` that you can pass to `replay`.
@@ -118,7 +119,8 @@ const next = await runDurableAgent(machine, {
 - The result is `done` with `output`, or `idle` awaiting an external event.
 - `entries` is the complete journal. Persist it after each call and pass it back on resume.
 - Recorded invoke completions replay without re-running; work still in flight at a crash runs again.
-- Use `onEntry` when the store should persist each append incrementally.
+- Use `onEntry(entry, snapshot)` when the store should persist each append incrementally; the second argument is the live snapshot that entry produced, so a host can broadcast state without replaying the log.
+- Every appended entry carries verification hashes, and a resume re-verifies the journal it was handed with strict [replay verification](event-log.md#strict-replay-verification): impure transitions or effect inputs throw `AgentReplayDivergenceError` at the entry that diverged instead of drifting on. Pass `verification: false` to skip both.
 - This mode is experimental because it uses XState's experimental durable runtime.
 
 ## Owning the loop: the step path

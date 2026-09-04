@@ -1,5 +1,10 @@
-import type { AnyActorLogic, AnyStateMachine } from "xstate";
-import { isTextLogic, USER_INPUT_ACTOR, type AgentRequestExecutors } from "./text-logic.js";
+import type { AnyActorLogic, AnyActorRef, AnyStateMachine } from "xstate";
+import {
+  isTextLogic,
+  USER_INPUT_ACTOR,
+  type AgentRequestExecutorInfo,
+  type AgentRequestExecutors,
+} from "./text-logic.js";
 import { isDecisionLogic } from "./decision.js";
 import {
   bindChildMachineForProvide,
@@ -35,6 +40,22 @@ export interface ProvideExecutorsOptions<TMachine extends AnyStateMachine = AnyS
    * boundary).
    */
   onTrace?: (event: AgentTraceEvent<TMachine>) => void;
+  /**
+   * Mints the per-call idempotency key threaded to executors as
+   * `info.callKey`. `runAgent` owns a log and mints the key itself; the
+   * uncontrolled path has no log, so a host that HAS one (notably
+   * {@link runDurableAgent}, which keys against its journal) supplies the
+   * minter here and gets the same `${logId}:${siteId}#${occurrence}` key on
+   * every bound text and decision call. `siteId` is the call's durable invoke
+   * id (the same value `info.requestId` carries); returning `undefined` leaves
+   * `info.callKey` unset. Omit the option and `info.callKey` is always
+   * undefined, as before.
+   *
+   * `self` is accepted for signature parity with `runAgent`'s minter and is
+   * never passed on this path — the key is minted at the executor seam, which
+   * sees `info`, not the invoked leaf actor.
+   */
+  callKey?: (siteId: string, self?: AnyActorRef) => string | undefined;
 }
 
 /**
@@ -79,9 +100,13 @@ export interface ProvideExecutorsOptions<TMachine extends AnyStateMachine = AnyS
  */
 export function provideExecutors<TMachine extends AnyStateMachine>(
   machine: TMachine,
-  executors: AgentRequestExecutors,
+  rawExecutors: AgentRequestExecutors,
   options: ProvideExecutorsOptions<TMachine> = {},
 ): TMachine {
+  // Key minting wraps the host executors themselves, so every bound call —
+  // top level or inside a recursively rebound child machine — carries
+  // `info.callKey` alongside the `requestId` the binder already sets.
+  const executors = options.callKey ? withCallKeys(rawExecutors, options.callKey) : rawExecutors;
   const bindOptions = {
     onChunk: options.onChunk,
     onTrace: options.onTrace as ((event: AgentTraceEvent) => void) | undefined,
@@ -153,6 +178,63 @@ export function provideExecutors<TMachine extends AnyStateMachine>(
   }
 
   return withActors(provided, wrappedSources);
+}
+
+/**
+ * Wraps each provided executor so it receives `info.callKey`, minted once per
+ * live call from `info.requestId` (the durable invoke id = the call's site id).
+ *
+ * A decision RETRY calls the same executor again for ONE invoke (the retry
+ * loop grows `request.attempts` and re-enters), which must not consume a new
+ * occurrence — the mirror of `runAgent` memoizing its key per invoked leaf
+ * actor. `attempts.length > 0` identifies those re-entries, and they reuse the
+ * site's last minted key.
+ */
+function withCallKeys(
+  executors: AgentRequestExecutors,
+  mintCallKey: (siteId: string, self?: AnyActorRef) => string | undefined,
+): AgentRequestExecutors {
+  const lastKeyBySite = new Map<string, string>();
+  const keyFor = (info: AgentRequestExecutorInfo | undefined, isRetry: boolean) => {
+    const siteId = info?.requestId;
+    // Nothing to key against without a site id, and a key already on `info`
+    // (a host that minted its own) is never overwritten.
+    if (siteId === undefined || info?.callKey !== undefined) {
+      return undefined;
+    }
+    if (isRetry) {
+      return lastKeyBySite.get(siteId);
+    }
+    const key = mintCallKey(siteId);
+    if (key !== undefined) {
+      lastKeyBySite.set(siteId, key);
+    }
+    return key;
+  };
+  const withKey = (
+    info: AgentRequestExecutorInfo | undefined,
+    key: string | undefined,
+  ): AgentRequestExecutorInfo | undefined =>
+    key === undefined ? info : { ...(info ?? {}), callKey: key };
+
+  const { generateText, streamText, decide } = executors;
+  return {
+    ...(generateText
+      ? {
+          generateText: (request, info) =>
+            generateText(request, withKey(info, keyFor(info, false))),
+        }
+      : {}),
+    ...(streamText
+      ? { streamText: (request, info) => streamText(request, withKey(info, keyFor(info, false))) }
+      : {}),
+    ...(decide
+      ? {
+          decide: (request, info) =>
+            decide(request, withKey(info, keyFor(info, (request.attempts?.length ?? 0) > 0))),
+        }
+      : {}),
+  };
 }
 
 /** The executor slot + label an agent logic needs, or `undefined` for a non-agent actor. */

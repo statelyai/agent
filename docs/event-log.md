@@ -116,7 +116,9 @@ const second = await runAgent(machine, {
 replay(machine, second.events);
 ```
 
-The `events` option only carries history forward. `snapshot` remains the live resume source. If you omit `events` on a snapshot resume, the returned array contains only the events observed during that invocation, and it is not a complete replay from initialization.
+When the events passed are a self-contained log, that log is the resume source and the `snapshot` is a cache of it. See [Resume precedence](#resume-precedence).
+
+If you omit `events` on a snapshot resume, the returned array contains only the events observed during that invocation, and it is not a complete replay from initialization.
 
 To capture the same replayable events while the run is in flight, use `onEvent`.
 
@@ -145,7 +147,7 @@ const result = await runAgent(machine, {
 
 <!-- events-only resume from src/run-agent.ts (options.events + replay + getPersistedSnapshot); tests in src/run-agent.test.ts "restore semantics" -->
 
-A log is self-contained when its first entry is the reserved `@agent.init` entry. Every fresh `runAgent` log is self-contained. Given such a log and no `snapshot`, `runAgent` derives the resume snapshot from the log itself.
+A log is self-contained when its first entry is the reserved `@agent.init` entry. Every fresh `runAgent` log is self-contained. Given such a log, `runAgent` derives the resume state from the log itself.
 
 ```ts
 const recovered = await runAgent(machine, {
@@ -157,6 +159,8 @@ const recovered = await runAgent(machine, {
 - Recorded results are replayed, never re-executed. A model call whose completion is in the log runs zero times during recovery.
 - A request that was in flight when the log ended has no recorded completion. It round-trips as a pending child and re-executes on restore, because XState v6 restarts restored pending invokes.
 - The recovered result's `events` extends the same log, so the whole history stays replayable.
+
+- A log that already reached a final state settles immediately with `status: "done"` and the recorded output.
 
 > **Warning:** Resume fan-out from the log, not from a mid-flight live snapshot. `replay` re-derives spawned branches that are still owed. Restoring a live `runAgent` snapshot that was persisted mid-flight drops frozen children instead. See [Roadmap](roadmap.md#near-term-non-gating).
 
@@ -174,6 +178,8 @@ Use `assertJsonSerializable(value)` and `assertAgentLogEntry(entry)` at custom t
 ## Strict replay verification
 
 `createReplayEntry` and `initEntry` write the `verification` hashes, and they do so by default. Hashes are absent in one case: `runAgent` resuming from a snapshot whose log does not start at the `@agent.init` entry, because that replay history is incomplete.
+
+`runDurableAgent` also records hashes by default. It takes them straight from the live snapshot and the frontier effects of the transition it just made, so recording is O(1) per entry and the hashes are identical to a pure fold's. On resume it re-verifies the journal it was handed with `{ verify: 'strict' }` — one pure fold, no executors and nothing executed — so nondeterminism surfaces at the diverging entry rather than compounding. Pass `verification: false` to opt out of both.
 
 `replay` has three verification modes.
 
@@ -288,9 +294,25 @@ await assertEventLogStoreConformance(() => createMyStore());
 
 Each assertion throws a descriptive `Error` on the first violation, so any test runner or a plain script can drive it. The SQLite store passes the same suite.
 
+## Resume precedence
+
+<!-- log-first resume from src/run-agent.ts (options.events + replay + logIndex cache check); tests in src/run-agent.test.ts "log-first resume (snapshot as cache)" -->
+
+When both `snapshot` and `events` are passed, which one wins depends on whether the log is self-contained.
+
+- **Self-contained log.** The log is the source of truth. The snapshot is a cache of it and never overrides it.
+- **No log, or a log that does not start at `@agent.init`.** The snapshot is the live resume source and the events are history only. This path is lossy: the run has no replayable history before the snapshot, so it cannot be replayed, verified, or forked. Prefer carrying the full log.
+
+Every settled snapshot is stamped with `agentMeta.logIndex`, the length of the run's event log when it settled. On the next resume, that stamp decides how the cache is used.
+
+- `logIndex` equal to `events.length`: the snapshot was taken at the log's current tail, so it is trusted as-is and no replay runs.
+- `logIndex` lower than `events.length`: the log is replayed. The snapshot is verified against the state the log's first `logIndex` entries replay to, and the run resumes from the replayed state, not the snapshot.
+- A mismatch between those two states throws an `AgentError` with code `snapshot-diverged`. The two copies disagree about the same point in history, which is a bug rather than a resume. Drop the snapshot and resume from `events` alone if the log is the trustworthy copy.
+- An unstamped snapshot carries no position, so there is nothing to verify against and the log wins.
+
 ## Snapshots as compaction
 
-[`AgentSnapshotStore`](human-in-the-loop.md) serves as an idle-point cache. At a quiescent point, meaning an idle state with no in-flight effects, persist the snapshot. A later run resumes from that snapshot plus the events appended since, instead of replaying from index 0. Compact only at quiescent points. A snapshot taken mid-flight cannot carry in-flight effect state, but the log can.
+[`AgentSnapshotStore`](human-in-the-loop.md) serves as an idle-point cache. At a quiescent point, meaning an idle state with no in-flight effects, persist the snapshot. A later run passes that snapshot alongside the log, and it is used as the cache described in [Resume precedence](#resume-precedence). Compact only at quiescent points. A snapshot taken mid-flight cannot carry in-flight effect state, but the log can.
 
 ## Related
 

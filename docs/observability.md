@@ -262,7 +262,7 @@ The run span nests under whatever span is active when the run starts, so an agen
 | `stream.chunk`       | Counted; lands as `agent.stream_chunks` on the request span.                                          |
 | `machine.transition` | Span event `agent.transition` on the run span (`agent.event_type`, `agent.state`, `agent.event_id?`). |
 | `emit`               | Span event `agent.emit` on the run span.                                                              |
-| `usage.dropped`      | Span event `agent.usage.dropped` with the reason and the dropped call's tokens.                       |
+| `usage.dropped`      | Span event `agent.usage.dropped` with the reason and the undelivered call's tokens. The usage entry is still journaled; only delivery to the machine was skipped.                       |
 | `run.end`            | `agent.status` + span status (`ERROR` records the cause), run span ends.                              |
 
 Attributes follow the [GenAI semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-agent-spans.md) (Development stability, tracking core semconv v1.43.0):
