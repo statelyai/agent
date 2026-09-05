@@ -1,5 +1,12 @@
 # @statelyai/example-cloudflare-agent-host
 
+## 0.0.1-alpha.11
+
+### Patch Changes
+
+- Updated dependencies [[`8375f50`](https://github.com/statelyai/agent/commit/8375f50bd0f548136ff21d514979cfa4790b3028)]:
+  - @statelyai/agent@2.0.0-alpha.23
+
 ## 0.0.1-alpha.10
 
 ### Patch Changes
