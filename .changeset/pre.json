@@ -20,6 +20,7 @@
     "allowed-events-wildcards",
     "alpha-api-consistency-pass",
     "api-polish-states-helpers-prune",
+    "api-simplification-xstate-owned",
     "assert-agent-machine",
     "audit-bugfixes-batch",
     "blessed-ai-sdk-executors",
