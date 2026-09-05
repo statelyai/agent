@@ -23,6 +23,12 @@ type VizPanelContext = {
   status: VizPanelStatus;
   error: string | null;
   frameKey: number;
+  /**
+   * Bumped whenever new machine content lands in the embed (init, machine
+   * switch, live system init). The panel schedules a camera fit off it —
+   * the editor never fits on its own, so fresh content starts off-viewport.
+   */
+  fitEpoch: number;
   liveMessages: SystemMessage[];
   selectedSessionId: string | null;
   liveEvent: string | null;
@@ -36,8 +42,8 @@ type VizPanelEvents = {
   transportFailed: { message: string };
   iframeReady: { fallbackMessages: SystemMessage[] };
   machineChanged: { initMessage: SystemMessage | null };
-  /** Re-init the embed (e.g. theme flip), then replay what it was showing. */
-  themeChanged: { initMessage: SystemMessage | null; fallbackMessages: SystemMessage[] };
+  /** Flip the embed theme in place — no re-init, no replay. */
+  themeChanged: { message: SystemMessage };
   fallbackFrame: { message: SystemMessage };
   systemInit: { message: SystemMessage };
   systemMessage: { message: SystemMessage };
@@ -93,6 +99,7 @@ export function createVizPanelStore() {
       status: "connecting",
       error: null,
       frameKey: 0,
+      fitEpoch: 0,
       liveMessages: [],
       selectedSessionId: null,
       liveEvent: null,
@@ -117,7 +124,7 @@ export function createVizPanelStore() {
         // Always initialize it once, then layer buffered live snapshots on top.
         for (const message of event.fallbackMessages) enqueue.emit.post({ message });
         for (const message of context.liveMessages) enqueue.emit.post({ message });
-        return { ...context, status: "ready", error: null };
+        return { ...context, status: "ready", error: null, fitEpoch: context.fitEpoch + 1 };
       },
       machineChanged: (context, event, enqueue) => {
         if (context.status === "ready" && event.initMessage) {
@@ -129,16 +136,11 @@ export function createVizPanelStore() {
           selectedSessionId: null,
           liveEvent: null,
           liveStateLabel: null,
+          fitEpoch: context.fitEpoch + 1,
         };
       },
       themeChanged: (context, event, enqueue) => {
-        if (context.status !== "ready") return context;
-        if (context.liveMessages.length > 0) {
-          if (event.initMessage) enqueue.emit.post({ message: event.initMessage });
-          for (const message of context.liveMessages) enqueue.emit.post({ message });
-        } else {
-          for (const message of event.fallbackMessages) enqueue.emit.post({ message });
-        }
+        if (context.status === "ready") enqueue.emit.post({ message: event.message });
         return context;
       },
       fallbackFrame: (context, event, enqueue) => {
@@ -159,6 +161,7 @@ export function createVizPanelStore() {
           selectedSessionId: root?.sessionId ?? null,
           liveEvent: null,
           liveStateLabel: snapshotStateLabel(root?.snapshot),
+          fitEpoch: context.fitEpoch + 1,
         };
       },
       systemMessage: (context, event, enqueue) => {

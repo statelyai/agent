@@ -7,25 +7,18 @@ import type { ExampleSummary } from "@/lib/example-library";
 import type { Selection } from "@/lib/selection";
 import type { ShellStore } from "@/lib/shell-store";
 
-/**
- * Header logo slot. Placeholder per the design handoff (dashed rounded rect +
- * accent dot) — swap the SVG for the real Stately brand mark.
- */
+/** Stately brand mark. Body follows `currentColor`; the head dot uses the accent. */
 function LogoSlot() {
   return (
-    <svg className="logo-slot" width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
-      <rect
-        x="1.5"
-        y="1.5"
-        width="23"
-        height="23"
-        rx="7"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeDasharray="4 3"
+    <svg className="logo-slot" width="26" height="26" viewBox="0 0 400 400" aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="M160.048396,62 L200.37018,102.226265 L313.959955,215.546521 L313.959955,215.570808 C315.837975,217.466064 317,220.069114 317,222.944958 C317,226.157786 315.548447,229.029294 313.267435,230.954041 L208.213956,335.758657 C203.882338,340.080448 196.858891,340.080448 192.527273,335.758657 L87.2490397,230.730253 C82.9169868,226.408463 82.9169868,219.401654 87.2490397,215.080297 L152.153757,150.3289 L159.394132,157.552991 C169.631514,167.11948 186.170262,195.360094 164.012235,218.951043 C161.846426,221.111288 161.846426,224.615126 164.012235,226.775804 L196.490243,259.176874 C198.656487,261.337552 202.167775,261.337552 204.334019,259.176874 L236.707692,226.879891 C237.766686,225.869377 238.504418,224.471572 238.504418,222.894216 C238.504418,221.359796 237.836243,219.971098 236.827242,218.965788 L209.069933,191.274668 L209.153401,191.191832 L160.173597,142.328058 C137.904715,120.111929 137.779514,84.2165628 160.048396,62 Z"
       />
-      <circle cx="13" cy="13" r="3.5" fill="var(--primary)" />
+      <path
+        fill="var(--primary)"
+        d="M244.500217,62 C260.239954,62 273,74.7595142 273,90.5 C273,106.240051 260.239954,119 244.500217,119 C228.760046,119 216,106.240051 216,90.5 C216,74.7595142 228.760046,62 244.500217,62 Z"
+      />
     </svg>
   );
 }
@@ -34,7 +27,6 @@ type SwitcherRow = {
   selection: Selection;
   title: string;
   purpose: string;
-  keyless: boolean;
 };
 
 type SwitcherGroup = { label: string; rows: SwitcherRow[] };
@@ -55,7 +47,6 @@ function buildGroups(examples: ExampleSummary[], query: string): SwitcherGroup[]
         selection: { type: "scenario", id: scenario.id } as const,
         title: scenario.name,
         purpose: scenario.eyebrow,
-        keyless: true,
       })),
     },
   ];
@@ -66,14 +57,15 @@ function buildGroups(examples: ExampleSummary[], query: string): SwitcherGroup[]
       selection: { type: "example", id: example.id },
       title: example.title,
       purpose: example.purpose ?? example.kind,
-      keyless: false,
     };
     const rows = byKind.get(example.kind) ?? [];
     rows.push(row);
     byKind.set(example.kind, rows);
   }
+  // Key requirement is uniform within a group, so it lives in the group
+  // label — a badge repeated on every row is noise.
   for (const [kind, rows] of [...byKind.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-    groups.push({ label: kind.replace(/-/g, " "), rows });
+    groups.push({ label: `${kind.replace(/-/g, " ")} · API key`, rows });
   }
 
   return groups
@@ -197,11 +189,6 @@ export function SiteHeader({ store, examples, currentTitle, onSelect }: SiteHead
                             <strong>{row.title}</strong>
                             <small>{row.purpose}</small>
                           </span>
-                          {row.keyless ? (
-                            <span className="key-badge">no key</span>
-                          ) : (
-                            <span className="key-badge key-badge--needs">API key</span>
-                          )}
                           {active && <Check size={13} aria-label="Current example" />}
                         </button>
                       );

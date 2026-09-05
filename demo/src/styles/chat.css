@@ -125,7 +125,10 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  max-width: 220px;
+  /* The rail wraps, so a lone chip may take the full row before truncating —
+     a clipped "Amount exceeds the $100 auto-r…" with room to spare reads as
+     a bug. */
+  max-width: 100%;
   padding: 3px 10px 3px 4px;
   border: 1px solid var(--line, rgba(127, 127, 127, 0.35));
   border-radius: 999px;
@@ -161,6 +164,22 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* One line stating the split-pane premise; the machine pane it points at is
+   hidden behind a tab on mobile, so the hint hides with it. */
+.chat-intro__hint {
+  margin: 0;
+  color: var(--quiet);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+@media (max-width: 800px) {
+  .chat-intro__hint {
+    display: none;
+  }
 }
 
 .chat-intro__status,
