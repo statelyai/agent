@@ -546,7 +546,9 @@ export function DemoShell() {
       machineKey={machineKey}
       vizConfig={
         isScenario
-          ? scenarioSource[scenario.id]
+          ? // The embed's init takes serialized machine config, not TS source —
+            // source in this slot renders as an empty canvas.
+            scenarioVizConfig[scenario.id]
           : exampleDetail
             ? (activeMachine?.vizConfig ?? null)
             : null

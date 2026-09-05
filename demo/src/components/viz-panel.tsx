@@ -151,6 +151,7 @@ function EmbedVizPanel({
   const status = useSelector(store, (snapshot) => snapshot.context.status);
   const transportError = useSelector(store, (snapshot) => snapshot.context.error);
   const frameKey = useSelector(store, (snapshot) => snapshot.context.frameKey);
+  const fitEpoch = useSelector(store, (snapshot) => snapshot.context.fitEpoch);
   const ready = status === "ready";
   const timedOut = status === "timedOut";
   const failed = status === "failed";
@@ -175,6 +176,11 @@ function EmbedVizPanel({
     function onMessage(event: MessageEvent) {
       if (!isTrustedVizMessage(event, iframeRef.current?.contentWindow ?? null, targetOrigin))
         return;
+      // The graph finished loading/laying out — the one reliable moment to
+      // fit the camera on a cold editor load.
+      if (event.data?.type === "@statelyai.loaded") {
+        post({ type: "@statelyai.camera.fit" });
+      }
       if (event.data?.type === "@statelyai.ready") {
         const latest = latestRef.current;
         store.trigger.iframeReady({
@@ -189,7 +195,7 @@ function EmbedVizPanel({
     }
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [store, targetOrigin]);
+  }, [post, store, targetOrigin]);
 
   // Reset live inspection only when the selected machine changes. In
   // particular, do not clear observations when the iframe becomes ready.
@@ -203,17 +209,25 @@ function EmbedVizPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [machineKey, store]);
 
-  // Theme lives in the embed's init payload, so a flip means re-initing the
-  // embed and replaying whatever it was already showing.
+  // A theme flip is a live message (`setTheme`) — never a re-init, which
+  // would remount the embed and drop the camera and inspection state.
   const previousTheme = useRef(theme);
   useEffect(() => {
     if (previousTheme.current === theme) return;
     previousTheme.current = theme;
-    store.trigger.themeChanged({
-      initMessage: vizConfig ? createInitMessage(vizConfig, theme, documents) : null,
-      fallbackMessages: createStaticMessages(vizConfig, latestRef.current.frame, theme, documents),
-    });
-  }, [documents, store, theme, vizConfig]);
+    store.trigger.themeChanged({ message: { type: "@statelyai.setTheme", theme } });
+  }, [store, theme]);
+
+  // The editor never fits the camera on its own, so freshly loaded content
+  // starts off-viewport. After each content load (init, machine switch, live
+  // system init) fit once right away and once after layout settles.
+  useEffect(() => {
+    if (fitEpoch === 0) return;
+    const fit = () => post({ type: "@statelyai.camera.fit" });
+    fit();
+    const timeout = window.setTimeout(fit, 800);
+    return () => window.clearTimeout(timeout);
+  }, [fitEpoch, post]);
 
   // Fallback replay frames (only used when live inspection is unavailable).
   useEffect(() => {
@@ -293,7 +307,7 @@ function EmbedVizPanel({
               </div>
             )}
             <iframe
-              key={`${frameKey}:${theme}`}
+              key={frameKey}
               ref={iframeRef}
               className="viz-embed"
               data-ready={ready || undefined}

@@ -130,15 +130,9 @@ function messagesFromTurns(turns: Turn[], liveSteps: TraceStep[]): ThreadMessage
     const userMessage: ThreadMessageLike = {
       id: `turn-${turn.id}-user`,
       role: "user",
-      content: [
-        {
-          type: "text",
-          text:
-            turn.role === "action" && turn.eventType
-              ? `${turn.input}\n\n\`${turn.eventType}\``
-              : turn.input,
-        },
-      ],
+      // The transition log below already names the event (`APPROVE → approved`),
+      // so the bubble carries only the human-readable action label.
+      content: [{ type: "text", text: turn.input }],
     };
 
     if (turn.status === "loading") {
@@ -269,7 +263,7 @@ export function AppPanel({
   });
 
   const Welcome = () => (
-    <div className="aui-demo-welcome mx-auto flex w-full max-w-md flex-col gap-4 px-4">
+    <div className="aui-demo-welcome mx-auto my-auto flex w-full max-w-md flex-col gap-4 px-4 py-8">
       {intro}
       {starters.length ? (
         <div
@@ -283,7 +277,7 @@ export function AppPanel({
               variant="ghost"
               disabled={loading || !hydrated}
               onClick={starter.onStart}
-              className="aui-thread-welcome-suggestion text-foreground hover:bg-muted border-border/60 h-auto max-w-full gap-1.5 rounded-xl border px-3.5 py-1.5 text-center text-sm font-normal whitespace-normal transition-colors sm:rounded-full sm:whitespace-nowrap"
+              className="aui-thread-welcome-suggestion text-foreground hover:bg-muted border-border/60 h-auto max-w-full gap-1.5 rounded-xl border px-3.5 py-1.5 text-center text-sm font-normal whitespace-normal transition-colors sm:rounded-full"
             >
               {starter.label}
             </Button>
@@ -291,6 +285,9 @@ export function AppPanel({
         </div>
       ) : null}
       {startForm ? <StartFormCard schema={startForm.schema} onStart={startForm.onStart} /> : null}
+      <p className="chat-intro__hint">
+        The machine on the right updates with every reply.
+      </p>
     </div>
   );
   // The current wait's own checkpoint is shown but not rewindable; earlier
