@@ -25,10 +25,28 @@ There are four integration paths. The first two both go through `createAiSdkExec
 
 - **AI SDK adapter.** Accepts any `LanguageModel`, including models from Mastra, Cloudflare Workers AI through `workers-ai-provider`, TanStack AI, OpenRouter's AI SDK provider, and any `@ai-sdk/*` package. Supports all three executors, including `decide`.
 - **OpenAI-compatible endpoints.** Point `createOpenAI({ baseURL })` from `@ai-sdk/openai` at any OpenAI-shaped endpoint, such as Groq, Ollama, vLLM, Together, or LM Studio, then pass the result to the same adapter. Supports all three executors, including `decide`.
-- **Hand-written executors.** Write the three executors yourself against a provider's HTTP API, or against a client that is not an AI SDK `LanguageModel`, such as a LangChain `BaseChatModel`. Supports all three executors, but you map structured output and decision retries yourself. See [Hosts](hosts.md#writing-your-own-executors) and [LangChain models](#langchain-models).
+- **Hand-written executors.** Write the three executors yourself against a provider's HTTP API, or against a client that is not an AI SDK `LanguageModel`, such as a LangChain `BaseChatModel`. Supports all three executors, but you map structured output and decision retries yourself. See [Hosts](hosts.md) and [LangChain models](#langchain-models).
 - **Raw `ai` functions.** Pass the `ai` package's `generateText` and `streamText` as your `executors` set. This path supports text only. `decide` requires the adapter, and structured output is best-effort.
 
 <!-- viz: executor sourcing paths: LanguageModel object -> createAiSdkExecutors -> { generateText, streamText, decide }, with the raw-`ai` path bypassing the adapter and losing decide/structured output -->
+
+## Host-owned model settings
+
+<!-- settings and model-entry precedence from src/ai-sdk/index.ts and src/ai-sdk/mappers.ts -->
+
+Pass provider-specific settings to `createAiSdkExecutors`, not the machine. An object applies to every call; a function can vary settings by request. A model entry may also pair one model with its defaults.
+
+```ts
+const executors = createAiSdkExecutors({
+  models: {
+    quick: openai("gpt-5.4-mini"),
+    careful: { model: openai("gpt-5.4"), settings: { reasoning: "high" } },
+  },
+  settings: (request) => ({ temperature: request.name === "draft" ? 0.7 : 0 }),
+});
+```
+
+Precedence is global `settings`, then model-entry settings, then portable generation fields declared by the request.
 
 ## Mastra models
 
@@ -121,7 +139,7 @@ await runAgent(machine, {
 
 To use Groq, vLLM, Together, OpenRouter, or LM Studio, change `baseURL` and add `apiKey` where the endpoint requires one. Nothing else changes.
 
-To avoid depending on `ai`, write the three executors over raw `fetch` against the same Chat Completions endpoint. Build the request body from the plain `AgentTextRequest` fields. Use `buildEnvelopeSchema`, `getJsonSchema`, and `parseOutput` from `@statelyai/agent` for structured output, and `renderDecisionAttempts` for decision retries. See [Hosts](hosts.md#writing-your-own-executors).
+To avoid depending on `ai`, write the three executors over raw `fetch` against the same Chat Completions endpoint. Build the request body from the plain `AgentTextRequest` fields. Use `buildEnvelopeSchema`, `getJsonSchema`, and `parseOutput` from `@statelyai/agent` for structured output, and `renderDecisionAttempts` for decision retries. See [Hosts](hosts.md).
 
 ## Raw AI SDK functions
 
@@ -154,7 +172,7 @@ Each example is a runnable host for one provider stack.
 
 | Example                                                                       | Backing                                                                                                           |
 | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| [ai-sdk-game-host](../examples/ai-sdk-game-host/index.ts)                    | Vercel AI SDK, through the optional adapter                                                                       |
+| [ai-sdk-game-host](../examples/ai-sdk-game-host/index.ts)                     | Vercel AI SDK, through the optional adapter                                                                       |
 | [openai-sdk-host](../examples/openai-sdk-host/index.ts)                       | raw `openai` (Chat Completions); structured via `response_format`, decisions via `tool_choice: 'required'`        |
 | [anthropic-sdk-host](../examples/anthropic-sdk-host/index.ts)                 | raw `@anthropic-ai/sdk` (Messages); structured via forced tool call, decisions via `tool_choice: { type: 'any' }` |
 | [langchain-host](../examples/langchain-host/index.ts)                         | LangChain `BaseChatModel` (`@langchain/core`), wrapped into the executor contract                                 |

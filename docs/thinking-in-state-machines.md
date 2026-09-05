@@ -13,7 +13,7 @@ For the mechanical refactor of an existing codebase, see [Migrating from a hand-
 
 <!-- xstate version requirement from package.json#peerDependencies -->
 
-> **Version requirement.** Build the machine with the `xstate` install this package peers on, v6 alpha.46 or newer. See [Installation](quickstart.md#installation). Machines authored for XState v5 usually port with few changes, but a machine object imported from a separate `xstate@5` install does not bind. Write event-transition guards as functions that return `undefined`. XState v6 drops named string guards on `on`, and the function form is what makes `snapshot.can(event)` reflect the guard.
+> **Version requirement.** Build the machine with the `xstate` install this package peers on, v6 alpha.46 or newer. See the [Quickstart](quickstart.md). Machines authored for XState v5 usually port with few changes, but a machine object imported from a separate `xstate@5` install does not bind. Write event-transition guards as functions that return `undefined`. XState v6 drops named string guards on `on`, and the function form is what makes `snapshot.can(event)` reflect the guard.
 
 ## The loop to model
 
@@ -302,7 +302,7 @@ For what the machine gives you over the loop, see the [overview](index.md).
 
 The design work above assumes you are writing the machine. Existing machines can still be hosted without Agent-specific authoring.
 
-- The machine already exists and contains nothing agent-specific. Any machine whose invokes resolve to values and whose events you can enumerate can be driven. Use [`getAcceptedEvents(snapshot)`](human-in-the-loop.md) for the candidates and call [`resolveDecision`](steps.md#standalone-decision-resolution) gated by `snapshot.can(event)`. See [plain-xstate](../examples/plain-xstate/index.ts).
+- The machine already exists and contains nothing agent-specific. Any machine whose invokes resolve to values and whose events you can enumerate can be driven. Use [`getAcceptedEvents(snapshot)`](human-in-the-loop.md) for the candidates and call `resolveDecision` gated by `snapshot.can(event)`. See [plain-xstate](../examples/plain-xstate/index.ts).
 
 Prompts do not have to live in the machine. Leave bare `src` strings and bind a separate prompt map through the `actors` option of `runAgent`, which is shorthand for `machine.provide({ actors })`. The explicit invokes remain part of the graph, which is what lets a machine round-trip through JSON with `setupAgent.fromConfig`. See [Machines as data](machines-as-data.md).
 
