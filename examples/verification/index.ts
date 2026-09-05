@@ -104,9 +104,6 @@ export const verificationSchemas = createAgentSchemas({
 const agentSetup = setupAgent({
   schemas: verificationSchemas,
   models,
-  // The gate is an idle state: runAgent settles `idle` there and waits for a
-  // human event rather than hanging.
-  isIdle: (snapshot) => snapshot.hasTag("awaiting-approval"),
 });
 
 const CLASSIFY_SYSTEM_PROMPT =

@@ -3,24 +3,18 @@ import { z } from "zod";
 import {
   AgentDecisionExhaustedError,
   AgentError,
-  AgentEventLogConflictError,
-  AgentIdleError,
   AgentIllegalResumeEventError,
   AgentLintError,
-  AgentReplayDivergenceError,
-  AgentReplayMachineMismatchError,
-  AgentSnapshotVersionMismatchError,
   createAgentSchemas,
   createTextLogic,
-  NonSerializableAgentEventError,
   runAgent,
   serializeTraceEvent,
   setupAgent,
   type AgentTraceEvent,
   type JsonSerializableTraceEvent,
-  type JsonValue,
   type RunAgentErrorCause,
 } from "./index.js";
+type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
 // ─── Compile-time pin: the derived JsonSerializableTraceEvent must stay
 // structurally identical to the hand-written union it replaced. Edit this
@@ -45,7 +39,7 @@ type HandWrittenJsonSerializableTraceEvent = {
     }
   | { type: "request.error"; request: JsonValue; error: JsonValue }
   | { type: "stream.chunk"; request: JsonValue; chunk: string }
-  | { type: "machine.transition"; snapshot: JsonValue; event: JsonValue; eventId?: string }
+  | { type: "machine.transition"; snapshot: JsonValue; event: JsonValue }
   | { type: "emit"; event: JsonValue }
   | { type: "usage.dropped"; event: JsonValue; reason: "settled" }
   | { type: "run.end"; status: "done"; output: JsonValue; snapshot: JsonValue }
@@ -54,7 +48,6 @@ type HandWrittenJsonSerializableTraceEvent = {
       status: "idle";
       snapshot: JsonValue;
       pendingUserInputs?: JsonValue;
-      persistedSnapshot?: JsonValue;
     }
   | {
       type: "run.end";
@@ -122,7 +115,6 @@ describe("serializeTraceEvent", () => {
         type: "machine.transition",
         snapshot: { value: "a", context: {} } as never,
         event: { type: "GO" },
-        eventId: "evt_00000001",
       },
       { ...envelope, type: "emit", event: { type: "DRAFTED" } as never },
       {
@@ -137,14 +129,13 @@ describe("serializeTraceEvent", () => {
         type: "run.end",
         status: "idle",
         snapshot: { value: "waiting", context: {} } as never,
-        persistedSnapshot: { value: "waiting" } as never,
       },
       {
         ...envelope,
         type: "run.end",
         status: "error",
         cause: "machine",
-        error: new AgentIdleError({ value: "waiting" } as never, ["GO"]),
+        error: new AgentIllegalResumeEventError("GO", ["STOP"]),
         snapshot: { value: "waiting", context: {} } as never,
       },
     ];
@@ -310,23 +301,9 @@ describe("serializeTraceEvent", () => {
 describe("AgentError", () => {
   test("every error extends AgentError and carries a stable kebab-case code", () => {
     const errors: Array<[AgentError, string]> = [
-      [new AgentIdleError({ value: "a" } as never, ["GO"]), "agent-idle"],
       [new AgentIllegalResumeEventError("GO", ["STOP"]), "illegal-resume-event"],
-      [new AgentSnapshotVersionMismatchError("v1", "v2", "m"), "snapshot-version-mismatch"],
       [new AgentDecisionExhaustedError([]), "decision-exhausted"],
       [new AgentLintError("m", []), "lint-failed"],
-      [new AgentEventLogConflictError("t", 1, 2), "event-log-conflict"],
-      [new NonSerializableAgentEventError("event.x", "function"), "non-serializable-event"],
-      [
-        new AgentReplayMachineMismatchError(
-          "evt_1",
-          0,
-          { machineId: "a", machineVersion: "1" },
-          { machineId: "b", machineVersion: "2" },
-        ),
-        "replay-machine-mismatch",
-      ],
-      [new AgentReplayDivergenceError("evt_1", 0, "state"), "replay-divergence"],
     ];
 
     for (const [error, code] of errors) {

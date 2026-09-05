@@ -110,7 +110,7 @@ async function play(options: PlayOptions) {
     expect(result.snapshot.can(event as never)).toBe(true);
 
     result = await runAgent(twentyQuestionsMachine, {
-      snapshot: result.persistedSnapshot,
+      snapshot: result.persist(),
       event,
       ...shared,
     });
@@ -189,7 +189,7 @@ describe("twenty-questions", () => {
 
     // The entry appears only once an answer event arrives.
     const answered = await runAgent(twentyQuestionsMachine, {
-      snapshot: asked.persistedSnapshot,
+      snapshot: asked.persist(),
       event: { type: "ANSWER_YES" },
       executors: { generateText: createClassifier(), decide },
     });
@@ -215,7 +215,7 @@ describe("twenty-questions", () => {
     if (asked.status !== "idle") throw new Error("expected idle");
 
     const answered = await runAgent(twentyQuestionsMachine, {
-      snapshot: asked.persistedSnapshot,
+      snapshot: asked.persist(),
       event: { type: "ANSWER", rawAnswer: "mhm" },
       executors: { generateText: createClassifier(), decide },
     });

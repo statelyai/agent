@@ -15,17 +15,14 @@
  * @module
  */
 import type { AnyActorLogic, AnyMachineSnapshot, AnyStateMachine } from "xstate";
-import type { ChosenEvent } from "./types.js";
+import type { ChosenEvent, StandardSchemaV1 } from "./types.js";
 import { AgentError } from "./errors.js";
 import { getJsonSchemaSync } from "./utils.js";
 import { getAcceptedEvents } from "./events.js";
 import { AgentDecisionExhaustedError, isDecisionLogic, resolveDecision } from "./decision.js";
 import { isTextLogic } from "./text-logic.js";
-import {
-  executorBoundLogics,
-  getMachineStaticTransitionTargets,
-  getRegisteredAgentExecutionOptions,
-} from "./internal/registry.js";
+import { AGENT_MESSAGES_EVENT_TYPE } from "./messages.js";
+import { executorBoundLogics, getRegisteredAgentExecutionOptions } from "./internal/registry.js";
 import {
   getInvokeEffectMetadata,
   initialAgentStep,
@@ -51,15 +48,7 @@ export type AgentLintSeverity = "error" | "warning";
  * or config location, and `message` explains the problem and its remedy.
  */
 export interface AgentLintDiagnostic {
-  code:
-    | "unreachable-state"
-    | "decide-without-events"
-    | "unserializable-context"
-    | "direct-object-src"
-    | "final-without-output"
-    | "final-output-reads-event"
-    | "undeclared-event"
-    | "missing-final";
+  code: "decide-without-events" | "direct-object-src" | "unhandled-agent-messages";
   severity: AgentLintSeverity;
   /** State path (`parent.child`) or config pointer (e.g. `(root)`, `context`) the finding is about. */
   path: string;
@@ -148,210 +137,9 @@ function buildStateIndex(rootConfig: AnyConfig): Map<string, StateNode> {
   return index;
 }
 
-function childrenOf(index: Map<string, StateNode>, parentPath: string): StateNode[] {
-  const out: StateNode[] = [];
-  for (const node of index.values()) {
-    if (node.parentPath === parentPath) {
-      out.push(node);
-    }
-  }
-  return out;
-}
-
-// ─── Reachability (static, conservative) ───
-
-// Extracts concrete target paths from a single transition config value, marking
-// `opaque` when a target is a function (dynamic), a `#id` reference, or an
-// unresolvable string — cases where we cannot know the destination and must
-// over-approximate rather than risk a false "unreachable" finding.
-function collectTransitionTargets(
-  value: unknown,
-  fromNode: StateNode,
-  index: Map<string, StateNode>,
-  out: { targets: string[]; opaque: boolean },
-): void {
-  if (value === undefined || value === null) {
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      collectTransitionTargets(item, fromNode, index, out);
-    }
-    return;
-  }
-  if (typeof value === "function") {
-    // Dynamic transition — destination unknowable at lint time.
-    out.opaque = true;
-    return;
-  }
-  if (typeof value === "string") {
-    resolveTargetString(value, fromNode, index, out);
-    return;
-  }
-  if (typeof value === "object") {
-    const { target, to } = value as { target?: unknown; to?: unknown };
-    if (target !== undefined) {
-      collectTransitionTargets(target, fromNode, index, out);
-      return;
-    }
-    // xstate's JSON layer folds a transition that carries a context patch into a
-    // single `to` resolver, erasing its `target`. Treat it as opaque rather than
-    // as a targetless (in-state) transition, which would under-approximate.
-    if (to !== undefined) {
-      collectTransitionTargets(to, fromNode, index, out);
-      return;
-    }
-    // An object with neither stays in-state (no edge).
-  }
-}
-
-function resolveTargetString(
-  target: string,
-  fromNode: StateNode,
-  index: Map<string, StateNode>,
-  out: { targets: string[]; opaque: boolean },
-): void {
-  // `#id...` absolute references can't be resolved reliably from config alone.
-  if (target.startsWith("#")) {
-    out.opaque = true;
-    return;
-  }
-  const resolved = target.startsWith(".")
-    ? `${fromNode.path}.${target.slice(1)}`
-    : fromNode.parentPath
-      ? `${fromNode.parentPath}.${target}`
-      : target;
-
-  if (index.has(resolved)) {
-    out.targets.push(resolved);
-  } else {
-    // Unresolved (deep/relative form we don't model) — over-approximate.
-    out.opaque = true;
-  }
-}
-
-// All outgoing edges from a state node: `on`/`always`/`after`/`onDone`
-// transitions plus each invoke's `onDone`/`onError`.
-//
-// `staticTargets` (present for `setupAgent.fromConfig` machines) is the source
-// config's own targets by state path. It is complete — the lowering records
-// every declared target, including the ones the JSON layer later folds into
-// opaque resolver functions — so when it is present it fully replaces the scan
-// over `machine.config`, and reachability is exact rather than approximated.
-function outgoingTargets(
-  node: StateNode,
-  index: Map<string, StateNode>,
-  staticTargets?: Record<string, string[]>,
-): { targets: string[]; opaque: boolean } {
-  const out = { targets: [] as string[], opaque: false };
-  const { config } = node;
-
-  if (staticTargets) {
-    for (const target of staticTargets[node.path] ?? []) {
-      resolveTargetString(target, node, index, out);
-    }
-    return out;
-  }
-
-  for (const value of Object.values(config.on ?? {})) {
-    collectTransitionTargets(value, node, index, out);
-  }
-  collectTransitionTargets(config.always, node, index, out);
-  // `type: 'choice'` pseudo-states resolve a `choice` transition immediately.
-  collectTransitionTargets(config.choice, node, index, out);
-  for (const value of Object.values(config.after ?? {})) {
-    collectTransitionTargets(value, node, index, out);
-  }
-  collectTransitionTargets(config.onDone, node, index, out);
-  for (const invoke of node.invokes) {
-    collectTransitionTargets(invoke.onDone, node, index, out);
-    collectTransitionTargets(invoke.onError, node, index, out);
-  }
-
-  return out;
-}
-
-// Computes the set of statically-reachable state paths from the machine's
-// initial state. Conservative: dynamic (function) transitions, `#id` targets,
-// and unresolved targets over-approximate by marking every sibling reachable,
-// so a state is only reported unreachable when NO static or over-approximated
-// path leads to it. Never a false positive; may miss (false negative) a truly
-// dead state hidden behind a dynamic transition. `staticTargets` (see
-// {@link outgoingTargets}) makes the walk exact for config-lowered machines.
-function computeReachable(
-  rootConfig: AnyConfig,
-  index: Map<string, StateNode>,
-  staticTargets?: Record<string, string[]>,
-): Set<string> {
-  const reachable = new Set<string>();
-  const queue: string[] = [];
-
-  const markAncestors = (path: string): void => {
-    let parent = index.get(path)?.parentPath ?? "";
-    while (parent) {
-      reachable.add(parent);
-      parent = index.get(parent)?.parentPath ?? "";
-    }
-  };
-
-  const enter = (path: string): void => {
-    if (reachable.has(path)) {
-      return;
-    }
-    const node = index.get(path);
-    if (!node) {
-      return;
-    }
-    reachable.add(path);
-    queue.push(path);
-    markAncestors(path);
-
-    if (node.isParallel) {
-      for (const child of childrenOf(index, path)) {
-        enter(child.path);
-      }
-    } else if (node.isCompound && node.config.initial) {
-      enter(`${path}.${node.config.initial}`);
-    }
-  };
-
-  if (rootConfig.type === "parallel") {
-    // A parallel root activates every top-level region at once.
-    for (const child of childrenOf(index, "")) {
-      enter(child.path);
-    }
-  } else if (rootConfig.initial) {
-    enter(rootConfig.initial);
-  }
-
-  // Worklist: process each newly-entered node's outgoing edges once.
-  while (queue.length > 0) {
-    const node = index.get(queue.shift() as string);
-    if (!node) {
-      continue;
-    }
-    const { targets, opaque } = outgoingTargets(node, index, staticTargets);
-    for (const target of targets) {
-      enter(target);
-    }
-    if (opaque) {
-      // A dynamic/unresolved transition could target any sibling — mark them
-      // all reachable rather than risk a false "unreachable" finding.
-      for (const sibling of childrenOf(index, node.parentPath)) {
-        enter(sibling.path);
-      }
-    }
-  }
-
-  return reachable;
-}
-
-// ─── Lint check helpers ───
-
 interface LintContext {
   config: AnyConfig;
   index: Map<string, StateNode>;
-  reachable: Set<string>;
   schemas: { context?: unknown; output?: unknown; events?: Record<string, unknown> } | undefined;
   actors: Record<string, AnyActorLogic>;
 }
@@ -391,36 +179,6 @@ function isAgentLogicNeedingBinding(src: object): boolean {
 // `z.custom` without the `jsonSchema` extension) or throws producing it. A
 // schema with no JSON Schema cannot be statically inspected at all, so lint
 // checks read this as "nothing to check".
-function readJsonSchema(schema: unknown): Record<string, unknown> | undefined {
-  if (!schema) {
-    return undefined;
-  }
-  try {
-    return getJsonSchemaSync(schema as never);
-  } catch {
-    return undefined;
-  }
-}
-
-// ─── Lint checks (each returns its own diagnostics) ───
-
-function checkUnreachableStates(ctx: LintContext): AgentLintDiagnostic[] {
-  const out: AgentLintDiagnostic[] = [];
-  for (const node of ctx.index.values()) {
-    if (!ctx.reachable.has(node.path)) {
-      out.push({
-        code: "unreachable-state",
-        severity: "error",
-        path: node.path,
-        message:
-          `State '${node.path}' is unreachable: no transition, always, onDone, or onError ` +
-          `target (from any reachable state) leads to it. Remove it or add a transition.`,
-      });
-    }
-  }
-  return out;
-}
-
 function checkDecideWithoutEvents(ctx: LintContext): AgentLintDiagnostic[] {
   const out: AgentLintDiagnostic[] = [];
   for (const node of ctx.index.values()) {
@@ -453,28 +211,6 @@ function checkDecideWithoutEvents(ctx: LintContext): AgentLintDiagnostic[] {
   return out;
 }
 
-function checkUnserializableContext(ctx: LintContext): AgentLintDiagnostic[] {
-  const contextSchema = ctx.schemas?.context;
-  if (!contextSchema) {
-    return [];
-  }
-  if (readJsonSchema(contextSchema)) {
-    return [];
-  }
-  return [
-    {
-      code: "unserializable-context",
-      severity: "warning",
-      path: "context",
-      message:
-        "The context schema does not expose a JSON schema (e.g. a `z.custom` without a " +
-        "`jsonSchema` extension, such as a messages array), so its fields cannot be " +
-        "statically checked for JSON persist/resume round-tripping. This is expected for " +
-        "message transcripts; verify any other custom-typed context is JSON-serializable.",
-    },
-  ];
-}
-
 function checkDirectObjectSrc(ctx: LintContext): AgentLintDiagnostic[] {
   const out: AgentLintDiagnostic[] = [];
   for (const node of ctx.index.values()) {
@@ -501,158 +237,57 @@ function checkDirectObjectSrc(ctx: LintContext): AgentLintDiagnostic[] {
   return out;
 }
 
-function checkFinalWithoutOutput(ctx: LintContext): AgentLintDiagnostic[] {
-  // Only a "real" declared output schema (a JSON object schema with at least
-  // one property, or required fields) creates a contract every final must
-  // satisfy — the pass-through/unknown default does not.
-  const outputJson = readJsonSchema(ctx.schemas?.output);
-  const properties = outputJson?.properties as Record<string, unknown> | undefined;
-  const required = outputJson?.required as unknown[] | undefined;
-  const isDeclaredOutputSchema =
-    (outputJson?.type === "object" && !!properties && Object.keys(properties).length > 0) ||
-    (Array.isArray(required) && required.length > 0);
-  if (!isDeclaredOutputSchema) {
+function checkUnhandledAgentMessages(ctx: LintContext): AgentLintDiagnostic[] {
+  const handlesMessages = (config: AnyConfig) =>
+    config.on?.[AGENT_MESSAGES_EVENT_TYPE] !== undefined || config.on?.["*"] !== undefined;
+  if (
+    handlesMessages(ctx.config) ||
+    [...ctx.index.values()].some((node) => handlesMessages(node.config))
+  ) {
     return [];
   }
-  // A root `output` (including the single-final-state sugar that copies one
-  // final's output to the root) satisfies the contract for every final path.
-  if (ctx.config.output !== undefined) {
-    return [];
-  }
-  const out: AgentLintDiagnostic[] = [];
-  for (const node of ctx.index.values()) {
-    if (node.parentPath !== "" || !node.isFinal) {
-      continue;
-    }
-    if (node.config.output === undefined) {
-      out.push({
-        code: "final-without-output",
-        severity: "error",
-        path: node.path,
-        message:
-          `The machine declares an output schema, but top-level final state '${node.path}' ` +
-          `has no 'output'. Its snapshot output will be undefined and fail the schema. Add ` +
-          `an 'output' to this final state (or a root 'output').`,
-      });
-    }
-  }
-  return out;
-}
 
-// Heuristically detects whether a final-state `output` function reads data off
-// the entering `event`, via `fn.toString()`: a property, optional-chain, or
-// index access on `event` (`event.x`, `event?.x`, `event[...]`). A bare
-// destructured `event` that is only passed through — notably the resolver
-// closures xstate's `createMachineFromConfig` generates for
-// `setupAgent.fromConfig` output slots (`({ context, event, self }) =>
-// evaluateResolvable(...)`) — is not a read and stays quiet, so config-lowered
-// machines don't false-flag.
-function outputFnReadsEvent(fn: (...args: never[]) => unknown): boolean {
-  return /\bevent\s*(?:\.|\?\.|\[)/.test(fn.toString());
-}
-
-function checkFinalOutputReadsEvent(ctx: LintContext): AgentLintDiagnostic[] {
-  const out: AgentLintDiagnostic[] = [];
-  for (const node of ctx.index.values()) {
-    if (node.parentPath !== "" || !node.isFinal) {
-      continue;
-    }
-    const output = node.config.output;
-    if (typeof output !== "function") {
-      continue;
-    }
-    if (!outputFnReadsEvent(output as (...args: never[]) => unknown)) {
-      continue;
-    }
-    out.push({
-      code: "final-output-reads-event",
-      severity: "warning",
-      path: node.path,
-      message:
-        `Final state '${node.path}' has an 'output' function that reads 'event'. Final-state ` +
-        `'output' functions are evaluated more than once with different events (the entering ` +
-        `event, then the machine-done computation) under current xstate behavior, so 'event' ` +
-        `is unreliable here. Read 'context' only; capture what you need from the entering ` +
-        `event into context in the transition that targets this state. (This guard can relax ` +
-        `if xstate guarantees a stable entering event across evaluations.)`,
-    });
+  let contextJsonSchema: { properties?: Record<string, unknown> } | undefined;
+  try {
+    contextJsonSchema = getJsonSchemaSync(
+      ctx.schemas?.context as StandardSchemaV1 | undefined,
+    ) as typeof contextJsonSchema;
+  } catch {
+    // Some Standard Schemas deliberately cannot lower custom fields to JSON
+    // Schema. This advisory check must stay best-effort.
   }
-  return out;
-}
+  if (!contextJsonSchema?.properties?.messages) return [];
 
-// True for `on:` keys that are legitimately not among declared event schemas:
-// the catch-all wildcard, partial wildcard patterns, and xstate builtin events.
-function isBuiltinOrWildcardEvent(eventType: string): boolean {
-  return (
-    eventType === "*" ||
-    eventType.includes("*") ||
-    eventType.startsWith("xstate.") ||
-    eventType.startsWith("done.") ||
-    eventType.startsWith("error.")
+  const hasTextRequest = [...ctx.index.values()].some((node) =>
+    node.invokes.some((invoke) => {
+      if (typeof invoke.src !== "string") return false;
+      return (
+        invoke.src === "agent.generateText" ||
+        invoke.src === "agent.streamText" ||
+        isTextLogic(ctx.actors[invoke.src])
+      );
+    }),
   );
-}
-
-// Flags `on:` handlers for events that are neither declared in `schemas.events`
-// nor a builtin/wildcard pattern — a likely typo. WARNING, not error: a config
-// may legitimately handle events it did not declare a payload schema for (the
-// lowering accepts any `on` key), so this only fires when the machine declares
-// typed events, and never blocks a run.
-function checkUndeclaredEvents(ctx: LintContext): AgentLintDiagnostic[] {
-  const declared = ctx.schemas?.events;
-  // The reserved `@agent.*` entries setupAgent registers by default (e.g.
-  // `'@agent.usage'`) don't count as "the machine declares typed events" — a
-  // machine that declared none should stay unlinted here.
-  const declaredTypes = new Set(Object.keys(declared ?? {}));
-  if ([...declaredTypes].every((type) => type.startsWith("@agent."))) {
-    return [];
-  }
-  const out: AgentLintDiagnostic[] = [];
-  for (const node of ctx.index.values()) {
-    for (const eventType of Object.keys(node.config.on ?? {})) {
-      if (declaredTypes.has(eventType) || isBuiltinOrWildcardEvent(eventType)) {
-        continue;
-      }
-      out.push({
-        code: "undeclared-event",
-        severity: "warning",
-        path: node.path,
-        message:
-          `State '${node.path}' handles event '${eventType}' in 'on:', but it is not declared ` +
-          `in schemas.events and is not a builtin/wildcard pattern. If intentional its payload ` +
-          `stays unvalidated; otherwise this is likely a typo.`,
-      });
-    }
-  }
-  return out;
-}
-
-function checkMissingFinal(ctx: LintContext): AgentLintDiagnostic[] {
-  for (const node of ctx.index.values()) {
-    if (node.isFinal && ctx.reachable.has(node.path)) {
-      return [];
-    }
-  }
-  return [
-    {
-      code: "missing-final",
-      severity: "warning",
-      path: "(root)",
-      message:
-        "The machine has no reachable final state, so a run can never settle 'done' (only " +
-        "idle/looping). This is legal for agents that only idle, but verify it is intended.",
-    },
-  ];
+  return hasTextRequest
+    ? [
+        {
+          code: "unhandled-agent-messages",
+          severity: "warning",
+          path: "(root)",
+          message:
+            "Text requests may return framework messages, but the machine does not " +
+            `handle '${AGENT_MESSAGES_EVENT_TYPE}'. Add on: { ` +
+            `'${AGENT_MESSAGES_EVENT_TYPE}': appendMessages() } when transcript retention ` +
+            "is intended, or disable this warning when messages are intentionally ignored.",
+        },
+      ]
+    : [];
 }
 
 const LINT_CHECKS: Array<(ctx: LintContext) => AgentLintDiagnostic[]> = [
-  checkUnreachableStates,
   checkDecideWithoutEvents,
-  checkUnserializableContext,
   checkDirectObjectSrc,
-  checkFinalWithoutOutput,
-  checkFinalOutputReadsEvent,
-  checkUndeclaredEvents,
-  checkMissingFinal,
+  checkUnhandledAgentMessages,
 ];
 
 /**
@@ -663,8 +298,9 @@ const LINT_CHECKS: Array<(ctx: LintContext) => AgentLintDiagnostic[]> = [
  * plus the schemas/actor sources the library already retains per machine.
  *
  * No model calls, no API keys — a coding agent that emits an agent machine can
- * call this to catch dead states, undeliverable decisions, un-rebindable
- * invoke srcs, and output-contract gaps before ever running it.
+ * call this to catch agent-specific mistakes such as undeliverable decisions,
+ * un-rebindable request sources, and an unhandled transcript event. General
+ * state-machine lint belongs to XState tooling.
  *
  * Pass `{ throw: true }` for the one-liner form used in tests and generation
  * loops: it returns silently when the machine is clean and throws
@@ -690,12 +326,10 @@ export function lintAgentMachine(
 ): AgentLintDiagnostic[] {
   const config = (machine as { config?: AnyConfig }).config ?? {};
   const index = buildStateIndex(config);
-  const reachable = computeReachable(config, index, getMachineStaticTransitionTargets(machine));
   const registered = getRegisteredAgentExecutionOptions(machine);
   const ctx: LintContext = {
     config,
     index,
-    reachable,
     schemas: registered.schemas as LintContext["schemas"],
     actors:
       (registered.actors as Record<string, AnyActorLogic> | undefined) ??
@@ -1423,8 +1057,33 @@ export async function explorePaths(
 export interface CanReachResult {
   /** True when the target state was reached within the exploration bounds. */
   reachable: boolean;
+  /** Resolved XState state-node id for a string target. */
+  target?: string;
   /** When reachable, the sequence of chosen/applied events that gets there. */
   witness?: ChosenEvent[];
+}
+
+/** Thrown when a string reachability target is not a state in the machine. */
+export class AgentUnknownStateError extends AgentError {
+  readonly target: string;
+
+  constructor(machineId: string, target: string) {
+    super("unknown-state", `canReach: machine '${machineId}' has no state matching '${target}'.`);
+    this.name = "AgentUnknownStateError";
+    this.target = target;
+  }
+}
+
+function resolveStateTarget(machine: AnyStateMachine, target: string): string {
+  const stack = [machine.root];
+  while (stack.length > 0) {
+    const node = stack.pop()!;
+    if (node.id === target.replace(/^#/, "") || node.path.join(".") === target) {
+      return node.id;
+    }
+    stack.push(...Object.values(node.states));
+  }
+  throw new AgentUnknownStateError(machine.id, target);
 }
 
 /**
@@ -1457,16 +1116,15 @@ export async function canReach(
   target: string | ((snapshot: AnyMachineSnapshot) => boolean),
   options: ExplorePathsOptions = {},
 ): Promise<CanReachResult> {
+  const resolvedTarget =
+    typeof target === "string" ? resolveStateTarget(machine, target) : undefined;
   const stopWhen =
     typeof target === "function"
       ? target
-      : (snapshot: AnyMachineSnapshot): boolean => {
-          try {
-            return snapshot.matches(target as never);
-          } catch {
-            return false;
-          }
-        };
+      : (snapshot: AnyMachineSnapshot): boolean =>
+          snapshot.nodes.some((node) => node.id === resolvedTarget);
   const { witness } = await explore(machine, options, stopWhen);
-  return witness !== undefined ? { reachable: true, witness } : { reachable: false };
+  return witness !== undefined
+    ? { reachable: true, witness, ...(resolvedTarget ? { target: resolvedTarget } : {}) }
+    : { reachable: false, ...(resolvedTarget ? { target: resolvedTarget } : {}) };
 }

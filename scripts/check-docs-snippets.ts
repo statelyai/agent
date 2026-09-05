@@ -27,7 +27,6 @@ const COMPILER_OPTIONS: ts.CompilerOptions = {
     "@statelyai/agent/ai-sdk": ["./src/ai-sdk/index.ts"],
     "@statelyai/agent/machines": ["./src/machines/index.ts"],
     "@statelyai/agent/otel": ["./src/otel/index.ts"],
-    "@statelyai/agent/sqlite": ["./src/sqlite/index.ts"],
   },
 };
 
@@ -65,7 +64,6 @@ const PACKAGE_ENTRIES: Record<string, string> = {
   "@statelyai/agent/ai-sdk": "src/ai-sdk/index.ts",
   "@statelyai/agent/machines": "src/machines/index.ts",
   "@statelyai/agent/otel": "src/otel/index.ts",
-  "@statelyai/agent/sqlite": "src/sqlite/index.ts",
 };
 
 function collectPackageExports(): Map<string, string> {

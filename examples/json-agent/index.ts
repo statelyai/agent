@@ -14,13 +14,10 @@
  *   - `draftReply` (drafting): a plain text request, same as any
  *     `setupAgent({ requests: {...} })` request.
  *   - `awaitingApproval`: an idle state — no invoke, nothing left to do
- *     until a human sends APPROVE/REJECT. The config's `idleTags:
- *     ["awaiting-approval"]` (matching the state's `tags`) is the declarative
- *     form of `setupAgent({ isIdle })` — `fromConfig` lowers it to a
- *     `hasTag` predicate, so `runAgent` settles `{ status: 'idle', snapshot }`
- *     deterministically (no timing heuristic, no warning); the host persists
- *     that snapshot and resumes with `runAgent(machine, { snapshot, event,
- *     executors })`.
+ *     until a human sends APPROVE/REJECT. Structural idle detection recognizes
+ *     its event handlers, so no Agent-specific pause declaration is needed;
+ *     the host persists the snapshot and resumes with
+ *     `runAgent(machine, { snapshot, event, executors })`.
  *
  * `fromConfig(...)` requires a `compileSchema` option — the library does not
  * bundle a JSON Schema engine, so the config's JSON Schemas (context/events/

@@ -1,17 +1,3 @@
-import type { Snapshot } from "xstate";
-
-/**
- * A minimal, type-only contract for a snapshot store: persist a `runAgent`
- * idle/settled snapshot under an id and load it back. It exists purely so
- * userland stores (a file, a SQLite table, a KV row, …) share one shape and
- * interoperate — there is **zero runtime** behind it; the library ships no
- * implementation. See `examples/file-snapshot-store` for a `node:fs` store.
- */
-export interface AgentSnapshotStore {
-  load(id: string): Promise<Snapshot<unknown> | undefined>;
-  save(id: string, snapshot: Snapshot<unknown>): Promise<void>;
-}
-
 /**
  * The [Standard Schema](https://standardschema.dev) interface. Every schema
  * this library accepts (context, events, input/output, tool schemas, …) is a
@@ -184,11 +170,9 @@ export type ToolMessage = {
 };
 
 /**
- * A single conversation turn, in this library's portable message model
- * (structurally compatible with the AI SDK's `ModelMessage`). Stored as
- * plain context state — see {@link appendMessages} — and passed to text/
- * decision requests via `messages`. Validate a context field with
- * {@link messagesSchema}.
+ * Optional framework-neutral message helpers. Requests also accept native
+ * framework message values directly; core never converts between formats.
+ * Store messages as plain context state — see {@link appendMessages}.
  */
 export type AgentMessage = SystemMessage | UserMessage | AssistantMessage | ToolMessage;
 

@@ -315,9 +315,6 @@ export const chatWithPdfSchemas = createAgentSchemas({
 const agentSetup = setupAgent({
   schemas: chatWithPdfSchemas,
   models,
-  // Deterministic idle detection: the states waiting on the human are exactly
-  // the ones tagged `waiting`.
-  isIdle: (snapshot) => snapshot.hasTag("waiting"),
   actors: {
     // Plain typed actor — no model in the retrieval path.
     retrieve: createAsyncLogic<Chunk[], QueryPdfInput>({
@@ -373,8 +370,12 @@ const agentSetup = setupAgent({
   states: {
     // `asking` always sets `pending` before `awaitingAnswer` / `grading` read
     // it, so those two states can be narrowed non-null.
-    awaitingAnswer: { context: { pending: askedQuestionSchema } },
-    grading: { context: { pending: askedQuestionSchema } },
+    awaitingAnswer: {
+      schemas: { context: chatWithPdfSchemas.context.extend({ pending: askedQuestionSchema }) },
+    },
+    grading: {
+      schemas: { context: chatWithPdfSchemas.context.extend({ pending: askedQuestionSchema }) },
+    },
   },
 });
 
@@ -701,7 +702,7 @@ export async function main() {
   while (result.status === "idle") {
     const text = await promptLine(`${idlePrompt(result.snapshot)}\n> `);
     result = await runAgent(chatWithPdfMachine, {
-      snapshot: result.persistedSnapshot,
+      snapshot: result.persist(),
       event: toLearnerEvent(result.snapshot, text),
       ...shared,
     });

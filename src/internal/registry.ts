@@ -6,6 +6,14 @@ import {
   type AsyncActorLogic,
 } from "xstate";
 import type { AgentRequestOptions } from "../events.js";
+import type { AgentRequestExecutors } from "../text-logic.js";
+
+/** Non-enumerable hook an optional adapter can attach to a model registry. */
+export const DEFAULT_AGENT_EXECUTORS = Symbol.for("@statelyai/agent.defaultExecutors");
+
+export type DefaultExecutorsRegistry = {
+  [DEFAULT_AGENT_EXECUTORS]?: () => AgentRequestExecutors;
+};
 
 export type AgentExecutionOptions = Pick<AgentRequestOptions, "schemas" | "actors"> & {
   models?: object;
@@ -19,8 +27,7 @@ export const agentExecutionOptions = new WeakMap<object, AgentExecutionOptions>(
  * machine through `.provide` — which is why it is keyed on `config`, not the
  * machine. Set by `setupAgent({ isIdle })` in `createMachine` and by
  * `setupAgent.fromConfig` (its `isIdle` option or the config's
- * `idleTags`), read by `runAgent` (below the host `options.isIdle`
- * override, above the timing heuristic).
+ * `idleTags`), read by `runAgent` before its structural default.
  */
 export const machineIdlePredicates = new WeakMap<
   object,
@@ -33,28 +40,6 @@ export function getMachineIdlePredicate(
 ): ((snapshot: AnyMachineSnapshot) => boolean) | undefined {
   const config = (machine as { config?: object }).config;
   return config ? machineIdlePredicates.get(config) : undefined;
-}
-
-/**
- * Lint-reachability sidecar for `fromConfig` machines.
- *
- * Static transition targets declared by the source config of a
- * `setupAgent.fromConfig` machine, as `dotted state path → declared target
- * strings` (every `on`/`always`/`after`/`onDone`/`choice` target plus each
- * invoke's `onDone`/`onError`). The JSON layer folds a transition that carries a
- * context patch into an opaque resolver function, erasing its target from
- * `machine.config` — so `lintAgentMachine`'s reachability walk reads the
- * targets from here instead. Keyed on the machine's root `config` object (like
- * {@link machineIdlePredicates}) so it survives `machine.provide(...)`.
- */
-export const machineStaticTransitionTargets = new WeakMap<object, Record<string, string[]>>();
-
-/** Reads the {@link machineStaticTransitionTargets} map carried by `machine` (via its root `config`), if any. */
-export function getMachineStaticTransitionTargets(
-  machine: AnyStateMachine,
-): Record<string, string[]> | undefined {
-  const config = (machine as { config?: object }).config;
-  return config ? machineStaticTransitionTargets.get(config) : undefined;
 }
 
 // Actor logic objects that are unbound placeholders (no host execution) and

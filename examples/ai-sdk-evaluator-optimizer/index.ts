@@ -89,9 +89,16 @@ const agentSetup = setupAgent({
   },
   // `improving` runs only after evaluating set translation + evaluation.
   states: {
-    evaluating: { context: { translation: z.string() } },
-    improving: { context: { translation: z.string(), evaluation: translationEvaluationSchema } },
-    done: { context: { translation: z.string() } },
+    evaluating: { schemas: { context: contextSchema.extend({ translation: z.string() }) } },
+    improving: {
+      schemas: {
+        context: contextSchema.extend({
+          translation: z.string(),
+          evaluation: translationEvaluationSchema,
+        }),
+      },
+    },
+    done: { schemas: { context: contextSchema.extend({ translation: z.string() }) } },
   },
   requests: {
     translateText: {

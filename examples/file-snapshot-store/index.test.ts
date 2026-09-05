@@ -2,49 +2,15 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
-import { runAgent } from "@statelyai/agent";
-import { createFileSnapshotStore, draftMachine, runFileSnapshotStoreExample } from "./index.js";
+import { runFileSnapshotStoreExample } from "./index.js";
 
-const generateText = async ({ prompt }: { prompt?: string }) => ({
-  output: `Draft: ${prompt ?? ""}`,
+test("persists and resumes a native XState snapshot through application storage", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "agent-snapshot-test-"));
+  const output = await runFileSnapshotStoreExample(directory, {
+    generateText: async () => ({ output: "Framework-owned persistence." }),
+  });
+
+  const stored = JSON.parse(readFileSync(join(directory, "release-42.json"), "utf8"));
+  expect(stored.value).toBe("reviewing");
+  expect(output).toEqual({ draft: "Framework-owned persistence." });
 });
-
-test("multi-turn idle/resume across fresh processes via the file store", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "agent-snap-test-"));
-  const store = createFileSnapshotStore(dir);
-  const sessionId = "s1";
-
-  const first = await runAgent(draftMachine, {
-    input: { topic: "release notes" },
-    executors: { generateText },
-  });
-  expect(first.status).toBe("idle");
-  await store.save(sessionId, first.snapshot);
-
-  // The checkpoint is a real JSON file on disk.
-  const onDisk = JSON.parse(readFileSync(join(dir, `${sessionId}.json`), "utf8"));
-  expect(onDisk.value).toBe("reviewing");
-
-  // Cycle 1: reject → back to reviewing (fresh runAgent = new process).
-  const second = await runAgent(draftMachine, {
-    snapshot: await store.load(sessionId),
-    event: { type: "REJECT", reason: "add detail" },
-    executors: { generateText },
-  });
-  expect(second.status).toBe("idle");
-  await store.save(sessionId, second.snapshot);
-
-  // Cycle 2: approve → done.
-  const third = await runAgent(draftMachine, {
-    snapshot: await store.load(sessionId),
-    event: { type: "APPROVE" },
-    executors: { generateText },
-  });
-  expect(third.status).toBe("done");
-  if (third.status !== "done") return;
-  expect(third.output).toEqual({
-    draft: "Draft: release notes\nRevision: add detail",
-  });
-});
-
-test("runFileSnapshotStoreExample runs end to end", runFileSnapshotStoreExample);

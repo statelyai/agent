@@ -39,7 +39,7 @@ export async function POST(
     // A REJECT loops back through `drafting` and settles at `reviewing` again,
     // so the stored snapshot has to be replaced or the next resume would run
     // against the pre-rejection draft.
-    snapshots.set(id, result.persistedSnapshot);
+    snapshots.set(id, result.persist());
     return NextResponse.json(
       { status: "idle", id, draft: result.snapshot.context.draft },
       { status: 202 },

@@ -6,6 +6,7 @@ import {
 } from "xstate";
 import type { StandardSchemaV1 } from "./types.js";
 import { validateSchemaSync } from "./utils.js";
+import { AGENT_MESSAGES_EVENT_TYPE } from "./messages.js";
 
 /** The invoke `src` of an {@link AgentRequest}/{@link AgentDecisionRequest} — a plain string, widened so literal `src` values still narrow in editor hints. */
 // `& {}` keeps literal-union autocomplete alive while still allowing any string — a bare `string` in a union would swallow the literals.
@@ -78,17 +79,21 @@ function matchesEventPattern(eventType: string, pattern: string): boolean {
 }
 
 /**
- * The namespace reserved for events the library itself delivers to a machine
- * (`@agent.init`, `@agent.usage`). A machine may declare transitions on them,
+ * Event types reserved for delivery by the library (`@agent.*` and
+ * `agent.messages`). A machine may declare transitions on them,
  * but they are never model-facing: {@link getAcceptedEvents} drops them before
  * any `allowedEvents` matching, so they cannot be offered as a decision
  * candidate (not even under a `'*'` wildcard) and {@link parseAgentEvent}
  * rejects them — a model or a wire message must not be able to forge one.
- * Matched as a prefix rather than a list so this module stays free of an import
- * cycle back to `effects.ts`, where the constants live.
  * @internal
  */
 const RESERVED_AGENT_EVENT_PREFIX = "@agent.";
+
+function isReservedAgentEvent(eventType: string): boolean {
+  return (
+    eventType.startsWith(RESERVED_AGENT_EVENT_PREFIX) || eventType === AGENT_MESSAGES_EVENT_TYPE
+  );
+}
 
 /** True when an `allowedEvents` entry is a wildcard pattern rather than a concrete event type. @internal */
 export function isEventPattern(entry: string): boolean {
@@ -213,7 +218,7 @@ export function getAcceptedEvents(
       !eventType ||
       eventType === "*" ||
       eventType.startsWith("xstate.") ||
-      eventType.startsWith(RESERVED_AGENT_EVENT_PREFIX) ||
+      isReservedAgentEvent(eventType) ||
       (eventTypes && !eventTypes.some((pattern) => matchesEventPattern(eventType, pattern))) ||
       seen.has(eventType)
     ) {

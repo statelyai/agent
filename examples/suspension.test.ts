@@ -1,35 +1,21 @@
 /**
- * Registry-level guard: every demo-runnable example machine that waits on a
- * human must declare *how* it suspends.
+ * Registry-level guard for example idle semantics.
  *
- * A state with `meta.interaction` is this repo's marker for "a person answers
- * here" — the demo renders it as a prompt. When such a state rests, `runAgent`
- * has to decide the run is idle; without a declared predicate it falls back to
- * a timing heuristic and logs a warning. The fix is one line on `setupAgent`:
- *
- *     isIdle: (snapshot) => snapshot.hasTag("awaiting-approval")
- *
- * plus the matching `tags: [...]` on the waiting state. This test fails when a
- * new example forgets it.
+ * Human waits are ordinary resting XState states with accepted events and
+ * interaction metadata. They should use `isAgentIdle` by default. Exactly one
+ * example carries an explicit predicate to demonstrate additive composition.
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import type { AnyStateMachine, StateNode } from "xstate";
+import { isAgentIdle, setupAgent } from "../src/index.js";
 import { getMachineIdlePredicate } from "../src/internal/registry.js";
 
 const examplesDir = fileURLToPath(new URL(".", import.meta.url));
 
-/**
- * Machines that legitimately cannot carry a predicate today. Keep each entry
- * justified — this is an escape hatch, not a backlog.
- */
-const EXCLUDED: Record<string, string> = {
-  // (empty — every human-waiting example currently declares its predicate)
-};
-
-/** An XState machine, duck-typed — instanceof is unreliable across module graphs. */
 function isMachine(value: unknown): value is AnyStateMachine {
   if (!value || typeof value !== "object") return false;
   const candidate = value as { transition?: unknown; root?: unknown; config?: unknown };
@@ -38,11 +24,6 @@ function isMachine(value: unknown): value is AnyStateMachine {
   return !!config && typeof config === "object" && ("states" in config || "initial" in config);
 }
 
-/**
- * States that rest waiting for a person: `meta.interaction` (the human prompt)
- * plus event handlers and nothing of its own left to do — no invoke, no
- * `after`, no `always`.
- */
 function humanWaitStates(machine: AnyStateMachine): string[] {
   const found: string[] = [];
   const walk = (node: StateNode<any, any>) => {
@@ -62,7 +43,6 @@ function humanWaitStates(machine: AnyStateMachine): string[] {
   return found;
 }
 
-/** The demo lists every `examples/*` folder with an `index.ts`, minus `"manual": true`. */
 function runnableExampleIds(): string[] {
   return readdirSync(examplesDir)
     .filter((id) => existsSync(path.join(examplesDir, id, "index.ts")))
@@ -75,9 +55,12 @@ function runnableExampleIds(): string[] {
 }
 
 describe("example suspension predicates", () => {
-  it("declares deterministic suspension for every human-waiting machine", async () => {
-    const undeclared: string[] = [];
-    const declared: string[] = [];
+  it("uses structural idle by default and preserves it in custom predicates", async () => {
+    const humanWaits: string[] = [];
+    const customPredicates: Array<{
+      key: string;
+      predicate: NonNullable<ReturnType<typeof getMachineIdlePredicate>>;
+    }> = [];
 
     for (const id of runnableExampleIds()) {
       const module = (await import(path.join(examplesDir, id, "index.ts"))) as Record<
@@ -85,32 +68,49 @@ describe("example suspension predicates", () => {
         unknown
       >;
       for (const [exportName, value] of Object.entries(module)) {
-        if (!isMachine(value)) continue;
+        if (!isMachine(value) || !humanWaitStates(value).length) continue;
         const key = `${id}#${exportName}`;
-        if (!humanWaitStates(value).length || key in EXCLUDED) continue;
-        (getMachineIdlePredicate(value) ? declared : undeclared).push(key);
+        humanWaits.push(key);
+        const predicate = getMachineIdlePredicate(value);
+        if (predicate) customPredicates.push({ key, predicate });
       }
     }
 
-    // A miss here means `runAgent` guesses with a timing heuristic (and warns).
-    // Fix the example, don't extend EXCLUDED, unless a library gap blocks it.
-    expect(undeclared).toEqual([]);
-    expect(declared.length).toBeGreaterThan(15);
-  }, 60_000);
+    expect(humanWaits.length).toBeGreaterThan(15);
+    expect(customPredicates.length).toBeGreaterThan(0);
 
-  it("keeps the excluded machines honest", async () => {
-    for (const key of Object.keys(EXCLUDED)) {
-      const [id, exportName] = key.split("#") as [string, string];
-      const module = (await import(path.join(examplesDir, id, "index.ts"))) as Record<
-        string,
-        unknown
-      >;
-      const machine = module[exportName];
-      expect(isMachine(machine), `${key} no longer exists`).toBe(true);
-      // Still a human-waiting machine, still undeclared — drop the exclusion
-      // once either stops being true.
-      expect(humanWaitStates(machine as AnyStateMachine).length).toBeGreaterThan(0);
-      expect(getMachineIdlePredicate(machine as AnyStateMachine)).toBeUndefined();
+    const idleFixture = setupAgent({
+      context: z.object({}),
+      events: { CONTINUE: z.object({}) },
+      meta: z.object({
+        interaction: z.object({ label: z.string() }).optional(),
+      }),
+    });
+    const eventWait = idleFixture
+      .createMachine({
+        context: {},
+        initial: "waiting",
+        states: {
+          waiting: { on: { CONTINUE: { target: "done" } } },
+          done: { type: "final" },
+        },
+      })
+      .getInitialSnapshot();
+    const interactionWait = idleFixture
+      .createMachine({
+        context: {},
+        initial: "waiting",
+        states: {
+          waiting: { meta: { interaction: { label: "Continue" } } },
+        },
+      })
+      .getInitialSnapshot();
+
+    expect(isAgentIdle(eventWait)).toBe(true);
+    expect(isAgentIdle(interactionWait)).toBe(true);
+    for (const { key, predicate } of customPredicates) {
+      expect(predicate(eventWait), `${key} replaced event-based idle semantics`).toBe(true);
+      expect(predicate(interactionWait), `${key} replaced interaction idle semantics`).toBe(true);
     }
   }, 60_000);
 });

@@ -28,6 +28,7 @@ import {
   type AgentDecisionExecutor,
   type AgentDecisionRequest,
   type AgentEventDescriptor,
+  type AgentMessage,
   type AgentRequestExecutorInfo,
   type AgentRequestExecutors,
   type AgentTextRequest,
@@ -40,7 +41,7 @@ import {
 
 /** Maps `AgentTextRequest.messages`/`system`/`prompt` to LangChain messages. */
 export function toLangChainMessages(
-  request: Pick<AgentTextRequest, "system" | "prompt" | "messages">,
+  request: Pick<AgentTextRequest, "system" | "prompt"> & { messages?: AgentMessage[] },
 ): BaseMessage[] {
   if (request.messages) {
     // `AgentMessage`'s system|user|assistant|tool roles map 1:1 onto
@@ -267,7 +268,7 @@ export function createLangChainExecutors({
     return { output: text, ...(usage ? { usage } : {}) };
   };
 
-  const decide: AgentDecisionExecutor = async (request) => {
+  const decide: AgentDecisionExecutor = async (request, info) => {
     const chat = resolveModel(request.model);
     const bound = requireBindTools(chat)(toLangChainEventTools(request.events), {
       tool_choice: decisionToolChoice,
@@ -275,7 +276,7 @@ export function createLangChainExecutors({
 
     const response = await bound.invoke(
       toDecisionMessages(request),
-      request.signal ? { signal: request.signal } : {},
+      info?.signal ? { signal: info.signal } : {},
     );
 
     const toolCall = response.tool_calls?.[0];

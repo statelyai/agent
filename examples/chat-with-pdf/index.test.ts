@@ -88,7 +88,7 @@ async function play(options: PlayOptions): Promise<PlayResult> {
     const event = queue.shift();
     if (!event) break;
     result = await runAgent(chatWithPdfMachine, {
-      snapshot: result.persistedSnapshot,
+      snapshot: result.persist(),
       event,
       executors: { generateText },
     });

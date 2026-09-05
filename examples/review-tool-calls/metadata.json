@@ -9,7 +9,7 @@
   },
   "comparison": {
     "targets": ["LangGraph"],
-    "purpose": "LangGraph's interrupt() over a proposed tool call plus Command(resume={...}) to approve, edit-before-run, or reject-with-feedback, here as a first-class idle `reviewing` state resumed by typed APPROVE / EDIT / REJECT events."
+    "purpose": "Contrasts SDK-owned tool loops by making LangGraph's interrupt() over a proposed call a first-class idle `reviewing` state, resumed by typed APPROVE / EDIT / REJECT events before the consequential tool runs."
   },
   "starters": [
     "Refund me $60 for the late delivery on order #8891.",

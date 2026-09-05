@@ -327,13 +327,13 @@ A run settles in one of two ways.
 result = await runAgent(machine, { snapshot, event: { type: "APPROVE" }, executors });
 ```
 
-> **Note:** An **idle state** is any state with no `invoke`. Nothing runs in it, so the machine waits for an external event declared under `on`. A state with an `invoke` is doing work: a decision, a text request, or an `agent.userInput` pause.
-
+> **Note:** By default, an **idle state** is an active snapshot that accepts an external event anywhere in its active hierarchy, or has `meta.interaction`. `runAgent` also verifies that no invoked child, eventless transition, or delayed transition is still working.
+>
 > **Note:** Two `prompt`-shaped fields sit at different layers. A `requests` entry's `prompt` is the text sent to the model. An `invoke`'s `input` is the data passed to the invoked source. That is either a request's typed input, or an `agent.decide` inline input carrying its own `model`, `prompt`, and `allowedEvents`.
 
 ## Idle declaration
 
-Without a declared idle predicate, `runAgent` settles idle using a best-effort timing heuristic and logs a warning. A config declares the predicate with `idleTags`. This is the declarative form of `setupAgent({ isIdle })`, because JSON cannot carry a function.
+`runAgent` uses its exported `isAgentIdle(snapshot)` rule by default. A config can replace that predicate with `idleTags`; this is the declarative form of `setupAgent({ isIdle })`, because JSON cannot carry a function.
 
 ```yaml
 idleTags: [awaiting-approval]
@@ -345,7 +345,7 @@ states:
 ```
 
 - `fromConfig(...)` converts the list into a `snapshot.hasTag(...)` predicate. Every listed tag must appear in some state's `tags`. An unused entry is a build-time error.
-- For predicates that a tag list cannot express, pass a function instead: `setupAgent.fromConfig(config, { isIdle })`. The function takes precedence over `idleTags`. A `runAgent({ isIdle })` host override takes precedence over both.
+- For predicates that a tag list cannot express, pass a function instead: `setupAgent.fromConfig(config, { isIdle })`. The function takes precedence over `idleTags` and remains machine-owned. Import `isAgentIdle` and call it inside that predicate when expanding, rather than replacing, the default rule.
 
 ## Decisions from JSON
 

@@ -1,254 +1,73 @@
 /**
- * Durable checkpoints in a file-backed snapshot store.
+ * Framework-owned snapshot persistence.
  *
- * Each idle settle writes the snapshot to a JSON file keyed by session id.
- * A fresh `runAgent` call — a stand-in for a new process after a crash or
- * redeploy — loads it back and resumes. The snapshot is the entire process
- * state, so nothing else needs to be threaded between turns.
+ * The store is ordinary application code: one JSON file per run. Stately
+ * Agent supplies no storage adapter. Each request loads or saves XState's
+ * native persisted snapshot and can run in a fresh process.
  *
- * The store here is `node:fs` writing JSON files under the OS temp dir. Swap
- * `save`/`load` for a `better-sqlite3` table to get the same shape backed by
- * SQLite:
- *
- *   // CREATE TABLE snapshots (session_id TEXT PRIMARY KEY, snapshot TEXT);
- *   save: (id, snap) => db.prepare(
- *     'INSERT OR REPLACE INTO snapshots VALUES (?, ?)'
- *   ).run(id, JSON.stringify(snap));
- *   load: (id) => JSON.parse(
- *     db.prepare('SELECT snapshot FROM snapshots WHERE session_id = ?').get(id).snapshot
- *   );
- *
- * Run: OPENAI_API_KEY=... npx tsx examples/file-snapshot-store/index.ts
+ * Run: npx tsx examples/file-snapshot-store/index.ts
  */
-import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { z } from "zod";
-import { openai } from "@ai-sdk/openai";
-import { runAgent, setupAgent } from "@statelyai/agent";
-import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import type { Snapshot } from "xstate";
-import type { AgentSnapshotStore } from "@statelyai/agent";
+import { runAgent, type AgentRequestExecutors } from "@statelyai/agent";
+import { portableLoopMachine } from "../portable-xstate-loop/index.js";
 
-const draftContextSchema = z.object({ topic: z.string(), draft: z.string().nullable() });
-
-// Typed interaction meta for the idle review gate: the pause's `label`, a
-// button `label`/`style` per accepted event, and `textEvent` naming the ONE
-// event free-typed text is delivered to.
-const metaSchema = z.object({
-  interaction: z
-    .object({
-      label: z.string(),
-      events: z
-        .record(
-          z.string(),
-          z.object({
-            label: z.string().optional(),
-            style: z.enum(["primary", "danger", "default"]).optional(),
-          }),
-        )
-        .optional(),
-      textEvent: z.string().optional(),
-    })
-    .optional(),
-});
-
-const agentSetup = setupAgent({
-  meta: metaSchema,
-  context: draftContextSchema,
-  input: z.object({ topic: z.string() }),
-  output: z.object({ draft: z.string() }),
-  events: {
-    APPROVE: z.object({}),
-    REJECT: z.object({ reason: z.string() }),
-  },
-  // The machine's own wait signal: the `awaiting-review` tag. `runAgent` settles
-  // idle deterministically whenever a resting snapshot carries it.
-  isIdle: (snapshot) => snapshot.hasTag("awaiting-review"),
-  requests: {
-    writeDraft: {
-      schemas: { input: z.object({ topic: z.string() }), output: z.string() },
-      model: "writer",
-      system:
-        "You draft short, concrete announcement copy. Two or three sentences. " +
-        'If the topic includes a "Revision:" note, apply it. Return only the draft text.',
-      prompt: ({ input }) => input.topic,
-    },
-  },
-  // drafting's onDone sets `draft` before every path into "reviewing" (a
-  // REJECT loops back through drafting, which re-sets it) — narrow it
-  // non-null from "reviewing" onward.
-  states: {
-    drafting: {},
-    reviewing: {
-      schemas: { context: draftContextSchema.extend({ draft: z.string() }) },
-    },
-    published: {
-      schemas: { context: draftContextSchema.extend({ draft: z.string() }) },
-    },
-  },
-});
-
-// drafting → reviewing (idle HITL) → published, with a REJECT loop back to
-// drafting. Each REJECT is one idle/resume cycle through the store.
-export const draftMachine = agentSetup.createMachine({
-  id: "file-snapshot-drafter",
-  context: ({ input }) => ({ topic: input.topic, draft: null }),
-  initial: "drafting",
-  states: {
-    drafting: {
-      invoke: {
-        src: "writeDraft",
-        input: ({ context }) => ({ topic: context.topic }),
-        onDone: ({ output }) => ({ target: "reviewing", context: { draft: output } }),
-      },
-    },
-    reviewing: {
-      tags: ["awaiting-review"],
-      meta: {
-        interaction: {
-          label: "Approve the draft to publish it, or type the revision you want.",
-          events: {
-            APPROVE: { label: "Approve draft", style: "primary" },
-            REJECT: { label: "Request a revision", style: "danger" },
-          },
-          // Without this, free text would silently REJECT (its `reason` is the
-          // only single-string payload here).
-          textEvent: "REJECT",
-        },
-      },
-      on: {
-        APPROVE: { target: "published" },
-        REJECT: ({ context, event }) => ({
-          target: "drafting",
-          context: { topic: `${context.topic}\nRevision: ${event.reason}` },
-        }),
-      },
-    },
-    published: {
-      type: "final",
-      output: ({ context }) => ({ draft: context.draft }),
-    },
-  },
-});
-
-// ─── File-backed snapshot store ───
-//
-// One JSON file per session id. `save` on every idle settle; `load` when a
-// fresh process resumes. See the SQLite sketch in the header comment.
-//
-// Typed as the library's `AgentSnapshotStore` — the type-only contract that
-// lets any store (file, SQLite, KV, …) interoperate. The interface is
-// async-shaped (`load` returns `Snapshot | undefined`); this fs implementation
-// happens to do its I/O synchronously.
-export function createFileSnapshotStore(dir: string): AgentSnapshotStore {
-  const pathFor = (id: string) => join(dir, `${id}.json`);
-  return {
-    async save(id, snapshot) {
-      writeFileSync(pathFor(id), JSON.stringify(snapshot), "utf8");
-    },
-    async load(id) {
-      const path = pathFor(id);
-      return existsSync(path)
-        ? (JSON.parse(readFileSync(path, "utf8")) as Snapshot<unknown>)
-        : undefined;
-    },
-  };
+/** Ordinary application I/O; use the equivalent APIs from your framework. */
+export async function saveSnapshot(
+  directory: string,
+  id: string,
+  snapshot: Snapshot<unknown>,
+): Promise<void> {
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, `${id}.json`), JSON.stringify(snapshot), "utf8");
 }
 
-const generateText = async ({ prompt }: { prompt?: string }) => ({
-  output: `Draft: ${prompt ?? ""}`,
-});
-
-export async function runFileSnapshotStoreExample() {
-  const store = createFileSnapshotStore(mkdtempSync(join(tmpdir(), "agent-snap-")));
-  const sessionId = "refund-123";
-
-  // ── Process 1: run to the first idle, checkpoint to disk. ──
-  const first = await runAgent(draftMachine, {
-    input: { topic: "release notes" },
-    executors: { generateText },
-  });
-  assert.equal(first.status, "idle");
-  await store.save(sessionId, first.snapshot);
-
-  // ── Process 2 (fresh runAgent): load, reject once, checkpoint again. ──
-  const second = await runAgent(draftMachine, {
-    snapshot: await store.load(sessionId),
-    event: { type: "REJECT", reason: "too terse" },
-    executors: { generateText },
-  });
-  // REJECT loops back through drafting to reviewing → idle again.
-  assert.equal(second.status, "idle");
-  await store.save(sessionId, second.snapshot);
-
-  // ── Process 3 (fresh runAgent): load, approve, run to done. ──
-  const third = await runAgent(draftMachine, {
-    snapshot: await store.load(sessionId),
-    event: { type: "APPROVE" },
-    executors: { generateText },
-  });
-  assert.equal(third.status, "done");
-  assert.deepEqual(third.status === "done" ? third.output : undefined, {
-    draft: "Draft: release notes\nRevision: too terse",
-  });
-}
-
-// Direct run: the same idle → persist-to-disk → fresh-process resume dance,
-// but with a real model writing the draft and a real snapshot file on disk.
-export async function main() {
-  const { generateText } = createAiSdkExecutors({
-    models: { writer: openai("gpt-5.4-mini") },
-  });
-  const dir = mkdtempSync(join(tmpdir(), "agent-snap-"));
-  const store = createFileSnapshotStore(dir);
-  const sessionId = "release-123";
-  const snapshotPath = join(dir, `${sessionId}.json`);
-
-  // Process 1: draft, settle idle at review, checkpoint to disk.
-  const first = await runAgent(draftMachine, {
-    input: { topic: "Launch of our new snapshot store" },
-    executors: { generateText },
-    onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
-  });
-  assert.equal(first.status, "idle");
-  await store.save(sessionId, first.snapshot);
-  console.log(`Draft checkpointed to ${snapshotPath}`);
-  console.log(`Draft: ${first.snapshot.context.draft}\n`);
-
-  // Process 2 (fresh runAgent): load, request a revision, checkpoint again.
-  const second = await runAgent(draftMachine, {
-    snapshot: await store.load(sessionId),
-    event: { type: "REJECT", reason: "make it punchier" },
-    executors: { generateText },
-    onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
-  });
-  assert.equal(second.status, "idle");
-  await store.save(sessionId, second.snapshot);
-  console.log(`Revised draft: ${second.snapshot.context.draft}\n`);
-
-  // Process 3 (fresh runAgent): load, approve, run to done.
-  const third = await runAgent(draftMachine, {
-    snapshot: await store.load(sessionId),
-    event: { type: "APPROVE" },
-    executors: { generateText },
-    onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
-  });
-  if (third.status !== "done") {
-    throw new Error(`Draft did not publish: ${third.status}`);
+export async function loadSnapshot(
+  directory: string,
+  id: string,
+): Promise<Snapshot<unknown> | undefined> {
+  const path = join(directory, `${id}.json`);
+  try {
+    return JSON.parse(await readFile(path, "utf8")) as Snapshot<unknown>;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
   }
-  console.log("Published:", third.output.draft);
 }
 
-// Run directly (`tsx index.ts`); skipped when a test imports this module.
+export async function runFileSnapshotStoreExample(
+  directory: string,
+  executors: AgentRequestExecutors,
+): Promise<{ draft: string }> {
+  const runId = "release-42";
+
+  // Request/process one: run until the machine waits for approval.
+  const paused = await runAgent(portableLoopMachine, {
+    input: { topic: "framework-owned storage" },
+    executors,
+  });
+  if (paused.status !== "idle") throw new Error(`Expected idle, got '${paused.status}'.`);
+  await saveSnapshot(directory, runId, paused.persist());
+
+  // Request/process two: load the native snapshot and deliver a normal event.
+  const snapshot = await loadSnapshot(directory, runId);
+  if (!snapshot) throw new Error(`No snapshot stored for '${runId}'.`);
+  const resumed = await runAgent(portableLoopMachine, {
+    snapshot,
+    event: { type: "APPROVE" },
+    executors,
+  });
+  if (resumed.status !== "done") throw new Error(`Expected done, got '${resumed.status}'.`);
+  return resumed.output;
+}
+
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
-    process.exit(1);
-  }
-  main().catch((error) => {
-    console.error(error);
-    process.exitCode = 1;
+  const directory = mkdtempSync(join(tmpdir(), "stately-agent-snapshots-"));
+  const output = await runFileSnapshotStoreExample(directory, {
+    generateText: async () => ({ output: "Stored the framework way." }),
   });
+  console.log({ directory, output });
 }

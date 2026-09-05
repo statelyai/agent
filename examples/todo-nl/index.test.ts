@@ -105,7 +105,7 @@ describe("todo-nl", () => {
     // Resuming from the persisted snapshot with COMMAND enters the loop.
     const { decide: decide2 } = scriptedDecide([{ type: "QUIT" }]);
     const resumed = await runAgent(todoMachine, {
-      snapshot: result.persistedSnapshot,
+      snapshot: result.persist(),
       event: { type: "COMMAND", text: "quit" },
       executors: { decide: decide2 },
     });
@@ -130,7 +130,7 @@ describe("todo-nl", () => {
     expect(idlePrompt(started.snapshot)).toBe("What should I do with your list? (list is empty)");
 
     const result = await runAgent(todoMachine, {
-      snapshot: started.persistedSnapshot,
+      snapshot: started.persist(),
       event: { type: "COMMAND", text: "add pick up laundry and do groceries, laundry is done" },
       executors: { decide },
     });

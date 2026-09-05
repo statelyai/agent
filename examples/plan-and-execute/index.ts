@@ -72,7 +72,7 @@ const agentSetup = setupAgent({
   // solveTask always sets `answer` before `done` reads it — narrow it non-null there.
   states: {
     done: {
-      context: { answer: z.string() },
+      schemas: { context: planAndExecuteContextSchema.extend({ answer: z.string() }) },
     },
   },
   requests: {

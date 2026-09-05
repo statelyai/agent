@@ -64,8 +64,10 @@ const agentSetup = setupAgent({
     },
   },
   states: {
-    routing: { context: { action: actionSchema } },
-    needsApproval: { context: { pendingRefund: z.number() } },
+    routing: { schemas: { context: schemas.context.extend({ action: actionSchema }) } },
+    needsApproval: {
+      schemas: { context: schemas.context.extend({ pendingRefund: z.number() }) },
+    },
   },
 });
 

@@ -10,7 +10,7 @@
  *     `playing` compound state, not on a per-turn substate. It stays alive
  *     across every substate transition (your turn, my turn, round over, next
  *     round), keeping its accumulated observations — including across idle
- *     settles, because resumes use the result's `persistedSnapshot`, which
+ *     settles, because resumes use the result of `persist()`, which
  *     round-trips invoked children with their state.
  *   - Pushed game state. The game machine forwards what happens as it happens
  *     via `OBSERVE` events (opponent rolls, busts, banks, round results). The
@@ -22,7 +22,7 @@
  *   - Human moves as gated machine events with `meta.interaction` hints, so
  *     hosts/demos drive them as buttons (`HUMAN_ROLL` / `HUMAN_BANK`) and a
  *     free-text box (`ROUND_REPLY`). The run settles idle on those states and
- *     resumes with `runAgent(machine, { snapshot: persistedSnapshot, event })`.
+ *     resumes with `runAgent(machine, { snapshot: result.persist(), event })`.
  *   - Natural-language round control. The free-text round reply is interpreted
  *     with a structured-output request.
  *
@@ -178,11 +178,6 @@ const metaSchema = z.object({
 const gameSetup = setupAgent({
   models,
   meta: metaSchema,
-  // The machine's own wait signal: the `waiting` tag on the human-move states.
-  // `runAgent` settles idle deterministically whenever a resting snapshot
-  // carries it — the invoked `player` child (with its accumulated
-  // observations) round-trips through the idle `persistedSnapshot`.
-  isIdle: (snapshot) => snapshot.hasTag("waiting"),
   context: z.object({
     seed: z.number(),
     target: z.number(),
@@ -576,7 +571,7 @@ export async function runGameLoopExample(options?: {
     ...shared,
   });
 
-  // Every human move settles the run idle. Resume from `persistedSnapshot` —
+  // Every human move settles the run idle. Resume from `result.persist()` —
   // it round-trips the invoked `player` child WITH its accumulated
   // observations (the live `snapshot` would restart the child fresh).
   while (result.status === "idle") {
@@ -585,7 +580,7 @@ export async function runGameLoopExample(options?: {
       queued.shift() ??
       toHumanEvent(result.snapshot, await promptLine(`${idlePrompt(result.snapshot)}\n> `));
     result = await runAgent(gameMachine, {
-      snapshot: result.persistedSnapshot,
+      snapshot: result.persist(),
       event,
       ...shared,
     });

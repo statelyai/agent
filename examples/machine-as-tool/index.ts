@@ -80,9 +80,6 @@ const agentSetup = setupAgent({
     APPROVE: z.object({}),
     REJECT: z.object({ reason: z.string() }),
   },
-  // The machine's own wait signal: the `awaiting-approval` tag. `runAgent`
-  // settles idle deterministically whenever a resting snapshot carries it.
-  isIdle: (snapshot) => snapshot.hasTag("awaiting-approval"),
   requests: {
     // Stands in for a real validation model call (fraud check, policy, …).
     validateRefund: {

@@ -1,26 +1,25 @@
 import {
   generateText as aiGenerateText,
-  NoObjectGeneratedError,
   Output,
   streamText as aiStreamText,
   stepCountIs,
   type FinishReason,
   type FlexibleSchema,
   type LanguageModel,
+  type ModelMessage,
   type ToolSet,
   type TypedToolCall,
   type TypedToolResult,
 } from "ai";
 import {
   buildEnvelopeSchema,
-  type AgentRequestExecutor,
   type AgentRequestExecutorInfo,
-  type AgentRequestExecutors,
   type AgentTextRequest,
   type StructuredOutputEnvelope,
 } from "../text-logic.js";
-import type { AgentDecisionExecutor, AgentDecisionRequest } from "../decision.js";
+import type { AgentDecisionRequest } from "../decision.js";
 import type { AgentTools, ChosenEvent } from "../types.js";
+import { DEFAULT_AGENT_EXECUTORS } from "../internal/registry.js";
 import {
   defined,
   extractFirstJsonValue,
@@ -34,12 +33,10 @@ import {
 } from "./mappers.js";
 
 // Multi-step tool loops: the request's typed `maxSteps` bounds the AI SDK
-// tool-call loop; default stays single-step. `metadata.maxSteps` is still read
-// as a fallback for requests written before `maxSteps` was a typed field.
-// Shared by generateText and streamText so both honor it symmetrically.
+// tool-call loop; default stays single-step. Shared by generateText and
+// streamText so both honor it symmetrically.
 function maxStepsSetting(request: AgentTextRequest): { stopWhen?: ReturnType<typeof stepCountIs> } {
-  const maxSteps =
-    typeof request.maxSteps === "number" ? request.maxSteps : request.metadata?.maxSteps;
+  const maxSteps = request.maxSteps;
   return typeof maxSteps === "number" ? { stopWhen: stepCountIs(maxSteps) } : {};
 }
 
@@ -79,7 +76,12 @@ export type AiSdkModelMap<TKey extends string = string> = Record<TKey, AiSdkMode
 export function defineModels<T extends Record<string, AiSdkModelEntry>>(
   models: T,
 ): AiSdkModelMap<keyof T & string> {
-  return models;
+  const registry = { ...models } as AiSdkModelMap<keyof T & string>;
+  Object.defineProperty(registry, DEFAULT_AGENT_EXECUTORS, {
+    enumerable: false,
+    value: () => createAiSdkExecutors({ models: registry }),
+  });
+  return registry;
 }
 
 /**
@@ -227,6 +229,10 @@ export type AiSdkGenerateResult = {
   finishReason: FinishReason;
   toolCalls: TypedToolCall<ToolSet>[];
   toolResults: TypedToolResult<ToolSet>[];
+  /** AI SDK response messages, including tool calls/results from every step. */
+  messages: ModelMessage[];
+  /** The untouched AI SDK result. */
+  raw: unknown;
 };
 /** Raw result shape from {@link AiSdkExecutors.streamText} — the `{ output }` envelope carrying the fully-accumulated text once the stream finishes (chunks are delivered separately via `onChunk`), plus the stream's final usage/finish metadata for `onResult`. */
 export type AiSdkStreamResult = {
@@ -234,6 +240,10 @@ export type AiSdkStreamResult = {
   /** The stream's final (awaited) usage; aggregated into the run result's `AgentUsage`. */
   usage: AiSdkCallUsage;
   finishReason: FinishReason;
+  /** AI SDK response messages, including tool calls/results from every step. */
+  messages: ModelMessage[];
+  /** The untouched AI SDK result. */
+  raw: unknown;
 };
 /** Raw result shape from {@link AiSdkExecutors.decide} — the chosen event plus the AI SDK call metadata, delivered per decision attempt to `onResult`. */
 export type AiSdkDecideResult = {
@@ -246,13 +256,19 @@ export type AiSdkDecideResult = {
 /** `createAiSdkExecutors` always populates all three slots (unlike the
  * general `AgentRequestExecutors`, where `streamText`/`decide` are optional),
  * and its `generateText`/`streamText` results are concretely typed. */
-export interface AiSdkExecutors extends AgentRequestExecutors<
-  AiSdkGenerateResult,
-  AiSdkStreamResult
-> {
-  generateText: AgentRequestExecutor<AiSdkGenerateResult>;
-  streamText: AgentRequestExecutor<AiSdkStreamResult>;
-  decide: AgentDecisionExecutor;
+export interface AiSdkExecutors {
+  generateText: (
+    request: AgentTextRequest & { tools: AgentTools },
+    info?: AgentRequestExecutorInfo,
+  ) => Promise<AiSdkGenerateResult>;
+  streamText: (
+    request: AgentTextRequest & { tools: AgentTools },
+    info?: AgentRequestExecutorInfo,
+  ) => Promise<AiSdkStreamResult>;
+  decide: (
+    request: AgentDecisionRequest,
+    info?: AgentRequestExecutorInfo,
+  ) => Promise<AiSdkDecideResult>;
 }
 
 /**
@@ -299,22 +315,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
           schema: envelope as FlexibleSchema<unknown>,
         }),
       );
-      // One malformed response must not kill a run: when the output still
-      // fails parsing/validation after JSON repair, the request is re-sent
-      // once. (The SDK's own maxRetries covers network errors, not these.)
-      // Only tool-FREE requests retry: a request carrying tools may already
-      // have executed side effects in its tool loop before the final output
-      // failed to parse, and re-sending would run them again.
-      const canRetry = !request.tools || Object.keys(request.tools).length === 0;
-      let result;
-      try {
-        result = await aiGenerateText({ ...common, output: structuredOutput });
-      } catch (error) {
-        if (!canRetry || !NoObjectGeneratedError.isInstance(error) || info?.signal?.aborted) {
-          throw error;
-        }
-        result = await aiGenerateText({ ...common, output: structuredOutput });
-      }
+      const result = await aiGenerateText({ ...common, output: structuredOutput });
       const { result: output, reasoning } = result.output as StructuredOutputEnvelope;
       return {
         output,
@@ -323,6 +324,8 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
         finishReason: result.finishReason,
         toolCalls: result.toolCalls,
         toolResults: result.toolResults,
+        messages: result.responseMessages,
+        raw: result,
       } satisfies AiSdkGenerateResult;
     }
 
@@ -333,6 +336,8 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
       finishReason: result.finishReason,
       toolCalls: result.toolCalls,
       toolResults: result.toolResults,
+      messages: result.responseMessages,
+      raw: result,
     } satisfies AiSdkGenerateResult;
   };
 
@@ -358,17 +363,19 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
       output: await result.text,
       usage: toAgentCallUsage(await result.usage),
       finishReason: await result.finishReason,
+      messages: await result.responseMessages,
+      raw: result,
     } satisfies AiSdkStreamResult;
   };
 
-  const decide: AgentDecisionExecutor = async (request) => {
+  const decide = async (request: AgentDecisionRequest, info?: AgentRequestExecutorInfo) => {
     const { model, settings: modelSettings } = resolveAiSdkModel(options, request.model);
     const tools = toAiSdkEventTools(request.events);
     const messages = toDecisionMessages(request);
 
     const result = await aiGenerateText({
       model,
-      abortSignal: request.signal,
+      abortSignal: info?.signal,
       ...callSettings(options, request),
       ...defined(modelSettings ?? {}),
       system: request.system,

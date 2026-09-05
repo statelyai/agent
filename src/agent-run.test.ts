@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
-import { createAgentRun } from "./agent-run.js";
+import { createAgentRun, runAgentStream } from "./agent-run.js";
 import {
   createAgentSchemas,
   createTextLogic,
@@ -191,7 +191,7 @@ describe("createAgentRun", () => {
 
     // Resume via createAgentRun with the persisted snapshot + resume event.
     const run = createAgentRun(machine, {
-      snapshot: first.snapshot,
+      snapshot: first.persist(),
       event: { type: "APPROVE" },
       executors: { generateText },
     });
@@ -278,5 +278,29 @@ describe("createAgentRun", () => {
     const last = events.at(-1);
     expect(last?.type).toBe("run.end");
     expect(last?.type === "run.end" ? last.status : undefined).toBe("error");
+  });
+});
+
+describe("runAgentStream", () => {
+  test("projects chunks, requests, transitions, and the terminal result", async () => {
+    const machine = buildStreamMachine();
+    const events = [];
+
+    for await (const event of runAgentStream(machine, {
+      executors: {
+        streamText: async (_request, info) => {
+          info?.onChunk?.("hello");
+          return { output: "hello" };
+        },
+      },
+    })) {
+      events.push(event);
+    }
+
+    expect(events.map((event) => event.kind)).toContain("chunk");
+    expect(events.at(-1)?.kind).toBe("done");
+    expect(events.find((event) => event.kind === "request" && event.phase === "start")).toEqual(
+      expect.objectContaining({ name: "joke" }),
+    );
   });
 });

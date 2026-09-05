@@ -69,7 +69,7 @@ async function play(options: PlayOptions) {
   const prompt = idlePrompt(idle.snapshot);
 
   const result = await runAgent(chameleonMachine, {
-    snapshot: idle.persistedSnapshot,
+    snapshot: idle.persist(),
     event: options.accuse,
     ...shared,
   });
@@ -197,7 +197,7 @@ describe("chameleon", () => {
 
     // Persist mid-vote as JSON, then resume a fresh run from it.
     const resumed = await runAgent(chameleonMachine, {
-      snapshot: JSON.parse(JSON.stringify(idle.persistedSnapshot)),
+      snapshot: JSON.parse(JSON.stringify(idle.persist())),
       event: { type: "ACCUSE_P0" },
       ...shared,
     });

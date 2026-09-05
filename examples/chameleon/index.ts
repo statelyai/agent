@@ -35,7 +35,7 @@
  * The vote is an idle state (no invoke) carrying `meta.interaction`: the
  * category and the four spoken words in the label, one `ACCUSE_P*` button per
  * player. Resume with
- * `runAgent(machine, { snapshot: result.persistedSnapshot, event })`.
+ * `runAgent(machine, { snapshot: result.persist(), event })`.
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/chameleon/index.ts
  */
@@ -226,9 +226,6 @@ const CHAMELEON_SYSTEM_PROMPT = [
 const agentSetup = setupAgent({
   schemas: chameleonSchemas,
   models,
-  // Deterministic idle detection: the run settles exactly when it is waiting on
-  // the detective, instead of falling back to the timing heuristic.
-  isIdle: (snapshot) => snapshot.hasTag("waiting"),
   requests: {
     /**
      * ONE request definition for all four players. Its input is a union, and
@@ -553,7 +550,7 @@ export async function main() {
     ...shared,
   });
 
-  // The vote settles the run idle. Resume from `persistedSnapshot`.
+  // The vote settles the run idle. Resume from `result.persist()`.
   while (result.status === "idle") {
     const text = await promptLine(
       `${idlePrompt(result.snapshot)}\n(${PLAYERS.map((name, index) => `${index}=${name}`).join(", ")})\n> `,
@@ -564,7 +561,7 @@ export async function main() {
       continue;
     }
     result = await runAgent(chameleonMachine, {
-      snapshot: result.persistedSnapshot,
+      snapshot: result.persist(),
       event,
       ...shared,
     });

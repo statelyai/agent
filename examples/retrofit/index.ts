@@ -95,9 +95,6 @@ const schemas = createAgentSchemas({
 const agentSetup = setupAgent({
   schemas,
   models,
-  // The machine's own wait signal — `runAgent` settles idle whenever a resting
-  // snapshot carries this tag (the `{ pending }` sentinel, now first-class).
-  isIdle: (snapshot) => snapshot.hasTag("awaiting-approval"),
   actors: {
     // The `lookupOrder` tool, now a typed actor. Reads the sample table.
     lookupOrder: createAsyncLogic<string, { orderId: string }>({
@@ -121,7 +118,9 @@ const agentSetup = setupAgent({
   },
   states: {
     // `pendingRefund` is set non-null before the machine reaches these.
-    awaitingApproval: { context: { pendingRefund: z.number() } },
+    awaitingApproval: {
+      schemas: { context: schemas.context.extend({ pendingRefund: z.number() }) },
+    },
   },
 });
 
@@ -331,7 +330,7 @@ export async function runRetrofitExample(
     ? ({ type: "APPROVE" } as const)
     : ({ type: "DENY", reason: denyReason } as const);
   const second = await runAgent(supportMachine, {
-    snapshot: first.persistedSnapshot,
+    snapshot: first.persist(),
     event,
     executors,
     onTransition: track,

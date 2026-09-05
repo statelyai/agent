@@ -210,7 +210,7 @@ const agentSetup = setupAgent({
   // `generating` always sets `generation` before `done` reads it — narrow it
   // non-null there. Declare ONLY the field that changes.
   states: {
-    done: { context: { generation: z.string() } },
+    done: { schemas: { context: cragContextSchema.extend({ generation: z.string() }) } },
   },
   actors: {
     // retrieve: keyword search over the primary corpus. Top 3 docs.

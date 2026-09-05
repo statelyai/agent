@@ -24,8 +24,8 @@
  * LangSmith: because the model call is LangChain's own, tracing is env-var
  * driven and needs no code here — set `LANGSMITH_TRACING=true` and
  * `LANGSMITH_API_KEY=...` and every generation, stream, and decision below
- * shows up as a trace. (See ../langsmith-otel for the OTel route, which traces
- * the machine's own spans instead.)
+ * shows up as a trace. Use `@statelyai/agent/otel` when the host should trace
+ * the machine's own spans instead.
  *
  * Run: npx tsx examples/langchain-host/index.ts
  *   No API key -> both directions run against a scripted LangChain model.

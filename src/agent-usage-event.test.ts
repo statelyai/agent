@@ -1,25 +1,15 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
-import { initialTransition, transition, type AnyMachineSnapshot, type EventObject } from "xstate";
 import {
-  AGENT_USAGE_EVENT_TYPE,
-  createReplayEntry,
-  executeAgentRequest,
-  getAgentEffects,
-  getCallUsage,
-  initEntry,
-  createAgentActor,
   createAgentSchemas,
   createTextLogic,
   getAcceptedEvents,
   parseAgentEvent,
-  replay,
   runAgent,
   setupAgent,
-  type AgentLogEntry,
-  type AgentUsageEvent,
   type ChosenEvent,
 } from "./index.js";
+import { AGENT_USAGE_EVENT_TYPE, type AgentUsageEvent } from "./usage.js";
 
 const schemas = createAgentSchemas({
   input: z.object({ maxTokens: z.number() }),
@@ -91,9 +81,6 @@ const budgetMachine = agent.createMachine({
 const textExecutors = {
   generateText: async () => ({ output: "a fact", usage: { totalTokens: 400, inputTokens: 300 } }),
 };
-
-const usageEntries = (events: readonly AgentLogEntry[]): AgentLogEntry[] =>
-  events.filter((entry) => entry.event.type === AGENT_USAGE_EVENT_TYPE);
 
 describe("@agent.usage (reserved per-call usage event)", () => {
   test("folds a text call's tokens into context, so a budget guard can stop the run", async () => {
@@ -186,7 +173,7 @@ describe("@agent.usage (reserved per-call usage event)", () => {
     });
   });
 
-  test("a machine that declares no handler is untouched: no event, no log entry", async () => {
+  test("a machine that declares no handler is untouched", async () => {
     const plainSchemas = createAgentSchemas({
       context: z.object({ note: z.string() }),
       output: z.object({ note: z.string() }),
@@ -216,7 +203,6 @@ describe("@agent.usage (reserved per-call usage event)", () => {
 
     expect(result.status).toBe("done");
     expect(seen).not.toContain(AGENT_USAGE_EVENT_TYPE);
-    expect(usageEntries(result.events)).toHaveLength(0);
     // Aggregation is unaffected by delivery being skipped.
     expect(result.usage).toEqual({ totalTokens: 400, inputTokens: 300, modelCalls: 1 });
   });
@@ -254,89 +240,6 @@ describe("@agent.usage (reserved per-call usage event)", () => {
         usage: { totalTokens: 999_999 },
       }),
     ).toThrow(/is not an accepted event/);
-  });
-
-  test("rides the event log: a pure replay rebuilds the folded context exactly", async () => {
-    const result = await runAgent(budgetMachine, {
-      input: { maxTokens: 1000 },
-      executors: textExecutors,
-    });
-
-    expect(result.status).toBe("done");
-    // One journal entry per delivered usage event, alongside the invoke results.
-    expect(usageEntries(result.events)).toHaveLength(3);
-
-    // Folding the journal through the machine executes nothing — no model call,
-    // no executor — yet reproduces the token counter byte for byte.
-    const replayed = replay(budgetMachine, result.events);
-    expect(replayed.snapshot.context).toEqual(result.snapshot.context);
-    expect(replayed.snapshot.context.tokens).toBe(1200);
-  });
-
-  test("events-only recovery resumes with the folded tokens, re-calling no model", async () => {
-    // Same budget shape, but it pauses for approval — the crash-recovery case:
-    // the log is resumed while the machine is still live.
-    const resumable = agent.createMachine({
-      context: ({ input }) => ({ notes: [], tokens: 0, maxTokens: input.maxTokens, seen: [] }),
-      on: {
-        [AGENT_USAGE_EVENT_TYPE]: ({ context, event }) => ({
-          context: { tokens: context.tokens + (event.usage.totalTokens ?? 0) },
-        }),
-      },
-      initial: "researching",
-      states: {
-        researching: {
-          invoke: {
-            id: "research",
-            src: "researchStep",
-            input: { turn: 1 },
-            onDone: ({ context, output }) => ({
-              target: "waiting",
-              context: { notes: [...context.notes, output] },
-            }),
-          },
-        },
-        waiting: { on: { APPROVE: { target: "reported" } } },
-        reported: {
-          type: "final",
-          output: ({ context }) => ({
-            notes: context.notes,
-            tokens: context.tokens,
-            stoppedBy: "approval",
-          }),
-        },
-      },
-    });
-
-    const first = await runAgent(resumable, {
-      input: { maxTokens: 9999 },
-      executors: textExecutors,
-    });
-    expect(first.status).toBe("idle");
-    expect(first.snapshot.context.tokens).toBe(400);
-    expect(usageEntries(first.events)).toHaveLength(1);
-
-    // Resume from the LOG ALONE (no snapshot). Executors throw if touched: a
-    // recorded call must never be re-made.
-    const recovered = await runAgent(resumable, {
-      events: first.events,
-      event: { type: "APPROVE" },
-      executors: {
-        generateText: async () => {
-          throw new Error("executor must not be called during events-only recovery");
-        },
-      },
-    });
-
-    expect(recovered.status).toBe("done");
-    expect(recovered.usage.modelCalls).toBe(0);
-    // The tokens folded in by `@agent.usage` survived the replay untouched.
-    expect(recovered.snapshot.context.tokens).toBe(first.snapshot.context.tokens);
-    expect(recovered.status === "done" ? recovered.output : undefined).toEqual({
-      notes: ["a fact"],
-      tokens: 400,
-      stoppedBy: "approval",
-    });
   });
 
   test("a wildcard-only machine DOES receive it: `on: { '*' }` matches, per plain XState semantics", async () => {
@@ -377,7 +280,6 @@ describe("@agent.usage (reserved per-call usage event)", () => {
 
     expect(result.status).toBe("done");
     expect(seen).toContain(AGENT_USAGE_EVENT_TYPE);
-    expect(usageEntries(result.events)).toHaveLength(1);
     expect(result.snapshot.context.wildcards).toContain(AGENT_USAGE_EVENT_TYPE);
   });
 
@@ -415,87 +317,15 @@ describe("@agent.usage (reserved per-call usage event)", () => {
       },
     });
 
-    const result = await runAgent(bothMachine, { executors: textExecutors });
+    const seen: string[] = [];
+    const result = await runAgent(bothMachine, {
+      executors: textExecutors,
+      onTransition: (_snapshot, event) => seen.push(event.type),
+    });
 
     expect(result.status).toBe("done");
     expect(result.snapshot.context.tokens).toBe(400);
-    expect(usageEntries(result.events)).toHaveLength(1);
-  });
-
-  test("a log truncated between a usage entry and its call's result keeps BOTH spends", async () => {
-    const resumable = agent.createMachine({
-      context: ({ input }) => ({ notes: [], tokens: 0, maxTokens: input.maxTokens, seen: [] }),
-      on: {
-        [AGENT_USAGE_EVENT_TYPE]: ({ context, event }) => ({
-          context: { tokens: context.tokens + (event.usage.totalTokens ?? 0) },
-        }),
-      },
-      initial: "researching",
-      states: {
-        researching: {
-          invoke: {
-            id: "research",
-            src: "researchStep",
-            input: { turn: 1 },
-            onDone: ({ context, output }) => ({
-              target: "waiting",
-              context: { notes: [...context.notes, output] },
-            }),
-          },
-        },
-        waiting: { on: { APPROVE: { target: "reported" } } },
-        reported: {
-          type: "final",
-          output: ({ context }) => ({
-            notes: context.notes,
-            tokens: context.tokens,
-            stoppedBy: "approval",
-          }),
-        },
-      },
-    });
-
-    const first = await runAgent(resumable, {
-      input: { maxTokens: 9999 },
-      executors: textExecutors,
-    });
-    expect(first.snapshot.context.tokens).toBe(400);
-
-    // Crash window: the log holds the usage entry but not yet the invoke's
-    // result, so the call is still pending and WILL be re-executed on recovery.
-    const doneIndex = first.events.findIndex((entry) =>
-      entry.event.type.startsWith("xstate.done.actor"),
-    );
-    expect(doneIndex).toBeGreaterThan(0);
-    expect(first.events[doneIndex - 1]!.event.type).toBe(AGENT_USAGE_EVENT_TYPE);
-    const truncated = first.events.slice(0, doneIndex);
-
-    const recovered = await runAgent(resumable, {
-      events: truncated,
-      executors: textExecutors,
-    });
-
-    expect(recovered.status).toBe("idle");
-    // SPEND RECORDS, not bookkeeping: the lost call's tokens were burned at
-    // call time — losing its RESULT to the crash does not un-spend them — and
-    // the recovery's re-execution is additional real spend. So the recovered
-    // total is the sum of both calls (400 + 400), and both usage entries stand
-    // in the log. That is the budget-guard-correct number: you really did pay
-    // for two calls.
-    expect(recovered.snapshot.context.tokens).toBe(800);
-    expect(usageEntries(recovered.events)).toHaveLength(2);
-  });
-
-  test("the session actor path behaves identically to runAgent", async () => {
-    const session = createAgentActor(budgetMachine, {
-      input: { maxTokens: 1000 },
-      executors: textExecutors,
-    });
-    const result = await session.settled();
-
-    expect(result.status).toBe("done");
-    expect(result.snapshot.context.tokens).toBe(1200);
-    expect(usageEntries(result.events)).toHaveLength(3);
+    expect(seen).toContain(AGENT_USAGE_EVENT_TYPE);
   });
 });
 
@@ -516,7 +346,11 @@ describe("@agent.usage registration (declared by setupAgent, not by the machine)
   });
 
   test("setupAgent's retained schemas expose it alongside the machine's own events", () => {
-    expect(Object.keys(agent.schemas.events).sort()).toEqual([AGENT_USAGE_EVENT_TYPE, "APPROVE"]);
+    expect(Object.keys(agent.schemas.events).sort()).toEqual([
+      AGENT_USAGE_EVENT_TYPE,
+      "APPROVE",
+      "agent.messages",
+    ]);
   });
 
   test("the machine's event union includes it — the handler is typed without declaring it", () => {
@@ -559,6 +393,7 @@ describe("@agent.usage registration (declared by setupAgent, not by the machine)
     expect(Object.keys(fromConfigSchemas.events).sort()).toEqual([
       AGENT_USAGE_EVENT_TYPE,
       "APPROVE",
+      "agent.messages",
     ]);
 
     expect(() =>
@@ -588,55 +423,5 @@ describe("@agent.usage registration (declared by setupAgent, not by the machine)
         events: { [AGENT_USAGE_EVENT_TYPE]: z.object({ usage: z.object({}) }) },
       }),
     ).toThrow(/reserved '@agent\.' namespace/);
-  });
-});
-
-describe("@agent.usage on the step path (host-applied, journaled like any event)", () => {
-  test("a hand-driven step loop folds the same token counter runAgent does", async () => {
-    const executors = {
-      generateText: async () => ({
-        output: "a fact",
-        usage: { totalTokens: 400, inputTokens: 300 },
-      }),
-    };
-    const input = { maxTokens: 1000 };
-
-    const entries = [initEntry(budgetMachine, input)];
-    let [snapshot, actions] = initialTransition(budgetMachine, input);
-
-    const append = (event: EventObject) => {
-      entries.push(createReplayEntry(budgetMachine, entries, event));
-      [snapshot, actions] = transition(budgetMachine, snapshot, event as never);
-    };
-
-    while (snapshot.status === "active") {
-      const effects = getAgentEffects(budgetMachine, snapshot as AnyMachineSnapshot, actions, {
-        history: entries,
-      });
-      const effect = effects.find((candidate) => candidate.kind === "text");
-      if (!effect) {
-        break;
-      }
-
-      // Executing an effect always hands back the RAW executor result too.
-      const { output, raw } = await executeAgentRequest(effect, executors);
-
-      // The recipe: usage is an ordinary host-applied event, journaled like any
-      // other external input — applied BEFORE the call's own result, so a guard
-      // sees the tokens in the same step that consumes it.
-      const usage = getCallUsage(raw);
-      if (usage) {
-        append({ type: AGENT_USAGE_EVENT_TYPE, usage } as EventObject);
-      }
-      append(effect.toDoneEvent(output) as EventObject);
-    }
-
-    // 3 calls x 400 = 1200 >= 1000, identical to the runAgent path.
-    expect(snapshot.status).toBe("done");
-    expect((snapshot as AnyMachineSnapshot).context.tokens).toBe(1200);
-    expect(usageEntries(entries)).toHaveLength(3);
-
-    // Journaled, so a pure replay of the log reproduces the counter.
-    expect(replay(budgetMachine, entries).snapshot.context.tokens).toBe(1200);
   });
 });

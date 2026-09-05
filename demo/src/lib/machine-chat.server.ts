@@ -13,7 +13,6 @@
 import {
   getAcceptedEvents,
   getAgentSchemas,
-  getSnapshotNodes,
   getStateMeta,
   parseAgentEvent,
   runAgent,
@@ -215,7 +214,7 @@ export function resolveLabel(label: string, context: unknown): string {
  * it is the next-best idle prompt.
  */
 function activeDescription(snapshot: AnyMachineSnapshot): string | null {
-  const nodes = getSnapshotNodes(snapshot);
+  const nodes = snapshot.nodes;
   for (let index = nodes.length - 1; index >= 0; index -= 1) {
     const description = nodes[index]?.description;
     if (typeof description === "string" && description.trim()) return description;
@@ -447,7 +446,7 @@ function toChatResult(
       // Resume from the run's persisted snapshot, not the live one — it
       // round-trips invoked children WITH their state (a long-lived agent
       // keeps its context across chat turns).
-      idle: { ...idle, snapshot: result.persistedSnapshot as unknown as Json },
+      idle: { ...idle, snapshot: result.persist() as unknown as Json },
     };
   }
   const error = (result as { error?: unknown }).error;

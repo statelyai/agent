@@ -27,7 +27,6 @@ import type {
   StateValue,
 } from "xstate";
 import { AgentError } from "./errors.js";
-import type { AgentLogEntry } from "./event-log-store.js";
 import { getCallUsage, normalizeGeneratorResult } from "./text-logic.js";
 import { runAgent } from "./run-agent.js";
 import type { RunAgentOptions, RunAgentResult } from "./run-agent.js";
@@ -45,6 +44,7 @@ import type {
 } from "./text-logic.js";
 import type { AgentTools } from "./types.js";
 import { getStateMeta, type MetaOfSnapshot } from "./utils.js";
+import type { TrajectoryEvent } from "./trajectory.js";
 
 /**
  * Which model call is under test: the Nth call with this request `name` (the
@@ -106,8 +106,8 @@ export interface SeamCall {
 export interface SeamSlice {
   /** State values entered on this side of the seam, in order. */
   statePath: StateValue[];
-  /** Replayable log entries on this side of the seam, in order. */
-  events: AgentLogEntry[];
+  /** Root-machine transition events on this side of the seam, in order. */
+  events: TrajectoryEvent[];
 }
 
 /** Options for {@link runSeam}. */
@@ -154,8 +154,6 @@ export interface RunSeamOptions<TMachine extends AnyStateMachine> {
    * Text slots are always owned by the routing.
    */
   executors?: Partial<AgentRequestExecutors>;
-  /** Passed through to `runAgent`: the deterministic idle-state predicate. */
-  isIdle?: RunAgentOptions<TMachine>["isIdle"];
   /** Passed through to `runAgent`: actor implementations merged onto the machine. */
   actors?: RunAgentOptions<TMachine>["actors"];
 }
@@ -163,8 +161,7 @@ export interface RunSeamOptions<TMachine extends AnyStateMachine> {
 /** What {@link runSeam} returns: the seam's own answer, plus the run it caused. */
 export interface RunSeamResult<TMachine extends AnyStateMachine> {
   /**
-   * The final `runAgent` result. Its `events` are the WHOLE run's log (every
-   * leg's entries), while `usage` accounts only for the last leg.
+   * The final `runAgent` result. `usage` accounts for the last leg.
    */
   result: RunAgentResult<TMachine>;
   /** What the seam call returned, or `undefined` when the run never reached it. */
@@ -363,7 +360,7 @@ export async function runSeam<TMachine extends AnyStateMachine>(
 
   let snapshot: Snapshot<unknown> | undefined;
   let event: EventFromLogic<TMachine> | undefined;
-  let events: AgentLogEntry[] = [];
+  const events: TrajectoryEvent[] = [];
   let result!: RunAgentResult<TMachine>;
   const maxTurns = options.maxTurns ?? 12;
 
@@ -371,13 +368,8 @@ export async function runSeam<TMachine extends AnyStateMachine>(
     result = await runAgent(machine, {
       ...(snapshot ? { snapshot } : { input: options.input }),
       ...(event ? { event } : {}),
-      ...(options.isIdle ? { isIdle: options.isIdle } : {}),
       ...(options.actors ? { actors: options.actors } : {}),
-      events,
       executors,
-      onEvent: () => {
-        liveEvents++;
-      },
       onTransition: (next, causedBy) => {
         // A resumed leg re-emits the state it restored into under
         // `@xstate.init`. That is an artifact of the leg structure this helper
@@ -385,13 +377,11 @@ export async function runSeam<TMachine extends AnyStateMachine>(
         if (turn > 0 && causedBy.type === "@xstate.init") {
           return;
         }
+        events.push(causedBy as TrajectoryEvent);
+        liveEvents = events.length;
         statePath.push((next as AnyMachineSnapshot).value);
       },
     });
-
-    events = result.events;
-    // Resync: the settled log is the source of truth for the next leg's offset.
-    liveEvents = events.length;
 
     if (result.status !== "idle" || turn === maxTurns) {
       break;
@@ -408,7 +398,7 @@ export async function runSeam<TMachine extends AnyStateMachine>(
       break;
     }
     event = next;
-    snapshot = result.snapshot;
+    snapshot = result.persist();
   }
 
   // The seam's own effect completion opens the `after` slice.
@@ -416,7 +406,7 @@ export async function runSeam<TMachine extends AnyStateMachine>(
   if (seamReached) {
     splitAt = seamEventAt;
     for (let index = seamEventAt; index < events.length; index++) {
-      const type = events[index]!.event.type;
+      const type = events[index]!.type;
       if (type.startsWith("xstate.done") || type.startsWith("xstate.error")) {
         splitAt = index;
         break;

@@ -31,7 +31,6 @@ import {
   getAgentSchemas,
   setupAgent,
   toolMessage,
-  userMessage,
   type AgentDecisionRequest,
   type AgentTextRequest,
   type AgentTools,
@@ -194,7 +193,7 @@ describe("setupAgent", () => {
             input: z.object({ prompt: z.string() }),
             output: z.object({ answer: z.string() }),
           },
-          // Registered aliases autocomplete, but any string is a legal model ref.
+          // @ts-expect-error a registered model map closes the alias set
           model: "missing",
           prompt: ({ input }) => input.prompt,
         },
@@ -206,7 +205,7 @@ describe("setupAgent", () => {
       initial: "deciding",
       states: {
         deciding: {
-          // A bare (unregistered) model ref is accepted on inline decisions too.
+          // @ts-expect-error inline decisions use registered model aliases
           invoke: {
             src: "agent.decide",
             input: {
@@ -854,15 +853,13 @@ describe("setupAgent", () => {
     });
   });
 
-  test("appendMessages creates a typed action for message context", async () => {
+  test("appendMessages creates an explicit agent.messages transition", async () => {
     const schemas = createAgentSchemas({
       context: z.object({
         messages: messagesSchema,
       }),
       input: z.object({}),
-      events: {
-        USER_REPLIED: z.object({ text: z.string() }),
-      },
+      events: {},
     });
     const agent = setupAgent({ schemas });
     const machine = agent.createMachine({
@@ -871,10 +868,7 @@ describe("setupAgent", () => {
       states: {
         waiting: {
           on: {
-            USER_REPLIED: agent.appendMessages(({ event }) => {
-              const text: string = event.text;
-              return userMessage(text);
-            }) as never,
+            "agent.messages": agent.appendMessages(),
           },
         },
       },
@@ -882,9 +876,30 @@ describe("setupAgent", () => {
 
     const actor = createActor(machine);
     actor.start();
-    actor.send({ type: "USER_REPLIED", text: "hello" } as never);
+    actor.send({
+      type: "agent.messages",
+      request: "reply",
+      actorId: "reply",
+      messages: [{ role: "user", content: "hello" }],
+    } as never);
 
     expect(actor.getSnapshot().context.messages).toEqual([{ role: "user", content: "hello" }]);
+  });
+
+  test("appendMessages only targets declared array context keys", () => {
+    const agent = setupAgent({
+      context: z.object({
+        history: z.array(z.unknown()),
+        count: z.number(),
+      }),
+    });
+
+    agent.appendMessages({ key: "history" });
+    agent.appendMessages();
+    // @ts-expect-error message targets must be array-valued context keys
+    agent.appendMessages({ key: "count" });
+    // @ts-expect-error the context key must be declared
+    agent.appendMessages({ key: "missing" });
   });
 
   test("toolMessage builds a tool-role message from tool-result parts", () => {
@@ -3304,6 +3319,26 @@ describe("inline agent.decide invoke (state-local decisions)", () => {
         attacked: {},
       },
     });
+
+    // Illegal: framework events can be handled by the machine but are never
+    // model-facing decision candidates.
+    agent.createMachine({
+      context: {},
+      initial: "choosingMove",
+      states: {
+        choosingMove: {
+          // @ts-expect-error 'agent.messages' is reserved from allowedEvents
+          invoke: {
+            id: "choosingMove",
+            src: "agent.decide",
+            input: {
+              model: "test-model",
+              allowedEvents: ["agent.messages"],
+            },
+          },
+        },
+      },
+    });
   });
 });
 
@@ -3368,139 +3403,22 @@ describe("per-state context schemas (setupAgent({ states }))", () => {
     expect(actor.getSnapshot().output).toEqual({ answer: "about states" });
   });
 
-  test("the field-level narrowing sugar ({ context: { field } }) narrows like the full form", async () => {
+  test("throws when a native state-schema key does not name a machine state", () => {
+    const context = z.object({ answer: z.string().nullable() });
     const agent = setupAgent({
-      schemas: createAgentSchemas({
-        context: z.object({ topic: z.string(), answer: z.string().nullable() }),
-        input: z.object({ topic: z.string() }),
-        output: z.object({ answer: z.string() }),
-      }),
-      actors: {
-        finish: createAsyncLogic({
-          run: async ({ input }: { input: { echo: string } }) => input.echo,
-        }),
-      },
-      // Sugar: only the field that changes is declared — no base re-statement.
+      context,
       states: {
-        finishing: { context: { answer: z.string() } },
-        done: { context: { answer: z.string() } },
+        typo: { schemas: { context: context.extend({ answer: z.string() }) } },
       },
-    });
-
-    const machine = agent.createMachine({
-      context: ({ input }) => ({ topic: input.topic, answer: null }),
-      initial: "working",
-      states: {
-        working: {
-          always: {
-            target: "finishing",
-            context: ({ context }) => ({ ...context, answer: `about ${context.topic}` }),
-          },
-        },
-        finishing: {
-          invoke: {
-            src: "finish",
-            // Narrowed: `context.answer` is `string` here; `topic` survives untouched.
-            input: ({ context }) => ({
-              echo: `${context.topic satisfies string}: ${context.answer satisfies string}`,
-            }),
-            onDone: { target: "done" },
-          },
-        },
-        done: {
-          type: "final",
-          output: ({ context }) => ({ answer: context.answer satisfies string }),
-        },
-      },
-    });
-
-    const actor = createActor(machine, { input: { topic: "states" } });
-    actor.start();
-    await toPromise(actor);
-
-    expect(actor.getSnapshot().output).toEqual({ answer: "about states" });
-  });
-
-  test("the sugar's merged schema validates: base plus overridden fields", () => {
-    const agent = setupAgent({
-      schemas: createAgentSchemas({
-        context: z.object({ topic: z.string(), answer: z.string().nullable() }),
-        input: z.object({ topic: z.string() }),
-      }),
-      states: {
-        done: { context: { answer: z.string() } },
-      },
-    });
-    // Reach through the machine config's resolved setup states to the merged schema.
-    const machine = agent.createMachine({
-      context: { topic: "t", answer: null },
-      initial: "done",
-      states: { done: {} },
-    });
-    expect(machine).toBeDefined();
-  });
-
-  test("throws when a narrowing key does not name a state in the machine config", () => {
-    const agent = setupAgent({
-      schemas: createAgentSchemas({
-        context: z.object({ topic: z.string(), answer: z.string().nullable() }),
-        input: z.object({ topic: z.string() }),
-      }),
-      states: {
-        // Typo: the machine's state is `done`.
-        dnoe: { context: { answer: z.string() } },
-      } as never,
     });
 
     expect(() =>
       agent.createMachine({
-        context: { topic: "t", answer: null },
+        context: { answer: null },
         initial: "done",
-        states: { done: {}, working: {} },
+        states: { done: {} },
       }),
-    ).toThrow(
-      /'states' key 'dnoe'.*Valid child states: done, working.*setupAgent\(\{ states \}\)/s,
-    );
-  });
-
-  test("throws when a nested narrowing key does not name a child state", () => {
-    const agent = setupAgent({
-      schemas: createAgentSchemas({
-        context: z.object({ topic: z.string(), answer: z.string().nullable() }),
-        input: z.object({ topic: z.string() }),
-      }),
-      states: {
-        outer: { context: { answer: z.string() }, states: { inrer: {} } },
-      } as never,
-    });
-
-    expect(() =>
-      agent.createMachine({
-        context: { topic: "t", answer: null },
-        initial: "outer",
-        states: { outer: { initial: "inner", states: { inner: {} } } },
-      }),
-    ).toThrow(/'states' key 'outer\.inrer'.*of state 'outer': inner/s);
-  });
-
-  test("valid narrowing keys, nested included, do not throw", () => {
-    const agent = setupAgent({
-      schemas: createAgentSchemas({
-        context: z.object({ topic: z.string(), answer: z.string().nullable() }),
-        input: z.object({ topic: z.string() }),
-      }),
-      states: {
-        outer: { context: { answer: z.string() }, states: { inner: {} } },
-      } as never,
-    });
-
-    expect(() =>
-      agent.createMachine({
-        context: { topic: "t", answer: null },
-        initial: "outer",
-        states: { outer: { initial: "inner", states: { inner: {} } } },
-      }),
-    ).not.toThrow();
+    ).toThrow(/'states' key 'typo'.*Valid child states: done/s);
   });
 });
 

@@ -117,9 +117,6 @@ export const models = defineModels({
 const triageAgentSetup = setupAgent({
   schemas,
   models,
-  // Deterministic idle detection: the run settles whenever a person owes it a
-  // decision, instead of falling back to the timing heuristic.
-  isIdle: (snapshot) => snapshot.hasTag("waiting"),
   requests: {
     classifyTicket: {
       schemas: {
@@ -162,11 +159,19 @@ const triageAgentSetup = setupAgent({
   // `classifying` assigns `classification` before any of these is entered —
   // narrow it non-null so they can read it.
   states: {
-    checkingConfidence: { context: { classification: classificationSchema } },
-    escalating: { context: { classification: classificationSchema } },
-    replying: { context: { classification: classificationSchema } },
-    done: { context: { classification: classificationSchema } },
-    failed: { context: { classification: classificationSchema } },
+    checkingConfidence: {
+      schemas: { context: contextSchema.extend({ classification: classificationSchema }) },
+    },
+    escalating: {
+      schemas: { context: contextSchema.extend({ classification: classificationSchema }) },
+    },
+    replying: {
+      schemas: { context: contextSchema.extend({ classification: classificationSchema }) },
+    },
+    done: { schemas: { context: contextSchema.extend({ classification: classificationSchema }) } },
+    failed: {
+      schemas: { context: contextSchema.extend({ classification: classificationSchema }) },
+    },
   },
 });
 
@@ -370,7 +375,7 @@ export async function main() {
   while (result.status === "idle") {
     const answer = await promptLine(`${escalationLabel(result.snapshot)}\n> `);
     result = await runAgent(triageMachine, {
-      snapshot: result.persistedSnapshot,
+      snapshot: result.persist(),
       event: answer === "" ? { type: "CONFIRM" } : { type: "RECLASSIFY", category: answer },
       ...shared,
     });

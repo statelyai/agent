@@ -7,10 +7,8 @@
  *
  * Three scorers, three seams:
  * - `output_structure` — `result.output`, the machine's final-state output.
- * - `state_path` / `event_trajectory` — where the machine went. `result.events`
- *   is the durable, JSON-safe log of every external input the run observed; it
- *   is the trajectory, and it is the same artifact that drives replay and
- *   crash recovery. The live state path is collected via `onTransition`.
+ * - `state_path` / `event_trajectory` — where the machine went, collected from
+ *   XState transitions through `onTransition`.
  * - `token_budget` — `result.usage`, summed across the run's resume legs.
  *
  * Two modes, one code path:
@@ -30,22 +28,13 @@
  * Run: npx tsx examples/braintrust-evals/index.ts
  */
 import { Eval } from "braintrust";
-import type { AnyMachineSnapshot, EventFromLogic, SnapshotFrom } from "xstate";
+import type { EventFromLogic, Snapshot, SnapshotFrom } from "xstate";
 import { createScriptedExecutors, matchesTrajectory, runAgent } from "@statelyai/agent";
-import type { AgentLogEntry, AgentRequestExecutors } from "@statelyai/agent";
+import type { AgentRequestExecutors } from "@statelyai/agent";
 import { emailDrafter, models } from "../email-drafter/agent-logic.js";
 
 type DrafterEvent = EventFromLogic<typeof emailDrafter>;
 type DrafterSnapshot = SnapshotFrom<typeof emailDrafter>;
-
-/**
- * The states where the drafter waits for a human. Declared so idle detection is
- * deterministic instead of falling back to `runAgent`'s timing heuristic.
- */
-const WAITING_STATES = new Set(["prompting", "needsMoreInfo", "reviewing", "sent"]);
-
-const isIdle = (snapshot: AnyMachineSnapshot) =>
-  typeof snapshot.value === "string" && WAITING_STATES.has(snapshot.value);
 
 /** One dataset row's input: the request, plus how the simulated user behaves. */
 export interface DrafterCase {
@@ -92,7 +81,7 @@ export interface DrafterOutcome {
   sentEmails: { to: string; subject: string; body: string }[];
   /** Every state the run entered, in order (from `onTransition`). */
   statePath: string[];
-  /** Event types from `result.events` — the durable trajectory. */
+  /** Event types observed on XState root transitions. */
   eventTrajectory: string[];
   modelCalls: number;
   totalTokens: number;
@@ -130,9 +119,7 @@ function nextUserEvent(
  * Runs one dataset row to completion and collects everything the scorers need.
  *
  * The machine pauses for the human, so a run is several `runAgent` legs chained
- * by `{ snapshot, event }`. `events` is threaded through every leg so the final
- * `result.events` is the complete, replayable log for the whole run — and
- * `usage` is summed, because each leg reports only its own model calls.
+ * by native persisted snapshots and events. Usage is summed across legs.
  */
 export async function runDrafterCase(
   drafterCase: DrafterCase,
@@ -140,8 +127,9 @@ export async function runDrafterCase(
   maxLegs = 12,
 ): Promise<DrafterOutcome> {
   const statePath: string[] = [];
-  let log: AgentLogEntry[] = [];
-  let snapshot: DrafterSnapshot | undefined;
+  const eventTrajectory: string[] = [];
+  let snapshot: Snapshot<unknown> | undefined;
+  let liveSnapshot: DrafterSnapshot | undefined;
   let detailsUsed = false;
   let modelCalls = 0;
   let totalTokens = 0;
@@ -149,22 +137,24 @@ export async function runDrafterCase(
   let sentEmails: DrafterOutcome["sentEmails"] = [];
 
   for (let leg = 0; leg < maxLegs; leg++) {
-    const event = snapshot
-      ? nextUserEvent(snapshot, drafterCase, detailsUsed)
+    const event = liveSnapshot
+      ? nextUserEvent(liveSnapshot, drafterCase, detailsUsed)
       : ({ type: "PROMPT_SUBMITTED", prompt: drafterCase.prompt } as DrafterEvent);
     if (!event) break;
     if (event.type === "MORE_INFO") detailsUsed = true;
 
     const result = await runAgent(emailDrafter, {
       ...(snapshot ? { snapshot, event } : { event }),
-      events: log,
       executors,
-      isIdle,
-      onTransition: (next) => statePath.push(String(next.value)),
+      onTransition: (next, causedBy) => {
+        if (snapshot && (causedBy as { type: string }).type === "@xstate.init") return;
+        statePath.push(String(next.value));
+        eventTrajectory.push(causedBy.type);
+      },
     });
 
-    log = result.events;
-    snapshot = result.snapshot;
+    liveSnapshot = result.snapshot;
+    snapshot = result.persist();
     modelCalls += result.usage.modelCalls ?? 0;
     totalTokens += result.usage.totalTokens ?? 0;
 
@@ -183,7 +173,7 @@ export async function runDrafterCase(
     status,
     sentEmails,
     statePath,
-    eventTrajectory: log.map((entry) => entry.event.type),
+    eventTrajectory,
     modelCalls,
     totalTokens,
   };
@@ -248,10 +238,8 @@ export function scoreStatePath(
 }
 
 /**
- * The durable trajectory: `result.events` is the JSON-safe log of every
- * external input the run observed (machine input, effect completions, user
- * events). Persist it and the run replays; score it and you are scoring the
- * agent's actual path, not a reconstruction of it.
+ * The transition trajectory is observed directly from XState. Scoring it
+ * measures the agent's actual path, not a reconstruction of it.
  */
 export function scoreEventTrajectory(
   output: DrafterOutcome,
@@ -335,7 +323,7 @@ export const dataset: {
         "sent",
         "done",
       ],
-      eventTrajectory: ["@agent.init", "PROMPT_SUBMITTED", "MORE_INFO", "SEND", "END"],
+      eventTrajectory: ["@xstate.init", "PROMPT_SUBMITTED", "MORE_INFO", "SEND", "END"],
       to: "team@example.com",
       sentCount: 1,
       maxTokens: 900,
@@ -357,7 +345,7 @@ export const dataset: {
     expected: {
       // No `needsMoreInfo`: a complete request must go straight to drafting.
       statePath: ["prompting", "evaluating", "drafting", "reviewing", "sending", "sent", "done"],
-      eventTrajectory: ["@agent.init", "PROMPT_SUBMITTED", "SEND", "END"],
+      eventTrajectory: ["@xstate.init", "PROMPT_SUBMITTED", "SEND", "END"],
       to: "team@example.com",
       sentCount: 1,
       maxTokens: 600,
@@ -387,7 +375,7 @@ export const dataset: {
         "sent",
         "done",
       ],
-      eventTrajectory: ["@agent.init", "PROMPT_SUBMITTED", "DRAFT_ANYWAY", "SEND", "END"],
+      eventTrajectory: ["@xstate.init", "PROMPT_SUBMITTED", "DRAFT_ANYWAY", "SEND", "END"],
       // The user never named a recipient, so there is nothing to score here.
       // What matters on this row is the branch: it drafted anyway.
       to: null,

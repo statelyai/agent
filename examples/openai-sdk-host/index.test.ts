@@ -232,7 +232,7 @@ describe("createOpenAiExecutors + runAgent (stubbed client, no network)", () => 
     for (const event of playerEvents) {
       if (result.status !== "idle") throw new Error(`expected idle, got ${result.status}`);
       result = await runAgent(twentyQuestionsMachine, {
-        snapshot: result.persistedSnapshot,
+        snapshot: result.persist(),
         event,
         executors,
       });

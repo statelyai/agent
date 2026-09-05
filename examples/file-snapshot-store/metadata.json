@@ -1,15 +1,15 @@
 {
   "name": "file-snapshot-store",
-  "title": "Durable drafts (file snapshot store)",
-  "kind": "agent-workflow",
+  "title": "Framework-owned snapshot storage",
+  "kind": "host-adapter",
   "origin": {
     "type": "stately-agent",
-    "source": "Created in this repository",
+    "source": "Native XState snapshot persistence in application code",
     "url": null
   },
   "comparison": {
-    "targets": [],
-    "purpose": "Durable HITL checkpoints in a file-backed snapshot store: each idle settle writes JSON to disk and a fresh runAgent call resumes across multiple turns."
+    "targets": ["Redis", "Postgres", "KV", "filesystem storage"],
+    "purpose": "Persists and resumes native XState snapshots without an Agent-specific storage abstraction."
   },
-  "starters": ["Launch of our new snapshot store.", "Q3 roadmap highlights for the platform team."]
+  "starters": ["framework-owned storage"]
 }

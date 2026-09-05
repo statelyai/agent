@@ -19,7 +19,7 @@
  * Your throws are gated machine events (`HUMAN_ROCK` / `HUMAN_PAPER` /
  * `HUMAN_SCISSORS`) hinted through `meta.interaction`, so hosts and demos
  * render them as buttons: the run settles idle on `awaitingHumanThrow` and
- * resumes with `runAgent(rpsMachine, { snapshot: persistedSnapshot, event })`.
+ * resumes with `runAgent(rpsMachine, { snapshot: result.persist(), event })`.
  * `metadata.json` nominates `rpsMachine` as the machine a host should drive.
  *
  * The combat turn runs ONE turn end-to-end via `runAgent`. For the multi-turn,
@@ -117,7 +117,7 @@ export const chooseMoveInput = ({
 }: {
   context: { playerHp: number; enemyHp: number };
 }) => ({
-  model: "moveChooser",
+  model: "moveChooser" as const,
   system: "You are playing a turn-based game. Choose exactly one legal move.",
   prompt: [
     `Player HP: ${context.playerHp}`,
@@ -463,9 +463,6 @@ export function renderMatch(
 const rpsSetup = setupAgent({
   schemas: rpsSchemas,
   models: rpsModels,
-  // Deterministic idle detection: the run settles as soon as the machine is in
-  // the tagged waiting-for-you state, no timing heuristic involved.
-  isIdle: (snapshot) => snapshot.hasTag("waiting"),
   states: {
     awaitingHumanThrow: {},
     choosingThrow: {},
@@ -608,7 +605,7 @@ export function resolveInteractionLabel(label: string, context: Record<string, u
 
 /**
  * Plays a full RPS match, settling idle on every one of your throws and
- * resuming from `result.persistedSnapshot`. The test passes mock executors and
+ * resuming from `result.persist()`. The test passes mock executors and
  * scripted throws, so CI stays keyless.
  */
 export async function runRpsExample(options?: {
@@ -633,7 +630,7 @@ export async function runRpsExample(options?: {
     ...shared,
   });
 
-  // Every throw settles the run idle. Resume from `persistedSnapshot`.
+  // Every throw settles the run idle. Resume from `result.persist()`.
   while (result.status === "idle") {
     const label = resolveInteractionLabel(
       getStateMeta(result.snapshot).interaction?.label ?? "Your throw?",
@@ -645,7 +642,7 @@ export async function runRpsExample(options?: {
       queued.shift() ??
       toThrowEvent(await promptLine(`${label}\n(rock/paper/scissors) > `));
     result = await runAgent(rpsMachine, {
-      snapshot: result.persistedSnapshot,
+      snapshot: result.persist(),
       event,
       ...shared,
     });

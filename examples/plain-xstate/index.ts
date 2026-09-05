@@ -185,7 +185,7 @@ export const plainWriterMachine = setup({
     // Nothing here knows the events will be chosen by a model.
     judging: {
       // Plain XState tags mark the human-wait state; hosts that want
-      // deterministic idle pass runAgent({ isIdle: (s) => s.hasTag("waiting") }).
+      // `runAgent` recognizes this resting event-handling state as idle.
       tags: ["waiting"],
       on: {
         APPROVE: { target: "approved" },
@@ -233,6 +233,7 @@ export async function runPlainXstateExample(
       writeDraft: createAsyncLogic<string, { topic: string; attempts: number }>({
         run: async ({ input }) => {
           const result = await generateText({
+            name: "writeDraft",
             model: "writer",
             tools: {},
             system: "You are a concise product copywriter.",

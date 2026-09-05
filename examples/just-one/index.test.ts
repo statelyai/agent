@@ -66,7 +66,7 @@ async function play(options: PlayOptions) {
     expect(result.snapshot.can(event as never)).toBe(true);
 
     result = await runAgent(justOneMachine, {
-      snapshot: result.persistedSnapshot,
+      snapshot: result.persist(),
       event,
       ...shared,
     });
@@ -151,7 +151,7 @@ describe("just-one", () => {
 
     // Pass on round 1: no score, and the round advances.
     const secondIdle = await runAgent(justOneMachine, {
-      snapshot: firstIdle.persistedSnapshot,
+      snapshot: firstIdle.persist(),
       event: { type: "PASS" },
       ...shared,
     });
@@ -163,7 +163,7 @@ describe("just-one", () => {
     );
 
     // Persist mid-guess as JSON, then resume a fresh run from it.
-    const serialized = JSON.stringify(secondIdle.persistedSnapshot);
+    const serialized = JSON.stringify(secondIdle.persist());
     const resumed = await runAgent(justOneMachine, {
       snapshot: JSON.parse(serialized),
       event: { type: "GUESS", guess: "Honey!" },

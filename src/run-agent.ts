@@ -8,7 +8,6 @@ import {
   type AnyMachineSnapshot,
   type AnyStateMachine,
   type EmittedFrom,
-  type EventObject,
   type EventFromLogic,
   type InputFrom,
   type InspectionEvent,
@@ -17,7 +16,6 @@ import {
   type SnapshotFrom,
 } from "xstate";
 import type {
-  AgentMessage,
   AgentTools,
   ChosenEvent,
   InferInput,
@@ -27,18 +25,10 @@ import type {
 import { AgentError } from "./errors.js";
 import {
   findNonSerializableContextPaths,
-  getAgentMessages,
   isStandardSchema,
   resolveMachineVersion,
   validateSchemaSync,
 } from "./utils.js";
-import {
-  runStateRequestPass,
-  type AgentStateRequest,
-  type StateRequestPassDeps,
-} from "./internal/state-request-pass.js";
-
-export type { AgentStateRequest } from "./internal/state-request-pass.js";
 import { getAcceptedEvents, type AgentSchemas } from "./events.js";
 import {
   AGENT_USAGE_TOKEN_FIELDS,
@@ -68,20 +58,16 @@ import {
 import type { AgentRequest, AgentStepRequest } from "./steps.js";
 import {
   executorBoundLogics,
+  DEFAULT_AGENT_EXECUTORS,
   getMachineIdlePredicate,
   getRegisteredAgentExecutionOptions,
   isUnboundPlaceholder,
+  type DefaultExecutorsRegistry,
 } from "./internal/registry.js";
-import {
-  createReplayEntry,
-  initEntry,
-  replay,
-  validateReplayEntries,
-  AGENT_INIT_EVENT_TYPE,
-  AGENT_USAGE_EVENT_TYPE,
-  type AgentUsageEvent,
-} from "./effects.js";
-import type { AgentLogEntry, JsonValue } from "./event-log-store.js";
+import { AGENT_USAGE_EVENT_TYPE, type AgentUsageEvent } from "./usage.js";
+import { AGENT_MESSAGES_EVENT_TYPE } from "./messages.js";
+
+type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
 // ─── runAgent (createActor wrapper) ───
 //
@@ -115,87 +101,16 @@ export class AgentIllegalResumeEventError extends AgentError {
   }
 }
 
-/**
- * Thrown by {@link runAgent} when resuming from a `snapshot` whose stamped
- * `agentMeta.version` differs from the current machine's version, under the
- * default `onVersionMismatch: 'throw'` and with no `migrateSnapshot` hook. The
- * structural fingerprint of the machine changed since the snapshot was
- * persisted (a state/transition/invoke was added, removed, or retargeted), so
- * the snapshot may no longer resume cleanly. `from` is the snapshot's version,
- * `to` the current machine's.
- */
-export class AgentSnapshotVersionMismatchError extends AgentError {
-  readonly from: string;
-  readonly to: string;
-  readonly machineId: string;
-  constructor(from: string, to: string, machineId: string) {
-    super(
-      "snapshot-version-mismatch",
-      `runAgent: cannot resume snapshot stamped with machine version '${from}' against ` +
-        `machine '${machineId}' at version '${to}' — the machine's structure changed since ` +
-        `the snapshot was persisted. Provide options.migrateSnapshot to adapt it, or set ` +
-        `options.onVersionMismatch to 'warn'/'ignore' to proceed anyway.`,
-    );
-    this.name = "AgentSnapshotVersionMismatchError";
-    this.from = from;
-    this.to = to;
-    this.machineId = machineId;
-  }
-}
-
-/**
- * Thrown by {@link generateResult} when the run settles `idle` instead of
- * `done`: the machine paused for external input. Carries the idle `snapshot`
- * and `acceptedTypes` (the event types that could resume it, via
- * {@link getAcceptedEvents}). Use {@link runAgent} directly when idle is an
- * expected outcome you handle.
- */
-export class AgentIdleError extends AgentError {
-  readonly snapshot: AnyMachineSnapshot;
-  readonly acceptedTypes: string[];
-  constructor(snapshot: AnyMachineSnapshot, acceptedTypes: string[]) {
-    super(
-      "agent-idle",
-      `generateResult: the machine paused (idle) instead of completing. Resume it by ` +
-        `calling runAgent with one of these events: ${
-          acceptedTypes.length > 0 ? acceptedTypes.join(", ") : "(none)"
-        }.`,
-    );
-    this.name = "AgentIdleError";
-    this.snapshot = snapshot;
-    this.acceptedTypes = acceptedTypes;
-  }
-}
-
 /** Handler for `agent.userInput` invokes passed as {@link RunAgentOptions.userInput}. Resolves to what the human typed. */
 export interface AgentUserInputExecutor {
   (input: AgentUserInput): PromiseLike<string>;
 }
 
-/**
- * The run's machine identity, stamped onto every settled snapshot's `agentMeta`.
- * `machineId` is the machine's `id`; `version` is the machine's own
- * `version` (XState's `createMachine({ version })`) or, when unversioned, the
- * {@link getMachineStructuralHash} of the machine. Trace events and the
- * `onMessage` info arg carry the same identity flattened, as
- * `machineId`/`machineVersion`.
- */
-export interface AgentRunMeta {
-  machineId: string;
-  version: string;
-}
-
-/**
- * Second argument passed to {@link RunAgentOptions.onMessage}: the run's
- * identity, carried alongside each live message. Not stamped onto the message
- * itself (messages stay clean model input).
- */
-export interface AgentMessageInfo {
-  runId: string;
-  machineId: string;
-  /** The machine's own `version`, else its structural hash. */
-  machineVersion: string;
-}
+/** Typed root-machine transition observer accepted by {@link runAgent}. */
+export type AgentTransitionHandler<TMachine extends AnyStateMachine> = (
+  snapshot: SnapshotFrom<TMachine>,
+  event: EventFromLogic<TMachine>,
+) => void;
 
 /**
  * The version of the {@link AgentTraceEvent} envelope every trace event carries
@@ -243,8 +158,6 @@ export type AgentTraceEvent<TMachine extends AnyStateMachine = AnyStateMachine> 
       type: "machine.transition";
       snapshot: SnapshotFrom<TMachine>;
       event: EventFromLogic<TMachine>;
-      /** Durable replay-entry id when this transition corresponds to one. */
-      eventId?: string;
     }
   | { type: "emit"; event: EmittedFrom<TMachine> }
   | {
@@ -268,7 +181,6 @@ export type AgentTraceEvent<TMachine extends AnyStateMachine = AnyStateMachine> 
           status: "idle";
           snapshot: SnapshotFrom<TMachine>;
           pendingUserInputs?: PendingUserInput[];
-          persistedSnapshot?: Snapshot<unknown>;
         }
       | {
           type: "run.end";
@@ -328,7 +240,6 @@ const TRACE_ENVELOPE_KEYS = [
   "type",
   "status",
   "cause",
-  "eventId",
   "reasoning",
   "chunk",
 ] as const;
@@ -481,7 +392,7 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
   /**
    * Machine input. Validated against the machine's declared input schema —
    * defaults filled, transforms applied — before it reaches
-   * `createActor(machine, { input })` and the replayable event log; invalid
+   * `createActor(machine, { input })`; invalid
    * input throws an {@link AgentError} with code `invalid-machine-input`.
    * Typed as {@link AgentInputFrom}, so fields the schema defaults are optional
    * here. Omit when resuming via `snapshot`.
@@ -489,55 +400,10 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
   input?: AgentInputFrom<TMachine>;
 
   // resume
-  /** A previously-settled run's `result.snapshot`, to resume from instead of starting fresh. Pair with `event` to deliver the event that unblocks the resumed idle state. */
+  /** A previously-settled run's `result.persist()`, to resume from instead of starting fresh. Pair with `event` to deliver the event that unblocks the resumed idle state. */
   snapshot?: Snapshot<unknown>;
   /** An event to send immediately after starting/resuming the actor (e.g. the human's answer to an idle-state prompt). */
   event?: EventFromLogic<TMachine>;
-  /**
-   * A prior `runAgent` result's replayable `events`, copied as the prefix of
-   * this result's event log. Pass this alongside `snapshot` + `event` when
-   * resuming so the next result retains the complete, replayable history;
-   * with a `snapshot` these events are history only (`snapshot` is the live
-   * resume source).
-   *
-   * **Events-only resume:** with NO `snapshot` and a self-contained log (a
-   * reserved `@agent.init` first entry — every log started by `runAgent` from
-   * scratch has one), the resume snapshot is derived by replaying the log:
-   * recorded model/tool results are reused, never re-executed, and a request
-   * that was still in flight when the log ended re-executes idempotently on
-   * restore. This is the crash-recovery path: persist entries via `onEvent`
-   * (or an event-log store) and resume from the log alone.
-   */
-  events?: readonly AgentLogEntry[];
-  // version stamping
-  /**
-   * How to handle a resume `snapshot` whose stamped `agentMeta.version` differs
-   * from the current machine's `version` (XState's `createMachine({ version })`
-   * prop — the single source of truth; an unversioned machine falls back to its
-   * {@link getMachineStructuralHash}). `'throw'` (default) throws
-   * {@link AgentSnapshotVersionMismatchError} with `from`/`to`; `'warn'`
-   * `console.warn`s once and proceeds; `'ignore'` proceeds silently. Ignored
-   * when {@link migrateSnapshot} is provided (that runs instead), and never
-   * triggers for an unstamped snapshot (no `agentMeta`).
-   */
-  onVersionMismatch?: "throw" | "warn" | "ignore";
-  /**
-   * Called instead of {@link onVersionMismatch} when a resume snapshot's
-   * version mismatches the current machine's: receives the incoming snapshot
-   * and `{ from, to }`, and its return value is used as the snapshot to resume
-   * from. A throw propagates.
-   *
-   * Prefer XState's own `createMachine({ version, migrate })` hook when the
-   * migration belongs to the machine: a machine that declares `migrate` is left
-   * to xstate, and runAgent neither throws nor rewrites the snapshot's version
-   * before restore. This option stays for host-owned migrations (a machine you
-   * do not control, or a migration that needs run-scoped context).
-   */
-  migrateSnapshot?: (
-    snapshot: Snapshot<unknown>,
-    info: { from: string; to: string },
-  ) => Snapshot<unknown>;
-
   // actor sources — sugar for machine.provide({ actors }) before the run
   /** Actor source implementations, merged onto the machine before binding — sugar for `machine.provide({ actors })` ahead of the run. */
   actors?: Record<string, AnyActorLogic>;
@@ -547,74 +413,11 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
    * web form, Slack, …). With a handler, input is gathered inline without
    * settling. Without one, an `agent.userInput` invoke becomes a *pending
    * placeholder*: it waits indefinitely, does not block idle detection, and
-   * the run settles `{ status: 'idle', pendingUserInputs, persistedSnapshot }`
-   * once no other work is in flight — resume by passing `persistedSnapshot`
-   * back as `snapshot` together with a `userInput` handler that answers it.
+   * the run settles `{ status: 'idle', pendingUserInputs }` once no other work
+   * is in flight — persist with `result.persist()` and resume that snapshot
+   * with a `userInput` handler that answers it.
    */
   userInput?: AgentUserInputExecutor;
-
-  /**
-   * Host override for detecting a snapshot that is an INTENTIONAL wait for an
-   * external event — the deterministic replacement for the timing heuristic
-   * runAgent uses to settle idle. Resolution order: this option (host override)
-   * → the machine-carried predicate declared via `setupAgent({ isIdle })`
-   * → the timing heuristic (when neither is present). When the resolved
-   * predicate returns true and nothing is in flight (no live requests/
-   * invokes; the `agent.userInput` placeholder exemption still applies), runAgent
-   * settles idle immediately, without the `setTimeout` heuristic. It does NOT
-   * force-settle while agent work is in flight, and whole-machine idle semantics
-   * are unchanged; a machine with no predicate falls back to the heuristic
-   * exactly as before (with a one-time dev warning suggesting a predicate).
-   * Declare your own signal, e.g. `(s) => s.hasTag('awaiting-review')`.
-   */
-  isIdle?: (snapshot: AnyMachineSnapshot) => boolean;
-
-  // interpretation — the override to the default invoke-driven contract
-  /**
-   * The override to runAgent's DEFAULT contract. By default agent work is
-   * whatever the machine *invokes* (`agent.generateText`, TextLogic,
-   * `agent.decide`, …). With `getRequests`, whenever the machine would
-   * otherwise settle idle, this hook reads the snapshot and returns the model
-   * request(s) to run instead — prompts from state `description`s, `meta`,
-   * tags, a lookup table keyed by state value, wherever you keep them. Return
-   * nothing to settle idle (human-wait states).
-   *
-   * There is no blessed source for the prompts — this is a recipe seam. The
-   * shipped prompts-in-descriptions recipe is {@link getSnapshotRequests}:
-   *
-   * ```ts
-   * getRequests: (snapshot) => getSnapshotRequests(snapshot, { model: 'writer' }),
-   * ```
-   *
-   * Reach for {@link getSnapshotNodes} when you want to build requests some
-   * other way — between them, host code never touches `snapshot._nodes`.
-   *
-   * Each request runs per {@link AgentStateRequest.kind}, appends to the
-   * run's message log (see {@link RunAgentOptions.messages}), and advances
-   * the machine per {@link AgentStateRequest.onDone} — explicitly named/
-   * computed event, or a `decide` call when omitted — always gated by
-   * `snapshot.can`. Multiple requests run concurrently (parallel regions —
-   * scope each with `allowedEvents`, e.g. the node's `ownEvents`). A pass
-   * that sends no event settles idle. Every model call counts against
-   * `maxModelCalls`.
-   */
-  getRequests?: (
-    snapshot: SnapshotFrom<TMachine>,
-    // Named to disambiguate from the machine's own `context`.
-    agentContext: { messages: readonly AgentMessage[] },
-  ) => AgentStateRequest | readonly AgentStateRequest[] | undefined;
-  /**
-   * Adds to the run's aggregated message log (the working memory
-   * `getRequests` requests read and append to). The log starts as the resume
-   * `snapshot`'s stamped `messages` (else `[]`); an ARRAY here is APPENDED to
-   * that history — the safe default for folding in a user reply on resume,
-   * never silently erasing prior conversation. Pass a FUNCTION
-   * `(prior) => AgentMessage[]` to take full control (replace, filter,
-   * compact). The final log is stamped onto every settled result's
-   * `snapshot.messages` (like `agentMeta`), so persist/resume round-trips it
-   * with no extra wiring — read it with `getAgentMessages(snapshot)`.
-   */
-  messages?: AgentMessage[] | ((prior: AgentMessage[]) => AgentMessage[]);
 
   // observation — all void; no callback controls the run
   /**
@@ -631,13 +434,6 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
    * event-sourced replay logging.
    */
   onResult?: (request: AgentStepRequest, result: { output: unknown; raw: unknown }) => void;
-  /**
-   * Fires as each new replayable external input is appended to this run's
-   * event log. A fresh run begins with `@agent.init`; raised and other internal
-   * events are excluded. History supplied through {@link events} is not
-   * re-emitted. Purely observational, like {@link onTransition}.
-   */
-  onEvent?: (entry: AgentLogEntry) => void;
   /** Fires a single ordered stream of run/request/chunk/transition/emit/end events. Intended for eval traces, JSONL logs, and adapter-owned telemetry/exporters. */
   onTrace?: (event: AgentTraceEvent<TMachine>) => void;
   /**
@@ -645,16 +441,7 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
    * root-machine transition (snapshot + causing event). Pure observation —
    * progress UIs, logging, tracing. Cannot send events.
    */
-  onTransition?: (snapshot: SnapshotFrom<TMachine>, event: EventFromLogic<TMachine>) => void;
-  /**
-   * Fires for each message appended to the run's aggregated log (see
-   * {@link RunAgentOptions.messages}) the moment a `getRequests` request
-   * appends it — the live view of the log a caller otherwise only reads off
-   * the settled snapshot via `getAgentMessages`. Purely observational, like
-   * {@link onTransition}. Never fires for the seeded history, and never fires
-   * on a default invoke-driven run (nothing appends there).
-   */
-  onMessage?: (message: AgentMessage, info: AgentMessageInfo) => void;
+  onTransition?: AgentTransitionHandler<TMachine>;
   /**
    * Handlers for events the machine emits (`enq.emit(...)`), keyed by emitted
    * event type — `'*'` catches all. Typed from the machine's `emitted`
@@ -701,133 +488,6 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
   signal?: AbortSignal;
 }
 
-// ─── getSnapshotRequests (the getRequests recipe, without _nodes) ───
-
-/**
- * One active state node of a snapshot, as {@link getSnapshotRequests} and
- * {@link getSnapshotNodes} surface it: the prompt-bearing `description`, the
- * `tags` a recipe branches on, the state `meta`, and `ownEvents` (the event
- * types this node itself declares transitions for). The shape hosts used to
- * reach for through the private `snapshot._nodes` array.
- */
-export interface AgentSnapshotNode {
-  /** The node's full id (e.g. `writer.drafting`). */
-  id: string;
-  /** The node's own key (e.g. `drafting`). */
-  key: string;
-  /** The node's `description` — the prompt, in the prompts-in-descriptions recipe. */
-  description?: string;
-  tags: string[];
-  meta?: unknown;
-  /** Event types this node declares transitions for (xstate's `ownEvents`). */
-  ownEvents: string[];
-  /** True when the node has no child states. */
-  leaf: boolean;
-}
-
-// TODO(xstate): use snapshot.nodes when public — this is the ONE place the
-// private `_nodes` array is read, so host code never has to.
-function snapshotNodes(snapshot: AnyMachineSnapshot): AgentSnapshotNode[] {
-  const nodes = (snapshot as unknown as { nodes?: readonly unknown[] }).nodes ?? [];
-  return nodes.map((raw) => {
-    const node = raw as {
-      id?: string;
-      key?: string;
-      description?: string;
-      tags?: readonly string[];
-      meta?: unknown;
-      ownEvents?: readonly string[];
-      states?: Record<string, unknown>;
-    };
-    return {
-      id: node.id ?? "",
-      key: node.key ?? "",
-      ...(node.description !== undefined ? { description: node.description } : {}),
-      tags: [...(node.tags ?? [])],
-      ...(node.meta !== undefined ? { meta: node.meta } : {}),
-      ownEvents: [...(node.ownEvents ?? [])],
-      leaf: Object.keys(node.states ?? {}).length === 0,
-    };
-  });
-}
-
-/**
- * The active state nodes of a snapshot, as plain {@link AgentSnapshotNode}
- * descriptors. The escape hatch under {@link getSnapshotRequests}: use it when
- * your `getRequests` hook needs to build requests some other way, so host code
- * never touches xstate's private `snapshot._nodes`.
- */
-export function getSnapshotNodes(snapshot: AnyMachineSnapshot): AgentSnapshotNode[] {
-  return snapshotNodes(snapshot);
-}
-
-/** Options for {@link getSnapshotRequests}. */
-export interface GetSnapshotRequestsOptions {
-  /** Executor model name every produced request carries. */
-  model: string;
-  /**
-   * Which active nodes produce a request. Default: every node with a
-   * `description` that is NOT tagged `'waiting'` (a human-wait state settles
-   * idle instead).
-   */
-  filter?: (node: AgentSnapshotNode) => boolean;
-  /**
-   * Shapes (or drops, by returning `undefined`) each node's request before it
-   * is returned — set `system`, `allowedEvents`, a custom `onDone`, …
-   */
-  map?: (request: AgentStateRequest, node: AgentSnapshotNode) => AgentStateRequest | undefined;
-}
-
-/**
- * Builds the {@link AgentStateRequest}s for a snapshot straight from its active
- * state nodes — the prompts-in-descriptions recipe as a function, so a
- * {@link RunAgentOptions.getRequests} hook is one line and never reaches into
- * xstate's private `snapshot._nodes`:
- *
- * ```ts
- * runAgent(machine, {
- *   executors,
- *   getRequests: (snapshot) => getSnapshotRequests(snapshot, { model: 'writer' }),
- * });
- * ```
- *
- * Each described active node becomes one request: `prompt` from the node's
- * `description`, `kind: 'decision'` when it is tagged `'decision'`, `system`
- * from `meta.role` when present, `allowedEvents` scoped to the node's own
- * events, and an explicit `onDone` when the node has exactly one own event
- * (single-outcome states advance deterministically; anything else falls
- * through to a `decide` call). Nodes tagged `'waiting'` produce nothing, so the
- * run settles idle for a human. Override any of it with `filter`/`map`.
- */
-export function getSnapshotRequests(
-  snapshot: AnyMachineSnapshot,
-  options: GetSnapshotRequestsOptions,
-): AgentStateRequest[] {
-  const filter =
-    options.filter ??
-    ((node: AgentSnapshotNode) => !!node.description && !node.tags.includes("waiting"));
-  const requests: AgentStateRequest[] = [];
-  for (const node of snapshotNodes(snapshot)) {
-    if (!filter(node)) {
-      continue;
-    }
-    const system = (node.meta as { role?: string } | undefined)?.role;
-    const request: AgentStateRequest = {
-      model: options.model,
-      prompt: node.description ?? "",
-      kind: node.tags.includes("decision") ? "decision" : "text",
-      ...(system !== undefined ? { system } : {}),
-      ...(node.ownEvents.length > 0 ? { allowedEvents: node.ownEvents } : {}),
-      ...(node.ownEvents.length === 1 ? { onDone: { type: node.ownEvents[0]! } } : {}),
-    };
-    const mapped = options.map ? options.map(request, node) : request;
-    if (mapped) {
-      requests.push(mapped);
-    }
-  }
-  return requests;
-}
-
 /**
  * The outcome of a {@link runAgent} call — always exactly one of three
  * variants, never a throw for a waiting or failed machine (programmer
@@ -838,7 +498,8 @@ export function getSnapshotRequests(
  * failure, discriminated by `cause` (`'aborted'`, `'max-model-calls'`,
  * `'decision-exhausted'`, `'machine'` for any other machine error state, or
  * `'stopped'` for an external stop — see {@link RunAgentErrorCause}). Every
- * variant carries the final `snapshot` plus a replayable `events` array. The
+ * variant carries the final `snapshot` and a native XState persistence
+ * function. The
  * underlying actor is stopped on every settle path — there is no live actor to
  * resume; resume is always by snapshot.
  */
@@ -855,14 +516,6 @@ type RunAgentOutcome<TMachine extends AnyStateMachine> =
       snapshot: SnapshotFrom<TMachine>;
       /** Present when the machine is waiting on unhandled `agent.userInput` invokes: one entry per pending invoke. */
       pendingUserInputs?: PendingUserInput[];
-      /**
-       * The JSON-serializable persisted snapshot (in-flight children included,
-       * WITH their own state). Persist THIS one and resume with
-       * `runAgent(machine, { snapshot: persistedSnapshot, ... })` — the live
-       * `snapshot` above cannot round-trip active children, so resuming from
-       * it restarts every invoked child from scratch.
-       */
-      persistedSnapshot: Snapshot<unknown>;
     }
   | {
       status: "error";
@@ -873,17 +526,12 @@ type RunAgentOutcome<TMachine extends AnyStateMachine> =
 
 export type RunAgentResult<TMachine extends AnyStateMachine> = RunAgentOutcome<TMachine> & {
   /**
-   * Versioned, JSON-safe envelopes around replayable external inputs observed
-   * through this run: machine input, effect completions/failures, user events,
-   * and timer firings. Raised/internal events are excluded because replay
-   * re-derives them. Each entry carries timestamp, machine identity/version,
-   * and strict replay hashes.
-   *
-   * A fresh run starts with `@agent.init`. When resuming from a snapshot, pass
-   * the preceding result's `events` through {@link RunAgentOptions.events} to
-   * retain a self-contained history.
+   * Returns XState's persisted snapshot while the run-owned actor is still
+   * available, including active child state. Store this value and pass it back
+   * as `snapshot` to resume. Persistence, migration, and retries remain XState
+   * and host responsibilities.
    */
-  events: AgentLogEntry[];
+  persist(): Snapshot<unknown>;
   /**
    * Aggregated model-call usage for THIS run — `modelCalls` plus the token
    * fields every executor reported (see {@link AgentUsage} for the
@@ -891,7 +539,7 @@ export type RunAgentResult<TMachine extends AnyStateMachine> = RunAgentOutcome<T
    * result accounts for the calls made before the run settled.
    *
    * A resumed run counts only its own calls, not the history behind
-   * `snapshot`/`events`.
+   * `snapshot`.
    */
   usage: AgentUsage;
 };
@@ -1395,13 +1043,12 @@ function bindTextLogic(logic: TextLogic, runCtx: RunAgentBindContext): TextLogic
     // `{ request }`, script routing, host mocks) work without a `name` in the
     // config. The `agent.*` builtins keep their documented nameless requests —
     // their `src` is the builtin id, not a handle the author chose.
-    const request: AgentTextRequest =
-      rawRequest.name === undefined &&
-      src !== "" &&
-      src !== GENERATE_TEXT_ACTOR &&
-      src !== STREAM_TEXT_ACTOR
-        ? { ...rawRequest, name: src }
-        : rawRequest;
+    const request: AgentTextRequest = {
+      ...rawRequest,
+      name:
+        rawRequest.name ??
+        (src !== "" && src !== GENERATE_TEXT_ACTOR && src !== STREAM_TEXT_ACTOR ? src : id || src),
+    };
     const executor = logic.mode === "stream" ? runCtx.streamText : runCtx.generateText;
     if (!executor) {
       throw new Error(
@@ -1440,6 +1087,23 @@ function bindTextLogic(logic: TextLogic, runCtx: RunAgentBindContext): TextLogic
           runCtx.emitTrace?.({ type: "stream.chunk", request: agentRequest, chunk }, self);
         },
       });
+
+      const responseMessages = (raw as { messages?: unknown } | null | undefined)?.messages;
+      if (Array.isArray(responseMessages) && responseMessages.length > 0) {
+        const parent = invokingActorOf(self, runCtx);
+        const event = {
+          type: AGENT_MESSAGES_EVENT_TYPE,
+          request: request.name!,
+          actorId: id,
+          messages: responseMessages,
+        };
+        // Transcript retention is explicit machine behavior. An executor may
+        // return messages even when this machine intentionally ignores them;
+        // only deliver when the current configuration accepts the event.
+        if ((parent?.getSnapshot() as AnyMachineSnapshot | undefined)?.can(event)) {
+          parent?.send(event);
+        }
+      }
 
       // Lift `reasoning` off the raw executor result (structured-output
       // envelope opt-in) onto the request.end trace — never into machine output.
@@ -1589,7 +1253,14 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
           })
         : [];
 
-      const request: AgentDecisionRequest = { ...logic.request(input as never), id, events };
+      const lowered = logic.request(input as never);
+      const request: AgentDecisionRequest = {
+        ...lowered,
+        id,
+        name: lowered.name ?? id,
+        input,
+        events,
+      };
 
       const chosen = await resolveDecision(
         request,
@@ -2013,75 +1684,23 @@ export async function runAgent<TMachine extends AnyStateMachine>(
   machine: TMachine,
   options: RunAgentOptions<TMachine>,
 ): Promise<RunAgentResult<TMachine>> {
-  return createAgentSession(machine, options, { oneShot: true }).settled();
+  return createAgentSession(machine, options).settled();
 }
 
-/**
- * A long-lived agent session returned by {@link createAgentActor}: the same
- * engine as {@link runAgent} (executor binding at any depth, the replayable
- * event log, budgets, traces), but the actor stays alive across idle settles.
- *
- * One **cycle** runs from start (or the event that re-opened the session) to
- * the next quiescence. `settled()` resolves with the current cycle's
- * {@link RunAgentResult}; after an `idle` settle, sending the actor an event
- * re-opens the cycle and the next `settled()` call tracks it. The event log
- * spans the whole session — every turn appends to one replayable history.
- * `done`, `error`, and external stop are final: the actor stops and every
- * later `settled()` resolves with that final result.
- */
-export interface AgentActorSession<TMachine extends AnyStateMachine> {
-  /** The live bound actor. Drive it directly: `session.actor.send(event)`. */
-  actor: ReturnType<typeof createActor<TMachine>>;
-  /** The session's replayable event log (live; grows across cycles). */
-  readonly events: readonly AgentLogEntry[];
-  /** Cumulative session usage (all cycles). */
-  usage(): AgentUsage;
-  /** Resolves with the current cycle's settled result (`done | idle | error`). */
+interface AgentRunSession<TMachine extends AnyStateMachine> {
   settled(): Promise<RunAgentResult<TMachine>>;
-  /** Stops the actor. A not-yet-settled cycle settles `error`/`stopped`. */
-  stop(): void;
-}
-
-/**
- * Session mode: {@link runAgent}'s engine with a long-lived actor. Use it when
- * the agent is a *session* fed by external events (chat turns, device or
- * timer events, a socket) rather than a one-shot job — you keep the log,
- * budget, traces, and idle semantics that bare `provideExecutors` +
- * `createActor` would forfeit.
- *
- * ```ts
- * const session = createAgentActor(machine, { input, executors });
- * let result = await session.settled();          // first quiescence
- * while (result.status === "idle") {
- *   session.actor.send(await nextUserEvent(result.snapshot));
- *   result = await session.settled();            // next quiescence, same log
- * }
- * session.stop();
- * ```
- *
- * Accepts the same options as {@link runAgent} (including `snapshot`/`events`
- * resume). Not yet supported in session mode: `getRequests` re-interpretation
- * across cycles behaves per-cycle exactly as in `runAgent`.
- */
-export function createAgentActor<TMachine extends AnyStateMachine>(
-  machine: TMachine,
-  options: RunAgentOptions<TMachine>,
-): AgentActorSession<TMachine> {
-  return createAgentSession(machine, options, { oneShot: false });
 }
 
 function createAgentSession<TMachine extends AnyStateMachine>(
   machine: TMachine,
   options: RunAgentOptions<TMachine>,
-  lifecycle: { oneShot: boolean },
-): AgentActorSession<TMachine> {
+): AgentRunSession<TMachine> {
   const maxModelCalls = options.maxModelCalls ?? 100;
   let modelCallCount = 0;
   let budgetExceeded = false;
   // Dev-only serialization guard: warn at most once per run when idle context
   // holds values that won't survive snapshot persist/resume (see settleIdle).
   let warnedNonSerializable = false;
-  let warnedHeuristicIdle = false;
   const runId = `run_${nextRunAgentTraceId++}`;
   let traceSeq = 0;
   // Validated once, then used everywhere `options.input` would have been: the
@@ -2090,15 +1709,11 @@ function createAgentSession<TMachine extends AnyStateMachine>(
   // schema default is computed rather than constant.
   const resolvedInput = resolveMachineInput(machine, options.input);
 
-  // Version stamping (§ item 2): every settled snapshot carries a plain,
-  // enumerable `agentMeta` field so it survives JSON persist/resume, and an
-  // incoming snapshot's stamp is checked against this version on resume.
   const machineId = (machine.config as { id?: string }).id ?? machine.id ?? "(machine)";
   // The machine's own `version` (XState's standard `createMachine({ version })`
   // prop, `.provide`-surviving) is the single source of truth; an unversioned
   // machine falls back to the structural hash.
   const machineVersion = resolveMachineVersion(machine);
-  const agentMeta: AgentRunMeta = { machineId, version: machineVersion };
 
   // The run's single observation dispatch point: every trace payload in this
   // run goes through `onTrace`, which stamps the run-scoped envelope for
@@ -2157,11 +1772,10 @@ function createAgentSession<TMachine extends AnyStateMachine>(
   // INVOKED CHILD machine is therefore reported to the root too, attributed by
   // the event's `id`/`src`/`model`.
   //
-  // A call that settles AFTER the run's current cycle has resolved is a
+  // A call that settles AFTER the run has resolved is a
   // straggler: its tokens still fold into the run-level aggregate, but the
-  // event is DROPPED rather than delivered — identical on both the one-shot
-  // and the session (`createAgentActor`) path, so a late arrival can never
-  // re-open an already-returned idle result. Dropped stragglers are visible on
+  // event is DROPPED rather than delivered, so a late arrival can never
+  // affect an already-returned result. Dropped stragglers are visible on
   // `onTrace` as `usage.dropped`.
   //
   // Run-level usage aggregation: every executor-reported per-call usage folds
@@ -2222,20 +1836,21 @@ function createAgentSession<TMachine extends AnyStateMachine>(
 
   const effectiveSources = provided.sources.actors as Record<string, AnyActorLogic>;
 
-  assertBindable(provided, effectiveSources, options.executors ?? {});
+  const registeredModels = getRegisteredAgentExecutionOptions(machine).models as
+    | DefaultExecutorsRegistry
+    | undefined;
+  const executors = {
+    ...registeredModels?.[DEFAULT_AGENT_EXECUTORS]?.(),
+    ...options.executors,
+  };
 
-  if (options.getRequests && !options.executors?.generateText && !options.executors?.decide) {
-    throw new Error(
-      "runAgent: 'getRequests' requires a 'generateText' and/or 'decide' executor — " +
-        "the returned requests run through them.",
-    );
-  }
+  assertBindable(provided, effectiveSources, executors);
 
   const actorHolder: { actorRef: AnyActorRef | undefined } = { actorRef: undefined };
   const runCtx: RunAgentBindContext = {
-    generateText: options.executors?.generateText,
-    streamText: options.executors?.streamText,
-    decide: options.executors?.decide,
+    generateText: executors.generateText,
+    streamText: executors.streamText,
+    decide: executors.decide,
     emitTrace: onTrace as TraceDispatch,
     consumeModelCall,
     recordUsage,
@@ -2264,7 +1879,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
       } else if (isUnboundPlaceholder(logic)) {
         // The blessed HITL placeholder: with no handler, an `agent.userInput`
         // invoke waits forever. Idle detection ignores it, so the run settles
-        // `{ status: 'idle', pendingUserInputs, persistedSnapshot }` once no
+        // `{ status: 'idle', pendingUserInputs }` once no
         // OTHER work is in flight (a sibling parallel region keeps running).
         // Resume with the persisted snapshot plus a `userInput` handler; the
         // restored invoke re-runs against the handler and completes.
@@ -2309,140 +1924,14 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     actors: wrappedSources as never,
   }) as TMachine;
 
-  // Resolution order: host override → machine-carried predicate
-  // (`setupAgent({ isIdle })`, read off the original machine so it survives
-  // the provide/rebind above) → the timing heuristic (`() => false` here — the
-  // inspect handler falls through to `scheduleIdleCheck`).
-  const declaredIdlePredicate = options.isIdle ?? getMachineIdlePredicate(machine);
-  const isIdle = declaredIdlePredicate ?? (() => false);
+  // The machine owns its wait semantics. An explicit setupAgent predicate wins;
+  // otherwise a resting configuration with event handlers (or interaction
+  // metadata) is an intentional external wait.
+  const isIdle = getMachineIdlePredicate(machine) ?? isAgentIdle;
+  const isIntentionalIdle = (snapshot: AnyMachineSnapshot) =>
+    isIdle(snapshot) || collectPendingUserInputs(snapshot).length > 0;
 
-  // Version stamping (§ item 2): when resuming, compare the incoming snapshot's
-  // stamped version against this machine's. A mismatch runs `migrateSnapshot`
-  // (its return value is used) if provided, else `onVersionMismatch`
-  // ('throw' | 'warn' | 'ignore'). An unstamped snapshot (no `agentMeta` and no
-  // XState persisted `version` field) is always accepted. The (possibly
-  // migrated) snapshot is threaded through the illegal-resume check,
-  // createActor, and the run.start trace. runAgent owns the whole version
-  // policy: after this gate, the snapshot's XState-level `version` field is
-  // aligned to the machine's (see below) so `restoreSnapshot`'s own
-  // mismatch throw never double-fires.
-  // xstate ships its own migration hook (`createMachine({ version, migrate })`)
-  // and applies it during restore. When the machine declares one, that hook
-  // owns version mismatches: runAgent neither throws nor aligns the snapshot's
-  // `version` field (see below), so xstate's `migrate` sees the real
-  // `fromVersion`. An explicit `options.migrateSnapshot` still wins (a
-  // host-owned migration is the more specific instruction).
-  const machineDeclaresMigrate =
-    typeof (machine.config as { migrate?: unknown }).migrate === "function";
-  let effectiveSnapshot = options.snapshot;
-  if (effectiveSnapshot !== undefined) {
-    const incoming = (effectiveSnapshot as { agentMeta?: { version?: string } }).agentMeta;
-    const from = incoming?.version ?? (effectiveSnapshot as { version?: string }).version;
-    if (
-      from !== undefined &&
-      from !== machineVersion &&
-      !(machineDeclaresMigrate && !options.migrateSnapshot)
-    ) {
-      const info = { from, to: machineVersion };
-      if (options.migrateSnapshot) {
-        effectiveSnapshot = options.migrateSnapshot(effectiveSnapshot, info);
-      } else {
-        const mode = options.onVersionMismatch ?? "throw";
-        if (mode === "throw") {
-          throw new AgentSnapshotVersionMismatchError(from, machineVersion, machineId);
-        }
-        if (mode === "warn") {
-          console.warn(
-            `runAgent: resuming a snapshot stamped with machine version '${from}' against ` +
-              `machine '${machineId}' at version '${machineVersion}'. Structural changes may ` +
-              `not resume cleanly.`,
-          );
-        }
-        // 'ignore': proceed silently.
-      }
-    }
-  }
-
-  // Events-only resume: no `snapshot`, but a self-contained replayable log (a
-  // reserved `@agent.init` first entry). Derive the resume snapshot by folding
-  // the log through `replay` — recorded model/tool results are never
-  // re-executed — then convert the pure-transition snapshot to persisted form
-  // so `createActor` restores it (children included). A request that was still
-  // in flight when the log ended round-trips as a pending child and re-executes
-  // idempotently on restore (XState restarts restored pending async logic), so
-  // a crashed run resumes from its log alone. `replay` validates entry
-  // contiguity and machine identity/version itself.
-  //
-  // `@agent.usage` entries are SPEND RECORDS: the tokens were burned at call
-  // time, so a crash that lost the call's result does not un-spend them. Every
-  // usage entry in the log folds in as-is, and a re-executed call journals its
-  // own usage on top — the recovered total is the true cumulative cost.
-  const resumeEvents = options.events;
-  if (
-    effectiveSnapshot === undefined &&
-    options.events !== undefined &&
-    options.events[0]?.event.type === AGENT_INIT_EVENT_TYPE
-  ) {
-    const { snapshot: replayedSnapshot } = replay(machine, resumeEvents!, { machineVersion });
-    effectiveSnapshot = machine.getPersistedSnapshot(
-      replayedSnapshot as never,
-    ) as Snapshot<unknown>;
-  }
-
-  // Align the snapshot's XState-level `version` field with the machine's own
-  // `version` before restore. The gate above already decided compatibility
-  // (throw/warn/ignore/migrate), so `restoreSnapshot`'s built-in mismatch
-  // throw must not second-guess it — a live `result.snapshot` (or its JSON
-  // round-trip) carries no `version` field at all, and would otherwise fail to
-  // restore under any versioned machine. Prototype-preserving copy: the
-  // caller's snapshot object is never mutated.
-  const machineOwnVersion = (machine as { version?: string }).version;
-  if (
-    !machineDeclaresMigrate &&
-    effectiveSnapshot !== undefined &&
-    (effectiveSnapshot as { version?: string }).version !== machineOwnVersion
-  ) {
-    const aligned = Object.assign(
-      Object.create(Object.getPrototypeOf(effectiveSnapshot) as object | null),
-      effectiveSnapshot,
-    ) as Snapshot<unknown> & { version?: string };
-    if (machineOwnVersion === undefined) {
-      delete aligned.version;
-    } else {
-      aligned.version = machineOwnVersion;
-    }
-    // A live snapshot carries its producing machine as an own property;
-    // restore prefers it over the actor's machine for the version check, so a
-    // stale reference would re-raise the mismatch this block just resolved.
-    delete (aligned as { machine?: unknown }).machine;
-    effectiveSnapshot = aligned;
-  }
-
-  // State interpretation (see `RunAgentOptions.getRequests`): the run-owned
-  // message log — seeded from an explicit `options.messages`, else the resume
-  // snapshot's stamped `messages`, else empty — and its stamp, applied to
-  // every settled snapshot (like `agentMeta`) so persist/resume round-trips
-  // the log with no extra wiring.
-  const priorMessages = getAgentMessages(effectiveSnapshot);
-  const messages: AgentMessage[] =
-    typeof options.messages === "function"
-      ? [...options.messages([...priorMessages])]
-      : [...priorMessages, ...(options.messages ?? [])];
-  // Everything a settled snapshot carries out of the run: the `agentMeta`
-  // stamp (read back by the next resume's version check) plus the message log.
-  // Messages are stamped when this run uses the log — and also when a resumed
-  // snapshot carried one, so a plain invoke-driven resume never silently drops
-  // the conversation that round-tripped in (parity with agentMeta).
-  const stampSettledSnapshot = (snapshot: unknown): void => {
-    if (!snapshot || typeof snapshot !== "object") {
-      return;
-    }
-    (snapshot as { agentMeta?: unknown }).agentMeta = agentMeta;
-    if (!options.getRequests && !options.messages && messages.length === 0) {
-      return;
-    }
-    (snapshot as { messages?: AgentMessage[] }).messages = [...messages];
-  };
+  const effectiveSnapshot = options.snapshot;
 
   // Feature B: reject a resume `event` the restored state cannot take. Checked
   // here (before the actor starts, like the bind-time throws) against the
@@ -2453,54 +1942,27 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     const restoredSnapshot = createActor(boundMachine, {
       snapshot: effectiveSnapshot,
     } as never).getSnapshot() as AnyMachineSnapshot;
-    const acceptedTypes = getAcceptedEvents(restoredSnapshot, { schemas: runCtx.schemas }).map(
-      (descriptor) => descriptor.type,
-    );
-    const eventType = (options.event as { type: string }).type;
-    if (!acceptedTypes.includes(eventType)) {
-      throw new AgentIllegalResumeEventError(eventType, acceptedTypes);
+    if (restoredSnapshot.status === "active") {
+      const acceptedTypes = getAcceptedEvents(restoredSnapshot, { schemas: runCtx.schemas }).map(
+        (descriptor) => descriptor.type,
+      );
+      const eventType = (options.event as { type: string }).type;
+      if (!acceptedTypes.includes(eventType)) {
+        throw new AgentIllegalResumeEventError(eventType, acceptedTypes);
+      }
     }
   }
 
-  const replayEvents: AgentLogEntry[] = [...(resumeEvents ?? [])];
-  validateReplayEntries(replayEvents, { machineId, machineVersion }, "runAgent events");
-  const replayEventIds = new Set<string>(replayEvents.map((entry) => entry.id));
-  const hasCompleteReplayHistory =
-    replayEvents[0]?.event.type === AGENT_INIT_EVENT_TYPE ||
-    (effectiveSnapshot === undefined && replayEvents.length === 0);
-  const appendReplayEvent = (event: EventObject): AgentLogEntry => {
-    const entry = createReplayEntry(machine, replayEvents, event, {
-      machineVersion,
-      verification: hasCompleteReplayHistory,
-    });
-    if (replayEventIds.has(entry.id)) {
-      throw new Error(`runAgent generated duplicate event id '${entry.id}'.`);
-    }
-    replayEventIds.add(entry.id);
-    replayEvents.push(entry);
-    options.onEvent?.(entry);
-    return entry;
-  };
-  if (replayEvents.length === 0 && effectiveSnapshot === undefined) {
-    const entry = initEntry(machine, resolvedInput, { machineVersion });
-    replayEventIds.add(entry.id);
-    replayEvents.push(entry);
-    options.onEvent?.(entry);
-  }
-
-  // One cycle = start (or re-opening event) → next quiescence. `settled`
-  // gates the current cycle; `finalized` marks a terminal settle (one-shot
-  // mode, or done/error/stopped in session mode) after which the actor is
-  // stopped and the result is permanent.
+  // One run = start (or resume event) to the next quiescence.
   let settled = false;
-  let finalized = false;
-  // A call settling after the cycle resolved is a straggler (see
-  // deliverUsageEvent): dropped identically on both lifecycle paths.
+  // A call settling after the run resolved is a straggler (see
+  // deliverUsageEvent): dropped after the run settles.
   cycleGate.isResolved = () => settled;
   let lastResult: RunAgentResult<TMachine> | undefined;
   const waiters: Array<(result: RunAgentResult<TMachine>) => void> = [];
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
   let actor: ReturnType<typeof createActor<TMachine>>;
+  let actorStarted = false;
   // True only during the resumed actor's initial (restore) transition, while
   // an `event` is still pending delivery. The restored state may itself be a
   // idle snapshot; without this guard, Feature A's immediate settle
@@ -2513,29 +1975,35 @@ function createAgentSession<TMachine extends AnyStateMachine>(
       return;
     }
     settled = true;
+    let persistedSnapshot: Snapshot<unknown> | undefined;
+    let persistenceError: unknown;
+    if (actorStarted && outcome.status !== "done") {
+      try {
+        persistedSnapshot = actor.getPersistedSnapshot() as Snapshot<unknown>;
+      } catch (error) {
+        persistenceError = error;
+      }
+    }
+    const persist = () => {
+      if (persistenceError !== undefined) {
+        throw persistenceError;
+      }
+      persistedSnapshot ??= actor.getPersistedSnapshot() as Snapshot<unknown>;
+      return persistedSnapshot;
+    };
     const result = {
       ...outcome,
-      events: [...replayEvents],
+      persist,
       usage: runUsage(),
     } as RunAgentResult<TMachine>;
     if (idleTimer !== undefined) {
       clearTimeout(idleTimer);
     }
-    // Stamp the settled snapshot(s) with the machine id + version. A plain
-    // enumerable field (snapshots are not frozen), so it survives JSON
-    // persist/resume and is read back on the next resume's version check.
-    stampSettledSnapshot(result.snapshot);
-    if ("persistedSnapshot" in result) {
-      stampSettledSnapshot(result.persistedSnapshot);
-    }
     onTrace({ type: "run.end", ...outcome } as AgentTraceEventPayload<TMachine>);
-    if (lifecycle.oneShot || result.status !== "idle") {
-      finalized = true;
-      if (options.signal) {
-        options.signal.removeEventListener("abort", onAbort);
-      }
-      actor.stop();
+    if (options.signal) {
+      options.signal.removeEventListener("abort", onAbort);
     }
+    actor.stop();
     lastResult = result;
     for (const resolve of waiters.splice(0)) {
       resolve(result);
@@ -2561,122 +2029,17 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     settle({
       status: "idle",
       snapshot: current as SnapshotFrom<TMachine>,
-      persistedSnapshot: actor.getPersistedSnapshot() as Snapshot<unknown>,
       ...(pendingUserInputs.length > 0 ? { pendingUserInputs } : {}),
     });
   };
 
-  // ─── State interpretation (RunAgentOptions.getRequests) ───
-  // Consulted at every would-be idle settle: if the hook returns request(s)
-  // for the current snapshot, run them (model call(s) → message log → one
-  // legal event sent each) instead of settling. The pass logic itself is
-  // extracted (internal/state-request-pass.ts); what lives HERE is only the
-  // glue that must close over this run's mutable state — the live `actor`,
-  // the `settled` flag, the shared log, and the idle scheduler — none of
-  // which exist outside this session closure. `interpreting` blocks a
-  // concurrent idle settle while a pass's model calls are in flight.
-  let interpreting = false;
-  let interpretSeq = 0;
-
-  // Append to the run's message log + notify the live observer (onMessage).
-  const appendToLog = (...items: AgentMessage[]): void => {
-    messages.push(...items);
-    if (options.onMessage) {
-      const info: AgentMessageInfo = { runId, machineId, machineVersion };
-      for (const item of items) {
-        options.onMessage(item, info);
-      }
-    }
-  };
-
-  // The run-level error cause ladder, shared by the interpret settle and
-  // the machine-error settle in the inspect handler.
+  // The run-level error cause ladder.
   const runErrorCause = (error: unknown): RunAgentErrorCause =>
     budgetExceeded
       ? "max-model-calls"
       : wrapsDecisionExhausted(error)
         ? "decision-exhausted"
         : "machine";
-
-  const settleInterpretError = (error: unknown) => {
-    settle({
-      status: "error",
-      cause: runErrorCause(error),
-      error,
-      snapshot: actor.getSnapshot(),
-    });
-  };
-
-  // The pass itself (text phase → ordered advance phase) lives in
-  // internal/state-request-pass.ts, testable against a bare actor. These
-  // deps are runAgent's host seams: the live actor, settle awareness, the
-  // budgeted/traced executors, and the shared log.
-  const passDeps: StateRequestPassDeps = {
-    getSnapshot: () => actor.getSnapshot() as AnyMachineSnapshot,
-    send: (event) => actor.send(event as never),
-    isSettled: () => settled,
-    messages,
-    appendToLog,
-    generateText: runCtx.generateText,
-    decide: runCtx.decide ? createCountingDecide(runCtx, undefined) : undefined,
-    consumeModelCall,
-    recordUsage,
-    nextRequestId: () => `interpret_${++interpretSeq}`,
-    // `onResult` is not wired here: the pass's `request.end` payloads flow
-    // through `onTrace`, which is the dispatch that invokes `options.onResult`.
-    onTrace,
-    schemas: runCtx.schemas,
-    signal: options.signal,
-  };
-
-  // Returns true when the caller must NOT settle idle: a getRequests pass
-  // was started for this snapshot, or one is already in flight.
-  const maybeInterpret = (snapshot: AnyMachineSnapshot): boolean => {
-    if (!options.getRequests || settled) {
-      return false;
-    }
-    if (interpreting) {
-      return true;
-    }
-    let requested: AgentStateRequest | readonly AgentStateRequest[] | undefined;
-    try {
-      requested = options.getRequests(snapshot as SnapshotFrom<TMachine>, { messages });
-    } catch (error) {
-      settleInterpretError(error);
-      return true;
-    }
-    const requests = (Array.isArray(requested) ? requested : requested ? [requested] : []).filter(
-      (stateRequest): stateRequest is AgentStateRequest => Boolean(stateRequest),
-    );
-    if (requests.length === 0) {
-      return false;
-    }
-    interpreting = true;
-    void runStateRequestPass(requests, passDeps)
-      .then(({ sentAny }) => {
-        if (settled || sentAny) {
-          return;
-        }
-        // The whole pass sent no event: settle idle rather than re-running
-        // the same requests forever.
-        const current = actor.getSnapshot() as AnyMachineSnapshot;
-        if (isIdleSnapshot(current, { ignoreUserInputChildren: userInputIsPlaceholder })) {
-          settleIdle(current);
-        }
-      })
-      .catch((error) => settleInterpretError(error))
-      .finally(() => {
-        interpreting = false;
-        // A transition observed DURING this pass (e.g. our own send while
-        // the machine reads as idle) saw `interpreting` and skipped
-        // both settling and starting a new pass — re-evaluate now so the
-        // run always makes progress (settle, or the next pass).
-        if (!settled) {
-          scheduleIdleCheck();
-        }
-      });
-    return true;
-  };
 
   // Fallback for untagged machines: defer one macrotask so in-flight work
   // that starts synchronously with a transition registers first, then settle
@@ -2692,24 +2055,11 @@ function createAgentSession<TMachine extends AnyStateMachine>(
         return;
       }
       const current = actor.getSnapshot() as AnyMachineSnapshot;
-      if (isIdleSnapshot(current, { ignoreUserInputChildren: userInputIsPlaceholder })) {
-        if (!maybeInterpret(current)) {
-          if (
-            !declaredIdlePredicate &&
-            current.status === "active" &&
-            !warnedHeuristicIdle &&
-            process.env.NODE_ENV !== "production"
-          ) {
-            warnedHeuristicIdle = true;
-            console.warn(
-              `[@statelyai/agent] runAgent settled idle via the timing heuristic (no ` +
-                `idle predicate declared). This is best-effort; for deterministic ` +
-                `idle detection, declare setupAgent({ isIdle }) or pass ` +
-                `runAgent(machine, { isIdle }), e.g. (s) => s.hasTag('waiting').`,
-            );
-          }
-          settleIdle(current);
-        }
+      if (
+        isIntentionalIdle(current) &&
+        isIdleSnapshot(current, { ignoreUserInputChildren: userInputIsPlaceholder })
+      ) {
+        settleIdle(current);
       }
     }, 0);
   };
@@ -2733,39 +2083,15 @@ function createAgentSession<TMachine extends AnyStateMachine>(
         return;
       }
       if (settled) {
-        if (finalized) {
-          return;
-        }
-        // Session mode: an external event after an idle settle re-opens the
-        // cycle. The journal keeps appending to the same log below, and the
-        // next quiescence resolves the next `settled()` call.
-        settled = false;
-        lastResult = undefined;
+        return;
       }
 
       const snapshot = event.snapshot as AnyMachineSnapshot;
-
-      // The replay journal is deliberately smaller than the trace. A root
-      // transition is an external input when it came from outside the root
-      // actor (a host/user send or child completion). Timer delivery is the
-      // one self-sent input that must be retained. Initial and raised/internal
-      // events are re-derived by initialTransition/transition during replay.
-      let eventId: string | undefined;
-      if (
-        event.event.type !== "@xstate.init" &&
-        (event.sourceRef !== event.actorRef || event.event.type === "xstate.timer")
-      ) {
-        eventId = appendReplayEvent(event.event as EventObject).id;
-      } else if (event.event.type === "@xstate.init") {
-        eventId =
-          replayEvents[0]?.event.type === AGENT_INIT_EVENT_TYPE ? replayEvents[0].id : undefined;
-      }
 
       onTrace({
         type: "machine.transition",
         snapshot: snapshot as SnapshotFrom<TMachine>,
         event: event.event as EventFromLogic<TMachine>,
-        ...(eventId !== undefined ? { eventId } : {}),
       });
 
       if (snapshot.status === "done") {
@@ -2808,7 +2134,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
       // sibling work still running) falls through to the timing heuristic.
       if (
         !deliveringResumeEvent &&
-        isIdle(snapshot) &&
+        isIntentionalIdle(snapshot) &&
         isIdleSnapshot(snapshot, { ignoreUserInputChildren: userInputIsPlaceholder })
       ) {
         // Not settled synchronously: the event that reached this idle
@@ -2823,12 +2149,10 @@ function createAgentSession<TMachine extends AnyStateMachine>(
           }
           const current = actor.getSnapshot() as AnyMachineSnapshot;
           if (
-            isIdle(current) &&
+            isIntentionalIdle(current) &&
             isIdleSnapshot(current, { ignoreUserInputChildren: userInputIsPlaceholder })
           ) {
-            if (!maybeInterpret(current)) {
-              settleIdle(current);
-            }
+            settleIdle(current);
           } else {
             // A drained child event started new work (or left the idle state)
             // without a root transition to re-trigger idle detection — fall
@@ -2863,21 +2187,13 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     }
   }
 
-  const sessionApi: AgentActorSession<TMachine> = {
-    actor,
-    get events() {
-      return replayEvents;
-    },
-    usage: runUsage,
+  const sessionApi: AgentRunSession<TMachine> = {
     settled: () =>
       settled && lastResult !== undefined
         ? Promise.resolve(lastResult)
         : new Promise<RunAgentResult<TMachine>>((resolve) => {
             waiters.push(resolve);
           }),
-    stop: () => {
-      actor.stop();
-    },
   };
 
   if (options.signal) {
@@ -2900,67 +2216,43 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     ...(options.event !== undefined ? { event: options.event } : {}),
   });
 
+  actorStarted = true;
   actor.start();
-  if (options.event) {
+  // Restoring an incompatible native XState snapshot can synchronously leave
+  // the actor in an error/stopped state without emitting an inspection event.
+  // Observe that post-start snapshot directly so the run cannot hang (or try
+  // to deliver a resume event to an actor XState has already stopped).
+  if (!settled) {
+    const startedSnapshot = actor.getSnapshot() as AnyMachineSnapshot;
+    if (startedSnapshot.status === "done") {
+      settle({
+        status: "done",
+        output: startedSnapshot.output as OutputFrom<TMachine>,
+        snapshot: startedSnapshot as SnapshotFrom<TMachine>,
+      });
+    } else if (startedSnapshot.status === "error") {
+      settle({
+        status: "error",
+        cause: runErrorCause(startedSnapshot.error),
+        error: startedSnapshot.error,
+        snapshot: startedSnapshot as SnapshotFrom<TMachine>,
+      });
+    } else if (startedSnapshot.status === "stopped") {
+      settle({
+        status: "error",
+        cause: "stopped",
+        error: new Error("Actor stopped externally."),
+        snapshot: startedSnapshot as SnapshotFrom<TMachine>,
+      });
+    }
+  }
+  if (options.event && !settled) {
     // Restore transition is done; allow the post-event transition to settle.
     deliveringResumeEvent = false;
     actor.send(options.event as never);
   }
 
   return sessionApi;
-}
-
-/**
- * The resolved value of {@link generateResult}: the `done`-narrowed
- * {@link RunAgentResult} — `output` plus run metadata (`snapshot`, replayable
- * `events`, aggregated `usage`), mirroring how the AI SDK's `generateText`
- * resolves `text` alongside its call metadata.
- */
-export type GenerateResult<TMachine extends AnyStateMachine> = Extract<
-  RunAgentResult<TMachine>,
-  { status: "done" }
->;
-
-/**
- * Runs an agent machine to a **final state**, for run-to-done flows where an
- * idle pause is unexpected. Wraps {@link runAgent}:
- *
- * - `done` → resolves with the done result: `result.output` (the machine's
- *   `OutputFrom`) plus metadata — `result.snapshot`, the replayable
- *   `result.events`, and the aggregated `result.usage` — the same shape
- *   `generateText` users expect (`text` + call metadata).
- * - `idle` → throws {@link AgentIdleError} carrying the idle snapshot and the
- *   event types that could resume it.
- * - `error` → throws `result.error` when it is an `Error`; otherwise wraps it
- *   in an `Error` whose `.cause` is the {@link RunAgentErrorCause} and whose
- *   `.error` is the raw thrown value.
- *
- * Use {@link runAgent} directly when idle is an expected outcome you handle
- * (human-in-the-loop, resumable flows); use `generateResult` when the
- * machine is meant to run straight through to a final state.
- */
-export async function generateResult<TMachine extends AnyStateMachine>(
-  machine: TMachine,
-  options: RunAgentOptions<TMachine>,
-): Promise<GenerateResult<TMachine>> {
-  const result = await runAgent(machine, options);
-  if (result.status === "done") {
-    return result;
-  }
-  if (result.status === "idle") {
-    const acceptedTypes = getAcceptedEvents(result.snapshot as AnyMachineSnapshot, {
-      schemas: getRegisteredAgentExecutionOptions(machine).schemas,
-    }).map((descriptor) => descriptor.type);
-    throw new AgentIdleError(result.snapshot as AnyMachineSnapshot, acceptedTypes);
-  }
-  // error
-  if (result.error instanceof Error) {
-    throw result.error;
-  }
-  const wrapped = new Error(`generateResult: run failed with cause '${result.cause}'.`);
-  (wrapped as { cause?: unknown }).cause = result.cause;
-  (wrapped as { error?: unknown }).error = result.error;
-  throw wrapped;
 }
 
 /**
@@ -3078,6 +2370,28 @@ function isIdleSnapshot(
       transitionDef.eventType === "" || transitionDef.eventType.startsWith("xstate.after"),
   );
   return !hasPendingWork;
+}
+
+/**
+ * Default machine-owned idle signal used by {@link runAgent}: an active
+ * snapshot that accepts an external event anywhere in its active hierarchy,
+ * or declares interaction metadata on an active state.
+ *
+ * Compose this in `setupAgent({ isIdle })` when the application has additional
+ * wait states: `isIdle: (snapshot) => isAgentIdle(snapshot) || snapshot.hasTag('waiting')`.
+ * Pending work and active invoked children are checked separately by the
+ * runner, so this function only answers whether the state is an intentional
+ * external wait.
+ */
+export function isAgentIdle(snapshot: AnyMachineSnapshot): boolean {
+  if (snapshot.status !== "active") {
+    return false;
+  }
+  const hasInteraction = snapshot.nodes.some((node) => {
+    const meta = node.meta;
+    return typeof meta === "object" && meta !== null && "interaction" in meta;
+  });
+  return hasInteraction || getAcceptedEvents(snapshot).length > 0;
 }
 
 // Gathers the still-active `agent.userInput` placeholder children off an idle snapshot: one {@link PendingUserInput} per pending invoke, with the invoke's resolved input (prompt, metadata) read off the child's own snapshot.

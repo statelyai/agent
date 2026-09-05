@@ -323,7 +323,7 @@ export function resolveAgentStep<TMachine extends AnyActorLogic>(
  * — merges the request's tools, dispatches to `generateText`/`streamText` per
  * `mode`, and validates the result against the request's `outputSchema` if
  * present. Accepts either a `kind: 'text'` `AgentEffect` (the step-path shape
- * from `getAgentEffects`) or an {@link AgentRequest} envelope.
+ * from a custom XState host) or an {@link AgentRequest} envelope.
  * **Text-only**: passing a `kind: 'decision'` request throws, directing the
  * caller to `resolveDecision(request, executors, ...)` instead. Always
  * returns both the normalized `output` and the `raw` executor result (tool

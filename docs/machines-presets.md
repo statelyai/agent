@@ -10,7 +10,7 @@ description: Factories for proven agent shapes (tool loop, sequential, router, p
 `@statelyai/agent/machines` ships factories for common agent shapes. Each factory is a thin composition over `setupAgent(...).createMachine(...)`.
 
 - The result is an ordinary machine, with the same states, guards, snapshots, and `lintAgentMachine` support as a machine you write yourself.
-- Executors stay separate. Presets name no SDK, so the host still passes `executors` to `runAgent` or `generateResult`.
+- Executors stay separate. Presets name no SDK, so the host passes `executors` to `runAgent`.
 - Each preset is around 100 lines of states that you can read, diagram, and copy into your own project.
 
 ```ts
@@ -102,7 +102,7 @@ One `agent.decide` picks exactly one declared route, then the machine runs it. R
 
 ### `createParallelMachine`
 
-Static fan-out with one region per branch. All branches run concurrently and join into a keyed `results` object. The branch count is fixed at author time. [examples/preset-machine](../examples/preset-machine/index.ts) runs this preset over two review branches. For a branch count decided at run time, see [examples/fan-out](../examples/fan-out/index.ts).
+Static parallel work with one region per branch. All branches run concurrently and join into a keyed `results` object. Dynamic fan-out remains ordinary XState actor composition.
 
 <!-- viz: state diagram of createParallelMachine: parallel state with one region per branch, all joining into a single done state with keyed results -->
 
@@ -130,25 +130,23 @@ A preset is a starting point. When you need one more state, a human gate, a diff
 
 Examples to eject toward:
 
-- [react-agent](../examples/react-agent/index.ts): the tool loop expressed as states.
 - [review-tool-calls](../examples/review-tool-calls/index.ts): an approval gate.
-- [fan-out](../examples/fan-out/index.ts): a branch count decided at run time.
 - [reflection-writer](../examples/reflection-writer/index.ts): a critique loop.
-- [supervisor](../examples/supervisor/index.ts) and [swarm-handoff](../examples/swarm-handoff/index.ts): multi-agent topologies.
+- [hierarchical-teams](../examples/hierarchical-teams/index.ts) and [swarm-handoff](../examples/swarm-handoff/index.ts): multi-agent topologies.
 
 ## Versioning
 
-Every preset machine carries `version: "1"`, using XState's standard `createMachine({ version })` prop. This is the machine's own topology version. It is unrelated to the `@statelyai/agent` package version. `runAgent` reads `machine.version`, and falls back to a structural hash only for a machine that declares no version. Snapshots, event-log entries, and trace events are stamped with `"1"` and stay resumable across releases:
+Every preset machine carries `version: "1"`, using XState's standard `createMachine({ version })` prop. This is the machine's own topology version. It is unrelated to the `@statelyai/agent` package version. Native persisted snapshots and trace events carry that version:
 
 ```ts
 const result = await runAgent(machine, { input, executors });
-// result.events[0].machineVersion === "1"
+// result.persist().version === "1"
 ```
 
 The versioning policy:
 
-- The version identifies the machine's topology, not the release that built it. Internals can be refactored without a version bump, including prompt wording, an added `onError`, or a renamed internal id. Persisted snapshots and event logs stay valid.
-- A topology change that a persisted snapshot could not resume into bumps the machine version to `"2"`, in a minor package release at most. Resume across the bump with `migrateSnapshot` or `onVersionMismatch`.
+- The version identifies the machine's topology, not the release that built it. Prompt wording can change without a version bump.
+- A topology change that an old snapshot cannot restore bumps the version. Migrate it with XState's machine-level `migrate(snapshot, fromVersion)`.
 
 The same prop works for your own machines. Set `version` in `createMachine(...)` and `runAgent` stamps that value instead of the structural hash, which changes on any edit.
 
@@ -156,4 +154,4 @@ The same prop works for your own machines. Set `version` in `createMachine(...)`
 
 - Read more about [Agent machines](machines.md), including `setupAgent`, states, invokes, and guards.
 - Read more about [Agent patterns](patterns.md), the full runnable example catalog.
-- Read more about [The event log](event-log.md), where `machineVersion` is recorded and checked.
+- Read more about [Persistence](persistence.md).

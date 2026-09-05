@@ -67,6 +67,26 @@ export type ScriptedTextEntry =
   | null
   | object;
 
+/** A request-name keyed script. `"*"` is the fallback route. */
+export type ScriptedByName<TEntry> = Record<string, TEntry | TEntry[]>;
+
+/** One scripted stream call: chunks, or a function producing chunks. */
+export type ScriptedStreamEntry =
+  | string
+  | readonly string[]
+  | ((
+      request: AgentTextRequest,
+      info?: AgentRequestExecutorInfo,
+    ) => string | readonly string[] | PromiseLike<string | readonly string[]>);
+
+/** A call observed by {@link createScriptedExecutors}. */
+export interface ScriptedExecutorCall {
+  kind: "generateText" | "streamText" | "decide" | "userInput";
+  name: string;
+  input: unknown;
+  request: AgentTextRequest | AgentDecisionRequest | AgentUserInput;
+}
+
 /**
  * One entry in the `userInput` queue: the string the simulated human typed, or
  * a function of the {@link AgentUserInput} request (its `prompt`/`metadata`)
@@ -89,12 +109,18 @@ export type ScriptedUserInputEntry =
  * non-`userInput` invokes are plain actors, supplied via `actors`.
  */
 export interface ScriptedExecutorsScript {
-  /** Answers for `decide` requests, consumed in order. */
-  decisions?: ScriptedDecisionEntry[];
-  /** Answers for text requests, consumed in order. `generateText` and `streamText` share this one queue. */
-  text?: ScriptedTextEntry[];
+  /** Answers for `decide` requests, keyed by semantic request name. A flat array is the legacy FIFO fallback. */
+  decisions?: ScriptedDecisionEntry[] | ScriptedByName<ScriptedDecisionEntry>;
+  /** Answers for generate requests, keyed by semantic request name. A flat array is the legacy FIFO fallback. */
+  text?: ScriptedTextEntry[] | ScriptedByName<ScriptedTextEntry>;
+  /** Stream chunks keyed by semantic request name. */
+  stream?: Record<string, ScriptedStreamEntry>;
   /** Answers for `agent.userInput` requests, consumed in order. */
   userInput?: ScriptedUserInputEntry[];
+  /** Reuse the last routed entry after its queue is exhausted. */
+  repeat?: boolean;
+  /** Default usage attached when an entry does not provide its own. */
+  usage?: AgentCallUsage;
 }
 
 /**
@@ -104,7 +130,42 @@ export interface ScriptedExecutorsScript {
  */
 export type ScriptedExecutors = Required<AgentRequestExecutors> & {
   userInput: (input: AgentUserInput) => Promise<string>;
+  calls: ScriptedExecutorCall[];
 };
+
+interface ScriptQueue<T> {
+  entries: T[];
+  index: number;
+}
+
+function asQueue<T>(value: T | T[]): ScriptQueue<T> {
+  return { entries: Array.isArray(value) ? [...value] : [value], index: 0 };
+}
+
+function namedQueues<T>(value: T[] | ScriptedByName<T> | undefined): {
+  fifo: ScriptQueue<T>;
+  byName: Map<string, ScriptQueue<T>>;
+} {
+  if (!value || Array.isArray(value)) {
+    return { fifo: asQueue(value ?? []), byName: new Map() };
+  }
+  return {
+    fifo: asQueue<T>([]),
+    byName: new Map(Object.entries(value).map(([name, entries]) => [name, asQueue(entries)])),
+  };
+}
+
+function takeEntry<T>(
+  channel: { fifo: ScriptQueue<T>; byName: Map<string, ScriptQueue<T>> },
+  name: string,
+  repeat: boolean,
+): T | undefined {
+  const queue = channel.byName.get(name) ?? channel.byName.get("*") ?? channel.fifo;
+  if (queue.index < queue.entries.length) {
+    return queue.entries[queue.index++];
+  }
+  return repeat && queue.entries.length > 0 ? queue.entries.at(-1) : undefined;
+}
 
 /** The only own keys an executor-result envelope carries. @internal */
 const TEXT_ENVELOPE_KEYS = new Set(["output", "usage", "raw"]);
@@ -196,23 +257,39 @@ export function emitScriptedChunk(result: unknown, info?: AgentRequestExecutorIn
  * ```
  */
 export function createScriptedExecutors(script: ScriptedExecutorsScript = {}): ScriptedExecutors {
-  const decisions = [...(script.decisions ?? [])];
-  const text = [...(script.text ?? [])];
+  const decisions = namedQueues(script.decisions);
+  const text = namedQueues(script.text);
   const userInput = [...(script.userInput ?? [])];
+  const calls: ScriptedExecutorCall[] = [];
+  const repeat = script.repeat ?? false;
 
-  const nextText = async (request: AgentTextRequest, info?: AgentRequestExecutorInfo) => {
-    if (text.length === 0) {
+  const withDefaultUsage = <T extends object>(result: T): T & { usage?: AgentCallUsage } =>
+    (result as { usage?: AgentCallUsage }).usage || !script.usage
+      ? result
+      : { ...result, usage: script.usage };
+
+  const nextText = async (
+    kind: "generateText" | "streamText",
+    request: AgentTextRequest,
+    info?: AgentRequestExecutorInfo,
+  ) => {
+    const name = request.name ?? "*";
+    calls.push({ kind, name, input: request.input, request });
+    const entry = takeEntry(text, name, repeat);
+    if (entry === undefined) {
       throw new AgentError(
         "scripted-executors-exhausted",
         `createScriptedExecutors: script ran dry on a pending text request ${describeText(request)}. ` +
           "Add another entry to the script's `text` queue.",
       );
     }
-    return resolveScriptedTextEntry(text.shift()!, request, info);
+    return withDefaultUsage(await resolveScriptedTextEntry(entry, request, info));
   };
 
   return {
+    calls,
     userInput: async (input) => {
+      calls.push({ kind: "userInput", name: "agent.userInput", input, request: input });
       if (userInput.length === 0) {
         throw new AgentError(
           "scripted-executors-exhausted",
@@ -224,14 +301,27 @@ export function createScriptedExecutors(script: ScriptedExecutorsScript = {}): S
       const entry = userInput.shift()!;
       return typeof entry === "function" ? await entry(input) : entry;
     },
-    generateText: nextText,
+    generateText: (request, info) => nextText("generateText", request, info),
     streamText: async (request, info) => {
-      const result = await nextText(request, info);
+      const name = request.name ?? "*";
+      const streamEntry = script.stream?.[name] ?? script.stream?.["*"];
+      if (streamEntry !== undefined) {
+        calls.push({ kind: "streamText", name, input: request.input, request });
+        const resolved =
+          typeof streamEntry === "function" ? await streamEntry(request, info) : streamEntry;
+        const chunks = typeof resolved === "string" ? [resolved] : [...resolved];
+        for (const chunk of chunks) info?.onChunk?.(chunk);
+        return withDefaultUsage({ output: chunks.join("") });
+      }
+      const result = await nextText("streamText", request, info);
       emitScriptedChunk(result, info);
       return result;
     },
     decide: async (request) => {
-      if (decisions.length === 0) {
+      const name = request.name ?? request.id;
+      calls.push({ kind: "decide", name, input: request.input, request });
+      const entry = takeEntry(decisions, name, repeat);
+      if (entry === undefined) {
         throw new AgentError(
           "scripted-executors-exhausted",
           `createScriptedExecutors: script ran dry on a pending decision request (id '${request.id}'). ` +
@@ -239,15 +329,16 @@ export function createScriptedExecutors(script: ScriptedExecutorsScript = {}): S
             `Candidate events: ${request.events.map((event) => event.type).join(", ") || "(none)"}.`,
         );
       }
-      const entry = decisions.shift()!;
       const value = typeof entry === "function" ? await entry(request) : entry;
       // A string `type` wins: chosen events may legitimately carry an `event`
       // payload field. Only an untyped object owning `event` is the envelope.
-      return isRecord(value) &&
+      const result =
+        isRecord(value) &&
         typeof (value as Record<string, unknown>)["type"] !== "string" &&
         "event" in value
-        ? (value as { event: ChosenEvent })
-        : { event: value as ChosenEvent };
+          ? (value as { event: ChosenEvent })
+          : { event: value as ChosenEvent };
+      return withDefaultUsage(result);
     },
   };
 }

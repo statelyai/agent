@@ -19,7 +19,7 @@
  *     event free chat text becomes (`textEvent`). Labels interpolate
  *     `{question}` against the snapshot context, so the button row is captioned
  *     with whatever the agent just asked. Resume with
- *     `runAgent(machine, { snapshot: result.persistedSnapshot, event })`.
+ *     `runAgent(machine, { snapshot: result.persist(), event })`.
  *   - Two paths into the same state: button events are deterministic (no model
  *     call), free text goes through a classifier request instead.
  *   - Side-question detour: the player's free-text reply to a yes/no question
@@ -150,10 +150,6 @@ export const twentyQuestionsSchemas = createAgentSchemas({
 const agentSetup = setupAgent({
   schemas: twentyQuestionsSchemas,
   models,
-  // Deterministic idle detection: the states waiting on the player are exactly
-  // the ones tagged `waiting`, so runAgent does not fall back to its timing
-  // heuristic.
-  isIdle: (snapshot) => snapshot.hasTag("waiting"),
   requests: {
     classifyAnswer: {
       schemas: {
@@ -264,7 +260,9 @@ const agentSetup = setupAgent({
   // and states whose reset transitions write `guess`/`pendingSideQuestion` back
   // to null cannot be narrowed (a narrowed source can't widen a field).
   states: {
-    gameOver: { context: { guess: z.string() } },
+    gameOver: {
+      schemas: { context: twentyQuestionsSchemas.context.extend({ guess: z.string() }) },
+    },
   },
 });
 
@@ -693,11 +691,11 @@ export async function main() {
     ...shared,
   });
 
-  // Every player turn settles the run idle. Resume from `persistedSnapshot`.
+  // Every player turn settles the run idle. Resume from `result.persist()`.
   while (result.status === "idle") {
     const text = await promptLine(`${idlePrompt(result.snapshot)}\n> `);
     result = await runAgent(twentyQuestionsMachine, {
-      snapshot: result.persistedSnapshot,
+      snapshot: result.persist(),
       event: toPlayerEvent(result.snapshot, text),
       ...shared,
     });

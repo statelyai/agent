@@ -21,7 +21,6 @@
     "steps",
     "---State & durability---",
     "persistence",
-    "event-log",
     "human-in-the-loop",
     "---Production---",
     "models-and-providers",

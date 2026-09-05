@@ -39,9 +39,9 @@ const agentSetup = setupAgent({
 
 <!-- machine input validation from src/run-agent.ts and the input schema retained by src/setup-agent.ts -->
 
-`runAgent` and `createAgentActor` validate supplied machine input before the
+`runAgent` validates supplied machine input before the
 actor starts. Defaults and transforms from the input schema reach the context
-factory, event log, and trace; invalid input throws `AgentError` with code
+factory and trace; invalid input throws `AgentError` with code
 `invalid-machine-input`. Calling XState's `createActor` directly does not run
 this validation.
 
@@ -234,7 +234,7 @@ const machine = agentSetup.createMachine({
 
 ## Per-state context narrowing
 
-A context field that starts `null` and is assigned mid-run forces a `?? fallback` at every later read. When a state is reachable only after that field is set, narrow it to non-null under `setupAgent({ states })`. Declare only the fields that change. The narrowed type flows into that state's invoke `input`, transition functions, and `output`, so the fallback is no longer needed:
+A context field that starts `null` and is assigned mid-run forces a `?? fallback` at every later read. When a state is reachable only after that field is set, narrow it with XState's native per-state context schema under `setupAgent({ states })`. The narrowed type flows into that state's invoke `input`, transition functions, and `output`, so the fallback is no longer needed:
 
 ```ts
 const context = z.object({ question: z.string(), plan: planSchema.nullable() });
@@ -243,13 +243,11 @@ const agentSetup = setupAgent({
   context,
   // `planning` assigns `plan` before `executing` and `done` run, so narrow it there.
   states: {
-    executing: { context: { plan: planSchema } },
-    done: { context: { plan: planSchema } },
+    executing: { schemas: { context: context.extend({ plan: planSchema }) } },
+    done: { schemas: { context: context.extend({ plan: planSchema }) } },
   },
 });
 ```
-
-The field-level form is shorthand for XState's full form, `executing: { schemas: { context: context.extend({ plan: planSchema }) } }`. The full form also works.
 
 > **Note:** Narrow only where every path into the state has assigned the field. A state that is also reachable on an error or refusal route, where the field is still `null`, must keep its nullable handling. Narrowing changes the type only. Runtime behavior is unchanged.
 
@@ -377,7 +375,7 @@ generating: {
 await runAgent(machine, { input, executors: { generateText, streamText } });
 ```
 
-Give every agent invoke a durable `id`. A resumed or replayed run uses the `id` to match the invoke back to its `onDone`. See [The event log](event-log.md).
+Give an invoke an explicit `id` when the host needs a stable occurrence identity. XState owns invoke identity and snapshot restoration.
 
 ## Final states and output
 
@@ -392,7 +390,7 @@ done: {
 
 When the root declares no `output` and exactly one final state does, `createMachine` promotes that final state's output to the root. `snapshot.output` is then set without you declaring the output twice.
 
-> **Note:** Read `context` in a final `output` function, never the entering `event`. A final `output` function is evaluated more than once with different events, so `event` is unreliable there. Capture what you need into `context` in the transition that targets the final state, then read it back. The `lintAgentMachine` check `final-output-reads-event` flags this.
+> **Note:** Read durable domain data from `context` in a final `output` function. Capture entering-event data into context when the transition needs it later.
 
 ## State and transition meta
 
@@ -433,7 +431,7 @@ waiting: {
 How `after` runs depends on the host:
 
 - Under [`runAgent`](hosts.md), the timer runs live. A pending `after` does not count as idle, so `runAgent` waits for it and continues.
-- On the [step path](steps.md), the delay surfaces from `getAgentEffects` as an effect with `kind: "delay"`. The durable host owns the clock, such as a workflow sleep, a Temporal timer, or a queue delay, and applies the event when it fires. See [Steps](steps.md).
+- Under a custom or durable XState host, timers follow that framework's runtime adapter. See [the XState transition loop](steps.md).
 
 ## Related
 

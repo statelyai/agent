@@ -212,7 +212,7 @@ function toResult(
   if (result.status === "idle") {
     base.idle = {
       ...describeIdle(machineFor(scenarioId), result.snapshot),
-      snapshot: result.persistedSnapshot as unknown as Json,
+      snapshot: result.persist() as unknown as Json,
     };
   }
   return base;

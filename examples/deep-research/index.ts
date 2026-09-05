@@ -16,7 +16,7 @@
  * one `research` branch per query off `actors` — the machine's post-
  * `provide` implementation, so `runAgent` binds the host executor onto every
  * branch (no pre-binding, no fixed parallel region). Branches are collected via
- * the canonical `xstate.done.actor` event's `actorId` (see `examples/fan-out`).
+ * the canonical `xstate.done.actor` event's `actorId` (see docs/multi-agent.md).
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/deep-research/index.ts
  */

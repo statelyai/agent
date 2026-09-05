@@ -2,6 +2,9 @@
  * Review tool calls — LangGraph's "review tool calls" human-in-the-loop pattern
  * as explicit, typed machine states.
  *
+ * Unlike `tool-calling`, where the AI SDK owns the complete multi-step loop,
+ * this machine surfaces the proposed call before any consequential tool runs.
+ *
  * LangGraph shape (how-tos/human_in_the_loop/review-tool-calls): the model emits
  * a tool call, the graph hits an `interrupt()` that surfaces the pending call to
  * a human, and the human resumes with a `Command(resume={...})` carrying one of
@@ -112,9 +115,6 @@ const agentSetup = setupAgent({
     EDIT: z.object({ override: refundCallSchema.partial() }),
     REJECT: z.object({ feedback: z.string() }),
   },
-  // The machine's own wait signal: the `awaiting-review` tag. `runAgent` settles
-  // idle deterministically whenever a resting snapshot carries it.
-  isIdle: (snapshot) => snapshot.hasTag("awaiting-review"),
   actors: {
     // The consequential tool: applies the approved/edited refund. A real host
     // would call a payments API here; this fake records it and returns a receipt.
@@ -148,8 +148,8 @@ const agentSetup = setupAgent({
   // `reviewing` and `executing` are reached only after a proposal exists — narrow
   // it non-null in both so the EDIT merge and the invoke input type-check.
   states: {
-    reviewing: { context: { proposal: refundCallSchema } },
-    executing: { context: { proposal: refundCallSchema } },
+    reviewing: { schemas: { context: contextSchema.extend({ proposal: refundCallSchema }) } },
+    executing: { schemas: { context: contextSchema.extend({ proposal: refundCallSchema }) } },
   },
 });
 
@@ -301,7 +301,7 @@ export async function runReviewToolCallsExample(
     const event = events[i] ?? events[events.length - 1];
     i++;
     result = await runAgent(reviewToolCallsMachine, {
-      snapshot: result.persistedSnapshot,
+      snapshot: result.persist(),
       event,
       ...executors,
       onTransition: track,
@@ -355,7 +355,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
       console.log(interaction?.label ?? "");
       console.log("Legal events:", legalEvents.join(", "));
 
-      const persisted = result.persistedSnapshot;
+      const persisted = result.persist();
       const answer = (await promptLine("approve / edit / reject? ")).toLowerCase();
 
       let event:

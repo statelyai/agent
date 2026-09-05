@@ -1,11 +1,5 @@
 import { createAsyncLogic, type AsyncActorLogic, type EventObject } from "xstate";
-import type {
-  AgentMessage,
-  AgentToolChoice,
-  AgentTools,
-  InferOutput,
-  StandardSchemaV1,
-} from "./types.js";
+import type { AgentToolChoice, AgentTools, InferOutput, StandardSchemaV1 } from "./types.js";
 import { getJsonSchemaSync, validateSchemaSync } from "./utils.js";
 import type { AgentDecisionExecutor, AgentDecisionInput } from "./decision.js";
 import type { ChosenEvent } from "./types.js";
@@ -20,9 +14,6 @@ export const STREAM_TEXT_ACTOR = "agent.streamText" as const;
 // Well-known invoke `src` for the builtin decision actor.
 export const DECIDE_ACTOR = "agent.decide" as const;
 
-/** Synthetic `src` stamped on trace requests produced by `getRequests` state interpretation — NOT a registered actor source (nothing is invoked; the pass makes the call directly). */
-export const INTERPRET_SOURCE = "agent.interpret" as const;
-
 /** Whether a text request should be resolved with `generateText` (one-shot) or `streamText` (chunked, via `onChunk`). */
 export type AgentRequestMode = "generate" | "stream";
 /** A `setupAgent({ models })` model registry, mapping short model refs to provider-specific model values. */
@@ -34,7 +25,7 @@ export type AgentModelMap = Record<string, unknown>;
  */
 export type AgentModelRef<TModels extends AgentModelMap = {}> = [keyof TModels] extends [never]
   ? string
-  : (keyof TModels & string) | (string & {});
+  : keyof TModels & string;
 
 /**
  * Splits a portable `"provider/model-id"` model ref (the convention JSON
@@ -65,7 +56,7 @@ export function parseModelRef(modelRef: string): {
  * `createAiSdkExecutors`) map this shape onto their provider's call
  * settings.
  */
-export interface AgentTextRequest<TMetadata = Record<string, unknown>> {
+export interface AgentTextRequest<TMetadata = Record<string, unknown>, TMessage = any> {
   /**
    * The registered name of the request that produced this call — the
    * `setupAgent({ requests })` key (also set by `setupAgent.fromConfig`), or
@@ -75,10 +66,12 @@ export interface AgentTextRequest<TMetadata = Record<string, unknown>> {
    * the caller sets it on the inline input.
    */
   name?: string;
+  /** The schema-validated invoke input that produced this request. */
+  input?: unknown;
   model: string;
   system?: string;
   prompt?: string;
-  messages?: AgentMessage[];
+  messages?: TMessage[];
   /** Host/model tools that are always available to this text call. */
   tools?: AgentTools;
   toolChoice?: AgentToolChoice;
@@ -129,7 +122,7 @@ export interface AgentTextRequest<TMetadata = Record<string, unknown>> {
 /**
  * Aggregated model-call usage for ONE `runAgent` call — the run-level total
  * attached to every settled {@link RunAgentResult} (and therefore to
- * `generateResult`'s `{ output, snapshot, events, usage }`).
+ * `runAgent`'s `{ output, snapshot, persist, usage }`).
  *
  * - `modelCalls` counts every model/decision call this run made (each decision
  *   retry counts separately) — the same seam `maxModelCalls` budgets. Always a
@@ -457,7 +450,8 @@ export interface TextLogicConfig<
   model: ResolveTextLogicValue<TModel, InferOutput<TInputSchema>>;
   system?: ResolveTextLogicValue<string | undefined, InferOutput<TInputSchema>>;
   prompt?: ResolveTextLogicValue<string | undefined, InferOutput<TInputSchema>>;
-  messages?: ResolveTextLogicValue<AgentMessage[] | undefined, InferOutput<TInputSchema>>;
+  /** Framework-native messages, passed through without conversion. */
+  messages?: ResolveTextLogicValue<any[] | undefined, InferOutput<TInputSchema>>;
   tools?: ResolveTextLogicValue<AgentTools | undefined, InferOutput<TInputSchema>>;
   toolChoice?: ResolveTextLogicValue<AgentToolChoice | undefined, InferOutput<TInputSchema>>;
   /** Opt into the structured-output envelope's `reasoning` field (see {@link AgentTextRequest.includeReasoning}). */
@@ -575,6 +569,7 @@ export function createTextLogic<
 
     return {
       name,
+      input: parsedInput,
       model: resolveTextLogicValue(config.model, args)!,
       system: resolveTextLogicValue(config.system, args),
       prompt,
@@ -601,7 +596,7 @@ export function createTextLogic<
         throw new Error(
           "Text logic has no host execution. Pass an executor as the second " +
             "argument to createTextLogic(...), provide a runtime adapter, or " +
-            "extract it with getAgentEffects(..., { actors }).",
+            "bind it through runAgent/provideExecutors, or execute the XState effect in your host.",
         );
       }
 
@@ -709,8 +704,10 @@ export function isTextLogic(value: unknown): value is TextLogic {
  * {@link AgentUsage}. Optional — an executor that reports nothing still counts
  * toward `modelCalls`.
  */
-export type AgentRequestExecutorResult<TOutput = unknown> = {
+export type AgentRequestExecutorResult<TOutput = unknown, TMessage = unknown> = {
   output: TOutput;
+  /** Framework-native response messages, preserved without normalization. */
+  messages?: TMessage[];
   /** This call's token usage, aggregated into the run result's {@link AgentUsage}. */
   usage?: AgentCallUsage;
   [key: string]: unknown;
@@ -795,9 +792,8 @@ export type AiSdkShapedStreamResult = {
  * - `prompt`/`messages` are mutually exclusive, matching `ai`'s `Prompt`
  *   union (core always sets exactly one).
  * - `tools`, `toolChoice`, and `messages` are widened to `any` — their
- *   portable shapes ({@link AgentTools}, {@link AgentToolChoice},
- *   {@link AgentMessage}) are structural supersets of `ai`'s branded types
- *   and would otherwise fail the contravariant check.
+ *   framework-native shapes may be branded and would otherwise fail the
+ *   contravariant check.
  *
  * Hand-written executors that want the precise shapes can annotate their
  * parameter as `AgentTextRequest & { tools: AgentTools }` — that wider
@@ -805,8 +801,10 @@ export type AiSdkShapedStreamResult = {
  */
 export type AgentExecutorTextRequest<TMetadata = Record<string, unknown>> = Omit<
   AgentTextRequest<TMetadata>,
-  "prompt" | "messages" | "tools" | "toolChoice"
+  "name" | "prompt" | "messages" | "tools" | "toolChoice"
 > & {
+  /** Semantic request identity; always resolved before an executor is called. */
+  name: string;
   tools: any;
   toolChoice?: any;
 } & ({ prompt: string; messages?: undefined } | { prompt?: undefined; messages: any[] });
@@ -1002,6 +1000,7 @@ export async function executeAgentTextRequest(
 ): Promise<{ output: unknown; raw: unknown }> {
   const request = {
     ...input,
+    name: input.name ?? id,
     tools: {
       ...input.tools,
       ...tools,

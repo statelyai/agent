@@ -36,7 +36,7 @@
  * The guesser's turn is an idle state (no invoke) carrying `meta.interaction`:
  * the surviving clues in the label, free text routed to `GUESS`, and a `PASS`
  * button. Resume with
- * `runAgent(machine, { snapshot: result.persistedSnapshot, event })`.
+ * `runAgent(machine, { snapshot: result.persist(), event })`.
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/just-one/index.ts
  */
@@ -278,9 +278,6 @@ const CLUE_SYSTEM_PROMPT = [
 const agentSetup = setupAgent({
   schemas: justOneSchemas,
   models,
-  // Deterministic idle detection: the run settles exactly when it is waiting on
-  // the guesser, instead of falling back to the timing heuristic.
-  isIdle: (snapshot) => snapshot.hasTag("waiting"),
   requests: {
     // ONE request definition, used by all three regions. Its input type is the
     // isolation guarantee in miniature: `{ secretWord, persona }` and nothing
@@ -526,11 +523,11 @@ export async function main() {
 
   let result = await runAgent(justOneMachine, { input: { rounds: 3 }, ...shared });
 
-  // Every guessing turn settles the run idle. Resume from `persistedSnapshot`.
+  // Every guessing turn settles the run idle. Resume from `result.persist()`.
   while (result.status === "idle") {
     const text = await promptLine(`${idlePrompt(result.snapshot)}\n> `);
     result = await runAgent(justOneMachine, {
-      snapshot: result.persistedSnapshot,
+      snapshot: result.persist(),
       event: toGuesserEvent(text),
       ...shared,
     });

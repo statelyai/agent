@@ -23,12 +23,7 @@ import {
 import type { AgentMessage, AgentToolChoice, AgentTools, StandardSchemaV1 } from "./types.js";
 import { validateSchemaSync } from "./utils.js";
 import { type AgentRequestMode } from "./text-logic.js";
-import {
-  agentExecutionOptions,
-  machineStaticTransitionTargets,
-  machineIdlePredicates,
-  missingActor,
-} from "./internal/registry.js";
+import { agentExecutionOptions, machineIdlePredicates, missingActor } from "./internal/registry.js";
 import {
   createAgentActors,
   createAgentSchemas,
@@ -165,7 +160,7 @@ export interface AgentWorkflowConfig {
    * snapshots idle deterministically instead of using its timing heuristic.
    * Every listed tag must appear in some state's `tags` — an unused tag is a
    * build-time error. A `fromConfig(config, { isIdle })` option takes
-   * precedence; a `runAgent({ isIdle })` host override beats both.
+   * precedence over declarative `idleTags`.
    */
   idleTags?: string[];
   meta?: Record<string, unknown>;
@@ -1000,12 +995,6 @@ export function setupAgentFromConfig(
   // What setupAgent's wrapped createMachine registers for runAgent: the
   // schemas/actors this machine executes with.
   agentExecutionOptions.set(machine as object, { schemas, actors, models: {} });
-  // The config's transition targets, which the JSON layer erases from
-  // `machine.config` whenever a transition carries a context patch. Keyed on the
-  // root config object so lint still sees them after `machine.provide(...)`.
-  if (machine.config) {
-    machineStaticTransitionTargets.set(machine.config as object, translation.transitionTargets);
-  }
   // The wait-state predicate (options.isIdle, or the config's declarative
   // `idleTags`), carried on the root config like setupAgent's — so it
   // survives further `machine.provide(...)` executor rebinding.
@@ -1068,9 +1057,8 @@ export interface FromConfigOptions {
    * the same machine-carried predicate `setupAgent({ isIdle })` declares
    * for TS-authored machines, registered here because a function cannot live
    * in the workflow config itself. Takes precedence over the config's
-   * declarative {@link AgentWorkflowConfig.idleTags}; a
-   * `runAgent({ isIdle })` host override beats both. Travels with the
-   * machine through `machine.provide(...)`.
+   * declarative {@link AgentWorkflowConfig.idleTags}. Travels with the machine
+   * through `machine.provide(...)`.
    */
   isIdle?: (snapshot: AnyMachineSnapshot) => boolean;
 }

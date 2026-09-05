@@ -63,10 +63,46 @@ export function objectSchema<T>(
     "~standard": {
       version: 1,
       vendor: "statelyai-agent-machines",
-      validate: (value: unknown) =>
-        value !== null && typeof value === "object"
-          ? { value: value as T }
-          : { issues: [{ message: "Expected an object" }] },
+      validate: (value: unknown) => {
+        if (value === null || typeof value !== "object" || Array.isArray(value)) {
+          return { issues: [{ message: "Expected an object" }] };
+        }
+        const record = value as Record<string, unknown>;
+        const issues: Array<{ message: string; path?: PropertyKey[] }> = [];
+        for (const key of required) {
+          if (!(key in record) || record[key] === undefined) {
+            issues.push({ message: `Required property '${key}' is missing`, path: [key] });
+          }
+        }
+        for (const [key, schema] of Object.entries(properties)) {
+          const item = record[key];
+          if (item === undefined) continue;
+          const type = (schema as { type?: string | string[] } | undefined)?.type;
+          const types = Array.isArray(type) ? type : type === undefined ? [] : [type];
+          const valid =
+            types.length === 0 ||
+            types.some((candidate) => {
+              switch (candidate) {
+                case "array":
+                  return Array.isArray(item);
+                case "object":
+                  return item !== null && typeof item === "object" && !Array.isArray(item);
+                case "null":
+                  return item === null;
+                case "integer":
+                  return typeof item === "number" && Number.isInteger(item);
+                case "number":
+                  return typeof item === "number" && Number.isFinite(item);
+                default:
+                  return typeof item === candidate;
+              }
+            });
+          if (!valid) {
+            issues.push({ message: `Expected '${key}' to be ${String(type)}`, path: [key] });
+          }
+        }
+        return issues.length > 0 ? { issues } : { value: value as T };
+      },
       jsonSchema: { input: () => json },
     },
   } as StandardSchemaV1<T>;

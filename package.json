@@ -78,16 +78,6 @@
         "default": "./dist/validate.cjs"
       }
     },
-    "./sqlite": {
-      "import": {
-        "types": "./dist/sqlite.d.mts",
-        "default": "./dist/sqlite.mjs"
-      },
-      "require": {
-        "types": "./dist/sqlite.d.cts",
-        "default": "./dist/sqlite.cjs"
-      }
-    },
     "./agent-workflow.json": "./schemas/agent-workflow.json"
   },
   "publishConfig": {
@@ -101,7 +91,7 @@
     "typecheck": "pnpm run typecheck:src && pnpm run typecheck:examples && pnpm run typecheck:example-packages",
     "typecheck:src": "tsc --noEmit",
     "typecheck:examples": "tsc -p examples/tsconfig.json --noEmit",
-    "typecheck:example-packages": "pnpm run build && tsc -p examples/next-host --noEmit && tsc -p examples/tanstack-start-host --noEmit && tsc -p examples/tanstack-ai-stream --noEmit && tsc -p examples/cloudflare-agent-host --noEmit && tsc -p examples/cloudflare-workers-ai-host --noEmit",
+    "typecheck:example-packages": "pnpm run build && tsc -p examples/next-host --noEmit && tsc -p examples/tanstack-ai-stream --noEmit && tsc -p examples/cloudflare-agent-host --noEmit && tsc -p examples/cloudflare-workers-ai-host --noEmit",
     "test:cloudflare": "pnpm --filter @statelyai/example-cloudflare-agent-host test && pnpm --filter @statelyai/example-cloudflare-workers-ai-host test",
     "lint": "oxlint",
     "format": "oxfmt src examples",
@@ -124,31 +114,23 @@
     "@changesets/cli": "^2.31.1",
     "@earendil-works/pi-ai": "0.83.0",
     "@flue/runtime": "2.0.3",
-    "@inquirer/prompts": "^8.6.0",
     "@langchain/core": "^1.2.9",
     "@langchain/openai": "^1.5.10",
     "@mastra/core": "^1.61.0",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/context-async-hooks": "^2.10.0",
-    "@opentelemetry/exporter-trace-otlp-http": "^0.221.0",
     "@opentelemetry/sdk-trace-base": "^2.10.0",
-    "@opentelemetry/sdk-trace-node": "^2.10.0",
-    "@statelyai/sdk": "^0.26.1",
-    "@types/express": "^5.0.6",
     "@types/node": "^20.19.43",
     "@types/react": "^19.2.18",
     "ai": "^7.0.0",
     "ajv": "^8.20.0",
     "braintrust": "^3.28.0",
     "dotenv": "^16.6.1",
-    "express": "^5.2.1",
-    "hono": "^4.13.3",
     "knip": "6.24.0",
     "langchain": "^1.5.10",
     "openai": "^7.5.0",
     "oxfmt": "0.57.0",
     "oxlint": "1.72.0",
-    "react": "^19.2.8",
     "tsdown": "^0.21.10",
     "tsx": "^4.23.12",
     "twoslash": "^0.3.9",

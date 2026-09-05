@@ -1,20 +1,10 @@
 /**
- * Cloudflare Workers AI step host for the game workflow — the DURABLE step-path
- * flavor.
- *
- * Unlike `../ai-sdk-game-host/index.ts` (same append-only-log loop, AI SDK
- * models, one in-process run), this one persists nothing but the JOURNAL of
- * external inputs (`entries`) and resumes by REPLAYING it. Each iteration below
- * calls `replay(machine, entries)` to rebuild `{ snapshot, effects }` from the
- * log alone — exactly what a fresh Worker invocation would do after loading the
- * journal from durable storage (KV, D1, a Durable Object). No snapshot blob is
- * persisted; the log is the source of truth.
+ * Cloudflare Workers AI host for the game workflow.
  *
  * Workers AI does not expose the same tool-calling shape as the Vercel AI SDK
  * binding path, so this host serializes allowed event tools into the prompt and
  * accepts JSON output for both text effects (structured output) and decision
- * effects (event choice) — see `resolveDecision` for the retry/validation core
- * this uses for the latter.
+ * effects (event choice). `runAgent` owns decision validation and retries.
  *
  * Running this
  * -------------
@@ -29,20 +19,15 @@
  * logged-in Cloudflare account, so a local run performs real inference. Run
  * `npx wrangler login` first if the account is not connected.
  */
-import { type EventObject } from "xstate";
 import {
-  createReplayEntry,
   getAgentOutputMode,
-  initEntry,
   renderDecisionAttempts,
-  replay,
-  resolveDecision,
+  runAgent,
   type AgentDecisionRequest,
-  type AgentLogEntry,
   type AgentTextRequest,
   type ChosenEvent,
 } from "@statelyai/agent";
-import { gameActors, gameMachine, gameSchemas } from "../game-agent/index.js";
+import { gameMachine } from "../game-agent/index.js";
 
 export interface Env {
   AI: {
@@ -154,99 +139,60 @@ async function runWorkersAiTextRequest(env: Env, request: AgentTextRequest) {
   }
 }
 
-/** Decision effect: legal events serialized into the prompt, JSON-parsed
- * choice validated and retried via `resolveDecision`. */
-async function runWorkersAiDecision(env: Env, request: AgentDecisionRequest): Promise<ChosenEvent> {
-  return resolveDecision(
-    request,
-    {
-      decide: async (attemptRequest) => {
-        const legalEvents = attemptRequest.events.map((event) => `- ${event.type}`).join("\n");
-        const attemptFeedback = renderDecisionAttempts(attemptRequest)
-          .map((m) => m.content)
-          .join("\n");
+/** One decision attempt. `runAgent` validates the returned event and calls this
+ * again with attempt feedback when it is malformed or rejected by a guard. */
+async function runWorkersAiDecision(
+  env: Env,
+  request: AgentDecisionRequest,
+): Promise<{ event: ChosenEvent }> {
+  const legalEvents = request.events.map((event) => `- ${event.type}`).join("\n");
+  const attemptFeedback = renderDecisionAttempts(request)
+    .map((message) => message.content)
+    .join("\n");
 
-        const prompt = [
-          attemptRequest.prompt ?? "",
-          attemptFeedback,
-          "",
-          "Choose exactly one legal event.",
-          "Legal events:",
-          legalEvents,
-          "",
-          "Reply with ONLY a JSON object and no other text, no explanation, no prose.",
-          'Example reply: {"type":"ATTACK","target":"goblin"}',
-        ]
-          .filter(Boolean)
-          .join("\n");
+  const prompt = [
+    request.prompt ?? "",
+    attemptFeedback,
+    "",
+    "Choose exactly one legal event.",
+    "Legal events:",
+    legalEvents,
+    "",
+    "Reply with ONLY a JSON object and no other text, no explanation, no prose.",
+    'Example reply: {"type":"ATTACK","target":"goblin"}',
+  ]
+    .filter(Boolean)
+    .join("\n");
 
-        const text = await runWorkersAiPrompt(env, {
-          model: attemptRequest.model,
-          system: attemptRequest.system,
-          prompt,
-          temperature: attemptRequest.temperature,
-          maxOutputTokens: attemptRequest.maxOutputTokens,
-        });
+  const text = await runWorkersAiPrompt(env, {
+    model: request.model,
+    system: request.system,
+    prompt,
+    temperature: request.temperature,
+    maxOutputTokens: request.maxOutputTokens,
+  });
 
-        try {
-          return { event: parseJsonFromText(text) as ChosenEvent };
-        } catch (error) {
-          // Not JSON at all. Hand back an event type that cannot match, so
-          // `resolveDecision` records an `unknown-event` attempt and re-asks with
-          // that feedback in `request.attempts` — rather than throwing out of the
-          // whole turn on one malformed response.
-          return { event: { type: `<unparsed response: ${String(error)}>` } };
-        }
-      },
-    },
-    { maxRetries: 2 },
-  );
+  try {
+    return { event: parseJsonFromText(text) as ChosenEvent };
+  } catch (error) {
+    return { event: { type: `<unparsed response: ${String(error)}>` } };
+  }
 }
 
 export async function runCloudflareGameTurn(env: Env, input = { playerHp: 20, enemyHp: 15 }) {
-  const options = { schemas: gameSchemas, actors: gameActors };
-
-  // The ONLY durable state is this journal of external inputs. In a real Worker
-  // it lives in KV/D1/a Durable Object; each turn below loads it, appends one
-  // completion, and stores it again.
-  const entries: AgentLogEntry[] = [initEntry(gameMachine, input)];
-
-  // Resume-by-replay: rebuild the frontier from the log alone every iteration,
-  // exactly as a fresh Worker invocation would after loading `entries`.
-  let { snapshot, effects } = replay(gameMachine, entries, options);
-
-  while (snapshot.status === "active") {
-    let next: EventObject | undefined;
-    for (const effect of effects) {
-      if (effect.kind === "execute") {
-        effect.exec();
-        continue;
-      }
-      if (effect.kind === "text") {
-        next = effect.toDoneEvent(await runWorkersAiTextRequest(env, effect.request));
-        break;
-      }
-      if (effect.kind === "decision") {
-        next = await runWorkersAiDecision(env, effect.request);
-        break;
-      }
-      throw new Error(`This game host does not handle '${effect.kind}' effects.`);
-    }
-    if (!next) {
-      break; // idle: nothing async owed. Persist `entries`; resume on the next event.
-    }
-
-    // Journal the completion, then re-derive the next frontier by REPLAYING the
-    // whole log — crash-safe: the same log always rebuilds the same
-    // `{ snapshot, effects }`, so a Worker that crashed mid-turn resumes here
-    // with no lost or duplicated work. (A hot loop could fold with
-    // `transition(snapshot, next)` for speed and only `replay` on cold start —
-    // both yield the identical state.)
-    entries.push(createReplayEntry(gameMachine, entries, next));
-    ({ snapshot, effects } = replay(gameMachine, entries, options));
+  const result = await runAgent(gameMachine, {
+    input,
+    executors: {
+      generateText: async (request) => ({
+        output: await runWorkersAiTextRequest(env, request),
+      }),
+      decide: (request) => runWorkersAiDecision(env, request),
+    },
+  });
+  if (result.status !== "done") {
+    throw new Error(`Game turn ended with ${result.status}.`);
   }
-
-  return snapshot.output;
+  return result.output;
 }
 
 export default {

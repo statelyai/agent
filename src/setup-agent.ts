@@ -14,7 +14,6 @@ import {
 } from "xstate";
 import type {
   AgentEventSchemaInputMap,
-  AgentMessage,
   EventUnion,
   InferInput,
   InferOutput,
@@ -35,8 +34,14 @@ import {
   type TextLogicConfig,
 } from "./text-logic.js";
 import { createDecideActor } from "./decision.js";
-import { AGENT_USAGE_EVENT_TYPE, type AgentUsageEvent } from "./effects.js";
-import { appendMessages } from "./messages.js";
+import { AGENT_USAGE_EVENT_TYPE, type AgentUsageEvent } from "./usage.js";
+import {
+  AGENT_MESSAGES_EVENT_TYPE,
+  agentMessagesEventSchema,
+  appendMessages,
+  type AgentMessagesEventPayload,
+  type AppendMessagesTransition,
+} from "./messages.js";
 import { agentExecutionOptions, machineIdlePredicates } from "./internal/registry.js";
 import type { AgentSchemas } from "./events.js";
 import {
@@ -225,12 +230,16 @@ const agentUsageEventSchema: StandardSchemaV1<AgentUsageEventPayload> = {
  * is typed (and autocompletes) without the machine declaring anything.
  * Idempotent: re-applying it to an already-registered map is a no-op.
  */
-export type WithAgentUsageEvent<T extends AgentEventSchemaInputMap> = Omit<
+export type WithAgentEvents<T extends AgentEventSchemaInputMap> = Omit<
   T,
-  typeof AGENT_USAGE_EVENT_TYPE
+  typeof AGENT_USAGE_EVENT_TYPE | typeof AGENT_MESSAGES_EVENT_TYPE
 > & {
   [AGENT_USAGE_EVENT_TYPE]: StandardSchemaV1<AgentUsageEventPayload>;
+  [AGENT_MESSAGES_EVENT_TYPE]: StandardSchemaV1<AgentMessagesEventPayload>;
 };
+
+/** @deprecated Use {@link WithAgentEvents}. */
+export type WithAgentUsageEvent<T extends AgentEventSchemaInputMap> = WithAgentEvents<T>;
 
 /**
  * Adds the reserved `'@agent.usage'` schema to an authored event map. A
@@ -241,7 +250,7 @@ export type WithAgentUsageEvent<T extends AgentEventSchemaInputMap> = Omit<
  */
 function withAgentUsageEventSchema<T extends AgentEventSchemaInputMap>(
   events: T | undefined,
-): WithAgentUsageEvent<T> {
+): WithAgentEvents<T> {
   const declared = events?.[AGENT_USAGE_EVENT_TYPE];
   if (declared !== undefined && declared !== agentUsageEventSchema) {
     throw new Error(
@@ -251,10 +260,19 @@ function withAgentUsageEventSchema<T extends AgentEventSchemaInputMap>(
         `transition instead: on: { '${AGENT_USAGE_EVENT_TYPE}': … }.`,
     );
   }
+  const declaredMessages = events?.[AGENT_MESSAGES_EVENT_TYPE];
+  if (declaredMessages !== undefined && declaredMessages !== agentMessagesEventSchema) {
+    throw new Error(
+      `setupAgent: event type '${AGENT_MESSAGES_EVENT_TYPE}' is reserved and cannot be ` +
+        `declared in 'events' — setupAgent registers it for you. Add a transition ` +
+        `instead: on: { '${AGENT_MESSAGES_EVENT_TYPE}': appendMessages() }.`,
+    );
+  }
   return {
     ...events,
     [AGENT_USAGE_EVENT_TYPE]: agentUsageEventSchema,
-  } as WithAgentUsageEvent<T>;
+    [AGENT_MESSAGES_EVENT_TYPE]: agentMessagesEventSchema,
+  } as WithAgentEvents<T>;
 }
 
 function normalizeEventSchemas<T extends AgentEventSchemaInputMap>(
@@ -476,9 +494,12 @@ type AgentSetupXStateConfig<
   actors: SetupActors<
     AgentSetupActors<
       AgentAllActors<TActors, TRequestSchemas>,
-      // Reserved `@agent.*` types are never model-facing, so they stay out of
-      // the `allowedEvents` candidate union the decide builtin types.
-      Exclude<keyof TEventSchemas & string, typeof AGENT_USAGE_EVENT_TYPE>,
+      // Framework-reserved event types are never model-facing, so they stay
+      // out of the `allowedEvents` candidate union the decide builtin types.
+      Exclude<
+        keyof TEventSchemas & string,
+        typeof AGENT_USAGE_EVENT_TYPE | typeof AGENT_MESSAGES_EVENT_TYPE
+      >,
       AgentModelRef<TModels>
     >
   >;
@@ -486,135 +507,6 @@ type AgentSetupXStateConfig<
   guards?: NonNullable<AnySetupConfig["guards"]>;
   delays?: NonNullable<AnySetupConfig["delays"]>;
 };
-
-// ─── per-state context narrowing ───
-
-/**
- * Field-level context-narrowing sugar for one `setupAgent({ states })` entry:
- * each `context` entry overrides that field's schema inside the state; every
- * other field keeps the base context schema. Sugar for the full xstate form —
- * `{ context: { draft: z.string() } }` resolves to
- * `{ schemas: { context: <base with draft: string> } }` — so only the fields
- * that change are declared, not the whole context schema.
- */
-export interface AgentStateNarrowing {
-  context: Record<string, StandardSchemaV1>;
-  states?: Record<string, AgentSetupStateSchema>;
-}
-
-/** One `setupAgent({ states })` entry: xstate's {@link SetupStateSchema} full form, or the {@link AgentStateNarrowing} field-level sugar. */
-export type AgentSetupStateSchema = SetupStateSchema | AgentStateNarrowing;
-
-// The narrowed context type for a state: base context with the declared fields' schemas swapped in.
-type NarrowedContext<
-  TContextSchema extends StandardSchemaV1,
-  TFields extends Record<string, StandardSchemaV1>,
-> = Omit<InferOutput<TContextSchema>, keyof TFields> & {
-  [K in keyof TFields]: InferOutput<TFields[K]>;
-};
-
-// Resolves one AgentSetupStateSchema into xstate's SetupStateSchema shape (recursing into nested states).
-type ResolveAgentStateSchema<TContextSchema extends StandardSchemaV1, T> = T extends {
-  context: infer TFields extends Record<string, StandardSchemaV1>;
-}
-  ? {
-      schemas: {
-        context: StandardSchemaV1<NarrowedContext<TContextSchema, TFields>>;
-      };
-    } & (T extends { states: infer TChildren extends Record<string, AgentSetupStateSchema> }
-      ? { states: ResolveAgentStateSchemas<TContextSchema, TChildren> }
-      : {})
-  : T extends { states: infer TChildren extends Record<string, AgentSetupStateSchema> }
-    ? Omit<T, "states"> & { states: ResolveAgentStateSchemas<TContextSchema, TChildren> }
-    : T;
-
-// Resolves a whole `setupAgent({ states })` map into xstate's Record<string, SetupStateSchema>.
-type ResolveAgentStateSchemas<
-  TContextSchema extends StandardSchemaV1,
-  TStates extends Record<string, AgentSetupStateSchema>,
-> = Constrain<
-  {
-    [K in keyof TStates]: ResolveAgentStateSchema<TContextSchema, TStates[K]>;
-  },
-  Record<string, SetupStateSchema>
->;
-
-// Composite standard schema for a narrowed state context: validates against the
-// base context schema, then re-validates each overridden field. Purely a type/
-// validation carrier for xstate's setup({ states }) — no zod dependency.
-function mergeContextSchema(
-  base: StandardSchemaV1,
-  fields: Record<string, StandardSchemaV1>,
-): StandardSchemaV1 {
-  return {
-    "~standard": {
-      version: 1,
-      vendor: "statelyai-agent",
-      validate(value: unknown) {
-        const baseResult = base["~standard"].validate(value);
-        if (baseResult instanceof Promise) {
-          throw new Error("setupAgent: async context schemas are not supported.");
-        }
-        if (baseResult.issues) {
-          return baseResult;
-        }
-        const merged: Record<string, unknown> = {
-          ...(baseResult.value as Record<string, unknown>),
-        };
-        const issues: Array<{ message: string; path?: unknown[] }> = [];
-        for (const [key, fieldSchema] of Object.entries(fields)) {
-          const fieldResult = fieldSchema["~standard"].validate(
-            (value as Record<string, unknown>)[key],
-          );
-          if (fieldResult instanceof Promise) {
-            throw new Error("setupAgent: async context schemas are not supported.");
-          }
-          if (fieldResult.issues) {
-            issues.push(
-              ...(fieldResult.issues as Array<{ message: string; path?: unknown[] }>).map(
-                (issue) => ({
-                  ...issue,
-                  path: [key, ...(issue.path ?? [])],
-                }),
-              ),
-            );
-          } else {
-            merged[key] = fieldResult.value;
-          }
-        }
-        return issues.length > 0 ? { issues } : { value: merged };
-      },
-    },
-  } as StandardSchemaV1;
-}
-
-// Resolves the AgentStateNarrowing sugar in a `states` map to xstate's SetupStateSchema shape at runtime (the type-level counterpart is ResolveAgentStateSchemas).
-function resolveAgentStateSchemas(
-  contextSchema: StandardSchemaV1,
-  states: Record<string, AgentSetupStateSchema>,
-): Record<string, SetupStateSchema> {
-  return Object.fromEntries(
-    Object.entries(states).map(([key, state]) => {
-      if (!state || typeof state !== "object") {
-        return [key, state];
-      }
-      const children =
-        "states" in state && state.states
-          ? resolveAgentStateSchemas(contextSchema, state.states)
-          : undefined;
-      if ("context" in state && state.context) {
-        return [
-          key,
-          {
-            schemas: { context: mergeContextSchema(contextSchema, state.context) },
-            ...(children ? { states: children } : {}),
-          },
-        ];
-      }
-      return [key, children ? { ...state, states: children } : state];
-    }),
-  );
-}
 
 // The public `setupAgent(config)` parameter type: schemas (packed or loose) plus models/actors/requests/actions/guards/delays.
 type SetupAgentBaseConfig<
@@ -627,10 +519,7 @@ type SetupAgentBaseConfig<
   TRequestSchemas extends AgentRequestSchemaMap,
   TModels extends AgentModelMap,
   TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
-  TStateSchemas extends Record<string, AgentSetupStateSchema> = Record<
-    string,
-    AgentSetupStateSchema
-  >,
+  TStateSchemas extends Record<string, SetupStateSchema> = Record<string, SetupStateSchema>,
 > = (
   | {
       schemas: AgentSchemaPack<
@@ -657,9 +546,8 @@ type SetupAgentBaseConfig<
    * Per-state schemas, mirroring xstate's `setup({ states })`: narrow
    * `context` inside a state (invoke `input`, transition fns, final `output`)
    * — e.g. mark a field non-null in states only reachable after it is set.
-   * Two forms per state: the {@link AgentStateNarrowing} sugar
-   * (`{ context: { draft: z.string() } }` — only the fields that change) or
-   * xstate's full `{ schemas: { context } }` with a complete context schema.
+   * Use xstate's native `{ schemas: { context } }` form with a complete
+   * context schema.
    */
   states?: TStateSchemas;
   requests?: AgentRequestInput<TRequestSchemas, AgentModelRef<TModels>>;
@@ -671,10 +559,10 @@ type SetupAgentBaseConfig<
    * human approval, an inbound webhook, …) — the machine's own declaration of
    * what "idle" means for it, so `runAgent` settles those snapshots idle
    * deterministically instead of using its timing heuristic. Travels with the
-   * machine through `machine.provide(...)`. A `runAgent({ isIdle })` host
-   * override takes precedence; with neither, `runAgent` falls back to the timing
-   * heuristic. Declare your own signal — e.g. `(s) => s.hasTag('awaiting-review')`
-   * or `(s) => getStateMeta(s).interaction !== undefined`.
+   * machine through `machine.provide(...)`. Without one, `runAgent` recognizes
+   * resting event-handling states and `meta.interaction` by structure. Use a
+   * predicate only for a more specialized machine-owned wait rule. Import and
+   * call `isAgentIdle(snapshot)` inside it when expanding the default rule.
    */
   isIdle?: (snapshot: AnyMachineSnapshot) => boolean;
 };
@@ -690,10 +578,7 @@ type SetupAgentXStateResult<
   TMetaSchema extends StandardSchemaV1,
   TModels extends AgentModelMap,
   TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
-  TStateSchemas extends Record<string, AgentSetupStateSchema> = Record<
-    string,
-    AgentSetupStateSchema
-  >,
+  TStateSchemas extends Record<string, SetupStateSchema> = Record<string, SetupStateSchema>,
 > = SetupReturnFromConfig<
   AgentSetupXStateConfig<
     TContextSchema,
@@ -705,7 +590,7 @@ type SetupAgentXStateResult<
     TMetaSchema,
     TModels,
     TEmittedSchemas,
-    ResolveAgentStateSchemas<TContextSchema, TStateSchemas>
+    TStateSchemas
   >
 >;
 
@@ -717,6 +602,15 @@ type SetupAgentXStateResult<
  * `runAgent` and the free step helpers can resolve their schemas/actors
  * without re-passing them each call.
  */
+type ArrayContextKey<TContext> = {
+  [TKey in keyof TContext & string]: TContext[TKey] extends readonly unknown[] ? TKey : never;
+}[keyof TContext & string];
+
+type AgentAppendMessages<TContext> = {
+  (): AppendMessagesTransition;
+  <TKey extends ArrayContextKey<TContext>>(options: { key: TKey }): AppendMessagesTransition;
+};
+
 type SetupAgentResult<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
   TEventSchemas extends AgentEventSchemaInputMap,
@@ -727,10 +621,7 @@ type SetupAgentResult<
   TMetaSchema extends StandardSchemaV1,
   TModels extends AgentModelMap,
   TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
-  TStateSchemas extends Record<string, AgentSetupStateSchema> = Record<
-    string,
-    AgentSetupStateSchema
-  >,
+  TStateSchemas extends Record<string, SetupStateSchema> = Record<string, SetupStateSchema>,
 > = Omit<
   SetupAgentXStateResult<
     TContextSchema,
@@ -777,21 +668,8 @@ type SetupAgentResult<
   readonly models: TModels;
   /** The {@link TextLogic} actors built from `setupAgent({ requests })`, keyed the same way. */
   readonly requests: RequestActors<TRequestSchemas>;
-  /** {@link appendMessages}, typed against this agent's context/event schemas. */
-  appendMessages(
-    resolve:
-      | AgentMessage
-      | AgentMessage[]
-      | ((args: {
-          context: ContextOf<TContextSchema> & { messages: AgentMessage[] };
-          event: any;
-        }) => AgentMessage | AgentMessage[]),
-  ): ReturnType<
-    typeof appendMessages<
-      ContextOf<TContextSchema> & { messages: AgentMessage[] },
-      EventsOf<WithAgentUsageEvent<TEventSchemas>>
-    >
-  >;
+  /** {@link appendMessages}, for an explicit top-level `agent.messages` transition. */
+  appendMessages: AgentAppendMessages<InferOutput<TContextSchema>>;
 };
 
 /**
@@ -849,10 +727,7 @@ export function setupAgent<
   TMetaSchema extends StandardSchemaV1 = StandardSchemaV1<MetaObject>,
   TModels extends AgentModelMap = {},
   TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
-  const TStateSchemas extends Record<string, AgentSetupStateSchema> = Record<
-    string,
-    AgentSetupStateSchema
-  >,
+  const TStateSchemas extends Record<string, SetupStateSchema> = Record<string, SetupStateSchema>,
 >(
   config: SetupAgentBaseConfig<
     TContextSchema,
@@ -908,7 +783,7 @@ export function setupAgent<
     TMetaSchema,
     TModels,
     TEmittedSchemas,
-    ResolveAgentStateSchemas<TContextSchema, TStateSchemas>
+    TStateSchemas
   > = {
     schemas: {
       context: schemas.context,
@@ -932,18 +807,9 @@ export function setupAgent<
       TMetaSchema,
       TModels,
       TEmittedSchemas,
-      ResolveAgentStateSchemas<TContextSchema, TStateSchemas>
+      TStateSchemas
     >["schemas"],
-    // Resolve the AgentStateNarrowing sugar into xstate's full per-state
-    // schema form (the cast mirrors the type-level ResolveAgentStateSchemas).
-    ...(config.states
-      ? {
-          states: resolveAgentStateSchemas(
-            schemas.context,
-            config.states,
-          ) as ResolveAgentStateSchemas<TContextSchema, TStateSchemas>,
-        }
-      : {}),
+    ...(config.states ? { states: config.states } : {}),
     // `createAgentActors` builds with a widened `string` event union; the setup
     // config narrows it to the declared (non-reserved) event types.
     actors: actors as never,
@@ -1159,14 +1025,14 @@ function normalizeAgentSchemas<
 }
 
 /**
- * Runtime guard: every key of the `setupAgent({ states })` narrowing map must
+ * Runtime guard: every key of the `setupAgent({ states })` schema map must
  * name a real state node in the machine config. A typo'd key is otherwise a
  * silent no-op — the narrowing simply never applies — so fail fast at
  * `createMachine` time. Walks nested `states` maps in parallel with the
  * machine config, since narrowing entries nest the same way.
  */
 function assertStateSchemaKeysExist(
-  stateSchemas: Record<string, AgentSetupStateSchema> | undefined,
+  stateSchemas: Record<string, SetupStateSchema> | undefined,
   machineStates: Record<string, any> | undefined,
   path: readonly string[] = [],
 ): void {
@@ -1181,7 +1047,7 @@ function assertStateSchemaKeysExist(
       const parent = path.length > 0 ? ` of state '${path.join(".")}'` : "";
       throw new Error(
         `setupAgent: 'states' key '${[...path, key].join(".")}' does not name a state in the ` +
-          `machine config, so its context narrowing would silently never apply. Valid child ` +
+          `machine config, so its state schema would silently never apply. Valid child ` +
           `states${parent}: ${validKeys.join(", ") || "(none)"}. Fix the key to match a state ` +
           `in createMachine({ states }), or remove it from setupAgent({ states }).`,
       );
@@ -1194,7 +1060,7 @@ function assertStateSchemaKeysExist(
       stateSchema.states
     ) {
       assertStateSchemaKeysExist(
-        stateSchema.states as Record<string, AgentSetupStateSchema>,
+        stateSchema.states as Record<string, SetupStateSchema>,
         machineState.states as Record<string, any> | undefined,
         [...path, key],
       );

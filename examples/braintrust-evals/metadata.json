@@ -5,12 +5,12 @@
   "manual": true,
   "origin": {
     "type": "eval-harness",
-    "source": "Real braintrust npm SDK (not a shim): Eval() over the unmodified email-drafter machine, scoring result.output, the state path, the durable result.events trajectory, and result.usage; runs keyless with noSendLogs and scripted executors",
+    "source": "Real Braintrust SDK over the unmodified email-drafter machine, scoring output, XState transitions, and usage with scripted executors",
     "url": "https://www.braintrust.dev/docs/guides/evals"
   },
   "comparison": {
     "targets": ["Braintrust", "LangSmith datasets", "agent eval harnesses"],
-    "purpose": "Evals over a machine need no eval-specific instrumentation: runAgent already returns the output, the replayable event log, and token usage. A simulated user answers whatever interaction the machine is waiting on, so the same dataset scores a scripted keyless run and a real-model run.",
+    "purpose": "Evals observe typed output, transition trajectories, named request calls, and usage while a simulated user drives ordinary idle states.",
     "requires": "A Braintrust account (BRAINTRUST_API_KEY) only to upload the experiment; the eval itself runs locally without one."
   },
   "starters": []

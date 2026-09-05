@@ -1,20 +1,15 @@
 {
   "name": "tool-calling",
-  "title": "Tool Calling",
-  "kind": "pattern",
+  "title": "Framework-native tool calling and messages",
+  "kind": "agent-workflow",
   "origin": {
     "type": "stately-agent",
-    "source": "Consolidated from the Burr tool-calling and LangGraph tool-calling-progress demos",
+    "source": "AI SDK-owned multi-step tool loop",
     "url": null
   },
   "comparison": {
-    "targets": ["Burr", "LangGraph"],
-    "purpose": "The SDK runs the tool loop inside one state (calculator, unit converter, sample-data lookup all genuinely execute), then the machine validates the typed answer: an answer no tool backs is rejected, the model retries with the reason, and a spent budget ends in a denial."
+    "targets": ["Vercel AI SDK tools", "framework-native chat history"],
+    "purpose": "Keeps the multi-step tool loop in the AI SDK while explicitly appending its native response messages through an agent.messages transition; use review-tool-calls when the machine must gate each call."
   },
-  "starters": [
-    "Convert 100 kilometers to miles.",
-    "What is 15% of 240?",
-    "What is the USD to JPY rate?",
-    "How many furlongs is 10 km?"
-  ]
+  "starters": ["What is 6 times 7?"]
 }

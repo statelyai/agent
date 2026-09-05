@@ -97,7 +97,6 @@ declare const output: any;
 
 declare let result: any;
 
-declare const generateResult: any;
 
 declare const rawOutput: any;
 
@@ -261,8 +260,6 @@ declare const Session: any;
 
 declare const Ai: any;
 
-declare const Command: any;
-
 // --- placeholder functions -------------------------------------------------
 
 declare function fetchWeather(city: string): Promise<any>;
@@ -282,8 +279,6 @@ declare function resolveModel(key: string): LanguageModel;
 declare function createMyStore(): any;
 
 declare function appendToStore(entry: any): Promise<void>;
-
-declare function createReplayEntry(entry: any): any;
 
 declare function createSubAgentExecute(config: any): any;
 
@@ -310,7 +305,3 @@ declare function completeAssessment(...args: any[]): any;
 declare function ajvCompileSchema(schema: any): any;
 
 declare function myCustomStreamText(options: any): any;
-
-type JsonValue = string | number | boolean | null | JsonValue[] | { [k: string]: JsonValue };
-
-type State = any;

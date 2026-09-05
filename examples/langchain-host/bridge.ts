@@ -17,7 +17,7 @@
  * lives in the tools. Same bridge as ../mastra-host/index.ts.
  *
  * Snapshots live in an in-memory `Map` keyed by handle (same shape as
- * ../express-host); swap it for Redis/Postgres and the tools are unchanged.
+ * ../next-host); swap it for Redis/Postgres and the tools are unchanged.
  */
 import { z } from "zod";
 import type { EventFromLogic, Snapshot } from "xstate";
@@ -146,7 +146,7 @@ function toToolResult(result: RunAgentResult<typeof emailDrafter>, handle: strin
 
   const meta = getStateMeta<typeof result.snapshot, z.infer<typeof metaSchema>>(result.snapshot);
   const interaction = meta.interaction ?? null;
-  runs.set(handle, { snapshot: result.persistedSnapshot, interaction });
+  runs.set(handle, { snapshot: result.persist(), interaction });
 
   return {
     status: "pending",

@@ -300,12 +300,11 @@ For what the machine gives you over the loop, see the [overview](index.md).
 
 ## Machines you cannot rewrite
 
-The design work above assumes you are writing the machine. Two cases do not require that.
+The design work above assumes you are writing the machine. Existing machines can still be hosted without Agent-specific authoring.
 
 - The machine already exists and contains nothing agent-specific. Any machine whose invokes resolve to values and whose events you can enumerate can be driven. Use [`getAcceptedEvents(snapshot)`](human-in-the-loop.md) for the candidates and call [`resolveDecision`](steps.md#standalone-decision-resolution) gated by `snapshot.can(event)`. See [plain-xstate](../examples/plain-xstate/index.ts).
-- The machine has no invokes, and prompts live in state `description` fields, in `meta`, or in an external lookup. It runs unmodified through the `getRequests` option of `runAgent`. See [Retrofit with `getRequests`](from-a-loop.md#retrofit-with-getrequests) and the runnable [described-workflow](../examples/described-workflow/index.ts) example.
 
-Prompts do not have to live in the machine. Remove them, leave bare `src` strings, and bind a separate prompt map through the `actors` option of `runAgent`, which is shorthand for `machine.provide({ actors })`. The graph is the same in both cases, which is what lets a machine round-trip through JSON with `setupAgent.fromConfig`. See [Machines as data](machines-as-data.md).
+Prompts do not have to live in the machine. Leave bare `src` strings and bind a separate prompt map through the `actors` option of `runAgent`, which is shorthand for `machine.provide({ actors })`. The explicit invokes remain part of the graph, which is what lets a machine round-trip through JSON with `setupAgent.fromConfig`. See [Machines as data](machines-as-data.md).
 
 ## Related
 

@@ -13,6 +13,29 @@ import type {
   UserMessage,
 } from "./types.js";
 
+/** Returns the human-readable text carried by a message, ignoring non-text parts. */
+export function getMessageText(message: AgentMessage): string {
+  if (typeof message.content === "string") {
+    return message.content;
+  }
+  const text: string[] = [];
+  for (const part of message.content) {
+    if (part.type === "text") {
+      text.push(part.text);
+      continue;
+    }
+    if (part.type !== "tool-result") {
+      continue;
+    }
+    if (part.output.type === "text" || part.output.type === "error-text") {
+      text.push(part.output.value);
+    } else if (part.output.type === "content") {
+      text.push(...part.output.value.flatMap((item) => (item.type === "text" ? [item.text] : [])));
+    }
+  }
+  return text.join("\n");
+}
+
 /**
  * Walks a context value and returns the dot-paths of the first few values that
  * would NOT survive a JSON persist/resume round-trip (persist with XState's
@@ -102,8 +125,7 @@ export function getMachineStructuralHash(machine: AnyStateMachine): string {
  * The version a machine is stamped with everywhere: an explicitly declared
  * `createMachine({ version })` when present, else its
  * {@link getMachineStructuralHash}. Single source of truth so `runAgent`,
- * `provideExecutors`/`traceTransitions` trace envelopes, and the event-log
- * helpers (`initEntry`, `createReplayEntry`, `replay`) never disagree.
+ * `provideExecutors`/`traceTransitions` trace envelopes agree.
  * @internal
  */
 export function resolveMachineVersion(machine: AnyStateMachine): string {
@@ -243,24 +265,6 @@ export function getStateMeta<
     .sort(([a], [b]) => depth(a) - depth(b) || (a < b ? -1 : a > b ? 1 : 0));
 
   return Object.assign({}, ...entries.map(([, meta]) => meta));
-}
-
-/**
- * Reads the run-owned message log off a snapshot settled by a `runAgent` call
- * that used `getRequests` (or `options.messages`) — the typed replacement for
- * the `(snapshot as { messages?: AgentMessage[] }).messages` cast. runAgent
- * stamps the log as a plain enumerable `messages` property (like `agentMeta`),
- * so it survives a JSON persist/resume round-trip; this accessor works on the
- * live settled snapshot and on a JSON-parsed persisted one alike. Returns `[]`
- * when no log was stamped (e.g. a default invoke-driven run).
- *
- * The write path is `runAgent(..., { messages })`: an explicit seed that
- * overrides the resume snapshot's stamped log (fold in a user reply on
- * resume, or start a run with prior history).
- */
-export function getAgentMessages(snapshot: unknown): AgentMessage[] {
-  const stamped = (snapshot as { messages?: unknown } | null | undefined)?.messages;
-  return Array.isArray(stamped) ? (stamped as AgentMessage[]) : [];
 }
 
 /**

@@ -154,10 +154,6 @@ const agentSetup = setupAgent({
     APPROVE: z.object({}),
     DENY: z.object({ reason: z.string() }),
   },
-  // The machine's own wait signal: the `confirming` tag. `runAgent` settles idle
-  // deterministically whenever a resting snapshot carries it — no timing
-  // heuristic, no host-side `snapshot.next` check.
-  isIdle: (snapshot) => snapshot.hasTag("awaiting-approval"),
   actors: {
     // Applies the approved sensitive action. Reads the real booking table and
     // returns a confirmation message. (A production host would persist the
@@ -228,8 +224,12 @@ const agentSetup = setupAgent({
   // `confirming` and `executing` are reached only after classify set a sensitive
   // `pendingAction` — narrow it non-null there so the invoke input type-checks.
   states: {
-    confirming: { context: { pendingAction: pendingActionSchema } },
-    executing: { context: { pendingAction: pendingActionSchema } },
+    confirming: {
+      schemas: { context: contextSchema.extend({ pendingAction: pendingActionSchema }) },
+    },
+    executing: {
+      schemas: { context: contextSchema.extend({ pendingAction: pendingActionSchema }) },
+    },
   },
 });
 
@@ -426,7 +426,7 @@ export async function runCustomerSupportExample(
     ? ({ type: "APPROVE" } as const)
     : ({ type: "DENY", reason: denyReason } as const);
   const second = await runAgent(customerSupportMachine, {
-    snapshot: first.persistedSnapshot,
+    snapshot: first.persist(),
     event,
     ...executors,
     onTransition: track,
@@ -489,7 +489,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
       console.log(interaction?.label ?? "");
       console.log("Legal events:", legalEvents.join(", "));
 
-      const persisted = result.persistedSnapshot;
+      const persisted = result.persist();
       const answer = (await promptLine("approve / deny? ")).toLowerCase();
       const event = answer.startsWith("a")
         ? ({ type: "APPROVE" } as const)

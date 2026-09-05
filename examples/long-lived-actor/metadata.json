@@ -1,0 +1,15 @@
+{
+  "name": "long-lived-actor",
+  "title": "Application-owned long-lived actor",
+  "kind": "host-adapter",
+  "origin": {
+    "type": "stately-agent",
+    "source": "Native XState createActor integration",
+    "url": null
+  },
+  "comparison": {
+    "targets": ["XState createActor", "application runtimes"],
+    "purpose": "Uses provideExecutors once, then leaves actor lifetime, subscriptions, and events entirely to XState and the application."
+  },
+  "starters": ["application-owned actors"]
+}

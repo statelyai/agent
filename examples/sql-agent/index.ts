@@ -101,9 +101,6 @@ const agentSetup = setupAgent({
     APPROVE: z.object({}),
     REJECT: z.object({}),
   },
-  // The machine's own wait signal: the `awaiting-approval` tag. `runAgent`
-  // settles idle deterministically whenever a resting snapshot carries it.
-  isIdle: (snapshot) => snapshot.hasTag("awaiting-approval"),
   actors: {
     runQuery: createAsyncLogic<number, { plan: QueryPlan }>({
       run: async ({ input }) => executeQuery(input.plan),
@@ -111,9 +108,13 @@ const agentSetup = setupAgent({
   },
   // planning sets plan before any state that reads it — narrow it non-null there.
   states: {
-    awaitingApproval: { context: { plan: queryPlanSchema } },
-    executing: { context: { plan: queryPlanSchema } },
-    summarizing: { context: { plan: queryPlanSchema, result: z.number() } },
+    awaitingApproval: {
+      schemas: { context: contextSchema.extend({ plan: queryPlanSchema }) },
+    },
+    executing: { schemas: { context: contextSchema.extend({ plan: queryPlanSchema }) } },
+    summarizing: {
+      schemas: { context: contextSchema.extend({ plan: queryPlanSchema, result: z.number() }) },
+    },
   },
   requests: {
     planQuery: {
@@ -263,7 +264,7 @@ export async function runSqlAgentExample(
   const interaction = readInteraction(first.snapshot);
 
   const second = await runAgent(sqlAgentMachine, {
-    snapshot: first.persistedSnapshot,
+    snapshot: first.persist(),
     event: { type: approval },
     onTransition: observe,
     ...resolved,

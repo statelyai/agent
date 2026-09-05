@@ -6,10 +6,6 @@ export {
   evaluatePrompt,
 } from "./email-drafter/index.js";
 export {
-  inspectedEmailDrafter,
-  main as runEmailDrafterInspectorExample,
-} from "./email-drafter-inspector/index.js";
-export {
   chooseMoveInput,
   gameActors,
   gameMachine,
@@ -22,14 +18,9 @@ export {
   renderHistory as renderRpsHistory,
 } from "./game-agent/index.js";
 export { jokeActors, jokeMachine, jokeSchemas, rateJoke, tellJoke } from "./joke/index.js";
-export {
-  describedWorkflowMachine,
-  runDescribedWorkflowExample,
-} from "./described-workflow/index.js";
 export { plainWriterMachine, runPlainXstateExample } from "./plain-xstate/index.js";
 export { triageMachine, triageSchemas, triageSchema } from "./triage/index.js";
 export { twentyQuestionsMachine, twentyQuestionsSchemas } from "./twenty-questions/index.js";
-export { goFishMachine, goFishSchemas, ranks as goFishRanks } from "./go-fish/index.js";
 export {
   justOneMachine,
   justOneSchemas,
@@ -37,9 +28,7 @@ export {
   main as runJustOneExample,
 } from "./just-one/index.js";
 export { humanInTheLoopMachine, runHumanInTheLoopExample } from "./human-in-the-loop/index.js";
-export { ragMachine, runRAGExample } from "./rag/index.js";
 export { correctiveRagMachine, runCorrectiveRagExample } from "./corrective-rag/index.js";
-export { adaptiveRagMachine, runAdaptiveRagExample } from "./adaptive-rag/index.js";
 export { deepResearchMachine, runDeepResearchExample } from "./deep-research/index.js";
 export { reflectionWriterMachine, runReflectionWriterExample } from "./reflection-writer/index.js";
 export {
@@ -49,9 +38,6 @@ export {
 } from "./code-assistant/index.js";
 export { customerSupportMachine, runCustomerSupportExample } from "./customer-support/index.js";
 export { reviewToolCallsMachine, runReviewToolCallsExample } from "./review-tool-calls/index.js";
-export { toolCallingMachine, runToolCallingExample } from "./tool-calling/index.js";
-export { reactAgentMachine, runReactAgentExample } from "./react-agent/index.js";
-export { supervisorMachine, runSupervisorExample } from "./supervisor/index.js";
 export {
   hierarchicalTeamsMachine,
   researchTeamMachine,
@@ -60,11 +46,6 @@ export {
 } from "./hierarchical-teams/index.js";
 export { swarmHandoffMachine, runSwarmHandoffExample } from "./swarm-handoff/index.js";
 export { planAndExecuteMachine, runPlanAndExecuteExample } from "./plan-and-execute/index.js";
-export {
-  childMachine as subflowsChildMachine,
-  subflowsMachine,
-  runSubflowsExample,
-} from "./subflows/index.js";
 export { sqlAgentMachine, runSqlAgentExample } from "./sql-agent/index.js";
 export { parallelStreamsMachine, runParallelStreamsExample } from "./parallel-streams/index.js";
 export {
@@ -74,18 +55,10 @@ export {
   resumeTool,
 } from "./machine-as-tool/index.js";
 export {
-  draftMachine as fileSnapshotDraftMachine,
-  createFileSnapshotStore,
-  runFileSnapshotStoreExample,
-} from "./file-snapshot-store/index.js";
-export { createSseMachine, createSseServer, runMachineStream } from "./sse-transport/index.js";
-export { timeTravelMachine, runTimeTravelExample, CheckpointHistory } from "./time-travel/index.js";
-export {
   crashRecoveryMachine,
   runUntilCrash,
   recover as recoverFromCrash,
 } from "./crash-recovery/index.js";
-export { sessionQuizMachine, runSession as runSessionActorExample } from "./session-actor/index.js";
 export {
   aiSdkUiStreamMachine,
   agentRunToUIMessageStream,
@@ -93,35 +66,14 @@ export {
   runAiSdkUiStreamExample,
 } from "./ai-sdk-ui-stream/index.js";
 export {
-  createAiSdkSubAgents,
-  runAiSdkSubAgentsDemo,
-  runAiSdkSubAgentsDeterministicExample,
-} from "./ai-sdk-sub-agents/index.js";
-export {
-  aiSdkMarketingChainMachine,
-  runAiSdkMarketingChainExample,
-} from "./ai-sdk-marketing-chain/index.js";
-export { aiSdkRoutingMachine, runAiSdkRoutingExample } from "./ai-sdk-routing/index.js";
-export {
-  aiSdkParallelReviewMachine,
-  runAiSdkParallelReviewExample,
-} from "./ai-sdk-parallel-review/index.js";
-export {
-  aiSdkOrchestratorWorkerMachine,
-  runAiSdkOrchestratorWorkerExample,
-} from "./ai-sdk-orchestrator-worker/index.js";
-export {
   aiSdkEvaluatorOptimizerMachine,
   runAiSdkEvaluatorOptimizerExample,
 } from "./ai-sdk-evaluator-optimizer/index.js";
-export { debateMachine, runDebateSubAgentsExample } from "./debate-sub-agents/index.js";
 export {
   jsonAgentMachine,
   runJsonAgentDemo,
   workflowConfig as jsonAgentWorkflowConfig,
 } from "./json-agent/index.js";
-export { codeReviewMachine, scriptedReviewer } from "./preset-machine/index.js";
-export { createFanOutMachine, runFanOutExample } from "./fan-out/index.js";
 export {
   describeMachine,
   riverCrossingMachine,
@@ -134,12 +86,6 @@ export {
   contextCompactionSchemas,
   main as runContextCompactionExample,
 } from "./context-compaction/index.js";
-export { latsMachine, runLatsExample } from "./lats/index.js";
-export { runTradingTeamExample, tradingTeamMachine } from "./trading-team/index.js";
-export {
-  runSimulatedUserEvaluationExample,
-  simulatedUserEvaluationMachine,
-} from "./simulated-user-evaluation/index.js";
 export {
   guardrailsMachine,
   guardrailsSchemas,
@@ -163,14 +109,16 @@ export {
   runSnapshotMigrationExample,
 } from "./snapshot-migration/index.js";
 export {
-  BAD_DRAFT,
-  GOOD_DRAFT,
-  runCandidate as runSeamScoringCandidate,
-  main as runSeamScoringExample,
-} from "./seam-scoring/index.js";
-export {
   chameleonMachine,
   chameleonSchemas,
   PLAYERS as CHAMELEON_PLAYERS,
   main as runChameleonExample,
 } from "./chameleon/index.js";
+export { portableLoopMachine, runPortableXstateLoop } from "./portable-xstate-loop/index.js";
+export { runLongLivedActor } from "./long-lived-actor/index.js";
+export {
+  loadSnapshot,
+  runFileSnapshotStoreExample,
+  saveSnapshot,
+} from "./file-snapshot-store/index.js";
+export { toolCallingMachine, runToolCallingExample } from "./tool-calling/index.js";

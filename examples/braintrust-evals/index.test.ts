@@ -33,16 +33,15 @@ describe("braintrust-evals", () => {
     },
   );
 
-  test("the run's event log is the durable trajectory: JSON-safe, ordered, one entry per external input", async () => {
+  test("the XState transition events form an ordered trajectory", async () => {
     const row = dataset[0]!;
     const output = await runDrafterCase(row.input, scriptedExecutorsFor(row.input));
 
-    // The log opens with `@agent.init` and carries the human's events verbatim.
-    expect(output.eventTrajectory[0]).toBe("@agent.init");
+    expect(output.eventTrajectory[0]).toBe("@xstate.init");
     expect(output.eventTrajectory).toContain("PROMPT_SUBMITTED");
     expect(output.eventTrajectory).toContain("MORE_INFO");
     expect(output.eventTrajectory).toContain("END");
-    // Effect completions are journaled too — that is what makes it replayable.
+    // Invoked actor completions are visible as ordinary XState events.
     expect(output.eventTrajectory.filter((type) => type.startsWith("xstate.done"))).toHaveLength(4);
   });
 

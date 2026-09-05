@@ -16,10 +16,10 @@ const result = await generateText({ model, prompt, tools });
 you end with this:
 
 ```ts
-const result = await generateResult(machine, { input, executors });
+const result = await runAgent(machine, { input, executors });
 ```
 
-The `generateText` call still exists. It moves into the executors, and the loop you wrote around it becomes the machine. Like `generateText`, the result carries metadata alongside the value: `result.output`, `result.snapshot`, the replayable `result.events`, and the aggregated `result.usage`. `generateResult` throws `AgentIdleError` when the run settles idle instead of done, so use `runAgent` when a pause is an expected outcome.
+The `generateText` call still exists. It moves into the executors, and the loop around it becomes the machine. The result carries `result.output`, the live `result.snapshot`, native `result.persist()`, and aggregated `result.usage`.
 
 For the design work behind this refactor, read [Thinking in state machines](thinking-in-state-machines.md). It covers how to find the states in a loop before you write any of them down.
 
@@ -182,9 +182,9 @@ const result = await runAgent(machine, {
 });
 
 if (result.status === "idle") {
-  // result.snapshot is plain JSON. Persist it, then resume in any process.
+  // result.snapshot is live; persist() returns XState's storage form.
   const resumed = await runAgent(machine, {
-    snapshot: result.snapshot,
+    snapshot: result.persist(),
     event: { type: "APPROVE" },
     executors,
   });
@@ -192,12 +192,12 @@ if (result.status === "idle") {
 }
 ```
 
-The idle snapshot is plain JSON, so a `stringify`, store, and `parse` round-trip resumes the same run.
+The persisted XState snapshot is plain JSON, so a `stringify`, store, and `parse` round-trip resumes the same run.
 
 <!-- viz: resume flow: runAgent settles idle -> persisted snapshot -> JSON in a store -> new process parses -> runAgent(snapshot, event) -> done -->
 
 ```ts
-const wire = JSON.stringify(result.persistedSnapshot ?? result.snapshot); // stored by your DB or queue
+const wire = JSON.stringify(result.persist()); // stored by your DB or queue
 const restored = JSON.parse(wire); // read in a fresh process, with no live objects
 
 const resumed = await runAgent(machine, {
@@ -267,45 +267,27 @@ Script one entry per decision attempt, including attempts a guard rejects. A rej
 
 `explorePaths` enumerates every branch, and `canReach` returns `{ reachable, witness }` for one target state. See [Testing and verification](verify.md).
 
-## Retrofit with `getRequests`
+## Make model work explicit
 
-The steps above assume you write the model calls into the machine as invokes. If you already have a plain XState machine, use `getRequests` instead. It is a `RunAgentOptions` hook. Whenever the machine would settle idle, `getRequests` reads the snapshot and returns the model requests to run. If it returns nothing, the run settles idle, which is how human-wait states stay human-wait states.
-
-The machine does not change. You choose where the prompts live: state `description` fields, `meta`, tags, or a lookup table keyed by state value. The library does not require any of these.
-
-The following example reads prompts from state descriptions.
+If an existing machine does not invoke its model work, add an ordinary XState invoke. The state graph should remain the single artifact that says what runs and when; `runAgent` does not interpret descriptions or metadata as hidden requests.
 
 ```ts no-check
-import { getSnapshotRequests, runAgent } from "@statelyai/agent";
+const machine = existingMachine.provide({ actors: { writeDraft } });
 
-const result = await runAgent(existingMachine, {
-  executors,
-  getRequests: (snapshot) => getSnapshotRequests(snapshot, { model: "writer" }),
-});
+// In the machine config:
+drafting: {
+  invoke: {
+    src: "writeDraft",
+    input: ({ context }) => ({ topic: context.topic }),
+    onDone: ({ output }) => ({
+      target: "reviewing",
+      context: { draft: output },
+    }),
+  },
+}
 ```
 
-`getSnapshotRequests(snapshot, { model, filter?, map? })` is the prompts-in-descriptions recipe as a function. By default every active node with a `description` that is not tagged `waiting` produces one request. The request's `prompt` is the node's `description`, its `kind` is `decision` when the node is tagged `decision`, its `system` comes from `meta.role`, and its `allowedEvents` are the node's own events. A node with exactly one own event gets an explicit `onDone`, so a single-outcome state advances without a model decision. Pass `filter` to choose which nodes produce requests, and `map` to reshape or drop each request.
-
-To build requests some other way, read the active state nodes with `getSnapshotNodes(snapshot)`. It returns `{ id, key, description?, tags, meta?, ownEvents, leaf }` per node.
-
-```ts no-check
-import { getSnapshotNodes } from "@statelyai/agent";
-
-getRequests: (snapshot) =>
-  getSnapshotNodes(snapshot)
-    .filter((node) => node.leaf && node.meta)
-    .map((node) => buildRequest(node));
-```
-
-This hook behaves as follows:
-
-- Each request runs according to its `kind` and appends to the run's message log. The log is `RunAgentOptions.messages`, and you read it back with `getAgentMessages(snapshot)`.
-- Each request advances the machine according to `onDone`. `onDone` is either an explicit event, or a `decide` call when you omit it. Both are gated by `snapshot.can`.
-- Multiple returned requests run concurrently. For parallel regions, scope each request with `allowedEvents`. The node's `ownEvents` is a reasonable default.
-- A pass that sends no event settles idle.
-- Every model call counts against `maxModelCalls`.
-
-For a runnable version, see [described-workflow](../examples/described-workflow/index.ts). It is a plain `createMachine` with no invokes and no `setupAgent`, driven by `getRequests`.
+The actor can be a normal promise actor or Agent request logic. Prompts may still come from state metadata or an external map, but the invoke remains explicit. This keeps execution visible to XState tooling, persistence, inspection, and tests.
 
 ## Related
 
@@ -316,6 +298,5 @@ For a worked version of this conversion, see [retrofit](../examples/retrofit/ind
 The same conversion works from shapes other than a `while` loop:
 
 - [plain-xstate](../examples/plain-xstate/index.ts): a standard XState machine driven with no agent-specific setup.
-- [described-workflow](../examples/described-workflow/index.ts): prompts written as state `description` fields and run through the `getRequests` option of `runAgent`.
 - [todo-nl](../examples/todo-nl/index.ts): natural-language commands mapped onto machine events.
 - [Thinking in state machines](thinking-in-state-machines.md): the design tutorial behind this refactor, worked through on one triage agent.

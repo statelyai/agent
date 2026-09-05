@@ -14,10 +14,9 @@
  *   - Human input as a gated machine event. `awaitingCommand` has no invoke, so
  *     the run settles `idle` there. `meta.interaction` declares the label and
  *     `textEvent: "COMMAND"`, so a host routes free chat text into the machine
- *     and resumes with `runAgent(machine, { snapshot: persistedSnapshot,
- *     event })`. Nothing needs to answer a prompt callback. The state is
- *     tagged `waiting` and `setupAgent({ isIdle })` reads that tag, so
- *     idle detection is deterministic rather than heuristic.
+ *     and resumes with `runAgent(machine, { snapshot: result.persist(),
+ *     event })`. Nothing needs to answer a prompt callback. The default
+ *     structural idle rule recognizes the state's external event handler.
  *   - Context-interpolated prompts: the label is
  *     "What should I do with your list? ({todosSummary})", and `{todosSummary}`
  *     resolves against the snapshot context, so the idle prompt lists the
@@ -151,9 +150,6 @@ export function summarizeTodos(todos: Todo[]): string {
 const agentSetup = setupAgent({
   schemas: todoSchemas,
   models,
-  // Deterministic idle detection: the only state that waits on a human is
-  // tagged `waiting`, so hosts never rely on the timing heuristic.
-  isIdle: (snapshot) => snapshot.hasTag("waiting"),
 });
 
 export const todoMachine = agentSetup.createMachine({
@@ -361,11 +357,11 @@ export async function runTodoNlExample(options?: {
   });
 
   // Each command settles the run idle in `awaitingCommand`. Resume from
-  // `persistedSnapshot` with the COMMAND event named by `meta.interaction`.
+  // persisted snapshot from `result.persist()` with the COMMAND interaction.
   while (result.status === "idle") {
     const text = queued.shift() ?? (await promptLine(`${idlePrompt(result.snapshot)}\n> `));
     result = await runAgent(todoMachine, {
-      snapshot: result.persistedSnapshot,
+      snapshot: result.persist(),
       event: { type: "COMMAND", text },
       ...shared,
     });

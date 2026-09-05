@@ -4,7 +4,7 @@
  *
  * Every preset returns an ORDINARY, fully inspectable XState machine — same
  * states, same lint, same snapshots as a hand-written one. Executors are still
- * supplied separately by the host (`runAgent`/`generateResult`), and nothing
+ * supplied separately by the host (`runAgent`/`provideExecutors`), and nothing
  * here names an SDK.
  *
  * See docs/machines-presets.md.

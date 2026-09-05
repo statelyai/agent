@@ -11,6 +11,39 @@ import {
   createSupervisorMachine,
   createToolLoopMachine,
 } from "./index.js";
+import { objectSchema } from "./internal.js";
+
+describe("preset object schemas", () => {
+  test("required properties reject explicit undefined", async () => {
+    const schema = objectSchema<{ name: string }>({ name: { type: "string" } }, ["name"]);
+    const result = await schema["~standard"].validate({ name: undefined });
+    expect(result.issues).toEqual([
+      expect.objectContaining({ message: "Required property 'name' is missing", path: ["name"] }),
+    ]);
+  });
+
+  test("supports nullable type arrays, null, and integers", async () => {
+    const schema = objectSchema<{
+      label: string | null;
+      empty: null;
+      count: number;
+    }>(
+      {
+        label: { type: ["string", "null"] },
+        empty: { type: "null" },
+        count: { type: "integer" },
+      },
+      ["label", "empty", "count"],
+    );
+
+    expect(
+      await schema["~standard"].validate({ label: "ready", empty: null, count: 2 }),
+    ).toHaveProperty("value");
+    expect(
+      await schema["~standard"].validate({ label: null, empty: null, count: 2.5 }),
+    ).toHaveProperty("issues");
+  });
+});
 
 /** Records every text request and answers with `reply(request)`. */
 function mockGenerateText(reply: (request: AgentTextRequest) => unknown = () => "ok") {
@@ -91,8 +124,7 @@ describe("createToolLoopMachine", () => {
     });
 
     expect(new Set(events)).toEqual(new Set(["1"]));
-    expect(result.events.every((entry) => entry.machineVersion === "1")).toBe(true);
-    expect((result.snapshot as { agentMeta?: { version?: string } }).agentMeta?.version).toBe("1");
+    expect(result.persist()).toEqual(expect.objectContaining({ version: "1" }));
   });
 
   test("the machine's own version is the single source (no machineVersion option)", async () => {
@@ -434,7 +466,7 @@ describe("createHandoffMachine", () => {
     expect(first.snapshot.context.reply).toBe("travel says hi");
 
     const second = await runAgent(machine, {
-      snapshot: first.persistedSnapshot,
+      snapshot: first.persist(),
       event: { type: "transfer_to_food", message: "What should I eat?" },
       executors: { generateText },
     });
@@ -510,7 +542,7 @@ describe("preset machine types", () => {
     });
     await expect(
       runAgent(handoff, {
-        snapshot: first.snapshot,
+        snapshot: first.persist(),
         // @ts-expect-error 'transfer_to_nope' is not a declared agent transfer
         event: { type: "transfer_to_nope" },
         executors: { generateText },

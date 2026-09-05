@@ -5,7 +5,7 @@
  * contract directly against the raw `@anthropic-ai/sdk` package (Messages
  * API) with no Vercel AI SDK in between — proof that the contract is "three
  * plain functions," not an AI-SDK-specific shape. Compare with
- * `../ai-sdk-host/index.ts` (same contract, mapped through the AI SDK),
+ * `@statelyai/agent/ai-sdk` (same contract, mapped through the AI SDK),
  * `../openai-sdk-host/index.ts` (same contract, raw OpenAI SDK), and
  * `../../src/ai-sdk/index.ts` (the reference adapter this file mirrors).
  *
@@ -317,21 +317,24 @@ export function createAnthropicExecutors(
     return { output: await stream.finalText() };
   };
 
-  const decide: AgentDecisionExecutor = async (request) => {
+  const decide: AgentDecisionExecutor = async (request, info) => {
     const tools = toAnthropicEventTools(request.events);
 
-    const response = await client.messages.create({
-      model: resolveModel(request.model),
-      system: request.system,
-      messages: toDecisionMessages(request),
-      tools,
-      // No Anthropic tool_choice forces "one of exactly these N tools" other
-      // than sending only those N tools with `{ type: 'any' }` ("use any
-      // available tool") — since `tools` here is exactly the candidate-event
-      // set, `{ type: 'any' }` is equivalent to "pick one of the candidates".
-      tool_choice: { type: "any" },
-      ...toAnthropicCallSettings(request),
-    });
+    const response = await client.messages.create(
+      {
+        model: resolveModel(request.model),
+        system: request.system,
+        messages: toDecisionMessages(request),
+        tools,
+        // No Anthropic tool_choice forces "one of exactly these N tools" other
+        // than sending only those N tools with `{ type: 'any' }` ("use any
+        // available tool") — since `tools` here is exactly the candidate-event
+        // set, `{ type: 'any' }` is equivalent to "pick one of the candidates".
+        tool_choice: { type: "any" },
+        ...toAnthropicCallSettings(request),
+      },
+      { signal: info?.signal },
+    );
 
     const toolUse = response.content.find(
       (block): block is Extract<typeof block, { type: "tool_use" }> => block.type === "tool_use",

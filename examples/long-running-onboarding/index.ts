@@ -117,11 +117,6 @@ const coordinatorSetup = setupAgent({
     DOCS_SIGNED: z.object({ signedAt: z.string() }),
     HARDWARE_DELIVERED: z.object({ deliveredAt: z.string() }),
   },
-  // Meta-based wait signal: this machine already annotates every human-wait
-  // state with `meta.interaction` (what the host should show), so it reuses that
-  // as its suspension signal instead of a separate tag. runAgent settles idle
-  // deterministically at any resting state carrying an interaction.
-  isIdle: (snapshot) => getStateMeta(snapshot).interaction !== undefined,
   actors: {
     sendWelcomePacket: createAsyncLogic({
       schemas: {
@@ -170,23 +165,33 @@ const coordinatorSetup = setupAgent({
     // Narrowing threads through the chain: each state declares what is
     // guaranteed by the time it is entered, so every bare `target` into the
     // next narrowed state typechecks.
-    waitingForSignedDocs: { context: { welcomePacketId: z.string() } },
-    provisioningIt: { context: { welcomePacketId: z.string() } },
+    waitingForSignedDocs: {
+      schemas: { context: contextSchema.extend({ welcomePacketId: z.string() }) },
+    },
+    provisioningIt: {
+      schemas: { context: contextSchema.extend({ welcomePacketId: z.string() }) },
+    },
     waitingForHardware: {
-      context: { welcomePacketId: z.string(), accounts: accountsSchema },
+      schemas: {
+        context: contextSchema.extend({ welcomePacketId: z.string(), accounts: accountsSchema }),
+      },
     },
     preparingSchedule: {
-      context: {
-        welcomePacketId: z.string(),
-        accounts: accountsSchema,
-        hardwareDeliveredAt: z.string(),
+      schemas: {
+        context: contextSchema.extend({
+          welcomePacketId: z.string(),
+          accounts: accountsSchema,
+          hardwareDeliveredAt: z.string(),
+        }),
       },
     },
     onboarded: {
-      context: {
-        welcomePacketId: z.string(),
-        accounts: accountsSchema,
-        schedule: z.string(),
+      schemas: {
+        context: contextSchema.extend({
+          welcomePacketId: z.string(),
+          accounts: accountsSchema,
+          schedule: z.string(),
+        }),
       },
     },
   },
@@ -334,7 +339,7 @@ export async function runLongRunningOnboardingExample(
   idlePrompts.push(getStateMeta(first.snapshot).interaction?.label ?? "");
   idleEventTypes.push(getAcceptedEvents(first.snapshot).map((event) => event.type));
 
-  const persistedAfterWelcome = first.persistedSnapshot;
+  const persistedAfterWelcome = first.persist();
   const second = await runAgent(longRunningOnboardingMachine, {
     snapshot: persistedAfterWelcome,
     event: { type: "DOCS_SIGNED", signedAt: "2026-07-20" },
@@ -350,7 +355,7 @@ export async function runLongRunningOnboardingExample(
   idlePrompts.push(getStateMeta(second.snapshot).interaction?.label ?? "");
   idleEventTypes.push(getAcceptedEvents(second.snapshot).map((event) => event.type));
 
-  const persistedAfterProvisioning = second.persistedSnapshot;
+  const persistedAfterProvisioning = second.persist();
   const third = await runAgent(longRunningOnboardingMachine, {
     snapshot: persistedAfterProvisioning,
     event: { type: "HARDWARE_DELIVERED", deliveredAt: "2026-07-28" },
