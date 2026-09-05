@@ -1,5 +1,6 @@
 import type { AnyStateMachine, EventFromLogic } from "xstate";
 import { runAgent, type RunAgentOptions, type RunAgentResult } from "./run-agent.js";
+import type { AgentLogEntry } from "./event-log.js";
 import type { AgentUsage } from "./text-logic.js";
 
 export interface RunAgentLoopOptions<TMachine extends AnyStateMachine> extends Omit<
@@ -46,12 +47,17 @@ export async function runAgentLoop<TMachine extends AnyStateMachine>(
   let usage: AgentUsage = { modelCalls: 0 };
   let snapshot: ReturnType<RunAgentResult<TMachine>["persist"]> | undefined;
   let event: EventFromLogic<TMachine> | undefined;
+  // Threaded turn to turn so the whole loop yields ONE continuous log rather
+  // than a fresh segment per turn.
+  let events: readonly AgentLogEntry[] | undefined = options.events;
 
   for (let turn = 0; ; turn++) {
     const result = await runAgent(machine, {
       ...runOptions,
+      ...(events ? { events } : {}),
       ...(snapshot ? { snapshot, event } : {}),
     } as RunAgentOptions<TMachine>);
+    events = result.events;
     usage = addUsage(usage, result.usage);
     const cumulative = { ...result, usage } as RunAgentResult<TMachine>;
 

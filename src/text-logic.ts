@@ -735,6 +735,18 @@ export interface AgentRequestExecutorInfo {
    * call has no invoking actor.
    */
   requestId?: string;
+  /**
+   * A per-call idempotency key, `${executionId}:${requestId}#${n}` — the event
+   * log's lineage id plus the occurrence of this call at this invoke site.
+   * IDENTICAL across a crash re-execution: a run resumed from a log whose last
+   * call was still in flight re-issues that call under the same key, so an
+   * executor-level cache (or a provider's own idempotency header) can return
+   * the first attempt's result instead of paying for it twice. A decision's
+   * retries within one invoke share the key.
+   *
+   * Undefined off the `runAgent` path, and for a log with no `executionId`.
+   */
+  callKey?: string;
 }
 
 /**

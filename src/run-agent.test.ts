@@ -1,10 +1,24 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
-import { createActor, createAsyncLogic, setup, toPromise, type Snapshot } from "xstate";
+import {
+  createActor,
+  createAsyncLogic,
+  setup,
+  toPromise,
+  type AnyMachineSnapshot,
+  type Snapshot,
+} from "xstate";
 import { createDecisionLogic } from "./decision.js";
 import {
+  AGENT_INIT_EVENT_TYPE,
   AGENT_TRACE_SCHEMA_VERSION,
+  AGENT_USAGE_EVENT_TYPE,
   AgentError,
+  AgentMachineVersionMismatchError,
+  AgentSnapshotDivergedError,
+  getLogExecutionId,
+  getUsageFromEvents,
+  replay,
   createAgentSchemas,
   createTextLogic,
   AgentIllegalResumeEventError,
@@ -13,6 +27,7 @@ import {
   runAgent,
   setupAgent,
   type AgentDecisionRequest,
+  type AgentLogEntry,
   type AgentTextRequest,
   type AgentTools,
   type AgentTraceEvent,
@@ -3469,5 +3484,398 @@ describe("machine input validation", () => {
 
     if (result.status !== "done") throw new Error("expected done");
     expect(result.output).toEqual({ anything: 1 });
+  });
+});
+
+describe("runAgent event log", () => {
+  const answer = createTextLogic({ model: "test-model", prompt: () => "hello" });
+
+  /** asking --(model)--> waiting --APPROVE--> wrapping --(raised)--> done */
+  const makeLoggedMachine = (
+    overrides: { version?: string; migrate?: (snapshot: unknown) => unknown } = {},
+  ) =>
+    setup({ actors: { answer } }).createMachine({
+      id: "logged",
+      ...(overrides.version !== undefined ? { version: overrides.version } : {}),
+      ...(overrides.migrate ? { migrate: overrides.migrate } : {}),
+      context: () => ({ answer: null as string | null }),
+      initial: "asking",
+      states: {
+        asking: {
+          invoke: {
+            id: "ask",
+            src: "answer",
+            input: () => ({}),
+            onDone: ({ output }: { output: string }) => ({
+              target: "waiting",
+              context: { answer: output },
+            }),
+          } as never,
+        },
+        waiting: { on: { APPROVE: { target: "wrapping" } } },
+        wrapping: {
+          entry: (_args: never, enqueue: { raise: (event: { type: string }) => void }) =>
+            enqueue.raise({ type: "CONTINUE" }),
+          on: { CONTINUE: { target: "done" } },
+        },
+        done: { type: "final", output: () => ({ ok: true }) },
+      },
+    } as never);
+
+  const executors = () => ({
+    generateText: async () => ({ output: "42", usage: { totalTokens: 7 } }),
+  });
+
+  const types = (entries: readonly AgentLogEntry[]) => entries.map((entry) => entry.event.type);
+
+  test("a fresh run yields a self-contained log of external inputs only", async () => {
+    const machine = makeLoggedMachine();
+    const streamed: AgentLogEntry[] = [];
+
+    const first = await runAgent(machine, {
+      input: undefined,
+      executors: executors(),
+      onEvent: (entry) => streamed.push(entry),
+    });
+
+    expect(first.status).toBe("idle");
+    // The reserved init entry comes first and names the lineage.
+    expect(first.events[0]!.event.type).toBe(AGENT_INIT_EVENT_TYPE);
+    expect(typeof getLogExecutionId(first.events)).toBe("string");
+    // External inputs are journaled: the invoke's completion and the reserved
+    // usage record. Nothing else — no `@xstate.init`.
+    expect(types(first.events)).toEqual([
+      AGENT_INIT_EVENT_TYPE,
+      AGENT_USAGE_EVENT_TYPE,
+      "xstate.done.actor",
+    ]);
+    // `onEvent` streamed exactly the same entries, in order, init first.
+    expect(streamed).toEqual(first.events);
+    // Every entry carries a verification hash, and the whole log folds back to
+    // the state the run reached.
+    expect(first.events.every((entry) => typeof entry.verification?.stateHash === "string")).toBe(
+      true,
+    );
+    const folded = replay(machine, first.events);
+    expect((folded.snapshot as AnyMachineSnapshot).matches("waiting")).toBe(true);
+
+    // Resuming continues the SAME log: same lineage, contiguous indices.
+    const second = await runAgent(machine, {
+      events: first.events,
+      snapshot: first.persist(),
+      event: { type: "APPROVE" } as never,
+      executors: executors(),
+    });
+    expect(second.status).toBe("done");
+    expect(getLogExecutionId(second.events)).toBe(getLogExecutionId(first.events));
+    expect(second.events.map((entry) => entry.index)).toEqual(
+      second.events.map((_entry, index) => index),
+    );
+    // The host's APPROVE is journaled; the machine's own raised CONTINUE is not
+    // (replay re-derives it).
+    expect(types(second.events)).toContain("APPROVE");
+    expect(types(second.events)).not.toContain("CONTINUE");
+    expect(replay(machine, second.events).snapshot.status).toBe("done");
+  });
+
+  test("verification: false omits the recorded state hashes", async () => {
+    const machine = makeLoggedMachine();
+    const result = await runAgent(machine, {
+      input: undefined,
+      executors: executors(),
+      verification: false,
+    });
+    expect(result.events.length).toBeGreaterThan(1);
+    expect(result.events.every((entry) => entry.verification === undefined)).toBe(true);
+  });
+
+  test("events-only crash recovery: journaled calls are not re-run, and the in-flight call keeps its callKey", async () => {
+    const twoCallMachine = setup({ actors: { answer } }).createMachine({
+      id: "two-calls",
+      context: () => ({}),
+      initial: "a",
+      states: {
+        a: {
+          invoke: { id: "a", src: "answer", input: () => ({}), onDone: { target: "b" } } as never,
+        },
+        b: {
+          invoke: {
+            id: "b",
+            src: "answer",
+            input: () => ({}),
+            onDone: { target: "waiting" },
+          } as never,
+        },
+        waiting: { on: { GO: { target: "done" } } },
+        done: { type: "final" },
+      },
+    } as never);
+
+    const firstCalls: Array<{ requestId?: string; callKey?: string }> = [];
+    const crashed = await runAgent(twoCallMachine, {
+      input: undefined,
+      signal: AbortSignal.timeout(30),
+      executors: {
+        generateText: async (_request, info) => {
+          firstCalls.push({ requestId: info?.requestId, callKey: info?.callKey });
+          // The second call is the one that was still in flight at the crash.
+          return firstCalls.length === 1 ? { output: "one" } : await new Promise<never>(() => {});
+        },
+      },
+    });
+
+    expect(crashed.status).toBe("error");
+    expect(firstCalls.map((call) => call.requestId)).toEqual(["a", "b"]);
+    expect(types(crashed.events)).toContain("xstate.done.actor");
+
+    const secondCalls: Array<{ requestId?: string; callKey?: string }> = [];
+    const recovered = await runAgent(twoCallMachine, {
+      // Log only — no snapshot survived the crash.
+      events: crashed.events,
+      executors: {
+        generateText: async (_request, info) => {
+          secondCalls.push({ requestId: info?.requestId, callKey: info?.callKey });
+          return { output: "two" };
+        },
+      },
+    });
+
+    expect(recovered.status).toBe("idle");
+    // `a` completed before the crash and folds back in from the log.
+    expect(secondCalls.map((call) => call.requestId)).toEqual(["b"]);
+    // Identical key across the crash: an executor-level cache can dedupe it.
+    expect(secondCalls[0]!.callKey).toBe(firstCalls[1]!.callKey);
+    expect(secondCalls[0]!.callKey).toMatch(/^[0-9a-f-]+:b#1$/);
+  });
+
+  test("resume precedence: a tail-stamped snapshot is trusted, a stale one is not", async () => {
+    const machine = makeLoggedMachine();
+    const first = await runAgent(machine, {
+      input: undefined,
+      executors: executors(),
+    });
+    const cached = JSON.parse(JSON.stringify(first.persist())) as Snapshot<unknown>;
+
+    // Corrupt a MIDDLE entry's recorded hash: replaying this log throws, so a
+    // resume that succeeds proves the cached snapshot was trusted as-is.
+    const poisoned = (JSON.parse(JSON.stringify(first.events)) as AgentLogEntry[]).map((entry) =>
+      entry.index === 1 ? { ...entry, verification: { stateHash: "deadbeef" } } : entry,
+    );
+    expect(() => replay(machine, poisoned)).toThrow(/Replay diverged/);
+
+    const fastPath = await runAgent(machine, {
+      events: poisoned,
+      snapshot: cached,
+      event: { type: "APPROVE" } as never,
+      executors: executors(),
+    });
+    expect(fastPath.status).toBe("done");
+
+    // The same poisoned log with no cache to trust must replay — and throw.
+    await expect(
+      runAgent(machine, {
+        events: poisoned,
+        executors: executors(),
+      }),
+    ).rejects.toThrow(/Replay diverged/);
+  });
+
+  test("a stale snapshot loses to the log, and a divergent one throws", async () => {
+    const machine = makeLoggedMachine();
+    const first = await runAgent(machine, {
+      input: undefined,
+      executors: executors(),
+    });
+    const staleSnapshot = JSON.parse(JSON.stringify(first.persist())) as Snapshot<unknown>;
+    const second = await runAgent(machine, {
+      events: first.events,
+      snapshot: staleSnapshot,
+      event: { type: "APPROVE" } as never,
+      executors: executors(),
+    });
+    expect(second.status).toBe("done");
+
+    // `staleSnapshot` caches index 3 of a log that is now 5 entries long. It
+    // still agrees with the log at index 3, so the log simply wins.
+    expect(second.events.length).toBeGreaterThan(first.events.length);
+    const resumedFromStale = await runAgent(machine, {
+      events: second.events,
+      snapshot: staleSnapshot,
+      executors: executors(),
+    });
+    expect(resumedFromStale.status).toBe("done");
+
+    // A snapshot from another lineage that claims a position in THIS log is a
+    // host bug, not a resume.
+    const otherRun = await runAgent(machine, {
+      input: undefined,
+      executors: { generateText: async () => ({ output: "different" }) },
+    });
+    await expect(
+      runAgent(machine, {
+        events: first.events,
+        snapshot: JSON.parse(JSON.stringify(otherRun.persist())) as Snapshot<unknown>,
+        executors: executors(),
+      }),
+    ).rejects.toBeInstanceOf(AgentSnapshotDivergedError);
+  });
+
+  test("version bridge: a snapshot opens a new log segment, and its absence throws", async () => {
+    const v1 = makeLoggedMachine({ version: "1" });
+    const first = await runAgent(v1, {
+      input: undefined,
+      executors: executors(),
+    });
+    expect(first.status).toBe("idle");
+    const persisted = JSON.parse(JSON.stringify(first.persist())) as Snapshot<unknown>;
+
+    const v2 = makeLoggedMachine({
+      version: "2",
+      migrate: (snapshot) => ({ ...(snapshot as object), version: "2" }),
+    });
+
+    const bridged = await runAgent(v2, {
+      events: first.events,
+      snapshot: persisted,
+      event: { type: "APPROVE" } as never,
+      executors: executors(),
+    });
+    expect(bridged.status).toBe("done");
+    const init = bridged.events[0]!;
+    expect(init.event.type).toBe(AGENT_INIT_EVENT_TYPE);
+    expect((init.event as { snapshot?: unknown }).snapshot).toBeDefined();
+    expect(init.machineVersion).toBe("2");
+    expect(init.metadata?.executionId).toBe(getLogExecutionId(first.events));
+    expect(init.metadata?.migratedFrom).toEqual({
+      machineVersion: "1",
+      logIndex: first.events.length,
+    });
+
+    await expect(
+      runAgent(v2, {
+        events: first.events,
+        executors: executors(),
+      }),
+    ).rejects.toBeInstanceOf(AgentMachineVersionMismatchError);
+  });
+
+  test("snapshot-only resume starts a replayable log from that snapshot", async () => {
+    const machine = makeLoggedMachine();
+    const first = await runAgent(machine, {
+      input: undefined,
+      executors: executors(),
+    });
+    const second = await runAgent(machine, {
+      snapshot: JSON.parse(JSON.stringify(first.persist())) as Snapshot<unknown>,
+      event: { type: "APPROVE" } as never,
+      executors: executors(),
+    });
+    expect(second.status).toBe("done");
+    expect(second.events[0]!.event.type).toBe(AGENT_INIT_EVENT_TYPE);
+    expect((second.events[0]!.event as { snapshot?: unknown }).snapshot).toBeDefined();
+    // A NEW lineage: the snapshot carried no log with it.
+    expect(getLogExecutionId(second.events)).not.toBe(getLogExecutionId(first.events));
+    expect(replay(machine, second.events).snapshot.status).toBe("done");
+  });
+
+  test("usage is journaled even when the machine declares no transition for it, and result.usage folds the log", async () => {
+    const machine = makeLoggedMachine();
+    const result = await runAgent(machine, {
+      input: undefined,
+      executors: {
+        generateText: async () => ({ output: "42", usage: { totalTokens: 7, inputTokens: 3 } }),
+      },
+    });
+    const usageEntries = result.events.filter(
+      (entry) => entry.event.type === AGENT_USAGE_EVENT_TYPE,
+    );
+    expect(usageEntries).toHaveLength(1);
+    expect(result.usage).toEqual({ totalTokens: 7, inputTokens: 3, modelCalls: 1 });
+    expect(getUsageFromEvents(result.events)).toEqual({ totalTokens: 7, inputTokens: 3 });
+    // The machine never reacted to it, so the log still folds cleanly.
+    expect(replay(machine, result.events).snapshot.status).toBe("active");
+  });
+
+  test("a call that settles after the run is still appended to the log", async () => {
+    const machine = makeLoggedMachine();
+    const streamed: AgentLogEntry[] = [];
+    let release: (() => void) | undefined;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    const result = await runAgent(machine, {
+      input: undefined,
+      signal: AbortSignal.timeout(20),
+      onEvent: (entry) => streamed.push(entry),
+      executors: {
+        generateText: async () => {
+          await pending;
+          return { output: "late", usage: { totalTokens: 11 } };
+        },
+      },
+    });
+
+    expect(result.status).toBe("error");
+    const atSettle = streamed.length;
+    expect(result.events).toHaveLength(atSettle);
+    release!();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    // The tokens were spent, so the record is appended (and streamed) even
+    // though the run had already returned.
+    const straggler = streamed[streamed.length - 1]!;
+    expect(streamed.length).toBe(atSettle + 1);
+    expect(straggler.event.type).toBe(AGENT_USAGE_EVENT_TYPE);
+  });
+
+  test("timers are journaled and raised events are not; both round-trip through replay", async () => {
+    const timerMachine = setup({}).createMachine({
+      id: "timer-log",
+      context: () => ({}),
+      initial: "waiting",
+      states: {
+        waiting: { after: { 5: { target: "beeped" } } },
+        beeped: {
+          entry: (_args: never, enqueue: { raise: (event: { type: string }) => void }) =>
+            enqueue.raise({ type: "CONTINUE" }),
+          on: { CONTINUE: { target: "done" } },
+        },
+        done: { type: "final" },
+      },
+    } as never);
+
+    const result = await runAgent(timerMachine, { input: undefined, executors: {} });
+    expect(result.status).toBe("done");
+    expect(types(result.events)).toContain("xstate.timer");
+    expect(types(result.events)).not.toContain("CONTINUE");
+    expect(replay(timerMachine, result.events).snapshot.status).toBe("done");
+  });
+
+  test("a log whose last entry reached a final state settles immediately on resume", async () => {
+    const machine = makeLoggedMachine();
+    const first = await runAgent(machine, {
+      input: undefined,
+      executors: executors(),
+    });
+    const finished = await runAgent(machine, {
+      events: first.events,
+      snapshot: first.persist(),
+      event: { type: "APPROVE" } as never,
+      executors: executors(),
+    });
+    expect(finished.status).toBe("done");
+
+    let called = 0;
+    const replayed = await runAgent(machine, {
+      events: finished.events,
+      executors: {
+        generateText: async () => {
+          called++;
+          return { output: "should not happen" };
+        },
+      },
+    });
+    expect(replayed.status).toBe("done");
+    expect(called).toBe(0);
   });
 });

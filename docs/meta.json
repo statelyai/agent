@@ -20,6 +20,7 @@
     "any-stack",
     "steps",
     "---State & durability---",
+    "event-log",
     "persistence",
     "human-in-the-loop",
     "---Production---",

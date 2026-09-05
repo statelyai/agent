@@ -10,7 +10,7 @@
   },
   "comparison": {
     "targets": ["Cloudflare Agents", "durable agent runtimes"],
-    "purpose": "Persists XState actor snapshots in Durable Object state, so a conversation survives eviction; keyless scripted executors by default, live AI SDK models when OPENAI_API_KEY is bound."
+    "purpose": "Durable host recipe: the Durable Object persists an append-only event log (its SQLite storage) and drives every turn with runAgent — the log is the source of truth, no snapshot is persisted, so an evicted conversation resumes by folding the journal instead of re-running model calls; keyless scripted executors by default, live AI SDK models when OPENAI_API_KEY is bound."
   },
   "starters": []
 }

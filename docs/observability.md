@@ -15,7 +15,9 @@ await runAgent(machine, {
 
 Agent trace kinds are `run.start`, `request.start`, `request.end`, `request.error`, `stream.chunk`, `machine.transition`, `emit`, `usage.dropped`, and `run.end`.
 
-`serializeTraceEvent` creates a JSON-safe projection. Traces are observations, not a persistence protocol.
+`serializeTraceEvent` creates a JSON-safe projection. Traces are observations, not a persistence protocol; the [event log](event-log.md) is.
+
+`usage.dropped` means the `@agent.usage` event was not delivered to the machine, because no active state accepted it or the leg had already settled. The spend is still journaled and still counted: the entry is in the event log, and `getUsageFromEvents` folds it into the totals. Only the machine event is dropped.
 
 ## Async stream
 
