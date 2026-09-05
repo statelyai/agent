@@ -13,7 +13,6 @@ The snippets below come from [Twenty Questions](../examples/twenty-questions/ind
 
 <!-- viz: sequence diagram for one decision: machine invokes agent.decide -> host coerces the model to one candidate event -> validation (unknown-event / invalid-payload / rejected-by-guard) -> retry or send the event to the machine -->
 
-
 ## Invoking an agent decision
 
 <!-- agent.decide builtin from src/setup-agent.ts and src/decision.ts -->
@@ -52,18 +51,18 @@ deciding: {
 
 The `allowedEvents` list is typed against the machine's user-authored event schema, so a typo is a compile error. Framework events such as `agent.messages` and `@agent.usage` can be handled by the machine but are never model-facing candidates. Listing events explicitly also makes the candidate set visible in the machine.
 
-> **Note:** `agent.decide` needs a snapshot-aware host, either `runAgent` or the [step path](steps.md), to know which events are currently legal. In [uncontrolled mode](choosing-a-run-mode.md#uncontrolled-provideexecutors), under a bare `createActor(...)`, list `allowedEvents` explicitly. Wildcards and the omitted default cannot expand there.
+> **Note:** `agent.decide` needs a snapshot-aware host such as `runAgent` to know which events are currently legal. With a [long-lived actor](choosing-a-run-mode.md#long-lived-actor), list `allowedEvents` explicitly. Wildcards and the omitted default cannot expand there.
 
 ### `allowedEvents` patterns
 
 The `allowedEvents` option accepts a single string or an array. Entries are exact event types or wildcard patterns, and the two can mix, as in `['todo.*', 'reset']`.
 
-| Value | Meaning |
-| ----- | ------- |
-| `['ASK', 'GUESS']` | Exact event types, typed against the event-schema keys. A typo is a compile error. |
-| `'ASK'` | A single string, shorthand for a one-entry array. |
-| `'*'` | Every currently-legal event. |
-| `'todo.*'` | Every declared event under the `todo.` namespace, such as `todo.add` and `todo.toggle`. Typed against declared dotted types, so a pattern matching nothing, such as `'nope.*'`, is a compile error. |
+| Value              | Meaning                                                                                                                                                                                             |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `['ASK', 'GUESS']` | Exact event types, typed against the event-schema keys. A typo is a compile error.                                                                                                                  |
+| `'ASK'`            | A single string, shorthand for a one-entry array.                                                                                                                                                   |
+| `'*'`              | Every currently-legal event.                                                                                                                                                                        |
+| `'todo.*'`         | Every declared event under the `todo.` namespace, such as `todo.add` and `todo.toggle`. Typed against declared dotted types, so a pattern matching nothing, such as `'nope.*'`, is a compile error. |
 
 ### Reusable decision logic
 
@@ -100,7 +99,7 @@ Guards are transition functions that return `undefined`. See [Transitions](machi
 
 The candidate set is the `allowedEvents` list intersected with the events the state statically accepts. After the model picks one, `snapshot.can(event)` decides whether it is legal in the current snapshot. A chosen `ASK` on the final turn is rejected, and the model is asked again.
 
-`runAgent` and the step path perform this check for you. When you call [`resolveDecision`](steps.md#standalone-decision-resolution) directly in [uncontrolled mode](choosing-a-run-mode.md#uncontrolled-provideexecutors), pass the check through `canTake`:
+`runAgent` performs this check for you. When you call `resolveDecision` directly with a [long-lived actor](choosing-a-run-mode.md#long-lived-actor), pass the check through `canTake`:
 
 ```ts
 import { resolveDecision } from "@statelyai/agent";
@@ -116,10 +115,10 @@ const event = await resolveDecision(request, executors, {
 
 Each attempt runs three checks in order. Each failure is typed and fed back to the model on the next attempt:
 
-| Failure | Cause |
-| ------- | ----- |
-| `unknown-event` | The event type is not among the candidate events. |
-| `invalid-payload` | The payload does not match that event's schema. |
+| Failure             | Cause                                                                       |
+| ------------------- | --------------------------------------------------------------------------- |
+| `unknown-event`     | The event type is not among the candidate events.                           |
+| `invalid-payload`   | The payload does not match that event's schema.                             |
 | `rejected-by-guard` | The type and payload are valid, but `snapshot.can(event)` returned `false`. |
 
 Retry behavior:
@@ -144,7 +143,6 @@ A decision produces one event. When one command needs several events, such as "a
 - The trail of applied events lives in context and is appended to each step's prompt.
 
 <!-- viz: state diagram of the decide loop: planning (invoke agent.decide) -> applying (always -> planning) for ADD_TODO/TOGGLE_TODO, and DONE -> awaitingCommand -->
-
 
 ```ts no-check
 planning: {

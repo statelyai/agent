@@ -75,7 +75,7 @@ function addUsage(a: AgentUsage, b: AgentUsage): AgentUsage {
 Two callbacks report usage per call. Both are live and read-only.
 
 - `onResult(request, { output, raw })`: `raw` is your executor's verbatim result, so `raw.usage` is that call's usage in whatever shape the executor produced.
-- `onTrace` on a `request.end` event: `usage?: AgentCallUsage` is normalized, and present only when the executor reported usage. See [Observability](observability.md#the-versioned-trace-stream).
+- `onTrace` on a `request.end` event: `usage?: AgentCallUsage` is normalized, and present only when the executor reported usage. See [Observability](observability.md#trace-one-run).
 
 ```ts
 await runAgent(machine, {
@@ -157,12 +157,12 @@ A wrapper is still host-side. The machine cannot read the remaining budget or re
 
 ## The `@agent.usage` event
 
-<!-- AGENT_USAGE_EVENT_TYPE and AgentUsageEvent from src/effects.ts -->
+<!-- AGENT_USAGE_EVENT_TYPE and AgentUsageEvent from src/usage.ts -->
 
 `@agent.usage` is a reserved event that carries one model call's tokens into the machine. Four rules govern it.
 
 - You declare nothing. `setupAgent` and `createAgentSchemas` register `'@agent.usage'` and its payload schema in every agent's events, so the handler is typed and `event.usage.totalTokens` narrows. Declaring it yourself is an error, because the `@agent.` namespace is reserved.
-- Delivery is opt-in. The event is delivered only when an active state declares a transition that matches it, either `'@agent.usage'` or the wildcard `'*'`. If no active state declares one, there is no transition, no trace event, and no event-log entry. Wildcard matching follows XState semantics, so a catch-all `on: { '*': … }` does receive `@agent.usage`. Narrow the handler on `event.type` when the catch-all is meant for other events.
+- Delivery is opt-in. The event is delivered only when an active state declares a transition that matches it, either `'@agent.usage'` or the wildcard `'*'`. Otherwise no usage event is sent to the machine. Wildcard matching follows XState semantics, so a catch-all `on: { '*': … }` does receive `@agent.usage`. Narrow the handler on `event.type` when the catch-all is meant for other events.
 - Declare the handler at machine level. A root `on: { '@agent.usage': … }` catches every call regardless of which state made it. A state-scoped handler drops calls made in other states.
 - Delivery goes to the run's root machine, including usage from requests inside an invoked child machine. Attribute those calls with `id`, `src`, and `model`.
 
@@ -191,13 +191,13 @@ Model-call results reach the machine with usage stripped out.
 
 ### Rules
 
-| Area                 | Rule                                                                                                                                                                                                                                                                                               |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Not model-facing** | The `@agent.*` namespace is excluded from `getAcceptedEvents` and `parseAgentEvent`. The event is never a decision candidate, even under `allowedEvents: ['*']`, and cannot be forged from a wire message.                                                                                         |
-| **Durability**       | The event is folded into machine context, so a native snapshot from `result.persist()` retains the counters when a later `runAgent({ snapshot })` resumes.                                                                                                                                         |
-| **Spend records**    | The cost is already incurred when the event is reported, so entries are append-only facts. Replay folds every entry, and a call re-executed by crash recovery journals its own usage on top. A recovered total therefore reflects cumulative cost, including the call whose result the crash lost. |
-| **Stragglers**       | A call that settles after a `runAgent` leg resolved still folds into `result.usage`, but its machine event is dropped. Watch `usage.dropped` on `onTrace` if a counter looks short.                                                                                                                |
-| **Coverage**         | Only usage your executor reports is delivered. No `usage` on the result means no event. [`simulateAgent`](verify.md) scripts return no usage, so a token counter stays `0` under simulation. Test budgets with `runAgent` and a usage-reporting mock.                                              |
+| Area                 | Rule                                                                                                                                                                                                                                                  |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Not model-facing** | The `@agent.*` namespace is excluded from `getAcceptedEvents` and `parseAgentEvent`. The event is never a decision candidate, even under `allowedEvents: ['*']`, and cannot be forged from a wire message.                                            |
+| **Durability**       | The event is folded into machine context, so a native snapshot from `result.persist()` retains the counters when a later `runAgent({ snapshot })` resumes.                                                                                            |
+| **Run scope**        | `result.usage` counts calls made during that run only. Persist cumulative counters in machine context when they must survive snapshot resume.                                                                                                         |
+| **Stragglers**       | A call that settles after a `runAgent` leg resolved still folds into `result.usage`, but its machine event is dropped. Watch `usage.dropped` on `onTrace` if a counter looks short.                                                                   |
+| **Coverage**         | Only usage your executor reports is delivered. No `usage` on the result means no event. [`simulateAgent`](verify.md) scripts return no usage, so a token counter stays `0` under simulation. Test budgets with `runAgent` and a usage-reporting mock. |
 
 Opt in with a transition.
 
@@ -374,7 +374,7 @@ deciding: {
 
 ### Uncontrolled: `provideExecutors` + `createActor`
 
-Delivery is built in, but it follows the binding boundary. `provideExecutors` does not descend into invoked child machines, so a child with its own agent invokes needs its own `provideExecutors(...)` call. Until it has one, its calls report no usage anywhere. `runAgent` rebinds children and reports their usage to the root. There is no run cycle on the [uncontrolled path](any-stack.md#controlled-and-uncontrolled), so no stragglers are dropped either.
+Delivery is built in, but it follows the binding boundary. `provideExecutors` does not descend into invoked child machines, so a child with its own agent invokes needs its own `provideExecutors(...)` call. Until it has one, its calls report no usage anywhere. `runAgent` rebinds children and reports their usage to the root. A [long-lived actor](choosing-a-run-mode.md#long-lived-actor) has no run cycle, so no stragglers are dropped either.
 
 ```ts no-check
 import { createActor, toPromise } from "xstate";
@@ -388,10 +388,6 @@ actor.start();
 
 const output = await toPromise(actor); // stoppedBy: 'tokens'
 ```
-
-### Step path: an ordinary event
-
-On [the step path](steps.md#token-usage-on-this-path) the host holds the raw executor result. Normalize it with `getCallUsage(raw)` and append the event yourself. The entry is journaled, so `replay` reproduces the folded counter exactly.
 
 ### Plain XState: manual send
 
