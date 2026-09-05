@@ -20,6 +20,34 @@ const result = await runAgent(machine, {
 
 Text, stream, and decision executors all receive `(request, info)`; cancellation is `info.signal`.
 
+## Idempotency keys
+
+Execution is at-least-once. A host runs the request and then journals its completion, so a crash between the two re-executes the request on resume.
+
+`info.callKey` makes the duplicate safe to drop. Its format is `<executionId>:<requestId>#<n>`:
+
+- `executionId` is the log's lineage id, pinned in the reserved `@agent.init` entry's `metadata` and inherited by every resume.
+- `requestId` is the invoke site, and `n` counts that site's completions in the log — each iteration of a looped state gets its own key.
+- A resumed run re-executing an in-flight request passes the same `callKey` as the original attempt.
+- A fork copies the init entry, so it keeps the parent's lineage id and can reuse results cached under the parent's keys.
+- It is `undefined` off the `runAgent` path (a bare `provideExecutors` bind) and on a run with no event log.
+
+Pass it to the provider or tool as the idempotency key, and dedupe on it in your own cache:
+
+```ts no-check
+const executors = {
+  generateText: async (request, info) => {
+    const cached = info.callKey ? results.get(info.callKey) : undefined;
+    if (cached) return cached;
+    const result = await callProvider(request, { idempotencyKey: info.callKey });
+    if (info.callKey) results.set(info.callKey, result);
+    return result;
+  }
+};
+```
+
+See [The event log](event-log.md).
+
 ## Optional AI SDK default
 
 ```ts no-check

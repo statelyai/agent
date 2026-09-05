@@ -1,15 +1,15 @@
 {
   "name": "crash-recovery",
-  "title": "Resume a run that crashed mid-way",
+  "title": "Resume a crashed run from its event log",
   "kind": "agent-workflow",
   "origin": {
     "type": "stately-agent",
-    "source": "Native XState snapshot resume after a simulated process crash",
+    "source": "Event-log recovery after a simulated process crash",
     "url": null
   },
   "comparison": {
     "targets": ["LangGraph checkpointer"],
-    "purpose": "Writes an article in two steps, persists a native idle snapshot, and resumes it in a fresh run without an Agent-specific storage layer."
+    "purpose": "Writes an article in two steps, journals every accepted input through `onEvent`, and resumes from the log alone — recorded model calls are replayed, and the in-flight one re-executes under the same `info.callKey`."
   },
   "starters": ["state machines", "the history of the fax machine", "why builds are slow"]
 }
