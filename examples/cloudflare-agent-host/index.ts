@@ -7,9 +7,10 @@
  * - The Agent (a Durable Object) owns an append-only event log in its own
  *   SQLite storage (`./event-log-store.ts`). THE LOG IS THE SOURCE OF TRUTH;
  *   no snapshot is persisted anywhere.
- * - Every turn is one `runAgent` call: read the journal, run, append what the
- *   run produced. A turn is a `runAgent` leg that settles idle (the machine is
- *   waiting on a human) or done.
+ * - Every turn is one `runAgent` call, handed the store: it reads the journal,
+ *   runs, and writes each new entry back before the next model call. A turn is
+ *   a `runAgent` leg that settles idle (the machine is waiting on a human) or
+ *   done.
  * - Eviction is a non-event: the next request reads the journal back and
  *   `runAgent` folds it — journaled model/tool results are replayed, never
  *   re-executed.
@@ -153,55 +154,40 @@ export class EmailDrafter extends Agent<Env> {
   }
 
   /**
-   * One turn: read the journal, run, append what the run produced.
+   * One turn: hand `runAgent` the store and let it read the journal, run, and
+   * write back.
    *
-   * `events` is the whole durable state — a fresh thread has none and starts
-   * from `input` instead. Entries stream to storage through `onEvent` as the
-   * run makes them, each at its own index, so a crash mid-turn loses nothing
-   * but the call that was in flight.
+   * The log in the store is the whole durable state — a fresh thread has none
+   * and starts from `input` instead. Entries are written at their own index
+   * (the optimistic precondition: a concurrent writer at that position makes
+   * the append conflict instead of silently interleaving) and each write is
+   * awaited before the next model call, so a crash mid-turn loses nothing but
+   * the call that was in flight.
    */
   async #run(event?: EventFromLogic<typeof emailDrafter>): Promise<Turn> {
-    const entries = await this.#log.read(THREAD_ID);
     this.#executors ??= resolveExecutors(this.env);
 
-    // `onEvent` is synchronous; appends chain off it and are awaited below.
-    let appends: Promise<void> = Promise.resolve();
-
-    try {
-      const result = await runAgent(emailDrafter, {
-        ...(entries.length > 0 ? { events: entries } : { input: undefined }),
-        ...(event !== undefined ? { event } : {}),
-        executors: this.#executors,
-        onEvent: (entry) => {
-          appends = appends.then(() =>
-            this.#log.append({
-              threadId: THREAD_ID,
-              // The entry's own index IS the optimistic precondition: a
-              // concurrent writer at that position makes the append conflict
-              // instead of silently interleaving.
-              expectedIndex: entry.index,
-              entries: [entry],
-            }),
-          );
-        },
-        onTransition: (snapshot) => {
-          this.broadcast(
-            JSON.stringify({
-              type: "state",
-              value: snapshot.value,
-              // meta is schema-typed: clients get the interaction protocol
-              // (text / select / confirm) for the current state.
-              meta: snapshot.getMeta(),
-            }),
-          );
-        },
-      });
-      this.#last = result;
-      return result;
-    } finally {
-      // Await the journal even when the run failed: what did happen is durable.
-      await appends;
-    }
+    const result = await runAgent(emailDrafter, {
+      store: this.#log,
+      threadId: THREAD_ID,
+      // Used only when the thread's log is empty; a resume ignores it.
+      input: undefined,
+      ...(event !== undefined ? { event } : {}),
+      executors: this.#executors,
+      onTransition: (snapshot) => {
+        this.broadcast(
+          JSON.stringify({
+            type: "state",
+            value: snapshot.value,
+            // meta is schema-typed: clients get the interaction protocol
+            // (text / select / confirm) for the current state.
+            meta: snapshot.getMeta(),
+          }),
+        );
+      },
+    });
+    this.#last = result;
+    return result;
   }
 
   /**

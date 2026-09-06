@@ -22,7 +22,7 @@ Text, stream, and decision executors all receive `(request, info)`; cancellation
 
 ## Idempotency keys
 
-Execution is at-least-once. A host runs the request and then journals its completion, so a crash between the two re-executes the request on resume.
+Execution is at-least-once. A host runs the request and then journals its completion, so a crash between the two re-executes the request on resume. `runAgent({ store, threadId })` makes the log durable *before* each call, which bounds the duplicate to the one call that was in flight; it does not remove it.
 
 `info.callKey` makes the duplicate safe to drop. Its format is `<executionId>:<requestId>#<n>`:
 

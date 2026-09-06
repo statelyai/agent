@@ -24,6 +24,7 @@ import type {
   WithAgentInputSchema,
 } from "./types.js";
 import { AgentError } from "./errors.js";
+import { AgentEventLogConflictError, type AgentEventLogStore } from "./event-log-store.js";
 import {
   findNonSerializableContextPaths,
   isStandardSchema,
@@ -498,9 +499,24 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
    */
   events?: readonly AgentLogEntry[];
   /**
-   * Called synchronously as each log entry is appended, init entry first. The
-   * host persistence seam: append the entry to durable storage here and a crash
-   * mid-run loses nothing but the in-flight call.
+   * Durable log storage, write-ahead. With a `store` the run reads the thread's
+   * log to resume from (unless `events` is given, which wins) and writes every
+   * appended entry back through {@link AgentEventLogStore.append}, in log
+   * order. Writes are awaited before every model call, so a paid call is never
+   * made against an unpersisted log; pure transitions never wait. A rejected
+   * write (an {@link AgentEventLogConflictError} from a concurrent writer, or
+   * any other failure) stops the run: `{ status: 'error', cause: 'journal' }`.
+   *
+   * Requires {@link RunAgentOptions.threadId}.
+   */
+  store?: AgentEventLogStore;
+  /** The {@link RunAgentOptions.store} thread this run reads and appends to. Required whenever `store` is given. */
+  threadId?: string;
+  /**
+   * Called synchronously as each log entry is appended, init entry first. An
+   * observer, never awaited: persisting here is at-least-once and the run does
+   * not wait for it. Use {@link RunAgentOptions.store} for write-ahead
+   * durability.
    */
   onEvent?: (entry: AgentLogEntry) => void;
   /**
@@ -672,13 +688,16 @@ export type RunAgentResult<TMachine extends AnyStateMachine> = RunAgentOutcome<T
  *   (or wraps) a {@link AgentDecisionExhaustedError} that no `onError` handled.
  * - `'machine'` — any other machine error state.
  * - `'stopped'` — the actor was stopped externally (`status === 'stopped'`).
+ * - `'journal'` — a {@link RunAgentOptions.store} write rejected (a concurrent
+ *   writer's {@link AgentEventLogConflictError}, or any other storage failure).
  */
 export type RunAgentErrorCause =
   | "aborted"
   | "max-model-calls"
   | "decision-exhausted"
   | "machine"
-  | "stopped";
+  | "stopped"
+  | "journal";
 
 let nextRunAgentTraceId = 1;
 
@@ -1051,6 +1070,14 @@ interface RunAgentBindContext {
    * key. Unset off the runAgent path, and when the log has no `executionId`.
    */
   callKey?: (siteId: string, self?: object) => string | undefined;
+  /**
+   * The write-ahead barrier: awaited immediately before every text/decision
+   * executor invocation, so no paid call is made against a log that is not yet
+   * durable. Resolves immediately when the run has no
+   * {@link RunAgentOptions.store}; rejects with the journal's failure once a
+   * write has rejected. Unset off the runAgent path.
+   */
+  awaitJournal?: () => Promise<void>;
   /** Assigned right after createActor (§2.6); read lazily by decision wraps. */
   actorHolder: { actorRef: AnyActorRef | undefined };
   /** Registered `setupAgent` schemas (for event `inputSchema`s), if any. */
@@ -1201,6 +1228,8 @@ function bindTextLogic(logic: TextLogic, runCtx: RunAgentBindContext): TextLogic
     runCtx.emitTrace?.({ type: "request.start", request: agentRequest }, self);
     try {
       const callKey = id !== "" ? runCtx.callKey?.(id, self) : undefined;
+      // Write-ahead: the log up to this point must be durable before the call.
+      await runCtx.awaitJournal?.();
       const raw = await executor(requestWithTools as AgentExecutorTextRequest, {
         onChunk: (chunk: string) => {
           runCtx.emitTrace?.({ type: "stream.chunk", request: agentRequest, chunk }, self);
@@ -1291,6 +1320,8 @@ function createCountingDecide(
       // One key per invoke, not per decision attempt: `callKey` is memoized on
       // `self`, so a retried decision keeps the key its first attempt used.
       const callKey = id !== "" ? runCtx.callKey?.(id, self) : undefined;
+      // Write-ahead: the log up to this point must be durable before the call.
+      await runCtx.awaitJournal?.();
       // `runId` rides on the request like `signal` does: host-injected
       // correlation, never serialized into machine state. It also rides on the
       // `info` second argument, where generateText/streamText carry it.
@@ -1818,7 +1849,32 @@ export async function runAgent<TMachine extends AnyStateMachine>(
   machine: TMachine,
   options: RunAgentOptions<TMachine>,
 ): Promise<RunAgentResult<TMachine>> {
-  return createAgentSession(machine, options).settled();
+  const store = options.store;
+  if (store === undefined) {
+    // No store: the run starts synchronously, exactly as it always has.
+    return createAgentSession(machine, options).settled();
+  }
+  const threadId = options.threadId;
+  if (threadId === undefined || threadId === "") {
+    throw new AgentError(
+      "missing-thread-id",
+      "runAgent: `threadId` is required when `store` is given — it names the log thread to read and append to.",
+    );
+  }
+  if (options.events !== undefined) {
+    // An explicit log wins as the resume, but it must BE the thread's log:
+    // appending onto a store that has moved on would interleave two lineages.
+    const length = await store.length(threadId);
+    if (length !== options.events.length) {
+      throw new AgentEventLogConflictError(threadId, options.events.length, length);
+    }
+    return createAgentSession(machine, options).settled();
+  }
+  const stored = await store.read(threadId);
+  return createAgentSession(
+    machine,
+    stored.length > 0 ? { ...options, events: stored } : options,
+  ).settled();
 }
 
 interface AgentRunSession<TMachine extends AnyStateMachine> {
@@ -1895,6 +1951,82 @@ function createAgentSession<TMachine extends AnyStateMachine>(
   // by the inspect handler below. It is the value returned as `result.events`,
   // and the value `options.onEvent` streams entry by entry.
   const logEntries: AgentLogEntry[] = [];
+
+  // ─── Write-ahead journaling (`options.store`) ───
+  //
+  // Every appended entry is queued onto ONE chain, so writes reach the store in
+  // log order and each carries its own index as `expectedIndex`. The chain is
+  // awaited at two points only: before a model call (`awaitJournal`, the
+  // barrier the executors call) and at settle. Pure transitions never wait.
+  // The first rejection wins, stops the run (`cause: 'journal'`) and blocks
+  // every later write and call.
+  const store = options.store;
+  const threadId = options.threadId;
+  if (store !== undefined && (threadId === undefined || threadId === "")) {
+    throw new AgentError(
+      "missing-thread-id",
+      "runAgent: `threadId` is required when `store` is given — it names the log thread to read and append to.",
+    );
+  }
+  let journalChain: Promise<void> = Promise.resolve();
+  let journalPending = 0;
+  let journalError: unknown;
+
+  const journalEntry = (entry: AgentLogEntry): void => {
+    if (store === undefined) {
+      return;
+    }
+    journalPending++;
+    journalChain = journalChain
+      .then(async () => {
+        if (journalError !== undefined) {
+          return;
+        }
+        await store.append({
+          threadId: threadId!,
+          expectedIndex: entry.index,
+          entries: [entry],
+        });
+      })
+      .catch((error: unknown) => {
+        journalError ??= error;
+        failRunOnJournalError(error);
+      })
+      .finally(() => {
+        journalPending--;
+      });
+  };
+
+  /** The barrier: settle the pending chain, then surface any failure. */
+  const awaitJournal = async (): Promise<void> => {
+    if (store === undefined) {
+      return;
+    }
+    while (journalPending > 0) {
+      await journalChain;
+    }
+    if (journalError !== undefined) {
+      throw journalError;
+    }
+  };
+
+  // A failed write means the log is no longer authoritative — abort the run.
+  // Settling stops the actor, which aborts every in-flight call's signal, and
+  // the barrier above rejects any call that has not started yet. Declared
+  // before `settle` exists; only ever called from a rejected write, i.e. after
+  // this function's synchronous body has run.
+  const failRunOnJournalError = (error: unknown): void => {
+    if (settled) {
+      return;
+    }
+    settle({
+      status: "error",
+      cause: "journal",
+      error,
+      snapshot: actor.getSnapshot() as SnapshotFrom<TMachine>,
+    });
+  };
+
   // Where THIS run's own entries begin — the fold boundary for `runUsage`.
   let resumedLogLength = 0;
   // The lineage id pinned in the log's init entry metadata; also the prefix of
@@ -1933,6 +2065,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
       ...(verificationEnabled && snapshot !== undefined ? { snapshot } : {}),
     });
     logEntries.push(entry);
+    journalEntry(entry);
     options.onEvent?.(entry);
     return entry;
   };
@@ -2069,6 +2202,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     consumeModelCall,
     recordUsage,
     actorHolder,
+    awaitJournal,
     runId,
     schemas: getRegisteredAgentExecutionOptions(machine).schemas,
   };
@@ -2195,6 +2329,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
         try {
           const entry = initEntry(logMachine, init, { machineVersion, verification, metadata });
           logEntries.push(entry);
+          journalEntry(entry);
           options.onEvent?.(entry);
           return;
         } catch {
@@ -2354,6 +2489,8 @@ function createAgentSession<TMachine extends AnyStateMachine>(
 
   // One run = start (or resume event) to the next quiescence.
   let settled = false;
+  // The journal chain as it stood at settle (see `settle`).
+  let journalAtSettle: Promise<void> | undefined;
   // A call settling after the run resolved is a straggler (see
   // deliverUsageEvent): dropped after the run settles.
   cycleGate.isResolved = () => settled;
@@ -2386,6 +2523,10 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     // The log position this snapshot caches, frozen at settle: a straggler
     // appended afterwards makes the cache stale, and the stamp says so.
     const logIndexAtSettle = logEntries.length;
+    // Every write queued so far, in one promise: the result waits for these.
+    // A straggler `@agent.usage` entry appended after this point is still
+    // written, but chains behind and is not awaited.
+    journalAtSettle = journalChain;
     const persist = () => {
       if (persistenceError !== undefined) {
         throw persistenceError;
@@ -2623,12 +2764,19 @@ function createAgentSession<TMachine extends AnyStateMachine>(
   }
 
   const sessionApi: AgentRunSession<TMachine> = {
-    settled: () =>
-      settled && lastResult !== undefined
-        ? Promise.resolve(lastResult)
-        : new Promise<RunAgentResult<TMachine>>((resolve) => {
-            waiters.push(resolve);
-          }),
+    settled: async () => {
+      const result =
+        settled && lastResult !== undefined
+          ? lastResult
+          : await new Promise<RunAgentResult<TMachine>>((resolve) => {
+              waiters.push(resolve);
+            });
+      // The run resolves only once the log it reports is durable. A write that
+      // rejected has already settled the run with `cause: 'journal'`, so the
+      // failure is on the result, not thrown here.
+      await journalAtSettle;
+      return result;
+    },
   };
 
   if (options.signal) {

@@ -48,8 +48,11 @@ export async function runAgentLoop<TMachine extends AnyStateMachine>(
   let snapshot: ReturnType<RunAgentResult<TMachine>["persist"]> | undefined;
   let event: EventFromLogic<TMachine> | undefined;
   // Threaded turn to turn so the whole loop yields ONE continuous log rather
-  // than a fresh segment per turn.
-  let events: readonly AgentLogEntry[] | undefined = options.events;
+  // than a fresh segment per turn. With a `store`, the log lives there: each
+  // turn reads the thread back, so carrying it here would only re-assert a
+  // length the store already knows.
+  const stored = options.store !== undefined;
+  let events: readonly AgentLogEntry[] | undefined = stored ? undefined : options.events;
 
   for (let turn = 0; ; turn++) {
     const result = await runAgent(machine, {
@@ -57,7 +60,9 @@ export async function runAgentLoop<TMachine extends AnyStateMachine>(
       ...(events ? { events } : {}),
       ...(snapshot ? { snapshot, event } : {}),
     } as RunAgentOptions<TMachine>);
-    events = result.events;
+    if (!stored) {
+      events = result.events;
+    }
     usage = addUsage(usage, result.usage);
     const cumulative = { ...result, usage } as RunAgentResult<TMachine>;
 

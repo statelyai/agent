@@ -14,12 +14,14 @@ import {
   AGENT_TRACE_SCHEMA_VERSION,
   AGENT_USAGE_EVENT_TYPE,
   AgentError,
+  AgentEventLogConflictError,
   AgentMachineVersionMismatchError,
   AgentSnapshotDivergedError,
   getLogExecutionId,
   getUsageFromEvents,
   replay,
   createAgentSchemas,
+  createInMemoryEventLogStore,
   createTextLogic,
   AgentIllegalResumeEventError,
   inspectTransitions,
@@ -27,6 +29,7 @@ import {
   runAgent,
   setupAgent,
   type AgentDecisionRequest,
+  type AgentEventLogStore,
   type AgentLogEntry,
   type AgentTextRequest,
   type AgentTools,
@@ -3877,5 +3880,218 @@ describe("runAgent event log", () => {
     });
     expect(replayed.status).toBe("done");
     expect(called).toBe(0);
+  });
+});
+
+describe("runAgent write-ahead store", () => {
+  const answer = createTextLogic({ model: "test-model", prompt: () => "hello" });
+
+  /** asking --(model)--> waiting --APPROVE--> done */
+  const makeMachine = () =>
+    setup({ actors: { answer } }).createMachine({
+      id: "stored",
+      context: () => ({}),
+      initial: "asking",
+      states: {
+        asking: {
+          invoke: { id: "ask", src: "answer", input: () => ({}), onDone: { target: "waiting" } },
+        },
+        waiting: { on: { APPROVE: { target: "done" } } },
+        done: { type: "final" },
+      },
+    } as never);
+
+  const executors = () => ({ generateText: async () => ({ output: "42" }) });
+
+  test("a fresh run writes every entry to the store, in index order", async () => {
+    const store = createInMemoryEventLogStore();
+    const result = await runAgent(makeMachine(), {
+      input: undefined,
+      store,
+      threadId: "main",
+      executors: executors(),
+    });
+
+    expect(result.status).toBe("idle");
+    const stored = await store.read("main");
+    expect(stored).toEqual(result.events);
+    expect(stored.map((entry) => entry.index)).toEqual(stored.map((_entry, index) => index));
+    expect(stored[0]!.event.type).toBe(AGENT_INIT_EVENT_TYPE);
+  });
+
+  test("the result resolves only after the last write lands", async () => {
+    const inner = createInMemoryEventLogStore();
+    let inFlight = 0;
+    const store: AgentEventLogStore = {
+      ...inner,
+      append: async (input) => {
+        inFlight++;
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        await inner.append(input);
+        inFlight--;
+      },
+    };
+
+    const result = await runAgent(makeMachine(), {
+      input: undefined,
+      store,
+      threadId: "main",
+      executors: executors(),
+    });
+
+    expect(inFlight).toBe(0);
+    expect(await store.read("main")).toEqual(result.events);
+  });
+
+  test("no model call is made until the preceding entry is durable", async () => {
+    const inner = createInMemoryEventLogStore();
+    const gates: Array<() => void> = [];
+    let holding = true;
+    const store: AgentEventLogStore = {
+      ...inner,
+      append: async (input) => {
+        if (holding) {
+          await new Promise<void>((resolve) => gates.push(resolve));
+        }
+        await inner.append(input);
+      },
+    };
+
+    let calls = 0;
+    const settled = runAgent(makeMachine(), {
+      input: undefined,
+      store,
+      threadId: "main",
+      executors: {
+        generateText: async () => {
+          calls++;
+          return { output: "42" };
+        },
+      },
+    });
+
+    // Several turns of the loop: the run is blocked on the init entry's write.
+    for (let i = 0; i < 10; i++) {
+      await Promise.resolve();
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(calls).toBe(0);
+
+    holding = false;
+    for (const release of gates.splice(0)) {
+      release();
+    }
+    const result = await settled;
+    expect(calls).toBe(1);
+    expect(result.status).toBe("idle");
+  });
+
+  test("resuming from the store alone continues the log without re-executing", async () => {
+    const twoCallMachine = setup({ actors: { answer } }).createMachine({
+      id: "two-calls",
+      context: () => ({}),
+      initial: "a",
+      states: {
+        a: { invoke: { id: "a", src: "answer", input: () => ({}), onDone: { target: "b" } } },
+        b: { invoke: { id: "b", src: "answer", input: () => ({}), onDone: { target: "waiting" } } },
+        waiting: { on: { GO: { target: "done" } } },
+        done: { type: "final" },
+      },
+    } as never);
+
+    const store = createInMemoryEventLogStore();
+    const firstCalls: Array<{ requestId?: string; callKey?: string }> = [];
+    const crashed = await runAgent(twoCallMachine, {
+      input: undefined,
+      store,
+      threadId: "main",
+      signal: AbortSignal.timeout(30),
+      executors: {
+        generateText: async (_request, info) => {
+          firstCalls.push({ requestId: info?.requestId, callKey: info?.callKey });
+          return firstCalls.length === 1 ? { output: "one" } : await new Promise<never>(() => {});
+        },
+      },
+    });
+    expect(crashed.status).toBe("error");
+
+    const secondCalls: Array<{ requestId?: string; callKey?: string }> = [];
+    // No `events`, no snapshot: the thread's log in the store IS the resume.
+    const recovered = await runAgent(twoCallMachine, {
+      store,
+      threadId: "main",
+      executors: {
+        generateText: async (_request, info) => {
+          secondCalls.push({ requestId: info?.requestId, callKey: info?.callKey });
+          return { output: "two" };
+        },
+      },
+    });
+
+    expect(recovered.status).toBe("idle");
+    expect(secondCalls.map((call) => call.requestId)).toEqual(["b"]);
+    expect(secondCalls[0]!.callKey).toBe(firstCalls[1]!.callKey);
+    expect(recovered.events.slice(0, crashed.events.length)).toEqual(crashed.events);
+    expect(await store.read("main")).toEqual(recovered.events);
+  });
+
+  test("a conflicting writer stops the run with cause 'journal'", async () => {
+    const inner = createInMemoryEventLogStore();
+    let stolen = false;
+    const store: AgentEventLogStore = {
+      ...inner,
+      append: async (input) => {
+        if (!stolen) {
+          // A concurrent writer takes this index first.
+          stolen = true;
+          await inner.append({
+            ...input,
+            entries: input.entries.map((entry) => ({ ...entry, id: `${entry.id}_other` })),
+          });
+        }
+        await inner.append(input);
+      },
+    };
+
+    let calls = 0;
+    const result = await runAgent(makeMachine(), {
+      input: undefined,
+      store,
+      threadId: "main",
+      executors: {
+        generateText: async () => {
+          calls++;
+          return { output: "42" };
+        },
+      },
+    });
+
+    expect(result.status).toBe("error");
+    expect(result.status === "error" && result.cause).toBe("journal");
+    expect(result.status === "error" && result.error).toBeInstanceOf(AgentEventLogConflictError);
+    // The barrier held the model call back until the write failed.
+    expect(calls).toBe(0);
+  });
+
+  test("`store` without `threadId` throws, and `events` must match the thread's length", async () => {
+    const store = createInMemoryEventLogStore();
+    await expect(
+      runAgent(makeMachine(), { input: undefined, store, executors: executors() }),
+    ).rejects.toMatchObject({ code: "missing-thread-id" });
+
+    const first = await runAgent(makeMachine(), {
+      input: undefined,
+      store,
+      threadId: "main",
+      executors: executors(),
+    });
+    await expect(
+      runAgent(makeMachine(), {
+        store,
+        threadId: "main",
+        events: first.events.slice(0, 1),
+        executors: executors(),
+      }),
+    ).rejects.toBeInstanceOf(AgentEventLogConflictError);
   });
 });

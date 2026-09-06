@@ -8,35 +8,38 @@ The [event log](event-log.md) is the durable artifact. A snapshot is a cache ove
 
 ## Persist the log
 
-Append entries as they happen through `onEvent`, or store `result.events` when the leg settles.
+Hand `runAgent` a [store](event-log.md#stores) and the thread it owns. Entries are written as they are accepted, and no model call runs against a log that is not yet durable.
 
 ```ts no-check
-const appended: AgentLogEntry[] = [];
-
 const result = await runAgent(machine, {
   input,
-  executors,
-  onEvent: (entry) => appended.push(entry)
+  store,
+  threadId,
+  executors
 });
-
-await store.append({ threadId, expectedIndex: appended[0].index, entries: appended });
 ```
 
-`onEvent` is synchronous, so it buffers rather than awaits. Flush the buffer to the store as the leg settles, or on whatever cadence the host durability model needs.
+- A rejected write stops the run: `{ status: "error", cause: "journal" }`.
+- `threadId` is required whenever `store` is given.
+
+`onEvent` remains the observer seam — synchronous, never awaited. Persisting there is at-least-once: a crash between an entry and the host's flush loses it. See [Record a log](event-log.md#record-a-log).
 
 `result.events` is a complete, self-contained segment: its first entry is the reserved `@agent.init` entry, so it replays with no side channel.
 
 ## Resume from the log
 
-Pass `events` with no snapshot. `runAgent` folds the log and continues from there.
+With a `store`, the thread's log is the resume: pass no `events` and no snapshot.
 
 ```ts no-check
 const resumed = await runAgent(machine, {
-  events: await store.read(threadId),
+  store,
+  threadId,
   event: { type: "APPROVE" },
   executors
 });
 ```
+
+An empty thread starts fresh from `input`. Pass `events` explicitly to resume from a log the host holds itself (the store's thread length must then match it).
 
 - Recorded results are replayed, never re-executed.
 - A request that was in flight when the log ended has no recorded completion, so it re-executes. Execution is at-least-once; key provider calls on [`info.callKey`](hosts.md#idempotency-keys).
@@ -100,20 +103,15 @@ const machine = setup.createMachine({
 
 Implement `AgentEventLogStore` against the host's database, or append through the framework's own mechanism: a Durable Object, workflow checkpoint, or server action store. See [Stores](event-log.md#stores) and [Hosts and executors](hosts.md).
 
-The recipe per turn is the same everywhere: read the log, run, append what the run produced.
+The recipe per turn is one call: `runAgent` reads the thread, runs, and writes back.
 
 ```ts no-check
-const events = await store.read(threadId);
-const appended: AgentLogEntry[] = [];
-
 const result = await runAgent(machine, {
-  events,
+  store,
+  threadId,
   event: incoming,
-  executors,
-  onEvent: (entry) => appended.push(entry)
+  executors
 });
-
-await store.append({ threadId, expectedIndex: events.length, entries: appended });
 ```
 
 The framework remains responsible for transactionality, retries, interruption recovery, and retention.

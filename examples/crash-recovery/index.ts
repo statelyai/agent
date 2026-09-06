@@ -1,12 +1,13 @@
 /**
  * Crash recovery — resume a run from its event log, with no snapshot.
  *
- * The log is the source of truth: `onEvent` hands the host every external input
- * the machine accepted, and `runAgent({ events })` folds that journal back into
- * state without executing anything it already recorded. A request that was
- * still in flight at the crash has no recorded completion, so it — and only it
- * — runs again, under the same `info.callKey` the first attempt used, which is
- * the idempotency key a real host would send to the provider.
+ * The log is the source of truth: `runAgent({ store, threadId })` writes every
+ * external input the machine accepted straight to durable storage — before the
+ * next model call — and reads it back to resume, folding the journal into state
+ * without executing anything it already recorded. A request that was still in
+ * flight at the crash has no recorded completion, so it — and only it — runs
+ * again, under the same `info.callKey` the first attempt used, which is the
+ * idempotency key a real host would send to the provider.
  *
  * No API key needed: executors are scripted. Run:
  * npx tsx examples/crash-recovery/index.ts
@@ -18,8 +19,6 @@ import {
   runAgent,
   setupAgent,
 } from "@statelyai/agent";
-import type { AgentLogEntry } from "@statelyai/agent";
-
 const crashRecoverySetup = setupAgent({
   context: z.object({
     topic: z.string(),
@@ -95,22 +94,19 @@ export async function runUntilCrash(topic = "state machines", threadId = crypto.
     ],
   });
 
-  // `onEvent` is synchronous, so it buffers; the buffer is flushed to the store
-  // once the leg settles (a real host may flush on its own cadence).
-  const journal: AgentLogEntry[] = [];
-
+  // Write-ahead: each entry reaches the store as it is appended, and the outline
+  // call cannot start until the entries before it are durable.
   const crashed = await runAgent(crashRecoveryMachine, {
     input: { topic },
+    store,
+    threadId,
     executors,
     signal: abort.signal,
-    onEvent: (entry) => journal.push(entry),
   });
-
-  await store.append({ threadId, expectedIndex: 0, entries: journal });
 
   console.log(`crashed with status '${crashed.status}'`);
   console.log(`model calls before the crash: ${executors.calls.length}`); // 2 — one completed
-  console.log(`journaled entries: ${journal.length}`);
+  console.log(`journaled entries: ${crashed.events.length}`);
   return { threadId, inFlightCallKey, calls: executors.calls.length };
 }
 
@@ -132,16 +128,9 @@ export async function recover(threadId: string) {
     ],
   });
 
-  const events = await store.read(threadId);
-  const recovered = await runAgent(crashRecoveryMachine, { events, executors });
-
-  // The resumed result's `events` extends the same log, so the thread stays
-  // replayable end to end.
-  await store.append({
-    threadId,
-    expectedIndex: events.length,
-    entries: recovered.events.slice(events.length),
-  });
+  // No `events`, no snapshot: the store's thread IS the resume, and the run
+  // keeps appending to it, so the thread stays replayable end to end.
+  const recovered = await runAgent(crashRecoveryMachine, { store, threadId, executors });
 
   console.log(`recovered with status '${recovered.status}'`);
   console.log(`model calls during recovery: ${executors.calls.length}`); // 1 — only the draft
