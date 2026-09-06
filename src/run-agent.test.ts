@@ -4317,6 +4317,34 @@ describe("runAgent write-ahead store", () => {
     expect(resumed.status).toBe("done");
   });
 
+  test("`events` whose payload keys are merely reordered still match the thread", async () => {
+    const store = createInMemoryEventLogStore();
+    const first = await runAgent(makeMachine(), {
+      input: undefined,
+      store,
+      threadId: "main",
+      executors: executors(),
+    });
+
+    // Same content, different key insertion order: a host that rebuilt the
+    // entries from a database row must not be told its own log diverged.
+    const reordered = (JSON.parse(JSON.stringify(first.events)) as AgentLogEntry[]).map(
+      (entry) => ({
+        ...entry,
+        event: Object.fromEntries(Object.entries(entry.event).reverse()) as AgentLogEntry["event"],
+      }),
+    );
+    const resumed = await runAgent(makeMachine(), {
+      store,
+      threadId: "main",
+      events: reordered,
+      snapshot: first.persist(),
+      event: { type: "APPROVE" } as never,
+      executors: executors(),
+    });
+    expect(resumed.status).toBe("done");
+  });
+
   test("result.drain() waits for a straggler's write; the result itself does not", async () => {
     const inner = createInMemoryEventLogStore();
     const slowStore: AgentEventLogStore = {

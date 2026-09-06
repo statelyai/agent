@@ -396,13 +396,19 @@ function canonicalizeForHash(
   if (value === null || typeof value !== "object") return value;
   if (value instanceof Date) return `[Date:${value.toISOString()}]`;
   if (value instanceof Error) {
-    return {
-      errorName: value.name,
-      message: value.message,
-      ...(value.cause !== undefined
-        ? { cause: canonicalizeForHash(value.cause, seen, "data") }
-        : {}),
-    };
+    if (seen.has(value)) return "[circular]";
+    seen.add(value);
+    try {
+      return {
+        errorName: value.name,
+        message: value.message,
+        ...(value.cause !== undefined
+          ? { cause: canonicalizeForHash(value.cause, seen, "data") }
+          : {}),
+      };
+    } finally {
+      seen.delete(value);
+    }
   }
   if (seen.has(value)) return "[circular]";
   seen.add(value);
@@ -443,6 +449,16 @@ function canonicalizeForHash(
   } finally {
     seen.delete(value);
   }
+}
+
+/**
+ * Key-sorted JSON for comparing two events by content: key insertion order
+ * does not count, so an entry read back from storage equals the one that was
+ * appended.
+ * @internal
+ */
+export function canonicalEventJson(event: unknown): string {
+  return stableJson(canonicalizeForHash(event, new Set(), "data"));
 }
 
 function stableJson(value: unknown): string {

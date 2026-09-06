@@ -417,6 +417,14 @@ describe("getSnapshotStateHash", () => {
     expect(getSnapshotStateHash({ context: { set } })).toMatch(/^[0-9a-f]{8}$/);
   });
 
+  test("terminates on an Error whose cause chain is cyclic", () => {
+    const outer = new Error("outer");
+    const inner = new Error("inner", { cause: outer });
+    (outer as { cause?: unknown }).cause = inner;
+
+    expect(getSnapshotStateHash({ context: { failure: outer } })).toMatch(/^[0-9a-f]{8}$/);
+  });
+
   test("is stable across a JSON round-trip and changes with state", () => {
     const early = replay(machine, buildLog().slice(0, 2)).persistedSnapshot;
     const late = replay(machine, buildLog()).persistedSnapshot;

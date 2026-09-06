@@ -81,6 +81,7 @@ import {
   type AgentLogInit,
   type AgentPersistedSnapshot,
   type JsonValue as AgentLogJsonValue,
+  canonicalEventJson,
 } from "./event-log.js";
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
@@ -1922,7 +1923,7 @@ function assertThreadMatchesEvents(
     const same =
       storedEntry.id === givenEntry.id &&
       storedEntry.index === givenEntry.index &&
-      JSON.stringify(storedEntry.event) === JSON.stringify(givenEntry.event) &&
+      canonicalEventJson(storedEntry.event) === canonicalEventJson(givenEntry.event) &&
       (storedHash === undefined || givenHash === undefined || storedHash === givenHash);
     if (!same) {
       throw new AgentError(

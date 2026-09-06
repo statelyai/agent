@@ -21,7 +21,7 @@ const result = await runAgent(machine, {
 
 - `runAgent` reads the thread, runs, and writes back: the store is the whole durable state, and a fresh thread has none and starts from `input`.
 - Writes are write-ahead — each entry is durable before the next model call — and each lands at its own index, so the append is optimistic: a concurrent writer conflicts instead of interleaving.
-- A rejected write fails the turn: `runAgent` rejects, and the cached turn is left where the journal is.
+- A rejected write settles `runAgent` with an error result. This host throws that result, and the cached turn is left where the journal is.
 - Turns are serialized per Durable Object — one leg at a time.
 - A settled turn is cached in memory only. After an eviction it is gone, and the next request folds the log again.
 
