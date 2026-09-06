@@ -1,6 +1,10 @@
 import { expect, test } from "vitest";
-import { runAgent, type AgentTextRequest } from "@statelyai/agent";
-import { longRunningOnboardingMachine, runLongRunningOnboardingExample } from "./index.js";
+import { getInteraction, runAgent, type AgentTextRequest } from "@statelyai/agent";
+import {
+  MAX_DOCS_REJECTIONS,
+  longRunningOnboardingMachine,
+  runLongRunningOnboardingExample,
+} from "./index.js";
 
 const generateText = async (request: AgentTextRequest) => ({
   output: `Day one for ${request.prompt}`,
@@ -10,13 +14,15 @@ test("pauses twice and resumes from JSON snapshots", async () => {
   const result = await runLongRunningOnboardingExample({ generateText });
 
   expect(result.idleStates).toEqual(["waitingForSignedDocs", "waitingForHardware"]);
-  expect(result.idlePrompts).toEqual([
-    "Waiting for the signed onboarding documents. Mark them signed to continue.",
-    "Waiting on hardware delivery. Mark the laptop delivered to continue.",
+  expect(result.idlePrompts[0]).toContain("Waiting on Ann Lee's signed onboarding documents");
+  expect(result.idlePrompts[1]).toContain("Simulated IT provisioning done (ticket IT-E-100)");
+  expect(result.idleEventTypes).toEqual([
+    ["DOCS_SIGNED", "DOCS_REJECTED", "ESCALATE"],
+    ["HARDWARE_DELIVERED", "ESCALATE"],
   ]);
-  expect(result.idleEventTypes).toEqual([["DOCS_SIGNED"], ["HARDWARE_DELIVERED"]]);
   expect(result.output).toMatchObject({
     employeeId: "E-100",
+    status: "onboarded",
     welcomePacketId: "WELCOME-E-100",
     accounts: {
       email: "ann.lee@example.com",
@@ -27,7 +33,7 @@ test("pauses twice and resumes from JSON snapshots", async () => {
   expect(result.output.schedule).toContain("Ann Lee");
 });
 
-test("labels the stub-provisioned accounts as simulated", async () => {
+test("the hardware pause labels the stub-provisioned accounts as simulated", async () => {
   const first = await runAgent(longRunningOnboardingMachine, {
     input: {
       employee: {
@@ -51,9 +57,46 @@ test("labels the stub-provisioned accounts as simulated", async () => {
   expect(second.status).toBe("idle");
   if (second.status !== "idle") return;
 
-  // A host rendering context sees the provenance next to the identifiers.
-  expect(second.snapshot.context.provisioningNote).toContain("Simulated IT provisioning");
-  expect(second.snapshot.context.provisioningNote).toContain("ann.lee@example.com");
+  // The provenance is rendered from `accounts` at read time, so a host can
+  // never show the identifiers without it.
+  const label = getInteraction(second.snapshot)?.label ?? "";
+  expect(label).toContain("Simulated IT provisioning");
+  expect(label).toContain("ann.lee@example.com");
+  expect(label).toContain("no real accounts exist");
+});
+
+test("a rejected packet is resent, and the second rejection escalates", async () => {
+  const result = await runLongRunningOnboardingExample({
+    generateText,
+    answers: [
+      { type: "DOCS_REJECTED", reason: "wrong start date" },
+      { type: "DOCS_REJECTED", reason: "still wrong" },
+    ],
+  });
+
+  // The first rejection went back through sendingWelcomePacket to the same
+  // wait; the second one hit the bound.
+  expect(result.idleStates).toEqual(["waitingForSignedDocs", "waitingForSignedDocs"]);
+  expect(result.output.status).toBe("escalated");
+  expect(result.output.escalation).toBe(
+    `Onboarding documents rejected ${MAX_DOCS_REJECTIONS} times. Last reason: still wrong`,
+  );
+  expect(result.output.schedule).toBeNull();
+});
+
+test("a human can escalate a wait instead of waiting longer", async () => {
+  const result = await runLongRunningOnboardingExample({
+    generateText,
+    answers: [
+      { type: "DOCS_SIGNED", signedAt: "2026-07-20" },
+      { type: "ESCALATE", note: "Laptop backordered six weeks; hand to IT." },
+    ],
+  });
+
+  expect(result.output.status).toBe("escalated");
+  expect(result.output.escalation).toContain("backordered");
+  // Everything the run did get done is still reported.
+  expect(result.output.accounts?.ticketId).toBe("IT-E-100");
 });
 
 test("a delivered laptop is never written up as still scheduled", async () => {

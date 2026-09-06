@@ -1,18 +1,19 @@
 {
   "name": "review-tool-calls",
-  "title": "Review a proposed refund tool call",
+  "title": "Who owns the tool loop: machine-gated vs SDK-owned",
   "kind": "agent-workflow",
   "origin": {
     "type": "langgraph",
-    "source": "LangGraph review-tool-calls human-in-the-loop how-to",
+    "source": "LangGraph review-tool-calls human-in-the-loop how-to, plus an AI SDK-owned multi-step tool loop",
     "url": "https://langchain-ai.github.io/langgraph/how-tos/human_in_the_loop/review-tool-calls/"
   },
   "comparison": {
-    "targets": ["LangGraph"],
-    "purpose": "Contrasts SDK-owned tool loops by making LangGraph's interrupt() over a proposed call a first-class idle `reviewing` state, resumed by typed APPROVE / EDIT / REJECT events before the consequential tool runs."
+    "targets": ["LangGraph", "Vercel AI SDK tools", "framework-native chat history"],
+    "purpose": "Two variants on one axis. Machine-owned: LangGraph's interrupt() over a proposed call becomes a first-class idle `reviewing` state, resumed by typed APPROVE / EDIT / REJECT events before the consequential tool runs. SDK-owned: the AI SDK runs the whole multi-step loop under `maxSteps` and the machine only appends its native response messages through an agent.messages transition."
   },
   "starters": [
     "Refund me $60 for the late delivery on order #8891.",
-    "I want my money back for the subscription I never used."
+    "I want my money back for the subscription I never used.",
+    "What is 6 times 7?"
   ]
 }

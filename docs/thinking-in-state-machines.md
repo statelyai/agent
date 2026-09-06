@@ -298,6 +298,16 @@ The revision cap behaves differently from the loop. The loop returned the curren
 
 For what the machine gives you over the loop, see the [overview](index.md).
 
+## Context must be replay-stable
+
+Context is replayed. A persisted snapshot resumes by re-applying the [event log](event-log.md), so anything the machine writes into context has to produce the same value on the second pass as on the first.
+
+- No `Date.now()`, `new Date()`, `performance.now()`, `Math.random()`, or `crypto.randomUUID()` in context, entry actions, or transition results.
+- Measure elapsed time, generate ids, and read the clock in the host, then pass the value in as event or input data. It is then recorded in the log and replays identically.
+- The same rule covers derived, rendered strings. Compute them in a final state's `output` or in the host, not as a context field kept in sync by hand.
+
+A machine that breaks this rule still runs, but its replays diverge, and a divergence surfaces as an `AgentReplayDivergenceError` rather than as a wrong answer.
+
 ## Machines you cannot rewrite
 
 The design work above assumes you are writing the machine. Existing machines can still be hosted without Agent-specific authoring.

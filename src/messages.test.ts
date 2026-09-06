@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { z } from "zod";
-import { appendMessages, getMessageText, runAgent, setupAgent } from "./index.js";
+import { appendMessages, getMessageText, isAgentMessages, runAgent, setupAgent } from "./index.js";
 
 test("request actors expose framework-native messages through an explicit machine transition", async () => {
   const nativeMessage = z.object({ kind: z.literal("native"), body: z.string() });
@@ -82,4 +82,14 @@ test("getMessageText reads string and text-part content", () => {
       ],
     }),
   ).toBe("first\nsecond");
+});
+
+test("isAgentMessages guards a zod context field with the messagesSchema validator", () => {
+  expect(isAgentMessages([{ role: "user", content: "hi" }])).toBe(true);
+  expect(isAgentMessages([{ role: "narrator", content: "hi" }])).toBe(false);
+  expect(isAgentMessages("nope")).toBe(false);
+
+  const schema = z.object({ messages: z.custom<unknown>(isAgentMessages) });
+  expect(schema.safeParse({ messages: [{ role: "assistant", content: "ok" }] }).success).toBe(true);
+  expect(schema.safeParse({ messages: [{ role: "assistant" }] }).success).toBe(false);
 });

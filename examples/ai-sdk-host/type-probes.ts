@@ -1,9 +1,9 @@
 /**
- * Compile-only type probes for the game-agent setup.
+ * Compile-only type probes for the combat (`gameMachine`) setup.
  *
  * Nothing here runs — the machine exists purely so `tsc` fails if the typed
  * root/final output stops being typed against `gameSchemas.output`. Kept out of
- * the runnable `game-agent/index.ts` so that file reads as a clean example.
+ * the runnable `ai-sdk-host/index.ts` so that file reads as a clean example.
  * Typechecked via `examples/tsconfig.json` (globs `examples/**`).
  */
 import { z } from "zod";
@@ -21,6 +21,8 @@ const gameAgentSetup = setupAgent({
   actors: gameActors,
   states: {
     choosingMove: {},
+    takingHit: {},
+    blockingHit: {},
     summarizing: {},
     checkingOutcome: {},
     done: { schemas: { context: nonNullSummaryContext } },
@@ -37,7 +39,6 @@ gameAgentSetup.createMachine({
   context: {
     playerHp: 20,
     enemyHp: 15,
-    defended: false,
     lastSummary: null,
     log: [],
   },

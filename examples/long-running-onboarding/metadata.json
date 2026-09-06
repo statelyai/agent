@@ -9,7 +9,7 @@
   },
   "comparison": {
     "targets": ["Google ADK", "durable agents", "human-in-the-loop", "multi-agent delegation"],
-    "purpose": "Ports the article's onboarding coordinator shape into Stately Agent: explicit durable state, event-driven idle states, snapshot resume across days, and delegated IT provisioning."
+    "purpose": "Ports the article's onboarding coordinator shape into Stately Agent: explicit durable state, event-driven idle states, snapshot resume across days, delegated IT provisioning, a bounded resend loop for rejected documents, and an escalation path off every wait."
   },
   "starters": [
     {

@@ -535,3 +535,62 @@ describe("createScriptedExecutors — userInput", () => {
     );
   });
 });
+
+describe("name-keyed scripts", () => {
+  const request = {
+    kind: "text" as const,
+    id: "1",
+    name: "summarize",
+    model: "quick",
+    prompt: "hi",
+  };
+
+  test("routes by request name", async () => {
+    const scripted = createScriptedExecutors({
+      text: { summarize: ["short"], expand: ["long"] },
+    });
+    await expect(scripted.generateText(request as never)).resolves.toMatchObject({
+      output: "short",
+    });
+  });
+
+  test("names the known keys when a request name has no entry", async () => {
+    const scripted = createScriptedExecutors({
+      text: { summarise: ["short"], expand: ["long"] },
+    });
+    await expect(scripted.generateText(request as never)).rejects.toThrow(
+      /no entry for request name 'summarize'\. Known names: summarise, expand/,
+    );
+  });
+
+  test("a '*' fallback keeps unnamed requests working", async () => {
+    const scripted = createScriptedExecutors({ text: { "*": ["anything"] } });
+    await expect(scripted.generateText(request as never)).resolves.toMatchObject({
+      output: "anything",
+    });
+  });
+
+  test("reports unknown decision names too", async () => {
+    const scripted = createScriptedExecutors({ decisions: { route: [{ type: "GO" }] } });
+    await expect(
+      scripted.decide({
+        kind: "decision",
+        id: "d1",
+        name: "choose",
+        model: "quick",
+        events: [{ type: "GO", toolName: "send_event_GO" }],
+        attempts: [],
+      } as never),
+    ).rejects.toThrow(/Known names: route/);
+  });
+
+  test("positional arrays still work", async () => {
+    const scripted = createScriptedExecutors({ text: ["first", "second"] });
+    await expect(scripted.generateText(request as never)).resolves.toMatchObject({
+      output: "first",
+    });
+    await expect(scripted.generateText(request as never)).resolves.toMatchObject({
+      output: "second",
+    });
+  });
+});

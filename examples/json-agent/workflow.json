@@ -1,6 +1,6 @@
 {
   "id": "support-ticket-json",
-  "description": "Support ticket flow: decide escalate-vs-reply, draft a reply, wait for human approval. Defined entirely as data \u2014 no code, no eval.",
+  "description": "Support ticket flow: decide escalate-vs-reply, draft a reply, wait for human approval. Defined entirely as data — no code, no eval.",
   "schemas": {
     "input": {
       "type": "object",
@@ -20,10 +20,10 @@
         "reply": {
           "type": "string"
         },
-        "resolution": {
+        "escalationReason": {
           "type": "string"
         },
-        "escalationReason": {
+        "error": {
           "type": "string"
         }
       },
@@ -56,12 +56,16 @@
       "type": "object",
       "properties": {
         "resolution": {
-          "type": "string"
+          "type": "string",
+          "enum": ["replied", "escalated", "failed"]
         },
         "reply": {
           "type": "string"
         },
         "escalationReason": {
+          "type": "string"
+        },
+        "error": {
           "type": "string"
         }
       },
@@ -69,8 +73,7 @@
     }
   },
   "context": {
-    "ticket": "{{ input.ticket }}",
-    "escalationReason": ""
+    "ticket": "{{ input.ticket }}"
   },
   "requests": {
     "draftReply": {
@@ -111,17 +114,16 @@
           "maxRetries": 2
         },
         "onError": {
-          "target": "resolved",
+          "target": "failed",
           "assign": {
-            "resolution": "escalated"
+            "error": "Triage decision failed: {{ event.error.message }}"
           }
         }
       },
       "on": {
         "ESCALATE": {
-          "target": "resolved",
+          "target": "escalated",
           "assign": {
-            "resolution": "escalated",
             "escalationReason": "{{ event.reason }}"
           }
         },
@@ -141,6 +143,12 @@
           "target": "awaitingApproval",
           "assign": {
             "reply": "{{ event.output.reply }}"
+          }
+        },
+        "onError": {
+          "target": "failed",
+          "assign": {
+            "error": "Drafting the reply failed: {{ event.error.message }}"
           }
         }
       }
@@ -165,26 +173,36 @@
       },
       "on": {
         "APPROVE": {
-          "target": "resolved",
-          "assign": {
-            "resolution": "replied"
-          }
+          "target": "replied"
         },
         "REJECT": {
-          "target": "resolved",
+          "target": "escalated",
           "assign": {
-            "resolution": "escalated",
             "escalationReason": "Reviewer rejected the drafted reply."
           }
         }
       }
     },
-    "resolved": {
+    "replied": {
       "type": "final",
       "output": {
-        "resolution": "{{ context.resolution }}",
-        "reply": "{{ context.reply }}",
-        "escalationReason": "{{ context.escalationReason }}"
+        "resolution": "replied",
+        "reply": "{{ context.reply }}"
+      }
+    },
+    "escalated": {
+      "type": "final",
+      "output": {
+        "resolution": "escalated",
+        "escalationReason": "{{ context.escalationReason }}",
+        "reply": "{{ context.reply }}"
+      }
+    },
+    "failed": {
+      "type": "final",
+      "output": {
+        "resolution": "failed",
+        "error": "{{ context.error }}"
       }
     }
   }

@@ -48,7 +48,11 @@ export type AgentLintSeverity = "error" | "warning";
  * or config location, and `message` explains the problem and its remedy.
  */
 export interface AgentLintDiagnostic {
-  code: "decide-without-events" | "direct-object-src" | "unhandled-agent-messages";
+  code:
+    | "decide-without-events"
+    | "direct-object-src"
+    | "invoke-without-on-error"
+    | "unhandled-agent-messages";
   severity: AgentLintSeverity;
   /** State path (`parent.child`) or config pointer (e.g. `(root)`, `context`) the finding is about. */
   path: string;
@@ -237,6 +241,41 @@ function checkDirectObjectSrc(ctx: LintContext): AgentLintDiagnostic[] {
   return out;
 }
 
+// True when a state config can observe an actor error: an explicit state-level
+// `onError`, a wildcard handler, or an `xstate.error.*` handler in `on`.
+function handlesActorError(config: AnyConfig): boolean {
+  if (config["onError"] !== undefined) return true;
+  return Object.keys(config.on ?? {}).some(
+    (type) => type === "*" || type.startsWith("xstate.error"),
+  );
+}
+
+function checkInvokeWithoutOnError(ctx: LintContext): AgentLintDiagnostic[] {
+  const out: AgentLintDiagnostic[] = [];
+  for (const node of ctx.index.values()) {
+    for (const invoke of node.invokes) {
+      if (invoke.onError !== undefined || handlesActorError(node.config)) {
+        continue;
+      }
+      if (ancestorChain(node, ctx.index).some((ancestor) => handlesActorError(ancestor.config))) {
+        continue;
+      }
+      const srcName = typeof invoke.src === "string" ? invoke.src : "(inline logic)";
+      out.push({
+        code: "invoke-without-on-error",
+        severity: "warning",
+        path: node.path,
+        message:
+          `State '${node.path}' invokes '${srcName}' with no 'onError' transition, and no ` +
+          `ancestor handles an actor error. A rejected request or actor puts the machine in ` +
+          `an error state with no modeled recovery. Add 'onError' (a 'failed' final state, or ` +
+          `a bounded retry).`,
+      });
+    }
+  }
+  return out;
+}
+
 function checkUnhandledAgentMessages(ctx: LintContext): AgentLintDiagnostic[] {
   const handlesMessages = (config: AnyConfig) =>
     config.on?.[AGENT_MESSAGES_EVENT_TYPE] !== undefined || config.on?.["*"] !== undefined;
@@ -287,6 +326,7 @@ function checkUnhandledAgentMessages(ctx: LintContext): AgentLintDiagnostic[] {
 const LINT_CHECKS: Array<(ctx: LintContext) => AgentLintDiagnostic[]> = [
   checkDecideWithoutEvents,
   checkDirectObjectSrc,
+  checkInvokeWithoutOnError,
   checkUnhandledAgentMessages,
 ];
 

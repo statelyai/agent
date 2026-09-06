@@ -1,17 +1,21 @@
 /**
  * Human-in-the-loop: draft → idle review → APPROVE / REJECT redraft, with a
- * JSON snapshot round-trip across every `runAgent` call.
+ * real JSON snapshot round-trip between `runAgent` calls.
  *
  * Demonstrates:
  *   - An *idle* review state: `reviewing` has no invoke, so `runAgent` settles
  *     `{ status: 'idle', snapshot }` instead of hanging — the machine is
  *     waiting on a human, not on work.
- *   - Typed `meta.interaction` on the idle state for the label; legal events
- *     are inferred from the idle snapshot with `getAcceptedEvents(...)`.
- *   - REJECT-with-reason redraft loop: rejecting feeds the reason back into the
- *     next draft; APPROVE publishes.
- *   - Snapshot persistence: each idle settle's `persist()` result survives a
- *     JSON round-trip and resumes in the *next* `runAgent` call.
+ *   - `meta.interaction` typed by the library's own `interactionMetaSchema`,
+ *     read back with `getInteraction(snapshot)`, which filters the choices
+ *     through the events the machine currently accepts.
+ *   - A REJECT-with-feedback redraft loop, bounded by `MAX_REJECTIONS`: the
+ *     first rejections redraft, the one past the budget ends the run in
+ *     `abandoned`. APPROVE publishes. The loop cannot run forever and no
+ *     answer is silently swallowed.
+ *   - Snapshot persistence: the idle settle's `persist()` result is
+ *     `JSON.parse(JSON.stringify(...))`-ed and resumed in the *next*
+ *     `runAgent` call.
  *
  * Two entry points:
  *   - `runHumanInTheLoopExample(options)` — compact, test-facing: draft → idle →
@@ -24,19 +28,22 @@
  * Run: OPENAI_API_KEY=... npx tsx examples/human-in-the-loop/index.ts
  */
 import { z } from "zod";
+import type { Snapshot } from "xstate";
 import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 import {
   eventFromInteraction,
-  getAcceptedEvents,
   getInteraction,
-  getStateMeta,
+  interactionMetaSchema,
   isAgentIdle,
   runAgent,
   runAgentLoop,
   setupAgent,
   type AgentRequestExecutors,
 } from "@statelyai/agent";
+
+/** Rejections allowed before the review loop gives up. */
+export const MAX_REJECTIONS = 2;
 
 export const models = defineModels({
   writer: openai("gpt-5.4-mini"),
@@ -45,36 +52,28 @@ export const models = defineModels({
 const contextSchema = z.object({
   topic: z.string(),
   draft: z.string().nullable(),
+  /** The last rejection's text, fed back into the next draft. */
+  feedback: z.string().nullable(),
+  /** Rejections used so far; bounds the reviewing → drafting loop. */
+  rejections: z.number(),
 });
 
 const agentSetup = setupAgent({
   models,
   context: contextSchema,
   input: z.object({ topic: z.string() }),
-  output: z.object({ published: z.boolean(), draft: z.string() }),
-  // Typed interaction meta: the pause's `label`, a button `label`/`style` per
-  // accepted event, and `textEvent` naming the ONE event free-typed text is
-  // delivered to.
-  meta: z.object({
-    interaction: z
-      .object({
-        label: z.string(),
-        events: z
-          .record(
-            z.string(),
-            z.object({
-              label: z.string().optional(),
-              style: z.enum(["primary", "danger", "default"]).optional(),
-            }),
-          )
-          .optional(),
-        textEvent: z.string().optional(),
-      })
-      .optional(),
-  }),
+  // `draft` is nullable because `abandoned` is also where a failed first draft
+  // lands, and there is no draft to report then.
+  output: z.object({ published: z.boolean(), draft: z.string().nullable() }),
+  // The library's own interaction meta — a `label`, a button `label`/`style`
+  // per accepted event, and `textEvent` naming the ONE event free-typed text
+  // is delivered to — instead of restating that shape per machine.
+  meta: interactionMetaSchema,
   events: {
     APPROVE: z.object({}),
-    REJECT: z.object({ reason: z.string() }),
+    // `text` is the field `eventFromInteraction(snapshot, { text })` fills in
+    // for a state's declared `textEvent`.
+    REJECT: z.object({ text: z.string() }),
   },
   // Most machines need no predicate: event-handling states are structurally
   // idle. This deliberately demonstrates extending—not replacing—the default.
@@ -82,17 +81,23 @@ const agentSetup = setupAgent({
   requests: {
     writeDraft: {
       schemas: {
-        input: z.object({ topic: z.string() }),
+        input: z.object({ topic: z.string(), feedback: z.string().nullable() }),
         output: z.string(),
       },
       model: "writer",
       system: "You write short, punchy internal announcements — two or three sentences.",
-      prompt: ({ input }) => `Write a short announcement about: ${input.topic}`,
+      // The prompt is composed here, from durable facts. Context stores the
+      // topic and the last feedback, never the rendered prompt.
+      prompt: ({ input }) =>
+        input.feedback === null
+          ? `Write a short announcement about: ${input.topic}`
+          : `Write a short announcement about: ${input.topic}\nRevision requested: ${input.feedback}`,
     },
   },
   // `reviewing` and `published` are reachable only after drafting's onDone set
   // `draft`; narrowing it to non-null lets reviewing's bare APPROVE target
-  // satisfy published's narrowed context.
+  // satisfy published's narrowed context. `abandoned` is not narrowed: a failed
+  // first draft reaches it with no draft at all.
   states: {
     reviewing: { schemas: { context: contextSchema.extend({ draft: z.string() }) } },
     published: { schemas: { context: contextSchema.extend({ draft: z.string() }) } },
@@ -101,22 +106,31 @@ const agentSetup = setupAgent({
 
 export const humanInTheLoopMachine = agentSetup.createMachine({
   id: "human-in-the-loop",
-  context: ({ input }) => ({ topic: input.topic, draft: null }),
+  context: ({ input }) => ({
+    topic: input.topic,
+    draft: null,
+    feedback: null,
+    rejections: 0,
+  }),
   initial: "drafting",
   states: {
     drafting: {
       invoke: {
         src: "writeDraft",
-        input: ({ context }) => ({ topic: context.topic }),
+        input: ({ context }) => ({ topic: context.topic, feedback: context.feedback }),
         onDone: ({ output }) => ({
           target: "reviewing",
           context: { draft: output },
         }),
+        onError: ({ event }) => ({
+          target: "abandoned",
+          context: { feedback: `writeDraft failed: ${String(event.error)}` },
+        }),
       },
     },
     // No invoke here: runAgent settles idle and waits for a human event.
-    // `meta.interaction` tells the host what to show; legal events come from
-    // `getAcceptedEvents(snapshot)`.
+    // `getInteraction(snapshot)` tells the host what to show, filtered through
+    // the events the machine currently accepts.
     reviewing: {
       tags: ["awaiting-review"],
       meta: {
@@ -133,17 +147,31 @@ export const humanInTheLoopMachine = agentSetup.createMachine({
       },
       on: {
         APPROVE: { target: "published" },
-        REJECT: ({ context, event }) => ({
-          target: "drafting",
-          context: {
-            topic: `${context.topic}\nRevision requested: ${event.reason}`,
-          },
-        }),
+        // The budget is a counter in context compared to a constant, checked
+        // in the transition itself: the first MAX_REJECTIONS rejections redraft,
+        // the next one ends the run in `abandoned`. The loop cannot run forever
+        // and nothing silently swallows the human's answer.
+        REJECT: ({ context, event }) =>
+          context.rejections >= MAX_REJECTIONS
+            ? { target: "abandoned", context: { feedback: event.text } }
+            : {
+                target: "drafting",
+                context: {
+                  feedback: event.text,
+                  rejections: context.rejections + 1,
+                },
+              },
       },
     },
     published: {
       type: "final",
       output: ({ context }) => ({ published: true, draft: context.draft }),
+    },
+    // A distinct final state, not `published: false` smuggled out of the happy
+    // path: the review budget ran out, or drafting errored.
+    abandoned: {
+      type: "final",
+      output: ({ context }) => ({ published: false, draft: context.draft }),
     },
   },
 });
@@ -159,12 +187,15 @@ export interface HumanInTheLoopResult {
   interactionLabel: string | undefined;
   legalEvents: string[];
   published: boolean;
-  publishedDraft: string;
+  publishedDraft: string | null;
+  /** Drafts produced: 1 plus the number of rejections that were accepted. */
+  drafts: number;
 }
 
 /**
- * Drafts, pauses idle for review, persists the snapshot via a JSON round-trip,
- * then resumes with APPROVE in a second `runAgent` call. Returns both phases.
+ * Drafts, pauses idle for review, rejects once with feedback, then approves —
+ * each resume from a snapshot that really went through `JSON.stringify` and
+ * back, as it would if it had been stored in a row between HTTP requests.
  */
 export async function runHumanInTheLoopExample(
   options: RunHumanInTheLoopOptions = {},
@@ -181,27 +212,43 @@ export async function runHumanInTheLoopExample(
   }
 
   const draft = first.snapshot.context.draft ?? "";
-  const { interaction } = getStateMeta(first.snapshot);
-  const legalEvents = getAcceptedEvents(first.snapshot).map((event) => event.type);
+  const interaction = getInteraction(first.snapshot);
+  const legalEvents = interaction?.events.map(({ type }) => type) ?? [];
 
-  // Phase 2: ...later, new process, human approved. Same machine, one event,
-  // resumed from the persisted (JSON-round-tripped) snapshot.
+  // Phase 2: ...later, new process. The human wants a change. The snapshot
+  // really goes through JSON — that is the whole persistence claim.
   const second = await runAgent(humanInTheLoopMachine, {
-    snapshot: first.persist(),
-    event: { type: "APPROVE" },
+    snapshot: roundTrip(first.persist()),
+    event: eventFromInteraction(first.snapshot, { text: "Mention the rollback plan." }),
     ...executors,
   });
-  if (second.status !== "done") {
-    throw new Error(`Expected done after APPROVE, got '${second.status}'.`);
+  if (second.status !== "idle") {
+    throw new Error(`Expected a second review pause, got '${second.status}'.`);
+  }
+
+  // Phase 3: approve the revised draft, again across a JSON round-trip.
+  const third = await runAgent(humanInTheLoopMachine, {
+    snapshot: roundTrip(second.persist()),
+    event: eventFromInteraction(second.snapshot, { type: "APPROVE" }),
+    ...executors,
+  });
+  if (third.status !== "done") {
+    throw new Error(`Expected done after APPROVE, got '${third.status}'.`);
   }
 
   return {
     draft,
     interactionLabel: interaction?.label,
     legalEvents,
-    published: second.output.published,
-    publishedDraft: second.output.draft,
+    published: third.output.published,
+    publishedDraft: third.output.draft,
+    drafts: second.snapshot.context.rejections + 1,
   };
+}
+
+/** Serialize and revive a persisted snapshot, as a database row would. */
+function roundTrip(snapshot: Snapshot<unknown>): Snapshot<unknown> {
+  return JSON.parse(JSON.stringify(snapshot)) as Snapshot<unknown>;
 }
 
 // Direct run: runAgentLoop drives a real interactive review. Each idle pause
@@ -236,20 +283,18 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
 
         const answer = (await promptLine("approve / reject? ")).toLowerCase();
         if (answer.startsWith("a")) {
-          return eventFromInteraction(snapshot, { type: "APPROVE" }) as { type: "APPROVE" };
+          // Typed off the snapshot: the machine's own event union, no cast.
+          return eventFromInteraction(snapshot, { type: "APPROVE" });
         }
-        const reason = await promptLine("Reason for rejection: ");
-        return eventFromInteraction(snapshot, { type: "REJECT", reason }) as {
-          type: "REJECT";
-          reason: string;
-        };
+        const text = await promptLine("What should change? ");
+        return eventFromInteraction(snapshot, { text });
       },
     });
 
     if (result.status !== "done") {
-      throw new Error(`Expected done after APPROVE, got '${result.status}'.`);
+      throw new Error(`Expected a final state, got '${result.status}'.`);
     }
-    console.log("\n--- Published ---");
+    console.log(result.output.published ? "\n--- Published ---" : "\n--- Abandoned ---");
     console.log(result.output.draft);
   })().catch((error) => {
     console.error(error);

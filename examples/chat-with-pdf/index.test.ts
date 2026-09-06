@@ -53,7 +53,7 @@ async function play(options: PlayOptions): Promise<PlayResult> {
   let questionNumber = 0;
 
   const generateText: AgentRequestExecutor = async (request) => {
-    if (request.system?.includes("Grade a quiz answer")) {
+    if (request.name === "gradeAnswer") {
       gradePrompts.push(request.prompt ?? "");
       const answer = (request.prompt ?? "").match(/Learner's answer: (.*)/)?.[1] ?? "";
       return {

@@ -139,7 +139,8 @@ describe("langchain-host: Direction B (machine as a LangChain tool)", () => {
     // The machine drove itself past the prompt and both model calls to the
     // human review pause; the host never named a state to get there.
     expect(result.draft?.subject).toBe("Deploy pipeline is faster");
-    expect(result.interaction?.type).toBe("select");
+    expect(result.interaction?.events.map(({ type }) => type)).toEqual(["SEND", "REQUEST_CHANGES"]);
+    expect(result.interaction?.textEvent).toBe("REQUEST_CHANGES");
   });
 
   test("the two tools run the machine to done and return JSON", async () => {
@@ -150,17 +151,17 @@ describe("langchain-host: Direction B (machine as a LangChain tool)", () => {
     expect(finished.sentEmails[0]?.to).toBe("team@example.com");
   });
 
-  test("revision text is routed to the field the interaction declared", async () => {
+  test("revision text is delivered through the interaction's declared textEvent", async () => {
     useModel(new ScriptedChatModel({ responses: [...machineScript, machineScript[1]!] }));
     const started = await startDraft("Announce the faster deploys.");
     if (started.status !== "pending") throw new Error("expected pending");
 
-    // REQUEST_CHANGES declares an input field (`changes`); the host derives that
-    // from `meta.interaction` rather than hardcoding the event's payload shape.
+    // REQUEST_CHANGES is the reviewing pause's `textEvent`, so the host attaches
+    // the text to it without hardcoding the event's payload shape.
     const revised = await resumeDraft(started.handle, "REQUEST_CHANGES", "Make it shorter.");
     expect(revised.status).toBe("pending");
     if (revised.status !== "pending") return;
-    expect(revised.interaction?.type).toBe("select");
+    expect(revised.interaction?.textEvent).toBe("REQUEST_CHANGES");
     expect(revised.draft).not.toBeNull();
   });
 

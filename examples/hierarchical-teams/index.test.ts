@@ -2,11 +2,13 @@ import { expect, test } from "vitest";
 import type { AgentDecisionRequest, ChosenEvent } from "@statelyai/agent";
 import { hierarchicalTeamsMachine, runHierarchicalTeamsExample } from "./index.js";
 
+// Keyed by the request's declared `name`, so a mock never has to guess from
+// prompt text or model id.
 const WORKER_RESPONSES: Record<string, string> = {
-  searcher: "source A; source B",
-  scraper: "Explicit states expose retries and approval gates.",
-  outliner: "1. Reliability\n2. Inspection",
-  writer: "Explicit workflow state makes reliability behavior inspectable.",
+  search: "source A; source B",
+  scrape: "Explicit states expose retries and approval gates.",
+  outline: "1. Reliability\n2. Inspection",
+  write: "Explicit workflow state makes reliability behavior inspectable.",
 };
 
 // The research supervisor is the decision whose candidates include FINISH; the
@@ -21,8 +23,8 @@ test("research supervisor routes SEARCH → SCRAPE → FINISH, looping workers",
 
   const output = await runHierarchicalTeamsExample({
     generateText: async (request) => {
-      workerCalls.push(request.model);
-      return { output: WORKER_RESPONSES[request.model] };
+      workerCalls.push(request.name);
+      return { output: WORKER_RESPONSES[request.name] };
     },
     decide: async (request: AgentDecisionRequest): Promise<{ event: ChosenEvent }> => {
       if (isResearchDecision(request)) {
@@ -37,22 +39,23 @@ test("research supervisor routes SEARCH → SCRAPE → FINISH, looping workers",
 
   // The supervisor looped both workers in the order it chose, then the writing
   // team ran — worker call order reflects the routing, not a fixed pipeline.
-  expect(workerCalls).toEqual(["searcher", "scraper", "outliner", "writer"]);
+  expect(workerCalls).toEqual(["search", "scrape", "outline", "write"]);
   expect(researchDecisions).toBe(3); // SEARCH, SCRAPE, FINISH
   expect(output.details.research).toContain("approval gates");
   expect(output.details.report).toContain("inspectable");
 
   // The team tree leads: one line per team, indented one line per worker, and
   // the coordinator's verdict.
-  expect(output.teamReport.split("\n").slice(0, 6)).toEqual([
+  expect(output.teamReport.split("\n").slice(0, 8)).toEqual([
     "research team",
     "  search. done. source A; source B",
     "  scrape. done. Explicit states expose retries and approval gates.",
     "writing team",
     "  outline. done. 1. Reliability 2. Inspection",
     "  write. done. Explicit workflow state makes reliability behavior inspectable.",
+    "coordinator",
+    "  review. done. publish",
   ]);
-  expect(output.teamReport).toContain("coordinator. publish");
   // The report sits under the tree, so the tree string always leads.
   expect(output.teamReport).toContain("Report\nExplicit workflow state");
   expect(output.teamReport.length).toBeGreaterThan(output.details.report.length);
@@ -63,8 +66,8 @@ test("worker-step budget bounds the research loop", async () => {
 
   const output = await runHierarchicalTeamsExample({
     generateText: async (request) => {
-      workerCalls.push(request.model);
-      return { output: WORKER_RESPONSES[request.model] ?? "note" };
+      workerCalls.push(request.name);
+      return { output: WORKER_RESPONSES[request.name] ?? "note" };
     },
     // The research supervisor never stops on its own — it always asks to
     // SEARCH. The budget (2) must force FINISH once exhausted.
@@ -76,8 +79,8 @@ test("worker-step budget bounds the research loop", async () => {
 
   // Exactly `budget` searches ran before the loop was forced to end; the
   // supervisor never chose SCRAPE.
-  expect(workerCalls.filter((model) => model === "searcher")).toHaveLength(2);
-  expect(workerCalls).not.toContain("scraper");
+  expect(workerCalls.filter((name) => name === "search")).toHaveLength(2);
+  expect(workerCalls).not.toContain("scrape");
   // The coordinator still published a report from what was gathered.
   expect(output.details.report).toContain("inspectable");
 });
@@ -88,8 +91,8 @@ test("coordinator supervisor sends one bounded revision round back to research",
 
   const output = await runHierarchicalTeamsExample({
     generateText: async (request) => {
-      workerCalls.push(request.model);
-      return { output: WORKER_RESPONSES[request.model] ?? "note" };
+      workerCalls.push(request.name);
+      return { output: WORKER_RESPONSES[request.name] ?? "note" };
     },
     decide: async (request: AgentDecisionRequest): Promise<{ event: ChosenEvent }> => {
       if (isResearchDecision(request)) return { event: { type: "FINISH" } };
@@ -101,10 +104,10 @@ test("coordinator supervisor sends one bounded revision round back to research",
 
   // One REVISE + one PUBLISH; the writing team ran twice (revision round).
   expect(coordinatorDecisions).toBe(2);
-  expect(workerCalls.filter((model) => model === "outliner")).toHaveLength(2);
+  expect(workerCalls.filter((name) => name === "outline")).toHaveLength(2);
 
   // The tree records the revision round as its own labelled block.
-  expect(output.teamReport).toContain("coordinator. revise");
+  expect(output.teamReport).toContain("  review. done. revise");
   expect(output.teamReport).toContain("research team (revision)");
   expect(output.teamReport.match(/^writing team$/gm)).toHaveLength(2);
 });

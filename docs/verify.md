@@ -7,7 +7,7 @@ description: Statically lint, simulate, and explore agent machines without any A
 
 This page covers the APIs that check an agent machine before it runs. None of them need an API key or a model call.
 
-- `lintAgentMachine` statically catches dead states, undeliverable decisions, and output-contract gaps. Pass `{ throw: true }` for the throwing form.
+- `lintAgentMachine` statically catches undeliverable decisions, unrebindable invoke sources, invokes with no error path, and dropped framework messages. Pass `{ throw: true }` for the throwing form.
 - `assertAgentMachine` is the one-line throwing form for tests and generation loops.
 - `simulateAgent` drives a deterministic scripted playthrough to a known outcome.
 - `explorePaths` and `canReach` enumerate decision branches and check that a target state is reachable.
@@ -41,16 +41,12 @@ skip checks by code.
 assertAgentMachine(machine, { warnings: true });
 ```
 
-| Code                       | Severity | Fires when                                                                                                                                                                                                                                                                         |
-| -------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `unreachable-state`        | error    | A state that no transition, `always`, `choice`, `onDone`, or `onError` can reach from the initial state. The check is conservative. Dynamic function transitions over-approximate, so it never reports a false positive. It is exact for `fromConfig` machines, because the lowering retains their declared targets.                 |
-| `decide-without-events`    | error    | A state invokes `agent.decide` but neither it nor any ancestor handles any event, so the chosen event can never be delivered.                                                                                                                                                      |
-| `unserializable-context`   | warning  | The context schema exposes no JSON schema, for example a `z.custom` messages array, so its fields cannot be checked statically for JSON persist and resume.                                                                                                                                   |
-| `direct-object-src`        | warning  | An invoke `src` is a direct object or machine value that `runAgent` cannot rebind, so it inherits no host executors.                                                                                                                                                            |
-| `final-without-output`     | error    | The machine declares an output schema but a top-level final state has no `output`.                                                                                                                                                                                                 |
-| `final-output-reads-event` | warning  | A top-level final state's `output` function reads the entering `event`. Final `output` functions are evaluated more than once with different events, so `event` is unreliable. Read `context` only, and capture what you need into context in the transition that targets the final state. |
-| `undeclared-event`         | warning  | A state handles an event in `on:` that is not declared in `schemas.events` and is not a builtin or wildcard pattern. Its payload stays unvalidated. This is usually a typo. The check is skipped when the machine declares no events.                                                               |
-| `missing-final`            | warning  | The machine has no reachable final state, so it can only idle or loop. This is legal, but flagged.                                                                                                                                                                                                     |
+| Code                       | Severity | Fires when                                                                                                                                                                                                                                                          |
+| -------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `decide-without-events`    | error    | A state invokes `agent.decide` but neither it nor any ancestor handles any event, so the chosen event can never be delivered.                                                                                                                                       |
+| `invoke-without-on-error`  | warning  | An invoke declares no `onError`, and neither its state nor any ancestor handles an actor error, so a rejected request or actor lands the machine in an error state with no modeled recovery. Add `onError` targeting a `failed` final state or a bounded retry.     |
+| `direct-object-src`        | warning  | An invoke `src` is a direct object or machine value that `runAgent` cannot rebind, so it inherits no host executors.                                                                                                                                                |
+| `unhandled-agent-messages` | warning  | A text request may return framework messages, but no state handles `agent.messages`, so returned transcripts are dropped. Add `on: { 'agent.messages': appendMessages() }` when retention is intended, or disable the warning when messages are ignored on purpose. |
 
 ## Test assertions
 
@@ -153,7 +149,6 @@ if (result.status === "done") {
 - A src with no canned output halts that branch with a `needs-output` terminal instead of throwing. The terminal's `missingSrc` names it.
 
 <!-- viz: branch exploration tree for the refund machine: deciding -> AUTO_APPROVE (pruned by guard) / NEEDS_REVIEW -> awaitingHuman -> refunded, denied -->
-
 
 ```ts
 import { explorePaths } from "@statelyai/agent";

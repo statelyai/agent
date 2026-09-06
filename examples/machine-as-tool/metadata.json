@@ -1,6 +1,6 @@
 {
   "name": "machine-as-tool",
-  "title": "Refund approval (machine as tool)",
+  "title": "Refund approval (machine as a stateless tool)",
   "kind": "agent-workflow",
   "origin": {
     "type": "stately-agent",
@@ -9,16 +9,22 @@
   },
   "comparison": {
     "targets": [],
-    "purpose": "Embed a whole agent machine inside one tool call of a host harness: start/resume tools bridge a JSON-safe snapshot handle and read the typed interaction meta."
+    "purpose": "Embed a whole agent machine inside one tool call of a host harness, with no framework and no run store: the handle IS the persisted snapshot, so start/resume are pure functions of a JSON blob. The policy check branches in a choice state, so a small refund auto-approves without ever pausing and only an over-limit one comes back with an interaction. See mastra-host for the same bridge inside a real framework, with a store-keyed handle."
   },
   "starters": [
     {
       "label": "Small refund ($129.99) — auto-approvable",
-      "input": { "amount": 129.99, "orderId": "ORD-4471" }
+      "input": {
+        "amount": 129.99,
+        "orderId": "ORD-4471"
+      }
     },
     {
       "label": "Large refund ($780) — over the approval limit",
-      "input": { "amount": 780, "orderId": "ORD-9002" }
+      "input": {
+        "amount": 780,
+        "orderId": "ORD-9002"
+      }
     }
   ]
 }

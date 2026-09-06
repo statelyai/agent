@@ -22,7 +22,14 @@
  */
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
-import { runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
+import {
+  createTextLogic,
+  getStatePath,
+  runAgent,
+  setupAgent,
+  type AgentRequestExecutors,
+  type DoneActorEventOf,
+} from "@statelyai/agent";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 
 const queriesSchema = z.array(z.string()).min(2).max(4);
@@ -35,6 +42,12 @@ export const models = defineModels({
 });
 
 const BRANCH_PREFIX = "research-";
+
+/** Branch id for round `round`, query `index`. The round is part of the id so a
+ * follow-up round never reuses a spawned child's name. */
+function branchId(round: number, index: number): string {
+  return `${BRANCH_PREFIX}${round}-${index}`;
+}
 
 /** One cited page: the exact document a claim came from, not a query for it. */
 const sourceSchema = z.object({
@@ -90,38 +103,67 @@ function renderLedger(sources: Source[]): string {
 /** Reflection rounds before the report is written no matter what. */
 const MAX_ROUNDS = 2;
 
+const contextSchema = z.object({
+  question: z.string(),
+  queries: queriesSchema,
+  // findings keyed by branch id (`research-0`..`research-<N-1>`), each
+  // carrying the `[n]` markers of the sources it rests on
+  findings: z.record(z.string(), z.string()),
+  /** Run-wide ledger, deduped by URL. Position is the citation number. */
+  sources: z.array(sourceSchema),
+  /** Branches spawned this round. */
+  expected: z.number(),
+  /** Branches that finished this round, succeeded or failed. */
+  settled: z.number(),
+  /** Branch ids whose researcher errored, so a failure is visible, not silent. */
+  failedBranches: z.array(z.string()),
+  /** The reflector's latest verdict; `null` before the first reflection. */
+  assessment: z.object({ sufficient: z.boolean(), gaps: z.string() }).nullable(),
+  feedback: z.string().nullable(),
+  round: z.number(),
+  report: z.string().nullable(),
+  /** Why the run failed, when a request errored. `null` otherwise. */
+  failure: z.string().nullable(),
+});
+
+/**
+ * One researcher branch, as a standalone logic value rather than a `requests`
+ * entry: `researching` spawns it dynamically, and `DoneActorEventOf<typeof
+ * research>` types the collected `xstate.done.actor` event off it.
+ */
+export const research = createTextLogic({
+  schemas: {
+    input: z.object({ question: z.string(), query: z.string() }),
+    output: z.object({
+      finding: z.string(),
+      sources: z.array(sourceSchema).min(1).max(3),
+    }),
+  },
+  name: "research",
+  model: "researcher",
+  system:
+    "Research the query using the host's available search tools. Return a concise finding " +
+    "plus the specific pages it came from: each source is the document carrying the claim " +
+    "(article, paper, docs page) with its title, its page URL, and the one line from it " +
+    "the finding rests on. Never cite a search-results page or a bare homepage.",
+  prompt: ({ input }) => `Question: ${input.question}\nQuery: ${input.query}`,
+});
+
 const setup = setupAgent({
   models,
-  context: z.object({
-    question: z.string(),
-    queries: queriesSchema,
-    // findings keyed by branch id (`research-0`..`research-<N-1>`), each
-    // carrying the `[n]` markers of the sources it rests on
-    findings: z.record(z.string(), z.string()),
-    /** Run-wide ledger, deduped by URL. Position is the citation number. */
-    sources: z.array(sourceSchema),
-    sourceLedger: z.string(),
-    expected: z.number(),
-    feedback: z.string().nullable(),
-    round: z.number(),
-    maxRounds: z.number(),
-    report: z.string().nullable(),
-  }),
+  context: contextSchema,
+  actors: { research },
   input: z.object({ question: z.string() }),
   output: z.object({
     report: z.string(),
     rounds: z.number(),
     findings: z.record(z.string(), z.string()),
+    /** Rendered from `context.sources` at the end, never stored in context. */
     sourceLedger: z.string(),
+    /** Branch ids whose researcher errored. Empty on a clean run. */
+    failedBranches: z.array(z.string()),
+    failure: z.string().nullable(),
   }),
-  states: {
-    planning: {},
-    researching: {},
-    collecting: {},
-    reflecting: {},
-    writing: {},
-    done: {},
-  },
   requests: {
     planResearch: {
       schemas: {
@@ -133,22 +175,6 @@ const setup = setupAgent({
         "Plan two to four complementary research queries. If feedback is present, target the named coverage gaps.",
       prompt: ({ input }) =>
         `Question: ${input.question}\nCoverage feedback: ${input.feedback ?? "none"}`,
-    },
-    research: {
-      schemas: {
-        input: z.object({ question: z.string(), query: z.string() }),
-        output: z.object({
-          finding: z.string(),
-          sources: z.array(sourceSchema).min(1).max(3),
-        }),
-      },
-      model: "researcher",
-      system:
-        "Research the query using the host's available search tools. Return a concise finding " +
-        "plus the specific pages it came from: each source is the document carrying the claim " +
-        "(article, paper, docs page) with its title, its page URL, and the one line from it " +
-        "the finding rests on. Never cite a search-results page or a bare homepage.",
-      prompt: ({ input }) => `Question: ${input.question}\nQuery: ${input.query}`,
     },
     reflect: {
       schemas: {
@@ -189,18 +215,24 @@ export const deepResearchMachine = setup.createMachine({
     queries: [],
     findings: {},
     sources: [],
-    sourceLedger: "",
     expected: 0,
+    settled: 0,
+    failedBranches: [],
+    assessment: null,
     feedback: null,
     round: 0,
-    maxRounds: MAX_ROUNDS,
     report: null,
+    failure: null,
   }),
+  // The ledger is derived, so it is rendered here rather than kept in context
+  // and hand-synchronized on every branch that lands.
   output: ({ context }) => ({
     report: context.report ?? "",
     rounds: context.round,
     findings: context.findings,
-    sourceLedger: context.sourceLedger,
+    sourceLedger: renderLedger(context.sources),
+    failedBranches: context.failedBranches,
+    failure: context.failure,
   }),
   initial: "planning",
   states: {
@@ -214,8 +246,13 @@ export const deepResearchMachine = setup.createMachine({
             queries: output.queries,
             findings: {},
             expected: output.queries.length,
+            settled: 0,
             round: context.round + 1,
           },
+        }),
+        onError: ({ event }) => ({
+          target: "failed",
+          context: { failure: `planResearch failed: ${String(event.error)}` },
         }),
       },
     },
@@ -226,35 +263,53 @@ export const deepResearchMachine = setup.createMachine({
       entry: ({ context, actors }, enq) => {
         context.queries.forEach((query, index) => {
           enq.spawn(actors.research, {
-            id: `${BRANCH_PREFIX}${index}`,
+            id: branchId(context.round, index),
             input: { question: context.question, query },
           });
         });
       },
       always: { target: "collecting" },
     },
-    // REDUCE: count every researcher completion, keying its finding by branch id
-    // via canonical `xstate.done.actor` + `actorId` (ids only known at runtime).
+    // REDUCE: count every researcher *settlement* — a finding or an error —
+    // keying results by branch id via canonical `xstate.done.actor` +
+    // `actorId` (ids are only known at runtime). Counting failures is what
+    // stops one broken researcher from parking the machine here forever.
     collecting: {
       on: {
         "xstate.done.actor": ({ context, event }) => {
-          const id = (event as unknown as { actorId: string }).actorId;
-          if (!id.startsWith(BRANCH_PREFIX)) {
+          const { actorId, output } = event as DoneActorEventOf<typeof research>;
+          if (!actorId.startsWith(BRANCH_PREFIX)) {
             return undefined;
           }
-          const output = (event as unknown as { output: { finding: string; sources: Source[] } })
-            .output;
           // The branch's sources join the run-wide ledger, and its finding
           // carries the `[n]` markers back, so the citation survives the
           // reduce instead of being re-guessed by the writer.
           const { sources, markers } = mergeSources(context.sources, output.sources);
-          const findings = {
-            ...context.findings,
-            [id]: markers ? `${output.finding} ${markers}` : output.finding,
+          const settled = context.settled + 1;
+          const next = {
+            settled,
+            sources,
+            findings: {
+              ...context.findings,
+              [actorId]: markers ? `${output.finding} ${markers}` : output.finding,
+            },
           };
-          const next = { findings, sources, sourceLedger: renderLedger(sources) };
-          return Object.keys(findings).length >= context.expected
-            ? { target: "reflecting", context: next }
+          return settled >= context.expected
+            ? { target: "reflecting" as const, context: next }
+            : { context: next };
+        },
+        "xstate.error.actor": ({ context, event }) => {
+          const { actorId } = event as unknown as { actorId: string };
+          if (!actorId.startsWith(BRANCH_PREFIX)) {
+            return undefined;
+          }
+          const settled = context.settled + 1;
+          const next = {
+            settled,
+            failedBranches: [...context.failedBranches, actorId],
+          };
+          return settled >= context.expected
+            ? { target: "reflecting" as const, context: next }
             : { context: next };
         },
       },
@@ -266,11 +321,26 @@ export const deepResearchMachine = setup.createMachine({
           question: context.question,
           findings: Object.values(context.findings),
         }),
-        onDone: ({ output, context }) => ({
-          target: output.sufficient || context.round >= context.maxRounds ? "writing" : "planning",
-          context: { feedback: output.gaps },
+        onDone: ({ output }) => ({
+          target: "reflected",
+          context: { assessment: output, feedback: output.gaps },
+        }),
+        onError: ({ event }) => ({
+          target: "failed",
+          context: { failure: `reflect failed: ${String(event.error)}` },
         }),
       },
+    },
+    // A `choice` state: the "research more or write it up" branch is its own
+    // state rather than a ternary buried in `reflecting`'s `onDone`, so both
+    // arms are visible to `explorePaths`/`canReach`. The round budget is a
+    // counter in context compared to the MAX_ROUNDS constant.
+    reflected: {
+      type: "choice",
+      choice: ({ context }) =>
+        context.assessment?.sufficient === true || context.round >= MAX_ROUNDS
+          ? { target: "writing" }
+          : { target: "planning" },
     },
     writing: {
       invoke: {
@@ -278,12 +348,19 @@ export const deepResearchMachine = setup.createMachine({
         input: ({ context }) => ({
           question: context.question,
           findings: Object.values(context.findings),
-          ledger: context.sourceLedger,
+          ledger: renderLedger(context.sources),
         }),
         onDone: ({ output }) => ({ target: "done", context: { report: output } }),
+        onError: ({ event }) => ({
+          target: "failed",
+          context: { failure: `writeReport failed: ${String(event.error)}` },
+        }),
       },
     },
     done: { type: "final" },
+    // A request errored. The run ends with the reason, not with an empty report
+    // dressed up as success.
+    failed: { type: "final" },
   },
 });
 
@@ -306,7 +383,7 @@ export async function runDeepResearchExample(options: RunDeepResearchOptions = {
     ...(generateText
       ? { executors: { generateText } }
       : { executors: createAiSdkExecutors({ models }) }),
-    ...(onProgress ? { onTransition: (snapshot) => onProgress(String(snapshot.value)) } : {}),
+    ...(onProgress ? { onTransition: (snapshot) => onProgress(getStatePath(snapshot)) } : {}),
   });
   if (result.status !== "done") throw new Error(`Deep research did not complete: ${result.status}`);
   return result.output;

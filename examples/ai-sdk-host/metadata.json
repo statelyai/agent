@@ -1,0 +1,29 @@
+{
+  "name": "ai-sdk-host",
+  "title": "Fight a goblin, narrated (Vercel AI SDK host)",
+  "kind": "host-adapter",
+  "machine": "gameMachine",
+  "origin": {
+    "type": "sdk-adapter",
+    "source": "Vercel AI SDK integration",
+    "url": "https://ai-sdk.dev"
+  },
+  "comparison": {
+    "targets": ["Vercel AI SDK tool calling", "LangGraph tool nodes"],
+    "purpose": "One combat turn: AI SDK tool calls become legal XState events, the machine computes the HP, and a text request only narrates it. The same machine runs unchanged on Workers AI — the host is the only provider-aware part."
+  },
+  "starters": [
+    {
+      "label": "Full health (20 vs 15)",
+      "input": { "playerHp": 20, "enemyHp": 15 }
+    },
+    {
+      "label": "Nearly down (5 vs 15) — HEAL becomes legal",
+      "input": { "playerHp": 5, "enemyHp": 15 }
+    },
+    {
+      "label": "Finishing blow (18 vs 4)",
+      "input": { "playerHp": 18, "enemyHp": 4 }
+    }
+  ]
+}

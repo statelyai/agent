@@ -34,7 +34,9 @@ import { openai } from "@ai-sdk/openai";
 import { createActor, createAsyncLogic, setup, waitFor } from "xstate";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 import {
+  createDecisionRequest,
   getAcceptedEvents,
+  isAgentIdle,
   resolveDecision,
   userMessage,
   type AgentRequestExecutors,
@@ -57,25 +59,30 @@ const contextSchema = z.object({
   topic: z.string(),
   maxRevisions: z.number(),
   /** Drafts produced so far (incremented each time `writeDraft` resolves). */
-  attempts: z.number(),
+  drafts: z.number(),
+  /** Accepted REVISEs so far. This — not the draft count — is what the
+   * revision budget bounds, so the two can never drift by one. */
+  revisions: z.number(),
   /** Failed draft attempts re-invoked so far. */
   retries: z.number(),
   maxRetries: z.number(),
   draft: z.string(),
-  /** Readable running tally of drafts, revisions, and retries. */
-  progress: z.string(),
+  /** Why the run gave up, when it did. `null` on the happy path. */
+  failure: z.string().nullable(),
 });
 
-/** The tally a host can show without decoding the trace. */
-function renderProgress(context: {
-  attempts: number;
-  maxRevisions: number;
-  retries: number;
-}): string {
-  const revisions = Math.max(0, context.attempts - 1);
+type WriterContext = z.infer<typeof contextSchema>;
+
+/**
+ * The tally a host can show without decoding the trace. DERIVED, not stored:
+ * a rendered string in context is one more thing to keep in sync, and it
+ * bloats every persisted snapshot.
+ */
+function renderProgress(context: WriterContext): string {
+  if (context.failure) return context.failure;
   const retries = `${context.retries} ${context.retries === 1 ? "retry" : "retries"}`;
   return (
-    `Draft ${context.attempts} ready: ${revisions} of ${context.maxRevisions} revisions used, ` +
+    `Draft ${context.drafts} ready: ${context.revisions} of ${context.maxRevisions} revisions used, ` +
     `${retries} after a failed attempt.`
   );
 }
@@ -86,10 +93,10 @@ const eventSchemas = {
 };
 
 /** Prompt for one draft, plain data the actor turns into a model call. */
-function draftPrompt(input: { topic: string; attempts: number }): string {
-  return input.attempts === 0
+function draftPrompt(input: { topic: string; revisions: number }): string {
+  return input.revisions === 0
     ? `Write a two-sentence launch blurb for: ${input.topic}. No buzzwords.`
-    : `Revise the launch blurb for: ${input.topic}. This is revision #${input.attempts}; ` +
+    : `Revise the launch blurb for: ${input.topic}. This is revision #${input.revisions}; ` +
         `make it more concrete and cut any filler.`;
 }
 
@@ -100,7 +107,8 @@ export const plainWriterMachine = setup({
     input: z.object({ topic: z.string() }),
     output: z.object({
       draft: z.string(),
-      attempts: z.number(),
+      drafts: z.number(),
+      revisions: z.number(),
       retries: z.number(),
       progress: z.string(),
     }),
@@ -109,11 +117,11 @@ export const plainWriterMachine = setup({
     // A bog-standard promise-shaped actor. Standalone it returns a canned
     // draft; the driving code replaces it with a model-backed one via
     // `machine.provide(...)`. The machine never mentions an LLM.
-    writeDraft: createAsyncLogic<string, { topic: string; attempts: number }>({
+    writeDraft: createAsyncLogic<string, { topic: string; revisions: number }>({
       run: async ({ input }) =>
-        input.attempts === 0
+        input.revisions === 0
           ? `${input.topic}: a first draft.`
-          : `${input.topic}: revised draft #${input.attempts}.`,
+          : `${input.topic}: revised draft #${input.revisions}.`,
     }),
   },
 }).createMachine({
@@ -121,17 +129,21 @@ export const plainWriterMachine = setup({
   context: ({ input }) => ({
     topic: input.topic,
     maxRevisions: MAX_REVISIONS,
-    attempts: 0,
+    drafts: 0,
+    revisions: 0,
     retries: 0,
     maxRetries: MAX_RETRIES,
     draft: "",
-    progress: "",
+    failure: null,
   }),
+  // The rendered tally is computed here, at the end, from the counters the
+  // machine actually maintains.
   output: ({ context }) => ({
     draft: context.draft,
-    attempts: context.attempts,
+    drafts: context.drafts,
+    revisions: context.revisions,
     retries: context.retries,
-    progress: context.progress,
+    progress: renderProgress(context),
   }),
   initial: "drafting",
   states: {
@@ -143,36 +155,19 @@ export const plainWriterMachine = setup({
       invoke: {
         id: "writeDraft",
         src: "writeDraft",
-        input: ({ context }) => ({ topic: context.topic, attempts: context.attempts }),
-        onDone: ({ context, output }) => {
-          const attempts = context.attempts + 1;
-          return {
-            target: "judging",
-            context: {
-              draft: output,
-              attempts,
-              progress: renderProgress({ ...context, attempts }),
-            },
-          };
-        },
+        input: ({ context }) => ({ topic: context.topic, revisions: context.revisions }),
+        onDone: ({ context, output }) => ({
+          target: "judging",
+          context: { draft: output, drafts: context.drafts + 1 },
+        }),
         // The retry budget, like the revision budget, is the machine's: past it
         // the transition targets `failed` instead of trying forever.
         onError: ({ context }) =>
           context.retries < context.maxRetries
-            ? {
-                target: "retrying",
-                context: {
-                  retries: context.retries + 1,
-                  progress:
-                    `Draft attempt failed: retrying ` +
-                    `(${context.retries + 1} of ${context.maxRetries}).`,
-                },
-              }
+            ? { target: "retrying", context: { retries: context.retries + 1 } }
             : {
                 target: "failed",
-                context: {
-                  progress: `Draft failed after ${context.maxRetries} retries.`,
-                },
+                context: { failure: `Draft failed after ${context.maxRetries} retries.` },
               },
       },
     },
@@ -184,8 +179,9 @@ export const plainWriterMachine = setup({
     // A normal decision point: an event-waiting state with a guarded loop.
     // Nothing here knows the events will be chosen by a model.
     judging: {
-      // Plain XState tags mark the human-wait state; hosts that want
-      // `runAgent` recognizes this resting event-handling state as idle.
+      // A plain XState tag, for a host that wants to spot the wait state by
+      // name. `isAgentIdle` does not need it: an active state that accepts an
+      // external event is already idle by the library's definition.
       tags: ["waiting"],
       on: {
         APPROVE: { target: "approved" },
@@ -193,8 +189,12 @@ export const plainWriterMachine = setup({
         // over budget, it returns nothing and the transition is not taken, so
         // `snapshot.can({ type: "REVISE" })` returns false and only APPROVE
         // remains legal — the machine, not the model, enforces the bound.
+        // The counter compared here is the one the transition increments, so
+        // exactly `maxRevisions` REVISEs are accepted, never one more.
         REVISE: ({ context }) =>
-          context.attempts <= context.maxRevisions ? { target: "drafting" } : undefined,
+          context.revisions < context.maxRevisions
+            ? { target: "drafting", context: { revisions: context.revisions + 1 } }
+            : undefined,
       },
     },
     approved: { type: "final" },
@@ -206,11 +206,13 @@ export const plainWriterMachine = setup({
 
 export interface PlainXstateResult {
   draft: string;
-  /** Drafts produced (1 + number of accepted REVISEs). */
-  attempts: number;
+  /** Drafts produced (1 + accepted REVISEs). */
+  drafts: number;
+  /** REVISEs the machine accepted. */
+  revisions: number;
   /** Failed draft attempts the machine re-invoked. */
   retries: number;
-  /** Readable tally of drafts, revisions, and retries. */
+  /** Readable tally, derived from the machine's output. */
   progress: string;
   /** The chosen event type per judging round, in order. */
   decisions: string[];
@@ -230,7 +232,7 @@ export async function runPlainXstateExample(
   //    unchanged, only the actor implementation is swapped.
   const boundMachine = plainWriterMachine.provide({
     actors: {
-      writeDraft: createAsyncLogic<string, { topic: string; attempts: number }>({
+      writeDraft: createAsyncLogic<string, { topic: string; revisions: number }>({
         run: async ({ input }) => {
           const result = await generateText({
             name: "writeDraft",
@@ -249,29 +251,31 @@ export async function runPlainXstateExample(
   const decisions: string[] = [];
   actor.start();
 
-  // 2. Drive the decisions. Whenever the machine settles somewhere that accepts
-  //    events (its `judging` state), let the model choose one — gated by the
-  //    machine's own guard via `snapshot.can`.
+  // 2. Drive the decisions. `isAgentIdle` is the library's definition of "this
+  //    machine is resting on a human/model choice, not on work in flight": an
+  //    active snapshot that accepts an external event. That is exactly the
+  //    wake-up condition this loop wants, so it is the predicate `waitFor`
+  //    waits on — no state name, no tag, no timer. `getAcceptedEvents` then
+  //    supplies the candidate list for the decision, and `snapshot.can` is the
+  //    final gate.
   for (;;) {
-    const snapshot = await waitFor(
-      actor,
-      (state) => state.status === "done" || getAcceptedEvents(state).length > 0,
-    );
+    const snapshot = await waitFor(actor, (state) => state.status === "done" || isAgentIdle(state));
     if (snapshot.status === "done") break;
 
     const events = getAcceptedEvents(snapshot); // [{ type: "APPROVE", toolName: "send_event_APPROVE" }, { type: "REVISE", toolName: "send_event_REVISE" }]
     const chosen = await resolveDecision<{ type: "APPROVE" } | { type: "REVISE" }>(
-      {
-        kind: "decision",
-        id: "judge",
+      // `createDecisionRequest` fills in the request's boilerplate (`kind`, the
+      // per-event tool names, the empty `attempts` list) so a host only states
+      // what it actually knows.
+      createDecisionRequest({
+        name: "judge",
         model: "judge",
         system: "You are a strict editor.",
         prompt:
           "Judge this launch blurb. APPROVE if it is concrete and free of filler; " +
           `otherwise choose REVISE.\n\n${snapshot.context.draft}`,
         events,
-        attempts: [],
-      },
+      }),
       { decide },
       // The guard, not the model, is the source of truth: a REVISE past the
       // budget is rejected here and the decision retries (converging to APPROVE).
@@ -282,14 +286,10 @@ export async function runPlainXstateExample(
     actor.send(chosen);
   }
 
-  const settled = actor.getSnapshot();
-  return {
-    draft: settled.context.draft,
-    attempts: settled.context.attempts,
-    retries: settled.context.retries,
-    progress: settled.context.progress,
-    decisions,
-  };
+  // Every path ends in a final state, so the machine's own `output` is the
+  // report — including the tally, rendered there rather than kept in context.
+  const output = actor.getSnapshot().output!;
+  return { ...output, decisions };
 }
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
@@ -302,7 +302,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     const result = await runPlainXstateExample();
     console.log("Decisions:", result.decisions.join(" → "));
     console.log(result.progress);
-    console.log(`\nFinal draft (after ${result.attempts} draft(s)):\n${result.draft}`);
+    console.log(`\nFinal draft (after ${result.drafts} draft(s)):\n${result.draft}`);
   })().catch((error) => {
     console.error(error);
     process.exitCode = 1;

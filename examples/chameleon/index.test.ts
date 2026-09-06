@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { getStateMeta, runAgent } from "@statelyai/agent";
+import { getInteraction, runAgent } from "@statelyai/agent";
 import type { AgentRequestExecutor } from "@statelyai/agent";
 import {
   type AccuseEvent,
@@ -64,8 +64,8 @@ async function play(options: PlayOptions) {
   if (idle.status !== "idle") throw new Error(`expected idle, got ${idle.status}`);
 
   // The idle vote must advertise how a host can unblock it.
-  expect(getStateMeta(idle.snapshot).interaction).toBeDefined();
-  expect(idle.snapshot.can(options.accuse as never)).toBe(true);
+  expect(getInteraction(idle.snapshot)?.events.map((choice) => choice.type)).toEqual(["ACCUSE"]);
+  expect(idle.snapshot.can(options.accuse)).toBe(true);
   const prompt = idlePrompt(idle.snapshot);
 
   const result = await runAgent(chameleonMachine, {
@@ -85,7 +85,7 @@ describe("chameleon", () => {
     await play({
       input: { category: "Ocean creatures", secretWord: "octopus", chameleonIndex: 2 },
       script: OCEAN,
-      accuse: { type: "ACCUSE_P0" },
+      accuse: { type: "ACCUSE", seat: 0 },
       captured,
     });
 
@@ -124,12 +124,13 @@ describe("chameleon", () => {
     const captured: CapturedRequest[] = [];
     const { result, prompt } = await play({
       script: { ...OCEAN, guess: "jellyfish" },
-      accuse: { type: "ACCUSE_P2" },
+      accuse: { type: "ACCUSE", seat: 2 },
       captured,
     });
 
     expect(prompt).toBe(
-      "Category: Ocean creatures. Ada: ink, Bruno: tentacle, Cleo: reef, Dev: suction. Who is the chameleon?",
+      "Category: Ocean creatures. Ada: ink, Bruno: tentacle, Cleo: reef, Dev: suction. " +
+        "Who is the chameleon? (0=Ada, 1=Bruno, 2=Cleo, 3=Dev)",
     );
     // The steal attempt happens only because the accusation landed.
     const guessRequest = captured.find((request) => request.name === "guessSecret");
@@ -153,7 +154,7 @@ describe("chameleon", () => {
   });
 
   test("a caught chameleon that names the secret steals the win", async () => {
-    const { result } = await play({ script: OCEAN, accuse: { type: "ACCUSE_P2" } });
+    const { result } = await play({ script: OCEAN, accuse: { type: "ACCUSE", seat: 2 } });
 
     expect(result.output.outcome).toBe("chameleon-steals");
     expect(result.output.summary).toContain(
@@ -166,7 +167,7 @@ describe("chameleon", () => {
     const captured: CapturedRequest[] = [];
     const { result } = await play({
       script: OCEAN,
-      accuse: { type: "ACCUSE_P3" },
+      accuse: { type: "ACCUSE", seat: 3 },
       captured,
     });
 
@@ -192,13 +193,14 @@ describe("chameleon", () => {
     expect(idle.status).toBe("idle");
     if (idle.status !== "idle") throw new Error("expected idle");
     expect(idlePrompt(idle.snapshot)).toBe(
-      "Category: Big cats. Ada: stripes, Bruno: roar, Cleo: savanna, Dev: whiskers. Who is the chameleon?",
+      "Category: Big cats. Ada: stripes, Bruno: roar, Cleo: savanna, Dev: whiskers. " +
+        "Who is the chameleon? (0=Ada, 1=Bruno, 2=Cleo, 3=Dev)",
     );
 
     // Persist mid-vote as JSON, then resume a fresh run from it.
     const resumed = await runAgent(chameleonMachine, {
       snapshot: JSON.parse(JSON.stringify(idle.persist())),
-      event: { type: "ACCUSE_P0" },
+      event: { type: "ACCUSE", seat: 0 },
       ...shared,
     });
 

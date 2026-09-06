@@ -60,7 +60,7 @@ export interface SeamCaseInput {
   details: string | null;
   /** Revision request at `reviewing`, used once; `null` sends immediately. */
   changes: string | null;
-  /** The call plan: canned answers per model key, in call order. */
+  /** The call plan: canned answers per REQUEST NAME, in call order. */
   scripts: Record<string, ScriptedTextEntry[]>;
   seam: SeamRef;
 }
@@ -89,17 +89,17 @@ function respondFor(input: SeamCaseInput) {
   return ({ state }: SeamTurn<typeof emailDrafter>): DrafterEvent | null => {
     switch (state) {
       case "prompting":
-        return { type: "PROMPT_SUBMITTED", prompt: input.prompt } as DrafterEvent;
+        return { type: "PROMPT_SUBMITTED", text: input.prompt } as DrafterEvent;
       case "needsMoreInfo":
         if (input.details !== null && !used.details) {
           used.details = true;
-          return { type: "MORE_INFO", details: input.details } as DrafterEvent;
+          return { type: "MORE_INFO", text: input.details } as DrafterEvent;
         }
         return { type: "DRAFT_ANYWAY" } as DrafterEvent;
       case "reviewing":
         if (input.changes !== null && !used.changes) {
           used.changes = true;
-          return { type: "REQUEST_CHANGES", changes: input.changes } as DrafterEvent;
+          return { type: "REQUEST_CHANGES", text: input.changes } as DrafterEvent;
         }
         return { type: "SEND" } as DrafterEvent;
       case "sent":
@@ -240,7 +240,7 @@ const COMPLETE_PROMPT =
   "Email team@example.com with subject 'Deploy pipeline is twice as fast' telling them the " +
   "deploy pipeline now runs in half the time, and that details are in the thread.";
 
-/** Seam 1: prompt → clarifications. The seam is the only `promptEvaluator` call. */
+/** Seam 1: prompt → clarifications. The seam is the only `evaluatePrompt` call. */
 export const clarifySeam: SeamRow[] = [
   {
     metadata: { case: "vague-prompt-must-ask" },
@@ -249,8 +249,8 @@ export const clarifySeam: SeamRow[] = [
       details: "Send it to team@example.com.",
       changes: null,
       scripts: {
-        promptEvaluator: [VAGUE_ASSESSMENT, COMPLETE_ASSESSMENT],
-        emailDrafter: [DRAFT],
+        evaluatePrompt: [VAGUE_ASSESSMENT, COMPLETE_ASSESSMENT],
+        draftEmail: [DRAFT],
       },
       seam: { request: "evaluatePrompt", occurrence: 0 },
     },
@@ -269,8 +269,8 @@ export const clarifySeam: SeamRow[] = [
       details: null,
       changes: null,
       scripts: {
-        promptEvaluator: [COMPLETE_ASSESSMENT],
-        emailDrafter: [DRAFT],
+        evaluatePrompt: [COMPLETE_ASSESSMENT],
+        draftEmail: [DRAFT],
       },
       seam: { request: "evaluatePrompt", occurrence: 0 },
     },
@@ -283,7 +283,7 @@ export const clarifySeam: SeamRow[] = [
   },
 ];
 
-/** Seam 2: prompt + clarifications → draft. The seam is the first `emailDrafter` call. */
+/** Seam 2: prompt + clarifications → draft. The seam is the first `draftEmail` call. */
 export const draftSeam: SeamRow[] = [
   {
     metadata: { case: "drafts-from-a-complete-prompt" },
@@ -292,8 +292,8 @@ export const draftSeam: SeamRow[] = [
       details: null,
       changes: null,
       scripts: {
-        promptEvaluator: [COMPLETE_ASSESSMENT],
-        emailDrafter: [DRAFT],
+        evaluatePrompt: [COMPLETE_ASSESSMENT],
+        draftEmail: [DRAFT],
       },
       seam: { request: "draftEmail", occurrence: 0 },
     },
@@ -311,8 +311,8 @@ export const draftSeam: SeamRow[] = [
       details: "Send it to team@example.com.",
       changes: null,
       scripts: {
-        promptEvaluator: [VAGUE_ASSESSMENT, COMPLETE_ASSESSMENT],
-        emailDrafter: [DRAFT],
+        evaluatePrompt: [VAGUE_ASSESSMENT, COMPLETE_ASSESSMENT],
+        draftEmail: [DRAFT],
       },
       seam: { request: "draftEmail", occurrence: 0 },
     },
@@ -334,7 +334,7 @@ export const reviseSeam: SeamRow[] = [
       details: null,
       changes: "Add that we ship the change on Friday.",
       scripts: {
-        promptEvaluator: [COMPLETE_ASSESSMENT],
+        evaluatePrompt: [COMPLETE_ASSESSMENT],
         emailDrafter: [DRAFT, REVISED_DRAFT],
       },
       seam: { request: "draftEmail", occurrence: 1 },

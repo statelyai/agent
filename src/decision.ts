@@ -398,6 +398,55 @@ export interface AgentDecisionRequest {
   runId?: string;
 }
 
+/**
+ * Options for {@link createDecisionRequest}. Everything except `model` and
+ * `events` is optional; `events` also accepts bare event types.
+ */
+export interface CreateDecisionRequestOptions extends Omit<
+  AgentDecisionRequest,
+  "kind" | "id" | "events" | "attempts"
+> {
+  /** Durable invoke id. Defaults to `name`, then `'decision'`. */
+  id?: string;
+  /** Candidate events: descriptors (from `getAcceptedEvents`) or bare types. */
+  events: readonly (string | AgentEventDescriptor)[];
+  /** Prior failed attempts. Defaults to `[]` (a first attempt). */
+  attempts?: DecisionAttempt[];
+}
+
+/**
+ * Builds an {@link AgentDecisionRequest} for {@link resolveDecision}, filling
+ * in the fields a hand-written literal has to restate every time: `kind`, an
+ * `id`, an empty `attempts` list, and each candidate event's `toolName`.
+ *
+ * @example
+ * ```ts
+ * const chosen = await resolveDecision(
+ *   createDecisionRequest({
+ *     name: 'judge',
+ *     model: 'reviewer',
+ *     prompt: `Judge this draft.\n\n${snapshot.context.draft}`,
+ *     events: getAcceptedEvents(snapshot),
+ *   }),
+ *   { decide },
+ *   { canTake: (event) => snapshot.can(event) },
+ * );
+ * ```
+ */
+export function createDecisionRequest(options: CreateDecisionRequestOptions): AgentDecisionRequest {
+  const { id, name, events, attempts, ...rest } = options;
+  return {
+    ...rest,
+    kind: "decision",
+    id: id ?? name ?? "decision",
+    ...(name === undefined ? {} : { name }),
+    events: events.map((event) =>
+      typeof event === "string" ? { type: event, toolName: sanitizeEventToolName(event) } : event,
+    ),
+    attempts: attempts ?? [],
+  };
+}
+
 /** Decision request after core has resolved its semantic identity. */
 export type AgentExecutorDecisionRequest = AgentDecisionRequest & { name: string };
 

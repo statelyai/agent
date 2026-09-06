@@ -1,4 +1,4 @@
-import type { AnyMachineSnapshot, AnyStateMachine } from "xstate";
+import type { AnyMachineSnapshot, AnyStateMachine, StateValue } from "xstate";
 import type {
   AgentMessage,
   AssistantMessage,
@@ -265,6 +265,48 @@ export function getStateMeta<
     .sort(([a], [b]) => depth(a) - depth(b) || (a < b ? -1 : a > b ? 1 : 0));
 
   return Object.assign({}, ...entries.map(([, meta]) => meta));
+}
+
+/**
+ * Renders a snapshot's state value as one deterministic string, so a log line,
+ * a progress field, or a test assertion reads the same on every run.
+ *
+ * - An atomic state is its own name: `'writing'`.
+ * - A nested state joins with dots: `{ review: { editing: 'draft' } }` →
+ *   `'review.editing.draft'`.
+ * - A parallel state brackets its regions, sorted by region name, so key order
+ *   never leaks into the string: `{ p: { left: 'x', right: { a: 'b' } } }` →
+ *   `'p:{left.x,right.a.b}'`.
+ *
+ * Prefer this over `String(snapshot.value)`, which renders every non-atomic
+ * value as `[object Object]`.
+ *
+ * @example
+ * ```ts
+ * onTransition: (snapshot) => console.log(getStatePath(snapshot));
+ * ```
+ */
+export function getStatePath(snapshot: { value: StateValue } | StateValue): string {
+  const value =
+    typeof snapshot === "object" && snapshot !== null && "value" in snapshot
+      ? (snapshot as { value: StateValue }).value
+      : (snapshot as StateValue);
+  return serializeStateValue(value);
+}
+
+function serializeStateValue(value: StateValue): string {
+  if (typeof value === "string") return value;
+  const entries = Object.entries(value)
+    .map(([key, child]) => {
+      const rendered = serializeStateValue(child as StateValue);
+      if (!rendered) return [key, key] as const;
+      // `:` before a parallel region set, `.` for ordinary nesting.
+      return [key, `${key}${rendered.startsWith("{") ? ":" : "."}${rendered}`] as const;
+    })
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  if (entries.length === 0) return "";
+  if (entries.length === 1) return entries[0]![1];
+  return `{${entries.map(([, rendered]) => rendered).join(",")}}`;
 }
 
 /**

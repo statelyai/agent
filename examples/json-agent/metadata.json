@@ -13,13 +13,13 @@
   },
   "starters": [
     {
-      "label": "Draft a reply for approval (login issue)",
+      "label": "Login issue ticket",
       "input": {
         "ticket": "I can't log in - password reset emails never arrive."
       }
     },
     {
-      "label": "Immediate escalation path (duplicate invoice)",
+      "label": "Duplicate invoice ticket",
       "input": {
         "ticket": "My invoice charged me twice this month. Please fix it."
       }

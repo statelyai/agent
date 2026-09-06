@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { getStateMeta, runAgent } from "@statelyai/agent";
+import { getInteraction, getStatePath, runAgent } from "@statelyai/agent";
 import type {
   AgentDecisionRequest,
   AgentMessage,
@@ -16,48 +16,50 @@ function rawAnswerFrom(request: Parameters<AgentRequestExecutor>[0]) {
   return textContent(request.messages?.at(-1)).match(/Raw answer: (.*)/)?.[1] ?? "";
 }
 
+/** Routed on `request.name` — the `setupAgent({ requests })` key. */
 function createClassifier(seenModels: string[] = []): AgentRequestExecutor {
   return async (request) => {
     seenModels.push(request.model);
     const rawAnswer = rawAnswerFrom(request);
-    if (request.system?.includes("guess was correct")) {
-      return {
-        output: {
-          correct: /^(yes|correct|right)$/i.test(rawAnswer),
-          reasoning: `classified guess feedback ${rawAnswer}`,
-        },
-      };
+    switch (request.name) {
+      case "classifyGuessFeedback":
+        return {
+          output: {
+            correct: /^(yes|correct|right)$/i.test(rawAnswer),
+            reasoning: `classified guess feedback ${rawAnswer}`,
+          },
+        };
+      case "classifyPlayAgain":
+        return {
+          output: {
+            playAgain: /^yes$/i.test(rawAnswer),
+            reasoning: `classified play again ${rawAnswer}`,
+          },
+        };
+      case "answerSideQuestion": {
+        const question = request.prompt?.match(/Side question: (.*)/)?.[1] ?? "";
+        return { output: `Briefly: the answer to "${question}" is yes.` };
+      }
+      case "classifyAnswer":
+        // A reply ending in '?' is a side question back at the agent.
+        return rawAnswer.endsWith("?")
+          ? {
+              output: {
+                kind: "sideQuestion",
+                question: rawAnswer,
+                reasoning: `classified side question ${rawAnswer}`,
+              },
+            }
+          : {
+              output: {
+                kind: "answer",
+                answer: rawAnswer === "mhm" || rawAnswer === "for sure" ? "yes" : "no",
+                reasoning: `classified ${rawAnswer}`,
+              },
+            };
+      default:
+        throw new Error(`Unexpected request '${request.name}'.`);
     }
-    if (request.system?.includes("play another round")) {
-      return {
-        output: {
-          playAgain: /^yes$/i.test(rawAnswer),
-          reasoning: `classified play again ${rawAnswer}`,
-        },
-      };
-    }
-    if (request.system?.includes("side question")) {
-      // answerSideQuestion: prompt carries `Side question: ...`.
-      const question = request.prompt?.match(/Side question: (.*)/)?.[1] ?? "";
-      return { output: `Briefly: the answer to "${question}" is yes.` };
-    }
-    // classifyAnswer: a reply ending in '?' is a side question back at the agent.
-    if (rawAnswer.endsWith("?")) {
-      return {
-        output: {
-          kind: "sideQuestion",
-          question: rawAnswer,
-          reasoning: `classified side question ${rawAnswer}`,
-        },
-      };
-    }
-    return {
-      output: {
-        kind: "answer",
-        answer: rawAnswer === "mhm" || rawAnswer === "for sure" ? "yes" : "no",
-        reasoning: `classified ${rawAnswer}`,
-      },
-    };
   };
 }
 
@@ -67,7 +69,7 @@ interface PlayOptions {
   generateText?: AgentRequestExecutor;
   /** Consumed in order on each idle settle. */
   playerEvents: PlayerEvent[];
-  on?: Record<string, (payload: never) => void>;
+  on?: { SIDE_ANSWER?: (payload: { question: string; answer: string }) => void };
 }
 
 /**
@@ -83,7 +85,7 @@ async function play(options: PlayOptions) {
       generateText: options.generateText ?? createClassifier(),
       decide: options.decide,
     },
-    ...(options.on ? { on: options.on as never } : {}),
+    ...(options.on ? { on: options.on } : {}),
   };
 
   let result = await runAgent(twentyQuestionsMachine, {
@@ -93,21 +95,18 @@ async function play(options: PlayOptions) {
 
   while (result.status === "idle") {
     // Every idle state must advertise how a host can unblock it.
-    const interaction = getStateMeta(result.snapshot).interaction;
-    expect(
-      interaction,
-      `no interaction meta on ${JSON.stringify(result.snapshot.value)}`,
-    ).toBeDefined();
+    const interaction = getInteraction(result.snapshot);
+    expect(interaction, `no interaction meta on ${getStatePath(result.snapshot)}`).toBeDefined();
     prompts.push(idlePrompt(result.snapshot));
     interactions.push({
-      events: Object.keys(interaction!.events ?? {}),
+      events: interaction!.events.map(({ type }) => type),
       textEvent: interaction!.textEvent,
     });
 
     const event = queued.shift();
     if (!event) throw new Error(`ran out of player events at: ${prompts.at(-1)}`);
     // Buttons and free text alike are ordinary machine events the state accepts.
-    expect(result.snapshot.can(event as never)).toBe(true);
+    expect(result.snapshot.can(event)).toBe(true);
 
     result = await runAgent(twentyQuestionsMachine, {
       snapshot: result.persist(),
@@ -347,9 +346,9 @@ describe("twenty-questions", () => {
         { type: "PLAY_AGAIN", rawAnswer: "no" },
       ],
       on: {
-        SIDE_ANSWER: (({ question, answer }: { question: string; answer: string }) => {
+        SIDE_ANSWER: ({ question, answer }) => {
           sideAnswers.push({ question, answer });
-        }) as never,
+        },
       },
     });
 

@@ -27,18 +27,20 @@ agentSetup.createMachine({
     draft: null,
     sentEmails: [],
     messages: [],
+    revisions: 0,
+    failure: null,
   },
   initial: "probe",
   states: {
     probe: {
       meta: {
-        // @ts-expect-error meta is schema-typed: 'banner' is not a valid interaction type
+        // @ts-expect-error meta is schema-typed: an interaction has no 'type'
         interaction: { type: "banner" },
       },
       on: {
         MORE_INFO: ({ event }) => ({
           context: {
-            // @ts-expect-error MORE_INFO carries `details`, not `changes`
+            // @ts-expect-error MORE_INFO carries `text`, not `changes`
             prompt: event.changes,
           },
         }),
@@ -46,7 +48,7 @@ agentSetup.createMachine({
     },
     probeFinal: {
       type: "final",
-      output: ({ context }) => ({ sentEmails: context.sentEmails }),
+      output: ({ context }) => ({ sentEmails: context.sentEmails, failure: context.failure }),
     },
   },
 });
@@ -59,14 +61,16 @@ agentSetup.createMachine({
     draft: null,
     sentEmails: [],
     messages: [],
+    revisions: 0,
+    failure: null,
   },
-  // @ts-expect-error machine output is { sentEmails: EmailDraft[] }
+  // @ts-expect-error machine output is { sentEmails: EmailDraft[]; failure: string | null }
   output: () => ({ wrong: true }),
   initial: "probe",
   states: {
     probe: {
       type: "final",
-      // @ts-expect-error top-level final state output is { sentEmails: EmailDraft[] }
+      // @ts-expect-error top-level final state output is { sentEmails; failure }
       output: () => ({ wrong: true }),
     },
   },
@@ -80,6 +84,8 @@ agentSetup.createMachine({
     draft: null,
     sentEmails: [],
     messages: [],
+    revisions: 0,
+    failure: null,
   },
   initial: "drafting",
   states: {

@@ -2,13 +2,8 @@ import { describe, expect, test } from "vitest";
 import type { InspectionEvent } from "xstate";
 import type { AgentDecisionExecutor, AgentRequestExecutor, ChosenEvent } from "@statelyai/agent";
 import type { SnapshotFrom } from "xstate";
-import {
-  gameMachine,
-  resolveInteractionLabel,
-  runGameLoopExample,
-  type HumanEvent,
-} from "./index.js";
-import { getStateMeta } from "@statelyai/agent";
+import { gameMachine, runGameLoopExample, type HumanEvent } from "./index.js";
+import { getInteraction } from "@statelyai/agent";
 
 type GameSnapshot = SnapshotFrom<typeof gameMachine>;
 
@@ -90,15 +85,14 @@ describe("game-loop-agent", () => {
     expect(lastPrompt).toContain("Round 1 won by");
   });
 
-  test("the round question's label resolves {notice} to who won", async () => {
+  test("the round question's label interpolates who won and the tallied wins", async () => {
     const player = createMockPlayer();
     const referee = createMockReferee([false]);
     const labels: string[] = [];
     const human = createMockHuman(["done"]);
     const nextHumanEvent = (snapshot: GameSnapshot): HumanEvent => {
       if (snapshot.can({ type: "ROUND_REPLY", reply: "" })) {
-        const label = getStateMeta(snapshot).interaction?.label ?? "";
-        labels.push(resolveInteractionLabel(label, snapshot.context));
+        labels.push(getInteraction(snapshot)?.label ?? "");
       }
       return human.nextHumanEvent(snapshot);
     };
@@ -111,8 +105,10 @@ describe("game-loop-agent", () => {
     });
 
     expect(labels).toHaveLength(1);
+    // The round's win is already tallied when the question is asked, so the
+    // label reads 1-0 rather than 0-0.
     expect(labels[0]).toMatch(
-      /^(human|agent) won the round\. Score: you \d+ · agent \d+ \(wins \d+–\d+\)\. Another round, or call it here\?$/,
+      /^(human|agent) won the round\. Score: you \d+ · agent \d+ \(wins (1–0|0–1)\)\. Another round, or call it here\?$/,
     );
   });
 

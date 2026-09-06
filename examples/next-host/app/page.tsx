@@ -2,7 +2,7 @@
  * The browser half of the human-in-the-loop flow. Plain unstyled HTML on
  * purpose — the point is the two fetches:
  *
- *   POST /api/agent                → { id, status: 'idle', draft, prompt, acceptedEvents }
+ *   POST /api/agent                → { id, status: 'idle', draft, interaction }
  *   POST /api/agent/<id>/resume    → { status: 'done', output } (or 'idle' again after REJECT)
  *
  * The run id is the whole client-side state. Everything else lives in the
@@ -17,13 +17,20 @@ import { QueryClient, QueryClientProvider, useMutation } from "@tanstack/react-q
 import { createStore } from "@xstate/store";
 import { useSelector } from "@xstate/store-react";
 
+/** One rendered pause, exactly as `getInteraction` returned it on the server. */
+type Interaction = {
+  label: string;
+  events: { type: string; label: string; style?: string }[];
+  textEvent?: string;
+};
+
 type StartResponse = {
   id?: string;
   status: string;
   draft?: string | null;
-  prompt?: string;
-  acceptedEvents?: string[];
-  output?: { published: boolean; draft: string };
+  interaction?: Interaction | null;
+  error?: string;
+  output?: { published: boolean; draft: string | null; reason: string | null };
 };
 
 const store = createStore({
@@ -110,7 +117,7 @@ function Announcer() {
       {awaitingReview && (
         <section>
           <h2>Review</h2>
-          <p id="prompt">{result?.prompt}</p>
+          <p id="prompt">{result?.interaction?.label}</p>
           <blockquote id="draft">{result?.draft}</blockquote>
           <button
             id="approve"
@@ -142,8 +149,12 @@ function Announcer() {
 
       {result?.status === "done" && (
         <section>
-          <h2>Published</h2>
-          <blockquote id="published">{result.output?.draft}</blockquote>
+          {/* `done` covers every final state, so the outcome comes from the
+              output, not from the status. */}
+          <h2>{result.output?.published ? "Published" : "Not published"}</h2>
+          <blockquote id="published">
+            {result.output?.published ? result.output.draft : result.output?.reason}
+          </blockquote>
         </section>
       )}
 

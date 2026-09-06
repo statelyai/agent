@@ -1,7 +1,14 @@
 /**
- * Plan-and-execute (ReWOO-flavored) — a planner produces a typed step list,
- * an explicit index loop gathers evidence per step, and a solver composes the
- * final answer from the accumulated evidence map.
+ * Bounded plan execution (ReWOO-flavored) — a planner produces a typed step
+ * list, an explicit index loop gathers evidence per step under a step budget,
+ * and a solver composes the final answer from the accumulated evidence map.
+ *
+ * The point of the example is the budget: `MAX_STEPS` caps how many plan steps
+ * the loop will run, and when the planner hands back more steps than the budget
+ * allows, the run ends in `failed` — "I could not execute this plan" — instead
+ * of quietly truncating the plan and dressing a partial answer up as `done`.
+ * (Contrast deep-research, which fans out in parallel and *reflects* its way to
+ * an answer; this one runs a fixed plan in order and can honestly run out.)
  *
  * Shows:
  *   - `planTask`: a structured-output request → a typed list of steps.
@@ -12,11 +19,16 @@
  *     evidence is retained, not discarded between steps.
  *   - `solveTask`: composes the final answer from the whole evidence map.
  *
- * Readable output: the plan stays visible as a `plan` string and each finished
- * step collapses to ONE line appended to `progress`. Full per-step evidence
- * lives under the nested `details` field, so a renderer that leads with the
- * longest string field shows the plan/progress/answer summary, not a wall of
- * evidence prose.
+ * Readable output: the plan and the per-step progress trail are RENDERED in
+ * `output` from the steps and the evidence map, never stored pre-rendered in
+ * context. Full per-step evidence lives under the nested `details` field, so a
+ * renderer that leads with the longest string field shows the
+ * plan/progress/answer summary, not a wall of evidence prose.
+ *
+ * Bounded: the `executing` choice state is a three-way decision — gather the
+ * next step, solve because the plan finished, or fail because the budget ran
+ * out mid-plan. A request that errors also ends the run in `failed` rather than
+ * quietly producing an empty answer.
  *
  * Dual-mode: `runPlanAndExecuteExample(options?)` takes injectable executors
  * (the test passes mocks — keyless CI); the direct run below uses real models.
@@ -37,22 +49,56 @@ export const models = defineModels({
   solver: openai("gpt-5.4-mini"),
 });
 
+/** Hard cap on plan steps the loop will run, whatever the planner returns. */
+export const MAX_STEPS = 4;
+
 const planAndExecuteContextSchema = z.object({
   goal: z.string(),
   steps: z.array(stepSchema),
   stepIndex: z.number(),
   evidence: z.record(z.string(), z.string()),
-  // The plan, kept visible for the whole run: one line per step.
-  plan: z.string(),
-  // One collapsed line per finished step, appended as the loop runs.
-  progress: z.string(),
   answer: z.string().nullable(),
+  /** Why the run gave up, when it did. `null` on the happy path. */
+  failure: z.string().nullable(),
 });
+
+type PlanContext = z.infer<typeof planAndExecuteContextSchema>;
 
 /** Collapses a model answer to a single short line for the progress trail. */
 function oneLine(text: string, max = 70): string {
   const flat = text.replace(/\s+/g, " ").trim();
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
+/**
+ * The plan as the planner returned it, one line per step — derived from
+ * `steps`, not stored. Steps past `MAX_STEPS` are marked rather than hidden, so
+ * a plan that overran the budget is visible in the output that reports it.
+ */
+function renderPlan(context: PlanContext): string {
+  return context.steps
+    .map((step, index) =>
+      index < MAX_STEPS
+        ? `${step.id}. ${step.question}`
+        : `${step.id}. ${step.question} (over budget)`,
+    )
+    .join("\n");
+}
+
+/**
+ * One collapsed line per step the loop actually reached: `done` when the
+ * evidence map has an entry for it, `skipped` when the worker errored.
+ * Derived from the evidence map, so the trail can never drift from it.
+ */
+function renderProgress(context: PlanContext): string {
+  return context.steps
+    .slice(0, context.stepIndex)
+    .map((step) =>
+      step.id in context.evidence
+        ? `${step.id}. done. ${oneLine(context.evidence[step.id]!)}`
+        : `${step.id}. skipped. worker error`,
+    )
+    .join("\n");
 }
 
 const agentSetup = setupAgent({
@@ -127,9 +173,8 @@ export const planAndExecuteMachine = agentSetup.createMachine({
     steps: [],
     stepIndex: 0,
     evidence: {},
-    plan: "",
-    progress: "",
     answer: null,
+    failure: null,
   }),
   initial: "planning",
   states: {
@@ -138,25 +183,43 @@ export const planAndExecuteMachine = agentSetup.createMachine({
         id: "planTask",
         src: "planTask",
         input: ({ context }) => ({ goal: context.goal }),
-        onDone: ({ output }) => ({
-          target: "executing",
-          context: {
-            steps: output.steps,
-            // The plan is written once and stays visible for the whole run.
-            plan: output.steps.map((step) => `${step.id}. ${step.question}`).join("\n"),
-          },
+        onDone: ({ output }) => ({ target: "executing", context: { steps: output.steps } }),
+        // A planner that errors ends the run in `failed` — an empty answer in
+        // `done` would look like a successful run that had nothing to say.
+        onError: ({ event }) => ({
+          target: "failed",
+          context: { failure: `planTask failed: ${String(event.error)}` },
         }),
-        // On failure, finish with an empty answer (best-effort output).
-        onError: { target: "done", context: { answer: "" } },
       },
     },
-    // Explicit index/guard loop: gather evidence for one step, advance the
-    // index, and re-check whether more steps remain. This is the honest
-    // XState shape — no hidden iteration.
+    // Explicit index/guard loop with a THREE-way decision, which is the whole
+    // point of this example: gather the next step, solve because the plan is
+    // finished, or give up because the step budget ran out mid-plan.
+    //
+    // The budget is not a silent truncation. A planner that returns fifty steps
+    // costs at most MAX_STEPS worker calls AND lands in `failed` — the run
+    // never composes an answer from a plan it only partly executed and passes
+    // it off as `done`.
     executing: {
       type: "choice",
-      choice: ({ context }) =>
-        context.stepIndex < context.steps.length ? { target: "gathering" } : { target: "solving" },
+      choice: ({ context }) => {
+        if (context.stepIndex >= context.steps.length) {
+          // Every planned step ran (or was skipped): the plan is complete.
+          return { target: "solving" };
+        }
+        if (context.stepIndex >= MAX_STEPS) {
+          // Budget exhausted with plan steps still unrun.
+          return {
+            target: "failed",
+            context: {
+              failure:
+                `step budget exhausted: ran ${MAX_STEPS} of ${context.steps.length} ` +
+                `planned steps (MAX_STEPS=${MAX_STEPS})`,
+            },
+          };
+        }
+        return { target: "gathering" };
+      },
     },
     gathering: {
       invoke: {
@@ -174,22 +237,16 @@ export const planAndExecuteMachine = agentSetup.createMachine({
             context: {
               stepIndex: context.stepIndex + 1,
               evidence: { ...context.evidence, [id]: output },
-              progress: `${context.progress}${id}. done. ${oneLine(output)}\n`,
             },
           };
         },
         // On failure, skip the failed step (advance the index) and continue the
-        // loop rather than retrying it forever.
-        onError: ({ context }) => {
-          const id = context.steps[context.stepIndex]?.id ?? String(context.stepIndex);
-          return {
-            target: "executing",
-            context: {
-              stepIndex: context.stepIndex + 1,
-              progress: `${context.progress}${id}. skipped. worker error\n`,
-            },
-          };
-        },
+        // loop rather than retrying it forever. The absence of an evidence
+        // entry is what marks the step skipped.
+        onError: ({ context }) => ({
+          target: "executing",
+          context: { stepIndex: context.stepIndex + 1 },
+        }),
       },
     },
     solving: {
@@ -204,8 +261,10 @@ export const planAndExecuteMachine = agentSetup.createMachine({
           target: "done",
           context: { answer: output },
         }),
-        // On failure, finish with an empty answer (best-effort output).
-        onError: { target: "done", context: { answer: "" } },
+        onError: ({ event }) => ({
+          target: "failed",
+          context: { failure: `solveTask failed: ${String(event.error)}` },
+        }),
       },
     },
     done: {
@@ -213,19 +272,37 @@ export const planAndExecuteMachine = agentSetup.createMachine({
       output: ({ context }) => ({
         summary: [
           "Plan",
-          context.plan || "(no plan)",
+          renderPlan(context) || "(no plan)",
           "",
           "Progress",
-          context.progress.trimEnd() || "(no steps run)",
+          renderProgress(context) || "(no steps run)",
           "",
           "Answer",
-          context.answer || "(none)",
+          context.answer,
         ].join("\n"),
         details: {
           answer: context.answer,
           steps: context.steps,
           evidence: context.evidence,
         },
+      }),
+    },
+    // A distinct terminal for "the run could not produce an answer", so a
+    // caller can tell an empty answer apart from a failed one.
+    failed: {
+      type: "final",
+      output: ({ context }) => ({
+        summary: [
+          "Plan",
+          renderPlan(context) || "(no plan)",
+          "",
+          "Progress",
+          renderProgress(context) || "(no steps run)",
+          "",
+          "Failed",
+          context.failure ?? "unknown failure",
+        ].join("\n"),
+        details: { answer: "", steps: context.steps, evidence: context.evidence },
       }),
     },
   },
@@ -236,9 +313,8 @@ export async function runPlanAndExecuteExample(
 ) {
   const result = await runAgent(planAndExecuteMachine, {
     input: { goal: "Is a heat pump worth it for a 1920s house?" },
-    ...(options && Object.keys(options).length > 0
-      ? options
-      : { executors: createAiSdkExecutors({ models }) }),
+    executors: createAiSdkExecutors({ models }),
+    ...options,
   });
   if (result.status !== "done") {
     throw new Error(`Plan-and-execute example did not complete: ${result.status}`);

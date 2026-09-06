@@ -21,18 +21,19 @@ export const models = defineModels({
   writer: openai("gpt-5.4-mini"),
 });
 
-/** The scripted stand-in for the `writeDraft` request. */
+/** The scripted stand-in for the `writeDraft` request, as a function of it. */
 const writeDraft = (request: AgentTextRequest): string => {
-  const topic = (request.prompt ?? "").replace(/^Write a short announcement about:\s*/, "");
+  const topic = (request.input as { topic: string }).topic;
   return `Big news: ${topic.split("\n")[0]} just shipped.`;
 };
 
 /**
- * Keyless executors for one request. Four entries so a REJECT (which sends the
- * machine back to `drafting`) still has an answer waiting.
+ * Keyless executors for one request. The script is keyed by request NAME, not
+ * by position, and `repeat` replays the same function for every redraft a
+ * REJECT triggers — the machine's own rejection budget bounds the loop.
  */
 export function createExecutors(): Partial<AgentRequestExecutors> {
-  return createScriptedExecutors({ text: [writeDraft, writeDraft, writeDraft, writeDraft] });
+  return createScriptedExecutors({ text: { writeDraft }, repeat: true });
 }
 
 /** Real models when `OPENAI_API_KEY` is set, scripted playback otherwise. */

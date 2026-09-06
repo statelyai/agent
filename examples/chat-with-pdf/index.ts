@@ -44,7 +44,13 @@ import type { SnapshotFrom } from "xstate";
 import { createAsyncLogic } from "xstate";
 import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
-import { createAgentSchemas, getStateMeta, runAgent, setupAgent } from "@statelyai/agent";
+import {
+  createAgentSchemas,
+  getInteraction,
+  interactionMetaSchema,
+  runAgent,
+  setupAgent,
+} from "@statelyai/agent";
 
 /**
  * The part of the original instructions.md that is genuinely prose: tone and
@@ -221,6 +227,15 @@ const askedQuestionSchema = z.object({
   sourceText: z.string(),
 });
 
+/** A grade plus the passage it was grounded on: everything the label needs. */
+const gradedAnswerSchema = z.object({
+  correct: z.boolean(),
+  expected: z.string(),
+  explanation: z.string(),
+  pageNumber: z.number(),
+  sourceText: z.string(),
+});
+
 const resultSchema = z.object({
   pageNumber: z.number(),
   prompt: z.string(),
@@ -233,27 +248,9 @@ const models = defineModels({
   quiz: openai("gpt-5.4-mini"),
 });
 
-/** Typed `meta.interaction` hints a host reads off an idle snapshot. */
-const metaSchema = z.object({
-  interaction: z
-    .object({
-      label: z.string(),
-      events: z
-        .record(
-          z.string(),
-          z.object({
-            label: z.string().optional(),
-            style: z.enum(["primary", "danger", "default"]).optional(),
-          }),
-        )
-        .optional(),
-      textEvent: z.string().optional(),
-    })
-    .optional(),
-});
-
 export const chatWithPdfSchemas = createAgentSchemas({
-  meta: metaSchema,
+  // The library's own interaction protocol, not a per-machine restatement.
+  meta: interactionMetaSchema,
   context: z.object({
     /** Session state, not a prompt reminder: every retrieval reads it. */
     documentId: z.string().nullable(),
@@ -272,10 +269,10 @@ export const chatWithPdfSchemas = createAgentSchemas({
     sinceRefresh: z.number(),
     pending: askedQuestionSchema.nullable(),
     results: z.array(resultSchema),
-    /** Rendered label for whatever the idle state is waiting on. */
-    prompt: z.string(),
-    /** Verdict on the previous answer, shown above the next question. */
-    lastGrade: z.string(),
+    /** What the learner typed for the pending question, awaiting grading. */
+    answer: z.string(),
+    /** The previous grade, as DATA — the label renders it above the next question. */
+    lastGrade: gradedAnswerSchema.nullable(),
     /** Set when retrieval comes back empty; explains an early summary. */
     exhausted: z.boolean(),
   }),
@@ -379,27 +376,6 @@ const agentSetup = setupAgent({
   },
 });
 
-type QuizContext = {
-  chunks: Chunk[];
-  chunkCursor: number;
-  questionsAsked: number;
-  maxQuestions: number;
-  sinceRefresh: number;
-  refreshEvery: number;
-};
-
-/**
- * The whole quiz loop, in one place instead of four prose bullets:
- * budget spent → stop; refresh due or batch drained → retrieve fresh pages;
- * otherwise → next question from the current batch.
- */
-function nextStep(context: QuizContext): "summary" | "retrieving" | "asking" {
-  if (context.questionsAsked >= context.maxQuestions) return "summary";
-  if (context.sinceRefresh >= context.refreshEvery) return "retrieving";
-  if (context.chunkCursor >= context.chunks.length) return "retrieving";
-  return "asking";
-}
-
 /** The one-line verdict shown above the next question. */
 function renderGrade(grade: z.infer<typeof gradeSchema>): string {
   const verdict = grade.correct ? "Correct" : "Incorrect";
@@ -449,8 +425,8 @@ export const chatWithPdfMachine = agentSetup.createMachine({
     sinceRefresh: 0,
     pending: null,
     results: [],
-    prompt: "",
-    lastGrade: "",
+    answer: "",
+    lastGrade: null,
     exhausted: false,
   }),
   initial: "selectingDocument",
@@ -474,7 +450,7 @@ export const chatWithPdfMachine = agentSetup.createMachine({
             context: { documentId: only.id, documentTitle: only.title },
           };
         }
-        return { target: "choosingDocument", context: { prompt: PICKER_PROMPT } };
+        return { target: "choosingDocument" };
       },
     },
 
@@ -483,7 +459,7 @@ export const chatWithPdfMachine = agentSetup.createMachine({
       tags: ["waiting"],
       meta: {
         interaction: {
-          label: "{prompt}",
+          label: PICKER_PROMPT,
           events: { SELECT_DOCUMENT: { label: "Choose" } },
           textEvent: "SELECT_DOCUMENT",
         },
@@ -549,7 +525,6 @@ export const chatWithPdfMachine = agentSetup.createMachine({
             target: "awaitingAnswer",
             context: {
               pending: { pageNumber: chunk.pageNumber, prompt, sourceText: chunk.content },
-              prompt,
               chunkCursor: context.chunkCursor + 1,
               questionsAsked: context.questionsAsked + 1,
               sinceRefresh: context.sinceRefresh + 1,
@@ -565,9 +540,19 @@ export const chatWithPdfMachine = agentSetup.createMachine({
       tags: ["waiting"],
       meta: {
         interaction: {
-          // `{lastGrade}` puts the verdict on the previous answer above the
-          // question, so a host never jumps to the next one silently.
-          label: "{lastGrade}\n\n{prompt}",
+          // The verdict on the previous answer is RENDERED here, above the
+          // question, so a host never jumps to the next one silently. Read it
+          // with `getInteraction(snapshot, { preserveWhitespace: true })`: the
+          // line breaks are the layout.
+          label: ({ context }) =>
+            [
+              context.lastGrade
+                ? `${renderGrade(context.lastGrade)}\n${citeSource(context.lastGrade.pageNumber, context.lastGrade.sourceText)}`
+                : "",
+              context.pending?.prompt ?? "",
+            ]
+              .filter(Boolean)
+              .join("\n\n"),
           events: {
             ANSWER: { label: "Answer", style: "primary" },
             SKIP: { label: "Skip" },
@@ -577,13 +562,10 @@ export const chatWithPdfMachine = agentSetup.createMachine({
         },
       },
       on: {
-        ANSWER: ({ event }) => ({
-          target: "grading",
-          context: { prompt: event.text },
-        }),
-        // Skipping still advances the loop through the same function grading
-        // uses, so the two paths cannot drift apart.
-        SKIP: ({ context }) => ({ target: nextStep(context), context: { lastGrade: "" } }),
+        ANSWER: ({ event }) => ({ target: "grading", context: { answer: event.text } }),
+        // Skipping goes through the same `continuing` branch grading uses, so
+        // the two paths cannot drift apart.
+        SKIP: { target: "continuing", context: { lastGrade: null } },
         STOP: { target: "summary" },
       },
     },
@@ -593,7 +575,7 @@ export const chatWithPdfMachine = agentSetup.createMachine({
         src: "gradeAnswer",
         input: ({ context }) => ({
           prompt: context.pending.prompt,
-          answer: context.prompt,
+          answer: context.answer,
           sourceText: context.pending.sourceText,
           pageNumber: context.pending.pageNumber,
         }),
@@ -609,27 +591,41 @@ export const chatWithPdfMachine = agentSetup.createMachine({
             {
               pageNumber: context.pending.pageNumber,
               prompt: context.pending.prompt,
-              answer: context.prompt,
+              answer: context.answer,
               correct: output.correct,
               explanation: output.explanation,
             },
           ];
           return {
-            target: nextStep(context),
+            target: "continuing",
             context: {
               results,
               pending: null,
-              lastGrade:
-                renderGrade(output) +
-                "\n" +
-                citeSource(context.pending.pageNumber, context.pending.sourceText),
+              answer: "",
+              lastGrade: {
+                ...output,
+                pageNumber: context.pending.pageNumber,
+                sourceText: context.pending.sourceText,
+              },
             },
           };
         },
-        onError: ({ context }) => ({
-          target: nextStep(context),
-          context: { pending: null, lastGrade: "" },
-        }),
+        onError: { target: "continuing", context: { pending: null, lastGrade: null } },
+      },
+    },
+
+    /**
+     * The whole quiz loop as ONE visible branch instead of a helper called from
+     * three transitions: budget spent → stop; refresh due or batch drained →
+     * retrieve fresh pages; otherwise → next question from the current batch.
+     */
+    continuing: {
+      type: "choice",
+      choice: ({ context }) => {
+        if (context.questionsAsked >= context.maxQuestions) return { target: "summary" };
+        if (context.sinceRefresh >= context.refreshEvery) return { target: "retrieving" };
+        if (context.chunkCursor >= context.chunks.length) return { target: "retrieving" };
+        return { target: "asking" };
       },
     },
 
@@ -656,27 +652,19 @@ export type LearnerEvent =
   | { type: "SKIP" }
   | { type: "STOP" };
 
-/** `{key}` placeholders in interaction labels resolve against context. */
-export function resolveInteractionLabel(label: string, context: Record<string, unknown>): string {
-  return label
-    .replace(/\{(\w+)\}/g, (_, key: string) => {
-      const value = context[key];
-      return typeof value === "string" || typeof value === "number" ? String(value) : "";
-    })
-    .trim();
-}
-
-/** Prompt for whatever the idle state is waiting on, from its meta hint. */
+/**
+ * Prompt for whatever the idle state is waiting on. `preserveWhitespace`: the
+ * quiz label is deliberately multi-line (verdict, blank line, question).
+ */
 export function idlePrompt(snapshot: QuizSnapshot): string {
-  const interaction = getStateMeta(snapshot).interaction;
-  return resolveInteractionLabel(interaction?.label ?? "?", snapshot.context);
+  return getInteraction(snapshot, { preserveWhitespace: true })?.label ?? "?";
 }
 
 /** Route free text to the idle state's `textEvent`. */
 export function toLearnerEvent(snapshot: QuizSnapshot, text: string): LearnerEvent {
   if (text.toLowerCase() === "stop") return { type: "STOP" };
   if (text.toLowerCase() === "skip") return { type: "SKIP" };
-  const textEvent = getStateMeta(snapshot).interaction?.textEvent ?? "ANSWER";
+  const textEvent = getInteraction(snapshot)?.textEvent ?? "ANSWER";
   return textEvent === "SELECT_DOCUMENT"
     ? { type: "SELECT_DOCUMENT", documentId: text }
     : { type: "ANSWER", text };

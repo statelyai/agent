@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { EventType, StreamProcessor, type StreamChunk } from "@tanstack/ai";
-import { handleChatRequest, POST } from "./index.js";
+import {
+  agentRunToAgUiStream,
+  createScriptedChatExecutors,
+  handleChatRequest,
+  POST,
+  tanstackAiStreamMachine,
+} from "./index.js";
 
 // The route resolves real model executors when `OPENAI_API_KEY` is set. These
 // tests assert the scripted playback, so the key is neutralized here rather
@@ -179,7 +185,7 @@ test("the exported POST handler serves the route", async () => {
   expect(types(parseChunks(await response.text()))).toContain("RUN_FINISHED");
 });
 
-test("a failing executor closes the stream with RUN_ERROR", async () => {
+test("a failing executor ends in the machine's `failed` state", async () => {
   const response = await handleChatRequest(chatRequest("Why state machines?"), {
     generateText: async () => ({ output: "" }),
     streamText: async () => {
@@ -188,6 +194,30 @@ test("a failing executor closes the stream with RUN_ERROR", async () => {
   });
 
   const chunks = parseChunks(await response.text());
+  const seen = types(chunks);
+  expect(seen[0]).toBe("RUN_STARTED");
+  // The invoke's `onError` models the failure, so the run completes: the
+  // outcome rides on the output, not on an unhandled actor error.
+  expect(seen[seen.length - 1]).toBe("RUN_FINISHED");
+  expect(seen).toContain("STEP_STARTED");
+  const finished = chunks[chunks.length - 1] as StreamChunk & {
+    result: { status: string; outline: string | null };
+  };
+  expect(finished.result).toEqual({ status: "failed", outline: null, answer: null });
+  // Nothing streamed, so no assistant message was ever opened or closed.
+  expect(seen).not.toContain("TEXT_MESSAGE_START");
+  expect(seen).not.toContain("TEXT_MESSAGE_END");
+});
+
+test("an aborted run closes the stream with RUN_ERROR", async () => {
+  const chunks: StreamChunk[] = [];
+  for await (const chunk of agentRunToAgUiStream(tanstackAiStreamMachine, {
+    input: { question: "Why state machines?" },
+    executors: createScriptedChatExecutors(),
+    signal: AbortSignal.abort(),
+  })) {
+    chunks.push(chunk);
+  }
   const seen = types(chunks);
   expect(seen[0]).toBe("RUN_STARTED");
   expect(seen).toContain("RUN_ERROR");

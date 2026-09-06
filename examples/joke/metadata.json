@@ -12,8 +12,8 @@
     "purpose": "Tells a joke, rates it out of 10, always takes one improvement pass, then decides for itself whether to try another one or stop."
   },
   "starters": [
-    "Tell me a joke about penguins reviewing code.",
-    "Tell me a joke about a state machine that won't transition.",
-    "Tell me a joke about a database that trusts no one."
+    "penguins reviewing code",
+    "a state machine that won't transition",
+    "a database that trusts no one"
   ]
 }
